@@ -1,0 +1,27 @@
+# config/config.example.yaml - Example configuration
+# Copy this to config.yaml and fill in your values
+
+platforms:
+  discord:
+    token: "your-discord-bot-token"
+    enabled: true
+  misskey:
+    host: "misskey.example.com"
+    token: "your-misskey-access-token"
+    enabled: false
+
+agent:
+  model: "gpt-4"
+  system_prompt_path: "./prompts/system.md"
+  token_limit: 4096
+
+memory:
+  search_limit: 10
+  max_chars: 2000
+
+workspace:
+  repo_path: "./data"
+  workspaces_dir: "workspaces"
+
+logging:
+  level: "INFO"

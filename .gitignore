@@ -65,9 +65,10 @@ web_modules/
 # Yarn Integrity file
 .yarn-integrity
 
-# dotenv environment variable files
+# Environment files
 .env
-.env.*
+.env.local
+.env.*.local
 !.env.example
 
 # parcel-bundler cache (https://parceljs.org/)
@@ -107,6 +108,12 @@ dist
 # Docusaurus cache and generated files
 .docusaurus
 
+# Data directory (workspaces and memory)
+/data/
+
+# Deno cache (optional, usually not committed)
+.deno/
+
 # Serverless directories
 .serverless/
 
@@ -125,6 +132,16 @@ dist
 # Stores VSCode versions used for testing VSCode extensions
 .vscode-test
 
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
+
 # yarn v3
 .pnp.*
 .yarn/*
@@ -137,3 +154,6 @@ dist
 # Vite logs files
 vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
+
+# Local config overrides
+config.local.yaml

@@ -1,0 +1,44 @@
+{
+  "name": "@agent-chatbot/core",
+  "version": "0.1.0",
+  "imports": {
+    "@std/assert": "jsr:@std/assert@^1.0.0",
+    "@std/path": "jsr:@std/path@^1.0.0",
+    "@std/yaml": "jsr:@std/yaml@^1.0.0",
+    "@std/dotenv": "jsr:@std/dotenv@^0.225.0",
+    "@std/fs": "jsr:@std/fs@^1.0.0",
+    "@std/json": "jsr:@std/json@^1.0.0",
+    "@core/": "./src/core/",
+    "@platforms/": "./src/platforms/",
+    "@skills/": "./src/skills/",
+    "@types/": "./src/types/",
+    "@utils/": "./src/utils/"
+  },
+  "tasks": {
+    "dev": "deno run --watch --allow-net --allow-read --allow-write --allow-env src/main.ts",
+    "start": "deno run --allow-net --allow-read --allow-write --allow-env src/main.ts",
+    "test": "deno test --allow-read --allow-write",
+    "fmt": "deno fmt src/ tests/",
+    "fmt:check": "deno fmt --check src/ tests/",
+    "lint": "deno lint src/ tests/",
+    "check": "deno check src/main.ts"
+  },
+  "fmt": {
+    "lineWidth": 100,
+    "indentWidth": 2,
+    "useTabs": false,
+    "singleQuote": false,
+    "proseWrap": "preserve"
+  },
+  "lint": {
+    "rules": {
+      "tags": ["recommended"]
+    }
+  },
+  "compilerOptions": {
+    "strict": true,
+    "noImplicitAny": true,
+    "noImplicitReturns": true,
+    "noFallthroughCasesInSwitch": true
+  }
+}
