@@ -10,6 +10,7 @@
     "@std/fs": "jsr:@std/fs@^1.0.0",
     "@std/json": "jsr:@std/json@^1.0.0",
     "discord.js": "npm:discord.js@^14.0.0",
+    "misskey-js": "npm:misskey-js@2025.12.2",
     "@core/": "./src/core/",
     "@platforms/": "./src/platforms/",
     "@skills/": "./src/skills/",
