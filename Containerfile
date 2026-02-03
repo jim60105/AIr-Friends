@@ -73,6 +73,13 @@ COPY --link --chown=$UID:0 --chmod=775 config.yaml /app/
 COPY --link --chown=$UID:0 --chmod=775 src/ /app/src/
 COPY --link --chown=$UID:0 --chmod=775 prompts/ /app/prompts/
 
+# Copy skills to ~/.copilot/skills/ for personal skills
+# Create home directory for deno user and install skills
+RUN mkdir -p /home/deno/.copilot/skills && \
+    chown -R $UID:0 /home/deno && \
+    chmod -R 775 /home/deno
+COPY --link --chown=$UID:0 --chmod=775 skills/ /home/deno/.copilot/skills/
+
 # Copy cached Deno dependencies from cache stage
 COPY --link --chown=$UID:0 --chmod=775 --from=cache /deno-dir/ /deno-dir/
 
@@ -80,6 +87,9 @@ WORKDIR /app
 
 # Volume for persistent data (workspaces and memory)
 VOLUME ["/data"]
+
+# Set HOME environment variable for copilot skills discovery
+ENV HOME=/home/deno
 
 # Switch to non-privileged user
 USER $UID
