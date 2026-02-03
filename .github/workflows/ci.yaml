@@ -137,7 +137,7 @@ jobs:
             ${{ runner.os }}-deno-
 
       - name: Compile check
-        run: deno compile --check src/main.ts --output /tmp/agent-chatbot
+        run: deno compile --check --output /tmp/agent-chatbot src/main.ts
 
       - name: Verify executable
         run: |
