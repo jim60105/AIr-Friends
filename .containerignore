@@ -1,0 +1,53 @@
+# Container build ignore file
+# Works with Docker (.dockerignore) and Podman (.containerignore)
+
+# Git
+.git
+.gitignore
+
+# IDE and editors
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Dependencies
+node_modules/
+
+# Documentation (not needed at runtime)
+docs/
+*.md
+!README.md
+
+# Tests
+tests/
+
+# GitHub
+.github/
+
+# Config examples (use actual config)
+config/
+
+# Environment files (sensitive)
+.env
+.env.*
+!.env.example
+
+# Coverage
+coverage/
+*.lcov
+
+# Logs
+logs/
+*.log
+
+# Local data (will be volume mounted)
+data/
+
+# Temporary files
+.cache/
+.deno/
+tmp/
+
+# Build artifacts
+dist/

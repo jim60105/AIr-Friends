@@ -132,10 +132,11 @@ Configuration is loaded from `config.yaml` (YAML format). See [config/config.exa
 podman build -t agent-chatbot .
 
 # Run with volume mounts
-podman run -d \
+podman run -d --rm \
   -v ./data:/data \
   -v ./config.yaml:/app/config.yaml:ro \
-  -e DISCORD_TOKEN=your_token \
+  --env-file .env \
+  --name agent-chatbot \
   agent-chatbot
 ```
 
