@@ -44,6 +44,7 @@ We have implemented a complete Agent Skills system that allows external ACP Agen
 Located in `.github/skills/`, these files follow the [Agent Skills Standard](https://agentskills.io/) format:
 
 ### 1. memory-save.md
+
 - **Purpose**: Save important information to persistent memory
 - **Parameters**:
   - `content` (required): Memory content to save
@@ -55,6 +56,7 @@ Located in `.github/skills/`, these files follow the [Agent Skills Standard](htt
   - High importance memories always loaded into context
 
 ### 2. memory-search.md
+
 - **Purpose**: Search through saved memories
 - **Parameters**:
   - `query` (required): Search keywords
@@ -62,6 +64,7 @@ Located in `.github/skills/`, these files follow the [Agent Skills Standard](htt
 - **Returns**: Array of matching memories
 
 ### 3. send-reply.md
+
 - **Purpose**: Send final reply to user
 - **Parameters**:
   - `message` (required): Final message to send
@@ -69,6 +72,7 @@ Located in `.github/skills/`, these files follow the [Agent Skills Standard](htt
 - **Critical Rule**: Can only be called ONCE per interaction
 
 ### 4. fetch-context.md
+
 - **Purpose**: Fetch additional context from platform
 - **Parameters**:
   - `type` (required): "recent_messages", "search_messages", or "user_info"
@@ -77,6 +81,7 @@ Located in `.github/skills/`, these files follow the [Agent Skills Standard](htt
 - **Use Cases**: Get more history, search conversations, get user info
 
 ### 5. memory-patch.md
+
 - **Purpose**: Modify memory metadata (not content)
 - **Parameters**:
   - `memory_id` (required): ID of memory to modify
@@ -88,24 +93,30 @@ Located in `.github/skills/`, these files follow the [Agent Skills Standard](htt
 ## Skill Handlers Implementation
 
 ### Type Definitions (src/skills/types.ts)
+
 - `SkillCall`: Structure of skill invocation
 - `SkillResult`: Return value from skill execution
 - `SkillContext`: Context passed to skill handlers
 - Parameter types for each skill
 
 ### Memory Handler (src/skills/memory-handler.ts)
+
 Handles all memory-related operations:
+
 - `handleMemorySave`: Validates parameters and saves memory using MemoryStore
 - `handleMemorySearch`: Searches memories by keywords
 - `handleMemoryPatch`: Patches memory metadata
 
 **Key Features**:
+
 - Parameter validation for all inputs
 - Security check: private memories only in DM contexts
 - Proper error handling and logging
 
 ### Reply Handler (src/skills/reply-handler.ts)
+
 Manages reply sending with strict once-per-interaction enforcement:
+
 - `handleSendReply`: Sends reply via platform adapter
 - Session tracking to prevent multiple replies
 - `clearReplyState`: Clears state for new interactions
@@ -113,7 +124,9 @@ Manages reply sending with strict once-per-interaction enforcement:
 **Critical Feature**: Maintains state map to ensure only one reply per session
 
 ### Context Handler (src/skills/context-handler.ts)
+
 Fetches additional context from platform:
+
 - `handleFetchContext`: Routes to appropriate context fetch method
 - Supports:
   - Recent messages (via `fetchRecentMessages`)
@@ -121,7 +134,9 @@ Fetches additional context from platform:
   - User info (via `getUsername`)
 
 ### Skill Registry (src/skills/registry.ts)
+
 Central registry for all skills:
+
 - `executeSkill`: Executes skill by name
 - `getAvailableSkills`: Lists all registered skills
 - `hasSkill`: Checks if skill exists
@@ -132,17 +147,20 @@ Central registry for all skills:
 Comprehensive test suite in `tests/skills/`:
 
 ### memory-handler.test.ts
+
 - Tests memory save with valid/invalid parameters
 - Tests memory search functionality
 - Tests memory patching
 
 ### reply-handler.test.ts
+
 - Tests successful reply sending
 - Tests once-per-interaction enforcement
 - Tests parameter validation
 - Tests state clearing
 
 ### registry.test.ts
+
 - Tests skill registration
 - Tests skill execution
 - Tests unknown skill handling
@@ -165,7 +183,7 @@ const skillRegistry = new SkillRegistry(memoryStore);
 const result = await skillRegistry.executeSkill(
   "memory-save",
   { content: "User likes hiking", visibility: "public" },
-  context
+  context,
 );
 
 // Clear reply state for new interaction
