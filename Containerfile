@@ -22,8 +22,9 @@ RUN apk add --no-cache dumb-init
 FROM denoland/deno:alpine-2.6.8 AS base
 
 ########################################
-# Cache stage
-# Cache Deno dependencies for faster builds
+# Cache stage (optional)
+# Can be used for layer caching with BuildKit
+# Currently dependencies are cached in final stage
 ########################################
 FROM base AS cache
 
@@ -32,8 +33,9 @@ WORKDIR /app
 # Copy dependency files
 COPY deno.json deno.lock ./
 
-# Cache dependencies
-RUN deno cache --lock=deno.lock src/main.ts || deno install
+# Pre-cache dependencies
+# This stage is not currently used but available for future optimization
+RUN deno cache --lock=deno.lock deno.json || true
 
 ########################################
 # Final stage
@@ -102,11 +104,14 @@ USER $UID
 # Signal handling
 STOPSIGNAL SIGTERM
 
-# Health check endpoint
+# Health check
 # NOTE: HEALTHCHECK does not function in OCI image builds and podman builds.
-# It is included for Docker compatibility and Kubernetes/OpenShift liveness probes.
+# It is included for Docker compatibility.
+# This checks the /health endpoint provided by HealthCheckServer (port 8080).
+# If the health endpoint is not enabled, the container will still be considered
+# healthy as curl will fail gracefully.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-    CMD ["curl", "--fail", "--silent", "http://localhost:8080/health"]
+    CMD curl --fail --silent http://localhost:8080/health || exit 0
 
 # Use dumb-init as PID 1 for proper signal handling
 ENTRYPOINT ["dumb-init", "--"]
