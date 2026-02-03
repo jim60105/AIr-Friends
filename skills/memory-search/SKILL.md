@@ -1,36 +1,55 @@
 ---
 name: memory-search
-description: |
-  Search through saved memories using keywords.
-  Returns relevant memories that match the search query.
+type: shell
+description: Search through saved memories using keywords.
+command: deno run --allow-net skills/memory-search/skill.ts
 parameters:
-  type: object
-  properties:
-    query:
-      type: string
-      description: Search keywords to find relevant memories
-    limit:
-      type: integer
-      default: 10
-      description: Maximum number of results to return
-  required: [query]
+  - name: session-id
+    type: string
+    required: true
+    flag: --session-id
+  - name: query
+    type: string
+    required: true
+    flag: --query
+    description: Search query keywords
+  - name: limit
+    type: number
+    flag: --limit
+    default: 10
+    description: Maximum number of results to return
+output:
+  format: json
 ---
 
 # Memory Search Skill
 
-Search through persistent memories to recall past information.
+Search through saved memories to retrieve relevant information.
 
-## When to Use
+## Usage
 
-- Need to recall user preferences
-- Looking for previously discussed topics
-- Checking relationship history
+```bash
+deno run --allow-net skills/memory-search/skill.ts \
+  --session-id "$SESSION_ID" \
+  --query "hiking preferences" \
+  --limit 10
+```
 
-## Example
+## Output
 
 ```json
 {
-  "query": "favorite color preferences",
-  "limit": 5
+  "success": true,
+  "data": {
+    "memories": [
+      {
+        "id": "mem_xxx",
+        "content": "User loves hiking in the mountains",
+        "visibility": "public",
+        "importance": "high",
+        "timestamp": "2024-01-01T12:00:00Z"
+      }
+    ]
+  }
 }
 ```

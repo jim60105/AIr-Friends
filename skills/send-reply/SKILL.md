@@ -1,52 +1,67 @@
 ---
 name: send-reply
+type: shell
 description: |
   Send the final reply message to the user on the platform.
   This is the ONLY way to communicate with the user externally.
   Can only be called ONCE per interaction - subsequent calls will fail.
+command: deno run --allow-net skills/send-reply/skill.ts
 parameters:
-  type: object
-  properties:
-    message:
+  - name: session-id
+    type: string
+    required: true
+    flag: --session-id
+    description: The session identifier (provided in SESSION_ID file)
+  - name: message
+    type: string
+    required: true
+    flag: --message
+    description: The final message to send to the user
+output:
+  format: json
+  fields:
+    - name: success
+      type: boolean
+    - name: data.messageId
       type: string
-      description: The final message to send to the user
-    attachments:
-      type: array
-      items:
-        type: object
-        properties:
-          type:
-            type: string
-            enum: [image, file]
-          url:
-            type: string
-          filename:
-            type: string
-      description: Optional attachments to include
-  required: [message]
+    - name: error
+      type: string
 ---
 
 # Send Reply Skill
 
 Send your final response to the user. This is the gateway to external communication.
 
+## Usage
+
+```bash
+deno run --allow-net skills/send-reply/skill.ts \
+  --session-id "$SESSION_ID" \
+  --message "Your reply message here"
+```
+
 ## Critical Rules
 
 1. **One reply only**: You can only send ONE reply per interaction
 2. **This is the ONLY external output**: All other processing remains internal
 3. **Make it complete**: Ensure your reply addresses the user's request fully
+4. **Session ID**: Read the session ID from the `SESSION_ID` file in the working directory
 
-## Guidelines
+## Output Format
 
-- Be conversational and natural
-- Address all parts of the user's message
-- Don't mention internal processing steps
-
-## Example
+On success:
 
 ```json
-{
-  "message": "Hello! I remember you mentioned you like hiking. How was your recent trip?",
-  "attachments": []
-}
+{ "success": true, "data": { "messageId": "123456789", "timestamp": "2024-01-01T12:00:00Z" } }
 ```
+
+On failure:
+
+```json
+{ "success": false, "error": "Reply already sent for this session" }
+```
+
+## Exit Codes
+
+- `0`: Success
+- `1`: Error (check stderr or stdout JSON for details)
