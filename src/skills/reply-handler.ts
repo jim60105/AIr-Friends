@@ -18,8 +18,16 @@ export class ReplyHandler {
   /**
    * Check if reply was already sent for this session
    */
-  private hasReplySent(context: SkillContext): boolean {
+  private hasReplySentInternal(context: SkillContext): boolean {
     const key = this.getSessionKey(context);
+    return this.replySentMap.get(key) ?? false;
+  }
+
+  /**
+   * Check if reply was sent for a workspace/channel (public API)
+   */
+  hasReplySent(workspaceKey: string, channelId: string): boolean {
+    const key = `${workspaceKey}:${channelId}`;
     return this.replySentMap.get(key) ?? false;
   }
 
@@ -48,7 +56,7 @@ export class ReplyHandler {
   ): Promise<SkillResult> => {
     try {
       // Check if reply was already sent
-      if (this.hasReplySent(context)) {
+      if (this.hasReplySentInternal(context)) {
         logger.warn("Attempted to send reply multiple times", {
           workspaceKey: context.workspace.key,
           channelId: context.channelId,

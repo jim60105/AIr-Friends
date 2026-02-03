@@ -12,16 +12,17 @@ platforms:
 
 agent:
   model: "gpt-4"
-  system_prompt_path: "./prompts/system.md"
-  token_limit: 4096
+  systemPromptPath: "./prompts/system.md"
+  tokenLimit: 4096
 
 memory:
-  search_limit: 10
-  max_chars: 2000
+  searchLimit: 10
+  maxChars: 2000
+  recentMessageLimit: 20
 
 workspace:
-  repo_path: "./data"
-  workspaces_dir: "workspaces"
+  repoPath: "./data"
+  workspacesDir: "workspaces"
 
 logging:
   level: "INFO"

@@ -1,0 +1,213 @@
+// src/core/session-orchestrator.ts
+
+import { createLogger } from "@utils/logger.ts";
+import { AgentConnector } from "@acp/agent-connector.ts";
+import { createAgentConfig, getDefaultAgentType } from "@acp/agent-factory.ts";
+import { ContextAssembler } from "./context-assembler.ts";
+import { WorkspaceManager } from "./workspace-manager.ts";
+import type { SkillRegistry } from "@skills/registry.ts";
+import type { Config } from "../types/config.ts";
+import type { NormalizedEvent } from "../types/events.ts";
+import type { PlatformAdapter } from "@platforms/platform-adapter.ts";
+import type { ClientConfig } from "@acp/types.ts";
+
+const logger = createLogger("SessionOrchestrator");
+
+/**
+ * Response from a session
+ */
+export interface SessionResponse {
+  success: boolean;
+  replySent: boolean;
+  error?: string;
+}
+
+/**
+ * SessionOrchestrator coordinates the entire conversation flow
+ * from receiving a message to sending a reply
+ */
+export class SessionOrchestrator {
+  private workspaceManager: WorkspaceManager;
+  private contextAssembler: ContextAssembler;
+  private skillRegistry: SkillRegistry;
+  private config: Config;
+
+  constructor(
+    workspaceManager: WorkspaceManager,
+    contextAssembler: ContextAssembler,
+    skillRegistry: SkillRegistry,
+    config: Config,
+  ) {
+    this.workspaceManager = workspaceManager;
+    this.contextAssembler = contextAssembler;
+    this.skillRegistry = skillRegistry;
+    this.config = config;
+  }
+
+  /**
+   * Process a message event through the full orchestration flow
+   */
+  async processMessage(
+    event: NormalizedEvent,
+    platformAdapter: PlatformAdapter,
+  ): Promise<SessionResponse> {
+    const sessionLoggerName = `${event.platform}:${event.channelId}`;
+    const sessionLogger = logger.child(sessionLoggerName);
+
+    sessionLogger.info("Processing message", {
+      platform: event.platform,
+      userId: event.userId,
+      channelId: event.channelId,
+      messageId: event.messageId,
+    });
+
+    try {
+      // 1. Get or create workspace
+      const workspace = await this.workspaceManager.getOrCreateWorkspace(event);
+      sessionLogger.debug("Workspace ready", {
+        workspaceKey: workspace.key,
+        workingDir: workspace.path,
+      });
+
+      // 2. Assemble initial context
+      const context = await this.contextAssembler.assembleContext(
+        event,
+        workspace,
+        platformAdapter,
+      );
+      sessionLogger.debug("Context assembled", {
+        memoriesCount: context.importantMemories.length,
+        recentMessagesCount: context.recentMessages.length,
+        relatedMessagesCount: context.relatedMessages?.length ?? 0,
+        estimatedTokens: context.estimatedTokens,
+      });
+
+      // 3. Format context for prompt
+      const formattedContext = this.contextAssembler.formatContext(context);
+      const fullPrompt = this.buildPrompt(formattedContext);
+
+      sessionLogger.debug("Prompt built", {
+        estimatedTokens: formattedContext.estimatedTokens,
+      });
+
+      // 4. Create client config for ACP
+      const clientConfig: ClientConfig = {
+        workingDir: workspace.path,
+        platform: event.platform,
+        userId: event.userId,
+        channelId: event.channelId,
+        isDM: event.isDm,
+      };
+
+      // 5. Build ACP connector
+      const agentType = getDefaultAgentType(this.config);
+      const connector = new AgentConnector({
+        agentConfig: createAgentConfig(agentType, workspace.path, this.config),
+        clientConfig,
+        skillRegistry: this.skillRegistry,
+        logger: sessionLogger,
+      });
+
+      // 6. Execute agent session
+      try {
+        await connector.connect();
+        sessionLogger.info("Agent connected");
+
+        const sessionId = await connector.createSession();
+        sessionLogger.info("Agent session created", { sessionId });
+
+        // Clear reply state before prompting
+        const replyHandler = this.skillRegistry.getReplyHandler();
+        replyHandler.clearReplyState(workspace.key, event.channelId);
+
+        // Send prompt to agent
+        const response = await connector.prompt(sessionId, fullPrompt);
+        sessionLogger.info("Agent session completed", {
+          sessionId,
+          stopReason: response.stopReason,
+        });
+
+        // Check if reply was sent
+        const replySent = replyHandler.hasReplySent(workspace.key, event.channelId);
+
+        if (replySent) {
+          return {
+            success: true,
+            replySent: true,
+          };
+        }
+
+        // Agent completed but didn't send reply
+        if (response.stopReason === "end_turn") {
+          sessionLogger.warn("Agent completed without sending reply");
+          return {
+            success: false,
+            replySent: false,
+            error: "Agent did not generate a reply",
+          };
+        }
+
+        if (response.stopReason === "cancelled") {
+          return {
+            success: false,
+            replySent: false,
+            error: "Session was cancelled",
+          };
+        }
+
+        return {
+          success: false,
+          replySent: false,
+          error: `Unexpected stop reason: ${response.stopReason}`,
+        };
+      } finally {
+        await connector.disconnect();
+        sessionLogger.debug("Agent disconnected");
+      }
+    } catch (error) {
+      sessionLogger.error("Session failed", {
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return {
+        success: false,
+        replySent: false,
+        error: error instanceof Error ? error.message : "Unknown error",
+      };
+    }
+  }
+
+  /**
+   * Build the full prompt to send to the agent
+   */
+  private buildPrompt(context: {
+    systemMessage: string;
+    userMessage: string;
+  }): string {
+    const parts: string[] = [];
+
+    // System prompt
+    parts.push("# System Instructions");
+    parts.push("");
+    parts.push(context.systemMessage);
+    parts.push("");
+
+    // User message with context
+    parts.push("# Context and Message");
+    parts.push("");
+    parts.push(context.userMessage);
+    parts.push("");
+
+    // Instructions
+    parts.push("# Instructions");
+    parts.push("");
+    parts.push("Please respond to the current message above.");
+    parts.push("Use the `send-reply` skill to deliver your final response.");
+    parts.push("You may use other available skills as needed:");
+    parts.push("- `memory-save`: Save important information");
+    parts.push("- `memory-search`: Search for saved memories");
+    parts.push("- `memory-patch`: Update memory metadata");
+    parts.push("- `fetch-context`: Get additional context from the platform");
+
+    return parts.join("\n");
+  }
+}
