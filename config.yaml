@@ -11,7 +11,7 @@ platforms:
     enabled: false
 
 agent:
-  model: "gpt-4"
+  model: "gpt-5-mini"
   systemPromptPath: "./prompts/system.md"
   tokenLimit: 4096
 
