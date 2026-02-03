@@ -88,7 +88,14 @@ RUN cat > /home/deno/.copilot/mcp-config.json <<'EOF'
       "type": "stdio",
       "command": "deno",
       "args": ["task", "mcp:start"],
-      "cwd": "/app"
+      "cwd": "/app",
+      "tools": [
+        "memory_save",
+        "memory_search",
+        "memory_patch",
+        "send_reply",
+        "fetch_context"
+      ]
     }
   }
 }

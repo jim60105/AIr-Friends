@@ -80,7 +80,14 @@ Add to `~/.copilot/mcp-config.json`:
         "task",
         "mcp:start"
       ],
-      "cwd": "/path/to/agent-chatbot"
+      "cwd": "/path/to/agent-chatbot",
+      "tools": [
+        "memory_save",
+        "memory_search",
+        "memory_patch",
+        "send_reply",
+        "fetch_context"
+      ]
     }
   }
 }
