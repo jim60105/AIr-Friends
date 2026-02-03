@@ -29,7 +29,7 @@ export class ChatbotClient implements acp.Client {
 
   /**
    * Handle permission requests from the Agent
-   * Auto-approves our registered skills, rejects unknown tool calls
+   * Auto-approves our registered skills and access to skills directory
    */
   requestPermission(
     params: acp.RequestPermissionRequest,
@@ -38,6 +38,31 @@ export class ChatbotClient implements acp.Client {
       toolCall: params.toolCall.title,
       kind: params.toolCall.kind,
     });
+
+    // Auto-approve read access to skills directory
+    // External agents need to read SKILL.md files to understand available skills
+    if (params.toolCall.kind === "read" && params.toolCall.locations) {
+      const skillsPath = "/home/deno/.copilot/skills";
+      const isReadingSkills = params.toolCall.locations.some((loc) =>
+        loc.path?.startsWith(skillsPath)
+      );
+
+      if (isReadingSkills) {
+        this.logger.info("Auto-approving skills directory read", {
+          locations: params.toolCall.locations.map((l) => l.path),
+        });
+
+        const allowOption = params.options.find((o) => o.kind === "allow_once") ??
+          params.options[0];
+
+        return Promise.resolve({
+          outcome: {
+            outcome: "selected",
+            optionId: allowOption.optionId,
+          },
+        });
+      }
+    }
 
     // Extract skill name from tool call (only works for ToolCall, not ToolCallUpdate)
     let skillName = "";
@@ -122,6 +147,9 @@ export class ChatbotClient implements acp.Client {
         // Agent's thinking process - only log
         this.logger.debug("Agent thought", {
           hasContent: update.content?.type === "text",
+          text: update.content?.type === "text"
+            ? update.content.text.substring(0, 100)
+            : "",
         });
         break;
 

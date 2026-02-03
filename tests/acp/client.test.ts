@@ -155,6 +155,50 @@ Deno.test("ChatbotClient - requestPermission rejects unknown skills", async () =
   }
 });
 
+Deno.test("ChatbotClient - requestPermission auto-approves skills directory read", async () => {
+  const tempDir = Deno.makeTempDirSync();
+  try {
+    const skillRegistry = createTestSkillRegistry();
+    const logger = createTestLogger();
+    const config = {
+      workingDir: tempDir,
+      platform: "discord",
+      userId: "123",
+      channelId: "456",
+      isDM: false,
+    };
+
+    const client = new ChatbotClient(skillRegistry, logger, config);
+
+    // Create a mock RequestPermissionRequest for reading skills directory
+    const request: acp.RequestPermissionRequest = {
+      sessionId: "test-session",
+      toolCall: {
+        title: "Access paths outside trusted directories",
+        kind: "read",
+        status: "pending" as const,
+        content: [],
+        toolCallId: "test-id",
+        locations: [
+          { path: "/home/deno/.copilot/skills/send-reply" },
+        ],
+      },
+      options: [
+        { kind: "allow_once", optionId: "allow-1", name: "Allow once" },
+        { kind: "reject_once", optionId: "reject-1", name: "Reject once" },
+      ],
+    };
+
+    const response = await client.requestPermission(request);
+    assertEquals(response.outcome.outcome, "selected");
+    if (response.outcome.outcome === "selected") {
+      assertEquals(response.outcome.optionId, "allow-1");
+    }
+  } finally {
+    Deno.removeSync(tempDir, { recursive: true });
+  }
+});
+
 Deno.test("ChatbotClient - readTextFile validates path within working directory", async () => {
   const tempDir = Deno.makeTempDirSync();
   try {
