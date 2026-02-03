@@ -57,6 +57,7 @@ export class ShutdownHandler {
     if (!this.context) {
       logger.warn("No context to shutdown");
       Deno.exit(0);
+      return;
     }
 
     const { platformRegistry } = this.context;
