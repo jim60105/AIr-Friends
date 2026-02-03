@@ -43,6 +43,78 @@ export interface AgentConfig {
 export type AgentType = "copilot" | "gemini";
 
 /**
+ * MCP transport capabilities reported by Agent
+ */
+export interface MCPCapabilities {
+  /** Whether the Agent supports HTTP transport for MCP servers */
+  http?: boolean;
+  /** Whether the Agent supports SSE transport for MCP servers */
+  sse?: boolean;
+}
+
+/**
+ * Agent capabilities reported during initialization
+ */
+export interface AgentCapabilities {
+  /** Whether the Agent supports loading previous sessions */
+  loadSession?: boolean;
+  /** MCP transport capabilities */
+  mcpCapabilities?: MCPCapabilities;
+}
+
+/**
+ * MCP Server configuration base
+ */
+export interface BaseMCPServerConfig {
+  /** Human-readable identifier for the server */
+  name: string;
+}
+
+/**
+ * MCP Server using stdio transport (required support by all Agents)
+ */
+export interface StdioMCPServerConfig extends BaseMCPServerConfig {
+  /** The absolute path to the MCP server executable */
+  command: string;
+  /** Command-line 引數 to pass to the server */
+  args: string[];
+  /** Environment 變數 to set when launching the server */
+  env?: Array<{ name: string; value: string }>;
+}
+
+/**
+ * MCP Server using HTTP transport (optional capability)
+ */
+export interface HTTPMCPServerConfig extends BaseMCPServerConfig {
+  /** Must be "http" to indicate HTTP transport */
+  type: "http";
+  /** The URL of the MCP server */
+  url: string;
+  /** HTTP headers to include in requests */
+  headers?: Array<{ name: string; value: string }>;
+}
+
+/**
+ * MCP Server using SSE transport (optional capability, deprecated)
+ */
+export interface SSEMCPServerConfig extends BaseMCPServerConfig {
+  /** Must be "sse" to indicate SSE transport */
+  type: "sse";
+  /** The URL of the SSE endpoint */
+  url: string;
+  /** HTTP headers to include when establishing the SSE connection */
+  headers?: Array<{ name: string; value: string }>;
+}
+
+/**
+ * Union type for all MCP server configurations
+ */
+export type MCPServerConfig =
+  | StdioMCPServerConfig
+  | HTTPMCPServerConfig
+  | SSEMCPServerConfig;
+
+/**
  * Options for AgentConnector
  */
 export interface AgentConnectorOptions {

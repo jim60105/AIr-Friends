@@ -147,9 +147,7 @@ export class ChatbotClient implements acp.Client {
         // Agent's thinking process - only log
         this.logger.debug("Agent thought", {
           hasContent: update.content?.type === "text",
-          text: update.content?.type === "text"
-            ? update.content.text.substring(0, 100)
-            : "",
+          text: update.content?.type === "text" ? update.content.text.substring(0, 100) : "",
         });
         break;
 

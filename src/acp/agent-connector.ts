@@ -2,7 +2,7 @@
 
 import * as acp from "@agentclientprotocol/sdk";
 import { ChatbotClient } from "./client.ts";
-import type { AgentConnectorOptions } from "./types.ts";
+import type { AgentCapabilities, AgentConnectorOptions, MCPServerConfig } from "./types.ts";
 import type { SkillRegistry } from "@skills/registry.ts";
 import type { Logger } from "@utils/logger.ts";
 
@@ -21,6 +21,7 @@ export class AgentConnector {
   private process: Deno.ChildProcess | null = null;
   private client: ChatbotClient | null = null;
   private options: AgentConnectorOptions;
+  private capabilities: AgentCapabilities | null = null;
 
   constructor(options: AgentConnectorOptions) {
     this.options = options;
@@ -81,10 +82,12 @@ export class AgentConnector {
           terminal: false,
         },
       });
+      // Store agent capabilities for transport validation
+      this.capabilities = initResult.agentCapabilities ?? {};
 
       (logger as Logger).info("Connected to ACP agent", {
         protocolVersion: initResult.protocolVersion,
-        agentCapabilities: initResult.agentCapabilities,
+        agentCapabilities: this.capabilities,
       });
     } catch (error) {
       // Clean up on initialization failure
@@ -95,21 +98,129 @@ export class AgentConnector {
 
   /**
    * Create a new session with the Agent
+   * @param mcpServers Optional MCP servers to connect to
+   * @throws Error if MCP servers use unsupported transport types
    */
-  async createSession(): Promise<string> {
+  async createSession(mcpServers: MCPServerConfig[] = []): Promise<string> {
     if (!this.connection) {
       throw new Error("Not connected to agent");
     }
 
     const logger = this.options.logger as Logger;
 
+    // Validate MCP server transports before creating session
+    if (mcpServers.length > 0) {
+      this.validateMCPServerTransports(mcpServers);
+    }
+
     const result = await this.connection.newSession({
       cwd: this.options.agentConfig.cwd,
-      mcpServers: [],
+      mcpServers: mcpServers.map((server) => this.convertMCPServerConfig(server)),
     });
 
-    logger.info("Session created", { sessionId: result.sessionId });
+    logger.info("Session created", {
+      sessionId: result.sessionId,
+      mcpServerCount: mcpServers.length,
+    });
     return result.sessionId;
+  }
+
+  /**
+   * Validate that all MCP server transports are supported by the Agent
+   * @throws Error if any server uses unsupported transport type
+   */
+  private validateMCPServerTransports(servers: MCPServerConfig[]): void {
+    const logger = this.options.logger as Logger;
+
+    for (const server of servers) {
+      // Stdio transport is always supported
+      if (!("type" in server)) {
+        continue;
+      }
+
+      // Check HTTP transport support
+      if (server.type === "http") {
+        if (!this.supportsHTTPTransport()) {
+          throw new Error(
+            `Agent does not support HTTP transport for MCP servers (server: ${server.name})`,
+          );
+        }
+        logger.debug("HTTP transport validated", { serverName: server.name });
+      }
+
+      // Check SSE transport support
+      if (server.type === "sse") {
+        if (!this.supportsSSETransport()) {
+          throw new Error(
+            `Agent does not support SSE transport for MCP servers (server: ${server.name})`,
+          );
+        }
+        logger.debug("SSE transport validated", { serverName: server.name });
+      }
+    }
+  }
+
+  /**
+   * Convert our MCPServerConfig to ACP SDK format
+   */
+  private convertMCPServerConfig(
+    server: MCPServerConfig,
+  ): acp.McpServer {
+    // Stdio transport (no type field)
+    if (!("type" in server)) {
+      return {
+        name: server.name,
+        command: server.command,
+        args: server.args,
+        env: server.env ?? [],
+      };
+    }
+
+    // HTTP transport
+    if (server.type === "http") {
+      return {
+        type: "http",
+        name: server.name,
+        url: server.url,
+        headers: server.headers ?? [],
+      };
+    }
+
+    // SSE transport
+    return {
+      type: "sse",
+      name: server.name,
+      url: server.url,
+      headers: server.headers ?? [],
+    };
+  }
+
+  /**
+   * Check if Agent supports HTTP transport for MCP servers
+   */
+  supportsHTTPTransport(): boolean {
+    return this.capabilities?.mcpCapabilities?.http === true;
+  }
+
+  /**
+   * Check if Agent supports SSE transport for MCP servers
+   */
+  supportsSSETransport(): boolean {
+    return this.capabilities?.mcpCapabilities?.sse === true;
+  }
+
+  /**
+   * Check if Agent supports loading previous sessions
+   */
+  supportsLoadSession(): boolean {
+    return this.capabilities?.loadSession === true;
+  }
+
+  /**
+   * Get agent capabilities
+   */
+  getCapabilities(): AgentCapabilities | null {
+    return this.capabilities;
   }
 
   /**
@@ -195,6 +306,7 @@ export class AgentConnector {
     }
     this.connection = null;
     this.client = null;
+    this.capabilities = null;
   }
 
   /**
