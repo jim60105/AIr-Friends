@@ -111,11 +111,26 @@ export class Logger {
   }
 }
 
+// Global logger configuration
+let globalLoggerConfig: Partial<LoggerConfig> = {};
+
+/**
+ * Configure global logger settings
+ */
+export function configureLogger(config: { level?: string; format?: string }): void {
+  const levelStr = config.level ?? Deno.env.get("LOG_LEVEL") ?? "INFO";
+  const level = LogLevel[levelStr.toUpperCase() as keyof typeof LogLevel] ?? LogLevel.INFO;
+  globalLoggerConfig = { level };
+}
+
 // Factory function to create logger with environment-based level
 export function createLogger(module: string): Logger {
-  const levelStr = Deno.env.get("LOG_LEVEL") ?? "INFO";
-  const level = LogLevel[levelStr as keyof typeof LogLevel] ?? LogLevel.INFO;
-  return new Logger(module, { level });
+  if (Object.keys(globalLoggerConfig).length === 0) {
+    const levelStr = Deno.env.get("LOG_LEVEL") ?? "INFO";
+    const level = LogLevel[levelStr as keyof typeof LogLevel] ?? LogLevel.INFO;
+    globalLoggerConfig = { level };
+  }
+  return new Logger(module, globalLoggerConfig);
 }
 
 // Re-export LogLevel for convenience

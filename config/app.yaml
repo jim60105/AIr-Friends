@@ -1,0 +1,40 @@
+# Agent Chatbot Configuration
+# Copy this file to config.yaml and customize as needed
+
+# Logging configuration
+logging:
+  level: INFO # DEBUG, INFO, WARN, ERROR, FATAL
+
+# Platform configurations
+platforms:
+  discord:
+    enabled: false
+    token: "" # Use environment variable DISCORD_TOKEN
+    guildIds: [] # Empty = all guilds
+
+  misskey:
+    enabled: false
+    host: "" # e.g., misskey.io
+    token: "" # Use environment variable MISSKEY_TOKEN
+
+# Agent/LLM configuration
+agent:
+  model: "gpt-4"
+  systemPromptPath: "./prompts/system.md"
+  tokenLimit: 4096
+
+# Memory system configuration
+memory:
+  searchLimit: 10
+  maxChars: 2000
+  recentMessageLimit: 20
+
+# Workspace configuration
+workspace:
+  repoPath: "./data"
+  workspacesDir: "workspaces"
+
+# Health check configuration (optional)
+health:
+  enabled: false
+  port: 8080

@@ -1,99 +1,104 @@
 // src/main.ts
-// Entry point for Agent Chatbot
 
-import { AgentCore } from "@core/agent-core.ts";
-import { loadConfig } from "@core/config-loader.ts";
-import { createLogger } from "@utils/logger.ts";
+import { bootstrap, startPlatforms } from "./bootstrap.ts";
+import { shutdownHandler } from "./shutdown.ts";
+import { configureLogger, createLogger } from "@utils/logger.ts";
+import { parse } from "@std/flags";
 
-const logger = createLogger("main");
+const logger = createLogger("Main");
 
 /**
- * Main entry point for Agent Chatbot
+ * Parse command line arguments
  */
-async function main() {
-  logger.info("Agent Chatbot starting...");
+function parseArgs(): { config?: string; help: boolean } {
+  const args = parse(Deno.args, {
+    string: ["config"],
+    boolean: ["help"],
+    alias: {
+      c: "config",
+      h: "help",
+    },
+  });
+
+  return {
+    config: args.config,
+    help: args.help,
+  };
+}
+
+/**
+ * Print help message
+ */
+function printHelp(): void {
+  console.log(`
+Agent Chatbot - AI-powered chatbot supporting multiple platforms
+
+Usage:
+  deno run -A src/main.ts [options]
+
+Options:
+  -c, --config <path>   Path to configuration file (default: config.yaml)
+  -h, --help            Show this help message
+
+Environment Variables:
+  LOG_LEVEL             Log level (DEBUG, INFO, WARN, ERROR, FATAL)
+  DISCORD_TOKEN         Discord bot token
+  MISSKEY_TOKEN         Misskey API token
+  MISSKEY_HOST          Misskey instance host
+
+Example:
+  deno run -A src/main.ts --config ./my-config.yaml
+`);
+}
+
+/**
+ * Main entry point
+ */
+async function main(): Promise<void> {
+  // Parse command line arguments
+  const args = parseArgs();
+
+  if (args.help) {
+    printHelp();
+    Deno.exit(0);
+  }
+
+  // Configure initial logging (will be reconfigured after config load)
+  configureLogger({ level: "INFO", format: "json" });
+
+  logger.info("Starting Agent Chatbot");
+  logger.info("Deno version", { version: Deno.version.deno });
 
   try {
-    // Load configuration
-    const config = await loadConfig(".");
-    logger.info("Configuration loaded", {
-      enabledPlatforms: Object.entries(config.platforms)
-        .filter(([_, platformConfig]) => platformConfig.enabled)
-        .map(([name]) => name),
+    // Bootstrap application
+    const context = await bootstrap(args.config);
+
+    // Set up shutdown handler
+    shutdownHandler.setContext(context);
+    shutdownHandler.registerSignalHandlers();
+
+    // Start platforms
+    await startPlatforms(context);
+
+    // Log startup complete
+    logger.info("Agent Chatbot is running", {
+      platforms: context.platformRegistry.getAllAdapters().map((a) => a.platform),
     });
 
-    // Initialize Agent Core
-    const agentCore = new AgentCore(config);
-    logger.info("Agent Core initialized");
-
-    // Initialize and register platform adapters
-    const enabledPlatforms: string[] = [];
-
-    // Discord Platform
-    if (config.platforms.discord.enabled) {
-      try {
-        const { DiscordAdapter } = await import("@platforms/discord/discord-adapter.ts");
-        const discordAdapter = new DiscordAdapter(config.platforms.discord);
-        agentCore.registerPlatform(discordAdapter);
-        await discordAdapter.connect();
-        enabledPlatforms.push("discord");
-        logger.info("Discord platform connected");
-      } catch (error) {
-        logger.error("Failed to initialize Discord platform", {
-          error: error instanceof Error ? error.message : String(error),
-        });
-      }
-    }
-
-    // Misskey Platform
-    if (config.platforms.misskey.enabled) {
-      try {
-        const { MisskeyAdapter } = await import("@platforms/misskey/misskey-adapter.ts");
-        const misskeyAdapter = new MisskeyAdapter(config.platforms.misskey);
-        agentCore.registerPlatform(misskeyAdapter);
-        await misskeyAdapter.connect();
-        enabledPlatforms.push("misskey");
-        logger.info("Misskey platform connected");
-      } catch (error) {
-        logger.error("Failed to initialize Misskey platform", {
-          error: error instanceof Error ? error.message : String(error),
-        });
-      }
-    }
-
-    if (enabledPlatforms.length === 0) {
-      throw new Error("No platforms were successfully initialized");
-    }
-
-    logger.info("Agent Chatbot started successfully", {
-      platforms: enabledPlatforms,
+    // Keep process alive
+    await new Promise<void>(() => {
+      // This promise never resolves - the process will exit on signal
     });
-
-    // Keep process running
-    await new Promise(() => {}); // Infinite wait
   } catch (error) {
-    logger.fatal("Failed to start Agent Chatbot", {
+    logger.error("Fatal error during startup", {
       error: error instanceof Error ? error.message : String(error),
+      stack: error instanceof Error ? error.stack : undefined,
     });
     Deno.exit(1);
   }
 }
 
-// Handle graceful shutdown
-const shutdown = () => {
-  logger.info("Shutting down Agent Chatbot...");
-  // Platform adapters will handle their own cleanup
-  Deno.exit(0);
-};
-
-// Register signal handlers
-Deno.addSignalListener("SIGINT", shutdown);
-Deno.addSignalListener("SIGTERM", shutdown);
-
-// Start the application
+// Run main
 if (import.meta.main) {
-  main().catch((error) => {
-    console.error("Fatal error:", error);
-    Deno.exit(1);
-  });
+  main();
 }

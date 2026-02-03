@@ -33,7 +33,7 @@ jobs:
         run: deno task check
       
       - name: Run tests with coverage
-        run: deno test --allow-read --allow-write --allow-env --coverage=coverage
+        run: deno test --allow-read --allow-write --allow-env --allow-net --coverage=coverage
       
       - name: Generate coverage report
         run: deno coverage coverage --lcov --output=coverage.lcov
