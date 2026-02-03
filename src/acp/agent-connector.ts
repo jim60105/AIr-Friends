@@ -7,6 +7,12 @@ import type { SkillRegistry } from "@skills/registry.ts";
 import type { Logger } from "@utils/logger.ts";
 
 /**
+ * Timeout in milliseconds for graceful agent process shutdown
+ * Following GitHub's ACP best practices
+ */
+const DISCONNECT_TIMEOUT_MS = 2000;
+
+/**
  * AgentConnector manages the lifecycle of ACP Agent connections
  * Handles spawning, connecting, and communicating with external ACP Agents
  */
@@ -158,7 +164,7 @@ export class AgentConnector {
         // Best-effort cleanup with timeout (following GitHub's example)
         await Promise.race([
           this.process.status,
-          new Promise<void>((resolve) => setTimeout(() => resolve(), 2000)),
+          new Promise<void>((resolve) => setTimeout(() => resolve(), DISCONNECT_TIMEOUT_MS)),
         ]);
       } catch (error) {
         // Ignore kill errors - best effort cleanup
