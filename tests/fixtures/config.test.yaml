@@ -1,0 +1,27 @@
+# Test configuration
+logging:
+  level: debug
+  format: text
+
+acp:
+  agent:
+    type: copilot
+    githubToken: test-github-token
+
+session:
+  maxDuration: 10000
+  maxLlmCalls: 5
+  maxSkillCalls: 10
+  llmTimeout: 5000
+
+workspace:
+  repoPath: ./test-workspace
+
+platforms:
+  discord:
+    enabled: false
+    token: test-discord-token
+  misskey:
+    enabled: false
+    host: test.misskey.io
+    token: test-misskey-token
