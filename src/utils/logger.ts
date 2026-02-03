@@ -1,6 +1,7 @@
 // src/utils/logger.ts
 
-import { LogEntry, LoggerConfig, LogLevel } from "@types/logger.ts";
+import type { LogEntry, LoggerConfig } from "@types/logger.ts";
+import { LogLevel } from "@types/logger.ts";
 
 // Default patterns for sensitive data detection
 const DEFAULT_SENSITIVE_PATTERNS: RegExp[] = [
