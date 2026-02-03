@@ -6,6 +6,7 @@ import { WorkspaceManager } from "@core/workspace-manager.ts";
 import { ContextAssembler } from "@core/context-assembler.ts";
 import { MemoryStore } from "@core/memory-store.ts";
 import { SkillRegistry } from "@skills/registry.ts";
+import { SessionRegistry } from "../../src/skill-api/session-registry.ts";
 import type { Config } from "../../src/types/config.ts";
 import type { NormalizedEvent, PlatformMessage } from "../../src/types/events.ts";
 import type { PlatformAdapter } from "@platforms/platform-adapter.ts";
@@ -114,14 +115,19 @@ Deno.test("SessionOrchestrator - constructs successfully", async () => {
       memoryMaxChars: config.memory.maxChars,
     });
 
+    const sessionRegistry = new SessionRegistry();
+
     const orchestrator = new SessionOrchestrator(
       workspaceManager,
       contextAssembler,
       skillRegistry,
       config,
+      sessionRegistry,
     );
 
     assertExists(orchestrator);
+
+    sessionRegistry.stop();
   } finally {
     await Deno.remove(tempDir, { recursive: true });
   }
@@ -155,11 +161,14 @@ Deno.test("SessionOrchestrator - processMessage creates workspace", async () => 
       memoryMaxChars: config.memory.maxChars,
     });
 
+    const sessionRegistry = new SessionRegistry();
+
     const orchestrator = new SessionOrchestrator(
       workspaceManager,
       contextAssembler,
       skillRegistry,
       config,
+      sessionRegistry,
     );
 
     const event = createTestEvent();
@@ -181,6 +190,8 @@ Deno.test("SessionOrchestrator - processMessage creates workspace", async () => 
       .then(() => true)
       .catch(() => false);
     assertEquals(workspaceExists, true);
+
+    sessionRegistry.stop();
   } finally {
     await Deno.remove(tempDir, { recursive: true });
   }

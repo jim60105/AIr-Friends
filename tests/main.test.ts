@@ -50,9 +50,16 @@ Deno.test("ShutdownHandler - shutdown without context", async () => {
 Deno.test("ShutdownHandler - shutdown with context", async () => {
   const handler = new ShutdownHandler();
   let disconnectCalled = false;
+  let shutdownCalled = false;
+
   const mockContext = {
     config: {},
-    agentCore: {},
+    agentCore: {
+      shutdown: () => {
+        shutdownCalled = true;
+        return Promise.resolve();
+      },
+    },
     platformRegistry: {
       getAllAdapters: () => [],
       disconnectAll: () => {
@@ -72,6 +79,7 @@ Deno.test("ShutdownHandler - shutdown with context", async () => {
 
   try {
     await handler.shutdown();
+    assertEquals(shutdownCalled, true);
     assertEquals(disconnectCalled, true);
     assertEquals(exitCode, 0);
     assertEquals(handler.isShutdownInProgress(), true);

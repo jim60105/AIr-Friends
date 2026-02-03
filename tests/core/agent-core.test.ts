@@ -129,6 +129,9 @@ Deno.test("AgentCore - constructs successfully", async () => {
     const agentCore = new AgentCore(config);
 
     assertExists(agentCore);
+
+    // Cleanup
+    await agentCore.shutdown();
   } finally {
     await Deno.remove(tempDir, { recursive: true });
   }
@@ -154,6 +157,9 @@ Deno.test("AgentCore - registers platform adapters", async () => {
 
     const retrievedAdapter = agentCore.getPlatformAdapter("discord");
     assertEquals(retrievedAdapter, adapter);
+
+    // Cleanup
+    await agentCore.shutdown();
   } finally {
     await Deno.remove(tempDir, { recursive: true });
   }
@@ -187,6 +193,9 @@ Deno.test("AgentCore - handles events from registered platforms", async () => {
     // but it should send an error message
     const sentReplies = mockAdapter.sentReplies;
     assertEquals(sentReplies.length > 0, true, "Should send error message");
+
+    // Cleanup
+    await agentCore.shutdown();
   } finally {
     await Deno.remove(tempDir, { recursive: true });
   }
@@ -206,6 +215,9 @@ Deno.test("AgentCore - returns config", async () => {
 
     const retrievedConfig = agentCore.getConfig();
     assertEquals(retrievedConfig, config);
+
+    // Cleanup
+    await agentCore.shutdown();
   } finally {
     await Deno.remove(tempDir, { recursive: true });
   }
