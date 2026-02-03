@@ -1,7 +1,7 @@
 // tests/types/errors.test.ts
 
 import { assertEquals, assertInstanceOf } from "@std/assert";
-import { BaseError, ConfigError, ErrorCode, PlatformError } from "@types/errors.ts";
+import { BaseError, ConfigError, ErrorCode, PlatformError } from "../../src/types/errors.ts";
 
 Deno.test("ConfigError - should have correct properties", () => {
   const error = new ConfigError(

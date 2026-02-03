@@ -4,8 +4,8 @@ import { parse as parseYaml } from "@std/yaml";
 import { exists } from "@std/fs";
 import { createLogger } from "@utils/logger.ts";
 import { applyEnvOverrides, getEnvironment } from "@utils/env.ts";
-import type { Config } from "@types/config.ts";
-import { ConfigError, ErrorCode } from "@types/errors.ts";
+import type { Config } from "../types/config.ts";
+import { ConfigError, ErrorCode } from "../types/errors.ts";
 
 const logger = createLogger("ConfigLoader");
 

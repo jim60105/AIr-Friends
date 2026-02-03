@@ -2,7 +2,7 @@
 
 import { assertEquals, assertRejects } from "@std/assert";
 import { loadConfig } from "@core/config-loader.ts";
-import { ConfigError } from "@types/errors.ts";
+import { ConfigError } from "../../src/types/errors.ts";
 
 // Test with a temporary directory containing test config files
 async function withTestConfig(

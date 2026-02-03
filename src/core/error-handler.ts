@@ -1,7 +1,7 @@
 // src/core/error-handler.ts
 
 import { createLogger } from "@utils/logger.ts";
-import { BaseError } from "@types/errors.ts";
+import { BaseError } from "../types/errors.ts";
 
 const logger = createLogger("ErrorHandler");
 
