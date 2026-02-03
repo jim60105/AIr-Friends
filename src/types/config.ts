@@ -52,6 +52,15 @@ export interface AgentConfig {
 
   /** API key (can be overridden by env var) */
   apiKey?: string;
+
+  /** GitHub token for GitHub Copilot CLI (optional) */
+  githubToken?: string;
+
+  /** Gemini API key for Gemini CLI (optional) */
+  geminiApiKey?: string;
+
+  /** Default ACP agent type to use ("copilot" or "gemini") */
+  defaultAgentType?: "copilot" | "gemini";
 }
 
 /**

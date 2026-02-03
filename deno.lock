@@ -7,6 +7,7 @@
     "jsr:@std/path@1": "1.1.4",
     "jsr:@std/path@^1.1.4": "1.1.4",
     "jsr:@std/yaml@1": "1.0.11",
+    "npm:@agentclientprotocol/sdk@~0.13.1": "0.13.1_zod@4.3.6",
     "npm:discord.js@14": "14.25.1",
     "npm:misskey-js@2025.12.2": "2025.12.2"
   },
@@ -38,6 +39,12 @@
     }
   },
   "npm": {
+    "@agentclientprotocol/sdk@0.13.1_zod@4.3.6": {
+      "integrity": "sha512-6byvu+F/xc96GBkdAx4hq6/tB3vT63DSBO4i3gYCz8nuyZMerVFna2Gkhm8EHNpZX0J9DjUxzZCW+rnHXUg0FA==",
+      "dependencies": [
+        "zod"
+      ]
+    },
     "@discordjs/builders@1.13.1": {
       "integrity": "sha512-cOU0UDHc3lp/5nKByDxkmRiNZBpdp0kx55aarbiAfakfKJHlxv/yFW1zmIqCAmwH5CRlrH9iMFKJMpvW4DPB+w==",
       "dependencies": [
@@ -189,6 +196,9 @@
     },
     "ws@8.19.0": {
       "integrity": "sha512-blAT2mjOEIi0ZzruJfIhb3nps74PRWTCz1IjglWEEpQl5XS/UNama6u2/rjFkDDouqr4L67ry+1aGIALViWjDg=="
+    },
+    "zod@4.3.6": {
+      "integrity": "sha512-rftlrkhHZOcjDwkGlnUtZZkvaPHCsDATp4pGpuOOMDaTdDDXF91wuVDJoWoPsKX/3YPQ5fHuF3STjcYyKr+Qhg=="
     }
   },
   "workspace": {
@@ -199,6 +209,7 @@
       "jsr:@std/json@1",
       "jsr:@std/path@1",
       "jsr:@std/yaml@1",
+      "npm:@agentclientprotocol/sdk@~0.13.1",
       "npm:discord.js@14",
       "npm:misskey-js@2025.12.2"
     ]
