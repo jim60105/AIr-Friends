@@ -180,6 +180,7 @@ export class ChatbotClient implements acp.Client {
             logContext.exitCode = updateAny.exitCode;
           }
           // Log full update object for debugging
+          logContext.fullUpdate = JSON.stringify(update);
           this.logger.error("Tool call failed", logContext);
         } else {
           this.logger.info("Tool call updated", logContext);
