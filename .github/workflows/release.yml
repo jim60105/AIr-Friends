@@ -18,7 +18,7 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Setup Deno
         uses: denoland/setup-deno@v2
@@ -26,7 +26,7 @@ jobs:
           deno-version: v2.x
 
       - name: Cache Deno dependencies
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: |
             ~/.cache/deno
@@ -45,37 +45,32 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
-      - name: Setup Deno
-        uses: denoland/setup-deno@v2
-        with:
-          deno-version: v2.x
-
-      - name: Cache Deno dependencies
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cache/deno
-            ~/.deno
-          key: ${{ runner.os }}-deno-${{ hashFiles('deno.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-deno-
-
-      - name: Compile binaries
+      - name: Extract changelog content
+        id: extract_changelog
         run: |
-          mkdir -p dist
-          deno compile -A --target x86_64-unknown-linux-gnu --output dist/agent-chatbot-linux-x64 src/main.ts
-          deno compile -A --target x86_64-apple-darwin --output dist/agent-chatbot-darwin-x64 src/main.ts
-          deno compile -A --target aarch64-apple-darwin --output dist/agent-chatbot-darwin-arm64 src/main.ts
+          # Extract the latest version's changelog content
+          VERSION="${{ github.ref_name }}"
+          # Remove 'v' prefix if present
+          VERSION_NUM="${VERSION#v}"
+
+          # Find the section for this version and extract content until next version or end
+          awk "/^## \[$VERSION_NUM\]/{flag=1; next} /^## \[/{if(flag) exit} flag" CHANGELOG.md > release_notes.md
+
+          # If no specific version found, use a default message
+          if [ ! -s release_notes.md ]; then
+            echo "Release $VERSION" > release_notes.md
+          fi
 
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/*
-          generate_release_notes: true
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          tag_name: ${{ github.ref_name }}
+          name: Release ${{ github.ref_name }}
+          draft: false
+          prerelease: false
+          body_path: release_notes.md
 
   docker:
     name: Build and Push Docker Image
@@ -84,7 +79,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Extract version from tag
         id: extract_version
@@ -123,19 +118,19 @@ jobs:
           provenance: true
 
       - name: Add attestations for GitHub Container Registry
-        uses: actions/attest-build-provenance@v2
+        uses: actions/attest-build-provenance@v3
         with:
           subject-name: ghcr.io/${{ github.repository_owner }}/agent-chatbot
           subject-digest: ${{ steps.build_push.outputs.digest }}
 
       - name: Add attestations for DockerHub
-        uses: actions/attest-build-provenance@v2
+        uses: actions/attest-build-provenance@v3
         with:
           subject-name: ${{ secrets.DOCKERHUB_USERNAME }}/agent-chatbot
           subject-digest: ${{ steps.build_push.outputs.digest }}
 
       - name: Add attestations for Quay
-        uses: actions/attest-build-provenance@v2
+        uses: actions/attest-build-provenance@v3
         with:
           subject-name: quay.io/${{ github.repository_owner }}/agent-chatbot
           subject-digest: ${{ steps.build_push.outputs.digest }}
