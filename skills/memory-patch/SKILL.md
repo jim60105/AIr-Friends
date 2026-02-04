@@ -4,7 +4,6 @@ type: shell
 description: |
   Modify the state of an existing memory (enable/disable, change visibility/importance).
   Cannot modify the content - only metadata. Memories cannot be deleted, only disabled.
-command: deno run --allow-net skills/memory-patch/skill.ts
 parameters:
   - name: session-id
     type: string
@@ -43,13 +42,13 @@ Modify metadata of existing memories without changing content.
 
 ```bash
 # Disable a memory
-deno run --allow-net skills/memory-patch/skill.ts \
+deno run --allow-net /home/deno/.copilot/skills/memory-patch/skill.ts \
   --session-id "$SESSION_ID" \
   --memory-id "mem_abc123" \
   --disabled
 
 # Change importance
-deno run --allow-net skills/memory-patch/skill.ts \
+deno run --allow-net /home/deno/.copilot/skills/memory-patch/skill.ts \
   --session-id "$SESSION_ID" \
   --memory-id "mem_abc123" \
   --importance high

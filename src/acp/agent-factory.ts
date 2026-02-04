@@ -27,13 +27,26 @@ export function createAgentConfig(
         );
       }
 
+      // Build environment: inherit critical env vars and add GITHUB_TOKEN
+      // Agent needs PATH to find deno, HOME for skills directory discovery
+      const env: Record<string, string> = {
+        GITHUB_TOKEN: githubToken,
+      };
+
+      // Inherit critical environment variables
+      const inheritVars = ["PATH", "HOME", "DENO_DIR", "LANG", "LC_ALL", "USER"];
+      for (const varName of inheritVars) {
+        const value = Deno.env.get(varName);
+        if (value !== undefined) {
+          env[varName] = value;
+        }
+      }
+
       return {
         command: "copilot",
         args: ["--acp"],
         cwd: workingDir,
-        env: {
-          GITHUB_TOKEN: githubToken,
-        },
+        env,
       };
     }
 
@@ -49,13 +62,26 @@ export function createAgentConfig(
         );
       }
 
+      // Build environment: inherit critical env vars and add GEMINI_API_KEY
+      // Agent needs PATH to find deno, HOME for skills directory discovery
+      const env: Record<string, string> = {
+        GEMINI_API_KEY: geminiApiKey,
+      };
+
+      // Inherit critical environment variables
+      const inheritVars = ["PATH", "HOME", "DENO_DIR", "LANG", "LC_ALL", "USER"];
+      for (const varName of inheritVars) {
+        const value = Deno.env.get(varName);
+        if (value !== undefined) {
+          env[varName] = value;
+        }
+      }
+
       return {
         command: "gemini",
         args: ["cli", "--acp"],
         cwd: workingDir,
-        env: {
-          GEMINI_API_KEY: geminiApiKey,
-        },
+        env,
       };
     }
 

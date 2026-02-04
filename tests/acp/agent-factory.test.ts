@@ -171,3 +171,59 @@ Deno.test("getDefaultAgentType - returns configured default agent type", () => {
   });
   assertEquals(getDefaultAgentType(config), "gemini");
 });
+
+Deno.test("createAgentConfig - inherits critical environment variables for copilot", () => {
+  const config = createTestConfig();
+
+  // Set up environment variables to inherit
+  const originalPath = Deno.env.get("PATH");
+  const originalHome = Deno.env.get("HOME");
+  Deno.env.set("PATH", "/usr/bin:/bin");
+  Deno.env.set("HOME", "/home/testuser");
+
+  try {
+    const agentConfig = createAgentConfig("copilot", "/tmp/workspace", config);
+
+    // Should inherit PATH and HOME
+    assertEquals(agentConfig.env?.PATH, "/usr/bin:/bin");
+    assertEquals(agentConfig.env?.HOME, "/home/testuser");
+    // Should also have GITHUB_TOKEN
+    assertEquals(agentConfig.env?.GITHUB_TOKEN, "test-github-token");
+  } finally {
+    // Restore original env vars
+    if (originalPath) {
+      Deno.env.set("PATH", originalPath);
+    }
+    if (originalHome) {
+      Deno.env.set("HOME", originalHome);
+    }
+  }
+});
+
+Deno.test("createAgentConfig - inherits critical environment variables for gemini", () => {
+  const config = createTestConfig();
+
+  // Set up environment variables to inherit
+  const originalPath = Deno.env.get("PATH");
+  const originalHome = Deno.env.get("HOME");
+  Deno.env.set("PATH", "/usr/local/bin:/usr/bin");
+  Deno.env.set("HOME", "/home/testuser");
+
+  try {
+    const agentConfig = createAgentConfig("gemini", "/tmp/workspace", config);
+
+    // Should inherit PATH and HOME
+    assertEquals(agentConfig.env?.PATH, "/usr/local/bin:/usr/bin");
+    assertEquals(agentConfig.env?.HOME, "/home/testuser");
+    // Should also have GEMINI_API_KEY
+    assertEquals(agentConfig.env?.GEMINI_API_KEY, "test-gemini-key");
+  } finally {
+    // Restore original env vars
+    if (originalPath) {
+      Deno.env.set("PATH", originalPath);
+    }
+    if (originalHome) {
+      Deno.env.set("HOME", originalHome);
+    }
+  }
+});

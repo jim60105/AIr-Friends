@@ -4,7 +4,6 @@ type: shell
 description: |
   Fetch additional context from the platform when needed.
   Use this to get more message history or search for related conversations.
-command: deno run --allow-net skills/fetch-context/skill.ts
 parameters:
   - name: session-id
     type: string
@@ -37,13 +36,13 @@ Retrieve additional context from the platform to better understand the conversat
 
 ```bash
 # Get recent messages
-deno run --allow-net skills/fetch-context/skill.ts \
+deno run --allow-net /home/deno/.copilot/skills/fetch-context/skill.ts \
   --session-id "$SESSION_ID" \
   --type recent_messages \
   --limit 20
 
 # Search messages
-deno run --allow-net skills/fetch-context/skill.ts \
+deno run --allow-net /home/deno/.copilot/skills/fetch-context/skill.ts \
   --session-id "$SESSION_ID" \
   --type search_messages \
   --query "project deadline" \

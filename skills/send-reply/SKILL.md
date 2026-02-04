@@ -5,7 +5,6 @@ description: |
   Send the final reply message to the user on the platform.
   This is the ONLY way to communicate with the user externally.
   Can only be called ONCE per interaction - subsequent calls will fail.
-command: deno run --allow-net skills/send-reply/skill.ts
 parameters:
   - name: session-id
     type: string
@@ -35,7 +34,7 @@ Send your final response to the user. This is the gateway to external communicat
 ## Usage
 
 ```bash
-deno run --allow-net skills/send-reply/skill.ts \
+deno run --allow-net --allow-env /home/deno/.copilot/skills/send-reply/skill.ts \
   --session-id "$SESSION_ID" \
   --message "Your reply message here"
 ```
@@ -45,7 +44,6 @@ deno run --allow-net skills/send-reply/skill.ts \
 1. **One reply only**: You can only send ONE reply per interaction
 2. **This is the ONLY external output**: All other processing remains internal
 3. **Make it complete**: Ensure your reply addresses the user's request fully
-4. **Session ID**: Read the session ID from the `SESSION_ID` file in the working directory
 
 ## Output Format
 

@@ -64,6 +64,35 @@ export class ChatbotClient implements acp.Client {
       }
     }
 
+    // Auto-approve shell execution for our skill commands
+    // Our skills are invoked via 'deno run skills/...' commands
+    if (params.toolCall.kind === "execute") {
+      const rawInput = params.toolCall.rawInput as
+        | { command?: string; commands?: string[] }
+        | undefined;
+      const commands = rawInput?.commands ?? (rawInput?.command ? [rawInput.command] : []);
+
+      // Check if all commands are our skill commands
+      const isSkillCommand = commands.length > 0 &&
+        commands.every((cmd) => cmd.includes("skills/") && cmd.includes("skill.ts"));
+
+      if (isSkillCommand) {
+        this.logger.info("Auto-approving skill shell execution", {
+          commands,
+        });
+
+        const allowOption = params.options.find((o) => o.kind === "allow_once") ??
+          params.options[0];
+
+        return Promise.resolve({
+          outcome: {
+            outcome: "selected",
+            optionId: allowOption.optionId,
+          },
+        });
+      }
+    }
+
     // Extract skill name from tool call (only works for ToolCall, not ToolCallUpdate)
     let skillName = "";
     // Check if this is a complete ToolCall (not just an update)
@@ -130,12 +159,34 @@ export class ChatbotClient implements acp.Client {
         });
         break;
 
-      case "tool_call_update":
-        this.logger.info("Tool call updated", {
+      case "tool_call_update": {
+        // Log tool call updates with full context
+        const logContext: Record<string, unknown> = {
           id: update.toolCallId,
           status: update.status,
-        });
+        };
+
+        // Add error information if status is failed
+        if (update.status === "failed") {
+          // ACP SDK may include error details in various fields
+          const updateAny = update as Record<string, unknown>;
+          if (updateAny.output) {
+            logContext.output = updateAny.output;
+          }
+          if (updateAny.error) {
+            logContext.error = updateAny.error;
+          }
+          if (updateAny.exitCode !== undefined) {
+            logContext.exitCode = updateAny.exitCode;
+          }
+          // Log full update object for debugging
+          logContext.fullUpdate = JSON.stringify(update);
+          this.logger.error("Tool call failed", logContext);
+        } else {
+          this.logger.info("Tool call updated", logContext);
+        }
         break;
+      }
 
       case "plan":
         this.logger.debug("Agent plan", {

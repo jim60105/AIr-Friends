@@ -47,5 +47,3 @@ You have access to the following skills in `~/.copilot/skills/`. To use a skill,
 - Keep responses concise
 - Maintain context across conversations using memory skills
 - Read the full SKILL.md file for any skill before using it
-
-<!-- This prompt will be expanded based on specific bot requirements -->

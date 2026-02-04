@@ -46,10 +46,17 @@ export class AgentConnector {
       env: agentConfig.env,
       stdin: "piped",
       stdout: "piped",
-      stderr: "inherit",
+      stderr: "piped", // Capture stderr to log error messages
     });
 
     this.process = command.spawn();
+
+    // Pipe stderr to logger (doesn't block the process)
+    this.readStderr(this.process.stderr, logger as Logger).catch((error) => {
+      (logger as Logger).error("Failed to read stderr", {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    });
 
     // Create streams for JSON-RPC communication
     // ACP uses: output (to agent) = WritableStream, input (from agent) = ReadableStream
@@ -314,6 +321,38 @@ export class AgentConnector {
    */
   get isConnected(): boolean {
     return this.connection !== null && this.process !== null;
+  }
+
+  /**
+   * Read stderr stream from the agent process and log errors
+   * This runs asynchronously in the background
+   */
+  private async readStderr(
+    stderr: ReadableStream<Uint8Array>,
+    logger: Logger,
+  ): Promise<void> {
+    try {
+      const decoder = new TextDecoder();
+      const reader = stderr.getReader();
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        const text = decoder.decode(value, { stream: true });
+        if (text.trim()) {
+          // Log stderr output as warnings (they're usually errors)
+          logger.warn("Agent stderr", { message: text.trim() });
+        }
+      }
+    } catch (error) {
+      // Only log if it's not a cancellation error
+      if (error instanceof Error && error.message !== "operation canceled") {
+        logger.error("Error reading stderr stream", {
+          error: error.message,
+        });
+      }
+    }
   }
 
   /**

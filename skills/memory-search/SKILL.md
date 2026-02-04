@@ -2,7 +2,6 @@
 name: memory-search
 type: shell
 description: Search through saved memories using keywords.
-command: deno run --allow-net skills/memory-search/skill.ts
 parameters:
   - name: session-id
     type: string
@@ -29,7 +28,7 @@ Search through saved memories to retrieve relevant information.
 ## Usage
 
 ```bash
-deno run --allow-net skills/memory-search/skill.ts \
+deno run --allow-net /home/deno/.copilot/skills/memory-search/skill.ts \
   --session-id "$SESSION_ID" \
   --query "hiking preferences" \
   --limit 10

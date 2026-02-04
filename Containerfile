@@ -5,9 +5,9 @@ ARG RELEASE=0
 
 ########################################
 # Base stage
-# Deno official Alpine image as base
+# Deno official Debian image as base
 ########################################
-FROM docker.io/denoland/deno:alpine AS base
+FROM docker.io/denoland/deno:debian AS base
 
 ########################################
 # GitHub Copilot unpack stage

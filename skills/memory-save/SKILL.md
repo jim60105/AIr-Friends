@@ -4,7 +4,6 @@ type: shell
 description: |
   Save important information to persistent memory for future conversations.
   Memory is append-only and cannot be deleted, only disabled.
-command: deno run --allow-net skills/memory-save/skill.ts
 parameters:
   - name: session-id
     type: string
@@ -36,7 +35,7 @@ Save important information that should persist across conversations.
 ## Usage
 
 ```bash
-deno run --allow-net skills/memory-save/skill.ts \
+deno run --allow-net /home/deno/.copilot/skills/memory-save/skill.ts \
   --session-id "$SESSION_ID" \
   --content "User prefers formal communication" \
   --importance high

@@ -199,6 +199,97 @@ Deno.test("ChatbotClient - requestPermission auto-approves skills directory read
   }
 });
 
+Deno.test("ChatbotClient - requestPermission auto-approves skill shell execution", async () => {
+  const tempDir = Deno.makeTempDirSync();
+  try {
+    const skillRegistry = createTestSkillRegistry();
+    const logger = createTestLogger();
+    const config = {
+      workingDir: tempDir,
+      platform: "discord",
+      userId: "123",
+      channelId: "456",
+      isDM: false,
+    };
+
+    const client = new ChatbotClient(skillRegistry, logger, config);
+
+    // Create a mock RequestPermissionRequest for shell execution of skill command
+    const request: acp.RequestPermissionRequest = {
+      sessionId: "test-session",
+      toolCall: {
+        title: "Execute shell command",
+        kind: "execute",
+        status: "pending" as const,
+        content: [],
+        toolCallId: "test-id",
+        rawInput: {
+          commands: [
+            "deno run --allow-net /home/deno/.copilot/skills/memory-save/skill.ts --session-id test --content 'test'",
+          ],
+        },
+      },
+      options: [
+        { kind: "allow_once", optionId: "allow-1", name: "Allow once" },
+        { kind: "reject_once", optionId: "reject-1", name: "Reject once" },
+      ],
+    };
+
+    const response = await client.requestPermission(request);
+    assertEquals(response.outcome.outcome, "selected");
+    if (response.outcome.outcome === "selected") {
+      assertEquals(response.outcome.optionId, "allow-1");
+    }
+  } finally {
+    Deno.removeSync(tempDir, { recursive: true });
+  }
+});
+
+Deno.test("ChatbotClient - requestPermission rejects non-skill shell execution", async () => {
+  const tempDir = Deno.makeTempDirSync();
+  try {
+    const skillRegistry = createTestSkillRegistry();
+    const logger = createTestLogger();
+    const config = {
+      workingDir: tempDir,
+      platform: "discord",
+      userId: "123",
+      channelId: "456",
+      isDM: false,
+    };
+
+    const client = new ChatbotClient(skillRegistry, logger, config);
+
+    // Create a mock RequestPermissionRequest for non-skill shell command
+    const request: acp.RequestPermissionRequest = {
+      sessionId: "test-session",
+      toolCall: {
+        title: "Execute shell command",
+        kind: "execute",
+        status: "pending" as const,
+        content: [],
+        toolCallId: "test-id",
+        rawInput: {
+          commands: ["rm -rf /"],
+        },
+      },
+      options: [
+        { kind: "allow_once", optionId: "allow-1", name: "Allow once" },
+        { kind: "reject_once", optionId: "reject-1", name: "Reject once" },
+      ],
+    };
+
+    const response = await client.requestPermission(request);
+    assertEquals(response.outcome.outcome, "selected");
+    if (response.outcome.outcome === "selected") {
+      // Should reject non-skill commands
+      assertEquals(response.outcome.optionId, "reject-1");
+    }
+  } finally {
+    Deno.removeSync(tempDir, { recursive: true });
+  }
+});
+
 Deno.test("ChatbotClient - readTextFile validates path within working directory", async () => {
   const tempDir = Deno.makeTempDirSync();
   try {
@@ -355,6 +446,50 @@ Deno.test("ChatbotClient - sessionUpdate handles various update types", async ()
 
     // Should not throw errors
     assertEquals(true, true);
+  } finally {
+    Deno.removeSync(tempDir, { recursive: true });
+  }
+});
+
+Deno.test("ChatbotClient - sessionUpdate logs failed tool calls with details", async () => {
+  const tempDir = Deno.makeTempDirSync();
+  try {
+    // Create a logger that captures error logs
+    const errorLogs: Array<{ message: string; context: unknown }> = [];
+    const testLogger = new Logger("test", { level: LogLevel.DEBUG });
+    const originalError = testLogger.error.bind(testLogger);
+    testLogger.error = (message: string, context?: Record<string, unknown>) => {
+      errorLogs.push({ message, context });
+      originalError(message, context);
+    };
+
+    const skillRegistry = createTestSkillRegistry();
+    const config = {
+      workingDir: tempDir,
+      platform: "discord",
+      userId: "123",
+      channelId: "456",
+      isDM: false,
+    };
+
+    const client = new ChatbotClient(skillRegistry, testLogger, config);
+
+    // Test tool_call_update with failed status
+    await client.sessionUpdate({
+      sessionId: "test-session",
+      update: {
+        sessionUpdate: "tool_call_update",
+        toolCallId: "test-id",
+        status: "failed" as const,
+      },
+    } as unknown as acp.SessionNotification);
+
+    // Verify error was logged
+    assertEquals(errorLogs.length, 1);
+    assertEquals(errorLogs[0].message, "Tool call failed");
+    const context = errorLogs[0].context as Record<string, unknown>;
+    assertEquals(context.id, "test-id");
+    assertEquals(context.status, "failed");
   } finally {
     Deno.removeSync(tempDir, { recursive: true });
   }

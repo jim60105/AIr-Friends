@@ -114,7 +114,7 @@ export class SessionOrchestrator {
 
       // 3. Format context for prompt
       const formattedContext = this.contextAssembler.formatContext(context);
-      const fullPrompt = this.buildPrompt(formattedContext);
+      const fullPrompt = this.buildPrompt(formattedContext, shellSessionId);
 
       sessionLogger.debug("Prompt built", {
         estimatedTokens: formattedContext.estimatedTokens,
@@ -236,10 +236,13 @@ export class SessionOrchestrator {
   /**
    * Build the full prompt to send to the agent
    */
-  private buildPrompt(context: {
-    systemMessage: string;
-    userMessage: string;
-  }): string {
+  private buildPrompt(
+    context: {
+      systemMessage: string;
+      userMessage: string;
+    },
+    sessionId: string | null,
+  ): string {
     const parts: string[] = [];
 
     // System prompt
@@ -247,6 +250,17 @@ export class SessionOrchestrator {
     parts.push("");
     parts.push(context.systemMessage);
     parts.push("");
+
+    // Session information
+    if (sessionId) {
+      parts.push("# Session Information");
+      parts.push("");
+      parts.push(`Your session ID is: ${sessionId}`);
+      parts.push(
+        "Use this session ID when calling skills that require --session-id parameter.",
+      );
+      parts.push("");
+    }
 
     // User message with context
     parts.push("# Context and Message");
