@@ -56,12 +56,35 @@ jobs:
           # Remove 'v' prefix if present
           VERSION_NUM="${VERSION#v}"
 
-          # Find the section for this version and extract content until next version or end
-          awk "/^## \[$VERSION_NUM\]/{flag=1; next} /^## \[/{if(flag) exit} flag" CHANGELOG.md > release_notes.md
+          # Create installation guide
+          echo "## Container Image" > release_notes.md
+          echo "" >> release_notes.md
+          echo "This release is published to multiple container registries:" >> release_notes.md
+          echo "- GitHub Container Registry (ghcr.io)" >> release_notes.md
+          echo "- Docker Hub" >> release_notes.md
+          echo "- Quay.io" >> release_notes.md
+          echo "" >> release_notes.md
+          echo "You can pull the image using Podman:" >> release_notes.md
+          echo "" >> release_notes.md
+          echo '```bash' >> release_notes.md
+          echo "podman pull ghcr.io/${{ github.repository_owner }}/agent-chatbot:${VERSION_NUM}" >> release_notes.md
+          echo '```' >> release_notes.md
+          echo "" >> release_notes.md
+          echo "## Changelog" >> release_notes.md
+          echo "" >> release_notes.md
 
-          # If no specific version found, use a default message
-          if [ ! -s release_notes.md ]; then
-            echo "Release $VERSION" > release_notes.md
+          # Count lines before appending changelog
+          LINES_BEFORE=$(wc -l < release_notes.md)
+
+          # Find the section for this version and extract content until next version or end
+          awk "/^## \[$VERSION_NUM\]/{flag=1; next} /^## \[/{if(flag) exit} flag" CHANGELOG.md >> release_notes.md
+
+          # Count lines after appending changelog
+          LINES_AFTER=$(wc -l < release_notes.md)
+
+          # If no new lines were added, the changelog section wasn't found
+          if [ "$LINES_BEFORE" -eq "$LINES_AFTER" ]; then
+            echo "No changelog available for this version." >> release_notes.md
           fi
 
       - name: Create Release
