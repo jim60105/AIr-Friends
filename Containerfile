@@ -9,6 +9,15 @@ ARG RELEASE=0
 ########################################
 FROM docker.io/denoland/deno:debian AS base
 
+# RUN mount cache for multi-arch: https://github.com/docker/buildx/issues/549#issuecomment-1788297892
+ARG TARGETARCH
+ARG TARGETVARIANT
+
+RUN --mount=type=cache,id=apt-$TARGETARCH$TARGETVARIANT,sharing=locked,target=/var/cache/apt \
+    --mount=type=cache,id=aptlists-$TARGETARCH$TARGETVARIANT,sharing=locked,target=/var/lib/apt/lists \
+    apt-get update && apt-get install -y --no-install-recommends \
+        git
+
 ########################################
 # GitHub Copilot unpack stage
 ########################################
@@ -34,7 +43,7 @@ COPY src/ ./src/
 
 # Pre-cache dependencies by caching the main entry point
 # Deno caches modules in DENO_DIR (default: /deno-dir/ in official image)
-RUN deno cache --lock=deno.lock src/main.ts
+RUN deno cache --lock=deno.lock src/main.ts npm:@google/gemini-cli
 
 ########################################
 # Final stage

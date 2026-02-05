@@ -56,8 +56,8 @@ Deno.test("createAgentConfig - creates gemini config correctly", () => {
   const config = createTestConfig();
   const agentConfig = createAgentConfig("gemini", "/tmp/workspace", config);
 
-  assertEquals(agentConfig.command, "gemini");
-  assertEquals(agentConfig.args, ["cli", "--acp"]);
+  assertEquals(agentConfig.command, "deno");
+  assertEquals(agentConfig.args, ["task", "gemini", "--experimental-acp"]);
   assertEquals(agentConfig.cwd, "/tmp/workspace");
   assertEquals(agentConfig.env?.GEMINI_API_KEY, "test-gemini-key");
 });

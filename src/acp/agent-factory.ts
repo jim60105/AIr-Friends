@@ -78,8 +78,8 @@ export function createAgentConfig(
       }
 
       return {
-        command: "gemini",
-        args: ["cli", "--acp"],
+        command: "deno",
+        args: ["task", "gemini", "--experimental-acp"],
         cwd: workingDir,
         env,
       };

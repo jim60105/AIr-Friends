@@ -14,6 +14,7 @@ agent:
   model: "gpt-5-mini"
   systemPromptPath: "./prompts/system.md"
   tokenLimit: 4096
+  defaultAgentType: "copilot" # copilot, gemini
 
 memory:
   searchLimit: 10
