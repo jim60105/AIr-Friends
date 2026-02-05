@@ -82,6 +82,15 @@ An AI-powered conversational chatbot using the [Agent Client Protocol (ACP)](htt
    deno task start
    ```
 
+6. **Run with YOLO mode (auto-approve all permissions)**
+
+   ```bash
+   deno run --allow-net --allow-read --allow-write --allow-env --allow-run src/main.ts --yolo
+   ```
+
+   > [!WARNING]  
+   > YOLO mode auto-approves ALL permission requests from the ACP agent. Only use this in trusted container environments or for testing purposes.
+
 ## Development
 
 ### Available Tasks
@@ -182,6 +191,9 @@ podman run -d --rm \
   --name ai-friend \
   ghcr.io/jim60105/ai-friend:latest
 ```
+
+> [!NOTE]  
+> The container image runs with the `--yolo` flag by default, which auto-approves all permission requests. This is safe in the isolated container environment.
 
 ## Documentation
 

@@ -30,6 +30,7 @@ export class ChatbotClient implements acp.Client {
   /**
    * Handle permission requests from the Agent
    * Auto-approves our registered skills and access to skills directory
+   * In YOLO mode, auto-approves ALL permission requests
    */
   requestPermission(
     params: acp.RequestPermissionRequest,
@@ -37,7 +38,26 @@ export class ChatbotClient implements acp.Client {
     this.logger.debug("Permission requested", {
       toolCall: params.toolCall,
       kind: params.toolCall.kind,
+      yolo: this.config.yolo,
     });
+
+    // YOLO mode: auto-approve everything
+    if (this.config.yolo) {
+      this.logger.info("YOLO mode: auto-approving all permissions", {
+        kind: params.toolCall.kind,
+        title: params.toolCall.title,
+      });
+
+      const allowOption = params.options.find((o) => o.kind === "allow_once") ??
+        params.options[0];
+
+      return Promise.resolve({
+        outcome: {
+          outcome: "selected",
+          optionId: allowOption.optionId,
+        },
+      });
+    }
 
     // Auto-approve read access to skills directory
     // External agents need to read SKILL.md files to understand available skills

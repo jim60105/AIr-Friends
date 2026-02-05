@@ -28,11 +28,13 @@ export class AgentCore {
   private sessionRegistry: SessionRegistry;
   private skillApiServer: SkillAPIServer | null = null;
   private orchestrator: SessionOrchestrator;
+  private yolo: boolean;
 
-  constructor(config: Config) {
+  constructor(config: Config, yolo = false) {
     this.config = config;
+    this.yolo = yolo;
 
-    logger.info("Initializing Agent Core");
+    logger.info("Initializing Agent Core", { yolo });
 
     // Initialize workspace manager
     const workspaceManager = new WorkspaceManager({
@@ -84,6 +86,7 @@ export class AgentCore {
       skillRegistry,
       config,
       this.sessionRegistry,
+      this.yolo,
     );
 
     // Initialize message handler and reply dispatcher

@@ -17,13 +17,14 @@ export interface AppContext {
   config: Config;
   agentCore: AgentCore;
   platformRegistry: ReturnType<typeof getPlatformRegistry>;
+  yolo: boolean;
 }
 
 /**
  * Bootstrap the application
  */
-export async function bootstrap(configPath?: string): Promise<AppContext> {
-  logger.info("Starting bootstrap");
+export async function bootstrap(configPath?: string, yolo = false): Promise<AppContext> {
+  logger.info("Starting bootstrap", { yolo });
 
   // Load configuration
   const configFile = configPath ?? "./config.yaml";
@@ -38,7 +39,7 @@ export async function bootstrap(configPath?: string): Promise<AppContext> {
 
   // Initialize agent core (this initializes all necessary components)
   logger.info("Initializing agent core");
-  const agentCore = new AgentCore(config);
+  const agentCore = new AgentCore(config, yolo);
 
   // Initialize platform registry
   logger.info("Initializing platform registry");
@@ -66,6 +67,7 @@ export async function bootstrap(configPath?: string): Promise<AppContext> {
     config,
     agentCore,
     platformRegistry,
+    yolo,
   };
 }
 

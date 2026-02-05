@@ -494,3 +494,142 @@ Deno.test("ChatbotClient - sessionUpdate logs failed tool calls with details", a
     Deno.removeSync(tempDir, { recursive: true });
   }
 });
+
+Deno.test("ChatbotClient - YOLO mode auto-approves all permission requests", async () => {
+  const tempDir = Deno.makeTempDirSync();
+  try {
+    const skillRegistry = createTestSkillRegistry();
+    const logger = createTestLogger();
+    const config = {
+      workingDir: tempDir,
+      platform: "discord",
+      userId: "123",
+      channelId: "456",
+      isDM: false,
+      yolo: true, // Enable YOLO mode
+    };
+
+    const client = new ChatbotClient(skillRegistry, logger, config);
+
+    // Test with unknown skill - should be approved in YOLO mode
+    const unknownSkillRequest: acp.RequestPermissionRequest = {
+      sessionId: "test-session",
+      toolCall: {
+        title: "dangerous-operation",
+        kind: null,
+        status: "pending" as const,
+        rawInput: { skill: "dangerous-operation" },
+        content: [],
+        toolCallId: "test-id-1",
+      },
+      options: [
+        { kind: "allow_once", optionId: "allow-1", name: "Allow once" },
+        { kind: "reject_once", optionId: "reject-1", name: "Reject once" },
+      ],
+    };
+
+    const response1 = await client.requestPermission(unknownSkillRequest);
+    assertEquals(response1.outcome.outcome, "selected");
+    if (response1.outcome.outcome === "selected") {
+      assertEquals(response1.outcome.optionId, "allow-1");
+    }
+
+    // Test with dangerous shell command - should be approved in YOLO mode
+    const dangerousShellRequest: acp.RequestPermissionRequest = {
+      sessionId: "test-session",
+      toolCall: {
+        title: "Execute shell command",
+        kind: "execute",
+        status: "pending" as const,
+        content: [],
+        toolCallId: "test-id-2",
+        rawInput: {
+          commands: ["rm -rf /"],
+        },
+      },
+      options: [
+        { kind: "allow_once", optionId: "allow-2", name: "Allow once" },
+        { kind: "reject_once", optionId: "reject-2", name: "Reject once" },
+      ],
+    };
+
+    const response2 = await client.requestPermission(dangerousShellRequest);
+    assertEquals(response2.outcome.outcome, "selected");
+    if (response2.outcome.outcome === "selected") {
+      assertEquals(response2.outcome.optionId, "allow-2");
+    }
+
+    // Test with arbitrary file access - should be approved in YOLO mode
+    const fileAccessRequest: acp.RequestPermissionRequest = {
+      sessionId: "test-session",
+      toolCall: {
+        title: "Access sensitive file",
+        kind: "read",
+        status: "pending" as const,
+        content: [],
+        toolCallId: "test-id-3",
+        locations: [
+          { path: "/etc/passwd" },
+        ],
+      },
+      options: [
+        { kind: "allow_once", optionId: "allow-3", name: "Allow once" },
+        { kind: "reject_once", optionId: "reject-3", name: "Reject once" },
+      ],
+    };
+
+    const response3 = await client.requestPermission(fileAccessRequest);
+    assertEquals(response3.outcome.outcome, "selected");
+    if (response3.outcome.outcome === "selected") {
+      assertEquals(response3.outcome.optionId, "allow-3");
+    }
+  } finally {
+    Deno.removeSync(tempDir, { recursive: true });
+  }
+});
+
+Deno.test("ChatbotClient - YOLO mode disabled still rejects unknown operations", async () => {
+  const tempDir = Deno.makeTempDirSync();
+  try {
+    const skillRegistry = createTestSkillRegistry();
+    const logger = createTestLogger();
+    const config = {
+      workingDir: tempDir,
+      platform: "discord",
+      userId: "123",
+      channelId: "456",
+      isDM: false,
+      yolo: false, // Explicitly disable YOLO mode
+    };
+
+    const client = new ChatbotClient(skillRegistry, logger, config);
+
+    // Test with dangerous shell command - should be rejected without YOLO mode
+    const dangerousShellRequest: acp.RequestPermissionRequest = {
+      sessionId: "test-session",
+      toolCall: {
+        title: "Execute shell command",
+        kind: "execute",
+        status: "pending" as const,
+        content: [],
+        toolCallId: "test-id",
+        rawInput: {
+          commands: ["rm -rf /"],
+        },
+      },
+      options: [
+        { kind: "allow_once", optionId: "allow-1", name: "Allow once" },
+        { kind: "reject_once", optionId: "reject-1", name: "Reject once" },
+      ],
+    };
+
+    const response = await client.requestPermission(dangerousShellRequest);
+    assertEquals(response.outcome.outcome, "selected");
+    if (response.outcome.outcome === "selected") {
+      // Should reject dangerous commands without YOLO mode
+      assertEquals(response.outcome.optionId, "reject-1");
+    }
+  } finally {
+    Deno.removeSync(tempDir, { recursive: true });
+  }
+});

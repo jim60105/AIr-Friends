@@ -10,10 +10,10 @@ const logger = createLogger("Main");
 /**
  * Parse command line arguments
  */
-function parseArgs(): { config?: string; help: boolean } {
+function parseArgs(): { config?: string; help: boolean; yolo: boolean } {
   const args = parse(Deno.args, {
     string: ["config"],
-    boolean: ["help"],
+    boolean: ["help", "yolo"],
     alias: {
       c: "config",
       h: "help",
@@ -23,6 +23,7 @@ function parseArgs(): { config?: string; help: boolean } {
   return {
     config: args.config,
     help: args.help,
+    yolo: args.yolo || false,
   };
 }
 
@@ -39,6 +40,7 @@ Usage:
 Options:
   -c, --config <path>   Path to configuration file (default: config.yaml)
   -h, --help            Show this help message
+  --yolo                Auto-approve all permission requests (for container environments)
 
 Environment Variables:
   LOG_LEVEL             Log level (DEBUG, INFO, WARN, ERROR, FATAL)
@@ -47,7 +49,7 @@ Environment Variables:
   MISSKEY_HOST          Misskey instance host
 
 Example:
-  deno run -A src/main.ts --config ./my-config.yaml
+  deno run -A src/main.ts --config ./my-config.yaml --yolo
 `);
 }
 
@@ -71,7 +73,7 @@ async function main(): Promise<void> {
 
   try {
     // Bootstrap application
-    const context = await bootstrap(args.config);
+    const context = await bootstrap(args.config, args.yolo);
 
     // Set up shutdown handler
     shutdownHandler.setContext(context);

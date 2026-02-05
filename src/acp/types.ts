@@ -18,6 +18,9 @@ export interface ClientConfig {
 
   /** Whether this is a DM conversation */
   isDM: boolean;
+
+  /** YOLO mode: auto-approve all permission requests */
+  yolo?: boolean;
 }
 
 /**

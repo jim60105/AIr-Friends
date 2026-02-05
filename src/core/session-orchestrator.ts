@@ -34,6 +34,7 @@ export class SessionOrchestrator {
   private skillRegistry: SkillRegistry;
   private sessionRegistry: SessionRegistry;
   private config: Config;
+  private yolo: boolean;
 
   constructor(
     workspaceManager: WorkspaceManager,
@@ -41,12 +42,14 @@ export class SessionOrchestrator {
     skillRegistry: SkillRegistry,
     config: Config,
     sessionRegistry: SessionRegistry,
+    yolo = false,
   ) {
     this.workspaceManager = workspaceManager;
     this.contextAssembler = contextAssembler;
     this.skillRegistry = skillRegistry;
     this.sessionRegistry = sessionRegistry;
     this.config = config;
+    this.yolo = yolo;
   }
 
   /**
@@ -127,6 +130,7 @@ export class SessionOrchestrator {
         userId: event.userId,
         channelId: event.channelId,
         isDM: event.isDm,
+        yolo: this.yolo,
       };
 
       // 5. Build ACP connector

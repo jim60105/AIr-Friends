@@ -109,6 +109,21 @@ deno run --allow-net --allow-read --allow-write --allow-env src/main.ts
 | `--allow-write` | Memory log files in workspace directories         |
 | `--allow-env`   | Environment variables (tokens, configuration)     |
 
+#### YOLO Mode
+
+The `--yolo` flag enables automatic approval of ALL permission requests from the ACP agent:
+
+```bash
+deno run --allow-net --allow-read --allow-write --allow-env src/main.ts --yolo
+```
+
+**Use cases**:
+- Container environments (enabled by default in Containerfile)
+- Testing and development
+- Trusted execution environments
+
+**Warning**: Only use YOLO mode in isolated/trusted environments. It bypasses all permission checks for agent actions.
+
 ## Code Style & Formatting
 
 This project uses Deno's built-in formatter and linter. Configuration is in `deno.json`:
@@ -301,10 +316,18 @@ We use `@agentclientprotocol/sdk` for Client-side connection:
 
 - Implements ACP `Client` interface
 - Handles callbacks from external agents:
-  - `requestPermission`: Permission requests
+  - `requestPermission`: Permission requests (auto-approves registered skills, or all requests in YOLO mode)
   - `sessionUpdate`: Session state changes
   - `readTextFile`: Read files from workspace
   - `writeTextFile`: Write files to workspace
+
+**Permission Handling**:
+
+- **Normal mode**: Auto-approves registered skills and skills directory access
+- **YOLO mode** (`--yolo` flag): Auto-approves ALL permission requests
+  - Enabled by default in container deployments
+  - Useful for trusted/isolated environments
+  - Bypasses all permission validation
 
 **Session Flow**:
 
