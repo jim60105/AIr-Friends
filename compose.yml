@@ -1,0 +1,13 @@
+services:
+  ai-friend:
+    container_name: ai-friend
+    image: ghcr.io/jim60105/ai-friend:latest
+    build:
+      context: .
+      dockerfile: Containerfile
+      target: final
+    env_file:
+      - .env
+    volumes:
+      - ./data:/data
+      - ./config.yaml:/app/config.yaml:ro,z
