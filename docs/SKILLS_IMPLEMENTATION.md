@@ -70,6 +70,7 @@ Located in `.github/skills/`, these files follow the [Agent Skills Standard](htt
   - `message` (required): Final message to send
   - `attachments`: Optional attachments (not fully implemented yet)
 - **Critical Rule**: Can only be called ONCE per interaction
+- **Reply Threading**: When triggered from a note (Misskey) or message, the reply is threaded to the original note/message using `replyToMessageId` from the SkillContext. For new conversations without a triggering message, a new note/message is created instead.
 
 ### 4. fetch-context.md
 
@@ -96,7 +97,12 @@ Located in `.github/skills/`, these files follow the [Agent Skills Standard](htt
 
 - `SkillCall`: Structure of skill invocation
 - `SkillResult`: Return value from skill execution
-- `SkillContext`: Context passed to skill handlers
+- `SkillContext`: Context passed to skill handlers, includes:
+  - `workspace`: Workspace information
+  - `platformAdapter`: Platform interface for sending messages
+  - `channelId`: Target channel ID
+  - `userId`: User who triggered the interaction
+  - `replyToMessageId`: Optional original message ID for reply threading
 - Parameter types for each skill
 
 ### Memory Handler (src/skills/memory-handler.ts)

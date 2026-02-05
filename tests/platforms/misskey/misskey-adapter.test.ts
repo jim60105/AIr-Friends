@@ -161,7 +161,7 @@ Deno.test("noteToPlatformMessage - should convert correctly", () => {
 
   assertEquals(msg.messageId, "note123");
   assertEquals(msg.userId, "user123");
-  assertEquals(msg.username, "Test User");
+  assertEquals(msg.username, "@Test User (user123)");
   assertEquals(msg.content, "Hello @testbot!");
   assertEquals(msg.isBot, false);
 });

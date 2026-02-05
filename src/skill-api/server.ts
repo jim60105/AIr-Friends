@@ -158,6 +158,7 @@ export class SkillAPIServer {
         channelId: session.channelId,
         userId: session.userId,
         platformAdapter: session.platformAdapter,
+        replyToMessageId: session.triggerEvent.messageId,
       };
 
       // Execute skill

@@ -30,6 +30,8 @@ export interface SkillContext {
   platformAdapter: PlatformAdapter;
   channelId: string;
   userId: string;
+  /** Original message ID that triggered this session (for reply threading) */
+  replyToMessageId?: string;
 }
 
 /**

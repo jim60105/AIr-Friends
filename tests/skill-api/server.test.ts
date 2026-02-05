@@ -289,8 +289,16 @@ Deno.test("SkillAPIServer - validates skill name", async () => {
       workspace: mockWorkspace,
       // deno-lint-ignore no-explicit-any
       platformAdapter: {} as any,
-      // deno-lint-ignore no-explicit-any
-      triggerEvent: {} as any,
+      triggerEvent: {
+        platform: "discord",
+        channelId: "456",
+        userId: "123",
+        messageId: "msg_trigger",
+        isDm: false,
+        guildId: "",
+        content: "",
+        timestamp: new Date(),
+      },
       timeoutMs: 60000,
     });
 
@@ -360,8 +368,16 @@ Deno.test("SkillAPIServer - enforces single reply rule", async () => {
       isDm: false,
       workspace: mockWorkspace,
       platformAdapter: mockAdapter,
-      // deno-lint-ignore no-explicit-any
-      triggerEvent: {} as any,
+      triggerEvent: {
+        platform: "discord",
+        channelId: "456",
+        userId: "123",
+        messageId: "msg_trigger",
+        isDm: false,
+        guildId: "",
+        content: "",
+        timestamp: new Date(),
+      },
       timeoutMs: 60000,
     });
 

@@ -36,10 +36,13 @@ export function noteToPlatformMessage(
   note: MisskeyNote,
   botId: string,
 ): PlatformMessage {
+  const displayName = note.user.name ?? note.user.username;
+  const formattedUsername = `@${displayName} (${note.userId})`;
+
   return {
     messageId: note.id,
     userId: note.userId,
-    username: note.user.name ?? note.user.username,
+    username: formattedUsername,
     content: note.text ?? "",
     timestamp: new Date(note.createdAt),
     isBot: note.userId === botId,

@@ -329,6 +329,9 @@ Agent Output (internal)
         ├─── Reasoning text ────► Internal only (not sent externally)
         │
         └─── send_reply call ───► Sent to platform (max 1 per session)
+                   │
+                   └─── Uses replyToMessageId to thread replies
+                        (for Misskey: replies to original note)
 ```
 
 **Constraints:**
@@ -336,6 +339,7 @@ Agent Output (internal)
 - Only one `send_reply` call allowed per session
 - Second `send_reply` call must be rejected/error
 - All non-reply outputs remain internal
+- Replies are threaded to the original message when applicable (platform-dependent)
 
 ---
 
@@ -454,12 +458,14 @@ Each platform adapter must provide these skills:
 - Handles gateway connection and events
 - Maps Discord-specific IDs to normalized format
 
-**Misskey Adapter (Reserved):**
+**Misskey Adapter:**
 
 - Uses REST API for queries and replies
 - Uses WebSocket streaming for real-time events
 - Authentication via `i` parameter (access token)
-- Full implementation deferred to future phase
+- **Reply Threading**: When triggered from a note, replies are sent as threaded replies to the same note using `replyId`
+- **Username Format**: User names in context include both display name and ID (e.g., `@DisplayName (userId)`) for better identification
+- Creates new notes only when there's no previous note context (e.g., time-triggered messages)
 
 ---
 

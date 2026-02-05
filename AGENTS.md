@@ -238,6 +238,12 @@ interface PatchEvent {
 - Maximum **one reply per session** (enforced by SessionRegistry)
 - Attempting second reply returns 409 Conflict error
 - All other outputs (tool calls, reasoning) stay internal
+- **Reply Threading**: When triggered from a message/note, replies are threaded to the original message using `replyToMessageId` from SkillContext
+
+**Platform-Specific Reply Behavior**:
+
+- **Misskey**: When triggered from a note, the reply is sent as a reply to that note (using `replyId`). For scheduled/time-triggered messages without a source note, a new note is created instead.
+- **Discord**: Replies are sent to the same channel (threading not yet implemented).
 
 **Skill API Implementation**:
 
@@ -273,7 +279,13 @@ Platform adapters must implement:
 
 - `fetchRecentMessages(channelId, limit)`
 - `searchMessages(channelId, query)`
-- `sendReply(channelId, content)`
+- `sendReply(channelId, content, options?)`
+
+**Misskey-Specific Notes**:
+
+- **Username Format**: When building context, usernames are formatted as `@DisplayName (userId)` for better identification in conversation history
+- **Note Channel ID**: Notes use `note:{noteId}` as channel ID for reply threading
+- **DM Channel ID**: DMs use `dm:{userId}` as channel ID
 
 ### 6. ACP Client Integration
 

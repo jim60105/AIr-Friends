@@ -106,6 +106,7 @@ export class ReplyHandler {
       const result = await context.platformAdapter.sendReply(
         context.channelId,
         params.message,
+        { replyToMessageId: context.replyToMessageId },
       );
 
       if (!result.success) {

@@ -8,7 +8,7 @@ platforms:
   misskey:
     host: "${MISSKEY_HOST}"
     token: "${MISSKEY_TOKEN}"
-    enabled: false
+    enabled: true
 
 agent:
   model: "gpt-5-mini"
