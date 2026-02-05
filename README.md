@@ -1,4 +1,4 @@
-# Agent Chatbot
+# AI Friend
 
 An AI-powered conversational chatbot using the [Agent Client Protocol (ACP)](https://agentclientprotocol.org/) to connect with external AI agents (GitHub Copilot CLI, Gemini CLI). Operates across multiple platforms (Discord, Misskey) with persistent cross-conversation memory and workspace-based trust boundaries.
 
@@ -18,7 +18,7 @@ An AI-powered conversational chatbot using the [Agent Client Protocol (ACP)](htt
 
 ```text
 ┌─────────────────────────────────────────────────────────────┐
-│                 Agent Chatbot (ACP CLIENT)                  │
+│                   AI Friend (ACP CLIENT)                    │
 ├─────────────────────────────────────────────────────────────┤
 │  Platform Adapters (Discord/Misskey)                        │
 │           ↓                                                 │
@@ -52,8 +52,8 @@ An AI-powered conversational chatbot using the [Agent Client Protocol (ACP)](htt
 1. **Clone the repository**
 
    ```bash
-   git clone https://github.com/jim60105/agent-chatbot.git
-   cd agent-chatbot
+   git clone https://github.com/jim60105/ai-friend.git
+   cd ai-friend
    ```
 
 2. **Set up environment variables**
@@ -98,7 +98,7 @@ An AI-powered conversational chatbot using the [Agent Client Protocol (ACP)](htt
 ### Project Structure
 
 ```text
-agent-chatbot/
+ai-friend/
 ├── src/
 │   ├── main.ts              # Entry point
 │   ├── bootstrap.ts         # Application bootstrap
@@ -179,8 +179,8 @@ podman run -d --rm \
   -v ./data:/data \
   -v ./config.yaml:/app/config.yaml:ro \
   --env-file .env \
-  --name agent-chatbot \
-  ghcr.io/jim60105/agent-chatbot:latest
+  --name ai-friend \
+  ghcr.io/jim60105/ai-friend:latest
 ```
 
 ## Documentation

@@ -1,10 +1,10 @@
-# Agent Chatbot - Development Guide for AI Agents
+# AI Friend - Development Guide for AI Agents
 
-This document provides comprehensive guidance for AI agents working on the Agent Chatbot project. It covers architecture, coding standards, build processes, and key design decisions.
+This document provides comprehensive guidance for AI agents working on the AI Friend project. It covers architecture, coding standards, build processes, and key design decisions.
 
 ## Project Overview
 
-Agent Chatbot is a multi-platform conversational AI bot that acts as an **ACP (Agent Client Protocol) Client**, delegating AI reasoning to external agents (GitHub Copilot CLI, Gemini CLI) while maintaining persistent cross-conversation memory.
+AI Friend is a multi-platform conversational AI bot that acts as an **ACP (Agent Client Protocol) Client**, delegating AI reasoning to external agents (GitHub Copilot CLI, Gemini CLI) while maintaining persistent cross-conversation memory.
 
 **Key Concepts:**
 
@@ -30,7 +30,7 @@ Agent Chatbot is a multi-platform conversational AI bot that acts as an **ACP (A
 
 ```text
 ┌─────────────────────────────────────────────────────────────┐
-│                 Agent Chatbot (ACP CLIENT)                  │
+│                   AI Friend (ACP CLIENT)                    │
 ├─────────────────────────────────────────────────────────────┤
 │  Platform Adapters (Discord/Misskey)                        │
 │           ↓                                                 │
@@ -408,7 +408,7 @@ Environment variables override config file values.
 ## File Layout Quick Reference
 
 ```text
-agent-chatbot/
+ai-friend/
 ├── src/
 │   ├── main.ts               # Entry point
 │   ├── bootstrap.ts          # Application bootstrap

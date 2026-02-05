@@ -104,16 +104,16 @@ CMD ["deno", "run", "--allow-net", "--allow-read", "--allow-write", "--allow-env
 
 ARG VERSION
 ARG RELEASE
-LABEL name="jim60105/agent-chatbot" \
-    # Authors for Agent Chatbot
+LABEL name="jim60105/ai-friend" \
+    # Authors for AI Friend
     vendor="jim60105" \
     # Maintainer for this docker image
     maintainer="jim60105" \
     # Containerfile source repository
-    url="https://github.com/jim60105/agent-chatbot" \
+    url="https://github.com/jim60105/ai-friend" \
     version=${VERSION} \
     # This should be a number, incremented with each change
     release=${RELEASE} \
-    io.k8s.display-name="Agent Chatbot" \
-    summary="Agent Chatbot - Multi-platform AI chatbot with ACP integration" \
+    io.k8s.display-name="AI Friend" \
+    summary="AI Friend - Multi-platform AI chatbot with ACP integration" \
     description="An AI-powered conversational chatbot using the Agent Client Protocol (ACP) to connect with external AI agents. Supports Discord and Misskey platforms with persistent cross-conversation memory."

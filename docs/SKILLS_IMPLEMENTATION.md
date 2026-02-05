@@ -1,6 +1,6 @@
 # Agent Skills Implementation Summary
 
-This document summarizes the implementation of SKILL.md definition files and skill handlers for the Agent Chatbot project.
+This document summarizes the implementation of SKILL.md definition files and skill handlers for the AI Friend project.
 
 ## Overview
 

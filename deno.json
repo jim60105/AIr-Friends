@@ -1,5 +1,5 @@
 {
-  "name": "@agent-chatbot/core",
+  "name": "@ai-friend/core",
   "version": "0.1.0",
   "exports": "./src/main.ts",
   "imports": {

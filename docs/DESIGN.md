@@ -1,10 +1,10 @@
-# Agent Chatbot Design Document
+# AI Friend Design Document
 
-This document describes the architecture and design decisions for the Agent Chatbot project—an AI-powered conversational agent that operates across multiple platforms (Discord, Misskey) with persistent cross-conversation memory and a clean separation between internal reasoning and external communication.
+This document describes the architecture and design decisions for the AI Friend project—an AI-powered conversational agent that operates across multiple platforms (Discord, Misskey) with persistent cross-conversation memory and a clean separation between internal reasoning and external communication.
 
 ## Table of Contents
 
-- [Agent Chatbot Design Document](#agent-chatbot-design-document)
+- [AI Friend Design Document](#ai-friend-design-document)
   - [Table of Contents](#table-of-contents)
   - [Overview](#overview)
     - [Design Principles](#design-principles)
@@ -54,7 +54,7 @@ This document describes the architecture and design decisions for the Agent Chat
 
 ## Overview
 
-Agent Chatbot is a conversational AI bot designed to:
+AI Friend is a conversational AI bot designed to:
 
 1. **Operate across multiple platforms** (Discord, Misskey) with a unified abstraction layer
 2. **Maintain cross-conversation memory** using append-only log files
@@ -78,9 +78,9 @@ Agent Chatbot is a conversational AI bot designed to:
 
 ```text
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│                              Agent Chatbot                                   │
+│                                AI Friend                                    │
 ├─────────────────────────────────────────────────────────────────────────────┤
-│                                                                              │
+│                                                                             │
 │  ┌──────────────┐    ┌──────────────┐    ┌──────────────┐                   │
 │  │   Discord    │    │   Misskey    │    │   (Future)   │   Platform        │
 │  │   Adapter    │    │   Adapter    │    │   Adapters   │   Layer           │
@@ -548,7 +548,7 @@ CMD ["deno", "run", "--allow-net", "--allow-read", "--allow-write", "--allow-env
 **Required Labels:**
 
 ```dockerfile
-LABEL org.opencontainers.image.title="agent-chatbot"
+LABEL org.opencontainers.image.title="ai-friend"
 LABEL org.opencontainers.image.description="AI-powered multi-platform chatbot"
 LABEL org.opencontainers.image.source="https://github.com/..."
 LABEL org.opencontainers.image.version="1.0.0"
@@ -686,7 +686,7 @@ All checks must pass before merge:
 ## Project Structure
 
 ```text
-agent-chatbot/
+ai-friend/
 ├── deno.json                 # Deno configuration (imports, tasks, fmt, lint)
 ├── deno.lock                 # Dependency lock file
 ├── config.yaml               # Default configuration

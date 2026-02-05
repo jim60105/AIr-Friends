@@ -67,7 +67,7 @@ jobs:
           echo "You can pull the image using Podman:" >> release_notes.md
           echo "" >> release_notes.md
           echo '```bash' >> release_notes.md
-          echo "podman pull ghcr.io/${{ github.repository_owner }}/agent-chatbot:${VERSION_NUM}" >> release_notes.md
+          echo "podman pull ghcr.io/${{ github.repository_owner }}/ai-friend:${VERSION_NUM}" >> release_notes.md
           echo '```' >> release_notes.md
           echo "" >> release_notes.md
           echo "## Changelog" >> release_notes.md
@@ -135,26 +135,26 @@ jobs:
           platforms: linux/amd64,linux/arm64
           # Cache from latest to speed up tagged builds
           cache-from: |
-            type=registry,ref=ghcr.io/${{ github.repository_owner }}/agent-chatbot:cache
-            type=registry,ref=ghcr.io/${{ github.repository_owner }}/agent-chatbot:latest
-          cache-to: type=registry,ref=ghcr.io/${{ github.repository_owner }}/agent-chatbot:cache,mode=max
+            type=registry,ref=ghcr.io/${{ github.repository_owner }}/ai-friend:cache
+            type=registry,ref=ghcr.io/${{ github.repository_owner }}/ai-friend:latest
+          cache-to: type=registry,ref=ghcr.io/${{ github.repository_owner }}/ai-friend:cache,mode=max
           sbom: true
           provenance: true
 
       - name: Add attestations for GitHub Container Registry
         uses: actions/attest-build-provenance@v3
         with:
-          subject-name: ghcr.io/${{ github.repository_owner }}/agent-chatbot
+          subject-name: ghcr.io/${{ github.repository_owner }}/ai-friend
           subject-digest: ${{ steps.build_push.outputs.digest }}
 
       - name: Add attestations for DockerHub
         uses: actions/attest-build-provenance@v3
         with:
-          subject-name: ${{ secrets.DOCKERHUB_USERNAME }}/agent-chatbot
+          subject-name: ${{ secrets.DOCKERHUB_USERNAME }}/ai-friend
           subject-digest: ${{ steps.build_push.outputs.digest }}
 
       - name: Add attestations for Quay
         uses: actions/attest-build-provenance@v3
         with:
-          subject-name: quay.io/${{ github.repository_owner }}/agent-chatbot
+          subject-name: quay.io/${{ github.repository_owner }}/ai-friend
           subject-digest: ${{ steps.build_push.outputs.digest }}

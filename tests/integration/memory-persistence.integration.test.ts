@@ -5,7 +5,7 @@ import { join } from "@std/path";
 
 // Use temp directory for integration tests
 const TEST_DIR = await Deno.makeTempDir({
-  prefix: "agent-chatbot-test-",
+  prefix: "ai-friend-test-",
 });
 
 Deno.test({

@@ -35,9 +35,9 @@ runs:
       uses: docker/metadata-action@v5
       with:
         images: |
-          ${{ inputs.DOCKERHUB_USERNAME }}/agent-chatbot
-          ghcr.io/${{ github.repository_owner }}/agent-chatbot
-          quay.io/${{ github.repository_owner }}/agent-chatbot
+          ${{ inputs.DOCKERHUB_USERNAME }}/ai-friend
+          ghcr.io/${{ github.repository_owner }}/ai-friend
+          quay.io/${{ github.repository_owner }}/ai-friend
         flavor: |
           latest=${{ inputs.tag == 'latest' }}
         tags: |

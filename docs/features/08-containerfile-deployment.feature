@@ -79,7 +79,7 @@
     那麼必須使用 LABEL 指令宣告映像檔 metadata
     而且至少包含
       | Label | 說明 |
-      | org.opencontainers.image.title | agent-chatbot |
+      | org.opencontainers.image.title | ai-friend |
       | org.opencontainers.image.description | 專案描述 |
       | org.opencontainers.image.source | Git repository URL |
       | org.opencontainers.image.version | 版本號 |
