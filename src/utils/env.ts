@@ -9,6 +9,9 @@ export const ENV_MAPPINGS = {
   MISSKEY_HOST: "platforms.misskey.host",
   AGENT_MODEL: "agent.model",
   AGENT_API_KEY: "agent.apiKey",
+  GITHUB_TOKEN: "agent.githubToken",
+  GEMINI_API_KEY: "agent.geminiApiKey",
+  AGENT_DEFAULT_TYPE: "agent.defaultAgentType",
   LOG_LEVEL: "logging.level",
   HEALTH_PORT: "health.port",
 } as const;

@@ -63,11 +63,7 @@ function validateConfig(config: Record<string, unknown>): void {
       current = (current as Record<string, unknown>)[part];
     }
 
-    if (
-      current === undefined || current === "" ||
-      current === "${" + field.split(".").pop()?.toUpperCase() + "}"
-    ) {
-      // Check if it's a template variable that wasn't replaced
+    if (current === undefined || current === "") {
       missing.push(field);
     }
   }

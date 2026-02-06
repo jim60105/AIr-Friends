@@ -1,40 +1,63 @@
 # AI Friend Configuration
-# Copy this file to config.yaml and customize as needed
+# Copy this file to config.yaml and customize as needed.
+# Use ${ENV_VAR} placeholders where appropriate (see src/utils/env.ts for supported mappings).
 
 # Logging configuration
 logging:
-  level: INFO # DEBUG, INFO, WARN, ERROR, FATAL
+  level: "INFO" # Valid: DEBUG, INFO, WARN, ERROR, FATAL (default: INFO)
 
 # Platform configurations
 platforms:
   discord:
-    enabled: false
-    token: "" # Use environment variable DISCORD_TOKEN
-    guildIds: [] # Empty = all guilds
+    enabled: true # true/false (default: false)
+    token: "${DISCORD_TOKEN}" # Bot token; use environment variable DISCORD_TOKEN or set here
+    guildIds: [] # List of guild IDs to operate in (empty = all)
+    allowDm: true # Respond to direct messages (default: true)
+    respondToMention: true # Respond when mentioned (default: true)
+    commandPrefix: "!" # Optional command prefix (set empty to disable)
 
   misskey:
-    enabled: false
-    host: "" # e.g., misskey.io
-    token: "" # Use environment variable MISSKEY_TOKEN
+    enabled: false # true/false (default: false)
+    host: "${MISSKEY_HOST}" # e.g., misskey.example.com - or set via MISSKEY_HOST env var
+    token: "${MISSKEY_TOKEN}" # API token (preferred via MISSKEY_TOKEN env var)
+    secure: true # Use wss/https when connecting (true/false, default: true)
+    respondToMention: true # Respond to mentions (default: true)
+    allowDm: true # Respond to DMs (default: true)
+    reconnect:
+      enabled: true # Auto-reconnect (default: true)
+      maxAttempts: 5 # Max reconnect attempts (default: 5)
+      baseDelay: 1000 # Base delay between reconnect attempts in ms (default: 1000)
 
 # Agent/LLM configuration
 agent:
-  model: "gpt-4"
-  systemPromptPath: "./prompts/system.md"
-  tokenLimit: 4096
+  model: "gpt-5-mini" # Model identifier (e.g., "gpt-4", "gpt-5-mini")
+  systemPromptPath: "./prompts/system.md" # Path to the system prompt file
+  tokenLimit: 4096 # Max tokens for context
+  apiEndpoint: "" # Optional custom API endpoint (e.g., "https://api.openai.com")
+  apiKey: "${AGENT_API_KEY}" # Optional API key (use AGENT_API_KEY env var)
+  githubToken: "${GITHUB_TOKEN}" # Optional GitHub token for Copilot (env: GITHUB_TOKEN)
+  geminiApiKey: "${GEMINI_API_KEY}" # Optional Gemini API key (env: GEMINI_API_KEY)
+  defaultAgentType: "copilot" # Default ACP agent: "copilot" or "gemini"
 
 # Memory system configuration
 memory:
-  searchLimit: 10
-  maxChars: 2000
-  recentMessageLimit: 20
+  searchLimit: 10 # Max number of search results (default: 10)
+  maxChars: 2000 # Max characters stored per memory (default: 2000)
+  recentMessageLimit: 20 # Number of recent messages included in context (default: 20)
 
 # Workspace configuration
 workspace:
-  repoPath: "./data"
-  workspacesDir: "workspaces"
+  repoPath: "./data" # Root path for workspace data (default: ./data)
+  workspacesDir: "workspaces" # Directory name under repoPath (default: workspaces)
+
+# Skill API (used by external shell-based skills)
+skillApi:
+  enabled: true # Enable skill API server for shell-based skills (default: true)
+  host: "127.0.0.1" # Host to bind (should be localhost)
+  port: 3001 # Port for skill API server (default: 3001)
+  sessionTimeoutMs: 1800000 # Session timeout in ms (default: 1800000 = 30min)
 
 # Health check configuration (optional)
 health:
-  enabled: false
-  port: 8080
+  enabled: false # Enable HTTP health check endpoint (default: false)
+  port: 8080 # Port for health check (default: 8080)
