@@ -1,7 +1,7 @@
-// skills/memory-save/skill.ts
+#!/usr/bin/env -S deno run --allow-net --allow-env
 
 import { parse } from "jsr:@std/flags@^0.224.0";
-import { callSkillApi, exitWithError, outputResult, parseBaseArgs } from "../lib/client.ts";
+import { callSkillApi, exitWithError, outputResult, parseBaseArgs } from "../../lib/client.ts";
 
 async function main() {
   try {

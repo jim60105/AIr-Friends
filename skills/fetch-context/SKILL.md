@@ -1,6 +1,7 @@
 ---
 name: fetch-context
 description: Fetch additional context from the platform, including recent messages, search through conversation history, or get user information. Use when you need more context than what's provided initially.
+allowed-tools: Bash
 ---
 
 # Fetch Context Skill
@@ -11,13 +12,13 @@ Retrieve additional context from the platform to better understand the conversat
 
 ```bash
 # Get recent messages
-deno run --allow-net /home/deno/.copilot/skills/fetch-context/skill.ts \
+scripts/fetch-context.ts \
   --session-id "$SESSION_ID" \
   --type recent_messages \
   --limit 20
 
 # Search messages
-deno run --allow-net /home/deno/.copilot/skills/fetch-context/skill.ts \
+scripts/fetch-context.ts \
   --session-id "$SESSION_ID" \
   --type search_messages \
   --query "project deadline" \

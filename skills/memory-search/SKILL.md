@@ -1,6 +1,7 @@
 ---
 name: memory-search
 description: Search through saved memories by keywords. Use when you need to recall previous conversations or information about the user.
+allowed-tools: Bash
 ---
 
 # Memory Search Skill
@@ -10,7 +11,7 @@ Search through saved memories to retrieve relevant information.
 ## Usage
 
 ```bash
-deno run --allow-net /home/deno/.copilot/skills/memory-search/skill.ts \
+scripts/memory-search.ts \
   --session-id "$SESSION_ID" \
   --query "hiking preferences" \
   --limit 10

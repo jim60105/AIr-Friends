@@ -1,6 +1,7 @@
 ---
 name: memory-patch
 description: Modify memory metadata (visibility, importance) or disable memories. Use when you need to update the status of existing memories.
+allowed-tools: Bash
 ---
 
 # Memory Patch Skill
@@ -11,13 +12,13 @@ Modify metadata of existing memories without changing content.
 
 ```bash
 # Disable a memory
-deno run --allow-net /home/deno/.copilot/skills/memory-patch/skill.ts \
+scripts/memory-patch.ts \
   --session-id "$SESSION_ID" \
   --memory-id "mem_abc123" \
   --disabled
 
 # Change importance
-deno run --allow-net /home/deno/.copilot/skills/memory-patch/skill.ts \
+scripts/memory-patch.ts \
   --session-id "$SESSION_ID" \
   --memory-id "mem_abc123" \
   --importance high

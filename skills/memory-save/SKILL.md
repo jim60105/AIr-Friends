@@ -1,6 +1,7 @@
 ---
 name: memory-save
 description: Save important information to persistent cross-conversation memory. Use when you learn something important about the user or context that should be remembered for future conversations.
+allowed-tools: Bash
 ---
 
 # Memory Save Skill
@@ -10,7 +11,7 @@ Save important information that should persist across conversations.
 ## Usage
 
 ```bash
-deno run --allow-net /home/deno/.copilot/skills/memory-save/skill.ts \
+scripts/memory-save.ts \
   --session-id "$SESSION_ID" \
   --content "User prefers formal communication" \
   --importance high

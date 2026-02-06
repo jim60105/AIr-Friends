@@ -1,6 +1,7 @@
 ---
 name: send-reply
 description: Send the final reply message to the user on the platform. This is the ONLY way to communicate with the user externally.
+allowed-tools: Bash
 ---
 
 # Send Reply Skill
@@ -10,7 +11,7 @@ Send your final response to the user. This is the gateway to external communicat
 ## Usage
 
 ```bash
-deno run --allow-net --allow-env /home/deno/.copilot/skills/send-reply/skill.ts \
+scripts/send-reply.ts \
   --session-id "$SESSION_ID" \
   --message "Your reply message here"
 ```

@@ -1,4 +1,4 @@
-// skills/lib/client.ts
+#!/usr/bin/env -S deno run --allow-net --allow-env
 // This file is used by all skill scripts to interact with the Skill API
 
 import { parse } from "jsr:@std/flags@^0.224.0";
