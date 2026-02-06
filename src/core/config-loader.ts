@@ -2,7 +2,7 @@
 
 import { parse as parseYaml } from "@std/yaml";
 import { exists } from "@std/fs";
-import { dirname, join } from "@std/path";
+import { basename, dirname, join } from "@std/path";
 import { createLogger } from "@utils/logger.ts";
 import { applyEnvOverrides, getEnvironment } from "@utils/env.ts";
 import type { Config } from "../types/config.ts";
@@ -239,7 +239,7 @@ export async function loadSystemPrompt(path: string): Promise<string> {
 
   // Build a map of available template fragment files in the same directory
   const promptDir = dirname(path);
-  const systemFileName = path.split("/").pop() ?? path.split("\\").pop() ?? "";
+  const systemFileName = basename(path);
   const fragments = await loadPromptFragments(promptDir, systemFileName);
 
   // Replace all {{placeholder}} tokens
