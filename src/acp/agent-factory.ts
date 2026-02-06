@@ -97,6 +97,44 @@ export function createAgentConfig(
       };
     }
 
+    case "opencode": {
+      // OpenCode CLI in ACP mode
+      // OpenCode can work without API key by using GitHub/Gemini providers
+      const opencodeApiKey = appConfig.agent.opencodeApiKey ??
+        Deno.env.get("OPENCODE_API_KEY");
+
+      // Build environment: inherit critical env vars
+      // Agent needs PATH to find deno, HOME for skills directory discovery
+      const env: Record<string, string> = {};
+
+      // OPENCODE_API_KEY is optional since OpenCode can use GitHub/Gemini providers
+      if (opencodeApiKey) {
+        env["OPENCODE_API_KEY"] = opencodeApiKey;
+      }
+
+      // Inherit critical environment variables
+      const inheritVars = ["PATH", "HOME", "DENO_DIR", "LANG", "LC_ALL", "USER"];
+      for (const varName of inheritVars) {
+        const value = Deno.env.get(varName);
+        if (value !== undefined) {
+          env[varName] = value;
+        }
+      }
+
+      const args = ["acp"];
+      if (yolo) {
+        // https://github.com/anomalyco/opencode/pull/11833
+        env["OPENCODE_YOLO"] = "true";
+      }
+
+      return {
+        command: "opencode",
+        args,
+        cwd: workingDir,
+        env,
+      };
+    }
+
     default:
       throw new Error(`Unknown agent type: ${type}`);
   }

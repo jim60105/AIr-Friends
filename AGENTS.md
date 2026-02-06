@@ -4,12 +4,12 @@ This document provides comprehensive guidance for AI agents working on the AI Fr
 
 ## Project Overview
 
-AI Friend is a multi-platform conversational AI bot that acts as an **ACP (Agent Client Protocol) Client**, delegating AI reasoning to external agents (GitHub Copilot CLI, Gemini CLI) while maintaining persistent cross-conversation memory.
+AI Friend is a multi-platform conversational AI bot that acts as an **ACP (Agent Client Protocol) Client**, delegating AI reasoning to external agents (GitHub Copilot CLI, Gemini CLI, OpenCode CLI) while maintaining persistent cross-conversation memory.
 
 **Key Concepts:**
 
 - **We are the ACP Client**: We spawn and communicate with external ACP Agents
-- **External CLI tools are the Agents**: GitHub Copilot CLI, Gemini CLI execute AI tasks
+- **External CLI tools are the Agents**: GitHub Copilot CLI, Gemini CLI, OpenCode CLI execute AI tasks
 - **Skills are shell-based**: We provide Deno TypeScript skill scripts that Agents can execute
 - **Skill API Server**: HTTP server for skills to communicate back to the main bot
 - **Workspace isolation**: Each conversation context has its own isolated working directory
@@ -20,7 +20,7 @@ AI Friend is a multi-platform conversational AI bot that acts as an **ACP (Agent
 | --------------- | ------------------------ | ------------- |
 | Runtime         | Deno                     | 2.x           |
 | Language        | TypeScript               | (Deno native) |
-| ACP SDK         | @agentclientprotocol/sdk | 0.13.1        |
+| ACP SDK         | @agentclientprotocol/sdk | 0.14.1        |
 | Discord Library | discord.js               | ^14.0.0       |
 | Misskey Library | misskey-js               | ^2024.10.1    |
 | Configuration   | YAML (via @std/yaml)     | -             |
@@ -40,7 +40,7 @@ AI Friend is a multi-platform conversational AI bot that acts as an **ACP (Agent
 │           ↓ (spawn subprocess, stdio JSON-RPC)              │
 ├─────────────────────────────────────────────────────────────┤
 │           External ACP AGENTS                               │
-│  (GitHub Copilot CLI / Gemini CLI)                          │
+│  (GitHub Copilot CLI / Gemini CLI / OpenCode CLI)           │
 │           ↓ (executes our shell-based skills)               │
 ├─────────────────────────────────────────────────────────────┤
 │  Shell Skills (Deno scripts in skills/ directory)           │
@@ -318,7 +318,7 @@ We use `@agentclientprotocol/sdk` for Client-side connection:
 
 **AgentConnector** (`src/acp/agent-connector.ts`):
 
-- Spawns external ACP agent as subprocess (copilot/gemini CLI)
+- Spawns external ACP agent as subprocess (copilot/gemini/opencode CLI)
 - Creates bidirectional JSON-RPC stream (stdin/stdout)
 - Manages agent lifecycle (connect, disconnect, cleanup)
 
@@ -361,6 +361,7 @@ await connector.disconnect();
 
 - **GitHub Copilot CLI** (`@github/copilot-cli`) - Default when `GITHUB_TOKEN` is set
 - **Gemini CLI** - Alternative agent (requires separate configuration)
+- **OpenCode CLI** - Open source coding agent (requires separate configuration)
 
 ## Prompt Template System
 

@@ -1,6 +1,6 @@
 # AI Friend
 
-An AI-powered conversational chatbot using the [Agent Client Protocol (ACP)](https://agentclientprotocol.org/) to connect with external AI agents (GitHub Copilot CLI, Gemini CLI). Operates across multiple platforms (Discord, Misskey) with persistent cross-conversation memory and workspace-based trust boundaries.
+An AI-powered conversational chatbot using the [Agent Client Protocol (ACP)](https://agentclientprotocol.org/) to connect with external AI agents (GitHub Copilot CLI, Gemini CLI, OpenCode CLI). Operates across multiple platforms (Discord, Misskey) with persistent cross-conversation memory and workspace-based trust boundaries.
 
 ## Features
 
@@ -28,7 +28,7 @@ An AI-powered conversational chatbot using the [Agent Client Protocol (ACP)](htt
 │           ↓ (spawn subprocess, stdio JSON-RPC)              │
 ├─────────────────────────────────────────────────────────────┤
 │           External ACP AGENTS                               │
-│  (GitHub Copilot CLI / Gemini CLI)                          │
+│  (GitHub Copilot CLI / Gemini CLI / OpenCode CLI)           │
 │           ↓ (executes our shell-based skills)               │
 ├─────────────────────────────────────────────────────────────┤
 │  Shell Skills (Deno scripts in skills/ directory)           │
@@ -45,7 +45,8 @@ An AI-powered conversational chatbot using the [Agent Client Protocol (ACP)](htt
 - [Deno](https://deno.land/) 2.x or higher
 - Discord Bot Token (for Discord integration)
 - Misskey Access Token (for Misskey integration, optional)
-- An ACP-compliant CLI agent (GitHub Copilot CLI or Gemini CLI)
+- An ACP-compliant CLI agent (GitHub Copilot CLI, Gemini CLI, or OpenCode CLI)
+- For OpenCode CLI: GITHUB_TOKEN and/or GEMINI_API_KEY for provider access
 
 ## Quick Start
 
@@ -169,20 +170,48 @@ Configuration is loaded from `config.yaml` (YAML format). See [config/config.exa
 
 ### Environment Variables
 
-| Variable         | Description                           | Required |
-| ---------------- | ------------------------------------- | -------- |
-| `DISCORD_TOKEN`  | Discord bot token                     | Yes*     |
-| `GITHUB_TOKEN`   | GitHub token for Copilot CLI          | Yes**    |
-| `MISSKEY_TOKEN`  | Misskey access token                  | No       |
-| `MISSKEY_HOST`   | Misskey instance host                 | No       |
-| `AGENT_MODEL`    | LLM model identifier (e.g., "gpt-4")  | No       |
-| `LOG_LEVEL`      | Logging level (DEBUG/INFO/WARN/ERROR) | No       |
-| `DENO_ENV`       | Environment name (dev/prod)           | No       |
-| `SKILL_API_PORT` | Skill API server port (default: 3001) | No       |
-| `SKILL_API_HOST` | Skill API server host (localhost)     | No       |
+| Variable          | Description                                        | Required |
+| ----------------- | -------------------------------------------------- | -------- |
+| `DISCORD_TOKEN`   | Discord bot token                                  | Yes*     |
+| `GITHUB_TOKEN`    | GitHub token for Copilot/OpenCode                  | Yes**    |
+| `GEMINI_API_KEY`  | Gemini API key for Gemini CLI/OpenCode             | No       |
+| `OPENCODE_API_KEY`| OpenCode API key (optional, can use GitHub/Gemini) | No       |
+| `MISSKEY_TOKEN`   | Misskey access token                               | No       |
+| `MISSKEY_HOST`    | Misskey instance host                              | No       |
+| `AGENT_MODEL`     | LLM model identifier (e.g., "gpt-4")               | No       |
+| `LOG_LEVEL`       | Logging level (DEBUG/INFO/WARN/ERROR)              | No       |
+| `DENO_ENV`        | Environment name (dev/prod)                        | No       |
+| `SKILL_API_PORT`  | Skill API server port (default: 3001)              | No       |
+| `SKILL_API_HOST`  | Skill API server host (localhost)                  | No       |
 
 \* Required if Discord platform is enabled.\
-\*\* Required for GitHub Copilot CLI agent.
+\*\* Required for GitHub Copilot CLI or OpenCode GitHub provider.
+
+### OpenCode Configuration
+
+The container includes a pre-configured `opencode.json` that automatically sets up OpenCode CLI with:
+
+- **GitHub Provider**: Uses `GITHUB_TOKEN` environment variable
+- **Gemini Provider**: Uses `GEMINI_API_KEY` environment variable
+- **All Tools Enabled**: bash, edit, write, read, grep, glob, list, patch, skill, webfetch, and more
+- **Auto-compaction**: Enabled for better token management
+- **Auto-update**: Disabled (container should be rebuilt for updates)
+
+The configuration file is located at `~/.config/opencode/opencode.json` inside the container. OpenCode will automatically use the GitHub and Gemini providers when their respective tokens are available as environment variables.
+
+You can customize OpenCode behavior by mounting your own `opencode.json` configuration file:
+
+```bash
+podman run -d --rm \
+  -v ./data:/app/data \
+  -v ./config.yaml:/app/config.yaml:ro \
+  -v ./my-opencode.json:/home/deno/.config/opencode/opencode.json:ro \
+  --env-file .env \
+  --name ai-friend \
+  ghcr.io/jim60105/ai-friend:latest
+```
+
+For more information about OpenCode configuration, see the [OpenCode documentation](https://opencode.ai/docs/config/).
 
 ## Prompt Template System
 

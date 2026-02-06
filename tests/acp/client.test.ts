@@ -451,6 +451,53 @@ Deno.test("ChatbotClient - sessionUpdate handles various update types", async ()
   }
 });
 
+Deno.test("ChatbotClient - sessionUpdate handles usage_update", async () => {
+  const tempDir = Deno.makeTempDirSync();
+  try {
+    // Create a logger that captures info logs
+    const infoLogs: Array<{ message: string; context: unknown }> = [];
+    const testLogger = new Logger("test", { level: LogLevel.DEBUG });
+    const originalInfo = testLogger.info.bind(testLogger);
+    testLogger.info = (message: string, context?: Record<string, unknown>) => {
+      infoLogs.push({ message, context });
+      originalInfo(message, context);
+    };
+
+    const skillRegistry = createTestSkillRegistry();
+    const config = {
+      workingDir: tempDir,
+      platform: "discord",
+      userId: "123",
+      channelId: "456",
+      isDM: false,
+    };
+
+    const client = new ChatbotClient(skillRegistry, testLogger, config);
+
+    // Test usage_update
+    await client.sessionUpdate({
+      sessionId: "test-session",
+      update: {
+        sessionUpdate: "usage_update",
+        used: 14914,
+        size: 262144,
+        cost: { amount: 0, currency: "USD" },
+      },
+    } as unknown as acp.SessionNotification);
+
+    // Verify usage update was logged
+    const usageLogs = infoLogs.filter((log) => log.message === "Agent usage update");
+    assertEquals(usageLogs.length, 1);
+    const context = usageLogs[0].context as Record<string, unknown>;
+    assertEquals(context.used, 14914);
+    assertEquals(context.size, 262144);
+    assertEquals((context.cost as { amount: number; currency: string }).amount, 0);
+    assertEquals((context.cost as { amount: number; currency: string }).currency, "USD");
+  } finally {
+    Deno.removeSync(tempDir, { recursive: true });
+  }
+});
+
 Deno.test("ChatbotClient - sessionUpdate logs failed tool calls with details", async () => {
   const tempDir = Deno.makeTempDirSync();
   try {

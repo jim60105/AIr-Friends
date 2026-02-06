@@ -71,7 +71,8 @@ ARG UID
 # OpenShift compatibility: root group (GID 0) for arbitrary UID support
 RUN install -d -m 775 -o $UID -g 0 /app && \
     install -d -m 775 -o $UID -g 0 /app/data && \
-    install -d -m 775 -o $UID -g 0 /licenses
+    install -d -m 775 -o $UID -g 0 /licenses && \
+    install -d -m 775 -o $UID -g 0 /home/deno/.config/opencode
 
 # Copy license file (OpenShift Policy)
 COPY --link --chown=$UID:0 --chmod=775 LICENSE /licenses/LICENSE
@@ -86,6 +87,9 @@ COPY --link --chown=$UID:0 --chmod=755 --from=ghcr.io/tarampampam/curl:8.7.1 /bi
 # Copy Agents CLI binary
 COPY --link --chown=$UID:0 --chmod=775 --from=copilot-unpacker /copilot/copilot /usr/local/bin/copilot
 COPY --link --chown=$UID:0 --chmod=775 --from=opencode-unpacker /opencode/opencode /usr/local/bin/opencode
+
+# Copy OpenCode configuration
+COPY --link --chown=$UID:0 --chmod=775 opencode.json /home/deno/.config/opencode/opencode.json
 
 # Copy cached Deno dependencies from cache stage
 COPY --link --chown=$UID:0 --chmod=775 --from=cache /deno-dir/ /deno-dir/

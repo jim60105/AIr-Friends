@@ -1,6 +1,6 @@
 // tests/acp/agent-factory.test.ts
 
-import { assertEquals, assertThrows } from "@std/assert";
+import { assertEquals, assertExists, assertThrows } from "@std/assert";
 import { createAgentConfig, getDefaultAgentType } from "@acp/agent-factory.ts";
 import type { Config } from "../../src/types/config.ts";
 
@@ -67,6 +67,23 @@ Deno.test("createAgentConfig - creates gemini config correctly", () => {
   assertEquals(agentConfig.env?.GEMINI_API_KEY, "test-gemini-key");
 });
 
+Deno.test("createAgentConfig - creates opencode config correctly", () => {
+  const config = createTestConfig({
+    agent: {
+      model: "test-model",
+      systemPromptPath: "./test.md",
+      tokenLimit: 4096,
+      opencodeApiKey: "test-opencode-key",
+    },
+  });
+  const agentConfig = createAgentConfig("opencode", "/tmp/workspace", config);
+
+  assertEquals(agentConfig.command, "opencode");
+  assertEquals(agentConfig.args, ["acp"]);
+  assertEquals(agentConfig.cwd, "/tmp/workspace");
+  assertEquals(agentConfig.env?.OPENCODE_API_KEY, "test-opencode-key");
+});
+
 Deno.test("createAgentConfig - throws for copilot without GitHub token", () => {
   const config = createTestConfig({
     agent: {
@@ -123,6 +140,34 @@ Deno.test("createAgentConfig - throws for gemini without API key", () => {
   }
 });
 
+Deno.test("createAgentConfig - creates opencode without API key (uses GitHub/Gemini providers)", () => {
+  const config = createTestConfig({
+    agent: {
+      model: "test",
+      systemPromptPath: "./test.md",
+      tokenLimit: 4096,
+      opencodeApiKey: undefined,
+    },
+  });
+
+  // Clear env var too
+  const originalKey = Deno.env.get("OPENCODE_API_KEY");
+  Deno.env.delete("OPENCODE_API_KEY");
+
+  try {
+    // OpenCode can work without API key by using GitHub/Gemini providers
+    const agentConfig = createAgentConfig("opencode", "/tmp/workspace", config);
+    assertEquals(agentConfig.command, "opencode");
+    assertEquals(agentConfig.args, ["acp"]);
+    assertEquals(agentConfig.env?.OPENCODE_API_KEY, undefined);
+  } finally {
+    // Restore env var if it existed
+    if (originalKey) {
+      Deno.env.set("OPENCODE_API_KEY", originalKey);
+    }
+  }
+});
+
 Deno.test("createAgentConfig - uses env var for GitHub token if config not set", () => {
   const config = createTestConfig({
     agent: {
@@ -146,6 +191,33 @@ Deno.test("createAgentConfig - uses env var for GitHub token if config not set",
       Deno.env.set("GITHUB_TOKEN", originalToken);
     } else {
       Deno.env.delete("GITHUB_TOKEN");
+    }
+  }
+});
+
+Deno.test("createAgentConfig - uses env var for OpenCode API key if config not set", () => {
+  const config = createTestConfig({
+    agent: {
+      model: "test",
+      systemPromptPath: "./test.md",
+      tokenLimit: 4096,
+      opencodeApiKey: undefined,
+    },
+  });
+
+  // Set env var
+  const originalKey = Deno.env.get("OPENCODE_API_KEY");
+  Deno.env.set("OPENCODE_API_KEY", "env-opencode-key");
+
+  try {
+    const agentConfig = createAgentConfig("opencode", "/tmp/workspace", config);
+    assertEquals(agentConfig.env?.OPENCODE_API_KEY, "env-opencode-key");
+  } finally {
+    // Restore env var
+    if (originalKey) {
+      Deno.env.set("OPENCODE_API_KEY", originalKey);
+    } else {
+      Deno.env.delete("OPENCODE_API_KEY");
     }
   }
 });
@@ -175,6 +247,18 @@ Deno.test("getDefaultAgentType - returns configured default agent type", () => {
     },
   });
   assertEquals(getDefaultAgentType(config), "gemini");
+});
+
+Deno.test("getDefaultAgentType - returns opencode when configured", () => {
+  const config = createTestConfig({
+    agent: {
+      model: "test",
+      systemPromptPath: "./test.md",
+      tokenLimit: 4096,
+      defaultAgentType: "opencode",
+    },
+  });
+  assertEquals(getDefaultAgentType(config), "opencode");
 });
 
 Deno.test("createAgentConfig - inherits critical environment variables for copilot", () => {
@@ -233,6 +317,41 @@ Deno.test("createAgentConfig - inherits critical environment variables for gemin
   }
 });
 
+Deno.test("createAgentConfig - inherits critical environment variables for opencode", () => {
+  const config = createTestConfig({
+    agent: {
+      model: "test-model",
+      systemPromptPath: "./test.md",
+      tokenLimit: 4096,
+      opencodeApiKey: "test-opencode-key",
+    },
+  });
+
+  // Set up environment variables to inherit
+  const originalPath = Deno.env.get("PATH");
+  const originalHome = Deno.env.get("HOME");
+  Deno.env.set("PATH", "/usr/local/bin:/usr/bin");
+  Deno.env.set("HOME", "/home/testuser");
+
+  try {
+    const agentConfig = createAgentConfig("opencode", "/tmp/workspace", config);
+
+    // Should inherit PATH and HOME
+    assertEquals(agentConfig.env?.PATH, "/usr/local/bin:/usr/bin");
+    assertEquals(agentConfig.env?.HOME, "/home/testuser");
+    // Should also have OPENCODE_API_KEY
+    assertEquals(agentConfig.env?.OPENCODE_API_KEY, "test-opencode-key");
+  } finally {
+    // Restore original env vars
+    if (originalPath) {
+      Deno.env.set("PATH", originalPath);
+    }
+    if (originalHome) {
+      Deno.env.set("HOME", originalHome);
+    }
+  }
+});
+
 Deno.test("createAgentConfig - adds --yolo flag to copilot when yolo is true", () => {
   const config = createTestConfig();
   const agentConfig = createAgentConfig("copilot", "/tmp/workspace", config, true);
@@ -278,5 +397,41 @@ Deno.test("createAgentConfig - does not add --yolo flag to gemini when yolo is f
 
   assertEquals(agentConfig.command, "deno");
   assertEquals(agentConfig.args, ["task", "gemini", "--experimental-acp"]);
+  assertEquals(agentConfig.cwd, "/tmp/workspace");
+});
+
+Deno.test("createAgentConfig - adds OPENCODE_YOLO env var when yolo is true", () => {
+  const config = createTestConfig({
+    agent: {
+      model: "test-model",
+      systemPromptPath: "./test.md",
+      tokenLimit: 4096,
+      opencodeApiKey: "test-opencode-key",
+    },
+  });
+  const agentConfig = createAgentConfig("opencode", "/tmp/workspace", config, true);
+
+  assertEquals(agentConfig.command, "opencode");
+  assertEquals(agentConfig.args, ["acp"]);
+  assertExists(agentConfig.env);
+  assertEquals(agentConfig.env!["OPENCODE_YOLO"], "true");
+  assertEquals(agentConfig.cwd, "/tmp/workspace");
+});
+
+Deno.test("createAgentConfig - does not add OPENCODE_YOLO env var when yolo is false", () => {
+  const config = createTestConfig({
+    agent: {
+      model: "test-model",
+      systemPromptPath: "./test.md",
+      tokenLimit: 4096,
+      opencodeApiKey: "test-opencode-key",
+    },
+  });
+  const agentConfig = createAgentConfig("opencode", "/tmp/workspace", config, false);
+
+  assertEquals(agentConfig.command, "opencode");
+  assertEquals(agentConfig.args, ["acp"]);
+  assertExists(agentConfig.env);
+  assertEquals(agentConfig.env!["OPENCODE_YOLO"], undefined);
   assertEquals(agentConfig.cwd, "/tmp/workspace");
 });

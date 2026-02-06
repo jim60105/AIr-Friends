@@ -37,7 +37,8 @@ agent:
   apiKey: "${AGENT_API_KEY}" # Optional API key (use AGENT_API_KEY env var)
   githubToken: "${GITHUB_TOKEN}" # Optional GitHub token for Copilot (env: GITHUB_TOKEN)
   geminiApiKey: "${GEMINI_API_KEY}" # Optional Gemini API key (env: GEMINI_API_KEY)
-  defaultAgentType: "copilot" # Default ACP agent: "copilot" or "gemini"
+  opencodeApiKey: "${OPENCODE_API_KEY}" # Optional OpenCode API key (env: OPENCODE_API_KEY)
+  defaultAgentType: "copilot" # Default ACP agent: "copilot", "gemini", or "opencode"
 
 # Memory system configuration
 memory:

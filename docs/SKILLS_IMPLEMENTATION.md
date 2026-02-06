@@ -4,14 +4,14 @@ This document summarizes the implementation of SKILL.md definition files and ski
 
 ## Overview
 
-We have implemented a complete Agent Skills system that allows external ACP Agents (like GitHub Copilot CLI and Gemini CLI) to interact with our chatbot through standardized SKILL.md files.
+We have implemented a complete Agent Skills system that allows external ACP Agents (like GitHub Copilot CLI, Gemini CLI, and OpenCode CLI) to interact with our chatbot through standardized SKILL.md files.
 
 ## Architecture
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
 │                     外部 ACP Agent                               │
-│              (GitHub Copilot CLI / Gemini CLI)                   │
+│              (GitHub Copilot CLI / Gemini CLI / OpenCode CLI)    │
 │                                                                  │
 │  1. 讀取 working_dir/.github/skills/*.md                         │
 │  2. 解析 SKILL.md YAML frontmatter                              │

@@ -222,6 +222,22 @@ export class ChatbotClient implements acp.Client {
         });
         break;
 
+      case "usage_update": {
+        // Token usage information from the agent
+        const usageUpdate = update as unknown as {
+          sessionUpdate: "usage_update";
+          used?: number;
+          size?: number;
+          cost?: { amount: number; currency: string };
+        };
+        this.logger.info("Agent usage update", {
+          used: usageUpdate.used,
+          size: usageUpdate.size,
+          cost: usageUpdate.cost,
+        });
+        break;
+      }
+
       default:
         this.logger.debug("Session update", {
           type: (update as { sessionUpdate?: string }).sessionUpdate,

@@ -59,8 +59,11 @@ export interface AgentConfig {
   /** Gemini API key for Gemini CLI (optional) */
   geminiApiKey?: string;
 
-  /** Default ACP agent type to use ("copilot" or "gemini") */
-  defaultAgentType?: "copilot" | "gemini";
+  /** OpenCode API key for OpenCode CLI (optional) */
+  opencodeApiKey?: string;
+
+  /** Default ACP agent type to use ("copilot", "gemini", or "opencode") */
+  defaultAgentType?: "copilot" | "gemini" | "opencode";
 }
 
 /**

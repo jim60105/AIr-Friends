@@ -43,7 +43,7 @@ export interface AgentConfig {
 /**
  * Supported ACP Agent types
  */
-export type AgentType = "copilot" | "gemini";
+export type AgentType = "copilot" | "gemini" | "opencode";
 
 /**
  * MCP transport capabilities reported by Agent
