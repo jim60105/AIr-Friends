@@ -30,6 +30,17 @@ ADD https://github.com/github/copilot-cli/releases/latest/download/copilot-linux
 RUN tar -xzf /tmp/copilot-linux-x64.tar.gz -C /copilot
 
 ########################################
+# Opencode unpack stage
+########################################
+FROM base AS opencode-unpacker
+
+WORKDIR /opencode
+
+ADD https://github.com/anomalyco/opencode/releases/latest/download/opencode-linux-x64.tar.gz /tmp/opencode-linux-x64.tar.gz
+
+RUN tar -xzf /tmp/opencode-linux-x64.tar.gz -C /opencode
+
+########################################
 # Cache stage
 # Pre-cache Deno dependencies for layer reuse
 ########################################
@@ -72,8 +83,9 @@ ADD --link --chown=$UID:0 --chmod=755 https://github.com/Yelp/dumb-init/releases
 # https://github.com/tarampampam/curl-docker
 COPY --link --chown=$UID:0 --chmod=755 --from=ghcr.io/tarampampam/curl:8.7.1 /bin/curl /usr/local/bin/curl
 
-# Copy Copilot CLI binary
+# Copy Agents CLI binary
 COPY --link --chown=$UID:0 --chmod=775 --from=copilot-unpacker /copilot/copilot /usr/local/bin/copilot
+COPY --link --chown=$UID:0 --chmod=775 --from=opencode-unpacker /opencode/opencode /usr/local/bin/opencode
 
 # Copy cached Deno dependencies from cache stage
 COPY --link --chown=$UID:0 --chmod=775 --from=cache /deno-dir/ /deno-dir/
