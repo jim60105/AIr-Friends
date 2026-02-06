@@ -11,3 +11,6 @@ services:
     volumes:
       - ./data:/app/data:Z
       - ./config.yaml:/app/config.yaml:ro,Z
+      # Mount custom prompts directory (optional, comment out to use defaults)
+      # Ensure you provide all required prompt files (system.md and fragments)
+      - ./prompts:/app/prompts:ro,Z

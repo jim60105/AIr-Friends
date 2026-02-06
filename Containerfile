@@ -82,6 +82,7 @@ COPY --link --chown=$UID:0 --chmod=775 --from=cache /deno-dir/ /deno-dir/
 COPY --link --chown=$UID:0 --chmod=775 deno.json deno.lock /app/
 COPY --link --chown=$UID:0 --chmod=775 config.yaml /app/
 COPY --link --chown=$UID:0 --chmod=775 src/ /app/src/
+# Copy default prompts (can be overridden by mounting custom prompts to /app/prompts)
 COPY --link --chown=$UID:0 --chmod=775 prompts/ /app/prompts/
 
 # Copy skills to ~/.copilot/skills/ for personal skills
@@ -91,6 +92,8 @@ WORKDIR /app
 
 # Volume for persistent data (workspaces and memory)
 VOLUME ["/app/data"]
+# Volume for custom prompts (optional, defaults to bundled prompts)
+VOLUME ["/app/prompts"]
 
 # Set HOME environment variable for copilot skills discovery
 ENV HOME=/home/deno

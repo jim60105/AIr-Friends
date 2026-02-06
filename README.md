@@ -88,7 +88,7 @@ An AI-powered conversational chatbot using the [Agent Client Protocol (ACP)](htt
    deno run --allow-net --allow-read --allow-write --allow-env --allow-run src/main.ts --yolo
    ```
 
-   > [!WARNING]  
+   > [!WARNING]\
    > YOLO mode auto-approves ALL permission requests from the ACP agent. Only use this in trusted container environments or for testing purposes.
 
 ## Development
@@ -169,19 +169,19 @@ Configuration is loaded from `config.yaml` (YAML format). See [config/config.exa
 
 ### Environment Variables
 
-| Variable          | Description                           | Required |
-| ----------------- | ------------------------------------- | -------- |
-| `DISCORD_TOKEN`   | Discord bot token                     | Yes*     |
-| `GITHUB_TOKEN`    | GitHub token for Copilot CLI          | Yes**    |
-| `MISSKEY_TOKEN`   | Misskey access token                  | No       |
-| `MISSKEY_HOST`    | Misskey instance host                 | No       |
-| `AGENT_MODEL`     | LLM model identifier (e.g., "gpt-4")  | No       |
-| `LOG_LEVEL`       | Logging level (DEBUG/INFO/WARN/ERROR) | No       |
-| `DENO_ENV`        | Environment name (dev/prod)           | No       |
-| `SKILL_API_PORT`  | Skill API server port (default: 3001) | No       |
-| `SKILL_API_HOST`  | Skill API server host (localhost)     | No       |
+| Variable         | Description                           | Required |
+| ---------------- | ------------------------------------- | -------- |
+| `DISCORD_TOKEN`  | Discord bot token                     | Yes*     |
+| `GITHUB_TOKEN`   | GitHub token for Copilot CLI          | Yes**    |
+| `MISSKEY_TOKEN`  | Misskey access token                  | No       |
+| `MISSKEY_HOST`   | Misskey instance host                 | No       |
+| `AGENT_MODEL`    | LLM model identifier (e.g., "gpt-4")  | No       |
+| `LOG_LEVEL`      | Logging level (DEBUG/INFO/WARN/ERROR) | No       |
+| `DENO_ENV`       | Environment name (dev/prod)           | No       |
+| `SKILL_API_PORT` | Skill API server port (default: 3001) | No       |
+| `SKILL_API_HOST` | Skill API server host (localhost)     | No       |
 
-\* Required if Discord platform is enabled.  
+\* Required if Discord platform is enabled.\
 \*\* Required for GitHub Copilot CLI agent.
 
 ## Prompt Template System
@@ -212,7 +212,67 @@ prompts/
 
 To customize the bot's character, simply edit the individual fragment files without touching `system.md`.
 
+### Customizing Prompts in Container Deployments
+
+When running AI Friend in a container, you can customize the bot's character by mounting your own prompt files without rebuilding the container image:
+
+1. **Copy the default prompts to your local directory:**
+
+   ```bash
+   # The default prompts are included in the repository
+   # You can copy them to customize:
+   cp -r prompts/ my-custom-prompts/
+   ```
+
+2. **Edit the prompt files in your local directory:**
+
+   Edit `my-custom-prompts/character_name.md`, `my-custom-prompts/character_info.md`, etc. to customize your bot's character.
+
+3. **Mount your custom prompts directory when running the container:**
+
+   Using `podman run`:
+   ```bash
+   podman run -d --rm \
+     -v ./data:/app/data \
+     -v ./config.yaml:/app/config.yaml:ro \
+     -v ./my-custom-prompts:/app/prompts:ro \
+     --env-file .env \
+     --name ai-friend \
+     ghcr.io/jim60105/ai-friend:latest
+   ```
+
+   Using `compose.yml` (already configured):
+   ```yaml
+   volumes:
+     - ./prompts:/app/prompts:ro,Z # Mount your custom prompts
+   ```
+
+   > [!IMPORTANT]
+   > When mounting custom prompts, ensure you provide **all required files**:
+   >
+   > - `system.md` - Main system prompt template
+   > - All fragment files referenced in `system.md` (e.g., `character_name.md`, `character_info.md`, etc.)
+   >
+   > Missing files will result in unresolved `{{placeholders}}` in the system prompt.
+
+4. **Restart the container** to apply the changes:
+
+   ```bash
+   podman-compose down && podman-compose up -d
+   ```
+
+The container includes default prompts that will be used if you don't mount a custom prompts directory.
+
 ## Container Deployment
+
+### Quick Start with Compose
+
+```bash
+# Edit compose.yml to customize volume mounts if needed
+podman-compose up -d
+```
+
+### Manual Container Run
 
 ```bash
 # Run with volume mounts
@@ -224,7 +284,21 @@ podman run -d --rm \
   ghcr.io/jim60105/ai-friend:latest
 ```
 
-> [!NOTE]  
+To mount custom prompts:
+
+```bash
+podman run -d --rm \
+  -v ./data:/app/data \
+  -v ./config.yaml:/app/config.yaml:ro \
+  -v ./my-custom-prompts:/app/prompts:ro \
+  --env-file .env \
+  --name ai-friend \
+  ghcr.io/jim60105/ai-friend:latest
+```
+
+See [Customizing Prompts in Container Deployments](#customizing-prompts-in-container-deployments) for details.
+
+> [!NOTE]\
 > The container image runs with the `--yolo` flag by default, which auto-approves all permission requests. This is safe in the isolated container environment.
 
 ## Documentation

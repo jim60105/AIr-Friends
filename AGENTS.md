@@ -54,16 +54,16 @@ AI Friend is a multi-platform conversational AI bot that acts as an **ACP (Agent
 
 ### Core Components
 
-| Directory          | Purpose                                                |
-| ------------------ | ------------------------------------------------------ |
-| `src/core/`        | Agent session, workspace manager, context assembly     |
-| `src/acp/`         | ACP Client integration, agent connector                |
-| `src/platforms/`   | Platform adapters (Discord, Misskey)                   |
-| `src/skills/`      | Internal skill handlers (memory, reply, context)       |
-| `src/skill-api/`   | HTTP server for shell-based skills                     |
-| `src/types/`       | TypeScript type definitions                            |
-| `src/utils/`       | Logging, configuration loading, utilities              |
-| `skills/`          | Shell-based skill scripts (executed by external agent) |
+| Directory        | Purpose                                                |
+| ---------------- | ------------------------------------------------------ |
+| `src/core/`      | Agent session, workspace manager, context assembly     |
+| `src/acp/`       | ACP Client integration, agent connector                |
+| `src/platforms/` | Platform adapters (Discord, Misskey)                   |
+| `src/skills/`    | Internal skill handlers (memory, reply, context)       |
+| `src/skill-api/` | HTTP server for shell-based skills                     |
+| `src/types/`     | TypeScript type definitions                            |
+| `src/utils/`     | Logging, configuration loading, utilities              |
+| `skills/`        | Shell-based skill scripts (executed by external agent) |
 
 ## Build & Development Commands
 
@@ -118,6 +118,7 @@ deno run --allow-net --allow-read --allow-write --allow-env src/main.ts --yolo
 ```
 
 **Use cases**:
+
 - Container environments (enabled by default in Containerfile)
 - Testing and development
 - Trusted execution environments
@@ -239,13 +240,13 @@ interface PatchEvent {
 
 **Available Skills**:
 
-| Skill             | Purpose                      | HTTP Endpoint              |
-| ----------------- | ---------------------------- | -------------------------- |
-| `memory-save`     | Save new memory              | POST /api/skill/memory-save     |
-| `memory-search`   | Search existing memories     | POST /api/skill/memory-search   |
-| `memory-patch`    | Update memory attributes     | POST /api/skill/memory-patch    |
-| `fetch-context`   | Get additional platform data | POST /api/skill/fetch-context   |
-| `send-reply`      | Send final reply (max 1)     | POST /api/skill/send-reply      |
+| Skill           | Purpose                      | HTTP Endpoint                 |
+| --------------- | ---------------------------- | ----------------------------- |
+| `memory-save`   | Save new memory              | POST /api/skill/memory-save   |
+| `memory-search` | Search existing memories     | POST /api/skill/memory-search |
+| `memory-patch`  | Update memory attributes     | POST /api/skill/memory-patch  |
+| `fetch-context` | Get additional platform data | POST /api/skill/fetch-context |
+| `send-reply`    | Send final reply (max 1)     | POST /api/skill/send-reply    |
 
 **Single Reply Rule**:
 
@@ -268,8 +269,8 @@ const result = await fetch("http://localhost:3001/api/skill/memory-save", {
   method: "POST",
   body: JSON.stringify({
     sessionId: "sess_abc123",
-    parameters: { content: "User likes TypeScript", visibility: "public" }
-  })
+    parameters: { content: "User likes TypeScript", visibility: "public" },
+  }),
 });
 ```
 
@@ -305,10 +306,10 @@ Platform adapters must implement:
 
 **Misskey Channel Types**:
 
-| Channel ID Format | Description                          | API Endpoint                    |
-| ----------------- | ------------------------------------ | ------------------------------- |
-| `note:{noteId}`   | Public note conversation thread      | `notes/replies`, `notes/create` |
-| `dm:{userId}`     | Direct message via specified notes   | `notes/mentions`                |
+| Channel ID Format | Description                          | API Endpoint                                                  |
+| ----------------- | ------------------------------------ | ------------------------------------------------------------- |
+| `note:{noteId}`   | Public note conversation thread      | `notes/replies`, `notes/create`                               |
+| `dm:{userId}`     | Direct message via specified notes   | `notes/mentions`                                              |
 | `chat:{userId}`   | Private chat room with specific user | `chat/messages/user-timeline`, `chat/messages/create-to-user` |
 
 ### 6. ACP Client Integration
@@ -360,6 +361,88 @@ await connector.disconnect();
 
 - **GitHub Copilot CLI** (`@github/copilot-cli`) - Default when `GITHUB_TOKEN` is set
 - **Gemini CLI** - Alternative agent (requires separate configuration)
+
+## Prompt Template System
+
+The system uses a template-based prompt system that allows easy customization without rebuilding containers.
+
+### How It Works
+
+The main system prompt (`prompts/system.md`) uses `{{placeholder}}` syntax to reference content from separate fragment files. During startup, `loadSystemPrompt` (in `src/core/config-loader.ts`) scans the prompts directory and replaces all placeholders with the corresponding file contents.
+
+**Example:**
+
+```markdown
+<!-- prompts/system.md -->
+
+You are {{character_name}}. {{character_info}}
+```
+
+```markdown
+<!-- prompts/character_name.md -->
+
+Yuna
+```
+
+```markdown
+<!-- prompts/character_info.md -->
+
+An AI assistant
+```
+
+**Result after loading:**
+
+```
+You are Yuna. An AI assistant
+```
+
+### Template Processing Rules
+
+| Rule                  | Behavior                                                         |
+| --------------------- | ---------------------------------------------------------------- |
+| Placeholder format    | `{{name}}` where name matches a `.md` filename                   |
+| Fragment files        | Any `.md` file in prompts directory (except `system.md`)         |
+| Content trimming      | All fragment content is trimmed before replacement               |
+| Repeated placeholders | All occurrences are replaced with the same content               |
+| Missing fragments     | Placeholders without matching files are preserved with a warning |
+| Self-exclusion        | `system.md` itself is never used as a fragment                   |
+
+### Container Deployment Considerations
+
+**Default Prompts:**
+
+- Default prompt files are bundled in the container at `/app/prompts/`
+- The container declares `/app/prompts` as a VOLUME for optional overrides
+
+**Custom Prompts:**
+
+- Users can mount their own prompts directory to `/app/prompts:ro` without rebuilding
+- Custom mounts completely override defaults (ensure all required files are provided)
+- Missing fragment files result in unresolved placeholders and warnings in logs
+
+**Example compose.yml:**
+
+```yaml
+volumes:
+  - ./data:/app/data:Z
+  - ./config.yaml:/app/config.yaml:ro,Z
+  - ./my-prompts:/app/prompts:ro,Z # Custom prompts
+```
+
+### Adding New Placeholders
+
+To add a new placeholder:
+
+1. Add `{{new_placeholder}}` to `prompts/system.md`
+2. Create `prompts/new_placeholder.md` with the content
+3. No code changes needed - the system auto-discovers fragment files
+4. Test locally before deploying to containers
+
+### File References
+
+- Implementation: `src/core/config-loader.ts:213-312` (`loadSystemPrompt`, `loadPromptFragments`, `replacePlaceholders`)
+- Tests: `tests/core/config-loader.test.ts` (9 test cases covering template system)
+- BDD Spec: `docs/features/12-prompt-template-system.feature`
 
 ## Error Handling
 
