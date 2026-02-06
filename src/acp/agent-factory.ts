@@ -43,9 +43,10 @@ export function createAgentConfig(
         }
       }
 
-      const args = ["--acp"];
+      const args = ["--acp", "--disable-builtin-mcps", "--no-ask-user", "--no-color"];
       if (yolo) {
-        args.push("--yolo");
+        args.push("--allow-all-tools");
+        args.push("--allow-all-urls");
       }
 
       return {
