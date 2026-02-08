@@ -7,6 +7,7 @@ import { ReplyDispatcher } from "./reply-dispatcher.ts";
 import { WorkspaceManager } from "./workspace-manager.ts";
 import { ContextAssembler } from "./context-assembler.ts";
 import { MemoryStore } from "./memory-store.ts";
+import { ReplyPolicyEvaluator } from "./reply-policy.ts";
 import { SkillRegistry } from "@skills/registry.ts";
 import { SessionRegistry } from "../skill-api/session-registry.ts";
 import { SkillAPIServer } from "../skill-api/server.ts";
@@ -28,6 +29,7 @@ export class AgentCore {
   private sessionRegistry: SessionRegistry;
   private skillApiServer: SkillAPIServer | null = null;
   private orchestrator: SessionOrchestrator;
+  private replyPolicy: ReplyPolicyEvaluator;
   private yolo: boolean;
 
   constructor(config: Config, yolo = false) {
@@ -89,6 +91,8 @@ export class AgentCore {
       this.yolo,
     );
 
+    this.replyPolicy = new ReplyPolicyEvaluator(config.accessControl);
+
     // Initialize message handler and reply dispatcher
     this.messageHandler = new MessageHandler(this.orchestrator);
     this.replyDispatcher = new ReplyDispatcher();
@@ -134,6 +138,17 @@ export class AgentCore {
       userId: event.userId,
       messageId: event.messageId,
     });
+
+    if (!this.replyPolicy.shouldReply(event)) {
+      logger.info("Event filtered by access control policy", {
+        platform: event.platform,
+        channelId: event.channelId,
+        userId: event.userId,
+        messageId: event.messageId,
+        policy: this.config.accessControl.replyTo,
+      });
+      return;
+    }
 
     // Process the event
     const response = await this.messageHandler.handleEvent(event, platform);
