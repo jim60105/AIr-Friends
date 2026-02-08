@@ -1,5 +1,7 @@
 # AI Friend
 
+![preview image](./docs/preview.webp)
+
 An AI-powered conversational chatbot using the [Agent Client Protocol (ACP)](https://agentclientprotocol.org/) to connect with external AI agents (GitHub Copilot CLI, Gemini CLI, OpenCode CLI). Operates across multiple platforms (Discord, Misskey) with persistent cross-conversation memory and workspace-based trust boundaries.
 
 ## Features
