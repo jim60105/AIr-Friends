@@ -111,7 +111,9 @@ function validateConfig(config: Record<string, unknown>): void {
   }
 
   // Validate accessControl.whitelist entries format
-  const WHITELIST_ENTRY_PATTERN = /^(discord|misskey)\/(account|channel)\/\S+$/;
+  // Pattern allows alphanumeric, underscore, hyphen, and some special chars commonly used in IDs
+  // Excludes whitespace, path separators, and other potentially dangerous characters
+  const WHITELIST_ENTRY_PATTERN = /^(discord|misskey)\/(account|channel)\/[a-zA-Z0-9_\-@.]+$/;
   if (accessControl?.whitelist && Array.isArray(accessControl.whitelist)) {
     const validEntries: string[] = [];
     for (const entry of accessControl.whitelist) {
