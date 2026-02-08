@@ -6,6 +6,7 @@ import { AgentCore } from "@core/agent-core.ts";
 import { getPlatformRegistry } from "@platforms/platform-registry.ts";
 import { DiscordAdapter } from "@platforms/discord/index.ts";
 import { MisskeyAdapter } from "@platforms/misskey/index.ts";
+import { HealthCheckServer } from "./healthcheck.ts";
 import { configureLogger, createLogger } from "@utils/logger.ts";
 
 const logger = createLogger("Bootstrap");
@@ -17,6 +18,7 @@ export interface AppContext {
   config: Config;
   agentCore: AgentCore;
   platformRegistry: ReturnType<typeof getPlatformRegistry>;
+  healthCheckServer: HealthCheckServer | null;
   yolo: boolean;
 }
 
@@ -61,14 +63,30 @@ export async function bootstrap(configPath?: string, yolo = false): Promise<AppC
     agentCore.registerPlatform(misskeyAdapter);
   }
 
+  // Initialize Health Check server if enabled
+  let healthCheckServer: HealthCheckServer | null = null;
+  if (config.health?.enabled) {
+    logger.info("Initializing Health Check server", { port: config.health.port });
+    healthCheckServer = new HealthCheckServer(config.health.port);
+    healthCheckServer.start();
+  }
+
   logger.info("Bootstrap completed");
 
-  return {
+  const context: AppContext = {
     config,
     agentCore,
     platformRegistry,
+    healthCheckServer,
     yolo,
   };
+
+  // Set Health Check server context after all components initialized
+  if (healthCheckServer) {
+    healthCheckServer.setContext(context);
+  }
+
+  return context;
 }
 
 /**

@@ -171,6 +171,13 @@ export class AgentCore {
   }
 
   /**
+   * Get the Skill API server instance (if enabled)
+   */
+  getSkillAPIServer(): SkillAPIServer | null {
+    return this.skillApiServer;
+  }
+
+  /**
    * Shutdown the core (cleanup resources)
    */
   async shutdown(): Promise<void> {

@@ -60,9 +60,15 @@ export class ShutdownHandler {
       return;
     }
 
-    const { platformRegistry, agentCore } = this.context;
+    const { platformRegistry, agentCore, healthCheckServer } = this.context;
 
     try {
+      // Stop health check server first
+      if (healthCheckServer) {
+        logger.info("Stopping health check server");
+        await healthCheckServer.stop();
+      }
+
       // Shutdown agent core (stops skill API server, session registry)
       logger.info("Shutting down agent core");
       await agentCore.shutdown();

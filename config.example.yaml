@@ -59,5 +59,5 @@ skillApi:
 
 # Health check configuration (optional)
 health:
-  enabled: false # Enable HTTP health check endpoint (default: false)
+  enabled: true # Enable HTTP health check endpoint (default: true)
   port: 8080 # Port for health check (default: 8080)
