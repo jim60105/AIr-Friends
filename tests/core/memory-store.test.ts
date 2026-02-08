@@ -180,3 +180,68 @@ Deno.test("MemoryStore - should preserve memory order by timestamp", async () =>
     assertEquals(important[1].content, "Second memory");
   });
 });
+
+Deno.test("MemoryStore - DM should only get private important memories", async () => {
+  await withTestMemoryStore(true, async (store, workspace) => {
+    // Add a public memory (e.g. from before context-aware visibility)
+    await store.addMemory(workspace, "Public important", {
+      visibility: "public",
+      importance: "high",
+    });
+
+    // Add a private memory
+    await store.addMemory(workspace, "Private important", {
+      visibility: "private",
+      importance: "high",
+    });
+
+    // In DM context, getImportantMemories should only return private memories
+    const important = await store.getImportantMemories(workspace);
+    assertEquals(important.length, 1);
+    assertEquals(important[0].content, "Private important");
+    assertEquals(important[0].visibility, "private");
+  });
+});
+
+Deno.test("MemoryStore - non-DM should only get public important memories", async () => {
+  await withTestMemoryStore(false, async (store, workspace) => {
+    await store.addMemory(workspace, "Public important", {
+      visibility: "public",
+      importance: "high",
+    });
+
+    const important = await store.getImportantMemories(workspace);
+    assertEquals(important.length, 1);
+    assertEquals(important[0].content, "Public important");
+    assertEquals(important[0].visibility, "public");
+  });
+});
+
+Deno.test("MemoryStore - DM search should only search private memory", async () => {
+  await withTestMemoryStore(true, async (store, workspace) => {
+    // Add one public and one private memory
+    await store.addMemory(workspace, "Public favorite color is blue", {
+      visibility: "public",
+    });
+    await store.addMemory(workspace, "Private favorite color is red", {
+      visibility: "private",
+    });
+
+    // In DM, search should only find private memories
+    const results = await store.searchMemories(workspace, ["favorite"]);
+    assertEquals(results.length, 1);
+    assertEquals(results[0].visibility, "private");
+  });
+});
+
+Deno.test("MemoryStore - non-DM search should only search public memory", async () => {
+  await withTestMemoryStore(false, async (store, workspace) => {
+    await store.addMemory(workspace, "Public favorite food is pizza", {
+      visibility: "public",
+    });
+
+    const results = await store.searchMemories(workspace, ["favorite"]);
+    assertEquals(results.length, 1);
+    assertEquals(results[0].visibility, "public");
+  });
+});

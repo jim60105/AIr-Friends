@@ -6,8 +6,8 @@ import { callSkillApi, exitWithError, outputResult, parseBaseArgs } from "../../
 async function main() {
   try {
     const args = parse(Deno.args, {
-      string: ["session-id", "api-url", "content", "visibility", "importance"],
-      alias: { s: "session-id", a: "api-url", c: "content", v: "visibility", i: "importance" },
+      string: ["session-id", "api-url", "content", "importance"],
+      alias: { s: "session-id", a: "api-url", c: "content", i: "importance" },
     });
 
     const { sessionId, apiUrl } = parseBaseArgs(Deno.args);
@@ -17,20 +17,16 @@ async function main() {
       exitWithError("Missing required argument: --content");
     }
 
-    const visibility = args.visibility ?? "public";
     const importance = args.importance ?? "normal";
 
     // Validate values
-    if (!["public", "private"].includes(visibility)) {
-      exitWithError("Invalid visibility. Must be 'public' or 'private'");
-    }
     if (!["high", "normal"].includes(importance)) {
       exitWithError("Invalid importance. Must be 'high' or 'normal'");
     }
 
+    // Visibility is auto-determined by the server based on conversation context
     const result = await callSkillApi(apiUrl, "memory-save", sessionId, {
       content,
-      visibility,
       importance,
     });
 

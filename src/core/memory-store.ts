@@ -278,29 +278,19 @@ export class MemoryStore {
 
   /**
    * Get all important memories (for initial context)
+   * DM context → private memories only, non-DM → public memories only
    */
   async getImportantMemories(workspace: WorkspaceInfo): Promise<ResolvedMemory[]> {
-    const publicMemories = await this.loadAllMemories(workspace, "public");
-    const importantPublic = publicMemories.filter(
-      (m) => m.enabled && m.importance === "high",
-    );
-
-    // Include private memories only in DM context
-    if (workspace.isDm) {
-      const privateMemories = await this.loadAllMemories(workspace, "private");
-      const importantPrivate = privateMemories.filter(
-        (m) => m.enabled && m.importance === "high",
-      );
-      return [...importantPublic, ...importantPrivate].sort(
-        (a, b) => a.createdAt.localeCompare(b.createdAt),
-      );
-    }
-
-    return importantPublic.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+    const visibility = workspace.isDm ? "private" : "public";
+    const memories = await this.loadAllMemories(workspace, visibility);
+    return memories
+      .filter((m) => m.enabled && m.importance === "high")
+      .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
   }
 
   /**
    * Search memories by keywords
+   * DM context → private memory only, non-DM → public memory only
    */
   async searchMemories(
     workspace: WorkspaceInfo,
@@ -316,16 +306,17 @@ export class MemoryStore {
     const results: ResolvedMemory[] = [];
     const seenIds = new Set<string>();
 
-    // Search public memories
-    const publicPath = this.getMemoryPath(workspace, "public");
-    if (publicPath) {
-      const publicResults = await searchMultipleKeywords(
-        publicPath,
+    // Search only the context-appropriate memory file
+    const visibility = workspace.isDm ? "private" : "public";
+    const memoryPath = this.getMemoryPath(workspace, visibility);
+    if (memoryPath) {
+      const searchResults = await searchMultipleKeywords(
+        memoryPath,
         keywords,
         searchOpts,
       );
 
-      for (const result of publicResults) {
+      for (const result of searchResults) {
         try {
           const event = JSON.parse(result.content) as MemoryLogEvent;
           if (event.type === "memory" && !seenIds.has(event.id)) {
@@ -338,33 +329,6 @@ export class MemoryStore {
           }
         } catch {
           // Skip invalid JSON
-        }
-      }
-    }
-
-    // Search private memories if DM
-    if (workspace.isDm) {
-      const privatePath = this.getMemoryPath(workspace, "private");
-      if (privatePath) {
-        const privateResults = await searchMultipleKeywords(
-          privatePath,
-          keywords,
-          searchOpts,
-        );
-
-        for (const result of privateResults) {
-          try {
-            const event = JSON.parse(result.content) as MemoryLogEvent;
-            if (event.type === "memory" && !seenIds.has(event.id)) {
-              seenIds.add(event.id);
-              const memory = await this.findMemoryById(workspace, event.id);
-              if (memory && memory.enabled) {
-                results.push(memory);
-              }
-            }
-          } catch {
-            // Skip invalid JSON
-          }
         }
       }
     }

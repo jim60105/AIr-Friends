@@ -20,8 +20,11 @@ ${HOME}/.agents/skills/memory-save/scripts/memory-save.ts \
 ## Parameters
 
 - `--content`: (Required) The memory content to save
-- `--visibility`: `public` (default) or `private`
 - `--importance`: `normal` (default) or `high`
+
+## Notes
+
+- **Visibility is auto-determined**: DM conversations save to private memory, public conversations (guild/thread) save to public memory. You do NOT need to specify visibility.
 
 ## Critical Rules
 

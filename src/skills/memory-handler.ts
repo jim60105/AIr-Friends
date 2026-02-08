@@ -20,6 +20,8 @@ export class MemoryHandler {
 
   /**
    * Handle memory-save skill
+   * Visibility is auto-determined by context:
+   *   DM → private, non-DM (guild/public thread) → public
    */
   handleMemorySave: SkillHandler = async (
     parameters: Record<string, unknown>,
@@ -35,22 +37,8 @@ export class MemoryHandler {
         };
       }
 
-      // Validate visibility
-      const visibility = (params.visibility ?? "public") as MemoryVisibility;
-      if (visibility !== "public" && visibility !== "private") {
-        return {
-          success: false,
-          error: "Invalid 'visibility' parameter. Must be 'public' or 'private'",
-        };
-      }
-
-      // Private memory only allowed in DM
-      if (visibility === "private" && !context.workspace.isDm) {
-        return {
-          success: false,
-          error: "Private memories can only be saved in DM contexts",
-        };
-      }
+      // Auto-determine visibility from context: DM → private, non-DM → public
+      const visibility: MemoryVisibility = context.workspace.isDm ? "private" : "public";
 
       // Validate importance
       const importance = (params.importance ?? "normal") as MemoryImportance;

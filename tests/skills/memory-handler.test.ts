@@ -35,7 +35,7 @@ const createMockPlatformAdapter = (): PlatformAdapter => {
   } as unknown as PlatformAdapter;
 };
 
-Deno.test("MemoryHandler - handleMemorySave saves memory successfully", async () => {
+Deno.test("MemoryHandler - handleMemorySave saves memory in DM as private", async () => {
   const tempDir = await Deno.makeTempDir();
   const workspaceManager = new WorkspaceManager({
     repoPath: tempDir,
@@ -58,6 +58,58 @@ Deno.test("MemoryHandler - handleMemorySave saves memory successfully", async ()
     isDm: true,
   };
 
+  // Create workspace directory with both memory files
+  await Deno.mkdir(workspace.path, { recursive: true });
+  await Deno.writeTextFile(`${workspace.path}/memory.public.jsonl`, "");
+  await Deno.writeTextFile(`${workspace.path}/memory.private.jsonl`, "");
+
+  const context: SkillContext = {
+    workspace,
+    platformAdapter: createMockPlatformAdapter(),
+    channelId: "456",
+    userId: "123",
+  };
+
+  const result = await handler.handleMemorySave(
+    {
+      content: "Test memory content",
+      importance: "normal",
+    },
+    context,
+  );
+
+  assertEquals(result.success, true);
+  assertEquals(typeof result.data, "object");
+  // Visibility should be auto-determined as "private" in DM context
+  assertEquals((result.data as { visibility: string }).visibility, "private");
+
+  // Cleanup
+  await Deno.remove(tempDir, { recursive: true });
+});
+
+Deno.test("MemoryHandler - handleMemorySave saves memory in guild as public", async () => {
+  const tempDir = await Deno.makeTempDir();
+  const workspaceManager = new WorkspaceManager({
+    repoPath: tempDir,
+    workspacesDir: "workspaces",
+  });
+  const memoryStore = new MemoryStore(workspaceManager, {
+    searchLimit: 10,
+    maxChars: 2000,
+  });
+  const handler = new MemoryHandler(memoryStore);
+
+  const workspace: WorkspaceInfo = {
+    key: "discord/123/456",
+    components: {
+      platform: "discord",
+      userId: "123",
+      channelId: "456",
+    },
+    path: `${tempDir}/workspaces/discord/123/456`,
+    isDm: false,
+  };
+
   // Create workspace directory
   await Deno.mkdir(workspace.path, { recursive: true });
   await Deno.writeTextFile(`${workspace.path}/memory.public.jsonl`, "");
@@ -72,7 +124,6 @@ Deno.test("MemoryHandler - handleMemorySave saves memory successfully", async ()
   const result = await handler.handleMemorySave(
     {
       content: "Test memory content",
-      visibility: "public",
       importance: "normal",
     },
     context,
@@ -80,6 +131,8 @@ Deno.test("MemoryHandler - handleMemorySave saves memory successfully", async ()
 
   assertEquals(result.success, true);
   assertEquals(typeof result.data, "object");
+  // Visibility should be auto-determined as "public" in non-DM context
+  assertEquals((result.data as { visibility: string }).visibility, "public");
 
   // Cleanup
   await Deno.remove(tempDir, { recursive: true });
@@ -124,7 +177,7 @@ Deno.test("MemoryHandler - handleMemorySave validates parameters", async () => {
   await Deno.remove(tempDir, { recursive: true });
 });
 
-Deno.test("MemoryHandler - handleMemorySearch searches memories", async () => {
+Deno.test("MemoryHandler - handleMemorySearch searches memories in DM context", async () => {
   const tempDir = await Deno.makeTempDir();
   const workspaceManager = new WorkspaceManager({
     repoPath: tempDir,
@@ -147,9 +200,10 @@ Deno.test("MemoryHandler - handleMemorySearch searches memories", async () => {
     isDm: true,
   };
 
-  // Create workspace directory
+  // Create workspace directory with both memory files
   await Deno.mkdir(workspace.path, { recursive: true });
   await Deno.writeTextFile(`${workspace.path}/memory.public.jsonl`, "");
+  await Deno.writeTextFile(`${workspace.path}/memory.private.jsonl`, "");
 
   const context: SkillContext = {
     workspace,
@@ -158,17 +212,16 @@ Deno.test("MemoryHandler - handleMemorySearch searches memories", async () => {
     userId: "123",
   };
 
-  // Add a memory first
+  // Add a memory (will be saved as private in DM context)
   await handler.handleMemorySave(
     {
       content: "User likes hiking in mountains",
-      visibility: "public",
       importance: "normal",
     },
     context,
   );
 
-  // Search for it
+  // Search for it (DM context searches private only)
   const result = await handler.handleMemorySearch(
     {
       query: "hiking mountains",
@@ -207,9 +260,10 @@ Deno.test("MemoryHandler - handleMemoryPatch patches memory", async () => {
     isDm: true,
   };
 
-  // Create workspace directory
+  // Create workspace directory with both memory files
   await Deno.mkdir(workspace.path, { recursive: true });
   await Deno.writeTextFile(`${workspace.path}/memory.public.jsonl`, "");
+  await Deno.writeTextFile(`${workspace.path}/memory.private.jsonl`, "");
 
   const context: SkillContext = {
     workspace,
@@ -218,11 +272,10 @@ Deno.test("MemoryHandler - handleMemoryPatch patches memory", async () => {
     userId: "123",
   };
 
-  // Add a memory first
+  // Add a memory first (auto private in DM)
   const saveResult = await handler.handleMemorySave(
     {
       content: "Test memory to patch",
-      visibility: "public",
       importance: "normal",
     },
     context,
@@ -246,7 +299,7 @@ Deno.test("MemoryHandler - handleMemoryPatch patches memory", async () => {
   await Deno.remove(tempDir, { recursive: true });
 });
 
-Deno.test("MemoryHandler - handleMemorySave validates invalid visibility", async () => {
+Deno.test("MemoryHandler - handleMemorySave ignores agent-provided visibility in DM", async () => {
   const tempDir = await Deno.makeTempDir();
   const workspaceManager = new WorkspaceManager({
     repoPath: tempDir,
@@ -269,6 +322,11 @@ Deno.test("MemoryHandler - handleMemorySave validates invalid visibility", async
     isDm: true,
   };
 
+  // Create workspace directory with both memory files
+  await Deno.mkdir(workspace.path, { recursive: true });
+  await Deno.writeTextFile(`${workspace.path}/memory.public.jsonl`, "");
+  await Deno.writeTextFile(`${workspace.path}/memory.private.jsonl`, "");
+
   const context: SkillContext = {
     workspace,
     platformAdapter: createMockPlatformAdapter(),
@@ -276,13 +334,14 @@ Deno.test("MemoryHandler - handleMemorySave validates invalid visibility", async
     userId: "123",
   };
 
+  // Even if agent passes visibility: "public", DM context forces private
   const result = await handler.handleMemorySave(
-    { content: "test", visibility: "invalid" },
+    { content: "test", visibility: "public" },
     context,
   );
 
-  assertEquals(result.success, false);
-  assertEquals(result.error, "Invalid 'visibility' parameter. Must be 'public' or 'private'");
+  assertEquals(result.success, true);
+  assertEquals((result.data as { visibility: string }).visibility, "private");
 
   // Cleanup
   await Deno.remove(tempDir, { recursive: true });
@@ -330,7 +389,7 @@ Deno.test("MemoryHandler - handleMemorySave validates invalid importance", async
   await Deno.remove(tempDir, { recursive: true });
 });
 
-Deno.test("MemoryHandler - handleMemorySave rejects private in non-DM", async () => {
+Deno.test("MemoryHandler - handleMemorySave ignores agent-provided visibility in non-DM", async () => {
   const tempDir = await Deno.makeTempDir();
   const workspaceManager = new WorkspaceManager({
     repoPath: tempDir,
@@ -353,6 +412,10 @@ Deno.test("MemoryHandler - handleMemorySave rejects private in non-DM", async ()
     isDm: false, // Not a DM
   };
 
+  // Create workspace directory
+  await Deno.mkdir(workspace.path, { recursive: true });
+  await Deno.writeTextFile(`${workspace.path}/memory.public.jsonl`, "");
+
   const context: SkillContext = {
     workspace,
     platformAdapter: createMockPlatformAdapter(),
@@ -360,13 +423,14 @@ Deno.test("MemoryHandler - handleMemorySave rejects private in non-DM", async ()
     userId: "123",
   };
 
+  // Even if agent passes visibility: "private", non-DM context forces public
   const result = await handler.handleMemorySave(
     { content: "test", visibility: "private" },
     context,
   );
 
-  assertEquals(result.success, false);
-  assertEquals(result.error, "Private memories can only be saved in DM contexts");
+  assertEquals(result.success, true);
+  assertEquals((result.data as { visibility: string }).visibility, "public");
 
   // Cleanup
   await Deno.remove(tempDir, { recursive: true });
