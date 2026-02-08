@@ -38,7 +38,7 @@ export interface PlatformsConfig {
  * Agent/LLM configuration
  */
 export interface AgentConfig {
-  /** Model identifier (e.g., "gpt-4", "claude-3-opus") */
+  /** Model identifier */
   model: string;
 
   /** Path to system prompt file */
@@ -46,12 +46,6 @@ export interface AgentConfig {
 
   /** Maximum tokens for context */
   tokenLimit: number;
-
-  /** API endpoint (optional, for custom endpoints) */
-  apiEndpoint?: string;
-
-  /** API key (can be overridden by env var) */
-  apiKey?: string;
 
   /** GitHub token for GitHub Copilot CLI (optional) */
   githubToken?: string;

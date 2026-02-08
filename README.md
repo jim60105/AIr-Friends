@@ -166,26 +166,25 @@ ai-friend/
 
 ## Configuration
 
-Configuration is loaded from `config.yaml` (YAML format). See [config/config.example.yaml](config/config.example.yaml) for a complete example.
+Configuration is loaded from `config.yaml` (YAML format). See [config.example.yaml](config.example.yaml) for a complete example.
 
 ### Environment Variables
 
-| Variable          | Description                                        | Required |
-| ----------------- | -------------------------------------------------- | -------- |
-| `DISCORD_TOKEN`   | Discord bot token                                  | Yes*     |
-| `GITHUB_TOKEN`    | GitHub token for Copilot/OpenCode                  | Yes**    |
-| `GEMINI_API_KEY`  | Gemini API key for Gemini CLI/OpenCode             | No       |
-| `OPENCODE_API_KEY`| OpenCode API key (optional, can use GitHub/Gemini) | No       |
-| `MISSKEY_TOKEN`   | Misskey access token                               | No       |
-| `MISSKEY_HOST`    | Misskey instance host                              | No       |
-| `AGENT_MODEL`     | LLM model identifier (e.g., "gpt-4")               | No       |
-| `LOG_LEVEL`       | Logging level (DEBUG/INFO/WARN/ERROR)              | No       |
-| `DENO_ENV`        | Environment name (dev/prod)                        | No       |
-| `SKILL_API_PORT`  | Skill API server port (default: 3001)              | No       |
-| `SKILL_API_HOST`  | Skill API server host (localhost)                  | No       |
-
-\* Required if Discord platform is enabled.\
-\*\* Required for GitHub Copilot CLI or OpenCode GitHub provider.
+| Variable             | Description                                      |
+| -------------------- | ------------------------------------------------ |
+| `DISCORD_ENABLED`    | Enable Discord integration (true/false)          |
+| `MISSKEY_ENABLED`    | Enable Misskey integration (true/false)          |
+| `DISCORD_TOKEN`      | Discord bot token                                |
+| `MISSKEY_HOST`       | Misskey instance host                            |
+| `MISSKEY_TOKEN`      | Misskey access token                             |
+| `AGENT_MODEL`        | LLM model identifier (e.g., "gpt-5-mini")        |
+| `AGENT_DEFAULT_TYPE` | Default ACP agent type (copilot/gemini/opencode) |
+| `LOG_LEVEL`          | Logging level (DEBUG/INFO/WARN/ERROR)            |
+| `DENO_ENV`           | Environment name (dev/prod)                      |
+| `GITHUB_TOKEN`       | GitHub token for Copilot/OpenCode                |
+| `GEMINI_API_KEY`     | Gemini API key for Gemini CLI/OpenCode           |
+| `OPENCODE_API_KEY`   | OpenCode API key                                 |
+| `OPENROUTER_API_KEY` | OpenRouter API key                               |
 
 ### OpenCode Configuration
 

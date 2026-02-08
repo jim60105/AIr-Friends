@@ -43,10 +43,28 @@ export function createAgentConfig(
         }
       }
 
-      const args = ["--acp", "--disable-builtin-mcps", "--no-ask-user", "--no-color"];
-      if (yolo) {
-        args.push("--allow-all-tools");
-        args.push("--allow-all-urls");
+      // Copilot seems doesn't have a solution to override system prompt.
+
+      const args = [
+        "--disable-builtin-mcps",
+        "--no-ask-user",
+        "--no-color",
+        "--no-auto-update",
+        "--acp",
+      ];
+
+      if (!yolo) {
+        // We need at least bash tool to run deno scripts for skills.
+        args.push("--available-tools");
+        args.push("write_bash");
+        args.push("--available-tools");
+        args.push("read_bash");
+        args.push("--available-tools");
+        args.push("stop_bash");
+        args.push("--available-tools");
+        args.push("bash");
+      } else {
+        args.push("--yolo");
       }
 
       return {
@@ -73,6 +91,7 @@ export function createAgentConfig(
       // Agent needs PATH to find deno, HOME for skills directory discovery
       const env: Record<string, string> = {
         GEMINI_API_KEY: geminiApiKey,
+        GEMINI_SYSTEM_MD: "/app/prompts/system_prompt_override.md",
       };
 
       // Inherit critical environment variables
@@ -138,7 +157,11 @@ export function createAgentConfig(
       }
 
       const args = ["acp"];
-      if (yolo) {
+
+      if (!yolo) {
+        // OpenCode permissions are configured in opencode.json.
+      } else {
+        // OpenCode currently does not have a YOLO mode. This will be available after this PR is merged:
         // https://github.com/anomalyco/opencode/pull/11833
         env["OPENCODE_YOLO"] = "true";
       }

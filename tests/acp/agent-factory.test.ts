@@ -48,10 +48,19 @@ Deno.test("createAgentConfig - creates copilot config correctly", () => {
 
   assertEquals(agentConfig.command, "copilot");
   assertEquals(agentConfig.args, [
-    "--acp",
     "--disable-builtin-mcps",
     "--no-ask-user",
     "--no-color",
+    "--no-auto-update",
+    "--acp",
+    "--available-tools",
+    "write_bash",
+    "--available-tools",
+    "read_bash",
+    "--available-tools",
+    "stop_bash",
+    "--available-tools",
+    "bash",
   ]);
   assertEquals(agentConfig.cwd, "/tmp/workspace");
   assertEquals(agentConfig.env?.GITHUB_TOKEN, "test-github-token");
@@ -65,6 +74,7 @@ Deno.test("createAgentConfig - creates gemini config correctly", () => {
   assertEquals(agentConfig.args, ["task", "gemini", "--experimental-acp"]);
   assertEquals(agentConfig.cwd, "/tmp/workspace");
   assertEquals(agentConfig.env?.GEMINI_API_KEY, "test-gemini-key");
+  assertEquals(agentConfig.env?.GEMINI_SYSTEM_MD, "/app/prompts/system_prompt_override.md");
 });
 
 Deno.test("createAgentConfig - creates opencode config correctly", () => {
@@ -358,12 +368,12 @@ Deno.test("createAgentConfig - adds --yolo flag to copilot when yolo is true", (
 
   assertEquals(agentConfig.command, "copilot");
   assertEquals(agentConfig.args, [
-    "--acp",
     "--disable-builtin-mcps",
     "--no-ask-user",
     "--no-color",
-    "--allow-all-tools",
-    "--allow-all-urls",
+    "--no-auto-update",
+    "--acp",
+    "--yolo",
   ]);
   assertEquals(agentConfig.cwd, "/tmp/workspace");
 });
@@ -374,10 +384,19 @@ Deno.test("createAgentConfig - does not add --yolo flag to copilot when yolo is 
 
   assertEquals(agentConfig.command, "copilot");
   assertEquals(agentConfig.args, [
-    "--acp",
     "--disable-builtin-mcps",
     "--no-ask-user",
     "--no-color",
+    "--no-auto-update",
+    "--acp",
+    "--available-tools",
+    "write_bash",
+    "--available-tools",
+    "read_bash",
+    "--available-tools",
+    "stop_bash",
+    "--available-tools",
+    "bash",
   ]);
   assertEquals(agentConfig.cwd, "/tmp/workspace");
 });

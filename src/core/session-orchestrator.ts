@@ -264,8 +264,6 @@ export class SessionOrchestrator {
     const parts: string[] = [];
 
     // System prompt
-    parts.push("# System Instructions");
-    parts.push("");
     parts.push(context.systemMessage);
     parts.push("");
 

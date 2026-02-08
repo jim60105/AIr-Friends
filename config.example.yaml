@@ -33,12 +33,11 @@ agent:
   model: "gpt-5-mini" # Model identifier (e.g., "gpt-4", "gpt-5-mini")
   systemPromptPath: "./prompts/system.md" # Path to the system prompt file
   tokenLimit: 4096 # Max tokens for context
-  apiEndpoint: "" # Optional custom API endpoint (e.g., "https://api.openai.com")
-  apiKey: "${AGENT_API_KEY}" # Optional API key (use AGENT_API_KEY env var)
   githubToken: "${GITHUB_TOKEN}" # Optional GitHub token for Copilot (env: GITHUB_TOKEN)
   geminiApiKey: "${GEMINI_API_KEY}" # Optional Gemini API key (env: GEMINI_API_KEY)
   opencodeApiKey: "${OPENCODE_API_KEY}" # Optional OpenCode API key (env: OPENCODE_API_KEY)
-  defaultAgentType: "copilot" # Default ACP agent: "copilot", "gemini", or "opencode" (env: AGENT_DEFAULT_TYPE)
+  openRouterApiKey: "${OPENROUTER_API_KEY}" # Optional OpenRouter API key (env: OPENROUTER_API_KEY)
+  defaultAgentType: "${AGENT_DEFAULT_TYPE}" # Default ACP agent: "copilot", "gemini", or "opencode" (env: AGENT_DEFAULT_TYPE)
 
 # Memory system configuration
 memory:

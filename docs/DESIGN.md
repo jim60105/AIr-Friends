@@ -358,10 +358,10 @@ Agent Output (internal)
 
 Memory uses append-only JSONL (JSON Lines) files:
 
-| File                   | Purpose                      |
-| ---------------------- | ---------------------------- |
-| `memory.public.jsonl`  | Public memories              |
-| `memory.private.jsonl` | Private memories             |
+| File                   | Purpose          |
+| ---------------------- | ---------------- |
+| `memory.public.jsonl`  | Public memories  |
+| `memory.private.jsonl` | Private memories |
 
 Both files exist in every workspace. Each line is a JSON event. No new files are created for new memories.
 
@@ -481,11 +481,11 @@ Each platform adapter must provide these skills:
 
 **Misskey Channel Types:**
 
-| Channel ID Format | Description                          | Message Type  |
-| ----------------- | ------------------------------------ | ------------- |
-| `note:{noteId}`   | Public note conversation thread      | Note          |
-| `dm:{userId}`     | Direct message via specified notes   | Note (DM)     |
-| `chat:{userId}`   | Private chat room with specific user | Chat Message  |
+| Channel ID Format | Description                          | Message Type |
+| ----------------- | ------------------------------------ | ------------ |
+| `note:{noteId}`   | Public note conversation thread      | Note         |
+| `dm:{userId}`     | Direct message via specified notes   | Note (DM)    |
+| `chat:{userId}`   | Private chat room with specific user | Chat Message |
 
 ---
 
