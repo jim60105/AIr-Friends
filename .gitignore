@@ -109,7 +109,8 @@ dist
 .docusaurus
 
 # Data directory (workspaces and memory)
-/data/
+data/
+!data/.gitkeep
 
 # Deno cache (optional, usually not committed)
 .deno/
