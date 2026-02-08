@@ -10,6 +10,7 @@ An AI-powered conversational chatbot using the [Agent Client Protocol (ACP)](htt
 - **Skill API Server**: HTTP server for skills to call back to main bot (localhost:3001)
 - **Workspace Isolation**: Trust boundaries based on `{platform}/{user_id}`
 - **Persistent Memory**: Append-only JSONL logs with patch-based updates
+- **Access Control & Reply Policy**: Centralized allow/deny filtering by policy and whitelist
 - **Single Reply Rule**: Only one reply per interaction, enforced by session management
 - **Clean Thought Process**: Internal reasoning stays private; only final reply sent externally
 - **Containerized Deployment**: Deno-based with Podman/Docker support
@@ -127,6 +128,7 @@ ai-friend/
 │   │   ├── context-assembler.ts
 │   │   ├── message-handler.ts
 │   │   ├── reply-dispatcher.ts
+│   │   ├── reply-policy.ts
 │   │   └── config-loader.ts
 │   ├── platforms/           # Platform adapters (Discord, Misskey)
 │   │   ├── platform-adapter.ts
@@ -179,12 +181,47 @@ Configuration is loaded from `config.yaml` (YAML format). See [config.example.ya
 | `MISSKEY_TOKEN`      | Misskey access token                             |
 | `AGENT_MODEL`        | LLM model identifier (e.g., "gpt-5-mini")        |
 | `AGENT_DEFAULT_TYPE` | Default ACP agent type (copilot/gemini/opencode) |
+| `REPLY_TO`           | Reply policy mode (`all`/`public`/`whitelist`)    |
+| `WHITELIST`          | Whitelist entries (comma-separated, replaces config) |
 | `LOG_LEVEL`          | Logging level (DEBUG/INFO/WARN/ERROR)            |
 | `DENO_ENV`           | Environment name (dev/prod)                      |
 | `GITHUB_TOKEN`       | GitHub token for Copilot/OpenCode                |
 | `GEMINI_API_KEY`     | Gemini API key for Gemini CLI/OpenCode           |
 | `OPENCODE_API_KEY`   | OpenCode API key                                 |
 | `OPENROUTER_API_KEY` | OpenRouter API key                               |
+
+### Access Control & Reply Policy
+
+AI Friend can centrally control whether an incoming event is processed by `AgentCore` using `accessControl`:
+
+- `all`: reply to all events in public channels and DMs.
+- `public`: always reply in public channels; for DMs, reply only if account/channel is whitelisted.
+- `whitelist`: reply only when account/channel is whitelisted (default).
+
+Whitelist entry format:
+
+```text
+{platform}/account/{account_ID}
+{platform}/channel/{channel_ID}
+```
+
+Example configuration:
+
+```yaml
+accessControl:
+  replyTo: "whitelist"
+  whitelist:
+    - "discord/account/123456789012345678"
+    - "discord/channel/987654321098765432"
+    - "misskey/account/abcdef1234567890"
+```
+
+Environment variable overrides:
+
+```bash
+REPLY_TO=public
+WHITELIST=discord/account/123456789,discord/channel/987654321,misskey/account/abcdef123
+```
 
 ### OpenCode Configuration
 
