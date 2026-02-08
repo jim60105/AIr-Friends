@@ -193,6 +193,15 @@ Initial context comprises:
 
 **No automatic memory compression or summarization**.
 
+**`/clear` Command:**
+
+When a message starts with `/clear`, it acts as a context reset command:
+
+- **If the trigger message itself is `/clear`**: The system immediately returns without executing the agent or sending any reply, as this is purely a command, not a conversation requiring a response.
+- **If `/clear` appears in recent message history**: When assembling context, the system drops that message and everything before it—only messages after the last `/clear` are included. This lets users reset conversation context within the same channel (e.g., Discord DMs where switching channels is impractical).
+
+The command only affects recent channel messages, not memories or guild-related context.
+
 ### 3. Memory System (Feature 03)
 
 Append-only JSONL files (both exist in every workspace):

@@ -7,6 +7,18 @@ import { WorkspaceManager } from "../../src/core/workspace-manager.ts";
 import type { MessageFetcher } from "../../src/types/context.ts";
 import type { NormalizedEvent, Platform, PlatformMessage } from "../../src/types/events.ts";
 
+function createTestMessage(overrides: Partial<PlatformMessage> = {}): PlatformMessage {
+  return {
+    messageId: "msg1",
+    userId: "user1",
+    username: "User1",
+    content: "Hello",
+    timestamp: new Date(),
+    isBot: false,
+    ...overrides,
+  };
+}
+
 function createTestEvent(overrides: Partial<NormalizedEvent> = {}): NormalizedEvent {
   return {
     platform: "discord" as Platform,
@@ -36,7 +48,7 @@ async function withTestContextAssembler(
     store: MemoryStore,
     manager: WorkspaceManager,
     tempDir: string,
-  ) => Promise<void>,
+  ) => Promise<void> | void,
 ): Promise<void> {
   const tempDir = await Deno.makeTempDir();
   try {
@@ -367,4 +379,165 @@ Deno.test("ContextAssembler - should remove oldest messages when exceeding token
   } finally {
     await Deno.remove(tempDir, { recursive: true });
   }
+});
+
+// ============ /clear command tests ============
+
+Deno.test("ContextAssembler - applyClearCommand should return all messages when no /clear present", async () => {
+  await withTestContextAssembler((assembler) => {
+    const messages = [
+      createTestMessage({ messageId: "m1", content: "Hello" }),
+      createTestMessage({ messageId: "m2", content: "How are you?" }),
+      createTestMessage({ messageId: "m3", content: "Fine thanks" }),
+    ];
+
+    const result = assembler.applyClearCommand(messages);
+    assertEquals(result.length, 3);
+    assertEquals(result[0].content, "Hello");
+    assertEquals(result[2].content, "Fine thanks");
+  });
+});
+
+Deno.test("ContextAssembler - applyClearCommand should drop messages before and including /clear", async () => {
+  await withTestContextAssembler((assembler) => {
+    const messages = [
+      createTestMessage({ messageId: "m1", content: "Old message 1" }),
+      createTestMessage({ messageId: "m2", content: "Old message 2" }),
+      createTestMessage({ messageId: "m3", content: "/clear" }),
+      createTestMessage({ messageId: "m4", content: "New message 1" }),
+      createTestMessage({ messageId: "m5", content: "New message 2" }),
+    ];
+
+    const result = assembler.applyClearCommand(messages);
+    assertEquals(result.length, 2);
+    assertEquals(result[0].content, "New message 1");
+    assertEquals(result[1].content, "New message 2");
+  });
+});
+
+Deno.test("ContextAssembler - applyClearCommand should use the last /clear when multiple exist", async () => {
+  await withTestContextAssembler((assembler) => {
+    const messages = [
+      createTestMessage({ messageId: "m1", content: "Old 1" }),
+      createTestMessage({ messageId: "m2", content: "/clear" }),
+      createTestMessage({ messageId: "m3", content: "Mid message" }),
+      createTestMessage({ messageId: "m4", content: "/clear" }),
+      createTestMessage({ messageId: "m5", content: "New message" }),
+    ];
+
+    const result = assembler.applyClearCommand(messages);
+    assertEquals(result.length, 1);
+    assertEquals(result[0].content, "New message");
+  });
+});
+
+Deno.test("ContextAssembler - applyClearCommand should return empty array when /clear is the last message", async () => {
+  await withTestContextAssembler((assembler) => {
+    const messages = [
+      createTestMessage({ messageId: "m1", content: "Hello" }),
+      createTestMessage({ messageId: "m2", content: "World" }),
+      createTestMessage({ messageId: "m3", content: "/clear" }),
+    ];
+
+    const result = assembler.applyClearCommand(messages);
+    assertEquals(result.length, 0);
+  });
+});
+
+Deno.test("ContextAssembler - applyClearCommand should handle /clear with trailing text", async () => {
+  await withTestContextAssembler((assembler) => {
+    const messages = [
+      createTestMessage({ messageId: "m1", content: "Old message" }),
+      createTestMessage({ messageId: "m2", content: "/clear everything" }),
+      createTestMessage({ messageId: "m3", content: "New message" }),
+    ];
+
+    const result = assembler.applyClearCommand(messages);
+    assertEquals(result.length, 1);
+    assertEquals(result[0].content, "New message");
+  });
+});
+
+Deno.test("ContextAssembler - applyClearCommand should NOT trigger for /clear in the middle of text", async () => {
+  await withTestContextAssembler((assembler) => {
+    const messages = [
+      createTestMessage({ messageId: "m1", content: "Hello" }),
+      createTestMessage({ messageId: "m2", content: "Please /clear this" }),
+      createTestMessage({ messageId: "m3", content: "Goodbye" }),
+    ];
+
+    const result = assembler.applyClearCommand(messages);
+    assertEquals(result.length, 3);
+  });
+});
+
+Deno.test("ContextAssembler - applyClearCommand should handle /clear with leading whitespace", async () => {
+  await withTestContextAssembler((assembler) => {
+    const messages = [
+      createTestMessage({ messageId: "m1", content: "Old message" }),
+      createTestMessage({ messageId: "m2", content: "  /clear" }),
+      createTestMessage({ messageId: "m3", content: "New message" }),
+    ];
+
+    const result = assembler.applyClearCommand(messages);
+    assertEquals(result.length, 1);
+    assertEquals(result[0].content, "New message");
+  });
+});
+
+Deno.test("ContextAssembler - applyClearCommand should handle empty messages array", async () => {
+  await withTestContextAssembler((assembler) => {
+    const result = assembler.applyClearCommand([]);
+    assertEquals(result.length, 0);
+  });
+});
+
+Deno.test("ContextAssembler - applyClearCommand should handle /clear as the only message", async () => {
+  await withTestContextAssembler((assembler) => {
+    const messages = [
+      createTestMessage({ messageId: "m1", content: "/clear" }),
+    ];
+
+    const result = assembler.applyClearCommand(messages);
+    assertEquals(result.length, 0);
+  });
+});
+
+Deno.test("ContextAssembler - /clear should be applied during context assembly", async () => {
+  await withTestContextAssembler(async (assembler, _store, manager) => {
+    const event = createTestEvent();
+    const workspace = await manager.getOrCreateWorkspace(event);
+    const fetcher = createMockMessageFetcher([
+      {
+        messageId: "old1",
+        userId: "user1",
+        username: "Alice",
+        content: "Old conversation",
+        timestamp: new Date(),
+        isBot: false,
+      },
+      {
+        messageId: "clear1",
+        userId: "user1",
+        username: "Alice",
+        content: "/clear",
+        timestamp: new Date(),
+        isBot: false,
+      },
+      {
+        messageId: "new1",
+        userId: "user1",
+        username: "Alice",
+        content: "New conversation start",
+        timestamp: new Date(),
+        isBot: false,
+      },
+    ]);
+
+    const context = await assembler.assembleContext(event, workspace, fetcher);
+
+    // Only the message after /clear should remain
+    assertEquals(context.recentMessages.length, 1);
+    assertEquals(context.recentMessages[0].content, "New conversation start");
+  });
 });

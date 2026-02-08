@@ -69,6 +69,16 @@ export class SessionOrchestrator {
       messageId: event.messageId,
     });
 
+    // Check if the trigger message is a /clear command
+    // If so, exit immediately without calling agent or replying
+    if (event.content.trimStart().startsWith("/clear")) {
+      sessionLogger.info("Trigger message is /clear command, skipping agent execution");
+      return {
+        success: true,
+        replySent: false,
+      };
+    }
+
     try {
       // 1. Get or create workspace
       const workspace = await this.workspaceManager.getOrCreateWorkspace(event);

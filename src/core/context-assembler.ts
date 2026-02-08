@@ -61,11 +61,20 @@ export class ContextAssembler {
     logger.debug("Loaded important memories", { count: importantMemories.length });
 
     // Fetch recent messages
-    const recentMessages = await messageFetcher.fetchRecentMessages(
+    const rawRecentMessages = await messageFetcher.fetchRecentMessages(
       event.channelId,
       this.config.recentMessageLimit,
     );
-    logger.debug("Fetched recent messages", { count: recentMessages.length });
+    logger.debug("Fetched recent messages", { count: rawRecentMessages.length });
+
+    // Apply /clear command: drop everything before (and including) the last /clear message
+    const recentMessages = this.applyClearCommand(rawRecentMessages);
+    if (recentMessages.length !== rawRecentMessages.length) {
+      logger.info("Applied /clear command to recent messages", {
+        originalCount: rawRecentMessages.length,
+        filteredCount: recentMessages.length,
+      });
+    }
 
     // Fetch related messages if available and in guild context
     let relatedMessages: PlatformMessage[] | undefined;
@@ -424,5 +433,31 @@ export class ContextAssembler {
    */
   invalidateSystemPromptCache(): void {
     this.systemPromptCache = null;
+  }
+
+  /**
+   * Apply /clear command to recent messages.
+   *
+   * If any message content starts with "/clear", drop that message and
+   * everything before it. When multiple /clear messages exist, the last
+   * one wins. This allows users to reset context within the same channel.
+   */
+  applyClearCommand(messages: PlatformMessage[]): PlatformMessage[] {
+    // Find the index of the last message starting with "/clear"
+    let lastClearIndex = -1;
+    for (let i = messages.length - 1; i >= 0; i--) {
+      if (messages[i].content.trimStart().startsWith("/clear")) {
+        lastClearIndex = i;
+        break;
+      }
+    }
+
+    // No /clear found — return all messages unchanged
+    if (lastClearIndex === -1) {
+      return messages;
+    }
+
+    // Return only messages after the /clear message
+    return messages.slice(lastClearIndex + 1);
   }
 }

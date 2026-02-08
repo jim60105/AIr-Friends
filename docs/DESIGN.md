@@ -308,6 +308,15 @@ Initial context comprises three data sources:
 | Recent Messages | Last N messages from same channel       | 20 (fixed)   |
 | Guild Context   | Related interactions from same guild    | Configurable |
 
+**`/clear` Command:**
+
+When a message starts with `/clear`, it acts as a context reset command:
+
+- **If the trigger message itself is `/clear`**: The system immediately exits without executing the agent or sending any reply, as this is purely a command, not a conversation requiring a response.
+- **If `/clear` appears in recent message history**: The system drops that message and all messages before it. Only messages after the last `/clear` are included in the context.
+
+This allows users to reset the conversation context within the same channel (useful for DMs or long-lived threads where creating a new channel is not practical). The `/clear` command only affects recent channel messages — it does not affect memory retrieval or guild-related message searches.
+
 **Dynamic Context Expansion:**
 
 The Agent can request additional context during reasoning by calling:

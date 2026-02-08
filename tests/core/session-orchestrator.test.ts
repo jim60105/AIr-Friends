@@ -196,3 +196,118 @@ Deno.test("SessionOrchestrator - processMessage creates workspace", async () => 
     await Deno.remove(tempDir, { recursive: true });
   }
 });
+
+Deno.test("SessionOrchestrator - skips agent execution for /clear command", async () => {
+  const tempDir = await Deno.makeTempDir();
+  try {
+    const config = createTestConfig(tempDir);
+    const workspaceManager = new WorkspaceManager({
+      repoPath: config.workspace.repoPath,
+      workspacesDir: config.workspace.workspacesDir,
+    });
+    const memoryStore = new MemoryStore(workspaceManager, {
+      searchLimit: config.memory.searchLimit,
+      maxChars: config.memory.maxChars,
+    });
+    const skillRegistry = new SkillRegistry(memoryStore);
+
+    // Create a system prompt file
+    await Deno.mkdir(`${tempDir}/prompts`, { recursive: true });
+    await Deno.writeTextFile(
+      `${tempDir}/prompts/system.md`,
+      "You are a helpful assistant.",
+    );
+
+    const contextAssembler = new ContextAssembler(memoryStore, {
+      systemPromptPath: `${tempDir}/prompts/system.md`,
+      recentMessageLimit: config.memory.recentMessageLimit,
+      tokenLimit: config.agent.tokenLimit,
+      memoryMaxChars: config.memory.maxChars,
+    });
+
+    const sessionRegistry = new SessionRegistry();
+
+    const orchestrator = new SessionOrchestrator(
+      workspaceManager,
+      contextAssembler,
+      skillRegistry,
+      config,
+      sessionRegistry,
+    );
+
+    const event = createTestEvent();
+    event.content = "/clear"; // Set trigger message to /clear command
+    const platformAdapter = new MockPlatformAdapter() as unknown as PlatformAdapter;
+
+    // Process the message - should return immediately without agent execution
+    const response = await orchestrator.processMessage(event, platformAdapter);
+
+    // Verify response indicates success but no reply sent
+    assertEquals(response.success, true);
+    assertEquals(response.replySent, false);
+
+    // Verify workspace was NOT created (since we exit early)
+    const workspaceKey = workspaceManager.getWorkspaceKeyFromEvent(event);
+    const workspacePath = workspaceManager.getWorkspacePath(workspaceKey);
+    const workspaceExists = await Deno.stat(workspacePath)
+      .then(() => true)
+      .catch(() => false);
+    assertEquals(workspaceExists, false);
+
+    sessionRegistry.stop();
+  } finally {
+    await Deno.remove(tempDir, { recursive: true });
+  }
+});
+
+Deno.test("SessionOrchestrator - handles /clear with leading whitespace", async () => {
+  const tempDir = await Deno.makeTempDir();
+  try {
+    const config = createTestConfig(tempDir);
+    const workspaceManager = new WorkspaceManager({
+      repoPath: config.workspace.repoPath,
+      workspacesDir: config.workspace.workspacesDir,
+    });
+    const memoryStore = new MemoryStore(workspaceManager, {
+      searchLimit: config.memory.searchLimit,
+      maxChars: config.memory.maxChars,
+    });
+    const skillRegistry = new SkillRegistry(memoryStore);
+
+    await Deno.mkdir(`${tempDir}/prompts`, { recursive: true });
+    await Deno.writeTextFile(
+      `${tempDir}/prompts/system.md`,
+      "You are a helpful assistant.",
+    );
+
+    const contextAssembler = new ContextAssembler(memoryStore, {
+      systemPromptPath: `${tempDir}/prompts/system.md`,
+      recentMessageLimit: config.memory.recentMessageLimit,
+      tokenLimit: config.agent.tokenLimit,
+      memoryMaxChars: config.memory.maxChars,
+    });
+
+    const sessionRegistry = new SessionRegistry();
+
+    const orchestrator = new SessionOrchestrator(
+      workspaceManager,
+      contextAssembler,
+      skillRegistry,
+      config,
+      sessionRegistry,
+    );
+
+    const event = createTestEvent();
+    event.content = "  /clear"; // With leading whitespace
+    const platformAdapter = new MockPlatformAdapter() as unknown as PlatformAdapter;
+
+    const response = await orchestrator.processMessage(event, platformAdapter);
+
+    assertEquals(response.success, true);
+    assertEquals(response.replySent, false);
+
+    sessionRegistry.stop();
+  } finally {
+    await Deno.remove(tempDir, { recursive: true });
+  }
+});
