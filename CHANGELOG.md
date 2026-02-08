@@ -7,6 +7,71 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-02-08
+
+### Added
+
+- Discord slash commands cleanup on connection for clean command state
+- `/clear` command for context reset within channels (useful for DMs where channel switching is impractical)
+- OpenCode CLI as third supported ACP agent alongside Copilot and Gemini
+  - Supports multiple providers (GitHub, Gemini, OpenRouter) via configuration
+  - OPENCODE_YOLO environment variable for permission auto-approval
+  - Optional OPENCODE_API_KEY for authentication
+- OpenRouter provider support with deepseek-v3.2 model integration
+- Environment variable overrides for platform configuration
+  - DISCORD_ENABLED and MISSKEY_ENABLED for toggling platforms
+  - AGENT_DEFAULT_TYPE for selecting agent type
+- Prompt template system with `{{placeholder}}` replacement
+  - Fragment files in prompts/ directory (character_name.md, character_info.md, etc.)
+  - Automatic template processing on bot startup
+  - Container volume mount support at /app/prompts for custom prompts without rebuild
+- Ripgrep binary included in container for enhanced memory search performance
+- compose.yml for simplified container orchestration with Podman/Docker
+- `--yolo` flag for auto-approving all agent permission requests
+  - Enabled by default in container deployments
+  - Useful for trusted/isolated environments
+- Misskey chat message support via chat:{userId} channel type
+  - Integration with chat/messages/user-timeline for fetching
+  - Integration with chat/messages/create-to-user for sending
+- Misskey reply threading with replyId for proper conversation context
+- Misskey username format as @DisplayName (userId) for better identification
+- .env.example file with comprehensive environment variable documentation
+- data/.gitkeep to preserve data directory in version control
+
+### Changed
+
+- **Workspace structure from per-channel to per-user** (breaking change for existing workspaces)
+  - Workspace key changed from `{platform}/{userId}/{channelId}` to `{platform}/{userId}`
+  - Enables memory sharing across channels for the same user
+- Memory visibility is now context-aware (auto-determined)
+  - DM conversations: saves to private, searches both public and private
+  - Public/guild conversations: saves to public, searches public only
+  - Agent no longer has direct control over visibility parameter
+- Both memory.public.jsonl and memory.private.jsonl now exist in every workspace
+- Default workspace path from absolute `/data` to relative `./data`
+- Container workspace volume from `/data` to `/app/data`
+- Skills directory from `~/.copilot/skills` to `~/.agents/skills`
+- Skill entrypoints moved into per-skill scripts/ subdirectories
+- Configuration system relaxed to allow template placeholders without validation errors
+- Expanded config.example.yaml with comprehensive examples and environment variable mappings
+- Copilot CLI flags: added `--disable-builtin-mcps`, `--no-ask-user`, `--no-color`
+- Yolo mode implementation for Copilot: uses `--allow-all-tools` and `--allow-all-urls` instead of `--yolo`
+- Gemini agent execution: uses Deno task with experimental ACP flag for better dependency caching
+- Default agent configuration: added defaultAgentType option (copilot/gemini/opencode)
+- Default platform in example config from Discord to Misskey
+- Upgraded ACP SDK from 0.13.1 to 0.14.1 for better protocol support
+
+### Fixed
+
+- Duplicate skill execution in API server (implemented request deduplication with 1-second TTL cache)
+- Message truncation mid-content in context assembly
+  - Implemented intelligent message removal instead of string truncation
+  - Prioritizes recent messages and removes oldest complete messages when token budget exceeded
+- Duplicate replies due to race condition (implemented atomic lock pattern)
+- Invalid input error with OpenCode agent (added usage_update session notification handling)
+- OpenCode command format (corrected from `--acp` flag to `acp` subcommand)
+- Agent-factory tests after Copilot CLI flag changes
+
 ## [0.1.0] - 2026-02-05
 
 ### Added
@@ -131,5 +196,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ---
 
-[Unreleased]: https://github.com/jim60105/ai-friend/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/jim60105/ai-friend/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/jim60105/ai-friend/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/jim60105/ai-friend/releases/tag/v0.1.0
