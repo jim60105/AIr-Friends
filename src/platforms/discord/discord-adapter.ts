@@ -6,6 +6,8 @@ import {
   type DMChannel,
   type Message,
   type NewsChannel,
+  REST,
+  Routes,
   type TextChannel,
 } from "discord.js";
 import { createLogger } from "@utils/logger.ts";
@@ -66,7 +68,7 @@ export class DiscordAdapter extends PlatformAdapter {
    * Set up Discord event handlers
    */
   private setupEventHandlers(): void {
-    this.client.on("ready", () => {
+    this.client.on("ready", async () => {
       this.botId = this.client.user?.id ?? null;
       this.updateConnectionState(ConnectionState.CONNECTED);
 
@@ -75,6 +77,9 @@ export class DiscordAdapter extends PlatformAdapter {
         botId: this.botId,
         guilds: this.client.guilds.cache.size,
       });
+
+      // Cleanup all slash commands
+      await this.cleanupSlashCommands();
     });
 
     this.client.on("messageCreate", async (message) => {
@@ -97,6 +102,51 @@ export class DiscordAdapter extends PlatformAdapter {
       logger.info("Discord client reconnecting");
       this.updateConnectionState(ConnectionState.RECONNECTING);
     });
+  }
+
+  /**
+   * Cleanup all slash commands (global and guild-based)
+   */
+  private async cleanupSlashCommands(): Promise<void> {
+    if (!this.botId) {
+      logger.warn("Cannot cleanup commands: bot ID not set");
+      return;
+    }
+
+    const rest = new REST().setToken(this.config.token);
+
+    try {
+      // Delete all global commands
+      logger.info("Deleting all global slash commands");
+      await rest.put(Routes.applicationCommands(this.botId), { body: [] });
+      logger.info("Successfully deleted all global slash commands");
+    } catch (error) {
+      logger.error("Failed to delete global commands", {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+
+    // Delete guild-based commands for all guilds
+    const guilds = this.client.guilds.cache;
+    for (const [guildId, guild] of guilds) {
+      try {
+        logger.info("Deleting slash commands for guild", {
+          guildId,
+          guildName: guild.name,
+        });
+        await rest.put(Routes.applicationGuildCommands(this.botId, guildId), { body: [] });
+        logger.info("Successfully deleted all guild commands", {
+          guildId,
+          guildName: guild.name,
+        });
+      } catch (error) {
+        logger.error("Failed to delete guild commands", {
+          guildId,
+          guildName: guild.name,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
   }
 
   /**
