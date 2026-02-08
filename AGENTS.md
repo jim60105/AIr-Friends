@@ -57,6 +57,7 @@ AI Friend is a multi-platform conversational AI bot that acts as an **ACP (Agent
 | Directory        | Purpose                                                |
 | ---------------- | ------------------------------------------------------ |
 | `src/core/`      | Agent session, workspace manager, context assembly     |
+| `src/core/reply-policy.ts` | Access control and reply policy evaluation    |
 | `src/acp/`       | ACP Client integration, agent connector                |
 | `src/platforms/` | Platform adapters (Discord, Misskey)                   |
 | `src/skills/`    | Internal skill handlers (memory, reply, context)       |
@@ -388,6 +389,50 @@ await connector.disconnect();
 - Valid values: `"copilot"`, `"gemini"`, or `"opencode"`
 - Container includes pre-installed binaries for all three agents
 
+### 7. Access Control & Reply Policy (Feature 13)
+
+Controls bot reply behavior through the `accessControl` section in `config.yaml`.
+
+**Reply Policy Modes:**
+
+| Mode | Behavior |
+|------|----------|
+| `all` | Reply to everyone in both public channels and DMs |
+| `public` | Reply in public channels only; DMs only if the account/channel is whitelisted |
+| `whitelist` | Reply only to whitelisted accounts/channels (default) |
+
+**Whitelist Format:**
+
+```text
+{platform}/account/{account_ID}
+{platform}/channel/{channel_ID}
+```
+
+**Processing Order:**
+1. Platform-level filters (bot self-check, `allowDm`, `respondToMention`)
+2. Access control (`ReplyPolicyEvaluator.shouldReply()`)
+3. Message handling and agent execution
+
+**Configuration Example:**
+
+```yaml
+accessControl:
+  replyTo: "whitelist"
+  whitelist:
+    - "discord/account/123456789012345678"
+    - "discord/channel/987654321098765432"
+    - "misskey/account/abcdef1234567890"
+```
+
+**Environment Variable Overrides:**
+- `REPLY_TO` -> sets `accessControl.replyTo`
+- `WHITELIST` -> sets `accessControl.whitelist` (comma-separated, fully replaces config file value)
+
+```bash
+REPLY_TO=public
+WHITELIST=discord/account/123456789,discord/channel/987654321,misskey/account/abcdef123
+```
+
 ## Prompt Template System
 
 The system uses a template-based prompt system that allows easy customization without rebuilding containers.
@@ -562,6 +607,11 @@ memory:
 workspace:
   repo_path: "./data"
   workspaces_dir: "workspaces"
+
+accessControl:
+  replyTo: "whitelist"
+  whitelist:
+    - "discord/account/123456789"
 ```
 
 Environment variables override config file values.
@@ -588,6 +638,7 @@ ai-friend/
 │   │   ├── context-assembler.ts    # Initial context assembly
 │   │   ├── message-handler.ts      # Platform event processing
 │   │   ├── reply-dispatcher.ts     # Reply sending coordination
+│   │   ├── reply-policy.ts         # Access control & reply policy
 │   │   └── config-loader.ts        # Configuration loading
 │   ├── platforms/
 │   │   ├── platform-adapter.ts     # Platform adapter base class

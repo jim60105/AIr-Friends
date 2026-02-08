@@ -74,7 +74,10 @@ class MockPlatformAdapter implements Partial<PlatformAdapter> {
 }
 
 // Helper to create test config
-function createTestConfig(tempDir: string): Config {
+function createTestConfig(
+  tempDir: string,
+  accessControl: Config["accessControl"] = { replyTo: "whitelist", whitelist: [] },
+): Config {
   return {
     platforms: {
       discord: { token: "test", enabled: true },
@@ -98,10 +101,7 @@ function createTestConfig(tempDir: string): Config {
     logging: {
       level: "FATAL",
     },
-    accessControl: {
-      replyTo: "whitelist",
-      whitelist: [],
-    },
+    accessControl,
   };
 }
 
@@ -178,7 +178,10 @@ Deno.test("AgentCore - handles events from registered platforms", async () => {
       "You are a helpful assistant.",
     );
 
-    const config = createTestConfig(tempDir);
+    const config = createTestConfig(tempDir, {
+      replyTo: "all",
+      whitelist: [],
+    });
     const agentCore = new AgentCore(config);
     const mockAdapter = new MockPlatformAdapter();
     const adapter = mockAdapter as unknown as PlatformAdapter;
@@ -199,6 +202,37 @@ Deno.test("AgentCore - handles events from registered platforms", async () => {
     assertEquals(sentReplies.length > 0, true, "Should send error message");
 
     // Cleanup
+    await agentCore.shutdown();
+  } finally {
+    await Deno.remove(tempDir, { recursive: true });
+  }
+});
+
+Deno.test("AgentCore - filters events blocked by access control", async () => {
+  const tempDir = await Deno.makeTempDir();
+  try {
+    await Deno.mkdir(`${tempDir}/prompts`, { recursive: true });
+    await Deno.writeTextFile(
+      `${tempDir}/prompts/system.md`,
+      "You are a helpful assistant.",
+    );
+
+    // Default whitelist mode with empty whitelist should block all events.
+    const config = createTestConfig(tempDir, {
+      replyTo: "whitelist",
+      whitelist: [],
+    });
+    const agentCore = new AgentCore(config);
+    const mockAdapter = new MockPlatformAdapter();
+    const adapter = mockAdapter as unknown as PlatformAdapter;
+
+    agentCore.registerPlatform(adapter);
+
+    await mockAdapter.triggerEvent(createTestEvent());
+    await new Promise((resolve) => setTimeout(resolve, 100));
+
+    assertEquals(mockAdapter.sentReplies.length, 0, "Blocked events should not be processed");
+
     await agentCore.shutdown();
   } finally {
     await Deno.remove(tempDir, { recursive: true });
