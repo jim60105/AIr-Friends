@@ -222,3 +222,149 @@ Deno.test("ContextAssembler - should invalidate cache", async () => {
     assertEquals(context3.systemPrompt, "You are a different assistant.");
   });
 });
+
+Deno.test("ContextAssembler - should not truncate messages mid-content", async () => {
+  await withTestContextAssembler(async (assembler, _store, manager) => {
+    const event = createTestEvent();
+    const workspace = await manager.getOrCreateWorkspace(event);
+
+    // Create messages with full content
+    const messages: PlatformMessage[] = [
+      {
+        messageId: "msg1",
+        userId: "user1",
+        username: "Alice",
+        content: "This is the first message with some content",
+        timestamp: new Date(),
+        isBot: false,
+      },
+      {
+        messageId: "msg2",
+        userId: "user2",
+        username: "Bob",
+        content: "This is the second message with more content",
+        timestamp: new Date(),
+        isBot: false,
+      },
+      {
+        messageId: "msg3",
+        userId: "user3",
+        username: "Charlie",
+        content: "This is the third message with even more content",
+        timestamp: new Date(),
+        isBot: false,
+      },
+    ];
+
+    const fetcher = createMockMessageFetcher(messages);
+    const context = await assembler.assembleContext(event, workspace, fetcher);
+    const formatted = assembler.formatContext(context);
+
+    // Check that messages are either completely included or completely excluded
+    // Messages should not be cut off mid-content (no "..." in the middle of message content)
+    const hasFirstMessage = formatted.userMessage.includes(
+      "This is the first message with some content",
+    );
+    const hasSecondMessage = formatted.userMessage.includes(
+      "This is the second message with more content",
+    );
+    const hasThirdMessage = formatted.userMessage.includes(
+      "This is the third message with even more content",
+    );
+
+    // If a message is partially included, it should not end with ...
+    // (The ... should only appear if we truncated the entire context, which shouldn't happen with small test data)
+    if (hasFirstMessage) {
+      assertStringIncludes(
+        formatted.userMessage,
+        "Alice: This is the first message with some content",
+      );
+    }
+    if (hasSecondMessage) {
+      assertStringIncludes(
+        formatted.userMessage,
+        "Bob: This is the second message with more content",
+      );
+    }
+    if (hasThirdMessage) {
+      assertStringIncludes(
+        formatted.userMessage,
+        "Charlie: This is the third message with even more content",
+      );
+    }
+
+    // All messages should be included in our test scenario (small context)
+    assertEquals(hasFirstMessage, true);
+    assertEquals(hasSecondMessage, true);
+    assertEquals(hasThirdMessage, true);
+  });
+});
+
+Deno.test("ContextAssembler - should remove oldest messages when exceeding token limit", async () => {
+  // Create a test with very limited token budget
+  const tempDir = await Deno.makeTempDir();
+  try {
+    await Deno.mkdir(`${tempDir}/prompts`, { recursive: true });
+    await Deno.writeTextFile(
+      `${tempDir}/prompts/system.md`,
+      "You are a helpful assistant.",
+    );
+
+    const manager = new WorkspaceManager({
+      repoPath: tempDir,
+      workspacesDir: "workspaces",
+    });
+    const store = new MemoryStore(manager, {
+      searchLimit: 10,
+      maxChars: 2000,
+    });
+
+    // Create assembler with very small token limit
+    const assembler = new ContextAssembler(store, {
+      recentMessageLimit: 20,
+      memoryMaxChars: 2000,
+      tokenLimit: 500, // Very small limit to trigger truncation
+      systemPromptPath: `${tempDir}/prompts/system.md`,
+    });
+
+    const event = createTestEvent();
+    const workspace = await manager.getOrCreateWorkspace(event);
+
+    // Create many long messages
+    const messages: PlatformMessage[] = [];
+    for (let i = 0; i < 10; i++) {
+      messages.push({
+        messageId: `msg${i}`,
+        userId: `user${i}`,
+        username: `User${i}`,
+        content:
+          `This is message number ${i} with quite a bit of content to make it longer and consume more tokens`,
+        timestamp: new Date(),
+        isBot: false,
+      });
+    }
+
+    const fetcher = createMockMessageFetcher(messages);
+    const context = await assembler.assembleContext(event, workspace, fetcher);
+    const formatted = assembler.formatContext(context);
+
+    // The most recent messages should be included
+    const hasLastMessage = formatted.userMessage.includes("message number 9");
+    assertEquals(hasLastMessage, true);
+
+    // With our very small token limit, we should have removed some old messages
+    // but the newest message should still be there
+    assertEquals(formatted.estimatedTokens <= 500, true);
+
+    // Messages that are included should not be truncated mid-content
+    // They should appear in full
+    if (formatted.userMessage.includes("message number 9")) {
+      assertStringIncludes(
+        formatted.userMessage,
+        "This is message number 9 with quite a bit of content to make it longer and consume more tokens",
+      );
+    }
+  } finally {
+    await Deno.remove(tempDir, { recursive: true });
+  }
+});

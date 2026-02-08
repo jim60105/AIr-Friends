@@ -123,6 +123,10 @@ export class SessionOrchestrator {
         estimatedTokens: formattedContext.estimatedTokens,
       });
 
+      sessionLogger.debug("Full prompt content", {
+        fullPrompt,
+      });
+
       // 4. Create client config for ACP
       const clientConfig: ClientConfig = {
         workingDir: workspace.path,

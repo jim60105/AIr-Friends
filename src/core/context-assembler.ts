@@ -1,7 +1,7 @@
 // src/core/context-assembler.ts
 
 import { createLogger } from "@utils/logger.ts";
-import { combinedTokenCount, estimateTokens, truncateToTokenLimit } from "@utils/token-counter.ts";
+import { combinedTokenCount, estimateTokens } from "@utils/token-counter.ts";
 import { MemoryStore } from "./memory-store.ts";
 import { loadSystemPrompt } from "./config-loader.ts";
 import type {
@@ -164,15 +164,25 @@ export class ContextAssembler {
    * Format context for LLM consumption
    */
   formatContext(context: AssembledContext): FormattedContext {
-    // Format memories section
+    const availableTokens = this.config.tokenLimit - estimateTokens(context.systemPrompt);
+
+    // Format memories section (always include all important memories)
     const memoriesSection = context.importantMemories.length > 0
       ? this.formatMemoriesSection(context.importantMemories)
       : "";
 
-    // Format conversation history
-    const conversationSection = this.formatConversationSection(
+    // Calculate trigger message section
+    const triggerSection = this.formatTriggerSection(context.triggerMessage);
+
+    // Calculate tokens used by fixed sections
+    const fixedTokens = estimateTokens(memoriesSection) + estimateTokens(triggerSection);
+    const conversationTokenBudget = availableTokens - fixedTokens;
+
+    // Format conversation with smart truncation (removes oldest messages if needed)
+    const conversationSection = this.formatConversationSectionWithBudget(
       context.recentMessages,
       context.relatedMessages,
+      conversationTokenBudget,
     );
 
     // Build user message with context
@@ -182,18 +192,14 @@ export class ContextAssembler {
       context.triggerMessage,
     );
 
-    // Truncate if necessary
-    const availableTokens = this.config.tokenLimit - estimateTokens(context.systemPrompt);
-    const truncatedUserMessage = truncateToTokenLimit(userMessage, availableTokens);
-
     const estimatedTokens = combinedTokenCount(
       context.systemPrompt,
-      truncatedUserMessage,
+      userMessage,
     );
 
     return {
       systemMessage: context.systemPrompt,
-      userMessage: truncatedUserMessage,
+      userMessage,
       estimatedTokens,
     };
   }
@@ -246,6 +252,147 @@ export class ContextAssembler {
   }
 
   /**
+   * Format conversation history section with token budget
+   * Intelligently removes oldest messages if budget is exceeded
+   */
+  private formatConversationSectionWithBudget(
+    recentMessages: PlatformMessage[],
+    relatedMessages: PlatformMessage[] | undefined,
+    tokenBudget: number,
+  ): string {
+    // If budget is negative or zero, skip conversation history
+    if (tokenBudget <= 0) {
+      logger.warn("No token budget for conversation history");
+      return "";
+    }
+
+    // Format all messages first
+    const formattedRecent: string[] = [];
+    const recentTokens: number[] = [];
+
+    for (const msg of recentMessages) {
+      const prefix = msg.isBot ? "[Bot]" : "[User]";
+      const line = `${prefix} ${msg.username}: ${msg.content}`;
+      formattedRecent.push(line);
+      recentTokens.push(estimateTokens(line));
+    }
+
+    const formattedRelated: string[] = [];
+    const relatedTokens: number[] = [];
+
+    if (relatedMessages) {
+      for (const msg of relatedMessages) {
+        const prefix = msg.isBot ? "[Bot]" : "[User]";
+        const line = `${prefix} ${msg.username}: ${msg.content}`;
+        formattedRelated.push(line);
+        relatedTokens.push(estimateTokens(line));
+      }
+    }
+
+    // Calculate header tokens
+    const recentHeaderTokens = estimateTokens("## Recent Conversation\n\n");
+    const relatedHeaderTokens = relatedMessages && relatedMessages.length > 0
+      ? estimateTokens("## Related Messages from this Server\n\n")
+      : 0;
+
+    // Calculate total tokens needed
+    const totalRecentTokens = recentTokens.reduce((sum, t) => sum + t, 0) + recentHeaderTokens;
+    const totalRelatedTokens = relatedTokens.reduce((sum, t) => sum + t, 0) + relatedHeaderTokens;
+    const totalTokens = totalRecentTokens + totalRelatedTokens;
+
+    // If everything fits, return full conversation
+    if (totalTokens <= tokenBudget) {
+      return this.formatConversationSection(recentMessages, relatedMessages);
+    }
+
+    // Need to truncate - prioritize recent messages over related
+    const lines: string[] = [];
+
+    // Try to fit as many recent messages as possible (from oldest to newest)
+    if (formattedRecent.length > 0) {
+      lines.push("## Recent Conversation");
+      lines.push("");
+
+      let usedTokens = recentHeaderTokens;
+      const includedMessages: string[] = [];
+
+      // Always try to include at least the most recent message
+      if (recentTokens.length > 0) {
+        const lastMsgTokens = recentTokens[recentTokens.length - 1];
+        if (usedTokens + lastMsgTokens <= tokenBudget) {
+          // Work backwards from the newest message
+          for (let i = recentTokens.length - 1; i >= 0; i--) {
+            if (usedTokens + recentTokens[i] <= tokenBudget) {
+              includedMessages.unshift(formattedRecent[i]);
+              usedTokens += recentTokens[i];
+            } else {
+              break;
+            }
+          }
+        }
+      }
+
+      if (includedMessages.length < formattedRecent.length) {
+        logger.info("Truncated recent messages to fit token budget", {
+          original: formattedRecent.length,
+          included: includedMessages.length,
+          tokenBudget,
+          tokensUsed: usedTokens,
+        });
+      }
+
+      lines.push(...includedMessages);
+      lines.push("");
+
+      // Try to fit related messages with remaining budget
+      const remainingBudget = tokenBudget - usedTokens;
+      if (formattedRelated.length > 0 && remainingBudget > relatedHeaderTokens) {
+        lines.push("## Related Messages from this Server");
+        lines.push("");
+
+        let relatedUsed = relatedHeaderTokens;
+        const includedRelated: string[] = [];
+
+        for (let i = relatedTokens.length - 1; i >= 0; i--) {
+          if (relatedUsed + relatedTokens[i] <= remainingBudget) {
+            includedRelated.unshift(formattedRelated[i]);
+            relatedUsed += relatedTokens[i];
+          } else {
+            break;
+          }
+        }
+
+        if (includedRelated.length > 0) {
+          lines.push(...includedRelated);
+          lines.push("");
+        } else {
+          // Remove header if no messages fit
+          lines.pop();
+          lines.pop();
+        }
+
+        if (includedRelated.length < formattedRelated.length) {
+          logger.info("Truncated related messages to fit token budget", {
+            original: formattedRelated.length,
+            included: includedRelated.length,
+            remainingBudget,
+            tokensUsed: relatedUsed,
+          });
+        }
+      }
+    }
+
+    return lines.join("\n");
+  }
+
+  /**
+   * Format trigger message section
+   */
+  private formatTriggerSection(triggerMessage: PlatformMessage): string {
+    return `## Current Message\n\n${triggerMessage.username}: ${triggerMessage.content}\n`;
+  }
+
+  /**
    * Build the complete user message
    */
   private buildUserMessage(
@@ -268,7 +415,6 @@ export class ContextAssembler {
     parts.push("");
     parts.push(`${triggerMessage.username}: ${triggerMessage.content}`);
     parts.push("");
-    parts.push("Please respond to the current message above.");
 
     return parts.join("\n");
   }
