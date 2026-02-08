@@ -16,6 +16,8 @@ export const ENV_MAPPINGS = {
   AGENT_DEFAULT_TYPE: "agent.defaultAgentType",
   LOG_LEVEL: "logging.level",
   HEALTH_PORT: "health.port",
+  REPLY_TO: "accessControl.replyTo",
+  WHITELIST: "accessControl.whitelist",
 } as const;
 
 /**
@@ -77,6 +79,10 @@ export function applyEnvOverrides(config: Record<string, unknown>): void {
       if (value === "true") parsedValue = true;
       else if (value === "false") parsedValue = false;
       else if (/^\d+$/.test(value)) parsedValue = parseInt(value, 10);
+      // Handle comma-separated array for WHITELIST
+      else if (envName === "WHITELIST") {
+        parsedValue = value.split(",").map((s) => s.trim()).filter((s) => s !== "");
+      }
 
       setNestedProperty(config, configPath, parsedValue);
     }

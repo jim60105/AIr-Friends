@@ -125,6 +125,22 @@ export interface SkillAPIConfig {
 }
 
 /**
+ * Reply policy mode
+ */
+export type ReplyPolicy = "all" | "public" | "whitelist";
+
+/**
+ * Access control configuration
+ */
+export interface AccessControlConfig {
+  /** Reply policy mode (default: "whitelist") */
+  replyTo: ReplyPolicy;
+
+  /** Whitelist entries in format "{platform}/account/{id}" or "{platform}/channel/{id}" */
+  whitelist: string[];
+}
+
+/**
  * Complete application configuration
  */
 export interface Config {
@@ -135,6 +151,7 @@ export interface Config {
   logging: LoggingConfig;
   health?: HealthConfig;
   skillApi?: SkillAPIConfig;
+  accessControl: AccessControlConfig;
 }
 
 /**

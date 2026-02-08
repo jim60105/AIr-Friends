@@ -32,6 +32,10 @@ const DEFAULT_CONFIG: Partial<Config> = {
     host: "127.0.0.1",
     sessionTimeoutMs: 1800000, // 30 minutes
   },
+  accessControl: {
+    replyTo: "whitelist",
+    whitelist: [],
+  },
 };
 
 /**
@@ -87,6 +91,41 @@ function validateConfig(config: Record<string, unknown>): void {
       `Missing required configuration fields: ${missing.join(", ")}`,
       { missingFields: missing },
     );
+  }
+
+  // Validate accessControl.replyTo value
+  const accessControl = config.accessControl as
+    | { replyTo?: unknown; whitelist?: unknown[] }
+    | undefined;
+  if (accessControl?.replyTo !== undefined) {
+    const validReplyPolicies = ["all", "public", "whitelist"];
+    if (!validReplyPolicies.includes(String(accessControl.replyTo))) {
+      throw new ConfigError(
+        ErrorCode.CONFIG_INVALID,
+        `Invalid accessControl.replyTo value: "${accessControl.replyTo}". Must be one of: ${
+          validReplyPolicies.join(", ")
+        }`,
+        { replyTo: accessControl.replyTo, validValues: validReplyPolicies },
+      );
+    }
+  }
+
+  // Validate accessControl.whitelist entries format
+  const WHITELIST_ENTRY_PATTERN = /^(discord|misskey)\/(account|channel)\/\S+$/;
+  if (accessControl?.whitelist && Array.isArray(accessControl.whitelist)) {
+    const validEntries: string[] = [];
+    for (const entry of accessControl.whitelist) {
+      if (typeof entry === "string" && WHITELIST_ENTRY_PATTERN.test(entry)) {
+        validEntries.push(entry);
+      } else {
+        logger.warn("Invalid whitelist entry format, ignoring", {
+          entry,
+          expectedFormat: "{platform}/account/{id} or {platform}/channel/{id}",
+        });
+      }
+    }
+    // Replace whitelist with only valid entries
+    accessControl.whitelist = validEntries;
   }
 }
 
