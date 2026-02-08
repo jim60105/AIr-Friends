@@ -61,3 +61,11 @@ skillApi:
 health:
   enabled: true # Enable HTTP health check endpoint (default: true)
   port: 8080 # Port for health check (default: 8080)
+
+# Access control configuration
+accessControl:
+  replyTo: "whitelist" # "all" | "public" | "whitelist" (default: "whitelist"); override with env REPLY_TO
+  whitelist: # Whitelist entries (format: "{platform}/account/{id}" or "{platform}/channel/{id}"); override with env WHITELIST (comma-separated)
+# - "discord/account/123456789012345678"
+# - "discord/channel/987654321098765432"
+# - "misskey/account/abcdef1234567890"

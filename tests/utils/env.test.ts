@@ -81,3 +81,86 @@ Deno.test("applyEnvOverrides - empty env var does not override", () => {
     Deno.env.delete("DISCORD_ENABLED");
   }
 });
+
+Deno.test("applyEnvOverrides - REPLY_TO sets accessControl.replyTo", () => {
+  Deno.env.set("REPLY_TO", "public");
+  try {
+    const config: Record<string, unknown> = {
+      accessControl: { replyTo: "whitelist", whitelist: [] },
+    };
+    applyEnvOverrides(config);
+    const accessControl = config.accessControl as { replyTo: string };
+    assertEquals(accessControl.replyTo, "public");
+  } finally {
+    Deno.env.delete("REPLY_TO");
+  }
+});
+
+Deno.test("applyEnvOverrides - WHITELIST parses comma-separated entries", () => {
+  Deno.env.set(
+    "WHITELIST",
+    "discord/account/123,discord/channel/456,misskey/account/abc",
+  );
+  try {
+    const config: Record<string, unknown> = {
+      accessControl: { replyTo: "whitelist", whitelist: [] },
+    };
+    applyEnvOverrides(config);
+    const accessControl = config.accessControl as { whitelist: string[] };
+    assertEquals(accessControl.whitelist, [
+      "discord/account/123",
+      "discord/channel/456",
+      "misskey/account/abc",
+    ]);
+  } finally {
+    Deno.env.delete("WHITELIST");
+  }
+});
+
+Deno.test("applyEnvOverrides - WHITELIST trims whitespace from entries", () => {
+  Deno.env.set("WHITELIST", "  discord/account/123  ,  misskey/channel/456  ");
+  try {
+    const config: Record<string, unknown> = {
+      accessControl: { replyTo: "whitelist", whitelist: [] },
+    };
+    applyEnvOverrides(config);
+    const accessControl = config.accessControl as { whitelist: string[] };
+    assertEquals(accessControl.whitelist, [
+      "discord/account/123",
+      "misskey/channel/456",
+    ]);
+  } finally {
+    Deno.env.delete("WHITELIST");
+  }
+});
+
+Deno.test("applyEnvOverrides - WHITELIST filters out empty entries", () => {
+  Deno.env.set("WHITELIST", "discord/account/123,,misskey/channel/456,  ,");
+  try {
+    const config: Record<string, unknown> = {
+      accessControl: { replyTo: "whitelist", whitelist: [] },
+    };
+    applyEnvOverrides(config);
+    const accessControl = config.accessControl as { whitelist: string[] };
+    assertEquals(accessControl.whitelist, [
+      "discord/account/123",
+      "misskey/channel/456",
+    ]);
+  } finally {
+    Deno.env.delete("WHITELIST");
+  }
+});
+
+Deno.test("applyEnvOverrides - empty WHITELIST does not override", () => {
+  Deno.env.set("WHITELIST", "");
+  try {
+    const config: Record<string, unknown> = {
+      accessControl: { replyTo: "whitelist", whitelist: ["discord/account/original"] },
+    };
+    applyEnvOverrides(config);
+    const accessControl = config.accessControl as { whitelist: string[] };
+    assertEquals(accessControl.whitelist, ["discord/account/original"]);
+  } finally {
+    Deno.env.delete("WHITELIST");
+  }
+});

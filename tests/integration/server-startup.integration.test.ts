@@ -55,6 +55,10 @@ const createTestConfig = (
       port: healthPort,
     }
     : undefined,
+  accessControl: {
+    replyTo: "whitelist",
+    whitelist: [],
+  },
 });
 
 Deno.test({

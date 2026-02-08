@@ -363,3 +363,299 @@ Deno.test("loadSystemPrompt - should handle prompt with no placeholders", async 
     },
   );
 });
+
+// --- accessControl configuration tests ---
+
+Deno.test("loadConfig - should apply default accessControl values", async () => {
+  const config = `
+platforms:
+  discord:
+    token: "test-token"
+    enabled: true
+  misskey:
+    enabled: false
+agent:
+  model: "gpt-4"
+  systemPromptPath: "./prompts/system.md"
+  tokenLimit: 4096
+workspace:
+  repoPath: "./data"
+  workspacesDir: "workspaces"
+`;
+
+  await withTestConfig(config, async (dir) => {
+    const result = await loadConfig(dir);
+    assertEquals(result.accessControl.replyTo, "whitelist");
+    assertEquals(result.accessControl.whitelist, []);
+  });
+});
+
+Deno.test("loadConfig - should load valid accessControl configuration", async () => {
+  const config = `
+platforms:
+  discord:
+    token: "test-token"
+    enabled: true
+  misskey:
+    enabled: false
+agent:
+  model: "gpt-4"
+  systemPromptPath: "./prompts/system.md"
+  tokenLimit: 4096
+workspace:
+  repoPath: "./data"
+  workspacesDir: "workspaces"
+accessControl:
+  replyTo: "public"
+  whitelist:
+    - "discord/account/123456789012345678"
+    - "misskey/channel/abcdef1234567890"
+`;
+
+  await withTestConfig(config, async (dir) => {
+    const result = await loadConfig(dir);
+    assertEquals(result.accessControl.replyTo, "public");
+    assertEquals(result.accessControl.whitelist, [
+      "discord/account/123456789012345678",
+      "misskey/channel/abcdef1234567890",
+    ]);
+  });
+});
+
+Deno.test("loadConfig - REPLY_TO env overrides config file", async () => {
+  const config = `
+platforms:
+  discord:
+    token: "test-token"
+    enabled: true
+  misskey:
+    enabled: false
+agent:
+  model: "gpt-4"
+  systemPromptPath: "./prompts/system.md"
+  tokenLimit: 4096
+workspace:
+  repoPath: "./data"
+  workspacesDir: "workspaces"
+accessControl:
+  replyTo: "whitelist"
+  whitelist: []
+`;
+
+  Deno.env.set("REPLY_TO", "all");
+  try {
+    await withTestConfig(config, async (dir) => {
+      const result = await loadConfig(dir);
+      assertEquals(result.accessControl.replyTo, "all");
+    });
+  } finally {
+    Deno.env.delete("REPLY_TO");
+  }
+});
+
+Deno.test("loadConfig - WHITELIST env overrides config file with comma-separated values", async () => {
+  const config = `
+platforms:
+  discord:
+    token: "test-token"
+    enabled: true
+  misskey:
+    enabled: false
+agent:
+  model: "gpt-4"
+  systemPromptPath: "./prompts/system.md"
+  tokenLimit: 4096
+workspace:
+  repoPath: "./data"
+  workspacesDir: "workspaces"
+accessControl:
+  replyTo: "whitelist"
+  whitelist:
+    - "discord/account/111111111111111111"
+`;
+
+  Deno.env.set(
+    "WHITELIST",
+    "discord/account/123456789012345678,discord/channel/987654321098765432,misskey/account/abcdef1234567890",
+  );
+  try {
+    await withTestConfig(config, async (dir) => {
+      const result = await loadConfig(dir);
+      assertEquals(result.accessControl.whitelist, [
+        "discord/account/123456789012345678",
+        "discord/channel/987654321098765432",
+        "misskey/account/abcdef1234567890",
+      ]);
+    });
+  } finally {
+    Deno.env.delete("WHITELIST");
+  }
+});
+
+Deno.test("loadConfig - WHITELIST env trims whitespace from entries", async () => {
+  const config = `
+platforms:
+  discord:
+    token: "test-token"
+    enabled: true
+  misskey:
+    enabled: false
+agent:
+  model: "gpt-4"
+  systemPromptPath: "./prompts/system.md"
+  tokenLimit: 4096
+workspace:
+  repoPath: "./data"
+  workspacesDir: "workspaces"
+accessControl:
+  replyTo: "whitelist"
+  whitelist: []
+`;
+
+  Deno.env.set("WHITELIST", "  discord/account/123  ,  misskey/channel/456  ");
+  try {
+    await withTestConfig(config, async (dir) => {
+      const result = await loadConfig(dir);
+      assertEquals(result.accessControl.whitelist, [
+        "discord/account/123",
+        "misskey/channel/456",
+      ]);
+    });
+  } finally {
+    Deno.env.delete("WHITELIST");
+  }
+});
+
+Deno.test("loadConfig - empty WHITELIST env does not override config file", async () => {
+  const config = `
+platforms:
+  discord:
+    token: "test-token"
+    enabled: true
+  misskey:
+    enabled: false
+agent:
+  model: "gpt-4"
+  systemPromptPath: "./prompts/system.md"
+  tokenLimit: 4096
+workspace:
+  repoPath: "./data"
+  workspacesDir: "workspaces"
+accessControl:
+  replyTo: "whitelist"
+  whitelist:
+    - "discord/account/123456789012345678"
+`;
+
+  Deno.env.set("WHITELIST", "");
+  try {
+    await withTestConfig(config, async (dir) => {
+      const result = await loadConfig(dir);
+      assertEquals(result.accessControl.whitelist, [
+        "discord/account/123456789012345678",
+      ]);
+    });
+  } finally {
+    Deno.env.delete("WHITELIST");
+  }
+});
+
+Deno.test("loadConfig - should throw on invalid replyTo value", async () => {
+  const config = `
+platforms:
+  discord:
+    token: "test-token"
+    enabled: true
+  misskey:
+    enabled: false
+agent:
+  model: "gpt-4"
+  systemPromptPath: "./prompts/system.md"
+  tokenLimit: 4096
+workspace:
+  repoPath: "./data"
+  workspacesDir: "workspaces"
+accessControl:
+  replyTo: "invalid-value"
+  whitelist: []
+`;
+
+  await withTestConfig(config, async (dir) => {
+    await assertRejects(
+      () => loadConfig(dir),
+      ConfigError,
+      'Invalid accessControl.replyTo value: "invalid-value"',
+    );
+  });
+});
+
+Deno.test("loadConfig - should filter invalid whitelist entries and warn", async () => {
+  const config = `
+platforms:
+  discord:
+    token: "test-token"
+    enabled: true
+  misskey:
+    enabled: false
+agent:
+  model: "gpt-4"
+  systemPromptPath: "./prompts/system.md"
+  tokenLimit: 4096
+workspace:
+  repoPath: "./data"
+  workspacesDir: "workspaces"
+accessControl:
+  replyTo: "whitelist"
+  whitelist:
+    - "discord/account/123456789012345678"
+    - "invalid-format"
+    - "misskey/channel/abc123"
+    - "twitter/account/123"
+    - ""
+`;
+
+  await withTestConfig(config, async (dir) => {
+    const result = await loadConfig(dir);
+    // Only valid entries should be kept
+    assertEquals(result.accessControl.whitelist, [
+      "discord/account/123456789012345678",
+      "misskey/channel/abc123",
+    ]);
+  });
+});
+
+Deno.test("loadConfig - should accept all valid whitelist entry formats", async () => {
+  const config = `
+platforms:
+  discord:
+    token: "test-token"
+    enabled: true
+  misskey:
+    enabled: false
+agent:
+  model: "gpt-4"
+  systemPromptPath: "./prompts/system.md"
+  tokenLimit: 4096
+workspace:
+  repoPath: "./data"
+  workspacesDir: "workspaces"
+accessControl:
+  replyTo: "whitelist"
+  whitelist:
+    - "discord/account/123456789012345678"
+    - "discord/channel/987654321098765432"
+    - "misskey/account/abcdef1234567890"
+    - "misskey/channel/xyz9876543210"
+`;
+
+  await withTestConfig(config, async (dir) => {
+    const result = await loadConfig(dir);
+    assertEquals(result.accessControl.whitelist.length, 4);
+    assertEquals(result.accessControl.whitelist, [
+      "discord/account/123456789012345678",
+      "discord/channel/987654321098765432",
+      "misskey/account/abcdef1234567890",
+      "misskey/channel/xyz9876543210",
+    ]);
+  });
+});

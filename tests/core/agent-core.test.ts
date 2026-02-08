@@ -98,6 +98,10 @@ function createTestConfig(tempDir: string): Config {
     logging: {
       level: "FATAL",
     },
+    accessControl: {
+      replyTo: "whitelist",
+      whitelist: [],
+    },
   };
 }
 
