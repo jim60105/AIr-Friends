@@ -21,6 +21,14 @@ export interface SkillResponse {
   success: boolean;
   data?: unknown;
   error?: string;
+  statusCode?: number; // Optional HTTP status code override
+}
+
+/** Request cache entry for deduplication */
+interface RequestCacheEntry {
+  timestamp: number;
+  response: SkillResponse;
+  promise?: Promise<SkillResponse>;
 }
 
 export class SkillAPIServer {
@@ -28,6 +36,9 @@ export class SkillAPIServer {
   private sessionRegistry: SessionRegistry;
   private skillRegistry: SkillRegistry;
   private config: SkillAPIConfig;
+  private requestCache: Map<string, RequestCacheEntry> = new Map();
+  private readonly CACHE_TTL_MS = 1000; // 1 second cache for duplicate detection
+  private cleanupInterval?: number;
 
   constructor(
     sessionRegistry: SessionRegistry,
@@ -53,12 +64,26 @@ export class SkillAPIServer {
       },
       (request) => this.handleRequest(request),
     );
+
+    // Start cleanup interval for request cache
+    this.cleanupInterval = setInterval(() => {
+      this.cleanupRequestCache();
+    }, this.CACHE_TTL_MS);
   }
 
   /**
    * Stop the HTTP server
    */
   async stop(): Promise<void> {
+    // Clear cleanup interval
+    if (this.cleanupInterval !== undefined) {
+      clearInterval(this.cleanupInterval);
+      this.cleanupInterval = undefined;
+    }
+
+    // Clear request cache
+    this.requestCache.clear();
+
     if (this.server) {
       await this.server.shutdown();
       this.server = null;
@@ -122,77 +147,63 @@ export class SkillAPIServer {
         );
       }
 
-      // Validate session
-      const session = this.sessionRegistry.get(body.sessionId);
-      if (!session) {
-        return new Response(
-          JSON.stringify({ success: false, error: "Invalid or expired session" }),
-          { status: 401, headers },
-        );
-      }
+      // Generate cache key for deduplication
+      const cacheKey = this.generateCacheKey(skillName, body.sessionId, body.parameters ?? {});
 
-      // Check if skill exists
-      if (!this.skillRegistry.hasSkill(skillName)) {
-        return new Response(
-          JSON.stringify({ success: false, error: `Unknown skill: ${skillName}` }),
-          { status: 404, headers },
-        );
-      }
+      // Check if we have a cached response for this exact request
+      const cached = this.requestCache.get(cacheKey);
+      if (cached) {
+        const age = Date.now() - cached.timestamp;
+        if (age < this.CACHE_TTL_MS) {
+          logger.warn("Detected duplicate request, returning cached response", {
+            skillName,
+            sessionId: body.sessionId,
+            cacheAge: age,
+          });
 
-      // Special handling for send-reply (single reply rule)
-      // Mark as sent BEFORE execution to prevent race condition
-      if (skillName === "send-reply") {
-        const marked = this.sessionRegistry.markReplySent(body.sessionId);
-        if (!marked) {
+          // If there's a pending promise, wait for it
+          if (cached.promise) {
+            const result = await cached.promise;
+            const statusCode = result.statusCode ?? (result.success ? 200 : 400);
+            return new Response(
+              JSON.stringify(result),
+              { status: statusCode, headers },
+            );
+          }
+
+          // Return cached response
+          const statusCode = cached.response.statusCode ??
+            (cached.response.success ? 200 : 400);
           return new Response(
-            JSON.stringify({
-              success: false,
-              error: "Reply already sent for this session",
-            }),
-            { status: 409, headers },
+            JSON.stringify(cached.response),
+            { status: statusCode, headers },
           );
         }
       }
 
-      // Build skill context
-      const skillContext: SkillContext = {
-        workspace: session.workspace,
-        channelId: session.channelId,
-        userId: session.userId,
-        platformAdapter: session.platformAdapter,
-        replyToMessageId: session.triggerEvent.messageId,
-      };
+      // Create a promise for this request (for concurrent duplicate detection)
+      const executionPromise = this.executeSkillRequest(skillName, body, headers);
 
-      // Execute skill
-      logger.debug("Executing skill via API", {
-        skillName,
-        sessionId: body.sessionId,
+      // Store the pending promise in cache
+      this.requestCache.set(cacheKey, {
+        timestamp: Date.now(),
+        response: { success: false }, // Placeholder, will be updated
+        promise: executionPromise,
       });
 
-      const result = await this.skillRegistry.executeSkill(
-        skillName,
-        body.parameters ?? {},
-        skillContext,
-      );
+      // Wait for execution to complete
+      const result = await executionPromise;
 
-      // Rollback if send-reply failed
-      if (skillName === "send-reply" && !result.success) {
-        this.sessionRegistry.unmarkReplySent(body.sessionId);
-        logger.warn("Send-reply failed, unmarked session", {
-          sessionId: body.sessionId,
-          error: result.error,
-        });
-      }
-
-      logger.info("Skill executed via API", {
-        skillName,
-        sessionId: body.sessionId,
-        success: result.success,
+      // Update cache with the actual result
+      this.requestCache.set(cacheKey, {
+        timestamp: Date.now(),
+        response: result,
       });
 
+      const statusCode = result.statusCode ?? (result.success ? 200 : 400);
       return new Response(
         JSON.stringify(result),
-        { status: result.success ? 200 : 400, headers },
+        { status: statusCode, headers },
       );
     } catch (error) {
       logger.error("Skill API error", {
@@ -206,6 +217,120 @@ export class SkillAPIServer {
         }),
         { status: 500, headers },
       );
+    }
+  }
+
+  /**
+   * Execute skill request (extracted for caching)
+   */
+  private async executeSkillRequest(
+    skillName: string,
+    body: SkillRequest,
+    _headers: Record<string, string>,
+  ): Promise<SkillResponse> {
+    // Validate session
+    const session = this.sessionRegistry.get(body.sessionId);
+    if (!session) {
+      return {
+        success: false,
+        error: "Invalid or expired session",
+        statusCode: 401,
+      };
+    }
+
+    // Check if skill exists
+    if (!this.skillRegistry.hasSkill(skillName)) {
+      return {
+        success: false,
+        error: `Unknown skill: ${skillName}`,
+        statusCode: 404,
+      };
+    }
+
+    // Special handling for send-reply (single reply rule)
+    // Mark as sent BEFORE execution to prevent race condition
+    if (skillName === "send-reply") {
+      const marked = this.sessionRegistry.markReplySent(body.sessionId);
+      if (!marked) {
+        return {
+          success: false,
+          error: "Reply already sent for this session",
+          statusCode: 409,
+        };
+      }
+    }
+
+    // Build skill context
+    const skillContext: SkillContext = {
+      workspace: session.workspace,
+      channelId: session.channelId,
+      userId: session.userId,
+      platformAdapter: session.platformAdapter,
+      replyToMessageId: session.triggerEvent.messageId,
+    };
+
+    // Execute skill
+    logger.debug("Executing skill via API", {
+      skillName,
+      sessionId: body.sessionId,
+    });
+
+    const result = await this.skillRegistry.executeSkill(
+      skillName,
+      body.parameters ?? {},
+      skillContext,
+    );
+
+    // Rollback if send-reply failed
+    if (skillName === "send-reply" && !result.success) {
+      this.sessionRegistry.unmarkReplySent(body.sessionId);
+      logger.warn("Send-reply failed, unmarked session", {
+        sessionId: body.sessionId,
+        error: result.error,
+      });
+    }
+
+    logger.info("Skill executed via API", {
+      skillName,
+      sessionId: body.sessionId,
+      success: result.success,
+    });
+
+    return {
+      ...result,
+      statusCode: result.success ? 200 : 400,
+    };
+  }
+
+  /**
+   * Generate cache key for request deduplication
+   */
+  private generateCacheKey(
+    skillName: string,
+    sessionId: string,
+    parameters: Record<string, unknown>,
+  ): string {
+    // Create a stable string representation of parameters
+    const paramStr = JSON.stringify(parameters, Object.keys(parameters).sort());
+    return `${skillName}:${sessionId}:${paramStr}`;
+  }
+
+  /**
+   * Clean up expired cache entries
+   */
+  private cleanupRequestCache(): void {
+    const now = Date.now();
+    let cleaned = 0;
+
+    for (const [key, entry] of this.requestCache.entries()) {
+      if (now - entry.timestamp > this.CACHE_TTL_MS) {
+        this.requestCache.delete(key);
+        cleaned++;
+      }
+    }
+
+    if (cleaned > 0) {
+      logger.debug("Cleaned up request cache", { entriesRemoved: cleaned });
     }
   }
 }
