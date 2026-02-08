@@ -22,7 +22,7 @@ AI Friend is a multi-platform conversational AI bot that acts as an **ACP (Agent
 | Language        | TypeScript               | (Deno native) |
 | ACP SDK         | @agentclientprotocol/sdk | 0.14.1        |
 | Discord Library | discord.js               | ^14.0.0       |
-| Misskey Library | misskey-js               | ^2024.10.1    |
+| Misskey Library | misskey-js               | 2025.12.2     |
 | Configuration   | YAML (via @std/yaml)     | -             |
 | Testing         | Deno.test + @std/assert  | -             |
 
@@ -97,17 +97,18 @@ deno fmt --check src/ tests/
 When running manually, use these explicit permissions:
 
 ```bash
-deno run --allow-net --allow-read --allow-write --allow-env src/main.ts
+deno run --allow-net --allow-read --allow-write --allow-env --allow-run src/main.ts
 ```
 
 **Never use `--allow-all`**. Required permissions:
 
-| Permission      | Purpose                                           |
-| --------------- | ------------------------------------------------- |
-| `--allow-net`   | Discord API, Misskey API, external connections    |
-| `--allow-read`  | Configuration files, workspace files, memory logs |
-| `--allow-write` | Memory log files in workspace directories         |
-| `--allow-env`   | Environment variables (tokens, configuration)     |
+| Permission      | Purpose                                            |
+| --------------- | -------------------------------------------------- |
+| `--allow-net`   | Discord API, Misskey API, external connections     |
+| `--allow-read`  | Configuration files, workspace files, memory logs  |
+| `--allow-write` | Memory log files in workspace directories          |
+| `--allow-env`   | Environment variables (tokens, configuration)      |
+| `--allow-run`   | Spawning ACP agent subprocesses and skill scripts  |
 
 #### YOLO Mode
 
@@ -171,14 +172,16 @@ Available aliases:
 
 ### 1. Workspace Trust Boundary (Feature 01)
 
-- `workspace_key = "{platform}/{user_id}/{channel_id}"`
+- `workspace_key = "{platform}/{user_id}"`
+- **Workspace is per-user**, not per-channel — the same user's memories are shared across all channels/threads they interact in
 - Each workspace is an isolated directory under `repo/workspaces/`
 - Agent sessions use workspace path as current working directory (cwd)
 - No cross-workspace file access allowed
+- A `SESSION_ID` file is created in the workspace during active sessions
 
 ```typescript
 // Workspace path structure
-const workspacePath = `${config.workspace.repo_path}/workspaces/${platform}/${userId}/${channelId}`;
+const workspacePath = `${config.workspace.repo_path}/workspaces/${platform}/${userId}`;
 ```
 
 ### 2. Context Assembly (Feature 02)
@@ -242,10 +245,13 @@ interface PatchEvent {
 
 **Shell-Based Skills Architecture**:
 
-- Skills are Deno TypeScript scripts in `skills/` directory
+- Skills are Deno TypeScript scripts in `skills/{skill-name}/scripts/` directories
+- Each skill has a `SKILL.md` file describing its usage for the agent
 - External Agents execute these scripts with `--session-id` parameter
-- Scripts call back to main bot via HTTP API (Skill API Server)
+- Scripts use shared client library in `skills/lib/client.ts`
+- Scripts call back to main bot via HTTP API (Skill API Server on localhost:3001)
 - Session-based authentication ensures security
+- A `SESSION_ID` file is created in the workspace with the active session ID
 
 **Available Skills**:
 
@@ -368,9 +374,19 @@ await connector.disconnect();
 
 **Supported Agents**:
 
-- **GitHub Copilot CLI** (`@github/copilot-cli`) - Default when `GITHUB_TOKEN` is set
-- **Gemini CLI** - Alternative agent (requires separate configuration)
-- **OpenCode CLI** - Open source coding agent (requires separate configuration)
+- **GitHub Copilot CLI** (`copilot`) - Commercial agent from GitHub, requires `GITHUB_TOKEN`
+- **Gemini CLI** (`gemini`) - Google's Gemini CLI, requires `GEMINI_API_KEY`
+- **OpenCode CLI** (`opencode`) - Open source coding agent that supports multiple providers:
+  - GitHub provider (uses `GITHUB_TOKEN` env var)
+  - Gemini provider (uses `GEMINI_API_KEY` env var)
+  - OpenRouter provider (uses `OPENROUTER_API_KEY` env var)
+  - Pre-configured in container with `opencode.json`
+
+**Agent Selection**:
+
+- Set via `agent.defaultAgentType` in config or `AGENT_DEFAULT_TYPE` env var
+- Valid values: `"copilot"`, `"gemini"`, or `"opencode"`
+- Container includes pre-installed binaries for all three agents
 
 ## Prompt Template System
 
@@ -429,6 +445,15 @@ You are Yuna. An AI assistant
 - Users can mount their own prompts directory to `/app/prompts:ro` without rebuilding
 - Custom mounts completely override defaults (ensure all required files are provided)
 - Missing fragment files result in unresolved placeholders and warnings in logs
+
+**Container Binaries:**
+
+- The container includes pre-installed binaries:
+  - `copilot` - GitHub Copilot CLI (latest release)
+  - `opencode` - OpenCode CLI (latest release)
+  - `rg` - ripgrep 15.1.0 for memory search
+- OpenCode configuration is pre-configured at `/home/deno/.config/opencode/opencode.json`
+- Skills are copied to `/home/deno/.agents/skills/` for agent discovery
 
 **Example compose.yml:**
 
@@ -598,20 +623,25 @@ ai-friend/
 │       └── env.ts            # Environment utilities
 ├── skills/                   # Shell-based skill scripts
 │   ├── memory-save/
-│   │   ├── SKILL.md          # Skill definition for agent
-│   │   └── skill.ts          # Deno script
+│   │   ├── SKILL.md         # Skill definition for agent
+│   │   └── scripts/
+│   │       └── send-reply.ts # Deno script
 │   ├── memory-search/
 │   │   ├── SKILL.md
-│   │   └── skill.ts
+│   │   └── scripts/
+│   │       └── memory-search.ts
 │   ├── memory-patch/
 │   │   ├── SKILL.md
-│   │   └── skill.ts
+│   │   └── scripts/
+│   │       └── memory-patch.ts
 │   ├── fetch-context/
 │   │   ├── SKILL.md
-│   │   └── skill.ts
+│   │   └── scripts/
+│   │       └── fetch-context.ts
 │   ├── send-reply/
 │   │   ├── SKILL.md
-│   │   └── skill.ts
+│   │   └── scripts/
+│   │       └── send-reply.ts
 │   └── lib/
 │       └── client.ts         # Shared skill API client
 ├── prompts/

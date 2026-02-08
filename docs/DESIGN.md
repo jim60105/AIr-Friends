@@ -112,7 +112,7 @@ AI Friend is a conversational AI bot designed to:
 │                              ▼                                               │
 │                   ┌─────────────────────┐                                    │
 │                   │   Final Reply Only  │   Output Gate                      │
-│                   │   (send_reply skill)│                                    │
+│                   │   (send-reply skill)│                                    │
 │                   └──────────┬──────────┘                                    │
 │                              ▼                                               │
 │                      External Platform                                       │
@@ -230,7 +230,7 @@ interface AgentSession {
 
 - Each trigger creates a new session (no state reuse)
 - Internal outputs (tool calls, reasoning) stay within the session
-- Only `send_reply` skill can emit external responses
+- Only `send-reply` skill can emit external responses
 - Maximum one external reply per session
 
 ### Memory System
@@ -243,19 +243,29 @@ See [Memory System Design](#memory-system-design) for detailed specifications.
 
 **Responsibility:** Provide callable capabilities to the Agent.
 
-**Skill Categories:**
+**Architecture:**
 
-| Category | Skills                        | Description                          |
-| -------- | ----------------------------- | ------------------------------------ |
-| Platform | `platform.send_reply`         | Send final reply to platform         |
-| Platform | `platform.fetch_more_context` | Request additional context           |
-| Memory   | `memory.add`                  | Add new memory entry                 |
-| Memory   | `memory.patch`                | Modify memory state (enable/disable) |
-| Memory   | `memory.search`               | Search memory by keyword             |
-| Web      | `web.search`                  | Search the web for information       |
+Skills are implemented as shell-based Deno TypeScript scripts that external ACP Agents can execute. Each skill:
+- Has a `SKILL.md` file describing its usage and parameters for the agent
+- Contains executable scripts in a `scripts/` subdirectory
+- Receives a `--session-id` parameter identifying the active session
+- Calls back to the main bot via HTTP API (Skill API Server on localhost:3001)
+- Uses session-based authentication for security
+
+During an active session, a `SESSION_ID` file is created in the workspace containing the session identifier that skills must use.
+
+**Available Skills:**
+
+| Skill           | Purpose                      | HTTP Endpoint                 | Handler             |
+| --------------- | ---------------------------- | ----------------------------- | ------------------- |
+| `memory-save`   | Save new memory              | POST /api/skill/memory-save   | MemoryHandler       |
+| `memory-search` | Search existing memories     | POST /api/skill/memory-search | MemoryHandler       |
+| `memory-patch`  | Update memory attributes     | POST /api/skill/memory-patch  | MemoryHandler       |
+| `fetch-context` | Get additional platform data | POST /api/skill/fetch-context | ContextHandler      |
+| `send-reply`    | Send final reply (max 1)     | POST /api/skill/send-reply    | ReplyHandler        |
 
 > [!IMPORTANT]
-> Only `platform.send_reply` can send content externally. All other skills inject results into the session context only.
+> Only `send-reply` can send content externally. All other skills inject results into the agent's session context only.
 
 ---
 
@@ -292,7 +302,7 @@ See [Memory System Design](#memory-system-design) for detailed specifications.
    - Build response
          │
          ▼
-7. Final Reply (via send_reply skill)
+7. Final Reply (via send-reply skill)
          │
          ▼
 8. Session Cleanup
@@ -321,9 +331,8 @@ This allows users to reset the conversation context within the same channel (use
 
 The Agent can request additional context during reasoning by calling:
 
-- `platform.fetch_more_context` — Fetch more messages
-- `memory.search` — Search memory by keywords
-- `web.search` — Search the web
+- `fetch-context` — Fetch more messages from the platform
+- `memory-search` — Search memory by keywords
 
 > [!NOTE]
 > The system does **not** perform automatic memory compression or summarization. Context size is controlled through fixed quotas and retrieval limits.
@@ -337,7 +346,7 @@ Agent Output (internal)
         │
         ├─── Reasoning text ────► Internal only (not sent externally)
         │
-        └─── send_reply call ───► Sent to platform (max 1 per session)
+        └─── send-reply call ───► Sent to platform (max 1 per session)
                    │
                    └─── Uses replyToMessageId to thread replies
                         (for Misskey: replies to original note)
@@ -345,8 +354,8 @@ Agent Output (internal)
 
 **Constraints:**
 
-- Only one `send_reply` call allowed per session
-- Second `send_reply` call must be rejected/error
+- Only one `send-reply` call allowed per session
+- Second `send-reply` call must be rejected/error
 - All non-reply outputs remain internal
 - Replies are threaded to the original message when applicable (platform-dependent)
 
@@ -453,9 +462,9 @@ interface NormalizedEvent {
 
 ### Platform Capabilities
 
-Each platform adapter must provide these skills:
+Each platform adapter must provide these methods:
 
-| Skill                   | Signature                         | Description                 |
+| Method                  | Signature                         | Description                 |
 | ----------------------- | --------------------------------- | --------------------------- |
 | `fetch_recent_messages` | `(channel_id, limit) → Message[]` | Get recent channel messages |
 | `search_messages`       | `(channel_id, query) → Message[]` | Keyword search in channel   |
@@ -524,14 +533,19 @@ workspace:
 
 Environment variables override configuration file values:
 
-| Variable           | Config Path               | Description           |
-| ------------------ | ------------------------- | --------------------- |
-| `DISCORD_TOKEN`    | `platforms.discord.token` | Discord bot token     |
-| `MISSKEY_TOKEN`    | `platforms.misskey.token` | Misskey access token  |
-| `MISSKEY_HOST`     | `platforms.misskey.host`  | Misskey instance host |
-| `AGENT_MODEL`      | `agent.model`             | LLM model identifier  |
-| `LOG_LEVEL`        | -                         | Logging level         |
-| `ENV` / `DENO_ENV` | -                         | Environment name      |
+| Variable             | Config Path                | Description                               |
+| -------------------- | -------------------------- | ----------------------------------------- |
+| `DISCORD_TOKEN`      | `platforms.discord.token`  | Discord bot token                         |
+| `MISSKEY_TOKEN`      | `platforms.misskey.token`  | Misskey access token                      |
+| `MISSKEY_HOST`       | `platforms.misskey.host`   | Misskey instance host                     |
+| `AGENT_MODEL`        | `agent.model`              | LLM model identifier                      |
+| `AGENT_DEFAULT_TYPE` | `agent.default_agent_type` | Default ACP agent (copilot/gemini/opencode) |
+| `GITHUB_TOKEN`       | `agent.github_token`       | GitHub token for Copilot/OpenCode         |
+| `GEMINI_API_KEY`     | `agent.gemini_api_key`     | Gemini API key for Gemini CLI/OpenCode    |
+| `OPENCODE_API_KEY`   | `agent.opencode_api_key`   | OpenCode API key                          |
+| `OPENROUTER_API_KEY` | `agent.open_router_api_key`| OpenRouter API key                        |
+| `LOG_LEVEL`          | `logging.level`            | Logging level                             |
+| `ENV` / `DENO_ENV`   | -                          | Environment name                          |
 
 ### Multi-Environment Support
 
@@ -551,24 +565,59 @@ Environment-specific config overrides base config.
 
 ### Container Image
 
-**Base Image:** `denoland/deno:alpine` (with explicit minor version tag)
+**Base Image:** `denoland/deno:debian` (Debian-based for better compatibility)
+
+**Included Binaries:**
+
+- **copilot** - GitHub Copilot CLI (latest release)
+- **opencode** - OpenCode CLI (latest release)
+- **rg** (ripgrep 15.1.0) - For memory search operations
+- **curl** - For health checks
+- **dumb-init** - For proper signal handling as PID 1
 
 **Multi-Stage Build:**
 
 ```dockerfile
-# Stage 1: Cache dependencies
-FROM denoland/deno:2.1-alpine AS deps
+# Stage 1: Unpack binaries (copilot, opencode, ripgrep)
+FROM base AS copilot-unpacker
+# ... download and extract copilot
+
+FROM base AS opencode-unpacker
+# ... download and extract opencode
+
+FROM base AS ripgrip-unpacker
+# ... download and extract ripgrep
+
+# Stage 2: Cache dependencies
+FROM base AS cache
 WORKDIR /app
 COPY deno.json deno.lock ./
-RUN deno cache src/main.ts
+COPY src/ ./src/
+RUN deno cache --lock=deno.lock src/main.ts npm:@google/gemini-cli
 
-# Stage 2: Runtime
-FROM denoland/deno:2.1-alpine
+# Stage 3: Final runtime
+FROM base AS final
 WORKDIR /app
-COPY --from=deps /deno-dir /deno-dir
-COPY . .
+# Copy binaries from unpack stages
+COPY --from=copilot-unpacker /copilot/copilot /usr/local/bin/copilot
+COPY --from=opencode-unpacker /opencode/opencode /usr/local/bin/opencode
+COPY --from=ripgrip-unpacker /ripgrip/.../rg /usr/local/bin/rg
+# Copy cached dependencies
+COPY --from=cache /deno-dir/ /deno-dir/
+# Copy application files
+COPY deno.json deno.lock /app/
+COPY config.example.yaml /app/config.yaml
+COPY src/ /app/src/
+COPY prompts/ /app/prompts/
+# Copy skills to ~/.agents/skills/ for agent discovery
+COPY skills/ /home/deno/.agents/skills/
+# Copy OpenCode configuration
+COPY opencode.json /home/deno/.config/opencode/opencode.json
+
 USER deno
-CMD ["deno", "run", "--allow-net", "--allow-read", "--allow-write", "--allow-env", "src/main.ts"]
+ENTRYPOINT ["dumb-init", "--"]
+# Default command includes --yolo flag (safe in container environment)
+CMD ["deno", "run", "--allow-net", "--allow-read", "--allow-write", "--allow-env", "--allow-run", "src/main.ts", "--yolo"]
 ```
 
 **Required Labels:**

@@ -8,7 +8,7 @@ An AI-powered conversational chatbot using the [Agent Client Protocol (ACP)](htt
 - **ACP Client Integration**: Spawns external ACP-compliant agents as subprocesses
 - **Shell-Based Skills**: Deno TypeScript skill scripts that agents can execute
 - **Skill API Server**: HTTP server for skills to call back to main bot (localhost:3001)
-- **Workspace Isolation**: Trust boundaries based on `{platform}/{user_id}/{channel_id}`
+- **Workspace Isolation**: Trust boundaries based on `{platform}/{user_id}`
 - **Persistent Memory**: Append-only JSONL logs with patch-based updates
 - **Single Reply Rule**: Only one reply per interaction, enforced by session management
 - **Clean Thought Process**: Internal reasoning stays private; only final reply sent externally
