@@ -41,6 +41,17 @@ ADD https://github.com/anomalyco/opencode/releases/latest/download/opencode-linu
 RUN tar -xzf /tmp/opencode-linux-x64.tar.gz -C /opencode
 
 ########################################
+# Ripgrip unpack stage
+########################################
+FROM base AS ripgrip-unpacker
+
+WORKDIR /ripgrip
+
+ADD https://github.com/BurntSushi/ripgrep/releases/download/15.1.0/ripgrep-15.1.0-x86_64-unknown-linux-musl.tar.gz /tmp/ripgrip-linux-x64.tar.gz
+
+RUN tar -xzf /tmp/ripgrip-linux-x64.tar.gz -C /ripgrip
+
+########################################
 # Cache stage
 # Pre-cache Deno dependencies for layer reuse
 ########################################
@@ -83,6 +94,9 @@ ADD --link --chown=$UID:0 --chmod=755 https://github.com/Yelp/dumb-init/releases
 # Copy static curl binary for healthcheck
 # https://github.com/tarampampam/curl-docker
 COPY --link --chown=$UID:0 --chmod=755 --from=ghcr.io/tarampampam/curl:8.7.1 /bin/curl /usr/local/bin/curl
+
+# Copy ripgrep binary for internal use (e.g. in skills)
+COPY --link --chown=$UID:0 --chmod=775 --from=ripgrip-unpacker /ripgrip/ripgrep-15.1.0-x86_64-unknown-linux-musl/rg /usr/local/bin/rg
 
 # Copy Agents CLI binary
 COPY --link --chown=$UID:0 --chmod=775 --from=copilot-unpacker /copilot/copilot /usr/local/bin/copilot
