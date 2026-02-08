@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-02-09
+
+### Added
+- Added: Integrate HealthCheckServer and Skill API server startup in bootstrap. The system now initializes and stops the HealthCheckServer when `config.health.enabled` is true, and exposes the Skill API server instance via `AgentCore.getSkillAPIServer()` for orchestration and tests.
+- Added: Default to OpenCode agent and streamline agent configuration. Switched default ACP agent type to `opencode` in examples, clarified environment flags, improved Copilot/Gemini/OpenCode execution flags, and updated README and tests to reflect the simplified agent-factory configuration.
+
 ## [0.2.0] - 2026-02-08
 
 ### Added
@@ -196,6 +202,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ---
 
-[Unreleased]: https://github.com/jim60105/ai-friend/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/jim60105/ai-friend/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/jim60105/ai-friend/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/jim60105/ai-friend/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/jim60105/ai-friend/releases/tag/v0.1.0
