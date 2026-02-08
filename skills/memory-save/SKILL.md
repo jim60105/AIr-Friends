@@ -25,4 +25,4 @@ ${HOME}/.agents/skills/memory-save/scripts/memory-save.ts \
 
 ## Critical Rules
 
-1. **Timeout**: The script won't run for more than 30 seconds. If it hangs, do stop_bash and retry ONCE. If it fails again, return an error message in JSON format.
+1. **Timeout**: The script won't run for more than 30 seconds. If it hangs, do stop_bash and do not retry, return an error message in JSON format.
