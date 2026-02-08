@@ -140,8 +140,10 @@ export class SkillAPIServer {
       }
 
       // Special handling for send-reply (single reply rule)
+      // Mark as sent BEFORE execution to prevent race condition
       if (skillName === "send-reply") {
-        if (session.replySent) {
+        const marked = this.sessionRegistry.markReplySent(body.sessionId);
+        if (!marked) {
           return new Response(
             JSON.stringify({
               success: false,
@@ -173,9 +175,13 @@ export class SkillAPIServer {
         skillContext,
       );
 
-      // Mark reply sent if successful
-      if (skillName === "send-reply" && result.success) {
-        this.sessionRegistry.markReplySent(body.sessionId);
+      // Rollback if send-reply failed
+      if (skillName === "send-reply" && !result.success) {
+        this.sessionRegistry.unmarkReplySent(body.sessionId);
+        logger.warn("Send-reply failed, unmarked session", {
+          sessionId: body.sessionId,
+          error: result.error,
+        });
       }
 
       logger.info("Skill executed via API", {

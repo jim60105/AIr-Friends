@@ -106,6 +106,8 @@ export class SessionRegistry {
 
   /**
    * Mark reply as sent for a session
+   * Returns true if marking succeeded (was not already marked)
+   * Returns false if reply was already marked as sent
    */
   markReplySent(sessionId: string): boolean {
     const session = this.sessions.get(sessionId);
@@ -117,7 +119,19 @@ export class SessionRegistry {
     }
 
     session.replySent = true;
+    logger.debug("Reply marked as sent", { sessionId });
     return true;
+  }
+
+  /**
+   * Unmark reply sent (for rollback when execution fails)
+   */
+  unmarkReplySent(sessionId: string): void {
+    const session = this.sessions.get(sessionId);
+    if (session) {
+      session.replySent = false;
+      logger.debug("Reply unmarked (rollback)", { sessionId });
+    }
   }
 
   /**
