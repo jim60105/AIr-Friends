@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-02-09
+
+### Added
+- Added: Access Control & Reply Policy configuration support (`accessControl`) with `ReplyPolicy` type (`all` | `public` | `whitelist`), whitelist entries, and environment overrides `REPLY_TO` and `WHITELIST`.
+- Added: `ReplyPolicyEvaluator` and centralized reply filtering integrated into `AgentCore` to enforce access-control before message handling and agent execution.
+- Added: Configuration loading, validation, and comprehensive unit tests for access-control behavior and whitelist parsing.
+
+### Changed
+- Changed: Default `accessControl.replyTo` is `whitelist` with an empty `whitelist` (secure default requiring explicit configuration to enable replies).
+- Changed: `WHITELIST` environment variable is parsed as a comma-separated list and fully replaces the YAML whitelist when provided.
+
+### Security
+- Security: Improved whitelist entry validation pattern to more strictly validate platform and entry types.
+
 ## [0.3.0] - 2026-02-09
 
 ### Added
@@ -202,7 +216,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ---
 
-[Unreleased]: https://github.com/jim60105/ai-friend/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/jim60105/ai-friend/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/jim60105/ai-friend/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/jim60105/ai-friend/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/jim60105/ai-friend/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/jim60105/ai-friend/releases/tag/v0.1.0
