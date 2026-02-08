@@ -38,6 +38,11 @@ const createTestConfig = (overrides: Partial<Config> = {}): Config => {
     logging: {
       level: "INFO",
     },
+    accessControl: {
+      replyTo: "whitelist",
+      whitelist: [],
+      ...overrides.accessControl,
+    },
     ...overrides,
   };
 };
