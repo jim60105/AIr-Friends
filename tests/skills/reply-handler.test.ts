@@ -39,13 +39,12 @@ Deno.test("ReplyHandler - handleSendReply sends reply successfully", async () =>
   const handler = new ReplyHandler();
 
   const workspace: WorkspaceInfo = {
-    key: "discord/123/456",
+    key: "discord/123",
     components: {
       platform: "discord",
       userId: "123",
-      channelId: "456",
     },
-    path: "/tmp/workspaces/discord/123/456",
+    path: "/tmp/workspaces/discord/123",
     isDm: true,
   };
 
@@ -71,13 +70,12 @@ Deno.test("ReplyHandler - handleSendReply prevents multiple replies", async () =
   const handler = new ReplyHandler();
 
   const workspace: WorkspaceInfo = {
-    key: "discord/789/012",
+    key: "discord/789",
     components: {
       platform: "discord",
       userId: "789",
-      channelId: "012",
     },
-    path: "/tmp/workspaces/discord/789/012",
+    path: "/tmp/workspaces/discord/789",
     isDm: true,
   };
 
@@ -114,13 +112,12 @@ Deno.test("ReplyHandler - handleSendReply validates message parameter", async ()
   const handler = new ReplyHandler();
 
   const workspace: WorkspaceInfo = {
-    key: "discord/345/678",
+    key: "discord/345",
     components: {
       platform: "discord",
       userId: "345",
-      channelId: "678",
     },
-    path: "/tmp/workspaces/discord/345/678",
+    path: "/tmp/workspaces/discord/345",
     isDm: true,
   };
 
@@ -146,13 +143,12 @@ Deno.test("ReplyHandler - clearReplyState clears state", async () => {
   const handler = new ReplyHandler();
 
   const workspace: WorkspaceInfo = {
-    key: "discord/111/222",
+    key: "discord/111",
     components: {
       platform: "discord",
       userId: "111",
-      channelId: "222",
     },
-    path: "/tmp/workspaces/discord/111/222",
+    path: "/tmp/workspaces/discord/111",
     isDm: true,
   };
 
@@ -178,13 +174,12 @@ Deno.test("ReplyHandler - handleSendReply handles platform failure", async () =>
   const handler = new ReplyHandler();
 
   const workspace: WorkspaceInfo = {
-    key: "discord/999/888",
+    key: "discord/999",
     components: {
       platform: "discord",
       userId: "999",
-      channelId: "888",
     },
-    path: "/tmp/workspaces/discord/999/888",
+    path: "/tmp/workspaces/discord/999",
     isDm: true,
   };
 
@@ -208,13 +203,12 @@ Deno.test("ReplyHandler - handleSendReply validates attachments type", async () 
   const handler = new ReplyHandler();
 
   const workspace: WorkspaceInfo = {
-    key: "discord/777/666",
+    key: "discord/777",
     components: {
       platform: "discord",
       userId: "777",
-      channelId: "666",
     },
-    path: "/tmp/workspaces/discord/777/666",
+    path: "/tmp/workspaces/discord/777",
     isDm: true,
   };
 
@@ -238,13 +232,12 @@ Deno.test("ReplyHandler - handleSendReply logs warning for attachments", async (
   const handler = new ReplyHandler();
 
   const workspace: WorkspaceInfo = {
-    key: "discord/555/444",
+    key: "discord/555",
     components: {
       platform: "discord",
       userId: "555",
-      channelId: "444",
     },
-    path: "/tmp/workspaces/discord/555/444",
+    path: "/tmp/workspaces/discord/555",
     isDm: true,
   };
 

@@ -64,7 +64,7 @@ AI Friend is a conversational AI bot designed to:
 
 ### Design Principles
 
-- **Trust Boundary Isolation**: Each conversation context (platform/user/channel combination) has its own isolated workspace
+- **Trust Boundary Isolation**: Each conversation context (platform/user combination) has its own isolated workspace
 - **Clean Thought Process**: Agent's intermediate reasoning and tool calls remain internal; only final replies are sent externally
 - **Append-Only Memory**: Memory cannot be deleted, only disabled—ensuring audit trail integrity
 - **Platform Agnostic**: Core logic is decoupled from platform-specific implementations
@@ -127,26 +127,26 @@ The system uses working directories to enforce trust boundaries:
 repo/
 └── workspaces/
     ├── discord/
-    │   ├── user123/
-    │   │   ├── channel456/           # DM workspace
-    │   │   │   ├── memory.public.jsonl
-    │   │   │   └── memory.private.jsonl
-    │   │   └── channel789/           # Another DM
-    │   │       └── ...
-    │   └── guildABC/
-    │       └── channelDEF/           # Guild channel workspace
-    │           └── memory.public.jsonl
+    │   ├── user123/                     # Per-user workspace
+    │   │   ├── memory.public.jsonl
+    │   │   └── memory.private.jsonl
+    │   └── user456/
+    │       ├── memory.public.jsonl
+    │       └── memory.private.jsonl
     └── misskey/
         └── user789/
-            └── channelXYZ/
-                └── ...
+            ├── memory.public.jsonl
+            └── memory.private.jsonl
 ```
 
 **Key Rules:**
 
-- `workspace_key = "{platform}/{user_id}/{channel_id}"`
+- `workspace_key = "{platform}/{user_id}"`
+- Same user across different channels shares one workspace
 - Each workspace is isolated—no cross-workspace file access allowed
-- Private memory (`memory.private.jsonl`) only exists in DM workspaces
+- Both `memory.public.jsonl` and `memory.private.jsonl` exist in every workspace
+- In DM context: saves to private, reads from **both** private and public
+- In non-DM context (guild/public thread): saves/reads from public only
 - Each agent session uses its workspace as the current working directory (cwd)
 
 ---
@@ -349,12 +349,12 @@ Agent Output (internal)
 
 Memory uses append-only JSONL (JSON Lines) files:
 
-| File                   | Purpose                               |
-| ---------------------- | ------------------------------------- |
-| `memory.public.jsonl`  | Public memories (all workspaces)      |
-| `memory.private.jsonl` | Private memories (DM workspaces only) |
+| File                   | Purpose                      |
+| ---------------------- | ---------------------------- |
+| `memory.public.jsonl`  | Public memories              |
+| `memory.private.jsonl` | Private memories             |
 
-Each line is a JSON event. No new files are created for new memories.
+Both files exist in every workspace. Each line is a JSON event. No new files are created for new memories.
 
 ### Memory Types
 
@@ -416,7 +416,9 @@ Each line is a JSON event. No new files are created for new memories.
 
 **Private Memory Access:**
 
-- `memory.private.jsonl` only accessible in DM contexts
+- Both memory files exist in every workspace
+- In DM context: reads/searches **both** `memory.private.jsonl` and `memory.public.jsonl`; saves to `memory.private.jsonl`
+- In non-DM context: reads/searches only `memory.public.jsonl`; saves to `memory.public.jsonl`
 - Non-DM contexts must not load or search private memories
 
 ---

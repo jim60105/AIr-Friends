@@ -39,7 +39,7 @@ Deno.test("WorkspaceManager - should compute correct workspace key", async () =>
   await withTestWorkspace((manager) => {
     const event = createTestEvent();
     const key = manager.getWorkspaceKeyFromEvent(event);
-    assertEquals(key, "discord/user456/channel123");
+    assertEquals(key, "discord/user456");
     return Promise.resolve();
   });
 });
@@ -73,29 +73,36 @@ Deno.test("WorkspaceManager - should create workspace directory", async () => {
   });
 });
 
-Deno.test("WorkspaceManager - should create private memory only for DM", async () => {
+Deno.test("WorkspaceManager - should always create both memory files", async () => {
   await withTestWorkspace(async (manager) => {
-    // Non-DM workspace
+    // Non-DM workspace should also have private memory file
     const nonDmEvent = createTestEvent({ isDm: false });
     const nonDmWorkspace = await manager.getOrCreateWorkspace(nonDmEvent);
 
-    // Private memory file should not exist
-    try {
-      await Deno.stat(`${nonDmWorkspace.path}/${MemoryFileType.PRIVATE}`);
-      throw new Error("Private memory should not exist for non-DM");
-    } catch (error) {
-      assertEquals(error instanceof Deno.errors.NotFound, true);
-    }
+    // Both memory files should exist
+    const publicStat = await Deno.stat(
+      `${nonDmWorkspace.path}/${MemoryFileType.PUBLIC}`,
+    );
+    assertEquals(publicStat.isFile, true);
 
-    // DM workspace
-    const dmEvent = createTestEvent({ isDm: true, channelId: "dm-channel" });
-    const dmWorkspace = await manager.getOrCreateWorkspace(dmEvent);
-
-    // Private memory file should exist
     const privateStat = await Deno.stat(
-      `${dmWorkspace.path}/${MemoryFileType.PRIVATE}`,
+      `${nonDmWorkspace.path}/${MemoryFileType.PRIVATE}`,
     );
     assertEquals(privateStat.isFile, true);
+
+    // DM workspace should also have both
+    const dmEvent = createTestEvent({ isDm: true, userId: "dm-user" });
+    const dmWorkspace = await manager.getOrCreateWorkspace(dmEvent);
+
+    const dmPublicStat = await Deno.stat(
+      `${dmWorkspace.path}/${MemoryFileType.PUBLIC}`,
+    );
+    assertEquals(dmPublicStat.isFile, true);
+
+    const dmPrivateStat = await Deno.stat(
+      `${dmWorkspace.path}/${MemoryFileType.PRIVATE}`,
+    );
+    assertEquals(dmPrivateStat.isFile, true);
   });
 });
 
@@ -113,13 +120,19 @@ Deno.test("WorkspaceManager - should prevent path traversal", async () => {
   });
 });
 
-Deno.test("WorkspaceManager - should return null for private memory in non-DM", async () => {
+Deno.test("WorkspaceManager - should return memory file path for all contexts", async () => {
   await withTestWorkspace(async (manager) => {
     const event = createTestEvent({ isDm: false });
     const workspace = await manager.getOrCreateWorkspace(event);
 
+    // Both public and private paths should be valid strings
+    const publicPath = manager.getMemoryFilePath(workspace, MemoryFileType.PUBLIC);
+    assertEquals(typeof publicPath, "string");
+    assertEquals(publicPath.endsWith(MemoryFileType.PUBLIC), true);
+
     const privatePath = manager.getMemoryFilePath(workspace, MemoryFileType.PRIVATE);
-    assertEquals(privatePath, null);
+    assertEquals(typeof privatePath, "string");
+    assertEquals(privatePath.endsWith(MemoryFileType.PRIVATE), true);
   });
 });
 
@@ -153,15 +166,15 @@ Deno.test("WorkspaceManager - should append to files", async () => {
 
 Deno.test("WorkspaceManager - should list workspaces", async () => {
   await withTestWorkspace(async (manager) => {
-    // Create multiple workspaces
+    // Create multiple workspaces (per-user, not per-channel)
     await manager.getOrCreateWorkspace(createTestEvent({ userId: "user1", channelId: "ch1" }));
     await manager.getOrCreateWorkspace(createTestEvent({ userId: "user1", channelId: "ch2" }));
     await manager.getOrCreateWorkspace(createTestEvent({ userId: "user2", channelId: "ch1" }));
 
     const workspaces = await manager.listWorkspaces("discord");
-    assertEquals(workspaces.length, 3);
-    assertEquals(workspaces.includes("discord/user1/ch1"), true);
-    assertEquals(workspaces.includes("discord/user1/ch2"), true);
-    assertEquals(workspaces.includes("discord/user2/ch1"), true);
+    // user1/ch1 and user1/ch2 map to same workspace (discord/user1)
+    assertEquals(workspaces.length, 2);
+    assertEquals(workspaces.includes("discord/user1"), true);
+    assertEquals(workspaces.includes("discord/user2"), true);
   });
 });

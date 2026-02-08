@@ -7,11 +7,12 @@
     而且 Copilot SDK/ACP Agent 僅信任當前 working directory 可存取的檔案範圍
     而且系統以 working directory 區分不同互動情境的記憶讀取權限
 
-  情境: 以 (平台, user_id, channel_id) 決定 working directory
+  情境: 以 (平台, user_id) 決定 working directory
     當 Bot 在某平台收到一則與 Bot 互動的訊息
-    那麼系統必須計算 workspace_key = "{platform}/{user_id}/{channel_id}"
+    那麼系統必須計算 workspace_key = "{platform}/{user_id}"
     而且必須確保 working directory 路徑為 "repo/workspaces/{workspace_key}/"
     而且此路徑不可與其他 workspace_key 共用
+    而且同一使用者在不同 channel 的互動都共用同一個 workspace
 
   情境: 每次觸發皆建立新的 Agent session 且使用該 working directory 當 cwd
     當 Bot 被觸發開始一次回覆流程

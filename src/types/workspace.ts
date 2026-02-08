@@ -8,14 +8,13 @@ import type { Platform } from "./events.ts";
 export interface WorkspaceKeyComponents {
   platform: Platform;
   userId: string;
-  channelId: string;
 }
 
 /**
  * Workspace information
  */
 export interface WorkspaceInfo {
-  /** Full workspace key (e.g., "discord/123456/789012") */
+  /** Full workspace key (e.g., "discord/123456") */
   key: string;
 
   /** Components of the workspace key */

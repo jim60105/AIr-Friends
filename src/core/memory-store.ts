@@ -45,7 +45,7 @@ export class MemoryStore {
   private getMemoryPath(
     workspace: WorkspaceInfo,
     visibility: MemoryVisibility,
-  ): string | null {
+  ): string {
     const fileType = visibility === "private" ? MemoryFileType.PRIVATE : MemoryFileType.PUBLIC;
     return this.workspaceManager.getMemoryFilePath(workspace, fileType);
   }
@@ -63,15 +63,6 @@ export class MemoryStore {
   ): Promise<MemoryEntry> {
     const visibility = options.visibility ?? "public";
     const importance = options.importance ?? "normal";
-
-    const memoryPath = this.getMemoryPath(workspace, visibility);
-    if (!memoryPath) {
-      throw new MemoryError(
-        ErrorCode.MEMORY_WRITE_FAILED,
-        "Cannot write private memory in non-DM context",
-        { workspaceKey: workspace.key, visibility },
-      );
-    }
 
     const entry: MemoryEntry = {
       id: this.generateId(),
@@ -133,15 +124,6 @@ export class MemoryStore {
     };
 
     // Write patch to the same file as the original memory
-    const memoryPath = this.getMemoryPath(workspace, originalMemory.visibility);
-    if (!memoryPath) {
-      throw new MemoryError(
-        ErrorCode.MEMORY_WRITE_FAILED,
-        "Cannot write to memory file",
-        { workspaceKey: workspace.key },
-      );
-    }
-
     const line = JSON.stringify(patchEntry) + "\n";
     await this.workspaceManager.appendWorkspaceFile(
       workspace,
@@ -187,9 +169,6 @@ export class MemoryStore {
     workspace: WorkspaceInfo,
     visibility: MemoryVisibility,
   ): Promise<ResolvedMemory[]> {
-    const memoryPath = this.getMemoryPath(workspace, visibility);
-    if (!memoryPath) return [];
-
     try {
       const content = await this.workspaceManager.readWorkspaceFile(
         workspace,
@@ -278,19 +257,32 @@ export class MemoryStore {
 
   /**
    * Get all important memories (for initial context)
-   * DM context → private memories only, non-DM → public memories only
+   * DM context → both private and public memories
+   * Non-DM context → public memories only
    */
   async getImportantMemories(workspace: WorkspaceInfo): Promise<ResolvedMemory[]> {
-    const visibility = workspace.isDm ? "private" : "public";
-    const memories = await this.loadAllMemories(workspace, visibility);
-    return memories
-      .filter((m) => m.enabled && m.importance === "high")
-      .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+    const publicMemories = await this.loadAllMemories(workspace, "public");
+    const importantPublic = publicMemories.filter(
+      (m) => m.enabled && m.importance === "high",
+    );
+
+    if (workspace.isDm) {
+      const privateMemories = await this.loadAllMemories(workspace, "private");
+      const importantPrivate = privateMemories.filter(
+        (m) => m.enabled && m.importance === "high",
+      );
+      return [...importantPublic, ...importantPrivate].sort(
+        (a, b) => a.createdAt.localeCompare(b.createdAt),
+      );
+    }
+
+    return importantPublic.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
   }
 
   /**
    * Search memories by keywords
-   * DM context → private memory only, non-DM → public memory only
+   * DM context → both private and public memory
+   * Non-DM context → public memory only
    */
   async searchMemories(
     workspace: WorkspaceInfo,
@@ -306,10 +298,11 @@ export class MemoryStore {
     const results: ResolvedMemory[] = [];
     const seenIds = new Set<string>();
 
-    // Search only the context-appropriate memory file
-    const visibility = workspace.isDm ? "private" : "public";
-    const memoryPath = this.getMemoryPath(workspace, visibility);
-    if (memoryPath) {
+    // Determine which files to search based on context
+    const visibilities: MemoryVisibility[] = workspace.isDm ? ["public", "private"] : ["public"];
+
+    for (const visibility of visibilities) {
+      const memoryPath = this.getMemoryPath(workspace, visibility);
       const searchResults = await searchMultipleKeywords(
         memoryPath,
         keywords,

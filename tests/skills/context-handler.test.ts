@@ -64,13 +64,12 @@ const createMockPlatformAdapter = (
 
 const createTestContext = (platformAdapter: PlatformAdapter): SkillContext => {
   const workspace: WorkspaceInfo = {
-    key: "discord/123/456",
+    key: "discord/123",
     components: {
       platform: "discord",
       userId: "123",
-      channelId: "456",
     },
-    path: "/tmp/workspaces/discord/123/456",
+    path: "/tmp/workspaces/discord/123",
     isDm: true,
   };
 

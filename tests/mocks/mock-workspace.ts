@@ -46,16 +46,14 @@ export class MockWorkspaceManager {
   createWorkspaceInfo(
     platform: Platform,
     userId: string,
-    channelId: string,
     isDm = false,
   ): WorkspaceInfo {
-    const key = `${platform}/${userId}/${channelId}`;
+    const key = `${platform}/${userId}`;
     return {
       key,
       components: {
         platform,
         userId,
-        channelId,
       },
       path: `${this.root}/${key}`,
       isDm,

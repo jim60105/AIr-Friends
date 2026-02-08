@@ -72,17 +72,15 @@ Deno.test("MemoryStore - should add high importance memory", async () => {
   });
 });
 
-Deno.test("MemoryStore - should fail to add private memory in non-DM", async () => {
+Deno.test("MemoryStore - should allow private memory write in any context", async () => {
   await withTestMemoryStore(false, async (store, workspace) => {
-    await assertRejects(
-      async () => {
-        await store.addMemory(workspace, "Private content", {
-          visibility: "private",
-        });
-      },
-      MemoryError,
-      "non-DM context",
-    );
+    // Private memory write succeeds because both files always exist
+    const memory = await store.addMemory(workspace, "Private content", {
+      visibility: "private",
+    });
+
+    assertEquals(memory.visibility, "private");
+    assertEquals(memory.content, "Private content");
   });
 });
 
@@ -181,9 +179,9 @@ Deno.test("MemoryStore - should preserve memory order by timestamp", async () =>
   });
 });
 
-Deno.test("MemoryStore - DM should only get private important memories", async () => {
+Deno.test("MemoryStore - DM should get both private and public important memories", async () => {
   await withTestMemoryStore(true, async (store, workspace) => {
-    // Add a public memory (e.g. from before context-aware visibility)
+    // Add a public memory
     await store.addMemory(workspace, "Public important", {
       visibility: "public",
       importance: "high",
@@ -195,11 +193,12 @@ Deno.test("MemoryStore - DM should only get private important memories", async (
       importance: "high",
     });
 
-    // In DM context, getImportantMemories should only return private memories
+    // In DM context, getImportantMemories should return BOTH
     const important = await store.getImportantMemories(workspace);
-    assertEquals(important.length, 1);
-    assertEquals(important[0].content, "Private important");
-    assertEquals(important[0].visibility, "private");
+    assertEquals(important.length, 2);
+    const contents = important.map((m) => m.content);
+    assertEquals(contents.includes("Public important"), true);
+    assertEquals(contents.includes("Private important"), true);
   });
 });
 
@@ -217,7 +216,7 @@ Deno.test("MemoryStore - non-DM should only get public important memories", asyn
   });
 });
 
-Deno.test("MemoryStore - DM search should only search private memory", async () => {
+Deno.test("MemoryStore - DM search should search both private and public memory", async () => {
   await withTestMemoryStore(true, async (store, workspace) => {
     // Add one public and one private memory
     await store.addMemory(workspace, "Public favorite color is blue", {
@@ -227,10 +226,11 @@ Deno.test("MemoryStore - DM search should only search private memory", async () 
       visibility: "private",
     });
 
-    // In DM, search should only find private memories
+    // In DM, search should find BOTH memories
     const results = await store.searchMemories(workspace, ["favorite"]);
-    assertEquals(results.length, 1);
-    assertEquals(results[0].visibility, "private");
+    assertEquals(results.length, 2);
+    const visibilities = results.map((r) => r.visibility).sort();
+    assertEquals(visibilities, ["private", "public"]);
   });
 });
 

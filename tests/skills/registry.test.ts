@@ -91,13 +91,12 @@ Deno.test("SkillRegistry - executeSkill executes known skill", async () => {
   const registry = new SkillRegistry(memoryStore);
 
   const workspace: WorkspaceInfo = {
-    key: "discord/123/456",
+    key: "discord/123",
     components: {
       platform: "discord",
       userId: "123",
-      channelId: "456",
     },
-    path: `${tempDir}/workspaces/discord/123/456`,
+    path: `${tempDir}/workspaces/discord/123`,
     isDm: true,
   };
 
@@ -141,13 +140,12 @@ Deno.test("SkillRegistry - executeSkill returns error for unknown skill", async 
   const registry = new SkillRegistry(memoryStore);
 
   const workspace: WorkspaceInfo = {
-    key: "discord/123/456",
+    key: "discord/123",
     components: {
       platform: "discord",
       userId: "123",
-      channelId: "456",
     },
-    path: `${tempDir}/workspaces/discord/123/456`,
+    path: `${tempDir}/workspaces/discord/123`,
     isDm: true,
   };
 
@@ -199,13 +197,12 @@ Deno.test("SkillRegistry - executeSkill handles handler exceptions", async () =>
   const registry = new SkillRegistry(memoryStore);
 
   const workspace: WorkspaceInfo = {
-    key: "discord/123/456",
+    key: "discord/123",
     components: {
       platform: "discord",
       userId: "123",
-      channelId: "456",
     },
-    path: `${tempDir}/workspaces/discord/123/456`,
+    path: `${tempDir}/workspaces/discord/123`,
     isDm: true,
   };
 

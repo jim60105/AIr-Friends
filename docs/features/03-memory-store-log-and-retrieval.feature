@@ -13,7 +13,8 @@
     而且至少包含
       | 檔案 | 用途 |
       | memory.public.jsonl | 公開記憶的新增/變更事件 |
-      | memory.private.jsonl | 私人記憶的新增/變更事件(僅 DM workspace 存在) |
+      | memory.private.jsonl | 私人記憶的新增/變更事件 |
+    而且每個 workspace 都必須同時建立 public 和 private 記憶檔案
     而且每筆記憶或變更都必須以一行 JSON 追加寫入
     而且不得因新增記憶而新增新的檔案
 
@@ -41,12 +42,15 @@
     而且只回傳命中結果的片段或行範圍
     而且命中筆數與總字數必須有上限
 
-  情境: 私人記憶僅在 DM 才取用
+  情境: 記憶取用依互動情境區分可見範圍
     假設一筆記憶的 visibility=private
     當互動情境為 DM
-    那麼系統允許載入與檢索 memory.private.jsonl
+    那麼系統允許載入與檢索 memory.private.jsonl 以及 memory.public.jsonl
+    而且 DM 情境下儲存記憶使用 private 可見性
     當互動情境不是 DM
-    那麼系統不得載入或檢索任何 private 記憶
+    那麼系統僅載入與檢索 memory.public.jsonl
+    而且非 DM 情境下儲存記憶使用 public 可見性
+    而且非 DM 情境下不得載入或檢索任何 private 記憶
 
   情境: 記憶不可刪除，以禁用舊記憶取代
     假設 id=mem1 的記憶已存在

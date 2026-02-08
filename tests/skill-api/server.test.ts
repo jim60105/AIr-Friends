@@ -271,11 +271,10 @@ Deno.test("SkillAPIServer - validates skill name", async () => {
 
     // Create a valid session
     const mockWorkspace = {
-      key: "test/123/456",
+      key: "test/123",
       components: {
         platform: "discord" as const,
         userId: "123",
-        channelId: "456",
       },
       path: tempDir,
       isDm: false,
@@ -346,11 +345,10 @@ Deno.test("SkillAPIServer - enforces single reply rule", async () => {
 
     // Create workspace
     const mockWorkspace = {
-      key: "test/123/456",
+      key: "test/123",
       components: {
         platform: "discord" as const,
         userId: "123",
-        channelId: "456",
       },
       path: tempDir,
       isDm: false,

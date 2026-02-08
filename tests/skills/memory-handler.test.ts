@@ -48,13 +48,12 @@ Deno.test("MemoryHandler - handleMemorySave saves memory in DM as private", asyn
   const handler = new MemoryHandler(memoryStore);
 
   const workspace: WorkspaceInfo = {
-    key: "discord/123/456",
+    key: "discord/123",
     components: {
       platform: "discord",
       userId: "123",
-      channelId: "456",
     },
-    path: `${tempDir}/workspaces/discord/123/456`,
+    path: `${tempDir}/workspaces/discord/123`,
     isDm: true,
   };
 
@@ -100,19 +99,19 @@ Deno.test("MemoryHandler - handleMemorySave saves memory in guild as public", as
   const handler = new MemoryHandler(memoryStore);
 
   const workspace: WorkspaceInfo = {
-    key: "discord/123/456",
+    key: "discord/123",
     components: {
       platform: "discord",
       userId: "123",
-      channelId: "456",
     },
-    path: `${tempDir}/workspaces/discord/123/456`,
+    path: `${tempDir}/workspaces/discord/123`,
     isDm: false,
   };
 
   // Create workspace directory
   await Deno.mkdir(workspace.path, { recursive: true });
   await Deno.writeTextFile(`${workspace.path}/memory.public.jsonl`, "");
+  await Deno.writeTextFile(`${workspace.path}/memory.private.jsonl`, "");
 
   const context: SkillContext = {
     workspace,
@@ -151,13 +150,12 @@ Deno.test("MemoryHandler - handleMemorySave validates parameters", async () => {
   const handler = new MemoryHandler(memoryStore);
 
   const workspace: WorkspaceInfo = {
-    key: "discord/123/456",
+    key: "discord/123",
     components: {
       platform: "discord",
       userId: "123",
-      channelId: "456",
     },
-    path: `${tempDir}/workspaces/discord/123/456`,
+    path: `${tempDir}/workspaces/discord/123`,
     isDm: true,
   };
 
@@ -190,13 +188,12 @@ Deno.test("MemoryHandler - handleMemorySearch searches memories in DM context", 
   const handler = new MemoryHandler(memoryStore);
 
   const workspace: WorkspaceInfo = {
-    key: "discord/123/456",
+    key: "discord/123",
     components: {
       platform: "discord",
       userId: "123",
-      channelId: "456",
     },
-    path: `${tempDir}/workspaces/discord/123/456`,
+    path: `${tempDir}/workspaces/discord/123`,
     isDm: true,
   };
 
@@ -250,13 +247,12 @@ Deno.test("MemoryHandler - handleMemoryPatch patches memory", async () => {
   const handler = new MemoryHandler(memoryStore);
 
   const workspace: WorkspaceInfo = {
-    key: "discord/123/456",
+    key: "discord/123",
     components: {
       platform: "discord",
       userId: "123",
-      channelId: "456",
     },
-    path: `${tempDir}/workspaces/discord/123/456`,
+    path: `${tempDir}/workspaces/discord/123`,
     isDm: true,
   };
 
@@ -312,13 +308,12 @@ Deno.test("MemoryHandler - handleMemorySave ignores agent-provided visibility in
   const handler = new MemoryHandler(memoryStore);
 
   const workspace: WorkspaceInfo = {
-    key: "discord/123/456",
+    key: "discord/123",
     components: {
       platform: "discord",
       userId: "123",
-      channelId: "456",
     },
-    path: `${tempDir}/workspaces/discord/123/456`,
+    path: `${tempDir}/workspaces/discord/123`,
     isDm: true,
   };
 
@@ -360,13 +355,12 @@ Deno.test("MemoryHandler - handleMemorySave validates invalid importance", async
   const handler = new MemoryHandler(memoryStore);
 
   const workspace: WorkspaceInfo = {
-    key: "discord/123/456",
+    key: "discord/123",
     components: {
       platform: "discord",
       userId: "123",
-      channelId: "456",
     },
-    path: `${tempDir}/workspaces/discord/123/456`,
+    path: `${tempDir}/workspaces/discord/123`,
     isDm: true,
   };
 
@@ -402,19 +396,19 @@ Deno.test("MemoryHandler - handleMemorySave ignores agent-provided visibility in
   const handler = new MemoryHandler(memoryStore);
 
   const workspace: WorkspaceInfo = {
-    key: "discord/123/456",
+    key: "discord/123",
     components: {
       platform: "discord",
       userId: "123",
-      channelId: "456",
     },
-    path: `${tempDir}/workspaces/discord/123/456`,
+    path: `${tempDir}/workspaces/discord/123`,
     isDm: false, // Not a DM
   };
 
   // Create workspace directory
   await Deno.mkdir(workspace.path, { recursive: true });
   await Deno.writeTextFile(`${workspace.path}/memory.public.jsonl`, "");
+  await Deno.writeTextFile(`${workspace.path}/memory.private.jsonl`, "");
 
   const context: SkillContext = {
     workspace,
@@ -449,13 +443,12 @@ Deno.test("MemoryHandler - handleMemorySearch validates invalid limit", async ()
   const handler = new MemoryHandler(memoryStore);
 
   const workspace: WorkspaceInfo = {
-    key: "discord/123/456",
+    key: "discord/123",
     components: {
       platform: "discord",
       userId: "123",
-      channelId: "456",
     },
-    path: `${tempDir}/workspaces/discord/123/456`,
+    path: `${tempDir}/workspaces/discord/123`,
     isDm: true,
   };
 
@@ -491,13 +484,12 @@ Deno.test("MemoryHandler - handleMemoryPatch validates missing memory_id", async
   const handler = new MemoryHandler(memoryStore);
 
   const workspace: WorkspaceInfo = {
-    key: "discord/123/456",
+    key: "discord/123",
     components: {
       platform: "discord",
       userId: "123",
-      channelId: "456",
     },
-    path: `${tempDir}/workspaces/discord/123/456`,
+    path: `${tempDir}/workspaces/discord/123`,
     isDm: true,
   };
 
@@ -530,13 +522,12 @@ Deno.test("MemoryHandler - handleMemoryPatch validates invalid enabled", async (
   const handler = new MemoryHandler(memoryStore);
 
   const workspace: WorkspaceInfo = {
-    key: "discord/123/456",
+    key: "discord/123",
     components: {
       platform: "discord",
       userId: "123",
-      channelId: "456",
     },
-    path: `${tempDir}/workspaces/discord/123/456`,
+    path: `${tempDir}/workspaces/discord/123`,
     isDm: true,
   };
 
@@ -572,13 +563,12 @@ Deno.test("MemoryHandler - handleMemoryPatch validates invalid visibility", asyn
   const handler = new MemoryHandler(memoryStore);
 
   const workspace: WorkspaceInfo = {
-    key: "discord/123/456",
+    key: "discord/123",
     components: {
       platform: "discord",
       userId: "123",
-      channelId: "456",
     },
-    path: `${tempDir}/workspaces/discord/123/456`,
+    path: `${tempDir}/workspaces/discord/123`,
     isDm: true,
   };
 
@@ -614,13 +604,12 @@ Deno.test("MemoryHandler - handleMemoryPatch validates invalid importance", asyn
   const handler = new MemoryHandler(memoryStore);
 
   const workspace: WorkspaceInfo = {
-    key: "discord/123/456",
+    key: "discord/123",
     components: {
       platform: "discord",
       userId: "123",
-      channelId: "456",
     },
-    path: `${tempDir}/workspaces/discord/123/456`,
+    path: `${tempDir}/workspaces/discord/123`,
     isDm: true,
   };
 
@@ -656,13 +645,12 @@ Deno.test("MemoryHandler - handleMemoryPatch requires at least one field", async
   const handler = new MemoryHandler(memoryStore);
 
   const workspace: WorkspaceInfo = {
-    key: "discord/123/456",
+    key: "discord/123",
     components: {
       platform: "discord",
       userId: "123",
-      channelId: "456",
     },
-    path: `${tempDir}/workspaces/discord/123/456`,
+    path: `${tempDir}/workspaces/discord/123`,
     isDm: true,
   };
 

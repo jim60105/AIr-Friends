@@ -22,11 +22,10 @@ Deno.test("SessionRegistry - registers and retrieves sessions", () => {
   const registry = new SessionRegistry();
 
   const mockWorkspace = {
-    key: "test/123/456",
+    key: "test/123",
     components: {
       platform: "discord" as const,
       userId: "123",
-      channelId: "456",
     },
     path: "/tmp/test",
     isDm: false,
@@ -76,11 +75,10 @@ Deno.test("SessionRegistry - tracks reply sent status", () => {
   const registry = new SessionRegistry();
 
   const mockWorkspace = {
-    key: "test/123/456",
+    key: "test/123",
     components: {
       platform: "discord" as const,
       userId: "123",
-      channelId: "456",
     },
     path: "/tmp/test",
     isDm: false,
@@ -116,11 +114,10 @@ Deno.test("SessionRegistry - removes sessions", () => {
   const registry = new SessionRegistry();
 
   const mockWorkspace = {
-    key: "test/123/456",
+    key: "test/123",
     components: {
       platform: "discord" as const,
       userId: "123",
-      channelId: "456",
     },
     path: "/tmp/test",
     isDm: false,
@@ -154,11 +151,10 @@ Deno.test("SessionRegistry - cleans up expired sessions", async () => {
   const registry = new SessionRegistry();
 
   const mockWorkspace = {
-    key: "test/123/456",
+    key: "test/123",
     components: {
       platform: "discord" as const,
       userId: "123",
-      channelId: "456",
     },
     path: "/tmp/test",
     isDm: false,

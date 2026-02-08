@@ -35,17 +35,18 @@ export class WorkspaceManager {
 
   /**
    * Compute workspace key from event components
-   * Format: {platform}/{user_id}/{channel_id}
+   * Format: {platform}/{user_id}
+   * Memory is per-user, not per-channel — the same user's memories are shared
+   * across all channels/threads they interact in.
    */
   computeWorkspaceKey(components: WorkspaceKeyComponents): string {
-    const { platform, userId, channelId } = components;
+    const { platform, userId } = components;
 
     // Sanitize each component to prevent path traversal
     const safePlatform = sanitizePathComponent(platform);
     const safeUserId = sanitizePathComponent(userId);
-    const safeChannelId = sanitizePathComponent(channelId);
 
-    return `${safePlatform}/${safeUserId}/${safeChannelId}`;
+    return `${safePlatform}/${safeUserId}`;
   }
 
   /**
@@ -55,7 +56,6 @@ export class WorkspaceManager {
     return this.computeWorkspaceKey({
       platform: event.platform,
       userId: event.userId,
-      channelId: event.channelId,
     });
   }
 
@@ -104,7 +104,6 @@ export class WorkspaceManager {
       components: {
         platform: event.platform,
         userId: event.userId,
-        channelId: event.channelId,
       },
       path,
       isDm: event.isDm,
@@ -114,10 +113,12 @@ export class WorkspaceManager {
 
   /**
    * Initialize workspace with required files
+   * Both public and private memory files are always created since
+   * the same workspace serves both DM and non-DM interactions.
    */
   private async initializeWorkspaceFiles(
     workspacePath: string,
-    isDm: boolean,
+    _isDm: boolean,
   ): Promise<void> {
     // Create public memory file
     const publicMemoryPath = join(workspacePath, MemoryFileType.PUBLIC);
@@ -125,33 +126,23 @@ export class WorkspaceManager {
       await Deno.writeTextFile(publicMemoryPath, "");
     }
 
-    // Create private memory file only for DM workspaces
-    if (isDm) {
-      const privateMemoryPath = join(workspacePath, MemoryFileType.PRIVATE);
-      if (!(await pathExists(privateMemoryPath))) {
-        await Deno.writeTextFile(privateMemoryPath, "");
-      }
+    // Always create private memory file (workspace is per-user, may be used in DM later)
+    const privateMemoryPath = join(workspacePath, MemoryFileType.PRIVATE);
+    if (!(await pathExists(privateMemoryPath))) {
+      await Deno.writeTextFile(privateMemoryPath, "");
     }
 
-    logger.debug("Workspace files initialized", { workspacePath, isDm });
+    logger.debug("Workspace files initialized", { workspacePath });
   }
 
   /**
    * Get memory file path for a workspace
-   * Returns null for private memory in non-DM contexts
+   * Both public and private memory files always exist in per-user workspaces.
    */
   getMemoryFilePath(
     workspace: WorkspaceInfo,
     fileType: MemoryFileType,
-  ): string | null {
-    // Private memory only accessible in DM contexts
-    if (fileType === MemoryFileType.PRIVATE && !workspace.isDm) {
-      logger.warn("Attempted to access private memory in non-DM context", {
-        workspaceKey: workspace.key,
-      });
-      return null;
-    }
-
+  ): string {
     return join(workspace.path, fileType);
   }
 
@@ -235,15 +226,9 @@ export class WorkspaceManager {
         for await (const userEntry of Deno.readDir(platformPath)) {
           if (!userEntry.isDirectory) continue;
 
-          const userPath = join(platformPath, userEntry.name);
-
-          for await (const channelEntry of Deno.readDir(userPath)) {
-            if (!channelEntry.isDirectory) continue;
-
-            workspaces.push(
-              `${platformEntry.name}/${userEntry.name}/${channelEntry.name}`,
-            );
-          }
+          workspaces.push(
+            `${platformEntry.name}/${userEntry.name}`,
+          );
         }
       }
     } catch (error) {

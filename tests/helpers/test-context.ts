@@ -28,7 +28,6 @@ export function createTestSkillContext(
   const workspaceInfo = workspace.createWorkspaceInfo(
     mockEvent.platform,
     mockEvent.userId,
-    mockEvent.channelId,
     mockEvent.isDm,
   );
   const platform = new MockPlatformAdapter();

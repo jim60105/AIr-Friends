@@ -195,10 +195,10 @@ Initial context comprises:
 
 ### 3. Memory System (Feature 03)
 
-Append-only JSONL files:
+Append-only JSONL files (both exist in every workspace):
 
-- `memory.public.jsonl` - Public memories (all workspaces)
-- `memory.private.jsonl` - Private memories (DM workspaces only)
+- `memory.public.jsonl` - Public memories
+- `memory.private.jsonl` - Private memories
 
 Memory event structure:
 
@@ -497,9 +497,8 @@ Deno.test("WorkspaceManager - generates correct workspace key", () => {
   const key = getWorkspaceKey({
     platform: "discord",
     user_id: "123",
-    channel_id: "456",
   });
-  assertEquals(key, "discord/123/456");
+  assertEquals(key, "discord/123");
 });
 ```
 
