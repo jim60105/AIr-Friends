@@ -531,21 +531,23 @@ workspace:
 
 ### Environment Variables
 
-Environment variables override configuration file values:
-
-| Variable             | Config Path                | Description                               |
-| -------------------- | -------------------------- | ----------------------------------------- |
-| `DISCORD_TOKEN`      | `platforms.discord.token`  | Discord bot token                         |
-| `MISSKEY_TOKEN`      | `platforms.misskey.token`  | Misskey access token                      |
-| `MISSKEY_HOST`       | `platforms.misskey.host`   | Misskey instance host                     |
-| `AGENT_MODEL`        | `agent.model`              | LLM model identifier                      |
-| `AGENT_DEFAULT_TYPE` | `agent.default_agent_type` | Default ACP agent (copilot/gemini/opencode) |
-| `GITHUB_TOKEN`       | `agent.github_token`       | GitHub token for Copilot/OpenCode         |
-| `GEMINI_API_KEY`     | `agent.gemini_api_key`     | Gemini API key for Gemini CLI/OpenCode    |
-| `OPENCODE_API_KEY`   | `agent.opencode_api_key`   | OpenCode API key                          |
-| `OPENROUTER_API_KEY` | `agent.open_router_api_key`| OpenRouter API key                        |
-| `LOG_LEVEL`          | `logging.level`            | Logging level                             |
-| `ENV` / `DENO_ENV`   | -                          | Environment name                          |
+| Variable             | Description                                      |
+| -------------------- | ------------------------------------------------ |
+| `DISCORD_ENABLED`    | Enable Discord integration (true/false)          |
+| `MISSKEY_ENABLED`    | Enable Misskey integration (true/false)          |
+| `DISCORD_TOKEN`      | Discord bot token                                |
+| `MISSKEY_HOST`       | Misskey instance host                            |
+| `MISSKEY_TOKEN`      | Misskey access token                             |
+| `AGENT_MODEL`        | LLM model identifier (e.g., "gpt-5-mini")        |
+| `AGENT_DEFAULT_TYPE` | Default ACP agent type (copilot/gemini/opencode) |
+| `REPLY_TO`           | Reply policy mode (`all`/`public`/`whitelist`)    |
+| `WHITELIST`          | Whitelist entries (comma-separated, replaces config) |
+| `LOG_LEVEL`          | Logging level (DEBUG/INFO/WARN/ERROR)            |
+| `DENO_ENV`           | Environment name (dev/prod)                      |
+| `GITHUB_TOKEN`       | GitHub token for Copilot/OpenCode                |
+| `GEMINI_API_KEY`     | Gemini API key for Gemini CLI/OpenCode           |
+| `OPENCODE_API_KEY`   | OpenCode API key                                 |
+| `OPENROUTER_API_KEY` | OpenRouter API key                               |
 
 ### Multi-Environment Support
 
@@ -762,44 +764,60 @@ All checks must pass before merge:
 
 ```text
 AIr-Friends/
-├── deno.json                 # Deno configuration (imports, tasks, fmt, lint)
-├── deno.lock                 # Dependency lock file
-├── config.yaml               # Default configuration
-├── .env.example              # Environment variable template
-├── Containerfile             # Container build definition
 ├── src/
-│   ├── main.ts               # Entry point
-│   ├── core/                 # Core logic
-│   │   ├── workspace.ts      # Workspace manager
-│   │   ├── session.ts        # Agent session
-│   │   ├── context.ts        # Context assembly
-│   │   └── memory.ts         # Memory operations
-│   ├── platforms/            # Platform adapters
-│   │   ├── adapter.ts        # Adapter interface
-│   │   ├── discord/          # Discord implementation
-│   │   └── misskey/          # Misskey implementation (stub)
-│   ├── skills/               # Skill implementations
-│   │   ├── platform.ts       # Platform skills
-│   │   ├── memory.ts         # Memory skills
-│   │   └── web.ts            # Web search skills
-│   ├── types/                # TypeScript type definitions
-│   │   ├── config.ts         # Configuration types
-│   │   ├── event.ts          # Event types
-│   │   └── memory.ts         # Memory types
-│   └── utils/                # Utility functions
-│       ├── logger.ts         # Structured logging
-│       └── config.ts         # Configuration loading
-├── prompts/                  # Bot prompt files
-│   └── system.md             # System prompt
-├── config/                   # Example configurations
-│   └── config.example.yaml
-├── docs/                     # Documentation
-│   ├── DESIGN.md             # This document
-│   └── features/             # Feature specifications (Gherkin)
-└── tests/                    # Test files
-    ├── core/
-    ├── platforms/
-    └── skills/
+│   ├── main.ts              # Entry point
+│   ├── bootstrap.ts         # Application bootstrap
+│   ├── shutdown.ts          # Graceful shutdown handler
+│   ├── healthcheck.ts       # Health check server
+│   ├── acp/                 # ACP Client integration
+│   │   ├── agent-connector.ts
+│   │   ├── agent-factory.ts
+│   │   ├── client.ts
+│   │   └── types.ts
+│   ├── core/                # Core logic (agent, memory, workspace)
+│   │   ├── agent-core.ts
+│   │   ├── session-orchestrator.ts
+│   │   ├── workspace-manager.ts
+│   │   ├── memory-store.ts
+│   │   ├── context-assembler.ts
+│   │   ├── message-handler.ts
+│   │   ├── reply-dispatcher.ts
+│   │   ├── reply-policy.ts
+│   │   └── config-loader.ts
+│   ├── platforms/           # Platform adapters (Discord, Misskey)
+│   │   ├── platform-adapter.ts
+│   │   ├── platform-registry.ts
+│   │   ├── discord/
+│   │   └── misskey/
+│   ├── skills/              # Skill handlers
+│   │   ├── registry.ts
+│   │   ├── memory-handler.ts
+│   │   ├── reply-handler.ts
+│   │   ├── context-handler.ts
+│   │   └── types.ts
+│   ├── skill-api/           # HTTP API for shell skills
+│   │   ├── server.ts
+│   │   └── session-registry.ts
+│   ├── types/               # TypeScript type definitions
+│   └── utils/               # Utility functions
+├── skills/                  # Shell-based skill scripts
+│   ├── memory-save/
+│   ├── memory-search/
+│   ├── memory-patch/
+│   ├── fetch-context/
+│   ├── send-reply/
+│   └── lib/                 # Shared skill client library
+├── prompts/                 # Bot prompt files (template system)
+│   ├── system.md            # Main system prompt with {{placeholders}}
+│   ├── character_name.md    # Replaces {{character_name}}
+│   ├── character_info.md    # Replaces {{character_info}}
+│   └── ...                  # Any .md file becomes a placeholder source
+├── config/                  # Configuration examples
+├── docs/                    # Documentation & BDD features
+│   ├── DESIGN.md            # Design document
+│   ├── SKILLS_IMPLEMENTATION.md
+│   └── features/            # Gherkin feature specs
+└── tests/                   # Test files
 ```
 
 ### deno.json Configuration
