@@ -6,9 +6,9 @@ This guide provides comprehensive instructions for developing and customizing AI
 
 - [Deno](https://deno.land/) 2.x or higher
 - Discord Bot Token (for Discord integration)
-- Misskey Access Token (for Misskey integration, optional)
-- An ACP-compliant CLI agent (GitHub Copilot CLI, Gemini CLI, or OpenCode CLI)
-- For OpenCode CLI: GITHUB_TOKEN and/or GEMINI_API_KEY for provider access
+- Misskey Access Token (for Misskey integration)
+- An ACP-compliant CLI agent (OpenCode CLI, GitHub Copilot CLI, Gemini CLI. The recommended one is OpenCode CLI)
+- For OpenCode CLI: GITHUB_TOKEN, GEMINI_API_KEY, OPENCODE_API_KEY, or OPENROUTER_API_KEY for [provider access](https://opencode.ai/docs/providers/)
 
 ## Development Setup
 
@@ -23,10 +23,12 @@ This guide provides comprehensive instructions for developing and customizing AI
 
    ```bash
    cp .env.example .env
-   # Edit .env with your tokens
+   # Edit .env with your credentials and configuration
    ```
 
-3. **Configure the bot**
+3. **Optional: Configure the bot**
+
+   All the necessary configuration can be done through environment variables. However, if you prefer using a YAML config file, copy the example config:
 
    ```bash
    cp config.example.yaml config.yaml
@@ -51,7 +53,7 @@ This guide provides comprehensive instructions for developing and customizing AI
    deno run --allow-net --allow-read --allow-write --allow-env --allow-run src/main.ts --yolo
    ```
 
-   > [!WARNING]\
+   > [!WARNING]  
    > YOLO mode auto-approves ALL permission requests from the ACP agent. Only use this in trusted container environments or for testing purposes.
 
 ## Available Tasks
@@ -193,7 +195,7 @@ The container includes a pre-configured `opencode.json` that automatically sets 
 
 - **GitHub Provider**: Uses `GITHUB_TOKEN` environment variable
 - **Gemini Provider**: Uses `GEMINI_API_KEY` environment variable
-- **All Tools Enabled**: bash, edit, write, read, grep, glob, list, patch, skill, webfetch, and more
+- **Only Necessary Tools Enabled**: enable bash, disable edit and write
 - **Auto-compaction**: Enabled for better token management
 - **Auto-update**: Disabled (container should be rebuilt for updates)
 
@@ -203,7 +205,7 @@ You can customize OpenCode behavior by mounting your own `opencode.json` configu
 
 ```bash
 podman run -d --rm \
-  -v ./data:/app/data \
+  -v data:/app/data \
   -v ./config.yaml:/app/config.yaml:ro \
   -v ./my-opencode.json:/home/deno/.config/opencode/opencode.json:ro \
   --env-file .env \
@@ -220,6 +222,8 @@ For more information about OpenCode configuration, see the [OpenCode documentati
 The system prompt (`prompts/system.md`) supports a template placeholder system. Any `{{placeholder}}` in the file is automatically replaced with the content of the corresponding `.md` file in the same directory.
 
 For example, if `system.md` contains `{{character_name}}`, the system loads `prompts/character_name.md` and replaces all occurrences of `{{character_name}}` with its trimmed content.
+
+It does not support nesting and will only replace the content within {{ double curly braces }} in system.md.
 
 #### How It Works
 
@@ -265,7 +269,7 @@ When running AIr-Friends in a container, you can customize the bot's character b
 
    ```bash
    podman run -d --rm \
-     -v ./data:/app/data \
+     -v data:/app/data \
      -v ./config.yaml:/app/config.yaml:ro \
      -v ./my-custom-prompts:/app/prompts:ro \
      --env-file .env \
@@ -280,7 +284,7 @@ When running AIr-Friends in a container, you can customize the bot's character b
      - ./prompts:/app/prompts:ro,Z # Mount your custom prompts
    ```
 
-   > [!IMPORTANT]
+   > [!IMPORTANT]  
    > When mounting custom prompts, ensure you provide **all required files**:
    >
    > - `system.md` - Main system prompt template
@@ -291,7 +295,7 @@ When running AIr-Friends in a container, you can customize the bot's character b
 4. **Restart the container** to apply the changes:
 
    ```bash
-   podman-compose down && podman-compose up -d
+   podman compose down && podman compose up -d
    ```
 
 The container includes default prompts that will be used if you don't mount a custom prompts directory.

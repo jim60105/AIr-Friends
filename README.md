@@ -2,30 +2,28 @@
 
 ![preview image](./docs/preview.webp)
 
-A smart conversational chatbot with memory that works on Discord and Misskey. Powered by AI agents, it remembers conversations across channels while keeping your data organized in isolated workspaces.
+Your AIr friends custom chatbot with integrated shell and skills. Powered by ACP AI agents, it remembers conversations across channels while keeping your data organized in isolated workspaces.
 
 ## ✨ Highlights
 
-- 🤖 **Multi-Platform**: Works on Discord and Misskey
+- 🤖 **Multi-Platform**: Currently works on Discord and Misskey
 - 🧠 **Persistent Memory**: Remembers conversations across different channels
 - 🔒 **Privacy First**: Isolated workspaces per user with access control
 - 🐳 **Easy Deploy**: One-command container deployment
-- 🎨 **Customizable**: Template-based personality system
-- 🔌 **Extensible**: Skill-based architecture with HTTP API
+- 🎨 **Customizable**: Template-based personality prompt system
+- 🔌 **Extensible**: Skill-based architecture
 
 ## 🚀 Quick Start
 
-The easiest way to run AIr-Friends is using containers:
+The recommended way to run AIr-Friends is by using containers:
 
-1. **Prepare configuration files**
+1. **Prepare .env file**
 
    ```bash
-   # Download example files
-   wget https://raw.githubusercontent.com/jim60105/AIr-Friends/master/config.example.yaml -O config.yaml
+   # Download example file
    wget https://raw.githubusercontent.com/jim60105/AIr-Friends/master/.env.example -O .env
 
    # Edit with your credentials
-   vim config.yaml
    vim .env
    ```
 
@@ -44,57 +42,41 @@ The easiest way to run AIr-Friends is using containers:
 
    ```bash
    wget https://raw.githubusercontent.com/jim60105/AIr-Friends/master/compose.yml
-   podman-compose up -d
+   podman compose up -d
    ```
 
 That's it! Your bot should now be online.
 
-## 📖 Documentation
-
-- **[Development Guide](docs/DEVELOPMENT.md)** - Setup, configuration, and customization
-- **[Design Document](docs/DESIGN.md)** - Architecture and technical details
-- **[Agent Guide](AGENTS.md)** - For AI agents working on this codebase
-
 ## 🎨 Customizing Your Bot
 
-Want to change your bot's personality? Simply edit the prompt files:
+Want to change the personality of your bot? Edit the prompt files:
 
 ```bash
-# Copy default prompts
-cp -r prompts/ my-custom-prompts/
+# Clone or download the entire prompts directory from the repository.
+# https://github.com/jim60105/AIr-Friends/tree/master/prompts
 
 # Edit character files
-vim my-custom-prompts/character_name.md
-vim my-custom-prompts/character_info.md
+vim prompts/character_info.md
+vim prompts/character_name.md
+vim prompts/character_personality.md
+vim prompts/character_reference_terms.md
+vim prompts/character_speaking_style.md
+
+# These two files are also required for the system to function when customizing prompts.
+cat prompts/system.md
+cat prompts/system_prompt_override.md
 
 # Mount when running
 podman run -d --rm \
-  -v ./data:/app/data \
+  -v data:/app/data \
   -v ./config.yaml:/app/config.yaml:ro \
-  -v ./my-custom-prompts:/app/prompts:ro \
+  -v ./prompts:/app/prompts:ro \
   --env-file .env \
   --name air-friends \
   ghcr.io/jim60105/air-friends:latest
 ```
 
-See [Development Guide](docs/DEVELOPMENT.md#customizing-the-bot) for details.
-
-## 🛠️ Development
-
-For local development with Deno:
-
-```bash
-git clone https://github.com/jim60105/AIr-Friends.git
-cd AIr-Friends
-
-cp .env.example .env
-cp config.example.yaml config.yaml
-# Edit .env and config.yaml
-
-deno task dev
-```
-
-See [Development Guide](docs/DEVELOPMENT.md) for complete setup instructions.
+See [Development Guide -- Customizing the Bot](docs/DEVELOPMENT.md#customizing-the-bot) section for details.
 
 ## 🔐 Access Control
 
@@ -108,11 +90,11 @@ accessControl:
     - "misskey/account/abcdef1234567890"
 ```
 
-See [Development Guide](docs/DEVELOPMENT.md#access-control--reply-policy) for details.
+See [Development Guide -- Access Control & Reply Policy](docs/DEVELOPMENT.md#access-control--reply-policy) section for details.
 
 ## 🏗️ Architecture
 
-AIr-Friends acts as an ACP (Agent Client Protocol) client, delegating AI reasoning to external agents while maintaining persistent memory:
+AIr-Friends acts as an [ACP (Agent Client Protocol)](https://agentclientprotocol.com/) client, delegating AI reasoning to external agents while maintaining persistent memory:
 
 ```text
 ┌─────────────────────────────────────────┐
@@ -138,7 +120,9 @@ The official container image includes:
 - Health check endpoint on port 8080
 - Default prompts at `/app/prompts` (can be overridden)
 
-See [Development Guide](docs/DEVELOPMENT.md#opencode-configuration) for advanced configuration
+## 🛠️ Development
+
+See [Development Guide](docs/DEVELOPMENT.md) for complete setup instructions.
 
 ## License
 
