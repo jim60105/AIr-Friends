@@ -25,8 +25,8 @@ The easiest way to run AIr-Friends is using containers:
    wget https://raw.githubusercontent.com/jim60105/AIr-Friends/master/.env.example -O .env
 
    # Edit with your credentials
-   nano config.yaml
-   nano .env
+   vim config.yaml
+   vim .env
    ```
 
 2. **Run with Podman (or Docker)**
@@ -64,8 +64,8 @@ Want to change your bot's personality? Simply edit the prompt files:
 cp -r prompts/ my-custom-prompts/
 
 # Edit character files
-nano my-custom-prompts/character_name.md
-nano my-custom-prompts/character_info.md
+vim my-custom-prompts/character_name.md
+vim my-custom-prompts/character_info.md
 
 # Mount when running
 podman run -d --rm \
