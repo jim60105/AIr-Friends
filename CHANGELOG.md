@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-02-09
+
+### Changed
+- Changed: Rebranded the project from "ai-friend" to "AIr-Friends" across documentation, CI/CD pipelines, container labels, compose services, and package names (including `deno.json`). This updates runtime image names and repository references to the new branding.
+
+### Added
+- Added: Documentation preview images and updated the README preview image.
+- Added: Consolidated registry links in release notes for GitHub Container Registry, Docker Hub, and Quay.
+
 ## [0.4.0] - 2026-02-09
 
 ### Added
@@ -216,7 +225,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ---
 
-[Unreleased]: https://github.com/jim60105/AIr-Friends/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/jim60105/AIr-Friends/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/jim60105/AIr-Friends/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/jim60105/AIr-Friends/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/jim60105/AIr-Friends/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/jim60105/AIr-Friends/compare/v0.1.0...v0.2.0
