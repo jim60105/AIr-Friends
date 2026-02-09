@@ -9,8 +9,8 @@ services:
     env_file:
       - .env
     volumes:
-      - ./data:/app/data:Z
+      - data:/app/data:Z
       # - ./config.yaml:/app/config.yaml:ro,Z
       # Mount custom prompts directory (optional, comment out to use defaults)
       # Ensure you provide all required prompt files (system.md and fragments)
-      - ./my-prompts:/app/prompts:ro,Z
+      # - ./prompts:/app/prompts:ro,Z
