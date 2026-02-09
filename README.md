@@ -21,8 +21,8 @@ The easiest way to run AIr-Friends is using containers:
 
    ```bash
    # Download example files
-   wget https://raw.githubusercontent.com/jim60105/AIr-Friends/main/config.example.yaml -O config.yaml
-   wget https://raw.githubusercontent.com/jim60105/AIr-Friends/main/.env.example -O .env
+   wget https://raw.githubusercontent.com/jim60105/AIr-Friends/master/config.example.yaml -O config.yaml
+   wget https://raw.githubusercontent.com/jim60105/AIr-Friends/master/.env.example -O .env
 
    # Edit with your credentials
    nano config.yaml
@@ -33,7 +33,7 @@ The easiest way to run AIr-Friends is using containers:
 
    ```bash
    podman run -d --rm \
-     -v ./data:/app/data \
+     -v data:/app/data \
      -v ./config.yaml:/app/config.yaml:ro \
      --env-file .env \
      --name air-friends \
@@ -43,7 +43,7 @@ The easiest way to run AIr-Friends is using containers:
 3. **Or use Compose**
 
    ```bash
-   wget https://raw.githubusercontent.com/jim60105/AIr-Friends/main/compose.yml
+   wget https://raw.githubusercontent.com/jim60105/AIr-Friends/master/compose.yml
    podman-compose up -d
    ```
 
