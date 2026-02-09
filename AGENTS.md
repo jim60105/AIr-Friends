@@ -54,17 +54,17 @@ AIr-Friends is a multi-platform conversational AI bot that acts as an **ACP (Age
 
 ### Core Components
 
-| Directory        | Purpose                                                |
-| ---------------- | ------------------------------------------------------ |
-| `src/core/`      | Agent session, workspace manager, context assembly     |
-| `src/core/reply-policy.ts` | Access control and reply policy evaluation    |
-| `src/acp/`       | ACP Client integration, agent connector                |
-| `src/platforms/` | Platform adapters (Discord, Misskey)                   |
-| `src/skills/`    | Internal skill handlers (memory, reply, context)       |
-| `src/skill-api/` | HTTP server for shell-based skills                     |
-| `src/types/`     | TypeScript type definitions                            |
-| `src/utils/`     | Logging, configuration loading, utilities              |
-| `skills/`        | Shell-based skill scripts (executed by external agent) |
+| Directory                  | Purpose                                                |
+| -------------------------- | ------------------------------------------------------ |
+| `src/core/`                | Agent session, workspace manager, context assembly     |
+| `src/core/reply-policy.ts` | Access control and reply policy evaluation             |
+| `src/acp/`                 | ACP Client integration, agent connector                |
+| `src/platforms/`           | Platform adapters (Discord, Misskey)                   |
+| `src/skills/`              | Internal skill handlers (memory, reply, context)       |
+| `src/skill-api/`           | HTTP server for shell-based skills                     |
+| `src/types/`               | TypeScript type definitions                            |
+| `src/utils/`               | Logging, configuration loading, utilities              |
+| `skills/`                  | Shell-based skill scripts (executed by external agent) |
 
 ## Build & Development Commands
 
@@ -103,13 +103,13 @@ deno run --allow-net --allow-read --allow-write --allow-env --allow-run src/main
 
 **Never use `--allow-all`**. Required permissions:
 
-| Permission      | Purpose                                            |
-| --------------- | -------------------------------------------------- |
-| `--allow-net`   | Discord API, Misskey API, external connections     |
-| `--allow-read`  | Configuration files, workspace files, memory logs  |
-| `--allow-write` | Memory log files in workspace directories          |
-| `--allow-env`   | Environment variables (tokens, configuration)      |
-| `--allow-run`   | Spawning ACP agent subprocesses and skill scripts  |
+| Permission      | Purpose                                           |
+| --------------- | ------------------------------------------------- |
+| `--allow-net`   | Discord API, Misskey API, external connections    |
+| `--allow-read`  | Configuration files, workspace files, memory logs |
+| `--allow-write` | Memory log files in workspace directories         |
+| `--allow-env`   | Environment variables (tokens, configuration)     |
+| `--allow-run`   | Spawning ACP agent subprocesses and skill scripts |
 
 #### YOLO Mode
 
@@ -395,11 +395,11 @@ Controls bot reply behavior through the `accessControl` section in `config.yaml`
 
 **Reply Policy Modes:**
 
-| Mode | Behavior |
-|------|----------|
-| `all` | Reply to everyone in both public channels and DMs |
-| `public` | Reply in public channels only; DMs only if the account/channel is whitelisted |
-| `whitelist` | Reply only to whitelisted accounts/channels (default) |
+| Mode        | Behavior                                                                      |
+| ----------- | ----------------------------------------------------------------------------- |
+| `all`       | Reply to everyone in both public channels and DMs                             |
+| `public`    | Reply in public channels only; DMs only if the account/channel is whitelisted |
+| `whitelist` | Reply only to whitelisted accounts/channels (default)                         |
 
 **Whitelist Format:**
 
@@ -409,6 +409,7 @@ Controls bot reply behavior through the `accessControl` section in `config.yaml`
 ```
 
 **Processing Order:**
+
 1. Platform-level filters (bot self-check, `allowDm`, `respondToMention`)
 2. Access control (`ReplyPolicyEvaluator.shouldReply()`)
 3. Message handling and agent execution
@@ -425,6 +426,7 @@ accessControl:
 ```
 
 **Environment Variable Overrides:**
+
 - `REPLY_TO` -> sets `accessControl.replyTo`
 - `WHITELIST` -> sets `accessControl.whitelist` (comma-separated, fully replaces config file value)
 
@@ -731,6 +733,7 @@ Before committing, ensure:
 ## Related Documentation
 
 - [docs/DESIGN.md](docs/DESIGN.md) - Detailed design document
+- [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) - Development setup and customization guide
 - [docs/features/](docs/features/) - BDD feature specifications
 - [ACP Protocol Spec](https://agentclientprotocol.org/) - Agent Client Protocol
 - [Agent Skills Standard](https://agentskills.io/) - SKILL.md format
