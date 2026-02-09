@@ -32,7 +32,6 @@ The recommended way to run AIr-Friends is by using containers:
    ```bash
    podman run -d --rm \
      -v data:/app/data \
-     -v ./config.yaml:/app/config.yaml:ro \
      --env-file .env \
      --name air-friends \
      ghcr.io/jim60105/air-friends:latest
@@ -69,7 +68,6 @@ cat prompts/system_prompt_override.md
 # Mount when running
 podman run -d --rm \
   -v data:/app/data \
-  -v ./config.yaml:/app/config.yaml:ro \
   -v ./prompts:/app/prompts:ro \
   --env-file .env \
   --name air-friends \
