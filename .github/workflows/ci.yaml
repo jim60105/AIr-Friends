@@ -101,16 +101,17 @@ jobs:
             ${{ runner.os }}-deno-
 
       - name: Run tests with coverage
-        run: deno test --allow-net --allow-read --allow-write --allow-env --allow-run --coverage=coverage
+        run: deno task test:coverage
 
       - name: Generate coverage report
-        run: deno coverage coverage --lcov --output=coverage.lcov
+        run: deno task coverage:report
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v5
         with:
           files: ./coverage.lcov
-          fail_ci_if_error: false
+        env:
+          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
 
   build:
     name: Build Check
