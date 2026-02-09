@@ -53,8 +53,8 @@ This guide provides comprehensive instructions for developing and customizing AI
    deno run --allow-net --allow-read --allow-write --allow-env --allow-run src/main.ts --yolo
    ```
 
-   > [!WARNING]  
-   > YOLO mode auto-approves ALL permission requests from the ACP agent. Only use this in trusted container environments or for testing purposes.
+> [!WARNING]  
+> YOLO mode auto-approves ALL permission requests from the ACP agent. Only use this in trusted container environments or for testing purposes.
 
 ## Available Tasks
 
@@ -286,13 +286,13 @@ When running AIr-Friends in a container, you can customize the bot's character b
      - ./prompts:/app/prompts:ro,Z # Mount your custom prompts
    ```
 
-   > [!IMPORTANT]  
-   > When mounting custom prompts, ensure you provide **all required files**:
-   >
-   > - `system.md` - Main system prompt template
-   > - All fragment files referenced in `system.md` (e.g., `character_name.md`, `character_info.md`, etc.)
-   >
-   > Missing files will result in unresolved `{{placeholders}}` in the system prompt.
+> [!IMPORTANT]  
+> When mounting custom prompts, ensure you provide **all required files**:
+>
+> - `system.md` - Main system prompt template
+> - All fragment files referenced in `system.md` (e.g., `character_name.md`, `character_info.md`, etc.)
+>
+> Missing files will result in unresolved `{{placeholders}}` in the system prompt.
 
 4. **Restart the container** to apply the changes:
 
