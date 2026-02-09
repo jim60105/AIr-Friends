@@ -2,6 +2,8 @@
 
 ![preview image](./docs/preview.webp)
 
+[![codecov](https://codecov.io/gh/jim60105/AIr-Friends/graph/badge.svg?token=0DtdMc3GBq)](https://codecov.io/gh/jim60105/AIr-Friends) [![Build Status](https://img.shields.io/github/actions/workflow/status/jim60105/AIr-Friends/ci.yaml?branch=master)](https://github.com/jim60105/AIr-Friends/actions) [![Release](https://img.shields.io/github/v/tag/jim60105/AIr-Friends?label=release)](https://github.com/jim60105/AIr-Friends/releases) [![License](https://img.shields.io/badge/license-GPLv3-blue.svg)](LICENSE) [![Container Image](https://img.shields.io/badge/ghcr.io%2Fjim60105%2Fair--friends-available-brightgreen)](https://github.com/jim60105/AIr-Friends/pkgs/container/air-friends)
+
 Your AIr friends custom chatbot with integrated shell and skills. Powered by ACP AI agents, it remembers conversations across channels while keeping your data organized in isolated workspaces.
 
 ## ✨ Highlights
