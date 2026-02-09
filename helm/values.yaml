@@ -17,10 +17,15 @@ resources:
     memory: 300Mi
 
 # Security context for the container
-securityContext:
+containerSecurityContext:
   runAsUser: 1000
   runAsGroup: 0
   allowPrivilegeEscalation: false
+
+# Security context for the pod (required for PVC write permissions)
+podSecurityContext:
+  fsGroup: 0
+  fsGroupChangePolicy: "OnRootMismatch"
 
 # -- Environment variables for bot credentials and configuration.
 # These are stored in a Kubernetes Secret.
