@@ -1,0 +1,95 @@
+# AIr-Friends Helm Chart Values
+# See config.example.yaml in the repository for detailed configuration documentation.
+
+image:
+  repository: ghcr.io/jim60105/air-friends
+  tag: latest
+  pullPolicy: Always
+
+replicas: 1
+
+resources:
+  limits:
+    cpu: 1000m
+    memory: 1000Mi
+  requests:
+    cpu: 100m
+    memory: 300Mi
+
+# Security context for the container
+securityContext:
+  runAsUser: 1000
+  runAsGroup: 0
+  allowPrivilegeEscalation: false
+
+# -- Environment variables for bot credentials and configuration.
+# These are stored in a Kubernetes Secret.
+env:
+  # Platform tokens
+  DISCORD_TOKEN: ""
+  MISSKEY_HOST: ""
+  MISSKEY_TOKEN: ""
+
+  # Agent API keys (provide at least one)
+  GITHUB_TOKEN: ""
+  GEMINI_API_KEY: ""
+  OPENCODE_API_KEY: ""
+  OPENROUTER_API_KEY: ""
+
+  # Platform toggles
+  DISCORD_ENABLED: "true"
+  MISSKEY_ENABLED: "false"
+
+  # Agent configuration
+  AGENT_MODEL: "gpt-5-mini"
+  AGENT_DEFAULT_TYPE: "opencode"  # copilot, gemini, or opencode
+
+  # Access control
+  REPLY_TO: "whitelist"           # all, public, or whitelist
+  WHITELIST: ""                   # Comma-separated: discord/account/123,misskey/account/abc
+
+  # Logging
+  LOG_LEVEL: "INFO"
+
+# -- Extra environment variables to add to the container (list of name/value pairs).
+extraEnv: []
+#  - name: DENO_ENV
+#    value: "prod"
+
+# Persistent volume for bot data (workspaces and memory)
+persistence:
+  enabled: true
+  storageClass: "openebs-jiva-csi-default"
+  accessModes:
+    - ReadWriteOnce
+  size: 200Mi
+  # -- Use an existing PVC instead of creating a new one.
+  existingClaim: ""
+
+# -- Mount custom prompts directory via a ConfigMap.
+# Set enabled=true and provide prompt file contents to override the default prompts bundled in the image.
+prompts:
+  enabled: false
+  # -- Map of filename -> content for prompt files to mount at /app/prompts.
+  # At minimum provide system.md and all fragment files referenced in it.
+  files: {}
+  #   system.md: |
+  #     You are {{character_name}}. {{character_info}}
+  #   character_name.md: |
+  #     Yuna
+  #   character_info.md: |
+  #     An AI assistant
+
+# Health check endpoint configuration
+health:
+  port: 8080
+
+# Service configuration (exposes health check endpoint within cluster)
+service:
+  type: ClusterIP
+  port: 80
+  targetPort: 8080
+
+# Kubernetes-specific settings
+kubernetes:
+  clusterDomain: cluster.local

@@ -1,0 +1,15 @@
+{{- if .Values.prompts.enabled }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "air-friends.fullname" . }}-prompts
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "air-friends.labels" . | nindent 4 }}
+data:
+  {{- range $filename, $content := .Values.prompts.files }}
+  {{ $filename }}: |
+    {{- $content | nindent 4 }}
+  {{- end }}
+{{- end }}
