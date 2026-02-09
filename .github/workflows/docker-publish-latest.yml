@@ -47,25 +47,25 @@ jobs:
             RELEASE=${{ github.run_number }}
           platforms: linux/amd64,linux/arm64
           # Cache to registry instead of gha to avoid the capacity limit.
-          cache-from: type=registry,ref=ghcr.io/${{ github.repository_owner }}/ai-friend:cache
-          cache-to: type=registry,ref=ghcr.io/${{ github.repository_owner }}/ai-friend:cache,mode=max
+          cache-from: type=registry,ref=ghcr.io/${{ github.repository_owner }}/air-friends:cache
+          cache-to: type=registry,ref=ghcr.io/${{ github.repository_owner }}/air-friends:cache,mode=max
           sbom: true
           provenance: true
 
       - name: Add attestations for GitHub Container Registry
         uses: actions/attest-build-provenance@v3
         with:
-          subject-name: ghcr.io/${{ github.repository_owner }}/ai-friend
+          subject-name: ghcr.io/${{ github.repository_owner }}/air-friends
           subject-digest: ${{ steps.build_push.outputs.digest }}
 
       - name: Add attestations for DockerHub
         uses: actions/attest-build-provenance@v3
         with:
-          subject-name: ${{ secrets.DOCKERHUB_USERNAME }}/ai-friend
+          subject-name: ${{ secrets.DOCKERHUB_USERNAME }}/air-friends
           subject-digest: ${{ steps.build_push.outputs.digest }}
 
       - name: Add attestations for Quay
         uses: actions/attest-build-provenance@v3
         with:
-          subject-name: quay.io/${{ github.repository_owner }}/ai-friend
+          subject-name: quay.io/${{ github.repository_owner }}/air-friends
           subject-digest: ${{ steps.build_push.outputs.digest }}

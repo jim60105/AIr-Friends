@@ -137,9 +137,9 @@ jobs:
             ${{ runner.os }}-deno-
 
       - name: Compile check
-        run: deno compile --check --output /tmp/ai-friend src/main.ts
+        run: deno compile --check --output /tmp/air-friends src/main.ts
 
       - name: Verify executable
         run: |
-          chmod +x /tmp/ai-friend
-          /tmp/ai-friend --help || true
+          chmod +x /tmp/air-friends
+          /tmp/air-friends --help || true

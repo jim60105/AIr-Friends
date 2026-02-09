@@ -1,10 +1,10 @@
-# AI Friend - Development Guide for AI Agents
+# AIr-Friends - Development Guide for AI Agents
 
-This document provides comprehensive guidance for AI agents working on the AI Friend project. It covers architecture, coding standards, build processes, and key design decisions.
+This document provides comprehensive guidance for AI agents working on the AIr-Friends project. It covers architecture, coding standards, build processes, and key design decisions.
 
 ## Project Overview
 
-AI Friend is a multi-platform conversational AI bot that acts as an **ACP (Agent Client Protocol) Client**, delegating AI reasoning to external agents (GitHub Copilot CLI, Gemini CLI, OpenCode CLI) while maintaining persistent cross-conversation memory.
+AIr-Friends is a multi-platform conversational AI bot that acts as an **ACP (Agent Client Protocol) Client**, delegating AI reasoning to external agents (GitHub Copilot CLI, Gemini CLI, OpenCode CLI) while maintaining persistent cross-conversation memory.
 
 **Key Concepts:**
 
@@ -30,7 +30,7 @@ AI Friend is a multi-platform conversational AI bot that acts as an **ACP (Agent
 
 ```text
 ┌─────────────────────────────────────────────────────────────┐
-│                   AI Friend (ACP CLIENT)                    │
+│                 AIr-Friends (ACP CLIENT)                    │
 ├─────────────────────────────────────────────────────────────┤
 │  Platform Adapters (Discord/Misskey)                        │
 │           ↓                                                 │
@@ -619,7 +619,7 @@ Environment variables override config file values.
 ## File Layout Quick Reference
 
 ```text
-ai-friend/
+AIr-Friends/
 ├── src/
 │   ├── main.ts               # Entry point
 │   ├── bootstrap.ts          # Application bootstrap
