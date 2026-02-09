@@ -83,6 +83,7 @@ ARG UID
 RUN install -d -m 775 -o $UID -g 0 /app && \
     install -d -m 775 -o $UID -g 0 /app/data && \
     install -d -m 775 -o $UID -g 0 /licenses && \
+    install -d -m 775 -o $UID -g 0 /home/deno/ && \
     install -d -m 775 -o $UID -g 0 /home/deno/.local && \
     install -d -m 775 -o $UID -g 0 /home/deno/.config/opencode
 
