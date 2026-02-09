@@ -1,4 +1,4 @@
-# AI Friend Configuration
+# AIr-Friends Configuration
 # Copy this file to config.yaml and customize as needed.
 # Use ${ENV_VAR} placeholders where appropriate (see src/utils/env.ts for supported mappings).
 

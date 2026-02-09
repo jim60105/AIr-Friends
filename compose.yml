@@ -1,7 +1,7 @@
 services:
-  ai-friend:
-    container_name: ai-friend
-    image: ghcr.io/jim60105/ai-friend:latest
+  air-friends:
+    container_name: air-friends
+    image: ghcr.io/jim60105/air-friends:latest
     build:
       context: .
       dockerfile: Containerfile

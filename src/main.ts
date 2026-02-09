@@ -32,7 +32,7 @@ function parseArgs(): { config?: string; help: boolean; yolo: boolean } {
  */
 function printHelp(): void {
   console.log(`
-AI Friend - AI-powered chatbot supporting multiple platforms
+AIr-Friends - AI-powered chatbot supporting multiple platforms
 
 Usage:
   deno run -A src/main.ts [options]
@@ -68,7 +68,7 @@ async function main(): Promise<void> {
   // Configure initial logging (will be reconfigured after config load)
   configureLogger({ level: "INFO", format: "json" });
 
-  logger.info("Starting AI Friend");
+  logger.info("Starting AIr-Friends");
   logger.info("Deno version", { version: Deno.version.deno });
 
   try {
@@ -83,7 +83,7 @@ async function main(): Promise<void> {
     await startPlatforms(context);
 
     // Log startup complete
-    logger.info("AI Friend is running", {
+    logger.info("AIr-Friends is running", {
       platforms: context.platformRegistry.getAllAdapters().map((a) => a.platform),
     });
 

@@ -1,10 +1,10 @@
-# AI Friend Design Document
+# AIr-Friends Design Document
 
-This document describes the architecture and design decisions for the AI Friend project—an AI-powered conversational agent that operates across multiple platforms (Discord, Misskey) with persistent cross-conversation memory and a clean separation between internal reasoning and external communication.
+This document describes the architecture and design decisions for the AIr-Friends project—an AI-powered conversational agent that operates across multiple platforms (Discord, Misskey) with persistent cross-conversation memory and a clean separation between internal reasoning and external communication.
 
 ## Table of Contents
 
-- [AI Friend Design Document](#ai-friend-design-document)
+- [AIr-Friends Design Document](#air-friends-design-document)
   - [Table of Contents](#table-of-contents)
   - [Overview](#overview)
     - [Design Principles](#design-principles)
@@ -54,7 +54,7 @@ This document describes the architecture and design decisions for the AI Friend 
 
 ## Overview
 
-AI Friend is a conversational AI bot designed to:
+AIr-Friends is a conversational AI bot designed to:
 
 1. **Operate across multiple platforms** (Discord, Misskey) with a unified abstraction layer
 2. **Maintain cross-conversation memory** using append-only log files
@@ -78,7 +78,7 @@ AI Friend is a conversational AI bot designed to:
 
 ```text
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│                                AI Friend                                    │
+│                              AIr-Friends                                    │
 ├─────────────────────────────────────────────────────────────────────────────┤
 │                                                                             │
 │  ┌──────────────┐    ┌──────────────┐    ┌──────────────┐                   │
@@ -623,7 +623,7 @@ CMD ["deno", "run", "--allow-net", "--allow-read", "--allow-write", "--allow-env
 **Required Labels:**
 
 ```dockerfile
-LABEL org.opencontainers.image.title="ai-friend"
+LABEL org.opencontainers.image.title="air-friends"
 LABEL org.opencontainers.image.description="AI-powered multi-platform chatbot"
 LABEL org.opencontainers.image.source="https://github.com/..."
 LABEL org.opencontainers.image.version="1.0.0"
@@ -761,7 +761,7 @@ All checks must pass before merge:
 ## Project Structure
 
 ```text
-ai-friend/
+AIr-Friends/
 ├── deno.json                 # Deno configuration (imports, tasks, fmt, lint)
 ├── deno.lock                 # Dependency lock file
 ├── config.yaml               # Default configuration

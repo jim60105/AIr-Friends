@@ -1,4 +1,4 @@
-# AI Friend
+# AIr-Friends
 
 ![preview image](./docs/preview.webp)
 
@@ -21,7 +21,7 @@ An AI-powered conversational chatbot using the [Agent Client Protocol (ACP)](htt
 
 ```text
 ┌─────────────────────────────────────────────────────────────┐
-│                   AI Friend (ACP CLIENT)                    │
+│                 AIr-Friends (ACP CLIENT)                    │
 ├─────────────────────────────────────────────────────────────┤
 │  Platform Adapters (Discord/Misskey)                        │
 │           ↓                                                 │
@@ -56,8 +56,8 @@ An AI-powered conversational chatbot using the [Agent Client Protocol (ACP)](htt
 1. **Clone the repository**
 
    ```bash
-   git clone https://github.com/jim60105/ai-friend.git
-   cd ai-friend
+   git clone https://github.com/jim60105/AIr-Friends.git
+   cd AIr-Friends
    ```
 
 2. **Set up environment variables**
@@ -111,7 +111,7 @@ An AI-powered conversational chatbot using the [Agent Client Protocol (ACP)](htt
 ### Project Structure
 
 ```text
-ai-friend/
+AIr-Friends/
 ├── src/
 │   ├── main.ts              # Entry point
 │   ├── bootstrap.ts         # Application bootstrap
@@ -194,7 +194,7 @@ Configuration is loaded from `config.yaml` (YAML format). See [config.example.ya
 
 ### Access Control & Reply Policy
 
-AI Friend can centrally control whether an incoming event is processed by `AgentCore` using `accessControl`:
+AIr-Friends can centrally control whether an incoming event is processed by `AgentCore` using `accessControl`:
 
 - `all`: reply to all events in public channels and DMs.
 - `public`: always reply in public channels; for DMs, reply only if account/channel is whitelisted.
@@ -245,8 +245,8 @@ podman run -d --rm \
   -v ./config.yaml:/app/config.yaml:ro \
   -v ./my-opencode.json:/home/deno/.config/opencode/opencode.json:ro \
   --env-file .env \
-  --name ai-friend \
-  ghcr.io/jim60105/ai-friend:latest
+  --name air-friends \
+  ghcr.io/jim60105/air-friends:latest
 ```
 
 For more information about OpenCode configuration, see the [OpenCode documentation](https://opencode.ai/docs/config/).
@@ -281,7 +281,7 @@ To customize the bot's character, simply edit the individual fragment files with
 
 ### Customizing Prompts in Container Deployments
 
-When running AI Friend in a container, you can customize the bot's character by mounting your own prompt files without rebuilding the container image:
+When running AIr-Friends in a container, you can customize the bot's character by mounting your own prompt files without rebuilding the container image:
 
 1. **Copy the default prompts to your local directory:**
 
@@ -305,8 +305,8 @@ When running AI Friend in a container, you can customize the bot's character by 
      -v ./config.yaml:/app/config.yaml:ro \
      -v ./my-custom-prompts:/app/prompts:ro \
      --env-file .env \
-     --name ai-friend \
-     ghcr.io/jim60105/ai-friend:latest
+     --name air-friends \
+     ghcr.io/jim60105/air-friends:latest
    ```
 
    Using `compose.yml` (already configured):
@@ -349,8 +349,8 @@ podman run -d --rm \
   -v ./data:/app/data \
   -v ./config.yaml:/app/config.yaml:ro \
   --env-file .env \
-  --name ai-friend \
-  ghcr.io/jim60105/ai-friend:latest
+  --name air-friends \
+  ghcr.io/jim60105/air-friends:latest
 ```
 
 To mount custom prompts:
@@ -361,8 +361,8 @@ podman run -d --rm \
   -v ./config.yaml:/app/config.yaml:ro \
   -v ./my-custom-prompts:/app/prompts:ro \
   --env-file .env \
-  --name ai-friend \
-  ghcr.io/jim60105/ai-friend:latest
+  --name air-friends \
+  ghcr.io/jim60105/air-friends:latest
 ```
 
 See [Customizing Prompts in Container Deployments](#customizing-prompts-in-container-deployments) for details.

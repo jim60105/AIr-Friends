@@ -1,5 +1,5 @@
 {
-  "name": "@ai-friend/core",
+  "name": "@air-friends/core",
   "version": "0.4.0",
   "exports": "./src/main.ts",
   "imports": {
