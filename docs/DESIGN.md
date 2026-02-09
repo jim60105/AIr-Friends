@@ -54,7 +54,7 @@ This document describes the architecture and design decisions for the AIr-Friend
 
 ## Overview
 
-AI Friend is a conversational AI bot designed to:
+AIr-Friends is a conversational AI bot designed to:
 
 1. **Operate across multiple platforms** (Discord, Misskey) with a unified abstraction layer
 2. **Maintain cross-conversation memory** using append-only log files
@@ -78,7 +78,7 @@ AI Friend is a conversational AI bot designed to:
 
 ```text
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│                                AI Friend                                    │
+│                              AIr-Friends                                    │
 ├─────────────────────────────────────────────────────────────────────────────┤
 │                                                                             │
 │  ┌──────────────┐    ┌──────────────┐    ┌──────────────┐                   │
