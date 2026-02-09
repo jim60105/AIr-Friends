@@ -217,6 +217,8 @@ For more information about OpenCode configuration, see the [OpenCode documentati
 
 ## Customizing the Bot
 
+I recommend checking out my blog post, ["🤖 AI Can Cosplay Too? A Beginner's Guide to LLM Character Role-Playing"](https://xn--jgy.tw/AI/design-roleplay-llm-prompts), for tips on setting up your character.
+
 ### Prompt Template System
 
 The system prompt (`prompts/system.md`) supports a template placeholder system. Any `{{placeholder}}` in the file is automatically replaced with the content of the corresponding `.md` file in the same directory.
