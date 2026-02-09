@@ -91,10 +91,6 @@ COPY --link --chown=$UID:0 --chmod=775 LICENSE /licenses/LICENSE
 # Get Dumb Init
 ADD --link --chown=$UID:0 --chmod=755 https://github.com/Yelp/dumb-init/releases/download/v1.2.5/dumb-init_1.2.5_x86_64 /usr/local/bin/dumb-init
 
-# Copy static curl binary for healthcheck
-# https://github.com/tarampampam/curl-docker
-COPY --link --chown=$UID:0 --chmod=755 --from=ghcr.io/tarampampam/curl:8.7.1 /bin/curl /usr/local/bin/curl
-
 # Copy ripgrep binary for internal use (e.g. in skills)
 COPY --link --chown=$UID:0 --chmod=775 --from=ripgrip-unpacker /ripgrip/ripgrep-15.1.0-x86_64-unknown-linux-musl/rg /usr/local/bin/rg
 
@@ -133,10 +129,6 @@ USER $UID
 
 # Signal handling
 STOPSIGNAL SIGTERM
-
-# Health check
-HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-    CMD curl --fail --silent http://localhost:8080/health || exit 0
 
 # Use dumb-init as PID 1 for proper signal handling
 ENTRYPOINT ["dumb-init", "--"]
