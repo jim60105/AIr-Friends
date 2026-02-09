@@ -59,10 +59,7 @@ jobs:
           # Create installation guide
           echo "## Container Image" > release_notes.md
           echo "" >> release_notes.md
-          echo "This release is published to multiple container registries:" >> release_notes.md
-          echo "- GitHub Container Registry (ghcr.io)" >> release_notes.md
-          echo "- Docker Hub" >> release_notes.md
-          echo "- Quay.io" >> release_notes.md
+          echo "This release is published to multiple container registries: [GitHub Container Registry](https://github.com/jim60105/AIr-Friends/pkgs/container/air-friends), [Docker Hub](https://hub.docker.com/r/jim60105/air-friends), [Quay.io](https://quay.io/repository/jim60105/air-friends)" >> release_notes.md
           echo "" >> release_notes.md
           echo "You can pull the image using Podman:" >> release_notes.md
           echo "" >> release_notes.md
