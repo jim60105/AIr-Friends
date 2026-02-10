@@ -160,3 +160,4 @@ vite.config.ts.timestamp-*
 config.local.yaml
 config.yaml
 my-prompts/
+tmp/
