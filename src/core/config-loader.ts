@@ -39,6 +39,16 @@ const DEFAULT_CONFIG: Partial<Config> = {
 };
 
 /**
+ * Default spontaneous post configuration
+ */
+const DEFAULT_SPONTANEOUS_POST = {
+  enabled: false,
+  minIntervalMs: 10800000, // 3 hours
+  maxIntervalMs: 43200000, // 12 hours
+  contextFetchProbability: 0.5,
+};
+
+/**
  * Required configuration fields that must be present
  */
 const REQUIRED_FIELDS = [
@@ -128,6 +138,56 @@ function validateConfig(config: Record<string, unknown>): void {
     }
     // Replace whitelist with only valid entries
     accessControl.whitelist = validEntries;
+  }
+
+  // Validate spontaneous post config for each platform
+  for (const platformName of ["discord", "misskey"] as const) {
+    const platformConfig = (config.platforms as Record<string, Record<string, unknown>>)?.[
+      platformName
+    ];
+    if (!platformConfig) continue;
+
+    // Apply default spontaneous post config if not set
+    if (!platformConfig.spontaneousPost) {
+      platformConfig.spontaneousPost = { ...DEFAULT_SPONTANEOUS_POST };
+    } else {
+      // Merge with defaults for missing fields
+      platformConfig.spontaneousPost = {
+        ...DEFAULT_SPONTANEOUS_POST,
+        ...(platformConfig.spontaneousPost as Record<string, unknown>),
+      };
+    }
+
+    const sp = platformConfig.spontaneousPost as Record<string, unknown>;
+
+    if (sp.minIntervalMs !== undefined && sp.maxIntervalMs !== undefined) {
+      if ((sp.minIntervalMs as number) > (sp.maxIntervalMs as number)) {
+        logger.warn("spontaneousPost.minIntervalMs > maxIntervalMs, swapping values", {
+          platform: platformName,
+        });
+        [sp.minIntervalMs, sp.maxIntervalMs] = [sp.maxIntervalMs, sp.minIntervalMs];
+      }
+      if ((sp.minIntervalMs as number) < 60000) {
+        logger.warn("spontaneousPost.minIntervalMs < 1 minute, clamping to 60000", {
+          platform: platformName,
+        });
+        sp.minIntervalMs = 60000;
+      }
+    }
+    if (sp.contextFetchProbability !== undefined) {
+      if (
+        (sp.contextFetchProbability as number) < 0 ||
+        (sp.contextFetchProbability as number) > 1
+      ) {
+        logger.warn("spontaneousPost.contextFetchProbability out of range [0, 1], clamping", {
+          platform: platformName,
+        });
+        sp.contextFetchProbability = Math.max(
+          0,
+          Math.min(1, sp.contextFetchProbability as number),
+        );
+      }
+    }
   }
 }
 

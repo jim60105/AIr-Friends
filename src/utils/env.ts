@@ -18,6 +18,20 @@ export const ENV_MAPPINGS = {
   HEALTH_PORT: "health.port",
   REPLY_TO: "accessControl.replyTo",
   WHITELIST: "accessControl.whitelist",
+
+  // Spontaneous post settings - Discord
+  DISCORD_SPONTANEOUS_ENABLED: "platforms.discord.spontaneousPost.enabled",
+  DISCORD_SPONTANEOUS_MIN_INTERVAL_MS: "platforms.discord.spontaneousPost.minIntervalMs",
+  DISCORD_SPONTANEOUS_MAX_INTERVAL_MS: "platforms.discord.spontaneousPost.maxIntervalMs",
+  DISCORD_SPONTANEOUS_CONTEXT_FETCH_PROBABILITY:
+    "platforms.discord.spontaneousPost.contextFetchProbability",
+
+  // Spontaneous post settings - Misskey
+  MISSKEY_SPONTANEOUS_ENABLED: "platforms.misskey.spontaneousPost.enabled",
+  MISSKEY_SPONTANEOUS_MIN_INTERVAL_MS: "platforms.misskey.spontaneousPost.minIntervalMs",
+  MISSKEY_SPONTANEOUS_MAX_INTERVAL_MS: "platforms.misskey.spontaneousPost.maxIntervalMs",
+  MISSKEY_SPONTANEOUS_CONTEXT_FETCH_PROBABILITY:
+    "platforms.misskey.spontaneousPost.contextFetchProbability",
 } as const;
 
 /**
@@ -79,6 +93,7 @@ export function applyEnvOverrides(config: Record<string, unknown>): void {
       if (value === "true") parsedValue = true;
       else if (value === "false") parsedValue = false;
       else if (/^\d+$/.test(value)) parsedValue = parseInt(value, 10);
+      else if (/^\d+\.\d+$/.test(value)) parsedValue = parseFloat(value);
       // Handle comma-separated array for WHITELIST
       else if (envName === "WHITELIST") {
         parsedValue = value.split(",").map((s) => s.trim()).filter((s) => s !== "");

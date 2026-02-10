@@ -262,6 +262,23 @@ export class MisskeyAdapter extends PlatformAdapter {
         ? content.slice(0, maxLength - 3) + "..."
         : content;
 
+      // Handle spontaneous post to bot's own timeline
+      if (channelId === "timeline:self") {
+        const result = await this.client.request<{ createdNote: MisskeyNote }>(
+          "notes/create",
+          { text: truncatedContent },
+        );
+
+        logger.debug("Spontaneous note posted", {
+          noteId: result.createdNote.id,
+        });
+
+        return {
+          success: true,
+          messageId: result.createdNote.id,
+        };
+      }
+
       // Handle chat messages
       if (channelId.startsWith("chat:")) {
         return await this.sendChatMessage(channelId, truncatedContent);
@@ -369,6 +386,22 @@ export class MisskeyAdapter extends PlatformAdapter {
     limit: number,
   ): Promise<PlatformMessage[]> {
     try {
+      // For timeline:self, fetch the bot's own recent notes
+      if (channelId === "timeline:self") {
+        if (!this.botId) return [];
+
+        const notes = await this.client.request<MisskeyNote[]>(
+          "users/notes",
+          {
+            userId: this.botId,
+            limit,
+            includeReplies: false,
+          },
+        );
+
+        return notes.map((note) => noteToPlatformMessage(note, this.botId!));
+      }
+
       // For chat:userId, fetch chat message timeline with that user
       if (channelId.startsWith("chat:")) {
         const userId = channelId.slice(5);

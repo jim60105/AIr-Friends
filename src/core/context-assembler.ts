@@ -6,12 +6,13 @@ import { MemoryStore } from "./memory-store.ts";
 import { loadSystemPrompt } from "./config-loader.ts";
 import type {
   AssembledContext,
+  AssembledSpontaneousContext,
   ContextAssemblyConfig,
   FormattedContext,
   MessageFetcher,
 } from "../types/context.ts";
 import type { WorkspaceInfo } from "../types/workspace.ts";
-import type { NormalizedEvent, PlatformMessage } from "../types/events.ts";
+import type { NormalizedEvent, Platform, PlatformMessage } from "../types/events.ts";
 import type { ResolvedMemory } from "../types/memory.ts";
 import type { PlatformEmoji } from "../types/platform.ts";
 
@@ -518,6 +519,131 @@ export class ContextAssembler {
     parts.push("");
 
     return parts.join("\n");
+  }
+
+  /**
+   * Assemble context for a spontaneous post session.
+   * Unlike assembleContext(), this does not have a trigger message.
+   */
+  async assembleSpontaneousContext(
+    platform: Platform,
+    channelId: string,
+    workspace: WorkspaceInfo,
+    messageFetcher: MessageFetcher,
+    options: { fetchRecentMessages: boolean },
+  ): Promise<AssembledSpontaneousContext> {
+    logger.info("Assembling spontaneous context", {
+      platform,
+      channelId,
+      fetchRecentMessages: options.fetchRecentMessages,
+    });
+
+    const systemPrompt = await this.getSystemPrompt();
+    const importantMemories = await this.memoryStore.getImportantMemories(workspace);
+
+    let recentMessages: PlatformMessage[] = [];
+    if (options.fetchRecentMessages) {
+      try {
+        recentMessages = await messageFetcher.fetchRecentMessages(
+          channelId,
+          this.config.recentMessageLimit,
+        );
+      } catch (error) {
+        logger.warn("Failed to fetch recent messages for spontaneous context", {
+          platform,
+          channelId,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+
+    let availableEmojis: PlatformEmoji[] | undefined;
+    if (messageFetcher.fetchEmojis) {
+      try {
+        const emojis = await messageFetcher.fetchEmojis();
+        if (emojis.length > 0) {
+          availableEmojis = emojis;
+        }
+      } catch (error) {
+        logger.warn("Failed to fetch emojis for spontaneous context", {
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+
+    const memoriesText = importantMemories.map((m) => m.content).join("\n");
+    const recentText = recentMessages.map((m) => `${m.username}: ${m.content}`).join("\n");
+    const emojiText = availableEmojis?.map((e) => e.name).join(", ") ?? "";
+    const estimatedTokens = combinedTokenCount(systemPrompt, memoriesText, recentText, emojiText);
+
+    return {
+      systemPrompt,
+      importantMemories,
+      recentMessages,
+      availableEmojis,
+      recentMessagesFetched: options.fetchRecentMessages,
+      estimatedTokens,
+    };
+  }
+
+  /**
+   * Format the assembled spontaneous context into system + user messages.
+   */
+  formatSpontaneousContext(context: AssembledSpontaneousContext): FormattedContext {
+    const parts: string[] = [];
+
+    if (context.importantMemories.length > 0) {
+      parts.push(this.formatMemoriesSection(context.importantMemories));
+    }
+
+    if (context.recentMessages.length > 0) {
+      parts.push(this.formatConversationSection(context.recentMessages));
+    }
+
+    if (context.availableEmojis && context.availableEmojis.length > 0) {
+      parts.push(this.formatEmojiSection(context.availableEmojis));
+    }
+
+    parts.push(this.buildSpontaneousInstructions(context.recentMessagesFetched));
+
+    const userMessage = parts.join("\n");
+    const estimatedTokens = combinedTokenCount(context.systemPrompt, userMessage);
+
+    return {
+      systemMessage: context.systemPrompt,
+      userMessage,
+      estimatedTokens,
+    };
+  }
+
+  /**
+   * Build instructions specific to spontaneous post mode.
+   */
+  private buildSpontaneousInstructions(hasRecentMessages: boolean): string {
+    const lines: string[] = [];
+
+    lines.push("## Spontaneous Post Mode");
+    lines.push("");
+    lines.push("You are creating a spontaneous post. This is NOT a response to any user message.");
+    lines.push("There is no current message to reply to or react to.");
+    lines.push("");
+    lines.push("Guidelines:");
+    lines.push("- Create original content that fits your character and personality");
+    lines.push("- Use the `send-reply` skill to post your content");
+    lines.push("- Do NOT use the `react-message` skill (there is no message to react to)");
+    lines.push("- Do NOT address or respond to any specific user");
+
+    if (hasRecentMessages) {
+      lines.push(
+        "- You may reference recent conversation topics for inspiration, but do not reply to them directly",
+      );
+    } else {
+      lines.push(
+        "- Create something entirely original — share a thought, observation, or topic you find interesting",
+      );
+    }
+
+    return lines.join("\n");
   }
 
   /**

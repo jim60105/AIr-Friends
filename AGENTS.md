@@ -401,11 +401,11 @@ This retry mechanism uses `connector.prompt()` on the existing session — no CL
 
 The retry strategy is configured per agent type via `getRetryPromptStrategy()` in `src/acp/agent-factory.ts`:
 
-| Agent | Max Retries | Retry Supported |
-|-------|-------------|-----------------|
-| Copilot | 1 | Yes |
-| OpenCode | 1 | Yes |
-| Gemini | 1 | Yes |
+| Agent    | Max Retries | Retry Supported |
+| -------- | ----------- | --------------- |
+| Copilot  | 1           | Yes             |
+| OpenCode | 1           | Yes             |
+| Gemini   | 1           | Yes             |
 
 ### 7. Access Control & Reply Policy (Feature 13)
 
@@ -452,6 +452,55 @@ accessControl:
 REPLY_TO=public
 WHITELIST=discord/account/123456789,discord/channel/987654321,misskey/account/abcdef123
 ```
+
+### 8. Spontaneous Posting (Feature 14)
+
+Enables the bot to post messages/notes on its own schedule without user triggers.
+
+**Configuration (per-platform):**
+
+```yaml
+platforms:
+  discord:
+    spontaneousPost:
+      enabled: false # Enable spontaneous posting (default: false)
+      minIntervalMs: 10800000 # Minimum interval: 3 hours (default)
+      maxIntervalMs: 43200000 # Maximum interval: 12 hours (default)
+      contextFetchProbability: 0.5 # Probability of including recent messages (0.0-1.0)
+```
+
+**How It Works:**
+
+1. `SpontaneousScheduler` manages per-platform independent timers
+2. Each execution picks a random interval between min and max
+3. On trigger, the scheduler:
+   - Determines a target (Discord: random whitelist entry; Misskey: `timeline:self`)
+   - Randomly decides whether to fetch recent messages based on `contextFetchProbability`
+   - Calls `SessionOrchestrator.processSpontaneousPost()` to run the agent
+4. The agent receives a special prompt instructing it to create original content
+5. Errors never crash the bot — the next execution is always scheduled
+
+**Platform Target Selection:**
+
+| Platform | Target Selection                                               |
+| -------- | -------------------------------------------------------------- |
+| Discord  | Random channel/account from whitelist (DM for account entries) |
+| Misskey  | Bot's own timeline (`timeline:self`) — creates a new note      |
+
+**Environment Variable Overrides:**
+
+- `DISCORD_SPONTANEOUS_ENABLED` → `platforms.discord.spontaneousPost.enabled`
+- `DISCORD_SPONTANEOUS_MIN_INTERVAL_MS` → `platforms.discord.spontaneousPost.minIntervalMs`
+- `DISCORD_SPONTANEOUS_MAX_INTERVAL_MS` → `platforms.discord.spontaneousPost.maxIntervalMs`
+- `DISCORD_SPONTANEOUS_CONTEXT_FETCH_PROBABILITY` → `platforms.discord.spontaneousPost.contextFetchProbability`
+- Same pattern for Misskey with `MISSKEY_SPONTANEOUS_*` prefix
+
+**Key Components:**
+
+- `src/core/spontaneous-scheduler.ts` — Timer management and execution
+- `src/core/spontaneous-target.ts` — Platform-specific target determination
+- `SessionOrchestrator.processSpontaneousPost()` — Triggerless session flow
+- `ContextAssembler.assembleSpontaneousContext()` — Context assembly without trigger message
 
 ## Prompt Template System
 
@@ -659,6 +708,8 @@ AIr-Friends/
 │   │   ├── message-handler.ts      # Platform event processing
 │   │   ├── reply-dispatcher.ts     # Reply sending coordination
 │   │   ├── reply-policy.ts         # Access control & reply policy
+│   │   ├── spontaneous-scheduler.ts # Spontaneous posting scheduler
+│   │   ├── spontaneous-target.ts    # Platform-specific target selection
 │   │   └── config-loader.ts        # Configuration loading
 │   ├── platforms/
 │   │   ├── platform-adapter.ts     # Platform adapter base class

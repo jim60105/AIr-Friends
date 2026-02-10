@@ -15,6 +15,12 @@ platforms:
     allowDm: true # Respond to direct messages (default: true)
     respondToMention: true # Respond when mentioned (default: true)
     commandPrefix: "!" # Optional command prefix (set empty to disable)
+    # Spontaneous posting: agent posts messages on its own schedule
+    spontaneousPost:
+      enabled: false # Enable spontaneous posting (default: false)
+      minIntervalMs: 10800000 # Minimum interval: 3 hours (default)
+      maxIntervalMs: 43200000 # Maximum interval: 12 hours (default)
+      contextFetchProbability: 0.5 # Probability of including recent messages (0.0-1.0, default: 0.5)
 
   misskey:
     enabled: false # true/false (default: false); override with env MISSKEY_ENABLED
@@ -27,6 +33,12 @@ platforms:
       enabled: true # Auto-reconnect (default: true)
       maxAttempts: 5 # Max reconnect attempts (default: 5)
       baseDelay: 1000 # Base delay between reconnect attempts in ms (default: 1000)
+    # Spontaneous posting: agent posts notes on its own schedule
+    spontaneousPost:
+      enabled: false # Enable spontaneous posting (default: false)
+      minIntervalMs: 10800000 # Minimum interval: 3 hours (default)
+      maxIntervalMs: 43200000 # Maximum interval: 12 hours (default)
+      contextFetchProbability: 0.5 # Probability of including recent messages (0.0-1.0, default: 0.5)
 
 # Agent/LLM configuration
 agent:

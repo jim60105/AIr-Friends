@@ -7,32 +7,56 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- Added: Spontaneous posting feature — the bot can autonomously post messages/notes on a configurable random schedule without user triggers.
+  - New `SpontaneousPostConfig` type with `enabled`, `minIntervalMs`, `maxIntervalMs`, and `contextFetchProbability` fields.
+  - New `SpontaneousScheduler` class manages per-platform independent timers with random intervals.
+  - New `assembleSpontaneousContext()` and `formatSpontaneousContext()` methods in `ContextAssembler` for triggerless context assembly.
+  - New `processSpontaneousPost()` method in `SessionOrchestrator` for executing agent sessions without trigger events.
+  - New `determineSpontaneousTarget()` function: Discord selects from whitelist entries; Misskey posts to `timeline:self`.
+  - Discord adapter: new `getDmChannelId()` method for creating DM channels with whitelisted accounts.
+  - Misskey adapter: new `timeline:self` channel type for bot's own timeline in `sendReply()` and `fetchRecentMessages()`.
+  - `PlatformAdapter` base class: new abstract `getBotId()` method.
+  - `SessionRegistry.register()`: `triggerEvent` is now optional (undefined for spontaneous posts).
+  - Environment variable overrides: `DISCORD_SPONTANEOUS_ENABLED`, `DISCORD_SPONTANEOUS_MIN_INTERVAL_MS`, `DISCORD_SPONTANEOUS_MAX_INTERVAL_MS`, `DISCORD_SPONTANEOUS_CONTEXT_FETCH_PROBABILITY` (and Misskey equivalents).
+  - Float conversion support in `applyEnvOverrides()` for probability values.
+  - Config validation: auto-swaps reversed min/max intervals, clamps minIntervalMs ≥ 60s, clamps contextFetchProbability to [0, 1].
+  - BDD feature spec: `docs/features/14-spontaneous-posting.feature`.
+  - Comprehensive unit tests for scheduler, target selection, config loading, and env overrides.
+
 ## [0.5.0] - 2026-02-09
 
 ### Changed
+
 - Changed: Rebranded the project from "ai-friend" to "AIr-Friends" across documentation, CI/CD pipelines, container labels, compose services, and package names (including `deno.json`). This updates runtime image names and repository references to the new branding.
 
 ### Added
+
 - Added: Documentation preview images and updated the README preview image.
 - Added: Consolidated registry links in release notes for GitHub Container Registry, Docker Hub, and Quay.
 
 ## [0.4.0] - 2026-02-09
 
 ### Added
+
 - Added: Access Control & Reply Policy configuration support (`accessControl`) with `ReplyPolicy` type (`all` | `public` | `whitelist`), whitelist entries, and environment overrides `REPLY_TO` and `WHITELIST`.
 - Added: `ReplyPolicyEvaluator` and centralized reply filtering integrated into `AgentCore` to enforce access-control before message handling and agent execution.
 - Added: Configuration loading, validation, and comprehensive unit tests for access-control behavior and whitelist parsing.
 
 ### Changed
+
 - Changed: Default `accessControl.replyTo` is `whitelist` with an empty `whitelist` (secure default requiring explicit configuration to enable replies).
 - Changed: `WHITELIST` environment variable is parsed as a comma-separated list and fully replaces the YAML whitelist when provided.
 
 ### Security
+
 - Security: Improved whitelist entry validation pattern to more strictly validate platform and entry types.
 
 ## [0.3.0] - 2026-02-09
 
 ### Added
+
 - Added: Integrate HealthCheckServer and Skill API server startup in bootstrap. The system now initializes and stops the HealthCheckServer when `config.health.enabled` is true, and exposes the Skill API server instance via `AgentCore.getSkillAPIServer()` for orchestration and tests.
 - Added: Default to OpenCode agent and streamline agent configuration. Switched default ACP agent type to `opencode` in examples, clarified environment flags, improved Copilot/Gemini/OpenCode execution flags, and updated README and tests to reflect the simplified agent-factory configuration.
 

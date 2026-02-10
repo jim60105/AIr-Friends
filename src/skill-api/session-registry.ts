@@ -27,8 +27,8 @@ export interface ActiveSession {
   workspace: WorkspaceInfo;
   /** Reference to platform adapter */
   platformAdapter: PlatformAdapter;
-  /** Trigger event */
-  triggerEvent: NormalizedEvent;
+  /** Trigger event (undefined for spontaneous posts) */
+  triggerEvent?: NormalizedEvent;
   /** Session start time */
   startedAt: Date;
   /** Session timeout (ms) */

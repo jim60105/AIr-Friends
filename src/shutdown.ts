@@ -69,6 +69,12 @@ export class ShutdownHandler {
         await healthCheckServer.stop();
       }
 
+      // Stop spontaneous scheduler before disconnecting platforms
+      if (this.context.spontaneousScheduler) {
+        logger.info("Stopping spontaneous scheduler");
+        this.context.spontaneousScheduler.stop();
+      }
+
       // Shutdown agent core (stops skill API server, session registry)
       logger.info("Shutting down agent core");
       await agentCore.shutdown();

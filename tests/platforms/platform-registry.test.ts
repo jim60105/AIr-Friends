@@ -82,6 +82,10 @@ class MockAdapter extends PlatformAdapter {
     return userId === this.selfId;
   }
 
+  getBotId(): string | null {
+    return this.selfId;
+  }
+
   // Helper for testing
   simulateEvent(event: NormalizedEvent): Promise<void> {
     return this.emitEvent(event);

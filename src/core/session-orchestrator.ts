@@ -12,7 +12,7 @@ import { WorkspaceManager } from "./workspace-manager.ts";
 import type { SkillRegistry } from "@skills/registry.ts";
 import type { SessionRegistry } from "../skill-api/session-registry.ts";
 import type { Config } from "../types/config.ts";
-import type { NormalizedEvent } from "../types/events.ts";
+import type { NormalizedEvent, Platform } from "../types/events.ts";
 import type { PlatformAdapter } from "@platforms/platform-adapter.ts";
 import type { AgentConnectorOptions, ClientConfig } from "@acp/types.ts";
 import { join } from "@std/path";
@@ -327,11 +327,227 @@ export class SessionOrchestrator {
   }
 
   /**
+   * Process a spontaneous post without a user-triggered event.
+   * Used by the SpontaneousScheduler to create unprompted posts.
+   */
+  async processSpontaneousPost(
+    platform: Platform,
+    channelId: string,
+    platformAdapter: PlatformAdapter,
+    options: {
+      botId: string;
+      fetchRecentMessages: boolean;
+    },
+  ): Promise<SessionResponse> {
+    const sessionLoggerName = `spontaneous:${platform}:${channelId}`;
+    const sessionLogger = logger.child(sessionLoggerName);
+
+    sessionLogger.info("Processing spontaneous post", {
+      platform,
+      channelId,
+      fetchRecentMessages: options.fetchRecentMessages,
+    });
+
+    try {
+      // 1. Create workspace for the bot itself
+      const botEvent: NormalizedEvent = {
+        platform,
+        channelId,
+        userId: options.botId,
+        messageId: `spontaneous_${Date.now()}`,
+        isDm: false,
+        guildId: "",
+        content: "",
+        timestamp: new Date(),
+      };
+      const workspace = await this.workspaceManager.getOrCreateWorkspace(botEvent);
+
+      // 2. Register session WITHOUT triggerEvent
+      let shellSessionId: string | null = null;
+      if (this.config.skillApi?.enabled) {
+        shellSessionId = this.sessionRegistry.register({
+          platform,
+          channelId,
+          userId: options.botId,
+          isDm: false,
+          workspace,
+          platformAdapter,
+          // triggerEvent is omitted (undefined)
+          timeoutMs: this.config.skillApi.sessionTimeoutMs,
+        });
+
+        const sessionIdFile = join(workspace.path, "SESSION_ID");
+        await Deno.writeTextFile(sessionIdFile, shellSessionId);
+        sessionLogger.info("Shell session registered", { shellSessionId });
+      }
+
+      // 3. Assemble spontaneous context
+      const context = await this.contextAssembler.assembleSpontaneousContext(
+        platform,
+        channelId,
+        workspace,
+        platformAdapter,
+        { fetchRecentMessages: options.fetchRecentMessages },
+      );
+
+      // 4. Format context
+      const formattedContext = this.contextAssembler.formatSpontaneousContext(context);
+      const fullPrompt = this.buildSpontaneousPrompt(formattedContext, shellSessionId);
+
+      sessionLogger.debug("Spontaneous prompt built", {
+        estimatedTokens: formattedContext.estimatedTokens,
+      });
+
+      // 5. Create client config for ACP
+      const clientConfig: ClientConfig = {
+        workingDir: workspace.path,
+        platform,
+        userId: options.botId,
+        channelId,
+        isDM: false,
+        yolo: this.yolo,
+      };
+
+      // 6. Build and execute ACP connector
+      const agentType = getDefaultAgentType(this.config);
+      const connector = this.createConnector({
+        agentConfig: createAgentConfig(agentType, workspace.path, this.config, this.yolo),
+        clientConfig,
+        skillRegistry: this.skillRegistry,
+        logger: sessionLogger,
+      });
+
+      try {
+        await connector.connect();
+        sessionLogger.info("Agent connected");
+
+        const sessionId = await connector.createSession();
+        await connector.setSessionModel(sessionId, this.config.agent.model);
+
+        // Clear reply state
+        const replyHandler = this.skillRegistry.getReplyHandler();
+        replyHandler.clearReplyState(workspace.key, channelId);
+
+        // Send prompt
+        const response = await connector.prompt(sessionId, fullPrompt);
+        sessionLogger.info("Agent session completed", {
+          stopReason: response.stopReason,
+        });
+
+        let replySent = replyHandler.hasReplySent(workspace.key, channelId);
+
+        // Retry if no reply sent
+        if (!replySent && response.stopReason === "end_turn") {
+          sessionLogger.warn("Agent completed without reply, retrying");
+
+          const retryStrategy = getRetryPromptStrategy(agentType);
+          for (let attempt = 0; attempt < retryStrategy.maxRetries; attempt++) {
+            replyHandler.clearReplyState(workspace.key, channelId);
+
+            const retryResponse = await connector.prompt(
+              sessionId,
+              retryStrategy.retryPromptMessage,
+            );
+
+            replySent = replyHandler.hasReplySent(workspace.key, channelId);
+            if (replySent || retryResponse.stopReason !== "end_turn") break;
+          }
+
+          replySent = replyHandler.hasReplySent(workspace.key, channelId);
+        }
+
+        return {
+          success: replySent,
+          replySent,
+          error: replySent ? undefined : "Agent did not send a reply",
+        };
+      } finally {
+        await connector.disconnect();
+        sessionLogger.debug("Agent disconnected");
+
+        if (shellSessionId) {
+          this.sessionRegistry.remove(shellSessionId);
+          const sessionIdFile = join(workspace.path, "SESSION_ID");
+          try {
+            await Deno.remove(sessionIdFile);
+          } catch (error) {
+            if (!(error instanceof Deno.errors.NotFound)) {
+              sessionLogger.warn("Failed to remove SESSION_ID file", {
+                error: error instanceof Error ? error.message : String(error),
+              });
+            }
+          }
+        }
+      }
+    } catch (error) {
+      sessionLogger.error("Spontaneous post session failed", {
+        platform,
+        channelId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return {
+        success: false,
+        replySent: false,
+        error: error instanceof Error ? error.message : "Unknown error",
+      };
+    }
+  }
+
+  /**
    * Create an AgentConnector instance.
    * Protected to allow test subclasses to inject mocks.
    */
   protected createConnector(options: AgentConnectorOptions): AgentConnector {
     return new AgentConnector(options);
+  }
+
+  /**
+   * Build the full prompt to send to the agent for spontaneous posts
+   */
+  private buildSpontaneousPrompt(
+    context: {
+      systemMessage: string;
+      userMessage: string;
+    },
+    sessionId: string | null,
+  ): string {
+    const parts: string[] = [];
+
+    // System prompt
+    parts.push(context.systemMessage);
+    parts.push("");
+
+    // Session information
+    if (sessionId) {
+      parts.push("# Session Information");
+      parts.push("");
+      parts.push(`Your session ID is: ${sessionId}`);
+      parts.push(
+        "Use this session ID when calling skills that require --session-id parameter.",
+      );
+      parts.push("");
+    }
+
+    // User message with context
+    parts.push("# Context");
+    parts.push("");
+    parts.push(context.userMessage);
+    parts.push("");
+
+    // Instructions for spontaneous mode
+    parts.push("# Instructions");
+    parts.push("");
+    parts.push("This is a spontaneous post session. You are NOT responding to any user message.");
+    parts.push("- Create original content that fits your character and personality");
+    parts.push("- Use the `send-reply` skill to post your content");
+    parts.push("- Do NOT use the `react-message` skill (there is no message to react to)");
+    parts.push("- Do NOT address or respond to any specific user");
+    parts.push("You may use other available skills as needed:");
+    parts.push("- `memory-save`: Save important information");
+    parts.push("- `memory-search`: Search for saved memories");
+    parts.push("- `memory-patch`: Update memory metadata");
+
+    return parts.join("\n");
   }
 
   /**

@@ -3,11 +3,14 @@
 import { loadConfig } from "@core/config-loader.ts";
 import type { Config } from "./types/config.ts";
 import { AgentCore } from "@core/agent-core.ts";
+import { SpontaneousScheduler } from "@core/spontaneous-scheduler.ts";
+import { determineSpontaneousTarget } from "@core/spontaneous-target.ts";
 import { getPlatformRegistry } from "@platforms/platform-registry.ts";
 import { DiscordAdapter } from "@platforms/discord/index.ts";
 import { MisskeyAdapter } from "@platforms/misskey/index.ts";
 import { HealthCheckServer } from "./healthcheck.ts";
 import { configureLogger, createLogger } from "@utils/logger.ts";
+import type { Platform } from "./types/events.ts";
 
 const logger = createLogger("Bootstrap");
 
@@ -19,6 +22,7 @@ export interface AppContext {
   agentCore: AgentCore;
   platformRegistry: ReturnType<typeof getPlatformRegistry>;
   healthCheckServer: HealthCheckServer | null;
+  spontaneousScheduler: SpontaneousScheduler | null;
   yolo: boolean;
 }
 
@@ -71,6 +75,56 @@ export async function bootstrap(configPath?: string, yolo = false): Promise<AppC
     healthCheckServer.start();
   }
 
+  // Initialize Spontaneous Scheduler
+  const spontaneousScheduler = new SpontaneousScheduler(config);
+  spontaneousScheduler.setCallback(async (platform: Platform) => {
+    const adapter = platformRegistry.getAdapter(platform);
+    if (!adapter) {
+      logger.warn("Platform adapter not found", { platform });
+      return;
+    }
+
+    if (adapter.getConnectionStatus().state !== "connected") {
+      logger.warn("Platform not connected, skipping spontaneous post", { platform });
+      return;
+    }
+
+    const botId = adapter.getBotId();
+    if (!botId) {
+      logger.warn("Bot ID not available, skipping spontaneous post", { platform });
+      return;
+    }
+
+    const target = await determineSpontaneousTarget(platform, adapter, config);
+    if (!target) {
+      logger.warn("No valid target for spontaneous post", { platform });
+      return;
+    }
+
+    const sp = config.platforms[platform].spontaneousPost!;
+    const fetchRecentMessages = Math.random() < sp.contextFetchProbability;
+
+    logger.info("Triggering spontaneous post", {
+      platform,
+      channelId: target.channelId,
+      fetchRecentMessages,
+    });
+
+    const response = await agentCore.getOrchestrator().processSpontaneousPost(
+      platform,
+      target.channelId,
+      adapter,
+      { botId, fetchRecentMessages },
+    );
+
+    if (!response.success) {
+      logger.warn("Spontaneous post did not succeed", {
+        platform,
+        error: response.error,
+      });
+    }
+  });
+
   logger.info("Bootstrap completed");
 
   const context: AppContext = {
@@ -78,6 +132,7 @@ export async function bootstrap(configPath?: string, yolo = false): Promise<AppC
     agentCore,
     platformRegistry,
     healthCheckServer,
+    spontaneousScheduler,
     yolo,
   };
 
@@ -105,6 +160,11 @@ export async function startPlatforms(context: AppContext): Promise<void> {
 
   // Connect all platforms
   await platformRegistry.connectAll();
+
+  // Start spontaneous scheduler after platforms are connected
+  if (context.spontaneousScheduler) {
+    context.spontaneousScheduler.start();
+  }
 
   logger.info("All platforms connected");
 }
