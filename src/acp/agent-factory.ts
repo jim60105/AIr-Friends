@@ -1,6 +1,6 @@
 // src/acp/agent-factory.ts
 
-import type { AgentConfig, AgentType } from "./types.ts";
+import type { AgentConfig, AgentType, RetryPromptStrategy } from "./types.ts";
 import type { Config } from "../types/config.ts";
 
 /**
@@ -184,4 +184,37 @@ export function createAgentConfig(
  */
 export function getDefaultAgentType(appConfig: Config): AgentType {
   return appConfig.agent.defaultAgentType ?? "copilot";
+}
+
+/**
+ * Get the retry prompt strategy for a specific agent type.
+ * Used when an agent completes a prompt turn without sending a reply.
+ * Each agent type may need different retry prompt messages or behaviors.
+ */
+export function getRetryPromptStrategy(type: AgentType): RetryPromptStrategy {
+  const defaultRetryMessage =
+    "System message: You have a special turn. Regardless of whether you have already sent-reply, please send another send-reply.";
+
+  switch (type) {
+    case "copilot":
+      return {
+        retryPromptMessage: defaultRetryMessage,
+        maxRetries: 1,
+      };
+
+    case "opencode":
+      return {
+        retryPromptMessage: defaultRetryMessage,
+        maxRetries: 1,
+      };
+
+    case "gemini":
+      return {
+        retryPromptMessage: defaultRetryMessage,
+        maxRetries: 1,
+      };
+
+    default:
+      throw new Error(`Unknown agent type: ${type}`);
+  }
 }

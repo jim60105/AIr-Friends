@@ -315,3 +315,88 @@ Deno.test("SessionOrchestrator - handles /clear with leading whitespace", async 
     await Deno.remove(tempDir, { recursive: true });
   }
 });
+
+Deno.test("SessionOrchestrator - processMessage handles agent failure gracefully with retry logic", async () => {
+  const tempDir = await Deno.makeTempDir();
+  try {
+    const config = createTestConfig(tempDir);
+    const workspaceManager = new WorkspaceManager({
+      repoPath: config.workspace.repoPath,
+      workspacesDir: config.workspace.workspacesDir,
+    });
+    const memoryStore = new MemoryStore(workspaceManager, {
+      searchLimit: config.memory.searchLimit,
+      maxChars: config.memory.maxChars,
+    });
+    const skillRegistry = new SkillRegistry(memoryStore);
+
+    // Create a system prompt file
+    await Deno.mkdir(`${tempDir}/prompts`, { recursive: true });
+    await Deno.writeTextFile(
+      `${tempDir}/prompts/system.md`,
+      "You are a helpful assistant.",
+    );
+
+    const contextAssembler = new ContextAssembler(memoryStore, {
+      systemPromptPath: `${tempDir}/prompts/system.md`,
+      recentMessageLimit: config.memory.recentMessageLimit,
+      tokenLimit: config.agent.tokenLimit,
+      memoryMaxChars: config.memory.maxChars,
+    });
+
+    const sessionRegistry = new SessionRegistry();
+
+    const orchestrator = new SessionOrchestrator(
+      workspaceManager,
+      contextAssembler,
+      skillRegistry,
+      config,
+      sessionRegistry,
+    );
+
+    const event = createTestEvent();
+    const platformAdapter = new MockPlatformAdapter() as unknown as PlatformAdapter;
+
+    // This will fail because copilot CLI is not installed,
+    // but should not crash and should return error response
+    const response = await orchestrator.processMessage(event, platformAdapter);
+
+    assertExists(response);
+    assertEquals(response.success, false);
+    assertEquals(response.replySent, false);
+    assertExists(response.error);
+
+    sessionRegistry.stop();
+  } finally {
+    await Deno.remove(tempDir, { recursive: true });
+  }
+});
+
+Deno.test("SessionOrchestrator - reply state is accessible via skill registry", async () => {
+  const tempDir = await Deno.makeTempDir();
+  try {
+    const config = createTestConfig(tempDir);
+    const workspaceManager = new WorkspaceManager({
+      repoPath: config.workspace.repoPath,
+      workspacesDir: config.workspace.workspacesDir,
+    });
+    const memoryStore = new MemoryStore(workspaceManager, {
+      searchLimit: config.memory.searchLimit,
+      maxChars: config.memory.maxChars,
+    });
+    const skillRegistry = new SkillRegistry(memoryStore);
+
+    // Verify reply handler is accessible and supports clear/check operations
+    const replyHandler = skillRegistry.getReplyHandler();
+    assertExists(replyHandler);
+
+    // Verify initial state
+    assertEquals(replyHandler.hasReplySent("test/user", "channel1"), false);
+
+    // Verify clearReplyState doesn't throw on non-existent key
+    replyHandler.clearReplyState("test/user", "channel1");
+    assertEquals(replyHandler.hasReplySent("test/user", "channel1"), false);
+  } finally {
+    await Deno.remove(tempDir, { recursive: true });
+  }
+});

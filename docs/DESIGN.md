@@ -359,6 +359,18 @@ Agent Output (internal)
 - All non-reply outputs remain internal
 - Replies are threaded to the original message when applicable (platform-dependent)
 
+### Retry on Missing Reply
+
+**Single Reply Rule with Retry**: The system enforces one reply per session, but if the agent completes without sending any reply, the system will:
+
+1. Clear the reply state (`ReplyHandler.clearReplyState`)
+2. Send a retry prompt: `"System message: You have a special turn. Regardless of whether you have already sent-reply, please send another send-reply."`
+3. Check again if the reply was sent
+
+The retry uses the same ACP connection and session — it calls `connector.prompt()` again on the existing `sessionId`. This is standard ACP protocol usage.
+
+**Retry limit**: Maximum 1 retry attempt per session to prevent infinite loops.
+
 ---
 
 ## Memory System Design
