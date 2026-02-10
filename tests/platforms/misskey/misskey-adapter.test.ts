@@ -139,6 +139,20 @@ Deno.test("shouldRespondToNote - should not respond to DM when not allowed", () 
   assertEquals(result, false);
 });
 
+Deno.test("shouldRespondToNote - should not respond to bot accounts", () => {
+  const note = createMockNote({
+    user: {
+      ...createMockNote().user,
+      isBot: true,
+    },
+  });
+  const result = shouldRespondToNote(note, "bot123", "testbot", {
+    allowDm: true,
+    respondToMention: true,
+  });
+  assertEquals(result, false);
+});
+
 Deno.test("shouldRespondToNote - should respond to mention", () => {
   const note = createMockNote({ text: "Hello @testbot" });
   const result = shouldRespondToNote(note, "bot123", "testbot", {
@@ -175,6 +189,19 @@ Deno.test("noteToPlatformMessage - should convert correctly", () => {
 
 Deno.test("noteToPlatformMessage - should mark bot messages", () => {
   const note = createMockNote({ userId: "bot123" });
+  const msg = noteToPlatformMessage(note, "bot123");
+  assertEquals(msg.isBot, true);
+});
+
+Deno.test("noteToPlatformMessage - should mark other bot messages", () => {
+  const note = createMockNote({
+    userId: "otherbot456",
+    user: {
+      ...createMockNote().user,
+      id: "otherbot456",
+      isBot: true,
+    },
+  });
   const msg = noteToPlatformMessage(note, "bot123");
   assertEquals(msg.isBot, true);
 });
@@ -284,6 +311,19 @@ Deno.test("chatMessageToPlatformMessage - should mark bot messages", () => {
   assertEquals(msg.isBot, true);
 });
 
+Deno.test("chatMessageToPlatformMessage - should mark other bot messages", () => {
+  const message = createMockChatMessage({
+    fromUserId: "otherbot456",
+    fromUser: {
+      ...createMockChatMessage().fromUser,
+      id: "otherbot456",
+      isBot: true,
+    },
+  });
+  const msg = chatMessageToPlatformMessage(message, "bot123");
+  assertEquals(msg.isBot, true);
+});
+
 Deno.test("chatMessageToPlatformMessage - should fallback to username if name is null", () => {
   const message = createMockChatMessage();
   // deno-lint-ignore no-explicit-any
@@ -309,6 +349,17 @@ Deno.test("shouldRespondToChatMessage - should not respond to self", () => {
   const message = createMockChatMessage({ fromUserId: "bot123" });
   const result = shouldRespondToChatMessage(message, "bot123", { allowDm: true });
 
+  assertEquals(result, false);
+});
+
+Deno.test("shouldRespondToChatMessage - should not respond to bot accounts", () => {
+  const message = createMockChatMessage({
+    fromUser: {
+      ...createMockChatMessage().fromUser,
+      isBot: true,
+    },
+  });
+  const result = shouldRespondToChatMessage(message, "bot123", { allowDm: true });
   assertEquals(result, false);
 });
 

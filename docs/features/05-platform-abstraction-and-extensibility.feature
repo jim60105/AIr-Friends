@@ -29,6 +29,21 @@
     而且這些能力必須以 skill 的方式提供給 Agent 呼叫
     而且 skill 介面不得綁死 Discord 專用術語
 
+  情境: Misskey - 忽略來自 bot 帳號的 Note
+    假設 Misskey adapter 已連線
+    當 收到一則 mention note，其 user.isBot 為 true
+    那麼 shouldRespondToNote 回傳 false，不觸發 agent
+
+  情境: Misskey - 忽略來自 bot 帳號的 Chat 訊息
+    假設 Misskey adapter 已連線
+    當 收到一則 chat message，其 fromUser.isBot 為 true
+    那麼 shouldRespondToChatMessage 回傳 false，不觸發 agent
+
+  情境: Misskey - Recent Messages 正確標記其他 Bot 訊息
+    當 收到一則來自其他 bot 帳號的 note（user.isBot 為 true）
+    那麼 noteToPlatformMessage 的 PlatformMessage.isBot 為 true
+    而且在對話歷史中該訊息顯示 [Bot] 前綴
+
   情境: 工作目錄命名需包含 platform 以避免跨平台混用記憶
     當 Bot 在不同平台收到互動事件
     那麼系統必須把 platform 納入 workspace_key 的組成
