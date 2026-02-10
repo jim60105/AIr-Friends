@@ -633,6 +633,10 @@ logger.error("Operation failed", { error: err.message });
 
 **Never log sensitive information** (tokens, passwords, private message content).
 
+### GELF Output
+
+When `logging.gelf.enabled` is `true` and `logging.gelf.endpoint` is set, all log entries are also sent to a GELF HTTP endpoint via fire-and-forget `fetch()`. The GELF transport is initialized in `bootstrap.ts` and injected into the global logger config. The transport module is at `src/utils/gelf-transport.ts`.
+
 ## Testing
 
 - Unit tests: `{module}.test.ts`

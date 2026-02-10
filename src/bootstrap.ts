@@ -10,6 +10,7 @@ import { DiscordAdapter } from "@platforms/discord/index.ts";
 import { MisskeyAdapter } from "@platforms/misskey/index.ts";
 import { HealthCheckServer } from "./healthcheck.ts";
 import { configureLogger, createLogger } from "@utils/logger.ts";
+import { GelfTransport } from "@utils/gelf-transport.ts";
 import type { Platform } from "./types/events.ts";
 
 const logger = createLogger("Bootstrap");
@@ -37,10 +38,27 @@ export async function bootstrap(configPath?: string, yolo = false): Promise<AppC
   logger.info("Loading configuration", { path: configFile });
   const config = await loadConfig(configPath ? configPath.replace(/\/[^/]+$/, "") : ".");
 
+  // Initialize GELF transport if configured
+  let gelfTransport: GelfTransport | undefined;
+  if (config.logging.gelf?.enabled && config.logging.gelf.endpoint) {
+    gelfTransport = new GelfTransport(config.logging.gelf);
+    console.log(JSON.stringify({
+      timestamp: new Date().toISOString(),
+      level: "INFO",
+      module: "Bootstrap",
+      message: "GELF transport initialized",
+      context: {
+        endpoint: config.logging.gelf.endpoint,
+        hostname: config.logging.gelf.hostname ?? "air-friends",
+      },
+    }));
+  }
+
   // Configure logger based on config
   configureLogger({
     level: config.logging.level,
     format: "json",
+    gelfTransport,
   });
 
   // Initialize agent core (this initializes all necessary components)

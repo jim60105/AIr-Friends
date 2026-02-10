@@ -93,11 +93,32 @@ export interface WorkspaceConfig {
 }
 
 /**
+ * GELF (Graylog Extended Log Format) output configuration
+ */
+export interface GelfConfig {
+  /** Enable GELF log output (default: false) */
+  enabled: boolean;
+
+  /** GELF HTTP endpoint URL (e.g., "http://graylog.example.com:12202/gelf") */
+  endpoint: string;
+
+  /**
+   * Hostname to include in GELF messages.
+   * This identifies the source of the log message in the log server.
+   * (default: "air-friends")
+   */
+  hostname?: string;
+}
+
+/**
  * Logging configuration
  */
 export interface LoggingConfig {
   /** Log level (DEBUG, INFO, WARN, ERROR, FATAL) */
   level: keyof typeof LogLevel;
+
+  /** GELF output configuration (optional) */
+  gelf?: GelfConfig;
 }
 
 /**

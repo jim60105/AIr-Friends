@@ -32,6 +32,11 @@ export const ENV_MAPPINGS = {
   MISSKEY_SPONTANEOUS_MAX_INTERVAL_MS: "platforms.misskey.spontaneousPost.maxIntervalMs",
   MISSKEY_SPONTANEOUS_CONTEXT_FETCH_PROBABILITY:
     "platforms.misskey.spontaneousPost.contextFetchProbability",
+
+  // GELF log output settings
+  GELF_ENABLED: "logging.gelf.enabled",
+  GELF_ENDPOINT: "logging.gelf.endpoint",
+  GELF_HOSTNAME: "logging.gelf.hostname",
 } as const;
 
 /**

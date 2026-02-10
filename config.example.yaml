@@ -5,6 +5,12 @@
 # Logging configuration
 logging:
   level: "INFO" # Valid: DEBUG, INFO, WARN, ERROR, FATAL (default: INFO)
+  # GELF (Graylog Extended Log Format) output configuration
+  # When enabled, log messages are also sent to a GELF-compatible log server via HTTP
+  gelf:
+    enabled: false            # Enable GELF log output (default: false)
+    endpoint: ""              # GELF HTTP endpoint URL (e.g., "http://graylog.example.com:12202/gelf")
+    hostname: "air-friends"   # Source hostname in GELF messages (default: "air-friends")
 
 # Platform configurations
 platforms:
