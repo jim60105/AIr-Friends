@@ -1,6 +1,8 @@
 // tests/platforms/misskey/misskey-adapter.test.ts
 
-import { assertEquals } from "@std/assert";
+import { assertEquals, assertRejects } from "@std/assert";
+import { MisskeyAdapter } from "@platforms/misskey/misskey-adapter.ts";
+import { PlatformError } from "../../../src/types/errors.ts";
 import {
   buildReplyParams,
   ChatMessageLite,
@@ -322,4 +324,201 @@ Deno.test("shouldRespondToChatMessage - should not respond when DM not allowed",
   const result = shouldRespondToChatMessage(message, "bot123", { allowDm: false });
 
   assertEquals(result, false);
+});
+
+// ==================== MisskeyAdapter.fetchRecentMessages (note: channel) Tests ====================
+
+/**
+ * Helper to create a MisskeyAdapter with a stubbed client.request method.
+ * Sets botId via the private field so fetchRecentMessages can function.
+ */
+function createAdapterWithMockClient(
+  requestHandler: (endpoint: string, params: Record<string, unknown>) => unknown,
+): MisskeyAdapter {
+  const adapter = new MisskeyAdapter({
+    host: "misskey.test",
+    token: "test-token",
+  });
+
+  // Set botId so noteToPlatformMessage works
+  // deno-lint-ignore no-explicit-any
+  (adapter as any).botId = "bot123";
+
+  // Replace the client.request method with our mock
+  // deno-lint-ignore no-explicit-any
+  const client = (adapter as any).client;
+  client.request = (endpoint: string, params: Record<string, unknown> = {}) => {
+    return Promise.resolve(requestHandler(endpoint, params));
+  };
+
+  return adapter;
+}
+
+Deno.test("fetchRecentMessages - note: channel fetches ancestors, current note, and replies", async () => {
+  const ancestor = createMockNote({
+    id: "ancestor1",
+    text: "ancestor",
+    createdAt: "2024-01-01T00:00:00.000Z",
+  });
+  const current = createMockNote({
+    id: "noteABC",
+    text: "current note",
+    createdAt: "2024-01-01T01:00:00.000Z",
+  });
+  const reply = createMockNote({
+    id: "reply1",
+    text: "a reply",
+    createdAt: "2024-01-01T02:00:00.000Z",
+  });
+
+  const endpoints: string[] = [];
+  const adapter = createAdapterWithMockClient((endpoint, _params) => {
+    endpoints.push(endpoint);
+    if (endpoint === "notes/conversation") return [ancestor];
+    if (endpoint === "notes/show") return current;
+    if (endpoint === "notes/replies") return [reply];
+    return [];
+  });
+
+  const messages = await adapter.fetchRecentMessages("note:noteABC", 20);
+
+  assertEquals(endpoints.sort(), ["notes/conversation", "notes/replies", "notes/show"]);
+  assertEquals(messages.length, 3);
+  assertEquals(messages[0].messageId, "ancestor1");
+  assertEquals(messages[1].messageId, "noteABC");
+  assertEquals(messages[2].messageId, "reply1");
+});
+
+Deno.test("fetchRecentMessages - note: channel deduplicates notes", async () => {
+  const note = createMockNote({
+    id: "noteABC",
+    text: "same note",
+    createdAt: "2024-01-01T01:00:00.000Z",
+  });
+
+  const adapter = createAdapterWithMockClient((endpoint) => {
+    // current note appears in both ancestors and notes/show
+    if (endpoint === "notes/conversation") return [note];
+    if (endpoint === "notes/show") return note;
+    if (endpoint === "notes/replies") return [note];
+    return [];
+  });
+
+  const messages = await adapter.fetchRecentMessages("note:noteABC", 20);
+
+  assertEquals(messages.length, 1);
+  assertEquals(messages[0].messageId, "noteABC");
+});
+
+Deno.test("fetchRecentMessages - note: channel sorts chronologically", async () => {
+  const late = createMockNote({
+    id: "late",
+    text: "late",
+    createdAt: "2024-01-01T03:00:00.000Z",
+  });
+  const early = createMockNote({
+    id: "early",
+    text: "early",
+    createdAt: "2024-01-01T00:00:00.000Z",
+  });
+  const mid = createMockNote({
+    id: "mid",
+    text: "mid",
+    createdAt: "2024-01-01T01:30:00.000Z",
+  });
+
+  const adapter = createAdapterWithMockClient((endpoint) => {
+    // Return in non-chronological order
+    if (endpoint === "notes/conversation") return [late];
+    if (endpoint === "notes/show") return mid;
+    if (endpoint === "notes/replies") return [early];
+    return [];
+  });
+
+  const messages = await adapter.fetchRecentMessages("note:mid", 20);
+
+  assertEquals(messages.length, 3);
+  assertEquals(messages[0].messageId, "early");
+  assertEquals(messages[1].messageId, "mid");
+  assertEquals(messages[2].messageId, "late");
+});
+
+Deno.test("fetchRecentMessages - note: channel applies limit keeping latest notes", async () => {
+  const notes = Array.from({ length: 5 }, (_, i) =>
+    createMockNote({
+      id: `note${i}`,
+      text: `note ${i}`,
+      createdAt: `2024-01-01T0${i}:00:00.000Z`,
+    }));
+
+  const adapter = createAdapterWithMockClient((endpoint) => {
+    if (endpoint === "notes/conversation") return [notes[0], notes[1]];
+    if (endpoint === "notes/show") return notes[2];
+    if (endpoint === "notes/replies") return [notes[3], notes[4]];
+    return [];
+  });
+
+  // Limit to 3 — should keep the 3 most recent (note2, note3, note4)
+  const messages = await adapter.fetchRecentMessages("note:note2", 3);
+
+  assertEquals(messages.length, 3);
+  assertEquals(messages[0].messageId, "note2");
+  assertEquals(messages[1].messageId, "note3");
+  assertEquals(messages[2].messageId, "note4");
+});
+
+Deno.test("fetchRecentMessages - note: channel with empty ancestors and replies", async () => {
+  const current = createMockNote({
+    id: "noteOnly",
+    text: "standalone note",
+    createdAt: "2024-01-01T00:00:00.000Z",
+  });
+
+  const adapter = createAdapterWithMockClient((endpoint) => {
+    if (endpoint === "notes/conversation") return [];
+    if (endpoint === "notes/show") return current;
+    if (endpoint === "notes/replies") return [];
+    return [];
+  });
+
+  const messages = await adapter.fetchRecentMessages("note:noteOnly", 20);
+
+  assertEquals(messages.length, 1);
+  assertEquals(messages[0].messageId, "noteOnly");
+  assertEquals(messages[0].content, "standalone note");
+});
+
+Deno.test("fetchRecentMessages - note: channel passes noteId and limit to API calls", async () => {
+  const capturedCalls: Array<{ endpoint: string; params: Record<string, unknown> }> = [];
+
+  const adapter = createAdapterWithMockClient((endpoint, params) => {
+    capturedCalls.push({ endpoint, params });
+    if (endpoint === "notes/show") {
+      return createMockNote({ id: "targetNote", createdAt: "2024-01-01T00:00:00.000Z" });
+    }
+    return [];
+  });
+
+  await adapter.fetchRecentMessages("note:targetNote", 15);
+
+  const conversationCall = capturedCalls.find((c) => c.endpoint === "notes/conversation");
+  const showCall = capturedCalls.find((c) => c.endpoint === "notes/show");
+  const repliesCall = capturedCalls.find((c) => c.endpoint === "notes/replies");
+
+  assertEquals(conversationCall?.params, { noteId: "targetNote", limit: 15 });
+  assertEquals(showCall?.params, { noteId: "targetNote" });
+  assertEquals(repliesCall?.params, { noteId: "targetNote", limit: 15 });
+});
+
+Deno.test("fetchRecentMessages - note: channel wraps API errors in PlatformError", async () => {
+  const adapter = createAdapterWithMockClient((endpoint) => {
+    if (endpoint === "notes/show") throw new Error("API failure");
+    return [];
+  });
+
+  await assertRejects(
+    () => adapter.fetchRecentMessages("note:failNote", 20),
+    PlatformError,
+    "Failed to fetch messages",
+  );
 });

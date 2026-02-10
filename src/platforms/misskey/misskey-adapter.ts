@@ -396,15 +396,37 @@ export class MisskeyAdapter extends PlatformAdapter {
         return filtered.map((note) => noteToPlatformMessage(note, this.botId!));
       }
 
-      // For note:xxx, fetch the conversation thread
+      // For note:xxx, fetch the full conversation thread (ancestors + current + replies)
       if (channelId.startsWith("note:")) {
         const noteId = channelId.slice(5);
-        const notes = await this.client.request<MisskeyNote[]>(
-          "notes/replies",
-          { noteId, limit },
-        );
 
-        return notes.map((note) => noteToPlatformMessage(note, this.botId!));
+        const [ancestors, currentNote, replies] = await Promise.all([
+          this.client.request<MisskeyNote[]>(
+            "notes/conversation",
+            { noteId, limit },
+          ),
+          this.client.request<MisskeyNote>(
+            "notes/show",
+            { noteId },
+          ),
+          this.client.request<MisskeyNote[]>(
+            "notes/replies",
+            { noteId, limit },
+          ),
+        ]);
+
+        const allNotes = [...ancestors, currentNote, ...replies];
+
+        // Deduplicate by note ID and sort chronologically, then apply limit
+        const seen = new Set<string>();
+        const unique = allNotes.filter((note) => {
+          if (seen.has(note.id)) return false;
+          seen.add(note.id);
+          return true;
+        });
+        unique.sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+
+        return unique.slice(-limit).map((note) => noteToPlatformMessage(note, this.botId!));
       }
 
       return [];
