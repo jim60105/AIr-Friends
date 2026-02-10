@@ -626,32 +626,6 @@ Deno.test("ContextAssembler - formatEmojiSection groups by category", async () =
   });
 });
 
-Deno.test("ContextAssembler - formatEmojiSection limits emoji count", async () => {
-  await withTestContextAssembler(async (assembler, _store, manager) => {
-    const event = createTestEvent();
-    const workspace = await manager.getOrCreateWorkspace(event);
-
-    // Create 210 emojis (over limit of 200)
-    const testEmojis: PlatformEmoji[] = [];
-    for (let i = 0; i < 210; i++) {
-      testEmojis.push({
-        name: `emoji_${i}`,
-        animated: false,
-        useInText: `:emoji_${i}:`,
-        useAsReaction: `:emoji_${i}:`,
-        category: "Test",
-      });
-    }
-
-    const fetcher = createMockMessageFetcher([], testEmojis);
-    const context = await assembler.assembleContext(event, workspace, fetcher);
-    const formatted = assembler.formatContext(context);
-
-    // Should include "... and N more emojis"
-    assertStringIncludes(formatted.userMessage, "... and 10 more emojis");
-  });
-});
-
 // ============ Spontaneous context tests ============
 
 Deno.test("ContextAssembler - assembleSpontaneousContext without recent messages", async () => {

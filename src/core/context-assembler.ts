@@ -262,12 +262,12 @@ export class ContextAssembler {
    * Limits the list to fit within a reasonable token budget.
    */
   private formatEmojiSection(emojis: PlatformEmoji[]): string {
-    const MAX_EMOJIS = 200;
+    const MAX_EMOJIS = 50;
 
     const lines: string[] = [
       "## Available Custom Emojis",
       "",
-      "You can use these custom emojis in your replies (embed in text) or as reactions. Format: <e> = emoji, <t> = text embed, <r> = reaction, <a> = alias.",
+      "You can use these custom emojis in your replies (embed in text) or as reactions. Format: <e> = emoji, <t> = text embed, <r> = reaction, <a> = alias. Note that you should use the raw content of those tags, they may be another <xml> tag or :text: format. Strictly use those emojis and never make up new ones that are not in this list. Any emoji not on the list cannot be used.",
       "",
     ];
 
@@ -306,12 +306,7 @@ export class ContextAssembler {
       lines.push("");
     }
 
-    if (truncated) {
-      lines.push(`... and ${emojis.length - count} more emojis`);
-      lines.push("");
-    }
-
-    return lines.join("\n");
+    return count > 0 ? lines.join("\n") : "";
   }
 
   /**
