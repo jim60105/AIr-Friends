@@ -375,16 +375,17 @@ export class DiscordAdapter extends PlatformAdapter {
   }
 
   /**
-   * Fetch available custom emojis from all guilds the bot is in
+   * Fetch available custom emojis from all guilds the bot is in and application emojis
    */
-  fetchEmojis(): Promise<PlatformEmoji[]> {
+  async fetchEmojis(): Promise<PlatformEmoji[]> {
     const now = Date.now();
     if (this.emojiCache && (now - this.emojiCacheTimestamp) < this.EMOJI_CACHE_TTL_MS) {
-      return Promise.resolve(this.emojiCache);
+      return this.emojiCache;
     }
 
     const emojis: PlatformEmoji[] = [];
 
+    // Fetch guild emojis from cache
     for (const guild of this.client.guilds.cache.values()) {
       for (const emoji of guild.emojis.cache.values()) {
         if (!emoji.name || !emoji.id) continue;
@@ -401,11 +402,40 @@ export class DiscordAdapter extends PlatformAdapter {
       }
     }
 
+    // Fetch application emojis via REST API
+    if (this.botId) {
+      try {
+        const rest = new REST().setToken(this.config.token);
+        const response = await rest.get(Routes.applicationEmojis(this.botId)) as {
+          items: Array<{ id: string; name: string; animated?: boolean }>;
+        };
+
+        const seenIds = new Set(emojis.map((e) => e.platformId));
+        for (const emoji of response.items ?? []) {
+          if (!emoji.name || !emoji.id || seenIds.has(emoji.id)) continue;
+
+          emojis.push({
+            name: emoji.name,
+            animated: emoji.animated ?? false,
+            platformId: emoji.id,
+            useInText: emoji.animated
+              ? `<a:${emoji.name}:${emoji.id}>`
+              : `<:${emoji.name}:${emoji.id}>`,
+            useAsReaction: `${emoji.name}:${emoji.id}`,
+          });
+        }
+      } catch (error) {
+        logger.warn("Failed to fetch application emojis", {
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+
     this.emojiCache = emojis;
     this.emojiCacheTimestamp = now;
 
     logger.debug("Fetched Discord emojis", { count: emojis.length });
-    return Promise.resolve(emojis);
+    return emojis;
   }
 
   /**
