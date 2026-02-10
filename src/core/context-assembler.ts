@@ -13,6 +13,7 @@ import type {
 import type { WorkspaceInfo } from "../types/workspace.ts";
 import type { NormalizedEvent, PlatformMessage } from "../types/events.ts";
 import type { ResolvedMemory } from "../types/memory.ts";
+import type { PlatformEmoji } from "../types/platform.ts";
 
 const logger = createLogger("ContextAssembler");
 
@@ -101,6 +102,22 @@ export class ContextAssembler {
       }
     }
 
+    // Fetch available emojis
+    let availableEmojis: PlatformEmoji[] | undefined;
+    if (messageFetcher.fetchEmojis) {
+      try {
+        const emojis = await messageFetcher.fetchEmojis();
+        if (emojis.length > 0) {
+          availableEmojis = emojis;
+          logger.debug("Fetched available emojis", { count: emojis.length });
+        }
+      } catch (error) {
+        logger.warn("Failed to fetch emojis", {
+          error: String(error),
+        });
+      }
+    }
+
     // Create trigger message from event
     const triggerMessage: PlatformMessage = {
       messageId: event.messageId,
@@ -118,6 +135,7 @@ export class ContextAssembler {
       recentMessages,
       relatedMessages,
       triggerMessage,
+      availableEmojis,
     );
 
     const context: AssembledContext = {
@@ -127,6 +145,7 @@ export class ContextAssembler {
       systemPrompt,
       triggerMessage,
       estimatedTokens,
+      availableEmojis,
       assembledAt: new Date(),
     };
 
@@ -150,6 +169,7 @@ export class ContextAssembler {
     recentMessages: PlatformMessage[],
     relatedMessages: PlatformMessage[] | undefined,
     triggerMessage: PlatformMessage,
+    emojis?: PlatformEmoji[],
   ): number {
     const memoriesText = memories.map((m) => m.content).join("\n");
     const recentText = recentMessages
@@ -159,6 +179,7 @@ export class ContextAssembler {
       ?.map((m) => `${m.username}: ${m.content}`)
       .join("\n") ?? "";
     const triggerText = `${triggerMessage.username}: ${triggerMessage.content}`;
+    const emojiText = emojis?.map((e) => e.name).join(", ") ?? "";
 
     return combinedTokenCount(
       systemPrompt,
@@ -166,6 +187,7 @@ export class ContextAssembler {
       recentText,
       relatedText,
       triggerText,
+      emojiText,
     );
   }
 
@@ -183,8 +205,14 @@ export class ContextAssembler {
     // Calculate trigger message section
     const triggerSection = this.formatTriggerSection(context.triggerMessage);
 
+    // Format emoji section
+    const emojiSection = context.availableEmojis && context.availableEmojis.length > 0
+      ? this.formatEmojiSection(context.availableEmojis)
+      : "";
+
     // Calculate tokens used by fixed sections
-    const fixedTokens = estimateTokens(memoriesSection) + estimateTokens(triggerSection);
+    const fixedTokens = estimateTokens(memoriesSection) + estimateTokens(triggerSection) +
+      estimateTokens(emojiSection);
     const conversationTokenBudget = availableTokens - fixedTokens;
 
     // Format conversation with smart truncation (removes oldest messages if needed)
@@ -198,6 +226,7 @@ export class ContextAssembler {
     const userMessage = this.buildUserMessage(
       memoriesSection,
       conversationSection,
+      emojiSection,
       context.triggerMessage,
     );
 
@@ -223,6 +252,64 @@ export class ContextAssembler {
       ...memories.map((m, i) => `${i + 1}. ${m.content}`),
       "",
     ];
+    return lines.join("\n");
+  }
+
+  /**
+   * Format available emojis into a readable section for the agent.
+   * Groups emojis by category if categories are available.
+   * Limits the list to fit within a reasonable token budget.
+   */
+  private formatEmojiSection(emojis: PlatformEmoji[]): string {
+    const MAX_EMOJIS = 200;
+
+    const lines: string[] = [
+      "## Available Custom Emojis",
+      "",
+      "You can use these custom emojis in your replies (embed in text) or as reactions.",
+      "",
+    ];
+
+    // Group by category
+    const grouped = new Map<string, PlatformEmoji[]>();
+    for (const emoji of emojis) {
+      const category = emoji.category ?? "Uncategorized";
+      if (!grouped.has(category)) {
+        grouped.set(category, []);
+      }
+      grouped.get(category)!.push(emoji);
+    }
+
+    let count = 0;
+    let truncated = false;
+    for (const [category, categoryEmojis] of grouped) {
+      if (count >= MAX_EMOJIS) {
+        truncated = true;
+        break;
+      }
+
+      lines.push(`### ${category}`);
+      for (const emoji of categoryEmojis) {
+        if (count >= MAX_EMOJIS) {
+          truncated = true;
+          break;
+        }
+        const aliasStr = emoji.aliases && emoji.aliases.length > 0
+          ? ` (aliases: ${emoji.aliases.join(", ")})`
+          : "";
+        lines.push(
+          `- \`${emoji.name}\` → text: \`${emoji.useInText}\`, reaction: \`${emoji.useAsReaction}\`${aliasStr}`,
+        );
+        count++;
+      }
+      lines.push("");
+    }
+
+    if (truncated) {
+      lines.push(`... and ${emojis.length - count} more emojis`);
+      lines.push("");
+    }
+
     return lines.join("\n");
   }
 
@@ -407,6 +494,7 @@ export class ContextAssembler {
   private buildUserMessage(
     memoriesSection: string,
     conversationSection: string,
+    emojiSection: string,
     triggerMessage: PlatformMessage,
   ): string {
     const parts: string[] = [];
@@ -417,6 +505,10 @@ export class ContextAssembler {
 
     if (conversationSection) {
       parts.push(conversationSection);
+    }
+
+    if (emojiSection) {
+      parts.push(emojiSection);
     }
 
     // Add current message

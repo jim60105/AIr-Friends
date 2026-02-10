@@ -3,6 +3,7 @@
 import { createLogger } from "@utils/logger.ts";
 import { MemoryHandler } from "./memory-handler.ts";
 import { ReplyHandler } from "./reply-handler.ts";
+import { ReactionHandler } from "./reaction-handler.ts";
 import { ContextHandler } from "./context-handler.ts";
 import type { SkillContext, SkillHandler, SkillResult } from "./types.ts";
 import type { MemoryStore } from "@core/memory-store.ts";
@@ -16,11 +17,13 @@ export class SkillRegistry {
   private handlers: Map<string, SkillHandler> = new Map();
   private memoryHandler: MemoryHandler;
   private replyHandler: ReplyHandler;
+  private reactionHandler: ReactionHandler;
   private contextHandler: ContextHandler;
 
   constructor(memoryStore: MemoryStore) {
     this.memoryHandler = new MemoryHandler(memoryStore);
     this.replyHandler = new ReplyHandler();
+    this.reactionHandler = new ReactionHandler();
     this.contextHandler = new ContextHandler();
 
     this.registerSkills();
@@ -40,6 +43,9 @@ export class SkillRegistry {
 
     // Context skill
     this.handlers.set("fetch-context", this.contextHandler.handleFetchContext);
+
+    // Reaction skill
+    this.handlers.set("react-message", this.reactionHandler.handleReactMessage);
 
     logger.info("Skills registered", {
       skills: Array.from(this.handlers.keys()),
@@ -108,5 +114,12 @@ export class SkillRegistry {
    */
   getReplyHandler(): ReplyHandler {
     return this.replyHandler;
+  }
+
+  /**
+   * Get reaction handler for state management
+   */
+  getReactionHandler(): ReactionHandler {
+    return this.reactionHandler;
   }
 }

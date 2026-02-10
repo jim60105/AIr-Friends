@@ -21,8 +21,8 @@ export class ReplyDispatcher {
     response: SessionResponse,
     replyToMessageId?: string,
   ): Promise<boolean> {
-    // If successful or reply was already sent, nothing to do
-    if (response.success || response.replySent) {
+    // If successful or reply/reaction was already sent, nothing to do
+    if (response.success || response.replySent || response.reactionSent) {
       return false;
     }
 

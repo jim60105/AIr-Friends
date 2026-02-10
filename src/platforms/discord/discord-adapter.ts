@@ -16,6 +16,8 @@ import type { Platform, PlatformMessage } from "../../types/events.ts";
 import {
   ConnectionState,
   type PlatformCapabilities,
+  type PlatformEmoji,
+  type ReactionResult,
   type ReplyOptions,
   type ReplyResult,
 } from "../../types/platform.ts";
@@ -47,6 +49,9 @@ export class DiscordAdapter extends PlatformAdapter {
   private readonly client: Client;
   private readonly config: Required<DiscordAdapterConfig>;
   private botId: string | null = null;
+  private emojiCache: PlatformEmoji[] | null = null;
+  private emojiCacheTimestamp = 0;
+  private readonly EMOJI_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
 
   constructor(config: DiscordAdapterConfig) {
     super();
@@ -366,6 +371,106 @@ export class DiscordAdapter extends PlatformAdapter {
         error: error instanceof Error ? error.message : String(error),
       });
       return [];
+    }
+  }
+
+  /**
+   * Fetch available custom emojis from all guilds the bot is in and application emojis
+   */
+  async fetchEmojis(): Promise<PlatformEmoji[]> {
+    const now = Date.now();
+    if (this.emojiCache && (now - this.emojiCacheTimestamp) < this.EMOJI_CACHE_TTL_MS) {
+      return this.emojiCache;
+    }
+
+    const emojis: PlatformEmoji[] = [];
+
+    // Fetch guild emojis from cache
+    for (const guild of this.client.guilds.cache.values()) {
+      for (const emoji of guild.emojis.cache.values()) {
+        if (!emoji.name || !emoji.id) continue;
+
+        emojis.push({
+          name: emoji.name,
+          animated: emoji.animated ?? false,
+          platformId: emoji.id,
+          useInText: emoji.animated
+            ? `<a:${emoji.name}:${emoji.id}>`
+            : `<:${emoji.name}:${emoji.id}>`,
+          useAsReaction: `${emoji.name}:${emoji.id}`,
+        });
+      }
+    }
+
+    // Fetch application emojis via REST API
+    if (this.botId) {
+      try {
+        const rest = new REST().setToken(this.config.token);
+        const response = await rest.get(Routes.applicationEmojis(this.botId)) as {
+          items: Array<{ id: string; name: string; animated?: boolean }>;
+        };
+
+        const seenIds = new Set(emojis.map((e) => e.platformId));
+        for (const emoji of response.items ?? []) {
+          if (!emoji.name || !emoji.id || seenIds.has(emoji.id)) continue;
+
+          emojis.push({
+            name: emoji.name,
+            animated: emoji.animated ?? false,
+            platformId: emoji.id,
+            useInText: emoji.animated
+              ? `<a:${emoji.name}:${emoji.id}>`
+              : `<:${emoji.name}:${emoji.id}>`,
+            useAsReaction: `${emoji.name}:${emoji.id}`,
+          });
+        }
+      } catch (error) {
+        logger.warn("Failed to fetch application emojis", {
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+
+    this.emojiCache = emojis;
+    this.emojiCacheTimestamp = now;
+
+    logger.debug("Fetched Discord emojis", { count: emojis.length });
+    return emojis;
+  }
+
+  /**
+   * Add a reaction to a Discord message
+   * @param emoji - Unicode emoji character (e.g., "👍") or custom emoji "name:id" format
+   */
+  async addReaction(
+    channelId: string,
+    messageId: string,
+    emoji: string,
+  ): Promise<ReactionResult> {
+    try {
+      const channel = await this.client.channels.fetch(channelId);
+
+      if (!channel || !this.isTextBasedChannel(channel)) {
+        return {
+          success: false,
+          error: "Channel not found or not text-based",
+        };
+      }
+
+      const message = await channel.messages.fetch(messageId);
+      await message.react(emoji);
+
+      logger.debug("Reaction added", { channelId, messageId, emoji });
+
+      return { success: true };
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      logger.error("Failed to add reaction", { channelId, messageId, emoji, error: errorMessage });
+
+      return {
+        success: false,
+        error: errorMessage,
+      };
     }
   }
 
