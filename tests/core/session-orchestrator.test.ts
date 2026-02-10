@@ -11,6 +11,9 @@ import type { Config } from "../../src/types/config.ts";
 import type { NormalizedEvent, PlatformMessage } from "../../src/types/events.ts";
 import type { PlatformAdapter } from "@platforms/platform-adapter.ts";
 import type { PlatformCapabilities, ReplyResult } from "../../src/types/platform.ts";
+import type { AgentConnectorOptions } from "../../src/acp/types.ts";
+import type { AgentConnector } from "../../src/acp/agent-connector.ts";
+import type { PromptResponse } from "npm:@agentclientprotocol/sdk@^0.14.1";
 
 // Mock PlatformAdapter
 class MockPlatformAdapter implements Partial<PlatformAdapter> {
@@ -396,6 +399,309 @@ Deno.test("SessionOrchestrator - reply state is accessible via skill registry", 
     // Verify clearReplyState doesn't throw on non-existent key
     replyHandler.clearReplyState("test/user", "channel1");
     assertEquals(replyHandler.hasReplySent("test/user", "channel1"), false);
+  } finally {
+    await Deno.remove(tempDir, { recursive: true });
+  }
+});
+
+// --- Mock AgentConnector and Testable SessionOrchestrator for retry logic tests ---
+
+/**
+ * Mock AgentConnector that simulates agent behavior without real CLI tools
+ */
+class MockAgentConnector {
+  connected = false;
+  sessionId = "mock-session-id";
+  promptCallCount = 0;
+  promptResponses: PromptResponse[] = [];
+  modelSet = false;
+  disconnected = false;
+  onPrompt?: (callCount: number) => void;
+
+  constructor(_options: AgentConnectorOptions) {}
+
+  async connect(): Promise<void> {
+    this.connected = true;
+    await Promise.resolve();
+  }
+
+  async createSession(): Promise<string> {
+    return await Promise.resolve(this.sessionId);
+  }
+
+  async setSessionModel(_sessionId: string, _modelId: string): Promise<void> {
+    this.modelSet = true;
+    await Promise.resolve();
+  }
+
+  async prompt(_sessionId: string, _text: string): Promise<PromptResponse> {
+    const response = this.promptResponses[this.promptCallCount] ??
+      { stopReason: "end_turn" } as PromptResponse;
+    this.promptCallCount++;
+    this.onPrompt?.(this.promptCallCount);
+    return await Promise.resolve(response);
+  }
+
+  async disconnect(): Promise<void> {
+    this.disconnected = true;
+    await Promise.resolve();
+  }
+}
+
+/**
+ * Testable subclass that injects a mock connector
+ */
+class TestableSessionOrchestrator extends SessionOrchestrator {
+  mockConnector: MockAgentConnector | null = null;
+  private connectorSetup?: (connector: MockAgentConnector) => void;
+
+  setConnectorSetup(setup: (connector: MockAgentConnector) => void): void {
+    this.connectorSetup = setup;
+  }
+
+  protected override createConnector(
+    options: AgentConnectorOptions,
+  ): AgentConnector {
+    this.mockConnector = new MockAgentConnector(options);
+    this.connectorSetup?.(this.mockConnector);
+    return this.mockConnector as unknown as AgentConnector;
+  }
+}
+
+/**
+ * Helper to create a testable orchestrator with all dependencies
+ */
+async function createTestableOrchestrator(tempDir: string) {
+  const config = createTestConfig(tempDir);
+  config.agent.defaultAgentType = "copilot";
+  // Set GitHub token to avoid config error in createAgentConfig
+  config.agent.githubToken = "test-token";
+  const workspaceManager = new WorkspaceManager({
+    repoPath: config.workspace.repoPath,
+    workspacesDir: config.workspace.workspacesDir,
+  });
+  const memoryStore = new MemoryStore(workspaceManager, {
+    searchLimit: config.memory.searchLimit,
+    maxChars: config.memory.maxChars,
+  });
+  const skillRegistry = new SkillRegistry(memoryStore);
+
+  await Deno.mkdir(`${tempDir}/prompts`, { recursive: true });
+  await Deno.writeTextFile(
+    `${tempDir}/prompts/system.md`,
+    "You are a helpful assistant.",
+  );
+
+  const contextAssembler = new ContextAssembler(memoryStore, {
+    systemPromptPath: `${tempDir}/prompts/system.md`,
+    recentMessageLimit: config.memory.recentMessageLimit,
+    tokenLimit: config.agent.tokenLimit,
+    memoryMaxChars: config.memory.maxChars,
+  });
+
+  const sessionRegistry = new SessionRegistry();
+
+  const orchestrator = new TestableSessionOrchestrator(
+    workspaceManager,
+    contextAssembler,
+    skillRegistry,
+    config,
+    sessionRegistry,
+  );
+
+  return { orchestrator, skillRegistry, workspaceManager, sessionRegistry };
+}
+
+Deno.test("SessionOrchestrator - retry sends reply on first retry attempt", async () => {
+  const tempDir = await Deno.makeTempDir();
+  try {
+    const { orchestrator, skillRegistry, workspaceManager, sessionRegistry } =
+      await createTestableOrchestrator(tempDir);
+
+    const event = createTestEvent();
+    const platformAdapter = new MockPlatformAdapter() as unknown as PlatformAdapter;
+    const replyHandler = skillRegistry.getReplyHandler();
+
+    orchestrator.setConnectorSetup((connector) => {
+      // First prompt: end_turn without reply -> triggers retry
+      // Second prompt (retry): end_turn, and we simulate reply sent
+      connector.promptResponses = [
+        { stopReason: "end_turn" } as PromptResponse,
+        { stopReason: "end_turn" } as PromptResponse,
+      ];
+      connector.onPrompt = (callCount) => {
+        // On the retry prompt (2nd call), simulate reply was sent
+        if (callCount === 2) {
+          const workspace = workspaceManager.getWorkspaceKeyFromEvent(event);
+          const key = `${workspace}:${event.channelId}`;
+          // deno-lint-ignore no-explicit-any
+          (replyHandler as any).replySentMap.set(key, true);
+        }
+      };
+    });
+
+    const response = await orchestrator.processMessage(event, platformAdapter);
+
+    assertEquals(response.success, true);
+    assertEquals(response.replySent, true);
+
+    sessionRegistry.stop();
+  } finally {
+    await Deno.remove(tempDir, { recursive: true });
+  }
+});
+
+Deno.test("SessionOrchestrator - retry stops on non-end_turn stop reason", async () => {
+  const tempDir = await Deno.makeTempDir();
+  try {
+    const { orchestrator, sessionRegistry } = await createTestableOrchestrator(tempDir);
+
+    const event = createTestEvent();
+    const platformAdapter = new MockPlatformAdapter() as unknown as PlatformAdapter;
+
+    orchestrator.setConnectorSetup((connector) => {
+      // First prompt: end_turn without reply -> triggers retry
+      // Retry prompt: cancelled stop reason -> should break out of retry loop
+      connector.promptResponses = [
+        { stopReason: "end_turn" } as PromptResponse,
+        { stopReason: "cancelled" } as PromptResponse,
+      ];
+    });
+
+    const response = await orchestrator.processMessage(event, platformAdapter);
+
+    assertEquals(response.success, false);
+    assertEquals(response.replySent, false);
+    // Should have called prompt twice (initial + 1 retry that returned cancelled)
+    assertEquals(orchestrator.mockConnector!.promptCallCount, 2);
+
+    sessionRegistry.stop();
+  } finally {
+    await Deno.remove(tempDir, { recursive: true });
+  }
+});
+
+Deno.test("SessionOrchestrator - no retry when initial prompt has reply sent", async () => {
+  const tempDir = await Deno.makeTempDir();
+  try {
+    const { orchestrator, skillRegistry, workspaceManager, sessionRegistry } =
+      await createTestableOrchestrator(tempDir);
+
+    const event = createTestEvent();
+    const platformAdapter = new MockPlatformAdapter() as unknown as PlatformAdapter;
+    const replyHandler = skillRegistry.getReplyHandler();
+
+    orchestrator.setConnectorSetup((connector) => {
+      connector.promptResponses = [
+        { stopReason: "end_turn" } as PromptResponse,
+      ];
+      connector.onPrompt = (callCount) => {
+        // Simulate reply sent on the first prompt
+        if (callCount === 1) {
+          const workspace = workspaceManager.getWorkspaceKeyFromEvent(event);
+          const key = `${workspace}:${event.channelId}`;
+          // deno-lint-ignore no-explicit-any
+          (replyHandler as any).replySentMap.set(key, true);
+        }
+      };
+    });
+
+    const response = await orchestrator.processMessage(event, platformAdapter);
+
+    assertEquals(response.success, true);
+    assertEquals(response.replySent, true);
+    // Should have called prompt only once (no retry needed)
+    assertEquals(orchestrator.mockConnector!.promptCallCount, 1);
+
+    sessionRegistry.stop();
+  } finally {
+    await Deno.remove(tempDir, { recursive: true });
+  }
+});
+
+Deno.test("SessionOrchestrator - no retry when initial stop reason is cancelled", async () => {
+  const tempDir = await Deno.makeTempDir();
+  try {
+    const { orchestrator, sessionRegistry } = await createTestableOrchestrator(tempDir);
+
+    const event = createTestEvent();
+    const platformAdapter = new MockPlatformAdapter() as unknown as PlatformAdapter;
+
+    orchestrator.setConnectorSetup((connector) => {
+      // Initial prompt returns cancelled -> no retry should happen
+      connector.promptResponses = [
+        { stopReason: "cancelled" } as PromptResponse,
+      ];
+    });
+
+    const response = await orchestrator.processMessage(event, platformAdapter);
+
+    assertEquals(response.success, false);
+    assertEquals(response.replySent, false);
+    assertEquals(response.error, "Session was cancelled");
+    // Should have called prompt only once
+    assertEquals(orchestrator.mockConnector!.promptCallCount, 1);
+
+    sessionRegistry.stop();
+  } finally {
+    await Deno.remove(tempDir, { recursive: true });
+  }
+});
+
+Deno.test("SessionOrchestrator - retry exhausts max retries without reply", async () => {
+  const tempDir = await Deno.makeTempDir();
+  try {
+    const { orchestrator, sessionRegistry } = await createTestableOrchestrator(tempDir);
+
+    const event = createTestEvent();
+    const platformAdapter = new MockPlatformAdapter() as unknown as PlatformAdapter;
+
+    orchestrator.setConnectorSetup((connector) => {
+      // All prompts return end_turn without reply -> exhaust retries
+      connector.promptResponses = [
+        { stopReason: "end_turn" } as PromptResponse,
+        { stopReason: "end_turn" } as PromptResponse,
+        { stopReason: "end_turn" } as PromptResponse,
+      ];
+    });
+
+    const response = await orchestrator.processMessage(event, platformAdapter);
+
+    assertEquals(response.success, false);
+    assertEquals(response.replySent, false);
+    assertEquals(response.error, "Agent did not generate a reply");
+    // Initial prompt + maxRetries (1 for copilot) = 2
+    assertEquals(orchestrator.mockConnector!.promptCallCount, 2);
+
+    sessionRegistry.stop();
+  } finally {
+    await Deno.remove(tempDir, { recursive: true });
+  }
+});
+
+Deno.test("SessionOrchestrator - unexpected stop reason returns error", async () => {
+  const tempDir = await Deno.makeTempDir();
+  try {
+    const { orchestrator, sessionRegistry } = await createTestableOrchestrator(tempDir);
+
+    const event = createTestEvent();
+    const platformAdapter = new MockPlatformAdapter() as unknown as PlatformAdapter;
+
+    orchestrator.setConnectorSetup((connector) => {
+      // Return an unexpected stop reason (not end_turn, not cancelled)
+      connector.promptResponses = [
+        { stopReason: "unknown_reason" } as unknown as PromptResponse,
+      ];
+    });
+
+    const response = await orchestrator.processMessage(event, platformAdapter);
+
+    assertEquals(response.success, false);
+    assertEquals(response.replySent, false);
+    assertEquals(response.error, "Unexpected stop reason: unknown_reason");
+    assertEquals(orchestrator.mockConnector!.promptCallCount, 1);
+
+    sessionRegistry.stop();
   } finally {
     await Deno.remove(tempDir, { recursive: true });
   }

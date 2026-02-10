@@ -14,7 +14,7 @@ import type { SessionRegistry } from "../skill-api/session-registry.ts";
 import type { Config } from "../types/config.ts";
 import type { NormalizedEvent } from "../types/events.ts";
 import type { PlatformAdapter } from "@platforms/platform-adapter.ts";
-import type { ClientConfig } from "@acp/types.ts";
+import type { AgentConnectorOptions, ClientConfig } from "@acp/types.ts";
 import { join } from "@std/path";
 
 const logger = createLogger("SessionOrchestrator");
@@ -153,7 +153,7 @@ export class SessionOrchestrator {
 
       // 5. Build ACP connector
       const agentType = getDefaultAgentType(this.config);
-      const connector = new AgentConnector({
+      const connector = this.createConnector({
         agentConfig: createAgentConfig(agentType, workspace.path, this.config, this.yolo),
         clientConfig,
         skillRegistry: this.skillRegistry,
@@ -305,6 +305,14 @@ export class SessionOrchestrator {
         error: error instanceof Error ? error.message : "Unknown error",
       };
     }
+  }
+
+  /**
+   * Create an AgentConnector instance.
+   * Protected to allow test subclasses to inject mocks.
+   */
+  protected createConnector(options: AgentConnectorOptions): AgentConnector {
+    return new AgentConnector(options);
   }
 
   /**
