@@ -471,11 +471,19 @@ class TestableSessionOrchestrator extends SessionOrchestrator {
 /**
  * Helper to create a testable orchestrator with all dependencies
  */
-async function createTestableOrchestrator(tempDir: string) {
+async function createTestableOrchestrator(tempDir: string, options?: { skillApi?: boolean }) {
   const config = createTestConfig(tempDir);
   config.agent.defaultAgentType = "copilot";
   // Set GitHub token to avoid config error in createAgentConfig
   config.agent.githubToken = "test-token";
+  if (options?.skillApi !== false) {
+    config.skillApi = {
+      enabled: true,
+      port: 3999,
+      host: "127.0.0.1",
+      sessionTimeoutMs: 60000,
+    };
+  }
   const workspaceManager = new WorkspaceManager({
     repoPath: config.workspace.repoPath,
     workspacesDir: config.workspace.workspacesDir,
@@ -751,6 +759,299 @@ Deno.test("SessionOrchestrator - retry exhausts max retries without reply", asyn
     assertEquals(response.error, "Agent did not generate a reply");
     // Initial prompt + maxRetries (1 for copilot) = 2
     assertEquals(orchestrator.mockConnector!.promptCallCount, 2);
+
+    sessionRegistry.stop();
+  } finally {
+    await Deno.remove(tempDir, { recursive: true });
+  }
+});
+
+// --- Spontaneous post tests ---
+
+Deno.test("SessionOrchestrator - processSpontaneousPost sends reply successfully", async () => {
+  const tempDir = await Deno.makeTempDir();
+  try {
+    const { orchestrator, skillRegistry, sessionRegistry } = await createTestableOrchestrator(
+      tempDir,
+    );
+
+    const platformAdapter = new MockPlatformAdapter() as unknown as PlatformAdapter;
+
+    orchestrator.setConnectorSetup((connector) => {
+      connector.promptResponses = [
+        { stopReason: "end_turn" } as PromptResponse,
+      ];
+      connector.onPrompt = (callCount) => {
+        if (callCount === 1) {
+          const replyHandler = skillRegistry.getReplyHandler();
+          const key = `discord/bot_id:test_channel`;
+          // deno-lint-ignore no-explicit-any
+          (replyHandler as any).replySentMap.set(key, true);
+        }
+      };
+    });
+
+    const response = await orchestrator.processSpontaneousPost(
+      "discord",
+      "test_channel",
+      platformAdapter,
+      { botId: "bot_id", fetchRecentMessages: false },
+    );
+
+    assertEquals(response.success, true);
+    assertEquals(response.replySent, true);
+
+    sessionRegistry.stop();
+  } finally {
+    await Deno.remove(tempDir, { recursive: true });
+  }
+});
+
+Deno.test("SessionOrchestrator - processSpontaneousPost returns error when no reply sent", async () => {
+  const tempDir = await Deno.makeTempDir();
+  try {
+    const { orchestrator, sessionRegistry } = await createTestableOrchestrator(tempDir);
+
+    const platformAdapter = new MockPlatformAdapter() as unknown as PlatformAdapter;
+
+    orchestrator.setConnectorSetup((connector) => {
+      connector.promptResponses = [
+        { stopReason: "end_turn" } as PromptResponse,
+        { stopReason: "end_turn" } as PromptResponse,
+      ];
+    });
+
+    const response = await orchestrator.processSpontaneousPost(
+      "discord",
+      "test_channel",
+      platformAdapter,
+      { botId: "bot_id", fetchRecentMessages: false },
+    );
+
+    assertEquals(response.success, false);
+    assertEquals(response.replySent, false);
+    assertEquals(response.error, "Agent did not send a reply");
+
+    sessionRegistry.stop();
+  } finally {
+    await Deno.remove(tempDir, { recursive: true });
+  }
+});
+
+Deno.test("SessionOrchestrator - processSpontaneousPost retries on no reply", async () => {
+  const tempDir = await Deno.makeTempDir();
+  try {
+    const { orchestrator, skillRegistry, sessionRegistry } = await createTestableOrchestrator(
+      tempDir,
+    );
+
+    const platformAdapter = new MockPlatformAdapter() as unknown as PlatformAdapter;
+
+    orchestrator.setConnectorSetup((connector) => {
+      connector.promptResponses = [
+        { stopReason: "end_turn" } as PromptResponse,
+        { stopReason: "end_turn" } as PromptResponse,
+      ];
+      connector.onPrompt = (callCount) => {
+        // Simulate reply on retry (2nd prompt)
+        if (callCount === 2) {
+          const replyHandler = skillRegistry.getReplyHandler();
+          const key = `discord/bot_id:test_channel`;
+          // deno-lint-ignore no-explicit-any
+          (replyHandler as any).replySentMap.set(key, true);
+        }
+      };
+    });
+
+    const response = await orchestrator.processSpontaneousPost(
+      "discord",
+      "test_channel",
+      platformAdapter,
+      { botId: "bot_id", fetchRecentMessages: true },
+    );
+
+    assertEquals(response.success, true);
+    assertEquals(response.replySent, true);
+    assertEquals(orchestrator.mockConnector!.promptCallCount, 2);
+
+    sessionRegistry.stop();
+  } finally {
+    await Deno.remove(tempDir, { recursive: true });
+  }
+});
+
+Deno.test("SessionOrchestrator - processSpontaneousPost retry stops on non-end_turn", async () => {
+  const tempDir = await Deno.makeTempDir();
+  try {
+    const { orchestrator, sessionRegistry } = await createTestableOrchestrator(tempDir);
+
+    const platformAdapter = new MockPlatformAdapter() as unknown as PlatformAdapter;
+
+    orchestrator.setConnectorSetup((connector) => {
+      connector.promptResponses = [
+        { stopReason: "end_turn" } as PromptResponse,
+        { stopReason: "cancelled" } as PromptResponse,
+      ];
+    });
+
+    const response = await orchestrator.processSpontaneousPost(
+      "discord",
+      "test_channel",
+      platformAdapter,
+      { botId: "bot_id", fetchRecentMessages: false },
+    );
+
+    assertEquals(response.success, false);
+    assertEquals(response.replySent, false);
+
+    sessionRegistry.stop();
+  } finally {
+    await Deno.remove(tempDir, { recursive: true });
+  }
+});
+
+Deno.test("SessionOrchestrator - processSpontaneousPost handles connector error", async () => {
+  const tempDir = await Deno.makeTempDir();
+  try {
+    const { orchestrator, sessionRegistry } = await createTestableOrchestrator(tempDir);
+
+    const platformAdapter = new MockPlatformAdapter() as unknown as PlatformAdapter;
+
+    orchestrator.setConnectorSetup((connector) => {
+      connector.connect = () => Promise.reject(new Error("Connection failed"));
+    });
+
+    const response = await orchestrator.processSpontaneousPost(
+      "discord",
+      "test_channel",
+      platformAdapter,
+      { botId: "bot_id", fetchRecentMessages: false },
+    );
+
+    assertEquals(response.success, false);
+    assertEquals(response.replySent, false);
+    assertEquals(response.error, "Connection failed");
+
+    sessionRegistry.stop();
+  } finally {
+    await Deno.remove(tempDir, { recursive: true });
+  }
+});
+
+Deno.test("SessionOrchestrator - processSpontaneousPost with skillApi disabled", async () => {
+  const tempDir = await Deno.makeTempDir();
+  try {
+    const config = createTestConfig(tempDir);
+    config.agent.defaultAgentType = "copilot";
+    config.agent.githubToken = "test-token";
+    // Ensure skillApi is not configured (disabled)
+    // deno-lint-ignore no-explicit-any
+    delete (config as any).skillApi;
+
+    const workspaceManager = new WorkspaceManager({
+      repoPath: config.workspace.repoPath,
+      workspacesDir: config.workspace.workspacesDir,
+    });
+    const memoryStore = new MemoryStore(workspaceManager, {
+      searchLimit: config.memory.searchLimit,
+      maxChars: config.memory.maxChars,
+    });
+    const skillRegistry = new SkillRegistry(memoryStore);
+
+    await Deno.mkdir(`${tempDir}/prompts`, { recursive: true });
+    await Deno.writeTextFile(
+      `${tempDir}/prompts/system.md`,
+      "You are a helpful assistant.",
+    );
+
+    const contextAssembler = new ContextAssembler(memoryStore, {
+      systemPromptPath: `${tempDir}/prompts/system.md`,
+      recentMessageLimit: config.memory.recentMessageLimit,
+      tokenLimit: config.agent.tokenLimit,
+      memoryMaxChars: config.memory.maxChars,
+    });
+
+    const sessionRegistry = new SessionRegistry();
+
+    const orchestrator = new TestableSessionOrchestrator(
+      workspaceManager,
+      contextAssembler,
+      skillRegistry,
+      config,
+      sessionRegistry,
+    );
+
+    const platformAdapter = new MockPlatformAdapter() as unknown as PlatformAdapter;
+
+    orchestrator.setConnectorSetup((connector) => {
+      connector.promptResponses = [
+        { stopReason: "end_turn" } as PromptResponse,
+      ];
+      connector.onPrompt = (callCount) => {
+        if (callCount === 1) {
+          const replyHandler = skillRegistry.getReplyHandler();
+          const key = `discord/bot_id:test_channel`;
+          // deno-lint-ignore no-explicit-any
+          (replyHandler as any).replySentMap.set(key, true);
+        }
+      };
+    });
+
+    const response = await orchestrator.processSpontaneousPost(
+      "discord",
+      "test_channel",
+      platformAdapter,
+      { botId: "bot_id", fetchRecentMessages: false },
+    );
+
+    assertEquals(response.success, true);
+    assertEquals(response.replySent, true);
+
+    sessionRegistry.stop();
+  } finally {
+    await Deno.remove(tempDir, { recursive: true });
+  }
+});
+
+Deno.test("SessionOrchestrator - buildSpontaneousPrompt includes session ID", async () => {
+  const tempDir = await Deno.makeTempDir();
+  try {
+    const { orchestrator, skillRegistry, sessionRegistry } = await createTestableOrchestrator(
+      tempDir,
+    );
+
+    const platformAdapter = new MockPlatformAdapter() as unknown as PlatformAdapter;
+    let capturedPrompt = "";
+
+    orchestrator.setConnectorSetup((connector) => {
+      connector.promptResponses = [
+        { stopReason: "end_turn" } as PromptResponse,
+      ];
+      const originalPrompt = connector.prompt.bind(connector);
+      connector.prompt = (sessionId: string, text: string) => {
+        capturedPrompt = text;
+        return originalPrompt(sessionId, text);
+      };
+      connector.onPrompt = () => {
+        const replyHandler = skillRegistry.getReplyHandler();
+        const key = `discord/bot_id:test_channel`;
+        // deno-lint-ignore no-explicit-any
+        (replyHandler as any).replySentMap.set(key, true);
+      };
+    });
+
+    await orchestrator.processSpontaneousPost(
+      "discord",
+      "test_channel",
+      platformAdapter,
+      { botId: "bot_id", fetchRecentMessages: false },
+    );
+
+    // Verify the prompt contains session-related info and spontaneous post instructions
+    assertEquals(capturedPrompt.includes("Session Information"), true);
+    assertEquals(capturedPrompt.includes("Spontaneous Post Mode"), true);
+    assertEquals(capturedPrompt.includes("send-reply"), true);
+    assertEquals(capturedPrompt.includes("NOT responding to any user message"), true);
 
     sessionRegistry.stop();
   } finally {

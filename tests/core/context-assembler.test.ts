@@ -652,6 +652,255 @@ Deno.test("ContextAssembler - formatEmojiSection limits emoji count", async () =
   });
 });
 
+// ============ Spontaneous context tests ============
+
+Deno.test("ContextAssembler - assembleSpontaneousContext without recent messages", async () => {
+  await withTestContextAssembler(async (assembler, _store, manager) => {
+    const workspace = await manager.getOrCreateWorkspace(createTestEvent());
+    const fetcher = createMockMessageFetcher([]);
+
+    const context = await assembler.assembleSpontaneousContext(
+      "discord",
+      "channel123",
+      workspace,
+      fetcher,
+      { fetchRecentMessages: false },
+    );
+
+    assertEquals(context.systemPrompt, "You are a helpful assistant.");
+    assertEquals(context.recentMessages.length, 0);
+    assertEquals(context.recentMessagesFetched, false);
+    assertEquals(typeof context.estimatedTokens, "number");
+  });
+});
+
+Deno.test("ContextAssembler - assembleSpontaneousContext with recent messages", async () => {
+  await withTestContextAssembler(async (assembler, _store, manager) => {
+    const workspace = await manager.getOrCreateWorkspace(createTestEvent());
+
+    const messages: PlatformMessage[] = [
+      createTestMessage({ content: "Hey there", username: "Alice" }),
+    ];
+    const fetcher = createMockMessageFetcher(messages);
+
+    const context = await assembler.assembleSpontaneousContext(
+      "discord",
+      "channel123",
+      workspace,
+      fetcher,
+      { fetchRecentMessages: true },
+    );
+
+    assertEquals(context.recentMessages.length, 1);
+    assertEquals(context.recentMessagesFetched, true);
+  });
+});
+
+Deno.test("ContextAssembler - assembleSpontaneousContext includes important memories", async () => {
+  await withTestContextAssembler(async (assembler, store, manager) => {
+    const workspace = await manager.getOrCreateWorkspace(createTestEvent());
+    await store.addMemory(workspace, "Important memory", { importance: "high" });
+
+    const fetcher = createMockMessageFetcher([]);
+    const context = await assembler.assembleSpontaneousContext(
+      "discord",
+      "channel123",
+      workspace,
+      fetcher,
+      { fetchRecentMessages: false },
+    );
+
+    assertEquals(context.importantMemories.length, 1);
+    assertEquals(context.importantMemories[0].content, "Important memory");
+  });
+});
+
+Deno.test("ContextAssembler - assembleSpontaneousContext handles fetch error gracefully", async () => {
+  await withTestContextAssembler(async (assembler, _store, manager) => {
+    const workspace = await manager.getOrCreateWorkspace(createTestEvent());
+    const fetcher: MessageFetcher = {
+      fetchRecentMessages: () => Promise.reject(new Error("Network error")),
+    };
+
+    const context = await assembler.assembleSpontaneousContext(
+      "discord",
+      "channel123",
+      workspace,
+      fetcher,
+      { fetchRecentMessages: true },
+    );
+
+    // Should not throw, just return empty messages
+    assertEquals(context.recentMessages.length, 0);
+  });
+});
+
+Deno.test("ContextAssembler - assembleSpontaneousContext includes emojis", async () => {
+  await withTestContextAssembler(async (assembler, _store, manager) => {
+    const workspace = await manager.getOrCreateWorkspace(createTestEvent());
+    const emojis: PlatformEmoji[] = [
+      {
+        name: "happy",
+        animated: false,
+        useInText: ":happy:",
+        useAsReaction: ":happy:",
+        category: "Emotions",
+      },
+    ];
+    const fetcher = createMockMessageFetcher([], emojis);
+
+    const context = await assembler.assembleSpontaneousContext(
+      "discord",
+      "channel123",
+      workspace,
+      fetcher,
+      { fetchRecentMessages: false },
+    );
+
+    assertEquals(context.availableEmojis?.length, 1);
+    assertEquals(context.availableEmojis![0].name, "happy");
+  });
+});
+
+Deno.test("ContextAssembler - assembleSpontaneousContext handles emoji fetch error", async () => {
+  await withTestContextAssembler(async (assembler, _store, manager) => {
+    const workspace = await manager.getOrCreateWorkspace(createTestEvent());
+    const fetcher: MessageFetcher = {
+      fetchRecentMessages: () => Promise.resolve([]),
+      fetchEmojis: () => Promise.reject(new Error("Emoji fetch failed")),
+    };
+
+    const context = await assembler.assembleSpontaneousContext(
+      "discord",
+      "channel123",
+      workspace,
+      fetcher,
+      { fetchRecentMessages: false },
+    );
+
+    assertEquals(context.availableEmojis, undefined);
+  });
+});
+
+Deno.test("ContextAssembler - assembleSpontaneousContext with empty emojis", async () => {
+  await withTestContextAssembler(async (assembler, _store, manager) => {
+    const workspace = await manager.getOrCreateWorkspace(createTestEvent());
+    const fetcher = createMockMessageFetcher([], []);
+
+    const context = await assembler.assembleSpontaneousContext(
+      "discord",
+      "channel123",
+      workspace,
+      fetcher,
+      { fetchRecentMessages: false },
+    );
+
+    assertEquals(context.availableEmojis, undefined);
+  });
+});
+
+Deno.test("ContextAssembler - formatSpontaneousContext with no memories or messages", async () => {
+  await withTestContextAssembler(async (assembler, _store, manager) => {
+    const workspace = await manager.getOrCreateWorkspace(createTestEvent());
+    const fetcher = createMockMessageFetcher([]);
+
+    const context = await assembler.assembleSpontaneousContext(
+      "discord",
+      "channel123",
+      workspace,
+      fetcher,
+      { fetchRecentMessages: false },
+    );
+
+    const formatted = assembler.formatSpontaneousContext(context);
+
+    assertEquals(formatted.systemMessage, "You are a helpful assistant.");
+    assertStringIncludes(formatted.userMessage, "Spontaneous Post Mode");
+    assertStringIncludes(
+      formatted.userMessage,
+      "Create something entirely original",
+    );
+    assertEquals(formatted.estimatedTokens > 0, true);
+  });
+});
+
+Deno.test("ContextAssembler - formatSpontaneousContext with recent messages fetched", async () => {
+  await withTestContextAssembler(async (assembler, _store, manager) => {
+    const workspace = await manager.getOrCreateWorkspace(createTestEvent());
+    const messages: PlatformMessage[] = [
+      createTestMessage({ content: "Hello", username: "Bob" }),
+    ];
+    const fetcher = createMockMessageFetcher(messages);
+
+    const context = await assembler.assembleSpontaneousContext(
+      "discord",
+      "channel123",
+      workspace,
+      fetcher,
+      { fetchRecentMessages: true },
+    );
+
+    const formatted = assembler.formatSpontaneousContext(context);
+
+    assertStringIncludes(formatted.userMessage, "Recent Conversation");
+    assertStringIncludes(formatted.userMessage, "Bob: Hello");
+    assertStringIncludes(
+      formatted.userMessage,
+      "reference recent conversation topics",
+    );
+  });
+});
+
+Deno.test("ContextAssembler - formatSpontaneousContext includes memories section", async () => {
+  await withTestContextAssembler(async (assembler, store, manager) => {
+    const workspace = await manager.getOrCreateWorkspace(createTestEvent());
+    await store.addMemory(workspace, "My key fact", { importance: "high" });
+
+    const fetcher = createMockMessageFetcher([]);
+    const context = await assembler.assembleSpontaneousContext(
+      "discord",
+      "channel123",
+      workspace,
+      fetcher,
+      { fetchRecentMessages: false },
+    );
+
+    const formatted = assembler.formatSpontaneousContext(context);
+
+    assertStringIncludes(formatted.userMessage, "Important Memories");
+    assertStringIncludes(formatted.userMessage, "My key fact");
+  });
+});
+
+Deno.test("ContextAssembler - formatSpontaneousContext includes emojis", async () => {
+  await withTestContextAssembler(async (assembler, _store, manager) => {
+    const workspace = await manager.getOrCreateWorkspace(createTestEvent());
+    const emojis: PlatformEmoji[] = [
+      {
+        name: "wave",
+        animated: false,
+        useInText: ":wave:",
+        useAsReaction: ":wave:",
+        category: "Gestures",
+      },
+    ];
+    const fetcher = createMockMessageFetcher([], emojis);
+
+    const context = await assembler.assembleSpontaneousContext(
+      "discord",
+      "channel123",
+      workspace,
+      fetcher,
+      { fetchRecentMessages: false },
+    );
+
+    const formatted = assembler.formatSpontaneousContext(context);
+
+    assertStringIncludes(formatted.userMessage, "Available Custom Emojis");
+    assertStringIncludes(formatted.userMessage, "wave");
+  });
+});
+
 Deno.test("ContextAssembler - formatContext includes emoji section in token budget", async () => {
   await withTestContextAssembler(async (assembler, _store, manager) => {
     const event = createTestEvent();

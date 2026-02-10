@@ -179,3 +179,42 @@ Deno.test("SpontaneousScheduler - getStatus() returns correct state", () => {
 
   scheduler.stop();
 });
+
+Deno.test("SpontaneousScheduler - schedules both platforms independently", () => {
+  const config = createConfig({
+    discordEnabled: true,
+    discordSpontaneous: true,
+    misskeyEnabled: true,
+    misskeySpontaneous: true,
+  });
+  const scheduler = new SpontaneousScheduler(config);
+  scheduler.setCallback(async () => {});
+  scheduler.start();
+
+  const status = scheduler.getStatus();
+  assertEquals("discord" in status, true);
+  assertEquals("misskey" in status, true);
+
+  scheduler.stop();
+});
+
+Deno.test("SpontaneousScheduler - lastExecutedAt is set after callback runs", async () => {
+  const config = createConfig({
+    discordEnabled: true,
+    discordSpontaneous: true,
+    minIntervalMs: 30,
+    maxIntervalMs: 40,
+  });
+
+  const scheduler = new SpontaneousScheduler(config);
+  scheduler.setCallback(() => Promise.resolve());
+  scheduler.start();
+
+  // Wait for callback to execute
+  await new Promise((resolve) => setTimeout(resolve, 120));
+
+  const status = scheduler.getStatus();
+  assertEquals(status.discord.lastExecutedAt instanceof Date, true);
+
+  scheduler.stop();
+});
