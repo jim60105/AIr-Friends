@@ -2,7 +2,11 @@
 
 import { createLogger } from "@utils/logger.ts";
 import { AgentConnector } from "@acp/agent-connector.ts";
-import { createAgentConfig, getDefaultAgentType } from "@acp/agent-factory.ts";
+import {
+  createAgentConfig,
+  getDefaultAgentType,
+  getRetryPromptStrategy,
+} from "@acp/agent-factory.ts";
 import { ContextAssembler } from "./context-assembler.ts";
 import { WorkspaceManager } from "./workspace-manager.ts";
 import type { SkillRegistry } from "@skills/registry.ts";
@@ -10,7 +14,7 @@ import type { SessionRegistry } from "../skill-api/session-registry.ts";
 import type { Config } from "../types/config.ts";
 import type { NormalizedEvent } from "../types/events.ts";
 import type { PlatformAdapter } from "@platforms/platform-adapter.ts";
-import type { ClientConfig } from "@acp/types.ts";
+import type { AgentConnectorOptions, ClientConfig } from "@acp/types.ts";
 import { join } from "@std/path";
 
 const logger = createLogger("SessionOrchestrator");
@@ -149,7 +153,7 @@ export class SessionOrchestrator {
 
       // 5. Build ACP connector
       const agentType = getDefaultAgentType(this.config);
-      const connector = new AgentConnector({
+      const connector = this.createConnector({
         agentConfig: createAgentConfig(agentType, workspace.path, this.config, this.yolo),
         clientConfig,
         skillRegistry: this.skillRegistry,
@@ -183,7 +187,59 @@ export class SessionOrchestrator {
         });
 
         // Check if reply was sent
-        const replySent = replyHandler.hasReplySent(workspace.key, event.channelId);
+        let replySent = replyHandler.hasReplySent(workspace.key, event.channelId);
+
+        // If agent completed without reply, retry with a special prompt
+        if (!replySent && response.stopReason === "end_turn") {
+          sessionLogger.warn(
+            "Agent completed without sending reply, retrying with special prompt",
+          );
+
+          const retryStrategy = getRetryPromptStrategy(agentType);
+
+          for (let attempt = 0; attempt < retryStrategy.maxRetries; attempt++) {
+            // Clear reply state to allow retry
+            replyHandler.clearReplyState(workspace.key, event.channelId);
+
+            sessionLogger.info("Sending retry prompt", {
+              sessionId,
+              attempt: attempt + 1,
+              maxRetries: retryStrategy.maxRetries,
+            });
+
+            // Send retry prompt on the same session
+            const retryResponse = await connector.prompt(
+              sessionId,
+              retryStrategy.retryPromptMessage,
+            );
+
+            sessionLogger.info("Retry prompt completed", {
+              sessionId,
+              attempt: attempt + 1,
+              stopReason: retryResponse.stopReason,
+            });
+
+            // Check if reply was sent after retry
+            replySent = replyHandler.hasReplySent(workspace.key, event.channelId);
+
+            if (replySent) {
+              sessionLogger.info("Reply sent after retry", {
+                sessionId,
+                attempt: attempt + 1,
+              });
+              break;
+            }
+
+            // If the retry was cancelled or had unexpected stop reason, stop retrying
+            if (retryResponse.stopReason !== "end_turn") {
+              sessionLogger.warn("Retry stopped with unexpected stop reason", {
+                sessionId,
+                stopReason: retryResponse.stopReason,
+              });
+              break;
+            }
+          }
+        }
 
         if (replySent) {
           return {
@@ -192,9 +248,9 @@ export class SessionOrchestrator {
           };
         }
 
-        // Agent completed but didn't send reply
+        // Agent completed but didn't send reply even after retry
         if (response.stopReason === "end_turn") {
-          sessionLogger.warn("Agent completed without sending reply");
+          sessionLogger.warn("Agent completed without sending reply after retry");
           return {
             success: false,
             replySent: false,
@@ -249,6 +305,14 @@ export class SessionOrchestrator {
         error: error instanceof Error ? error.message : "Unknown error",
       };
     }
+  }
+
+  /**
+   * Create an AgentConnector instance.
+   * Protected to allow test subclasses to inject mocks.
+   */
+  protected createConnector(options: AgentConnectorOptions): AgentConnector {
+    return new AgentConnector(options);
   }
 
   /**

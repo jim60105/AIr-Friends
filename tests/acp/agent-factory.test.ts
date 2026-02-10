@@ -1,7 +1,11 @@
 // tests/acp/agent-factory.test.ts
 
-import { assertEquals, assertExists, assertThrows } from "@std/assert";
-import { createAgentConfig, getDefaultAgentType } from "@acp/agent-factory.ts";
+import { assertEquals, assertExists, assertStringIncludes, assertThrows } from "@std/assert";
+import {
+  createAgentConfig,
+  getDefaultAgentType,
+  getRetryPromptStrategy,
+} from "@acp/agent-factory.ts";
 import type { Config } from "../../src/types/config.ts";
 
 // Create a minimal test config
@@ -458,4 +462,38 @@ Deno.test("createAgentConfig - does not add OPENCODE_YOLO env var when yolo is f
   assertExists(agentConfig.env);
   assertEquals(agentConfig.env!["OPENCODE_YOLO"], undefined);
   assertEquals(agentConfig.cwd, "/tmp/workspace");
+});
+
+Deno.test("getRetryPromptStrategy - returns strategy for copilot", () => {
+  const strategy = getRetryPromptStrategy("copilot");
+  assertEquals(strategy.maxRetries, 1);
+  assertStringIncludes(strategy.retryPromptMessage, "send-reply");
+});
+
+Deno.test("getRetryPromptStrategy - returns strategy for opencode", () => {
+  const strategy = getRetryPromptStrategy("opencode");
+  assertEquals(strategy.maxRetries, 1);
+  assertStringIncludes(strategy.retryPromptMessage, "send-reply");
+});
+
+Deno.test("getRetryPromptStrategy - returns strategy for gemini", () => {
+  const strategy = getRetryPromptStrategy("gemini");
+  assertEquals(strategy.maxRetries, 1);
+  assertStringIncludes(strategy.retryPromptMessage, "send-reply");
+});
+
+Deno.test("getRetryPromptStrategy - throws for unknown agent type", () => {
+  assertThrows(
+    () => getRetryPromptStrategy("unknown" as never),
+    Error,
+    "Unknown agent type",
+  );
+});
+
+Deno.test("getRetryPromptStrategy - all strategies have maxRetries of 1", () => {
+  const types: Array<"copilot" | "opencode" | "gemini"> = ["copilot", "opencode", "gemini"];
+  for (const type of types) {
+    const strategy = getRetryPromptStrategy(type);
+    assertEquals(strategy.maxRetries, 1, `${type} should have maxRetries of 1`);
+  }
 });

@@ -389,6 +389,24 @@ await connector.disconnect();
 - Valid values: `"copilot"`, `"gemini"`, or `"opencode"`
 - Container includes pre-installed binaries for all three agents
 
+**Retry on Missing Reply**:
+
+When an ACP Agent completes a prompt turn (`stopReason === "end_turn"`) without calling the `send-reply` skill, the system automatically retries:
+
+1. Clears the reply state to allow a new reply
+2. Sends a second prompt on the **same ACP session** with a system message requesting the agent to send a reply
+3. If the retry also fails to produce a reply, the system returns a failure response
+
+This retry mechanism uses `connector.prompt()` on the existing session — no CLI-level resume or `loadSession()`/`resumeSession()` is needed.
+
+The retry strategy is configured per agent type via `getRetryPromptStrategy()` in `src/acp/agent-factory.ts`:
+
+| Agent | Max Retries | Retry Supported |
+|-------|-------------|-----------------|
+| Copilot | 1 | Yes |
+| OpenCode | 1 | Yes |
+| Gemini | 1 | Yes |
+
 ### 7. Access Control & Reply Policy (Feature 13)
 
 Controls bot reply behavior through the `accessControl` section in `config.yaml`.

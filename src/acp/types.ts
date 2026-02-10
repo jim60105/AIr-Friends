@@ -118,6 +118,18 @@ export type MCPServerConfig =
   | SSEMCPServerConfig;
 
 /**
+ * Retry prompt strategy for different agent types.
+ * Used when an agent completes without sending a reply.
+ */
+export interface RetryPromptStrategy {
+  /** The prompt message to send when retrying */
+  retryPromptMessage: string;
+
+  /** Maximum number of retry attempts (should be 1 to avoid infinite loops) */
+  maxRetries: number;
+}
+
+/**
  * Options for AgentConnector
  */
 export interface AgentConnectorOptions {
