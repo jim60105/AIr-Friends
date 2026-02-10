@@ -25,6 +25,7 @@ const logger = createLogger("SessionOrchestrator");
 export interface SessionResponse {
   success: boolean;
   replySent: boolean;
+  reactionSent?: boolean;
   error?: string;
 }
 
@@ -179,6 +180,10 @@ export class SessionOrchestrator {
         const replyHandler = this.skillRegistry.getReplyHandler();
         replyHandler.clearReplyState(workspace.key, event.channelId);
 
+        // Clear reaction state before prompting
+        const reactionHandler = this.skillRegistry.getReactionHandler();
+        reactionHandler.clearReactionState(workspace.key, event.channelId);
+
         // Send prompt to agent
         const response = await connector.prompt(sessionId, fullPrompt);
         sessionLogger.info("Agent session completed", {
@@ -186,19 +191,23 @@ export class SessionOrchestrator {
           stopReason: response.stopReason,
         });
 
-        // Check if reply was sent
+        // Check if reply or reaction was sent
         let replySent = replyHandler.hasReplySent(workspace.key, event.channelId);
+        let reactionSent = reactionHandler.hasReactionSent(workspace.key, event.channelId);
 
-        // If agent completed without reply, retry with a special prompt
-        if (!replySent && response.stopReason === "end_turn") {
+        // Agent has responded if it sent a reply OR a reaction
+        let hasResponded = replySent || reactionSent;
+
+        // If agent completed without any response (no reply AND no reaction), retry
+        if (!hasResponded && response.stopReason === "end_turn") {
           sessionLogger.warn(
-            "Agent completed without sending reply, retrying with special prompt",
+            "Agent completed without sending reply or reaction, retrying with special prompt",
           );
 
           const retryStrategy = getRetryPromptStrategy(agentType);
 
           for (let attempt = 0; attempt < retryStrategy.maxRetries; attempt++) {
-            // Clear reply state to allow retry
+            // Clear reply state to allow retry (reaction state is NOT cleared)
             replyHandler.clearReplyState(workspace.key, event.channelId);
 
             sessionLogger.info("Sending retry prompt", {
@@ -219,13 +228,17 @@ export class SessionOrchestrator {
               stopReason: retryResponse.stopReason,
             });
 
-            // Check if reply was sent after retry
+            // Check if reply or reaction was sent after retry
             replySent = replyHandler.hasReplySent(workspace.key, event.channelId);
+            reactionSent = reactionHandler.hasReactionSent(workspace.key, event.channelId);
+            hasResponded = replySent || reactionSent;
 
-            if (replySent) {
-              sessionLogger.info("Reply sent after retry", {
+            if (hasResponded) {
+              sessionLogger.info("Response sent after retry", {
                 sessionId,
                 attempt: attempt + 1,
+                replySent,
+                reactionSent,
               });
               break;
             }
@@ -239,16 +252,22 @@ export class SessionOrchestrator {
               break;
             }
           }
+
+          // Re-evaluate after retry
+          replySent = replyHandler.hasReplySent(workspace.key, event.channelId);
+          reactionSent = reactionHandler.hasReactionSent(workspace.key, event.channelId);
+          hasResponded = replySent || reactionSent;
         }
 
-        if (replySent) {
+        if (hasResponded) {
           return {
             success: true,
-            replySent: true,
+            replySent,
+            reactionSent,
           };
         }
 
-        // Agent completed but didn't send reply even after retry
+        // Agent completed but didn't send reply or reaction even after retry
         if (response.stopReason === "end_turn") {
           sessionLogger.warn("Agent completed without sending reply after retry");
           return {
@@ -353,11 +372,18 @@ export class SessionOrchestrator {
     parts.push("");
     parts.push("Please respond to the current message above.");
     parts.push("Use the `send-reply` skill to deliver your final response.");
+    parts.push(
+      "You may also use `react-message` to add an emoji reaction to the trigger message.",
+    );
+    parts.push(
+      "You can react AND reply, or just react without replying, or just reply without reacting.",
+    );
     parts.push("You may use other available skills as needed:");
     parts.push("- `memory-save`: Save important information");
     parts.push("- `memory-search`: Search for saved memories");
     parts.push("- `memory-patch`: Update memory metadata");
     parts.push("- `fetch-context`: Get additional context from the platform");
+    parts.push("- `react-message`: React to the trigger message with an emoji");
 
     return parts.join("\n");
   }

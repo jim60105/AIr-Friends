@@ -2,6 +2,7 @@
 
 import type { ResolvedMemory } from "./memory.ts";
 import type { PlatformMessage } from "./events.ts";
+import type { PlatformEmoji } from "./platform.ts";
 
 /**
  * Assembled context for an Agent session
@@ -24,6 +25,9 @@ export interface AssembledContext {
 
   /** Estimated token count */
   estimatedTokens: number;
+
+  /** Available custom emojis on the platform */
+  availableEmojis?: PlatformEmoji[];
 
   /** Timestamp when context was assembled */
   assembledAt: Date;
@@ -83,4 +87,9 @@ export interface MessageFetcher {
     query: string,
     limit: number,
   ): Promise<PlatformMessage[]>;
+
+  /**
+   * Fetch available custom emojis (optional)
+   */
+  fetchEmojis?(): Promise<PlatformEmoji[]>;
 }

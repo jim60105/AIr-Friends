@@ -193,7 +193,7 @@ export function getDefaultAgentType(appConfig: Config): AgentType {
  */
 export function getRetryPromptStrategy(type: AgentType): RetryPromptStrategy {
   const defaultRetryMessage =
-    "System message: You have a special turn. Regardless of whether you have already sent-reply, please send another send-reply.";
+    "System message: You have a special turn. Regardless of whether you have already sent-reply or react-message, please send another send-reply or react-message.";
 
   switch (type) {
     case "copilot":

@@ -551,6 +551,85 @@ Deno.test("SessionOrchestrator - retry sends reply on first retry attempt", asyn
   }
 });
 
+Deno.test("SessionOrchestrator - does not retry when reaction was sent", async () => {
+  const tempDir = await Deno.makeTempDir();
+  try {
+    const { orchestrator, skillRegistry, workspaceManager, sessionRegistry } =
+      await createTestableOrchestrator(tempDir);
+
+    const event = createTestEvent();
+    const platformAdapter = new MockPlatformAdapter() as unknown as PlatformAdapter;
+    const reactionHandler = skillRegistry.getReactionHandler();
+
+    orchestrator.setConnectorSetup((connector) => {
+      connector.promptResponses = [
+        { stopReason: "end_turn" } as PromptResponse,
+      ];
+      connector.onPrompt = (callCount) => {
+        // Simulate reaction sent on the first prompt
+        if (callCount === 1) {
+          const workspace = workspaceManager.getWorkspaceKeyFromEvent(event);
+          const key = `${workspace}:${event.channelId}`;
+          // deno-lint-ignore no-explicit-any
+          (reactionHandler as any).reactionSentMap.set(key, true);
+        }
+      };
+    });
+
+    const response = await orchestrator.processMessage(event, platformAdapter);
+
+    assertEquals(response.success, true);
+    assertEquals(response.replySent, false);
+    assertEquals(response.reactionSent, true);
+    // Should have called prompt only once (no retry needed)
+    assertEquals(orchestrator.mockConnector!.promptCallCount, 1);
+
+    sessionRegistry.stop();
+  } finally {
+    await Deno.remove(tempDir, { recursive: true });
+  }
+});
+
+Deno.test("SessionOrchestrator - does not retry when both reaction and reply were sent", async () => {
+  const tempDir = await Deno.makeTempDir();
+  try {
+    const { orchestrator, skillRegistry, workspaceManager, sessionRegistry } =
+      await createTestableOrchestrator(tempDir);
+
+    const event = createTestEvent();
+    const platformAdapter = new MockPlatformAdapter() as unknown as PlatformAdapter;
+    const replyHandler = skillRegistry.getReplyHandler();
+    const reactionHandler = skillRegistry.getReactionHandler();
+
+    orchestrator.setConnectorSetup((connector) => {
+      connector.promptResponses = [
+        { stopReason: "end_turn" } as PromptResponse,
+      ];
+      connector.onPrompt = (callCount) => {
+        if (callCount === 1) {
+          const workspace = workspaceManager.getWorkspaceKeyFromEvent(event);
+          const key = `${workspace}:${event.channelId}`;
+          // deno-lint-ignore no-explicit-any
+          (replyHandler as any).replySentMap.set(key, true);
+          // deno-lint-ignore no-explicit-any
+          (reactionHandler as any).reactionSentMap.set(key, true);
+        }
+      };
+    });
+
+    const response = await orchestrator.processMessage(event, platformAdapter);
+
+    assertEquals(response.success, true);
+    assertEquals(response.replySent, true);
+    assertEquals(response.reactionSent, true);
+    assertEquals(orchestrator.mockConnector!.promptCallCount, 1);
+
+    sessionRegistry.stop();
+  } finally {
+    await Deno.remove(tempDir, { recursive: true });
+  }
+});
+
 Deno.test("SessionOrchestrator - retry stops on non-end_turn stop reason", async () => {
   const tempDir = await Deno.makeTempDir();
   try {

@@ -7,6 +7,8 @@ import type { Platform, PlatformMessage } from "../../types/events.ts";
 import {
   ConnectionState,
   PlatformCapabilities,
+  type PlatformEmoji,
+  type ReactionResult,
   type ReplyOptions,
   type ReplyResult,
 } from "../../types/platform.ts";
@@ -50,6 +52,9 @@ export class MisskeyAdapter extends PlatformAdapter {
   private botUsername: string | null = null;
   private mainChannel: ChannelConnection<Channels["main"]> | null = null;
   private reconnectAttempts = 0;
+  private emojiCache: PlatformEmoji[] | null = null;
+  private emojiCacheTimestamp = 0;
+  private readonly EMOJI_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
 
   constructor(config: MisskeyAdapterConfig) {
     super();
@@ -434,6 +439,91 @@ export class MisskeyAdapter extends PlatformAdapter {
         error: error instanceof Error ? error.message : String(error),
       });
       return [];
+    }
+  }
+
+  /**
+   * Fetch available custom emojis from the Misskey instance
+   * Uses the public /emojis endpoint
+   */
+  async fetchEmojis(): Promise<PlatformEmoji[]> {
+    const now = Date.now();
+    if (this.emojiCache && (now - this.emojiCacheTimestamp) < this.EMOJI_CACHE_TTL_MS) {
+      return this.emojiCache;
+    }
+
+    try {
+      const response = await this.client.request<{
+        emojis: Array<{
+          name: string;
+          category: string | null;
+          aliases: string[];
+          url: string;
+        }>;
+      }>("emojis", {});
+
+      const emojis: PlatformEmoji[] = response.emojis.map((e) => ({
+        name: e.name,
+        animated: false, // Misskey doesn't distinguish animated in this API
+        category: e.category,
+        aliases: e.aliases,
+        useInText: `:${e.name}:`,
+        useAsReaction: `:${e.name}:`,
+      }));
+
+      this.emojiCache = emojis;
+      this.emojiCacheTimestamp = now;
+
+      logger.debug("Fetched Misskey emojis", { count: emojis.length });
+      return emojis;
+    } catch (error) {
+      logger.error("Failed to fetch Misskey emojis", {
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return this.emojiCache ?? [];
+    }
+  }
+
+  /**
+   * Add a reaction to a Misskey note
+   * @param emoji - Misskey emoji format: ":custom_emoji:" or Unicode character (e.g., "❤️")
+   * Note: channelId for Misskey uses "note:xxx" format; this method extracts the note ID.
+   * However, messageId is used directly as it is the actual note ID.
+   */
+  async addReaction(
+    channelId: string,
+    messageId: string,
+    emoji: string,
+  ): Promise<ReactionResult> {
+    // Chat messages don't support reactions
+    if (channelId.startsWith("chat:")) {
+      return {
+        success: false,
+        error: "Reactions are not supported for chat messages",
+      };
+    }
+
+    try {
+      await this.client.request("notes/reactions/create", {
+        noteId: messageId,
+        reaction: emoji,
+      });
+
+      logger.debug("Reaction added", { noteId: messageId, emoji });
+
+      return { success: true };
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      logger.error("Failed to add reaction", {
+        noteId: messageId,
+        emoji,
+        error: errorMessage,
+      });
+
+      return {
+        success: false,
+        error: errorMessage,
+      };
     }
   }
 

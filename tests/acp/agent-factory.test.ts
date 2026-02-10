@@ -468,18 +468,21 @@ Deno.test("getRetryPromptStrategy - returns strategy for copilot", () => {
   const strategy = getRetryPromptStrategy("copilot");
   assertEquals(strategy.maxRetries, 1);
   assertStringIncludes(strategy.retryPromptMessage, "send-reply");
+  assertStringIncludes(strategy.retryPromptMessage, "react-message");
 });
 
 Deno.test("getRetryPromptStrategy - returns strategy for opencode", () => {
   const strategy = getRetryPromptStrategy("opencode");
   assertEquals(strategy.maxRetries, 1);
   assertStringIncludes(strategy.retryPromptMessage, "send-reply");
+  assertStringIncludes(strategy.retryPromptMessage, "react-message");
 });
 
 Deno.test("getRetryPromptStrategy - returns strategy for gemini", () => {
   const strategy = getRetryPromptStrategy("gemini");
   assertEquals(strategy.maxRetries, 1);
   assertStringIncludes(strategy.retryPromptMessage, "send-reply");
+  assertStringIncludes(strategy.retryPromptMessage, "react-message");
 });
 
 Deno.test("getRetryPromptStrategy - throws for unknown agent type", () => {

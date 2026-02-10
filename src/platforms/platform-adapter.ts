@@ -7,6 +7,8 @@ import {
   type ConnectionStatus,
   type EventHandler,
   type PlatformCapabilities,
+  type PlatformEmoji,
+  type ReactionResult,
   type ReplyOptions,
   type ReplyResult,
 } from "../types/platform.ts";
@@ -163,6 +165,28 @@ export abstract class PlatformAdapter implements MessageFetcher {
     query: string,
     limit: number,
   ): Promise<PlatformMessage[]>;
+
+  /**
+   * Fetch available custom emojis on the platform.
+   * Returns an array of custom emojis the bot can use.
+   * Unicode emojis are universally available and do not need to be listed.
+   *
+   * Implementations should cache results to avoid excessive API calls.
+   */
+  abstract fetchEmojis(): Promise<PlatformEmoji[]>;
+
+  /**
+   * Add a reaction to a message.
+   *
+   * @param channelId - The channel containing the message
+   * @param messageId - The message to react to
+   * @param emoji - The emoji to use for the reaction (Unicode character or platform-specific format)
+   */
+  abstract addReaction(
+    channelId: string,
+    messageId: string,
+    emoji: string,
+  ): Promise<ReactionResult>;
 
   /**
    * Get username for a user ID

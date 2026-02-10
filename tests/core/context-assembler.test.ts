@@ -6,6 +6,7 @@ import { MemoryStore } from "../../src/core/memory-store.ts";
 import { WorkspaceManager } from "../../src/core/workspace-manager.ts";
 import type { MessageFetcher } from "../../src/types/context.ts";
 import type { NormalizedEvent, Platform, PlatformMessage } from "../../src/types/events.ts";
+import type { PlatformEmoji } from "../../src/types/platform.ts";
 
 function createTestMessage(overrides: Partial<PlatformMessage> = {}): PlatformMessage {
   return {
@@ -33,12 +34,16 @@ function createTestEvent(overrides: Partial<NormalizedEvent> = {}): NormalizedEv
   };
 }
 
-function createMockMessageFetcher(messages: PlatformMessage[]): MessageFetcher {
+function createMockMessageFetcher(
+  messages: PlatformMessage[],
+  emojis?: PlatformEmoji[],
+): MessageFetcher {
   return {
     fetchRecentMessages: (_channelId: string, limit: number) => {
       return Promise.resolve(messages.slice(0, limit));
     },
     searchRelatedMessages: () => Promise.resolve([]),
+    ...(emojis !== undefined ? { fetchEmojis: () => Promise.resolve(emojis) } : {}),
   };
 }
 
@@ -539,5 +544,135 @@ Deno.test("ContextAssembler - /clear should be applied during context assembly",
     // Only the message after /clear should remain
     assertEquals(context.recentMessages.length, 1);
     assertEquals(context.recentMessages[0].content, "New conversation start");
+  });
+});
+
+// ============ Emoji tests ============
+
+Deno.test("ContextAssembler - assembleContext includes emojis when available", async () => {
+  await withTestContextAssembler(async (assembler, _store, manager) => {
+    const event = createTestEvent();
+    const workspace = await manager.getOrCreateWorkspace(event);
+
+    const testEmojis: PlatformEmoji[] = [
+      {
+        name: "smile",
+        animated: false,
+        useInText: ":smile:",
+        useAsReaction: ":smile:",
+        category: "General",
+      },
+    ];
+
+    const fetcher = createMockMessageFetcher([], testEmojis);
+    const context = await assembler.assembleContext(event, workspace, fetcher);
+
+    assertEquals(context.availableEmojis?.length, 1);
+    assertEquals(context.availableEmojis![0].name, "smile");
+  });
+});
+
+Deno.test("ContextAssembler - assembleContext works without emojis", async () => {
+  await withTestContextAssembler(async (assembler, _store, manager) => {
+    const event = createTestEvent();
+    const workspace = await manager.getOrCreateWorkspace(event);
+
+    // No fetchEmojis method on fetcher
+    const fetcher = createMockMessageFetcher([]);
+    const context = await assembler.assembleContext(event, workspace, fetcher);
+
+    assertEquals(context.availableEmojis, undefined);
+  });
+});
+
+Deno.test("ContextAssembler - formatEmojiSection groups by category", async () => {
+  await withTestContextAssembler(async (assembler, _store, manager) => {
+    const event = createTestEvent();
+    const workspace = await manager.getOrCreateWorkspace(event);
+
+    const testEmojis: PlatformEmoji[] = [
+      {
+        name: "happy",
+        animated: false,
+        useInText: ":happy:",
+        useAsReaction: ":happy:",
+        category: "Emotions",
+      },
+      {
+        name: "sad",
+        animated: false,
+        useInText: ":sad:",
+        useAsReaction: ":sad:",
+        category: "Emotions",
+      },
+      {
+        name: "cat",
+        animated: false,
+        useInText: ":cat:",
+        useAsReaction: ":cat:",
+        category: "Animals",
+      },
+    ];
+
+    const fetcher = createMockMessageFetcher([], testEmojis);
+    const context = await assembler.assembleContext(event, workspace, fetcher);
+    const formatted = assembler.formatContext(context);
+
+    assertStringIncludes(formatted.userMessage, "Available Custom Emojis");
+    assertStringIncludes(formatted.userMessage, "Emotions");
+    assertStringIncludes(formatted.userMessage, "Animals");
+    assertStringIncludes(formatted.userMessage, "happy");
+    assertStringIncludes(formatted.userMessage, "cat");
+  });
+});
+
+Deno.test("ContextAssembler - formatEmojiSection limits emoji count", async () => {
+  await withTestContextAssembler(async (assembler, _store, manager) => {
+    const event = createTestEvent();
+    const workspace = await manager.getOrCreateWorkspace(event);
+
+    // Create 210 emojis (over limit of 200)
+    const testEmojis: PlatformEmoji[] = [];
+    for (let i = 0; i < 210; i++) {
+      testEmojis.push({
+        name: `emoji_${i}`,
+        animated: false,
+        useInText: `:emoji_${i}:`,
+        useAsReaction: `:emoji_${i}:`,
+        category: "Test",
+      });
+    }
+
+    const fetcher = createMockMessageFetcher([], testEmojis);
+    const context = await assembler.assembleContext(event, workspace, fetcher);
+    const formatted = assembler.formatContext(context);
+
+    // Should include "... and N more emojis"
+    assertStringIncludes(formatted.userMessage, "... and 10 more emojis");
+  });
+});
+
+Deno.test("ContextAssembler - formatContext includes emoji section in token budget", async () => {
+  await withTestContextAssembler(async (assembler, _store, manager) => {
+    const event = createTestEvent();
+    const workspace = await manager.getOrCreateWorkspace(event);
+
+    const testEmojis: PlatformEmoji[] = [
+      {
+        name: "test_emoji",
+        animated: false,
+        useInText: ":test_emoji:",
+        useAsReaction: ":test_emoji:",
+        category: "Test",
+      },
+    ];
+
+    const fetcher = createMockMessageFetcher([], testEmojis);
+    const context = await assembler.assembleContext(event, workspace, fetcher);
+    const formatted = assembler.formatContext(context);
+
+    // Token count should include emoji section
+    assertEquals(formatted.estimatedTokens > 0, true);
+    assertStringIncludes(formatted.userMessage, "test_emoji");
   });
 });

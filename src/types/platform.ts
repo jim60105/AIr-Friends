@@ -73,3 +73,46 @@ export interface ReplyResult {
   messageId?: string;
   error?: string;
 }
+
+/**
+ * Represents a custom emoji available on the platform.
+ * Unicode emojis do not need to be listed — agents already know them.
+ */
+export interface PlatformEmoji {
+  /** Emoji name (without colons) */
+  name: string;
+
+  /** Whether this is an animated emoji */
+  animated: boolean;
+
+  /** Platform-specific emoji ID (e.g., Discord snowflake ID) */
+  platformId?: string;
+
+  /** Category/group name (if available, e.g., Misskey categories) */
+  category?: string | null;
+
+  /** Aliases (if available, e.g., Misskey aliases) */
+  aliases?: string[];
+
+  /**
+   * The string format to embed this emoji in a text message.
+   * Discord: "<:name:id>" or "<a:name:id>"
+   * Misskey: ":name:"
+   */
+  useInText: string;
+
+  /**
+   * The string format to use when reacting to a message.
+   * Discord: "name:id" or Unicode character
+   * Misskey: ":name:" or Unicode character
+   */
+  useAsReaction: string;
+}
+
+/**
+ * Result of adding a reaction to a message
+ */
+export interface ReactionResult {
+  success: boolean;
+  error?: string;
+}

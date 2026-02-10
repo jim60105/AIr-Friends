@@ -89,6 +89,14 @@ export interface SendReplyParams {
 }
 
 /**
+ * Parameters for react-message skill
+ */
+export interface ReactMessageParams {
+  /** Emoji to react with (Unicode character or platform-specific format) */
+  emoji: string;
+}
+
+/**
  * Parameters for fetch-context skill
  */
 export interface FetchContextParams {

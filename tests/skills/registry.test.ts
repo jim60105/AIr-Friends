@@ -54,6 +54,7 @@ Deno.test("SkillRegistry - registers all skills", () => {
   assertEquals(skills.includes("memory-patch"), true);
   assertEquals(skills.includes("send-reply"), true);
   assertEquals(skills.includes("fetch-context"), true);
+  assertEquals(skills.includes("react-message"), true);
 
   // Cleanup
   Deno.removeSync(tempDir, { recursive: true });
@@ -179,6 +180,25 @@ Deno.test("SkillRegistry - getReplyHandler returns reply handler", () => {
 
   const replyHandler = registry.getReplyHandler();
   assertExists(replyHandler);
+
+  // Cleanup
+  Deno.removeSync(tempDir, { recursive: true });
+});
+
+Deno.test("SkillRegistry - getReactionHandler returns handler", () => {
+  const tempDir = Deno.makeTempDirSync();
+  const workspaceManager = new WorkspaceManager({
+    repoPath: tempDir,
+    workspacesDir: "workspaces",
+  });
+  const memoryStore = new MemoryStore(workspaceManager, {
+    searchLimit: 10,
+    maxChars: 2000,
+  });
+  const registry = new SkillRegistry(memoryStore);
+
+  const reactionHandler = registry.getReactionHandler();
+  assertExists(reactionHandler);
 
   // Cleanup
   Deno.removeSync(tempDir, { recursive: true });

@@ -7,6 +7,8 @@ import type { NormalizedEvent, Platform, PlatformMessage } from "../../src/types
 import {
   ConnectionState,
   type PlatformCapabilities,
+  type PlatformEmoji,
+  type ReactionResult,
   type ReplyResult,
 } from "../../src/types/platform.ts";
 
@@ -62,6 +64,18 @@ class MockAdapter extends PlatformAdapter {
 
   getUsername(_userId: string): Promise<string> {
     return Promise.resolve("TestUser");
+  }
+
+  fetchEmojis(): Promise<PlatformEmoji[]> {
+    return Promise.resolve([]);
+  }
+
+  addReaction(
+    _channelId: string,
+    _messageId: string,
+    _emoji: string,
+  ): Promise<ReactionResult> {
+    return Promise.resolve({ success: true });
   }
 
   isSelf(userId: string): boolean {
