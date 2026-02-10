@@ -521,7 +521,7 @@ export class MisskeyAdapter extends PlatformAdapter {
         name: e.name,
         animated: false, // Misskey doesn't distinguish animated in this API
         category: e.category,
-        aliases: e.aliases,
+        aliases: e.aliases.filter((a) => a.length > 0).map((a) => `:${a}:`),
         useInText: `:${e.name}:`,
         useAsReaction: `:${e.name}:`,
       }));

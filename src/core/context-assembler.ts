@@ -267,7 +267,7 @@ export class ContextAssembler {
     const lines: string[] = [
       "## Available Custom Emojis",
       "",
-      "You can use these custom emojis in your replies (embed in text) or as reactions.",
+      "You can use these custom emojis in your replies (embed in text) or as reactions. Format: <e> = emoji, <t> = text embed, <r> = reaction, <a> = alias.",
       "",
     ];
 
@@ -296,10 +296,10 @@ export class ContextAssembler {
           break;
         }
         const aliasStr = emoji.aliases && emoji.aliases.length > 0
-          ? ` (aliases: ${emoji.aliases.join(", ")})`
+          ? emoji.aliases.map((a) => `<a>${a}</a>`).join("")
           : "";
         lines.push(
-          `- \`${emoji.name}\` → text: \`${emoji.useInText}\`, reaction: \`${emoji.useAsReaction}\`${aliasStr}`,
+          `<e><t>${emoji.useInText}</t><r>${emoji.useAsReaction}</r>${aliasStr}</e>`,
         );
         count++;
       }
