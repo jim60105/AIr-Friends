@@ -319,6 +319,7 @@ Platform adapters must implement:
 - **Note Channel ID**: Notes use `note:{noteId}` as channel ID for reply threading
 - **DM Channel ID**: DMs use `dm:{userId}` as channel ID
 - **Chat Channel ID**: Private chat messages use `chat:{userId}` as channel ID, supporting Misskey's chat feature for 1-on-1 messaging
+- **Bot Filtering**: `shouldRespondToNote()` and `shouldRespondToChatMessage()` check `user.isBot` / `fromUser?.isBot` to ignore messages from bot accounts, preventing multi-instance infinite loops. Bot messages in recent history are correctly marked as `[Bot]` via `isBot` in `noteToPlatformMessage()` and `chatMessageToPlatformMessage()`.
 
 **Misskey Channel Types**:
 

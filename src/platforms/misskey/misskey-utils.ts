@@ -25,6 +25,7 @@ export interface ChatMessageLite {
     id: string;
     name: string | null;
     username: string;
+    isBot?: boolean;
   };
   toUserId: string;
   text: string | null;
@@ -70,7 +71,7 @@ export function noteToPlatformMessage(
     username: formattedUsername,
     content: note.text ?? "",
     timestamp: new Date(note.createdAt),
-    isBot: note.userId === botId,
+    isBot: note.userId === botId || !!note.user.isBot,
   };
 }
 
@@ -120,6 +121,11 @@ export function shouldRespondToNote(
 ): boolean {
   // Never respond to self
   if (note.userId === botId) {
+    return false;
+  }
+
+  // Never respond to bots
+  if (note.user.isBot) {
     return false;
   }
 
@@ -197,7 +203,7 @@ export function chatMessageToPlatformMessage(
     username: formattedUsername,
     content: message.text ?? "",
     timestamp: new Date(message.createdAt),
-    isBot: message.fromUserId === botId,
+    isBot: message.fromUserId === botId || !!fromUser?.isBot,
   };
 }
 
@@ -213,6 +219,11 @@ export function shouldRespondToChatMessage(
 ): boolean {
   // Never respond to self
   if (message.fromUserId === botId) {
+    return false;
+  }
+
+  // Never respond to bots
+  if (message.fromUser?.isBot) {
     return false;
   }
 
