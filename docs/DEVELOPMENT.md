@@ -155,6 +155,9 @@ Configuration is loaded from `config.yaml` (YAML format). See [config.example.ya
 | `GEMINI_API_KEY`     | Gemini API key for Gemini CLI/OpenCode               |
 | `OPENCODE_API_KEY`   | OpenCode API key                                     |
 | `OPENROUTER_API_KEY` | OpenRouter API key                                   |
+| `GELF_ENABLED`       | Enable GELF log output (true/false, default: false)  |
+| `GELF_ENDPOINT`      | GELF HTTP endpoint URL                               |
+| `GELF_HOSTNAME`      | Source hostname in GELF messages (default: air-friends) |
 
 ### Access Control & Reply Policy
 
@@ -187,6 +190,70 @@ Environment variable overrides:
 ```bash
 REPLY_TO=public
 WHITELIST=discord/account/123456789,discord/channel/987654321,misskey/account/abcdef123
+```
+
+### GELF Log Output
+
+AIr-Friends supports sending structured log messages to a GELF (Graylog Extended Log Format) compatible server via HTTP. This enables centralized log management using tools like Graylog or Grafana Loki.
+
+#### Configuration
+
+Via `config.yaml`:
+
+```yaml
+logging:
+  level: "INFO"
+  gelf:
+    enabled: true
+    endpoint: "http://graylog.example.com:12202/gelf"
+    hostname: "my-bot-instance"
+```
+
+Via environment variables:
+
+```bash
+GELF_ENABLED=true
+GELF_ENDPOINT=http://graylog.example.com:12202/gelf
+GELF_HOSTNAME=my-bot-instance
+```
+
+#### How It Works
+
+- Log messages are sent asynchronously via HTTP POST to the configured endpoint
+- The GELF transport uses fire-and-forget pattern — log sending never blocks the main execution flow
+- Failed sends are logged to stderr and silently discarded
+- Each request has a 5-second timeout to prevent hanging connections
+- All log levels (DEBUG through FATAL) are mapped to corresponding Syslog severity levels
+- Context data from log entries is automatically flattened into GELF additional fields
+- Sensitive data is already sanitized before reaching the GELF transport
+
+#### GELF Message Example
+
+```json
+{
+  "version": "1.1",
+  "host": "air-friends",
+  "short_message": "Configuration loaded successfully",
+  "timestamp": 1735689600.000,
+  "level": 6,
+  "_module": "ConfigLoader",
+  "_log_level": "INFO",
+  "_enabledPlatforms": "[\"discord\"]"
+}
+```
+
+#### Container Deployment
+
+When running in a container, configure GELF via environment variables in your `compose.yml`:
+
+```yaml
+services:
+  air-friends:
+    image: ghcr.io/jim60105/air-friends:latest
+    environment:
+      - GELF_ENABLED=true
+      - GELF_ENDPOINT=http://graylog:12202/gelf
+      - GELF_HOSTNAME=air-friends-production
 ```
 
 ### OpenCode Configuration

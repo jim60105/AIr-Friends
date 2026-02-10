@@ -2,6 +2,7 @@
 
 import { assertEquals, assertStringIncludes } from "@std/assert";
 import { Logger, LogLevel } from "@utils/logger.ts";
+import type { LogEntry } from "../../src/types/logger.ts";
 
 Deno.test("Logger - should output JSON format", () => {
   const logs: string[] = [];
@@ -73,6 +74,89 @@ Deno.test("Logger - should create child logger with module path", () => {
 
     const entry = JSON.parse(logs[0]);
     assertEquals(entry.module, "Parent:Child");
+  } finally {
+    console.log = originalLog;
+  }
+});
+
+Deno.test("Logger - sends log entries to GELF transport when configured", () => {
+  const sentEntries: LogEntry[] = [];
+  const mockTransport = {
+    send(entry: LogEntry) {
+      sentEntries.push(entry);
+    },
+  };
+
+  const originalLog = console.log;
+  console.log = () => {};
+
+  try {
+    const logger = new Logger("TestModule", {
+      level: LogLevel.DEBUG,
+      gelfTransport: mockTransport,
+    });
+
+    logger.info("Hello GELF", { key: "value" });
+
+    assertEquals(sentEntries.length, 1);
+    assertEquals(sentEntries[0].message, "Hello GELF");
+    assertEquals(sentEntries[0].module, "TestModule");
+    assertEquals(sentEntries[0].level, "INFO");
+  } finally {
+    console.log = originalLog;
+  }
+});
+
+Deno.test("Logger - child logger inherits GELF transport", () => {
+  const sentEntries: LogEntry[] = [];
+  const mockTransport = {
+    send(entry: LogEntry) {
+      sentEntries.push(entry);
+    },
+  };
+
+  const originalLog = console.log;
+  console.log = () => {};
+
+  try {
+    const parent = new Logger("Parent", {
+      level: LogLevel.DEBUG,
+      gelfTransport: mockTransport,
+    });
+    const child = parent.child("Child");
+
+    child.warn("Child message");
+
+    assertEquals(sentEntries.length, 1);
+    assertEquals(sentEntries[0].module, "Parent:Child");
+  } finally {
+    console.log = originalLog;
+  }
+});
+
+Deno.test("Logger - does not send to GELF when level is below threshold", () => {
+  const sentEntries: LogEntry[] = [];
+  const mockTransport = {
+    send(entry: LogEntry) {
+      sentEntries.push(entry);
+    },
+  };
+
+  const originalLog = console.log;
+  console.log = () => {};
+
+  try {
+    const logger = new Logger("TestModule", {
+      level: LogLevel.WARN,
+      gelfTransport: mockTransport,
+    });
+
+    logger.debug("Should not be sent");
+    logger.info("Should not be sent either");
+    logger.warn("This should be sent");
+
+    assertEquals(sentEntries.length, 1);
+    assertEquals(sentEntries[0].level, "WARN");
   } finally {
     console.log = originalLog;
   }

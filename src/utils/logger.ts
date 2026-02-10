@@ -1,6 +1,6 @@
 // src/utils/logger.ts
 
-import type { LogEntry, LoggerConfig } from "../types/logger.ts";
+import type { GelfTransportLike, LogEntry, LoggerConfig } from "../types/logger.ts";
 import { LogLevel } from "../types/logger.ts";
 
 // Default patterns for sensitive data detection
@@ -19,6 +19,7 @@ export class Logger {
     this.config = {
       level: config?.level ?? LogLevel.INFO,
       sensitivePatterns: config?.sensitivePatterns ?? DEFAULT_SENSITIVE_PATTERNS,
+      gelfTransport: config?.gelfTransport,
     };
   }
 
@@ -73,6 +74,11 @@ export class Logger {
     } else {
       console.log(line);
     }
+
+    // Send to GELF if transport is configured
+    if (this.config.gelfTransport) {
+      this.config.gelfTransport.send(entry);
+    }
   }
 
   debug(message: string, context?: Record<string, unknown>): void {
@@ -117,10 +123,12 @@ let globalLoggerConfig: Partial<LoggerConfig> = {};
 /**
  * Configure global logger settings
  */
-export function configureLogger(config: { level?: string; format?: string }): void {
+export function configureLogger(
+  config: { level?: string; format?: string; gelfTransport?: GelfTransportLike },
+): void {
   const levelStr = config.level ?? Deno.env.get("LOG_LEVEL") ?? "INFO";
   const level = LogLevel[levelStr.toUpperCase() as keyof typeof LogLevel] ?? LogLevel.INFO;
-  globalLoggerConfig = { level };
+  globalLoggerConfig = { level, gelfTransport: config.gelfTransport };
 }
 
 // Factory function to create logger with environment-based level

@@ -21,6 +21,10 @@ const DEFAULT_CONFIG: Partial<Config> = {
   },
   logging: {
     level: "INFO",
+    gelf: {
+      enabled: false,
+      endpoint: "",
+    },
   },
   health: {
     enabled: false,

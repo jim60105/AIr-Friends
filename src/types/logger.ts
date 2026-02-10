@@ -16,7 +16,14 @@ export interface LogEntry {
   context?: Record<string, unknown>;
 }
 
+/** Interface for GELF transport to avoid circular dependency */
+export interface GelfTransportLike {
+  send(entry: LogEntry): void;
+}
+
 export interface LoggerConfig {
   level: LogLevel;
   sensitivePatterns?: RegExp[];
+  /** Optional GELF transport instance for sending logs to a GELF server */
+  gelfTransport?: GelfTransportLike;
 }
