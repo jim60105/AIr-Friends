@@ -34,6 +34,30 @@ export interface AssembledContext {
 }
 
 /**
+ * Assembled context for a spontaneous post session.
+ * Similar to AssembledContext but without a trigger message.
+ */
+export interface AssembledSpontaneousContext {
+  /** System prompt content */
+  systemPrompt: string;
+
+  /** Important memories from the bot's workspace */
+  importantMemories: ResolvedMemory[];
+
+  /** Recent messages from the target channel (may be empty if not fetched) */
+  recentMessages: PlatformMessage[];
+
+  /** Available custom emojis */
+  availableEmojis?: PlatformEmoji[];
+
+  /** Whether recent messages were intentionally fetched */
+  recentMessagesFetched: boolean;
+
+  /** Estimated token count */
+  estimatedTokens: number;
+}
+
+/**
  * Configuration for context assembly
  */
 export interface ContextAssemblyConfig {

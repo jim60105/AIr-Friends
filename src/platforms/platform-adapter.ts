@@ -197,4 +197,9 @@ export abstract class PlatformAdapter implements MessageFetcher {
    * Check if a user ID is the bot itself
    */
   abstract isSelf(userId: string): boolean;
+
+  /**
+   * Get the bot user ID (null if not yet connected)
+   */
+  abstract getBotId(): string | null;
 }

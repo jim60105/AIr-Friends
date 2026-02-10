@@ -16,6 +16,8 @@ export interface DiscordConfig extends BasePlatformConfig {
   token: string;
   /** Optional: specific guild IDs to operate in (empty = all guilds) */
   guildIds?: string[];
+  /** Spontaneous posting configuration */
+  spontaneousPost?: SpontaneousPostConfig;
 }
 
 /**
@@ -24,6 +26,8 @@ export interface DiscordConfig extends BasePlatformConfig {
 export interface MisskeyConfig extends BasePlatformConfig {
   host: string;
   token: string;
+  /** Spontaneous posting configuration */
+  spontaneousPost?: SpontaneousPostConfig;
 }
 
 /**
@@ -105,6 +109,28 @@ export interface HealthConfig {
 
   /** Port for health check endpoint */
   port: number;
+}
+
+/**
+ * Spontaneous post configuration for a platform.
+ * When enabled, the agent will periodically post messages/notes without user triggers.
+ */
+export interface SpontaneousPostConfig {
+  /** Enable spontaneous posting (default: false) */
+  enabled: boolean;
+
+  /** Minimum interval between posts in milliseconds (default: 10800000 = 3 hours) */
+  minIntervalMs: number;
+
+  /** Maximum interval between posts in milliseconds (default: 43200000 = 12 hours) */
+  maxIntervalMs: number;
+
+  /**
+   * Probability (0.0 to 1.0) of fetching recent messages as context.
+   * When not fetched, the agent creates content without conversation context.
+   * (default: 0.5)
+   */
+  contextFetchProbability: number;
 }
 
 /**

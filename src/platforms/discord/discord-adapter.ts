@@ -475,6 +475,24 @@ export class DiscordAdapter extends PlatformAdapter {
   }
 
   /**
+   * Get or create a DM channel with a user.
+   * Used by spontaneous posting to send DMs to whitelisted accounts.
+   */
+  async getDmChannelId(userId: string): Promise<string | null> {
+    try {
+      const user = await this.client.users.fetch(userId);
+      const dmChannel = await user.createDM();
+      return dmChannel.id;
+    } catch (error) {
+      logger.error("Failed to create DM channel", {
+        userId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return null;
+    }
+  }
+
+  /**
    * Get username for a user ID
    */
   async getUsername(userId: string): Promise<string> {

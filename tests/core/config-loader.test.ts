@@ -659,3 +659,195 @@ accessControl:
     ]);
   });
 });
+
+// --- spontaneousPost configuration tests ---
+
+Deno.test("Config - spontaneousPost default values are applied", async () => {
+  const config = `
+platforms:
+  discord:
+    token: "test-token"
+    enabled: true
+  misskey:
+    enabled: false
+agent:
+  model: "gpt-4"
+  systemPromptPath: "./prompts/system.md"
+  tokenLimit: 4096
+workspace:
+  repoPath: "./data"
+  workspacesDir: "workspaces"
+`;
+
+  await withTestConfig(config, async (dir) => {
+    const result = await loadConfig(dir);
+    assertEquals(result.platforms.discord.spontaneousPost?.enabled, false);
+    assertEquals(result.platforms.discord.spontaneousPost?.minIntervalMs, 10800000);
+    assertEquals(result.platforms.discord.spontaneousPost?.maxIntervalMs, 43200000);
+    assertEquals(result.platforms.discord.spontaneousPost?.contextFetchProbability, 0.5);
+  });
+});
+
+Deno.test("Config - spontaneousPost.enabled can be set via env var", async () => {
+  const config = `
+platforms:
+  discord:
+    token: "test-token"
+    enabled: true
+  misskey:
+    enabled: false
+agent:
+  model: "gpt-4"
+  systemPromptPath: "./prompts/system.md"
+  tokenLimit: 4096
+workspace:
+  repoPath: "./data"
+  workspacesDir: "workspaces"
+`;
+
+  Deno.env.set("DISCORD_SPONTANEOUS_ENABLED", "true");
+  try {
+    await withTestConfig(config, async (dir) => {
+      const result = await loadConfig(dir);
+      assertEquals(result.platforms.discord.spontaneousPost?.enabled, true);
+    });
+  } finally {
+    Deno.env.delete("DISCORD_SPONTANEOUS_ENABLED");
+  }
+});
+
+Deno.test("Config - spontaneousPost validation swaps min/max interval when reversed", async () => {
+  const config = `
+platforms:
+  discord:
+    token: "test-token"
+    enabled: true
+    spontaneousPost:
+      enabled: true
+      minIntervalMs: 50000000
+      maxIntervalMs: 10000000
+  misskey:
+    enabled: false
+agent:
+  model: "gpt-4"
+  systemPromptPath: "./prompts/system.md"
+  tokenLimit: 4096
+workspace:
+  repoPath: "./data"
+  workspacesDir: "workspaces"
+`;
+
+  await withTestConfig(config, async (dir) => {
+    const result = await loadConfig(dir);
+    assertEquals(result.platforms.discord.spontaneousPost?.minIntervalMs, 10000000);
+    assertEquals(result.platforms.discord.spontaneousPost?.maxIntervalMs, 50000000);
+  });
+});
+
+Deno.test("Config - spontaneousPost validation clamps minIntervalMs to 60 seconds", async () => {
+  const config = `
+platforms:
+  discord:
+    token: "test-token"
+    enabled: true
+    spontaneousPost:
+      enabled: true
+      minIntervalMs: 1000
+      maxIntervalMs: 100000
+  misskey:
+    enabled: false
+agent:
+  model: "gpt-4"
+  systemPromptPath: "./prompts/system.md"
+  tokenLimit: 4096
+workspace:
+  repoPath: "./data"
+  workspacesDir: "workspaces"
+`;
+
+  await withTestConfig(config, async (dir) => {
+    const result = await loadConfig(dir);
+    assertEquals(result.platforms.discord.spontaneousPost?.minIntervalMs, 60000);
+  });
+});
+
+Deno.test("Config - spontaneousPost validation clamps contextFetchProbability to [0, 1]", async () => {
+  const config = `
+platforms:
+  discord:
+    token: "test-token"
+    enabled: true
+    spontaneousPost:
+      enabled: true
+      contextFetchProbability: 1.5
+  misskey:
+    enabled: false
+agent:
+  model: "gpt-4"
+  systemPromptPath: "./prompts/system.md"
+  tokenLimit: 4096
+workspace:
+  repoPath: "./data"
+  workspacesDir: "workspaces"
+`;
+
+  await withTestConfig(config, async (dir) => {
+    const result = await loadConfig(dir);
+    assertEquals(result.platforms.discord.spontaneousPost?.contextFetchProbability, 1.0);
+  });
+});
+
+Deno.test("Config - spontaneousPost validation clamps negative contextFetchProbability to 0", async () => {
+  const config = `
+platforms:
+  discord:
+    token: "test-token"
+    enabled: true
+    spontaneousPost:
+      enabled: true
+      contextFetchProbability: -0.5
+  misskey:
+    enabled: false
+agent:
+  model: "gpt-4"
+  systemPromptPath: "./prompts/system.md"
+  tokenLimit: 4096
+workspace:
+  repoPath: "./data"
+  workspacesDir: "workspaces"
+`;
+
+  await withTestConfig(config, async (dir) => {
+    const result = await loadConfig(dir);
+    assertEquals(result.platforms.discord.spontaneousPost?.contextFetchProbability, 0);
+  });
+});
+
+Deno.test("Config - spontaneousPost merges partial config with defaults", async () => {
+  const config = `
+platforms:
+  discord:
+    token: "test-token"
+    enabled: true
+    spontaneousPost:
+      enabled: true
+  misskey:
+    enabled: false
+agent:
+  model: "gpt-4"
+  systemPromptPath: "./prompts/system.md"
+  tokenLimit: 4096
+workspace:
+  repoPath: "./data"
+  workspacesDir: "workspaces"
+`;
+
+  await withTestConfig(config, async (dir) => {
+    const result = await loadConfig(dir);
+    assertEquals(result.platforms.discord.spontaneousPost?.enabled, true);
+    // Defaults should be filled in
+    assertEquals(result.platforms.discord.spontaneousPost?.minIntervalMs, 10800000);
+    assertEquals(result.platforms.discord.spontaneousPost?.maxIntervalMs, 43200000);
+    assertEquals(result.platforms.discord.spontaneousPost?.contextFetchProbability, 0.5);
+  });
+});

@@ -260,3 +260,24 @@ Deno.test("AgentCore - returns config", async () => {
     await Deno.remove(tempDir, { recursive: true });
   }
 });
+
+Deno.test("AgentCore - getOrchestrator returns orchestrator", async () => {
+  const tempDir = await Deno.makeTempDir();
+  try {
+    await Deno.mkdir(`${tempDir}/prompts`, { recursive: true });
+    await Deno.writeTextFile(
+      `${tempDir}/prompts/system.md`,
+      "You are a helpful assistant.",
+    );
+
+    const config = createTestConfig(tempDir);
+    const agentCore = new AgentCore(config);
+
+    const orchestrator = agentCore.getOrchestrator();
+    assertExists(orchestrator);
+
+    await agentCore.shutdown();
+  } finally {
+    await Deno.remove(tempDir, { recursive: true });
+  }
+});

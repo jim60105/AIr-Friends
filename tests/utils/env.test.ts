@@ -164,3 +164,36 @@ Deno.test("applyEnvOverrides - empty WHITELIST does not override", () => {
     Deno.env.delete("WHITELIST");
   }
 });
+
+Deno.test("applyEnvOverrides - converts float string to number", () => {
+  Deno.env.set("DISCORD_SPONTANEOUS_CONTEXT_FETCH_PROBABILITY", "0.7");
+  try {
+    const config: Record<string, unknown> = {
+      platforms: { discord: { spontaneousPost: { contextFetchProbability: 0.5 } } },
+    };
+    applyEnvOverrides(config);
+    const platforms = config.platforms as {
+      discord: { spontaneousPost: { contextFetchProbability: number } };
+    };
+    assertEquals(platforms.discord.spontaneousPost.contextFetchProbability, 0.7);
+    assertEquals(typeof platforms.discord.spontaneousPost.contextFetchProbability, "number");
+  } finally {
+    Deno.env.delete("DISCORD_SPONTANEOUS_CONTEXT_FETCH_PROBABILITY");
+  }
+});
+
+Deno.test("applyEnvOverrides - DISCORD_SPONTANEOUS_ENABLED sets nested boolean", () => {
+  Deno.env.set("DISCORD_SPONTANEOUS_ENABLED", "true");
+  try {
+    const config: Record<string, unknown> = {
+      platforms: { discord: { spontaneousPost: { enabled: false } } },
+    };
+    applyEnvOverrides(config);
+    const platforms = config.platforms as {
+      discord: { spontaneousPost: { enabled: boolean } };
+    };
+    assertEquals(platforms.discord.spontaneousPost.enabled, true);
+  } finally {
+    Deno.env.delete("DISCORD_SPONTANEOUS_ENABLED");
+  }
+});

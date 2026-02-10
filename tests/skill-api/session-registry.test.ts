@@ -186,3 +186,36 @@ Deno.test("SessionRegistry - cleans up expired sessions", async () => {
 
   registry.stop();
 });
+
+Deno.test("SessionRegistry - register session without triggerEvent", () => {
+  const registry = new SessionRegistry();
+
+  const mockWorkspace = {
+    key: "discord/bot-123",
+    components: {
+      platform: "discord" as const,
+      userId: "bot-123",
+    },
+    path: "/tmp/test",
+    isDm: false,
+  };
+
+  const sessionId = registry.register({
+    platform: "discord",
+    channelId: "456",
+    userId: "bot-123",
+    isDm: false,
+    workspace: mockWorkspace,
+    // deno-lint-ignore no-explicit-any
+    platformAdapter: {} as any,
+    // triggerEvent is omitted
+    timeoutMs: 60000,
+  });
+
+  const session = registry.get(sessionId);
+  assertEquals(session?.triggerEvent, undefined);
+  assertEquals(session?.platform, "discord");
+  assertEquals(session?.userId, "bot-123");
+
+  registry.stop();
+});

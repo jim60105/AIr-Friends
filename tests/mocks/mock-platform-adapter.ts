@@ -97,6 +97,10 @@ export class MockPlatformAdapter extends PlatformAdapter {
     return userId === "bot-123";
   }
 
+  getBotId(): string | null {
+    return "bot-123";
+  }
+
   /**
    * Simulate receiving an event
    */

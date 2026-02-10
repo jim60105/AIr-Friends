@@ -137,3 +137,13 @@ Deno.test({
     assertEquals(env.platform.sentReplies.length, 0);
   },
 });
+
+Deno.test({
+  name: "Integration: Mock platform adapter returns bot ID",
+  fn() {
+    const platform = new MockPlatformAdapter();
+    assertEquals(platform.getBotId(), "bot-123");
+    assertEquals(platform.isSelf("bot-123"), true);
+    assertEquals(platform.isSelf("not-bot"), false);
+  },
+});

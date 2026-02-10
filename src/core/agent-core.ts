@@ -193,6 +193,14 @@ export class AgentCore {
   }
 
   /**
+   * Get the session orchestrator.
+   * Used by SpontaneousScheduler to trigger spontaneous posts.
+   */
+  getOrchestrator(): SessionOrchestrator {
+    return this.orchestrator;
+  }
+
+  /**
    * Shutdown the core (cleanup resources)
    */
   async shutdown(): Promise<void> {
