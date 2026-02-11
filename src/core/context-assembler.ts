@@ -270,7 +270,7 @@ export class ContextAssembler {
     const lines: string[] = [
       "## Available Custom Emojis",
       "",
-      "You can use these custom emojis in your replies (embed in text) or as reactions. Format: <e> = emoji, <t> = text embed, <r> = reaction, <a> = alias. Note that you should use the raw content of those tags, they may be another <xml> tag or :text: format. Strictly use those emojis and never make up new ones that are not in this list. Any emoji not on the list cannot be used.",
+      "You can use these custom emojis in your replies (embed in text) or as reactions. Format: <e> = emoji, <t> = text embed, <r> = reaction. Note that you should use the raw content of those tags, they may be another <xml> tag or :text: format. Strictly use those emojis and never make up new ones that are not in this list. Any emoji not on the list cannot be used.",
       "",
     ];
 
@@ -298,11 +298,8 @@ export class ContextAssembler {
           _truncated = true;
           break;
         }
-        const aliasStr = emoji.aliases && emoji.aliases.length > 0
-          ? emoji.aliases.map((a) => `<a>${a}</a>`).join("")
-          : "";
         lines.push(
-          `<e><t>${emoji.useInText}</t><r>${emoji.useAsReaction}</r>${aliasStr}</e>`,
+          `<e><t>${emoji.useInText}</t><r>${emoji.useAsReaction}</r></e>`,
         );
         count++;
       }
@@ -322,7 +319,7 @@ export class ContextAssembler {
     const header = [
       "## Available Custom Emojis",
       "",
-      "You can use these custom emojis in your replies (embed in text) or as reactions. Format: <e> = emoji, <t> = text embed, <r> = reaction, <a> = alias. Note that you should use the raw content of those tags, they may be another <xml> tag or :text: format. Strictly use those emojis and never make up new ones that are not in this list. Any emoji not on the list cannot be used.",
+      "You can use these custom emojis in your replies (embed in text) or as reactions. Format: <e> = emoji, <t> = text embed, <r> = reaction. Note that you should use the raw content of those tags, they may be another <xml> tag or :text: format. Strictly use those emojis and never make up new ones that are not in this list. Any emoji not on the list cannot be used.",
       "",
     ];
 
@@ -356,10 +353,7 @@ export class ContextAssembler {
       for (const emoji of categoryEmojis) {
         if (count >= MAX_EMOJIS) break;
 
-        const aliasStr = emoji.aliases && emoji.aliases.length > 0
-          ? emoji.aliases.map((a) => `<a>${a}</a>`).join("")
-          : "";
-        const line = `<e><t>${emoji.useInText}</t><r>${emoji.useAsReaction}</r>${aliasStr}</e>`;
+        const line = `<e><t>${emoji.useInText}</t><r>${emoji.useAsReaction}</r></e>`;
         const lineTokens = estimateTokens(line);
 
         if (usedTokens + lineTokens > tokenBudget) break;

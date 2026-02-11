@@ -91,9 +91,6 @@ export interface PlatformEmoji {
   /** Category/group name (if available, e.g., Misskey categories) */
   category?: string | null;
 
-  /** Aliases (if available, e.g., Misskey aliases) */
-  aliases?: string[];
-
   /**
    * The string format to embed this emoji in a text message.
    * Discord: "<:name:id>" or "<a:name:id>"
