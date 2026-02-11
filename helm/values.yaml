@@ -25,36 +25,63 @@ containerSecurityContext:
 # Security context for the pod (required for PVC write permissions)
 podSecurityContext:
   fsGroup: 0
-  fsGroupChangePolicy: "OnRootMismatch"
+  fsGroupChangePolicy: 'OnRootMismatch'
 
 # -- Environment variables for bot credentials and configuration.
 # These are stored in a Kubernetes Secret.
 env:
   # Platform tokens
-  DISCORD_TOKEN: ""
-  MISSKEY_HOST: ""
-  MISSKEY_TOKEN: ""
+  DISCORD_TOKEN: 'your-discord-bot-token'
+  MISSKEY_TOKEN: 'your-misskey-access-token'
+  MISSKEY_HOST: 'misskey.example.com'
 
-  # Agent API keys (provide at least one)
-  GITHUB_TOKEN: ""
-  GEMINI_API_KEY: ""
-  OPENCODE_API_KEY: ""
-  OPENROUTER_API_KEY: ""
-
-  # Platform toggles
-  DISCORD_ENABLED: "true"
-  MISSKEY_ENABLED: "false"
+  # Platform enable flags (true/false). These can override the corresponding
+  DISCORD_ENABLED: 'true'
+  MISSKEY_ENABLED: 'false'
 
   # Agent configuration
-  AGENT_MODEL: "gpt-5-mini"
-  AGENT_DEFAULT_TYPE: "opencode"  # copilot, gemini, or opencode
+  AGENT_MODEL: 'gpt-5-mini'
 
-  # Access control
-  REPLY_TO: "whitelist"           # all, public, or whitelist
-  WHITELIST: ""                   # Comma-separated: discord/account/123,misskey/account/abc
+  # Default ACP agent type (copilot|gemini|opencode)
+  AGENT_DEFAULT_TYPE: 'opencode'
 
   # Logging
-  LOG_LEVEL: "INFO"
+  LOG_LEVEL: 'INFO'
+
+  # Environment
+  DENO_ENV: 'development'
+
+  # Agents API keys
+  # GitHub Token for Copilot and OpenCode GitHub provider
+  GITHUB_TOKEN: 'github_pat_your-token-here'
+  # Gemini API Key for Gemini CLI and OpenCode Gemini provider
+  GEMINI_API_KEY: 'your-gemini-api-key'
+  # OpenCode API Key (optional - can use GitHub/Gemini providers instead)
+  OPENCODE_API_KEY: 'your-opencode-api-key'
+  # OpenRouter API Key (optional - for OpenRouter provider)
+  OPENROUTER_API_KEY: 'your-openrouter-api-key'
+
+  # Access Control & Reply Policy (all|public|whitelist)
+  REPLY_TO: 'whitelist'
+  # Comma-separated list of user/channel IDs allowed to interact with the bot when REPLY_TO is set to 'whitelist'.
+  WHITELIST: '' 
+
+  # Spontaneous post settings - Discord
+  DISCORD_SPONTANEOUS_ENABLED: 'false'
+  DISCORD_SPONTANEOUS_MIN_INTERVAL_MS: '10800000'
+  DISCORD_SPONTANEOUS_MAX_INTERVAL_MS: '43200000 '
+  DISCORD_SPONTANEOUS_CONTEXT_FETCH_PROBABILITY: '0.5'
+
+  # Spontaneous post settings - Misskey
+  MISSKEY_SPONTANEOUS_ENABLED: 'false'
+  MISSKEY_SPONTANEOUS_MIN_INTERVAL_MS: '10800000'
+  MISSKEY_SPONTANEOUS_MAX_INTERVAL_MS: '43200000'
+  MISSKEY_SPONTANEOUS_CONTEXT_FETCH_PROBABILITY: '0.5'
+
+  # GELF Logging configuration
+  GELF_ENABLED: 'false'
+  GELF_ENDPOINT: 'http://your-gelf-endpoint:12201'
+  GELF_HOSTNAME: 'air-friends'
 
 # -- Extra environment variables to add to the container (list of name/value pairs).
 extraEnv: []
@@ -64,12 +91,12 @@ extraEnv: []
 # Persistent volume for bot data (workspaces and memory)
 persistence:
   enabled: true
-  storageClass: "openebs-jiva-csi-default"
+  storageClass: 'openebs-jiva-csi-default'
   accessModes:
     - ReadWriteOnce
   size: 200Mi
   # -- Use an existing PVC instead of creating a new one.
-  existingClaim: ""
+  existingClaim: ''
 
 # -- Mount custom prompts directory via a ConfigMap.
 # Set enabled=true and provide prompt file contents to override the default prompts bundled in the image.
