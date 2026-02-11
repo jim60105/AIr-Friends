@@ -282,17 +282,17 @@ export class ContextAssembler {
     }
 
     let count = 0;
-    let truncated = false;
+    let _truncated = false;
     for (const [category, categoryEmojis] of grouped) {
       if (count >= MAX_EMOJIS) {
-        truncated = true;
+        _truncated = true;
         break;
       }
 
       lines.push(`### ${category}`);
       for (const emoji of categoryEmojis) {
         if (count >= MAX_EMOJIS) {
-          truncated = true;
+          _truncated = true;
           break;
         }
         const aliasStr = emoji.aliases && emoji.aliases.length > 0
