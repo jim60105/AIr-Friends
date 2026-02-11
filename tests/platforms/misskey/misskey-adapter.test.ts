@@ -431,7 +431,7 @@ Deno.test("fetchRecentMessages - note: channel fetches ancestors, current note, 
       if (params.noteId === "noteABC") return current;
       if (params.noteId === "ancestor1") return ancestor;
     }
-    if (endpoint === "notes/replies") return [reply];
+    if (endpoint === "notes/children") return [reply];
     return [];
   });
 
@@ -455,7 +455,7 @@ Deno.test("fetchRecentMessages - note: channel deduplicates notes", async () => 
     if (endpoint === "notes/show") {
       if (params.noteId === "noteABC") return note;
     }
-    if (endpoint === "notes/replies") return [note];
+    if (endpoint === "notes/children") return [note];
     return [];
   });
 
@@ -489,7 +489,7 @@ Deno.test("fetchRecentMessages - note: channel sorts chronologically", async () 
       if (params.noteId === "mid") return mid;
       if (params.noteId === "late") return late;
     }
-    if (endpoint === "notes/replies") return [early];
+    if (endpoint === "notes/children") return [early];
     return [];
   });
 
@@ -515,7 +515,7 @@ Deno.test("fetchRecentMessages - note: channel applies limit keeping latest note
       const found = notes.find((n) => n.id === params.noteId);
       if (found) return found;
     }
-    if (endpoint === "notes/replies") return [notes[3], notes[4]];
+    if (endpoint === "notes/children") return [notes[3], notes[4]];
     return [];
   });
 
@@ -538,7 +538,7 @@ Deno.test("fetchRecentMessages - note: channel with empty ancestors and replies"
 
   const adapter = createAdapterWithMockClient((endpoint, params) => {
     if (endpoint === "notes/show" && params.noteId === "noteOnly") return current;
-    if (endpoint === "notes/replies") return [];
+    if (endpoint === "notes/children") return [];
     return [];
   });
 
@@ -567,10 +567,10 @@ Deno.test("fetchRecentMessages - note: channel passes noteId and limit to API ca
   await adapter.fetchRecentMessages("note:targetNote", 15);
 
   const showCall = capturedCalls.find((c) => c.endpoint === "notes/show");
-  const repliesCall = capturedCalls.find((c) => c.endpoint === "notes/replies");
+  const childrenCall = capturedCalls.find((c) => c.endpoint === "notes/children");
 
   assertEquals(showCall?.params, { noteId: "targetNote" });
-  assertEquals(repliesCall?.params, { noteId: "targetNote", limit: 15 });
+  assertEquals(childrenCall?.params, { noteId: "targetNote", limit: 15 });
 });
 
 Deno.test("fetchRecentMessages - note: channel wraps API errors in PlatformError", async () => {
@@ -612,7 +612,7 @@ Deno.test("fetchRecentMessages - note: channel walks multi-level ancestor chain"
       if (params.noteId === "p") return parent;
       if (params.noteId === "gp") return grandparent;
     }
-    if (endpoint === "notes/replies") return [];
+    if (endpoint === "notes/children") return [];
     return [];
   });
 
@@ -637,7 +637,7 @@ Deno.test("fetchRecentMessages - note: channel handles ancestor fetch error grac
       if (params.noteId === "c") return current;
       if (params.noteId === "missing") throw new Error("No such note");
     }
-    if (endpoint === "notes/replies") return [];
+    if (endpoint === "notes/children") return [];
     return [];
   });
 
@@ -646,4 +646,96 @@ Deno.test("fetchRecentMessages - note: channel handles ancestor fetch error grac
 
   assertEquals(messages.length, 1);
   assertEquals(messages[0].messageId, "c");
+});
+
+// ==================== Replies Fallback Chain Tests ====================
+
+Deno.test("fetchRecentMessages - note: falls back to notes/replies when notes/children fails", async () => {
+  const current = createMockNote({
+    id: "noteX",
+    text: "current",
+    createdAt: "2024-01-01T01:00:00.000Z",
+    replyId: null,
+  });
+  const reply = createMockNote({
+    id: "replyX",
+    text: "a reply",
+    createdAt: "2024-01-01T02:00:00.000Z",
+  });
+
+  const calledEndpoints: string[] = [];
+  const adapter = createAdapterWithMockClient((endpoint, params) => {
+    calledEndpoints.push(endpoint);
+    if (endpoint === "notes/show" && params.noteId === "noteX") return current;
+    if (endpoint === "notes/children") throw new Error("No such endpoint");
+    if (endpoint === "notes/replies") return [reply];
+    return [];
+  });
+
+  const messages = await adapter.fetchRecentMessages("note:noteX", 20);
+
+  assertEquals(messages.length, 2);
+  assertEquals(messages[0].messageId, "noteX");
+  assertEquals(messages[1].messageId, "replyX");
+  // Verify notes/children was tried first, then notes/replies
+  assertEquals(calledEndpoints.includes("notes/children"), true);
+  assertEquals(calledEndpoints.includes("notes/replies"), true);
+  assertEquals(
+    calledEndpoints.indexOf("notes/children") < calledEndpoints.indexOf("notes/replies"),
+    true,
+  );
+});
+
+Deno.test("fetchRecentMessages - note: returns current note when both reply endpoints fail", async () => {
+  const current = createMockNote({
+    id: "noteY",
+    text: "standalone",
+    createdAt: "2024-01-01T01:00:00.000Z",
+    replyId: null,
+  });
+
+  const adapter = createAdapterWithMockClient((endpoint, params) => {
+    if (endpoint === "notes/show" && params.noteId === "noteY") return current;
+    if (endpoint === "notes/children") throw new Error("No such endpoint");
+    if (endpoint === "notes/replies") throw new Error("No such endpoint");
+    return [];
+  });
+
+  // Should still return the current note even when both reply endpoints fail
+  const messages = await adapter.fetchRecentMessages("note:noteY", 20);
+
+  assertEquals(messages.length, 1);
+  assertEquals(messages[0].messageId, "noteY");
+});
+
+Deno.test("fetchRecentMessages - note: ancestors still work when reply endpoints fail", async () => {
+  const parent = createMockNote({
+    id: "parentZ",
+    text: "parent note",
+    createdAt: "2024-01-01T00:00:00.000Z",
+    replyId: null,
+  });
+  const current = createMockNote({
+    id: "noteZ",
+    text: "current",
+    createdAt: "2024-01-01T01:00:00.000Z",
+    replyId: "parentZ",
+  });
+
+  const adapter = createAdapterWithMockClient((endpoint, params) => {
+    if (endpoint === "notes/show") {
+      if (params.noteId === "noteZ") return current;
+      if (params.noteId === "parentZ") return parent;
+    }
+    if (endpoint === "notes/children") throw new Error("No such endpoint");
+    if (endpoint === "notes/replies") throw new Error("No such endpoint");
+    return [];
+  });
+
+  // Ancestor chain should still work even when reply endpoints fail
+  const messages = await adapter.fetchRecentMessages("note:noteZ", 20);
+
+  assertEquals(messages.length, 2);
+  assertEquals(messages[0].messageId, "parentZ");
+  assertEquals(messages[1].messageId, "noteZ");
 });

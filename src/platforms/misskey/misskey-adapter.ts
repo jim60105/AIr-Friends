@@ -433,17 +433,15 @@ export class MisskeyAdapter extends PlatformAdapter {
       if (channelId.startsWith("note:")) {
         const noteId = channelId.slice(5);
 
-        // Fetch the current note and its replies in parallel
-        const [currentNote, replies] = await Promise.all([
-          this.client.request<MisskeyNote>(
-            "notes/show",
-            { noteId },
-          ),
-          this.client.request<MisskeyNote[]>(
-            "notes/replies",
-            { noteId, limit },
-          ),
-        ]);
+        // Fetch the current note first — notes/show is available on all forks
+        const currentNote = await this.client.request<MisskeyNote>(
+          "notes/show",
+          { noteId },
+        );
+
+        // Fetch replies with fallback chain for fork compatibility:
+        // notes/children (broader, available on most forks) → notes/replies → empty
+        const replies = await this.fetchRepliesWithFallback(noteId, limit);
 
         // Walk the replyId chain to fetch ancestor notes via notes/show.
         // This is more compatible than notes/conversation which may not exist on all forks.
@@ -484,6 +482,39 @@ export class MisskeyAdapter extends PlatformAdapter {
         { channelId },
       );
     }
+  }
+
+  /**
+   * Fetch replies to a note with fallback chain for fork compatibility.
+   * Tries notes/children first (available on most forks), then notes/replies,
+   * and falls back to an empty array if neither endpoint exists.
+   */
+  private async fetchRepliesWithFallback(
+    noteId: string,
+    limit: number,
+  ): Promise<MisskeyNote[]> {
+    // Try notes/children first (broader — includes replies + quote renotes)
+    try {
+      return await this.client.request<MisskeyNote[]>(
+        "notes/children",
+        { noteId, limit },
+      );
+    } catch {
+      logger.debug("notes/children endpoint unavailable, trying notes/replies", { noteId });
+    }
+
+    // Fallback to notes/replies
+    try {
+      return await this.client.request<MisskeyNote[]>(
+        "notes/replies",
+        { noteId, limit },
+      );
+    } catch {
+      logger.debug("notes/replies endpoint unavailable, skipping replies fetch", { noteId });
+    }
+
+    // Both endpoints failed — return empty array
+    return [];
   }
 
   /**
