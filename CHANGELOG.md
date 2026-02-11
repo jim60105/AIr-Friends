@@ -7,23 +7,58 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-02-11
+
 ### Added
 
+- Added: Platform emoji support and react-message skill — the Agent can now use custom emojis in replies and add reactions to messages.
+  - New `PlatformEmoji` and `ReactionResult` types, `fetchEmojis()` and `addReaction()` on `PlatformAdapter`.
+  - Discord implementation fetches both guild and application-level custom emojis (5-minute cache).
+  - Misskey implementation fetches custom emojis via public `/emojis` API (5-minute cache).
+  - New `react-message` skill with `ReactionHandler`, shell script, and `SKILL.md`.
+  - Emoji list included in context assembly with category grouping and token-aware truncation.
+  - Retry logic updated: Agent can react without sending a text reply and still be considered a valid response.
 - Added: Spontaneous posting feature — the bot can autonomously post messages/notes on a configurable random schedule without user triggers.
   - New `SpontaneousPostConfig` type with `enabled`, `minIntervalMs`, `maxIntervalMs`, and `contextFetchProbability` fields.
   - New `SpontaneousScheduler` class manages per-platform independent timers with random intervals.
   - New `assembleSpontaneousContext()` and `formatSpontaneousContext()` methods in `ContextAssembler` for triggerless context assembly.
-  - New `processSpontaneousPost()` method in `SessionOrchestrator` for executing agent sessions without trigger events.
   - New `determineSpontaneousTarget()` function: Discord selects from whitelist entries; Misskey posts to `timeline:self`.
   - Discord adapter: new `getDmChannelId()` method for creating DM channels with whitelisted accounts.
-  - Misskey adapter: new `timeline:self` channel type for bot's own timeline in `sendReply()` and `fetchRecentMessages()`.
+  - Misskey adapter: new `timeline:self` channel type for bot's own timeline.
   - `PlatformAdapter` base class: new abstract `getBotId()` method.
-  - `SessionRegistry.register()`: `triggerEvent` is now optional (undefined for spontaneous posts).
   - Environment variable overrides: `DISCORD_SPONTANEOUS_ENABLED`, `DISCORD_SPONTANEOUS_MIN_INTERVAL_MS`, `DISCORD_SPONTANEOUS_MAX_INTERVAL_MS`, `DISCORD_SPONTANEOUS_CONTEXT_FETCH_PROBABILITY` (and Misskey equivalents).
-  - Float conversion support in `applyEnvOverrides()` for probability values.
   - Config validation: auto-swaps reversed min/max intervals, clamps minIntervalMs ≥ 60s, clamps contextFetchProbability to [0, 1].
-  - BDD feature spec: `docs/features/14-spontaneous-posting.feature`.
-  - Comprehensive unit tests for scheduler, target selection, config loading, and env overrides.
+- Added: Auto-retry when agent completes without sending reply — the system automatically sends a second prompt on the same ACP session to request the agent to send a reply.
+  - New `RetryPromptStrategy` interface with per-agent-type configuration via `getRetryPromptStrategy()`.
+  - All three agent types (copilot, opencode, gemini) support retry with `maxRetries` of 1.
+- Added: GELF (Graylog Extended Log Format) log output support for centralized log management.
+  - New `GelfConfig` type with `enabled`, `endpoint`, and `hostname` fields.
+  - New `GelfTransport` module with fire-and-forget HTTP POST.
+  - Environment variable overrides: `GELF_ENABLED`, `GELF_ENDPOINT`, `GELF_HOSTNAME`.
+  - GELF transport integrated into Logger class and initialized in bootstrap flow.
+- Added: Misskey bot account filtering to prevent multi-instance infinite loops.
+  - `shouldRespondToNote()` and `shouldRespondToChatMessage()` check `user.isBot` / `fromUser?.isBot`.
+  - Bot messages in recent history correctly marked as `[Bot]` in conversation context.
+- Added: Misskey full reply chain fetching including ancestors in note conversations.
+  - Ancestor traversal via replyId chain walking with `fetchAncestorsWithFallback()`.
+  - Fault-tolerant replies fetch with fallback chain (`notes/children` → `notes/replies` → empty array).
+- Added: Helm chart for Kubernetes deployment.
+- Added: Modularized app core and unified prompts architecture.
+
+### Changed
+
+- Changed: Conversation budget is now allocated before emojis in token budget, ensuring adequate context for conversation history.
+- Changed: Emoji section uses XML tags (`<e>`, `<t>`, `<r>`, `<a>`) for better prompt engineering clarity.
+- Changed: Maximum custom emoji count tightened to reduce token usage; entire emoji section omitted when no emojis are available.
+- Changed: Removed Misskey emoji alias support from cache.
+- Changed: Compose file now declares a named `data` volume.
+- Changed: `HEALTHCHECK` directive removed from Containerfile (not supported for OCI image format).
+- Changed: Default workspace data uses volume mount; host prompts mounting disabled by default.
+
+### Fixed
+
+- Fixed: Conversation context receiving too few messages when emoji section consumed most of the token budget.
+- Fixed: Container permission issues — pre-create `/home/deno/.local` directory and fix PVC write permissions in Helm chart.
 
 ## [0.5.0] - 2026-02-09
 
@@ -249,7 +284,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ---
 
-[Unreleased]: https://github.com/jim60105/AIr-Friends/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/jim60105/AIr-Friends/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/jim60105/AIr-Friends/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/jim60105/AIr-Friends/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/jim60105/AIr-Friends/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/jim60105/AIr-Friends/compare/v0.2.0...v0.3.0
