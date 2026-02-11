@@ -265,48 +265,7 @@ export class ContextAssembler {
    * Limits the list to fit within a reasonable token budget.
    */
   private formatEmojiSection(emojis: PlatformEmoji[]): string {
-    const MAX_EMOJIS = 50;
-
-    const lines: string[] = [
-      "## Available Custom Emojis",
-      "",
-      "You can use these custom emojis in your replies (embed in text) or as reactions. Format: <e> = emoji, <t> = text embed, <r> = reaction. Note that you should use the raw content inside those tags, they may be another <xml> tag or :text: format. Strictly use those emojis and never make up new ones that are not in this list. Any emoji not on the list cannot be used.",
-      "",
-    ];
-
-    // Group by category
-    const grouped = new Map<string, PlatformEmoji[]>();
-    for (const emoji of emojis) {
-      const category = emoji.category ?? "Uncategorized";
-      if (!grouped.has(category)) {
-        grouped.set(category, []);
-      }
-      grouped.get(category)!.push(emoji);
-    }
-
-    let count = 0;
-    let _truncated = false;
-    for (const [category, categoryEmojis] of grouped) {
-      if (count >= MAX_EMOJIS) {
-        _truncated = true;
-        break;
-      }
-
-      lines.push(`### ${category}`);
-      for (const emoji of categoryEmojis) {
-        if (count >= MAX_EMOJIS) {
-          _truncated = true;
-          break;
-        }
-        lines.push(
-          `<e><t>${emoji.useInText}</t><r>${emoji.useAsReaction}</r></e>`,
-        );
-        count++;
-      }
-      lines.push("");
-    }
-
-    return count > 0 ? lines.join("\n") : "";
+    return this.formatEmojiSectionWithBudget(emojis, Infinity);
   }
 
   /**
@@ -365,7 +324,7 @@ export class ContextAssembler {
       lines.push("");
     }
 
-    if (count > 0) {
+    if (count > 0 && isFinite(tokenBudget)) {
       logger.debug("Emoji section formatted with budget", {
         emojisIncluded: count,
         emojisTotal: emojis.length,
