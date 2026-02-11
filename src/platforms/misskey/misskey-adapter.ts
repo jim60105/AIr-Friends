@@ -433,11 +433,8 @@ export class MisskeyAdapter extends PlatformAdapter {
       if (channelId.startsWith("note:")) {
         const noteId = channelId.slice(5);
 
-        const [ancestors, currentNote, replies] = await Promise.all([
-          this.client.request<MisskeyNote[]>(
-            "notes/conversation",
-            { noteId, limit },
-          ),
+        // Fetch the current note and its replies in parallel
+        const [currentNote, replies] = await Promise.all([
           this.client.request<MisskeyNote>(
             "notes/show",
             { noteId },
@@ -447,6 +444,23 @@ export class MisskeyAdapter extends PlatformAdapter {
             { noteId, limit },
           ),
         ]);
+
+        // Walk the replyId chain to fetch ancestor notes via notes/show.
+        // This is more compatible than notes/conversation which may not exist on all forks.
+        const ancestors: MisskeyNote[] = [];
+        let cursorReplyId: string | null | undefined = currentNote.replyId;
+        while (cursorReplyId && ancestors.length < limit) {
+          try {
+            const parent: MisskeyNote = await this.client.request<MisskeyNote>(
+              "notes/show",
+              { noteId: cursorReplyId },
+            );
+            ancestors.unshift(parent);
+            cursorReplyId = parent.replyId;
+          } catch {
+            break;
+          }
+        }
 
         const allNotes = [...ancestors, currentNote, ...replies];
 

@@ -410,11 +410,13 @@ Deno.test("fetchRecentMessages - note: channel fetches ancestors, current note, 
     id: "ancestor1",
     text: "ancestor",
     createdAt: "2024-01-01T00:00:00.000Z",
+    replyId: null,
   });
   const current = createMockNote({
     id: "noteABC",
     text: "current note",
     createdAt: "2024-01-01T01:00:00.000Z",
+    replyId: "ancestor1",
   });
   const reply = createMockNote({
     id: "reply1",
@@ -423,17 +425,18 @@ Deno.test("fetchRecentMessages - note: channel fetches ancestors, current note, 
   });
 
   const endpoints: string[] = [];
-  const adapter = createAdapterWithMockClient((endpoint, _params) => {
+  const adapter = createAdapterWithMockClient((endpoint, params) => {
     endpoints.push(endpoint);
-    if (endpoint === "notes/conversation") return [ancestor];
-    if (endpoint === "notes/show") return current;
+    if (endpoint === "notes/show") {
+      if (params.noteId === "noteABC") return current;
+      if (params.noteId === "ancestor1") return ancestor;
+    }
     if (endpoint === "notes/replies") return [reply];
     return [];
   });
 
   const messages = await adapter.fetchRecentMessages("note:noteABC", 20);
 
-  assertEquals(endpoints.sort(), ["notes/conversation", "notes/replies", "notes/show"]);
   assertEquals(messages.length, 3);
   assertEquals(messages[0].messageId, "ancestor1");
   assertEquals(messages[1].messageId, "noteABC");
@@ -445,12 +448,13 @@ Deno.test("fetchRecentMessages - note: channel deduplicates notes", async () => 
     id: "noteABC",
     text: "same note",
     createdAt: "2024-01-01T01:00:00.000Z",
+    replyId: null,
   });
 
-  const adapter = createAdapterWithMockClient((endpoint) => {
-    // current note appears in both ancestors and notes/show
-    if (endpoint === "notes/conversation") return [note];
-    if (endpoint === "notes/show") return note;
+  const adapter = createAdapterWithMockClient((endpoint, params) => {
+    if (endpoint === "notes/show") {
+      if (params.noteId === "noteABC") return note;
+    }
     if (endpoint === "notes/replies") return [note];
     return [];
   });
@@ -466,6 +470,7 @@ Deno.test("fetchRecentMessages - note: channel sorts chronologically", async () 
     id: "late",
     text: "late",
     createdAt: "2024-01-01T03:00:00.000Z",
+    replyId: null,
   });
   const early = createMockNote({
     id: "early",
@@ -476,12 +481,14 @@ Deno.test("fetchRecentMessages - note: channel sorts chronologically", async () 
     id: "mid",
     text: "mid",
     createdAt: "2024-01-01T01:30:00.000Z",
+    replyId: "late",
   });
 
-  const adapter = createAdapterWithMockClient((endpoint) => {
-    // Return in non-chronological order
-    if (endpoint === "notes/conversation") return [late];
-    if (endpoint === "notes/show") return mid;
+  const adapter = createAdapterWithMockClient((endpoint, params) => {
+    if (endpoint === "notes/show") {
+      if (params.noteId === "mid") return mid;
+      if (params.noteId === "late") return late;
+    }
     if (endpoint === "notes/replies") return [early];
     return [];
   });
@@ -500,11 +507,14 @@ Deno.test("fetchRecentMessages - note: channel applies limit keeping latest note
       id: `note${i}`,
       text: `note ${i}`,
       createdAt: `2024-01-01T0${i}:00:00.000Z`,
+      replyId: i > 0 ? `note${i - 1}` : null,
     }));
 
-  const adapter = createAdapterWithMockClient((endpoint) => {
-    if (endpoint === "notes/conversation") return [notes[0], notes[1]];
-    if (endpoint === "notes/show") return notes[2];
+  const adapter = createAdapterWithMockClient((endpoint, params) => {
+    if (endpoint === "notes/show") {
+      const found = notes.find((n) => n.id === params.noteId);
+      if (found) return found;
+    }
     if (endpoint === "notes/replies") return [notes[3], notes[4]];
     return [];
   });
@@ -523,11 +533,11 @@ Deno.test("fetchRecentMessages - note: channel with empty ancestors and replies"
     id: "noteOnly",
     text: "standalone note",
     createdAt: "2024-01-01T00:00:00.000Z",
+    replyId: null,
   });
 
-  const adapter = createAdapterWithMockClient((endpoint) => {
-    if (endpoint === "notes/conversation") return [];
-    if (endpoint === "notes/show") return current;
+  const adapter = createAdapterWithMockClient((endpoint, params) => {
+    if (endpoint === "notes/show" && params.noteId === "noteOnly") return current;
     if (endpoint === "notes/replies") return [];
     return [];
   });
@@ -545,18 +555,20 @@ Deno.test("fetchRecentMessages - note: channel passes noteId and limit to API ca
   const adapter = createAdapterWithMockClient((endpoint, params) => {
     capturedCalls.push({ endpoint, params });
     if (endpoint === "notes/show") {
-      return createMockNote({ id: "targetNote", createdAt: "2024-01-01T00:00:00.000Z" });
+      return createMockNote({
+        id: "targetNote",
+        createdAt: "2024-01-01T00:00:00.000Z",
+        replyId: null,
+      });
     }
     return [];
   });
 
   await adapter.fetchRecentMessages("note:targetNote", 15);
 
-  const conversationCall = capturedCalls.find((c) => c.endpoint === "notes/conversation");
   const showCall = capturedCalls.find((c) => c.endpoint === "notes/show");
   const repliesCall = capturedCalls.find((c) => c.endpoint === "notes/replies");
 
-  assertEquals(conversationCall?.params, { noteId: "targetNote", limit: 15 });
   assertEquals(showCall?.params, { noteId: "targetNote" });
   assertEquals(repliesCall?.params, { noteId: "targetNote", limit: 15 });
 });
@@ -572,4 +584,66 @@ Deno.test("fetchRecentMessages - note: channel wraps API errors in PlatformError
     PlatformError,
     "Failed to fetch messages",
   );
+});
+
+Deno.test("fetchRecentMessages - note: channel walks multi-level ancestor chain", async () => {
+  const grandparent = createMockNote({
+    id: "gp",
+    text: "grandparent",
+    createdAt: "2024-01-01T00:00:00.000Z",
+    replyId: null,
+  });
+  const parent = createMockNote({
+    id: "p",
+    text: "parent",
+    createdAt: "2024-01-01T01:00:00.000Z",
+    replyId: "gp",
+  });
+  const current = createMockNote({
+    id: "c",
+    text: "current",
+    createdAt: "2024-01-01T02:00:00.000Z",
+    replyId: "p",
+  });
+
+  const adapter = createAdapterWithMockClient((endpoint, params) => {
+    if (endpoint === "notes/show") {
+      if (params.noteId === "c") return current;
+      if (params.noteId === "p") return parent;
+      if (params.noteId === "gp") return grandparent;
+    }
+    if (endpoint === "notes/replies") return [];
+    return [];
+  });
+
+  const messages = await adapter.fetchRecentMessages("note:c", 20);
+
+  assertEquals(messages.length, 3);
+  assertEquals(messages[0].messageId, "gp");
+  assertEquals(messages[1].messageId, "p");
+  assertEquals(messages[2].messageId, "c");
+});
+
+Deno.test("fetchRecentMessages - note: channel handles ancestor fetch error gracefully", async () => {
+  const current = createMockNote({
+    id: "c",
+    text: "current",
+    createdAt: "2024-01-01T01:00:00.000Z",
+    replyId: "missing",
+  });
+
+  const adapter = createAdapterWithMockClient((endpoint, params) => {
+    if (endpoint === "notes/show") {
+      if (params.noteId === "c") return current;
+      if (params.noteId === "missing") throw new Error("No such note");
+    }
+    if (endpoint === "notes/replies") return [];
+    return [];
+  });
+
+  // Should still return the current note even if ancestor fetch fails
+  const messages = await adapter.fetchRecentMessages("note:c", 20);
+
+  assertEquals(messages.length, 1);
+  assertEquals(messages[0].messageId, "c");
 });
