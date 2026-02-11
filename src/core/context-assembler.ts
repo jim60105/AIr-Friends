@@ -206,22 +206,25 @@ export class ContextAssembler {
     // Calculate trigger message section
     const triggerSection = this.formatTriggerSection(context.triggerMessage);
 
-    // Format emoji section
-    const emojiSection = context.availableEmojis && context.availableEmojis.length > 0
-      ? this.formatEmojiSection(context.availableEmojis)
-      : "";
+    // Calculate tokens used by mandatory sections (memories + trigger)
+    const mandatoryTokens = estimateTokens(memoriesSection) + estimateTokens(triggerSection);
+    const remainingAfterMandatory = availableTokens - mandatoryTokens;
 
-    // Calculate tokens used by fixed sections
-    const fixedTokens = estimateTokens(memoriesSection) + estimateTokens(triggerSection) +
-      estimateTokens(emojiSection);
-    const conversationTokenBudget = availableTokens - fixedTokens;
-
-    // Format conversation with smart truncation (removes oldest messages if needed)
+    // Allocate conversation budget FIRST, then give remaining to emojis.
+    // This prevents large emoji sections from starving conversation history.
     const conversationSection = this.formatConversationSectionWithBudget(
       context.recentMessages,
       context.relatedMessages,
-      conversationTokenBudget,
+      remainingAfterMandatory,
     );
+    const conversationTokens = estimateTokens(conversationSection);
+
+    // Emoji section gets whatever budget remains after conversation
+    const emojiBudget = remainingAfterMandatory - conversationTokens;
+    const emojiSection = context.availableEmojis && context.availableEmojis.length > 0 &&
+        emojiBudget > 0
+      ? this.formatEmojiSectionWithBudget(context.availableEmojis, emojiBudget)
+      : "";
 
     // Build user message with context
     const userMessage = this.buildUserMessage(
@@ -304,6 +307,77 @@ export class ContextAssembler {
         count++;
       }
       lines.push("");
+    }
+
+    return count > 0 ? lines.join("\n") : "";
+  }
+
+  /**
+   * Format emoji section with a token budget constraint.
+   * Includes as many emojis as fit within the budget.
+   */
+  private formatEmojiSectionWithBudget(emojis: PlatformEmoji[], tokenBudget: number): string {
+    const MAX_EMOJIS = 50;
+
+    const header = [
+      "## Available Custom Emojis",
+      "",
+      "You can use these custom emojis in your replies (embed in text) or as reactions. Format: <e> = emoji, <t> = text embed, <r> = reaction, <a> = alias. Note that you should use the raw content of those tags, they may be another <xml> tag or :text: format. Strictly use those emojis and never make up new ones that are not in this list. Any emoji not on the list cannot be used.",
+      "",
+    ];
+
+    const headerTokens = estimateTokens(header.join("\n"));
+    if (headerTokens >= tokenBudget) return "";
+
+    // Group by category
+    const grouped = new Map<string, PlatformEmoji[]>();
+    for (const emoji of emojis) {
+      const category = emoji.category ?? "Uncategorized";
+      if (!grouped.has(category)) {
+        grouped.set(category, []);
+      }
+      grouped.get(category)!.push(emoji);
+    }
+
+    const lines = [...header];
+    let usedTokens = headerTokens;
+    let count = 0;
+
+    for (const [category, categoryEmojis] of grouped) {
+      if (count >= MAX_EMOJIS) break;
+
+      const categoryHeader = `### ${category}`;
+      const categoryHeaderTokens = estimateTokens(categoryHeader);
+      if (usedTokens + categoryHeaderTokens > tokenBudget) break;
+
+      lines.push(categoryHeader);
+      usedTokens += categoryHeaderTokens;
+
+      for (const emoji of categoryEmojis) {
+        if (count >= MAX_EMOJIS) break;
+
+        const aliasStr = emoji.aliases && emoji.aliases.length > 0
+          ? emoji.aliases.map((a) => `<a>${a}</a>`).join("")
+          : "";
+        const line = `<e><t>${emoji.useInText}</t><r>${emoji.useAsReaction}</r>${aliasStr}</e>`;
+        const lineTokens = estimateTokens(line);
+
+        if (usedTokens + lineTokens > tokenBudget) break;
+
+        lines.push(line);
+        usedTokens += lineTokens;
+        count++;
+      }
+      lines.push("");
+    }
+
+    if (count > 0) {
+      logger.debug("Emoji section formatted with budget", {
+        emojisIncluded: count,
+        emojisTotal: emojis.length,
+        tokensUsed: usedTokens,
+        tokenBudget,
+      });
     }
 
     return count > 0 ? lines.join("\n") : "";

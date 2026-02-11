@@ -382,6 +382,7 @@ Deno.test("shouldRespondToChatMessage - should not respond when DM not allowed",
 /**
  * Helper to create a MisskeyAdapter with a stubbed client.request method.
  * Sets botId via the private field so fetchRecentMessages can function.
+ * By default, notes/conversation throws to trigger the replyId chain fallback.
  */
 function createAdapterWithMockClient(
   requestHandler: (endpoint: string, params: Record<string, unknown>) => unknown,
@@ -399,6 +400,10 @@ function createAdapterWithMockClient(
   // deno-lint-ignore no-explicit-any
   const client = (adapter as any).client;
   client.request = (endpoint: string, params: Record<string, unknown> = {}) => {
+    // Default: throw for notes/conversation to test the replyId chain fallback
+    if (endpoint === "notes/conversation") {
+      return Promise.reject(new Error("notes/conversation not available (mock)"));
+    }
     return Promise.resolve(requestHandler(endpoint, params));
   };
 
@@ -738,4 +743,154 @@ Deno.test("fetchRecentMessages - note: ancestors still work when reply endpoints
   assertEquals(messages.length, 2);
   assertEquals(messages[0].messageId, "parentZ");
   assertEquals(messages[1].messageId, "noteZ");
+});
+
+// ==================== Ancestor Fetch Fallback Chain Tests ====================
+
+/**
+ * Helper that allows notes/conversation to work (does NOT throw by default).
+ * Use for tests that specifically test the notes/conversation path.
+ */
+function createAdapterWithFullMockClient(
+  requestHandler: (endpoint: string, params: Record<string, unknown>) => unknown,
+): MisskeyAdapter {
+  const adapter = new MisskeyAdapter({
+    host: "misskey.test",
+    token: "test-token",
+  });
+  // deno-lint-ignore no-explicit-any
+  (adapter as any).botId = "bot123";
+  // deno-lint-ignore no-explicit-any
+  const client = (adapter as any).client;
+  client.request = (endpoint: string, params: Record<string, unknown> = {}) => {
+    return Promise.resolve(requestHandler(endpoint, params));
+  };
+  return adapter;
+}
+
+Deno.test("fetchRecentMessages - note: uses notes/conversation for ancestors when available", async () => {
+  const ancestor = createMockNote({
+    id: "anc1",
+    text: "ancestor note",
+    createdAt: "2024-01-01T00:00:00.000Z",
+    replyId: null,
+  });
+  const current = createMockNote({
+    id: "cur1",
+    text: "current note",
+    createdAt: "2024-01-01T01:00:00.000Z",
+    replyId: "anc1",
+  });
+
+  const calledEndpoints: string[] = [];
+  const adapter = createAdapterWithFullMockClient((endpoint, params) => {
+    calledEndpoints.push(endpoint);
+    if (endpoint === "notes/show" && params.noteId === "cur1") return current;
+    if (endpoint === "notes/conversation") return [ancestor];
+    if (endpoint === "notes/children") return [];
+    return [];
+  });
+
+  const messages = await adapter.fetchRecentMessages("note:cur1", 20);
+
+  assertEquals(messages.length, 2);
+  assertEquals(messages[0].messageId, "anc1");
+  assertEquals(messages[1].messageId, "cur1");
+  // Verify notes/conversation was called
+  assertEquals(calledEndpoints.includes("notes/conversation"), true);
+});
+
+Deno.test("fetchRecentMessages - note: falls back to replyId walk when notes/conversation fails", async () => {
+  const ancestor = createMockNote({
+    id: "anc2",
+    text: "ancestor note",
+    createdAt: "2024-01-01T00:00:00.000Z",
+    replyId: null,
+  });
+  const current = createMockNote({
+    id: "cur2",
+    text: "current note",
+    createdAt: "2024-01-01T01:00:00.000Z",
+    replyId: "anc2",
+  });
+
+  const calledEndpoints: string[] = [];
+  // Use the default mock client which throws for notes/conversation
+  const adapter = createAdapterWithMockClient((endpoint, params) => {
+    calledEndpoints.push(endpoint);
+    if (endpoint === "notes/show") {
+      if (params.noteId === "cur2") return current;
+      if (params.noteId === "anc2") return ancestor;
+    }
+    if (endpoint === "notes/children") return [];
+    return [];
+  });
+
+  const messages = await adapter.fetchRecentMessages("note:cur2", 20);
+
+  assertEquals(messages.length, 2);
+  assertEquals(messages[0].messageId, "anc2");
+  assertEquals(messages[1].messageId, "cur2");
+  // Verify notes/show was used for ancestor walk (not notes/conversation)
+  const showCalls = calledEndpoints.filter((e) => e === "notes/show");
+  assertEquals(showCalls.length >= 2, true); // At least current + ancestor
+});
+
+Deno.test("fetchRecentMessages - note: deep ancestor chain (7 levels)", async () => {
+  // Create a chain of 7 notes
+  const notes = Array.from({ length: 7 }, (_, i) =>
+    createMockNote({
+      id: `deep${i}`,
+      text: `note level ${i}`,
+      createdAt: `2024-01-01T0${i}:00:00.000Z`,
+      replyId: i > 0 ? `deep${i - 1}` : null,
+    }));
+
+  const adapter = createAdapterWithMockClient((endpoint, params) => {
+    if (endpoint === "notes/show") {
+      const found = notes.find((n) => n.id === params.noteId);
+      if (found) return found;
+    }
+    if (endpoint === "notes/children") return [];
+    return [];
+  });
+
+  // Trigger from the deepest note (deep6, which has 6 ancestors)
+  const messages = await adapter.fetchRecentMessages("note:deep6", 20);
+
+  assertEquals(messages.length, 7);
+  assertEquals(messages[0].messageId, "deep0"); // Root
+  assertEquals(messages[6].messageId, "deep6"); // Trigger
+});
+
+Deno.test("fetchRecentMessages - note: notes/conversation returns deep chain in single call", async () => {
+  // Create a chain of 7 notes
+  const notes = Array.from({ length: 7 }, (_, i) =>
+    createMockNote({
+      id: `conv${i}`,
+      text: `note level ${i}`,
+      createdAt: `2024-01-01T0${i}:00:00.000Z`,
+      replyId: i > 0 ? `conv${i - 1}` : null,
+    }));
+
+  const calledEndpoints: string[] = [];
+  const adapter = createAdapterWithFullMockClient((endpoint, params) => {
+    calledEndpoints.push(endpoint);
+    if (endpoint === "notes/show" && params.noteId === "conv6") return notes[6];
+    // notes/conversation returns ancestors (excluding current) in reverse order
+    if (endpoint === "notes/conversation") return notes.slice(0, 6).reverse();
+    if (endpoint === "notes/children") return [];
+    return [];
+  });
+
+  const messages = await adapter.fetchRecentMessages("note:conv6", 20);
+
+  assertEquals(messages.length, 7);
+  assertEquals(messages[0].messageId, "conv0"); // Root
+  assertEquals(messages[6].messageId, "conv6"); // Trigger
+  // notes/conversation was called
+  assertEquals(calledEndpoints.includes("notes/conversation"), true);
+  // notes/show was only called for the current note, not for ancestor walk
+  const showCalls = calledEndpoints.filter((e) => e === "notes/show");
+  assertEquals(showCalls.length, 1);
 });

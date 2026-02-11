@@ -443,22 +443,9 @@ export class MisskeyAdapter extends PlatformAdapter {
         // notes/children (broader, available on most forks) → notes/replies → empty
         const replies = await this.fetchRepliesWithFallback(noteId, limit);
 
-        // Walk the replyId chain to fetch ancestor notes via notes/show.
-        // This is more compatible than notes/conversation which may not exist on all forks.
-        const ancestors: MisskeyNote[] = [];
-        let cursorReplyId: string | null | undefined = currentNote.replyId;
-        while (cursorReplyId && ancestors.length < limit) {
-          try {
-            const parent: MisskeyNote = await this.client.request<MisskeyNote>(
-              "notes/show",
-              { noteId: cursorReplyId },
-            );
-            ancestors.unshift(parent);
-            cursorReplyId = parent.replyId;
-          } catch {
-            break;
-          }
-        }
+        // Fetch ancestor notes with fallback chain for fork compatibility:
+        // notes/conversation (single call) → replyId chain walk via notes/show
+        const ancestors = await this.fetchAncestorsWithFallback(currentNote, limit);
 
         const allNotes = [...ancestors, currentNote, ...replies];
 
@@ -470,6 +457,13 @@ export class MisskeyAdapter extends PlatformAdapter {
           return true;
         });
         unique.sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+
+        logger.debug("Note thread assembled", {
+          noteId,
+          ancestorsCount: ancestors.length,
+          repliesCount: replies.length,
+          totalUnique: unique.length,
+        });
 
         return unique.slice(-limit).map((note) => noteToPlatformMessage(note, this.botId!));
       }
@@ -515,6 +509,62 @@ export class MisskeyAdapter extends PlatformAdapter {
 
     // Both endpoints failed — return empty array
     return [];
+  }
+
+  /**
+   * Fetch ancestor notes with fallback chain for fork compatibility.
+   * Tries notes/conversation first (single API call), then falls back to
+   * walking the replyId chain via repeated notes/show calls.
+   */
+  private async fetchAncestorsWithFallback(
+    currentNote: MisskeyNote,
+    limit: number,
+  ): Promise<MisskeyNote[]> {
+    if (!currentNote.replyId) return [];
+
+    // Try notes/conversation first (returns ancestors in one call)
+    try {
+      const ancestors = await this.client.request<MisskeyNote[]>(
+        "notes/conversation",
+        { noteId: currentNote.id, limit },
+      );
+      logger.debug("Fetched ancestors via notes/conversation", {
+        noteId: currentNote.id,
+        count: ancestors.length,
+      });
+      return ancestors;
+    } catch {
+      logger.debug("notes/conversation endpoint unavailable, falling back to replyId chain walk", {
+        noteId: currentNote.id,
+      });
+    }
+
+    // Fallback: walk the replyId chain via notes/show
+    const ancestors: MisskeyNote[] = [];
+    let cursorReplyId: string | null | undefined = currentNote.replyId;
+    while (cursorReplyId && ancestors.length < limit) {
+      try {
+        const parent: MisskeyNote = await this.client.request<MisskeyNote>(
+          "notes/show",
+          { noteId: cursorReplyId },
+        );
+        ancestors.unshift(parent);
+        cursorReplyId = parent.replyId;
+      } catch (error) {
+        logger.warn("Ancestor fetch stopped: failed to fetch parent note", {
+          noteId: cursorReplyId,
+          error: error instanceof Error ? error.message : String(error),
+          ancestorsFetched: ancestors.length,
+        });
+        break;
+      }
+    }
+
+    logger.debug("Fetched ancestors via replyId chain walk", {
+      noteId: currentNote.id,
+      count: ancestors.length,
+    });
+    return ancestors;
   }
 
   /**
