@@ -31,10 +31,12 @@
     "build": {
       "mode": "primary",
       "prompt": "{file:/app/prompts/system_prompt_override.md}",
-      "tools": {
-        "write": false,
-        "edit": false,
-        "bash": true
+      "permission": {
+        "external_directory": {
+          "data/agent-workspace/**/*": "allow",
+          "$AGENT_WORKSPACE/**/*": "allow",
+          "/app/data/agent-workspace/**/*": "allow"
+        },
       }
     }
   }

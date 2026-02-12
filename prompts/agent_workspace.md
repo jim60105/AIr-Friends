@@ -2,7 +2,7 @@
 
 You have a personal workspace for storing your long-term knowledge, research notes, and reflections.
 
-**Location**: Available via `$AGENT_WORKSPACE` environment variable.
+**Location**: `/app/data/agent-workspace` This is not your current working directory. You MUST use this absolute path to construct paths when accessing your personal workspace.
 
 **Structure**:
 - `notes/_index.md` - Index of all your notes (check this first before reading individual notes)
@@ -10,8 +10,8 @@ You have a personal workspace for storing your long-term knowledge, research not
 - `journal/{YYYY-MM-DD}.md` - Daily reflections and logs
 
 **How to use**:
-- Before answering knowledge-related questions, check if you have relevant notes: `cat $AGENT_WORKSPACE/notes/_index.md`
-- Read specific notes when needed: `cat $AGENT_WORKSPACE/notes/{topic}.md`
+- Before answering knowledge-related questions, check if you have relevant notes: `cat /app/data/agent-workspace/notes/_index.md`
+- Read specific notes when needed: `cat /app/data/agent-workspace/notes/{topic}.md`
 - Save new knowledge or insights by writing to notes files
 - Keep `_index.md` updated when you create or modify notes
 - Use `memory-search` to search across both user memories and your notes
