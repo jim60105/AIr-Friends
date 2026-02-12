@@ -112,13 +112,13 @@ export function createAgentConfig(
         env["AGENT_WORKSPACE"] = agentWorkspacePath;
       }
 
-      const args = ["task", "gemini", "--experimental-acp"];
+      const args = ["--experimental-acp"];
       if (yolo) {
         args.push("--yolo");
       }
 
       return {
-        command: "deno",
+        command: "gemini",
         args,
         cwd: workingDir,
         env,

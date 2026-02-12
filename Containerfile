@@ -65,7 +65,7 @@ COPY src/ ./src/
 
 # Pre-cache dependencies by caching the main entry point
 # Deno caches modules in DENO_DIR (default: /deno-dir/ in official image)
-RUN deno cache --lock=deno.lock src/main.ts npm:@google/gemini-cli
+RUN deno cache --lock=deno.lock src/main.ts
 
 ########################################
 # Final stage
@@ -115,6 +115,8 @@ RUN --mount=type=cache,id=apt-$TARGETARCH$TARGETVARIANT,sharing=locked,target=/v
 # Copy Agents CLI binary
 COPY --link --chown=$UID:0 --chmod=775 --from=copilot-unpacker /copilot/copilot /usr/local/bin/copilot
 COPY --link --chown=$UID:0 --chmod=775 --from=opencode-unpacker /opencode/opencode /usr/local/bin/opencode
+RUN npm install -g @google/gemini-cli && \
+    npm cache clean --force
 
 # Copy OpenCode configuration
 COPY --link --chown=$UID:0 --chmod=775 opencode.json /home/deno/.config/opencode/opencode.json

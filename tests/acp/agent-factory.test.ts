@@ -79,8 +79,8 @@ Deno.test("createAgentConfig - creates gemini config correctly", () => {
   const config = createTestConfig();
   const agentConfig = createAgentConfig("gemini", "/tmp/workspace", config);
 
-  assertEquals(agentConfig.command, "deno");
-  assertEquals(agentConfig.args, ["task", "gemini", "--experimental-acp"]);
+  assertEquals(agentConfig.command, "gemini");
+  assertEquals(agentConfig.args, ["--experimental-acp"]);
   assertEquals(agentConfig.cwd, "/tmp/workspace");
   assertEquals(agentConfig.env?.GEMINI_API_KEY, "test-gemini-key");
   assertEquals(agentConfig.env?.GEMINI_SYSTEM_MD, "/app/prompts/system_prompt_override.md");
@@ -414,8 +414,8 @@ Deno.test("createAgentConfig - adds --yolo flag to gemini when yolo is true", ()
   const config = createTestConfig();
   const agentConfig = createAgentConfig("gemini", "/tmp/workspace", config, true);
 
-  assertEquals(agentConfig.command, "deno");
-  assertEquals(agentConfig.args, ["task", "gemini", "--experimental-acp", "--yolo"]);
+  assertEquals(agentConfig.command, "gemini");
+  assertEquals(agentConfig.args, ["--experimental-acp", "--yolo"]);
   assertEquals(agentConfig.cwd, "/tmp/workspace");
 });
 
@@ -423,8 +423,8 @@ Deno.test("createAgentConfig - does not add --yolo flag to gemini when yolo is f
   const config = createTestConfig();
   const agentConfig = createAgentConfig("gemini", "/tmp/workspace", config, false);
 
-  assertEquals(agentConfig.command, "deno");
-  assertEquals(agentConfig.args, ["task", "gemini", "--experimental-acp"]);
+  assertEquals(agentConfig.command, "gemini");
+  assertEquals(agentConfig.args, ["--experimental-acp"]);
   assertEquals(agentConfig.cwd, "/tmp/workspace");
 });
 
