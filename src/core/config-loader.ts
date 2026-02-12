@@ -362,7 +362,7 @@ async function loadPromptFragments(
   try {
     for await (const entry of Deno.readDir(dir)) {
       if (
-        !entry.isFile ||
+        !(entry.isFile || entry.isSymlink) ||
         !entry.name.endsWith(".md") ||
         entry.name === excludeFileName
       ) {
