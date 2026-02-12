@@ -147,6 +147,7 @@ export function createAgentConfig(
         Deno.env.get("GEMINI_API_KEY");
       if (geminiApiKey) {
         env["GEMINI_API_KEY"] = geminiApiKey;
+        env["GOOGLE_GENERATIVE_AI_API_KEY"] = geminiApiKey;
       }
       // GitHub
       const githubToken = appConfig.agent.githubToken ??
