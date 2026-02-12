@@ -75,7 +75,7 @@ async function withTestContextAssembler(
     const assembler = new ContextAssembler(store, {
       recentMessageLimit: 20,
       memoryMaxChars: 2000,
-      tokenLimit: 4096,
+      tokenLimit: 20000,
       systemPromptPath: `${tempDir}/prompts/system.md`,
     });
 

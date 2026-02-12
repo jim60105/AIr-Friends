@@ -86,7 +86,7 @@ function createTestConfig(
     agent: {
       model: "gpt-4",
       systemPromptPath: `${tempDir}/prompts/system.md`,
-      tokenLimit: 4096,
+      tokenLimit: 20000,
       defaultAgentType: "copilot",
     },
     memory: {

@@ -50,7 +50,7 @@ platforms:
 agent:
   model: "gpt-5-mini" # Model identifier (e.g., "gpt-4", "gpt-5-mini")
   systemPromptPath: "./prompts/system.md" # Path to the system prompt file
-  tokenLimit: 4096 # Max tokens for context
+  tokenLimit: 20000 # Max tokens for context
   githubToken: "${GITHUB_TOKEN}" # Optional GitHub token for Copilot (env: GITHUB_TOKEN)
   geminiApiKey: "${GEMINI_API_KEY}" # Optional Gemini API key (env: GEMINI_API_KEY)
   opencodeApiKey: "${OPENCODE_API_KEY}" # Optional OpenCode API key (env: OPENCODE_API_KEY)

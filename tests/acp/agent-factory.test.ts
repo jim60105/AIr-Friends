@@ -25,7 +25,7 @@ const createTestConfig = (overrides: Partial<Config> = {}): Config => {
     agent: {
       model: "test-model",
       systemPromptPath: "./test.md",
-      tokenLimit: 4096,
+      tokenLimit: 20000,
       githubToken: "test-github-token",
       geminiApiKey: "test-gemini-key",
       ...overrides.agent,
@@ -91,7 +91,7 @@ Deno.test("createAgentConfig - creates opencode config correctly", () => {
     agent: {
       model: "test-model",
       systemPromptPath: "./test.md",
-      tokenLimit: 4096,
+      tokenLimit: 20000,
       opencodeApiKey: "test-opencode-key",
     },
   });
@@ -108,7 +108,7 @@ Deno.test("createAgentConfig - throws for copilot without GitHub token", () => {
     agent: {
       model: "test",
       systemPromptPath: "./test.md",
-      tokenLimit: 4096,
+      tokenLimit: 20000,
       githubToken: undefined,
     },
   });
@@ -136,7 +136,7 @@ Deno.test("createAgentConfig - throws for gemini without API key", () => {
     agent: {
       model: "test",
       systemPromptPath: "./test.md",
-      tokenLimit: 4096,
+      tokenLimit: 20000,
       geminiApiKey: undefined,
     },
   });
@@ -164,7 +164,7 @@ Deno.test("createAgentConfig - creates opencode without API key (uses GitHub/Gem
     agent: {
       model: "test",
       systemPromptPath: "./test.md",
-      tokenLimit: 4096,
+      tokenLimit: 20000,
       opencodeApiKey: undefined,
     },
   });
@@ -192,7 +192,7 @@ Deno.test("createAgentConfig - uses env var for GitHub token if config not set",
     agent: {
       model: "test",
       systemPromptPath: "./test.md",
-      tokenLimit: 4096,
+      tokenLimit: 20000,
       githubToken: undefined,
     },
   });
@@ -219,7 +219,7 @@ Deno.test("createAgentConfig - uses env var for OpenCode API key if config not s
     agent: {
       model: "test",
       systemPromptPath: "./test.md",
-      tokenLimit: 4096,
+      tokenLimit: 20000,
       opencodeApiKey: undefined,
     },
   });
@@ -261,7 +261,7 @@ Deno.test("getDefaultAgentType - returns configured default agent type", () => {
     agent: {
       model: "test",
       systemPromptPath: "./test.md",
-      tokenLimit: 4096,
+      tokenLimit: 20000,
       defaultAgentType: "gemini",
     },
   });
@@ -273,7 +273,7 @@ Deno.test("getDefaultAgentType - returns opencode when configured", () => {
     agent: {
       model: "test",
       systemPromptPath: "./test.md",
-      tokenLimit: 4096,
+      tokenLimit: 20000,
       defaultAgentType: "opencode",
     },
   });
@@ -341,7 +341,7 @@ Deno.test("createAgentConfig - inherits critical environment variables for openc
     agent: {
       model: "test-model",
       systemPromptPath: "./test.md",
-      tokenLimit: 4096,
+      tokenLimit: 20000,
       opencodeApiKey: "test-opencode-key",
     },
   });
@@ -433,7 +433,7 @@ Deno.test("createAgentConfig - adds OPENCODE_YOLO env var when yolo is true", ()
     agent: {
       model: "test-model",
       systemPromptPath: "./test.md",
-      tokenLimit: 4096,
+      tokenLimit: 20000,
       opencodeApiKey: "test-opencode-key",
     },
   });
@@ -451,7 +451,7 @@ Deno.test("createAgentConfig - does not add OPENCODE_YOLO env var when yolo is f
     agent: {
       model: "test-model",
       systemPromptPath: "./test.md",
-      tokenLimit: 4096,
+      tokenLimit: 20000,
       opencodeApiKey: "test-opencode-key",
     },
   });

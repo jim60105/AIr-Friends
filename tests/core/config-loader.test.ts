@@ -31,7 +31,7 @@ platforms:
 agent:
   model: "gpt-4"
   systemPromptPath: "./prompts/system.md"
-  tokenLimit: 4096
+  tokenLimit: 20000
 workspace:
   repoPath: "./data"
   workspacesDir: "workspaces"
@@ -56,7 +56,7 @@ platforms:
 agent:
   model: "gpt-4"
   systemPromptPath: "./prompts/system.md"
-  tokenLimit: 4096
+  tokenLimit: 20000
 workspace:
   repoPath: "./data"
   workspacesDir: "workspaces"
@@ -82,7 +82,7 @@ platforms:
 agent:
   model: "gpt-4"
   systemPromptPath: "./prompts/system.md"
-  tokenLimit: 4096
+  tokenLimit: 20000
 workspace:
   repoPath: "./data"
   workspacesDir: "workspaces"
@@ -112,7 +112,7 @@ platforms:
 agent:
   model: "gpt-4"
   systemPromptPath: "./prompts/system.md"
-  tokenLimit: 4096
+  tokenLimit: 20000
 workspace:
   repoPath: "./data"
   workspacesDir: "workspaces"
@@ -142,7 +142,7 @@ platforms:
 agent:
   model: "gpt-4"
   systemPromptPath: "./prompts/system.md"
-  tokenLimit: 4096
+  tokenLimit: 20000
 workspace:
   repoPath: "./data"
   workspacesDir: "workspaces"
@@ -170,7 +170,7 @@ platforms:
 agent:
   model: "gpt-4"
   systemPromptPath: "./prompts/system.md"
-  tokenLimit: 4096
+  tokenLimit: 20000
   defaultAgentType: "copilot"
 workspace:
   repoPath: "./data"
@@ -219,7 +219,7 @@ platforms:
 agent:
   model: "gpt-4"
   systemPromptPath: "./prompts/system.md"
-  tokenLimit: 4096
+  tokenLimit: 20000
 workspace:
   repoPath: "./data"
   workspacesDir: "workspaces"
@@ -377,7 +377,7 @@ platforms:
 agent:
   model: "gpt-4"
   systemPromptPath: "./prompts/system.md"
-  tokenLimit: 4096
+  tokenLimit: 20000
 workspace:
   repoPath: "./data"
   workspacesDir: "workspaces"
@@ -401,7 +401,7 @@ platforms:
 agent:
   model: "gpt-4"
   systemPromptPath: "./prompts/system.md"
-  tokenLimit: 4096
+  tokenLimit: 20000
 workspace:
   repoPath: "./data"
   workspacesDir: "workspaces"
@@ -433,7 +433,7 @@ platforms:
 agent:
   model: "gpt-4"
   systemPromptPath: "./prompts/system.md"
-  tokenLimit: 4096
+  tokenLimit: 20000
 workspace:
   repoPath: "./data"
   workspacesDir: "workspaces"
@@ -464,7 +464,7 @@ platforms:
 agent:
   model: "gpt-4"
   systemPromptPath: "./prompts/system.md"
-  tokenLimit: 4096
+  tokenLimit: 20000
 workspace:
   repoPath: "./data"
   workspacesDir: "workspaces"
@@ -503,7 +503,7 @@ platforms:
 agent:
   model: "gpt-4"
   systemPromptPath: "./prompts/system.md"
-  tokenLimit: 4096
+  tokenLimit: 20000
 workspace:
   repoPath: "./data"
   workspacesDir: "workspaces"
@@ -537,7 +537,7 @@ platforms:
 agent:
   model: "gpt-4"
   systemPromptPath: "./prompts/system.md"
-  tokenLimit: 4096
+  tokenLimit: 20000
 workspace:
   repoPath: "./data"
   workspacesDir: "workspaces"
@@ -571,7 +571,7 @@ platforms:
 agent:
   model: "gpt-4"
   systemPromptPath: "./prompts/system.md"
-  tokenLimit: 4096
+  tokenLimit: 20000
 workspace:
   repoPath: "./data"
   workspacesDir: "workspaces"
@@ -600,7 +600,7 @@ platforms:
 agent:
   model: "gpt-4"
   systemPromptPath: "./prompts/system.md"
-  tokenLimit: 4096
+  tokenLimit: 20000
 workspace:
   repoPath: "./data"
   workspacesDir: "workspaces"
@@ -635,7 +635,7 @@ platforms:
 agent:
   model: "gpt-4"
   systemPromptPath: "./prompts/system.md"
-  tokenLimit: 4096
+  tokenLimit: 20000
 workspace:
   repoPath: "./data"
   workspacesDir: "workspaces"
@@ -673,7 +673,7 @@ platforms:
 agent:
   model: "gpt-4"
   systemPromptPath: "./prompts/system.md"
-  tokenLimit: 4096
+  tokenLimit: 20000
 workspace:
   repoPath: "./data"
   workspacesDir: "workspaces"
@@ -699,7 +699,7 @@ platforms:
 agent:
   model: "gpt-4"
   systemPromptPath: "./prompts/system.md"
-  tokenLimit: 4096
+  tokenLimit: 20000
 workspace:
   repoPath: "./data"
   workspacesDir: "workspaces"
@@ -731,7 +731,7 @@ platforms:
 agent:
   model: "gpt-4"
   systemPromptPath: "./prompts/system.md"
-  tokenLimit: 4096
+  tokenLimit: 20000
 workspace:
   repoPath: "./data"
   workspacesDir: "workspaces"
@@ -759,7 +759,7 @@ platforms:
 agent:
   model: "gpt-4"
   systemPromptPath: "./prompts/system.md"
-  tokenLimit: 4096
+  tokenLimit: 20000
 workspace:
   repoPath: "./data"
   workspacesDir: "workspaces"
@@ -785,7 +785,7 @@ platforms:
 agent:
   model: "gpt-4"
   systemPromptPath: "./prompts/system.md"
-  tokenLimit: 4096
+  tokenLimit: 20000
 workspace:
   repoPath: "./data"
   workspacesDir: "workspaces"
@@ -811,7 +811,7 @@ platforms:
 agent:
   model: "gpt-4"
   systemPromptPath: "./prompts/system.md"
-  tokenLimit: 4096
+  tokenLimit: 20000
 workspace:
   repoPath: "./data"
   workspacesDir: "workspaces"
@@ -836,7 +836,7 @@ platforms:
 agent:
   model: "gpt-4"
   systemPromptPath: "./prompts/system.md"
-  tokenLimit: 4096
+  tokenLimit: 20000
 workspace:
   repoPath: "./data"
   workspacesDir: "workspaces"
