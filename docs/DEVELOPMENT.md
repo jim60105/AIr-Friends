@@ -5,6 +5,7 @@ This guide provides comprehensive instructions for developing and customizing AI
 ## Prerequisites
 
 - [Deno](https://deno.land/) 2.x or higher
+- [dumb-init](https://github.com/Yelp/dumb-init) - Required for wrapping agent subprocesses with proper signal forwarding and zombie process reaping
 - Discord Bot Token (for Discord integration)
 - Misskey Access Token (for Misskey integration)
 - An ACP-compliant CLI agent (OpenCode CLI, GitHub Copilot CLI, Gemini CLI. The recommended one is OpenCode CLI)

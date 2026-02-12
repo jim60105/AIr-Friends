@@ -229,6 +229,7 @@ interface AgentSession {
 **Key Behaviors:**
 
 - Each trigger creates a new session (no state reuse)
+- Agent subprocesses are wrapped with `dumb-init` for proper signal forwarding and zombie process reaping, preventing memory leaks from orphaned child processes
 - Internal outputs (tool calls, reasoning) stay within the session
 - Only `send-reply` skill can emit external responses
 - Maximum one external reply per session
@@ -587,7 +588,7 @@ Environment-specific config overrides base config.
 - **opencode** - OpenCode CLI (latest release)
 - **rg** (ripgrep 15.1.0) - For memory search operations
 - **curl** - For health checks
-- **dumb-init** - For proper signal handling as PID 1
+- **dumb-init** - For proper signal handling as PID 1 and wrapping agent subprocesses
 
 **Multi-Stage Build:**
 

@@ -567,6 +567,7 @@ You are Yuna. An AI assistant
   - `copilot` - GitHub Copilot CLI (latest release)
   - `opencode` - OpenCode CLI (latest release)
   - `rg` - ripgrep 15.1.0 for memory search
+  - `dumb-init` - Used as PID 1 and to wrap agent subprocesses for proper signal forwarding
 - OpenCode configuration is pre-configured at `/home/deno/.config/opencode/opencode.json`
 - Skills are copied to `/home/deno/.agents/skills/` for agent discovery
 

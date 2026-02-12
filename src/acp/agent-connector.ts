@@ -13,6 +13,13 @@ import type { Logger } from "@utils/logger.ts";
 const DISCONNECT_TIMEOUT_MS = 2000;
 
 /**
+ * Default path to dumb-init binary for wrapping agent subprocesses.
+ * dumb-init ensures proper signal forwarding and zombie process reaping,
+ * preventing memory leaks from orphaned child processes.
+ */
+const DUMB_INIT_PATH = "dumb-init";
+
+/**
  * AgentConnector manages the lifecycle of ACP Agent connections
  * Handles spawning, connecting, and communicating with external ACP Agents
  */
@@ -33,15 +40,16 @@ export class AgentConnector {
   async connect(): Promise<void> {
     const { agentConfig, clientConfig, skillRegistry, logger } = this.options;
 
-    (logger as Logger).info("Spawning ACP agent", {
+    (logger as Logger).info("Spawning ACP agent via dumb-init", {
       command: agentConfig.command,
       args: agentConfig.args,
       cwd: agentConfig.cwd,
     });
 
-    // Spawn the Agent subprocess
-    const command = new Deno.Command(agentConfig.command, {
-      args: agentConfig.args,
+    // Spawn the Agent subprocess wrapped with dumb-init for proper signal
+    // forwarding and child process reaping (prevents memory leaks from orphaned processes)
+    const command = new Deno.Command(DUMB_INIT_PATH, {
+      args: ["--", agentConfig.command, ...agentConfig.args],
       cwd: agentConfig.cwd,
       env: agentConfig.env,
       stdin: "piped",
