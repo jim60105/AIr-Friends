@@ -35,6 +35,8 @@ export interface ActiveSession {
   timeoutMs: number;
   /** Whether reply has been sent */
   replySent: boolean;
+  /** Agent's global workspace path */
+  agentWorkspacePath?: string;
 }
 
 /**

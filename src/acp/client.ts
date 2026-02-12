@@ -257,7 +257,7 @@ export class ChatbotClient implements acp.Client {
     this.logger.debug("Read file requested", { path: params.path });
 
     // Validate path is within working directory
-    if (!this.isPathWithinWorkingDir(params.path)) {
+    if (!this.isPathAllowed(params.path)) {
       throw new acp.RequestError(
         -32600,
         "Access denied: path outside working directory",
@@ -285,7 +285,7 @@ export class ChatbotClient implements acp.Client {
     this.logger.debug("Write file requested", { path: params.path });
 
     // Validate path is within working directory
-    if (!this.isPathWithinWorkingDir(params.path)) {
+    if (!this.isPathAllowed(params.path)) {
       throw new acp.RequestError(
         -32600,
         "Access denied: path outside working directory",
@@ -324,13 +324,21 @@ export class ChatbotClient implements acp.Client {
   }
 
   /**
-   * Validate that a path is within the working directory
+   * Validate that a path is within the allowed directories
+   * Allows: user workspace OR agent global workspace
    */
-  private isPathWithinWorkingDir(path: string): boolean {
+  private isPathAllowed(path: string): boolean {
     try {
       const normalizedPath = resolve(path);
       const normalizedWorkingDir = resolve(this.config.workingDir);
-      return normalizedPath.startsWith(normalizedWorkingDir);
+      if (normalizedPath.startsWith(normalizedWorkingDir)) return true;
+
+      if (this.config.agentWorkspacePath) {
+        const normalizedAgentWorkspace = resolve(this.config.agentWorkspacePath);
+        if (normalizedPath.startsWith(normalizedAgentWorkspace)) return true;
+      }
+
+      return false;
     } catch {
       return false;
     }

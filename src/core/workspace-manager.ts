@@ -211,6 +211,69 @@ export class WorkspaceManager {
   }
 
   /**
+   * Get or create the Agent's global workspace.
+   * Path: {repoPath}/agent-workspace/
+   * This workspace is shared across all users and conversations.
+   */
+  async getOrCreateAgentWorkspace(): Promise<string> {
+    const agentWorkspacePath = resolve(join(this.repoPath, "agent-workspace"));
+
+    // Validate path is within repoPath boundary
+    validatePathWithinBoundary(agentWorkspacePath, this.repoPath);
+
+    const exists = await pathExists(agentWorkspacePath);
+
+    if (!exists) {
+      logger.info("Creating agent workspace", { path: agentWorkspacePath });
+
+      // Create directory structure
+      await ensureDirectory(agentWorkspacePath);
+      await ensureDirectory(join(agentWorkspacePath, "notes"));
+      await ensureDirectory(join(agentWorkspacePath, "journal"));
+
+      // Initialize default files
+      await this.initializeAgentWorkspaceFiles(agentWorkspacePath);
+    }
+
+    return agentWorkspacePath;
+  }
+
+  /**
+   * Initialize agent workspace with default files (only if they don't exist)
+   */
+  private async initializeAgentWorkspaceFiles(workspacePath: string): Promise<void> {
+    const readmePath = join(workspacePath, "README.md");
+    if (!(await pathExists(readmePath))) {
+      await Deno.writeTextFile(
+        readmePath,
+        `# Agent Workspace
+
+This is your personal workspace for long-term knowledge and notes.
+
+## Structure
+- \`notes/\` - Knowledge notes organized by topic
+  - \`_index.md\` - Index of all notes (maintain this when adding/modifying notes)
+  - \`{topic-slug}.md\` - Individual topic files
+- \`journal/\` - Daily reflections and logs
+  - \`{YYYY-MM-DD}.md\` - Daily entries
+
+## Guidelines
+- Use kebab-case for filenames (e.g., \`typescript-patterns.md\`)
+- Keep \`_index.md\` updated with topic names and brief summaries
+- Do NOT store user private information here (use memory-save skill instead)
+`,
+      );
+    }
+
+    const indexPath = join(workspacePath, "notes", "_index.md");
+    if (!(await pathExists(indexPath))) {
+      await Deno.writeTextFile(indexPath, "# Notes Index\n\n");
+    }
+
+    logger.debug("Agent workspace files initialized", { workspacePath });
+  }
+
+  /**
    * List workspaces (for debugging/admin purposes)
    */
   async listWorkspaces(platform?: string): Promise<string[]> {

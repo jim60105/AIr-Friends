@@ -87,9 +87,11 @@ export class SessionOrchestrator {
     try {
       // 1. Get or create workspace
       const workspace = await this.workspaceManager.getOrCreateWorkspace(event);
+      const agentWorkspacePath = await this.workspaceManager.getOrCreateAgentWorkspace();
       sessionLogger.debug("Workspace ready", {
         workspaceKey: workspace.key,
         workingDir: workspace.path,
+        agentWorkspacePath,
       });
 
       // 2. Register session in SessionRegistry (if skill API is enabled)
@@ -105,6 +107,7 @@ export class SessionOrchestrator {
           platformAdapter,
           triggerEvent: event,
           timeoutMs: this.config.skillApi.sessionTimeoutMs,
+          agentWorkspacePath,
         });
 
         // Create SESSION_ID file in workspace
@@ -145,6 +148,7 @@ export class SessionOrchestrator {
       // 4. Create client config for ACP
       const clientConfig: ClientConfig = {
         workingDir: workspace.path,
+        agentWorkspacePath,
         platform: event.platform,
         userId: event.userId,
         channelId: event.channelId,
@@ -155,7 +159,13 @@ export class SessionOrchestrator {
       // 5. Build ACP connector
       const agentType = getDefaultAgentType(this.config);
       const connector = this.createConnector({
-        agentConfig: createAgentConfig(agentType, workspace.path, this.config, this.yolo),
+        agentConfig: createAgentConfig(
+          agentType,
+          workspace.path,
+          this.config,
+          this.yolo,
+          agentWorkspacePath,
+        ),
         clientConfig,
         skillRegistry: this.skillRegistry,
         logger: sessionLogger,
@@ -361,6 +371,7 @@ export class SessionOrchestrator {
         timestamp: new Date(),
       };
       const workspace = await this.workspaceManager.getOrCreateWorkspace(botEvent);
+      const agentWorkspacePath = await this.workspaceManager.getOrCreateAgentWorkspace();
 
       // 2. Register session WITHOUT triggerEvent
       let shellSessionId: string | null = null;
@@ -374,6 +385,7 @@ export class SessionOrchestrator {
           platformAdapter,
           // triggerEvent is omitted (undefined)
           timeoutMs: this.config.skillApi.sessionTimeoutMs,
+          agentWorkspacePath,
         });
 
         const sessionIdFile = join(workspace.path, "SESSION_ID");
@@ -401,6 +413,7 @@ export class SessionOrchestrator {
       // 5. Create client config for ACP
       const clientConfig: ClientConfig = {
         workingDir: workspace.path,
+        agentWorkspacePath,
         platform,
         userId: options.botId,
         channelId,
@@ -411,7 +424,13 @@ export class SessionOrchestrator {
       // 6. Build and execute ACP connector
       const agentType = getDefaultAgentType(this.config);
       const connector = this.createConnector({
-        agentConfig: createAgentConfig(agentType, workspace.path, this.config, this.yolo),
+        agentConfig: createAgentConfig(
+          agentType,
+          workspace.path,
+          this.config,
+          this.yolo,
+          agentWorkspacePath,
+        ),
         clientConfig,
         skillRegistry: this.skillRegistry,
         logger: sessionLogger,

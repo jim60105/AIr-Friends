@@ -67,6 +67,8 @@ memory:
 workspace:
   repoPath: "./data" # Root path for workspace data (default: ./data)
   workspacesDir: "workspaces" # Directory name under repoPath (default: workspaces)
+  # Agent global workspace is auto-created at {repoPath}/agent-workspace/
+  # This directory is managed by the agent for long-term knowledge notes
 
 # Skill API (used by external shell-based skills)
 skillApi:

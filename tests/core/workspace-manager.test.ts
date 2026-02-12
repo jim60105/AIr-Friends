@@ -178,3 +178,59 @@ Deno.test("WorkspaceManager - should list workspaces", async () => {
     assertEquals(workspaces.includes("discord/user2"), true);
   });
 });
+
+// ============ Agent Workspace Tests ============
+
+Deno.test("WorkspaceManager - getOrCreateAgentWorkspace creates directory structure", async () => {
+  await withTestWorkspace(async (manager, tempDir) => {
+    const path = await manager.getOrCreateAgentWorkspace();
+
+    // Verify path is absolute and within repoPath
+    assertEquals(path.startsWith(tempDir), true);
+    assertEquals(path.endsWith("agent-workspace"), true);
+
+    // Verify directory structure
+    const stat = await Deno.stat(path);
+    assertEquals(stat.isDirectory, true);
+
+    const notesStat = await Deno.stat(`${path}/notes`);
+    assertEquals(notesStat.isDirectory, true);
+
+    const journalStat = await Deno.stat(`${path}/journal`);
+    assertEquals(journalStat.isDirectory, true);
+
+    // Verify default files
+    const readme = await Deno.readTextFile(`${path}/README.md`);
+    assertEquals(readme.includes("Agent Workspace"), true);
+
+    const index = await Deno.readTextFile(`${path}/notes/_index.md`);
+    assertEquals(index.includes("Notes Index"), true);
+  });
+});
+
+Deno.test("WorkspaceManager - getOrCreateAgentWorkspace is idempotent", async () => {
+  await withTestWorkspace(async (manager, _tempDir) => {
+    const path1 = await manager.getOrCreateAgentWorkspace();
+
+    // Write custom content to README
+    await Deno.writeTextFile(`${path1}/README.md`, "Custom content");
+
+    // Call again
+    const path2 = await manager.getOrCreateAgentWorkspace();
+    assertEquals(path1, path2);
+
+    // Existing files should NOT be overwritten
+    const readme = await Deno.readTextFile(`${path2}/README.md`);
+    assertEquals(readme, "Custom content");
+  });
+});
+
+Deno.test(
+  "WorkspaceManager - agent workspace path is within repoPath boundary",
+  async () => {
+    await withTestWorkspace(async (manager, tempDir) => {
+      const path = await manager.getOrCreateAgentWorkspace();
+      assertEquals(path.startsWith(tempDir), true);
+    });
+  },
+);

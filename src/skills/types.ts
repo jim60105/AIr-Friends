@@ -2,7 +2,7 @@
 
 import type { WorkspaceInfo } from "../types/workspace.ts";
 import type { PlatformAdapter } from "@platforms/platform-adapter.ts";
-import type { ResolvedMemory } from "../types/memory.ts";
+import type { AgentNoteSearchResult, ResolvedMemory } from "../types/memory.ts";
 import type { PlatformMessage } from "../types/events.ts";
 
 /**
@@ -32,6 +32,8 @@ export interface SkillContext {
   userId: string;
   /** Original message ID that triggered this session (for reply threading) */
   replyToMessageId?: string;
+  /** Agent's global workspace path for searching notes */
+  agentWorkspacePath?: string;
 }
 
 /**
@@ -64,6 +66,7 @@ export interface MemorySearchParams {
  */
 export interface MemorySearchResult {
   memories: ResolvedMemory[];
+  agentNotes?: AgentNoteSearchResult[];
 }
 
 /**

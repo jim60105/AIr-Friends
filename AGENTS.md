@@ -185,6 +185,28 @@ Available aliases:
 const workspacePath = `${config.workspace.repo_path}/workspaces/${platform}/${userId}`;
 ```
 
+#### Agent Global Workspace (Feature 15)
+
+In addition to per-user workspaces, the Agent has a global workspace at `{workspace.repoPath}/agent-workspace/` for storing cross-conversation knowledge, research notes, and reflections.
+
+- **Not per-user**: Shared across all conversations and users
+- **Markdown-based**: All files use `.md` format for token efficiency
+- **Not pre-loaded**: Content is NOT included in initial context; Agent reads on-demand via `$AGENT_WORKSPACE` env var
+- **Index-guided**: `notes/_index.md` serves as a quick-reference index
+- **Privacy boundary**: User private data must NOT be stored here (use `memory-save` instead)
+
+```
+data/agent-workspace/
+├── README.md              # Workspace usage guide
+├── notes/                 # Knowledge notes by topic
+│   ├── _index.md          # Notes index (agent-maintained)
+│   └── {topic-slug}.md    # Individual topic files
+└── journal/               # Daily reflections
+    └── {YYYY-MM-DD}.md    # Daily entries
+```
+
+The `memory-search` skill automatically searches both user memories and agent workspace notes, returning results in separate `userMemories` and `agentNotes` sections.
+
 ### 2. Context Assembly (Feature 02)
 
 Initial context comprises:

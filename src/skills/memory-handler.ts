@@ -140,6 +140,22 @@ export class MemoryHandler {
         })),
       };
 
+      // Search agent workspace notes if available
+      if (context.agentWorkspacePath) {
+        try {
+          result.agentNotes = await this.memoryStore.searchAgentWorkspace(
+            context.agentWorkspacePath,
+            keywords,
+            limit,
+          );
+        } catch (error) {
+          logger.warn("Failed to search agent workspace", {
+            error: error instanceof Error ? error.message : String(error),
+          });
+          result.agentNotes = [];
+        }
+      }
+
       return {
         success: true,
         data: result,

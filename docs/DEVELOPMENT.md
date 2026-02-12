@@ -378,6 +378,25 @@ Run the test suite:
 deno task test
 ```
 
+### Data Directory Structure
+
+During development, data is stored under `./data/` (configurable via `workspace.repoPath`):
+
+```text
+data/
+├── workspaces/              # Per-user workspaces
+│   └── {platform}/{userId}/ # Each user's memory files
+└── agent-workspace/         # Agent's global knowledge workspace
+    ├── README.md            # Usage guide
+    ├── notes/               # Knowledge notes by topic
+    │   ├── _index.md        # Notes index
+    │   └── {topic}.md       # Individual notes
+    └── journal/             # Daily reflections
+        └── {YYYY-MM-DD}.md  # Daily entries
+```
+
+The agent workspace is automatically created on first use by `WorkspaceManager.getOrCreateAgentWorkspace()`.
+
 For more information about testing practices and guidelines, see [DESIGN.md](DESIGN.md).
 
 ## Documentation

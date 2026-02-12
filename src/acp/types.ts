@@ -7,6 +7,9 @@ export interface ClientConfig {
   /** Working directory for the session */
   workingDir: string;
 
+  /** Agent global workspace path */
+  agentWorkspacePath?: string;
+
   /** Platform identifier */
   platform: string;
 

@@ -452,6 +452,18 @@ Both files exist in every workspace. Each line is a JSON event. No new files are
 - In non-DM context: reads/searches only `memory.public.jsonl`; saves to `memory.public.jsonl`
 - Non-DM contexts must not load or search private memories
 
+### Agent Global Workspace
+
+In addition to per-user memory workspaces, the Agent has a global workspace at `{workspace.repoPath}/agent-workspace/` for long-term knowledge storage.
+
+**Design Decisions:**
+
+- **Not pre-loaded in context**: Workspace content is NOT included in the system prompt or initial context. The agent reads files on-demand using `$AGENT_WORKSPACE` env var and bash commands.
+- **Index-guided search**: `notes/_index.md` serves as a quick-reference index so the agent can decide which notes to read without loading everything.
+- **Integrated with memory-search**: The `memory-search` skill searches both user memories AND agent workspace notes, returning results in separate sections (`userMemories` and `agentNotes`).
+- **Privacy boundary**: User private information must use `memory-save` skill (per-user workspace). The agent workspace is for agent's own knowledge only.
+- **Markdown format**: All files use `.md` for token efficiency and structure.
+
 ---
 
 ## Platform Abstraction
