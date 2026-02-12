@@ -6,6 +6,8 @@ services:
       context: .
       dockerfile: Containerfile
       target: final
+      args:
+        - NODE_ENV=development
     env_file:
       - .env
     volumes:

@@ -16,7 +16,7 @@ ARG TARGETVARIANT
 RUN --mount=type=cache,id=apt-$TARGETARCH$TARGETVARIANT,sharing=locked,target=/var/cache/apt \
     --mount=type=cache,id=aptlists-$TARGETARCH$TARGETVARIANT,sharing=locked,target=/var/lib/apt/lists \
     apt-get update && apt-get install -y --no-install-recommends \
-    git
+    git nodejs npm
 
 ########################################
 # GitHub Copilot unpack stage
@@ -78,11 +78,15 @@ ARG TARGETVARIANT
 
 ARG UID
 
+ARG NODE_ENV=production
+ENV NODE_ENV $NODE_ENV
+
 # Set up directories with proper permissions
 # OpenShift compatibility: root group (GID 0) for arbitrary UID support
 RUN install -d -m 775 -o $UID -g 0 /app && \
     install -d -m 775 -o $UID -g 0 /app/data && \
     install -d -m 775 -o $UID -g 0 /licenses && \
+    install -d -m 775 -o $UID -g 0 /deno-dir/ && \
     install -d -m 775 -o $UID -g 0 /home/deno/ && \
     install -d -m 775 -o $UID -g 0 /home/deno/.local && \
     install -d -m 775 -o $UID -g 0 /home/deno/.config/opencode
@@ -96,15 +100,24 @@ ADD --link --chown=$UID:0 --chmod=755 https://github.com/Yelp/dumb-init/releases
 # Copy ripgrep binary for internal use (e.g. in skills)
 COPY --link --chown=$UID:0 --chmod=775 --from=ripgrip-unpacker /ripgrip/ripgrep-15.1.0-x86_64-unknown-linux-musl/rg /usr/local/bin/rg
 
+# Copy cached Deno dependencies from cache stage
+COPY --chown=$UID:0 --chmod=775 --from=cache /deno-dir/ /deno-dir/
+
+# Get agent-browser
+RUN npm install -g agent-browser && \
+    npm cache clean --force
+
+# Install Playwright dependencies for headless Chromium
+RUN --mount=type=cache,id=apt-$TARGETARCH$TARGETVARIANT,sharing=locked,target=/var/cache/apt \
+    --mount=type=cache,id=aptlists-$TARGETARCH$TARGETVARIANT,sharing=locked,target=/var/lib/apt/lists \
+    npx playwright install-deps chromium-headless-shell
+
 # Copy Agents CLI binary
 COPY --link --chown=$UID:0 --chmod=775 --from=copilot-unpacker /copilot/copilot /usr/local/bin/copilot
 COPY --link --chown=$UID:0 --chmod=775 --from=opencode-unpacker /opencode/opencode /usr/local/bin/opencode
 
 # Copy OpenCode configuration
 COPY --link --chown=$UID:0 --chmod=775 opencode.json /home/deno/.config/opencode/opencode.json
-
-# Copy cached Deno dependencies from cache stage
-COPY --link --chown=$UID:0 --chmod=775 --from=cache /deno-dir/ /deno-dir/
 
 # Copy application files
 COPY --link --chown=$UID:0 --chmod=775 deno.json deno.lock /app/
@@ -128,6 +141,9 @@ ENV HOME=/home/deno
 
 # Switch to non-privileged user
 USER $UID
+
+# Install Playwright browsers
+RUN npx playwright install chromium-headless-shell
 
 # Signal handling
 STOPSIGNAL SIGTERM
