@@ -500,3 +500,47 @@ Deno.test("getRetryPromptStrategy - all strategies have maxRetries of 1", () => 
     assertEquals(strategy.maxRetries, 1, `${type} should have maxRetries of 1`);
   }
 });
+
+// ============ Agent Workspace Env Var Tests ============
+
+Deno.test("createAgentConfig - includes AGENT_WORKSPACE env var for copilot", () => {
+  const config = createTestConfig();
+  const agentConfig = createAgentConfig(
+    "copilot",
+    "/tmp/workspace",
+    config,
+    false,
+    "/data/agent-workspace",
+  );
+  assertEquals(agentConfig.env?.AGENT_WORKSPACE, "/data/agent-workspace");
+});
+
+Deno.test("createAgentConfig - includes AGENT_WORKSPACE env var for gemini", () => {
+  const config = createTestConfig();
+  const agentConfig = createAgentConfig(
+    "gemini",
+    "/tmp/workspace",
+    config,
+    false,
+    "/data/agent-workspace",
+  );
+  assertEquals(agentConfig.env?.AGENT_WORKSPACE, "/data/agent-workspace");
+});
+
+Deno.test("createAgentConfig - includes AGENT_WORKSPACE env var for opencode", () => {
+  const config = createTestConfig();
+  const agentConfig = createAgentConfig(
+    "opencode",
+    "/tmp/workspace",
+    config,
+    false,
+    "/data/agent-workspace",
+  );
+  assertEquals(agentConfig.env?.AGENT_WORKSPACE, "/data/agent-workspace");
+});
+
+Deno.test("createAgentConfig - omits AGENT_WORKSPACE when not provided", () => {
+  const config = createTestConfig();
+  const agentConfig = createAgentConfig("copilot", "/tmp/workspace", config, false);
+  assertEquals(agentConfig.env?.AGENT_WORKSPACE, undefined);
+});

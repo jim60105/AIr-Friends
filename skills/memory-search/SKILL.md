@@ -1,6 +1,6 @@
 ---
 name: memory-search
-description: Search through saved memories by keywords. Use when you need to recall previous conversations or information about the user.
+description: Search through saved memories and your personal workspace notes by keywords. Use when you need to recall previous conversations, information about the user, or your own knowledge notes.
 allowed-tools: Bash
 ---
 

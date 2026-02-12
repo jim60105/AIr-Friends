@@ -13,6 +13,7 @@ export function createAgentConfig(
   workingDir: string,
   appConfig: Config,
   yolo = false,
+  agentWorkspacePath?: string,
 ): AgentConfig {
   switch (type) {
     case "copilot": {
@@ -44,6 +45,10 @@ export function createAgentConfig(
       }
 
       // Copilot seems doesn't have a solution to override system prompt.
+
+      if (agentWorkspacePath) {
+        env["AGENT_WORKSPACE"] = agentWorkspacePath;
+      }
 
       const args = [
         "--disable-builtin-mcps",
@@ -103,6 +108,10 @@ export function createAgentConfig(
         }
       }
 
+      if (agentWorkspacePath) {
+        env["AGENT_WORKSPACE"] = agentWorkspacePath;
+      }
+
       const args = ["task", "gemini", "--experimental-acp"];
       if (yolo) {
         args.push("--yolo");
@@ -154,6 +163,10 @@ export function createAgentConfig(
         if (value !== undefined) {
           env[varName] = value;
         }
+      }
+
+      if (agentWorkspacePath) {
+        env["AGENT_WORKSPACE"] = agentWorkspacePath;
       }
 
       const args = ["acp"];

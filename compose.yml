@@ -11,7 +11,7 @@ services:
     env_file:
       - .env
     volumes:
-      - data:/app/data:Z
+      - data:/app/data:Z  # Contains workspaces/ and agent-workspace/
       # - ./config.yaml:/app/config.yaml:ro,Z
       # Mount custom prompts directory (optional, comment out to use defaults)
       # Ensure you provide all required prompt files (system.md and fragments)

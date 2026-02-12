@@ -32,6 +32,8 @@ export interface SkillContext {
   userId: string;
   /** Original message ID that triggered this session (for reply threading) */
   replyToMessageId?: string;
+  /** Agent's global workspace path for searching notes */
+  agentWorkspacePath?: string;
 }
 
 /**
@@ -60,10 +62,22 @@ export interface MemorySearchParams {
 }
 
 /**
+ * Agent workspace note search result
+ */
+export interface AgentNoteSearchResult {
+  filePath: string;
+  matchedLines: Array<{
+    lineNumber: number;
+    content: string;
+  }>;
+}
+
+/**
  * Result for memory-search skill
  */
 export interface MemorySearchResult {
   memories: ResolvedMemory[];
+  agentNotes?: AgentNoteSearchResult[];
 }
 
 /**

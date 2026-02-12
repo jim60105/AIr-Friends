@@ -267,6 +267,7 @@ export class SkillAPIServer {
       userId: session.userId,
       platformAdapter: session.platformAdapter,
       replyToMessageId: session.triggerEvent?.messageId,
+      agentWorkspacePath: session.agentWorkspacePath,
     };
 
     // Execute skill

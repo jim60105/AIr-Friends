@@ -675,3 +675,106 @@ Deno.test("MemoryHandler - handleMemoryPatch requires at least one field", async
   // Cleanup
   await Deno.remove(tempDir, { recursive: true });
 });
+
+// ============ Agent Workspace Search Tests ============
+
+Deno.test("MemoryHandler - handleMemorySearch searches agent workspace notes", async () => {
+  const tempDir = await Deno.makeTempDir();
+  const workspaceManager = new WorkspaceManager({
+    repoPath: tempDir,
+    workspacesDir: "workspaces",
+  });
+  const memoryStore = new MemoryStore(workspaceManager, {
+    searchLimit: 10,
+    maxChars: 2000,
+  });
+  const handler = new MemoryHandler(memoryStore);
+
+  const workspace: WorkspaceInfo = {
+    key: "discord/123",
+    components: { platform: "discord", userId: "123" },
+    path: `${tempDir}/workspaces/discord/123`,
+    isDm: false,
+  };
+
+  // Create workspace and memory files
+  await Deno.mkdir(workspace.path, { recursive: true });
+  await Deno.writeTextFile(`${workspace.path}/memory.public.jsonl`, "");
+  await Deno.writeTextFile(`${workspace.path}/memory.private.jsonl`, "");
+
+  // Create agent workspace with a note
+  const agentWorkspacePath = `${tempDir}/agent-workspace`;
+  await Deno.mkdir(`${agentWorkspacePath}/notes`, { recursive: true });
+  await Deno.writeTextFile(
+    `${agentWorkspacePath}/notes/cooking.md`,
+    "# Cooking Notes\n\nBest pasta recipe uses fresh tomatoes\n",
+  );
+  await Deno.writeTextFile(`${agentWorkspacePath}/notes/_index.md`, "# Notes Index\n");
+
+  const context: SkillContext = {
+    workspace,
+    platformAdapter: createMockPlatformAdapter(),
+    channelId: "channel123",
+    userId: "123",
+    agentWorkspacePath,
+  };
+
+  const result = await handler.handleMemorySearch(
+    { query: "pasta" },
+    context,
+  );
+
+  assertEquals(result.success, true);
+  const data = result.data as { memories: unknown[]; agentNotes: unknown[] };
+  assertEquals(Array.isArray(data.agentNotes), true);
+  assertEquals(data.agentNotes.length > 0, true);
+
+  const note = data.agentNotes[0] as { filePath: string; matchedLines: unknown[] };
+  assertEquals(note.filePath, "notes/cooking.md");
+
+  await Deno.remove(tempDir, { recursive: true });
+});
+
+Deno.test("MemoryHandler - handleMemorySearch returns empty agentNotes when no workspace", async () => {
+  const tempDir = await Deno.makeTempDir();
+  const workspaceManager = new WorkspaceManager({
+    repoPath: tempDir,
+    workspacesDir: "workspaces",
+  });
+  const memoryStore = new MemoryStore(workspaceManager, {
+    searchLimit: 10,
+    maxChars: 2000,
+  });
+  const handler = new MemoryHandler(memoryStore);
+
+  const workspace: WorkspaceInfo = {
+    key: "discord/123",
+    components: { platform: "discord", userId: "123" },
+    path: `${tempDir}/workspaces/discord/123`,
+    isDm: false,
+  };
+
+  await Deno.mkdir(workspace.path, { recursive: true });
+  await Deno.writeTextFile(`${workspace.path}/memory.public.jsonl`, "");
+  await Deno.writeTextFile(`${workspace.path}/memory.private.jsonl`, "");
+
+  const context: SkillContext = {
+    workspace,
+    platformAdapter: createMockPlatformAdapter(),
+    channelId: "channel123",
+    userId: "123",
+    // No agentWorkspacePath
+  };
+
+  const result = await handler.handleMemorySearch(
+    { query: "test" },
+    context,
+  );
+
+  assertEquals(result.success, true);
+  const data = result.data as { memories: unknown[]; agentNotes?: unknown[] };
+  // agentNotes should be undefined when no workspace path provided
+  assertEquals(data.agentNotes, undefined);
+
+  await Deno.remove(tempDir, { recursive: true });
+});

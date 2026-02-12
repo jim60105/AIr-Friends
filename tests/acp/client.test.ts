@@ -680,3 +680,125 @@ Deno.test("ChatbotClient - YOLO mode disabled still rejects unknown operations",
     Deno.removeSync(tempDir, { recursive: true });
   }
 });
+
+// ============ Agent Workspace Path Validation Tests ============
+
+Deno.test("ChatbotClient - readTextFile allows agent workspace path", async () => {
+  const tempDir = Deno.makeTempDirSync();
+  const agentWorkspace = Deno.makeTempDirSync();
+  try {
+    const skillRegistry = createTestSkillRegistry();
+    const logger = createTestLogger();
+    const config = {
+      workingDir: tempDir,
+      agentWorkspacePath: agentWorkspace,
+      platform: "discord",
+      userId: "123",
+      channelId: "456",
+      isDM: false,
+    };
+
+    const client = new ChatbotClient(skillRegistry, logger, config);
+
+    const testFilePath = `${agentWorkspace}/notes/test.md`;
+    await Deno.mkdir(`${agentWorkspace}/notes`, { recursive: true });
+    await Deno.writeTextFile(testFilePath, "agent note content");
+
+    const response = await client.readTextFile({ path: testFilePath, sessionId: "test" });
+    assertEquals(response.content, "agent note content");
+  } finally {
+    Deno.removeSync(tempDir, { recursive: true });
+    Deno.removeSync(agentWorkspace, { recursive: true });
+  }
+});
+
+Deno.test("ChatbotClient - writeTextFile allows agent workspace path", async () => {
+  const tempDir = Deno.makeTempDirSync();
+  const agentWorkspace = Deno.makeTempDirSync();
+  try {
+    const skillRegistry = createTestSkillRegistry();
+    const logger = createTestLogger();
+    const config = {
+      workingDir: tempDir,
+      agentWorkspacePath: agentWorkspace,
+      platform: "discord",
+      userId: "123",
+      channelId: "456",
+      isDM: false,
+    };
+
+    const client = new ChatbotClient(skillRegistry, logger, config);
+
+    const testFilePath = `${agentWorkspace}/test-write.md`;
+    await client.writeTextFile({
+      path: testFilePath,
+      content: "written to agent workspace",
+      sessionId: "test",
+    });
+
+    const content = await Deno.readTextFile(testFilePath);
+    assertEquals(content, "written to agent workspace");
+  } finally {
+    Deno.removeSync(tempDir, { recursive: true });
+    Deno.removeSync(agentWorkspace, { recursive: true });
+  }
+});
+
+Deno.test("ChatbotClient - still allows user workspace with agentWorkspacePath", async () => {
+  const tempDir = Deno.makeTempDirSync();
+  const agentWorkspace = Deno.makeTempDirSync();
+  try {
+    const skillRegistry = createTestSkillRegistry();
+    const logger = createTestLogger();
+    const config = {
+      workingDir: tempDir,
+      agentWorkspacePath: agentWorkspace,
+      platform: "discord",
+      userId: "123",
+      channelId: "456",
+      isDM: false,
+    };
+
+    const client = new ChatbotClient(skillRegistry, logger, config);
+
+    const testFilePath = `${tempDir}/test.txt`;
+    await Deno.writeTextFile(testFilePath, "user workspace content");
+
+    const response = await client.readTextFile({ path: testFilePath, sessionId: "test" });
+    assertEquals(response.content, "user workspace content");
+  } finally {
+    Deno.removeSync(tempDir, { recursive: true });
+    Deno.removeSync(agentWorkspace, { recursive: true });
+  }
+});
+
+Deno.test("ChatbotClient - rejects paths outside both workspaces", async () => {
+  const tempDir = Deno.makeTempDirSync();
+  const agentWorkspace = Deno.makeTempDirSync();
+  try {
+    const skillRegistry = createTestSkillRegistry();
+    const logger = createTestLogger();
+    const config = {
+      workingDir: tempDir,
+      agentWorkspacePath: agentWorkspace,
+      platform: "discord",
+      userId: "123",
+      channelId: "456",
+      isDM: false,
+    };
+
+    const client = new ChatbotClient(skillRegistry, logger, config);
+
+    let errorThrown = false;
+    try {
+      await client.readTextFile({ path: "/etc/passwd", sessionId: "test" });
+    } catch (error) {
+      errorThrown = true;
+      assertEquals(error instanceof acp.RequestError, true);
+    }
+    assertEquals(errorThrown, true);
+  } finally {
+    Deno.removeSync(tempDir, { recursive: true });
+    Deno.removeSync(agentWorkspace, { recursive: true });
+  }
+});
