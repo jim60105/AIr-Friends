@@ -4,6 +4,7 @@ import { createLogger } from "@utils/logger.ts";
 import { searchMultipleKeywords, SearchOptions } from "@utils/text-search.ts";
 import { WorkspaceManager } from "./workspace-manager.ts";
 import {
+  AgentNoteSearchResult,
   MemoryEntry,
   MemoryImportance,
   MemoryLogEvent,
@@ -337,5 +338,62 @@ export class MemoryStore {
     memoryId: string,
   ): Promise<MemoryPatch> {
     return this.patchMemory(workspace, memoryId, { enabled: false });
+  }
+
+  /**
+   * Search agent workspace .md files for matching keywords
+   */
+  async searchAgentWorkspace(
+    agentWorkspacePath: string,
+    keywords: string[],
+    maxResults: number,
+  ): Promise<AgentNoteSearchResult[]> {
+    const results: AgentNoteSearchResult[] = [];
+    const mdFiles = await this.collectMdFiles(agentWorkspacePath);
+
+    for (const filePath of mdFiles) {
+      if (filePath.endsWith("/README.md")) continue;
+
+      const searchResults = await searchMultipleKeywords(
+        filePath,
+        keywords,
+        { maxResults },
+      );
+
+      if (searchResults.length > 0) {
+        const relativePath = filePath.slice(agentWorkspacePath.length + 1);
+        results.push({
+          filePath: relativePath,
+          matchedLines: searchResults.map((r) => ({
+            lineNumber: r.lineNumber,
+            content: r.content,
+          })),
+        });
+      }
+
+      if (results.length >= maxResults) break;
+    }
+
+    return results;
+  }
+
+  /**
+   * Recursively collect .md files from a directory
+   */
+  private async collectMdFiles(dir: string): Promise<string[]> {
+    const files: string[] = [];
+    try {
+      for await (const entry of Deno.readDir(dir)) {
+        const fullPath = `${dir}/${entry.name}`;
+        if (entry.isFile && entry.name.endsWith(".md")) {
+          files.push(fullPath);
+        } else if (entry.isDirectory) {
+          files.push(...await this.collectMdFiles(fullPath));
+        }
+      }
+    } catch {
+      // Directory doesn't exist or not accessible
+    }
+    return files;
   }
 }

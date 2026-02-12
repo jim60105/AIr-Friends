@@ -2,7 +2,7 @@
 
 import type { WorkspaceInfo } from "../types/workspace.ts";
 import type { PlatformAdapter } from "@platforms/platform-adapter.ts";
-import type { ResolvedMemory } from "../types/memory.ts";
+import type { AgentNoteSearchResult, ResolvedMemory } from "../types/memory.ts";
 import type { PlatformMessage } from "../types/events.ts";
 
 /**
@@ -59,17 +59,6 @@ export interface MemorySaveParams {
 export interface MemorySearchParams {
   query: string;
   limit?: number;
-}
-
-/**
- * Agent workspace note search result
- */
-export interface AgentNoteSearchResult {
-  filePath: string;
-  matchedLines: Array<{
-    lineNumber: number;
-    content: string;
-  }>;
 }
 
 /**

@@ -85,3 +85,14 @@ export interface ResolvedMemory {
   createdAt: string;
   lastModifiedAt: string;
 }
+
+/**
+ * Agent workspace note search result
+ */
+export interface AgentNoteSearchResult {
+  filePath: string;
+  matchedLines: Array<{
+    lineNumber: number;
+    content: string;
+  }>;
+}

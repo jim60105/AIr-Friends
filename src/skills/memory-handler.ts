@@ -2,9 +2,7 @@
 
 import { createLogger } from "@utils/logger.ts";
 import { MemoryStore } from "@core/memory-store.ts";
-import { searchMultipleKeywords, type SearchResult } from "@utils/text-search.ts";
 import type {
-  AgentNoteSearchResult,
   MemoryPatchParams,
   MemorySaveParams,
   MemorySearchParams,
@@ -145,7 +143,7 @@ export class MemoryHandler {
       // Search agent workspace notes if available
       if (context.agentWorkspacePath) {
         try {
-          result.agentNotes = await this.searchAgentWorkspace(
+          result.agentNotes = await this.memoryStore.searchAgentWorkspace(
             context.agentWorkspacePath,
             keywords,
             limit,
@@ -270,63 +268,4 @@ export class MemoryHandler {
       };
     }
   };
-
-  /**
-   * Search agent workspace .md files for matching keywords
-   */
-  private async searchAgentWorkspace(
-    agentWorkspacePath: string,
-    keywords: string[],
-    maxResults: number,
-  ): Promise<AgentNoteSearchResult[]> {
-    const results: AgentNoteSearchResult[] = [];
-    const mdFiles = await this.collectMdFiles(agentWorkspacePath, agentWorkspacePath);
-
-    for (const filePath of mdFiles) {
-      // Skip README.md
-      if (filePath.endsWith("/README.md")) continue;
-
-      const searchResults: SearchResult[] = await searchMultipleKeywords(
-        filePath,
-        keywords,
-        { maxResults },
-      );
-
-      if (searchResults.length > 0) {
-        // Compute relative path from agent workspace root
-        const relativePath = filePath.slice(agentWorkspacePath.length + 1);
-        results.push({
-          filePath: relativePath,
-          matchedLines: searchResults.map((r) => ({
-            lineNumber: r.lineNumber,
-            content: r.content,
-          })),
-        });
-      }
-
-      if (results.length >= maxResults) break;
-    }
-
-    return results;
-  }
-
-  /**
-   * Recursively collect .md files from a directory
-   */
-  private async collectMdFiles(dir: string, _root: string): Promise<string[]> {
-    const files: string[] = [];
-    try {
-      for await (const entry of Deno.readDir(dir)) {
-        const fullPath = `${dir}/${entry.name}`;
-        if (entry.isFile && entry.name.endsWith(".md")) {
-          files.push(fullPath);
-        } else if (entry.isDirectory) {
-          files.push(...await this.collectMdFiles(fullPath, _root));
-        }
-      }
-    } catch {
-      // Directory doesn't exist or not accessible
-    }
-    return files;
-  }
 }
