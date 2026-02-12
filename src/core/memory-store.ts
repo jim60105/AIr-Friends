@@ -391,8 +391,11 @@ export class MemoryStore {
           files.push(...await this.collectMdFiles(fullPath));
         }
       }
-    } catch {
-      // Directory doesn't exist or not accessible
+    } catch (error) {
+      logger.warn("Failed to read directory for agent workspace search", {
+        dir,
+        error: error instanceof Error ? error.message : String(error),
+      });
     }
     return files;
   }
