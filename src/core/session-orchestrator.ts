@@ -561,10 +561,7 @@ export class SessionOrchestrator {
     parts.push("- Use the `send-reply` skill to post your content");
     parts.push("- Do NOT use the `react-message` skill (there is no message to react to)");
     parts.push("- Do NOT address or respond to any specific user");
-    parts.push("You may use other available skills as needed:");
-    parts.push("- `memory-save`: Save important information");
-    parts.push("- `memory-search`: Search for saved memories");
-    parts.push("- `memory-patch`: Update memory metadata");
+    parts.push("You may use other available skills as needed.");
 
     return parts.join("\n");
   }
@@ -613,12 +610,7 @@ export class SessionOrchestrator {
     parts.push(
       "You can react AND reply, or just react without replying, or just reply without reacting.",
     );
-    parts.push("You may use other available skills as needed:");
-    parts.push("- `memory-save`: Save important information");
-    parts.push("- `memory-search`: Search for saved memories");
-    parts.push("- `memory-patch`: Update memory metadata");
-    parts.push("- `fetch-context`: Get additional context from the platform");
-    parts.push("- `react-message`: React to the trigger message with an emoji");
+    parts.push("You may use other available skills as needed.");
 
     return parts.join("\n");
   }
