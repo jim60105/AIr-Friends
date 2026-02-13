@@ -314,3 +314,19 @@ function createMockConnectorWithCapabilities(
 
   return connector;
 }
+
+Deno.test("AgentConnector - supportsImageContent cases", () => {
+  const connectorTrue = createMockConnectorWithCapabilities({ promptCapabilities: { image: true } as any });
+  const connectorFalse = createMockConnectorWithCapabilities({ promptCapabilities: { image: false } as any });
+  const connectorMissing = createMockConnectorWithCapabilities({} as any);
+  const connectorEmpty = createMockConnectorWithCapabilities({ promptCapabilities: {} as any });
+
+  // @ts-ignore access private method
+  assertEquals(connectorTrue.supportsImageContent(), true);
+  // @ts-ignore
+  assertEquals(connectorFalse.supportsImageContent(), false);
+  // @ts-ignore
+  assertEquals(connectorMissing.supportsImageContent(), false);
+  // @ts-ignore
+  assertEquals(connectorEmpty.supportsImageContent(), false);
+});
