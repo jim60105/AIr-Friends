@@ -4,7 +4,9 @@ import { loadConfig } from "@core/config-loader.ts";
 import type { Config } from "./types/config.ts";
 import { AgentCore } from "@core/agent-core.ts";
 import { SpontaneousScheduler } from "@core/spontaneous-scheduler.ts";
+import { SelfResearchScheduler } from "@core/self-research-scheduler.ts";
 import { determineSpontaneousTarget } from "@core/spontaneous-target.ts";
+import { fetchRssItems, pickRandom } from "@utils/rss-fetcher.ts";
 import { getPlatformRegistry } from "@platforms/platform-registry.ts";
 import { DiscordAdapter } from "@platforms/discord/index.ts";
 import { MisskeyAdapter } from "@platforms/misskey/index.ts";
@@ -24,6 +26,7 @@ export interface AppContext {
   platformRegistry: ReturnType<typeof getPlatformRegistry>;
   healthCheckServer: HealthCheckServer | null;
   spontaneousScheduler: SpontaneousScheduler | null;
+  selfResearchScheduler: SelfResearchScheduler | null;
   yolo: boolean;
 }
 
@@ -143,6 +146,30 @@ export async function bootstrap(configPath?: string, yolo = false): Promise<AppC
     }
   });
 
+  // Initialize Self-Research Scheduler
+  let selfResearchScheduler: SelfResearchScheduler | null = null;
+  if (config.selfResearch?.enabled) {
+    selfResearchScheduler = new SelfResearchScheduler(config);
+    selfResearchScheduler.setCallback(async () => {
+      const allItems = await fetchRssItems(config.selfResearch!.rssFeeds);
+      if (allItems.length === 0) {
+        logger.warn("No RSS items fetched, skipping self-research");
+        return;
+      }
+
+      const selectedItems = pickRandom(allItems, 20);
+
+      const response = await agentCore.getOrchestrator().processSelfResearch(
+        selectedItems,
+        config.selfResearch!,
+      );
+
+      if (!response.success) {
+        logger.warn("Self-research session did not succeed", { error: response.error });
+      }
+    });
+  }
+
   logger.info("Bootstrap completed");
 
   const context: AppContext = {
@@ -151,6 +178,7 @@ export async function bootstrap(configPath?: string, yolo = false): Promise<AppC
     platformRegistry,
     healthCheckServer,
     spontaneousScheduler,
+    selfResearchScheduler,
     yolo,
   };
 
@@ -182,6 +210,11 @@ export async function startPlatforms(context: AppContext): Promise<void> {
   // Start spontaneous scheduler after platforms are connected
   if (context.spontaneousScheduler) {
     context.spontaneousScheduler.start();
+  }
+
+  // Start self-research scheduler (independent of platforms)
+  if (context.selfResearchScheduler) {
+    context.selfResearchScheduler.start();
   }
 
   logger.info("All platforms connected");

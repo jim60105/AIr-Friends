@@ -53,6 +53,17 @@ const DEFAULT_SPONTANEOUS_POST = {
 };
 
 /**
+ * Default self-research configuration
+ */
+const DEFAULT_SELF_RESEARCH = {
+  enabled: false,
+  model: "",
+  rssFeeds: [],
+  minIntervalMs: 43200000, // 12 hours
+  maxIntervalMs: 86400000, // 24 hours
+};
+
+/**
  * Required configuration fields that must be present
  */
 const REQUIRED_FIELDS = [
@@ -191,6 +202,46 @@ function validateConfig(config: Record<string, unknown>): void {
           Math.min(1, sp.contextFetchProbability as number),
         );
       }
+    }
+  }
+
+  // Validate selfResearch config
+  if (!config.selfResearch) {
+    config.selfResearch = { ...DEFAULT_SELF_RESEARCH };
+  } else {
+    config.selfResearch = {
+      ...DEFAULT_SELF_RESEARCH,
+      ...(config.selfResearch as Record<string, unknown>),
+    };
+  }
+
+  const sr = config.selfResearch as Record<string, unknown>;
+
+  if (sr.enabled === true) {
+    // Disable if rssFeeds is empty
+    if (!Array.isArray(sr.rssFeeds) || (sr.rssFeeds as unknown[]).length === 0) {
+      logger.warn("selfResearch.enabled but rssFeeds is empty, disabling");
+      sr.enabled = false;
+    }
+    // Disable if model is empty
+    if (!sr.model || (sr.model as string).trim() === "") {
+      logger.warn("selfResearch.enabled but model is empty, disabling");
+      sr.enabled = false;
+    }
+    // Filter out RSS feeds with empty url
+    if (Array.isArray(sr.rssFeeds)) {
+      sr.rssFeeds = (sr.rssFeeds as { url?: string }[]).filter((f) => f.url && f.url.trim() !== "");
+    }
+  }
+
+  if (sr.minIntervalMs !== undefined && sr.maxIntervalMs !== undefined) {
+    if ((sr.minIntervalMs as number) < 3600000) {
+      logger.warn("selfResearch.minIntervalMs < 1 hour, clamping to 3600000");
+      sr.minIntervalMs = 3600000;
+    }
+    if ((sr.minIntervalMs as number) > (sr.maxIntervalMs as number)) {
+      logger.warn("selfResearch.minIntervalMs > maxIntervalMs, swapping values");
+      [sr.minIntervalMs, sr.maxIntervalMs] = [sr.maxIntervalMs, sr.minIntervalMs];
     }
   }
 }
@@ -353,7 +404,7 @@ export async function loadSystemPrompt(path: string): Promise<string> {
  * Scan the prompt directory for .md files (excluding the system prompt file itself)
  * and return a map of { name (without extension) -> trimmed content }.
  */
-async function loadPromptFragments(
+export async function loadPromptFragments(
   dir: string,
   excludeFileName: string,
 ): Promise<Map<string, string>> {
@@ -395,7 +446,7 @@ async function loadPromptFragments(
  * Replace all {{key}} placeholders in content with values from the fragments map.
  * Placeholders without a matching fragment are left unchanged and a warning is logged.
  */
-function replacePlaceholders(
+export function replacePlaceholders(
   content: string,
   fragments: Map<string, string>,
 ): string {

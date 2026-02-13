@@ -197,3 +197,80 @@ Deno.test("applyEnvOverrides - DISCORD_SPONTANEOUS_ENABLED sets nested boolean",
     Deno.env.delete("DISCORD_SPONTANEOUS_ENABLED");
   }
 });
+
+Deno.test("applyEnvOverrides - SELF_RESEARCH_ENABLED sets selfResearch.enabled", () => {
+  Deno.env.set("SELF_RESEARCH_ENABLED", "true");
+  try {
+    const config: Record<string, unknown> = {
+      selfResearch: { enabled: false },
+    };
+    applyEnvOverrides(config);
+    const sr = config.selfResearch as { enabled: boolean };
+    assertEquals(sr.enabled, true);
+  } finally {
+    Deno.env.delete("SELF_RESEARCH_ENABLED");
+  }
+});
+
+Deno.test("applyEnvOverrides - SELF_RESEARCH_MODEL sets selfResearch.model", () => {
+  Deno.env.set("SELF_RESEARCH_MODEL", "gpt-5-mini");
+  try {
+    const config: Record<string, unknown> = {
+      selfResearch: { model: "" },
+    };
+    applyEnvOverrides(config);
+    const sr = config.selfResearch as { model: string };
+    assertEquals(sr.model, "gpt-5-mini");
+  } finally {
+    Deno.env.delete("SELF_RESEARCH_MODEL");
+  }
+});
+
+Deno.test("applyEnvOverrides - SELF_RESEARCH_RSS_FEEDS parses JSON array", () => {
+  Deno.env.set(
+    "SELF_RESEARCH_RSS_FEEDS",
+    '[{"url":"https://example.com/feed.xml","name":"Test"}]',
+  );
+  try {
+    const config: Record<string, unknown> = {
+      selfResearch: { rssFeeds: [] },
+    };
+    applyEnvOverrides(config);
+    const sr = config.selfResearch as { rssFeeds: { url: string; name: string }[] };
+    assertEquals(sr.rssFeeds.length, 1);
+    assertEquals(sr.rssFeeds[0].url, "https://example.com/feed.xml");
+    assertEquals(sr.rssFeeds[0].name, "Test");
+  } finally {
+    Deno.env.delete("SELF_RESEARCH_RSS_FEEDS");
+  }
+});
+
+Deno.test("applyEnvOverrides - SELF_RESEARCH_RSS_FEEDS skips invalid JSON", () => {
+  Deno.env.set("SELF_RESEARCH_RSS_FEEDS", "not-json");
+  try {
+    const config: Record<string, unknown> = {
+      selfResearch: { rssFeeds: [{ url: "original" }] },
+    };
+    applyEnvOverrides(config);
+    const sr = config.selfResearch as { rssFeeds: { url: string }[] };
+    assertEquals(sr.rssFeeds.length, 1);
+    assertEquals(sr.rssFeeds[0].url, "original");
+  } finally {
+    Deno.env.delete("SELF_RESEARCH_RSS_FEEDS");
+  }
+});
+
+Deno.test("applyEnvOverrides - SELF_RESEARCH_MIN_INTERVAL_MS sets number", () => {
+  Deno.env.set("SELF_RESEARCH_MIN_INTERVAL_MS", "7200000");
+  try {
+    const config: Record<string, unknown> = {
+      selfResearch: { minIntervalMs: 43200000 },
+    };
+    applyEnvOverrides(config);
+    const sr = config.selfResearch as { minIntervalMs: number };
+    assertEquals(sr.minIntervalMs, 7200000);
+    assertEquals(typeof sr.minIntervalMs, "number");
+  } finally {
+    Deno.env.delete("SELF_RESEARCH_MIN_INTERVAL_MS");
+  }
+});

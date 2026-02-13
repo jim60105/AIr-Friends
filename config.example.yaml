@@ -89,3 +89,14 @@ accessControl:
     - "discord/account/560842157351763989"
     - "discord/channel/873618490202931231"
     - "misskey/account/agy61oh08uzl000g"
+
+# Self-research: agent periodically reads RSS and researches topics
+selfResearch:
+  enabled: false                    # Enable self-research (default: false); override with env SELF_RESEARCH_ENABLED
+  model: "gpt-5-mini"              # Model for research (separate from chat); override with env SELF_RESEARCH_MODEL
+  rssFeeds:                         # RSS feed sources; override with env SELF_RESEARCH_RSS_FEEDS (JSON string)
+    - url: "https://example.com/feed.xml"
+      name: "Tech News"
+    - url: "https://example.org/rss"
+  minIntervalMs: 43200000          # Minimum interval: 12 hours (default); override with env SELF_RESEARCH_MIN_INTERVAL_MS
+  maxIntervalMs: 86400000          # Maximum interval: 24 hours (default); override with env SELF_RESEARCH_MAX_INTERVAL_MS

@@ -37,6 +37,13 @@ export const ENV_MAPPINGS = {
   GELF_ENABLED: "logging.gelf.enabled",
   GELF_ENDPOINT: "logging.gelf.endpoint",
   GELF_HOSTNAME: "logging.gelf.hostname",
+
+  // Self-research settings
+  SELF_RESEARCH_ENABLED: "selfResearch.enabled",
+  SELF_RESEARCH_MODEL: "selfResearch.model",
+  SELF_RESEARCH_RSS_FEEDS: "selfResearch.rssFeeds",
+  SELF_RESEARCH_MIN_INTERVAL_MS: "selfResearch.minIntervalMs",
+  SELF_RESEARCH_MAX_INTERVAL_MS: "selfResearch.maxIntervalMs",
 } as const;
 
 /**
@@ -102,6 +109,14 @@ export function applyEnvOverrides(config: Record<string, unknown>): void {
       // Handle comma-separated array for WHITELIST
       else if (envName === "WHITELIST") {
         parsedValue = value.split(",").map((s) => s.trim()).filter((s) => s !== "");
+      } // Handle JSON string for SELF_RESEARCH_RSS_FEEDS
+      else if (envName === "SELF_RESEARCH_RSS_FEEDS") {
+        try {
+          parsedValue = JSON.parse(value);
+        } catch {
+          // If JSON parse fails, skip this override
+          continue;
+        }
       }
 
       setNestedProperty(config, configPath, parsedValue);
