@@ -188,6 +188,37 @@ export interface AccessControlConfig {
 }
 
 /**
+ * RSS feed source configuration
+ */
+export interface RssFeedSource {
+  /** RSS feed URL */
+  url: string;
+  /** Optional display name for the feed */
+  name?: string;
+}
+
+/**
+ * Self-research configuration.
+ * When enabled, the agent periodically reads RSS feeds and researches topics.
+ */
+export interface SelfResearchConfig {
+  /** Enable self-research feature (default: false) */
+  enabled: boolean;
+
+  /** LLM model to use for self-research (separate from chat model) */
+  model: string;
+
+  /** RSS feed sources */
+  rssFeeds: RssFeedSource[];
+
+  /** Minimum interval between research sessions in milliseconds (default: 43200000 = 12 hours) */
+  minIntervalMs: number;
+
+  /** Maximum interval between research sessions in milliseconds (default: 86400000 = 24 hours) */
+  maxIntervalMs: number;
+}
+
+/**
  * Complete application configuration
  */
 export interface Config {
@@ -199,6 +230,7 @@ export interface Config {
   health?: HealthConfig;
   skillApi?: SkillAPIConfig;
   accessControl: AccessControlConfig;
+  selfResearch?: SelfResearchConfig;
 }
 
 /**

@@ -159,6 +159,11 @@ Configuration is loaded from `config.yaml` (YAML format). See [config.example.ya
 | `GELF_ENABLED`       | Enable GELF log output (true/false, default: false)  |
 | `GELF_ENDPOINT`      | GELF HTTP endpoint URL                               |
 | `GELF_HOSTNAME`      | Source hostname in GELF messages (default: air-friends) |
+| `SELF_RESEARCH_ENABLED` | Enable self-research (true/false, default: false) |
+| `SELF_RESEARCH_MODEL` | LLM model for self-research (separate from chat) |
+| `SELF_RESEARCH_RSS_FEEDS` | RSS feed sources as JSON string |
+| `SELF_RESEARCH_MIN_INTERVAL_MS` | Minimum interval between research sessions (default: 43200000) |
+| `SELF_RESEARCH_MAX_INTERVAL_MS` | Maximum interval between research sessions (default: 86400000) |
 
 ### Access Control & Reply Policy
 

@@ -525,6 +525,48 @@ platforms:
 - `SessionOrchestrator.processSpontaneousPost()` — Triggerless session flow
 - `ContextAssembler.assembleSpontaneousContext()` — Context assembly without trigger message
 
+### 9. Self-Research via RSS/Atom Feeds (Feature 16)
+
+Enables the agent to periodically read RSS feeds, pick a topic as its character, research it, and write study notes to the agent workspace.
+
+**Configuration:**
+
+```yaml
+selfResearch:
+  enabled: false
+  model: "gpt-5-mini"
+  rssFeeds:
+    - url: "https://example.com/feed.xml"
+      name: "Tech News"
+  minIntervalMs: 43200000  # 12 hours
+  maxIntervalMs: 86400000  # 24 hours
+```
+
+**Environment Variable Overrides:**
+
+- `SELF_RESEARCH_ENABLED` → `selfResearch.enabled`
+- `SELF_RESEARCH_MODEL` → `selfResearch.model`
+- `SELF_RESEARCH_RSS_FEEDS` → `selfResearch.rssFeeds` (JSON string)
+- `SELF_RESEARCH_MIN_INTERVAL_MS` → `selfResearch.minIntervalMs`
+- `SELF_RESEARCH_MAX_INTERVAL_MS` → `selfResearch.maxIntervalMs`
+
+**How It Works:**
+
+1. `SelfResearchScheduler` manages a timer with random intervals (12-24h default)
+2. On trigger: fetch RSS items → randomly pick 20 → build research prompt
+3. Agent receives prompt with character personality and RSS materials
+4. Agent checks existing notes, picks a new topic, researches via web tools
+5. Agent writes notes to `$AGENT_WORKSPACE/notes/` and updates `_index.md`
+6. Agent self-reviews for hallucinations and privacy
+7. No reply is sent to any platform — purely internal research
+
+**Key Components:**
+
+- `src/core/self-research-scheduler.ts` — Timer management
+- `src/utils/rss-fetcher.ts` — RSS/Atom feed fetching and parsing
+- `SessionOrchestrator.processSelfResearch()` — Research session flow
+- `prompts/self_research_instructions.md` — Research prompt template
+
 ## Prompt Template System
 
 The system uses a template-based prompt system that allows easy customization without rebuilding containers.
@@ -738,6 +780,7 @@ AIr-Friends/
 │   │   ├── reply-policy.ts         # Access control & reply policy
 │   │   ├── spontaneous-scheduler.ts # Spontaneous posting scheduler
 │   │   ├── spontaneous-target.ts    # Platform-specific target selection
+│   │   ├── self-research-scheduler.ts # Self-research scheduling
 │   │   └── config-loader.ts        # Configuration loading
 │   ├── platforms/
 │   │   ├── platform-adapter.ts     # Platform adapter base class
@@ -770,6 +813,7 @@ AIr-Friends/
 │   │   └── logger.ts         # Logger types
 │   └── utils/
 │       ├── logger.ts         # Structured JSON logging
+│       ├── rss-fetcher.ts    # RSS/Atom feed fetching and parsing
 │       └── env.ts            # Environment utilities
 ├── skills/                   # Shell-based skill scripts
 │   ├── memory-save/

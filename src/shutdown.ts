@@ -75,6 +75,12 @@ export class ShutdownHandler {
         this.context.spontaneousScheduler.stop();
       }
 
+      // Stop self-research scheduler
+      if (this.context.selfResearchScheduler) {
+        logger.info("Stopping self-research scheduler");
+        this.context.selfResearchScheduler.stop();
+      }
+
       // Shutdown agent core (stops skill API server, session registry)
       logger.info("Shutting down agent core");
       await agentCore.shutdown();

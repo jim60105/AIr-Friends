@@ -9,13 +9,15 @@ import {
 } from "@acp/agent-factory.ts";
 import { ContextAssembler } from "./context-assembler.ts";
 import { WorkspaceManager } from "./workspace-manager.ts";
+import { loadPromptFragments, replacePlaceholders } from "./config-loader.ts";
 import type { SkillRegistry } from "@skills/registry.ts";
 import type { SessionRegistry } from "../skill-api/session-registry.ts";
-import type { Config } from "../types/config.ts";
+import type { Config, SelfResearchConfig } from "../types/config.ts";
 import type { NormalizedEvent, Platform } from "../types/events.ts";
 import type { PlatformAdapter } from "@platforms/platform-adapter.ts";
 import type { AgentConnectorOptions, ClientConfig } from "@acp/types.ts";
-import { join } from "@std/path";
+import { dirname, join } from "@std/path";
+import type { RssItem } from "@utils/rss-fetcher.ts";
 
 const logger = createLogger("SessionOrchestrator");
 
@@ -513,6 +515,143 @@ export class SessionOrchestrator {
   }
 
   /**
+   * Process a self-research session.
+   * The agent reads RSS materials, picks a topic, researches it, and writes notes.
+   * This does NOT send any reply to any platform - it only writes to agent workspace.
+   */
+  async processSelfResearch(
+    rssItems: RssItem[],
+    selfResearchConfig: SelfResearchConfig,
+  ): Promise<SessionResponse> {
+    const sessionLoggerName = "self-research";
+    const sessionLogger = logger.child(sessionLoggerName);
+
+    sessionLogger.info("Processing self-research session", {
+      rssItemCount: rssItems.length,
+      model: selfResearchConfig.model,
+    });
+
+    try {
+      // 1. Create workspace for self-research (uses special internal key)
+      const botEvent: NormalizedEvent = {
+        platform: "discord",
+        channelId: "internal",
+        userId: "self-research",
+        messageId: `research_${Date.now()}`,
+        isDm: false,
+        guildId: "",
+        content: "",
+        timestamp: new Date(),
+      };
+      const workspace = await this.workspaceManager.getOrCreateWorkspace(botEvent);
+      const agentWorkspacePath = await this.workspaceManager.getOrCreateAgentWorkspace();
+
+      // 2. Register session (for skill API access, mainly for memory-search)
+      let shellSessionId: string | null = null;
+      if (this.config.skillApi?.enabled) {
+        shellSessionId = this.sessionRegistry.register({
+          platform: "discord",
+          channelId: "internal",
+          userId: "self-research",
+          isDm: false,
+          workspace,
+          platformAdapter: undefined as unknown as PlatformAdapter,
+          timeoutMs: this.config.skillApi.sessionTimeoutMs,
+          agentWorkspacePath,
+        });
+
+        const sessionIdFile = join(workspace.path, "SESSION_ID");
+        await Deno.writeTextFile(sessionIdFile, shellSessionId);
+        sessionLogger.info("Shell session registered", { shellSessionId });
+      }
+
+      // 3. Build self-research prompt
+      const fullPrompt = await this.buildSelfResearchPrompt(
+        rssItems,
+        shellSessionId,
+      );
+
+      sessionLogger.debug("Self-research prompt built");
+
+      // 4. Create client config for ACP
+      const clientConfig: ClientConfig = {
+        workingDir: workspace.path,
+        agentWorkspacePath,
+        platform: "discord",
+        userId: "self-research",
+        channelId: "internal",
+        isDM: false,
+        yolo: this.yolo,
+      };
+
+      // 5. Build and execute ACP connector (use selfResearch model)
+      const agentType = getDefaultAgentType(this.config);
+      const connector = this.createConnector({
+        agentConfig: createAgentConfig(
+          agentType,
+          workspace.path,
+          this.config,
+          this.yolo,
+          agentWorkspacePath,
+        ),
+        clientConfig,
+        skillRegistry: this.skillRegistry,
+        logger: sessionLogger,
+      });
+
+      try {
+        await connector.connect();
+        sessionLogger.info("Agent connected");
+
+        const sessionId = await connector.createSession();
+        // Use self-research specific model
+        await connector.setSessionModel(sessionId, selfResearchConfig.model);
+
+        // Send prompt
+        const response = await connector.prompt(sessionId, fullPrompt);
+        sessionLogger.info("Self-research agent session completed", {
+          stopReason: response.stopReason,
+        });
+
+        // Success is determined by agent completing normally
+        const success = response.stopReason === "end_turn";
+
+        return {
+          success,
+          replySent: false,
+          error: success ? undefined : `Unexpected stop reason: ${response.stopReason}`,
+        };
+      } finally {
+        await connector.disconnect();
+        sessionLogger.debug("Agent disconnected");
+
+        if (shellSessionId) {
+          this.sessionRegistry.remove(shellSessionId);
+          const sessionIdFile = join(workspace.path, "SESSION_ID");
+          try {
+            await Deno.remove(sessionIdFile);
+          } catch (error) {
+            if (!(error instanceof Deno.errors.NotFound)) {
+              sessionLogger.warn("Failed to remove SESSION_ID file", {
+                error: error instanceof Error ? error.message : String(error),
+              });
+            }
+          }
+        }
+      }
+    } catch (error) {
+      sessionLogger.error("Self-research session failed", {
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return {
+        success: false,
+        replySent: false,
+        error: error instanceof Error ? error.message : "Unknown error",
+      };
+    }
+  }
+
+  /**
    * Create an AgentConnector instance.
    * Protected to allow test subclasses to inject mocks.
    */
@@ -611,6 +750,50 @@ export class SessionOrchestrator {
       "You can react AND reply, or just react without replying, or just reply without reacting.",
     );
     parts.push("You may use other available skills as needed.");
+
+    return parts.join("\n");
+  }
+
+  /**
+   * Build the full prompt for a self-research session
+   */
+  private async buildSelfResearchPrompt(
+    rssItems: RssItem[],
+    sessionId: string | null,
+  ): Promise<string> {
+    // Read self_research_instructions.md
+    const promptDir = dirname(this.config.agent.systemPromptPath);
+    const instructionsPath = join(promptDir, "self_research_instructions.md");
+    let instructions = await Deno.readTextFile(instructionsPath);
+
+    // Replace {{placeholder}} tokens using the same prompt fragment mechanism
+    const fragments = await loadPromptFragments(promptDir, "self_research_instructions.md");
+    instructions = replacePlaceholders(instructions, fragments);
+
+    // Format RSS items
+    const rssBlock = rssItems.map((item, i) =>
+      `${
+        i + 1
+      }. **${item.title}**\n   Source: ${item.sourceName}\n   URL: ${item.url}\n   ${item.description}`
+    ).join("\n\n");
+
+    // Replace RSS placeholder
+    instructions = instructions.replace("{rss_items_placeholder}", rssBlock);
+
+    const parts: string[] = [];
+    parts.push(instructions);
+    parts.push("");
+
+    // Session information
+    if (sessionId) {
+      parts.push("# Session Information");
+      parts.push("");
+      parts.push(`Your session ID is: ${sessionId}`);
+      parts.push(
+        "Use this session ID when calling skills that require --session-id parameter.",
+      );
+      parts.push("");
+    }
 
     return parts.join("\n");
   }

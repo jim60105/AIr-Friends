@@ -893,6 +893,36 @@ Required permissions for production:
 
 ---
 
+## Self-Research via RSS/Atom Feeds
+
+The self-research feature allows the agent to autonomously build knowledge by periodically reading RSS feeds, selecting topics of interest (in character), and writing research notes to the agent workspace.
+
+### Components
+
+| Component | File | Purpose |
+| --- | --- | --- |
+| Config types | `src/types/config.ts` | `SelfResearchConfig`, `RssFeedSource` interfaces |
+| RSS Fetcher | `src/utils/rss-fetcher.ts` | Fetch and parse RSS 2.0 / Atom feeds |
+| Scheduler | `src/core/self-research-scheduler.ts` | Timer management (mirrors SpontaneousScheduler) |
+| Session Flow | `src/core/session-orchestrator.ts` | `processSelfResearch()` method |
+| Prompt | `prompts/self_research_instructions.md` | Research instructions with character placeholders |
+
+### Flow
+
+1. Scheduler triggers at random interval (default 12-24h)
+2. RSS items fetched from configured sources
+3. 20 random items selected as reference materials
+4. Agent receives character-aware prompt with materials
+5. Agent checks existing notes, picks new topic, researches via web
+6. Agent writes notes to `agent-workspace/notes/` with character voice
+7. No platform reply sent — internal operation only
+
+### Configuration
+
+See `config.example.yaml` for the `selfResearch` section. Environment variables: `SELF_RESEARCH_ENABLED`, `SELF_RESEARCH_MODEL`, `SELF_RESEARCH_RSS_FEEDS` (JSON), `SELF_RESEARCH_MIN_INTERVAL_MS`, `SELF_RESEARCH_MAX_INTERVAL_MS`.
+
+---
+
 ## Appendix: Performance Metrics
 
 The system should collect:
