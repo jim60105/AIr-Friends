@@ -2,6 +2,7 @@
 
 import { createLogger } from "@utils/logger.ts";
 import { AgentConnector } from "@acp/agent-connector.ts";
+import * as acp from "@agentclientprotocol/sdk";
 import {
   createAgentConfig,
   getDefaultAgentType,
@@ -22,6 +23,12 @@ import type { RssItem } from "@utils/rss-fetcher.ts";
 import type { WorkspaceInfo } from "../types/workspace.ts";
 
 const logger = createLogger("SessionOrchestrator");
+
+/** Maximum image size in bytes for downloading (20MB) */
+const MAX_IMAGE_SIZE_BYTES = 20 * 1024 * 1024;
+
+/** Timeout for image download in milliseconds */
+const IMAGE_FETCH_TIMEOUT_MS = 10_000;
 
 /**
  * Response from a session
@@ -183,6 +190,10 @@ export class SessionOrchestrator {
         await connector.connect();
         sessionLogger.info("Agent connected");
 
+        // Check Agent image capability
+        const supportsImage = connector.supportsImageContent();
+        sessionLogger.info("Agent capabilities checked", { supportsImage });
+
         const sessionId = await connector.createSession();
         sessionLogger.info("Agent session created", { sessionId });
 
@@ -201,8 +212,14 @@ export class SessionOrchestrator {
         const reactionHandler = this.skillRegistry.getReactionHandler();
         reactionHandler.clearReactionState(workspace.key, event.channelId);
 
-        // Send prompt to agent
-        const response = await connector.prompt(sessionId, fullPrompt);
+        // Send prompt to agent (with image ContentBlocks if supported)
+        const promptContent = await this.buildPromptContent(
+          fullPrompt,
+          supportsImage,
+          event,
+          sessionLogger,
+        );
+        const response = await connector.prompt(sessionId, promptContent);
         sessionLogger.info("Agent session completed", {
           sessionId,
           stopReason: response.stopReason,
@@ -799,6 +816,70 @@ export class SessionOrchestrator {
    */
   protected createConnector(options: AgentConnectorOptions): AgentConnector {
     return new AgentConnector(options);
+  }
+
+  /**
+   * Build prompt content with optional image ContentBlocks.
+   * Only downloads images from the trigger message when Agent supports image capability.
+   */
+  private async buildPromptContent(
+    fullPrompt: string,
+    supportsImage: boolean,
+    event: NormalizedEvent,
+    sessionLogger: ReturnType<typeof logger.child>,
+  ): Promise<string | acp.ContentBlock[]> {
+    if (!supportsImage || !event.attachments) {
+      return fullPrompt;
+    }
+
+    const imageAttachments = event.attachments.filter(
+      (att) => att.isImage && (!att.size || att.size <= MAX_IMAGE_SIZE_BYTES),
+    );
+
+    if (imageAttachments.length === 0) {
+      return fullPrompt;
+    }
+
+    const contentBlocks: acp.ContentBlock[] = [{ type: "text" as const, text: fullPrompt }];
+
+    for (const att of imageAttachments) {
+      try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), IMAGE_FETCH_TIMEOUT_MS);
+
+        const response = await fetch(att.url, { signal: controller.signal });
+        clearTimeout(timeoutId);
+
+        if (response.ok) {
+          const arrayBuffer = await response.arrayBuffer();
+          const uint8Array = new Uint8Array(arrayBuffer);
+          let binary = "";
+          const chunkSize = 8192;
+          for (let i = 0; i < uint8Array.length; i += chunkSize) {
+            binary += String.fromCharCode(...uint8Array.subarray(i, i + chunkSize));
+          }
+          const base64 = btoa(binary);
+          contentBlocks.push({
+            type: "image" as const,
+            data: base64,
+            mimeType: att.mimeType,
+          });
+          sessionLogger.debug("Image attachment added to prompt", {
+            filename: att.filename,
+            mimeType: att.mimeType,
+            size: att.size,
+          });
+        }
+      } catch (error) {
+        sessionLogger.warn("Failed to fetch image attachment", {
+          url: att.url,
+          error: String(error),
+        });
+        // Failure is non-fatal — text description with URL is already in context
+      }
+    }
+
+    return contentBlocks.length > 1 ? contentBlocks : fullPrompt;
   }
 
   /**

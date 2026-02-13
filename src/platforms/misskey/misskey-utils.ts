@@ -1,7 +1,7 @@
 // src/platforms/misskey/misskey-utils.ts
 
 import type { entities } from "misskey-js";
-import type { NormalizedEvent, Platform, PlatformMessage } from "../../types/events.ts";
+import type { Attachment, NormalizedEvent, Platform, PlatformMessage } from "../../types/events.ts";
 
 /**
  * Misskey Note type (using misskey-js entities)
@@ -51,6 +51,18 @@ export function normalizeMisskeyNote(
     guildId: "", // Misskey doesn't have guilds
     content: note.text ?? "",
     timestamp: new Date(note.createdAt),
+    attachments: (note.files ?? []).length > 0
+      ? (note.files ?? []).map((file) => ({
+        id: file.id,
+        url: file.url,
+        mimeType: file.type,
+        filename: file.name,
+        size: file.size,
+        width: file.properties?.width ?? undefined,
+        height: file.properties?.height ?? undefined,
+        isImage: file.type.startsWith("image/"),
+      }))
+      : undefined,
     raw: note,
   };
 }
@@ -65,6 +77,17 @@ export function noteToPlatformMessage(
   const displayName = note.user.name ?? note.user.username;
   const formattedUsername = `@${displayName} (${note.userId})`;
 
+  const attachments: Attachment[] = (note.files ?? []).map((file) => ({
+    id: file.id,
+    url: file.url,
+    mimeType: file.type,
+    filename: file.name,
+    size: file.size,
+    width: file.properties?.width ?? undefined,
+    height: file.properties?.height ?? undefined,
+    isImage: file.type.startsWith("image/"),
+  }));
+
   return {
     messageId: note.id,
     userId: note.userId,
@@ -72,6 +95,7 @@ export function noteToPlatformMessage(
     content: note.text ?? "",
     timestamp: new Date(note.createdAt),
     isBot: note.userId === botId || !!note.user.isBot,
+    attachments: attachments.length > 0 ? attachments : undefined,
   };
 }
 
@@ -181,6 +205,18 @@ export function normalizeMisskeyChatMessage(
     guildId: "", // Misskey doesn't have guilds
     content: message.text ?? "",
     timestamp: new Date(message.createdAt),
+    attachments: message.file
+      ? [{
+        id: message.file.id,
+        url: message.file.url,
+        mimeType: message.file.type,
+        filename: message.file.name,
+        size: message.file.size,
+        width: message.file.properties?.width ?? undefined,
+        height: message.file.properties?.height ?? undefined,
+        isImage: message.file.type.startsWith("image/"),
+      }]
+      : undefined,
     raw: message,
   };
 }
@@ -197,6 +233,32 @@ export function chatMessageToPlatformMessage(
   const displayName = fromUser?.name ?? fromUser?.username ?? message.fromUserId;
   const formattedUsername = `@${displayName} (${message.fromUserId})`;
 
+  // Extract file attachment if present
+  const attachments: Attachment[] = [];
+  const file = message.file as
+    | {
+      id: string;
+      url: string;
+      type: string;
+      name: string;
+      size: number;
+      properties?: { width?: number; height?: number };
+    }
+    | null
+    | undefined;
+  if (file) {
+    attachments.push({
+      id: file.id,
+      url: file.url,
+      mimeType: file.type,
+      filename: file.name,
+      size: file.size,
+      width: file.properties?.width ?? undefined,
+      height: file.properties?.height ?? undefined,
+      isImage: file.type.startsWith("image/"),
+    });
+  }
+
   return {
     messageId: message.id,
     userId: message.fromUserId,
@@ -204,6 +266,7 @@ export function chatMessageToPlatformMessage(
     content: message.text ?? "",
     timestamp: new Date(message.createdAt),
     isBot: message.fromUserId === botId || !!fromUser?.isBot,
+    attachments: attachments.length > 0 ? attachments : undefined,
   };
 }
 

@@ -894,3 +894,97 @@ Deno.test("fetchRecentMessages - note: notes/conversation returns deep chain in 
   const showCalls = calledEndpoints.filter((e) => e === "notes/show");
   assertEquals(showCalls.length, 1);
 });
+Deno.test("normalizeMisskeyNote - files produce attachments", () => {
+  const file = {
+    id: "file1",
+    url: "https://example.com/file.png",
+    type: "image/png",
+    name: "photo.png",
+    size: 5000,
+    properties: { width: 640, height: 480 },
+  };
+  // deno-lint-ignore no-explicit-any
+  const note = createMockNote({ files: [file as any], fileIds: ["file1"] });
+  const ev = normalizeMisskeyNote(note, "bot123", false);
+  assertEquals(ev.attachments?.length, 1);
+  assertEquals(ev.attachments![0].isImage, true);
+  assertEquals(ev.attachments![0].mimeType, "image/png");
+  assertEquals(ev.attachments![0].width, 640);
+  assertEquals(ev.attachments![0].height, 480);
+});
+
+Deno.test("normalizeMisskeyNote - no files means no attachments", () => {
+  const note = createMockNote();
+  const ev = normalizeMisskeyNote(note, "bot123", false);
+  assertEquals(ev.attachments, undefined);
+});
+
+Deno.test("noteToPlatformMessage - with files", () => {
+  const file = {
+    id: "file1",
+    url: "https://example.com/file.png",
+    type: "image/png",
+    name: "photo.png",
+    size: 5000,
+    properties: { width: 640, height: 480 },
+  };
+  // deno-lint-ignore no-explicit-any
+  const note = createMockNote({ files: [file as any], fileIds: ["file1"] });
+  const pm = noteToPlatformMessage(note, "bot123");
+  assertEquals(pm.attachments?.length, 1);
+  assertEquals(pm.attachments![0].id, "file1");
+  assertEquals(pm.attachments![0].url, "https://example.com/file.png");
+  assertEquals(pm.attachments![0].isImage, true);
+});
+
+Deno.test("noteToPlatformMessage - without files", () => {
+  const note = createMockNote();
+  const pm = noteToPlatformMessage(note, "bot123");
+  assertEquals(pm.attachments, undefined);
+});
+
+Deno.test("normalizeMisskeyChatMessage - file becomes attachment", () => {
+  const file = {
+    id: "file1",
+    url: "https://example.com/file.png",
+    type: "image/png",
+    name: "photo.png",
+    size: 5000,
+    properties: { width: 640, height: 480 },
+  };
+  // deno-lint-ignore no-explicit-any
+  const chat = createMockChatMessage({ file: file as any });
+  const ev = normalizeMisskeyChatMessage(chat, "bot123");
+  assertEquals(ev.attachments?.length, 1);
+  assertEquals(ev.attachments![0].isImage, true);
+  assertEquals(ev.attachments![0].filename, "photo.png");
+});
+
+Deno.test("normalizeMisskeyChatMessage - no file means no attachments", () => {
+  const chat = createMockChatMessage();
+  const ev = normalizeMisskeyChatMessage(chat, "bot123");
+  assertEquals(ev.attachments, undefined);
+});
+
+Deno.test("chatMessageToPlatformMessage - with file", () => {
+  const file = {
+    id: "file1",
+    url: "https://example.com/file.png",
+    type: "image/png",
+    name: "photo.png",
+    size: 5000,
+    properties: { width: 640, height: 480 },
+  };
+  // deno-lint-ignore no-explicit-any
+  const chat = createMockChatMessage({ file: file as any });
+  const pm = chatMessageToPlatformMessage(chat, "bot123");
+  assertEquals(pm.attachments?.length, 1);
+  assertEquals(pm.attachments![0].isImage, true);
+  assertEquals(pm.attachments![0].mimeType, "image/png");
+});
+
+Deno.test("chatMessageToPlatformMessage - without file", () => {
+  const chat = createMockChatMessage();
+  const pm = chatMessageToPlatformMessage(chat, "bot123");
+  assertEquals(pm.attachments, undefined);
+});

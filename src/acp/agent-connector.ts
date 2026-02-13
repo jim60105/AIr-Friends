@@ -104,6 +104,11 @@ export class AgentConnector {
         protocolVersion: initResult.protocolVersion,
         agentCapabilities: this.capabilities,
       });
+
+      (logger as Logger).info("Agent prompt capabilities", {
+        image: this.capabilities?.promptCapabilities?.image ?? false,
+        audio: this.capabilities?.promptCapabilities?.audio ?? false,
+      });
     } catch (error) {
       // Clean up on initialization failure
       await this.disconnect();
@@ -257,9 +262,20 @@ export class AgentConnector {
   }
 
   /**
-   * Send a prompt to the Agent and wait for response
+   * Check if the connected Agent supports image content in prompts
    */
-  async prompt(sessionId: string, text: string): Promise<acp.PromptResponse> {
+  supportsImageContent(): boolean {
+    return this.capabilities?.promptCapabilities?.image === true;
+  }
+
+  /**
+   * Send a prompt to the Agent and wait for response.
+   * Accepts either a plain text string or an array of ContentBlock.
+   */
+  async prompt(
+    sessionId: string,
+    content: string | acp.ContentBlock[],
+  ): Promise<acp.PromptResponse> {
     if (!this.connection) {
       throw new Error("Not connected to agent");
     }
@@ -269,14 +285,20 @@ export class AgentConnector {
     // Reset client state for new prompt
     this.client?.reset();
 
+    // If content is a plain string, wrap as text ContentBlock (backward compatible)
+    const prompt: acp.ContentBlock[] = typeof content === "string"
+      ? [{ type: "text", text: content }]
+      : content;
+
     const result = await this.connection.prompt({
       sessionId,
-      prompt: [{ type: "text", text }],
+      prompt,
     });
 
     logger.info("Prompt completed", {
       sessionId,
       stopReason: result.stopReason,
+      contentBlockCount: prompt.length,
     });
 
     return result;

@@ -628,6 +628,38 @@ memoryMaintenance:
 5. Original memories are disabled via patch events (append-only preserved)
 6. Failures are isolated per workspace and do not stop the full maintenance cycle
 
+### 11. Multimedia Message Handling (Feature 18)
+
+Supports passing image and file attachments from platform messages to the ACP Agent.
+
+**Flow:**
+
+```
+Trigger/history message → Platform adapter extracts attachment metadata (URL, mimeType, filename, size)
+→ NormalizedEvent / PlatformMessage carry attachments[]
+→ ContextAssembler formats attachment info as text descriptions (always)
+→ SessionOrchestrator builds image ContentBlock (when Agent supports promptCapabilities.image)
+→ AgentConnector.prompt() sends mixed content (text + image ContentBlock)
+```
+
+**Key Design Points:**
+
+- **Attachment type**: `Attachment` interface in `src/types/events.ts` with `isImage` flag (MIME starts with `image/`)
+- **Capability negotiation**: Only sends image `ContentBlock` when Agent reports `promptCapabilities.image === true`
+- **Text description always present**: Attachment URLs and metadata are always included as text in context, regardless of image capability
+- **Only trigger message images downloaded**: History message images are described by URL only (no download)
+- **Size limit**: Images over 20MB are not downloaded; described by URL instead
+- **Download timeout**: 10 seconds per image; failures are non-fatal
+- **Backward compatible**: `attachments` field is optional; no changes to existing behavior for text-only messages
+
+**Platform Attachment Sources:**
+
+| Platform | Source | Field |
+|----------|--------|-------|
+| Discord | `message.attachments` (Collection) | id, url, contentType, name, size, width, height |
+| Misskey Note | `note.files` (DriveFile[]) | id, url, type, name, size, properties.width/height |
+| Misskey Chat | `message.file` (DriveFile \| null) | Same as above |
+
 ## Prompt Template System
 
 The system uses a template-based prompt system that allows easy customization without rebuilding containers.

@@ -1,7 +1,33 @@
 // src/platforms/discord/discord-utils.ts
 
 import type { GuildMember, Message, User } from "discord.js";
-import type { NormalizedEvent, Platform, PlatformMessage } from "../../types/events.ts";
+import type { Attachment, NormalizedEvent, Platform, PlatformMessage } from "../../types/events.ts";
+
+/**
+ * Convert a Discord attachment to our Attachment type
+ */
+function discordAttachmentToAttachment(
+  att: {
+    id: string;
+    url: string;
+    contentType: string | null;
+    name: string | null;
+    size: number;
+    width: number | null;
+    height: number | null;
+  },
+): Attachment {
+  return {
+    id: att.id,
+    url: att.url,
+    mimeType: att.contentType ?? "application/octet-stream",
+    filename: att.name ?? "unknown",
+    size: att.size,
+    width: att.width ?? undefined,
+    height: att.height ?? undefined,
+    isImage: att.contentType?.startsWith("image/") ?? false,
+  };
+}
 
 /**
  * Convert Discord Message to NormalizedEvent
@@ -21,6 +47,9 @@ export function normalizeDiscordMessage(
     guildId: message.guildId ?? "",
     content: message.content,
     timestamp: message.createdAt,
+    attachments: message.attachments.size > 0
+      ? Array.from(message.attachments.values()).map((att) => discordAttachmentToAttachment(att))
+      : undefined,
     raw: message,
   };
 }
@@ -32,6 +61,10 @@ export function messageToPltatformMessage(
   message: Message,
   botId: string,
 ): PlatformMessage {
+  const attachments = message.attachments.size > 0
+    ? Array.from(message.attachments.values()).map((att) => discordAttachmentToAttachment(att))
+    : undefined;
+
   return {
     messageId: message.id,
     userId: message.author.id,
@@ -39,6 +72,7 @@ export function messageToPltatformMessage(
     content: message.content,
     timestamp: message.createdAt,
     isBot: message.author.id === botId || message.author.bot,
+    attachments,
   };
 }
 

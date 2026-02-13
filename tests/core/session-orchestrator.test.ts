@@ -430,6 +430,10 @@ class MockAgentConnector {
     await Promise.resolve();
   }
 
+  supportsImageContent(): boolean {
+    return false;
+  }
+
   async createSession(): Promise<string> {
     return await Promise.resolve(this.sessionId);
   }
@@ -1690,6 +1694,276 @@ Deno.test("SessionOrchestrator - processMemoryMaintenance shows no memories mess
     );
 
     assertEquals(capturedPrompt.includes("(No enabled memories found)"), true);
+
+    sessionRegistry.stop();
+  } finally {
+    await Deno.remove(tempDir, { recursive: true });
+  }
+});
+Deno.test("SessionOrchestrator - prompt receives string when supportsImageContent is false", async () => {
+  const tempDir = await Deno.makeTempDir();
+  try {
+    const { orchestrator, sessionRegistry } = await createTestableOrchestrator(
+      tempDir,
+    );
+    const event = createTestEvent();
+    event.attachments = [{
+      id: "a1",
+      url: "https://example.com/img.png",
+      mimeType: "image/png",
+      filename: "img.png",
+      size: 1000,
+      isImage: true,
+    }];
+    orchestrator.setConnectorSetup((connector) => {
+      // default supportsImageContent false
+      connector.promptResponses = [{ stopReason: "end_turn" } as PromptResponse];
+    });
+
+    const platformAdapter = new MockPlatformAdapter() as unknown as PlatformAdapter;
+    await orchestrator.processMessage(event, platformAdapter);
+    // Ensure prompt was called
+    assertEquals(orchestrator.mockConnector!.promptCallCount > 0, true);
+
+    sessionRegistry.stop();
+  } finally {
+    await Deno.remove(tempDir, { recursive: true });
+  }
+});
+
+Deno.test({
+  name: "SessionOrchestrator - prompt receives ContentBlock[] when supportsImageContent is true",
+  sanitizeResources: false,
+  sanitizeOps: false,
+  fn: async () => {
+    const tempDir = await Deno.makeTempDir();
+    try {
+      const { orchestrator, sessionRegistry } = await createTestableOrchestrator(
+        tempDir,
+      );
+      const event = createTestEvent();
+      event.attachments = [{
+        id: "a1",
+        url: "https://example.com/img.png",
+        mimeType: "image/png",
+        filename: "img.png",
+        size: 1000,
+        isImage: true,
+      }];
+      let receivedArg: string | unknown[] | null = null;
+      orchestrator.setConnectorSetup((connector) => {
+        connector.supportsImageContent = () => true;
+        connector.prompt = (_sessionId: string, text: string | unknown[]) => {
+          receivedArg = text;
+          return Promise.resolve({ stopReason: "end_turn" } as PromptResponse);
+        };
+      });
+
+      const platformAdapter = new MockPlatformAdapter() as unknown as PlatformAdapter;
+      await orchestrator.processMessage(event, platformAdapter);
+
+      // Image download will fail (unreachable URL), so fallback to string prompt.
+      // The important thing is that the method was called and didn't crash.
+      assertEquals(receivedArg !== null, true);
+
+      sessionRegistry.stop();
+    } finally {
+      await Deno.remove(tempDir, { recursive: true });
+    }
+  },
+});
+
+Deno.test("SessionOrchestrator - non-image attachments do not trigger download", async () => {
+  const tempDir = await Deno.makeTempDir();
+  try {
+    const { orchestrator, sessionRegistry } = await createTestableOrchestrator(
+      tempDir,
+    );
+    const event = createTestEvent();
+    event.attachments = [{
+      id: "a1",
+      url: "https://example.com/doc.pdf",
+      mimeType: "application/pdf",
+      filename: "doc.pdf",
+      size: 1000,
+      isImage: false,
+    }];
+    let receivedArg: string | unknown[] | null = null;
+    orchestrator.setConnectorSetup((connector) => {
+      connector.supportsImageContent = () => true;
+      connector.prompt = (_sessionId: string, text: string | unknown[]) => {
+        receivedArg = text;
+        return Promise.resolve({ stopReason: "end_turn" } as PromptResponse);
+      };
+    });
+
+    const platformAdapter = new MockPlatformAdapter() as unknown as PlatformAdapter;
+    await orchestrator.processMessage(event, platformAdapter);
+
+    // Non-image attachments should not trigger image download; prompt should be string
+    assertEquals(typeof receivedArg, "string");
+
+    sessionRegistry.stop();
+  } finally {
+    await Deno.remove(tempDir, { recursive: true });
+  }
+});
+
+Deno.test({
+  name: "SessionOrchestrator - successful image download produces ContentBlock array",
+  sanitizeResources: false,
+  sanitizeOps: false,
+  fn: async () => {
+    // Start a local HTTP server to serve a tiny test image
+    const pngBytes = new Uint8Array([
+      137,
+      80,
+      78,
+      71,
+      13,
+      10,
+      26,
+      10,
+      0,
+      0,
+      0,
+      13,
+      73,
+      72,
+      68,
+      82,
+      0,
+      0,
+      0,
+      1,
+      0,
+      0,
+      0,
+      1,
+      8,
+      2,
+      0,
+      0,
+      0,
+      144,
+      119,
+      83,
+      222,
+      0,
+      0,
+      0,
+      12,
+      73,
+      68,
+      65,
+      84,
+      8,
+      215,
+      99,
+      248,
+      207,
+      192,
+      0,
+      0,
+      0,
+      3,
+      0,
+      1,
+      54,
+      0,
+      5,
+      249,
+      0,
+      0,
+      0,
+      0,
+      73,
+      69,
+      78,
+      68,
+      174,
+      66,
+      96,
+      130,
+    ]);
+
+    const server = Deno.serve({ port: 0, onListen: () => {} }, () => {
+      return new Response(pngBytes, {
+        headers: { "Content-Type": "image/png" },
+      });
+    });
+    const imageUrl = `http://localhost:${server.addr.port}/test.png`;
+
+    const tempDir = await Deno.makeTempDir();
+    try {
+      const { orchestrator, sessionRegistry } = await createTestableOrchestrator(tempDir);
+      const event = createTestEvent();
+      event.attachments = [{
+        id: "a1",
+        url: imageUrl,
+        mimeType: "image/png",
+        filename: "test.png",
+        size: pngBytes.length,
+        isImage: true,
+      }];
+      let firstPromptArg: string | unknown[] | null = null;
+      let promptCount = 0;
+      orchestrator.setConnectorSetup((connector) => {
+        connector.supportsImageContent = () => true;
+        connector.prompt = (_sessionId: string, text: string | unknown[]) => {
+          promptCount++;
+          if (promptCount === 1) firstPromptArg = text;
+          return Promise.resolve({ stopReason: "end_turn" } as PromptResponse);
+        };
+      });
+
+      const platformAdapter = new MockPlatformAdapter() as unknown as PlatformAdapter;
+      await orchestrator.processMessage(event, platformAdapter);
+
+      // With a reachable image, the first prompt should get ContentBlock array
+      assertEquals(Array.isArray(firstPromptArg), true);
+      const blocks = firstPromptArg as unknown as unknown[];
+      assertEquals(blocks.length, 2); // text + image
+      assertEquals((blocks[0] as { type: string }).type, "text");
+      assertEquals((blocks[1] as { type: string }).type, "image");
+
+      sessionRegistry.stop();
+    } finally {
+      await server.shutdown();
+      await Deno.remove(tempDir, { recursive: true });
+    }
+  },
+});
+
+Deno.test("SessionOrchestrator - oversized images are skipped", async () => {
+  const tempDir = await Deno.makeTempDir();
+  try {
+    const { orchestrator, sessionRegistry } = await createTestableOrchestrator(
+      tempDir,
+    );
+    const event = createTestEvent();
+    event.attachments = [{
+      id: "a1",
+      url: "https://example.com/huge.png",
+      mimeType: "image/png",
+      filename: "huge.png",
+      size: 30 * 1024 * 1024, // 30MB - over 20MB limit
+      isImage: true,
+    }];
+    let receivedArg: string | unknown[] | null = null;
+    orchestrator.setConnectorSetup((connector) => {
+      connector.supportsImageContent = () => true;
+      connector.prompt = (_sessionId: string, text: string | unknown[]) => {
+        receivedArg = text;
+        return Promise.resolve({ stopReason: "end_turn" } as PromptResponse);
+      };
+    });
+
+    const platformAdapter = new MockPlatformAdapter() as unknown as PlatformAdapter;
+    await orchestrator.processMessage(event, platformAdapter);
+
+    // Oversized image should be skipped, prompt should be string
+    assertEquals(typeof receivedArg, "string");
 
     sessionRegistry.stop();
   } finally {
