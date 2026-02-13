@@ -237,6 +237,24 @@ export interface MemoryMaintenanceConfig {
 }
 
 /**
+ * Rate limiting configuration.
+ * Prevents excessive API usage per user via sliding window + cooldown.
+ */
+export interface RateLimitConfig {
+  /** Enable rate limiting (default: false) */
+  enabled: boolean;
+
+  /** Maximum requests allowed per sliding window per user */
+  maxRequestsPerWindow: number;
+
+  /** Sliding window duration in milliseconds (default: 600000 = 10 min) */
+  windowMs: number;
+
+  /** Cooldown period in milliseconds after limit exceeded (default: 600000 = 10 min) */
+  cooldownMs: number;
+}
+
+/**
  * Complete application configuration
  */
 export interface Config {
@@ -250,6 +268,7 @@ export interface Config {
   accessControl: AccessControlConfig;
   selfResearch?: SelfResearchConfig;
   memoryMaintenance?: MemoryMaintenanceConfig;
+  rateLimit?: RateLimitConfig;
 }
 
 /**

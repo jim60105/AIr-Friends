@@ -97,7 +97,13 @@ export class AgentCore {
     this.replyPolicy = new ReplyPolicyEvaluator(config.accessControl);
 
     // Initialize message handler and reply dispatcher
-    this.messageHandler = new MessageHandler(this.orchestrator);
+    const rateLimitConfig = config.rateLimit ?? {
+      enabled: false,
+      maxRequestsPerWindow: 10,
+      windowMs: 600000,
+      cooldownMs: 600000,
+    };
+    this.messageHandler = new MessageHandler(this.orchestrator, rateLimitConfig);
     this.replyDispatcher = new ReplyDispatcher();
 
     logger.info("Agent Core initialized", {
@@ -230,6 +236,9 @@ export class AgentCore {
 
     // Stop session registry
     this.sessionRegistry.stop();
+
+    // Dispose message handler
+    this.messageHandler.dispose();
 
     logger.info("Agent Core shutdown complete");
   }

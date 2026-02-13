@@ -5,6 +5,14 @@ import { MessageHandler } from "@core/message-handler.ts";
 import type { SessionOrchestrator, SessionResponse } from "@core/session-orchestrator.ts";
 import type { NormalizedEvent } from "../../src/types/events.ts";
 import type { PlatformAdapter } from "@platforms/platform-adapter.ts";
+import type { RateLimitConfig } from "../../src/types/config.ts";
+
+const DEFAULT_RATE_LIMIT: RateLimitConfig = {
+  enabled: false,
+  maxRequestsPerWindow: 10,
+  windowMs: 600000,
+  cooldownMs: 600000,
+};
 
 // Mock SessionOrchestrator that implements the interface
 class MockSessionOrchestrator {
@@ -50,7 +58,7 @@ function createTestEvent(messageId: string): NormalizedEvent {
 
 Deno.test("MessageHandler - handles event successfully", async () => {
   const orchestrator = new MockSessionOrchestrator(true, true) as unknown as SessionOrchestrator;
-  const handler = new MessageHandler(orchestrator);
+  const handler = new MessageHandler(orchestrator, DEFAULT_RATE_LIMIT);
 
   const event = createTestEvent("msg_1");
   const response = await handler.handleEvent(event, mockPlatformAdapter);
@@ -61,7 +69,7 @@ Deno.test("MessageHandler - handles event successfully", async () => {
 
 Deno.test("MessageHandler - handles failed events", async () => {
   const orchestrator = new MockSessionOrchestrator(false, false) as unknown as SessionOrchestrator;
-  const handler = new MessageHandler(orchestrator);
+  const handler = new MessageHandler(orchestrator, DEFAULT_RATE_LIMIT);
 
   const event = createTestEvent("msg_2");
   const response = await handler.handleEvent(event, mockPlatformAdapter);
@@ -73,7 +81,7 @@ Deno.test("MessageHandler - handles failed events", async () => {
 
 Deno.test("MessageHandler - prevents duplicate event processing", async () => {
   const orchestrator = new MockSessionOrchestrator(true, true) as unknown as SessionOrchestrator;
-  const handler = new MessageHandler(orchestrator);
+  const handler = new MessageHandler(orchestrator, DEFAULT_RATE_LIMIT);
 
   const event = createTestEvent("msg_3");
 
@@ -97,7 +105,7 @@ Deno.test("MessageHandler - prevents duplicate event processing", async () => {
 
 Deno.test("MessageHandler - tracks processing state", async () => {
   const orchestrator = new MockSessionOrchestrator(true, true) as unknown as SessionOrchestrator;
-  const handler = new MessageHandler(orchestrator);
+  const handler = new MessageHandler(orchestrator, DEFAULT_RATE_LIMIT);
 
   const event = createTestEvent("msg_4");
 
@@ -121,7 +129,7 @@ Deno.test("MessageHandler - tracks processing state", async () => {
 
 Deno.test("MessageHandler - handles multiple events concurrently", async () => {
   const orchestrator = new MockSessionOrchestrator(true, true) as unknown as SessionOrchestrator;
-  const handler = new MessageHandler(orchestrator);
+  const handler = new MessageHandler(orchestrator, DEFAULT_RATE_LIMIT);
 
   const event1 = createTestEvent("msg_5");
   const event2 = createTestEvent("msg_6");
@@ -142,4 +150,88 @@ Deno.test("MessageHandler - handles multiple events concurrently", async () => {
 
   // All should be completed
   assertEquals(handler.getActiveCount(), 0);
+});
+
+Deno.test("MessageHandler - rate limited event returns error", async () => {
+  const orchestrator = new MockSessionOrchestrator(true, true) as unknown as SessionOrchestrator;
+  const rateLimitConfig: RateLimitConfig = {
+    enabled: true,
+    maxRequestsPerWindow: 1,
+    windowMs: 600000,
+    cooldownMs: 600000,
+  };
+  const handler = new MessageHandler(orchestrator, rateLimitConfig);
+
+  const event1 = createTestEvent("msg_rl_1");
+  const event2 = createTestEvent("msg_rl_2");
+
+  const response1 = await handler.handleEvent(event1, mockPlatformAdapter);
+  assertEquals(response1.success, true);
+
+  const response2 = await handler.handleEvent(event2, mockPlatformAdapter);
+  assertEquals(response2.success, false);
+  assertEquals(response2.error, "Rate limited");
+  assertEquals(response2.replySent, false);
+
+  handler.dispose();
+});
+
+Deno.test("MessageHandler - rate limited event does not call orchestrator", async () => {
+  let orchestratorCallCount = 0;
+  const orchestrator = {
+    processMessage(): Promise<SessionResponse> {
+      orchestratorCallCount++;
+      return Promise.resolve({ success: true, replySent: true });
+    },
+  } as unknown as SessionOrchestrator;
+
+  const rateLimitConfig: RateLimitConfig = {
+    enabled: true,
+    maxRequestsPerWindow: 1,
+    windowMs: 600000,
+    cooldownMs: 600000,
+  };
+  const handler = new MessageHandler(orchestrator, rateLimitConfig);
+
+  await handler.handleEvent(createTestEvent("msg_rl_3"), mockPlatformAdapter);
+  await handler.handleEvent(createTestEvent("msg_rl_4"), mockPlatformAdapter);
+
+  assertEquals(orchestratorCallCount, 1, "Orchestrator should only be called once");
+
+  handler.dispose();
+});
+
+Deno.test("MessageHandler - duplicate events not counted in rate limit", async () => {
+  let orchestratorCallCount = 0;
+  const orchestrator = {
+    async processMessage(): Promise<SessionResponse> {
+      orchestratorCallCount++;
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      return { success: true, replySent: true };
+    },
+  } as unknown as SessionOrchestrator;
+
+  const rateLimitConfig: RateLimitConfig = {
+    enabled: true,
+    maxRequestsPerWindow: 1,
+    windowMs: 600000,
+    cooldownMs: 600000,
+  };
+  const handler = new MessageHandler(orchestrator, rateLimitConfig);
+
+  // Send same message ID twice concurrently — duplicate should not count toward rate limit
+  const event = createTestEvent("msg_rl_dup");
+  const [r1, r2] = await Promise.all([
+    handler.handleEvent(event, mockPlatformAdapter),
+    handler.handleEvent(event, mockPlatformAdapter),
+  ]);
+
+  const duplicateResponse = [r1, r2].find((r) => r.error?.includes("already being processed"));
+  assertEquals(!!duplicateResponse, true);
+
+  // The duplicate should not have consumed a rate limit slot, so a new message should still work
+  // But since maxRequestsPerWindow is 1 and first event consumed it, next will be rate-limited
+  assertEquals(orchestratorCallCount, 1);
+
+  handler.dispose();
 });

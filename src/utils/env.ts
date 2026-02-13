@@ -50,6 +50,12 @@ export const ENV_MAPPINGS = {
   MEMORY_MAINTENANCE_MODEL: "memoryMaintenance.model",
   MEMORY_MAINTENANCE_MIN_MEMORY_COUNT: "memoryMaintenance.minMemoryCount",
   MEMORY_MAINTENANCE_INTERVAL_MS: "memoryMaintenance.intervalMs",
+
+  // Rate limit settings
+  RATE_LIMIT_ENABLED: "rateLimit.enabled",
+  RATE_LIMIT_MAX_REQUESTS_PER_WINDOW: "rateLimit.maxRequestsPerWindow",
+  RATE_LIMIT_WINDOW_MS: "rateLimit.windowMs",
+  RATE_LIMIT_COOLDOWN_MS: "rateLimit.cooldownMs",
 } as const;
 
 /**
