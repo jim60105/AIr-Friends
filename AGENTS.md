@@ -401,7 +401,6 @@ await connector.disconnect();
 - **GitHub Copilot CLI** (`copilot`) - Commercial agent from GitHub, requires `GITHUB_TOKEN`
 - **Gemini CLI** (`gemini`) - Google's Gemini CLI, requires `GEMINI_API_KEY`
 - **OpenCode CLI** (`opencode`) - Open source coding agent that supports multiple providers:
-  - GitHub provider (uses `GITHUB_TOKEN` env var)
   - Gemini provider (uses `GEMINI_API_KEY` env var)
   - OpenRouter provider (uses `OPENROUTER_API_KEY` env var)
   - Pre-configured in container with `opencode.json`

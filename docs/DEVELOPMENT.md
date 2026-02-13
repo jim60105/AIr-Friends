@@ -9,7 +9,7 @@ This guide provides comprehensive instructions for developing and customizing AI
 - Discord Bot Token (for Discord integration)
 - Misskey Access Token (for Misskey integration)
 - An ACP-compliant CLI agent (OpenCode CLI, GitHub Copilot CLI, Gemini CLI. The recommended one is OpenCode CLI)
-- For OpenCode CLI: GITHUB_TOKEN, GEMINI_API_KEY, OPENCODE_API_KEY, or OPENROUTER_API_KEY for [provider access](https://opencode.ai/docs/providers/)
+- For OpenCode CLI: GEMINI_API_KEY, OPENCODE_API_KEY, or OPENROUTER_API_KEY for [provider access](https://opencode.ai/docs/providers/)
 
 ## Development Setup
 
@@ -152,7 +152,7 @@ Configuration is loaded from `config.yaml` (YAML format). See [config.example.ya
 | `WHITELIST`          | Whitelist entries (comma-separated, replaces config) |
 | `LOG_LEVEL`          | Logging level (DEBUG/INFO/WARN/ERROR)                |
 | `DENO_ENV`           | Environment name (dev/prod)                          |
-| `GITHUB_TOKEN`       | GitHub token for Copilot/OpenCode                    |
+| `GITHUB_TOKEN`       | GitHub token for Copilot                             |
 | `GEMINI_API_KEY`     | Gemini API key for Gemini CLI/OpenCode               |
 | `OPENCODE_API_KEY`   | OpenCode API key                                     |
 | `OPENROUTER_API_KEY` | OpenRouter API key                                   |
@@ -266,7 +266,6 @@ services:
 
 The container includes a pre-configured `opencode.json` that automatically sets up OpenCode CLI with:
 
-- **GitHub Provider**: Uses `GITHUB_TOKEN` environment variable
 - **Gemini Provider**: Uses `GEMINI_API_KEY` environment variable
 - **Only Necessary Tools Enabled**: enable bash, disable edit and write
 - **Auto-compaction**: Enabled for better token management

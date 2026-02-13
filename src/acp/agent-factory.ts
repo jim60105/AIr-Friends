@@ -149,12 +149,6 @@ export function createAgentConfig(
         env["GEMINI_API_KEY"] = geminiApiKey;
         env["GOOGLE_GENERATIVE_AI_API_KEY"] = geminiApiKey;
       }
-      // GitHub
-      const githubToken = appConfig.agent.githubToken ??
-        Deno.env.get("GITHUB_TOKEN");
-      if (githubToken) {
-        env["GITHUB_TOKEN"] = githubToken;
-      }
 
       // Inherit critical environment variables
       // Agent needs PATH to find deno, HOME for skills directory discovery
