@@ -107,3 +107,11 @@ memoryMaintenance:
   model: "gpt-5-mini"              # Model for maintenance (separate from chat); override with env MEMORY_MAINTENANCE_MODEL
   minMemoryCount: 50                # Minimum enabled memories required to run; override with env MEMORY_MAINTENANCE_MIN_MEMORY_COUNT
   intervalMs: 604800000             # Fixed interval: 7 days (default); override with env MEMORY_MAINTENANCE_INTERVAL_MS
+
+# Rate limiting - prevent excessive API usage per user
+# Complements accessControl: accessControl decides "who can", rateLimit decides "how often"
+rateLimit:
+  enabled: false                  # Enable rate limiting (default: false); override with env RATE_LIMIT_ENABLED
+  maxRequestsPerWindow: 10       # Max requests per user per sliding window; override with env RATE_LIMIT_MAX_REQUESTS_PER_WINDOW
+  windowMs: 600000               # Sliding window duration in ms (default: 10 min); override with env RATE_LIMIT_WINDOW_MS
+  cooldownMs: 600000             # Cooldown period after limit exceeded in ms (default: 10 min); override with env RATE_LIMIT_COOLDOWN_MS

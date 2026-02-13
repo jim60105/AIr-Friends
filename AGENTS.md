@@ -477,6 +477,36 @@ REPLY_TO=public
 WHITELIST=discord/account/123456789,discord/channel/987654321,misskey/account/abcdef123
 ```
 
+### 7a. Rate Limiting & Cooldown
+
+Prevents excessive API usage per user via a sliding window + cooldown mechanism. Complements access control: access control decides "who can", rate limiting decides "how often".
+
+**Configuration:**
+
+```yaml
+rateLimit:
+  enabled: false
+  maxRequestsPerWindow: 10
+  windowMs: 600000        # 10-minute sliding window
+  cooldownMs: 600000      # Cooldown after limit exceeded
+```
+
+**How It Works:**
+
+1. Each user is tracked independently by `{platform}:{userId}` key
+2. Requests within the sliding window are counted
+3. When `maxRequestsPerWindow` is exceeded, the user enters a cooldown period
+4. During cooldown, all requests are silently rejected (no reply, no session started)
+5. After cooldown expires, the counter resets and the user can send requests again
+6. Rate limit check runs **after** duplicate event detection and **before** any resource allocation
+
+**Environment Variable Overrides:**
+
+- `RATE_LIMIT_ENABLED` → `rateLimit.enabled`
+- `RATE_LIMIT_MAX_REQUESTS_PER_WINDOW` → `rateLimit.maxRequestsPerWindow`
+- `RATE_LIMIT_WINDOW_MS` → `rateLimit.windowMs`
+- `RATE_LIMIT_COOLDOWN_MS` → `rateLimit.cooldownMs`
+
 ### 8. Spontaneous Posting (Feature 14)
 
 Enables the bot to post messages/notes on its own schedule without user triggers.

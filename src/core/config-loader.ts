@@ -5,7 +5,7 @@ import { exists } from "@std/fs";
 import { basename, dirname, join } from "@std/path";
 import { createLogger } from "@utils/logger.ts";
 import { applyEnvOverrides, getEnvironment } from "@utils/env.ts";
-import type { Config, MemoryMaintenanceConfig } from "../types/config.ts";
+import type { Config, MemoryMaintenanceConfig, RateLimitConfig } from "../types/config.ts";
 import { ConfigError, ErrorCode } from "../types/errors.ts";
 
 const logger = createLogger("ConfigLoader");
@@ -66,6 +66,16 @@ const DEFAULT_SELF_RESEARCH = {
 /**
  * Default memory maintenance configuration
  */
+/**
+ * Default rate limit configuration
+ */
+const DEFAULT_RATE_LIMIT: RateLimitConfig = {
+  enabled: false,
+  maxRequestsPerWindow: 10,
+  windowMs: 600000, // 10 minutes
+  cooldownMs: 600000, // 10 minutes
+};
+
 const DEFAULT_MEMORY_MAINTENANCE: MemoryMaintenanceConfig = {
   enabled: false,
   model: "gpt-5-mini",
@@ -280,6 +290,16 @@ function validateConfig(config: Record<string, unknown>): void {
   if (mm.enabled === true && (!mm.model || String(mm.model).trim() === "")) {
     logger.warn("memoryMaintenance enabled but no model specified, disabling");
     mm.enabled = false;
+  }
+
+  // Rate limit defaults
+  if (!config.rateLimit) {
+    config.rateLimit = { ...DEFAULT_RATE_LIMIT };
+  } else {
+    config.rateLimit = {
+      ...DEFAULT_RATE_LIMIT,
+      ...(config.rateLimit as Record<string, unknown>),
+    };
   }
 }
 

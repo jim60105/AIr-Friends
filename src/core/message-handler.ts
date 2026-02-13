@@ -4,6 +4,8 @@ import { createLogger } from "@utils/logger.ts";
 import type { SessionOrchestrator, SessionResponse } from "./session-orchestrator.ts";
 import type { NormalizedEvent } from "../types/events.ts";
 import type { PlatformAdapter } from "@platforms/platform-adapter.ts";
+import type { RateLimitConfig } from "../types/config.ts";
+import { RateLimiter } from "./rate-limiter.ts";
 
 const logger = createLogger("MessageHandler");
 
@@ -14,9 +16,19 @@ const logger = createLogger("MessageHandler");
 export class MessageHandler {
   private orchestrator: SessionOrchestrator;
   private activeEvents: Set<string> = new Set();
+  private rateLimiter: RateLimiter;
+  private cleanupInterval: ReturnType<typeof setInterval> | null = null;
 
-  constructor(orchestrator: SessionOrchestrator) {
+  constructor(orchestrator: SessionOrchestrator, rateLimitConfig: RateLimitConfig) {
     this.orchestrator = orchestrator;
+    this.rateLimiter = new RateLimiter(rateLimitConfig);
+
+    // Periodic cleanup every hour to prevent memory leaks
+    if (rateLimitConfig.enabled) {
+      this.cleanupInterval = setInterval(() => {
+        this.rateLimiter.cleanup();
+      }, 3600000);
+    }
   }
 
   /**
@@ -47,6 +59,17 @@ export class MessageHandler {
     this.activeEvents.add(eventKey);
 
     try {
+      // Rate limit check (after duplicate check, before any resource allocation)
+      const userKey = `${event.platform}:${event.userId}`;
+      if (!this.rateLimiter.isAllowed(userKey)) {
+        logger.info("Rate limited", {
+          platform: event.platform,
+          userId: event.userId,
+          channelId: event.channelId,
+        });
+        return { success: false, replySent: false, error: "Rate limited" };
+      }
+
       logger.info("Handling event", {
         platform: event.platform,
         userId: event.userId,
@@ -91,5 +114,15 @@ export class MessageHandler {
    */
   getActiveCount(): number {
     return this.activeEvents.size;
+  }
+
+  /**
+   * Dispose resources (cleanup interval)
+   */
+  dispose(): void {
+    if (this.cleanupInterval) {
+      clearInterval(this.cleanupInterval);
+      this.cleanupInterval = null;
+    }
   }
 }

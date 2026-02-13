@@ -3,14 +3,19 @@
   "specifiers": {
     "jsr:@std/assert@0.224": "0.224.0",
     "jsr:@std/assert@1": "1.0.18",
+    "jsr:@std/assert@^1.0.17": "1.0.18",
+    "jsr:@std/async@^1.1.0": "1.1.1",
+    "jsr:@std/data-structures@^1.0.10": "1.0.10",
     "jsr:@std/dotenv@0.225": "0.225.6",
     "jsr:@std/flags@0.224": "0.224.0",
     "jsr:@std/fs@1": "1.0.22",
+    "jsr:@std/fs@^1.0.22": "1.0.22",
     "jsr:@std/internal@^1.0.12": "1.0.12",
     "jsr:@std/json@1": "1.0.2",
     "jsr:@std/path@1": "1.1.4",
     "jsr:@std/path@^1.1.4": "1.1.4",
     "jsr:@std/streams@^1.0.9": "1.0.17",
+    "jsr:@std/testing@^1.0.17": "1.0.17",
     "jsr:@std/yaml@1": "1.0.11",
     "npm:@agentclientprotocol/sdk@~0.14.1": "0.14.1_zod@3.25.76",
     "npm:@google/gemini-cli@*": "0.27.0_zod@3.25.76_@modelcontextprotocol+sdk@1.25.3__zod@3.25.76__ajv@8.17.1__express@5.2.1_react@19.2.4",
@@ -26,6 +31,12 @@
       "dependencies": [
         "jsr:@std/internal"
       ]
+    },
+    "@std/async@1.1.1": {
+      "integrity": "8a79beb3378cc229ce65ba2c746cfd03e4855ddd891d1eb6b9e32128e0d5339c"
+    },
+    "@std/data-structures@1.0.10": {
+      "integrity": "f574f86b0e07c69b9edc555fcc814b57d29258bad39fd5a34ba8a80ecf033cfe"
     },
     "@std/dotenv@0.225.6": {
       "integrity": "1d6f9db72f565bd26790fa034c26e45ecb260b5245417be76c2279e5734c421b"
@@ -60,6 +71,17 @@
     },
     "@std/streams@1.0.17": {
       "integrity": "7859f3d9deed83cf4b41f19223d4a67661b3d3819e9fc117698f493bf5992140"
+    },
+    "@std/testing@1.0.17": {
+      "integrity": "87bdc2700fa98249d48a17cd72413352d3d3680dcfbdb64947fd0982d6bbf681",
+      "dependencies": [
+        "jsr:@std/assert@^1.0.17",
+        "jsr:@std/async",
+        "jsr:@std/data-structures",
+        "jsr:@std/fs@^1.0.22",
+        "jsr:@std/internal",
+        "jsr:@std/path@^1.1.4"
+      ]
     },
     "@std/yaml@1.0.11": {
       "integrity": "bd139ce77f2d06cbed3713c8b26d301d2a2e12ecc7986130a268107e212143ee"
@@ -3503,6 +3525,7 @@
       "jsr:@std/fs@1",
       "jsr:@std/json@1",
       "jsr:@std/path@1",
+      "jsr:@std/testing@^1.0.17",
       "jsr:@std/yaml@1",
       "npm:@agentclientprotocol/sdk@~0.14.1",
       "npm:discord.js@14",

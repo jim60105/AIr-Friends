@@ -94,6 +94,18 @@ accessControl:
 
 See [Development Guide -- Access Control & Reply Policy](docs/DEVELOPMENT.md#access-control--reply-policy) section for details.
 
+## 🛡️ Rate Limiting
+
+Prevent excessive API usage per user with configurable rate limiting:
+
+```yaml
+rateLimit:
+  enabled: false
+  maxRequestsPerWindow: 10
+  windowMs: 600000    # 10-minute sliding window
+  cooldownMs: 600000  # Cooldown after limit exceeded
+```
+
 ## 🏗️ Architecture
 
 AIr-Friends acts as an [ACP (Agent Client Protocol)](https://agentclientprotocol.com/) client, delegating AI reasoning to external agents while maintaining persistent memory:

@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ### Added
 
 - Added `memory-stats` skill for workspace memory statistics (total, enabled, disabled, high/normal importance counts)
+- Added rate limiting & cooldown mechanism to prevent excessive API usage per user (`rateLimit` config section)
 
 ## [0.6.0] - 2026-02-11
 
