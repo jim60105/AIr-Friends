@@ -49,6 +49,10 @@ spec:
               mountPath: /app/prompts
               readOnly: true
             {{- end }}
+            {{- if .Values.openCodeAuth.enabled }}
+            - name: opencode-auth
+              mountPath: /home/deno/.local/share/opencode
+            {{- end }}
           livenessProbe:
             httpGet:
               path: /healthz
@@ -77,4 +81,9 @@ spec:
         - name: prompts
           configMap:
             name: {{ include "air-friends.fullname" . }}-prompts
+        {{- end }}
+        {{- if .Values.openCodeAuth.enabled }}
+        - name: opencode-auth
+          persistentVolumeClaim:
+            claimName: {{ .Values.openCodeAuth.existingClaim | default (printf "%s-opencode-auth" (include "air-friends.fullname" .)) }}
         {{- end }}

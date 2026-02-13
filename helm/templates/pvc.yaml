@@ -19,3 +19,24 @@ spec:
     requests:
       storage: {{ .Values.persistence.size }}
 {{- end }}
+{{- if and .Values.openCodeAuth.enabled (not .Values.openCodeAuth.existingClaim) }}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "air-friends.fullname" . }}-opencode-auth
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "air-friends.labels" . | nindent 4 }}
+  annotations:
+    helm.sh/resource-policy: keep
+spec:
+  accessModes:
+    - ReadWriteOnce
+  {{- if .Values.openCodeAuth.storageClass }}
+  storageClassName: {{ .Values.openCodeAuth.storageClass | quote }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ .Values.openCodeAuth.size }}
+{{- end }}

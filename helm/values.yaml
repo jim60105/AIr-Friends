@@ -112,6 +112,15 @@ prompts:
   #   character_info.md: |
   #     An AI assistant
 
+# -- Persistent volume for OpenCode auth state (OAuth refresh tokens).
+# This file is regularly renewed by OpenCode CLI in the container, so it must be writable.
+openCodeAuth:
+  enabled: true
+  storageClass: ''
+  size: 1Mi
+  # -- Use an existing PVC instead of creating a new one.
+  existingClaim: ''
+
 # Health check endpoint configuration
 health:
   port: 8080
