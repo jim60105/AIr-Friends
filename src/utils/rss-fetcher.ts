@@ -73,8 +73,8 @@ export function parseRssXml(xml: string, sourceName: string): RssItem[] {
 
     if (title || link) {
       items.push({
-        title: stripXmlTags(title).trim(),
-        url: stripXmlTags(link).trim(),
+        title: decodeXmlEntities(stripXmlTags(title)).trim(),
+        url: decodeXmlEntities(stripXmlTags(link)).trim(),
         description: truncateText(stripXmlTags(decodeXmlEntities(description)), 300),
         sourceName,
       });
@@ -94,8 +94,8 @@ export function parseRssXml(xml: string, sourceName: string): RssItem[] {
 
       if (title || link) {
         items.push({
-          title: stripXmlTags(title).trim(),
-          url: link.trim(),
+          title: decodeXmlEntities(stripXmlTags(title)).trim(),
+          url: decodeXmlEntities(link).trim(),
           description: truncateText(stripXmlTags(decodeXmlEntities(description)), 300),
           sourceName,
         });
@@ -129,7 +129,7 @@ function extractTag(xml: string, tagName: string): string {
  */
 function extractAtomLink(xml: string): string {
   // Try <link rel="alternate" href="..."/>
-  const altMatch = /< link[^>]*rel\s*=\s*["']alternate["'][^>]*href\s*=\s*["']([^"']+)["']/i.exec(
+  const altMatch = /<link[^>]*rel\s*=\s*["']alternate["'][^>]*href\s*=\s*["']([^"']+)["']/i.exec(
     xml,
   );
   if (altMatch) return altMatch[1];

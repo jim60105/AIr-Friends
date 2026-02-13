@@ -15,6 +15,10 @@ Deno.test("stripXmlTags - handles text without tags", () => {
   assertEquals(stripXmlTags("plain text"), "plain text");
 });
 
+Deno.test("stripXmlTags - handles self-closing tags", () => {
+  assertEquals(stripXmlTags("before<br/>after"), "beforeafter");
+});
+
 Deno.test("truncateText - does not truncate short text", () => {
   assertEquals(truncateText("hello", 10), "hello");
 });
@@ -52,6 +56,11 @@ Deno.test("pickRandom - does not modify original array", () => {
   const original = [...items];
   pickRandom(items, 3);
   assertEquals(items, original);
+});
+
+Deno.test("pickRandom - returns 0 items when count is 0", () => {
+  const result = pickRandom([1, 2, 3], 0);
+  assertEquals(result.length, 0);
 });
 
 Deno.test("parseRssXml - parses RSS 2.0 format", () => {
@@ -139,4 +148,104 @@ Deno.test("parseRssXml - handles empty feed", () => {
   const xml = `<rss version="2.0"><channel><title>Empty</title></channel></rss>`;
   const items = parseRssXml(xml, "Test");
   assertEquals(items.length, 0);
+});
+
+Deno.test("parseRssXml - decodes XML entities in description", () => {
+  const xml = `<rss version="2.0"><channel>
+    <item>
+      <title>Test &amp; More</title>
+      <link>https://example.com</link>
+      <description>A &lt;b&gt;bold&lt;/b&gt; &amp; &quot;quoted&quot; text</description>
+    </item>
+  </channel></rss>`;
+
+  const items = parseRssXml(xml, "Test");
+  assertEquals(items.length, 1);
+  assertEquals(items[0].title, "Test & More");
+  assertEquals(items[0].description, 'A bold & "quoted" text');
+});
+
+Deno.test("parseRssXml - handles CDATA in description", () => {
+  const xml = `<rss version="2.0"><channel>
+    <item>
+      <title>CDATA Test</title>
+      <link>https://example.com</link>
+      <description><![CDATA[<p>Rich <em>content</em></p>]]></description>
+    </item>
+  </channel></rss>`;
+
+  const items = parseRssXml(xml, "Test");
+  assertEquals(items.length, 1);
+  assertEquals(items[0].description, "Rich content");
+});
+
+Deno.test("parseRssXml - handles Atom entry with link element content", () => {
+  const xml = `<?xml version="1.0"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <entry>
+    <title>Entry with link tag</title>
+    <link>https://example.com/entry1</link>
+    <summary>A summary</summary>
+  </entry>
+</feed>`;
+
+  const items = parseRssXml(xml, "Atom");
+  assertEquals(items.length, 1);
+  assertEquals(items[0].url, "https://example.com/entry1");
+});
+
+Deno.test("parseRssXml - handles Atom entry with content instead of summary", () => {
+  const xml = `<?xml version="1.0"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <entry>
+    <title>Content Entry</title>
+    <link href="https://example.com/entry2"/>
+    <content type="html">&lt;p&gt;Full content&lt;/p&gt;</content>
+  </entry>
+</feed>`;
+
+  const items = parseRssXml(xml, "Atom");
+  assertEquals(items.length, 1);
+  assertEquals(items[0].description, "Full content");
+});
+
+Deno.test("parseRssXml - handles multiple RSS items", () => {
+  const xml = `<rss version="2.0"><channel>
+    <item><title>One</title><link>https://a.com</link><description>Desc 1</description></item>
+    <item><title>Two</title><link>https://b.com</link><description>Desc 2</description></item>
+    <item><title>Three</title><link>https://c.com</link><description>Desc 3</description></item>
+  </channel></rss>`;
+
+  const items = parseRssXml(xml, "Multi");
+  assertEquals(items.length, 3);
+  assertEquals(items[0].title, "One");
+  assertEquals(items[1].title, "Two");
+  assertEquals(items[2].title, "Three");
+});
+
+Deno.test("parseRssXml - handles numeric character references", () => {
+  const xml = `<rss version="2.0"><channel>
+    <item>
+      <title>Test</title>
+      <link>https://example.com</link>
+      <description>Copyright &#169; 2024 &#x2603;</description>
+    </item>
+  </channel></rss>`;
+
+  const items = parseRssXml(xml, "Test");
+  assertEquals(items[0].description, "Copyright © 2024 ☃");
+});
+
+Deno.test("parseRssXml - item with title only (no link) is still parsed", () => {
+  const xml = `<rss version="2.0"><channel>
+    <item>
+      <title>Title Only</title>
+      <description>Some description</description>
+    </item>
+  </channel></rss>`;
+
+  const items = parseRssXml(xml, "Test");
+  assertEquals(items.length, 1);
+  assertEquals(items[0].title, "Title Only");
+  assertEquals(items[0].url, "");
 });

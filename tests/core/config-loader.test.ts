@@ -851,3 +851,240 @@ workspace:
     assertEquals(result.platforms.discord.spontaneousPost?.contextFetchProbability, 0.5);
   });
 });
+
+// --- selfResearch configuration tests ---
+
+Deno.test("Config - selfResearch default values are applied", async () => {
+  const config = `
+platforms:
+  discord:
+    token: "test-token"
+    enabled: true
+  misskey:
+    enabled: false
+agent:
+  model: "gpt-4"
+  systemPromptPath: "./prompts/system.md"
+  tokenLimit: 20000
+workspace:
+  repoPath: "./data"
+  workspacesDir: "workspaces"
+`;
+
+  await withTestConfig(config, async (dir) => {
+    const result = await loadConfig(dir);
+    assertEquals(result.selfResearch?.enabled, false);
+    assertEquals(result.selfResearch?.model, "");
+    assertEquals(result.selfResearch?.rssFeeds, []);
+    assertEquals(result.selfResearch?.minIntervalMs, 43200000);
+    assertEquals(result.selfResearch?.maxIntervalMs, 86400000);
+  });
+});
+
+Deno.test("Config - selfResearch enabled with valid config", async () => {
+  const config = `
+platforms:
+  discord:
+    token: "test-token"
+    enabled: true
+  misskey:
+    enabled: false
+agent:
+  model: "gpt-4"
+  systemPromptPath: "./prompts/system.md"
+  tokenLimit: 20000
+workspace:
+  repoPath: "./data"
+  workspacesDir: "workspaces"
+selfResearch:
+  enabled: true
+  model: "gpt-5-mini"
+  rssFeeds:
+    - url: "https://example.com/feed.xml"
+      name: "Test Feed"
+  minIntervalMs: 43200000
+  maxIntervalMs: 86400000
+`;
+
+  await withTestConfig(config, async (dir) => {
+    const result = await loadConfig(dir);
+    assertEquals(result.selfResearch?.enabled, true);
+    assertEquals(result.selfResearch?.model, "gpt-5-mini");
+    assertEquals(result.selfResearch?.rssFeeds.length, 1);
+  });
+});
+
+Deno.test("Config - selfResearch auto-disables when rssFeeds is empty", async () => {
+  const config = `
+platforms:
+  discord:
+    token: "test-token"
+    enabled: true
+  misskey:
+    enabled: false
+agent:
+  model: "gpt-4"
+  systemPromptPath: "./prompts/system.md"
+  tokenLimit: 20000
+workspace:
+  repoPath: "./data"
+  workspacesDir: "workspaces"
+selfResearch:
+  enabled: true
+  model: "gpt-5-mini"
+  rssFeeds: []
+`;
+
+  await withTestConfig(config, async (dir) => {
+    const result = await loadConfig(dir);
+    assertEquals(result.selfResearch?.enabled, false);
+  });
+});
+
+Deno.test("Config - selfResearch auto-disables when model is empty", async () => {
+  const config = `
+platforms:
+  discord:
+    token: "test-token"
+    enabled: true
+  misskey:
+    enabled: false
+agent:
+  model: "gpt-4"
+  systemPromptPath: "./prompts/system.md"
+  tokenLimit: 20000
+workspace:
+  repoPath: "./data"
+  workspacesDir: "workspaces"
+selfResearch:
+  enabled: true
+  model: ""
+  rssFeeds:
+    - url: "https://example.com/feed.xml"
+`;
+
+  await withTestConfig(config, async (dir) => {
+    const result = await loadConfig(dir);
+    assertEquals(result.selfResearch?.enabled, false);
+  });
+});
+
+Deno.test("Config - selfResearch clamps minIntervalMs to 1 hour", async () => {
+  const config = `
+platforms:
+  discord:
+    token: "test-token"
+    enabled: true
+  misskey:
+    enabled: false
+agent:
+  model: "gpt-4"
+  systemPromptPath: "./prompts/system.md"
+  tokenLimit: 20000
+workspace:
+  repoPath: "./data"
+  workspacesDir: "workspaces"
+selfResearch:
+  enabled: false
+  model: "gpt-5-mini"
+  rssFeeds: []
+  minIntervalMs: 1000
+  maxIntervalMs: 86400000
+`;
+
+  await withTestConfig(config, async (dir) => {
+    const result = await loadConfig(dir);
+    assertEquals(result.selfResearch?.minIntervalMs, 3600000);
+  });
+});
+
+Deno.test("Config - selfResearch swaps min/max interval when reversed", async () => {
+  const config = `
+platforms:
+  discord:
+    token: "test-token"
+    enabled: true
+  misskey:
+    enabled: false
+agent:
+  model: "gpt-4"
+  systemPromptPath: "./prompts/system.md"
+  tokenLimit: 20000
+workspace:
+  repoPath: "./data"
+  workspacesDir: "workspaces"
+selfResearch:
+  enabled: false
+  model: "gpt-5-mini"
+  rssFeeds: []
+  minIntervalMs: 86400000
+  maxIntervalMs: 43200000
+`;
+
+  await withTestConfig(config, async (dir) => {
+    const result = await loadConfig(dir);
+    assertEquals(result.selfResearch?.minIntervalMs, 43200000);
+    assertEquals(result.selfResearch?.maxIntervalMs, 86400000);
+  });
+});
+
+Deno.test("Config - selfResearch merges partial config with defaults", async () => {
+  const config = `
+platforms:
+  discord:
+    token: "test-token"
+    enabled: true
+  misskey:
+    enabled: false
+agent:
+  model: "gpt-4"
+  systemPromptPath: "./prompts/system.md"
+  tokenLimit: 20000
+workspace:
+  repoPath: "./data"
+  workspacesDir: "workspaces"
+selfResearch:
+  enabled: false
+  model: "gpt-5-mini"
+`;
+
+  await withTestConfig(config, async (dir) => {
+    const result = await loadConfig(dir);
+    assertEquals(result.selfResearch?.enabled, false);
+    assertEquals(result.selfResearch?.model, "gpt-5-mini");
+    assertEquals(result.selfResearch?.rssFeeds, []);
+    assertEquals(result.selfResearch?.minIntervalMs, 43200000);
+    assertEquals(result.selfResearch?.maxIntervalMs, 86400000);
+  });
+});
+
+Deno.test("Config - selfResearch filters out empty url feeds", async () => {
+  const config = `
+platforms:
+  discord:
+    token: "test-token"
+    enabled: true
+  misskey:
+    enabled: false
+agent:
+  model: "gpt-4"
+  systemPromptPath: "./prompts/system.md"
+  tokenLimit: 20000
+workspace:
+  repoPath: "./data"
+  workspacesDir: "workspaces"
+selfResearch:
+  enabled: true
+  model: "gpt-5-mini"
+  rssFeeds:
+    - url: "https://example.com/feed.xml"
+    - url: ""
+    - url: "https://example.org/rss"
+`;
+
+  await withTestConfig(config, async (dir) => {
+    const result = await loadConfig(dir);
+    assertEquals(result.selfResearch?.enabled, true);
+    assertEquals(result.selfResearch?.rssFeeds.length, 2);
+  });
+});
