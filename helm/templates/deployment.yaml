@@ -45,9 +45,12 @@ spec:
             - name: data
               mountPath: /app/data
             {{- if .Values.prompts.enabled }}
+            {{- range $filename, $content := .Values.prompts.files }}
             - name: prompts
-              mountPath: /app/prompts
+              mountPath: /app/prompts/{{ $filename }}
+              subPath: {{ $filename }}
               readOnly: true
+            {{- end }}
             {{- end }}
             {{- if .Values.openCodeAuth.enabled }}
             - name: opencode-auth

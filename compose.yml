@@ -13,9 +13,19 @@ services:
     volumes:
       - data:/app/data:Z  # Contains workspaces/ and agent-workspace/
       # - ./config.yaml:/app/config.yaml:ro,Z
-      # Mount custom prompts directory (optional, comment out to use defaults)
-      # Ensure you provide all required prompt files (system.md and fragments)
-      # - ./prompts:/app/prompts:ro,Z
+      # Mount individual prompt files (optional, comment out to use defaults)
+      # Only the files you mount will be overridden; others keep their container defaults.
+      # - ./prompts/system.md:/app/prompts/system.md:ro,Z
+      # - ./prompts/character_name.md:/app/prompts/character_name.md:ro,Z
+      # - ./prompts/character_info.md:/app/prompts/character_info.md:ro,Z
+      # - ./prompts/character_personality.md:/app/prompts/character_personality.md:ro,Z
+      # - ./prompts/character_speaking_style.md:/app/prompts/character_speaking_style.md:ro,Z
+      # - ./prompts/character_reference_terms.md:/app/prompts/character_reference_terms.md:ro,Z
+      # - ./prompts/agent_workspace.md:/app/prompts/agent_workspace.md:ro,Z
+      # - ./prompts/browser_automation.md:/app/prompts/browser_automation.md:ro,Z
+      # - ./prompts/system_prompt_override.md:/app/prompts/system_prompt_override.md:ro,Z
+      # - ./prompts/system_self_research.md:/app/prompts/system_self_research.md:ro,Z
+      # - ./prompts/system_memory_maintenance.md:/app/prompts/system_memory_maintenance.md:ro,Z
       # OpenCode auth state (writable - contains OAuth refresh tokens renewed by OpenCode CLI)
       # - ${HOME}/.local/share/opencode/auth.json:/home/deno/.local/share/opencode/auth.json:Z
 

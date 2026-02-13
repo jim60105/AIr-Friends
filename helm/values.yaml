@@ -98,15 +98,14 @@ persistence:
   # -- Use an existing PVC instead of creating a new one.
   existingClaim: ''
 
-# -- Mount custom prompts directory via a ConfigMap.
-# Set enabled=true and provide prompt file contents to override the default prompts bundled in the image.
+# -- Mount custom prompt files via a ConfigMap.
+# Set enabled=true and provide prompt file contents to override specific prompt files.
+# Only the files you specify will be overridden; others keep their container defaults.
 prompts:
   enabled: false
   # -- Map of filename -> content for prompt files to mount at /app/prompts.
-  # At minimum provide system.md and all fragment files referenced in it.
+  # Only include the files you want to override.
   files: {}
-  #   system.md: |
-  #     You are {{character_name}}. {{character_info}}
   #   character_name.md: |
   #     Yuna
   #   character_info.md: |

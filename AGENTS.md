@@ -651,9 +651,9 @@ You are Yuna. An AI assistant
 
 **Custom Prompts:**
 
-- Users can mount their own prompts directory to `/app/prompts:ro` without rebuilding
-- Custom mounts completely override defaults (ensure all required files are provided)
-- Missing fragment files result in unresolved placeholders and warnings in logs
+- Users can mount individual prompt files to `/app/prompts/<filename>:ro` without rebuilding
+- Only the files you mount will be overridden; others keep their container defaults
+- No need to provide all files — unmounted files retain the bundled defaults
 
 **Container Binaries:**
 
@@ -671,7 +671,9 @@ You are Yuna. An AI assistant
 volumes:
   - ./data:/app/data:Z
   - ./config.yaml:/app/config.yaml:ro,Z
-  - ./my-prompts:/app/prompts:ro,Z # Custom prompts
+  # Mount only the prompt files you want to override
+  - ./my-prompts/character_name.md:/app/prompts/character_name.md:ro,Z
+  - ./my-prompts/character_info.md:/app/prompts/character_info.md:ro,Z
 ```
 
 ### Adding New Placeholders

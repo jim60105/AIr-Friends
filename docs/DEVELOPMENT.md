@@ -337,7 +337,7 @@ When running AIr-Friends in a container, you can customize the bot's character b
 
    Edit `my-custom-prompts/character_name.md`, `my-custom-prompts/character_info.md`, etc. to customize your bot's character.
 
-3. **Mount your custom prompts directory when running the container:**
+3. **Mount your custom prompt files when running the container:**
 
    Using `podman run`:
 
@@ -345,26 +345,25 @@ When running AIr-Friends in a container, you can customize the bot's character b
    podman run -d --rm \
      -v data:/app/data \
      -v ./config.yaml:/app/config.yaml:ro \
-     -v ./my-custom-prompts:/app/prompts:ro \
+     -v ./my-custom-prompts/character_name.md:/app/prompts/character_name.md:ro \
+     -v ./my-custom-prompts/character_info.md:/app/prompts/character_info.md:ro \
      --env-file .env \
      --name air-friends \
      ghcr.io/jim60105/air-friends:latest
    ```
 
-   Using `compose.yml` (already configured):
+   Using `compose.yml`:
 
    ```yaml
    volumes:
-     - ./prompts:/app/prompts:ro,Z # Mount your custom prompts
+     # Mount only the prompt files you want to override
+     - ./prompts/character_name.md:/app/prompts/character_name.md:ro,Z
+     - ./prompts/character_info.md:/app/prompts/character_info.md:ro,Z
    ```
 
-> [!IMPORTANT]  
-> When mounting custom prompts, ensure you provide **all required files**:
->
-> - `system.md` - Main system prompt template
-> - All fragment files referenced in `system.md` (e.g., `character_name.md`, `character_info.md`, etc.)
->
-> Missing files will result in unresolved `{{placeholders}}` in the system prompt.
+> [!TIP]
+> Only the files you mount will be overridden. Files you don't mount keep their container defaults,
+> so there's no need to provide all prompt files.
 
 4. **Restart the container** to apply the changes:
 
@@ -372,7 +371,7 @@ When running AIr-Friends in a container, you can customize the bot's character b
    podman compose down && podman compose up -d
    ```
 
-The container includes default prompts that will be used if you don't mount a custom prompts directory.
+The container includes default prompts that will be used if you don't mount any custom prompt files.
 
 ## Testing
 
