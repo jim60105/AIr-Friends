@@ -59,6 +59,19 @@ export interface MCPCapabilities {
 }
 
 /**
+ * Prompt content capabilities (image, audio, embeddedContext)
+ * Reported by Agent during initialization
+ */
+export interface PromptCapabilities {
+  /** Agent supports ContentBlock::Image in prompt requests */
+  image?: boolean;
+  /** Agent supports ContentBlock::Audio in prompt requests */
+  audio?: boolean;
+  /** Agent supports ContentBlock::Resource (embedded context) */
+  embeddedContext?: boolean;
+}
+
+/**
  * Agent capabilities reported during initialization
  */
 export interface AgentCapabilities {
@@ -66,6 +79,8 @@ export interface AgentCapabilities {
   loadSession?: boolean;
   /** MCP transport capabilities */
   mcpCapabilities?: MCPCapabilities;
+  /** Prompt content type capabilities */
+  promptCapabilities?: PromptCapabilities;
 }
 
 /**

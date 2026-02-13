@@ -127,6 +127,7 @@ export class ContextAssembler {
       content: event.content,
       timestamp: event.timestamp,
       isBot: false,
+      attachments: event.attachments,
     };
 
     // Estimate token count
@@ -350,8 +351,7 @@ export class ContextAssembler {
       lines.push("## Recent Conversation");
       lines.push("");
       for (const msg of recentMessages) {
-        const prefix = msg.isBot ? "[Bot]" : "[User]";
-        lines.push(`${prefix} ${msg.username}: ${msg.content}`);
+        lines.push(this.formatMessageLine(msg));
       }
       lines.push("");
     }
@@ -361,8 +361,7 @@ export class ContextAssembler {
       lines.push("## Related Messages from this Server");
       lines.push("");
       for (const msg of relatedMessages) {
-        const prefix = msg.isBot ? "[Bot]" : "[User]";
-        lines.push(`${prefix} ${msg.username}: ${msg.content}`);
+        lines.push(this.formatMessageLine(msg));
       }
       lines.push("");
     }
@@ -390,8 +389,7 @@ export class ContextAssembler {
     const recentTokens: number[] = [];
 
     for (const msg of recentMessages) {
-      const prefix = msg.isBot ? "[Bot]" : "[User]";
-      const line = `${prefix} ${msg.username}: ${msg.content}`;
+      const line = this.formatMessageLine(msg);
       formattedRecent.push(line);
       recentTokens.push(estimateTokens(line));
     }
@@ -401,8 +399,7 @@ export class ContextAssembler {
 
     if (relatedMessages) {
       for (const msg of relatedMessages) {
-        const prefix = msg.isBot ? "[Bot]" : "[User]";
-        const line = `${prefix} ${msg.username}: ${msg.content}`;
+        const line = this.formatMessageLine(msg);
         formattedRelated.push(line);
         relatedTokens.push(estimateTokens(line));
       }
@@ -508,7 +505,17 @@ export class ContextAssembler {
    * Format trigger message section
    */
   private formatTriggerSection(triggerMessage: PlatformMessage): string {
-    return `## Current Message\n\n${triggerMessage.username}: ${triggerMessage.content}\n`;
+    let section = `## Current Message\n\n${triggerMessage.username}: ${triggerMessage.content}`;
+
+    if (triggerMessage.attachments && triggerMessage.attachments.length > 0) {
+      const attachmentDescs = triggerMessage.attachments.map((att) => {
+        const sizeStr = att.size ? ` ${formatFileSize(att.size)}` : "";
+        return `📎 ${att.filename} (${att.mimeType}${sizeStr}) ${att.url}`;
+      });
+      section += `\n  Attachments: ${attachmentDescs.join(" | ")}`;
+    }
+
+    return section + "\n";
   }
 
   /**
@@ -676,6 +683,24 @@ export class ContextAssembler {
   }
 
   /**
+   * Format a single message line with optional attachment descriptions
+   */
+  private formatMessageLine(msg: PlatformMessage): string {
+    const prefix = msg.isBot ? "[Bot]" : "[User]";
+    let line = `${prefix} ${msg.username}: ${msg.content}`;
+
+    if (msg.attachments && msg.attachments.length > 0) {
+      const attachmentDescs = msg.attachments.map((att) => {
+        const sizeStr = att.size ? ` ${formatFileSize(att.size)}` : "";
+        return `📎 ${att.filename} (${att.mimeType}${sizeStr}) ${att.url}`;
+      });
+      line += `\n  Attachments: ${attachmentDescs.join(" | ")}`;
+    }
+
+    return line;
+  }
+
+  /**
    * Apply /clear command to recent messages.
    *
    * If any message content starts with "/clear", drop that message and
@@ -700,4 +725,13 @@ export class ContextAssembler {
     // Return only messages after the /clear message
     return messages.slice(lastClearIndex + 1);
   }
+}
+
+/**
+ * Format file size in human-readable format
+ */
+function formatFileSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes}B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)}KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)}MB`;
 }

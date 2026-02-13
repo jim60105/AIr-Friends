@@ -31,6 +31,7 @@ function createMockMessage(overrides: Record<string, unknown> = {}): any {
     mentions: {
       users: new Map(),
     },
+    attachments: new Map(),
     ...overrides,
   };
 }

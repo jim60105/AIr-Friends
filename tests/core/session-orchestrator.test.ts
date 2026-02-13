@@ -430,6 +430,10 @@ class MockAgentConnector {
     await Promise.resolve();
   }
 
+  supportsImageContent(): boolean {
+    return false;
+  }
+
   async createSession(): Promise<string> {
     return await Promise.resolve(this.sessionId);
   }

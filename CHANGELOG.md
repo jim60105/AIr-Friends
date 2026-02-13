@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Added multimedia message handling: support for image and file attachments in platform messages
+  - New `Attachment` type in `NormalizedEvent` and `PlatformMessage`
+  - Discord and Misskey adapters extract attachment metadata (URL, MIME type, filename, size)
+  - Attachment text descriptions (with URLs) always included in context for all messages
+  - Image `ContentBlock` sent to ACP Agent when `promptCapabilities.image` is supported
+  - Capability negotiation via `AgentConnector.supportsImageContent()`
+  - `prompt()` method now accepts `string | ContentBlock[]` (backward compatible)
+  - 20MB size limit and 10s download timeout for image fetching
+- Added `PromptCapabilities` type to ACP types for image/audio/embeddedContext capability tracking
+- Added BDD feature spec: `docs/features/18-multimedia-message.feature`
 - Added `memory-stats` skill for workspace memory statistics (total, enabled, disabled, high/normal importance counts)
 - Added rate limiting & cooldown mechanism to prevent excessive API usage per user (`rateLimit` config section)
 
