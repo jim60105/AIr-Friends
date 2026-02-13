@@ -899,3 +899,47 @@ Deno.test("ContextAssembler - formatContext includes emoji section in token budg
     assertStringIncludes(formatted.userMessage, "test_emoji");
   });
 });
+Deno.test('ContextAssembler - formatContext includes attachment descriptions', async () => {
+  await withTestContextAssembler(async (assembler) => {
+    const event = createTestEvent();
+    const workspace = await assembler['manager'].getOrCreateWorkspace(event).catch(async ()=>{
+      // fallback to creating new manager path
+      const mgr = new (await import('../../src/core/workspace-manager.ts')).WorkspaceManager({repoPath: await Deno.makeTempDir(), workspacesDir: 'workspaces'});
+      return mgr.getOrCreateWorkspace(event);
+    });
+    const fetcher = createMockMessageFetcher([
+      createTestMessage({
+        content: 'Check this image',
+        attachments: [{ id: 'att1', url: 'https://example.com/photo.png', mimeType: 'image/png', filename: 'photo.png', size: 1048576, isImage: true }],
+        username: 'Alice',
+      }),
+    ]);
+
+    const context = await assembler.assembleContext(event, workspace as any, fetcher);
+    const formatted = assembler.formatContext(context);
+
+    assertStringIncludes(formatted.userMessage, 'Attachments:');
+    assertStringIncludes(formatted.userMessage, '📎 photo.png (image/png) https://example.com/photo.png');
+  });
+});
+
+Deno.test('ContextAssembler - formatContext without attachments omits section', async () => {
+  await withTestContextAssembler(async (assembler) => {
+    const event = createTestEvent();
+    const workspace = await assembler['manager'].getOrCreateWorkspace(event).catch(async ()=>{
+      const mgr = new (await import('../../src/core/workspace-manager.ts')).WorkspaceManager({repoPath: await Deno.makeTempDir(), workspacesDir: 'workspaces'});
+      return mgr.getOrCreateWorkspace(event);
+    });
+    const fetcher = createMockMessageFetcher([
+      createTestMessage({ content: 'No attachments here', username: 'Bob' }),
+    ]);
+
+    const context = await assembler.assembleContext(event, workspace as any, fetcher);
+    const formatted = assembler.formatContext(context);
+
+    // Should not include Attachments section
+    if (formatted.userMessage.includes('Attachments:')) {
+      throw new Error('Attachments section should not be present');
+    }
+  });
+});
