@@ -130,6 +130,7 @@ Deno.test("SessionOrchestrator - constructs successfully", async () => {
       skillRegistry,
       config,
       sessionRegistry,
+      memoryStore,
     );
 
     assertExists(orchestrator);
@@ -176,6 +177,7 @@ Deno.test("SessionOrchestrator - processMessage creates workspace", async () => 
       skillRegistry,
       config,
       sessionRegistry,
+      memoryStore,
     );
 
     const event = createTestEvent();
@@ -240,6 +242,7 @@ Deno.test("SessionOrchestrator - skips agent execution for /clear command", asyn
       skillRegistry,
       config,
       sessionRegistry,
+      memoryStore,
     );
 
     const event = createTestEvent();
@@ -302,6 +305,7 @@ Deno.test("SessionOrchestrator - handles /clear with leading whitespace", async 
       skillRegistry,
       config,
       sessionRegistry,
+      memoryStore,
     );
 
     const event = createTestEvent();
@@ -355,6 +359,7 @@ Deno.test("SessionOrchestrator - processMessage handles agent failure gracefully
       skillRegistry,
       config,
       sessionRegistry,
+      memoryStore,
     );
 
     const event = createTestEvent();
@@ -515,6 +520,7 @@ async function createTestableOrchestrator(tempDir: string, options?: { skillApi?
     skillRegistry,
     config,
     sessionRegistry,
+    memoryStore,
   );
 
   return { orchestrator, skillRegistry, workspaceManager, sessionRegistry };
@@ -979,6 +985,7 @@ Deno.test("SessionOrchestrator - processSpontaneousPost with skillApi disabled",
       skillRegistry,
       config,
       sessionRegistry,
+      memoryStore,
     );
 
     const platformAdapter = new MockPlatformAdapter() as unknown as PlatformAdapter;
@@ -1231,6 +1238,7 @@ Deno.test("SessionOrchestrator - processSelfResearch handles agent connection fa
       skillRegistry,
       config,
       sessionRegistry,
+      memoryStore,
     );
 
     const response = await orchestrator.processSelfResearch(

@@ -9,6 +9,7 @@ import {
 } from "@acp/agent-factory.ts";
 import { ContextAssembler } from "./context-assembler.ts";
 import { WorkspaceManager } from "./workspace-manager.ts";
+import { MemoryStore } from "./memory-store.ts";
 import { loadPromptFragments, replacePlaceholders } from "./config-loader.ts";
 import type { SkillRegistry } from "@skills/registry.ts";
 import type { SessionRegistry } from "../skill-api/session-registry.ts";
@@ -18,6 +19,7 @@ import type { PlatformAdapter } from "@platforms/platform-adapter.ts";
 import type { AgentConnectorOptions, ClientConfig } from "@acp/types.ts";
 import { dirname, join } from "@std/path";
 import type { RssItem } from "@utils/rss-fetcher.ts";
+import type { WorkspaceInfo } from "../types/workspace.ts";
 
 const logger = createLogger("SessionOrchestrator");
 
@@ -40,6 +42,7 @@ export class SessionOrchestrator {
   private contextAssembler: ContextAssembler;
   private skillRegistry: SkillRegistry;
   private sessionRegistry: SessionRegistry;
+  private memoryStore: MemoryStore;
   private config: Config;
   private yolo: boolean;
 
@@ -49,12 +52,14 @@ export class SessionOrchestrator {
     skillRegistry: SkillRegistry,
     config: Config,
     sessionRegistry: SessionRegistry,
+    memoryStore: MemoryStore,
     yolo = false,
   ) {
     this.workspaceManager = workspaceManager;
     this.contextAssembler = contextAssembler;
     this.skillRegistry = skillRegistry;
     this.sessionRegistry = sessionRegistry;
+    this.memoryStore = memoryStore;
     this.config = config;
     this.yolo = yolo;
   }
@@ -710,7 +715,11 @@ export class SessionOrchestrator {
         sessionLogger.info("Shell session registered", { shellSessionId });
       }
 
-      const fullPrompt = await this.buildMemoryMaintenancePrompt(workspaceKey, shellSessionId);
+      const fullPrompt = await this.buildMemoryMaintenancePrompt(
+        workspaceKey,
+        shellSessionId,
+        workspace,
+      );
 
       const clientConfig: ClientConfig = {
         workingDir: workspace.path,
@@ -937,6 +946,7 @@ export class SessionOrchestrator {
   private async buildMemoryMaintenancePrompt(
     workspaceKey: string,
     sessionId: string | null,
+    workspace: WorkspaceInfo,
   ): Promise<string> {
     const promptDir = dirname(this.config.agent.systemPromptPath);
     const instructionsPath = join(promptDir, "system_memory_maintenance.md");
@@ -947,6 +957,50 @@ export class SessionOrchestrator {
     instructions = instructions.replaceAll("{workspace_key}", workspaceKey);
     instructions = instructions.replaceAll("{session_id}", sessionId ?? "");
 
+    // Load all enabled memories and embed them in the prompt
+    const memoriesDump = await this.serializeAllMemories(workspace);
+    instructions = instructions.replaceAll("{memories_dump}", memoriesDump);
+
     return instructions.trim();
+  }
+
+  /**
+   * Load all enabled memories from a workspace and serialize as JSON for prompt injection
+   */
+  private async serializeAllMemories(workspace: WorkspaceInfo): Promise<string> {
+    const visibilities: import("../types/memory.ts").MemoryVisibility[] = workspace.isDm
+      ? ["public", "private"]
+      : ["public"];
+
+    const allMemories: {
+      id: string;
+      visibility: string;
+      importance: string;
+      content: string;
+      createdAt: string;
+    }[] = [];
+
+    for (const visibility of visibilities) {
+      const memories = await this.memoryStore.loadAllMemories(workspace, visibility);
+      for (const m of memories) {
+        if (!m.enabled) continue;
+        allMemories.push({
+          id: m.id,
+          visibility: m.visibility,
+          importance: m.importance,
+          content: m.content,
+          createdAt: m.createdAt,
+        });
+      }
+    }
+
+    // Sort by creation date ascending
+    allMemories.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+
+    if (allMemories.length === 0) {
+      return "(No enabled memories found)";
+    }
+
+    return JSON.stringify(allMemories, null, 2);
   }
 }

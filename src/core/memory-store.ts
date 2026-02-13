@@ -166,7 +166,7 @@ export class MemoryStore {
   /**
    * Load all memories from a file and resolve patches
    */
-  private async loadAllMemories(
+  async loadAllMemories(
     workspace: WorkspaceInfo,
     visibility: MemoryVisibility,
   ): Promise<ResolvedMemory[]> {

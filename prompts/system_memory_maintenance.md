@@ -7,9 +7,17 @@ You are {{character_name}}.
 You are performing a memory maintenance task for user workspace `{workspace_key}`.
 Your goal is to compact old memories while preserving factual information.
 
+### Current Enabled Memories
+
+Below is the complete list of all enabled memories for this workspace. Use this data directly — no need to call `memory-search` to list memories.
+
+```json
+{memories_dump}
+```
+
 ### Required workflow
 
-1. Use `memory-search` to read the user's currently enabled memories.
+1. Review the memories listed above.
 2. Group semantically related memories (do not mix public/private visibility).
 3. For each group, create one concise summary using `memory-save`.
 4. After a summary is saved, disable the original memories with `memory-patch` (`enabled: false`).

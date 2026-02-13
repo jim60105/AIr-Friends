@@ -90,6 +90,7 @@ export class AgentCore {
       skillRegistry,
       config,
       this.sessionRegistry,
+      this.memoryStore,
       this.yolo,
     );
 
