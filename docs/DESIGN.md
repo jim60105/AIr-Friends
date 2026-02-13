@@ -905,7 +905,7 @@ The self-research feature allows the agent to autonomously build knowledge by pe
 | RSS Fetcher | `src/utils/rss-fetcher.ts` | Fetch and parse RSS 2.0 / Atom feeds |
 | Scheduler | `src/core/self-research-scheduler.ts` | Timer management (mirrors SpontaneousScheduler) |
 | Session Flow | `src/core/session-orchestrator.ts` | `processSelfResearch()` method |
-| Prompt | `prompts/self_research_instructions.md` | Research instructions with character placeholders |
+| Prompt | `prompts/system_self_research.md` | Research instructions with character placeholders |
 
 ### Flow
 

@@ -1094,9 +1094,9 @@ Deno.test("SessionOrchestrator - processSelfResearch creates workspace and runs 
   try {
     const { orchestrator, sessionRegistry } = await createTestableOrchestrator(tempDir);
 
-    // Create self_research_instructions.md prompt file
+    // Create system_self_research.md prompt file
     await Deno.writeTextFile(
-      `${tempDir}/prompts/self_research_instructions.md`,
+      `${tempDir}/prompts/system_self_research.md`,
       "Research instructions for {{character_name}}\n{rss_items_placeholder}",
     );
 
@@ -1145,7 +1145,7 @@ Deno.test("SessionOrchestrator - processSelfResearch returns error on cancelled 
     const { orchestrator, sessionRegistry } = await createTestableOrchestrator(tempDir);
 
     await Deno.writeTextFile(
-      `${tempDir}/prompts/self_research_instructions.md`,
+      `${tempDir}/prompts/system_self_research.md`,
       "Research instructions\n{rss_items_placeholder}",
     );
 
@@ -1211,7 +1211,7 @@ Deno.test("SessionOrchestrator - processSelfResearch handles agent connection fa
       "You are a helpful assistant.",
     );
     await Deno.writeTextFile(
-      `${tempDir}/prompts/self_research_instructions.md`,
+      `${tempDir}/prompts/system_self_research.md`,
       "Research\n{rss_items_placeholder}",
     );
 
@@ -1261,7 +1261,7 @@ Deno.test("SessionOrchestrator - processSelfResearch formats RSS items in prompt
     const { orchestrator, sessionRegistry } = await createTestableOrchestrator(tempDir);
 
     await Deno.writeTextFile(
-      `${tempDir}/prompts/self_research_instructions.md`,
+      `${tempDir}/prompts/system_self_research.md`,
       "# Research\n\n{rss_items_placeholder}\n\n## End",
     );
 
@@ -1321,7 +1321,7 @@ Deno.test("SessionOrchestrator - processSelfResearch without skillApi", async ()
     });
 
     await Deno.writeTextFile(
-      `${tempDir}/prompts/self_research_instructions.md`,
+      `${tempDir}/prompts/system_self_research.md`,
       "Research\n{rss_items_placeholder}",
     );
 

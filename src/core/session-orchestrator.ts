@@ -761,13 +761,13 @@ export class SessionOrchestrator {
     rssItems: RssItem[],
     sessionId: string | null,
   ): Promise<string> {
-    // Read self_research_instructions.md
+    // Read system_self_research.md
     const promptDir = dirname(this.config.agent.systemPromptPath);
-    const instructionsPath = join(promptDir, "self_research_instructions.md");
+    const instructionsPath = join(promptDir, "system_self_research.md");
     let instructions = await Deno.readTextFile(instructionsPath);
 
     // Replace {{placeholder}} tokens using the same prompt fragment mechanism
-    const fragments = await loadPromptFragments(promptDir, "self_research_instructions.md");
+    const fragments = await loadPromptFragments(promptDir, "system_self_research.md");
     instructions = replacePlaceholders(instructions, fragments);
 
     // Format RSS items

@@ -565,7 +565,7 @@ selfResearch:
 - `src/core/self-research-scheduler.ts` — Timer management
 - `src/utils/rss-fetcher.ts` — RSS/Atom feed fetching and parsing
 - `SessionOrchestrator.processSelfResearch()` — Research session flow
-- `prompts/self_research_instructions.md` — Research prompt template
+- `prompts/system_self_research.md` — Research prompt template
 
 ## Prompt Template System
 
