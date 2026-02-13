@@ -31,6 +31,8 @@ export class AgentCore {
   private orchestrator: SessionOrchestrator;
   private replyPolicy: ReplyPolicyEvaluator;
   private yolo: boolean;
+  private workspaceManager: WorkspaceManager;
+  private memoryStore: MemoryStore;
 
   constructor(config: Config, yolo = false) {
     this.config = config;
@@ -39,19 +41,19 @@ export class AgentCore {
     logger.info("Initializing Agent Core", { yolo });
 
     // Initialize workspace manager
-    const workspaceManager = new WorkspaceManager({
+    this.workspaceManager = new WorkspaceManager({
       repoPath: config.workspace.repoPath,
       workspacesDir: config.workspace.workspacesDir,
     });
 
     // Initialize memory store
-    const memoryStore = new MemoryStore(workspaceManager, {
+    this.memoryStore = new MemoryStore(this.workspaceManager, {
       searchLimit: config.memory.searchLimit,
       maxChars: config.memory.maxChars,
     });
 
     // Initialize skill registry
-    const skillRegistry = new SkillRegistry(memoryStore);
+    const skillRegistry = new SkillRegistry(this.memoryStore);
 
     // Initialize session registry
     this.sessionRegistry = new SessionRegistry();
@@ -74,7 +76,7 @@ export class AgentCore {
     }
 
     // Initialize context assembler
-    const contextAssembler = new ContextAssembler(memoryStore, {
+    const contextAssembler = new ContextAssembler(this.memoryStore, {
       systemPromptPath: config.agent.systemPromptPath,
       recentMessageLimit: config.memory.recentMessageLimit,
       tokenLimit: config.agent.tokenLimit,
@@ -83,7 +85,7 @@ export class AgentCore {
 
     // Initialize orchestrator
     this.orchestrator = new SessionOrchestrator(
-      workspaceManager,
+      this.workspaceManager,
       contextAssembler,
       skillRegistry,
       config,
@@ -198,6 +200,20 @@ export class AgentCore {
    */
   getOrchestrator(): SessionOrchestrator {
     return this.orchestrator;
+  }
+
+  /**
+   * Get the workspace manager.
+   */
+  getWorkspaceManager(): WorkspaceManager {
+    return this.workspaceManager;
+  }
+
+  /**
+   * Get the memory store.
+   */
+  getMemoryStore(): MemoryStore {
+    return this.memoryStore;
   }
 
   /**

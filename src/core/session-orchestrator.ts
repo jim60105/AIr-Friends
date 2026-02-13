@@ -12,7 +12,7 @@ import { WorkspaceManager } from "./workspace-manager.ts";
 import { loadPromptFragments, replacePlaceholders } from "./config-loader.ts";
 import type { SkillRegistry } from "@skills/registry.ts";
 import type { SessionRegistry } from "../skill-api/session-registry.ts";
-import type { Config, SelfResearchConfig } from "../types/config.ts";
+import type { Config, MemoryMaintenanceConfig, SelfResearchConfig } from "../types/config.ts";
 import type { NormalizedEvent, Platform } from "../types/events.ts";
 import type { PlatformAdapter } from "@platforms/platform-adapter.ts";
 import type { AgentConnectorOptions, ClientConfig } from "@acp/types.ts";
@@ -652,6 +652,139 @@ export class SessionOrchestrator {
   }
 
   /**
+   * Process a memory maintenance session for one workspace.
+   * The agent summarizes/compacts memories and patches originals using memory skills.
+   */
+  async processMemoryMaintenance(
+    workspaceKey: string,
+    memoryMaintenanceConfig: MemoryMaintenanceConfig,
+  ): Promise<SessionResponse> {
+    const sessionLoggerName = `memory-maintenance:${workspaceKey}`;
+    const sessionLogger = logger.child(sessionLoggerName);
+
+    const [platformStr, userId] = workspaceKey.split("/");
+    if ((platformStr !== "discord" && platformStr !== "misskey") || !userId) {
+      return {
+        success: false,
+        replySent: false,
+        error: `Invalid workspace key: ${workspaceKey}`,
+      };
+    }
+    const platform = platformStr;
+
+    sessionLogger.info("Processing memory maintenance session", {
+      workspaceKey,
+      model: memoryMaintenanceConfig.model,
+    });
+
+    try {
+      // Create synthetic DM event to ensure private memory access
+      const syntheticEvent: NormalizedEvent = {
+        platform,
+        channelId: "internal",
+        userId,
+        messageId: `maintenance_${Date.now()}`,
+        isDm: true,
+        guildId: "",
+        content: "",
+        timestamp: new Date(),
+      };
+      const workspace = await this.workspaceManager.getOrCreateWorkspace(syntheticEvent);
+      const agentWorkspacePath = await this.workspaceManager.getOrCreateAgentWorkspace();
+
+      let shellSessionId: string | null = null;
+      if (this.config.skillApi?.enabled) {
+        shellSessionId = this.sessionRegistry.register({
+          platform,
+          channelId: "internal",
+          userId,
+          isDm: true,
+          workspace,
+          platformAdapter: undefined as unknown as PlatformAdapter,
+          timeoutMs: this.config.skillApi.sessionTimeoutMs,
+          agentWorkspacePath,
+        });
+
+        const sessionIdFile = join(workspace.path, "SESSION_ID");
+        await Deno.writeTextFile(sessionIdFile, shellSessionId);
+        sessionLogger.info("Shell session registered", { shellSessionId });
+      }
+
+      const fullPrompt = await this.buildMemoryMaintenancePrompt(workspaceKey, shellSessionId);
+
+      const clientConfig: ClientConfig = {
+        workingDir: workspace.path,
+        agentWorkspacePath,
+        platform,
+        userId,
+        channelId: "internal",
+        isDM: true,
+        yolo: this.yolo,
+      };
+
+      const agentType = getDefaultAgentType(this.config);
+      const connector = this.createConnector({
+        agentConfig: createAgentConfig(
+          agentType,
+          workspace.path,
+          this.config,
+          this.yolo,
+          agentWorkspacePath,
+        ),
+        clientConfig,
+        skillRegistry: this.skillRegistry,
+        logger: sessionLogger,
+      });
+
+      try {
+        await connector.connect();
+        sessionLogger.info("Agent connected");
+
+        const sessionId = await connector.createSession();
+        await connector.setSessionModel(sessionId, memoryMaintenanceConfig.model);
+
+        const response = await connector.prompt(sessionId, fullPrompt);
+        sessionLogger.info("Memory maintenance session completed", {
+          stopReason: response.stopReason,
+        });
+
+        const success = response.stopReason === "end_turn";
+        return {
+          success,
+          replySent: false,
+          error: success ? undefined : `Unexpected stop reason: ${response.stopReason}`,
+        };
+      } finally {
+        await connector.disconnect();
+        sessionLogger.debug("Agent disconnected");
+
+        if (shellSessionId) {
+          this.sessionRegistry.remove(shellSessionId);
+          const sessionIdFile = join(workspace.path, "SESSION_ID");
+          try {
+            await Deno.remove(sessionIdFile);
+          } catch (error) {
+            if (!(error instanceof Deno.errors.NotFound)) {
+              sessionLogger.warn("Failed to remove SESSION_ID file", {
+                error: error instanceof Error ? error.message : String(error),
+              });
+            }
+          }
+        }
+      }
+    } catch (error) {
+      sessionLogger.error("Memory maintenance session failed", {
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return {
+        success: false,
+        replySent: false,
+        error: error instanceof Error ? error.message : "Unknown error",
+      };
+    }
+  }
+
+  /**
    * Create an AgentConnector instance.
    * Protected to allow test subclasses to inject mocks.
    */
@@ -796,5 +929,24 @@ export class SessionOrchestrator {
     }
 
     return parts.join("\n");
+  }
+
+  /**
+   * Build the full prompt for a memory maintenance session
+   */
+  private async buildMemoryMaintenancePrompt(
+    workspaceKey: string,
+    sessionId: string | null,
+  ): Promise<string> {
+    const promptDir = dirname(this.config.agent.systemPromptPath);
+    const instructionsPath = join(promptDir, "system_memory_maintenance.md");
+    let instructions = await Deno.readTextFile(instructionsPath);
+
+    const fragments = await loadPromptFragments(promptDir, "system_memory_maintenance.md");
+    instructions = replacePlaceholders(instructions, fragments);
+    instructions = instructions.replaceAll("{workspace_key}", workspaceKey);
+    instructions = instructions.replaceAll("{session_id}", sessionId ?? "");
+
+    return instructions.trim();
   }
 }

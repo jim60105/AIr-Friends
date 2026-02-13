@@ -274,3 +274,31 @@ Deno.test("applyEnvOverrides - SELF_RESEARCH_MIN_INTERVAL_MS sets number", () =>
     Deno.env.delete("SELF_RESEARCH_MIN_INTERVAL_MS");
   }
 });
+
+Deno.test("applyEnvOverrides - MEMORY_MAINTENANCE_ENABLED sets memoryMaintenance.enabled", () => {
+  Deno.env.set("MEMORY_MAINTENANCE_ENABLED", "true");
+  try {
+    const config: Record<string, unknown> = {
+      memoryMaintenance: { enabled: false },
+    };
+    applyEnvOverrides(config);
+    const mm = config.memoryMaintenance as { enabled: boolean };
+    assertEquals(mm.enabled, true);
+  } finally {
+    Deno.env.delete("MEMORY_MAINTENANCE_ENABLED");
+  }
+});
+
+Deno.test("applyEnvOverrides - MEMORY_MAINTENANCE_INTERVAL_MS sets number", () => {
+  Deno.env.set("MEMORY_MAINTENANCE_INTERVAL_MS", "7200000");
+  try {
+    const config: Record<string, unknown> = {
+      memoryMaintenance: { intervalMs: 604800000 },
+    };
+    applyEnvOverrides(config);
+    const mm = config.memoryMaintenance as { intervalMs: number };
+    assertEquals(mm.intervalMs, 7200000);
+  } finally {
+    Deno.env.delete("MEMORY_MAINTENANCE_INTERVAL_MS");
+  }
+});

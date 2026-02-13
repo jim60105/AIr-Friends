@@ -217,7 +217,8 @@ Initial context comprises:
 | Recent channel messages  | 20 messages (fixed) |
 | Guild-related context    | Configurable        |
 
-**No automatic memory compression or summarization**.
+**No automatic memory compression or summarization during normal message handling**.
+Optional scheduled memory maintenance can be enabled separately.
 
 **`/clear` Command:**
 
@@ -566,6 +567,36 @@ selfResearch:
 - `SessionOrchestrator.processSelfResearch()` — Research session flow
 - `prompts/system_self_research.md` — Research prompt template
 
+### 10. Memory Maintenance (Feature 17)
+
+Enables periodic, agent-driven memory summarization/compaction per user workspace to control long-term memory growth.
+
+**Configuration:**
+
+```yaml
+memoryMaintenance:
+  enabled: false
+  model: "gpt-5-mini"
+  minMemoryCount: 50
+  intervalMs: 604800000  # 7 days
+```
+
+**Environment Variable Overrides:**
+
+- `MEMORY_MAINTENANCE_ENABLED` → `memoryMaintenance.enabled`
+- `MEMORY_MAINTENANCE_MODEL` → `memoryMaintenance.model`
+- `MEMORY_MAINTENANCE_MIN_MEMORY_COUNT` → `memoryMaintenance.minMemoryCount`
+- `MEMORY_MAINTENANCE_INTERVAL_MS` → `memoryMaintenance.intervalMs`
+
+**How It Works:**
+
+1. `MemoryMaintenanceScheduler` triggers at fixed intervals
+2. All workspaces are scanned, and low-memory workspaces are skipped by threshold
+3. `SessionOrchestrator.processMemoryMaintenance()` runs one ACP session per workspace
+4. Agent uses existing memory skills (`memory-search`, `memory-save`, `memory-patch`)
+5. Original memories are disabled via patch events (append-only preserved)
+6. Failures are isolated per workspace and do not stop the full maintenance cycle
+
 ## Prompt Template System
 
 The system uses a template-based prompt system that allows easy customization without rebuilding containers.
@@ -780,6 +811,7 @@ AIr-Friends/
 │   │   ├── spontaneous-scheduler.ts # Spontaneous posting scheduler
 │   │   ├── spontaneous-target.ts    # Platform-specific target selection
 │   │   ├── self-research-scheduler.ts # Self-research scheduling
+│   │   ├── memory-maintenance-scheduler.ts # Memory maintenance scheduling
 │   │   └── config-loader.ts        # Configuration loading
 │   ├── platforms/
 │   │   ├── platform-adapter.ts     # Platform adapter base class

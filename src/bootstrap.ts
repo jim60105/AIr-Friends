@@ -5,6 +5,7 @@ import type { Config } from "./types/config.ts";
 import { AgentCore } from "@core/agent-core.ts";
 import { SpontaneousScheduler } from "@core/spontaneous-scheduler.ts";
 import { SelfResearchScheduler } from "@core/self-research-scheduler.ts";
+import { MemoryMaintenanceScheduler } from "@core/memory-maintenance-scheduler.ts";
 import { determineSpontaneousTarget } from "@core/spontaneous-target.ts";
 import { fetchRssItems, pickRandom } from "@utils/rss-fetcher.ts";
 import { getPlatformRegistry } from "@platforms/platform-registry.ts";
@@ -27,6 +28,7 @@ export interface AppContext {
   healthCheckServer: HealthCheckServer | null;
   spontaneousScheduler: SpontaneousScheduler | null;
   selfResearchScheduler: SelfResearchScheduler | null;
+  memoryMaintenanceScheduler: MemoryMaintenanceScheduler | null;
   yolo: boolean;
 }
 
@@ -170,6 +172,58 @@ export async function bootstrap(configPath?: string, yolo = false): Promise<AppC
     });
   }
 
+  // Initialize Memory Maintenance Scheduler
+  let memoryMaintenanceScheduler: MemoryMaintenanceScheduler | null = null;
+  if (config.memoryMaintenance?.enabled) {
+    memoryMaintenanceScheduler = new MemoryMaintenanceScheduler(config.memoryMaintenance);
+    memoryMaintenanceScheduler.setCallback(async () => {
+      const orchestrator = agentCore.getOrchestrator();
+      const workspaceManager = agentCore.getWorkspaceManager();
+      const memoryStore = agentCore.getMemoryStore();
+      const workspaceKeys = await workspaceManager.listWorkspaces();
+
+      for (const workspaceKey of workspaceKeys) {
+        try {
+          const [platform, userId] = workspaceKey.split("/");
+          if ((platform !== "discord" && platform !== "misskey") || !userId) {
+            logger.warn("Skipping invalid workspace key", { workspaceKey });
+            continue;
+          }
+
+          const workspaceInfo = await workspaceManager.getOrCreateWorkspace({
+            platform,
+            userId,
+            channelId: "internal",
+            messageId: `maintenance_check_${Date.now()}`,
+            isDm: true,
+            guildId: "",
+            content: "",
+            timestamp: new Date(),
+          });
+
+          const count = await memoryStore.countEnabledMemories(workspaceInfo);
+          if (count < config.memoryMaintenance!.minMemoryCount) {
+            logger.debug("Skipping workspace, below memory maintenance threshold", {
+              workspaceKey,
+              count,
+              threshold: config.memoryMaintenance!.minMemoryCount,
+            });
+            continue;
+          }
+
+          logger.info("Starting memory maintenance for workspace", { workspaceKey, count });
+          await orchestrator.processMemoryMaintenance(workspaceKey, config.memoryMaintenance!);
+          logger.info("Memory maintenance completed for workspace", { workspaceKey });
+        } catch (error) {
+          logger.error("Memory maintenance failed for workspace", {
+            workspaceKey,
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
+      }
+    });
+  }
+
   logger.info("Bootstrap completed");
 
   const context: AppContext = {
@@ -179,6 +233,7 @@ export async function bootstrap(configPath?: string, yolo = false): Promise<AppC
     healthCheckServer,
     spontaneousScheduler,
     selfResearchScheduler,
+    memoryMaintenanceScheduler,
     yolo,
   };
 
@@ -215,6 +270,10 @@ export async function startPlatforms(context: AppContext): Promise<void> {
   // Start self-research scheduler (independent of platforms)
   if (context.selfResearchScheduler) {
     context.selfResearchScheduler.start();
+  }
+
+  if (context.memoryMaintenanceScheduler) {
+    context.memoryMaintenanceScheduler.start();
   }
 
   logger.info("All platforms connected");

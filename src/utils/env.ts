@@ -44,6 +44,12 @@ export const ENV_MAPPINGS = {
   SELF_RESEARCH_RSS_FEEDS: "selfResearch.rssFeeds",
   SELF_RESEARCH_MIN_INTERVAL_MS: "selfResearch.minIntervalMs",
   SELF_RESEARCH_MAX_INTERVAL_MS: "selfResearch.maxIntervalMs",
+
+  // Memory maintenance settings
+  MEMORY_MAINTENANCE_ENABLED: "memoryMaintenance.enabled",
+  MEMORY_MAINTENANCE_MODEL: "memoryMaintenance.model",
+  MEMORY_MAINTENANCE_MIN_MEMORY_COUNT: "memoryMaintenance.minMemoryCount",
+  MEMORY_MAINTENANCE_INTERVAL_MS: "memoryMaintenance.intervalMs",
 } as const;
 
 /**

@@ -281,6 +281,23 @@ export class MemoryStore {
   }
 
   /**
+   * Count enabled memories in a workspace (both public and private for DM).
+   * Used by memory maintenance scheduler to check if compaction threshold is met.
+   */
+  async countEnabledMemories(workspace: WorkspaceInfo): Promise<number> {
+    const publicMemories = await this.loadAllMemories(workspace, "public");
+    const enabledPublic = publicMemories.filter((m) => m.enabled).length;
+
+    if (workspace.isDm) {
+      const privateMemories = await this.loadAllMemories(workspace, "private");
+      const enabledPrivate = privateMemories.filter((m) => m.enabled).length;
+      return enabledPublic + enabledPrivate;
+    }
+
+    return enabledPublic;
+  }
+
+  /**
    * Search memories by keywords
    * DM context → both private and public memory
    * Non-DM context → public memory only

@@ -219,6 +219,24 @@ export interface SelfResearchConfig {
 }
 
 /**
+ * Memory maintenance configuration.
+ * When enabled, the agent periodically summarizes and compacts old memories.
+ */
+export interface MemoryMaintenanceConfig {
+  /** Enable memory maintenance feature (default: false) */
+  enabled: boolean;
+
+  /** LLM model to use for memory maintenance (separate from chat model) */
+  model: string;
+
+  /** Minimum enabled memory count required before maintenance runs */
+  minMemoryCount: number;
+
+  /** Fixed interval between maintenance runs in milliseconds */
+  intervalMs: number;
+}
+
+/**
  * Complete application configuration
  */
 export interface Config {
@@ -231,6 +249,7 @@ export interface Config {
   skillApi?: SkillAPIConfig;
   accessControl: AccessControlConfig;
   selfResearch?: SelfResearchConfig;
+  memoryMaintenance?: MemoryMaintenanceConfig;
 }
 
 /**

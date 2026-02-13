@@ -245,3 +245,38 @@ Deno.test("MemoryStore - non-DM search should only search public memory", async 
     assertEquals(results[0].visibility, "public");
   });
 });
+
+Deno.test("MemoryStore - countEnabledMemories returns correct count", async () => {
+  await withTestMemoryStore(false, async (store, workspace) => {
+    await store.addMemory(workspace, "Memory A");
+    await store.addMemory(workspace, "Memory B");
+
+    const count = await store.countEnabledMemories(workspace);
+    assertEquals(count, 2);
+  });
+});
+
+Deno.test("MemoryStore - countEnabledMemories excludes disabled memories", async () => {
+  await withTestMemoryStore(false, async (store, workspace) => {
+    const active = await store.addMemory(workspace, "Active memory");
+    const disabled = await store.addMemory(workspace, "Disabled memory");
+    await store.disableMemory(workspace, disabled.id);
+
+    const count = await store.countEnabledMemories(workspace);
+    assertEquals(count, 1);
+
+    const results = await store.searchMemories(workspace, ["memory"]);
+    assertEquals(results.some((m) => m.id === active.id), true);
+    assertEquals(results.some((m) => m.id === disabled.id), false);
+  });
+});
+
+Deno.test("MemoryStore - countEnabledMemories includes private memories for DM workspace", async () => {
+  await withTestMemoryStore(true, async (store, workspace) => {
+    await store.addMemory(workspace, "Public memory", { visibility: "public" });
+    await store.addMemory(workspace, "Private memory", { visibility: "private" });
+
+    const count = await store.countEnabledMemories(workspace);
+    assertEquals(count, 2);
+  });
+});
