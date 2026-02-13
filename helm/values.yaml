@@ -83,6 +83,18 @@ env:
   GELF_ENDPOINT: 'http://your-gelf-endpoint:12201'
   GELF_HOSTNAME: 'air-friends'
 
+  # Metrics
+  METRICS_ENABLED: 'false'
+  METRICS_PATH: '/metrics'
+
+# ServiceMonitor for Prometheus Operator (optional)
+serviceMonitor:
+  enabled: false
+  interval: 30s
+  path: /metrics
+  namespace: ""
+  additionalLabels: {}
+
 # -- Extra environment variables to add to the container (list of name/value pairs).
 extraEnv: []
 #  - name: DENO_ENV

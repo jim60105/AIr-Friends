@@ -5,6 +5,8 @@ import { SessionRegistry } from "./session-registry.ts";
 import { SkillRegistry } from "@skills/registry.ts";
 import type { SkillContext } from "@skills/types.ts";
 
+import { skillApiCallsTotal } from "@utils/metrics.ts";
+
 const logger = createLogger("SkillAPIServer");
 
 export interface SkillAPIConfig {
@@ -296,6 +298,7 @@ export class SkillAPIServer {
       sessionId: body.sessionId,
       success: result.success,
     });
+    skillApiCallsTotal.labels(skillName, result.success ? "success" : "error").inc();
 
     return {
       ...result,

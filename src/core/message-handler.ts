@@ -7,6 +7,8 @@ import type { PlatformAdapter } from "@platforms/platform-adapter.ts";
 import type { RateLimitConfig } from "../types/config.ts";
 import { RateLimiter } from "./rate-limiter.ts";
 
+import { messagesReceivedTotal } from "@utils/metrics.ts";
+
 const logger = createLogger("MessageHandler");
 
 /**
@@ -57,6 +59,7 @@ export class MessageHandler {
 
     // Mark event as active
     this.activeEvents.add(eventKey);
+    messagesReceivedTotal.labels(event.platform).inc();
 
     try {
       // Rate limit check (after duplicate check, before any resource allocation)

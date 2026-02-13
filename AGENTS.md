@@ -660,6 +660,43 @@ Trigger/history message → Platform adapter extracts attachment metadata (URL, 
 | Misskey Note | `note.files` (DriveFile[]) | id, url, type, name, size, properties.width/height |
 | Misskey Chat | `message.file` (DriveFile \| null) | Same as above |
 
+### 12. Prometheus Metrics Export (Feature 19)
+
+Exposes operational metrics via a Prometheus-compatible `/metrics` endpoint on the existing Health Check Server.
+
+**Configuration:**
+
+```yaml
+metrics:
+  enabled: false              # Enable Prometheus metrics endpoint (default: false)
+  path: "/metrics"            # Metrics endpoint path (default: "/metrics")
+```
+
+**Environment Variable Overrides:**
+
+- `METRICS_ENABLED` → `metrics.enabled`
+- `METRICS_PATH` → `metrics.path`
+
+**Exposed Metrics:**
+
+| Metric Name | Type | Labels | Description |
+|-------------|------|--------|-------------|
+| `airfriends_sessions_total` | Counter | `platform`, `type`, `status` | Total sessions (success/failure) |
+| `airfriends_session_duration_seconds` | Histogram | `platform`, `type`, `status` | Session processing time |
+| `airfriends_active_sessions` | Gauge | — | Currently active sessions |
+| `airfriends_messages_received_total` | Counter | `platform` | Messages received from platforms |
+| `airfriends_replies_sent_total` | Counter | `platform` | Replies sent to platforms |
+| `airfriends_memory_operations_total` | Counter | `operation`, `visibility` | Memory operations count |
+| `airfriends_skill_api_calls_total` | Counter | `skill`, `status` | Skill API call count |
+| `airfriends_rate_limit_rejections_total` | Counter | `platform` | Rate limit rejections |
+
+**Key Design Points:**
+
+- Uses `prom-client` (npm) with a dedicated Registry for test isolation
+- Shares the Health Check Server port — no additional port needed
+- All metric operations are pure in-memory O(1) with no I/O overhead
+- Metrics endpoint only exposes aggregate numbers, never user content or tokens
+
 ## Prompt Template System
 
 The system uses a template-based prompt system that allows easy customization without rebuilding containers.

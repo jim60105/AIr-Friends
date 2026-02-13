@@ -255,6 +255,16 @@ export interface RateLimitConfig {
 }
 
 /**
+ * Metrics export configuration
+ */
+export interface MetricsConfig {
+  /** Enable Prometheus metrics endpoint (default: false) */
+  enabled: boolean;
+  /** Metrics endpoint path (default: "/metrics") */
+  path: string;
+}
+
+/**
  * Complete application configuration
  */
 export interface Config {
@@ -269,6 +279,8 @@ export interface Config {
   selfResearch?: SelfResearchConfig;
   memoryMaintenance?: MemoryMaintenanceConfig;
   rateLimit?: RateLimitConfig;
+  /** Metrics export configuration (optional) */
+  metrics?: MetricsConfig;
 }
 
 /**

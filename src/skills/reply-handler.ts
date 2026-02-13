@@ -3,6 +3,8 @@
 import { createLogger } from "@utils/logger.ts";
 import type { SendReplyParams, SkillContext, SkillHandler, SkillResult } from "./types.ts";
 
+import { repliesSentTotal } from "@utils/metrics.ts";
+
 const logger = createLogger("ReplyHandler");
 
 export class ReplyHandler {
@@ -124,6 +126,7 @@ export class ReplyHandler {
 
       // Mark reply as sent
       this.markReplySent(context);
+      repliesSentTotal.labels(context.workspace.components.platform).inc();
 
       logger.info("Reply sent via skill", {
         workspaceKey: context.workspace.key,

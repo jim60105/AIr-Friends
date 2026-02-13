@@ -1,6 +1,7 @@
 // src/core/rate-limiter.ts
 
 import { createLogger } from "@utils/logger.ts";
+import { rateLimitRejectionsTotal } from "@utils/metrics.ts";
 import type { RateLimitConfig } from "../types/config.ts";
 
 const logger = createLogger("RateLimiter");
@@ -43,6 +44,7 @@ export class RateLimiter {
         userKey,
         cooldownRemainingMs: state.cooldownUntil - now,
       });
+      rateLimitRejectionsTotal.labels(userKey.split(":")[0]).inc();
       return false;
     }
 
@@ -65,6 +67,7 @@ export class RateLimiter {
         maxRequests: this.config.maxRequestsPerWindow,
         cooldownMs: this.config.cooldownMs,
       });
+      rateLimitRejectionsTotal.labels(userKey.split(":")[0]).inc();
       return false;
     }
 

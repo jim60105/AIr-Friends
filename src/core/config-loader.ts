@@ -292,6 +292,13 @@ function validateConfig(config: Record<string, unknown>): void {
     mm.enabled = false;
   }
 
+  // Metrics defaults
+  if (!config.metrics) {
+    config.metrics = { enabled: false, path: "/metrics" };
+  }
+  (config.metrics as Record<string, unknown>).path =
+    (config.metrics as Record<string, unknown>).path ?? "/metrics";
+
   // Rate limit defaults
   if (!config.rateLimit) {
     config.rateLimit = { ...DEFAULT_RATE_LIMIT };

@@ -51,6 +51,10 @@ export const ENV_MAPPINGS = {
   MEMORY_MAINTENANCE_MIN_MEMORY_COUNT: "memoryMaintenance.minMemoryCount",
   MEMORY_MAINTENANCE_INTERVAL_MS: "memoryMaintenance.intervalMs",
 
+  // Metrics settings
+  METRICS_ENABLED: "metrics.enabled",
+  METRICS_PATH: "metrics.path",
+
   // Rate limit settings
   RATE_LIMIT_ENABLED: "rateLimit.enabled",
   RATE_LIMIT_MAX_REQUESTS_PER_WINDOW: "rateLimit.maxRequestsPerWindow",

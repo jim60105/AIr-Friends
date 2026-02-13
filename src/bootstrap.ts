@@ -94,7 +94,7 @@ export async function bootstrap(configPath?: string, yolo = false): Promise<AppC
   let healthCheckServer: HealthCheckServer | null = null;
   if (config.health?.enabled) {
     logger.info("Initializing Health Check server", { port: config.health.port });
-    healthCheckServer = new HealthCheckServer(config.health.port);
+    healthCheckServer = new HealthCheckServer(config.health.port, config.metrics);
     healthCheckServer.start();
   }
 
