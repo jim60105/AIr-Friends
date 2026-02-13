@@ -226,7 +226,7 @@ export interface MemoryMaintenanceConfig {
   /** Enable memory maintenance feature (default: false) */
   enabled: boolean;
 
-  /** LLM model to use for memory maintenance (separate from chat model) */
+  /** LLM model to use for memory maintenance (separate from chat model, e.g. "gpt-5-mini") */
   model: string;
 
   /** Minimum enabled memory count required before maintenance runs */

@@ -45,13 +45,14 @@ Deno.test("MemoryMaintenanceScheduler - prevents concurrent execution", async ()
     if (running) overlapDetected = true;
     running = true;
     callCount++;
-    await new Promise((resolve) => setTimeout(resolve, 80));
+    await new Promise((resolve) => setTimeout(resolve, 40));
     running = false;
   });
   scheduler.start();
 
-  await new Promise((resolve) => setTimeout(resolve, 220));
+  await new Promise((resolve) => setTimeout(resolve, 140));
   scheduler.stop();
+  await new Promise((resolve) => setTimeout(resolve, 60));
 
   assertEquals(overlapDetected, false);
   assertEquals(callCount >= 2, true);
@@ -61,16 +62,18 @@ Deno.test("MemoryMaintenanceScheduler - reschedules after error", async () => {
   const scheduler = new MemoryMaintenanceScheduler(createConfig({ intervalMs: 20 }));
   let callCount = 0;
 
-  scheduler.setCallback(async () => {
+  scheduler.setCallback(() => {
     callCount++;
     if (callCount === 1) {
-      throw new Error("expected");
+      return Promise.reject(new Error("expected"));
     }
+    return Promise.resolve();
   });
   scheduler.start();
 
   await new Promise((resolve) => setTimeout(resolve, 140));
   scheduler.stop();
+  await new Promise((resolve) => setTimeout(resolve, 40));
 
   assertEquals(callCount >= 2, true);
 });
