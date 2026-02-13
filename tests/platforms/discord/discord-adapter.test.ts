@@ -197,7 +197,7 @@ Deno.test("normalizeDiscordMessage - non-image attachments are detected", () => 
     size: 999,
   };
   const message = createMockMessage({ attachments: new Map([["att2", attachment]]) });
-  const event = normalizeDiscordMessage(message as Message, "bot123");
+  const _event = normalizeDiscordMessage(message as Message, "bot123");
 });
 
 import { messageToPltatformMessage } from "@platforms/discord/discord-utils.ts";

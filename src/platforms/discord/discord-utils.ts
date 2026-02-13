@@ -48,7 +48,7 @@ export function normalizeDiscordMessage(
     content: message.content,
     timestamp: message.createdAt,
     attachments: message.attachments.size > 0
-      ? message.attachments.map((att) => discordAttachmentToAttachment(att))
+      ? Array.from(message.attachments.values()).map((att) => discordAttachmentToAttachment(att))
       : undefined,
     raw: message,
   };
@@ -62,7 +62,7 @@ export function messageToPltatformMessage(
   botId: string,
 ): PlatformMessage {
   const attachments = message.attachments.size > 0
-    ? message.attachments.map((att) => discordAttachmentToAttachment(att))
+    ? Array.from(message.attachments.values()).map((att) => discordAttachmentToAttachment(att))
     : undefined;
 
   return {

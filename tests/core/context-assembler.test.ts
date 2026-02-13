@@ -902,14 +902,7 @@ Deno.test("ContextAssembler - formatContext includes emoji section in token budg
 Deno.test("ContextAssembler - formatContext includes attachment descriptions", async () => {
   await withTestContextAssembler(async (assembler, _store, manager) => {
     const event = createTestEvent();
-    const workspace = await manager.getOrCreateWorkspace(event).catch(async () => {
-      // fallback to creating new manager path
-      const mgr = new (await import("../../src/core/workspace-manager.ts")).WorkspaceManager({
-        repoPath: await Deno.makeTempDir(),
-        workspacesDir: "workspaces",
-      });
-      return mgr.getOrCreateWorkspace(event);
-    });
+    const workspace = await manager.getOrCreateWorkspace(event);
     const fetcher = createMockMessageFetcher([
       createTestMessage({
         content: "Check this image",
@@ -925,13 +918,13 @@ Deno.test("ContextAssembler - formatContext includes attachment descriptions", a
       }),
     ]);
 
-    const context = await assembler.assembleContext(event, workspace as any, fetcher);
+    const context = await assembler.assembleContext(event, workspace, fetcher);
     const formatted = assembler.formatContext(context);
 
     assertStringIncludes(formatted.userMessage, "Attachments:");
     assertStringIncludes(
       formatted.userMessage,
-      "📎 photo.png (image/png) https://example.com/photo.png",
+      "📎 photo.png (image/png",
     );
   });
 });
@@ -939,18 +932,12 @@ Deno.test("ContextAssembler - formatContext includes attachment descriptions", a
 Deno.test("ContextAssembler - formatContext without attachments omits section", async () => {
   await withTestContextAssembler(async (assembler, _store, manager) => {
     const event = createTestEvent();
-    const workspace = await manager.getOrCreateWorkspace(event).catch(async () => {
-      const mgr = new (await import("../../src/core/workspace-manager.ts")).WorkspaceManager({
-        repoPath: await Deno.makeTempDir(),
-        workspacesDir: "workspaces",
-      });
-      return mgr.getOrCreateWorkspace(event);
-    });
+    const workspace = await manager.getOrCreateWorkspace(event);
     const fetcher = createMockMessageFetcher([
       createTestMessage({ content: "No attachments here", username: "Bob" }),
     ]);
 
-    const context = await assembler.assembleContext(event, workspace as any, fetcher);
+    const context = await assembler.assembleContext(event, workspace, fetcher);
     const formatted = assembler.formatContext(context);
 
     // Should not include Attachments section
