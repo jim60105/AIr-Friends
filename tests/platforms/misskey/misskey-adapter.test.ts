@@ -903,7 +903,7 @@ Deno.test("normalizeMisskeyNote - files produce attachments", () => {
     size: 5000,
     properties: { width: 640, height: 480 },
   };
-  const note = createMockNote({ files: [file], fileIds: ["file1"] });
+  const note = createMockNote({ files: [file as any], fileIds: ["file1"] });
   const ev = normalizeMisskeyNote(note, "bot123", false);
   assertEquals(ev.attachments?.length, 1);
 });
@@ -917,7 +917,7 @@ Deno.test("noteToPlatformMessage - with files", () => {
     size: 5000,
     properties: { width: 640, height: 480 },
   };
-  const note = createMockNote({ files: [file], fileIds: ["file1"] });
+  const note = createMockNote({ files: [file as any], fileIds: ["file1"] });
   const pm = noteToPlatformMessage(note, "bot123");
   assertEquals(pm.attachments?.length, 1);
 });
@@ -937,7 +937,7 @@ Deno.test("normalizeMisskeyChatMessage - file becomes attachment", () => {
     size: 5000,
     properties: { width: 640, height: 480 },
   };
-  const chat = createMockChatMessage({ file });
+  const chat = createMockChatMessage({ file: file as any });
   const ev = normalizeMisskeyChatMessage(chat, "bot123");
   assertEquals(ev.attachments?.length, 1);
 });
@@ -951,7 +951,7 @@ Deno.test("chatMessageToPlatformMessage - with file", () => {
     size: 5000,
     properties: { width: 640, height: 480 },
   };
-  const chat = createMockChatMessage({ file });
+  const chat = createMockChatMessage({ file: file as any });
   const pm = chatMessageToPlatformMessage(chat, "bot123");
   assertEquals(pm.attachments?.length, 1);
 });
