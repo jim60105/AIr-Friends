@@ -249,3 +249,132 @@ Deno.test("parseRssXml - item with title only (no link) is still parsed", () => 
   assertEquals(items[0].title, "Title Only");
   assertEquals(items[0].url, "");
 });
+
+// --- fetchRssItems tests (with fetch mock) ---
+
+Deno.test("fetchRssItems - fetches and parses items from a source", async () => {
+  const { fetchRssItems } = await import("@utils/rss-fetcher.ts");
+
+  const rssXml = `<rss version="2.0"><channel>
+    <item>
+      <title>Mock Article</title>
+      <link>https://mock.example.com/1</link>
+      <description>Mock description</description>
+    </item>
+  </channel></rss>`;
+
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = ((_input: string | URL | Request, _init?: RequestInit) => {
+    return Promise.resolve(new Response(rssXml, { status: 200 }));
+  }) as typeof fetch;
+
+  try {
+    const items = await fetchRssItems([
+      { url: "https://example.com/feed.xml", name: "Mock Feed" },
+    ]);
+    assertEquals(items.length, 1);
+    assertEquals(items[0].title, "Mock Article");
+    assertEquals(items[0].sourceName, "Mock Feed");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+Deno.test("fetchRssItems - skips failed feeds silently", async () => {
+  const { fetchRssItems } = await import("@utils/rss-fetcher.ts");
+
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = ((_input: string | URL | Request, _init?: RequestInit) => {
+    return Promise.resolve(new Response("Not Found", { status: 404 }));
+  }) as typeof fetch;
+
+  try {
+    const items = await fetchRssItems([
+      { url: "https://example.com/bad.xml" },
+    ]);
+    assertEquals(items.length, 0);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+Deno.test("fetchRssItems - handles network errors gracefully", async () => {
+  const { fetchRssItems } = await import("@utils/rss-fetcher.ts");
+
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = ((_input: string | URL | Request, _init?: RequestInit) => {
+    return Promise.reject(new Error("Network error"));
+  }) as typeof fetch;
+
+  try {
+    const items = await fetchRssItems([
+      { url: "https://unreachable.example.com/feed.xml" },
+    ]);
+    assertEquals(items.length, 0);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+Deno.test("fetchRssItems - uses source URL as name when name not provided", async () => {
+  const { fetchRssItems } = await import("@utils/rss-fetcher.ts");
+
+  const rssXml = `<rss version="2.0"><channel>
+    <item>
+      <title>Test</title>
+      <link>https://example.com</link>
+      <description>Desc</description>
+    </item>
+  </channel></rss>`;
+
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = ((_input: string | URL | Request, _init?: RequestInit) => {
+    return Promise.resolve(new Response(rssXml, { status: 200 }));
+  }) as typeof fetch;
+
+  try {
+    const items = await fetchRssItems([
+      { url: "https://example.com/feed.xml" },
+    ]);
+    assertEquals(items.length, 1);
+    assertEquals(items[0].sourceName, "https://example.com/feed.xml");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+Deno.test("fetchRssItems - collects items from multiple sources", async () => {
+  const { fetchRssItems } = await import("@utils/rss-fetcher.ts");
+
+  let callCount = 0;
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = ((_input: string | URL | Request, _init?: RequestInit) => {
+    callCount++;
+    const xml = `<rss version="2.0"><channel>
+      <item>
+        <title>Article ${callCount}</title>
+        <link>https://example${callCount}.com</link>
+        <description>Desc ${callCount}</description>
+      </item>
+    </channel></rss>`;
+    return Promise.resolve(new Response(xml, { status: 200 }));
+  }) as typeof fetch;
+
+  try {
+    const items = await fetchRssItems([
+      { url: "https://feed1.com/rss", name: "Feed 1" },
+      { url: "https://feed2.com/rss", name: "Feed 2" },
+    ]);
+    assertEquals(items.length, 2);
+    assertEquals(items[0].sourceName, "Feed 1");
+    assertEquals(items[1].sourceName, "Feed 2");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+Deno.test("fetchRssItems - returns empty array for empty sources", async () => {
+  const { fetchRssItems } = await import("@utils/rss-fetcher.ts");
+  const items = await fetchRssItems([]);
+  assertEquals(items.length, 0);
+});

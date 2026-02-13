@@ -1086,3 +1086,267 @@ Deno.test("SessionOrchestrator - unexpected stop reason returns error", async ()
     await Deno.remove(tempDir, { recursive: true });
   }
 });
+
+// --- processSelfResearch tests ---
+
+Deno.test("SessionOrchestrator - processSelfResearch creates workspace and runs agent", async () => {
+  const tempDir = await Deno.makeTempDir();
+  try {
+    const { orchestrator, sessionRegistry } = await createTestableOrchestrator(tempDir);
+
+    // Create self_research_instructions.md prompt file
+    await Deno.writeTextFile(
+      `${tempDir}/prompts/self_research_instructions.md`,
+      "Research instructions for {{character_name}}\n{rss_items_placeholder}",
+    );
+
+    const rssItems = [
+      {
+        title: "Test Article",
+        url: "https://example.com/article1",
+        description: "A test article description",
+        sourceName: "Test Feed",
+      },
+    ];
+
+    const selfResearchConfig = {
+      enabled: true,
+      model: "gpt-5-mini",
+      rssFeeds: [{ url: "https://example.com/feed.xml" }],
+      minIntervalMs: 43200000,
+      maxIntervalMs: 86400000,
+    };
+
+    orchestrator.setConnectorSetup((connector) => {
+      connector.promptResponses = [
+        { stopReason: "end_turn" } as PromptResponse,
+      ];
+    });
+
+    const response = await orchestrator.processSelfResearch(rssItems, selfResearchConfig);
+
+    assertExists(response);
+    assertEquals(response.success, true);
+    assertEquals(response.replySent, false);
+    assertEquals(orchestrator.mockConnector!.connected, true);
+    assertEquals(orchestrator.mockConnector!.disconnected, true);
+    assertEquals(orchestrator.mockConnector!.modelSet, true);
+    assertEquals(orchestrator.mockConnector!.promptCallCount, 1);
+
+    sessionRegistry.stop();
+  } finally {
+    await Deno.remove(tempDir, { recursive: true });
+  }
+});
+
+Deno.test("SessionOrchestrator - processSelfResearch returns error on cancelled stop reason", async () => {
+  const tempDir = await Deno.makeTempDir();
+  try {
+    const { orchestrator, sessionRegistry } = await createTestableOrchestrator(tempDir);
+
+    await Deno.writeTextFile(
+      `${tempDir}/prompts/self_research_instructions.md`,
+      "Research instructions\n{rss_items_placeholder}",
+    );
+
+    const rssItems = [
+      {
+        title: "Test",
+        url: "https://example.com",
+        description: "Desc",
+        sourceName: "Feed",
+      },
+    ];
+
+    orchestrator.setConnectorSetup((connector) => {
+      connector.promptResponses = [
+        { stopReason: "cancelled" } as PromptResponse,
+      ];
+    });
+
+    const response = await orchestrator.processSelfResearch(rssItems, {
+      enabled: true,
+      model: "gpt-5-mini",
+      rssFeeds: [],
+      minIntervalMs: 43200000,
+      maxIntervalMs: 86400000,
+    });
+
+    assertEquals(response.success, false);
+    assertEquals(response.replySent, false);
+    assertExists(response.error);
+
+    sessionRegistry.stop();
+  } finally {
+    await Deno.remove(tempDir, { recursive: true });
+  }
+});
+
+Deno.test("SessionOrchestrator - processSelfResearch handles agent connection failure", async () => {
+  const tempDir = await Deno.makeTempDir();
+  try {
+    const config = createTestConfig(tempDir);
+    config.agent.defaultAgentType = "copilot";
+    config.agent.githubToken = "test-token";
+    config.skillApi = {
+      enabled: true,
+      port: 3998,
+      host: "127.0.0.1",
+      sessionTimeoutMs: 60000,
+    };
+
+    const workspaceManager = new WorkspaceManager({
+      repoPath: config.workspace.repoPath,
+      workspacesDir: config.workspace.workspacesDir,
+    });
+    const memoryStore = new MemoryStore(workspaceManager, {
+      searchLimit: config.memory.searchLimit,
+      maxChars: config.memory.maxChars,
+    });
+    const skillRegistry = new SkillRegistry(memoryStore);
+
+    await Deno.mkdir(`${tempDir}/prompts`, { recursive: true });
+    await Deno.writeTextFile(
+      `${tempDir}/prompts/system.md`,
+      "You are a helpful assistant.",
+    );
+    await Deno.writeTextFile(
+      `${tempDir}/prompts/self_research_instructions.md`,
+      "Research\n{rss_items_placeholder}",
+    );
+
+    const contextAssembler = new ContextAssembler(memoryStore, {
+      systemPromptPath: `${tempDir}/prompts/system.md`,
+      recentMessageLimit: config.memory.recentMessageLimit,
+      tokenLimit: config.agent.tokenLimit,
+      memoryMaxChars: config.memory.maxChars,
+    });
+
+    const sessionRegistry = new SessionRegistry();
+
+    // Use real orchestrator (not testable) - will fail to connect to copilot CLI
+    const orchestrator = new SessionOrchestrator(
+      workspaceManager,
+      contextAssembler,
+      skillRegistry,
+      config,
+      sessionRegistry,
+    );
+
+    const response = await orchestrator.processSelfResearch(
+      [{ title: "Test", url: "https://example.com", description: "Desc", sourceName: "Feed" }],
+      {
+        enabled: true,
+        model: "gpt-5-mini",
+        rssFeeds: [],
+        minIntervalMs: 43200000,
+        maxIntervalMs: 86400000,
+      },
+    );
+
+    // Should fail gracefully
+    assertEquals(response.success, false);
+    assertEquals(response.replySent, false);
+    assertExists(response.error);
+
+    sessionRegistry.stop();
+  } finally {
+    await Deno.remove(tempDir, { recursive: true });
+  }
+});
+
+Deno.test("SessionOrchestrator - processSelfResearch formats RSS items in prompt", async () => {
+  const tempDir = await Deno.makeTempDir();
+  try {
+    const { orchestrator, sessionRegistry } = await createTestableOrchestrator(tempDir);
+
+    await Deno.writeTextFile(
+      `${tempDir}/prompts/self_research_instructions.md`,
+      "# Research\n\n{rss_items_placeholder}\n\n## End",
+    );
+
+    const rssItems = [
+      {
+        title: "Article Alpha",
+        url: "https://alpha.com/1",
+        description: "Alpha description",
+        sourceName: "Alpha Feed",
+      },
+      {
+        title: "Article Beta",
+        url: "https://beta.com/2",
+        description: "Beta description",
+        sourceName: "Beta Feed",
+      },
+    ];
+
+    let capturedPrompt = "";
+    orchestrator.setConnectorSetup((connector) => {
+      connector.promptResponses = [
+        { stopReason: "end_turn" } as PromptResponse,
+      ];
+      const originalPrompt = connector.prompt.bind(connector);
+      connector.prompt = (sid: string, text: string) => {
+        capturedPrompt = text;
+        return originalPrompt(sid, text);
+      };
+    });
+
+    await orchestrator.processSelfResearch(rssItems, {
+      enabled: true,
+      model: "gpt-5-mini",
+      rssFeeds: [],
+      minIntervalMs: 43200000,
+      maxIntervalMs: 86400000,
+    });
+
+    // Verify prompt contains RSS items
+    assertEquals(capturedPrompt.includes("Article Alpha"), true);
+    assertEquals(capturedPrompt.includes("Article Beta"), true);
+    assertEquals(capturedPrompt.includes("https://alpha.com/1"), true);
+    assertEquals(capturedPrompt.includes("Alpha Feed"), true);
+    assertEquals(capturedPrompt.includes("Alpha description"), true);
+
+    sessionRegistry.stop();
+  } finally {
+    await Deno.remove(tempDir, { recursive: true });
+  }
+});
+
+Deno.test("SessionOrchestrator - processSelfResearch without skillApi", async () => {
+  const tempDir = await Deno.makeTempDir();
+  try {
+    const { orchestrator, sessionRegistry } = await createTestableOrchestrator(tempDir, {
+      skillApi: false,
+    });
+
+    await Deno.writeTextFile(
+      `${tempDir}/prompts/self_research_instructions.md`,
+      "Research\n{rss_items_placeholder}",
+    );
+
+    orchestrator.setConnectorSetup((connector) => {
+      connector.promptResponses = [
+        { stopReason: "end_turn" } as PromptResponse,
+      ];
+    });
+
+    const response = await orchestrator.processSelfResearch(
+      [{ title: "Test", url: "https://example.com", description: "Desc", sourceName: "Feed" }],
+      {
+        enabled: true,
+        model: "gpt-5-mini",
+        rssFeeds: [],
+        minIntervalMs: 43200000,
+        maxIntervalMs: 86400000,
+      },
+    );
+
+    assertEquals(response.success, true);
+    assertEquals(response.replySent, false);
+
+    sessionRegistry.stop();
+  } finally {
+    await Deno.remove(tempDir, { recursive: true });
+  }
+});
