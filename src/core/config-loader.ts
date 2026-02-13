@@ -5,7 +5,7 @@ import { exists } from "@std/fs";
 import { basename, dirname, join } from "@std/path";
 import { createLogger } from "@utils/logger.ts";
 import { applyEnvOverrides, getEnvironment } from "@utils/env.ts";
-import type { Config } from "../types/config.ts";
+import type { Config, MemoryMaintenanceConfig } from "../types/config.ts";
 import { ConfigError, ErrorCode } from "../types/errors.ts";
 
 const logger = createLogger("ConfigLoader");
@@ -61,6 +61,16 @@ const DEFAULT_SELF_RESEARCH = {
   rssFeeds: [],
   minIntervalMs: 43200000, // 12 hours
   maxIntervalMs: 86400000, // 24 hours
+};
+
+/**
+ * Default memory maintenance configuration
+ */
+const DEFAULT_MEMORY_MAINTENANCE: MemoryMaintenanceConfig = {
+  enabled: false,
+  model: "gpt-5-mini",
+  minMemoryCount: 50,
+  intervalMs: 604800000, // 7 days
 };
 
 /**
@@ -243,6 +253,33 @@ function validateConfig(config: Record<string, unknown>): void {
       logger.warn("selfResearch.minIntervalMs > maxIntervalMs, swapping values");
       [sr.minIntervalMs, sr.maxIntervalMs] = [sr.maxIntervalMs, sr.minIntervalMs];
     }
+  }
+
+  // Memory Maintenance defaults and validation
+  if (!config.memoryMaintenance) {
+    config.memoryMaintenance = { ...DEFAULT_MEMORY_MAINTENANCE };
+  } else {
+    config.memoryMaintenance = {
+      ...DEFAULT_MEMORY_MAINTENANCE,
+      ...(config.memoryMaintenance as Record<string, unknown>),
+    };
+  }
+
+  const mm = config.memoryMaintenance as Record<string, unknown>;
+
+  if ((mm.intervalMs as number) < 3600000) {
+    logger.warn("memoryMaintenance.intervalMs too small, clamping to 1 hour");
+    mm.intervalMs = 3600000;
+  }
+
+  if ((mm.minMemoryCount as number) < 10) {
+    logger.warn("memoryMaintenance.minMemoryCount too small, clamping to 10");
+    mm.minMemoryCount = 10;
+  }
+
+  if (mm.enabled === true && (!mm.model || String(mm.model).trim() === "")) {
+    logger.warn("memoryMaintenance enabled but no model specified, disabling");
+    mm.enabled = false;
   }
 }
 

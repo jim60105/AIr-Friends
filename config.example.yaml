@@ -100,3 +100,10 @@ selfResearch:
     - url: "https://example.org/rss"
   minIntervalMs: 43200000          # Minimum interval: 12 hours (default); override with env SELF_RESEARCH_MIN_INTERVAL_MS
   maxIntervalMs: 86400000          # Maximum interval: 24 hours (default); override with env SELF_RESEARCH_MAX_INTERVAL_MS
+
+# Memory maintenance: agent periodically summarizes and compacts old memories
+memoryMaintenance:
+  enabled: false                    # Enable memory maintenance (default: false); override with env MEMORY_MAINTENANCE_ENABLED
+  model: "gpt-5-mini"              # Model for maintenance (separate from chat); override with env MEMORY_MAINTENANCE_MODEL
+  minMemoryCount: 50                # Minimum enabled memories required to run; override with env MEMORY_MAINTENANCE_MIN_MEMORY_COUNT
+  intervalMs: 604800000             # Fixed interval: 7 days (default); override with env MEMORY_MAINTENANCE_INTERVAL_MS

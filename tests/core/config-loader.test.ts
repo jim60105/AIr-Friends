@@ -1088,3 +1088,115 @@ selfResearch:
     assertEquals(result.selfResearch?.rssFeeds.length, 2);
   });
 });
+
+// --- memoryMaintenance configuration tests ---
+
+Deno.test("Config - applies memoryMaintenance defaults", async () => {
+  const config = `
+platforms:
+  discord:
+    token: "test-token"
+    enabled: true
+  misskey:
+    enabled: false
+agent:
+  model: "gpt-4"
+  systemPromptPath: "./prompts/system.md"
+  tokenLimit: 20000
+workspace:
+  repoPath: "./data"
+  workspacesDir: "workspaces"
+`;
+
+  await withTestConfig(config, async (dir) => {
+    const result = await loadConfig(dir);
+    assertEquals(result.memoryMaintenance?.enabled, false);
+    assertEquals(result.memoryMaintenance?.model, "gpt-5-mini");
+    assertEquals(result.memoryMaintenance?.minMemoryCount, 50);
+    assertEquals(result.memoryMaintenance?.intervalMs, 604800000);
+  });
+});
+
+Deno.test("Config - clamps memoryMaintenance intervalMs minimum to 1 hour", async () => {
+  const config = `
+platforms:
+  discord:
+    token: "test-token"
+    enabled: true
+  misskey:
+    enabled: false
+agent:
+  model: "gpt-4"
+  systemPromptPath: "./prompts/system.md"
+  tokenLimit: 20000
+workspace:
+  repoPath: "./data"
+  workspacesDir: "workspaces"
+memoryMaintenance:
+  enabled: false
+  model: "gpt-5-mini"
+  minMemoryCount: 50
+  intervalMs: 1000
+`;
+
+  await withTestConfig(config, async (dir) => {
+    const result = await loadConfig(dir);
+    assertEquals(result.memoryMaintenance?.intervalMs, 3600000);
+  });
+});
+
+Deno.test("Config - clamps memoryMaintenance minMemoryCount minimum to 10", async () => {
+  const config = `
+platforms:
+  discord:
+    token: "test-token"
+    enabled: true
+  misskey:
+    enabled: false
+agent:
+  model: "gpt-4"
+  systemPromptPath: "./prompts/system.md"
+  tokenLimit: 20000
+workspace:
+  repoPath: "./data"
+  workspacesDir: "workspaces"
+memoryMaintenance:
+  enabled: false
+  model: "gpt-5-mini"
+  minMemoryCount: 1
+  intervalMs: 604800000
+`;
+
+  await withTestConfig(config, async (dir) => {
+    const result = await loadConfig(dir);
+    assertEquals(result.memoryMaintenance?.minMemoryCount, 10);
+  });
+});
+
+Deno.test("Config - memoryMaintenance disables if model is missing", async () => {
+  const config = `
+platforms:
+  discord:
+    token: "test-token"
+    enabled: true
+  misskey:
+    enabled: false
+agent:
+  model: "gpt-4"
+  systemPromptPath: "./prompts/system.md"
+  tokenLimit: 20000
+workspace:
+  repoPath: "./data"
+  workspacesDir: "workspaces"
+memoryMaintenance:
+  enabled: true
+  model: ""
+  minMemoryCount: 50
+  intervalMs: 604800000
+`;
+
+  await withTestConfig(config, async (dir) => {
+    const result = await loadConfig(dir);
+    assertEquals(result.memoryMaintenance?.enabled, false);
+  });
+});

@@ -10,6 +10,7 @@ Your AIr friends custom chatbot with integrated shell and skills. Powered by ACP
 
 - 🤖 **Multi-Platform**: Currently works on Discord and Misskey
 - 🧠 **Persistent Memory**: Remembers conversations across different channels
+- 🗜️ **Memory Maintenance**: Optional scheduled agent task to summarize and compact old memories
 - 📝 **Agent Knowledge Base**: Personal workspace for long-term knowledge notes and reflections
 - 🔒 **Privacy First**: Isolated workspaces per user with access control
 - 🐳 **Easy Deploy**: One-command container deployment

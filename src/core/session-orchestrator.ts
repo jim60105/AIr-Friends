@@ -9,15 +9,17 @@ import {
 } from "@acp/agent-factory.ts";
 import { ContextAssembler } from "./context-assembler.ts";
 import { WorkspaceManager } from "./workspace-manager.ts";
+import { MemoryStore } from "./memory-store.ts";
 import { loadPromptFragments, replacePlaceholders } from "./config-loader.ts";
 import type { SkillRegistry } from "@skills/registry.ts";
 import type { SessionRegistry } from "../skill-api/session-registry.ts";
-import type { Config, SelfResearchConfig } from "../types/config.ts";
+import type { Config, MemoryMaintenanceConfig, SelfResearchConfig } from "../types/config.ts";
 import type { NormalizedEvent, Platform } from "../types/events.ts";
 import type { PlatformAdapter } from "@platforms/platform-adapter.ts";
 import type { AgentConnectorOptions, ClientConfig } from "@acp/types.ts";
 import { dirname, join } from "@std/path";
 import type { RssItem } from "@utils/rss-fetcher.ts";
+import type { WorkspaceInfo } from "../types/workspace.ts";
 
 const logger = createLogger("SessionOrchestrator");
 
@@ -40,6 +42,7 @@ export class SessionOrchestrator {
   private contextAssembler: ContextAssembler;
   private skillRegistry: SkillRegistry;
   private sessionRegistry: SessionRegistry;
+  private memoryStore: MemoryStore;
   private config: Config;
   private yolo: boolean;
 
@@ -49,12 +52,14 @@ export class SessionOrchestrator {
     skillRegistry: SkillRegistry,
     config: Config,
     sessionRegistry: SessionRegistry,
+    memoryStore: MemoryStore,
     yolo = false,
   ) {
     this.workspaceManager = workspaceManager;
     this.contextAssembler = contextAssembler;
     this.skillRegistry = skillRegistry;
     this.sessionRegistry = sessionRegistry;
+    this.memoryStore = memoryStore;
     this.config = config;
     this.yolo = yolo;
   }
@@ -652,6 +657,143 @@ export class SessionOrchestrator {
   }
 
   /**
+   * Process a memory maintenance session for one workspace.
+   * The agent summarizes/compacts memories and patches originals using memory skills.
+   */
+  async processMemoryMaintenance(
+    workspaceKey: string,
+    memoryMaintenanceConfig: MemoryMaintenanceConfig,
+  ): Promise<SessionResponse> {
+    const sessionLoggerName = `memory-maintenance:${workspaceKey}`;
+    const sessionLogger = logger.child(sessionLoggerName);
+
+    const [platformStr, userId] = workspaceKey.split("/");
+    if ((platformStr !== "discord" && platformStr !== "misskey") || !userId) {
+      return {
+        success: false,
+        replySent: false,
+        error: `Invalid workspace key: ${workspaceKey}`,
+      };
+    }
+    const platform = platformStr;
+
+    sessionLogger.info("Processing memory maintenance session", {
+      workspaceKey,
+      model: memoryMaintenanceConfig.model,
+    });
+
+    try {
+      // Create synthetic DM event to ensure private memory access
+      const syntheticEvent: NormalizedEvent = {
+        platform,
+        channelId: "internal",
+        userId,
+        messageId: `maintenance_${Date.now()}`,
+        isDm: true,
+        guildId: "",
+        content: "",
+        timestamp: new Date(),
+      };
+      const workspace = await this.workspaceManager.getOrCreateWorkspace(syntheticEvent);
+      const agentWorkspacePath = await this.workspaceManager.getOrCreateAgentWorkspace();
+
+      let shellSessionId: string | null = null;
+      if (this.config.skillApi?.enabled) {
+        shellSessionId = this.sessionRegistry.register({
+          platform,
+          channelId: "internal",
+          userId,
+          isDm: true,
+          workspace,
+          platformAdapter: undefined as unknown as PlatformAdapter,
+          timeoutMs: this.config.skillApi.sessionTimeoutMs,
+          agentWorkspacePath,
+        });
+
+        const sessionIdFile = join(workspace.path, "SESSION_ID");
+        await Deno.writeTextFile(sessionIdFile, shellSessionId);
+        sessionLogger.info("Shell session registered", { shellSessionId });
+      }
+
+      const fullPrompt = await this.buildMemoryMaintenancePrompt(
+        workspaceKey,
+        shellSessionId,
+        workspace,
+      );
+
+      const clientConfig: ClientConfig = {
+        workingDir: workspace.path,
+        agentWorkspacePath,
+        platform,
+        userId,
+        channelId: "internal",
+        isDM: true,
+        yolo: this.yolo,
+      };
+
+      const agentType = getDefaultAgentType(this.config);
+      const connector = this.createConnector({
+        agentConfig: createAgentConfig(
+          agentType,
+          workspace.path,
+          this.config,
+          this.yolo,
+          agentWorkspacePath,
+        ),
+        clientConfig,
+        skillRegistry: this.skillRegistry,
+        logger: sessionLogger,
+      });
+
+      try {
+        await connector.connect();
+        sessionLogger.info("Agent connected");
+
+        const sessionId = await connector.createSession();
+        await connector.setSessionModel(sessionId, memoryMaintenanceConfig.model);
+
+        const response = await connector.prompt(sessionId, fullPrompt);
+        sessionLogger.info("Memory maintenance session completed", {
+          stopReason: response.stopReason,
+        });
+
+        const success = response.stopReason === "end_turn";
+        return {
+          success,
+          replySent: false,
+          error: success ? undefined : `Unexpected stop reason: ${response.stopReason}`,
+        };
+      } finally {
+        await connector.disconnect();
+        sessionLogger.debug("Agent disconnected");
+
+        if (shellSessionId) {
+          this.sessionRegistry.remove(shellSessionId);
+          const sessionIdFile = join(workspace.path, "SESSION_ID");
+          try {
+            await Deno.remove(sessionIdFile);
+          } catch (error) {
+            if (!(error instanceof Deno.errors.NotFound)) {
+              sessionLogger.warn("Failed to remove SESSION_ID file", {
+                error: error instanceof Error ? error.message : String(error),
+              });
+            }
+          }
+        }
+      }
+    } catch (error) {
+      sessionLogger.error("Memory maintenance session failed", {
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return {
+        success: false,
+        replySent: false,
+        error: error instanceof Error ? error.message : "Unknown error",
+      };
+    }
+  }
+
+  /**
    * Create an AgentConnector instance.
    * Protected to allow test subclasses to inject mocks.
    */
@@ -796,5 +938,69 @@ export class SessionOrchestrator {
     }
 
     return parts.join("\n");
+  }
+
+  /**
+   * Build the full prompt for a memory maintenance session
+   */
+  private async buildMemoryMaintenancePrompt(
+    workspaceKey: string,
+    sessionId: string | null,
+    workspace: WorkspaceInfo,
+  ): Promise<string> {
+    const promptDir = dirname(this.config.agent.systemPromptPath);
+    const instructionsPath = join(promptDir, "system_memory_maintenance.md");
+    let instructions = await Deno.readTextFile(instructionsPath);
+
+    const fragments = await loadPromptFragments(promptDir, "system_memory_maintenance.md");
+    instructions = replacePlaceholders(instructions, fragments);
+    instructions = instructions.replaceAll("{workspace_key}", workspaceKey);
+    instructions = instructions.replaceAll("{session_id}", sessionId ?? "");
+
+    // Load all enabled memories and embed them in the prompt
+    const memoriesDump = await this.serializeAllMemories(workspace);
+    instructions = instructions.replaceAll("{memories_dump}", memoriesDump);
+
+    return instructions.trim();
+  }
+
+  /**
+   * Load all enabled memories from a workspace and serialize as JSON for prompt injection
+   */
+  private async serializeAllMemories(workspace: WorkspaceInfo): Promise<string> {
+    const visibilities: import("../types/memory.ts").MemoryVisibility[] = workspace.isDm
+      ? ["public", "private"]
+      : ["public"];
+
+    const allMemories: {
+      id: string;
+      visibility: string;
+      importance: string;
+      content: string;
+      createdAt: string;
+    }[] = [];
+
+    for (const visibility of visibilities) {
+      const memories = await this.memoryStore.loadAllMemories(workspace, visibility);
+      for (const m of memories) {
+        if (!m.enabled) continue;
+        allMemories.push({
+          id: m.id,
+          visibility: m.visibility,
+          importance: m.importance,
+          content: m.content,
+          createdAt: m.createdAt,
+        });
+      }
+    }
+
+    // Sort by creation date ascending
+    allMemories.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+
+    if (allMemories.length === 0) {
+      return "(No enabled memories found)";
+    }
+
+    return JSON.stringify(allMemories, null, 2);
   }
 }

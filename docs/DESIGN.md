@@ -336,7 +336,8 @@ The Agent can request additional context during reasoning by calling:
 - `memory-search` — Search memory by keywords
 
 > [!NOTE]
-> The system does **not** perform automatic memory compression or summarization. Context size is controlled through fixed quotas and retrieval limits.
+> The normal message flow does **not** perform inline memory compression or summarization.
+> Context size is controlled through fixed quotas and retrieval limits. Optional background memory maintenance is configured separately.
 
 ### Reply Flow
 
@@ -920,6 +921,36 @@ The self-research feature allows the agent to autonomously build knowledge by pe
 ### Configuration
 
 See `config.example.yaml` for the `selfResearch` section. Environment variables: `SELF_RESEARCH_ENABLED`, `SELF_RESEARCH_MODEL`, `SELF_RESEARCH_RSS_FEEDS` (JSON), `SELF_RESEARCH_MIN_INTERVAL_MS`, `SELF_RESEARCH_MAX_INTERVAL_MS`.
+
+---
+
+## Memory Maintenance
+
+The memory maintenance feature periodically compacts old memories in each user workspace using the existing memory skills and append-only patch model.
+
+### Components
+
+| Component | File | Purpose |
+| --- | --- | --- |
+| Config types | `src/types/config.ts` | `MemoryMaintenanceConfig` interface |
+| Scheduler | `src/core/memory-maintenance-scheduler.ts` | Fixed-interval timer management |
+| Session Flow | `src/core/session-orchestrator.ts` | `processMemoryMaintenance()` method |
+| Prompt | `prompts/system_memory_maintenance.md` | English maintenance instructions with placeholders |
+| Integration | `src/bootstrap.ts` | Workspace iteration, threshold check, and per-workspace isolation |
+
+### Flow
+
+1. Scheduler triggers at fixed interval (`intervalMs`, default 7 days)
+2. Bootstrap callback lists all workspaces
+3. For each workspace, enabled-memory count is calculated
+4. Workspaces below `minMemoryCount` are skipped
+5. For eligible workspaces, one agent session runs maintenance
+6. Agent saves high-importance summaries and disables covered originals via patch events
+7. Failures are isolated per workspace; processing continues for others
+
+### Configuration
+
+See `config.example.yaml` for the `memoryMaintenance` section. Environment variables: `MEMORY_MAINTENANCE_ENABLED`, `MEMORY_MAINTENANCE_MODEL`, `MEMORY_MAINTENANCE_MIN_MEMORY_COUNT`, `MEMORY_MAINTENANCE_INTERVAL_MS`.
 
 ---
 

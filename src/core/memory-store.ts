@@ -166,7 +166,7 @@ export class MemoryStore {
   /**
    * Load all memories from a file and resolve patches
    */
-  private async loadAllMemories(
+  async loadAllMemories(
     workspace: WorkspaceInfo,
     visibility: MemoryVisibility,
   ): Promise<ResolvedMemory[]> {
@@ -278,6 +278,23 @@ export class MemoryStore {
     }
 
     return importantPublic.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+  }
+
+  /**
+   * Count enabled memories in a workspace (both public and private for DM).
+   * Used by memory maintenance scheduler to check if compaction threshold is met.
+   */
+  async countEnabledMemories(workspace: WorkspaceInfo): Promise<number> {
+    const publicMemories = await this.loadAllMemories(workspace, "public");
+    const enabledPublic = publicMemories.filter((m) => m.enabled).length;
+
+    if (workspace.isDm) {
+      const privateMemories = await this.loadAllMemories(workspace, "private");
+      const enabledPrivate = privateMemories.filter((m) => m.enabled).length;
+      return enabledPublic + enabledPrivate;
+    }
+
+    return enabledPublic;
   }
 
   /**
