@@ -284,6 +284,7 @@ interface PatchEvent {
 | `memory-save`   | Save new memory              | POST /api/skill/memory-save   |
 | `memory-search` | Search existing memories     | POST /api/skill/memory-search |
 | `memory-patch`  | Update memory attributes     | POST /api/skill/memory-patch  |
+| `memory-stats`  | Get memory statistics        | POST /api/skill/memory-stats  |
 | `fetch-context` | Get additional platform data | POST /api/skill/fetch-context |
 | `send-reply`    | Send final reply (max 1)     | POST /api/skill/send-reply    |
 
@@ -861,6 +862,10 @@ AIr-Friends/
 │   │   ├── SKILL.md
 │   │   └── scripts/
 │   │       └── memory-patch.ts
+│   ├── memory-stats/
+│   │   ├── SKILL.md
+│   │   └── scripts/
+│   │       └── memory-stats.ts
 │   ├── fetch-context/
 │   │   ├── SKILL.md
 │   │   └── scripts/

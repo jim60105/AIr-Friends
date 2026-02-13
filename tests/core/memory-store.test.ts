@@ -280,3 +280,82 @@ Deno.test("MemoryStore - countEnabledMemories includes private memories for DM w
     assertEquals(count, 2);
   });
 });
+
+Deno.test("MemoryStore - getMemoryStats - returns correct statistics", async () => {
+  await withTestMemoryStore(false, async (store, workspace) => {
+    await store.addMemory(workspace, "Normal memory 1");
+    await store.addMemory(workspace, "Normal memory 2");
+    await store.addMemory(workspace, "High memory", { importance: "high" });
+    const toDisable = await store.addMemory(workspace, "Will disable");
+    await store.disableMemory(workspace, toDisable.id);
+
+    const stats = await store.getMemoryStats(workspace, false);
+
+    assertEquals(stats.public.total, 4);
+    assertEquals(stats.public.enabled, 3);
+    assertEquals(stats.public.disabled, 1);
+    assertEquals(stats.public.highImportance, 1);
+    assertEquals(stats.public.normalImportance, 2);
+    assertEquals(stats.private, null);
+    assertEquals(stats.summary.totalMemories, 4);
+    assertEquals(stats.summary.totalEnabled, 3);
+    assertEquals(stats.summary.totalDisabled, 1);
+  });
+});
+
+Deno.test("MemoryStore - getMemoryStats - empty workspace returns all zeros", async () => {
+  await withTestMemoryStore(false, async (store, workspace) => {
+    const stats = await store.getMemoryStats(workspace, false);
+
+    assertEquals(stats.public.total, 0);
+    assertEquals(stats.public.enabled, 0);
+    assertEquals(stats.public.disabled, 0);
+    assertEquals(stats.public.highImportance, 0);
+    assertEquals(stats.public.normalImportance, 0);
+    assertEquals(stats.private, null);
+    assertEquals(stats.summary.totalMemories, 0);
+  });
+});
+
+Deno.test("MemoryStore - getMemoryStats - excludes private when not DM", async () => {
+  await withTestMemoryStore(false, async (store, workspace) => {
+    await store.addMemory(workspace, "Public memory");
+
+    const stats = await store.getMemoryStats(workspace, false);
+    assertEquals(stats.private, null);
+    assertEquals(stats.summary.totalMemories, 1);
+  });
+});
+
+Deno.test("MemoryStore - getMemoryStats - includes private in DM", async () => {
+  await withTestMemoryStore(true, async (store, workspace) => {
+    await store.addMemory(workspace, "Public memory", { visibility: "public" });
+    await store.addMemory(workspace, "Private memory", { visibility: "private" });
+    await store.addMemory(workspace, "Private high", { visibility: "private", importance: "high" });
+
+    const stats = await store.getMemoryStats(workspace, true);
+
+    assertEquals(stats.public.total, 1);
+    assertEquals(stats.public.enabled, 1);
+    assertEquals(stats.private !== null, true);
+    assertEquals(stats.private!.total, 2);
+    assertEquals(stats.private!.enabled, 2);
+    assertEquals(stats.private!.highImportance, 1);
+    assertEquals(stats.private!.normalImportance, 1);
+    assertEquals(stats.summary.totalMemories, 3);
+    assertEquals(stats.summary.totalEnabled, 3);
+  });
+});
+
+Deno.test("MemoryStore - getMemoryStats - reflects patches correctly", async () => {
+  await withTestMemoryStore(false, async (store, workspace) => {
+    const mem1 = await store.addMemory(workspace, "Memory 1");
+    await store.addMemory(workspace, "Memory 2");
+    await store.disableMemory(workspace, mem1.id);
+
+    const stats = await store.getMemoryStats(workspace, false);
+    assertEquals(stats.public.total, 2);
+    assertEquals(stats.public.enabled, 1);
+    assertEquals(stats.public.disabled, 1);
+  });
+});

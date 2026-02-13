@@ -174,6 +174,34 @@ export class MemoryHandler {
   };
 
   /**
+   * Handle memory-stats skill
+   */
+  handleMemoryStats: SkillHandler = async (
+    _parameters: Record<string, unknown>,
+    context: SkillContext,
+  ): Promise<SkillResult> => {
+    try {
+      const includePrivate = context.workspace.isDm;
+      const stats = await this.memoryStore.getMemoryStats(context.workspace, includePrivate);
+
+      return {
+        success: true,
+        data: stats,
+      };
+    } catch (error) {
+      logger.error("Failed to get memory stats", {
+        error: error instanceof Error ? error.message : String(error),
+        workspaceKey: context.workspace.key,
+      });
+
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : "Unknown error",
+      };
+    }
+  };
+
+  /**
    * Handle memory-patch skill
    */
   handleMemoryPatch: SkillHandler = async (
