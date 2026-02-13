@@ -894,3 +894,42 @@ Deno.test("fetchRecentMessages - note: notes/conversation returns deep chain in 
   const showCalls = calledEndpoints.filter((e) => e === "notes/show");
   assertEquals(showCalls.length, 1);
 });
+Deno.test('normalizeMisskeyNote - files produce attachments', () => {
+  const file = { id: 'file1', url: 'https://example.com/file.png', type: 'image/png', name: 'photo.png', size: 5000, properties: { width: 640, height: 480 } };
+  const note = createMockNote({ files: [file], fileIds: ['file1'] });
+  const ev = normalizeMisskeyNote(note, 'bot123', false);
+  assertEquals(ev.attachments?.length, 1);
+});
+
+Deno.test('noteToPlatformMessage - with files', () => {
+  const file = { id: 'file1', url: 'https://example.com/file.png', type: 'image/png', name: 'photo.png', size: 5000, properties: { width: 640, height: 480 } };
+  const note = createMockNote({ files: [file], fileIds: ['file1'] });
+  const pm = noteToPlatformMessage(note, 'bot123');
+  assertEquals(pm.attachments?.length, 1);
+});
+
+Deno.test('noteToPlatformMessage - without files', () => {
+  const note = createMockNote();
+  const pm = noteToPlatformMessage(note, 'bot123');
+  assertEquals(pm.attachments, undefined);
+});
+
+Deno.test('normalizeMisskeyChatMessage - file becomes attachment', () => {
+  const file = { id: 'file1', url: 'https://example.com/file.png', type: 'image/png', name: 'photo.png', size: 5000, properties: { width: 640, height: 480 } };
+  const chat = createMockChatMessage({ file });
+  const ev = normalizeMisskeyChatMessage(chat, 'bot123');
+  assertEquals(ev.attachments?.length, 1);
+});
+
+Deno.test('chatMessageToPlatformMessage - with file', () => {
+  const file = { id: 'file1', url: 'https://example.com/file.png', type: 'image/png', name: 'photo.png', size: 5000, properties: { width: 640, height: 480 } };
+  const chat = createMockChatMessage({ file });
+  const pm = chatMessageToPlatformMessage(chat, 'bot123');
+  assertEquals(pm.attachments?.length, 1);
+});
+
+Deno.test('chatMessageToPlatformMessage - without file', () => {
+  const chat = createMockChatMessage();
+  const pm = chatMessageToPlatformMessage(chat, 'bot123');
+  assertEquals(pm.attachments, undefined);
+});
