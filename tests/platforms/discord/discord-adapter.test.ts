@@ -174,21 +174,43 @@ Deno.test("isBotMentioned - should not detect when not mentioned", () => {
   assertEquals(result, false);
 });
 Deno.test("normalizeDiscordMessage - image attachments are detected", () => {
-  const attachment = { id: "att1", url: "https://cdn.example.com/image.png", contentType: "image/png", name: "image.png", size: 12345, width: 800, height: 600 };
+  const attachment = {
+    id: "att1",
+    url: "https://cdn.example.com/image.png",
+    contentType: "image/png",
+    name: "image.png",
+    size: 12345,
+    width: 800,
+    height: 600,
+  };
   const message = createMockMessage({ attachments: new Map([["att1", attachment]]) });
   const event = normalizeDiscordMessage(message as Message, "bot123");
   assertEquals(Array.isArray(event.attachments), true);
 });
 
 Deno.test("normalizeDiscordMessage - non-image attachments are detected", () => {
-  const attachment = { id: "att2", url: "https://cdn.example.com/file.zip", contentType: "application/zip", name: "file.zip", size: 999 };
+  const attachment = {
+    id: "att2",
+    url: "https://cdn.example.com/file.zip",
+    contentType: "application/zip",
+    name: "file.zip",
+    size: 999,
+  };
   const message = createMockMessage({ attachments: new Map([["att2", attachment]]) });
   const event = normalizeDiscordMessage(message as Message, "bot123");
 });
 
 import { messageToPltatformMessage } from "@platforms/discord/discord-utils.ts";
 Deno.test("messageToPltatformMessage - with attachments", () => {
-  const attachment = { id: "att1", url: "https://cdn.example.com/image.png", contentType: "image/png", name: "image.png", size: 12345, width: 800, height: 600 };
+  const attachment = {
+    id: "att1",
+    url: "https://cdn.example.com/image.png",
+    contentType: "image/png",
+    name: "image.png",
+    size: 12345,
+    width: 800,
+    height: 600,
+  };
   const message = createMockMessage({ attachments: new Map([["att1", attachment]]) });
   const pm = messageToPltatformMessage(message as any, "bot123");
   assertEquals(pm.attachments?.length, 1);

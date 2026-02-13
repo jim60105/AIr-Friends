@@ -316,8 +316,12 @@ function createMockConnectorWithCapabilities(
 }
 
 Deno.test("AgentConnector - supportsImageContent cases", () => {
-  const connectorTrue = createMockConnectorWithCapabilities({ promptCapabilities: { image: true } as any });
-  const connectorFalse = createMockConnectorWithCapabilities({ promptCapabilities: { image: false } as any });
+  const connectorTrue = createMockConnectorWithCapabilities({
+    promptCapabilities: { image: true } as any,
+  });
+  const connectorFalse = createMockConnectorWithCapabilities({
+    promptCapabilities: { image: false } as any,
+  });
   const connectorMissing = createMockConnectorWithCapabilities({} as any);
   const connectorEmpty = createMockConnectorWithCapabilities({ promptCapabilities: {} as any });
 

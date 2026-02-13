@@ -1700,22 +1700,31 @@ Deno.test("SessionOrchestrator - processMemoryMaintenance shows no memories mess
     await Deno.remove(tempDir, { recursive: true });
   }
 });
-Deno.test('SessionOrchestrator - prompt receives string when supportsImageContent is false', async () => {
+Deno.test("SessionOrchestrator - prompt receives string when supportsImageContent is false", async () => {
   const tempDir = await Deno.makeTempDir();
   try {
-    const { orchestrator, workspaceManager, sessionRegistry } = await createTestableOrchestrator(tempDir);
+    const { orchestrator, workspaceManager, sessionRegistry } = await createTestableOrchestrator(
+      tempDir,
+    );
     const event = createTestEvent();
-    event.attachments = [{ id: 'a1', url: 'https://example.com/img.png', mimeType: 'image/png', filename: 'img.png', size: 1000, isImage: true }];
+    event.attachments = [{
+      id: "a1",
+      url: "https://example.com/img.png",
+      mimeType: "image/png",
+      filename: "img.png",
+      size: 1000,
+      isImage: true,
+    }];
     orchestrator.setConnectorSetup((connector) => {
       // default supportsImageContent false
-      connector.promptResponses = [{ stopReason: 'end_turn' } as any];
+      connector.promptResponses = [{ stopReason: "end_turn" } as any];
       connector.onPrompt = (callCount) => {};
     });
 
     const platformAdapter = new MockPlatformAdapter() as unknown as PlatformAdapter;
     await orchestrator.processMessage(event, platformAdapter);
     // Ensure prompt was called and received a string (mock returns based on call)
-    assertEquals(typeof calledWith, 'number');
+    assertEquals(typeof calledWith, "number");
 
     sessionRegistry.stop();
   } finally {
@@ -1723,18 +1732,27 @@ Deno.test('SessionOrchestrator - prompt receives string when supportsImageConten
   }
 });
 
-Deno.test('SessionOrchestrator - prompt receives ContentBlock[] when supportsImageContent is true', async () => {
+Deno.test("SessionOrchestrator - prompt receives ContentBlock[] when supportsImageContent is true", async () => {
   const tempDir = await Deno.makeTempDir();
   try {
-    const { orchestrator, workspaceManager, sessionRegistry } = await createTestableOrchestrator(tempDir);
+    const { orchestrator, workspaceManager, sessionRegistry } = await createTestableOrchestrator(
+      tempDir,
+    );
     const event = createTestEvent();
-    event.attachments = [{ id: 'a1', url: 'https://example.com/img.png', mimeType: 'image/png', filename: 'img.png', size: 1000, isImage: true }];
+    event.attachments = [{
+      id: "a1",
+      url: "https://example.com/img.png",
+      mimeType: "image/png",
+      filename: "img.png",
+      size: 1000,
+      isImage: true,
+    }];
     let receivedArg: any = null;
     orchestrator.setConnectorSetup((connector) => {
       connector.supportsImageContent = () => true;
       connector.prompt = async (_sessionId: string, text: any) => {
         receivedArg = text;
-        return { stopReason: 'end_turn' } as any;
+        return { stopReason: "end_turn" } as any;
       };
     });
 
@@ -1743,7 +1761,7 @@ Deno.test('SessionOrchestrator - prompt receives ContentBlock[] when supportsIma
 
     // When image support is true, orchestrator should pass array/objects (ContentBlocks)
     // Expect non-string (likely array or object)
-    assertEquals(typeof receivedArg === 'string', false);
+    assertEquals(typeof receivedArg === "string", false);
 
     sessionRegistry.stop();
   } finally {
