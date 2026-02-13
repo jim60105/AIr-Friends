@@ -185,7 +185,13 @@ Deno.test("normalizeDiscordMessage - image attachments are detected", () => {
   };
   const message = createMockMessage({ attachments: new Map([["att1", attachment]]) });
   const event = normalizeDiscordMessage(message as Message, "bot123");
-  assertEquals(Array.isArray(event.attachments), true);
+  assertEquals(event.attachments?.length, 1);
+  assertEquals(event.attachments![0].isImage, true);
+  assertEquals(event.attachments![0].mimeType, "image/png");
+  assertEquals(event.attachments![0].filename, "image.png");
+  assertEquals(event.attachments![0].width, 800);
+  assertEquals(event.attachments![0].height, 600);
+  assertEquals(event.attachments![0].size, 12345);
 });
 
 Deno.test("normalizeDiscordMessage - non-image attachments are detected", () => {
@@ -197,7 +203,29 @@ Deno.test("normalizeDiscordMessage - non-image attachments are detected", () => 
     size: 999,
   };
   const message = createMockMessage({ attachments: new Map([["att2", attachment]]) });
-  const _event = normalizeDiscordMessage(message as Message, "bot123");
+  const event = normalizeDiscordMessage(message as Message, "bot123");
+  assertEquals(event.attachments?.length, 1);
+  assertEquals(event.attachments![0].isImage, false);
+  assertEquals(event.attachments![0].mimeType, "application/zip");
+  assertEquals(event.attachments![0].width, undefined);
+  assertEquals(event.attachments![0].height, undefined);
+});
+
+Deno.test("normalizeDiscordMessage - null contentType defaults to octet-stream", () => {
+  const attachment = {
+    id: "att3",
+    url: "https://cdn.example.com/unknown",
+    contentType: null,
+    name: null,
+    size: 100,
+    width: null,
+    height: null,
+  };
+  const message = createMockMessage({ attachments: new Map([["att3", attachment]]) });
+  const event = normalizeDiscordMessage(message as Message, "bot123");
+  assertEquals(event.attachments![0].mimeType, "application/octet-stream");
+  assertEquals(event.attachments![0].filename, "unknown");
+  assertEquals(event.attachments![0].isImage, false);
 });
 
 import { messageToPltatformMessage } from "@platforms/discord/discord-utils.ts";

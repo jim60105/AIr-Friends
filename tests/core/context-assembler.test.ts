@@ -946,3 +946,52 @@ Deno.test("ContextAssembler - formatContext without attachments omits section", 
     }
   });
 });
+
+Deno.test("ContextAssembler - trigger message with attachments includes descriptions", async () => {
+  await withTestContextAssembler(async (assembler, _store, manager) => {
+    const event = createTestEvent({
+      attachments: [{
+        id: "att1",
+        url: "https://example.com/doc.pdf",
+        mimeType: "application/pdf",
+        filename: "doc.pdf",
+        size: 2048,
+        isImage: false,
+      }],
+    });
+    const workspace = await manager.getOrCreateWorkspace(event);
+    const fetcher = createMockMessageFetcher([]);
+
+    const context = await assembler.assembleContext(event, workspace, fetcher);
+    const formatted = assembler.formatContext(context);
+
+    assertStringIncludes(formatted.userMessage, "📎 doc.pdf");
+    assertStringIncludes(formatted.userMessage, "application/pdf");
+  });
+});
+
+Deno.test("ContextAssembler - formatFileSize via attachment description", async () => {
+  await withTestContextAssembler(async (assembler, _store, manager) => {
+    const event = createTestEvent();
+    const workspace = await manager.getOrCreateWorkspace(event);
+    const fetcher = createMockMessageFetcher([
+      createTestMessage({
+        content: "file",
+        attachments: [{
+          id: "a1",
+          url: "https://example.com/big.bin",
+          mimeType: "application/octet-stream",
+          filename: "big.bin",
+          size: 2 * 1024 * 1024,
+          isImage: false,
+        }],
+        username: "Alice",
+      }),
+    ]);
+
+    const context = await assembler.assembleContext(event, workspace, fetcher);
+    const formatted = assembler.formatContext(context);
+
+    assertStringIncludes(formatted.userMessage, "2.0MB");
+  });
+});

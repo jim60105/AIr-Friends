@@ -544,7 +544,15 @@ export class ContextAssembler {
     // Add current message
     parts.push("## Current Message");
     parts.push("");
-    parts.push(`${triggerMessage.username}: ${triggerMessage.content}`);
+    let triggerLine = `${triggerMessage.username}: ${triggerMessage.content}`;
+    if (triggerMessage.attachments && triggerMessage.attachments.length > 0) {
+      const attachmentDescs = triggerMessage.attachments.map((att) => {
+        const sizeStr = att.size ? ` ${formatFileSize(att.size)}` : "";
+        return `📎 ${att.filename} (${att.mimeType}${sizeStr}) ${att.url}`;
+      });
+      triggerLine += `\n  Attachments: ${attachmentDescs.join(" | ")}`;
+    }
+    parts.push(triggerLine);
     parts.push("");
 
     return parts.join("\n");

@@ -907,6 +907,16 @@ Deno.test("normalizeMisskeyNote - files produce attachments", () => {
   const note = createMockNote({ files: [file as any], fileIds: ["file1"] });
   const ev = normalizeMisskeyNote(note, "bot123", false);
   assertEquals(ev.attachments?.length, 1);
+  assertEquals(ev.attachments![0].isImage, true);
+  assertEquals(ev.attachments![0].mimeType, "image/png");
+  assertEquals(ev.attachments![0].width, 640);
+  assertEquals(ev.attachments![0].height, 480);
+});
+
+Deno.test("normalizeMisskeyNote - no files means no attachments", () => {
+  const note = createMockNote();
+  const ev = normalizeMisskeyNote(note, "bot123", false);
+  assertEquals(ev.attachments, undefined);
 });
 
 Deno.test("noteToPlatformMessage - with files", () => {
@@ -922,6 +932,9 @@ Deno.test("noteToPlatformMessage - with files", () => {
   const note = createMockNote({ files: [file as any], fileIds: ["file1"] });
   const pm = noteToPlatformMessage(note, "bot123");
   assertEquals(pm.attachments?.length, 1);
+  assertEquals(pm.attachments![0].id, "file1");
+  assertEquals(pm.attachments![0].url, "https://example.com/file.png");
+  assertEquals(pm.attachments![0].isImage, true);
 });
 
 Deno.test("noteToPlatformMessage - without files", () => {
@@ -943,6 +956,14 @@ Deno.test("normalizeMisskeyChatMessage - file becomes attachment", () => {
   const chat = createMockChatMessage({ file: file as any });
   const ev = normalizeMisskeyChatMessage(chat, "bot123");
   assertEquals(ev.attachments?.length, 1);
+  assertEquals(ev.attachments![0].isImage, true);
+  assertEquals(ev.attachments![0].filename, "photo.png");
+});
+
+Deno.test("normalizeMisskeyChatMessage - no file means no attachments", () => {
+  const chat = createMockChatMessage();
+  const ev = normalizeMisskeyChatMessage(chat, "bot123");
+  assertEquals(ev.attachments, undefined);
 });
 
 Deno.test("chatMessageToPlatformMessage - with file", () => {
@@ -958,6 +979,8 @@ Deno.test("chatMessageToPlatformMessage - with file", () => {
   const chat = createMockChatMessage({ file: file as any });
   const pm = chatMessageToPlatformMessage(chat, "bot123");
   assertEquals(pm.attachments?.length, 1);
+  assertEquals(pm.attachments![0].isImage, true);
+  assertEquals(pm.attachments![0].mimeType, "image/png");
 });
 
 Deno.test("chatMessageToPlatformMessage - without file", () => {
