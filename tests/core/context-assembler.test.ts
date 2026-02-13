@@ -902,7 +902,7 @@ Deno.test("ContextAssembler - formatContext includes emoji section in token budg
 Deno.test("ContextAssembler - formatContext includes attachment descriptions", async () => {
   await withTestContextAssembler(async (assembler, _store, manager) => {
     const event = createTestEvent();
-    const workspace = await assembler["manager"].getOrCreateWorkspace(event).catch(async () => {
+    const workspace = await manager.getOrCreateWorkspace(event).catch(async () => {
       // fallback to creating new manager path
       const mgr = new (await import("../../src/core/workspace-manager.ts")).WorkspaceManager({
         repoPath: await Deno.makeTempDir(),
@@ -939,7 +939,7 @@ Deno.test("ContextAssembler - formatContext includes attachment descriptions", a
 Deno.test("ContextAssembler - formatContext without attachments omits section", async () => {
   await withTestContextAssembler(async (assembler, _store, manager) => {
     const event = createTestEvent();
-    const workspace = await assembler["manager"].getOrCreateWorkspace(event).catch(async () => {
+    const workspace = await manager.getOrCreateWorkspace(event).catch(async () => {
       const mgr = new (await import("../../src/core/workspace-manager.ts")).WorkspaceManager({
         repoPath: await Deno.makeTempDir(),
         workspacesDir: "workspaces",
