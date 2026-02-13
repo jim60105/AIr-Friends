@@ -87,3 +87,51 @@ Deno.test("MemoryMaintenanceScheduler - stop clears timer", () => {
   scheduler.stop();
   assertEquals(scheduler.getStatus().nextScheduledAt, null);
 });
+
+Deno.test("MemoryMaintenanceScheduler - start is no-op when already started", () => {
+  const scheduler = new MemoryMaintenanceScheduler(createConfig({ intervalMs: 100 }));
+  scheduler.setCallback(async () => {});
+  scheduler.start();
+
+  const nextFirst = scheduler.getStatus().nextScheduledAt;
+  // Calling start again should be a no-op
+  scheduler.start();
+  const nextSecond = scheduler.getStatus().nextScheduledAt;
+
+  assertEquals(nextFirst, nextSecond);
+  scheduler.stop();
+});
+
+Deno.test("MemoryMaintenanceScheduler - getStatus returns correct running state", async () => {
+  const scheduler = new MemoryMaintenanceScheduler(createConfig({ intervalMs: 20 }));
+  let resolveCallback: () => void;
+  const callbackPromise = new Promise<void>((resolve) => {
+    resolveCallback = resolve;
+  });
+
+  scheduler.setCallback(async () => {
+    assertEquals(scheduler.getStatus().isRunning, true);
+    resolveCallback();
+    await new Promise((r) => setTimeout(r, 30));
+  });
+  scheduler.start();
+
+  await callbackPromise;
+  scheduler.stop();
+  await new Promise((r) => setTimeout(r, 50));
+
+  assertEquals(scheduler.getStatus().isRunning, false);
+  assertEquals(scheduler.getStatus().lastExecutedAt instanceof Date, true);
+});
+
+Deno.test("MemoryMaintenanceScheduler - execute without callback", async () => {
+  const scheduler = new MemoryMaintenanceScheduler(createConfig({ intervalMs: 20 }));
+  // No callback set
+  scheduler.start();
+
+  await new Promise((resolve) => setTimeout(resolve, 60));
+  scheduler.stop();
+
+  // Should not throw - lastExecutedAt should be set even without callback
+  assertEquals(scheduler.getStatus().lastExecutedAt instanceof Date, true);
+});

@@ -1358,3 +1358,341 @@ Deno.test("SessionOrchestrator - processSelfResearch without skillApi", async ()
     await Deno.remove(tempDir, { recursive: true });
   }
 });
+
+// --- processMemoryMaintenance tests ---
+
+Deno.test("SessionOrchestrator - processMemoryMaintenance returns success on end_turn", async () => {
+  const tempDir = await Deno.makeTempDir();
+  try {
+    const { orchestrator, sessionRegistry } = await createTestableOrchestrator(tempDir);
+
+    await Deno.writeTextFile(
+      `${tempDir}/prompts/system_memory_maintenance.md`,
+      "Maintenance for {workspace_key}\nSession: {session_id}\nMemories:\n{memories_dump}",
+    );
+
+    orchestrator.setConnectorSetup((connector) => {
+      connector.promptResponses = [
+        { stopReason: "end_turn" } as PromptResponse,
+      ];
+    });
+
+    const response = await orchestrator.processMemoryMaintenance(
+      "discord/test_user",
+      {
+        enabled: true,
+        model: "gpt-5-mini",
+        minMemoryCount: 50,
+        intervalMs: 604800000,
+      },
+    );
+
+    assertEquals(response.success, true);
+    assertEquals(response.replySent, false);
+    assertEquals(response.error, undefined);
+
+    sessionRegistry.stop();
+  } finally {
+    await Deno.remove(tempDir, { recursive: true });
+  }
+});
+
+Deno.test("SessionOrchestrator - processMemoryMaintenance returns failure on cancelled", async () => {
+  const tempDir = await Deno.makeTempDir();
+  try {
+    const { orchestrator, sessionRegistry } = await createTestableOrchestrator(tempDir);
+
+    await Deno.writeTextFile(
+      `${tempDir}/prompts/system_memory_maintenance.md`,
+      "Maintenance for {workspace_key}\n{session_id}\n{memories_dump}",
+    );
+
+    orchestrator.setConnectorSetup((connector) => {
+      connector.promptResponses = [
+        { stopReason: "cancelled" } as PromptResponse,
+      ];
+    });
+
+    const response = await orchestrator.processMemoryMaintenance(
+      "discord/test_user",
+      {
+        enabled: true,
+        model: "gpt-5-mini",
+        minMemoryCount: 50,
+        intervalMs: 604800000,
+      },
+    );
+
+    assertEquals(response.success, false);
+    assertEquals(response.replySent, false);
+    assertExists(response.error);
+
+    sessionRegistry.stop();
+  } finally {
+    await Deno.remove(tempDir, { recursive: true });
+  }
+});
+
+Deno.test("SessionOrchestrator - processMemoryMaintenance rejects invalid workspace key", async () => {
+  const tempDir = await Deno.makeTempDir();
+  try {
+    const { orchestrator, sessionRegistry } = await createTestableOrchestrator(tempDir);
+
+    const response = await orchestrator.processMemoryMaintenance(
+      "invalid_key",
+      {
+        enabled: true,
+        model: "gpt-5-mini",
+        minMemoryCount: 50,
+        intervalMs: 604800000,
+      },
+    );
+
+    assertEquals(response.success, false);
+    assertEquals(response.replySent, false);
+    assertEquals(response.error, "Invalid workspace key: invalid_key");
+
+    sessionRegistry.stop();
+  } finally {
+    await Deno.remove(tempDir, { recursive: true });
+  }
+});
+
+Deno.test("SessionOrchestrator - processMemoryMaintenance rejects unsupported platform", async () => {
+  const tempDir = await Deno.makeTempDir();
+  try {
+    const { orchestrator, sessionRegistry } = await createTestableOrchestrator(tempDir);
+
+    const response = await orchestrator.processMemoryMaintenance(
+      "telegram/user123",
+      {
+        enabled: true,
+        model: "gpt-5-mini",
+        minMemoryCount: 50,
+        intervalMs: 604800000,
+      },
+    );
+
+    assertEquals(response.success, false);
+    assertEquals(response.error, "Invalid workspace key: telegram/user123");
+
+    sessionRegistry.stop();
+  } finally {
+    await Deno.remove(tempDir, { recursive: true });
+  }
+});
+
+Deno.test("SessionOrchestrator - processMemoryMaintenance handles agent connection failure", async () => {
+  const tempDir = await Deno.makeTempDir();
+  try {
+    const config = createTestConfig(tempDir);
+    config.agent.defaultAgentType = "copilot";
+    config.agent.githubToken = "test-token";
+    config.skillApi = {
+      enabled: true,
+      port: 3997,
+      host: "127.0.0.1",
+      sessionTimeoutMs: 60000,
+    };
+
+    const workspaceManager = new WorkspaceManager({
+      repoPath: config.workspace.repoPath,
+      workspacesDir: config.workspace.workspacesDir,
+    });
+    const memoryStore = new MemoryStore(workspaceManager, {
+      searchLimit: config.memory.searchLimit,
+      maxChars: config.memory.maxChars,
+    });
+    const skillRegistry = new SkillRegistry(memoryStore);
+
+    await Deno.mkdir(`${tempDir}/prompts`, { recursive: true });
+    await Deno.writeTextFile(
+      `${tempDir}/prompts/system.md`,
+      "You are a helpful assistant.",
+    );
+    await Deno.writeTextFile(
+      `${tempDir}/prompts/system_memory_maintenance.md`,
+      "Maintenance\n{workspace_key}\n{session_id}\n{memories_dump}",
+    );
+
+    const contextAssembler = new ContextAssembler(memoryStore, {
+      systemPromptPath: `${tempDir}/prompts/system.md`,
+      recentMessageLimit: config.memory.recentMessageLimit,
+      tokenLimit: config.agent.tokenLimit,
+      memoryMaxChars: config.memory.maxChars,
+    });
+
+    const sessionRegistry = new SessionRegistry();
+
+    const orchestrator = new SessionOrchestrator(
+      workspaceManager,
+      contextAssembler,
+      skillRegistry,
+      config,
+      sessionRegistry,
+      memoryStore,
+    );
+
+    const response = await orchestrator.processMemoryMaintenance(
+      "discord/test_user",
+      {
+        enabled: true,
+        model: "gpt-5-mini",
+        minMemoryCount: 50,
+        intervalMs: 604800000,
+      },
+    );
+
+    assertEquals(response.success, false);
+    assertEquals(response.replySent, false);
+    assertExists(response.error);
+
+    sessionRegistry.stop();
+  } finally {
+    await Deno.remove(tempDir, { recursive: true });
+  }
+});
+
+Deno.test("SessionOrchestrator - processMemoryMaintenance without skillApi", async () => {
+  const tempDir = await Deno.makeTempDir();
+  try {
+    const { orchestrator, sessionRegistry } = await createTestableOrchestrator(tempDir, {
+      skillApi: false,
+    });
+
+    await Deno.writeTextFile(
+      `${tempDir}/prompts/system_memory_maintenance.md`,
+      "Maintenance\n{workspace_key}\n{session_id}\n{memories_dump}",
+    );
+
+    orchestrator.setConnectorSetup((connector) => {
+      connector.promptResponses = [
+        { stopReason: "end_turn" } as PromptResponse,
+      ];
+    });
+
+    const response = await orchestrator.processMemoryMaintenance(
+      "misskey/user456",
+      {
+        enabled: true,
+        model: "gpt-5-mini",
+        minMemoryCount: 50,
+        intervalMs: 604800000,
+      },
+    );
+
+    assertEquals(response.success, true);
+    assertEquals(response.replySent, false);
+
+    sessionRegistry.stop();
+  } finally {
+    await Deno.remove(tempDir, { recursive: true });
+  }
+});
+
+Deno.test("SessionOrchestrator - processMemoryMaintenance embeds memories in prompt", async () => {
+  const tempDir = await Deno.makeTempDir();
+  try {
+    const { orchestrator, sessionRegistry, workspaceManager } = await createTestableOrchestrator(
+      tempDir,
+    );
+
+    await Deno.writeTextFile(
+      `${tempDir}/prompts/system_memory_maintenance.md`,
+      "Maintenance for {workspace_key}\nSession: {session_id}\nMemories:\n{memories_dump}",
+    );
+
+    // Create workspace and write memory file
+    const event: NormalizedEvent = {
+      platform: "discord",
+      channelId: "internal",
+      userId: "mem_user",
+      messageId: "test",
+      isDm: true,
+      guildId: "",
+      content: "",
+      timestamp: new Date(),
+    };
+    const ws = await workspaceManager.getOrCreateWorkspace(event);
+    const memoryLine = JSON.stringify({
+      type: "memory",
+      id: "mem1",
+      ts: "2025-01-01T00:00:00.000Z",
+      enabled: true,
+      visibility: "public",
+      importance: "high",
+      content: "Test memory content",
+    });
+    await Deno.writeTextFile(`${ws.path}/memory.public.jsonl`, memoryLine + "\n");
+
+    let capturedPrompt = "";
+    orchestrator.setConnectorSetup((connector) => {
+      connector.promptResponses = [
+        { stopReason: "end_turn" } as PromptResponse,
+      ];
+      const originalPrompt = connector.prompt.bind(connector);
+      connector.prompt = (sid: string, text: string) => {
+        capturedPrompt = text;
+        return originalPrompt(sid, text);
+      };
+    });
+
+    const response = await orchestrator.processMemoryMaintenance(
+      "discord/mem_user",
+      {
+        enabled: true,
+        model: "gpt-5-mini",
+        minMemoryCount: 50,
+        intervalMs: 604800000,
+      },
+    );
+
+    assertEquals(response.success, true);
+    assertEquals(capturedPrompt.includes("Test memory content"), true);
+    assertEquals(capturedPrompt.includes("discord/mem_user"), true);
+
+    sessionRegistry.stop();
+  } finally {
+    await Deno.remove(tempDir, { recursive: true });
+  }
+});
+
+Deno.test("SessionOrchestrator - processMemoryMaintenance shows no memories message when empty", async () => {
+  const tempDir = await Deno.makeTempDir();
+  try {
+    const { orchestrator, sessionRegistry } = await createTestableOrchestrator(tempDir);
+
+    await Deno.writeTextFile(
+      `${tempDir}/prompts/system_memory_maintenance.md`,
+      "Maintenance\n{workspace_key}\n{session_id}\n{memories_dump}",
+    );
+
+    let capturedPrompt = "";
+    orchestrator.setConnectorSetup((connector) => {
+      connector.promptResponses = [
+        { stopReason: "end_turn" } as PromptResponse,
+      ];
+      const originalPrompt = connector.prompt.bind(connector);
+      connector.prompt = (sid: string, text: string) => {
+        capturedPrompt = text;
+        return originalPrompt(sid, text);
+      };
+    });
+
+    await orchestrator.processMemoryMaintenance(
+      "discord/empty_user",
+      {
+        enabled: true,
+        model: "gpt-5-mini",
+        minMemoryCount: 50,
+        intervalMs: 604800000,
+      },
+    );
+
+    assertEquals(capturedPrompt.includes("(No enabled memories found)"), true);
+
+    sessionRegistry.stop();
+  } finally {
+    await Deno.remove(tempDir, { recursive: true });
+  }
+});

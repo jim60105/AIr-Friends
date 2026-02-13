@@ -88,6 +88,39 @@ Deno.test("ShutdownHandler - shutdown with context", async () => {
   }
 });
 
+Deno.test("ShutdownHandler - shutdown stops memoryMaintenanceScheduler", async () => {
+  const handler = new ShutdownHandler();
+  let maintenanceStopCalled = false;
+
+  const mockContext = {
+    config: {},
+    agentCore: {
+      shutdown: () => Promise.resolve(),
+    },
+    platformRegistry: {
+      getAllAdapters: () => [],
+      disconnectAll: () => Promise.resolve(),
+    },
+    memoryMaintenanceScheduler: {
+      stop: () => {
+        maintenanceStopCalled = true;
+      },
+    },
+  } as unknown as AppContext;
+
+  handler.setContext(mockContext);
+
+  const originalExit = Deno.exit;
+  Deno.exit = ((_code: number) => {}) as typeof Deno.exit;
+
+  try {
+    await handler.shutdown();
+    assertEquals(maintenanceStopCalled, true);
+  } finally {
+    Deno.exit = originalExit;
+  }
+});
+
 Deno.test("ShutdownHandler - shutdown handles errors", async () => {
   const handler = new ShutdownHandler();
   const mockContext = {

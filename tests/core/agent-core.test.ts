@@ -281,3 +281,45 @@ Deno.test("AgentCore - getOrchestrator returns orchestrator", async () => {
     await Deno.remove(tempDir, { recursive: true });
   }
 });
+
+Deno.test("AgentCore - getWorkspaceManager returns workspace manager", async () => {
+  const tempDir = await Deno.makeTempDir();
+  try {
+    await Deno.mkdir(`${tempDir}/prompts`, { recursive: true });
+    await Deno.writeTextFile(
+      `${tempDir}/prompts/system.md`,
+      "You are a helpful assistant.",
+    );
+
+    const config = createTestConfig(tempDir);
+    const agentCore = new AgentCore(config);
+
+    const workspaceManager = agentCore.getWorkspaceManager();
+    assertExists(workspaceManager);
+
+    await agentCore.shutdown();
+  } finally {
+    await Deno.remove(tempDir, { recursive: true });
+  }
+});
+
+Deno.test("AgentCore - getMemoryStore returns memory store", async () => {
+  const tempDir = await Deno.makeTempDir();
+  try {
+    await Deno.mkdir(`${tempDir}/prompts`, { recursive: true });
+    await Deno.writeTextFile(
+      `${tempDir}/prompts/system.md`,
+      "You are a helpful assistant.",
+    );
+
+    const config = createTestConfig(tempDir);
+    const agentCore = new AgentCore(config);
+
+    const memoryStore = agentCore.getMemoryStore();
+    assertExists(memoryStore);
+
+    await agentCore.shutdown();
+  } finally {
+    await Deno.remove(tempDir, { recursive: true });
+  }
+});
