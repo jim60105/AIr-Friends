@@ -778,3 +778,95 @@ Deno.test("MemoryHandler - handleMemorySearch returns empty agentNotes when no w
 
   await Deno.remove(tempDir, { recursive: true });
 });
+
+Deno.test("MemoryHandler - memory-stats - returns statistics", async () => {
+  const tempDir = await Deno.makeTempDir();
+  const workspaceManager = new WorkspaceManager({
+    repoPath: tempDir,
+    workspacesDir: "workspaces",
+  });
+  const memoryStore = new MemoryStore(workspaceManager, {
+    searchLimit: 10,
+    maxChars: 2000,
+  });
+  const handler = new MemoryHandler(memoryStore);
+
+  const workspace: WorkspaceInfo = {
+    key: "discord/123",
+    components: { platform: "discord", userId: "123" },
+    path: `${tempDir}/workspaces/discord/123`,
+    isDm: true,
+  };
+
+  await Deno.mkdir(workspace.path, { recursive: true });
+  await Deno.writeTextFile(`${workspace.path}/memory.public.jsonl`, "");
+  await Deno.writeTextFile(`${workspace.path}/memory.private.jsonl`, "");
+
+  // Add some memories
+  await memoryStore.addMemory(workspace, "Test public", { visibility: "public" });
+  await memoryStore.addMemory(workspace, "Test private", { visibility: "private" });
+
+  const context: SkillContext = {
+    workspace,
+    platformAdapter: createMockPlatformAdapter(),
+    channelId: "channel123",
+    userId: "123",
+  };
+
+  const result = await handler.handleMemoryStats({}, context);
+
+  assertEquals(result.success, true);
+  const data2 = result.data as {
+    public: { total: number };
+    private: { total: number } | null;
+    summary: { totalMemories: number };
+  };
+  assertEquals(data2.public.total, 1);
+  assertEquals(data2.private !== null, true);
+  assertEquals(data2.private!.total, 1);
+  assertEquals(data2.summary.totalMemories, 2);
+
+  await Deno.remove(tempDir, { recursive: true });
+});
+
+Deno.test("MemoryHandler - memory-stats - respects DM privacy", async () => {
+  const tempDir = await Deno.makeTempDir();
+  const workspaceManager = new WorkspaceManager({
+    repoPath: tempDir,
+    workspacesDir: "workspaces",
+  });
+  const memoryStore = new MemoryStore(workspaceManager, {
+    searchLimit: 10,
+    maxChars: 2000,
+  });
+  const handler = new MemoryHandler(memoryStore);
+
+  const workspace: WorkspaceInfo = {
+    key: "discord/123",
+    components: { platform: "discord", userId: "123" },
+    path: `${tempDir}/workspaces/discord/123`,
+    isDm: false,
+  };
+
+  await Deno.mkdir(workspace.path, { recursive: true });
+  await Deno.writeTextFile(`${workspace.path}/memory.public.jsonl`, "");
+
+  const context: SkillContext = {
+    workspace,
+    platformAdapter: createMockPlatformAdapter(),
+    channelId: "channel123",
+    userId: "123",
+  };
+
+  const result = await handler.handleMemoryStats({}, context);
+
+  assertEquals(result.success, true);
+  const data2 = result.data as {
+    public: { total: number };
+    private: null;
+    summary: { totalMemories: number };
+  };
+  assertEquals(data2.private, null);
+
+  await Deno.remove(tempDir, { recursive: true });
+});

@@ -28,6 +28,7 @@ We have implemented a complete Agent Skills system that allows external ACP Agen
 │  ├── send-reply.md                                              │
 │  ├── fetch-context.md                                           │
 │  └── memory-patch.md                                            │
+│  └── memory-stats.md                                            │
 │                              │                                   │
 │  Skill 處理程式 (src/skills/)                                    │
 │  ├── types.ts - Type definitions                                │
@@ -90,6 +91,13 @@ Located in `.github/skills/`, these files follow the [Agent Skills Standard](htt
   - `visibility`: Change visibility level
   - `importance`: Change importance level
 - **Limitations**: Cannot modify content, only disable
+
+### 6. memory-stats.md
+
+- **Purpose**: Get memory statistics for the current workspace
+- **Parameters**: None
+- **Returns**: Statistics object with public/private/summary counts (total, enabled, disabled, high-importance, normal-importance)
+- **Privacy**: Private statistics only included in DM contexts
 
 ## Skill Handlers Implementation
 

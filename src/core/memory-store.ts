@@ -9,6 +9,8 @@ import {
   MemoryImportance,
   MemoryLogEvent,
   MemoryPatch,
+  MemoryStatCategory,
+  MemoryStats,
   MemoryVisibility,
   ResolvedMemory,
 } from "../types/memory.ts";
@@ -355,6 +357,45 @@ export class MemoryStore {
     memoryId: string,
   ): Promise<MemoryPatch> {
     return this.patchMemory(workspace, memoryId, { enabled: false });
+  }
+
+  /**
+   * Get memory statistics for a workspace
+   */
+  async getMemoryStats(
+    workspace: WorkspaceInfo,
+    includePrivate: boolean,
+  ): Promise<MemoryStats> {
+    const publicMemories = await this.loadAllMemories(workspace, "public");
+    const publicStats = this.computeStats(publicMemories);
+
+    let privateStats: MemoryStatCategory | null = null;
+    if (includePrivate) {
+      const privateMemories = await this.loadAllMemories(workspace, "private");
+      privateStats = this.computeStats(privateMemories);
+    }
+
+    const summary = {
+      totalMemories: publicStats.total + (privateStats?.total ?? 0),
+      totalEnabled: publicStats.enabled + (privateStats?.enabled ?? 0),
+      totalDisabled: publicStats.disabled + (privateStats?.disabled ?? 0),
+      totalHighImportance: publicStats.highImportance + (privateStats?.highImportance ?? 0),
+      totalNormalImportance: publicStats.normalImportance + (privateStats?.normalImportance ?? 0),
+    };
+
+    return { public: publicStats, private: privateStats, summary };
+  }
+
+  private computeStats(memories: ResolvedMemory[]): MemoryStatCategory {
+    const enabled = memories.filter((m) => m.enabled);
+    const disabled = memories.filter((m) => !m.enabled);
+    return {
+      total: memories.length,
+      enabled: enabled.length,
+      disabled: disabled.length,
+      highImportance: enabled.filter((m) => m.importance === "high").length,
+      normalImportance: enabled.filter((m) => m.importance === "normal").length,
+    };
   }
 
   /**

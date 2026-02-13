@@ -89,6 +89,28 @@ export interface ResolvedMemory {
 /**
  * Agent workspace note search result
  */
+/** Statistics for a single memory category (public or private) */
+export interface MemoryStatCategory {
+  total: number;
+  enabled: number;
+  disabled: number;
+  highImportance: number;
+  normalImportance: number;
+}
+
+/** Complete memory statistics for a workspace */
+export interface MemoryStats {
+  public: MemoryStatCategory;
+  private: MemoryStatCategory | null;
+  summary: {
+    totalMemories: number;
+    totalEnabled: number;
+    totalDisabled: number;
+    totalHighImportance: number;
+    totalNormalImportance: number;
+  };
+}
+
 export interface AgentNoteSearchResult {
   filePath: string;
   matchedLines: Array<{

@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- Added `memory-stats` skill for workspace memory statistics (total, enabled, disabled, high/normal importance counts)
+
 ## [0.6.0] - 2026-02-11
 
 ### Added
