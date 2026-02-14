@@ -35,3 +35,8 @@ ${HOME}/.agents/skills/edit-reply/scripts/edit-reply.ts \
 - You can call this multiple times to make additional edits
 - Only the most recent content will be visible on the platform
 - The `messageId` must be from a previous `send-reply` call in the same session
+
+## Platform-Specific Behavior
+
+- **Discord**: Uses native message edit API. The `messageId` remains the same after editing.
+- **Misskey**: Uses delete-and-recreate strategy (Misskey has no edit API). The returned `messageId` will be **different** from the original. Use the new `messageId` for subsequent edits.
