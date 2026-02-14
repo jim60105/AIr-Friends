@@ -63,7 +63,7 @@ export async function determineDiscordTarget(
     }
   }
 
-  logger.warn("Unknown whitelist entry type", { entry: selectedEntry });
+  logger.warn("Unknown whitelist entry type: {entry}", { entry: selectedEntry });
   return null;
 }
 
@@ -89,7 +89,7 @@ export async function determineSpontaneousTarget(
     case "misskey":
       return determineMisskeyTarget();
     default:
-      logger.warn("Unsupported platform for spontaneous post", { platform });
+      logger.warn("Unsupported platform for spontaneous post: {platform}", { platform });
       return null;
   }
 }

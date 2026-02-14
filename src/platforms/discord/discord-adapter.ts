@@ -77,7 +77,7 @@ export class DiscordAdapter extends PlatformAdapter {
       this.botId = this.client.user?.id ?? null;
       this.updateConnectionState(ConnectionState.CONNECTED);
 
-      logger.info("Discord bot ready", {
+      logger.info("Discord bot ready as {username} (id: {botId})", {
         username: this.client.user?.username,
         botId: this.botId,
         guilds: this.client.guilds.cache.size,

@@ -60,7 +60,7 @@ export class MemoryHandler {
         },
       );
 
-      logger.info("Memory saved via skill", {
+      logger.info("Memory {memoryId} saved via skill ({visibility}, {importance})", {
         workspaceKey: context.workspace.key,
         memoryId: entry.id,
         visibility,
@@ -125,7 +125,7 @@ export class MemoryHandler {
         { maxResults: limit },
       );
 
-      logger.info("Memory search via skill", {
+      logger.info("Memory search via skill: query returned {resultsCount} results", {
         workspaceKey: context.workspace.key,
         query: params.query,
         resultsCount: memories.length,
@@ -273,7 +273,7 @@ export class MemoryHandler {
         patch,
       );
 
-      logger.info("Memory patched via skill", {
+      logger.info("Memory {memoryId} patched via skill", {
         workspaceKey: context.workspace.key,
         memoryId: params.memory_id,
         patch,

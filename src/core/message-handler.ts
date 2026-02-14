@@ -52,7 +52,7 @@ export class MessageHandler {
 
     // Check for duplicate processing
     if (this.activeEvents.has(eventKey)) {
-      logger.warn("Duplicate event ignored", {
+      logger.warn("Duplicate event {messageId} ignored on {platform}", {
         platform: event.platform,
         messageId: event.messageId,
         channelId: event.channelId,
@@ -78,7 +78,7 @@ export class MessageHandler {
       );
 
       if (!isWhitelistedAccount && !this.rateLimiter.isAllowed(userKey)) {
-        logger.info("Rate limited", {
+        logger.info("Rate limited user {userId} on {platform}", {
           platform: event.platform,
           userId: event.userId,
           channelId: event.channelId,
@@ -86,7 +86,7 @@ export class MessageHandler {
         return { success: false, replySent: false, error: "Rate limited" };
       }
 
-      logger.info("Handling event", {
+      logger.info("Handling event {messageId} from user {userId} on {platform}", {
         platform: event.platform,
         userId: event.userId,
         channelId: event.channelId,
@@ -98,13 +98,13 @@ export class MessageHandler {
       const response = await this.orchestrator.processMessage(event, platformAdapter);
 
       if (response.success) {
-        logger.info("Event processed successfully", {
+        logger.info("Event {messageId} processed successfully", {
           platform: event.platform,
           messageId: event.messageId,
           replySent: response.replySent,
         });
       } else {
-        logger.warn("Event processing failed", {
+        logger.warn("Event {messageId} processing failed", {
           platform: event.platform,
           messageId: event.messageId,
           error: response.error,

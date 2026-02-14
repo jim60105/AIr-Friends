@@ -12,7 +12,8 @@ export interface LogEntry {
   timestamp: string; // ISO 8601 format
   level: keyof typeof LogLevel;
   module: string;
-  message: string;
+  message: string; // Rendered message ({PropertyName} replaced with actual values)
+  messageTemplate?: string; // Original template string (only when message contains {PropertyName})
   context?: Record<string, unknown>;
 }
 

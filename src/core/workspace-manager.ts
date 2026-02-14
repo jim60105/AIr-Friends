@@ -83,7 +83,7 @@ export class WorkspaceManager {
     let createdAt: Date | undefined;
 
     if (!exists) {
-      logger.info("Creating new workspace", { workspaceKey: key });
+      logger.info("Creating new workspace: {workspaceKey}", { workspaceKey: key });
       await ensureDirectory(path);
       createdAt = new Date();
 
@@ -224,7 +224,7 @@ export class WorkspaceManager {
     const exists = await pathExists(agentWorkspacePath);
 
     if (!exists) {
-      logger.info("Creating agent workspace", { path: agentWorkspacePath });
+      logger.info("Creating agent workspace at {path}", { path: agentWorkspacePath });
 
       // Create directory structure
       await ensureDirectory(agentWorkspacePath);

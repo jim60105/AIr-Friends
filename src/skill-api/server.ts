@@ -61,7 +61,7 @@ export class SkillAPIServer {
         port: this.config.port,
         hostname: this.config.host,
         onListen: ({ hostname, port }) => {
-          logger.info("Skill API server started", { hostname, port });
+          logger.info("Skill API server started on {hostname}:{port}", { hostname, port });
         },
       },
       (request) => this.handleRequest(request),
@@ -273,7 +273,7 @@ export class SkillAPIServer {
     };
 
     // Execute skill
-    logger.debug("Executing skill via API", {
+    logger.debug("Executing skill {skillName} via API for session {sessionId}", {
       skillName,
       sessionId: body.sessionId,
     });
@@ -293,7 +293,7 @@ export class SkillAPIServer {
       });
     }
 
-    logger.info("Skill executed via API", {
+    logger.info("Skill {skillName} executed via API for session {sessionId}", {
       skillName,
       sessionId: body.sessionId,
       success: result.success,

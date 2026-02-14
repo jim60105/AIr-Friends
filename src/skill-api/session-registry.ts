@@ -74,7 +74,7 @@ export class SessionRegistry {
 
     this.sessions.set(id, activeSession);
 
-    logger.info("Session registered", {
+    logger.info("Session {sessionId} registered for {platform}:{channelId}", {
       sessionId: id,
       platform: session.platform,
       channelId: session.channelId,
@@ -91,7 +91,7 @@ export class SessionRegistry {
     const session = this.sessions.get(sessionId);
 
     if (session && this.isExpired(session)) {
-      logger.warn("Session expired", { sessionId });
+      logger.warn("Session {sessionId} expired", { sessionId });
       this.sessions.delete(sessionId);
       return undefined;
     }
@@ -116,12 +116,12 @@ export class SessionRegistry {
     if (!session) return false;
 
     if (session.replySent) {
-      logger.warn("Reply already sent for session", { sessionId });
+      logger.warn("Reply already sent for session {sessionId}", { sessionId });
       return false;
     }
 
     session.replySent = true;
-    logger.debug("Reply marked as sent", { sessionId });
+    logger.debug("Reply marked as sent for session {sessionId}", { sessionId });
     return true;
   }
 
@@ -132,7 +132,7 @@ export class SessionRegistry {
     const session = this.sessions.get(sessionId);
     if (session) {
       session.replySent = false;
-      logger.debug("Reply unmarked (rollback)", { sessionId });
+      logger.debug("Reply unmarked (rollback) for session {sessionId}", { sessionId });
     }
   }
 
@@ -149,7 +149,7 @@ export class SessionRegistry {
    */
   remove(sessionId: string): void {
     this.sessions.delete(sessionId);
-    logger.debug("Session removed", { sessionId });
+    logger.debug("Session {sessionId} removed", { sessionId });
   }
 
   /**
@@ -174,7 +174,7 @@ export class SessionRegistry {
     this.cleanupInterval = setInterval(() => {
       for (const [id, session] of this.sessions) {
         if (this.isExpired(session)) {
-          logger.info("Cleaning up expired session", { sessionId: id });
+          logger.info("Cleaning up expired session {sessionId}", { sessionId: id });
           this.sessions.delete(id);
         }
       }

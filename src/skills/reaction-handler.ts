@@ -94,10 +94,11 @@ export class ReactionHandler {
       // Mark reaction as sent
       this.markReactionSent(context);
 
-      logger.info("Reaction added via skill", {
+      logger.info("Reaction {emoji} added via skill to message {messageId}", {
         workspaceKey: context.workspace.key,
         channelId: context.channelId,
         emoji: params.emoji,
+        messageId: context.replyToMessageId,
       });
 
       return {

@@ -209,7 +209,7 @@ export class MisskeyAdapter extends PlatformAdapter {
     const delay = (this.config.reconnect.baseDelay ?? 1000) *
       Math.pow(2, this.reconnectAttempts - 1);
 
-    logger.info("Scheduling reconnect", {
+    logger.info("Scheduling reconnect in {delay}ms (attempt {attempt})", {
       attempt: this.reconnectAttempts,
       delay,
     });

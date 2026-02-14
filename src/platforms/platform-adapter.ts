@@ -117,7 +117,7 @@ export abstract class PlatformAdapter implements MessageFetcher {
       this.connectionStatus.reconnectAttempts++;
     }
 
-    logger.info("Connection state changed", {
+    logger.info("Connection state changed to {newState} for {platform}", {
       platform: this.platform,
       previousState,
       newState: state,

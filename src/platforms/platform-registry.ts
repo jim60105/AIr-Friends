@@ -35,7 +35,7 @@ export class PlatformRegistry {
       await this.handleEvent(event);
     });
 
-    logger.info("Platform registered", {
+    logger.info("Platform registered: {platform}", {
       platform: adapter.platform,
       capabilities: adapter.capabilities,
     });
@@ -82,7 +82,8 @@ export class PlatformRegistry {
    * Connect all registered platforms
    */
   async connectAll(): Promise<void> {
-    logger.info("Connecting all platforms", {
+    logger.info("Connecting {count} platforms", {
+      count: Array.from(this.adapters.keys()).length,
       platforms: Array.from(this.adapters.keys()),
     });
 

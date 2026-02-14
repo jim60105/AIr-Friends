@@ -49,7 +49,9 @@ export class SkillRegistry {
     // Reaction skill
     this.handlers.set("react-message", this.reactionHandler.handleReactMessage);
 
-    logger.info("Skills registered", {
+    logger.info("Skills registered: {count} skills ({skillNames})", {
+      count: this.handlers.size,
+      skillNames: Array.from(this.handlers.keys()).join(", "),
       skills: Array.from(this.handlers.keys()),
     });
   }
@@ -65,7 +67,7 @@ export class SkillRegistry {
     const handler = this.handlers.get(skillName);
 
     if (!handler) {
-      logger.warn("Unknown skill requested", {
+      logger.warn("Unknown skill requested: {skillName}", {
         skillName,
         availableSkills: Array.from(this.handlers.keys()),
       });
@@ -76,7 +78,7 @@ export class SkillRegistry {
       };
     }
 
-    logger.debug("Executing skill", {
+    logger.debug("Executing skill: {skillName}", {
       skillName,
       workspaceKey: context.workspace.key,
     });
@@ -84,7 +86,7 @@ export class SkillRegistry {
     try {
       return await handler(parameters, context);
     } catch (error) {
-      logger.error("Skill execution error", {
+      logger.error("Skill {skillName} execution error", {
         skillName,
         error: error instanceof Error ? error.message : String(error),
         workspaceKey: context.workspace.key,

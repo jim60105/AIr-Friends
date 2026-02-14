@@ -103,24 +103,24 @@ export async function bootstrap(configPath?: string, yolo = false): Promise<AppC
   spontaneousScheduler.setCallback(async (platform: Platform) => {
     const adapter = platformRegistry.getAdapter(platform);
     if (!adapter) {
-      logger.warn("Platform adapter not found", { platform });
+      logger.warn("Platform adapter not found: {platform}", { platform });
       return;
     }
 
     if (adapter.getConnectionStatus().state !== "connected") {
-      logger.warn("Platform not connected, skipping spontaneous post", { platform });
+      logger.warn("Platform {platform} not connected, skipping spontaneous post", { platform });
       return;
     }
 
     const botId = adapter.getBotId();
     if (!botId) {
-      logger.warn("Bot ID not available, skipping spontaneous post", { platform });
+      logger.warn("Bot ID not available for {platform}, skipping spontaneous post", { platform });
       return;
     }
 
     const target = await determineSpontaneousTarget(platform, adapter, config);
     if (!target) {
-      logger.warn("No valid target for spontaneous post", { platform });
+      logger.warn("No valid target for spontaneous post on {platform}", { platform });
       return;
     }
 
@@ -211,11 +211,16 @@ export async function bootstrap(configPath?: string, yolo = false): Promise<AppC
             continue;
           }
 
-          logger.info("Starting memory maintenance for workspace", { workspaceKey, count });
+          logger.info("Starting memory maintenance for workspace {workspaceKey}", {
+            workspaceKey,
+            count,
+          });
           await orchestrator.processMemoryMaintenance(workspaceKey, config.memoryMaintenance!);
-          logger.info("Memory maintenance completed for workspace", { workspaceKey });
+          logger.info("Memory maintenance completed for workspace {workspaceKey}", {
+            workspaceKey,
+          });
         } catch (error) {
-          logger.error("Memory maintenance failed for workspace", {
+          logger.error("Memory maintenance failed for workspace {workspaceKey}", {
             workspaceKey,
             error: error instanceof Error ? error.message : String(error),
           });
@@ -257,7 +262,7 @@ export async function startPlatforms(context: AppContext): Promise<void> {
     return;
   }
 
-  logger.info("Connecting to platforms", { count: adapters.length });
+  logger.info("Connecting to {count} platforms", { count: adapters.length });
 
   // Connect all platforms
   await platformRegistry.connectAll();

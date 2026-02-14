@@ -60,19 +60,19 @@ export class ContextAssembler {
 
     // Get important memories
     const importantMemories = await this.memoryStore.getImportantMemories(workspace);
-    logger.debug("Loaded important memories", { count: importantMemories.length });
+    logger.debug("Loaded {count} important memories", { count: importantMemories.length });
 
     // Fetch recent messages
     const rawRecentMessages = await messageFetcher.fetchRecentMessages(
       event.channelId,
       this.config.recentMessageLimit,
     );
-    logger.debug("Fetched recent messages", { count: rawRecentMessages.length });
+    logger.debug("Fetched {count} recent messages", { count: rawRecentMessages.length });
 
     // Apply /clear command: drop everything before (and including) the last /clear message
     const recentMessages = this.applyClearCommand(rawRecentMessages);
     if (recentMessages.length !== rawRecentMessages.length) {
-      logger.info("Applied /clear command to recent messages", {
+      logger.info("Applied /clear command: {originalCount} → {filteredCount} messages", {
         originalCount: rawRecentMessages.length,
         filteredCount: recentMessages.length,
       });
@@ -93,7 +93,7 @@ export class ContextAssembler {
           event.content,
           10, // Limit related messages
         );
-        logger.debug("Fetched related messages", {
+        logger.debug("Fetched {count} related messages", {
           count: relatedMessages?.length ?? 0,
         });
       } catch (error) {
@@ -110,7 +110,7 @@ export class ContextAssembler {
         const emojis = await messageFetcher.fetchEmojis();
         if (emojis.length > 0) {
           availableEmojis = emojis;
-          logger.debug("Fetched available emojis", { count: emojis.length });
+          logger.debug("Fetched {count} available emojis", { count: emojis.length });
         }
       } catch (error) {
         logger.warn("Failed to fetch emojis", {
@@ -151,13 +151,16 @@ export class ContextAssembler {
       assembledAt: new Date(),
     };
 
-    logger.info("Context assembled", {
-      workspaceKey: workspace.key,
-      memoriesCount: importantMemories.length,
-      recentMessagesCount: recentMessages.length,
-      relatedMessagesCount: relatedMessages?.length ?? 0,
-      estimatedTokens,
-    });
+    logger.info(
+      "Context assembled: {memoriesCount} memories, {recentMessagesCount} recent, ~{estimatedTokens} tokens",
+      {
+        workspaceKey: workspace.key,
+        memoriesCount: importantMemories.length,
+        recentMessagesCount: recentMessages.length,
+        relatedMessagesCount: relatedMessages?.length ?? 0,
+        estimatedTokens,
+      },
+    );
 
     return context;
   }
@@ -449,7 +452,7 @@ export class ContextAssembler {
       }
 
       if (includedMessages.length < formattedRecent.length) {
-        logger.info("Truncated recent messages to fit token budget", {
+        logger.info("Truncated recent messages: {original} → {included} to fit token budget", {
           original: formattedRecent.length,
           included: includedMessages.length,
           tokenBudget,
@@ -488,7 +491,7 @@ export class ContextAssembler {
         }
 
         if (includedRelated.length < formattedRelated.length) {
-          logger.info("Truncated related messages to fit token budget", {
+          logger.info("Truncated related messages: {original} → {included} to fit token budget", {
             original: formattedRelated.length,
             included: includedRelated.length,
             remainingBudget,

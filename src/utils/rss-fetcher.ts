@@ -34,7 +34,10 @@ export async function fetchRssItems(sources: RssFeedSource[]): Promise<RssItem[]
       });
 
       if (!response.ok) {
-        logger.warn("RSS fetch failed", { url: source.url, status: response.status });
+        logger.warn("RSS fetch failed for {url}: status {status}", {
+          url: source.url,
+          status: response.status,
+        });
         continue;
       }
 
@@ -42,7 +45,7 @@ export async function fetchRssItems(sources: RssFeedSource[]): Promise<RssItem[]
       const items = parseRssXml(xml, source.name ?? source.url);
       allItems.push(...items);
     } catch (error) {
-      logger.warn("RSS fetch error", {
+      logger.warn("RSS fetch error for {url}", {
         url: source.url,
         error: error instanceof Error ? error.message : String(error),
       });
