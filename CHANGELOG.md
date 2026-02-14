@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.7.1] - 2026-02-15
+
+### Fixed
+
+- Fixed Misskey note and chat message editing by implementing delete-and-recreate strategy
+  - Misskey API lacks `notes/update` and `chat/messages/update` endpoints
+  - `editNote()` now uses `notes/show` → `notes/delete` → `notes/create` flow
+  - `editChatMessage()` now uses `chat/messages/delete` → `chat/messages/create-to-user` flow
+  - Preserves visibility from original note (including specified visibility for DMs)
+  - Sets `replyId` to original trigger note for proper conversation threading
+  - Returns new `messageId` after recreation
+  - Improved Misskey error serialization to avoid `[object Object]` in logs
+- Fixed non-Error object serialization in Misskey client using `JSON.stringify()` instead of `String()`
+
+### Changed
+
+- Changed logging system to adopt Message Template syntax (messagetemplates.org specification)
+  - Added `messageTemplate` field to `LogEntry` type for event categorization
+  - Implemented `{PropertyName}` placeholder syntax in ~80 log messages across all modules
+  - Added `_messageTemplate` custom field to GELF output
+  - Backward compatible: messages without placeholders are unaffected
+  - Enhanced structured logging capabilities for log management systems
+- Changed `PlatformAdapter.editMessage()` interface to include optional `replyToMessageId` parameter
+  - Enables proper reply threading in Misskey delete-and-recreate strategy
+  - Discord adapter implementation updated with unused optional parameter
+
 ## [0.7.0] - 2026-02-14
 
 ### Added
@@ -371,7 +397,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ---
 
-[Unreleased]: https://github.com/jim60105/AIr-Friends/compare/v0.7.0...HEAD
+[Unreleased]: https://github.com/jim60105/AIr-Friends/compare/v0.7.1...HEAD
+[0.7.1]: https://github.com/jim60105/AIr-Friends/compare/v0.7.0...v0.7.1
 [0.7.0]: https://github.com/jim60105/AIr-Friends/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/jim60105/AIr-Friends/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/jim60105/AIr-Friends/compare/v0.4.0...v0.5.0
