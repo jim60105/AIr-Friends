@@ -103,7 +103,7 @@ export class AgentCore {
       windowMs: 600000,
       cooldownMs: 600000,
     };
-    this.messageHandler = new MessageHandler(this.orchestrator, rateLimitConfig);
+    this.messageHandler = new MessageHandler(this.orchestrator, rateLimitConfig, this.replyPolicy);
     this.replyDispatcher = new ReplyDispatcher();
 
     logger.info("Agent Core initialized", {

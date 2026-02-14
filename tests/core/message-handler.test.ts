@@ -2,6 +2,7 @@
 
 import { assertEquals } from "@std/assert";
 import { MessageHandler } from "@core/message-handler.ts";
+import { ReplyPolicyEvaluator } from "@core/reply-policy.ts";
 import type { SessionOrchestrator, SessionResponse } from "@core/session-orchestrator.ts";
 import type { NormalizedEvent } from "../../src/types/events.ts";
 import type { PlatformAdapter } from "@platforms/platform-adapter.ts";
@@ -13,6 +14,11 @@ const DEFAULT_RATE_LIMIT: RateLimitConfig = {
   windowMs: 600000,
   cooldownMs: 600000,
 };
+
+const DEFAULT_REPLY_POLICY = new ReplyPolicyEvaluator({
+  replyTo: "all",
+  whitelist: [],
+});
 
 // Mock SessionOrchestrator that implements the interface
 class MockSessionOrchestrator {
@@ -58,7 +64,7 @@ function createTestEvent(messageId: string): NormalizedEvent {
 
 Deno.test("MessageHandler - handles event successfully", async () => {
   const orchestrator = new MockSessionOrchestrator(true, true) as unknown as SessionOrchestrator;
-  const handler = new MessageHandler(orchestrator, DEFAULT_RATE_LIMIT);
+  const handler = new MessageHandler(orchestrator, DEFAULT_RATE_LIMIT, DEFAULT_REPLY_POLICY);
 
   const event = createTestEvent("msg_1");
   const response = await handler.handleEvent(event, mockPlatformAdapter);
@@ -69,7 +75,7 @@ Deno.test("MessageHandler - handles event successfully", async () => {
 
 Deno.test("MessageHandler - handles failed events", async () => {
   const orchestrator = new MockSessionOrchestrator(false, false) as unknown as SessionOrchestrator;
-  const handler = new MessageHandler(orchestrator, DEFAULT_RATE_LIMIT);
+  const handler = new MessageHandler(orchestrator, DEFAULT_RATE_LIMIT, DEFAULT_REPLY_POLICY);
 
   const event = createTestEvent("msg_2");
   const response = await handler.handleEvent(event, mockPlatformAdapter);
@@ -81,7 +87,7 @@ Deno.test("MessageHandler - handles failed events", async () => {
 
 Deno.test("MessageHandler - prevents duplicate event processing", async () => {
   const orchestrator = new MockSessionOrchestrator(true, true) as unknown as SessionOrchestrator;
-  const handler = new MessageHandler(orchestrator, DEFAULT_RATE_LIMIT);
+  const handler = new MessageHandler(orchestrator, DEFAULT_RATE_LIMIT, DEFAULT_REPLY_POLICY);
 
   const event = createTestEvent("msg_3");
 
@@ -105,7 +111,7 @@ Deno.test("MessageHandler - prevents duplicate event processing", async () => {
 
 Deno.test("MessageHandler - tracks processing state", async () => {
   const orchestrator = new MockSessionOrchestrator(true, true) as unknown as SessionOrchestrator;
-  const handler = new MessageHandler(orchestrator, DEFAULT_RATE_LIMIT);
+  const handler = new MessageHandler(orchestrator, DEFAULT_RATE_LIMIT, DEFAULT_REPLY_POLICY);
 
   const event = createTestEvent("msg_4");
 
@@ -129,7 +135,7 @@ Deno.test("MessageHandler - tracks processing state", async () => {
 
 Deno.test("MessageHandler - handles multiple events concurrently", async () => {
   const orchestrator = new MockSessionOrchestrator(true, true) as unknown as SessionOrchestrator;
-  const handler = new MessageHandler(orchestrator, DEFAULT_RATE_LIMIT);
+  const handler = new MessageHandler(orchestrator, DEFAULT_RATE_LIMIT, DEFAULT_REPLY_POLICY);
 
   const event1 = createTestEvent("msg_5");
   const event2 = createTestEvent("msg_6");
@@ -160,7 +166,7 @@ Deno.test("MessageHandler - rate limited event returns error", async () => {
     windowMs: 600000,
     cooldownMs: 600000,
   };
-  const handler = new MessageHandler(orchestrator, rateLimitConfig);
+  const handler = new MessageHandler(orchestrator, rateLimitConfig, DEFAULT_REPLY_POLICY);
 
   const event1 = createTestEvent("msg_rl_1");
   const event2 = createTestEvent("msg_rl_2");
@@ -191,7 +197,7 @@ Deno.test("MessageHandler - rate limited event does not call orchestrator", asyn
     windowMs: 600000,
     cooldownMs: 600000,
   };
-  const handler = new MessageHandler(orchestrator, rateLimitConfig);
+  const handler = new MessageHandler(orchestrator, rateLimitConfig, DEFAULT_REPLY_POLICY);
 
   await handler.handleEvent(createTestEvent("msg_rl_3"), mockPlatformAdapter);
   await handler.handleEvent(createTestEvent("msg_rl_4"), mockPlatformAdapter);
@@ -217,7 +223,7 @@ Deno.test("MessageHandler - duplicate events not counted in rate limit", async (
     windowMs: 600000,
     cooldownMs: 600000,
   };
-  const handler = new MessageHandler(orchestrator, rateLimitConfig);
+  const handler = new MessageHandler(orchestrator, rateLimitConfig, DEFAULT_REPLY_POLICY);
 
   // Send same message ID twice concurrently — duplicate should not count toward rate limit
   const event = createTestEvent("msg_rl_dup");
@@ -232,6 +238,80 @@ Deno.test("MessageHandler - duplicate events not counted in rate limit", async (
   // The duplicate should not have consumed a rate limit slot, so a new message should still work
   // But since maxRequestsPerWindow is 1 and first event consumed it, next will be rate-limited
   assertEquals(orchestratorCallCount, 1);
+
+  handler.dispose();
+});
+
+Deno.test("MessageHandler - whitelisted account bypasses rate limit", async () => {
+  const orchestrator = new MockSessionOrchestrator(true, true) as unknown as SessionOrchestrator;
+  const rateLimitConfig: RateLimitConfig = {
+    enabled: true,
+    maxRequestsPerWindow: 1,
+    windowMs: 600000,
+    cooldownMs: 600000,
+  };
+  const replyPolicy = new ReplyPolicyEvaluator({
+    replyTo: "whitelist",
+    whitelist: ["discord/account/test_user"],
+  });
+  const handler = new MessageHandler(orchestrator, rateLimitConfig, replyPolicy);
+
+  // Send more than maxRequestsPerWindow messages — all should succeed
+  const r1 = await handler.handleEvent(createTestEvent("msg_wl_1"), mockPlatformAdapter);
+  const r2 = await handler.handleEvent(createTestEvent("msg_wl_2"), mockPlatformAdapter);
+  const r3 = await handler.handleEvent(createTestEvent("msg_wl_3"), mockPlatformAdapter);
+
+  assertEquals(r1.success, true);
+  assertEquals(r2.success, true);
+  assertEquals(r3.success, true);
+
+  handler.dispose();
+});
+
+Deno.test("MessageHandler - whitelisted channel user still rate limited", async () => {
+  const orchestrator = new MockSessionOrchestrator(true, true) as unknown as SessionOrchestrator;
+  const rateLimitConfig: RateLimitConfig = {
+    enabled: true,
+    maxRequestsPerWindow: 1,
+    windowMs: 600000,
+    cooldownMs: 600000,
+  };
+  const replyPolicy = new ReplyPolicyEvaluator({
+    replyTo: "whitelist",
+    whitelist: ["discord/channel/test_channel"],
+  });
+  const handler = new MessageHandler(orchestrator, rateLimitConfig, replyPolicy);
+
+  const r1 = await handler.handleEvent(createTestEvent("msg_ch_1"), mockPlatformAdapter);
+  const r2 = await handler.handleEvent(createTestEvent("msg_ch_2"), mockPlatformAdapter);
+
+  assertEquals(r1.success, true);
+  assertEquals(r2.success, false);
+  assertEquals(r2.error, "Rate limited");
+
+  handler.dispose();
+});
+
+Deno.test("MessageHandler - non-whitelisted account rate limited normally", async () => {
+  const orchestrator = new MockSessionOrchestrator(true, true) as unknown as SessionOrchestrator;
+  const rateLimitConfig: RateLimitConfig = {
+    enabled: true,
+    maxRequestsPerWindow: 1,
+    windowMs: 600000,
+    cooldownMs: 600000,
+  };
+  const replyPolicy = new ReplyPolicyEvaluator({
+    replyTo: "whitelist",
+    whitelist: ["discord/account/other_user"],
+  });
+  const handler = new MessageHandler(orchestrator, rateLimitConfig, replyPolicy);
+
+  const r1 = await handler.handleEvent(createTestEvent("msg_nwl_1"), mockPlatformAdapter);
+  const r2 = await handler.handleEvent(createTestEvent("msg_nwl_2"), mockPlatformAdapter);
+
+  assertEquals(r1.success, true);
+  assertEquals(r2.success, false);
+  assertEquals(r2.error, "Rate limited");
 
   handler.dispose();
 });

@@ -499,6 +499,7 @@ rateLimit:
 4. During cooldown, all requests are silently rejected (no reply, no session started)
 5. After cooldown expires, the counter resets and the user can send requests again
 6. Rate limit check runs **after** duplicate event detection and **before** any resource allocation
+7. Whitelisted accounts (`{platform}/account/{id}`) automatically bypass rate limiting. Whitelisted channels (`{platform}/channel/{id}`) do not affect rate limiting — users in whitelisted channels are still subject to rate limits.
 
 **Environment Variable Overrides:**
 
