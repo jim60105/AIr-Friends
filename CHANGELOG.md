@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-02-14
+
 ### Added
 
 - Added `edit-reply` skill for editing previously sent reply messages within the same session
@@ -14,6 +16,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   - Discord and Misskey adapter implementations (note and chat message editing)
   - Shell-based skill script in `skills/edit-reply/`
   - BDD feature spec: `docs/features/20-edit-reply.feature`
+  - Not subject to single reply rule — can be called multiple times per session
+- Added Prometheus metrics export endpoint (`/metrics`) on Health Check Server for observability
+  - New `prom-client` dependency and metrics registry (`src/utils/metrics.ts`)
+  - Eight metrics covering sessions, messages, replies, memory operations, skill API calls, and rate limit rejections
+  - `MetricsConfig` type with environment variable overrides (`METRICS_ENABLED`, `METRICS_PATH`)
+  - ServiceMonitor Helm template for Prometheus Operator integration
+  - BDD feature spec: `docs/features/19-metrics-export.feature`
 - Added multimedia message handling: support for image and file attachments in platform messages
   - New `Attachment` type in `NormalizedEvent` and `PlatformMessage`
   - Discord and Misskey adapters extract attachment metadata (URL, MIME type, filename, size)
@@ -22,10 +31,68 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   - Capability negotiation via `AgentConnector.supportsImageContent()`
   - `prompt()` method now accepts `string | ContentBlock[]` (backward compatible)
   - 20MB size limit and 10s download timeout for image fetching
+  - BDD feature spec: `docs/features/18-multimedia-message.feature`
 - Added `PromptCapabilities` type to ACP types for image/audio/embeddedContext capability tracking
-- Added BDD feature spec: `docs/features/18-multimedia-message.feature`
-- Added `memory-stats` skill for workspace memory statistics (total, enabled, disabled, high/normal importance counts)
-- Added rate limiting & cooldown mechanism to prevent excessive API usage per user (`rateLimit` config section)
+- Added rate limiting & cooldown mechanism to prevent excessive API usage per user
+  - New `RateLimitConfig` with sliding window + cooldown strategy
+  - Per-user tracking by `{platform}:{userId}` key
+  - Periodic cleanup to prevent memory leaks
+  - Environment variable overrides: `RATE_LIMIT_ENABLED`, `RATE_LIMIT_MAX_REQUESTS_PER_WINDOW`, `RATE_LIMIT_WINDOW_MS`, `RATE_LIMIT_COOLDOWN_MS`
+  - Disabled by default (`enabled: false`)
+  - Whitelisted accounts automatically bypass rate limiting
+- Added agent-driven memory maintenance scheduler for periodic memory summarization/compaction
+  - New `MemoryMaintenanceConfig` with configurable model, threshold, and interval
+  - Fixed-interval scheduler with per-workspace execution
+  - Agent uses existing memory skills (`memory-search`, `memory-save`, `memory-patch`) for compaction
+  - Original memories disabled via patch events (append-only preserved)
+  - Environment variable overrides: `MEMORY_MAINTENANCE_ENABLED`, `MEMORY_MAINTENANCE_MODEL`, `MEMORY_MAINTENANCE_MIN_MEMORY_COUNT`, `MEMORY_MAINTENANCE_INTERVAL_MS`
+  - Disabled by default
+- Added `memory-stats` skill for workspace memory statistics
+  - Total, enabled, disabled counts
+  - High/normal importance breakdowns for public and private memories
+  - Read-only operation with no state changes
+- Added RSS/Atom self-research scheduling feature
+  - Agent periodically reads RSS feeds, selects topics of interest, and writes research notes to agent workspace
+  - New `SelfResearchConfig` with RSS feed sources, model, and interval settings
+  - Regex-based RSS/Atom parser (`src/utils/rss-fetcher.ts`)
+  - `SelfResearchScheduler` with random interval execution (12-24h default)
+  - Environment variable overrides: `SELF_RESEARCH_ENABLED`, `SELF_RESEARCH_MODEL`, `SELF_RESEARCH_RSS_FEEDS`, `SELF_RESEARCH_MIN_INTERVAL_MS`, `SELF_RESEARCH_MAX_INTERVAL_MS`
+  - BDD feature spec: `docs/features/16-self-research-via-rss.feature`
+- Added agent global workspace for long-term knowledge storage (`{repoPath}/agent-workspace/`)
+  - Not per-user — shared across all conversations
+  - Directory structure: `notes/` for knowledge, `journal/` for reflections
+  - `notes/_index.md` serves as quick-reference index
+  - `memory-search` now searches both user memories and agent workspace notes
+  - `AGENT_WORKSPACE` environment variable passed to external agents
+  - ACP Client path validation extended to allow agent workspace access
+  - BDD feature spec: `docs/features/15-agent-own-workspace.feature`
+- Added browser agent support with Playwright integration
+  - `agent-browser` global npm package installed in container
+  - Node.js and npm in base image
+  - Playwright chromium-headless-shell for automation
+  - Comprehensive skill documentation and templates in `skills/agent-browser/`
+- Added `dumb-init` wrapper for agent subprocesses for proper signal forwarding
+
+### Changed
+
+- Changed prompt files to mount individually instead of entire directory
+  - Allows users to override specific files while keeping container defaults
+  - Updated `compose.yml`, Helm templates, and documentation
+- Changed OpenCode agent to no longer receive `GITHUB_TOKEN` environment variable
+  - OpenCode configured via other provider keys only
+  - Documentation updated to describe `GITHUB_TOKEN` as Copilot-only
+- Changed default agent token limit from 4096 to 20000
+- Changed Gemini CLI to be installed globally via npm in container instead of being pre-cached
+  - Agent invokes `gemini` executable directly instead of via `deno task`
+- Changed prompt instructions to simplify optional skills lists and add `#memory-search` command guidance
+- Changed embedded enabled memories in maintenance prompt to avoid redundant skill calls
+
+### Fixed
+
+- Fixed Kubernetes ConfigMap symlink handling in prompt fragment discovery
+  - `loadPromptFragments()` now checks `isSymlink` in addition to `isFile`
+- Fixed CI stack overflow during `deno compile` by setting `RUST_MIN_STACK=16777216` (16MB)
+- Fixed Helm PVC sync failures in ArgoCD by adding `helm.sh/resource-policy: keep` annotation
 
 ## [0.6.0] - 2026-02-11
 
@@ -304,7 +371,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ---
 
-[Unreleased]: https://github.com/jim60105/AIr-Friends/compare/v0.6.0...HEAD
+[Unreleased]: https://github.com/jim60105/AIr-Friends/compare/v0.7.0...HEAD
+[0.7.0]: https://github.com/jim60105/AIr-Friends/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/jim60105/AIr-Friends/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/jim60105/AIr-Friends/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/jim60105/AIr-Friends/compare/v0.3.0...v0.4.0
