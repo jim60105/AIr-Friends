@@ -30,6 +30,9 @@ podSecurityContext:
 # -- Environment variables for bot credentials and configuration.
 # These are stored in a Kubernetes Secret.
 env:
+  # Timezone
+  TZ: 'Asia/Taipei'
+
   # Platform tokens
   DISCORD_TOKEN: 'your-discord-bot-token'
   MISSKEY_TOKEN: 'your-misskey-access-token'

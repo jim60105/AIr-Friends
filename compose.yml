@@ -8,6 +8,8 @@ services:
       target: final
       args:
         - NODE_ENV=development
+    environment:
+      - TZ=Asia/Taipei
     env_file:
       - .env
     volumes:
