@@ -13,6 +13,8 @@ import type {
 } from "./types.ts";
 import type { MemoryImportance, MemoryVisibility } from "../types/memory.ts";
 
+import { memoryOperationsTotal } from "@utils/metrics.ts";
+
 const logger = createLogger("MemoryHandler");
 
 export class MemoryHandler {
@@ -64,6 +66,7 @@ export class MemoryHandler {
         visibility,
         importance,
       });
+      memoryOperationsTotal.labels("save", visibility).inc();
 
       return {
         success: true,
@@ -127,6 +130,7 @@ export class MemoryHandler {
         query: params.query,
         resultsCount: memories.length,
       });
+      memoryOperationsTotal.labels("search", "public").inc();
 
       const result: MemorySearchResult = {
         memories: memories.map((m) => ({
@@ -274,6 +278,7 @@ export class MemoryHandler {
         memoryId: params.memory_id,
         patch,
       });
+      memoryOperationsTotal.labels("patch", "public").inc();
 
       return {
         success: true,

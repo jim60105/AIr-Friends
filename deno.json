@@ -14,6 +14,7 @@
     "discord.js": "npm:discord.js@^14.0.0",
     "misskey-js": "npm:misskey-js@2025.12.2",
     "@agentclientprotocol/sdk": "npm:@agentclientprotocol/sdk@^0.14.1",
+    "prom-client": "npm:prom-client@^15",
     "@core/": "./src/core/",
     "@platforms/": "./src/platforms/",
     "@skills/": "./src/skills/",

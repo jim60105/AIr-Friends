@@ -1200,3 +1200,54 @@ memoryMaintenance:
     assertEquals(result.memoryMaintenance?.enabled, false);
   });
 });
+
+Deno.test("Config - metrics defaults when not specified", async () => {
+  const config = `
+platforms:
+  discord:
+    token: "test-token"
+    enabled: true
+  misskey:
+    enabled: false
+agent:
+  model: "gpt-4"
+  systemPromptPath: "./prompts/system.md"
+  tokenLimit: 20000
+workspace:
+  repoPath: "./data"
+  workspacesDir: "workspaces"
+`;
+
+  await withTestConfig(config, async (dir) => {
+    const result = await loadConfig(dir);
+    assertEquals(result.metrics?.enabled, false);
+    assertEquals(result.metrics?.path, "/metrics");
+  });
+});
+
+Deno.test("Config - metrics respects user values", async () => {
+  const config = `
+platforms:
+  discord:
+    token: "test-token"
+    enabled: true
+  misskey:
+    enabled: false
+agent:
+  model: "gpt-4"
+  systemPromptPath: "./prompts/system.md"
+  tokenLimit: 20000
+workspace:
+  repoPath: "./data"
+  workspacesDir: "workspaces"
+metrics:
+  enabled: true
+  path: "/custom"
+`;
+
+  await withTestConfig(config, async (dir) => {
+    const result = await loadConfig(dir);
+    assertEquals(result.metrics?.enabled, true);
+    assertEquals(result.metrics?.path, "/custom");
+  });
+});

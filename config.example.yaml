@@ -82,6 +82,11 @@ health:
   enabled: true # Enable HTTP health check endpoint (default: true)
   port: 8080 # Port for health check (default: 8080)
 
+# Prometheus metrics endpoint (shared with health check server port)
+metrics:
+  enabled: false              # Enable Prometheus metrics (default: false); override with env METRICS_ENABLED
+  path: "/metrics"            # Metrics endpoint path (default: "/metrics"); override with env METRICS_PATH
+
 # Access control configuration
 accessControl:
   replyTo: "whitelist" # "all" | "public" | "whitelist" (default: "whitelist"); override with env REPLY_TO

@@ -1,6 +1,7 @@
 // src/core/session-orchestrator.ts
 
 import { createLogger } from "@utils/logger.ts";
+import { activeSessionsGauge, sessionDurationSeconds, sessionsTotal } from "@utils/metrics.ts";
 import { AgentConnector } from "@acp/agent-connector.ts";
 import * as acp from "@agentclientprotocol/sdk";
 import {
@@ -97,6 +98,10 @@ export class SessionOrchestrator {
         replySent: false,
       };
     }
+
+    const sessionStartTime = Date.now();
+    activeSessionsGauge.inc();
+    let result: SessionResponse;
 
     try {
       // 1. Get or create workspace
@@ -294,36 +299,40 @@ export class SessionOrchestrator {
         }
 
         if (hasResponded) {
-          return {
+          result = {
             success: true,
             replySent,
             reactionSent,
           };
+          return result;
         }
 
         // Agent completed but didn't send reply or reaction even after retry
         if (response.stopReason === "end_turn") {
           sessionLogger.warn("Agent completed without sending reply after retry");
-          return {
+          result = {
             success: false,
             replySent: false,
             error: "Agent did not generate a reply",
           };
+          return result;
         }
 
         if (response.stopReason === "cancelled") {
-          return {
+          result = {
             success: false,
             replySent: false,
             error: "Session was cancelled",
           };
+          return result;
         }
 
-        return {
+        result = {
           success: false,
           replySent: false,
           error: `Unexpected stop reason: ${response.stopReason}`,
         };
+        return result;
       } finally {
         await connector.disconnect();
         sessionLogger.debug("Agent disconnected");
@@ -352,11 +361,18 @@ export class SessionOrchestrator {
       sessionLogger.error("Session failed", {
         error: error instanceof Error ? error.message : String(error),
       });
-      return {
+      result = {
         success: false,
         replySent: false,
         error: error instanceof Error ? error.message : "Unknown error",
       };
+      return result;
+    } finally {
+      activeSessionsGauge.dec();
+      const durationSec = (Date.now() - sessionStartTime) / 1000;
+      const status = result!.success ? "success" : "failure";
+      sessionsTotal.labels(event.platform, "message", status).inc();
+      sessionDurationSeconds.labels(event.platform, "message", status).observe(durationSec);
     }
   }
 
@@ -381,6 +397,10 @@ export class SessionOrchestrator {
       channelId,
       fetchRecentMessages: options.fetchRecentMessages,
     });
+
+    const sessionStartTime = Date.now();
+    activeSessionsGauge.inc();
+    let result: SessionResponse;
 
     try {
       // 1. Create workspace for the bot itself
@@ -499,11 +519,12 @@ export class SessionOrchestrator {
           replySent = replyHandler.hasReplySent(workspace.key, channelId);
         }
 
-        return {
+        result = {
           success: replySent,
           replySent,
           error: replySent ? undefined : "Agent did not send a reply",
         };
+        return result;
       } finally {
         await connector.disconnect();
         sessionLogger.debug("Agent disconnected");
@@ -528,11 +549,18 @@ export class SessionOrchestrator {
         channelId,
         error: error instanceof Error ? error.message : String(error),
       });
-      return {
+      result = {
         success: false,
         replySent: false,
         error: error instanceof Error ? error.message : "Unknown error",
       };
+      return result;
+    } finally {
+      activeSessionsGauge.dec();
+      const durationSec = (Date.now() - sessionStartTime) / 1000;
+      const status = result!.success ? "success" : "failure";
+      sessionsTotal.labels(platform, "spontaneous", status).inc();
+      sessionDurationSeconds.labels(platform, "spontaneous", status).observe(durationSec);
     }
   }
 
@@ -552,6 +580,10 @@ export class SessionOrchestrator {
       rssItemCount: rssItems.length,
       model: selfResearchConfig.model,
     });
+
+    const sessionStartTime = Date.now();
+    activeSessionsGauge.inc();
+    let result: SessionResponse;
 
     try {
       // 1. Create workspace for self-research (uses special internal key)
@@ -638,11 +670,12 @@ export class SessionOrchestrator {
         // Success is determined by agent completing normally
         const success = response.stopReason === "end_turn";
 
-        return {
+        result = {
           success,
           replySent: false,
           error: success ? undefined : `Unexpected stop reason: ${response.stopReason}`,
         };
+        return result;
       } finally {
         await connector.disconnect();
         sessionLogger.debug("Agent disconnected");
@@ -665,11 +698,18 @@ export class SessionOrchestrator {
       sessionLogger.error("Self-research session failed", {
         error: error instanceof Error ? error.message : String(error),
       });
-      return {
+      result = {
         success: false,
         replySent: false,
         error: error instanceof Error ? error.message : "Unknown error",
       };
+      return result;
+    } finally {
+      activeSessionsGauge.dec();
+      const durationSec = (Date.now() - sessionStartTime) / 1000;
+      const status = result!.success ? "success" : "failure";
+      sessionsTotal.labels("internal", "self_research", status).inc();
+      sessionDurationSeconds.labels("internal", "self_research", status).observe(durationSec);
     }
   }
 
@@ -698,6 +738,10 @@ export class SessionOrchestrator {
       workspaceKey,
       model: memoryMaintenanceConfig.model,
     });
+
+    const sessionStartTime = Date.now();
+    activeSessionsGauge.inc();
+    let result: SessionResponse;
 
     try {
       // Create synthetic DM event to ensure private memory access
@@ -775,11 +819,12 @@ export class SessionOrchestrator {
         });
 
         const success = response.stopReason === "end_turn";
-        return {
+        result = {
           success,
           replySent: false,
           error: success ? undefined : `Unexpected stop reason: ${response.stopReason}`,
         };
+        return result;
       } finally {
         await connector.disconnect();
         sessionLogger.debug("Agent disconnected");
@@ -802,11 +847,18 @@ export class SessionOrchestrator {
       sessionLogger.error("Memory maintenance session failed", {
         error: error instanceof Error ? error.message : String(error),
       });
-      return {
+      result = {
         success: false,
         replySent: false,
         error: error instanceof Error ? error.message : "Unknown error",
       };
+      return result;
+    } finally {
+      activeSessionsGauge.dec();
+      const durationSec = (Date.now() - sessionStartTime) / 1000;
+      const status = result!.success ? "success" : "failure";
+      sessionsTotal.labels(platform, "memory_maintenance", status).inc();
+      sessionDurationSeconds.labels(platform, "memory_maintenance", status).observe(durationSec);
     }
   }
 

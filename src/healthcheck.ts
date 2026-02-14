@@ -2,6 +2,8 @@
 
 import type { AppContext } from "./bootstrap.ts";
 import { createLogger } from "@utils/logger.ts";
+import { metricsRegistry } from "@utils/metrics.ts";
+import type { MetricsConfig } from "./types/config.ts";
 
 const logger = createLogger("HealthCheck");
 
@@ -27,9 +29,11 @@ export class HealthCheckServer {
   private server: Deno.HttpServer | null = null;
   private startTime: Date = new Date();
   private port: number;
+  private metricsConfig: MetricsConfig | null;
 
-  constructor(port: number = 8080) {
+  constructor(port: number = 8080, metricsConfig?: MetricsConfig) {
     this.port = port;
+    this.metricsConfig = metricsConfig ?? null;
   }
 
   /**
@@ -65,8 +69,16 @@ export class HealthCheckServer {
   /**
    * Handle incoming requests
    */
-  private handleRequest(request: Request): Response {
+  private handleRequest(request: Request): Response | Promise<Response> {
     const url = new URL(request.url);
+
+    // Check metrics path (configurable, default "/metrics")
+    if (
+      this.metricsConfig?.enabled &&
+      url.pathname === this.metricsConfig.path
+    ) {
+      return this.metricsResponse();
+    }
 
     switch (url.pathname) {
       case "/health":
@@ -77,6 +89,22 @@ export class HealthCheckServer {
         return this.readyResponse();
       default:
         return new Response("Not Found", { status: 404 });
+    }
+  }
+
+  /**
+   * Generate metrics response (Prometheus exposition format)
+   */
+  private async metricsResponse(): Promise<Response> {
+    try {
+      const metrics = await metricsRegistry.metrics();
+      return new Response(metrics, {
+        status: 200,
+        headers: { "Content-Type": metricsRegistry.contentType },
+      });
+    } catch (error) {
+      logger.error("Failed to generate metrics", { error: String(error) });
+      return new Response("Internal Server Error", { status: 500 });
     }
   }
 
