@@ -1,7 +1,13 @@
 // src/skills/reply-handler.ts
 
 import { createLogger } from "@utils/logger.ts";
-import type { SendReplyParams, SkillContext, SkillHandler, SkillResult } from "./types.ts";
+import type {
+  EditReplyParams,
+  SendReplyParams,
+  SkillContext,
+  SkillHandler,
+  SkillResult,
+} from "./types.ts";
 
 import { repliesSentTotal } from "@utils/metrics.ts";
 
@@ -143,6 +149,93 @@ export class ReplyHandler {
       };
     } catch (error) {
       logger.error("Failed to send reply", {
+        error: error instanceof Error ? error.message : String(error),
+        workspaceKey: context.workspace.key,
+        channelId: context.channelId,
+      });
+
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : "Unknown error",
+      };
+    }
+  };
+
+  /**
+   * Handle edit-reply skill
+   */
+  handleEditReply: SkillHandler = async (
+    parameters: Record<string, unknown>,
+    context: SkillContext,
+  ): Promise<SkillResult> => {
+    try {
+      // Must have sent a reply first
+      if (!this.hasReplySentInternal(context)) {
+        return {
+          success: false,
+          error: "No reply has been sent yet. Use send-reply first.",
+        };
+      }
+
+      const params = parameters as unknown as EditReplyParams;
+
+      if (!params.messageId || typeof params.messageId !== "string") {
+        return {
+          success: false,
+          error: "Missing or invalid 'messageId' parameter",
+        };
+      }
+
+      if (!params.message || typeof params.message !== "string") {
+        return {
+          success: false,
+          error: "Missing or invalid 'message' parameter",
+        };
+      }
+
+      if (params.message.trim().length === 0) {
+        return {
+          success: false,
+          error: "Message cannot be empty",
+        };
+      }
+
+      // Edit message via platform adapter
+      const result = await context.platformAdapter.editMessage(
+        context.channelId,
+        params.messageId,
+        params.message,
+      );
+
+      if (!result.success) {
+        logger.error("Failed to edit reply via platform", {
+          workspaceKey: context.workspace.key,
+          channelId: context.channelId,
+          messageId: params.messageId,
+          error: result.error,
+        });
+
+        return {
+          success: false,
+          error: result.error ?? "Failed to edit reply",
+        };
+      }
+
+      logger.info("Reply edited via skill", {
+        workspaceKey: context.workspace.key,
+        channelId: context.channelId,
+        messageId: params.messageId,
+      });
+
+      return {
+        success: true,
+        data: {
+          messageId: result.messageId,
+          timestamp: new Date().toISOString(),
+        },
+      };
+    } catch (error) {
+      logger.error("Failed to edit reply", {
         error: error instanceof Error ? error.message : String(error),
         workspaceKey: context.workspace.key,
         channelId: context.channelId,

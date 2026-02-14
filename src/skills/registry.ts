@@ -39,8 +39,9 @@ export class SkillRegistry {
     this.handlers.set("memory-patch", this.memoryHandler.handleMemoryPatch);
     this.handlers.set("memory-stats", this.memoryHandler.handleMemoryStats);
 
-    // Reply skill
+    // Reply skills
     this.handlers.set("send-reply", this.replyHandler.handleSendReply);
+    this.handlers.set("edit-reply", this.replyHandler.handleEditReply);
 
     // Context skill
     this.handlers.set("fetch-context", this.contextHandler.handleFetchContext);

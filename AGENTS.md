@@ -287,6 +287,7 @@ interface PatchEvent {
 | `memory-stats`  | Get memory statistics        | POST /api/skill/memory-stats  |
 | `fetch-context` | Get additional platform data | POST /api/skill/fetch-context |
 | `send-reply`    | Send final reply (max 1)     | POST /api/skill/send-reply    |
+| `edit-reply`    | Edit last sent reply         | POST /api/skill/edit-reply    |
 
 **Single Reply Rule**:
 
@@ -295,6 +296,14 @@ interface PatchEvent {
 - Attempting second reply returns 409 Conflict error
 - All other outputs (tool calls, reasoning) stay internal
 - **Reply Threading**: When triggered from a message/note, replies are threaded to the original message using `replyToMessageId` from SkillContext
+
+**Edit Reply**:
+
+- `edit-reply` skill allows the Agent to edit a previously sent reply
+- Requires the `messageId` returned by `send-reply`
+- Not subject to the single reply rule — editing is not a new reply
+- Can be called multiple times within the same session
+- Only edits messages sent by the bot
 
 **Platform-Specific Reply Behavior**:
 
@@ -974,6 +983,10 @@ AIr-Friends/
 │   │   ├── SKILL.md
 │   │   └── scripts/
 │   │       └── send-reply.ts
+│   ├── edit-reply/
+│   │   ├── SKILL.md
+│   │   └── scripts/
+│   │       └── edit-reply.ts
 │   └── lib/
 │       └── client.ts         # Shared skill API client
 ├── prompts/

@@ -92,6 +92,16 @@ export interface SendReplyParams {
 }
 
 /**
+ * Parameters for edit-reply skill
+ */
+export interface EditReplyParams {
+  /** ID of the message to edit (from send-reply result) */
+  messageId: string;
+  /** New message content */
+  message: string;
+}
+
+/**
  * Parameters for react-message skill
  */
 export interface ReactMessageParams {

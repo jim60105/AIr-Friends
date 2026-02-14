@@ -694,6 +694,63 @@ export class MisskeyAdapter extends PlatformAdapter {
   }
 
   /**
+   * Edit an existing message (note or chat message)
+   */
+  async editMessage(
+    channelId: string,
+    messageId: string,
+    newContent: string,
+  ): Promise<ReplyResult> {
+    const maxLength = channelId.startsWith("chat:") ? 2000 : this.capabilities.maxMessageLength;
+    const truncatedContent = newContent.length > maxLength
+      ? newContent.slice(0, maxLength - 3) + "..."
+      : newContent;
+
+    if (channelId.startsWith("chat:")) {
+      return await this.editChatMessage(messageId, truncatedContent);
+    }
+    return await this.editNote(messageId, truncatedContent);
+  }
+
+  private async editNote(
+    noteId: string,
+    newContent: string,
+  ): Promise<ReplyResult> {
+    try {
+      await this.client.request("notes/update", {
+        noteId,
+        text: newContent,
+      });
+
+      logger.debug("Note edited", { noteId, contentLength: newContent.length });
+      return { success: true, messageId: noteId };
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      logger.error("Failed to edit note", { noteId, error: errorMessage });
+      return { success: false, error: `Failed to edit note: ${errorMessage}` };
+    }
+  }
+
+  private async editChatMessage(
+    messageId: string,
+    newContent: string,
+  ): Promise<ReplyResult> {
+    try {
+      await this.client.request("chat/messages/update", {
+        messageId,
+        text: newContent,
+      });
+
+      logger.debug("Chat message edited", { messageId, contentLength: newContent.length });
+      return { success: true, messageId };
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      logger.error("Failed to edit chat message", { messageId, error: errorMessage });
+      return { success: false, error: `Failed to edit chat message: ${errorMessage}` };
+    }
+  }
+
+  /**
    * Check if a user ID is the bot itself
    */
   isSelf(userId: string): boolean {
