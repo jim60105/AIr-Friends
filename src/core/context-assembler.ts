@@ -666,6 +666,12 @@ export class ContextAssembler {
     lines.push("");
     lines.push("Guidelines:");
     lines.push("- Create original content that fits your character and personality");
+    lines.push(
+      "- Use your creativity to craft a post that could spark new conversations or entertain readers",
+    );
+    lines.push(
+      `- If you mention a specific event (for example, you saw an interesting project), make sure that the event actually exists (you are talking about a real project) and that you know enough about it to discuss it (you can draw on your previous knowledge to help you talk about this event). If you are not familiar with it, please state so when discussing it (for example, "I'm not too clear on the details but it seems interesting!"), rather than pretending to have in-depth knowledge.`,
+    );
     lines.push("- Use the `send-reply` skill to post your content");
     lines.push("- Do NOT use the `react-message` skill (there is no message to react to)");
     lines.push("- Do NOT address or respond to any specific user");
@@ -673,6 +679,9 @@ export class ContextAssembler {
     if (hasRecentMessages) {
       lines.push(
         "- You may reference recent conversation topics for inspiration, but do not reply to them directly",
+      );
+      lines.push(
+        "- Feel free to draw on themes or ideas from recent messages, but your post should stand on its own and not be the same as any recent message",
       );
     } else {
       lines.push(
