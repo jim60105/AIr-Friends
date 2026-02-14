@@ -443,3 +443,69 @@ Deno.test("ReplyHandler - handleEditReply allows multiple edits", async () => {
   );
   assertEquals(result2.success, true);
 });
+
+Deno.test("ReplyHandler - handleEditReply handles thrown exception", async () => {
+  const handler = new ReplyHandler();
+
+  const workspace: WorkspaceInfo = {
+    key: "discord/edit7",
+    components: { platform: "discord", userId: "edit7" },
+    path: "/tmp/workspaces/discord/edit7",
+    isDm: true,
+  };
+
+  const throwingAdapter = createMockPlatformAdapter({ success: true, messageId: "msg_e7" });
+  throwingAdapter.editMessage = () => {
+    throw new Error("Network failure");
+  };
+
+  const context: SkillContext = {
+    workspace,
+    platformAdapter: throwingAdapter,
+    channelId: "ch_edit7",
+    userId: "edit7",
+  };
+
+  await handler.handleSendReply({ message: "First" }, context);
+
+  const result = await handler.handleEditReply(
+    { messageId: "msg_e7", message: "Edit" },
+    context,
+  );
+
+  assertEquals(result.success, false);
+  assertEquals(result.error, "Network failure");
+});
+
+Deno.test("ReplyHandler - handleEditReply handles non-Error exception", async () => {
+  const handler = new ReplyHandler();
+
+  const workspace: WorkspaceInfo = {
+    key: "discord/edit8",
+    components: { platform: "discord", userId: "edit8" },
+    path: "/tmp/workspaces/discord/edit8",
+    isDm: true,
+  };
+
+  const throwingAdapter = createMockPlatformAdapter({ success: true, messageId: "msg_e8" });
+  throwingAdapter.editMessage = () => {
+    throw "string error";
+  };
+
+  const context: SkillContext = {
+    workspace,
+    platformAdapter: throwingAdapter,
+    channelId: "ch_edit8",
+    userId: "edit8",
+  };
+
+  await handler.handleSendReply({ message: "First" }, context);
+
+  const result = await handler.handleEditReply(
+    { messageId: "msg_e8", message: "Edit" },
+    context,
+  );
+
+  assertEquals(result.success, false);
+  assertEquals(result.error, "Unknown error");
+});

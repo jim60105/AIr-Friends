@@ -988,3 +988,92 @@ Deno.test("chatMessageToPlatformMessage - without file", () => {
   const pm = chatMessageToPlatformMessage(chat, "bot123");
   assertEquals(pm.attachments, undefined);
 });
+
+// ============ MisskeyAdapter.editMessage tests ============
+
+function createMockMisskeyAdapter(): MisskeyAdapter {
+  const adapter = new MisskeyAdapter({
+    host: "localhost",
+    token: "test-token",
+    secure: false,
+  });
+  return adapter;
+}
+
+// deno-lint-ignore no-explicit-any
+function mockClientRequest(adapter: MisskeyAdapter, fn: (...args: any[]) => any): void {
+  // deno-lint-ignore no-explicit-any
+  (adapter as any).client = { request: fn };
+}
+
+Deno.test("MisskeyAdapter.editMessage - edits note successfully", async () => {
+  const adapter = createMockMisskeyAdapter();
+  mockClientRequest(adapter, (_endpoint: string, _params: unknown) => {
+    return Promise.resolve({});
+  });
+
+  const result = await adapter.editMessage("note:abc123", "abc123", "Updated content");
+  assertEquals(result.success, true);
+  assertEquals(result.messageId, "abc123");
+});
+
+Deno.test("MisskeyAdapter.editMessage - edits chat message successfully", async () => {
+  const adapter = createMockMisskeyAdapter();
+  mockClientRequest(adapter, (_endpoint: string, _params: unknown) => {
+    return Promise.resolve({});
+  });
+
+  const result = await adapter.editMessage("chat:user1", "msg456", "Updated chat");
+  assertEquals(result.success, true);
+  assertEquals(result.messageId, "msg456");
+});
+
+Deno.test("MisskeyAdapter.editMessage - handles note edit failure", async () => {
+  const adapter = createMockMisskeyAdapter();
+  mockClientRequest(adapter, () => {
+    throw new Error("Note not found");
+  });
+
+  const result = await adapter.editMessage("note:abc123", "abc123", "Updated");
+  assertEquals(result.success, false);
+  assertEquals(result.error, "Failed to edit note: Note not found");
+});
+
+Deno.test("MisskeyAdapter.editMessage - handles chat edit failure", async () => {
+  const adapter = createMockMisskeyAdapter();
+  mockClientRequest(adapter, () => {
+    throw new Error("Chat message not found");
+  });
+
+  const result = await adapter.editMessage("chat:user1", "msg456", "Updated");
+  assertEquals(result.success, false);
+  assertEquals(result.error, "Failed to edit chat message: Chat message not found");
+});
+
+Deno.test("MisskeyAdapter.editMessage - truncates long note content", async () => {
+  const adapter = createMockMisskeyAdapter();
+  let capturedText = "";
+  mockClientRequest(adapter, (_endpoint: string, params: { text: string }) => {
+    capturedText = params.text;
+    return Promise.resolve({});
+  });
+
+  const longContent = "a".repeat(4000);
+  await adapter.editMessage("note:abc123", "abc123", longContent);
+  assertEquals(capturedText.length, 3000);
+  assertEquals(capturedText.endsWith("..."), true);
+});
+
+Deno.test("MisskeyAdapter.editMessage - truncates long chat content", async () => {
+  const adapter = createMockMisskeyAdapter();
+  let capturedText = "";
+  mockClientRequest(adapter, (_endpoint: string, params: { text: string }) => {
+    capturedText = params.text;
+    return Promise.resolve({});
+  });
+
+  const longContent = "a".repeat(3000);
+  await adapter.editMessage("chat:user1", "msg456", longContent);
+  assertEquals(capturedText.length, 2000);
+  assertEquals(capturedText.endsWith("..."), true);
+});

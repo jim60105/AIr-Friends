@@ -249,3 +249,105 @@ Deno.test("messageToPltatformMessage - without attachments", () => {
   const pm = messageToPltatformMessage(message as any, "bot123");
   assertEquals(pm.attachments, undefined);
 });
+
+// ============ DiscordAdapter.editMessage tests ============
+
+import { DiscordAdapter } from "@platforms/discord/discord-adapter.ts";
+
+function createMockDiscordAdapter(): DiscordAdapter {
+  const adapter = new DiscordAdapter({ token: "fake-token" });
+  return adapter;
+}
+
+function mockDiscordClient(adapter: DiscordAdapter, channelMock: any): void {
+  (adapter as any).client = {
+    channels: {
+      fetch: () => Promise.resolve(channelMock),
+    },
+  };
+}
+
+Deno.test({
+  name: "DiscordAdapter.editMessage - edits message successfully",
+  sanitizeOps: false,
+  sanitizeResources: false,
+  fn: async () => {
+    const adapter = createMockDiscordAdapter();
+    const mockChannel = {
+      type: 0,
+      messages: {
+        fetch: () => Promise.resolve({ edit: () => Promise.resolve() }),
+      },
+    };
+    mockDiscordClient(adapter, mockChannel);
+
+    const result = await adapter.editMessage("ch123", "msg123", "Updated content");
+    assertEquals(result.success, true);
+    assertEquals(result.messageId, "msg123");
+  },
+});
+
+Deno.test({
+  name: "DiscordAdapter.editMessage - handles channel not found",
+  sanitizeOps: false,
+  sanitizeResources: false,
+  fn: async () => {
+    const adapter = createMockDiscordAdapter();
+    mockDiscordClient(adapter, null);
+
+    const result = await adapter.editMessage("ch123", "msg123", "Updated");
+    assertEquals(result.success, false);
+    assertEquals(result.error, "Channel not found or not text-based");
+  },
+});
+
+Deno.test({
+  name: "DiscordAdapter.editMessage - handles edit error",
+  sanitizeOps: false,
+  sanitizeResources: false,
+  fn: async () => {
+    const adapter = createMockDiscordAdapter();
+    const mockChannel = {
+      type: 0,
+      messages: {
+        fetch: () =>
+          Promise.resolve({
+            edit: () => Promise.reject(new Error("Missing permissions")),
+          }),
+      },
+    };
+    mockDiscordClient(adapter, mockChannel);
+
+    const result = await adapter.editMessage("ch123", "msg123", "Updated");
+    assertEquals(result.success, false);
+    assertEquals(result.error, "Failed to edit message: Missing permissions");
+  },
+});
+
+Deno.test({
+  name: "DiscordAdapter.editMessage - truncates long content",
+  sanitizeOps: false,
+  sanitizeResources: false,
+  fn: async () => {
+    const adapter = createMockDiscordAdapter();
+    let capturedContent = "";
+    const mockChannel = {
+      type: 0,
+      messages: {
+        fetch: () =>
+          Promise.resolve({
+            edit: (opts: { content: string }) => {
+              capturedContent = opts.content;
+              return Promise.resolve();
+            },
+          }),
+      },
+    };
+    mockDiscordClient(adapter, mockChannel);
+
+    const longContent = "a".repeat(3000);
+    await adapter.editMessage("ch123", "msg123", longContent);
+    assertEquals(capturedContent.length, 2000);
+    assertEquals(capturedContent.endsWith("..."), true);
+  },
+});
