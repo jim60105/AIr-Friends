@@ -84,6 +84,10 @@ export class GelfTransport {
       _log_level: entry.level,
     };
 
+    if (entry.messageTemplate) {
+      gelf._messageTemplate = entry.messageTemplate;
+    }
+
     if (entry.context) {
       for (const [key, value] of Object.entries(entry.context)) {
         if (value !== undefined && value !== null) {

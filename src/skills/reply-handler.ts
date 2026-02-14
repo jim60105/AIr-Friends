@@ -134,10 +134,11 @@ export class ReplyHandler {
       this.markReplySent(context);
       repliesSentTotal.labels(context.workspace.components.platform).inc();
 
-      logger.info("Reply sent via skill", {
+      logger.info("Reply sent via skill to channel {channelId} ({contentLength} chars)", {
         workspaceKey: context.workspace.key,
         channelId: context.channelId,
         messageId: result.messageId,
+        contentLength: params.message.length,
       });
 
       return {
@@ -222,10 +223,11 @@ export class ReplyHandler {
         };
       }
 
-      logger.info("Reply edited via skill", {
+      logger.info("Reply edited via skill for message {messageId} ({contentLength} chars)", {
         workspaceKey: context.workspace.key,
         channelId: context.channelId,
         messageId: params.messageId,
+        contentLength: params.message.length,
       });
 
       return {

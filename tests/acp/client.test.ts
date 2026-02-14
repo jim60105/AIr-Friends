@@ -486,7 +486,9 @@ Deno.test("ChatbotClient - sessionUpdate handles usage_update", async () => {
     } as unknown as acp.SessionNotification);
 
     // Verify usage update was logged
-    const usageLogs = infoLogs.filter((log) => log.message === "Agent usage update");
+    const usageLogs = infoLogs.filter((log) =>
+      log.message === "Agent usage update: tokens {used}/{size}"
+    );
     assertEquals(usageLogs.length, 1);
     const context = usageLogs[0].context as Record<string, unknown>;
     assertEquals(context.used, 14914);
@@ -533,7 +535,7 @@ Deno.test("ChatbotClient - sessionUpdate logs failed tool calls with details", a
 
     // Verify error was logged
     assertEquals(errorLogs.length, 1);
-    assertEquals(errorLogs[0].message, "Tool call failed");
+    assertEquals(errorLogs[0].message, "Tool call {id} failed");
     const context = errorLogs[0].context as Record<string, unknown>;
     assertEquals(context.id, "test-id");
     assertEquals(context.status, "failed");

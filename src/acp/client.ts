@@ -43,7 +43,7 @@ export class ChatbotClient implements acp.Client {
 
     // YOLO mode: auto-approve everything
     if (this.config.yolo) {
-      this.logger.info("YOLO mode: auto-approving all permissions", {
+      this.logger.info("YOLO mode: auto-approving permission for {title}", {
         kind: params.toolCall.kind,
         title: params.toolCall.title,
       });
@@ -68,8 +68,8 @@ export class ChatbotClient implements acp.Client {
       );
 
       if (isReadingSkills) {
-        this.logger.info("Auto-approving skills directory read", {
-          locations: params.toolCall.locations.map((l) => l.path),
+        this.logger.info("Auto-approving skills directory read: {path}", {
+          path: params.toolCall.locations.map((l) => l.path).join(", "),
         });
 
         const allowOption = params.options.find((o) => o.kind === "allow_once") ??
@@ -97,8 +97,8 @@ export class ChatbotClient implements acp.Client {
         commands.every((cmd) => cmd.includes("skills/") && cmd.includes("skill.ts"));
 
       if (isSkillCommand) {
-        this.logger.info("Auto-approving skill shell execution", {
-          commands,
+        this.logger.info("Auto-approving skill shell execution: {command}", {
+          command: commands.join("; "),
         });
 
         const allowOption = params.options.find((o) => o.kind === "allow_once") ??
@@ -122,7 +122,7 @@ export class ChatbotClient implements acp.Client {
 
     // Check if this is one of our registered skills
     if (skillName && this.skillRegistry.hasSkill(skillName)) {
-      this.logger.info("Auto-approving registered skill", { skillName });
+      this.logger.info("Auto-approving registered skill: {skillName}", { skillName });
 
       // Find "allow_once" option, or default to first option
       const allowOption = params.options.find((o) => o.kind === "allow_once") ??
@@ -171,12 +171,15 @@ export class ChatbotClient implements acp.Client {
         break;
 
       case "tool_call":
-        this.logger.info("Tool call started", {
-          id: update.toolCallId,
-          title: update.title,
-          kind: update.kind,
-          status: update.status,
-        });
+        this.logger.info(
+          "Tool call started: {title} (id: {id}, kind: {kind})",
+          {
+            id: update.toolCallId,
+            title: update.title,
+            kind: update.kind,
+            status: update.status,
+          },
+        );
         break;
 
       case "tool_call_update": {
@@ -201,9 +204,9 @@ export class ChatbotClient implements acp.Client {
           }
           // Log full update object for debugging
           logContext.fullUpdate = JSON.stringify(update);
-          this.logger.error("Tool call failed", logContext);
+          this.logger.error("Tool call {id} failed", logContext);
         } else {
-          this.logger.info("Tool call updated", logContext);
+          this.logger.info("Tool call {id} updated to status {status}", logContext);
         }
         break;
       }
@@ -230,7 +233,7 @@ export class ChatbotClient implements acp.Client {
           size?: number;
           cost?: { amount: number; currency: string };
         };
-        this.logger.info("Agent usage update", {
+        this.logger.info("Agent usage update: tokens {used}/{size}", {
           used: usageUpdate.used,
           size: usageUpdate.size,
           cost: usageUpdate.cost,

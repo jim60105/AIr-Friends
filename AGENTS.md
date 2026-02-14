@@ -841,9 +841,33 @@ logger.error("Operation failed", { error: err.message });
 
 **Never log sensitive information** (tokens, passwords, private message content).
 
+### Message Template 語法
+
+日誌訊息應使用 [Message Template](https://messagetemplates.org/) 語法 `{PropertyName}` 引用 context 中的結構化屬性。Logger 會自動將 `{PropertyName}` 替換為 context 中對應的值，同時保留原始模板作為 `messageTemplate` 欄位供日誌系統分類使用。
+
+```typescript
+// ✅ 正確 — 使用 {PropertyName} 引用 context 屬性
+logger.info("Session {sessionId} model set to {modelId}", { sessionId, modelId });
+
+// ❌ 錯誤 — 靜態訊息未包含主要識別符
+logger.info("Session model set", { sessionId, modelId });
+
+// ❌ 錯誤 — 使用 template literal 而非 message template（會破壞事件分類）
+logger.info(`Session ${sessionId} model set to ${modelId}`, { sessionId, modelId });
+```
+
+**規則：**
+- `{PropertyName}` 中的名稱必須與 context 物件的 key 完全一致
+- 未匹配的佔位符保持原樣不替換
+- 使用 `{{` 和 `}}` 來跳脫字面大括號
+- 不包含 `{PropertyName}` 的訊息不會產生 `messageTemplate` 欄位（完全向後相容）
+- `null`/`undefined` 值替換為空字串；物件型別使用 `JSON.stringify()` 序列化
+
 ### GELF Output
 
 When `logging.gelf.enabled` is `true` and `logging.gelf.endpoint` is set, all log entries are also sent to a GELF HTTP endpoint via fire-and-forget `fetch()`. The GELF transport is initialized in `bootstrap.ts` and injected into the global logger config. The transport module is at `src/utils/gelf-transport.ts`.
+
+GELF 輸出中，`messageTemplate` 會作為 `_messageTemplate` 自訂欄位傳送。
 
 ## Testing
 

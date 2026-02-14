@@ -68,16 +68,18 @@ export class ConnectionManager {
 
     while (!this.isShuttingDown) {
       try {
-        logger.info("Attempting to connect", {
+        logger.info("Attempting to connect: attempt {attempt}/{maxAttempts}", {
           platform: this.adapter.platform,
           attempt: attempt + 1,
+          maxAttempts: this.config.maxAttempts || "∞",
         });
 
         await this.adapter.connect();
 
         // Connection successful
-        logger.info("Connected successfully", {
+        logger.info("Connected successfully on attempt {attempt}", {
           platform: this.adapter.platform,
+          attempt: attempt + 1,
         });
 
         // Set up reconnection on disconnect
@@ -86,7 +88,7 @@ export class ConnectionManager {
       } catch (error) {
         attempt++;
 
-        logger.error("Connection failed", {
+        logger.error("Connection failed on attempt {attempt}", {
           platform: this.adapter.platform,
           attempt,
           error: error instanceof Error ? error.message : String(error),
@@ -97,7 +99,7 @@ export class ConnectionManager {
           this.config.maxAttempts > 0 &&
           attempt >= this.config.maxAttempts
         ) {
-          logger.fatal("Max connection attempts reached", {
+          logger.fatal("Max connection attempts ({maxAttempts}) reached", {
             platform: this.adapter.platform,
             maxAttempts: this.config.maxAttempts,
           });
@@ -108,9 +110,10 @@ export class ConnectionManager {
 
         // Calculate delay and wait
         const delay = this.calculateDelay(attempt);
-        logger.info("Waiting before retry", {
+        logger.info("Waiting {delayMs}ms before retry attempt {nextAttempt}", {
           platform: this.adapter.platform,
           delayMs: Math.round(delay),
+          nextAttempt: attempt + 1,
         });
 
         await this.sleep(delay);

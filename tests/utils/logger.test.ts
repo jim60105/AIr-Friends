@@ -161,3 +161,138 @@ Deno.test("Logger - does not send to GELF when level is below threshold", () => 
     console.log = originalLog;
   }
 });
+
+Deno.test("Logger - renders message template with context values", () => {
+  const logs: string[] = [];
+  const originalLog = console.log;
+  console.log = (msg: string) => logs.push(msg);
+
+  try {
+    const logger = new Logger("TestModule", { level: LogLevel.DEBUG });
+    logger.info("Session {sessionId} created", { sessionId: "ses_123" });
+
+    const entry = JSON.parse(logs[0]);
+    assertEquals(entry.message, "Session ses_123 created");
+    assertEquals(entry.messageTemplate, "Session {sessionId} created");
+  } finally {
+    console.log = originalLog;
+  }
+});
+
+Deno.test("Logger - preserves unmatched placeholders", () => {
+  const logs: string[] = [];
+  const originalLog = console.log;
+  console.log = (msg: string) => logs.push(msg);
+
+  try {
+    const logger = new Logger("TestModule", { level: LogLevel.DEBUG });
+    logger.info("User {userId} on {platform}", { userId: "abc" });
+
+    const entry = JSON.parse(logs[0]);
+    assertEquals(entry.message, "User abc on {platform}");
+    assertEquals(entry.messageTemplate, "User {userId} on {platform}");
+  } finally {
+    console.log = originalLog;
+  }
+});
+
+Deno.test("Logger - handles escaped braces", () => {
+  const logs: string[] = [];
+  const originalLog = console.log;
+  console.log = (msg: string) => logs.push(msg);
+
+  try {
+    const logger = new Logger("TestModule", { level: LogLevel.DEBUG });
+    logger.info("Use {{braces}} for {name}", { name: "test" });
+
+    const entry = JSON.parse(logs[0]);
+    assertEquals(entry.message, "Use {braces} for test");
+    assertEquals(entry.messageTemplate, "Use {{braces}} for {name}");
+  } finally {
+    console.log = originalLog;
+  }
+});
+
+Deno.test("Logger - no messageTemplate when no placeholders", () => {
+  const logs: string[] = [];
+  const originalLog = console.log;
+  console.log = (msg: string) => logs.push(msg);
+
+  try {
+    const logger = new Logger("TestModule", { level: LogLevel.DEBUG });
+    logger.info("Simple message", { key: "val" });
+
+    const entry = JSON.parse(logs[0]);
+    assertEquals(entry.message, "Simple message");
+    assertEquals(entry.messageTemplate, undefined);
+  } finally {
+    console.log = originalLog;
+  }
+});
+
+Deno.test("Logger - handles object values in template", () => {
+  const logs: string[] = [];
+  const originalLog = console.log;
+  console.log = (msg: string) => logs.push(msg);
+
+  try {
+    const logger = new Logger("TestModule", { level: LogLevel.DEBUG });
+    logger.info("Cost: {cost}", { cost: { amount: 0.13, currency: "USD" } });
+
+    const entry = JSON.parse(logs[0]);
+    assertStringIncludes(entry.message, '{"amount":0.13,"currency":"USD"}');
+    assertEquals(entry.messageTemplate, "Cost: {cost}");
+  } finally {
+    console.log = originalLog;
+  }
+});
+
+Deno.test("Logger - handles null/undefined values in template", () => {
+  const logs: string[] = [];
+  const originalLog = console.log;
+  console.log = (msg: string) => logs.push(msg);
+
+  try {
+    const logger = new Logger("TestModule", { level: LogLevel.DEBUG });
+    logger.info("Value: {val}", { val: null });
+
+    const entry = JSON.parse(logs[0]);
+    assertEquals(entry.message, "Value: ");
+    assertEquals(entry.messageTemplate, "Value: {val}");
+  } finally {
+    console.log = originalLog;
+  }
+});
+
+Deno.test("Logger - sends messageTemplate to GELF transport", () => {
+  const sentEntries: LogEntry[] = [];
+  const mockTransport = {
+    send(entry: LogEntry) {
+      sentEntries.push(entry);
+    },
+  };
+
+  const originalLog = console.log;
+  console.log = () => {};
+
+  try {
+    const logger = new Logger("TestModule", {
+      level: LogLevel.DEBUG,
+      gelfTransport: mockTransport,
+    });
+
+    logger.info("Session {sessionId} model set to {modelId}", {
+      sessionId: "ses_abc",
+      modelId: "gpt-4",
+    });
+
+    assertEquals(sentEntries.length, 1);
+    assertEquals(sentEntries[0].message, "Session ses_abc model set to gpt-4");
+    assertEquals(
+      sentEntries[0].messageTemplate,
+      "Session {sessionId} model set to {modelId}",
+    );
+  } finally {
+    console.log = originalLog;
+  }
+});

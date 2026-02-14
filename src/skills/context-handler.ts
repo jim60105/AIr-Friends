@@ -54,7 +54,7 @@ export class ContextHandler {
             limit,
           );
 
-          logger.info("Fetched recent messages via skill", {
+          logger.info("Fetched {count} recent messages via skill for channel {channelId}", {
             workspaceKey: context.workspace.key,
             channelId: context.channelId,
             count: messages.length,
@@ -94,7 +94,7 @@ export class ContextHandler {
             limit,
           );
 
-          logger.info("Searched messages via skill", {
+          logger.info("Searched messages via skill: query returned {count} results", {
             workspaceKey: context.workspace.key,
             channelId: context.channelId,
             query: params.query,
@@ -111,7 +111,7 @@ export class ContextHandler {
         case "user_info": {
           const username = await context.platformAdapter.getUsername(context.userId);
 
-          logger.info("Fetched user info via skill", {
+          logger.info("Fetched user info via skill for user {userId}", {
             workspaceKey: context.workspace.key,
             userId: context.userId,
           });

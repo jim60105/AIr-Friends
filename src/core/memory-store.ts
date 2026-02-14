@@ -84,7 +84,7 @@ export class MemoryStore {
       line,
     );
 
-    logger.info("Memory added", {
+    logger.info("Memory {memoryId} added ({visibility}, {importance})", {
       workspaceKey: workspace.key,
       memoryId: entry.id,
       importance,
@@ -134,7 +134,7 @@ export class MemoryStore {
       line,
     );
 
-    logger.info("Memory patched", {
+    logger.info("Memory {targetId} patched", {
       workspaceKey: workspace.key,
       targetId,
       patch,

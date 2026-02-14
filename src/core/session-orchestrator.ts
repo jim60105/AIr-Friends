@@ -133,7 +133,7 @@ export class SessionOrchestrator {
         const sessionIdFile = join(workspace.path, "SESSION_ID");
         await Deno.writeTextFile(sessionIdFile, shellSessionId);
 
-        sessionLogger.info("Shell session registered", {
+        sessionLogger.info("Shell session {shellSessionId} registered", {
           shellSessionId,
           sessionIdFile,
         });
@@ -200,11 +200,11 @@ export class SessionOrchestrator {
         sessionLogger.info("Agent capabilities checked", { supportsImage });
 
         const sessionId = await connector.createSession();
-        sessionLogger.info("Agent session created", { sessionId });
+        sessionLogger.info("Agent session {sessionId} created", { sessionId });
 
         // Set the model for the session
         await connector.setSessionModel(sessionId, this.config.agent.model);
-        sessionLogger.info("Agent session model set", {
+        sessionLogger.info("Agent session {sessionId} model set to {model}", {
           sessionId,
           model: this.config.agent.model,
         });
@@ -225,7 +225,7 @@ export class SessionOrchestrator {
           sessionLogger,
         );
         const response = await connector.prompt(sessionId, promptContent);
-        sessionLogger.info("Agent session completed", {
+        sessionLogger.info("Agent session {sessionId} completed with stopReason {stopReason}", {
           sessionId,
           stopReason: response.stopReason,
         });
@@ -340,7 +340,7 @@ export class SessionOrchestrator {
         // Clean up shell session if it exists
         if (shellSessionId) {
           this.sessionRegistry.remove(shellSessionId);
-          sessionLogger.debug("Shell session cleaned up", { shellSessionId });
+          sessionLogger.debug("Shell session {shellSessionId} cleaned up", { shellSessionId });
 
           // Remove SESSION_ID file
           const sessionIdFile = join(workspace.path, "SESSION_ID");
@@ -434,7 +434,7 @@ export class SessionOrchestrator {
 
         const sessionIdFile = join(workspace.path, "SESSION_ID");
         await Deno.writeTextFile(sessionIdFile, shellSessionId);
-        sessionLogger.info("Shell session registered", { shellSessionId });
+        sessionLogger.info("Shell session {shellSessionId} registered", { shellSessionId });
       }
 
       // 3. Assemble spontaneous context
@@ -493,7 +493,7 @@ export class SessionOrchestrator {
 
         // Send prompt
         const response = await connector.prompt(sessionId, fullPrompt);
-        sessionLogger.info("Agent session completed", {
+        sessionLogger.info("Agent session completed with stopReason {stopReason}", {
           stopReason: response.stopReason,
         });
 
@@ -616,7 +616,7 @@ export class SessionOrchestrator {
 
         const sessionIdFile = join(workspace.path, "SESSION_ID");
         await Deno.writeTextFile(sessionIdFile, shellSessionId);
-        sessionLogger.info("Shell session registered", { shellSessionId });
+        sessionLogger.info("Shell session {shellSessionId} registered", { shellSessionId });
       }
 
       // 3. Build self-research prompt
@@ -663,7 +663,7 @@ export class SessionOrchestrator {
 
         // Send prompt
         const response = await connector.prompt(sessionId, fullPrompt);
-        sessionLogger.info("Self-research agent session completed", {
+        sessionLogger.info("Self-research agent session completed with stopReason {stopReason}", {
           stopReason: response.stopReason,
         });
 
@@ -773,7 +773,7 @@ export class SessionOrchestrator {
 
         const sessionIdFile = join(workspace.path, "SESSION_ID");
         await Deno.writeTextFile(sessionIdFile, shellSessionId);
-        sessionLogger.info("Shell session registered", { shellSessionId });
+        sessionLogger.info("Shell session {shellSessionId} registered", { shellSessionId });
       }
 
       const fullPrompt = await this.buildMemoryMaintenancePrompt(
@@ -814,7 +814,7 @@ export class SessionOrchestrator {
         await connector.setSessionModel(sessionId, memoryMaintenanceConfig.model);
 
         const response = await connector.prompt(sessionId, fullPrompt);
-        sessionLogger.info("Memory maintenance session completed", {
+        sessionLogger.info("Memory maintenance session completed with stopReason {stopReason}", {
           stopReason: response.stopReason,
         });
 

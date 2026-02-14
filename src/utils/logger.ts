@@ -58,13 +58,52 @@ export class Logger {
     message: string,
     context?: Record<string, unknown>,
   ): LogEntry {
-    return {
+    const hasTemplate = /\{[a-zA-Z_][a-zA-Z0-9_]*\}/.test(message);
+
+    let renderedMessage = message;
+    if (hasTemplate && context) {
+      renderedMessage = this.renderTemplate(message, context);
+    }
+
+    const entry: LogEntry = {
       timestamp: new Date().toISOString(),
       level,
       module: this.module,
-      message,
+      message: renderedMessage,
       context: context ? this.sanitize(context) as Record<string, unknown> : undefined,
     };
+
+    if (hasTemplate) {
+      entry.messageTemplate = message;
+    }
+
+    return entry;
+  }
+
+  /**
+   * Replace {PropertyName} placeholders in template with context values.
+   * Follows messagetemplates.org specification.
+   * Unmatched placeholders are preserved as-is.
+   * Double braces {{ and }} are escape sequences.
+   */
+  private renderTemplate(
+    template: string,
+    context: Record<string, unknown>,
+  ): string {
+    return template.replace(
+      /\{\{|\}\}|\{([a-zA-Z_][a-zA-Z0-9_]*)\}/g,
+      (match, propName) => {
+        if (match === "{{") return "{";
+        if (match === "}}") return "}";
+        if (propName in context) {
+          const value = context[propName];
+          if (value === null || value === undefined) return "";
+          if (typeof value === "object") return JSON.stringify(value);
+          return String(value);
+        }
+        return match;
+      },
+    );
   }
 
   private output(entry: LogEntry, isError: boolean = false): void {

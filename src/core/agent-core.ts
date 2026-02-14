@@ -69,7 +69,7 @@ export class AgentCore {
         },
       );
       this.skillApiServer.start();
-      logger.info("Skill API server enabled", {
+      logger.info("Skill API server enabled on port {port}", {
         port: config.skillApi.port,
         host: config.skillApi.host,
       });
@@ -119,7 +119,7 @@ export class AgentCore {
    */
   registerPlatform(adapter: PlatformAdapter): void {
     this.platformAdapters.set(adapter.platform, adapter);
-    logger.info("Platform adapter registered", {
+    logger.info("Platform adapter registered: {platform}", {
       platform: adapter.platform,
       capabilities: adapter.capabilities,
     });
@@ -134,7 +134,7 @@ export class AgentCore {
   async handleEvent(event: NormalizedEvent): Promise<void> {
     const platform = this.platformAdapters.get(event.platform);
     if (!platform) {
-      logger.error("No adapter registered for platform", {
+      logger.error("No adapter registered for platform: {platform}", {
         platform: event.platform,
         messageId: event.messageId,
       });
@@ -149,7 +149,7 @@ export class AgentCore {
     });
 
     if (!this.replyPolicy.shouldReply(event)) {
-      logger.info("Event filtered by access control policy", {
+      logger.info("Event filtered by access control policy for user {userId} on {platform}", {
         platform: event.platform,
         channelId: event.channelId,
         userId: event.userId,

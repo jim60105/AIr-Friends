@@ -155,3 +155,67 @@ Deno.test("GelfTransport - stringifies object values in context", async () => {
 
   await server.shutdown();
 });
+
+Deno.test("GelfTransport - includes messageTemplate as custom field", async () => {
+  let receivedBody: string | null = null;
+
+  const server = Deno.serve({ port: 0, onListen() {} }, async (req) => {
+    receivedBody = await req.text();
+    return new Response("", { status: 202 });
+  });
+
+  const port = server.addr.port;
+  const transport = new GelfTransport({
+    enabled: true,
+    endpoint: `http://127.0.0.1:${port}/gelf`,
+  });
+
+  transport.send({
+    timestamp: new Date().toISOString(),
+    level: "INFO",
+    module: "Test",
+    message: "Session ses_abc model set to gpt-4",
+    messageTemplate: "Session {sessionId} model set to {modelId}",
+    context: { sessionId: "ses_abc", modelId: "gpt-4" },
+  });
+
+  await new Promise((resolve) => setTimeout(resolve, 200));
+
+  const gelf = JSON.parse(receivedBody!);
+  assertEquals(gelf.short_message, "Session ses_abc model set to gpt-4");
+  assertEquals(gelf._messageTemplate, "Session {sessionId} model set to {modelId}");
+  assertEquals(gelf._sessionId, "ses_abc");
+  assertEquals(gelf._modelId, "gpt-4");
+
+  await server.shutdown();
+});
+
+Deno.test("GelfTransport - omits messageTemplate when not present", async () => {
+  let receivedBody: string | null = null;
+
+  const server = Deno.serve({ port: 0, onListen() {} }, async (req) => {
+    receivedBody = await req.text();
+    return new Response("", { status: 202 });
+  });
+
+  const port = server.addr.port;
+  const transport = new GelfTransport({
+    enabled: true,
+    endpoint: `http://127.0.0.1:${port}/gelf`,
+  });
+
+  transport.send({
+    timestamp: new Date().toISOString(),
+    level: "INFO",
+    module: "Test",
+    message: "Simple message without template",
+  });
+
+  await new Promise((resolve) => setTimeout(resolve, 200));
+
+  const gelf = JSON.parse(receivedBody!);
+  assertEquals(gelf.short_message, "Simple message without template");
+  assertEquals(gelf._messageTemplate, undefined);
+
+  await server.shutdown();
+});

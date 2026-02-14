@@ -138,7 +138,7 @@ export class AgentConnector {
       mcpServers: mcpServers.map((server) => this.convertMCPServerConfig(server)),
     });
 
-    logger.info("Session created", {
+    logger.info("Session {sessionId} created with {mcpServerCount} MCP servers", {
       sessionId: result.sessionId,
       mcpServerCount: mcpServers.length,
     });
@@ -165,7 +165,9 @@ export class AgentConnector {
             `Agent does not support HTTP transport for MCP servers (server: ${server.name})`,
           );
         }
-        logger.debug("HTTP transport validated", { serverName: server.name });
+        logger.debug("HTTP transport validated for server {serverName}", {
+          serverName: server.name,
+        });
       }
 
       // Check SSE transport support
@@ -175,7 +177,9 @@ export class AgentConnector {
             `Agent does not support SSE transport for MCP servers (server: ${server.name})`,
           );
         }
-        logger.debug("SSE transport validated", { serverName: server.name });
+        logger.debug("SSE transport validated for server {serverName}", {
+          serverName: server.name,
+        });
       }
     }
   }
@@ -258,7 +262,7 @@ export class AgentConnector {
       modelId,
     });
 
-    logger.info("Session model set", { sessionId, modelId });
+    logger.info("Session model set to {modelId} for session {sessionId}", { sessionId, modelId });
   }
 
   /**
@@ -295,7 +299,7 @@ export class AgentConnector {
       prompt,
     });
 
-    logger.info("Prompt completed", {
+    logger.info("Prompt completed for session {sessionId} with stopReason {stopReason}", {
       sessionId,
       stopReason: result.stopReason,
       contentBlockCount: prompt.length,
@@ -315,7 +319,7 @@ export class AgentConnector {
     const logger = this.options.logger as Logger;
 
     await this.connection.cancel({ sessionId });
-    logger.info("Session cancelled", { sessionId });
+    logger.info("Session {sessionId} cancelled", { sessionId });
   }
 
   /**

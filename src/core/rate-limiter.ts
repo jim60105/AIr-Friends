@@ -61,7 +61,7 @@ export class RateLimiter {
     // Check if limit exceeded
     if (state.timestamps.length >= this.config.maxRequestsPerWindow) {
       state.cooldownUntil = now + this.config.cooldownMs;
-      logger.warn("Rate limit exceeded, entering cooldown", {
+      logger.warn("Rate limit exceeded for {userKey}, entering cooldown", {
         userKey,
         requestCount: state.timestamps.length,
         maxRequests: this.config.maxRequestsPerWindow,
