@@ -50,6 +50,18 @@ export class ReplyPolicyEvaluator {
   }
 
   /**
+   * Check if a user is whitelisted as an account (not channel).
+   * Used by rate limiter to bypass rate limits for trusted accounts.
+   */
+  isWhitelistedAccount(platform: string, userId: string): boolean {
+    return this.entries.some((entry) =>
+      entry.platform === platform &&
+      entry.type === "account" &&
+      entry.id === userId
+    );
+  }
+
+  /**
    * Check whether an event matches any whitelist entry.
    */
   private isWhitelisted(event: NormalizedEvent): boolean {

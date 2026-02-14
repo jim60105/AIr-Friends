@@ -6,6 +6,7 @@ import type { NormalizedEvent } from "../types/events.ts";
 import type { PlatformAdapter } from "@platforms/platform-adapter.ts";
 import type { RateLimitConfig } from "../types/config.ts";
 import { RateLimiter } from "./rate-limiter.ts";
+import type { ReplyPolicyEvaluator } from "./reply-policy.ts";
 
 import { messagesReceivedTotal } from "@utils/metrics.ts";
 
@@ -19,11 +20,17 @@ export class MessageHandler {
   private orchestrator: SessionOrchestrator;
   private activeEvents: Set<string> = new Set();
   private rateLimiter: RateLimiter;
+  private replyPolicy: ReplyPolicyEvaluator;
   private cleanupInterval: ReturnType<typeof setInterval> | null = null;
 
-  constructor(orchestrator: SessionOrchestrator, rateLimitConfig: RateLimitConfig) {
+  constructor(
+    orchestrator: SessionOrchestrator,
+    rateLimitConfig: RateLimitConfig,
+    replyPolicy: ReplyPolicyEvaluator,
+  ) {
     this.orchestrator = orchestrator;
     this.rateLimiter = new RateLimiter(rateLimitConfig);
+    this.replyPolicy = replyPolicy;
 
     // Periodic cleanup every hour to prevent memory leaks
     if (rateLimitConfig.enabled) {
@@ -63,8 +70,14 @@ export class MessageHandler {
 
     try {
       // Rate limit check (after duplicate check, before any resource allocation)
+      // Whitelisted accounts bypass rate limiting
       const userKey = `${event.platform}:${event.userId}`;
-      if (!this.rateLimiter.isAllowed(userKey)) {
+      const isWhitelistedAccount = this.replyPolicy.isWhitelistedAccount(
+        event.platform,
+        event.userId,
+      );
+
+      if (!isWhitelistedAccount && !this.rateLimiter.isAllowed(userKey)) {
         logger.info("Rate limited", {
           platform: event.platform,
           userId: event.userId,

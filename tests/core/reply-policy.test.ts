@@ -119,3 +119,18 @@ Deno.test("ReplyPolicy - ignores invalid whitelist entries", () => {
   assertEquals(evaluator.shouldReply(validEvent), true);
   assertEquals(evaluator.shouldReply(invalidEvent), false);
 });
+
+Deno.test("ReplyPolicy - isWhitelistedAccount returns true for account entries", () => {
+  const evaluator = createEvaluator("whitelist", ["discord/account/123", "discord/channel/456"]);
+  assertEquals(evaluator.isWhitelistedAccount("discord", "123"), true);
+});
+
+Deno.test("ReplyPolicy - isWhitelistedAccount returns false for channel entries", () => {
+  const evaluator = createEvaluator("whitelist", ["discord/channel/456"]);
+  assertEquals(evaluator.isWhitelistedAccount("discord", "456"), false);
+});
+
+Deno.test("ReplyPolicy - isWhitelistedAccount returns false for different platform", () => {
+  const evaluator = createEvaluator("whitelist", ["discord/account/123"]);
+  assertEquals(evaluator.isWhitelistedAccount("misskey", "123"), false);
+});

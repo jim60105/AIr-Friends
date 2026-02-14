@@ -138,6 +138,8 @@ jobs:
             ${{ runner.os }}-deno-
 
       - name: Compile check
+        env:
+          RUST_MIN_STACK: 16777216
         run: deno compile --check --output /tmp/air-friends src/main.ts
 
       - name: Verify executable
