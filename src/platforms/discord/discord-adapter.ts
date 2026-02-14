@@ -475,6 +475,55 @@ export class DiscordAdapter extends PlatformAdapter {
   }
 
   /**
+   * Edit an existing message
+   */
+  async editMessage(
+    channelId: string,
+    messageId: string,
+    newContent: string,
+  ): Promise<ReplyResult> {
+    try {
+      const channel = await this.client.channels.fetch(channelId);
+
+      if (!channel || !this.isTextBasedChannel(channel)) {
+        return {
+          success: false,
+          error: "Channel not found or not text-based",
+        };
+      }
+
+      const truncatedContent = newContent.length > this.capabilities.maxMessageLength
+        ? newContent.slice(0, this.capabilities.maxMessageLength - 3) + "..."
+        : newContent;
+
+      const message = await channel.messages.fetch(messageId);
+      await message.edit({ content: truncatedContent });
+
+      logger.debug("Message edited", {
+        channelId,
+        messageId,
+        contentLength: newContent.length,
+      });
+
+      return {
+        success: true,
+        messageId,
+      };
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      logger.error("Failed to edit message", {
+        channelId,
+        messageId,
+        error: errorMessage,
+      });
+      return {
+        success: false,
+        error: `Failed to edit message: ${errorMessage}`,
+      };
+    }
+  }
+
+  /**
    * Get or create a DM channel with a user.
    * Used by spontaneous posting to send DMs to whitelisted accounts.
    */

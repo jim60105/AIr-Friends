@@ -46,6 +46,14 @@ class MockAdapter extends PlatformAdapter {
     return Promise.resolve({ success: true, messageId: "reply123" });
   }
 
+  editMessage(
+    _channelId: string,
+    messageId: string,
+    _newContent: string,
+  ): Promise<ReplyResult> {
+    return Promise.resolve({ success: true, messageId });
+  }
+
   fetchRecentMessages(
     _channelId: string,
     limit: number,

@@ -57,6 +57,14 @@ export class MockPlatformAdapter extends PlatformAdapter {
     });
   }
 
+  async editMessage(
+    _channelId: string,
+    messageId: string,
+    _newContent: string,
+  ): Promise<ReplyResult> {
+    return await Promise.resolve({ success: true, messageId });
+  }
+
   async fetchRecentMessages(
     _channelId: string,
     limit: number,

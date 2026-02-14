@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Added `edit-reply` skill for editing previously sent reply messages within the same session
+  - New `editMessage()` abstract method on `PlatformAdapter`
+  - Discord and Misskey adapter implementations (note and chat message editing)
+  - Shell-based skill script in `skills/edit-reply/`
+  - BDD feature spec: `docs/features/20-edit-reply.feature`
 - Added multimedia message handling: support for image and file attachments in platform messages
   - New `Attachment` type in `NormalizedEvent` and `PlatformMessage`
   - Discord and Misskey adapters extract attachment metadata (URL, MIME type, filename, size)

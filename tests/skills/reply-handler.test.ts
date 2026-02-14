@@ -9,6 +9,7 @@ import type { PlatformAdapter } from "@platforms/platform-adapter.ts";
 // Create a mock platform adapter
 const createMockPlatformAdapter = (
   sendReplyResult: { success: boolean; messageId?: string; error?: string } = { success: true },
+  editMessageResult?: { success: boolean; messageId?: string; error?: string },
 ): PlatformAdapter => {
   return {
     platform: "discord",
@@ -29,6 +30,8 @@ const createMockPlatformAdapter = (
     connect: async () => {},
     disconnect: async () => {},
     sendReply: () => Promise.resolve(sendReplyResult),
+    editMessage: () =>
+      Promise.resolve(editMessageResult ?? { success: true, messageId: "msg_123" }),
     fetchRecentMessages: () => Promise.resolve([]),
     getUsername: (userId: string) => Promise.resolve(`user_${userId}`),
     isSelf: () => false,
@@ -258,4 +261,185 @@ Deno.test("ReplyHandler - handleSendReply logs warning for attachments", async (
 
   // Should still succeed but log warning
   assertEquals(result.success, true);
+});
+
+// ============ edit-reply tests ============
+
+Deno.test("ReplyHandler - handleEditReply succeeds after send-reply", async () => {
+  const handler = new ReplyHandler();
+
+  const workspace: WorkspaceInfo = {
+    key: "discord/edit1",
+    components: { platform: "discord", userId: "edit1" },
+    path: "/tmp/workspaces/discord/edit1",
+    isDm: true,
+  };
+
+  const context: SkillContext = {
+    workspace,
+    platformAdapter: createMockPlatformAdapter(
+      { success: true, messageId: "msg_edit1" },
+      { success: true, messageId: "msg_edit1" },
+    ),
+    channelId: "ch_edit1",
+    userId: "edit1",
+  };
+
+  // Send reply first
+  await handler.handleSendReply({ message: "Original" }, context);
+
+  // Edit should succeed
+  const result = await handler.handleEditReply(
+    { messageId: "msg_edit1", message: "Corrected" },
+    context,
+  );
+
+  assertEquals(result.success, true);
+  assertEquals((result.data as Record<string, unknown>).messageId, "msg_edit1");
+});
+
+Deno.test("ReplyHandler - handleEditReply fails without prior send-reply", async () => {
+  const handler = new ReplyHandler();
+
+  const workspace: WorkspaceInfo = {
+    key: "discord/edit2",
+    components: { platform: "discord", userId: "edit2" },
+    path: "/tmp/workspaces/discord/edit2",
+    isDm: true,
+  };
+
+  const context: SkillContext = {
+    workspace,
+    platformAdapter: createMockPlatformAdapter(),
+    channelId: "ch_edit2",
+    userId: "edit2",
+  };
+
+  const result = await handler.handleEditReply(
+    { messageId: "msg_x", message: "Edit" },
+    context,
+  );
+
+  assertEquals(result.success, false);
+  assertEquals(result.error, "No reply has been sent yet. Use send-reply first.");
+});
+
+Deno.test("ReplyHandler - handleEditReply validates messageId parameter", async () => {
+  const handler = new ReplyHandler();
+
+  const workspace: WorkspaceInfo = {
+    key: "discord/edit3",
+    components: { platform: "discord", userId: "edit3" },
+    path: "/tmp/workspaces/discord/edit3",
+    isDm: true,
+  };
+
+  const context: SkillContext = {
+    workspace,
+    platformAdapter: createMockPlatformAdapter({ success: true, messageId: "msg_e3" }),
+    channelId: "ch_edit3",
+    userId: "edit3",
+  };
+
+  await handler.handleSendReply({ message: "First" }, context);
+
+  const result = await handler.handleEditReply({ message: "Edit" }, context);
+  assertEquals(result.success, false);
+  assertEquals(result.error, "Missing or invalid 'messageId' parameter");
+});
+
+Deno.test("ReplyHandler - handleEditReply validates message parameter", async () => {
+  const handler = new ReplyHandler();
+
+  const workspace: WorkspaceInfo = {
+    key: "discord/edit4",
+    components: { platform: "discord", userId: "edit4" },
+    path: "/tmp/workspaces/discord/edit4",
+    isDm: true,
+  };
+
+  const context: SkillContext = {
+    workspace,
+    platformAdapter: createMockPlatformAdapter({ success: true, messageId: "msg_e4" }),
+    channelId: "ch_edit4",
+    userId: "edit4",
+  };
+
+  await handler.handleSendReply({ message: "First" }, context);
+
+  // Missing message
+  const result1 = await handler.handleEditReply({ messageId: "msg_e4" }, context);
+  assertEquals(result1.success, false);
+  assertEquals(result1.error, "Missing or invalid 'message' parameter");
+
+  // Empty message
+  const result2 = await handler.handleEditReply({ messageId: "msg_e4", message: "   " }, context);
+  assertEquals(result2.success, false);
+  assertEquals(result2.error, "Message cannot be empty");
+});
+
+Deno.test("ReplyHandler - handleEditReply handles platform failure", async () => {
+  const handler = new ReplyHandler();
+
+  const workspace: WorkspaceInfo = {
+    key: "discord/edit5",
+    components: { platform: "discord", userId: "edit5" },
+    path: "/tmp/workspaces/discord/edit5",
+    isDm: true,
+  };
+
+  const context: SkillContext = {
+    workspace,
+    platformAdapter: createMockPlatformAdapter(
+      { success: true, messageId: "msg_e5" },
+      { success: false, error: "Message not found" },
+    ),
+    channelId: "ch_edit5",
+    userId: "edit5",
+  };
+
+  await handler.handleSendReply({ message: "First" }, context);
+
+  const result = await handler.handleEditReply(
+    { messageId: "msg_e5", message: "Edit" },
+    context,
+  );
+
+  assertEquals(result.success, false);
+  assertEquals(result.error, "Message not found");
+});
+
+Deno.test("ReplyHandler - handleEditReply allows multiple edits", async () => {
+  const handler = new ReplyHandler();
+
+  const workspace: WorkspaceInfo = {
+    key: "discord/edit6",
+    components: { platform: "discord", userId: "edit6" },
+    path: "/tmp/workspaces/discord/edit6",
+    isDm: true,
+  };
+
+  const context: SkillContext = {
+    workspace,
+    platformAdapter: createMockPlatformAdapter(
+      { success: true, messageId: "msg_e6" },
+      { success: true, messageId: "msg_e6" },
+    ),
+    channelId: "ch_edit6",
+    userId: "edit6",
+  };
+
+  await handler.handleSendReply({ message: "First" }, context);
+
+  const result1 = await handler.handleEditReply(
+    { messageId: "msg_e6", message: "Edit 1" },
+    context,
+  );
+  assertEquals(result1.success, true);
+
+  const result2 = await handler.handleEditReply(
+    { messageId: "msg_e6", message: "Edit 2" },
+    context,
+  );
+  assertEquals(result2.success, true);
 });

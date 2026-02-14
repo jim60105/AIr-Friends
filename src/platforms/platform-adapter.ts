@@ -189,6 +189,15 @@ export abstract class PlatformAdapter implements MessageFetcher {
   ): Promise<ReactionResult>;
 
   /**
+   * Edit an existing message on the platform
+   */
+  abstract editMessage(
+    channelId: string,
+    messageId: string,
+    newContent: string,
+  ): Promise<ReplyResult>;
+
+  /**
    * Get username for a user ID
    */
   abstract getUsername(userId: string): Promise<string>;
