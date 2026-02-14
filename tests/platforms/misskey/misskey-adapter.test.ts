@@ -1006,32 +1006,59 @@ function mockClientRequest(adapter: MisskeyAdapter, fn: (...args: any[]) => any)
   (adapter as any).client = { request: fn };
 }
 
-Deno.test("MisskeyAdapter.editMessage - edits note successfully", async () => {
+Deno.test("MisskeyAdapter.editMessage - edits note via delete-recreate", async () => {
   const adapter = createMockMisskeyAdapter();
-  mockClientRequest(adapter, (_endpoint: string, _params: unknown) => {
+  const calls: string[] = [];
+  mockClientRequest(adapter, (endpoint: string, _params: unknown) => {
+    calls.push(endpoint);
+    if (endpoint === "notes/show") {
+      return Promise.resolve({ id: "abc123", visibility: "public" });
+    }
+    if (endpoint === "notes/delete") {
+      return Promise.resolve({});
+    }
+    if (endpoint === "notes/create") {
+      return Promise.resolve({ createdNote: { id: "new_note_id" } });
+    }
     return Promise.resolve({});
   });
 
   const result = await adapter.editMessage("note:abc123", "abc123", "Updated content");
   assertEquals(result.success, true);
-  assertEquals(result.messageId, "abc123");
+  assertEquals(result.messageId, "new_note_id");
+  assertEquals(calls, ["notes/show", "notes/delete", "notes/create"]);
 });
 
-Deno.test("MisskeyAdapter.editMessage - edits chat message successfully", async () => {
+Deno.test("MisskeyAdapter.editMessage - edits chat via delete-recreate", async () => {
   const adapter = createMockMisskeyAdapter();
-  mockClientRequest(adapter, (_endpoint: string, _params: unknown) => {
+  const calls: string[] = [];
+  mockClientRequest(adapter, (endpoint: string, _params: unknown) => {
+    calls.push(endpoint);
+    if (endpoint === "chat/messages/delete") {
+      return Promise.resolve({});
+    }
+    if (endpoint === "chat/messages/create-to-user") {
+      return Promise.resolve({ id: "new_chat_id" });
+    }
     return Promise.resolve({});
   });
 
   const result = await adapter.editMessage("chat:user1", "msg456", "Updated chat");
   assertEquals(result.success, true);
-  assertEquals(result.messageId, "msg456");
+  assertEquals(result.messageId, "new_chat_id");
+  assertEquals(calls, ["chat/messages/delete", "chat/messages/create-to-user"]);
 });
 
-Deno.test("MisskeyAdapter.editMessage - handles note edit failure", async () => {
+Deno.test("MisskeyAdapter.editMessage - handles note delete failure", async () => {
   const adapter = createMockMisskeyAdapter();
-  mockClientRequest(adapter, () => {
-    throw new Error("Note not found");
+  mockClientRequest(adapter, (endpoint: string, _params: unknown) => {
+    if (endpoint === "notes/show") {
+      return Promise.resolve({ id: "abc123", visibility: "public" });
+    }
+    if (endpoint === "notes/delete") {
+      throw new Error("Note not found");
+    }
+    return Promise.resolve({});
   });
 
   const result = await adapter.editMessage("note:abc123", "abc123", "Updated");
@@ -1039,10 +1066,13 @@ Deno.test("MisskeyAdapter.editMessage - handles note edit failure", async () => 
   assertEquals(result.error, "Failed to edit note: Note not found");
 });
 
-Deno.test("MisskeyAdapter.editMessage - handles chat edit failure", async () => {
+Deno.test("MisskeyAdapter.editMessage - handles chat delete failure", async () => {
   const adapter = createMockMisskeyAdapter();
-  mockClientRequest(adapter, () => {
-    throw new Error("Chat message not found");
+  mockClientRequest(adapter, (endpoint: string, _params: unknown) => {
+    if (endpoint === "chat/messages/delete") {
+      throw new Error("Chat message not found");
+    }
+    return Promise.resolve({});
   });
 
   const result = await adapter.editMessage("chat:user1", "msg456", "Updated");
@@ -1053,8 +1083,14 @@ Deno.test("MisskeyAdapter.editMessage - handles chat edit failure", async () => 
 Deno.test("MisskeyAdapter.editMessage - truncates long note content", async () => {
   const adapter = createMockMisskeyAdapter();
   let capturedText = "";
-  mockClientRequest(adapter, (_endpoint: string, params: { text: string }) => {
-    capturedText = params.text;
+  mockClientRequest(adapter, (endpoint: string, params: Record<string, unknown>) => {
+    if (endpoint === "notes/show") {
+      return Promise.resolve({ id: "abc123", visibility: "public" });
+    }
+    if (endpoint === "notes/create") {
+      capturedText = params.text as string;
+      return Promise.resolve({ createdNote: { id: "new_id" } });
+    }
     return Promise.resolve({});
   });
 
@@ -1067,8 +1103,11 @@ Deno.test("MisskeyAdapter.editMessage - truncates long note content", async () =
 Deno.test("MisskeyAdapter.editMessage - truncates long chat content", async () => {
   const adapter = createMockMisskeyAdapter();
   let capturedText = "";
-  mockClientRequest(adapter, (_endpoint: string, params: { text: string }) => {
-    capturedText = params.text;
+  mockClientRequest(adapter, (endpoint: string, params: Record<string, unknown>) => {
+    if (endpoint === "chat/messages/create-to-user") {
+      capturedText = params.text as string;
+      return Promise.resolve({ id: "new_id" });
+    }
     return Promise.resolve({});
   });
 
@@ -1076,4 +1115,140 @@ Deno.test("MisskeyAdapter.editMessage - truncates long chat content", async () =
   await adapter.editMessage("chat:user1", "msg456", longContent);
   assertEquals(capturedText.length, 2000);
   assertEquals(capturedText.endsWith("..."), true);
+});
+
+Deno.test("MisskeyAdapter.editMessage - preserves specified visibility (DM)", async () => {
+  const adapter = createMockMisskeyAdapter();
+  let capturedParams: Record<string, unknown> = {};
+  mockClientRequest(adapter, (endpoint: string, params: Record<string, unknown>) => {
+    if (endpoint === "notes/show") {
+      return Promise.resolve({
+        id: "abc123",
+        visibility: "specified",
+        visibleUserIds: ["user_x", "user_y"],
+      });
+    }
+    if (endpoint === "notes/create") {
+      capturedParams = params;
+      return Promise.resolve({ createdNote: { id: "new_id" } });
+    }
+    return Promise.resolve({});
+  });
+
+  await adapter.editMessage("note:abc123", "abc123", "Updated DM");
+  assertEquals(capturedParams.visibility, "specified");
+  assertEquals(capturedParams.visibleUserIds, ["user_x", "user_y"]);
+});
+
+Deno.test("MisskeyAdapter.editMessage - uses default visibility when show fails", async () => {
+  const adapter = createMockMisskeyAdapter();
+  let capturedParams: Record<string, unknown> = {};
+  mockClientRequest(adapter, (endpoint: string, params: Record<string, unknown>) => {
+    if (endpoint === "notes/show") {
+      throw new Error("No such note");
+    }
+    if (endpoint === "notes/create") {
+      capturedParams = params;
+      return Promise.resolve({ createdNote: { id: "new_id" } });
+    }
+    return Promise.resolve({});
+  });
+
+  const result = await adapter.editMessage("note:abc123", "abc123", "Updated");
+  assertEquals(result.success, true);
+  assertEquals(capturedParams.visibility, "public");
+});
+
+Deno.test("MisskeyAdapter.editMessage - passes replyToMessageId as replyId", async () => {
+  const adapter = createMockMisskeyAdapter();
+  let capturedParams: Record<string, unknown> = {};
+  const calls: string[] = [];
+  mockClientRequest(adapter, (endpoint: string, params: Record<string, unknown>) => {
+    calls.push(endpoint);
+    if (endpoint === "notes/show" && params.noteId === "abc123") {
+      return Promise.resolve({ id: "abc123", visibility: "public" });
+    }
+    if (endpoint === "notes/show" && params.noteId === "trigger_note") {
+      return Promise.resolve({
+        id: "trigger_note",
+        visibility: "home",
+        userId: "original_user",
+      });
+    }
+    if (endpoint === "notes/create") {
+      capturedParams = params;
+      return Promise.resolve({ createdNote: { id: "new_id" } });
+    }
+    return Promise.resolve({});
+  });
+
+  await adapter.editMessage("note:abc123", "abc123", "Updated", "trigger_note");
+  assertEquals(capturedParams.replyId, "trigger_note");
+  assertEquals(capturedParams.visibility, "home");
+});
+
+Deno.test("MisskeyAdapter.editMessage - no replyId when no replyToMessageId", async () => {
+  const adapter = createMockMisskeyAdapter();
+  let capturedParams: Record<string, unknown> = {};
+  mockClientRequest(adapter, (endpoint: string, params: Record<string, unknown>) => {
+    if (endpoint === "notes/show") {
+      return Promise.resolve({ id: "abc123", visibility: "public" });
+    }
+    if (endpoint === "notes/create") {
+      capturedParams = params;
+      return Promise.resolve({ createdNote: { id: "new_id" } });
+    }
+    return Promise.resolve({});
+  });
+
+  await adapter.editMessage("note:abc123", "abc123", "Updated");
+  assertEquals(capturedParams.replyId, undefined);
+});
+
+Deno.test("MisskeyAdapter.editMessage - returns new messageId for note", async () => {
+  const adapter = createMockMisskeyAdapter();
+  mockClientRequest(adapter, (endpoint: string, _params: unknown) => {
+    if (endpoint === "notes/show") {
+      return Promise.resolve({ id: "old_note", visibility: "public" });
+    }
+    if (endpoint === "notes/create") {
+      return Promise.resolve({ createdNote: { id: "brand_new_note" } });
+    }
+    return Promise.resolve({});
+  });
+
+  const result = await adapter.editMessage("note:old_note", "old_note", "Updated");
+  assertEquals(result.success, true);
+  assertEquals(result.messageId, "brand_new_note");
+});
+
+Deno.test("MisskeyAdapter.editMessage - handles non-Error object in note error", async () => {
+  const adapter = createMockMisskeyAdapter();
+  mockClientRequest(adapter, (endpoint: string, _params: unknown) => {
+    if (endpoint === "notes/show") {
+      return Promise.resolve({ id: "abc123", visibility: "public" });
+    }
+    if (endpoint === "notes/delete") {
+      throw { code: "NO_SUCH_NOTE", message: "Note not found" };
+    }
+    return Promise.resolve({});
+  });
+
+  const result = await adapter.editMessage("note:abc123", "abc123", "Updated");
+  assertEquals(result.success, false);
+  assertEquals(result.error, "Failed to edit note: Note not found");
+});
+
+Deno.test("MisskeyAdapter.editMessage - handles non-Error object in chat error", async () => {
+  const adapter = createMockMisskeyAdapter();
+  mockClientRequest(adapter, (endpoint: string, _params: unknown) => {
+    if (endpoint === "chat/messages/delete") {
+      throw { code: "NO_SUCH_MESSAGE", message: "Message not found" };
+    }
+    return Promise.resolve({});
+  });
+
+  const result = await adapter.editMessage("chat:user1", "msg456", "Updated");
+  assertEquals(result.success, false);
+  assertEquals(result.error, "Failed to edit chat message: Message not found");
 });

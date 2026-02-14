@@ -195,6 +195,7 @@ export abstract class PlatformAdapter implements MessageFetcher {
     channelId: string,
     messageId: string,
     newContent: string,
+    replyToMessageId?: string,
   ): Promise<ReplyResult>;
 
   /**

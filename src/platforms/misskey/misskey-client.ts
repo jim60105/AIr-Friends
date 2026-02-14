@@ -79,9 +79,14 @@ export class MisskeyClient {
       // deno-lint-ignore no-explicit-any
       return await this.api.request(endpoint as any, params as any);
     } catch (error) {
+      const errorMessage = error instanceof Error
+        ? error.message
+        : (typeof error === "object" && error !== null)
+        ? JSON.stringify(error)
+        : String(error);
       logger.error("Misskey API error", {
         endpoint,
-        error: error instanceof Error ? error.message : String(error),
+        error: errorMessage,
       });
       throw error;
     }

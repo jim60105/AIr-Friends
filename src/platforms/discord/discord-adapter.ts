@@ -481,6 +481,7 @@ export class DiscordAdapter extends PlatformAdapter {
     channelId: string,
     messageId: string,
     newContent: string,
+    _replyToMessageId?: string,
   ): Promise<ReplyResult> {
     try {
       const channel = await this.client.channels.fetch(channelId);

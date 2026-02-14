@@ -695,11 +695,13 @@ export class MisskeyAdapter extends PlatformAdapter {
 
   /**
    * Edit an existing message (note or chat message)
+   * Misskey has no edit API — uses delete-and-recreate strategy
    */
   async editMessage(
     channelId: string,
     messageId: string,
     newContent: string,
+    replyToMessageId?: string,
   ): Promise<ReplyResult> {
     const maxLength = channelId.startsWith("chat:") ? 2000 : this.capabilities.maxMessageLength;
     const truncatedContent = newContent.length > maxLength
@@ -707,44 +709,123 @@ export class MisskeyAdapter extends PlatformAdapter {
       : newContent;
 
     if (channelId.startsWith("chat:")) {
-      return await this.editChatMessage(messageId, truncatedContent);
+      return await this.editChatMessage(channelId, messageId, truncatedContent);
     }
-    return await this.editNote(messageId, truncatedContent);
+    return await this.editNote(messageId, truncatedContent, replyToMessageId);
   }
 
   private async editNote(
     noteId: string,
     newContent: string,
+    replyToMessageId?: string,
   ): Promise<ReplyResult> {
     try {
-      await this.client.request("notes/update", {
-        noteId,
+      // Step 1: Fetch old note to preserve visibility
+      let visibility: "public" | "home" | "followers" | "specified" = "public";
+      let visibleUserIds: string[] | undefined;
+
+      try {
+        const oldNote = await this.client.request<MisskeyNote>(
+          "notes/show",
+          { noteId },
+        );
+        visibility = oldNote.visibility;
+        if (oldNote.visibility === "specified" && oldNote.visibleUserIds) {
+          visibleUserIds = oldNote.visibleUserIds;
+        }
+      } catch {
+        logger.warn("Could not fetch original note for visibility, using default", { noteId });
+      }
+
+      // Step 2: Delete old note
+      await this.client.request("notes/delete", { noteId });
+      logger.debug("Old note deleted for edit", { noteId });
+
+      // Step 3: Create new note, replying to the original trigger note
+      const createParams: Record<string, unknown> = {
         text: newContent,
+        visibility,
+      };
+
+      if (visibleUserIds) {
+        createParams.visibleUserIds = visibleUserIds;
+      }
+
+      // If replyToMessageId is provided, set reply target to the original trigger note
+      if (replyToMessageId) {
+        createParams.replyId = replyToMessageId;
+
+        try {
+          const originalNote = await this.client.request<MisskeyNote>(
+            "notes/show",
+            { noteId: replyToMessageId },
+          );
+          const replyParams = buildReplyParams(originalNote);
+          Object.assign(createParams, replyParams);
+        } catch {
+          logger.warn("Could not fetch original trigger note for reply params", {
+            replyToMessageId,
+          });
+        }
+      }
+
+      const result = await this.client.request<{ createdNote: MisskeyNote }>(
+        "notes/create",
+        createParams,
+      );
+
+      logger.debug("Note recreated for edit", {
+        oldNoteId: noteId,
+        newNoteId: result.createdNote.id,
+        contentLength: newContent.length,
       });
 
-      logger.debug("Note edited", { noteId, contentLength: newContent.length });
-      return { success: true, messageId: noteId };
+      return { success: true, messageId: result.createdNote.id };
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
+      const errorMessage = error instanceof Error
+        ? error.message
+        : (typeof error === "object" && error !== null && "message" in error)
+        ? String((error as Record<string, unknown>).message)
+        : JSON.stringify(error);
       logger.error("Failed to edit note", { noteId, error: errorMessage });
       return { success: false, error: `Failed to edit note: ${errorMessage}` };
     }
   }
 
   private async editChatMessage(
+    channelId: string,
     messageId: string,
     newContent: string,
   ): Promise<ReplyResult> {
     try {
-      await this.client.request("chat/messages/update", {
-        messageId,
-        text: newContent,
+      const userId = channelId.slice(5); // Remove "chat:" prefix
+
+      // Step 1: Delete old message
+      await this.client.request("chat/messages/delete", { messageId });
+      logger.debug("Old chat message deleted for edit", { messageId });
+
+      // Step 2: Recreate message
+      const result = await this.client.request<ChatMessageLite>(
+        "chat/messages/create-to-user",
+        {
+          toUserId: userId,
+          text: newContent,
+        },
+      );
+
+      logger.debug("Chat message recreated for edit", {
+        oldMessageId: messageId,
+        newMessageId: result.id,
+        contentLength: newContent.length,
       });
 
-      logger.debug("Chat message edited", { messageId, contentLength: newContent.length });
-      return { success: true, messageId };
+      return { success: true, messageId: result.id };
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
+      const errorMessage = error instanceof Error
+        ? error.message
+        : (typeof error === "object" && error !== null && "message" in error)
+        ? String((error as Record<string, unknown>).message)
+        : JSON.stringify(error);
       logger.error("Failed to edit chat message", { messageId, error: errorMessage });
       return { success: false, error: `Failed to edit chat message: ${errorMessage}` };
     }

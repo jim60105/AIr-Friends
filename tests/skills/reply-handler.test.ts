@@ -509,3 +509,46 @@ Deno.test("ReplyHandler - handleEditReply handles non-Error exception", async ()
   assertEquals(result.success, false);
   assertEquals(result.error, "Unknown error");
 });
+
+Deno.test("ReplyHandler - handleEditReply passes replyToMessageId to editMessage", async () => {
+  const handler = new ReplyHandler();
+
+  const workspace: WorkspaceInfo = {
+    key: "discord/edit9",
+    components: { platform: "discord", userId: "edit9" },
+    path: "/tmp/workspaces/discord/edit9",
+    isDm: true,
+  };
+
+  let capturedReplyToMessageId: string | undefined;
+  const adapter = createMockPlatformAdapter(
+    { success: true, messageId: "msg_e9" },
+    { success: true, messageId: "msg_e9" },
+  );
+  adapter.editMessage = (
+    _channelId: string,
+    _messageId: string,
+    _newContent: string,
+    replyToMessageId?: string,
+  ) => {
+    capturedReplyToMessageId = replyToMessageId;
+    return Promise.resolve({ success: true, messageId: "msg_e9" });
+  };
+
+  const context: SkillContext = {
+    workspace,
+    platformAdapter: adapter,
+    channelId: "ch_edit9",
+    userId: "edit9",
+    replyToMessageId: "trigger_msg_123",
+  };
+
+  await handler.handleSendReply({ message: "First" }, context);
+
+  await handler.handleEditReply(
+    { messageId: "msg_e9", message: "Edited" },
+    context,
+  );
+
+  assertEquals(capturedReplyToMessageId, "trigger_msg_123");
+});

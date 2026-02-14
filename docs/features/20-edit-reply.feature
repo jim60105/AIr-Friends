@@ -42,14 +42,37 @@ Feature: 訊息編輯與更正（Reply Edit / Correction）
     When Agent 呼叫 edit-reply
     Then 系統透過 Discord API Message.edit() 更新訊息
 
-  Scenario: Misskey Note 編輯
+  Scenario: Misskey Note 編輯（刪除再重建）
+    Given 平台為 Misskey 且 channelId 為 note: 格式
+    And Agent 已送出回覆（noteId 為 "old_note_123"）
+    And 原始觸發筆記為 "trigger_note_456"
+    When Agent 呼叫 edit-reply 帶有 messageId "old_note_123" 和新內容
+    Then 系統刪除舊筆記 "old_note_123"（呼叫 notes/delete）
+    And 系統建立新筆記（呼叫 notes/create），replyId 為 "trigger_note_456"
+    And 新筆記保持與舊筆記相同的 visibility
+    And 回傳 success: true 和新的 messageId
+    And Agent 後續編輯應使用新的 messageId
+
+  Scenario: Misskey Chat 訊息編輯（刪除再重建）
+    Given 平台為 Misskey 且 channelId 為 chat: 格式
+    And Agent 已送出聊天訊息
+    When Agent 呼叫 edit-reply
+    Then 系統刪除舊訊息（呼叫 chat/messages/delete）
+    And 系統重新建立訊息（呼叫 chat/messages/create-to-user）
+    And 回傳 success: true 和新的 messageId
+
+  Scenario: Misskey Note 編輯 — 刪除失敗時整體失敗
     Given 平台為 Misskey 且 channelId 為 note: 格式
     And Agent 已送出回覆
-    When Agent 呼叫 edit-reply
-    Then 系統透過 Misskey notes/update API 更新貼文
+    When Agent 呼叫 edit-reply 但舊筆記已被手動刪除
+    Then notes/delete 呼叫失敗
+    And 系統不建立新筆記
+    And 回傳 success: false 和包含原因的錯誤訊息
 
-  Scenario: Misskey Chat 訊息編輯
-    Given 平台為 Misskey 且 channelId 為 chat: 格式
+  Scenario: Misskey Note 編輯 — 保持 DM 的 specified visibility
+    Given 平台為 Misskey
+    And 原始筆記為 specified visibility（DM）
     And Agent 已送出回覆
     When Agent 呼叫 edit-reply
-    Then 系統透過 Misskey chat/messages/update API 更新聊天訊息
+    Then 新建的筆記保持 specified visibility
+    And visibleUserIds 包含原始筆記的使用者 ID

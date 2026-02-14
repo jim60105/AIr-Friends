@@ -205,6 +205,7 @@ export class ReplyHandler {
         context.channelId,
         params.messageId,
         params.message,
+        context.replyToMessageId,
       );
 
       if (!result.success) {
