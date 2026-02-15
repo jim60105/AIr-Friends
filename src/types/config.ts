@@ -265,6 +265,23 @@ export interface MetricsConfig {
 }
 
 /**
+ * Git backup configuration.
+ * When enabled, the data/ directory is periodically committed and pushed to a remote Git repository.
+ */
+export interface GitBackupConfig {
+  /** Enable Git backup (default: false) */
+  enabled: boolean;
+  /** Remote Git repository URL (HTTPS format) */
+  remoteUrl: string;
+  /** Backup interval in milliseconds (default: 3600000 = 1 hour) */
+  intervalMs: number;
+  /** Git commit author name (default: "AIr-Friends Backup") */
+  authorName: string;
+  /** Git commit author email (default: "airfriends-backup@noreply.github.com") */
+  authorEmail: string;
+}
+
+/**
  * Complete application configuration
  */
 export interface Config {
@@ -281,6 +298,8 @@ export interface Config {
   rateLimit?: RateLimitConfig;
   /** Metrics export configuration (optional) */
   metrics?: MetricsConfig;
+  /** Git backup configuration (optional) */
+  gitBackup?: GitBackupConfig;
 }
 
 /**

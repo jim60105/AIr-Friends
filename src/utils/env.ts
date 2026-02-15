@@ -60,6 +60,13 @@ export const ENV_MAPPINGS = {
   RATE_LIMIT_MAX_REQUESTS_PER_WINDOW: "rateLimit.maxRequestsPerWindow",
   RATE_LIMIT_WINDOW_MS: "rateLimit.windowMs",
   RATE_LIMIT_COOLDOWN_MS: "rateLimit.cooldownMs",
+
+  // Git backup settings
+  GIT_BACKUP_ENABLED: "gitBackup.enabled",
+  GIT_BACKUP_REMOTE_URL: "gitBackup.remoteUrl",
+  GIT_BACKUP_INTERVAL_MS: "gitBackup.intervalMs",
+  GIT_BACKUP_AUTHOR_NAME: "gitBackup.authorName",
+  GIT_BACKUP_AUTHOR_EMAIL: "gitBackup.authorEmail",
 } as const;
 
 /**

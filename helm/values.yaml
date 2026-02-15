@@ -105,6 +105,13 @@ env:
   METRICS_ENABLED: 'false'
   METRICS_PATH: '/metrics'
 
+  # Git Backup - backs up data/ directory to a remote Git repository
+  GIT_BACKUP_ENABLED: 'false'
+  GIT_BACKUP_REMOTE_URL: 'https://github.com/your-username/your-backup-repo.git'
+  GIT_BACKUP_INTERVAL_MS: '3600000'
+  GIT_BACKUP_AUTHOR_NAME: 'AIr-Friends Backup'
+  GIT_BACKUP_AUTHOR_EMAIL: 'airfriends-backup@noreply.github.com'
+
 # ServiceMonitor for Prometheus Operator (optional)
 serviceMonitor:
   enabled: false

@@ -5,7 +5,12 @@ import { exists } from "@std/fs";
 import { basename, dirname, join } from "@std/path";
 import { createLogger } from "@utils/logger.ts";
 import { applyEnvOverrides, getEnvironment } from "@utils/env.ts";
-import type { Config, MemoryMaintenanceConfig, RateLimitConfig } from "../types/config.ts";
+import type {
+  Config,
+  GitBackupConfig,
+  MemoryMaintenanceConfig,
+  RateLimitConfig,
+} from "../types/config.ts";
 import { ConfigError, ErrorCode } from "../types/errors.ts";
 
 const logger = createLogger("ConfigLoader");
@@ -81,6 +86,17 @@ const DEFAULT_MEMORY_MAINTENANCE: MemoryMaintenanceConfig = {
   model: "gpt-5-mini",
   minMemoryCount: 50,
   intervalMs: 604800000, // 7 days
+};
+
+/**
+ * Default git backup configuration
+ */
+const DEFAULT_GIT_BACKUP: GitBackupConfig = {
+  enabled: false,
+  remoteUrl: "",
+  intervalMs: 3600000, // 1 hour
+  authorName: "AIr-Friends Backup",
+  authorEmail: "airfriends-backup@noreply.github.com",
 };
 
 /**
@@ -306,6 +322,16 @@ function validateConfig(config: Record<string, unknown>): void {
     config.rateLimit = {
       ...DEFAULT_RATE_LIMIT,
       ...(config.rateLimit as Record<string, unknown>),
+    };
+  }
+
+  // Git backup defaults
+  if (!config.gitBackup) {
+    config.gitBackup = { ...DEFAULT_GIT_BACKUP };
+  } else {
+    config.gitBackup = {
+      ...DEFAULT_GIT_BACKUP,
+      ...(config.gitBackup as Record<string, unknown>),
     };
   }
 }

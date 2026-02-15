@@ -1251,3 +1251,61 @@ metrics:
     assertEquals(result.metrics?.path, "/custom");
   });
 });
+
+// --- gitBackup configuration tests ---
+
+Deno.test("Config - applies gitBackup defaults when not specified", async () => {
+  const config = `
+platforms:
+  discord:
+    token: "test-token"
+    enabled: true
+  misskey:
+    enabled: false
+agent:
+  model: "gpt-4"
+  systemPromptPath: "./prompts/system.md"
+  tokenLimit: 20000
+workspace:
+  repoPath: "./data"
+  workspacesDir: "workspaces"
+`;
+
+  await withTestConfig(config, async (dir) => {
+    const result = await loadConfig(dir);
+    assertEquals(result.gitBackup?.enabled, false);
+    assertEquals(result.gitBackup?.remoteUrl, "");
+    assertEquals(result.gitBackup?.intervalMs, 3600000);
+    assertEquals(result.gitBackup?.authorName, "AIr-Friends Backup");
+    assertEquals(result.gitBackup?.authorEmail, "airfriends-backup@noreply.github.com");
+  });
+});
+
+Deno.test("Config - merges partial gitBackup config with defaults", async () => {
+  const config = `
+platforms:
+  discord:
+    token: "test-token"
+    enabled: true
+  misskey:
+    enabled: false
+agent:
+  model: "gpt-4"
+  systemPromptPath: "./prompts/system.md"
+  tokenLimit: 20000
+workspace:
+  repoPath: "./data"
+  workspacesDir: "workspaces"
+gitBackup:
+  enabled: true
+  remoteUrl: "https://github.com/test/repo.git"
+`;
+
+  await withTestConfig(config, async (dir) => {
+    const result = await loadConfig(dir);
+    assertEquals(result.gitBackup?.enabled, true);
+    assertEquals(result.gitBackup?.remoteUrl, "https://github.com/test/repo.git");
+    assertEquals(result.gitBackup?.intervalMs, 3600000);
+    assertEquals(result.gitBackup?.authorName, "AIr-Friends Backup");
+  });
+});

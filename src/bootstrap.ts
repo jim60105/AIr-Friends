@@ -6,6 +6,8 @@ import { AgentCore } from "@core/agent-core.ts";
 import { SpontaneousScheduler } from "@core/spontaneous-scheduler.ts";
 import { SelfResearchScheduler } from "@core/self-research-scheduler.ts";
 import { MemoryMaintenanceScheduler } from "@core/memory-maintenance-scheduler.ts";
+import { GitBackupScheduler } from "@core/git-backup-scheduler.ts";
+import { GitBackupService } from "@core/git-backup-service.ts";
 import { determineSpontaneousTarget } from "@core/spontaneous-target.ts";
 import { fetchRssItems, pickRandom } from "@utils/rss-fetcher.ts";
 import { getPlatformRegistry } from "@platforms/platform-registry.ts";
@@ -29,6 +31,8 @@ export interface AppContext {
   spontaneousScheduler: SpontaneousScheduler | null;
   selfResearchScheduler: SelfResearchScheduler | null;
   memoryMaintenanceScheduler: MemoryMaintenanceScheduler | null;
+  gitBackupScheduler: GitBackupScheduler | null;
+  gitBackupService: GitBackupService | null;
   yolo: boolean;
 }
 
@@ -229,6 +233,23 @@ export async function bootstrap(configPath?: string, yolo = false): Promise<AppC
     });
   }
 
+  // Initialize Git Backup
+  let gitBackupScheduler: GitBackupScheduler | null = null;
+  let gitBackupService: GitBackupService | null = null;
+  if (config.gitBackup?.enabled && config.gitBackup.remoteUrl) {
+    gitBackupService = new GitBackupService(
+      config.gitBackup,
+      config.workspace.repoPath,
+    );
+
+    await gitBackupService.initialize();
+
+    gitBackupScheduler = new GitBackupScheduler(config.gitBackup);
+    gitBackupScheduler.setCallback(async () => {
+      await gitBackupService!.performBackup();
+    });
+  }
+
   logger.info("Bootstrap completed");
 
   const context: AppContext = {
@@ -239,6 +260,8 @@ export async function bootstrap(configPath?: string, yolo = false): Promise<AppC
     spontaneousScheduler,
     selfResearchScheduler,
     memoryMaintenanceScheduler,
+    gitBackupScheduler,
+    gitBackupService,
     yolo,
   };
 
@@ -279,6 +302,11 @@ export async function startPlatforms(context: AppContext): Promise<void> {
 
   if (context.memoryMaintenanceScheduler) {
     context.memoryMaintenanceScheduler.start();
+  }
+
+  // Start git backup scheduler (independent of platforms)
+  if (context.gitBackupScheduler) {
+    context.gitBackupScheduler.start();
   }
 
   logger.info("All platforms connected");

@@ -164,6 +164,11 @@ Configuration is loaded from `config.yaml` (YAML format). See [config.example.ya
 | `SELF_RESEARCH_RSS_FEEDS` | RSS feed sources as JSON string |
 | `SELF_RESEARCH_MIN_INTERVAL_MS` | Minimum interval between research sessions (default: 43200000) |
 | `SELF_RESEARCH_MAX_INTERVAL_MS` | Maximum interval between research sessions (default: 86400000) |
+| `GIT_BACKUP_ENABLED` | Enable Git backup (true/false, default: false) |
+| `GIT_BACKUP_REMOTE_URL` | Remote Git repository URL (HTTPS) |
+| `GIT_BACKUP_INTERVAL_MS` | Backup interval in ms (default: 3600000 = 1 hour) |
+| `GIT_BACKUP_AUTHOR_NAME` | Git commit author name |
+| `GIT_BACKUP_AUTHOR_EMAIL` | Git commit author email |
 
 ### Access Control & Reply Policy
 
