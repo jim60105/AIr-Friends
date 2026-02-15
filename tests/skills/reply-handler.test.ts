@@ -1,7 +1,7 @@
 // tests/skills/reply-handler.test.ts
 
 import { assertEquals } from "@std/assert";
-import { ReplyHandler } from "@skills/reply-handler.ts";
+import { ReplyHandler, stripXmlTags } from "@skills/reply-handler.ts";
 import type { SkillContext } from "@skills/types.ts";
 import type { WorkspaceInfo } from "../../src/types/workspace.ts";
 import type { PlatformAdapter } from "@platforms/platform-adapter.ts";
@@ -551,4 +551,117 @@ Deno.test("ReplyHandler - handleEditReply passes replyToMessageId to editMessage
   );
 
   assertEquals(capturedReplyToMessageId, "trigger_msg_123");
+});
+
+// ============ stripXmlTags tests ============
+
+Deno.test("stripXmlTags - strips simple XML tags", () => {
+  assertEquals(stripXmlTags("<e>😆</e>"), "😆");
+});
+
+Deno.test("stripXmlTags - strips multiple different tags", () => {
+  assertEquals(stripXmlTags("<e>😆</e> <t>text</t>"), "😆 text");
+});
+
+Deno.test("stripXmlTags - strips nested-looking tags", () => {
+  assertEquals(stripXmlTags("<a><e>😆</e></a>"), "😆");
+});
+
+Deno.test("stripXmlTags - preserves text without tags", () => {
+  assertEquals(stripXmlTags("Hello, world!"), "Hello, world!");
+});
+
+Deno.test("stripXmlTags - strips multi-character tag names", () => {
+  assertEquals(stripXmlTags("<scenario>text</scenario>"), "text");
+});
+
+Deno.test("stripXmlTags - preserves angle brackets in non-tag contexts", () => {
+  assertEquals(stripXmlTags("1 < 2 and 3 > 1"), "1 < 2 and 3 > 1");
+});
+
+Deno.test("stripXmlTags - handles empty string", () => {
+  assertEquals(stripXmlTags(""), "");
+});
+
+Deno.test("stripXmlTags - strips tags with alphanumeric names", () => {
+  assertEquals(stripXmlTags("<h1>Title</h1>"), "Title");
+});
+
+Deno.test("stripXmlTags - strips self-closing-like tag pairs", () => {
+  assertEquals(stripXmlTags("before <r>reaction</r> after"), "before reaction after");
+});
+
+// ============ XML tag stripping integration tests ============
+
+Deno.test("ReplyHandler - handleSendReply strips XML tags from message", async () => {
+  const handler = new ReplyHandler();
+
+  let capturedContent = "";
+  const adapter = createMockPlatformAdapter({ success: true, messageId: "msg_xml1" });
+  adapter.sendReply = (_channelId: string, content: string) => {
+    capturedContent = content;
+    return Promise.resolve({ success: true, messageId: "msg_xml1" });
+  };
+
+  const workspace: WorkspaceInfo = {
+    key: "discord/xml1",
+    components: { platform: "discord", userId: "xml1" },
+    path: "/tmp/workspaces/discord/xml1",
+    isDm: true,
+  };
+
+  const context: SkillContext = {
+    workspace,
+    platformAdapter: adapter,
+    channelId: "ch_xml1",
+    userId: "xml1",
+  };
+
+  const result = await handler.handleSendReply(
+    { message: "Hello <e>😆</e> world" },
+    context,
+  );
+
+  assertEquals(result.success, true);
+  assertEquals(capturedContent, "Hello 😆 world");
+});
+
+Deno.test("ReplyHandler - handleEditReply strips XML tags from message", async () => {
+  const handler = new ReplyHandler();
+
+  let capturedContent = "";
+  const adapter = createMockPlatformAdapter({ success: true, messageId: "msg_xml2" });
+  adapter.editMessage = (
+    _channelId: string,
+    _messageId: string,
+    newContent: string,
+  ) => {
+    capturedContent = newContent;
+    return Promise.resolve({ success: true, messageId: "msg_xml2" });
+  };
+
+  const workspace: WorkspaceInfo = {
+    key: "discord/xml2",
+    components: { platform: "discord", userId: "xml2" },
+    path: "/tmp/workspaces/discord/xml2",
+    isDm: true,
+  };
+
+  const context: SkillContext = {
+    workspace,
+    platformAdapter: adapter,
+    channelId: "ch_xml2",
+    userId: "xml2",
+  };
+
+  // Send reply first
+  await handler.handleSendReply({ message: "First" }, context);
+
+  const result = await handler.handleEditReply(
+    { messageId: "msg_xml2", message: "<scenario>edited</scenario> <e>🎉</e>" },
+    context,
+  );
+
+  assertEquals(result.success, true);
+  assertEquals(capturedContent, "edited 🎉");
 });

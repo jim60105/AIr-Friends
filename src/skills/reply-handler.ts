@@ -13,6 +13,14 @@ import { repliesSentTotal } from "@utils/metrics.ts";
 
 const logger = createLogger("ReplyHandler");
 
+/**
+ * Strip XML-like tags from message content, keeping only inner text.
+ * e.g. `<e>😆</e>` → `😆`, `<scenario>text</scenario>` → `text`
+ */
+export function stripXmlTags(message: string): string {
+  return message.replace(/<\/?[a-zA-Z][a-zA-Z0-9_]*>/g, "");
+}
+
 export class ReplyHandler {
   private replySentMap: Map<string, boolean> = new Map();
 
@@ -110,10 +118,13 @@ export class ReplyHandler {
         }
       }
 
+      // Strip XML-like tags from message content
+      const cleanedMessage = stripXmlTags(params.message);
+
       // Send reply via platform adapter
       const result = await context.platformAdapter.sendReply(
         context.channelId,
-        params.message,
+        cleanedMessage,
         { replyToMessageId: context.replyToMessageId },
       );
 
@@ -201,11 +212,14 @@ export class ReplyHandler {
         };
       }
 
+      // Strip XML-like tags from message content
+      const cleanedMessage = stripXmlTags(params.message);
+
       // Edit message via platform adapter
       const result = await context.platformAdapter.editMessage(
         context.channelId,
         params.messageId,
-        params.message,
+        cleanedMessage,
         context.replyToMessageId,
       );
 
