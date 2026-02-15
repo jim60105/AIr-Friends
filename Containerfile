@@ -16,7 +16,12 @@ ARG TARGETVARIANT
 RUN --mount=type=cache,id=apt-$TARGETARCH$TARGETVARIANT,sharing=locked,target=/var/cache/apt \
     --mount=type=cache,id=aptlists-$TARGETARCH$TARGETVARIANT,sharing=locked,target=/var/lib/apt/lists \
     apt-get update && apt-get install -y --no-install-recommends \
-    git nodejs npm
+    git nodejs npm \
+    curl wget ca-certificates \
+    build-essential ripgrep jq moreutils strace \
+    zip file tree bc \
+    python3 python3-pip python-is-python3 \
+    ffmpeg 7zip poppler-utils imagemagick exiftool
 
 ########################################
 # GitHub Copilot unpack stage
@@ -39,17 +44,6 @@ WORKDIR /opencode
 ADD https://github.com/anomalyco/opencode/releases/latest/download/opencode-linux-x64.tar.gz /tmp/opencode-linux-x64.tar.gz
 
 RUN tar -xzf /tmp/opencode-linux-x64.tar.gz -C /opencode
-
-########################################
-# Ripgrip unpack stage
-########################################
-FROM base AS ripgrip-unpacker
-
-WORKDIR /ripgrip
-
-ADD https://github.com/BurntSushi/ripgrep/releases/download/15.1.0/ripgrep-15.1.0-x86_64-unknown-linux-musl.tar.gz /tmp/ripgrip-linux-x64.tar.gz
-
-RUN tar -xzf /tmp/ripgrip-linux-x64.tar.gz -C /ripgrip
 
 ########################################
 # Cache stage
@@ -97,9 +91,6 @@ COPY --link --chown=$UID:0 --chmod=775 LICENSE /licenses/LICENSE
 
 # Get Dumb Init
 ADD --link --chown=$UID:0 --chmod=755 https://github.com/Yelp/dumb-init/releases/download/v1.2.5/dumb-init_1.2.5_x86_64 /usr/local/bin/dumb-init
-
-# Copy ripgrep binary for internal use (e.g. in skills)
-COPY --link --chown=$UID:0 --chmod=775 --from=ripgrip-unpacker /ripgrip/ripgrep-15.1.0-x86_64-unknown-linux-musl/rg /usr/local/bin/rg
 
 # Copy cached Deno dependencies from cache stage
 COPY --chown=$UID:0 --chmod=775 --from=cache /deno-dir/ /deno-dir/
