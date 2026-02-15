@@ -139,6 +139,12 @@ USER $UID
 # Install Playwright browsers
 RUN npx playwright install chromium-headless-shell
 
+# Replace Playwright's bundled ffmpeg with system ffmpeg
+RUN for dir in /home/deno/.cache/ms-playwright/ffmpeg-*; do \
+    rm -f "$dir/ffmpeg-linux" && \
+    ln -s /usr/bin/ffmpeg "$dir/ffmpeg-linux"; \
+    done
+
 # Signal handling
 STOPSIGNAL SIGTERM
 
