@@ -52,30 +52,46 @@ That's it! Your bot should now be online.
 
 ## 🎨 Customizing Your Bot
 
-Want to change the personality of your bot? Edit the prompt files:
+Change the personality of your bot!
+
+Override individual character prompt files — only the files you mount will be replaced; others keep their container defaults.
+
+**With Compose** (recommended — see [`compose.yml`](compose.yml)):
+
+```yaml
+volumes:
+  - data:/app/data:Z
+  # Mount only the prompt files you want to override
+  - ./prompts/character_name.md:/app/prompts/character_name.md:ro,Z
+  - ./prompts/character_info.md:/app/prompts/character_info.md:ro,Z
+  - ./prompts/character_personality.md:/app/prompts/character_personality.md:ro,Z
+  - ./prompts/character_speaking_style.md:/app/prompts/character_speaking_style.md:ro,Z
+  - ./prompts/character_reference_terms.md:/app/prompts/character_reference_terms.md:ro,Z
+```
+
+**With Podman/Docker run:**
 
 ```bash
-# Clone or download the entire prompts directory from the repository.
-# https://github.com/jim60105/AIr-Friends/tree/master/prompts
-
-# Edit character files
-vim prompts/character_info.md
-vim prompts/character_name.md
-vim prompts/character_personality.md
-vim prompts/character_reference_terms.md
-vim prompts/character_speaking_style.md
-
-# These two files are also required for the system to function when customizing prompts.
-cat prompts/system.md
-cat prompts/system_prompt_override.md
-
-# Mount when running
 podman run -d --rm \
   -v data:/app/data \
-  -v ./prompts:/app/prompts:ro \
+  -v ./prompts/character_name.md:/app/prompts/character_name.md:ro \
+  -v ./prompts/character_info.md:/app/prompts/character_info.md:ro \
   --env-file .env \
   --name air-friends \
   ghcr.io/jim60105/air-friends:latest
+```
+
+**With Helm** (see [`helm/`](helm/) chart):
+
+```yaml
+# values.yaml
+prompts:
+  enabled: true
+  files:
+    character_name.md: |
+      Yuna
+    character_info.md: |
+      An AI assistant
 ```
 
 See [Development Guide -- Customizing the Bot](docs/DEVELOPMENT.md#customizing-the-bot) section for details.
