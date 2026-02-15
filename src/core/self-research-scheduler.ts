@@ -100,7 +100,7 @@ export class SelfResearchScheduler {
     const nextTime = new Date(Date.now() + interval);
     this.nextScheduledAt = nextTime;
 
-    logger.info("Next self-research session scheduled", {
+    logger.info("Next self-research session scheduled at {scheduledAt}", {
       intervalMs: interval,
       scheduledAt: nextTime.toISOString(),
     });
