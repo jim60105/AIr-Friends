@@ -86,6 +86,23 @@ export class ShutdownHandler {
         this.context.memoryMaintenanceScheduler.stop();
       }
 
+      // Stop git backup scheduler and perform final backup
+      if (this.context.gitBackupScheduler) {
+        logger.info("Stopping git backup scheduler");
+        this.context.gitBackupScheduler.stop();
+      }
+
+      if (this.context.gitBackupService) {
+        logger.info("Performing final git backup before shutdown");
+        try {
+          await this.context.gitBackupService.performBackup();
+        } catch (error) {
+          logger.error("Final git backup failed", {
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
+      }
+
       // Shutdown agent core (stops skill API server, session registry)
       logger.info("Shutting down agent core");
       await agentCore.shutdown();

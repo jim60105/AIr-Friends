@@ -120,3 +120,11 @@ rateLimit:
   maxRequestsPerWindow: 10       # Max requests per user per sliding window; override with env RATE_LIMIT_MAX_REQUESTS_PER_WINDOW
   windowMs: 600000               # Sliding window duration in ms (default: 10 min); override with env RATE_LIMIT_WINDOW_MS
   cooldownMs: 600000             # Cooldown period after limit exceeded in ms (default: 10 min); override with env RATE_LIMIT_COOLDOWN_MS
+
+# Git backup - backs up the entire data/ directory to a remote Git repository
+gitBackup:
+  enabled: false                  # Enable Git backup (default: false); override with env GIT_BACKUP_ENABLED
+  remoteUrl: ""                   # Remote Git repository URL (HTTPS); override with env GIT_BACKUP_REMOTE_URL
+  intervalMs: 3600000             # Backup interval in ms (default: 1 hour); override with env GIT_BACKUP_INTERVAL_MS
+  authorName: "AIr-Friends Backup"    # Git author name; override with env GIT_BACKUP_AUTHOR_NAME
+  authorEmail: "airfriends-backup@noreply.github.com" # Git author email; override with env GIT_BACKUP_AUTHOR_EMAIL

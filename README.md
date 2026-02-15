@@ -13,6 +13,7 @@ Your AIr friends custom chatbot with integrated shell and skills. Powered by ACP
 - 🗜️ **Memory Maintenance**: Optional scheduled agent task to summarize and compact old memories
 - 📝 **Agent Knowledge Base**: Personal workspace for long-term knowledge notes and reflections
 - 🔒 **Privacy First**: Isolated workspaces per user with access control
+- 💾 **Git Backup**: Automatic versioned backup of memories and notes to GitHub
 - 🐳 **Easy Deploy**: One-command container deployment
 - 🎨 **Customizable**: Template-based personality prompt system
 - 🔌 **Extensible**: Skill-based architecture

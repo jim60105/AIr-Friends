@@ -708,6 +708,43 @@ metrics:
 - All metric operations are pure in-memory O(1) with no I/O overhead
 - Metrics endpoint only exposes aggregate numbers, never user content or tokens
 
+### 13. Git Backup (Feature 21)
+
+Periodically backs up the `data/` directory to a remote GitHub repository using Git.
+
+**Configuration:**
+
+```yaml
+gitBackup:
+  enabled: false
+  remoteUrl: ""
+  intervalMs: 3600000
+  authorName: "AIr-Friends Backup"
+  authorEmail: "airfriends-backup@noreply.github.com"
+```
+
+**Environment Variable Overrides:**
+
+- `GIT_BACKUP_ENABLED` → `gitBackup.enabled`
+- `GIT_BACKUP_REMOTE_URL` → `gitBackup.remoteUrl`
+- `GIT_BACKUP_INTERVAL_MS` → `gitBackup.intervalMs`
+- `GIT_BACKUP_AUTHOR_NAME` → `gitBackup.authorName`
+- `GIT_BACKUP_AUTHOR_EMAIL` → `gitBackup.authorEmail`
+
+**How It Works:**
+
+1. `GitBackupScheduler` triggers backup at fixed intervals
+2. `GitBackupService.initialize()` initializes the Git repo at startup (git init, remote add, fetch/pull)
+3. `GitBackupService.performBackup()` executes add → commit → push
+4. Authentication uses the existing `GITHUB_TOKEN`, dynamically injected into the HTTPS URL
+5. A final backup is performed during graceful shutdown
+6. Push conflicts trigger an automatic `pull --rebase` and one retry
+
+**Key Components:**
+
+- `src/core/git-backup-service.ts` — Git operation encapsulation
+- `src/core/git-backup-scheduler.ts` — Fixed-interval scheduling
+
 ## Prompt Template System
 
 The system uses a template-based prompt system that allows easy customization without rebuilding containers.

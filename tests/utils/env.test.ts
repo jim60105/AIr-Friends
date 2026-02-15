@@ -302,3 +302,60 @@ Deno.test("applyEnvOverrides - MEMORY_MAINTENANCE_INTERVAL_MS sets number", () =
     Deno.env.delete("MEMORY_MAINTENANCE_INTERVAL_MS");
   }
 });
+
+Deno.test("applyEnvOverrides - GIT_BACKUP_ENABLED sets gitBackup.enabled", () => {
+  Deno.env.set("GIT_BACKUP_ENABLED", "true");
+  try {
+    const config: Record<string, unknown> = {
+      gitBackup: { enabled: false },
+    };
+    applyEnvOverrides(config);
+    const gb = config.gitBackup as { enabled: boolean };
+    assertEquals(gb.enabled, true);
+  } finally {
+    Deno.env.delete("GIT_BACKUP_ENABLED");
+  }
+});
+
+Deno.test("applyEnvOverrides - GIT_BACKUP_REMOTE_URL sets gitBackup.remoteUrl", () => {
+  Deno.env.set("GIT_BACKUP_REMOTE_URL", "https://github.com/test/repo.git");
+  try {
+    const config: Record<string, unknown> = {
+      gitBackup: { remoteUrl: "" },
+    };
+    applyEnvOverrides(config);
+    const gb = config.gitBackup as { remoteUrl: string };
+    assertEquals(gb.remoteUrl, "https://github.com/test/repo.git");
+  } finally {
+    Deno.env.delete("GIT_BACKUP_REMOTE_URL");
+  }
+});
+
+Deno.test("applyEnvOverrides - GIT_BACKUP_INTERVAL_MS sets number", () => {
+  Deno.env.set("GIT_BACKUP_INTERVAL_MS", "7200000");
+  try {
+    const config: Record<string, unknown> = {
+      gitBackup: { intervalMs: 3600000 },
+    };
+    applyEnvOverrides(config);
+    const gb = config.gitBackup as { intervalMs: number };
+    assertEquals(gb.intervalMs, 7200000);
+    assertEquals(typeof gb.intervalMs, "number");
+  } finally {
+    Deno.env.delete("GIT_BACKUP_INTERVAL_MS");
+  }
+});
+
+Deno.test("applyEnvOverrides - GIT_BACKUP_AUTHOR_NAME sets string", () => {
+  Deno.env.set("GIT_BACKUP_AUTHOR_NAME", "Custom Author");
+  try {
+    const config: Record<string, unknown> = {
+      gitBackup: { authorName: "Default" },
+    };
+    applyEnvOverrides(config);
+    const gb = config.gitBackup as { authorName: string };
+    assertEquals(gb.authorName, "Custom Author");
+  } finally {
+    Deno.env.delete("GIT_BACKUP_AUTHOR_NAME");
+  }
+});
