@@ -1083,6 +1083,10 @@ Before committing, ensure:
 3. ✅ `deno check src/main.ts` passes
 4. ✅ `deno test` passes
 5. ✅ No sensitive data in code or logs
+6. ✅ When adding new configuration or environment variables, update **all** of:
+   - `config.example.yaml`
+   - `.env.example`
+   - `helm/values.yaml` (under `env:` section)
 
 ## Related Documentation
 
