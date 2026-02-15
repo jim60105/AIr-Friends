@@ -150,16 +150,16 @@ CMD ["deno", "run", "--allow-net", "--allow-read", "--allow-write", "--allow-env
 
 ARG VERSION
 ARG RELEASE
-LABEL name="jim60105/air-friends" \
-    # Authors for AIr-Friends
-    vendor="jim60105" \
+LABEL name="jim60105/AIr-Friends" \
+    # Author for AIr-Friends
+    vendor="Jim Chen" \
     # Maintainer for this docker image
-    maintainer="jim60105" \
+    maintainer="Jim Chen" \
     # Containerfile source repository
     url="https://github.com/jim60105/AIr-Friends" \
     version=${VERSION} \
     # This should be a number, incremented with each change
     release=${RELEASE} \
     io.k8s.display-name="AIr-Friends" \
-    summary="AIr-Friends - Multi-platform AI chatbot with ACP integration" \
-    description="An AI-powered conversational chatbot using the Agent Client Protocol (ACP) to connect with external AI agents. Supports Discord and Misskey platforms with persistent cross-conversation memory."
+    summary="AIr-Friends - Your AIr friends custom chatbot with integrated shell and skills." \
+    description="Your AIr friends custom chatbot with integrated shell and skills. Powered by ACP AI agents, it remembers conversations across channels while keeping your data organized in isolated workspaces."
