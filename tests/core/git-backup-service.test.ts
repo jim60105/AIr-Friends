@@ -49,7 +49,7 @@ async function withTempGitEnv(
     });
     await clone.output();
 
-    // Create initial commit so main branch exists
+    // Create initial commit so master branch exists
     await Deno.writeTextFile(`${cloneDir}/.gitkeep`, "");
     for (
       const cmd of [
@@ -57,8 +57,8 @@ async function withTempGitEnv(
         ["git", "-C", cloneDir, "config", "user.email", "init@test.com"],
         ["git", "-C", cloneDir, "add", "-A"],
         ["git", "-C", cloneDir, "commit", "-m", "init"],
-        ["git", "-C", cloneDir, "branch", "-M", "main"],
-        ["git", "-C", cloneDir, "push", "-u", "origin", "main"],
+        ["git", "-C", cloneDir, "branch", "-M", "master"],
+        ["git", "-C", cloneDir, "push", "-u", "origin", "master"],
       ]
     ) {
       const proc = new Deno.Command(cmd[0], {
@@ -150,7 +150,7 @@ Deno.test("GitBackupService - performBackup commits and pushes when changes exis
 
     // Verify the commit exists in the bare repo
     const logProc = new Deno.Command("git", {
-      args: ["log", "--oneline", "main"],
+      args: ["log", "--oneline", "master"],
       cwd: bareDir,
       stdout: "piped",
       stderr: "piped",
@@ -418,7 +418,7 @@ Deno.test("GitBackupService - initialize clones empty remote and creates initial
 
     // Verify it was pushed to the bare repo
     const bareLogProc = new Deno.Command("git", {
-      args: ["log", "--oneline", "main"],
+      args: ["log", "--oneline", "master"],
       cwd: bareDir,
       stdout: "piped",
       stderr: "piped",
@@ -542,7 +542,7 @@ Deno.test("GitBackupService - initialize pushes to fallback branch on non-fast-f
       const cmd of [
         ["git", "-C", conflictCloneDir, "add", "-A"],
         ["git", "-C", conflictCloneDir, "commit", "-m", "conflicting commit"],
-        ["git", "-C", conflictCloneDir, "push", "origin", "main"],
+        ["git", "-C", conflictCloneDir, "push", "origin", "master"],
       ]
     ) {
       await new Deno.Command(cmd[0], {
@@ -599,7 +599,7 @@ Deno.test("GitBackupService - initialize pushes to fallback branch on non-fast-f
       stderr: "piped",
     });
     const { stdout: branchOut } = await currentBranch.output();
-    assertEquals(new TextDecoder().decode(branchOut).trim(), "main");
+    assertEquals(new TextDecoder().decode(branchOut).trim(), "master");
 
     await Deno.remove(tempDir, { recursive: true });
   });

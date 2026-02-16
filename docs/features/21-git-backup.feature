@@ -32,7 +32,7 @@ Feature: Git Backup for Agent Notes and Knowledge Base
     When the bot starts up and push is rejected
     Then a new branch "backup-{datetime}" is created
     And the local commits are pushed to the new branch
-    And the repository switches back to the main branch
+    And the repository switches back to the master branch
 
   Scenario: Periodic backup with changes
     Given there are uncommitted changes in the data directory
