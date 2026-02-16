@@ -1,3 +1,4 @@
+import { resolve } from "@std/path";
 import { createLogger } from "@utils/logger.ts";
 import type { GitBackupConfig } from "../types/config.ts";
 
@@ -14,7 +15,8 @@ export class GitBackupService {
 
   constructor(config: GitBackupConfig, dataDir: string) {
     this.config = config;
-    this.dataDir = dataDir;
+    // Convert to absolute path to satisfy Git's safe.directory requirement
+    this.dataDir = resolve(dataDir);
   }
 
   /** Initialize the Git repository (called once at startup). */
