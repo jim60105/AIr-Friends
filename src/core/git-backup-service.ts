@@ -39,45 +39,136 @@ export class GitBackupService {
       logger.warn("Failed to set safe.directory config", { dataDir: this.dataDir });
     }
 
-    // Initialize git repo if needed
+    // Determine directory state and execute corresponding initialization
     const hasGit = await this.dirExists(`${this.dataDir}/.git`);
-    if (!hasGit) {
-      logger.info("Initializing Git repository in data directory");
-      const init = await this.runGit(["init", "-b", "main"]);
-      if (!init.success) {
-        logger.error("Failed to initialize Git repository");
-        return;
-      }
+    const isEmpty = await this.isDirEmpty(this.dataDir);
+
+    if (isEmpty) {
+      // Case A: Empty directory → clone remote repository
+      await this.initFromClone();
+    } else if (!hasGit) {
+      // Case B: Non-empty + not a Git repo → init and commit existing files
+      await this.initFromExisting();
+    } else {
+      // Case C: Existing Git repo → configure and sync
+      await this.initFromGitRepo();
     }
 
-    // Set user config
+    this.initialized = true;
+    logger.info("Git backup service initialized");
+  }
+
+  /** Check if a directory is empty. */
+  private async isDirEmpty(path: string): Promise<boolean> {
+    try {
+      for await (const _entry of Deno.readDir(path)) {
+        return false;
+      }
+      return true;
+    } catch {
+      return true; // Directory doesn't exist = treat as empty
+    }
+  }
+
+  /** Case A: Empty directory — clone the remote repository. */
+  private async initFromClone(): Promise<void> {
+    logger.info("Data directory is empty, cloning from remote");
+    const authUrl = this.getAuthenticatedUrl();
+
+    // Clone into the data directory (use "." to clone into current dir)
+    const clone = await this.runGit(["clone", authUrl, "."]);
+    if (!clone.success) {
+      // Clone failed (e.g., auth error, network issue)
+      // Fall back to initializing a new repo
+      logger.warn("Clone failed, initializing new repository");
+      await this.initFromExisting();
+      return;
+    }
+
+    // Set user config after clone
     await this.runGit(["config", "user.name", this.config.authorName]);
     await this.runGit(["config", "user.email", this.config.authorEmail]);
-
-    // Create .gitignore
     await this.ensureGitignore();
+    await this.configureRemote(); // Ensure remote uses plain URL (not auth URL)
 
-    // Configure remote (uses plain URL; auth is injected per-command)
+    // Ensure we are on the main branch after clone.
+    // When remote HEAD points to a non-existent branch (e.g., master vs main),
+    // clone succeeds but no local branch is created.
+    const branch = await this.runGit(["branch", "--show-current"]);
+    if (!branch.success || branch.output.trim() !== "main") {
+      // Check if origin/main exists from clone
+      const hasRemoteMain = await this.runGit([
+        "rev-parse",
+        "--verify",
+        "refs/remotes/origin/main",
+      ]);
+      if (hasRemoteMain.success) {
+        await this.runGit(["checkout", "-B", "main", "origin/main"]);
+      } else {
+        // No remote main branch — create orphan main branch
+        await this.runGit(["checkout", "-b", "main"]);
+      }
+    }
+
+    // Handle empty remote: clone succeeds but no commits exist (no HEAD)
+    const hasHead = await this.runGit(["rev-parse", "--verify", "HEAD"]);
+    if (!hasHead.success) {
+      logger.info("Remote repository is empty, creating initial commit");
+      await this.runGit(["add", "-A"]);
+      const status = await this.runGit(["status", "--porcelain"]);
+      if (status.success && status.output.trim() !== "") {
+        const timestamp = new Date().toISOString();
+        await this.runGit(["commit", "-m", `initial: ${timestamp}`]);
+        await this.pushWithFallback();
+      }
+      return;
+    }
+
+    // Remote had commits: commit .gitignore changes if any, and push
+    await this.runGit(["add", "-A"]);
+    const status = await this.runGit(["status", "--porcelain"]);
+    if (status.success && status.output.trim() !== "") {
+      const timestamp = new Date().toISOString();
+      await this.runGit(["commit", "-m", `backup: ${timestamp}`]);
+      await this.pushWithFallback();
+    }
+  }
+
+  /** Case B: Non-empty directory without Git — init, commit, and push. */
+  private async initFromExisting(): Promise<void> {
+    logger.info("Initializing Git repository from existing data");
+
+    const init = await this.runGit(["init", "-b", "main"]);
+    if (!init.success) {
+      logger.error("Failed to initialize Git repository");
+      return;
+    }
+
+    await this.runGit(["config", "user.name", this.config.authorName]);
+    await this.runGit(["config", "user.email", this.config.authorEmail]);
+    await this.ensureGitignore();
     await this.configureRemote();
 
-    // Fetch and sync using authenticated URL
-    const authUrl = this.getAuthenticatedUrl();
-    const fetchResult = await this.runGit(["fetch", authUrl, "main"]);
-    if (fetchResult.success) {
-      // Update the remote tracking ref manually after fetch-by-URL
-      await this.runGit(["update-ref", "refs/remotes/origin/main", "FETCH_HEAD"]);
-
-      // Check if we have local commits
-      const localRef = await this.runGit(["rev-parse", "--verify", "HEAD"]);
-      if (localRef.success) {
-        await this.runGit(["rebase", "origin/main"]);
-      } else {
-        // No local history yet; reset to match remote
-        await this.runGit(["checkout", "-B", "main", "origin/main"]);
-      }
-    } else {
-      logger.warn("Failed to fetch from remote, will retry on next backup");
+    // Commit all existing files
+    await this.runGit(["add", "-A"]);
+    const status = await this.runGit(["status", "--porcelain"]);
+    if (status.success && status.output.trim() !== "") {
+      const timestamp = new Date().toISOString();
+      await this.runGit(["commit", "-m", `initial: ${timestamp}`]);
     }
+
+    // Try to push (with conflict resolution)
+    await this.pushWithFallback();
+  }
+
+  /** Case C: Existing Git repo — configure, commit uncommitted changes, and sync. */
+  private async initFromGitRepo(): Promise<void> {
+    logger.info("Existing Git repository found, syncing");
+
+    await this.runGit(["config", "user.name", this.config.authorName]);
+    await this.runGit(["config", "user.email", this.config.authorEmail]);
+    await this.ensureGitignore();
+    await this.configureRemote();
 
     // Ensure we are on main branch
     const branch = await this.runGit(["branch", "--show-current"]);
@@ -88,8 +179,72 @@ export class GitBackupService {
       }
     }
 
-    this.initialized = true;
-    logger.info("Git backup service initialized");
+    // Commit any uncommitted changes
+    await this.runGit(["add", "-A"]);
+    const status = await this.runGit(["status", "--porcelain"]);
+    if (status.success && status.output.trim() !== "") {
+      const timestamp = new Date().toISOString();
+      await this.runGit(["commit", "-m", `backup: ${timestamp}`]);
+      logger.info("Committed uncommitted changes during initialization");
+    }
+
+    // Try to push (with conflict resolution)
+    await this.pushWithFallback();
+  }
+
+  /** Push to remote with fallback strategies for conflict resolution. */
+  private async pushWithFallback(): Promise<void> {
+    const authUrl = this.getAuthenticatedUrl();
+
+    // Check if we have any commits to push
+    const hasCommits = await this.runGit(["rev-parse", "--verify", "HEAD"]);
+    if (!hasCommits.success) {
+      logger.info("No commits to push");
+      return;
+    }
+
+    // Attempt 1: Direct push
+    let push = await this.runGit(["push", authUrl, "main"]);
+    if (push.success) return;
+
+    // Attempt 2: Fetch + rebase + push
+    logger.warn("Push rejected, attempting pull --rebase and retry");
+    const fetch = await this.runGit(["fetch", authUrl, "main"]);
+    if (fetch.success) {
+      await this.runGit(["update-ref", "refs/remotes/origin/main", "FETCH_HEAD"]);
+      const rebase = await this.runGit(["rebase", "origin/main"]);
+      if (rebase.success) {
+        push = await this.runGit(["push", authUrl, "main"]);
+        if (push.success) return;
+      } else {
+        const abortResult = await this.runGit(["rebase", "--abort"]);
+        if (!abortResult.success) {
+          logger.warn("Rebase abort failed, forcing clean state");
+          await this.runGit(["reset", "--hard", "HEAD"]);
+        }
+      }
+    }
+
+    // Attempt 3: Create a new branch with datetime and push
+    const datetime = new Date().toISOString().replace(/[:.]/g, "-");
+    const branchName = `backup-${datetime}`;
+    logger.warn("Push to main failed, creating fallback branch {branchName}", { branchName });
+
+    const checkout = await this.runGit(["checkout", "-b", branchName]);
+    if (!checkout.success) {
+      logger.error("Failed to create fallback branch {branchName}", { branchName });
+      return;
+    }
+
+    push = await this.runGit(["push", authUrl, branchName]);
+    if (push.success) {
+      logger.info("Pushed to fallback branch {branchName}", { branchName });
+    } else {
+      logger.error("Failed to push to fallback branch {branchName}", { branchName });
+    }
+
+    // Switch back to main for future operations
+    await this.runGit(["checkout", "main"]);
   }
 
   /** Perform a single backup cycle (add → commit → push). */

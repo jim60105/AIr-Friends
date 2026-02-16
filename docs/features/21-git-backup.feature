@@ -5,12 +5,34 @@ Feature: Git Backup for Agent Notes and Knowledge Base
     And gitBackup.remoteUrl is set to a valid GitHub repository URL
     And GITHUB_TOKEN is available in the environment
 
-  Scenario: First-time initialization
+  Scenario: First-time initialization with empty data directory
+    Given the data directory is empty
+    When the bot starts up
+    Then the remote repository is cloned into the data directory
+    And the remote origin is set to the configured URL (without credentials)
+    And git user config is set
+
+  Scenario: First-time initialization with existing non-Git data
+    Given the data directory contains files but is not a Git repository
     When the bot starts up
     Then a Git repository is initialized in the data directory
     And a .gitignore file is created excluding SESSION_ID files
-    And the remote origin is set to the configured URL
-    And the repository is synced with the remote (fetch + pull)
+    And existing files are committed with message "initial: {ISO timestamp}"
+    And the commit is pushed to the remote repository
+
+  Scenario: Initialization with existing Git repository and uncommitted changes
+    Given the data directory is a Git repository with uncommitted changes
+    When the bot starts up
+    Then the uncommitted changes are committed with message "backup: {ISO timestamp}"
+    And the commit is pushed to the remote repository
+
+  Scenario: Initialization push conflict with fallback branch
+    Given the data directory is a Git repository
+    And the remote has diverged and rebase fails
+    When the bot starts up and push is rejected
+    Then a new branch "backup-{datetime}" is created
+    And the local commits are pushed to the new branch
+    And the repository switches back to the main branch
 
   Scenario: Periodic backup with changes
     Given there are uncommitted changes in the data directory
