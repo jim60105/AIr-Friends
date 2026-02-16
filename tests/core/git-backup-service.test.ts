@@ -268,3 +268,60 @@ Deno.test("GitBackupService - initialize sets safe.directory config", async () =
     assertEquals(safeDirs.includes(dataDir), true);
   });
 });
+
+Deno.test("GitBackupService - converts relative path to absolute for safe.directory", async () => {
+  const tempDir = await Deno.makeTempDir();
+  const relativeDataDir = "./data";
+  const actualDataDir = `${tempDir}/data`;
+
+  await Deno.mkdir(actualDataDir, { recursive: true });
+
+  // Save current directory
+  const originalCwd = Deno.cwd();
+
+  try {
+    // Change to temp directory
+    Deno.chdir(tempDir);
+
+    // Create bare repo
+    const bareDir = `${tempDir}/bare.git`;
+    await new Deno.Command("git", {
+      args: ["init", "--bare", bareDir],
+      stdout: "piped",
+      stderr: "piped",
+    }).output();
+
+    // Create service with relative path
+    const service = new GitBackupService(
+      createConfig({ remoteUrl: bareDir }),
+      relativeDataDir,
+    );
+    await service.initialize();
+
+    // Check if safe.directory is set with absolute path
+    const proc = new Deno.Command("git", {
+      args: ["config", "--global", "--get-all", "safe.directory"],
+      stdout: "piped",
+      stderr: "piped",
+    });
+    const { stdout, success } = await proc.output();
+    const safeDirs = new TextDecoder().decode(stdout).trim().split("\n");
+
+    // Verify that the absolute path (not relative) is in the safe.directory list
+    assertEquals(success, true);
+    assertEquals(
+      safeDirs.some((dir) => dir === actualDataDir),
+      true,
+      `Expected ${actualDataDir} to be in safe.directory list`,
+    );
+    assertEquals(
+      safeDirs.includes(relativeDataDir),
+      false,
+      "Relative path should not be in safe.directory list",
+    );
+  } finally {
+    // Restore original directory
+    Deno.chdir(originalCwd);
+    await Deno.remove(tempDir, { recursive: true });
+  }
+});
