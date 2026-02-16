@@ -35,7 +35,8 @@ export class GitBackupScheduler {
     logger.info("Git backup scheduler started", {
       intervalMs: this.config.intervalMs,
     });
-    this.scheduleNext();
+    // Execute immediately on start, then schedule subsequent runs at intervalMs
+    this.execute();
   }
 
   stop(): void {

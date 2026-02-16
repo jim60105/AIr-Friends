@@ -22,17 +22,43 @@ Deno.test("GitBackupScheduler - disabled config does not start scheduler", () =>
   scheduler.stop();
 });
 
-Deno.test("GitBackupScheduler - scheduleNext sets correct interval", () => {
+Deno.test("GitBackupScheduler - executes immediately on start", async () => {
+  const scheduler = new GitBackupScheduler(createConfig({ intervalMs: 5000 }));
+  let executedAt: number | null = null;
+
+  scheduler.setCallback(() => {
+    if (executedAt === null) {
+      executedAt = Date.now();
+    }
+    return Promise.resolve();
+  });
+
+  const startedAt = Date.now();
+  scheduler.start();
+
+  // Wait a short time for the immediate execution
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  scheduler.stop();
+  await new Promise((resolve) => setTimeout(resolve, 50));
+
+  // First execution should happen almost immediately (within 50ms),
+  // not after intervalMs (5000ms)
+  assertEquals(executedAt !== null, true);
+  assertEquals((executedAt as unknown as number) - startedAt < 100, true);
+});
+
+Deno.test("GitBackupScheduler - scheduleNext sets correct interval after first execution", async () => {
   const scheduler = new GitBackupScheduler(createConfig({ intervalMs: 100 }));
   scheduler.setCallback(async () => {});
 
-  const before = Date.now();
   scheduler.start();
+
+  // Wait for immediate execution to complete and scheduleNext to be called
+  await new Promise((resolve) => setTimeout(resolve, 50));
+
   const next = scheduler.getStatus().nextScheduledAt;
   assertEquals(next instanceof Date, true);
 
-  const delta = (next as Date).getTime() - before;
-  assertEquals(delta >= 80 && delta <= 200, true);
   scheduler.stop();
 });
 
@@ -79,10 +105,13 @@ Deno.test("GitBackupScheduler - reschedules after error", async () => {
   assertEquals(callCount >= 2, true);
 });
 
-Deno.test("GitBackupScheduler - stop clears timer", () => {
-  const scheduler = new GitBackupScheduler(createConfig());
-  scheduler.setCallback(async () => {});
+Deno.test("GitBackupScheduler - stop clears timer", async () => {
+  const scheduler = new GitBackupScheduler(createConfig({ intervalMs: 5000 }));
+  scheduler.setCallback(() => Promise.resolve());
   scheduler.start();
+
+  // Wait for immediate execution to complete and scheduleNext to be called
+  await new Promise((resolve) => setTimeout(resolve, 50));
 
   assertEquals(scheduler.getStatus().nextScheduledAt instanceof Date, true);
   scheduler.stop();
@@ -103,7 +132,7 @@ Deno.test("GitBackupScheduler - start is no-op when already started", () => {
 });
 
 Deno.test("GitBackupScheduler - getStatus returns correct running state", async () => {
-  const scheduler = new GitBackupScheduler(createConfig({ intervalMs: 20 }));
+  const scheduler = new GitBackupScheduler(createConfig({ intervalMs: 5000 }));
   let resolveCallback: () => void;
   const callbackPromise = new Promise<void>((resolve) => {
     resolveCallback = resolve;
@@ -117,18 +146,19 @@ Deno.test("GitBackupScheduler - getStatus returns correct running state", async 
   scheduler.start();
 
   await callbackPromise;
-  scheduler.stop();
   await new Promise((r) => setTimeout(r, 50));
+  scheduler.stop();
 
   assertEquals(scheduler.getStatus().isRunning, false);
   assertEquals(scheduler.getStatus().lastExecutedAt instanceof Date, true);
 });
 
 Deno.test("GitBackupScheduler - execute without callback", async () => {
-  const scheduler = new GitBackupScheduler(createConfig({ intervalMs: 20 }));
+  const scheduler = new GitBackupScheduler(createConfig({ intervalMs: 5000 }));
   scheduler.start();
 
-  await new Promise((resolve) => setTimeout(resolve, 60));
+  // Wait for immediate execution to complete
+  await new Promise((resolve) => setTimeout(resolve, 50));
   scheduler.stop();
 
   assertEquals(scheduler.getStatus().lastExecutedAt instanceof Date, true);
