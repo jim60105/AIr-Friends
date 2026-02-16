@@ -245,3 +245,26 @@ Deno.test("GitBackupService - cleans stale lock files on initialize", async () =
     assertEquals(lockExists, false);
   });
 });
+
+Deno.test("GitBackupService - initialize sets safe.directory config", async () => {
+  await withTempGitEnv(async (dataDir, bareDir) => {
+    const service = new GitBackupService(
+      createConfig({ remoteUrl: bareDir }),
+      dataDir,
+    );
+    await service.initialize();
+
+    // Check if safe.directory is set globally
+    const proc = new Deno.Command("git", {
+      args: ["config", "--global", "--get-all", "safe.directory"],
+      stdout: "piped",
+      stderr: "piped",
+    });
+    const { stdout, success } = await proc.output();
+    const safeDirs = new TextDecoder().decode(stdout).trim().split("\n");
+
+    // Verify that our dataDir is in the safe.directory list
+    assertEquals(success, true);
+    assertEquals(safeDirs.includes(dataDir), true);
+  });
+});
