@@ -734,11 +734,15 @@ gitBackup:
 **How It Works:**
 
 1. `GitBackupScheduler` triggers backup at fixed intervals
-2. `GitBackupService.initialize()` initializes the Git repo at startup (git init, remote add, fetch/pull)
-3. `GitBackupService.performBackup()` executes add → commit → push
-4. Authentication uses the existing `GITHUB_TOKEN`, dynamically injected into the HTTPS URL
-5. A final backup is performed during graceful shutdown
-6. Push conflicts trigger an automatic `pull --rebase` and one retry
+2. `GitBackupService.initialize()` intelligently initializes based on directory state at startup:
+   - Empty directory: clone the remote repository
+   - Non-empty non-Git directory: git init + commit + push
+   - Existing Git repo: commit uncommitted changes + push
+3. Push conflicts during initialization trigger automatic rebase retry; if that also fails, a `backup-{datetime}` fallback branch is created and pushed
+4. `GitBackupService.performBackup()` executes add → commit → push
+5. Authentication uses the existing `GITHUB_TOKEN`, dynamically injected into the HTTPS URL
+6. A final backup is performed during graceful shutdown
+7. Push conflicts during periodic backup trigger an automatic `pull --rebase` and one retry
 
 **Key Components:**
 
