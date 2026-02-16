@@ -24,6 +24,19 @@ export class GitBackupService {
     // Clean up stale lock files
     await this.cleanStaleLockFiles();
 
+    // Mark directory as safe before any git operations
+    // This is required in containerized environments where directory ownership may differ
+    const safeDir = await this.runGit([
+      "config",
+      "--global",
+      "--add",
+      "safe.directory",
+      this.dataDir,
+    ]);
+    if (!safeDir.success) {
+      logger.warn("Failed to set safe.directory config", { dataDir: this.dataDir });
+    }
+
     // Initialize git repo if needed
     const hasGit = await this.dirExists(`${this.dataDir}/.git`);
     if (!hasGit) {
