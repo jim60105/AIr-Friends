@@ -1935,38 +1935,42 @@ Deno.test({
   },
 });
 
-Deno.test("SessionOrchestrator - oversized images are skipped", async () => {
-  const tempDir = await Deno.makeTempDir();
-  try {
-    const { orchestrator, sessionRegistry } = await createTestableOrchestrator(
-      tempDir,
-    );
-    const event = createTestEvent();
-    event.attachments = [{
-      id: "a1",
-      url: "https://example.com/huge.png",
-      mimeType: "image/png",
-      filename: "huge.png",
-      size: 30 * 1024 * 1024, // 30MB - over 20MB limit
-      isImage: true,
-    }];
-    let receivedArg: string | unknown[] | null = null;
-    orchestrator.setConnectorSetup((connector) => {
-      connector.supportsImageContent = () => true;
-      connector.prompt = (_sessionId: string, text: string | unknown[]) => {
-        receivedArg = text;
-        return Promise.resolve({ stopReason: "end_turn" } as PromptResponse);
-      };
-    });
+Deno.test({
+  name: "SessionOrchestrator - oversized images are skipped",
+  sanitizeResources: false,
+  fn: async () => {
+    const tempDir = await Deno.makeTempDir();
+    try {
+      const { orchestrator, sessionRegistry } = await createTestableOrchestrator(
+        tempDir,
+      );
+      const event = createTestEvent();
+      event.attachments = [{
+        id: "a1",
+        url: "https://example.com/huge.png",
+        mimeType: "image/png",
+        filename: "huge.png",
+        size: 30 * 1024 * 1024, // 30MB - over 20MB limit
+        isImage: true,
+      }];
+      let receivedArg: string | unknown[] | null = null;
+      orchestrator.setConnectorSetup((connector) => {
+        connector.supportsImageContent = () => true;
+        connector.prompt = (_sessionId: string, text: string | unknown[]) => {
+          receivedArg = text;
+          return Promise.resolve({ stopReason: "end_turn" } as PromptResponse);
+        };
+      });
 
-    const platformAdapter = new MockPlatformAdapter() as unknown as PlatformAdapter;
-    await orchestrator.processMessage(event, platformAdapter);
+      const platformAdapter = new MockPlatformAdapter() as unknown as PlatformAdapter;
+      await orchestrator.processMessage(event, platformAdapter);
 
-    // Oversized image should be skipped, prompt should be string
-    assertEquals(typeof receivedArg, "string");
+      // Oversized image should be skipped, prompt should be string
+      assertEquals(typeof receivedArg, "string");
 
-    sessionRegistry.stop();
-  } finally {
-    await Deno.remove(tempDir, { recursive: true });
-  }
+      sessionRegistry.stop();
+    } finally {
+      await Deno.remove(tempDir, { recursive: true });
+    }
+  },
 });

@@ -1,7 +1,7 @@
 // src/core/template-renderer.ts
 
 import vento from "ventojs";
-import type { Environment } from "https://cdn.jsdelivr.net/gh/ventojs/vento@2.2.0/core/environment.ts";
+import type { Environment } from "ventojs/core/environment.ts";
 import { resolve } from "@std/path";
 import { createLogger } from "@utils/logger.ts";
 import { ConfigError, ErrorCode } from "../types/errors.ts";
