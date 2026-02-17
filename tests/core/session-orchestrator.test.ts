@@ -65,7 +65,7 @@ function createTestConfig(tempDir: string): Config {
     },
     agent: {
       model: "gpt-4",
-      systemPromptPath: "./prompts/system.md",
+      systemPromptPath: "./prompts/system_reply.md",
       tokenLimit: 20000,
       defaultAgentType: "copilot",
     },
@@ -158,12 +158,12 @@ Deno.test("SessionOrchestrator - processMessage creates workspace", async () => 
     // Create a system prompt file
     await Deno.mkdir(`${tempDir}/prompts`, { recursive: true });
     await Deno.writeTextFile(
-      `${tempDir}/prompts/system.md`,
+      `${tempDir}/prompts/system_reply.md`,
       "You are a helpful assistant.",
     );
 
     const contextAssembler = new ContextAssembler(memoryStore, {
-      systemPromptPath: `${tempDir}/prompts/system.md`,
+      systemPromptPath: `${tempDir}/prompts/system_reply.md`,
       recentMessageLimit: config.memory.recentMessageLimit,
       tokenLimit: config.agent.tokenLimit,
       memoryMaxChars: config.memory.maxChars,
@@ -223,12 +223,12 @@ Deno.test("SessionOrchestrator - skips agent execution for /clear command", asyn
     // Create a system prompt file
     await Deno.mkdir(`${tempDir}/prompts`, { recursive: true });
     await Deno.writeTextFile(
-      `${tempDir}/prompts/system.md`,
+      `${tempDir}/prompts/system_reply.md`,
       "You are a helpful assistant.",
     );
 
     const contextAssembler = new ContextAssembler(memoryStore, {
-      systemPromptPath: `${tempDir}/prompts/system.md`,
+      systemPromptPath: `${tempDir}/prompts/system_reply.md`,
       recentMessageLimit: config.memory.recentMessageLimit,
       tokenLimit: config.agent.tokenLimit,
       memoryMaxChars: config.memory.maxChars,
@@ -286,12 +286,12 @@ Deno.test("SessionOrchestrator - handles /clear with leading whitespace", async 
 
     await Deno.mkdir(`${tempDir}/prompts`, { recursive: true });
     await Deno.writeTextFile(
-      `${tempDir}/prompts/system.md`,
+      `${tempDir}/prompts/system_reply.md`,
       "You are a helpful assistant.",
     );
 
     const contextAssembler = new ContextAssembler(memoryStore, {
-      systemPromptPath: `${tempDir}/prompts/system.md`,
+      systemPromptPath: `${tempDir}/prompts/system_reply.md`,
       recentMessageLimit: config.memory.recentMessageLimit,
       tokenLimit: config.agent.tokenLimit,
       memoryMaxChars: config.memory.maxChars,
@@ -340,12 +340,12 @@ Deno.test("SessionOrchestrator - processMessage handles agent failure gracefully
     // Create a system prompt file
     await Deno.mkdir(`${tempDir}/prompts`, { recursive: true });
     await Deno.writeTextFile(
-      `${tempDir}/prompts/system.md`,
+      `${tempDir}/prompts/system_reply.md`,
       "You are a helpful assistant.",
     );
 
     const contextAssembler = new ContextAssembler(memoryStore, {
-      systemPromptPath: `${tempDir}/prompts/system.md`,
+      systemPromptPath: `${tempDir}/prompts/system_reply.md`,
       recentMessageLimit: config.memory.recentMessageLimit,
       tokenLimit: config.agent.tokenLimit,
       memoryMaxChars: config.memory.maxChars,
@@ -505,12 +505,66 @@ async function createTestableOrchestrator(tempDir: string, options?: { skillApi?
 
   await Deno.mkdir(`${tempDir}/prompts`, { recursive: true });
   await Deno.writeTextFile(
-    `${tempDir}/prompts/system.md`,
-    "You are a helpful assistant.",
+    `${tempDir}/prompts/system_reply.md`,
+    `You are a helpful assistant.
+
+{{ if userContextMessage }}
+{{ if sessionId }}
+# Session Information
+
+Your session ID is: {{ sessionId }}
+Use this session ID when calling skills that require --session-id parameter.
+{{ /if }}
+
+# Context and Message
+
+{{ userContextMessage }}
+
+# Instructions
+
+Please respond to the current message above.
+Use the \`send-reply\` skill to deliver your final response.
+You may also use \`react-message\` to add an emoji reaction to the trigger message.
+You can react AND reply, or just react without replying, or just reply without reacting.
+You may use other available skills as needed.
+{{ /if }}`,
+  );
+  await Deno.writeTextFile(
+    `${tempDir}/prompts/system_spontaneous.md`,
+    `Spontaneous Post Mode
+
+{{ if recentMessagesFetched }}
+You may reference recent conversation topics for inspiration, but do not reply to them or reuse the same theme directly
+{{ else }}
+Create something entirely original
+{{ /if }}
+
+{{ if importantMemories }}
+## Important Memories
+
+{{ importantMemories }}
+{{ /if }}
+
+{{ if recentMessages }}
+## Recent Conversation
+
+{{ recentMessages }}
+{{ /if }}
+
+{{ if availableEmojis }}
+{{ availableEmojis }}
+{{ /if }}
+
+{{ if sessionId }}
+## Session Information
+
+Your session ID is: {{ sessionId }}
+Use this session ID when calling skills that require --session-id parameter.
+{{ /if }}`,
   );
 
   const contextAssembler = new ContextAssembler(memoryStore, {
-    systemPromptPath: `${tempDir}/prompts/system.md`,
+    systemPromptPath: `${tempDir}/prompts/system_reply.md`,
     recentMessageLimit: config.memory.recentMessageLimit,
     tokenLimit: config.agent.tokenLimit,
     memoryMaxChars: config.memory.maxChars,
@@ -970,12 +1024,12 @@ Deno.test("SessionOrchestrator - processSpontaneousPost with skillApi disabled",
 
     await Deno.mkdir(`${tempDir}/prompts`, { recursive: true });
     await Deno.writeTextFile(
-      `${tempDir}/prompts/system.md`,
+      `${tempDir}/prompts/system_reply.md`,
       "You are a helpful assistant.",
     );
 
     const contextAssembler = new ContextAssembler(memoryStore, {
-      systemPromptPath: `${tempDir}/prompts/system.md`,
+      systemPromptPath: `${tempDir}/prompts/system_reply.md`,
       recentMessageLimit: config.memory.recentMessageLimit,
       tokenLimit: config.agent.tokenLimit,
       memoryMaxChars: config.memory.maxChars,
@@ -1024,7 +1078,7 @@ Deno.test("SessionOrchestrator - processSpontaneousPost with skillApi disabled",
   }
 });
 
-Deno.test("SessionOrchestrator - buildSpontaneousPrompt includes session ID", async () => {
+Deno.test("SessionOrchestrator - buildSpontaneousPrompt uses Vento template", async () => {
   const tempDir = await Deno.makeTempDir();
   try {
     const { orchestrator, skillRegistry, sessionRegistry } = await createTestableOrchestrator(
@@ -1062,7 +1116,7 @@ Deno.test("SessionOrchestrator - buildSpontaneousPrompt includes session ID", as
     assertEquals(capturedPrompt.includes("Session Information"), true);
     assertEquals(capturedPrompt.includes("Spontaneous Post Mode"), true);
     assertEquals(capturedPrompt.includes("send-reply"), true);
-    assertEquals(capturedPrompt.includes("NOT responding to any user message"), true);
+    assertEquals(capturedPrompt.includes("Create something entirely original"), true);
 
     sessionRegistry.stop();
   } finally {
@@ -1218,7 +1272,7 @@ Deno.test("SessionOrchestrator - processSelfResearch handles agent connection fa
 
     await Deno.mkdir(`${tempDir}/prompts`, { recursive: true });
     await Deno.writeTextFile(
-      `${tempDir}/prompts/system.md`,
+      `${tempDir}/prompts/system_reply.md`,
       "You are a helpful assistant.",
     );
     await Deno.writeTextFile(
@@ -1227,7 +1281,7 @@ Deno.test("SessionOrchestrator - processSelfResearch handles agent connection fa
     );
 
     const contextAssembler = new ContextAssembler(memoryStore, {
-      systemPromptPath: `${tempDir}/prompts/system.md`,
+      systemPromptPath: `${tempDir}/prompts/system_reply.md`,
       recentMessageLimit: config.memory.recentMessageLimit,
       tokenLimit: config.agent.tokenLimit,
       memoryMaxChars: config.memory.maxChars,
@@ -1511,7 +1565,7 @@ Deno.test("SessionOrchestrator - processMemoryMaintenance handles agent connecti
 
     await Deno.mkdir(`${tempDir}/prompts`, { recursive: true });
     await Deno.writeTextFile(
-      `${tempDir}/prompts/system.md`,
+      `${tempDir}/prompts/system_reply.md`,
       "You are a helpful assistant.",
     );
     await Deno.writeTextFile(
@@ -1520,7 +1574,7 @@ Deno.test("SessionOrchestrator - processMemoryMaintenance handles agent connecti
     );
 
     const contextAssembler = new ContextAssembler(memoryStore, {
-      systemPromptPath: `${tempDir}/prompts/system.md`,
+      systemPromptPath: `${tempDir}/prompts/system_reply.md`,
       recentMessageLimit: config.memory.recentMessageLimit,
       tokenLimit: config.agent.tokenLimit,
       memoryMaxChars: config.memory.maxChars,

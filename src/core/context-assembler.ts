@@ -41,6 +41,29 @@ export class ContextAssembler {
   }
 
   /**
+   * Render the full prompt by re-rendering system_reply.md with userContextMessage.
+   * The system_reply.md template contains conditional sections for session info,
+   * context, and instructions that only render when userContextMessage is set.
+   */
+  async renderFullPrompt(
+    event: NormalizedEvent,
+    sessionId: string | undefined,
+    userContextMessage: string,
+  ): Promise<string> {
+    const templateVars: TemplateVariables = {
+      isDm: event.isDm,
+      platform: event.platform,
+      userId: event.userId,
+      channelId: event.channelId,
+      guildId: event.guildId ?? "",
+      sessionId: sessionId ?? "",
+      userContextMessage,
+    };
+
+    return await this.getSystemPrompt(templateVars);
+  }
+
+  /**
    * Assemble initial context for an Agent session
    */
   async assembleContext(
@@ -262,7 +285,7 @@ export class ContextAssembler {
   /**
    * Format memories into a readable section
    */
-  private formatMemoriesSection(memories: ResolvedMemory[]): string {
+  formatMemoriesSection(memories: ResolvedMemory[]): string {
     const lines = [
       "## Important Memories",
       "",
@@ -277,7 +300,7 @@ export class ContextAssembler {
    * Groups emojis by category if categories are available.
    * Limits the list to fit within a reasonable token budget.
    */
-  private formatEmojiSection(emojis: PlatformEmoji[]): string {
+  formatEmojiSection(emojis: PlatformEmoji[]): string {
     return this.formatEmojiSectionWithBudget(emojis, Infinity);
   }
 
@@ -352,7 +375,7 @@ export class ContextAssembler {
   /**
    * Format conversation history section
    */
-  private formatConversationSection(
+  formatConversationSection(
     recentMessages: PlatformMessage[],
     relatedMessages?: PlatformMessage[],
   ): string {
@@ -643,75 +666,6 @@ export class ContextAssembler {
       recentMessagesFetched: options.fetchRecentMessages,
       estimatedTokens,
     };
-  }
-
-  /**
-   * Format the assembled spontaneous context into system + user messages.
-   */
-  formatSpontaneousContext(context: AssembledSpontaneousContext): FormattedContext {
-    const parts: string[] = [];
-
-    if (context.importantMemories.length > 0) {
-      parts.push(this.formatMemoriesSection(context.importantMemories));
-    }
-
-    if (context.recentMessages.length > 0) {
-      parts.push(this.formatConversationSection(context.recentMessages));
-    }
-
-    if (context.availableEmojis && context.availableEmojis.length > 0) {
-      parts.push(this.formatEmojiSection(context.availableEmojis));
-    }
-
-    parts.push(this.buildSpontaneousInstructions(context.recentMessagesFetched));
-
-    const userMessage = parts.join("\n");
-    const estimatedTokens = combinedTokenCount(context.systemPrompt, userMessage);
-
-    return {
-      systemMessage: context.systemPrompt,
-      userMessage,
-      estimatedTokens,
-    };
-  }
-
-  /**
-   * Build instructions specific to spontaneous post mode.
-   */
-  private buildSpontaneousInstructions(hasRecentMessages: boolean): string {
-    const lines: string[] = [];
-
-    lines.push("## Spontaneous Post Mode");
-    lines.push("");
-    lines.push("You are creating a spontaneous post. This is NOT a response to any user message.");
-    lines.push("There is no current message to reply to or react to.");
-    lines.push("");
-    lines.push("Guidelines:");
-    lines.push("- Create original content that fits your character and personality");
-    lines.push(
-      "- Use your creativity to craft a post that could spark new conversations or entertain readers",
-    );
-    lines.push(
-      `- If you mention a specific event (for example, you saw an interesting project), make sure that the event actually exists (you are talking about a real project) and that you know enough about it to discuss it (you can draw on your previous knowledge to help you talk about this event). If you are not familiar with it, please state so when discussing it (for example, "I'm not too clear on the details but it seems interesting!"), rather than pretending to have in-depth knowledge.`,
-    );
-    lines.push("- Use the `send-reply` skill to post your content");
-    lines.push("- Do NOT use the `react-message` skill (there is no message to react to)");
-    lines.push("- Do NOT address or respond to any specific user");
-
-    if (hasRecentMessages) {
-      lines.push(
-        "- You may reference recent conversation topics for inspiration, but do not reply to them or reuse the same theme directly",
-      );
-    } else {
-      lines.push(
-        "- Create something entirely original — share a thought, observation, or topic you find interesting",
-      );
-    }
-      lines.push(
-        "- Search your memories for good topics to post about.",
-      );
-
-    return lines.join("\n");
   }
 
   /**

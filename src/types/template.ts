@@ -35,4 +35,19 @@ export interface TemplateVariables {
 
   /** JSON dump of enabled memories (for memory maintenance prompt) */
   memoriesDump?: string;
+
+  /** Whether recent messages were fetched (spontaneous post only) */
+  recentMessagesFetched?: boolean;
+
+  /** Formatted important memories text (spontaneous post only) */
+  importantMemories?: string;
+
+  /** Formatted recent messages text (spontaneous post only) */
+  recentMessages?: string;
+
+  /** Formatted available emojis text (spontaneous post only) */
+  availableEmojis?: string;
+
+  /** Pre-formatted user context message (normal message prompt only) */
+  userContextMessage?: string;
 }

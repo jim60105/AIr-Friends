@@ -60,7 +60,7 @@ async function withTestContextAssembler(
     // Create system prompt file
     await Deno.mkdir(`${tempDir}/prompts`, { recursive: true });
     await Deno.writeTextFile(
-      `${tempDir}/prompts/system.md`,
+      `${tempDir}/prompts/system_reply.md`,
       "You are a helpful assistant.",
     );
 
@@ -76,7 +76,7 @@ async function withTestContextAssembler(
       recentMessageLimit: 20,
       memoryMaxChars: 2000,
       tokenLimit: 20000,
-      systemPromptPath: `${tempDir}/prompts/system.md`,
+      systemPromptPath: `${tempDir}/prompts/system_reply.md`,
     });
 
     await fn(assembler, store, manager, tempDir);
@@ -223,7 +223,7 @@ Deno.test("ContextAssembler - should reload prompt when file changes", async () 
 
     // Update prompt file
     await Deno.writeTextFile(
-      `${tempDir}/prompts/system.md`,
+      `${tempDir}/prompts/system_reply.md`,
       "You are a different assistant.",
     );
 
@@ -319,7 +319,7 @@ Deno.test("ContextAssembler - should remove oldest messages when exceeding token
   try {
     await Deno.mkdir(`${tempDir}/prompts`, { recursive: true });
     await Deno.writeTextFile(
-      `${tempDir}/prompts/system.md`,
+      `${tempDir}/prompts/system_reply.md`,
       "You are a helpful assistant.",
     );
 
@@ -337,7 +337,7 @@ Deno.test("ContextAssembler - should remove oldest messages when exceeding token
       recentMessageLimit: 20,
       memoryMaxChars: 2000,
       tokenLimit: 500, // Very small limit to trigger truncation
-      systemPromptPath: `${tempDir}/prompts/system.md`,
+      systemPromptPath: `${tempDir}/prompts/system_reply.md`,
     });
 
     const event = createTestEvent();
@@ -766,108 +766,6 @@ Deno.test("ContextAssembler - assembleSpontaneousContext with empty emojis", asy
     );
 
     assertEquals(context.availableEmojis, undefined);
-  });
-});
-
-Deno.test("ContextAssembler - formatSpontaneousContext with no memories or messages", async () => {
-  await withTestContextAssembler(async (assembler, _store, manager) => {
-    const workspace = await manager.getOrCreateWorkspace(createTestEvent());
-    const fetcher = createMockMessageFetcher([]);
-
-    const context = await assembler.assembleSpontaneousContext(
-      "discord",
-      "channel123",
-      workspace,
-      fetcher,
-      { fetchRecentMessages: false },
-    );
-
-    const formatted = assembler.formatSpontaneousContext(context);
-
-    assertEquals(formatted.systemMessage, "You are a helpful assistant.");
-    assertStringIncludes(formatted.userMessage, "Spontaneous Post Mode");
-    assertStringIncludes(
-      formatted.userMessage,
-      "Create something entirely original",
-    );
-    assertEquals(formatted.estimatedTokens > 0, true);
-  });
-});
-
-Deno.test("ContextAssembler - formatSpontaneousContext with recent messages fetched", async () => {
-  await withTestContextAssembler(async (assembler, _store, manager) => {
-    const workspace = await manager.getOrCreateWorkspace(createTestEvent());
-    const messages: PlatformMessage[] = [
-      createTestMessage({ content: "Hello", username: "Bob" }),
-    ];
-    const fetcher = createMockMessageFetcher(messages);
-
-    const context = await assembler.assembleSpontaneousContext(
-      "discord",
-      "channel123",
-      workspace,
-      fetcher,
-      { fetchRecentMessages: true },
-    );
-
-    const formatted = assembler.formatSpontaneousContext(context);
-
-    assertStringIncludes(formatted.userMessage, "Recent Conversation");
-    assertStringIncludes(formatted.userMessage, "Bob: Hello");
-    assertStringIncludes(
-      formatted.userMessage,
-      "reference recent conversation topics",
-    );
-  });
-});
-
-Deno.test("ContextAssembler - formatSpontaneousContext includes memories section", async () => {
-  await withTestContextAssembler(async (assembler, store, manager) => {
-    const workspace = await manager.getOrCreateWorkspace(createTestEvent());
-    await store.addMemory(workspace, "My key fact", { importance: "high" });
-
-    const fetcher = createMockMessageFetcher([]);
-    const context = await assembler.assembleSpontaneousContext(
-      "discord",
-      "channel123",
-      workspace,
-      fetcher,
-      { fetchRecentMessages: false },
-    );
-
-    const formatted = assembler.formatSpontaneousContext(context);
-
-    assertStringIncludes(formatted.userMessage, "Important Memories");
-    assertStringIncludes(formatted.userMessage, "My key fact");
-  });
-});
-
-Deno.test("ContextAssembler - formatSpontaneousContext includes emojis", async () => {
-  await withTestContextAssembler(async (assembler, _store, manager) => {
-    const workspace = await manager.getOrCreateWorkspace(createTestEvent());
-    const emojis: PlatformEmoji[] = [
-      {
-        name: "wave",
-        animated: false,
-        useInText: ":wave:",
-        useAsReaction: ":wave:",
-        category: "Gestures",
-      },
-    ];
-    const fetcher = createMockMessageFetcher([], emojis);
-
-    const context = await assembler.assembleSpontaneousContext(
-      "discord",
-      "channel123",
-      workspace,
-      fetcher,
-      { fetchRecentMessages: false },
-    );
-
-    const formatted = assembler.formatSpontaneousContext(context);
-
-    assertStringIncludes(formatted.userMessage, "Available Custom Emojis");
-    assertStringIncludes(formatted.userMessage, "wave");
   });
 });
 

@@ -543,7 +543,7 @@ platforms:
 
 agent:
   model: "gpt-4"
-  system_prompt_path: "./prompts/system.md"
+  system_prompt_path: "./prompts/system_reply.md"
   token_limit: 4096
 
 memory:
@@ -834,7 +834,7 @@ AIr-Friends/
 │   ├── send-reply/
 │   └── lib/                 # Shared skill client library
 ├── prompts/                 # Bot prompt files (template system)
-│   ├── system.md            # Main system prompt with {{placeholders}}
+│   ├── system_reply.md      # Normal message reply system prompt
 │   ├── character_name.md    # Replaces {{character_name}}
 │   ├── character_info.md    # Replaces {{character_info}}
 │   └── ...                  # Any .md file becomes a placeholder source

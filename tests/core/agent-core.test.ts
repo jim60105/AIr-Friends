@@ -85,7 +85,7 @@ function createTestConfig(
     },
     agent: {
       model: "gpt-4",
-      systemPromptPath: `${tempDir}/prompts/system.md`,
+      systemPromptPath: `${tempDir}/prompts/system_reply.md`,
       tokenLimit: 20000,
       defaultAgentType: "copilot",
     },
@@ -125,7 +125,7 @@ Deno.test("AgentCore - constructs successfully", async () => {
     // Create system prompt
     await Deno.mkdir(`${tempDir}/prompts`, { recursive: true });
     await Deno.writeTextFile(
-      `${tempDir}/prompts/system.md`,
+      `${tempDir}/prompts/system_reply.md`,
       "You are a helpful assistant.",
     );
 
@@ -146,7 +146,7 @@ Deno.test("AgentCore - registers platform adapters", async () => {
   try {
     await Deno.mkdir(`${tempDir}/prompts`, { recursive: true });
     await Deno.writeTextFile(
-      `${tempDir}/prompts/system.md`,
+      `${tempDir}/prompts/system_reply.md`,
       "You are a helpful assistant.",
     );
 
@@ -174,7 +174,7 @@ Deno.test("AgentCore - handles events from registered platforms", async () => {
   try {
     await Deno.mkdir(`${tempDir}/prompts`, { recursive: true });
     await Deno.writeTextFile(
-      `${tempDir}/prompts/system.md`,
+      `${tempDir}/prompts/system_reply.md`,
       "You are a helpful assistant.",
     );
 
@@ -213,7 +213,7 @@ Deno.test("AgentCore - filters events blocked by access control", async () => {
   try {
     await Deno.mkdir(`${tempDir}/prompts`, { recursive: true });
     await Deno.writeTextFile(
-      `${tempDir}/prompts/system.md`,
+      `${tempDir}/prompts/system_reply.md`,
       "You are a helpful assistant.",
     );
 
@@ -244,7 +244,7 @@ Deno.test("AgentCore - returns config", async () => {
   try {
     await Deno.mkdir(`${tempDir}/prompts`, { recursive: true });
     await Deno.writeTextFile(
-      `${tempDir}/prompts/system.md`,
+      `${tempDir}/prompts/system_reply.md`,
       "You are a helpful assistant.",
     );
 
@@ -266,7 +266,7 @@ Deno.test("AgentCore - getOrchestrator returns orchestrator", async () => {
   try {
     await Deno.mkdir(`${tempDir}/prompts`, { recursive: true });
     await Deno.writeTextFile(
-      `${tempDir}/prompts/system.md`,
+      `${tempDir}/prompts/system_reply.md`,
       "You are a helpful assistant.",
     );
 
@@ -287,7 +287,7 @@ Deno.test("AgentCore - getWorkspaceManager returns workspace manager", async () 
   try {
     await Deno.mkdir(`${tempDir}/prompts`, { recursive: true });
     await Deno.writeTextFile(
-      `${tempDir}/prompts/system.md`,
+      `${tempDir}/prompts/system_reply.md`,
       "You are a helpful assistant.",
     );
 
@@ -308,7 +308,7 @@ Deno.test("AgentCore - getMemoryStore returns memory store", async () => {
   try {
     await Deno.mkdir(`${tempDir}/prompts`, { recursive: true });
     await Deno.writeTextFile(
-      `${tempDir}/prompts/system.md`,
+      `${tempDir}/prompts/system_reply.md`,
       "You are a helpful assistant.",
     );
 

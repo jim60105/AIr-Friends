@@ -38,7 +38,7 @@ function createConfig(overrides?: {
     },
     agent: {
       model: "gpt-4",
-      systemPromptPath: "./prompts/system.md",
+      systemPromptPath: "./prompts/system_reply.md",
       tokenLimit: 20000,
     },
     memory: { searchLimit: 10, maxChars: 2000, recentMessageLimit: 20 },

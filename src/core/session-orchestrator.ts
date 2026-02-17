@@ -156,7 +156,13 @@ export class SessionOrchestrator {
 
       // 3. Format context for prompt
       const formattedContext = this.contextAssembler.formatContext(context);
-      const fullPrompt = this.buildPrompt(formattedContext, shellSessionId);
+
+      // 4. Re-render system prompt with user context to produce the full prompt
+      const fullPrompt = await this.contextAssembler.renderFullPrompt(
+        event,
+        shellSessionId ?? undefined,
+        formattedContext.userMessage,
+      );
 
       sessionLogger.debug("Prompt built", {
         estimatedTokens: formattedContext.estimatedTokens,
@@ -449,12 +455,11 @@ export class SessionOrchestrator {
         shellSessionId ?? undefined,
       );
 
-      // 4. Format context
-      const formattedContext = this.contextAssembler.formatSpontaneousContext(context);
-      const fullPrompt = this.buildSpontaneousPrompt(formattedContext, shellSessionId);
+      // 4. Build prompt from template
+      const fullPrompt = await this.buildSpontaneousPromptFromTemplate(context, shellSessionId);
 
       sessionLogger.debug("Spontaneous prompt built", {
-        estimatedTokens: formattedContext.estimatedTokens,
+        estimatedTokens: context.estimatedTokens,
       });
 
       // 5. Create client config for ACP
@@ -938,98 +943,49 @@ export class SessionOrchestrator {
   }
 
   /**
-   * Build the full prompt to send to the agent for spontaneous posts
+   * Build the full prompt for spontaneous posts using Vento template
    */
-  private buildSpontaneousPrompt(
-    context: {
-      systemMessage: string;
-      userMessage: string;
-    },
+  private async buildSpontaneousPromptFromTemplate(
+    context: import("../types/context.ts").AssembledSpontaneousContext,
     sessionId: string | null,
-  ): string {
-    const parts: string[] = [];
+  ): Promise<string> {
+    const promptDir = dirname(this.config.agent.systemPromptPath);
+    const instructionsPath = join(promptDir, "system_spontaneous.md");
+    const env = createTemplateEngine(promptDir);
 
-    // System prompt
-    parts.push(context.systemMessage);
-    parts.push("");
+    const importantMemoriesText = context.importantMemories.length > 0
+      ? context.importantMemories.map((m, i) => `${i + 1}. ${m.content}`).join("\n")
+      : "";
 
-    // Session information
-    if (sessionId) {
-      parts.push("# Session Information");
-      parts.push("");
-      parts.push(`Your session ID is: ${sessionId}`);
-      parts.push(
-        "Use this session ID when calling skills that require --session-id parameter.",
-      );
-      parts.push("");
-    }
+    const recentMessagesText = context.recentMessages.length > 0
+      ? context.recentMessages.map((m) => {
+        const prefix = m.isBot ? "[Bot]" : "[User]";
+        return `${prefix} ${m.username}: ${m.content}`;
+      }).join("\n")
+      : "";
 
-    // User message with context
-    parts.push("# Context");
-    parts.push("");
-    parts.push(context.userMessage);
-    parts.push("");
+    const availableEmojisText = context.availableEmojis && context.availableEmojis.length > 0
+      ? this.contextAssembler.formatEmojiSection(context.availableEmojis)
+      : "";
 
-    // Instructions for spontaneous mode
-    parts.push("# Instructions");
-    parts.push("");
-    parts.push("This is a spontaneous post session. You are NOT responding to any user message.");
-    parts.push("- Create original content that fits your character and personality");
-    parts.push("- Use the `send-reply` skill to post your content");
-    parts.push("- Do NOT use the `react-message` skill (there is no message to react to)");
-    parts.push("- Do NOT address or respond to any specific user");
-    parts.push("You may use other available skills as needed.");
+    const variables: TemplateVariables = {
+      isDm: false,
+      platform: "internal",
+      userId: "",
+      channelId: "",
+      guildId: "",
+      sessionId: sessionId ?? "",
+      recentMessagesFetched: context.recentMessagesFetched,
+      importantMemories: importantMemoriesText,
+      recentMessages: recentMessagesText,
+      availableEmojis: availableEmojisText,
+    };
 
-    return parts.join("\n");
-  }
-
-  /**
-   * Build the full prompt to send to the agent
-   */
-  private buildPrompt(
-    context: {
-      systemMessage: string;
-      userMessage: string;
-    },
-    sessionId: string | null,
-  ): string {
-    const parts: string[] = [];
-
-    // System prompt
-    parts.push(context.systemMessage);
-    parts.push("");
-
-    // Session information
-    if (sessionId) {
-      parts.push("# Session Information");
-      parts.push("");
-      parts.push(`Your session ID is: ${sessionId}`);
-      parts.push(
-        "Use this session ID when calling skills that require --session-id parameter.",
-      );
-      parts.push("");
-    }
-
-    // User message with context
-    parts.push("# Context and Message");
-    parts.push("");
-    parts.push(context.userMessage);
-    parts.push("");
-
-    // Instructions
-    parts.push("# Instructions");
-    parts.push("");
-    parts.push("Please respond to the current message above.");
-    parts.push("Use the `send-reply` skill to deliver your final response.");
-    parts.push(
-      "You may also use `react-message` to add an emoji reaction to the trigger message.",
+    return await renderTemplate(
+      env,
+      instructionsPath,
+      variables as unknown as Record<string, unknown>,
     );
-    parts.push(
-      "You can react AND reply, or just react without replying, or just reply without reacting.",
-    );
-    parts.push("You may use other available skills as needed.");
-
-    return parts.join("\n");
   }
 
   /**
