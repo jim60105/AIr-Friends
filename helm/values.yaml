@@ -55,6 +55,11 @@ env:
   # External MCP Servers (JSON string array)
   AGENT_MCP_SERVERS: '[]'
 
+  # Dry Run / Debug Mode
+  # DRY_RUN_ENABLED: 'false'
+  # DRY_RUN_OUTPUT_PATH: './data/dry-run/'
+  # DRY_RUN_MOCK_REPLY: '（Dry run 模式 — 此為測試回覆）'
+
   # Logging
   LOG_LEVEL: 'INFO'
 

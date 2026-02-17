@@ -127,6 +127,38 @@ deno run --allow-net --allow-read --allow-write --allow-env src/main.ts --yolo
 
 **Warning**: Only use YOLO mode in isolated/trusted environments. It bypasses all permission checks for agent actions.
 
+#### Dry Run Mode
+
+The `--dry-run` flag enables dry run / debug mode. The system assembles context but does NOT call the ACP Agent — instead, the assembled prompt is written to an output directory:
+
+```bash
+deno run --allow-net --allow-read --allow-write --allow-env --allow-run src/main.ts --dry-run
+```
+
+**Use cases**:
+
+- Prompt engineering and context debugging
+- CI/CD smoke tests (zero API cost)
+- Verifying memory / context assembly output
+
+**Configuration** (in `config.yaml` under `agent:`):
+
+```yaml
+agent:
+  dryRun:
+    enabled: false                                       # Enable dry run mode (default: false)
+    outputPath: "./data/dry-run/"                        # Output directory for assembled prompts
+    mockReply: "（Dry run 模式 — 此為測試回覆）"          # Mock reply text (empty = no reply)
+```
+
+**Environment Variable Overrides:**
+
+- `DRY_RUN_ENABLED` → `agent.dryRun.enabled`
+- `DRY_RUN_OUTPUT_PATH` → `agent.dryRun.outputPath`
+- `DRY_RUN_MOCK_REPLY` → `agent.dryRun.mockReply`
+
+**Behavior**: Steps 1-6 of the session flow (workspace, session registration, context assembly, prompt rendering) execute normally. The agent connector is never created. If `mockReply` is non-empty and a platform adapter is available, a test reply is sent to the platform. Output files are named `{sessionType}_{timestamp}.md`.
+
 ## Code Style & Formatting
 
 This project uses Deno's built-in formatter and linter. Configuration is in `deno.json`:

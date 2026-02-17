@@ -68,6 +68,11 @@ export const ENV_MAPPINGS = {
   // MCP Server configuration
   AGENT_MCP_SERVERS: "agent.mcpServers",
 
+  // Dry run / debug mode settings
+  DRY_RUN_ENABLED: "agent.dryRun.enabled",
+  DRY_RUN_OUTPUT_PATH: "agent.dryRun.outputPath",
+  DRY_RUN_MOCK_REPLY: "agent.dryRun.mockReply",
+
   // Git backup settings
   GIT_BACKUP_ENABLED: "gitBackup.enabled",
   GIT_BACKUP_REMOTE_URL: "gitBackup.remoteUrl",

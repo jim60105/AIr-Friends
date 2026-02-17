@@ -91,6 +91,80 @@ export class SessionOrchestrator {
   }
 
   /**
+   * Handle dry run mode: write assembled prompt to file and optionally send mock reply.
+   * Returns a SessionResponse if dry run is active, or null if normal execution should proceed.
+   */
+  private async handleDryRun(
+    sessionType: string,
+    fullPrompt: string,
+    sessionLogger: ReturnType<typeof logger.child>,
+    options?: {
+      workspaceKey?: string;
+      channelId?: string;
+      shellSessionId?: string | null;
+      event?: NormalizedEvent;
+    },
+  ): Promise<SessionResponse | null> {
+    const dryRunConfig = this.config.agent.dryRun;
+    if (!dryRunConfig?.enabled) {
+      return null;
+    }
+
+    sessionLogger.warn("🧪 Dry run mode — skipping Agent execution");
+
+    // Ensure output directory exists
+    await Deno.mkdir(dryRunConfig.outputPath, { recursive: true });
+
+    // Generate output filename with timestamp and session type
+    const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+    const suffix = options?.shellSessionId ? `_${options.shellSessionId.slice(0, 8)}` : "";
+    const outputFile = join(
+      dryRunConfig.outputPath,
+      `${sessionType}_${timestamp}${suffix}.md`,
+    );
+
+    // Write the full prompt to file
+    await Deno.writeTextFile(outputFile, fullPrompt);
+    sessionLogger.info("Dry run prompt written to {outputFile}", { outputFile });
+
+    // Optionally send mock reply via platform adapter
+    let replySent = false;
+    if (
+      dryRunConfig.mockReply &&
+      options?.workspaceKey &&
+      options?.channelId
+    ) {
+      const replyHandler = this.skillRegistry.getReplyHandler();
+      replyHandler.clearReplyState(options.workspaceKey, options.channelId);
+
+      try {
+        const session = options.shellSessionId
+          ? this.sessionRegistry.get(options.shellSessionId)
+          : null;
+
+        if (session?.platformAdapter && options.event) {
+          await session.platformAdapter.sendReply(
+            options.event.channelId,
+            dryRunConfig.mockReply,
+            { replyToMessageId: options.event.messageId },
+          );
+          replySent = true;
+          sessionLogger.info("Dry run mock reply sent");
+        }
+      } catch (error) {
+        sessionLogger.warn("Dry run mock reply failed (non-fatal)", {
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+
+    return {
+      success: true,
+      replySent,
+    };
+  }
+
+  /**
    * Process a message event through the full orchestration flow
    */
   async processMessage(
@@ -188,6 +262,31 @@ export class SessionOrchestrator {
       sessionLogger.debug("Full prompt content", {
         fullPrompt,
       });
+
+      // === DRY RUN CHECK ===
+      const dryRunResult = await this.handleDryRun(
+        "message",
+        fullPrompt,
+        sessionLogger,
+        {
+          workspaceKey: workspace.key,
+          channelId: event.channelId,
+          shellSessionId,
+          event,
+        },
+      );
+      if (dryRunResult) {
+        if (shellSessionId) {
+          this.sessionRegistry.remove(shellSessionId);
+          const sessionIdFile = join(workspace.path, "SESSION_ID");
+          try {
+            await Deno.remove(sessionIdFile);
+          } catch { /* ignore NotFound */ }
+        }
+        result = dryRunResult;
+        return result;
+      }
+      // === END DRY RUN CHECK ===
 
       // 4. Create client config for ACP
       const clientConfig: ClientConfig = {
@@ -496,6 +595,30 @@ export class SessionOrchestrator {
         estimatedTokens: context.estimatedTokens,
       });
 
+      // === DRY RUN CHECK ===
+      const dryRunResult = await this.handleDryRun(
+        "spontaneous",
+        fullPrompt,
+        sessionLogger,
+        {
+          workspaceKey: workspace.key,
+          channelId,
+          shellSessionId,
+        },
+      );
+      if (dryRunResult) {
+        if (shellSessionId) {
+          this.sessionRegistry.remove(shellSessionId);
+          const sessionIdFile = join(workspace.path, "SESSION_ID");
+          try {
+            await Deno.remove(sessionIdFile);
+          } catch { /* ignore NotFound */ }
+        }
+        result = dryRunResult;
+        return result;
+      }
+      // === END DRY RUN CHECK ===
+
       // 5. Create client config for ACP
       const clientConfig: ClientConfig = {
         workingDir: workspace.path,
@@ -680,6 +803,26 @@ export class SessionOrchestrator {
 
       sessionLogger.debug("Self-research prompt built");
 
+      // === DRY RUN CHECK ===
+      const dryRunResult = await this.handleDryRun(
+        "self_research",
+        fullPrompt,
+        sessionLogger,
+        { shellSessionId },
+      );
+      if (dryRunResult) {
+        if (shellSessionId) {
+          this.sessionRegistry.remove(shellSessionId);
+          const sessionIdFile = join(workspace.path, "SESSION_ID");
+          try {
+            await Deno.remove(sessionIdFile);
+          } catch { /* ignore NotFound */ }
+        }
+        result = dryRunResult;
+        return result;
+      }
+      // === END DRY RUN CHECK ===
+
       // 4. Create client config for ACP
       const clientConfig: ClientConfig = {
         workingDir: workspace.path,
@@ -843,6 +986,26 @@ export class SessionOrchestrator {
         shellSessionId,
         workspace,
       );
+
+      // === DRY RUN CHECK ===
+      const dryRunResult = await this.handleDryRun(
+        "memory_maintenance",
+        fullPrompt,
+        sessionLogger,
+        { shellSessionId },
+      );
+      if (dryRunResult) {
+        if (shellSessionId) {
+          this.sessionRegistry.remove(shellSessionId);
+          const sessionIdFile = join(workspace.path, "SESSION_ID");
+          try {
+            await Deno.remove(sessionIdFile);
+          } catch { /* ignore NotFound */ }
+        }
+        result = dryRunResult;
+        return result;
+      }
+      // === END DRY RUN CHECK ===
 
       const clientConfig: ClientConfig = {
         workingDir: workspace.path,
@@ -1021,6 +1184,26 @@ export class SessionOrchestrator {
 
       // 4. Build reminder prompt
       const fullPrompt = await this.buildReminderPrompt(reminder, shellSessionId);
+
+      // === DRY RUN CHECK ===
+      const dryRunResult = await this.handleDryRun(
+        "reminder",
+        fullPrompt,
+        sessionLogger,
+        { shellSessionId },
+      );
+      if (dryRunResult) {
+        if (shellSessionId) {
+          this.sessionRegistry.remove(shellSessionId);
+          const sessionIdFile = join(workspace.path, "SESSION_ID");
+          try {
+            await Deno.remove(sessionIdFile);
+          } catch { /* ignore NotFound */ }
+        }
+        result = dryRunResult;
+        return result;
+      }
+      // === END DRY RUN CHECK ===
 
       // 5. Create client config
       const clientConfig: ClientConfig = {

@@ -9,6 +9,7 @@ import { createTemplateEngine, renderTemplate } from "./template-renderer.ts";
 import type { TemplateVariables } from "../types/template.ts";
 import type {
   Config,
+  DryRunConfig,
   GitBackupConfig,
   MemoryMaintenanceConfig,
   RateLimitConfig,
@@ -113,6 +114,15 @@ const DEFAULT_REMINDERS: RemindersConfig = {
   minIntervalMs: 60000, // 1 minute
   persistPath: "reminders.jsonl",
   checkIntervalMs: 30000, // 30 seconds
+};
+
+/**
+ * Default dry run configuration
+ */
+const DEFAULT_DRY_RUN: DryRunConfig = {
+  enabled: false,
+  outputPath: "./data/dry-run/",
+  mockReply: "（Dry run 模式 — 此為測試回覆）",
 };
 
 /**
@@ -450,6 +460,13 @@ function validateConfig(config: Record<string, unknown>): void {
 
       mr.rules = validRules;
     }
+  }
+
+  // Dry run defaults
+  if (!agentConfig.dryRun) {
+    agentConfig.dryRun = { ...DEFAULT_DRY_RUN };
+  } else {
+    agentConfig.dryRun = { ...DEFAULT_DRY_RUN, ...(agentConfig.dryRun as Record<string, unknown>) };
   }
 
   // MCP Servers validation
