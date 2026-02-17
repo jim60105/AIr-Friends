@@ -12,7 +12,8 @@ import {
 import { ContextAssembler } from "./context-assembler.ts";
 import { WorkspaceManager } from "./workspace-manager.ts";
 import { MemoryStore } from "./memory-store.ts";
-import { loadPromptFragments, replacePlaceholders } from "./config-loader.ts";
+import { createTemplateEngine, renderTemplate } from "./template-renderer.ts";
+import type { TemplateVariables } from "../types/template.ts";
 import type { SkillRegistry } from "@skills/registry.ts";
 import type { SessionRegistry } from "../skill-api/session-registry.ts";
 import type { Config, MemoryMaintenanceConfig, SelfResearchConfig } from "../types/config.ts";
@@ -144,6 +145,7 @@ export class SessionOrchestrator {
         event,
         workspace,
         platformAdapter,
+        shellSessionId ?? undefined,
       );
       sessionLogger.debug("Context assembled", {
         memoriesCount: context.importantMemories.length,
@@ -444,6 +446,7 @@ export class SessionOrchestrator {
         workspace,
         platformAdapter,
         { fetchRecentMessages: options.fetchRecentMessages },
+        shellSessionId ?? undefined,
       );
 
       // 4. Format context
@@ -1036,14 +1039,9 @@ export class SessionOrchestrator {
     rssItems: RssItem[],
     sessionId: string | null,
   ): Promise<string> {
-    // Read system_self_research.md
     const promptDir = dirname(this.config.agent.systemPromptPath);
     const instructionsPath = join(promptDir, "system_self_research.md");
-    let instructions = await Deno.readTextFile(instructionsPath);
-
-    // Replace {{placeholder}} tokens using the same prompt fragment mechanism
-    const fragments = await loadPromptFragments(promptDir, "system_self_research.md");
-    instructions = replacePlaceholders(instructions, fragments);
+    const env = createTemplateEngine(promptDir);
 
     // Format RSS items
     const rssBlock = rssItems.map((item, i) =>
@@ -1052,25 +1050,21 @@ export class SessionOrchestrator {
       }. **${item.title}**\n   Source: ${item.sourceName}\n   URL: ${item.url}\n   ${item.description}`
     ).join("\n\n");
 
-    // Replace RSS placeholder
-    instructions = instructions.replace("{rss_items_placeholder}", rssBlock);
+    const variables: TemplateVariables = {
+      isDm: false,
+      platform: "internal",
+      userId: "",
+      channelId: "",
+      guildId: "",
+      sessionId: sessionId ?? "",
+      rssItems: rssBlock,
+    };
 
-    const parts: string[] = [];
-    parts.push(instructions);
-    parts.push("");
-
-    // Session information
-    if (sessionId) {
-      parts.push("# Session Information");
-      parts.push("");
-      parts.push(`Your session ID is: ${sessionId}`);
-      parts.push(
-        "Use this session ID when calling skills that require --session-id parameter.",
-      );
-      parts.push("");
-    }
-
-    return parts.join("\n");
+    return await renderTemplate(
+      env,
+      instructionsPath,
+      variables as unknown as Record<string, unknown>,
+    );
   }
 
   /**
@@ -1083,18 +1077,27 @@ export class SessionOrchestrator {
   ): Promise<string> {
     const promptDir = dirname(this.config.agent.systemPromptPath);
     const instructionsPath = join(promptDir, "system_memory_maintenance.md");
-    let instructions = await Deno.readTextFile(instructionsPath);
-
-    const fragments = await loadPromptFragments(promptDir, "system_memory_maintenance.md");
-    instructions = replacePlaceholders(instructions, fragments);
-    instructions = instructions.replaceAll("{workspace_key}", workspaceKey);
-    instructions = instructions.replaceAll("{session_id}", sessionId ?? "");
+    const env = createTemplateEngine(promptDir);
 
     // Load all enabled memories and embed them in the prompt
     const memoriesDump = await this.serializeAllMemories(workspace);
-    instructions = instructions.replaceAll("{memories_dump}", memoriesDump);
 
-    return instructions.trim();
+    const variables: TemplateVariables = {
+      isDm: workspace.isDm,
+      platform: workspace.components.platform,
+      userId: workspace.components.userId ?? "",
+      channelId: "",
+      guildId: "",
+      sessionId: sessionId ?? "",
+      workspaceKey,
+      memoriesDump,
+    };
+
+    return await renderTemplate(
+      env,
+      instructionsPath,
+      variables as unknown as Record<string, unknown>,
+    );
   }
 
   /**

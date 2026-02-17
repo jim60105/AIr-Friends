@@ -1108,7 +1108,7 @@ Deno.test("SessionOrchestrator - processSelfResearch creates workspace and runs 
     // Create system_self_research.md prompt file
     await Deno.writeTextFile(
       `${tempDir}/prompts/system_self_research.md`,
-      "Research instructions for {{character_name}}\n{rss_items_placeholder}",
+      "Research instructions\n{{ rssItems }}",
     );
 
     const rssItems = [
@@ -1157,7 +1157,7 @@ Deno.test("SessionOrchestrator - processSelfResearch returns error on cancelled 
 
     await Deno.writeTextFile(
       `${tempDir}/prompts/system_self_research.md`,
-      "Research instructions\n{rss_items_placeholder}",
+      "Research instructions\n{{ rssItems }}",
     );
 
     const rssItems = [
@@ -1223,7 +1223,7 @@ Deno.test("SessionOrchestrator - processSelfResearch handles agent connection fa
     );
     await Deno.writeTextFile(
       `${tempDir}/prompts/system_self_research.md`,
-      "Research\n{rss_items_placeholder}",
+      "Research\n{{ rssItems }}",
     );
 
     const contextAssembler = new ContextAssembler(memoryStore, {
@@ -1274,7 +1274,7 @@ Deno.test("SessionOrchestrator - processSelfResearch formats RSS items in prompt
 
     await Deno.writeTextFile(
       `${tempDir}/prompts/system_self_research.md`,
-      "# Research\n\n{rss_items_placeholder}\n\n## End",
+      "# Research\n\n{{ rssItems }}\n\n## End",
     );
 
     const rssItems = [
@@ -1334,7 +1334,7 @@ Deno.test("SessionOrchestrator - processSelfResearch without skillApi", async ()
 
     await Deno.writeTextFile(
       `${tempDir}/prompts/system_self_research.md`,
-      "Research\n{rss_items_placeholder}",
+      "Research\n{{ rssItems }}",
     );
 
     orchestrator.setConnectorSetup((connector) => {
@@ -1372,7 +1372,7 @@ Deno.test("SessionOrchestrator - processMemoryMaintenance returns success on end
 
     await Deno.writeTextFile(
       `${tempDir}/prompts/system_memory_maintenance.md`,
-      "Maintenance for {workspace_key}\nSession: {session_id}\nMemories:\n{memories_dump}",
+      "Maintenance for {{ workspaceKey }}\nSession: {{ sessionId }}\nMemories:\n{{ memoriesDump }}",
     );
 
     orchestrator.setConnectorSetup((connector) => {
@@ -1408,7 +1408,7 @@ Deno.test("SessionOrchestrator - processMemoryMaintenance returns failure on can
 
     await Deno.writeTextFile(
       `${tempDir}/prompts/system_memory_maintenance.md`,
-      "Maintenance for {workspace_key}\n{session_id}\n{memories_dump}",
+      "Maintenance for {{ workspaceKey }}\n{{ sessionId }}\n{{ memoriesDump }}",
     );
 
     orchestrator.setConnectorSetup((connector) => {
@@ -1516,7 +1516,7 @@ Deno.test("SessionOrchestrator - processMemoryMaintenance handles agent connecti
     );
     await Deno.writeTextFile(
       `${tempDir}/prompts/system_memory_maintenance.md`,
-      "Maintenance\n{workspace_key}\n{session_id}\n{memories_dump}",
+      "Maintenance\n{{ workspaceKey }}\n{{ sessionId }}\n{{ memoriesDump }}",
     );
 
     const contextAssembler = new ContextAssembler(memoryStore, {
@@ -1566,7 +1566,7 @@ Deno.test("SessionOrchestrator - processMemoryMaintenance without skillApi", asy
 
     await Deno.writeTextFile(
       `${tempDir}/prompts/system_memory_maintenance.md`,
-      "Maintenance\n{workspace_key}\n{session_id}\n{memories_dump}",
+      "Maintenance\n{{ workspaceKey }}\n{{ sessionId }}\n{{ memoriesDump }}",
     );
 
     orchestrator.setConnectorSetup((connector) => {
@@ -1603,7 +1603,7 @@ Deno.test("SessionOrchestrator - processMemoryMaintenance embeds memories in pro
 
     await Deno.writeTextFile(
       `${tempDir}/prompts/system_memory_maintenance.md`,
-      "Maintenance for {workspace_key}\nSession: {session_id}\nMemories:\n{memories_dump}",
+      "Maintenance for {{ workspaceKey }}\nSession: {{ sessionId }}\nMemories:\n{{ memoriesDump }}",
     );
 
     // Create workspace and write memory file
@@ -1668,7 +1668,7 @@ Deno.test("SessionOrchestrator - processMemoryMaintenance shows no memories mess
 
     await Deno.writeTextFile(
       `${tempDir}/prompts/system_memory_maintenance.md`,
-      "Maintenance\n{workspace_key}\n{session_id}\n{memories_dump}",
+      "Maintenance\n{{ workspaceKey }}\n{{ sessionId }}\n{{ memoriesDump }}",
     );
 
     let capturedPrompt = "";

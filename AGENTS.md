@@ -751,18 +751,19 @@ gitBackup:
 
 ## Prompt Template System
 
-The system uses a template-based prompt system that allows easy customization without rebuilding containers.
+The system uses [Vento](https://vento.js.org/) as its prompt template engine, allowing easy customization without rebuilding containers.
 
 ### How It Works
 
-The main system prompt (`prompts/system.md`) uses `{{placeholder}}` syntax to reference content from separate fragment files. During startup, `loadSystemPrompt` (in `src/core/config-loader.ts`) scans the prompts directory and replaces all placeholders with the corresponding file contents.
+The main system prompt (`prompts/system.md`) uses Vento syntax. Fragment files are loaded via `{{ include }}` and assigned to variables with `{{ set }}`. The `loadSystemPrompt` function (in `src/core/config-loader.ts`) creates a Vento environment pointing at the prompts directory, then renders the template with context variables (platform, isDm, sessionId, etc.).
 
 **Example:**
 
 ```markdown
 <!-- prompts/system.md -->
+{{- set charName }}{{ include "./character_name.md" }}{{ /set -}}
 
-You are {{character_name}}. {{character_info}}
+You are {{ charName }}. {{ if isDm }}This is a private chat.{{ /if }}
 ```
 
 ```markdown
@@ -771,28 +772,38 @@ You are {{character_name}}. {{character_info}}
 Yuna
 ```
 
-```markdown
-<!-- prompts/character_info.md -->
-
-An AI assistant
-```
-
-**Result after loading:**
+**Result (isDm=true):**
 
 ```
-You are Yuna. An AI assistant
+You are Yuna. This is a private chat.
 ```
 
 ### Template Processing Rules
 
-| Rule                  | Behavior                                                         |
-| --------------------- | ---------------------------------------------------------------- |
-| Placeholder format    | `{{name}}` where name matches a `.md` filename                   |
-| Fragment files        | Any `.md` file in prompts directory (except `system.md`)         |
-| Content trimming      | All fragment content is trimmed before replacement               |
-| Repeated placeholders | All occurrences are replaced with the same content               |
-| Missing fragments     | Placeholders without matching files are preserved with a warning |
-| Self-exclusion        | `system.md` itself is never used as a fragment                   |
+| Rule                 | Behavior                                                           |
+| -------------------- | ------------------------------------------------------------------ |
+| Variable format      | `{{ variableName }}` outputs a variable value                      |
+| Include syntax       | `{{ include "./filename.md" }}` loads a file from prompts directory |
+| Conditionals         | `{{ if condition }}...{{ else }}...{{ /if }}`                       |
+| Set variables        | `{{ set name }}...{{ /set }}` assigns content to a variable        |
+| Content trimming     | `{{- ... -}}` removes surrounding whitespace                      |
+| Missing includes     | Throws an error with the missing file name                         |
+| Final result         | Rendered output is trimmed of leading/trailing whitespace          |
+| Comments             | `{{# comment #}}` is excluded from output                         |
+
+### Available Template Variables
+
+| Variable       | Type      | Description                                    |
+| -------------- | --------- | ---------------------------------------------- |
+| `isDm`         | `boolean` | Whether this is a direct message conversation  |
+| `platform`     | `string`  | Platform name (`"discord"` / `"misskey"`)      |
+| `userId`       | `string`  | User's platform ID                             |
+| `channelId`    | `string`  | Channel/conversation ID                        |
+| `guildId`      | `string`  | Server/guild ID (empty string if N/A)          |
+| `sessionId`    | `string`  | Current skill API session ID                   |
+| `rssItems`     | `string`  | RSS items (self-research prompt only)          |
+| `workspaceKey` | `string`  | Workspace key (memory maintenance prompt only) |
+| `memoriesDump` | `string`  | Memory JSON dump (memory maintenance only)     |
 
 ### Container Deployment Considerations
 
@@ -828,19 +839,22 @@ volumes:
   - ./my-prompts/character_info.md:/app/prompts/character_info.md:ro,Z
 ```
 
-### Adding New Placeholders
+### Adding New Template Features
 
-To add a new placeholder:
+To use new variables or conditionals in your templates:
 
-1. Add `{{new_placeholder}}` to `prompts/system.md`
-2. Create `prompts/new_placeholder.md` with the content
-3. No code changes needed - the system auto-discovers fragment files
-4. Test locally before deploying to containers
+1. Use `{{ variableName }}` directly in your template — available variables are listed above
+2. Use `{{ include "./fragment.md" }}` to include other files from the prompts directory
+3. Use `{{ if condition }}...{{ /if }}` for conditional rendering
+4. No code changes needed — Vento supports arbitrary JavaScript expressions
+5. Test locally before deploying to containers
 
 ### File References
 
-- Implementation: `src/core/config-loader.ts:213-312` (`loadSystemPrompt`, `loadPromptFragments`, `replacePlaceholders`)
-- Tests: `tests/core/config-loader.test.ts` (9 test cases covering template system)
+- Template Renderer: `src/core/template-renderer.ts` (`createTemplateEngine`, `renderTemplate`, `renderTemplateString`)
+- Config Loader: `src/core/config-loader.ts` (`loadSystemPrompt`)
+- Type Definitions: `src/types/template.ts` (`TemplateVariables`)
+- Tests: `tests/core/template-renderer.test.ts`, `tests/core/config-loader.test.ts`
 - BDD Spec: `docs/features/12-prompt-template-system.feature`
 
 ## Error Handling

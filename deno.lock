@@ -3540,6 +3540,29 @@
       "integrity": "sha512-gzUt/qt81nXsFGKIFcC3YnfEAx5NkunCfnDlvuBSSFS02bcXu4Lmea0AFIUwbLWxWPx3d9p8S5QoaujKcNQxcQ=="
     }
   },
+  "remote": {
+    "https://cdn.jsdelivr.net/gh/ventojs/vento@2.2.0/core/environment.ts": "140076e560d4d6e3ab8ecfee28fd10909d9c0f680138129a908a61076b52f768",
+    "https://cdn.jsdelivr.net/gh/ventojs/vento@2.2.0/core/errors.ts": "8606b682b465d598a394feea135dd2f84033b5ef2a61a23d116ccb782a0a547a",
+    "https://cdn.jsdelivr.net/gh/ventojs/vento@2.2.0/core/js.ts": "83084240150d7e8b83e43ec8fcf78564a8ba8599c3d517976efbb11b208903b2",
+    "https://cdn.jsdelivr.net/gh/ventojs/vento@2.2.0/core/reserved.ts": "e3ccafb4e5524b9c51fa14fa0e4bf17fd9bdd791848f17afa2aeb97835c486d1",
+    "https://cdn.jsdelivr.net/gh/ventojs/vento@2.2.0/core/tokenizer.ts": "460faa3de0e561e5046c46528c8bcbfc46b9de576af7ec8c4a8954a61a80ec76",
+    "https://cdn.jsdelivr.net/gh/ventojs/vento@2.2.0/loaders/file.ts": "83f579ac39838642bb45c6ddf48c05c08134cdd95fa7364d004fb443e972196a",
+    "https://cdn.jsdelivr.net/gh/ventojs/vento@2.2.0/mod.ts": "26081287509a87d81c51917795ff94ea80056c43599af8140bb5f666f0aaa767",
+    "https://cdn.jsdelivr.net/gh/ventojs/vento@2.2.0/plugins/echo.ts": "26109b7d47d33621dd764136be665052a48b3e68aeda2bd961504702f14c829f",
+    "https://cdn.jsdelivr.net/gh/ventojs/vento@2.2.0/plugins/escape.ts": "1db6eb7b22f88bbf94d21636c9b156ec4868e10bbcfa7dc5eae7113c36ef7b8a",
+    "https://cdn.jsdelivr.net/gh/ventojs/vento@2.2.0/plugins/export.ts": "c1f25c8e1e35027cc21e780f8fb3961febec4771463eb262959fbf035b8b8a63",
+    "https://cdn.jsdelivr.net/gh/ventojs/vento@2.2.0/plugins/for.ts": "a893a3de2c5cab43d5018cb80718ea46377c172d550e7a8ead076f00c58d59bf",
+    "https://cdn.jsdelivr.net/gh/ventojs/vento@2.2.0/plugins/function.ts": "472bdbe0bffb7d38c59003b02510cf85a78a35927219bc6a02ac2d4fde8b6597",
+    "https://cdn.jsdelivr.net/gh/ventojs/vento@2.2.0/plugins/if.ts": "db13776a5b9e7988f65c27943c344bec7463c5f3162a06cc4da1a313d7109195",
+    "https://cdn.jsdelivr.net/gh/ventojs/vento@2.2.0/plugins/import.ts": "b6fb6cc922c0897d15918d10766bbbd51069336780acdc8bbf23922ed870a1b3",
+    "https://cdn.jsdelivr.net/gh/ventojs/vento@2.2.0/plugins/include.ts": "0f473f75064be27d3c53329f2769bf0cc8bd520f04432ef94d99ebeae2e51ad1",
+    "https://cdn.jsdelivr.net/gh/ventojs/vento@2.2.0/plugins/js.ts": "f5a7fd8cc48cb1b1dc0b396e3d1fee4664cf28932dc5f5f301e38243e0e987dc",
+    "https://cdn.jsdelivr.net/gh/ventojs/vento@2.2.0/plugins/layout.ts": "09e4b29614c66847b4d9fac4f5eb3edae9159a9a85e2d22058b722ac84f367ea",
+    "https://cdn.jsdelivr.net/gh/ventojs/vento@2.2.0/plugins/mod.ts": "017d5bb3e3c80b7f67271cdf8779686f55916070c5d168a143e6a37c35bcd731",
+    "https://cdn.jsdelivr.net/gh/ventojs/vento@2.2.0/plugins/set.ts": "cbe42b771a04203b6fc1c178e655fa2536ab90ae67e52c083cf7c71f37c62711",
+    "https://cdn.jsdelivr.net/gh/ventojs/vento@2.2.0/plugins/trim.ts": "8d33271327b09ffd8f569ebde85125b1324fa9538a54d6072ac97a9fb5d24264",
+    "https://cdn.jsdelivr.net/gh/ventojs/vento@2.2.0/plugins/unescape.ts": "1c56f0310c7757880df7684fc6b7bf9efd27fdb6b929b89626802f5a99cb93ee"
+  },
   "workspace": {
     "dependencies": [
       "jsr:@std/assert@1",

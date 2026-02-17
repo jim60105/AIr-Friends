@@ -211,7 +211,7 @@ Deno.test("ContextAssembler - should estimate tokens", async () => {
   });
 });
 
-Deno.test("ContextAssembler - should invalidate cache", async () => {
+Deno.test("ContextAssembler - should reload prompt when file changes", async () => {
   await withTestContextAssembler(async (assembler, _store, manager, tempDir) => {
     const event = createTestEvent();
     const workspace = await manager.getOrCreateWorkspace(event);
@@ -227,16 +227,12 @@ Deno.test("ContextAssembler - should invalidate cache", async () => {
       "You are a different assistant.",
     );
 
-    // Still cached
+    // Vento creates a fresh engine each call, so the new file is picked up
     const context2 = await assembler.assembleContext(event, workspace, fetcher);
-    assertEquals(context2.systemPrompt, "You are a helpful assistant.");
+    assertEquals(context2.systemPrompt, "You are a different assistant.");
 
-    // Invalidate cache
+    // invalidateSystemPromptCache is now a no-op but should not throw
     assembler.invalidateSystemPromptCache();
-
-    // Should reload
-    const context3 = await assembler.assembleContext(event, workspace, fetcher);
-    assertEquals(context3.systemPrompt, "You are a different assistant.");
   });
 });
 

@@ -2,9 +2,11 @@
 
 import { parse as parseYaml } from "@std/yaml";
 import { exists } from "@std/fs";
-import { basename, dirname, join } from "@std/path";
+import { dirname } from "@std/path";
 import { createLogger } from "@utils/logger.ts";
 import { applyEnvOverrides, getEnvironment } from "@utils/env.ts";
+import { createTemplateEngine, renderTemplate } from "./template-renderer.ts";
+import type { TemplateVariables } from "../types/template.ts";
 import type {
   Config,
   GitBackupConfig,
@@ -453,17 +455,17 @@ export async function loadConfig(basePath: string = "."): Promise<Config> {
 }
 
 /**
- * Load system prompt from file, replacing {{placeholder}} tokens
- * with the content of corresponding .md files in the same directory.
+ * Load system prompt from file, rendering it with Vento template engine.
  *
- * For example, if system.md contains {{character_name}}, it will be
- * replaced with the trimmed content of character_name.md in the prompts directory.
- * Placeholders without a corresponding file are left unchanged and a warning is logged.
+ * Template files can use Vento syntax including {{ include }}, {{ if }},
+ * {{ set }}, and variable interpolation with {{ variableName }}.
  */
-export async function loadSystemPrompt(path: string): Promise<string> {
-  let content: string;
+export async function loadSystemPrompt(
+  path: string,
+  variables: TemplateVariables,
+): Promise<string> {
   try {
-    content = await Deno.readTextFile(path);
+    await Deno.stat(path);
   } catch (error) {
     if (error instanceof Deno.errors.NotFound) {
       throw new ConfigError(
@@ -479,76 +481,7 @@ export async function loadSystemPrompt(path: string): Promise<string> {
     );
   }
 
-  // Build a map of available template fragment files in the same directory
   const promptDir = dirname(path);
-  const systemFileName = basename(path);
-  const fragments = await loadPromptFragments(promptDir, systemFileName);
-
-  // Replace all {{placeholder}} tokens
-  content = replacePlaceholders(content, fragments);
-
-  return content.trim();
-}
-
-/**
- * Scan the prompt directory for .md files (excluding the system prompt file itself)
- * and return a map of { name (without extension) -> trimmed content }.
- */
-export async function loadPromptFragments(
-  dir: string,
-  excludeFileName: string,
-): Promise<Map<string, string>> {
-  const fragments = new Map<string, string>();
-
-  try {
-    for await (const entry of Deno.readDir(dir)) {
-      if (
-        !(entry.isFile || entry.isSymlink) ||
-        !entry.name.endsWith(".md") ||
-        entry.name === excludeFileName
-      ) {
-        continue;
-      }
-
-      const name = entry.name.slice(0, -3); // strip ".md"
-      const filePath = join(dir, entry.name);
-      try {
-        const text = await Deno.readTextFile(filePath);
-        fragments.set(name, text.trim());
-      } catch (error) {
-        logger.warn("Failed to read prompt fragment file", {
-          file: entry.name,
-          error: String(error),
-        });
-      }
-    }
-  } catch (error) {
-    logger.warn("Failed to scan prompt directory for fragments", {
-      dir,
-      error: String(error),
-    });
-  }
-
-  return fragments;
-}
-
-/**
- * Replace all {{key}} placeholders in content with values from the fragments map.
- * Placeholders without a matching fragment are left unchanged and a warning is logged.
- */
-export function replacePlaceholders(
-  content: string,
-  fragments: Map<string, string>,
-): string {
-  return content.replace(/\{\{(\w+)\}\}/g, (match, key: string) => {
-    const value = fragments.get(key);
-    if (value !== undefined) {
-      return value;
-    }
-    logger.warn("Prompt placeholder has no matching fragment file", {
-      placeholder: match,
-      expectedFile: `${key}.md`,
-    });
-    return match;
-  });
+  const env = createTemplateEngine(promptDir);
+  return await renderTemplate(env, path, variables as unknown as Record<string, unknown>);
 }
