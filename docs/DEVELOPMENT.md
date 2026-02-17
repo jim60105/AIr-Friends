@@ -116,7 +116,7 @@ AIr-Friends/
 │   ├── send-reply/
 │   └── lib/                 # Shared skill client library
 ├── prompts/                 # Bot prompt files (template system)
-│   ├── system.md            # Main system prompt with {{placeholders}}
+│   ├── system_reply.md      # Normal message reply system prompt
 │   ├── character_name.md    # Replaces {{character_name}}
 │   ├── character_info.md    # Replaces {{character_info}}
 │   └── ...                  # Any .md file becomes a placeholder source
@@ -298,7 +298,7 @@ I recommend checking out my blog post, ["🤖 AI Can Cosplay Too? A Beginner's G
 
 ### Prompt Template System
 
-The system prompt (`prompts/system.md`) uses [Vento](https://vento.js.org/) as its template engine. Vento is a JavaScript-based template engine that uses `{{ }}` syntax for both interpolation and control flow.
+The system prompt (`prompts/system_reply.md`) uses [Vento](https://vento.js.org/) as its template engine. Vento is a JavaScript-based template engine that uses `{{ }}` syntax for both interpolation and control flow.
 
 #### Key Features
 
@@ -337,7 +337,7 @@ The following variables are available in all prompt templates:
 | `importantMemories` | `system_spontaneous.md`       | Formatted important memories text |
 | `recentMessages` | `system_spontaneous.md`          | Formatted recent messages text  |
 | `availableEmojis` | `system_spontaneous.md`         | Formatted available emojis text |
-| `userContextMessage` | `system.md`                | Pre-formatted user context message |
+| `userContextMessage` | `system_reply.md`          | Pre-formatted user context message |
 
 #### Examples
 
@@ -380,12 +380,12 @@ Hello, I am {{ myVariable }}.
 
 #### Customizing Prompts
 
-To customize the bot's character, edit individual fragment files (e.g., `character_name.md`, `character_info.md`) without touching `system.md`. You can also override any prompt file by mounting your custom version:
+To customize the bot's character, edit individual fragment files (e.g., `character_name.md`, `character_info.md`) without touching `system_reply.md`. You can also override any prompt file by mounting your custom version:
 
 ```yaml
 # compose.yml
 volumes:
-  - ./my-prompts/system.md:/app/prompts/system.md:ro,Z
+  - ./my-prompts/system_reply.md:/app/prompts/system_reply.md:ro,Z
   - ./my-prompts/character_name.md:/app/prompts/character_name.md:ro,Z
 ```
 

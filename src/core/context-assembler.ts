@@ -41,8 +41,8 @@ export class ContextAssembler {
   }
 
   /**
-   * Render the full prompt by re-rendering system.md with userContextMessage.
-   * The system.md template contains conditional sections for session info,
+   * Render the full prompt by re-rendering system_reply.md with userContextMessage.
+   * The system_reply.md template contains conditional sections for session info,
    * context, and instructions that only render when userContextMessage is set.
    */
   async renderFullPrompt(

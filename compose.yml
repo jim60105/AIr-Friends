@@ -17,7 +17,7 @@ services:
       # - ./config.yaml:/app/config.yaml:ro,Z
       # Mount individual prompt files (optional, comment out to use defaults)
       # Only the files you mount will be overridden; others keep their container defaults.
-      # - ./prompts/system.md:/app/prompts/system.md:ro,Z
+      # - ./prompts/system_reply.md:/app/prompts/system_reply.md:ro,Z
       # - ./prompts/character_name.md:/app/prompts/character_name.md:ro,Z
       # - ./prompts/character_info.md:/app/prompts/character_info.md:ro,Z
       # - ./prompts/character_personality.md:/app/prompts/character_personality.md:ro,Z

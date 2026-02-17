@@ -53,7 +53,7 @@
     當系統組裝 Agent 初始脈絡或系統提示
     那麼必須從配置檔中的 agent.system_prompt_path 指定的路徑載入提示詞
     而且提示詞檔案必須支援純文字或 Markdown 格式
-    而且預設路徑為 "./prompts/system.md"
+    而且預設路徑為 "./prompts/system_reply.md"
     而且提示詞檔案與程式碼必須分離
     而且允許在不修改程式碼的情況下調整 Bot 行為
 

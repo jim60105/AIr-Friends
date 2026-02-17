@@ -755,12 +755,12 @@ The system uses [Vento](https://vento.js.org/) as its prompt template engine, al
 
 ### How It Works
 
-The main system prompt (`prompts/system.md`) uses Vento syntax. Fragment files are loaded via `{{ include }}` and assigned to variables with `{{ set }}`. The `loadSystemPrompt` function (in `src/core/config-loader.ts`) creates a Vento environment pointing at the prompts directory, then renders the template with context variables (platform, isDm, sessionId, etc.).
+The main system prompt (`prompts/system_reply.md`) uses Vento syntax. Fragment files are loaded via `{{ include }}` and assigned to variables with `{{ set }}`. The `loadSystemPrompt` function (in `src/core/config-loader.ts`) creates a Vento environment pointing at the prompts directory, then renders the template with context variables (platform, isDm, sessionId, etc.).
 
 **Example:**
 
 ```markdown
-<!-- prompts/system.md -->
+<!-- prompts/system_reply.md -->
 {{- set charName }}{{ include "./character_name.md" }}{{ /set -}}
 
 You are {{ charName }}. {{ if isDm }}This is a private chat.{{ /if }}
@@ -963,7 +963,7 @@ platforms:
 
 agent:
   model: "gpt-4"
-  system_prompt_path: "./prompts/system.md"
+  system_prompt_path: "./prompts/system_reply.md"
   token_limit: 4096
 
 memory:
@@ -1075,7 +1075,7 @@ AIr-Friends/
 │   └── lib/
 │       └── client.ts         # Shared skill API client
 ├── prompts/
-│   └── system.md             # Bot system prompt
+│   └── system_reply.md             # Bot system prompt
 ├── config/
 │   └── config.example.yaml   # Example configuration
 ├── docs/

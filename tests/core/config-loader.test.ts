@@ -40,7 +40,7 @@ platforms:
     enabled: false
 agent:
   model: "gpt-4"
-  systemPromptPath: "./prompts/system.md"
+  systemPromptPath: "./prompts/system_reply.md"
   tokenLimit: 20000
 workspace:
   repoPath: "./data"
@@ -65,7 +65,7 @@ platforms:
     enabled: false
 agent:
   model: "gpt-4"
-  systemPromptPath: "./prompts/system.md"
+  systemPromptPath: "./prompts/system_reply.md"
   tokenLimit: 20000
 workspace:
   repoPath: "./data"
@@ -91,7 +91,7 @@ platforms:
     enabled: false
 agent:
   model: "gpt-4"
-  systemPromptPath: "./prompts/system.md"
+  systemPromptPath: "./prompts/system_reply.md"
   tokenLimit: 20000
 workspace:
   repoPath: "./data"
@@ -121,7 +121,7 @@ platforms:
     enabled: false
 agent:
   model: "gpt-4"
-  systemPromptPath: "./prompts/system.md"
+  systemPromptPath: "./prompts/system_reply.md"
   tokenLimit: 20000
 workspace:
   repoPath: "./data"
@@ -151,7 +151,7 @@ platforms:
     enabled: false
 agent:
   model: "gpt-4"
-  systemPromptPath: "./prompts/system.md"
+  systemPromptPath: "./prompts/system_reply.md"
   tokenLimit: 20000
 workspace:
   repoPath: "./data"
@@ -179,7 +179,7 @@ platforms:
     enabled: false
 agent:
   model: "gpt-4"
-  systemPromptPath: "./prompts/system.md"
+  systemPromptPath: "./prompts/system_reply.md"
   tokenLimit: 20000
   defaultAgentType: "copilot"
 workspace:
@@ -228,7 +228,7 @@ platforms:
     enabled: false
 agent:
   model: "gpt-4"
-  systemPromptPath: "./prompts/system.md"
+  systemPromptPath: "./prompts/system_reply.md"
   tokenLimit: 20000
 workspace:
   repoPath: "./data"
@@ -257,7 +257,7 @@ async function withPromptDir(
     for (const [name, content] of Object.entries(files)) {
       await Deno.writeTextFile(`${promptDir}/${name}`, content);
     }
-    await fn(`${promptDir}/system.md`);
+    await fn(`${promptDir}/system_reply.md`);
   } finally {
     await Deno.remove(tempDir, { recursive: true });
   }
@@ -266,7 +266,7 @@ async function withPromptDir(
 Deno.test("loadSystemPrompt - should include fragment file content via Vento include", async () => {
   await withPromptDir(
     {
-      "system.md":
+      "system_reply.md":
         '{{- set charName }}{{ include "./character_name.md" }}{{ /set -}}\nHello, I am {{ charName }}!',
       "character_name.md": "Yuna",
     },
@@ -280,7 +280,7 @@ Deno.test("loadSystemPrompt - should include fragment file content via Vento inc
 Deno.test("loadSystemPrompt - should include multiple different fragments", async () => {
   await withPromptDir(
     {
-      "system.md":
+      "system_reply.md":
         '{{- set charName }}{{ include "./char_name.md" }}{{ /set -}}\n{{- set charInfo }}{{ include "./char_info.md" }}{{ /set -}}\nName: {{ charName }}, Info: {{ charInfo }}',
       "char_name.md": "Yuna",
       "char_info.md": "An AI assistant",
@@ -295,7 +295,7 @@ Deno.test("loadSystemPrompt - should include multiple different fragments", asyn
 Deno.test("loadSystemPrompt - should reuse set variable appearing multiple times", async () => {
   await withPromptDir(
     {
-      "system.md":
+      "system_reply.md":
         '{{- set name }}{{ include "./name.md" }}{{ /set -}}\nI am {{ name }}. Call me {{ name }}.',
       "name.md": "Yuna",
     },
@@ -309,7 +309,7 @@ Deno.test("loadSystemPrompt - should reuse set variable appearing multiple times
 Deno.test("loadSystemPrompt - should throw error when included file is missing", async () => {
   await withPromptDir(
     {
-      "system.md": '{{ include "./missing_fragment.md" }}',
+      "system_reply.md": '{{ include "./missing_fragment.md" }}',
     },
     async (path) => {
       await assertRejects(
@@ -323,7 +323,7 @@ Deno.test("loadSystemPrompt - should throw error when included file is missing",
 Deno.test("loadSystemPrompt - include uses explicit file paths", async () => {
   await withPromptDir(
     {
-      "system.md": '{{ include "./character_name.md" }}',
+      "system_reply.md": '{{ include "./character_name.md" }}',
       "character_name.md": "Yuna",
     },
     async (path) => {
@@ -336,7 +336,7 @@ Deno.test("loadSystemPrompt - include uses explicit file paths", async () => {
 Deno.test("loadSystemPrompt - should trim final result", async () => {
   await withPromptDir(
     {
-      "system.md": "\n  Hello World  \n",
+      "system_reply.md": "\n  Hello World  \n",
     },
     async (path) => {
       const result = await loadSystemPrompt(path, defaultVars);
@@ -347,7 +347,7 @@ Deno.test("loadSystemPrompt - should trim final result", async () => {
 
 Deno.test("loadSystemPrompt - should throw when system prompt file not found", async () => {
   await assertRejects(
-    () => loadSystemPrompt("/nonexistent/path/system.md", defaultVars),
+    () => loadSystemPrompt("/nonexistent/path/system_reply.md", defaultVars),
     ConfigError,
     "System prompt file not found",
   );
@@ -356,7 +356,7 @@ Deno.test("loadSystemPrompt - should throw when system prompt file not found", a
 Deno.test("loadSystemPrompt - should handle prompt with no placeholders", async () => {
   await withPromptDir(
     {
-      "system.md": "A plain prompt with no placeholders.",
+      "system_reply.md": "A plain prompt with no placeholders.",
       "unused.md": "This should not matter.",
     },
     async (path) => {
@@ -378,7 +378,7 @@ platforms:
     enabled: false
 agent:
   model: "gpt-4"
-  systemPromptPath: "./prompts/system.md"
+  systemPromptPath: "./prompts/system_reply.md"
   tokenLimit: 20000
 workspace:
   repoPath: "./data"
@@ -402,7 +402,7 @@ platforms:
     enabled: false
 agent:
   model: "gpt-4"
-  systemPromptPath: "./prompts/system.md"
+  systemPromptPath: "./prompts/system_reply.md"
   tokenLimit: 20000
 workspace:
   repoPath: "./data"
@@ -434,7 +434,7 @@ platforms:
     enabled: false
 agent:
   model: "gpt-4"
-  systemPromptPath: "./prompts/system.md"
+  systemPromptPath: "./prompts/system_reply.md"
   tokenLimit: 20000
 workspace:
   repoPath: "./data"
@@ -465,7 +465,7 @@ platforms:
     enabled: false
 agent:
   model: "gpt-4"
-  systemPromptPath: "./prompts/system.md"
+  systemPromptPath: "./prompts/system_reply.md"
   tokenLimit: 20000
 workspace:
   repoPath: "./data"
@@ -504,7 +504,7 @@ platforms:
     enabled: false
 agent:
   model: "gpt-4"
-  systemPromptPath: "./prompts/system.md"
+  systemPromptPath: "./prompts/system_reply.md"
   tokenLimit: 20000
 workspace:
   repoPath: "./data"
@@ -538,7 +538,7 @@ platforms:
     enabled: false
 agent:
   model: "gpt-4"
-  systemPromptPath: "./prompts/system.md"
+  systemPromptPath: "./prompts/system_reply.md"
   tokenLimit: 20000
 workspace:
   repoPath: "./data"
@@ -572,7 +572,7 @@ platforms:
     enabled: false
 agent:
   model: "gpt-4"
-  systemPromptPath: "./prompts/system.md"
+  systemPromptPath: "./prompts/system_reply.md"
   tokenLimit: 20000
 workspace:
   repoPath: "./data"
@@ -601,7 +601,7 @@ platforms:
     enabled: false
 agent:
   model: "gpt-4"
-  systemPromptPath: "./prompts/system.md"
+  systemPromptPath: "./prompts/system_reply.md"
   tokenLimit: 20000
 workspace:
   repoPath: "./data"
@@ -636,7 +636,7 @@ platforms:
     enabled: false
 agent:
   model: "gpt-4"
-  systemPromptPath: "./prompts/system.md"
+  systemPromptPath: "./prompts/system_reply.md"
   tokenLimit: 20000
 workspace:
   repoPath: "./data"
@@ -674,7 +674,7 @@ platforms:
     enabled: false
 agent:
   model: "gpt-4"
-  systemPromptPath: "./prompts/system.md"
+  systemPromptPath: "./prompts/system_reply.md"
   tokenLimit: 20000
 workspace:
   repoPath: "./data"
@@ -700,7 +700,7 @@ platforms:
     enabled: false
 agent:
   model: "gpt-4"
-  systemPromptPath: "./prompts/system.md"
+  systemPromptPath: "./prompts/system_reply.md"
   tokenLimit: 20000
 workspace:
   repoPath: "./data"
@@ -732,7 +732,7 @@ platforms:
     enabled: false
 agent:
   model: "gpt-4"
-  systemPromptPath: "./prompts/system.md"
+  systemPromptPath: "./prompts/system_reply.md"
   tokenLimit: 20000
 workspace:
   repoPath: "./data"
@@ -760,7 +760,7 @@ platforms:
     enabled: false
 agent:
   model: "gpt-4"
-  systemPromptPath: "./prompts/system.md"
+  systemPromptPath: "./prompts/system_reply.md"
   tokenLimit: 20000
 workspace:
   repoPath: "./data"
@@ -786,7 +786,7 @@ platforms:
     enabled: false
 agent:
   model: "gpt-4"
-  systemPromptPath: "./prompts/system.md"
+  systemPromptPath: "./prompts/system_reply.md"
   tokenLimit: 20000
 workspace:
   repoPath: "./data"
@@ -812,7 +812,7 @@ platforms:
     enabled: false
 agent:
   model: "gpt-4"
-  systemPromptPath: "./prompts/system.md"
+  systemPromptPath: "./prompts/system_reply.md"
   tokenLimit: 20000
 workspace:
   repoPath: "./data"
@@ -837,7 +837,7 @@ platforms:
     enabled: false
 agent:
   model: "gpt-4"
-  systemPromptPath: "./prompts/system.md"
+  systemPromptPath: "./prompts/system_reply.md"
   tokenLimit: 20000
 workspace:
   repoPath: "./data"
@@ -866,7 +866,7 @@ platforms:
     enabled: false
 agent:
   model: "gpt-4"
-  systemPromptPath: "./prompts/system.md"
+  systemPromptPath: "./prompts/system_reply.md"
   tokenLimit: 20000
 workspace:
   repoPath: "./data"
@@ -893,7 +893,7 @@ platforms:
     enabled: false
 agent:
   model: "gpt-4"
-  systemPromptPath: "./prompts/system.md"
+  systemPromptPath: "./prompts/system_reply.md"
   tokenLimit: 20000
 workspace:
   repoPath: "./data"
@@ -926,7 +926,7 @@ platforms:
     enabled: false
 agent:
   model: "gpt-4"
-  systemPromptPath: "./prompts/system.md"
+  systemPromptPath: "./prompts/system_reply.md"
   tokenLimit: 20000
 workspace:
   repoPath: "./data"
@@ -953,7 +953,7 @@ platforms:
     enabled: false
 agent:
   model: "gpt-4"
-  systemPromptPath: "./prompts/system.md"
+  systemPromptPath: "./prompts/system_reply.md"
   tokenLimit: 20000
 workspace:
   repoPath: "./data"
@@ -981,7 +981,7 @@ platforms:
     enabled: false
 agent:
   model: "gpt-4"
-  systemPromptPath: "./prompts/system.md"
+  systemPromptPath: "./prompts/system_reply.md"
   tokenLimit: 20000
 workspace:
   repoPath: "./data"
@@ -1010,7 +1010,7 @@ platforms:
     enabled: false
 agent:
   model: "gpt-4"
-  systemPromptPath: "./prompts/system.md"
+  systemPromptPath: "./prompts/system_reply.md"
   tokenLimit: 20000
 workspace:
   repoPath: "./data"
@@ -1040,7 +1040,7 @@ platforms:
     enabled: false
 agent:
   model: "gpt-4"
-  systemPromptPath: "./prompts/system.md"
+  systemPromptPath: "./prompts/system_reply.md"
   tokenLimit: 20000
 workspace:
   repoPath: "./data"
@@ -1070,7 +1070,7 @@ platforms:
     enabled: false
 agent:
   model: "gpt-4"
-  systemPromptPath: "./prompts/system.md"
+  systemPromptPath: "./prompts/system_reply.md"
   tokenLimit: 20000
 workspace:
   repoPath: "./data"
@@ -1103,7 +1103,7 @@ platforms:
     enabled: false
 agent:
   model: "gpt-4"
-  systemPromptPath: "./prompts/system.md"
+  systemPromptPath: "./prompts/system_reply.md"
   tokenLimit: 20000
 workspace:
   repoPath: "./data"
@@ -1129,7 +1129,7 @@ platforms:
     enabled: false
 agent:
   model: "gpt-4"
-  systemPromptPath: "./prompts/system.md"
+  systemPromptPath: "./prompts/system_reply.md"
   tokenLimit: 20000
 workspace:
   repoPath: "./data"
@@ -1157,7 +1157,7 @@ platforms:
     enabled: false
 agent:
   model: "gpt-4"
-  systemPromptPath: "./prompts/system.md"
+  systemPromptPath: "./prompts/system_reply.md"
   tokenLimit: 20000
 workspace:
   repoPath: "./data"
@@ -1185,7 +1185,7 @@ platforms:
     enabled: false
 agent:
   model: "gpt-4"
-  systemPromptPath: "./prompts/system.md"
+  systemPromptPath: "./prompts/system_reply.md"
   tokenLimit: 20000
 workspace:
   repoPath: "./data"
@@ -1213,7 +1213,7 @@ platforms:
     enabled: false
 agent:
   model: "gpt-4"
-  systemPromptPath: "./prompts/system.md"
+  systemPromptPath: "./prompts/system_reply.md"
   tokenLimit: 20000
 workspace:
   repoPath: "./data"
@@ -1237,7 +1237,7 @@ platforms:
     enabled: false
 agent:
   model: "gpt-4"
-  systemPromptPath: "./prompts/system.md"
+  systemPromptPath: "./prompts/system_reply.md"
   tokenLimit: 20000
 workspace:
   repoPath: "./data"
@@ -1266,7 +1266,7 @@ platforms:
     enabled: false
 agent:
   model: "gpt-4"
-  systemPromptPath: "./prompts/system.md"
+  systemPromptPath: "./prompts/system_reply.md"
   tokenLimit: 20000
 workspace:
   repoPath: "./data"
@@ -1293,7 +1293,7 @@ platforms:
     enabled: false
 agent:
   model: "gpt-4"
-  systemPromptPath: "./prompts/system.md"
+  systemPromptPath: "./prompts/system_reply.md"
   tokenLimit: 20000
 workspace:
   repoPath: "./data"

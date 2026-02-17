@@ -65,7 +65,7 @@ function createTestConfig(tempDir: string): Config {
     },
     agent: {
       model: "gpt-4",
-      systemPromptPath: "./prompts/system.md",
+      systemPromptPath: "./prompts/system_reply.md",
       tokenLimit: 20000,
       defaultAgentType: "copilot",
     },
@@ -158,12 +158,12 @@ Deno.test("SessionOrchestrator - processMessage creates workspace", async () => 
     // Create a system prompt file
     await Deno.mkdir(`${tempDir}/prompts`, { recursive: true });
     await Deno.writeTextFile(
-      `${tempDir}/prompts/system.md`,
+      `${tempDir}/prompts/system_reply.md`,
       "You are a helpful assistant.",
     );
 
     const contextAssembler = new ContextAssembler(memoryStore, {
-      systemPromptPath: `${tempDir}/prompts/system.md`,
+      systemPromptPath: `${tempDir}/prompts/system_reply.md`,
       recentMessageLimit: config.memory.recentMessageLimit,
       tokenLimit: config.agent.tokenLimit,
       memoryMaxChars: config.memory.maxChars,
@@ -223,12 +223,12 @@ Deno.test("SessionOrchestrator - skips agent execution for /clear command", asyn
     // Create a system prompt file
     await Deno.mkdir(`${tempDir}/prompts`, { recursive: true });
     await Deno.writeTextFile(
-      `${tempDir}/prompts/system.md`,
+      `${tempDir}/prompts/system_reply.md`,
       "You are a helpful assistant.",
     );
 
     const contextAssembler = new ContextAssembler(memoryStore, {
-      systemPromptPath: `${tempDir}/prompts/system.md`,
+      systemPromptPath: `${tempDir}/prompts/system_reply.md`,
       recentMessageLimit: config.memory.recentMessageLimit,
       tokenLimit: config.agent.tokenLimit,
       memoryMaxChars: config.memory.maxChars,
@@ -286,12 +286,12 @@ Deno.test("SessionOrchestrator - handles /clear with leading whitespace", async 
 
     await Deno.mkdir(`${tempDir}/prompts`, { recursive: true });
     await Deno.writeTextFile(
-      `${tempDir}/prompts/system.md`,
+      `${tempDir}/prompts/system_reply.md`,
       "You are a helpful assistant.",
     );
 
     const contextAssembler = new ContextAssembler(memoryStore, {
-      systemPromptPath: `${tempDir}/prompts/system.md`,
+      systemPromptPath: `${tempDir}/prompts/system_reply.md`,
       recentMessageLimit: config.memory.recentMessageLimit,
       tokenLimit: config.agent.tokenLimit,
       memoryMaxChars: config.memory.maxChars,
@@ -340,12 +340,12 @@ Deno.test("SessionOrchestrator - processMessage handles agent failure gracefully
     // Create a system prompt file
     await Deno.mkdir(`${tempDir}/prompts`, { recursive: true });
     await Deno.writeTextFile(
-      `${tempDir}/prompts/system.md`,
+      `${tempDir}/prompts/system_reply.md`,
       "You are a helpful assistant.",
     );
 
     const contextAssembler = new ContextAssembler(memoryStore, {
-      systemPromptPath: `${tempDir}/prompts/system.md`,
+      systemPromptPath: `${tempDir}/prompts/system_reply.md`,
       recentMessageLimit: config.memory.recentMessageLimit,
       tokenLimit: config.agent.tokenLimit,
       memoryMaxChars: config.memory.maxChars,
@@ -505,7 +505,7 @@ async function createTestableOrchestrator(tempDir: string, options?: { skillApi?
 
   await Deno.mkdir(`${tempDir}/prompts`, { recursive: true });
   await Deno.writeTextFile(
-    `${tempDir}/prompts/system.md`,
+    `${tempDir}/prompts/system_reply.md`,
     `You are a helpful assistant.
 
 {{ if userContextMessage }}
@@ -564,7 +564,7 @@ Use this session ID when calling skills that require --session-id parameter.
   );
 
   const contextAssembler = new ContextAssembler(memoryStore, {
-    systemPromptPath: `${tempDir}/prompts/system.md`,
+    systemPromptPath: `${tempDir}/prompts/system_reply.md`,
     recentMessageLimit: config.memory.recentMessageLimit,
     tokenLimit: config.agent.tokenLimit,
     memoryMaxChars: config.memory.maxChars,
@@ -1024,12 +1024,12 @@ Deno.test("SessionOrchestrator - processSpontaneousPost with skillApi disabled",
 
     await Deno.mkdir(`${tempDir}/prompts`, { recursive: true });
     await Deno.writeTextFile(
-      `${tempDir}/prompts/system.md`,
+      `${tempDir}/prompts/system_reply.md`,
       "You are a helpful assistant.",
     );
 
     const contextAssembler = new ContextAssembler(memoryStore, {
-      systemPromptPath: `${tempDir}/prompts/system.md`,
+      systemPromptPath: `${tempDir}/prompts/system_reply.md`,
       recentMessageLimit: config.memory.recentMessageLimit,
       tokenLimit: config.agent.tokenLimit,
       memoryMaxChars: config.memory.maxChars,
@@ -1272,7 +1272,7 @@ Deno.test("SessionOrchestrator - processSelfResearch handles agent connection fa
 
     await Deno.mkdir(`${tempDir}/prompts`, { recursive: true });
     await Deno.writeTextFile(
-      `${tempDir}/prompts/system.md`,
+      `${tempDir}/prompts/system_reply.md`,
       "You are a helpful assistant.",
     );
     await Deno.writeTextFile(
@@ -1281,7 +1281,7 @@ Deno.test("SessionOrchestrator - processSelfResearch handles agent connection fa
     );
 
     const contextAssembler = new ContextAssembler(memoryStore, {
-      systemPromptPath: `${tempDir}/prompts/system.md`,
+      systemPromptPath: `${tempDir}/prompts/system_reply.md`,
       recentMessageLimit: config.memory.recentMessageLimit,
       tokenLimit: config.agent.tokenLimit,
       memoryMaxChars: config.memory.maxChars,
@@ -1565,7 +1565,7 @@ Deno.test("SessionOrchestrator - processMemoryMaintenance handles agent connecti
 
     await Deno.mkdir(`${tempDir}/prompts`, { recursive: true });
     await Deno.writeTextFile(
-      `${tempDir}/prompts/system.md`,
+      `${tempDir}/prompts/system_reply.md`,
       "You are a helpful assistant.",
     );
     await Deno.writeTextFile(
@@ -1574,7 +1574,7 @@ Deno.test("SessionOrchestrator - processMemoryMaintenance handles agent connecti
     );
 
     const contextAssembler = new ContextAssembler(memoryStore, {
-      systemPromptPath: `${tempDir}/prompts/system.md`,
+      systemPromptPath: `${tempDir}/prompts/system_reply.md`,
       recentMessageLimit: config.memory.recentMessageLimit,
       tokenLimit: config.agent.tokenLimit,
       memoryMaxChars: config.memory.maxChars,

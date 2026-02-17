@@ -60,7 +60,7 @@ async function withTestContextAssembler(
     // Create system prompt file
     await Deno.mkdir(`${tempDir}/prompts`, { recursive: true });
     await Deno.writeTextFile(
-      `${tempDir}/prompts/system.md`,
+      `${tempDir}/prompts/system_reply.md`,
       "You are a helpful assistant.",
     );
 
@@ -76,7 +76,7 @@ async function withTestContextAssembler(
       recentMessageLimit: 20,
       memoryMaxChars: 2000,
       tokenLimit: 20000,
-      systemPromptPath: `${tempDir}/prompts/system.md`,
+      systemPromptPath: `${tempDir}/prompts/system_reply.md`,
     });
 
     await fn(assembler, store, manager, tempDir);
@@ -223,7 +223,7 @@ Deno.test("ContextAssembler - should reload prompt when file changes", async () 
 
     // Update prompt file
     await Deno.writeTextFile(
-      `${tempDir}/prompts/system.md`,
+      `${tempDir}/prompts/system_reply.md`,
       "You are a different assistant.",
     );
 
@@ -319,7 +319,7 @@ Deno.test("ContextAssembler - should remove oldest messages when exceeding token
   try {
     await Deno.mkdir(`${tempDir}/prompts`, { recursive: true });
     await Deno.writeTextFile(
-      `${tempDir}/prompts/system.md`,
+      `${tempDir}/prompts/system_reply.md`,
       "You are a helpful assistant.",
     );
 
@@ -337,7 +337,7 @@ Deno.test("ContextAssembler - should remove oldest messages when exceeding token
       recentMessageLimit: 20,
       memoryMaxChars: 2000,
       tokenLimit: 500, // Very small limit to trigger truncation
-      systemPromptPath: `${tempDir}/prompts/system.md`,
+      systemPromptPath: `${tempDir}/prompts/system_reply.md`,
     });
 
     const event = createTestEvent();
