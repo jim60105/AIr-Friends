@@ -337,8 +337,7 @@ The following variables are available in all prompt templates:
 | `importantMemories` | `system_spontaneous.md`       | Formatted important memories text |
 | `recentMessages` | `system_spontaneous.md`          | Formatted recent messages text  |
 | `availableEmojis` | `system_spontaneous.md`         | Formatted available emojis text |
-| `systemPrompt` | `system_message.md`              | Rendered system prompt content  |
-| `userContextMessage` | `system_message.md`          | Pre-formatted user context message |
+| `userContextMessage` | `system.md`                | Pre-formatted user context message |
 
 #### Examples
 

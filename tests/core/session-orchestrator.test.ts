@@ -506,12 +506,9 @@ async function createTestableOrchestrator(tempDir: string, options?: { skillApi?
   await Deno.mkdir(`${tempDir}/prompts`, { recursive: true });
   await Deno.writeTextFile(
     `${tempDir}/prompts/system.md`,
-    "You are a helpful assistant.",
-  );
-  await Deno.writeTextFile(
-    `${tempDir}/prompts/system_message.md`,
-    `{{ systemPrompt }}
+    `You are a helpful assistant.
 
+{{ if userContextMessage }}
 {{ if sessionId }}
 # Session Information
 
@@ -529,7 +526,8 @@ Please respond to the current message above.
 Use the \`send-reply\` skill to deliver your final response.
 You may also use \`react-message\` to add an emoji reaction to the trigger message.
 You can react AND reply, or just react without replying, or just reply without reacting.
-You may use other available skills as needed.`,
+You may use other available skills as needed.
+{{ /if }}`,
   );
   await Deno.writeTextFile(
     `${tempDir}/prompts/system_spontaneous.md`,

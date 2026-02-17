@@ -48,9 +48,6 @@ export interface TemplateVariables {
   /** Formatted available emojis text (spontaneous post only) */
   availableEmojis?: string;
 
-  /** Rendered system prompt content (normal message prompt only) */
-  systemPrompt?: string;
-
   /** Pre-formatted user context message (normal message prompt only) */
   userContextMessage?: string;
 }

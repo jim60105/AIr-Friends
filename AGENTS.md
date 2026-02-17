@@ -808,7 +808,6 @@ You are Yuna. This is a private chat.
 | `importantMemories` | `string` | Formatted important memories text (spontaneous post only) |
 | `recentMessages` | `string` | Formatted recent messages text (spontaneous post only) |
 | `availableEmojis` | `string` | Formatted available emojis text (spontaneous post only) |
-| `systemPrompt` | `string` | Rendered system prompt content (normal message prompt only) |
 | `userContextMessage` | `string` | Pre-formatted user context message (normal message prompt only) |
 
 ### Container Deployment Considerations

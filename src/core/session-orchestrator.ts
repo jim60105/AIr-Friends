@@ -156,7 +156,13 @@ export class SessionOrchestrator {
 
       // 3. Format context for prompt
       const formattedContext = this.contextAssembler.formatContext(context);
-      const fullPrompt = await this.buildNormalPromptFromTemplate(formattedContext, shellSessionId);
+
+      // 4. Re-render system prompt with user context to produce the full prompt
+      const fullPrompt = await this.contextAssembler.renderFullPrompt(
+        event,
+        shellSessionId ?? undefined,
+        formattedContext.userMessage,
+      );
 
       sessionLogger.debug("Prompt built", {
         estimatedTokens: formattedContext.estimatedTokens,
@@ -973,38 +979,6 @@ export class SessionOrchestrator {
       importantMemories: importantMemoriesText,
       recentMessages: recentMessagesText,
       availableEmojis: availableEmojisText,
-    };
-
-    return await renderTemplate(
-      env,
-      instructionsPath,
-      variables as unknown as Record<string, unknown>,
-    );
-  }
-
-  /**
-   * Build the full prompt for normal message replies using Vento template
-   */
-  private async buildNormalPromptFromTemplate(
-    context: {
-      systemMessage: string;
-      userMessage: string;
-    },
-    sessionId: string | null,
-  ): Promise<string> {
-    const promptDir = dirname(this.config.agent.systemPromptPath);
-    const instructionsPath = join(promptDir, "system_message.md");
-    const env = createTemplateEngine(promptDir);
-
-    const variables: TemplateVariables = {
-      isDm: false,
-      platform: "internal",
-      userId: "",
-      channelId: "",
-      guildId: "",
-      sessionId: sessionId ?? "",
-      systemPrompt: context.systemMessage,
-      userContextMessage: context.userMessage,
     };
 
     return await renderTemplate(

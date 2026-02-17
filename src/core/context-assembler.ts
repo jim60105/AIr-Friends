@@ -41,6 +41,29 @@ export class ContextAssembler {
   }
 
   /**
+   * Render the full prompt by re-rendering system.md with userContextMessage.
+   * The system.md template contains conditional sections for session info,
+   * context, and instructions that only render when userContextMessage is set.
+   */
+  async renderFullPrompt(
+    event: NormalizedEvent,
+    sessionId: string | undefined,
+    userContextMessage: string,
+  ): Promise<string> {
+    const templateVars: TemplateVariables = {
+      isDm: event.isDm,
+      platform: event.platform,
+      userId: event.userId,
+      channelId: event.channelId,
+      guildId: event.guildId ?? "",
+      sessionId: sessionId ?? "",
+      userContextMessage,
+    };
+
+    return await this.getSystemPrompt(templateVars);
+  }
+
+  /**
    * Assemble initial context for an Agent session
    */
   async assembleContext(

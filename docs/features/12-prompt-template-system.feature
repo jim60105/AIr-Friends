@@ -72,8 +72,8 @@
     那麼輸出包含「Create something entirely original」指示
 
   情境: 一般訊息回覆提示詞使用 Vento 模板渲染
-    假設 prompts/system_message.md 使用 Vento 語法
-    而且模板包含 systemPrompt 和 userContextMessage 變數
+    假設 prompts/system.md 包含 userContextMessage 條件區塊
+    而且模板包含 userContextMessage 變數
     當系統以 sessionId 渲染提示詞
     那麼輸出包含 Session Information 區塊
     而且輸出包含 Instructions 區塊
