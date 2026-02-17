@@ -1,6 +1,8 @@
 // src/platforms/discord/discord-adapter.ts
 
+import { Buffer } from "node:buffer";
 import {
+  AttachmentBuilder,
   ChannelType,
   Client,
   type DMChannel,
@@ -20,6 +22,8 @@ import {
   type ReactionResult,
   type ReplyOptions,
   type ReplyResult,
+  type SendFileOptions,
+  type SendFileResult,
 } from "../../types/platform.ts";
 import { ErrorCode, PlatformError } from "../../types/errors.ts";
 import { DEFAULT_DISCORD_CONFIG, type DiscordAdapterConfig } from "./discord-config.ts";
@@ -520,6 +524,75 @@ export class DiscordAdapter extends PlatformAdapter {
       return {
         success: false,
         error: `Failed to edit message: ${errorMessage}`,
+      };
+    }
+  }
+
+  /**
+   * Send a file to a channel
+   */
+  async sendFile(
+    channelId: string,
+    fileContent: Uint8Array,
+    fileName: string,
+    options?: SendFileOptions,
+  ): Promise<SendFileResult> {
+    try {
+      const channel = await this.client.channels.fetch(channelId);
+
+      if (!channel || !this.isTextBasedChannel(channel)) {
+        return {
+          success: false,
+          error: "Channel not found or not text-based",
+        };
+      }
+
+      const attachment = new AttachmentBuilder(Buffer.from(fileContent), {
+        name: fileName,
+      });
+
+      const messageOptions: {
+        files: AttachmentBuilder[];
+        content?: string;
+        reply?: { messageReference: string };
+      } = {
+        files: [attachment],
+      };
+
+      if (options?.comment) {
+        messageOptions.content = options.comment;
+      }
+
+      if (options?.replyToMessageId) {
+        messageOptions.reply = {
+          messageReference: options.replyToMessageId,
+        };
+      }
+
+      const sentMessage = await channel.send(messageOptions);
+
+      logger.debug("File sent", {
+        channelId,
+        messageId: sentMessage.id,
+        fileName,
+      });
+
+      return {
+        success: true,
+        messageId: sentMessage.id,
+      };
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+
+      logger.error("Failed to send file", {
+        channelId,
+        fileName,
+        error: errorMessage,
+      });
+
+      return {
+        success: false,
+        error: errorMessage,
       };
     }
   }

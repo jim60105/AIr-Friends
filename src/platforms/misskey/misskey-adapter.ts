@@ -11,6 +11,8 @@ import {
   type ReactionResult,
   type ReplyOptions,
   type ReplyResult,
+  type SendFileOptions,
+  type SendFileResult,
 } from "../../types/platform.ts";
 import { ErrorCode, PlatformError } from "../../types/errors.ts";
 import { MisskeyClient } from "./misskey-client.ts";
@@ -829,6 +831,92 @@ export class MisskeyAdapter extends PlatformAdapter {
       logger.error("Failed to edit chat message", { messageId, error: errorMessage });
       return { success: false, error: `Failed to edit chat message: ${errorMessage}` };
     }
+  }
+
+  /**
+   * Send a file to a channel.
+   * For chat channels, uploads to Drive then sends via chat message.
+   * For note channels, uploads to Drive then creates a note with file attachment.
+   */
+  async sendFile(
+    channelId: string,
+    fileContent: Uint8Array,
+    fileName: string,
+    options?: SendFileOptions,
+  ): Promise<SendFileResult> {
+    try {
+      // Step 1: Upload file to Misskey Drive
+      const driveFile = await this.client.uploadFile(fileContent, fileName);
+
+      // Step 2: Send via appropriate channel type
+      if (channelId.startsWith("chat:")) {
+        // Chat message with file
+        const userId = channelId.slice(5);
+        const result = await this.client.request(
+          "chat/messages/create-to-user",
+          {
+            toUserId: userId,
+            text: options?.comment ?? null,
+            fileId: driveFile.id,
+          },
+        );
+
+        return {
+          success: true,
+          messageId: (result as { id: string }).id,
+        };
+      }
+
+      // Note with file attachment (fallback for non-chat channels)
+      const params: Record<string, unknown> = {
+        text: options?.comment ?? null,
+        fileIds: [driveFile.id],
+      };
+
+      if (options?.replyToMessageId) {
+        params.replyId = options.replyToMessageId;
+
+        const originalNote = await this.client.request<MisskeyNote>(
+          "notes/show",
+          { noteId: options.replyToMessageId },
+        );
+
+        const replyParams = buildReplyParams(originalNote);
+        Object.assign(params, replyParams);
+      }
+
+      const createdNote = await this.client.request<{ createdNote: MisskeyNote }>(
+        "notes/create",
+        params,
+      );
+
+      return {
+        success: true,
+        messageId: createdNote.createdNote.id,
+      };
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+
+      logger.error("Failed to send file", {
+        channelId,
+        fileName,
+        error: errorMessage,
+      });
+
+      return {
+        success: false,
+        error: errorMessage,
+      };
+    }
+  }
+
+  /**
+   * Get or create a DM channel with a user.
+   * Misskey uses chat channel convention.
+   */
+  async getDmChannelId(userId: string): Promise<string | null> {
+    // Misskey DM uses chat channel convention
+    return await Promise.resolve(`chat:${userId}`);
   }
 
   /**

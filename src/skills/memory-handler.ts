@@ -3,6 +3,7 @@
 import { createLogger } from "@utils/logger.ts";
 import { MemoryStore } from "@core/memory-store.ts";
 import type {
+  MemoryExportParams,
   MemoryPatchParams,
   MemorySaveParams,
   MemorySearchParams,
@@ -11,7 +12,7 @@ import type {
   SkillHandler,
   SkillResult,
 } from "./types.ts";
-import type { MemoryImportance, MemoryVisibility } from "../types/memory.ts";
+import type { MemoryImportance, MemoryVisibility, ResolvedMemory } from "../types/memory.ts";
 
 import { memoryOperationsTotal } from "@utils/metrics.ts";
 
@@ -301,4 +302,180 @@ export class MemoryHandler {
       };
     }
   };
+
+  /**
+   * Handle memory-export skill
+   * Exports memories as a file and sends it directly via DM.
+   * Always includes both public and private memories (DM delivery ensures privacy).
+   * Agent workspace notes are NOT included (privacy boundary).
+   */
+  handleMemoryExport: SkillHandler = async (
+    parameters: Record<string, unknown>,
+    context: SkillContext,
+  ): Promise<SkillResult> => {
+    try {
+      const params = parameters as unknown as MemoryExportParams;
+
+      // Validate format
+      const format = params.format ?? "markdown";
+      if (format !== "markdown" && format !== "json") {
+        return {
+          success: false,
+          error: "Invalid 'format' parameter. Must be 'markdown' or 'json'",
+        };
+      }
+
+      // Validate importance filter
+      const importanceFilter = params.importance ?? "all";
+      if (
+        importanceFilter !== "high" && importanceFilter !== "normal" && importanceFilter !== "all"
+      ) {
+        return {
+          success: false,
+          error: "Invalid 'importance' parameter. Must be 'high', 'normal', or 'all'",
+        };
+      }
+
+      const enabledOnly = params.enabled_only !== false; // Default true
+
+      // Always load both public and private memories
+      // Privacy is enforced by DM delivery, not by visibility filtering
+      const allMemories: ResolvedMemory[] = [];
+      for (const visibility of ["public", "private"] as MemoryVisibility[]) {
+        const memories = await this.memoryStore.loadAllMemories(context.workspace, visibility);
+        allMemories.push(...memories);
+      }
+
+      // Apply filters
+      let filtered = allMemories;
+      if (enabledOnly) {
+        filtered = filtered.filter((m) => m.enabled);
+      }
+      if (importanceFilter !== "all") {
+        filtered = filtered.filter((m) => m.importance === importanceFilter);
+      }
+
+      // Sort by creation time (oldest first)
+      filtered.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+
+      // Format output
+      const output = format === "markdown"
+        ? this.formatMemoriesAsMarkdown(filtered)
+        : this.formatMemoriesAsJson(filtered);
+
+      // Determine file name
+      const ext = format === "markdown" ? "md" : "json";
+      const fileName = `memory-export.${ext}`;
+
+      // Get DM channel for the user (always send via DM for privacy)
+      const dmChannelId = await context.platformAdapter.getDmChannelId(context.userId);
+      if (!dmChannelId) {
+        return {
+          success: false,
+          error: "Failed to create DM channel. Cannot send export file.",
+        };
+      }
+
+      // Send file via DM
+      const fileContent = new TextEncoder().encode(output);
+      const sendResult = await context.platformAdapter.sendFile(
+        dmChannelId,
+        fileContent,
+        fileName,
+      );
+
+      if (!sendResult.success) {
+        logger.error("Failed to send memory export file via DM", {
+          workspaceKey: context.workspace.key,
+          userId: context.userId,
+          error: sendResult.error,
+        });
+
+        return {
+          success: false,
+          error: sendResult.error ?? "Failed to send export file",
+        };
+      }
+
+      logger.info("Memory export sent via DM: {count} memories ({format})", {
+        workspaceKey: context.workspace.key,
+        count: filtered.length,
+        format,
+        fileName,
+        messageId: sendResult.messageId,
+      });
+      memoryOperationsTotal.labels("export", "public").inc();
+
+      return {
+        success: true,
+        data: {
+          count: filtered.length,
+          format,
+          fileName,
+          messageId: sendResult.messageId,
+        },
+      };
+    } catch (error) {
+      logger.error("Failed to export memories", {
+        error: error instanceof Error ? error.message : String(error),
+        workspaceKey: context.workspace.key,
+      });
+
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : "Unknown error",
+      };
+    }
+  };
+
+  /**
+   * Format memories as Markdown
+   */
+  private formatMemoriesAsMarkdown(memories: ResolvedMemory[]): string {
+    if (memories.length === 0) {
+      return "# Memory Export\n\nNo memories found matching the specified criteria.\n";
+    }
+
+    const lines: string[] = [];
+    lines.push("# Memory Export");
+    lines.push(`Total: ${memories.length} memories`);
+    lines.push("");
+
+    for (const m of memories) {
+      lines.push(`## [${m.importance.toUpperCase()}] ${m.id}`);
+      lines.push(`- **Visibility**: ${m.visibility}`);
+      lines.push(`- **Importance**: ${m.importance}`);
+      lines.push(`- **Enabled**: ${m.enabled}`);
+      lines.push(`- **Created**: ${m.createdAt}`);
+      if (m.lastModifiedAt !== m.createdAt) {
+        lines.push(`- **Last Modified**: ${m.lastModifiedAt}`);
+      }
+      lines.push("");
+      lines.push(m.content);
+      lines.push("");
+      lines.push("---");
+      lines.push("");
+    }
+
+    return lines.join("\n");
+  }
+
+  /**
+   * Format memories as JSON
+   */
+  private formatMemoriesAsJson(memories: ResolvedMemory[]): string {
+    return JSON.stringify(
+      memories.map((m) => ({
+        id: m.id,
+        enabled: m.enabled,
+        visibility: m.visibility,
+        importance: m.importance,
+        content: m.content,
+        createdAt: m.createdAt,
+        lastModifiedAt: m.lastModifiedAt,
+      })),
+      null,
+      2,
+    );
+  }
 }

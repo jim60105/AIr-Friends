@@ -9,6 +9,7 @@ import {
   type ReactionResult,
   type ReplyOptions,
   type ReplyResult,
+  type SendFileResult,
 } from "../../src/types/platform.ts";
 
 /**
@@ -63,6 +64,18 @@ export class MockPlatformAdapter extends PlatformAdapter {
     _newContent: string,
   ): Promise<ReplyResult> {
     return await Promise.resolve({ success: true, messageId });
+  }
+
+  async sendFile(
+    _channelId: string,
+    _fileContent: Uint8Array,
+    _fileName: string,
+  ): Promise<SendFileResult> {
+    return await Promise.resolve({ success: true, messageId: "file-msg-1" });
+  }
+
+  async getDmChannelId(userId: string): Promise<string | null> {
+    return await Promise.resolve(`dm-${userId}`);
   }
 
   async fetchRecentMessages(

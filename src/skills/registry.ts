@@ -38,6 +38,7 @@ export class SkillRegistry {
     this.handlers.set("memory-search", this.memoryHandler.handleMemorySearch);
     this.handlers.set("memory-patch", this.memoryHandler.handleMemoryPatch);
     this.handlers.set("memory-stats", this.memoryHandler.handleMemoryStats);
+    this.handlers.set("memory-export", this.memoryHandler.handleMemoryExport);
 
     // Reply skills
     this.handlers.set("send-reply", this.replyHandler.handleSendReply);

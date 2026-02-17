@@ -44,9 +44,7 @@ export async function determineDiscordTarget(
 
   if (type === "account") {
     try {
-      const dmChannelId = await (adapter as PlatformAdapter & {
-        getDmChannelId(userId: string): Promise<string | null>;
-      }).getDmChannelId(id);
+      const dmChannelId = await adapter.getDmChannelId(id);
 
       if (!dmChannelId) {
         logger.warn("Failed to create DM channel for user", { userId: id });

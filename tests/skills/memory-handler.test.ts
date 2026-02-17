@@ -870,3 +870,584 @@ Deno.test("MemoryHandler - memory-stats - respects DM privacy", async () => {
 
   await Deno.remove(tempDir, { recursive: true });
 });
+
+// ============ Memory Export Tests ============
+
+Deno.test("MemoryHandler - handleMemoryExport returns empty file when no memories", async () => {
+  const tempDir = await Deno.makeTempDir();
+  const workspaceManager = new WorkspaceManager({
+    repoPath: tempDir,
+    workspacesDir: "workspaces",
+  });
+  const memoryStore = new MemoryStore(workspaceManager, {
+    searchLimit: 10,
+    maxChars: 2000,
+  });
+  const handler = new MemoryHandler(memoryStore);
+
+  const workspace: WorkspaceInfo = {
+    key: "discord/123",
+    components: { platform: "discord", userId: "123" },
+    path: `${tempDir}/workspaces/discord/123`,
+    isDm: false,
+  };
+
+  await Deno.mkdir(workspace.path, { recursive: true });
+  await Deno.writeTextFile(`${workspace.path}/memory.public.jsonl`, "");
+  await Deno.writeTextFile(`${workspace.path}/memory.private.jsonl`, "");
+
+  let sentFileName = "";
+  const mockAdapter = {
+    ...createMockPlatformAdapter(),
+    getDmChannelId: (_userId: string) => Promise.resolve("dm_123"),
+    sendFile: (_channelId: string, _content: Uint8Array, fileName: string) => {
+      sentFileName = fileName;
+      return Promise.resolve({ success: true, messageId: "file_msg_123" });
+    },
+  } as unknown as PlatformAdapter;
+
+  const context: SkillContext = {
+    workspace,
+    platformAdapter: mockAdapter,
+    channelId: "public_channel_456",
+    userId: "123",
+  };
+
+  const result = await handler.handleMemoryExport(
+    { format: "markdown" },
+    context,
+  );
+
+  assertEquals(result.success, true);
+  assertEquals((result.data as { count: number }).count, 0);
+  assertEquals(sentFileName, "memory-export.md");
+
+  await Deno.remove(tempDir, { recursive: true });
+});
+
+Deno.test("MemoryHandler - handleMemoryExport sends file via DM in markdown format", async () => {
+  const tempDir = await Deno.makeTempDir();
+  const workspaceManager = new WorkspaceManager({
+    repoPath: tempDir,
+    workspacesDir: "workspaces",
+  });
+  const memoryStore = new MemoryStore(workspaceManager, {
+    searchLimit: 10,
+    maxChars: 2000,
+  });
+  const handler = new MemoryHandler(memoryStore);
+
+  const workspace: WorkspaceInfo = {
+    key: "discord/123",
+    components: { platform: "discord", userId: "123" },
+    path: `${tempDir}/workspaces/discord/123`,
+    isDm: false,
+  };
+
+  await Deno.mkdir(workspace.path, { recursive: true });
+  await Deno.writeTextFile(`${workspace.path}/memory.public.jsonl`, "");
+  await Deno.writeTextFile(`${workspace.path}/memory.private.jsonl`, "");
+
+  // Add a public memory
+  await memoryStore.addMemory(workspace, "Public memory", {
+    visibility: "public",
+    importance: "normal",
+  });
+
+  let sentChannelId = "";
+  let sentFileName = "";
+  const mockAdapter = {
+    ...createMockPlatformAdapter(),
+    getDmChannelId: (userId: string) => Promise.resolve(`dm_${userId}`),
+    sendFile: (channelId: string, _content: Uint8Array, fileName: string) => {
+      sentChannelId = channelId;
+      sentFileName = fileName;
+      return Promise.resolve({ success: true, messageId: "file_msg_123" });
+    },
+  } as unknown as PlatformAdapter;
+
+  const context: SkillContext = {
+    workspace,
+    platformAdapter: mockAdapter,
+    channelId: "public_channel_456",
+    userId: "123",
+  };
+
+  const result = await handler.handleMemoryExport(
+    { format: "markdown" },
+    context,
+  );
+
+  assertEquals(result.success, true);
+  assertEquals(sentChannelId, "dm_123");
+  assertEquals(sentFileName, "memory-export.md");
+
+  await Deno.remove(tempDir, { recursive: true });
+});
+
+Deno.test("MemoryHandler - handleMemoryExport sends file via DM in json format", async () => {
+  const tempDir = await Deno.makeTempDir();
+  const workspaceManager = new WorkspaceManager({
+    repoPath: tempDir,
+    workspacesDir: "workspaces",
+  });
+  const memoryStore = new MemoryStore(workspaceManager, {
+    searchLimit: 10,
+    maxChars: 2000,
+  });
+  const handler = new MemoryHandler(memoryStore);
+
+  const workspace: WorkspaceInfo = {
+    key: "discord/123",
+    components: { platform: "discord", userId: "123" },
+    path: `${tempDir}/workspaces/discord/123`,
+    isDm: true,
+  };
+
+  await Deno.mkdir(workspace.path, { recursive: true });
+  await Deno.writeTextFile(`${workspace.path}/memory.public.jsonl`, "");
+  await Deno.writeTextFile(`${workspace.path}/memory.private.jsonl`, "");
+
+  let sentFileName = "";
+  const mockAdapter = {
+    ...createMockPlatformAdapter(),
+    getDmChannelId: (_userId: string) => Promise.resolve("dm_123"),
+    sendFile: (_channelId: string, _content: Uint8Array, fileName: string) => {
+      sentFileName = fileName;
+      return Promise.resolve({ success: true, messageId: "file_msg_456" });
+    },
+  } as unknown as PlatformAdapter;
+
+  const context: SkillContext = {
+    workspace,
+    platformAdapter: mockAdapter,
+    channelId: "456",
+    userId: "123",
+  };
+
+  const result = await handler.handleMemoryExport(
+    { format: "json" },
+    context,
+  );
+
+  assertEquals(result.success, true);
+  assertEquals(sentFileName, "memory-export.json");
+
+  await Deno.remove(tempDir, { recursive: true });
+});
+
+Deno.test("MemoryHandler - handleMemoryExport always includes both public and private memories", async () => {
+  const tempDir = await Deno.makeTempDir();
+  const workspaceManager = new WorkspaceManager({
+    repoPath: tempDir,
+    workspacesDir: "workspaces",
+  });
+  const memoryStore = new MemoryStore(workspaceManager, {
+    searchLimit: 10,
+    maxChars: 2000,
+  });
+  const handler = new MemoryHandler(memoryStore);
+
+  const workspace: WorkspaceInfo = {
+    key: "discord/123",
+    components: { platform: "discord", userId: "123" },
+    path: `${tempDir}/workspaces/discord/123`,
+    isDm: false,
+  };
+
+  await Deno.mkdir(workspace.path, { recursive: true });
+  await Deno.writeTextFile(`${workspace.path}/memory.public.jsonl`, "");
+  await Deno.writeTextFile(`${workspace.path}/memory.private.jsonl`, "");
+
+  // Add both public and private memories
+  await memoryStore.addMemory(workspace, "Public memory", {
+    visibility: "public",
+    importance: "normal",
+  });
+  await memoryStore.addMemory(workspace, "Private memory", {
+    visibility: "private",
+    importance: "high",
+  });
+
+  let sentFileContent: Uint8Array | null = null;
+  const mockAdapter = {
+    ...createMockPlatformAdapter(),
+    getDmChannelId: (_userId: string) => Promise.resolve("dm_123"),
+    sendFile: (_channelId: string, content: Uint8Array, _fileName: string) => {
+      sentFileContent = content;
+      return Promise.resolve({ success: true, messageId: "file_msg_789" });
+    },
+  } as unknown as PlatformAdapter;
+
+  const context: SkillContext = {
+    workspace,
+    platformAdapter: mockAdapter,
+    channelId: "public_channel_456",
+    userId: "123",
+  };
+
+  const result = await handler.handleMemoryExport(
+    { format: "markdown" },
+    context,
+  );
+
+  assertEquals(result.success, true);
+  assertEquals((result.data as { count: number }).count, 2);
+
+  // Verify both memories are in the file
+  const fileText = new TextDecoder().decode(sentFileContent!);
+  assertEquals(fileText.includes("Public memory"), true);
+  assertEquals(fileText.includes("Private memory"), true);
+
+  await Deno.remove(tempDir, { recursive: true });
+});
+
+Deno.test("MemoryHandler - handleMemoryExport filters by importance", async () => {
+  const tempDir = await Deno.makeTempDir();
+  const workspaceManager = new WorkspaceManager({
+    repoPath: tempDir,
+    workspacesDir: "workspaces",
+  });
+  const memoryStore = new MemoryStore(workspaceManager, {
+    searchLimit: 10,
+    maxChars: 2000,
+  });
+  const handler = new MemoryHandler(memoryStore);
+
+  const workspace: WorkspaceInfo = {
+    key: "discord/123",
+    components: { platform: "discord", userId: "123" },
+    path: `${tempDir}/workspaces/discord/123`,
+    isDm: false,
+  };
+
+  await Deno.mkdir(workspace.path, { recursive: true });
+  await Deno.writeTextFile(`${workspace.path}/memory.public.jsonl`, "");
+  await Deno.writeTextFile(`${workspace.path}/memory.private.jsonl`, "");
+
+  await memoryStore.addMemory(workspace, "Normal memory", {
+    visibility: "public",
+    importance: "normal",
+  });
+  await memoryStore.addMemory(workspace, "High memory", {
+    visibility: "public",
+    importance: "high",
+  });
+
+  const mockAdapter = {
+    ...createMockPlatformAdapter(),
+    getDmChannelId: (_userId: string) => Promise.resolve("dm_123"),
+    sendFile: (_channelId: string, _content: Uint8Array, _fileName: string) => {
+      return Promise.resolve({ success: true, messageId: "file_msg_123" });
+    },
+  } as unknown as PlatformAdapter;
+
+  const context: SkillContext = {
+    workspace,
+    platformAdapter: mockAdapter,
+    channelId: "456",
+    userId: "123",
+  };
+
+  const result = await handler.handleMemoryExport(
+    { format: "markdown", importance: "high" },
+    context,
+  );
+
+  assertEquals(result.success, true);
+  assertEquals((result.data as { count: number }).count, 1);
+
+  await Deno.remove(tempDir, { recursive: true });
+});
+
+Deno.test("MemoryHandler - handleMemoryExport filters enabled_only", async () => {
+  const tempDir = await Deno.makeTempDir();
+  const workspaceManager = new WorkspaceManager({
+    repoPath: tempDir,
+    workspacesDir: "workspaces",
+  });
+  const memoryStore = new MemoryStore(workspaceManager, {
+    searchLimit: 10,
+    maxChars: 2000,
+  });
+  const handler = new MemoryHandler(memoryStore);
+
+  const workspace: WorkspaceInfo = {
+    key: "discord/123",
+    components: { platform: "discord", userId: "123" },
+    path: `${tempDir}/workspaces/discord/123`,
+    isDm: false,
+  };
+
+  await Deno.mkdir(workspace.path, { recursive: true });
+  await Deno.writeTextFile(`${workspace.path}/memory.public.jsonl`, "");
+  await Deno.writeTextFile(`${workspace.path}/memory.private.jsonl`, "");
+
+  const saveResult = await memoryStore.addMemory(workspace, "Enabled memory", {
+    visibility: "public",
+    importance: "normal",
+  });
+  await memoryStore.addMemory(workspace, "To be disabled memory", {
+    visibility: "public",
+    importance: "normal",
+  });
+
+  // Disable the first memory
+  await memoryStore.patchMemory(workspace, saveResult.id, { enabled: false });
+
+  const mockAdapter = {
+    ...createMockPlatformAdapter(),
+    getDmChannelId: (_userId: string) => Promise.resolve("dm_123"),
+    sendFile: (_channelId: string, _content: Uint8Array, _fileName: string) => {
+      return Promise.resolve({ success: true, messageId: "file_msg_123" });
+    },
+  } as unknown as PlatformAdapter;
+
+  const context: SkillContext = {
+    workspace,
+    platformAdapter: mockAdapter,
+    channelId: "456",
+    userId: "123",
+  };
+
+  // Default enabled_only=true should exclude disabled
+  const result = await handler.handleMemoryExport(
+    { format: "markdown" },
+    context,
+  );
+
+  assertEquals(result.success, true);
+  assertEquals((result.data as { count: number }).count, 1);
+
+  await Deno.remove(tempDir, { recursive: true });
+});
+
+Deno.test("MemoryHandler - handleMemoryExport includes disabled when enabled_only is false", async () => {
+  const tempDir = await Deno.makeTempDir();
+  const workspaceManager = new WorkspaceManager({
+    repoPath: tempDir,
+    workspacesDir: "workspaces",
+  });
+  const memoryStore = new MemoryStore(workspaceManager, {
+    searchLimit: 10,
+    maxChars: 2000,
+  });
+  const handler = new MemoryHandler(memoryStore);
+
+  const workspace: WorkspaceInfo = {
+    key: "discord/123",
+    components: { platform: "discord", userId: "123" },
+    path: `${tempDir}/workspaces/discord/123`,
+    isDm: false,
+  };
+
+  await Deno.mkdir(workspace.path, { recursive: true });
+  await Deno.writeTextFile(`${workspace.path}/memory.public.jsonl`, "");
+  await Deno.writeTextFile(`${workspace.path}/memory.private.jsonl`, "");
+
+  const saveResult = await memoryStore.addMemory(workspace, "Memory one", {
+    visibility: "public",
+    importance: "normal",
+  });
+  await memoryStore.addMemory(workspace, "Memory two", {
+    visibility: "public",
+    importance: "normal",
+  });
+
+  // Disable one
+  await memoryStore.patchMemory(workspace, saveResult.id, { enabled: false });
+
+  const mockAdapter = {
+    ...createMockPlatformAdapter(),
+    getDmChannelId: (_userId: string) => Promise.resolve("dm_123"),
+    sendFile: (_channelId: string, _content: Uint8Array, _fileName: string) => {
+      return Promise.resolve({ success: true, messageId: "file_msg_123" });
+    },
+  } as unknown as PlatformAdapter;
+
+  const context: SkillContext = {
+    workspace,
+    platformAdapter: mockAdapter,
+    channelId: "456",
+    userId: "123",
+  };
+
+  // enabled_only=false should include disabled
+  const result = await handler.handleMemoryExport(
+    { format: "markdown", enabled_only: false },
+    context,
+  );
+
+  assertEquals(result.success, true);
+  assertEquals((result.data as { count: number }).count, 2);
+
+  await Deno.remove(tempDir, { recursive: true });
+});
+
+Deno.test("MemoryHandler - handleMemoryExport validates format parameter", async () => {
+  const tempDir = await Deno.makeTempDir();
+  const workspaceManager = new WorkspaceManager({
+    repoPath: tempDir,
+    workspacesDir: "workspaces",
+  });
+  const memoryStore = new MemoryStore(workspaceManager, {
+    searchLimit: 10,
+    maxChars: 2000,
+  });
+  const handler = new MemoryHandler(memoryStore);
+
+  const workspace: WorkspaceInfo = {
+    key: "discord/123",
+    components: { platform: "discord", userId: "123" },
+    path: `${tempDir}/workspaces/discord/123`,
+    isDm: false,
+  };
+
+  const context: SkillContext = {
+    workspace,
+    platformAdapter: createMockPlatformAdapter(),
+    channelId: "456",
+    userId: "123",
+  };
+
+  const result = await handler.handleMemoryExport(
+    { format: "csv" },
+    context,
+  );
+
+  assertEquals(result.success, false);
+  assertEquals(result.error, "Invalid 'format' parameter. Must be 'markdown' or 'json'");
+
+  await Deno.remove(tempDir, { recursive: true });
+});
+
+Deno.test("MemoryHandler - handleMemoryExport validates importance parameter", async () => {
+  const tempDir = await Deno.makeTempDir();
+  const workspaceManager = new WorkspaceManager({
+    repoPath: tempDir,
+    workspacesDir: "workspaces",
+  });
+  const memoryStore = new MemoryStore(workspaceManager, {
+    searchLimit: 10,
+    maxChars: 2000,
+  });
+  const handler = new MemoryHandler(memoryStore);
+
+  const workspace: WorkspaceInfo = {
+    key: "discord/123",
+    components: { platform: "discord", userId: "123" },
+    path: `${tempDir}/workspaces/discord/123`,
+    isDm: false,
+  };
+
+  const context: SkillContext = {
+    workspace,
+    platformAdapter: createMockPlatformAdapter(),
+    channelId: "456",
+    userId: "123",
+  };
+
+  const result = await handler.handleMemoryExport(
+    { format: "markdown", importance: "critical" },
+    context,
+  );
+
+  assertEquals(result.success, false);
+  assertEquals(result.error, "Invalid 'importance' parameter. Must be 'high', 'normal', or 'all'");
+
+  await Deno.remove(tempDir, { recursive: true });
+});
+
+Deno.test("MemoryHandler - handleMemoryExport returns error when getDmChannelId fails", async () => {
+  const tempDir = await Deno.makeTempDir();
+  const workspaceManager = new WorkspaceManager({
+    repoPath: tempDir,
+    workspacesDir: "workspaces",
+  });
+  const memoryStore = new MemoryStore(workspaceManager, {
+    searchLimit: 10,
+    maxChars: 2000,
+  });
+  const handler = new MemoryHandler(memoryStore);
+
+  const workspace: WorkspaceInfo = {
+    key: "discord/123",
+    components: { platform: "discord", userId: "123" },
+    path: `${tempDir}/workspaces/discord/123`,
+    isDm: false,
+  };
+
+  await Deno.mkdir(workspace.path, { recursive: true });
+  await Deno.writeTextFile(`${workspace.path}/memory.public.jsonl`, "");
+  await Deno.writeTextFile(`${workspace.path}/memory.private.jsonl`, "");
+
+  const mockAdapter = {
+    ...createMockPlatformAdapter(),
+    getDmChannelId: (_userId: string) => Promise.resolve(null),
+    sendFile: () => Promise.resolve({ success: true, messageId: "file_msg_123" }),
+  } as unknown as PlatformAdapter;
+
+  const context: SkillContext = {
+    workspace,
+    platformAdapter: mockAdapter,
+    channelId: "456",
+    userId: "123",
+  };
+
+  const result = await handler.handleMemoryExport(
+    { format: "markdown" },
+    context,
+  );
+
+  assertEquals(result.success, false);
+  assertEquals(result.error, "Failed to create DM channel. Cannot send export file.");
+
+  await Deno.remove(tempDir, { recursive: true });
+});
+
+Deno.test("MemoryHandler - handleMemoryExport returns error when sendFile fails", async () => {
+  const tempDir = await Deno.makeTempDir();
+  const workspaceManager = new WorkspaceManager({
+    repoPath: tempDir,
+    workspacesDir: "workspaces",
+  });
+  const memoryStore = new MemoryStore(workspaceManager, {
+    searchLimit: 10,
+    maxChars: 2000,
+  });
+  const handler = new MemoryHandler(memoryStore);
+
+  const workspace: WorkspaceInfo = {
+    key: "discord/123",
+    components: { platform: "discord", userId: "123" },
+    path: `${tempDir}/workspaces/discord/123`,
+    isDm: false,
+  };
+
+  await Deno.mkdir(workspace.path, { recursive: true });
+  await Deno.writeTextFile(`${workspace.path}/memory.public.jsonl`, "");
+  await Deno.writeTextFile(`${workspace.path}/memory.private.jsonl`, "");
+
+  const mockAdapter = {
+    ...createMockPlatformAdapter(),
+    getDmChannelId: (_userId: string) => Promise.resolve("dm_123"),
+    sendFile: () => Promise.resolve({ success: false, error: "DM channel closed" }),
+  } as unknown as PlatformAdapter;
+
+  const context: SkillContext = {
+    workspace,
+    platformAdapter: mockAdapter,
+    channelId: "456",
+    userId: "123",
+  };
+
+  const result = await handler.handleMemoryExport(
+    { format: "markdown" },
+    context,
+  );
+
+  assertEquals(result.success, false);
+  assertEquals(result.error, "DM channel closed");
+
+  await Deno.remove(tempDir, { recursive: true });
+});

@@ -102,4 +102,42 @@ export class MisskeyClient {
   }> {
     return this.request("i");
   }
+
+  /**
+   * Upload a file to Misskey Drive via multipart/form-data.
+   * The standard APIClient.request() only supports JSON bodies,
+   * but drive/files/create requires multipart/form-data.
+   */
+  async uploadFile(
+    fileContent: Uint8Array,
+    fileName: string,
+  ): Promise<{ id: string; url: string }> {
+    const formData = new FormData();
+    formData.append("i", this.config.token);
+    formData.append("name", fileName);
+    formData.append(
+      "file",
+      new Blob([new Uint8Array(fileContent)]),
+      fileName,
+    );
+
+    const origin = `${this.config.secure ? "https" : "http"}://${this.config.host}`;
+    const response = await fetch(`${origin}/api/drive/files/create`, {
+      method: "POST",
+      body: formData,
+    });
+
+    if (!response.ok) {
+      const errorBody = await response.text();
+      throw new Error(`Drive upload failed (${response.status}): ${errorBody}`);
+    }
+
+    const result = await response.json();
+    logger.info("File uploaded to Misskey Drive", {
+      fileId: result.id,
+      fileName,
+    });
+
+    return { id: result.id, url: result.url };
+  }
 }
