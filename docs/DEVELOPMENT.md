@@ -171,6 +171,11 @@ Configuration is loaded from `config.yaml` (YAML format). See [config.example.ya
 | `GIT_BACKUP_AUTHOR_EMAIL` | Git commit author email |
 | `MODEL_ROUTING_ENABLED` | Enable model routing (true/false, default: false) |
 | `MODEL_ROUTING_RULES` | Model routing rules as JSON string |
+| `REMINDERS_ENABLED` | Enable scheduled reminders (true/false, default: false) |
+| `REMINDERS_MAX_PER_USER` | Max active reminders per user (default: 20) |
+| `REMINDERS_MIN_INTERVAL_MS` | Minimum reminder delay from now in ms (default: 60000) |
+| `REMINDERS_PERSIST_PATH` | Reminder persistence file name (default: reminders.jsonl) |
+| `REMINDERS_CHECK_INTERVAL_MS` | How often to check for due reminders in ms (default: 30000) |
 
 ### Access Control & Reply Policy
 

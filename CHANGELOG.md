@@ -14,6 +14,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   - Match by whitelist entry (account/channel) or session type
   - Fallback chain: routing rules → section-specific model → `agent.model`
   - Environment variable overrides: `MODEL_ROUTING_ENABLED`, `MODEL_ROUTING_RULES`
+- Scheduled reminders feature (Feature 23)
+  - Users can set one-time reminders via DM using `set-reminder` skill
+  - Reminders delivered via DM at scheduled time using ACP agent session
+  - Skills: `set-reminder`, `cancel-reminder`, `list-reminders`
+  - Polling-based scheduler (configurable interval, default 30s)
+  - Restart-safe: overdue reminders picked up automatically
+  - Per-user limit (default: 20 active reminders)
+  - Prometheus metrics: `remindersSetTotal`, `remindersDeliveredTotal`, `remindersCancelledTotal`
+  - Configuration: `reminders` section in config.yaml
+  - Environment variable overrides: `REMINDERS_ENABLED`, `REMINDERS_MAX_PER_USER`, etc.
 
 ## [0.7.2] - 2026-02-15
 
