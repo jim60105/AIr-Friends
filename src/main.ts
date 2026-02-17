@@ -10,10 +10,10 @@ const logger = createLogger("Main");
 /**
  * Parse command line arguments
  */
-function parseArgs(): { config?: string; help: boolean; yolo: boolean } {
+function parseArgs(): { config?: string; help: boolean; yolo: boolean; dryRun: boolean } {
   const args = parse(Deno.args, {
     string: ["config"],
-    boolean: ["help", "yolo"],
+    boolean: ["help", "yolo", "dry-run"],
     alias: {
       c: "config",
       h: "help",
@@ -24,6 +24,7 @@ function parseArgs(): { config?: string; help: boolean; yolo: boolean } {
     config: args.config,
     help: args.help,
     yolo: args.yolo || false,
+    dryRun: args["dry-run"] || false,
   };
 }
 
@@ -41,6 +42,7 @@ Options:
   -c, --config <path>   Path to configuration file (default: config.yaml)
   -h, --help            Show this help message
   --yolo                Auto-approve all permission requests (for container environments)
+  --dry-run             Enable dry run mode (assemble context without calling Agent)
 
 Environment Variables:
   LOG_LEVEL             Log level (DEBUG, INFO, WARN, ERROR, FATAL)
@@ -73,7 +75,7 @@ async function main(): Promise<void> {
 
   try {
     // Bootstrap application
-    const context = await bootstrap(args.config, args.yolo);
+    const context = await bootstrap(args.config, args.yolo, args.dryRun);
 
     // Set up shutdown handler
     shutdownHandler.setContext(context);

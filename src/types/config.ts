@@ -67,6 +67,22 @@ export interface UserMCPServerConfig {
 }
 
 /**
+ * Dry run / debug mode configuration.
+ * When enabled, the system assembles context but does NOT call the ACP Agent.
+ * Instead, the assembled prompt is written to the output directory.
+ */
+export interface DryRunConfig {
+  /** Enable dry run mode (default: false) */
+  enabled: boolean;
+
+  /** Directory path for writing assembled prompt output (default: "./data/dry-run/") */
+  outputPath: string;
+
+  /** Optional mock reply text to send via platform adapter (empty = no reply sent) */
+  mockReply: string;
+}
+
+/**
  * Agent/LLM configuration
  */
 export interface AgentConfig {
@@ -99,6 +115,9 @@ export interface AgentConfig {
 
   /** External MCP servers to register with the ACP Agent (optional) */
   mcpServers?: UserMCPServerConfig[];
+
+  /** Dry run / debug mode configuration (optional) */
+  dryRun?: DryRunConfig;
 }
 
 /**

@@ -99,6 +99,13 @@ agent:
   #     transport: "sse"
   #     url: "https://events.example.com/mcp"
 
+  # Dry run / debug mode: assemble context without calling Agent
+  # Useful for prompt engineering, CI/CD smoke tests, and context debugging
+  dryRun:
+    enabled: false                                       # Enable dry run mode (default: false); override with env DRY_RUN_ENABLED
+    outputPath: "./data/dry-run/"                        # Output directory for assembled prompts; override with env DRY_RUN_OUTPUT_PATH
+    mockReply: "（Dry run 模式 — 此為測試回覆）"          # Mock reply text (empty = no reply); override with env DRY_RUN_MOCK_REPLY
+
 # Memory system configuration
 memory:
   searchLimit: 10 # Max number of search results (default: 10)

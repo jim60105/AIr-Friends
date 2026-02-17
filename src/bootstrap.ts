@@ -41,8 +41,12 @@ export interface AppContext {
 /**
  * Bootstrap the application
  */
-export async function bootstrap(configPath?: string, yolo = false): Promise<AppContext> {
-  logger.info("Starting bootstrap", { yolo });
+export async function bootstrap(
+  configPath?: string,
+  yolo = false,
+  dryRun = false,
+): Promise<AppContext> {
+  logger.info("Starting bootstrap", { yolo, dryRun });
 
   // Load configuration
   const configFile = configPath ?? "./config.yaml";
@@ -78,6 +82,27 @@ export async function bootstrap(configPath?: string, yolo = false): Promise<AppC
       servers: config.agent.mcpServers.map((s) => `${s.name} (${s.transport ?? "stdio"})`).join(
         ", ",
       ),
+    });
+  }
+
+  // CLI --dry-run flag overrides config
+  if (dryRun) {
+    if (!config.agent.dryRun) {
+      config.agent.dryRun = {
+        enabled: true,
+        outputPath: "./data/dry-run/",
+        mockReply: "（Dry run 模式 — 此為測試回覆）",
+      };
+    } else {
+      config.agent.dryRun.enabled = true;
+    }
+  }
+
+  // Log dry run mode activation
+  if (config.agent.dryRun?.enabled) {
+    logger.warn("🧪 Dry run mode ENABLED — Agent will NOT be called", {
+      outputPath: config.agent.dryRun.outputPath,
+      mockReply: config.agent.dryRun.mockReply ? "(configured)" : "(none)",
     });
   }
 
