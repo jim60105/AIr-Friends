@@ -123,6 +123,24 @@ rateLimit:
   cooldownMs: 600000  # Cooldown after limit exceeded
 ```
 
+## 🔀 Model Routing
+
+Dynamically select LLM models per user or context to control costs and quality:
+
+```yaml
+agent:
+  model: "gpt-5-mini"  # default fallback
+  modelRouting:
+    enabled: true
+    rules:
+      - match: { whitelist: "discord/account/123456789" }
+        model: "openrouter/deepseek/deepseek-v3.2"
+      - match: { sessionType: "spontaneous" }
+        model: "openrouter/deepseek/deepseek-v3.2"
+```
+
+Rules are evaluated in order (first-match wins). See [Development Guide -- Model Routing](docs/DEVELOPMENT.md#model-routing) for details.
+
 ## 🏗️ Architecture
 
 AIr-Friends acts as an [ACP (Agent Client Protocol)](https://agentclientprotocol.com/) client, delegating AI reasoning to external agents while maintaining persistent memory:

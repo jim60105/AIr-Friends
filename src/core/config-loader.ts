@@ -336,6 +336,67 @@ function validateConfig(config: Record<string, unknown>): void {
       ...(config.gitBackup as Record<string, unknown>),
     };
   }
+
+  // Model routing defaults and validation
+  const agentConfig = config.agent as Record<string, unknown>;
+  if (!agentConfig.modelRouting) {
+    agentConfig.modelRouting = { enabled: false, rules: [] };
+  } else {
+    const mr = agentConfig.modelRouting as Record<string, unknown>;
+    if (mr.enabled === undefined) mr.enabled = false;
+    if (!Array.isArray(mr.rules)) mr.rules = [];
+
+    if (mr.enabled === true) {
+      const validSessionTypes = ["message", "spontaneous", "self-research", "memory-maintenance"];
+      const whitelistPattern = /^(discord|misskey)\/(account|channel)\/[a-zA-Z0-9_\-@.]+$/;
+      const validRules: unknown[] = [];
+
+      for (const rule of mr.rules as Record<string, unknown>[]) {
+        const match = rule.match as Record<string, unknown> | undefined;
+        const model = rule.model;
+
+        // Validate basic structure
+        if (!match || typeof model !== "string" || model.trim() === "") {
+          logger.warn("Invalid model routing rule (missing match or model), skipping", { rule });
+          continue;
+        }
+
+        // Validate mutual exclusivity
+        const matchKeys = Object.keys(match).filter((k) =>
+          match[k] !== undefined && match[k] !== null
+        );
+        if (matchKeys.length !== 1) {
+          logger.warn("Model routing rule match must have exactly one field, skipping", { match });
+          continue;
+        }
+
+        // Validate whitelist format
+        if (match.whitelist !== undefined) {
+          if (typeof match.whitelist !== "string" || !whitelistPattern.test(match.whitelist)) {
+            logger.warn("Invalid whitelist format in model routing rule, skipping", {
+              whitelist: match.whitelist,
+            });
+            continue;
+          }
+        }
+
+        // Validate sessionType
+        if (match.sessionType !== undefined) {
+          if (!validSessionTypes.includes(match.sessionType as string)) {
+            logger.warn("Invalid sessionType in model routing rule, skipping", {
+              sessionType: match.sessionType,
+              validValues: validSessionTypes,
+            });
+            continue;
+          }
+        }
+
+        validRules.push(rule);
+      }
+
+      mr.rules = validRules;
+    }
+  }
 }
 
 /**

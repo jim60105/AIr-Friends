@@ -65,6 +65,45 @@ export interface AgentConfig {
 
   /** Default ACP agent type to use ("copilot", "gemini", or "opencode") */
   defaultAgentType?: "copilot" | "gemini" | "opencode";
+
+  /** Model routing configuration (optional) */
+  modelRouting?: ModelRoutingConfig;
+}
+
+/**
+ * Session type for model routing rules
+ */
+export type SessionType = "message" | "spontaneous" | "self-research" | "memory-maintenance";
+
+/**
+ * Match condition for a model routing rule.
+ * Exactly one field must be set (mutually exclusive).
+ */
+export interface ModelRoutingMatch {
+  /** Match a specific whitelist entry (format: "{platform}/account/{id}" or "{platform}/channel/{id}") */
+  whitelist?: string;
+  /** Match a session type */
+  sessionType?: SessionType;
+}
+
+/**
+ * A single model routing rule
+ */
+export interface ModelRoutingRule {
+  /** Match condition */
+  match: ModelRoutingMatch;
+  /** Model identifier to use when matched */
+  model: string;
+}
+
+/**
+ * Model routing configuration
+ */
+export interface ModelRoutingConfig {
+  /** Enable model routing (default: false) */
+  enabled: boolean;
+  /** Ordered list of routing rules (first-match wins) */
+  rules: ModelRoutingRule[];
 }
 
 /**

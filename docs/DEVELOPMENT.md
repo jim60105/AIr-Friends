@@ -169,6 +169,8 @@ Configuration is loaded from `config.yaml` (YAML format). See [config.example.ya
 | `GIT_BACKUP_INTERVAL_MS` | Backup interval in ms (default: 3600000 = 1 hour) |
 | `GIT_BACKUP_AUTHOR_NAME` | Git commit author name |
 | `GIT_BACKUP_AUTHOR_EMAIL` | Git commit author email |
+| `MODEL_ROUTING_ENABLED` | Enable model routing (true/false, default: false) |
+| `MODEL_ROUTING_RULES` | Model routing rules as JSON string |
 
 ### Access Control & Reply Policy
 
@@ -201,6 +203,79 @@ Environment variable overrides:
 ```bash
 REPLY_TO=public
 WHITELIST=discord/account/123456789,discord/channel/987654321,misskey/account/abcdef123
+```
+
+### Model Routing
+
+AIr-Friends supports dynamic model selection based on user identity, channel, or session type. This allows operators to fine-tune API costs and response quality per context.
+
+#### How It Works
+
+1. Rules are evaluated in array order (**first-match wins**)
+2. The first matching rule determines the model
+3. If no rule matches, the system falls back to `agent.model` (or section-specific model for self-research/memory-maintenance)
+4. When `modelRouting.enabled` is `false` (default), routing is skipped entirely — backward compatible
+
+#### Configuration
+
+Via `config.yaml`:
+
+```yaml
+agent:
+  model: "gpt-5-mini"  # default fallback model
+  modelRouting:
+    enabled: true
+    rules:
+      # Premium model for a specific user
+      - match: { whitelist: "discord/account/123456789" }
+        model: "openrouter/deepseek/deepseek-v3.2"
+      # Cheaper model for a specific channel
+      - match: { whitelist: "discord/channel/987654321" }
+        model: "openrouter/deepseek/deepseek-v3.2"
+      # Cheaper model for spontaneous posts
+      - match: { sessionType: "spontaneous" }
+        model: "openrouter/deepseek/deepseek-v3.2"
+      # Premium model for self-research
+      - match: { sessionType: "self-research" }
+        model: "github-copilot/claude-opus-4.6"
+      # Cheaper model for memory maintenance
+      - match: { sessionType: "memory-maintenance" }
+        model: "openrouter/deepseek/deepseek-v3.2"
+```
+
+Via environment variables:
+
+```bash
+MODEL_ROUTING_ENABLED=true
+MODEL_ROUTING_RULES='[{"match":{"whitelist":"discord/account/123"},"model":"openrouter/deepseek/deepseek-v3.2"},{"match":{"sessionType":"spontaneous"},"model":"openrouter/deepseek/deepseek-v3.2"}]'
+```
+
+#### Match Conditions
+
+Each rule's `match` object supports one of (mutually exclusive):
+
+| Field | Example | Description |
+|-------|---------|-------------|
+| `whitelist` | `"discord/account/123"` | Match a specific whitelist entry |
+| `sessionType` | `"message"` | Match a session type |
+
+Valid `sessionType` values: `"message"`, `"spontaneous"`, `"self-research"`, `"memory-maintenance"`
+
+#### Fallback Chain
+
+For `self-research` and `memory-maintenance` sessions, the fallback chain is:
+
+```
+modelRouting rules (if enabled & matched)
+  → section-specific model (selfResearch.model / memoryMaintenance.model)
+    → agent.model
+```
+
+For `message` and `spontaneous` sessions:
+
+```
+modelRouting rules (if enabled & matched)
+  → agent.model
 ```
 
 ### GELF Log Output
