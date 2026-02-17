@@ -77,3 +77,9 @@
     當系統以 sessionId 渲染提示詞
     那麼輸出包含 Session Information 區塊
     而且輸出包含 Instructions 區塊
+
+  情境: sessionId 不依賴 userContextMessage 條件
+    假設 prompts/system_reply.md 包含 sessionId 條件區塊
+    當系統以 sessionId 渲染提示詞但未提供 userContextMessage
+    那麼輸出仍包含 Session Information 區塊
+    而且輸出不包含 Instructions 區塊

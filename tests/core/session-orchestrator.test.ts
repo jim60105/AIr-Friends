@@ -508,7 +508,6 @@ async function createTestableOrchestrator(tempDir: string, options?: { skillApi?
     `${tempDir}/prompts/system_reply.md`,
     `You are a helpful assistant.
 
-{{ if userContextMessage }}
 {{ if sessionId }}
 # Session Information
 
@@ -516,6 +515,7 @@ Your session ID is: {{ sessionId }}
 Use this session ID when calling skills that require --session-id parameter.
 {{ /if }}
 
+{{ if userContextMessage }}
 # Context and Message
 
 {{ userContextMessage }}
