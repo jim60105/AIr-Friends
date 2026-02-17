@@ -359,3 +359,50 @@ Deno.test("applyEnvOverrides - GIT_BACKUP_AUTHOR_NAME sets string", () => {
     Deno.env.delete("GIT_BACKUP_AUTHOR_NAME");
   }
 });
+
+// --- Model Routing env override tests ---
+
+Deno.test("applyEnvOverrides - MODEL_ROUTING_ENABLED sets boolean", () => {
+  Deno.env.set("MODEL_ROUTING_ENABLED", "true");
+  try {
+    const config: Record<string, unknown> = {
+      agent: { modelRouting: { enabled: false } },
+    };
+    applyEnvOverrides(config);
+    const agent = config.agent as { modelRouting: { enabled: boolean } };
+    assertEquals(agent.modelRouting.enabled, true);
+  } finally {
+    Deno.env.delete("MODEL_ROUTING_ENABLED");
+  }
+});
+
+Deno.test("applyEnvOverrides - MODEL_ROUTING_RULES applies JSON", () => {
+  const rules = JSON.stringify([
+    { match: { whitelist: "discord/account/123" }, model: "test-model" },
+  ]);
+  Deno.env.set("MODEL_ROUTING_RULES", rules);
+  try {
+    const config: Record<string, unknown> = {
+      agent: { modelRouting: { enabled: true, rules: [] } },
+    };
+    applyEnvOverrides(config);
+    const agent = config.agent as { modelRouting: { rules: unknown[] } };
+    assertEquals(agent.modelRouting.rules.length, 1);
+  } finally {
+    Deno.env.delete("MODEL_ROUTING_RULES");
+  }
+});
+
+Deno.test("applyEnvOverrides - MODEL_ROUTING_RULES skips on invalid JSON", () => {
+  Deno.env.set("MODEL_ROUTING_RULES", "not-valid-json");
+  try {
+    const config: Record<string, unknown> = {
+      agent: { modelRouting: { enabled: true, rules: [] } },
+    };
+    applyEnvOverrides(config);
+    const agent = config.agent as { modelRouting: { rules: unknown[] } };
+    assertEquals(agent.modelRouting.rules.length, 0);
+  } finally {
+    Deno.env.delete("MODEL_ROUTING_RULES");
+  }
+});

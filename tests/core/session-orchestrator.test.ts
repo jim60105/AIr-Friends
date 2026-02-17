@@ -420,6 +420,7 @@ class MockAgentConnector {
   promptCallCount = 0;
   promptResponses: PromptResponse[] = [];
   modelSet = false;
+  lastModelId = "";
   disconnected = false;
   onPrompt?: (callCount: number) => void;
 
@@ -438,8 +439,9 @@ class MockAgentConnector {
     return await Promise.resolve(this.sessionId);
   }
 
-  async setSessionModel(_sessionId: string, _modelId: string): Promise<void> {
+  async setSessionModel(_sessionId: string, modelId: string): Promise<void> {
     this.modelSet = true;
+    this.lastModelId = modelId;
     await Promise.resolve();
   }
 
@@ -581,7 +583,7 @@ Use this session ID when calling skills that require --session-id parameter.
     memoryStore,
   );
 
-  return { orchestrator, skillRegistry, workspaceManager, sessionRegistry };
+  return { orchestrator, skillRegistry, workspaceManager, sessionRegistry, config };
 }
 
 Deno.test("SessionOrchestrator - retry sends reply on first retry attempt", async () => {
@@ -2021,6 +2023,152 @@ Deno.test({
 
       // Oversized image should be skipped, prompt should be string
       assertEquals(typeof receivedArg, "string");
+
+      sessionRegistry.stop();
+    } finally {
+      await Deno.remove(tempDir, { recursive: true });
+    }
+  },
+});
+
+// --- Model Routing integration tests ---
+
+Deno.test({
+  name: "SessionOrchestrator - processMessage uses model from routing rule when whitelist matches",
+  sanitizeResources: false,
+  sanitizeOps: false,
+  fn: async () => {
+    const tempDir = await Deno.makeTempDir();
+    try {
+      const { orchestrator, skillRegistry, sessionRegistry, config } =
+        await createTestableOrchestrator(tempDir);
+
+      // Configure model routing
+      config.agent.modelRouting = {
+        enabled: true,
+        rules: [
+          { match: { whitelist: "discord/account/test_user" }, model: "premium-model" },
+        ],
+      };
+
+      const platformAdapter = new MockPlatformAdapter() as unknown as PlatformAdapter;
+      const event = createTestEvent();
+
+      orchestrator.setConnectorSetup((connector) => {
+        connector.promptResponses = [
+          { stopReason: "end_turn" } as PromptResponse,
+        ];
+        connector.onPrompt = (callCount) => {
+          if (callCount === 1) {
+            const replyHandler = skillRegistry.getReplyHandler();
+            const key = `discord/test_user:test_channel`;
+            // deno-lint-ignore no-explicit-any
+            (replyHandler as any).replySentMap.set(key, true);
+          }
+        };
+      });
+
+      await orchestrator.processMessage(event, platformAdapter);
+
+      const connector = orchestrator.mockConnector!;
+      assertEquals(connector.lastModelId, "premium-model");
+
+      sessionRegistry.stop();
+    } finally {
+      await Deno.remove(tempDir, { recursive: true });
+    }
+  },
+});
+
+Deno.test({
+  name: "SessionOrchestrator - processMessage uses default model when routing is disabled",
+  sanitizeResources: false,
+  sanitizeOps: false,
+  fn: async () => {
+    const tempDir = await Deno.makeTempDir();
+    try {
+      const { orchestrator, skillRegistry, sessionRegistry, config } =
+        await createTestableOrchestrator(tempDir);
+
+      // Routing disabled
+      config.agent.modelRouting = {
+        enabled: false,
+        rules: [
+          { match: { whitelist: "discord/account/test_user" }, model: "premium-model" },
+        ],
+      };
+
+      const platformAdapter = new MockPlatformAdapter() as unknown as PlatformAdapter;
+      const event = createTestEvent();
+
+      orchestrator.setConnectorSetup((connector) => {
+        connector.promptResponses = [
+          { stopReason: "end_turn" } as PromptResponse,
+        ];
+        connector.onPrompt = (callCount) => {
+          if (callCount === 1) {
+            const replyHandler = skillRegistry.getReplyHandler();
+            const key = `discord/test_user:test_channel`;
+            // deno-lint-ignore no-explicit-any
+            (replyHandler as any).replySentMap.set(key, true);
+          }
+        };
+      });
+
+      await orchestrator.processMessage(event, platformAdapter);
+
+      const connector = orchestrator.mockConnector!;
+      assertEquals(connector.lastModelId, "gpt-4");
+
+      sessionRegistry.stop();
+    } finally {
+      await Deno.remove(tempDir, { recursive: true });
+    }
+  },
+});
+
+Deno.test({
+  name: "SessionOrchestrator - processSpontaneousPost uses model from sessionType routing rule",
+  sanitizeResources: false,
+  sanitizeOps: false,
+  fn: async () => {
+    const tempDir = await Deno.makeTempDir();
+    try {
+      const { orchestrator, skillRegistry, sessionRegistry, config } =
+        await createTestableOrchestrator(tempDir);
+
+      config.agent.modelRouting = {
+        enabled: true,
+        rules: [
+          { match: { sessionType: "spontaneous" }, model: "spontaneous-model" },
+        ],
+      };
+
+      const platformAdapter = new MockPlatformAdapter() as unknown as PlatformAdapter;
+
+      orchestrator.setConnectorSetup((connector) => {
+        connector.promptResponses = [
+          { stopReason: "end_turn" } as PromptResponse,
+        ];
+        connector.onPrompt = (callCount) => {
+          if (callCount === 1) {
+            const replyHandler = skillRegistry.getReplyHandler();
+            const key = `discord/bot_id:test_channel`;
+            // deno-lint-ignore no-explicit-any
+            (replyHandler as any).replySentMap.set(key, true);
+          }
+        };
+      });
+
+      await orchestrator.processSpontaneousPost(
+        "discord",
+        "test_channel",
+        platformAdapter,
+        { botId: "bot_id", fetchRecentMessages: false },
+      );
+
+      const connector = orchestrator.mockConnector!;
+      assertEquals(connector.lastModelId, "spontaneous-model");
 
       sessionRegistry.stop();
     } finally {

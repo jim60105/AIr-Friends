@@ -1311,3 +1311,202 @@ gitBackup:
     assertEquals(result.gitBackup?.authorName, "AIr-Friends Backup");
   });
 });
+
+// --- Model Routing validation tests ---
+
+Deno.test("loadConfig - should set default modelRouting when not configured", async () => {
+  const config = `
+platforms:
+  discord:
+    token: "test-token"
+    enabled: true
+  misskey:
+    enabled: false
+agent:
+  model: "gpt-4"
+  systemPromptPath: "./prompts/system_reply.md"
+  tokenLimit: 20000
+workspace:
+  repoPath: "./data"
+  workspacesDir: "workspaces"
+`;
+
+  await withTestConfig(config, async (dir) => {
+    const result = await loadConfig(dir);
+    assertEquals(result.agent.modelRouting?.enabled, false);
+    assertEquals(result.agent.modelRouting?.rules, []);
+  });
+});
+
+Deno.test("loadConfig - should skip invalid model routing rules (missing match)", async () => {
+  const config = `
+platforms:
+  discord:
+    token: "test-token"
+    enabled: true
+  misskey:
+    enabled: false
+agent:
+  model: "gpt-4"
+  systemPromptPath: "./prompts/system_reply.md"
+  tokenLimit: 20000
+  modelRouting:
+    enabled: true
+    rules:
+      - model: "some-model"
+workspace:
+  repoPath: "./data"
+  workspacesDir: "workspaces"
+`;
+
+  await withTestConfig(config, async (dir) => {
+    const result = await loadConfig(dir);
+    assertEquals(result.agent.modelRouting?.rules.length, 0);
+  });
+});
+
+Deno.test("loadConfig - should skip invalid model routing rules (empty model string)", async () => {
+  const config = `
+platforms:
+  discord:
+    token: "test-token"
+    enabled: true
+  misskey:
+    enabled: false
+agent:
+  model: "gpt-4"
+  systemPromptPath: "./prompts/system_reply.md"
+  tokenLimit: 20000
+  modelRouting:
+    enabled: true
+    rules:
+      - match: { sessionType: "message" }
+        model: ""
+workspace:
+  repoPath: "./data"
+  workspacesDir: "workspaces"
+`;
+
+  await withTestConfig(config, async (dir) => {
+    const result = await loadConfig(dir);
+    assertEquals(result.agent.modelRouting?.rules.length, 0);
+  });
+});
+
+Deno.test("loadConfig - should skip rules with invalid whitelist format", async () => {
+  const config = `
+platforms:
+  discord:
+    token: "test-token"
+    enabled: true
+  misskey:
+    enabled: false
+agent:
+  model: "gpt-4"
+  systemPromptPath: "./prompts/system_reply.md"
+  tokenLimit: 20000
+  modelRouting:
+    enabled: true
+    rules:
+      - match: { whitelist: "invalid-format" }
+        model: "some-model"
+workspace:
+  repoPath: "./data"
+  workspacesDir: "workspaces"
+`;
+
+  await withTestConfig(config, async (dir) => {
+    const result = await loadConfig(dir);
+    assertEquals(result.agent.modelRouting?.rules.length, 0);
+  });
+});
+
+Deno.test("loadConfig - should skip rules with invalid sessionType", async () => {
+  const config = `
+platforms:
+  discord:
+    token: "test-token"
+    enabled: true
+  misskey:
+    enabled: false
+agent:
+  model: "gpt-4"
+  systemPromptPath: "./prompts/system_reply.md"
+  tokenLimit: 20000
+  modelRouting:
+    enabled: true
+    rules:
+      - match: { sessionType: "invalid-type" }
+        model: "some-model"
+workspace:
+  repoPath: "./data"
+  workspacesDir: "workspaces"
+`;
+
+  await withTestConfig(config, async (dir) => {
+    const result = await loadConfig(dir);
+    assertEquals(result.agent.modelRouting?.rules.length, 0);
+  });
+});
+
+Deno.test("loadConfig - should skip rules with multiple match fields", async () => {
+  const config = `
+platforms:
+  discord:
+    token: "test-token"
+    enabled: true
+  misskey:
+    enabled: false
+agent:
+  model: "gpt-4"
+  systemPromptPath: "./prompts/system_reply.md"
+  tokenLimit: 20000
+  modelRouting:
+    enabled: true
+    rules:
+      - match: { whitelist: "discord/account/123", sessionType: "message" }
+        model: "some-model"
+workspace:
+  repoPath: "./data"
+  workspacesDir: "workspaces"
+`;
+
+  await withTestConfig(config, async (dir) => {
+    const result = await loadConfig(dir);
+    assertEquals(result.agent.modelRouting?.rules.length, 0);
+  });
+});
+
+Deno.test("loadConfig - should preserve valid rules and discard invalid ones", async () => {
+  const config = `
+platforms:
+  discord:
+    token: "test-token"
+    enabled: true
+  misskey:
+    enabled: false
+agent:
+  model: "gpt-4"
+  systemPromptPath: "./prompts/system_reply.md"
+  tokenLimit: 20000
+  modelRouting:
+    enabled: true
+    rules:
+      - match: { whitelist: "discord/account/123" }
+        model: "valid-model"
+      - match: { whitelist: "invalid-format" }
+        model: "bad-model"
+      - match: { sessionType: "spontaneous" }
+        model: "spontaneous-model"
+workspace:
+  repoPath: "./data"
+  workspacesDir: "workspaces"
+`;
+
+  await withTestConfig(config, async (dir) => {
+    const result = await loadConfig(dir);
+    assertEquals(result.agent.modelRouting?.rules.length, 2);
+    assertEquals(result.agent.modelRouting?.rules[0].model, "valid-model");
+    assertEquals(result.agent.modelRouting?.rules[1].model, "spontaneous-model");
+  });
+});

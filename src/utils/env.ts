@@ -61,6 +61,10 @@ export const ENV_MAPPINGS = {
   RATE_LIMIT_WINDOW_MS: "rateLimit.windowMs",
   RATE_LIMIT_COOLDOWN_MS: "rateLimit.cooldownMs",
 
+  // Model routing settings
+  MODEL_ROUTING_ENABLED: "agent.modelRouting.enabled",
+  MODEL_ROUTING_RULES: "agent.modelRouting.rules",
+
   // Git backup settings
   GIT_BACKUP_ENABLED: "gitBackup.enabled",
   GIT_BACKUP_REMOTE_URL: "gitBackup.remoteUrl",
@@ -132,6 +136,14 @@ export function applyEnvOverrides(config: Record<string, unknown>): void {
       // Handle comma-separated array for WHITELIST
       else if (envName === "WHITELIST") {
         parsedValue = value.split(",").map((s) => s.trim()).filter((s) => s !== "");
+      } // Handle JSON string for MODEL_ROUTING_RULES
+      else if (envName === "MODEL_ROUTING_RULES") {
+        try {
+          parsedValue = JSON.parse(value);
+        } catch {
+          // If JSON parse fails, skip this override
+          continue;
+        }
       } // Handle JSON string for SELF_RESEARCH_RSS_FEEDS
       else if (envName === "SELF_RESEARCH_RSS_FEEDS") {
         try {

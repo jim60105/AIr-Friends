@@ -57,6 +57,22 @@ agent:
   openRouterApiKey: "${OPENROUTER_API_KEY}" # Optional OpenRouter API key (env: OPENROUTER_API_KEY)
   defaultAgentType: "${AGENT_DEFAULT_TYPE}" # Default ACP agent: "copilot", "gemini", or "opencode" (env: AGENT_DEFAULT_TYPE)
 
+  # Model routing: per-user/per-context model selection
+  # When enabled, rules are evaluated in order (first-match wins).
+  # If no rule matches, falls back to agent.model (or selfResearch.model / memoryMaintenance.model for those session types).
+  modelRouting:
+    enabled: false
+    rules: []
+    # Example rules:
+    #   - match: { whitelist: "discord/account/123456789" }
+    #     model: "openrouter/deepseek/deepseek-v3.2"
+    #   - match: { sessionType: "spontaneous" }
+    #     model: "openrouter/deepseek/deepseek-v3.2"
+    #   - match: { sessionType: "self-research" }
+    #     model: "github-copilot/claude-opus-4.6"
+    #   - match: { sessionType: "memory-maintenance" }
+    #     model: "openrouter/deepseek/deepseek-v3.2"
+
 # Memory system configuration
 memory:
   searchLimit: 10 # Max number of search results (default: 10)

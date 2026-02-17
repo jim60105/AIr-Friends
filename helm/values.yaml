@@ -48,6 +48,10 @@ env:
   # Default ACP agent type (copilot|gemini|opencode)
   AGENT_DEFAULT_TYPE: 'opencode'
 
+  # Model routing
+  MODEL_ROUTING_ENABLED: 'false'
+  MODEL_ROUTING_RULES: '[]'
+
   # Logging
   LOG_LEVEL: 'INFO'
 

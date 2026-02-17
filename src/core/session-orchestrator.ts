@@ -14,6 +14,8 @@ import { WorkspaceManager } from "./workspace-manager.ts";
 import { MemoryStore } from "./memory-store.ts";
 import { createTemplateEngine, renderTemplate } from "./template-renderer.ts";
 import type { TemplateVariables } from "../types/template.ts";
+import { resolveModel } from "./model-router.ts";
+import type { ModelRoutingContext } from "./model-router.ts";
 import type { SkillRegistry } from "@skills/registry.ts";
 import type { SessionRegistry } from "../skill-api/session-registry.ts";
 import type { Config, MemoryMaintenanceConfig, SelfResearchConfig } from "../types/config.ts";
@@ -211,10 +213,21 @@ export class SessionOrchestrator {
         sessionLogger.info("Agent session {sessionId} created", { sessionId });
 
         // Set the model for the session
-        await connector.setSessionModel(sessionId, this.config.agent.model);
+        const routingContext: ModelRoutingContext = {
+          sessionType: "message",
+          platform: event.platform,
+          userId: event.userId,
+          channelId: event.channelId,
+        };
+        const resolvedModel = resolveModel(
+          this.config.agent.modelRouting,
+          routingContext,
+          this.config.agent.model,
+        );
+        await connector.setSessionModel(sessionId, resolvedModel);
         sessionLogger.info("Agent session {sessionId} model set to {model}", {
           sessionId,
-          model: this.config.agent.model,
+          model: resolvedModel,
         });
 
         // Clear reply state before prompting
@@ -493,7 +506,18 @@ export class SessionOrchestrator {
         sessionLogger.info("Agent connected");
 
         const sessionId = await connector.createSession();
-        await connector.setSessionModel(sessionId, this.config.agent.model);
+        const routingContext: ModelRoutingContext = {
+          sessionType: "spontaneous",
+          platform,
+          userId: options.botId,
+          channelId,
+        };
+        const resolvedModel = resolveModel(
+          this.config.agent.modelRouting,
+          routingContext,
+          this.config.agent.model,
+        );
+        await connector.setSessionModel(sessionId, resolvedModel);
 
         // Clear reply state
         const replyHandler = this.skillRegistry.getReplyHandler();
@@ -666,8 +690,17 @@ export class SessionOrchestrator {
         sessionLogger.info("Agent connected");
 
         const sessionId = await connector.createSession();
-        // Use self-research specific model
-        await connector.setSessionModel(sessionId, selfResearchConfig.model);
+        // Fallback chain: routing rules → selfResearch.model → agent.model
+        const routingContext: ModelRoutingContext = {
+          sessionType: "self-research",
+        };
+        const sectionFallback = selfResearchConfig.model || this.config.agent.model;
+        const resolvedModel = resolveModel(
+          this.config.agent.modelRouting,
+          routingContext,
+          sectionFallback,
+        );
+        await connector.setSessionModel(sessionId, resolvedModel);
 
         // Send prompt
         const response = await connector.prompt(sessionId, fullPrompt);
@@ -819,7 +852,17 @@ export class SessionOrchestrator {
         sessionLogger.info("Agent connected");
 
         const sessionId = await connector.createSession();
-        await connector.setSessionModel(sessionId, memoryMaintenanceConfig.model);
+        // Fallback chain: routing rules → memoryMaintenance.model → agent.model
+        const routingContext: ModelRoutingContext = {
+          sessionType: "memory-maintenance",
+        };
+        const sectionFallback = memoryMaintenanceConfig.model || this.config.agent.model;
+        const resolvedModel = resolveModel(
+          this.config.agent.modelRouting,
+          routingContext,
+          sectionFallback,
+        );
+        await connector.setSessionModel(sessionId, resolvedModel);
 
         const response = await connector.prompt(sessionId, fullPrompt);
         sessionLogger.info("Memory maintenance session completed with stopReason {stopReason}", {
