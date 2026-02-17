@@ -28,22 +28,42 @@ RUN --mount=type=cache,id=apt-$TARGETARCH$TARGETVARIANT,sharing=locked,target=/v
 ########################################
 FROM base AS copilot-unpacker
 
+ARG TARGETARCH
+
 WORKDIR /copilot
 
-ADD https://github.com/github/copilot-cli/releases/latest/download/copilot-linux-x64.tar.gz /tmp/copilot-linux-x64.tar.gz
-
-RUN tar -xzf /tmp/copilot-linux-x64.tar.gz -C /copilot
+# Map Docker TARGETARCH to Copilot CLI naming convention
+# TARGETARCH: amd64 -> x64, arm64 -> arm64
+RUN case "${TARGETARCH}" in \
+      amd64) COPILOT_ARCH="x64" ;; \
+      arm64) COPILOT_ARCH="arm64" ;; \
+      *) echo "unsupported architecture: ${TARGETARCH}" && exit 1 ;; \
+    esac && \
+    curl -fsSL "https://github.com/github/copilot-cli/releases/latest/download/copilot-linux-${COPILOT_ARCH}.tar.gz" \
+    -o /tmp/copilot.tar.gz && \
+    tar -xzf /tmp/copilot.tar.gz -C /copilot && \
+    rm -f /tmp/copilot.tar.gz
 
 ########################################
 # Opencode unpack stage
 ########################################
 FROM base AS opencode-unpacker
 
+ARG TARGETARCH
+
 WORKDIR /opencode
 
-ADD https://github.com/anomalyco/opencode/releases/latest/download/opencode-linux-x64.tar.gz /tmp/opencode-linux-x64.tar.gz
-
-RUN tar -xzf /tmp/opencode-linux-x64.tar.gz -C /opencode
+# Map Docker TARGETARCH to OpenCode CLI naming convention
+# TARGETARCH: amd64 -> x64, arm64 -> arm64
+RUN case "${TARGETARCH}" in \
+      amd64) OC_ARCH="x64" ;; \
+      arm64) OC_ARCH="arm64" ;; \
+      *) echo "unsupported architecture: ${TARGETARCH}" && exit 1 ;; \
+    esac && \
+    curl -fsSL "https://github.com/anomalyco/opencode/releases/latest/download/opencode-linux-${OC_ARCH}.tar.gz" \
+    -o /tmp/opencode.tar.gz && \
+    tar -xzf /tmp/opencode.tar.gz -C /opencode && \
+    rm -f /tmp/opencode.tar.gz
 
 ########################################
 # Cache stage
@@ -90,7 +110,17 @@ RUN install -d -m 775 -o $UID -g 0 /app && \
 COPY --link --chown=$UID:0 --chmod=775 LICENSE /licenses/LICENSE
 
 # Get Dumb Init
-ADD --link --chown=$UID:0 --chmod=755 https://github.com/Yelp/dumb-init/releases/download/v1.2.5/dumb-init_1.2.5_x86_64 /usr/local/bin/dumb-init
+# Map Docker TARGETARCH to dumb-init naming convention
+# TARGETARCH: amd64 -> x86_64, arm64 -> aarch64
+RUN case "${TARGETARCH}" in \
+      amd64) DUMBINIT_ARCH="x86_64" ;; \
+      arm64) DUMBINIT_ARCH="aarch64" ;; \
+      *) echo "unsupported architecture: ${TARGETARCH}" && exit 1 ;; \
+    esac && \
+    curl -fsSL "https://github.com/Yelp/dumb-init/releases/download/v1.2.5/dumb-init_1.2.5_${DUMBINIT_ARCH}" \
+    -o /usr/local/bin/dumb-init && \
+    chmod 755 /usr/local/bin/dumb-init && \
+    chown $UID:0 /usr/local/bin/dumb-init
 
 # Copy cached Deno dependencies from cache stage
 COPY --chown=$UID:0 --chmod=775 --from=cache /deno-dir/ /deno-dir/
