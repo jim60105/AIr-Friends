@@ -116,6 +116,13 @@ env:
   GIT_BACKUP_AUTHOR_NAME: 'AIr-Friends Backup'
   GIT_BACKUP_AUTHOR_EMAIL: 'airfriends-backup@noreply.github.com'
 
+  # Scheduled Reminders
+  REMINDERS_ENABLED: ''
+  REMINDERS_MAX_PER_USER: ''
+  REMINDERS_MIN_INTERVAL_MS: ''
+  REMINDERS_PERSIST_PATH: ''
+  REMINDERS_CHECK_INTERVAL_MS: ''
+
 # ServiceMonitor for Prometheus Operator (optional)
 serviceMonitor:
   enabled: false

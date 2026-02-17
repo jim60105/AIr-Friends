@@ -1,7 +1,12 @@
 // src/core/session-orchestrator.ts
 
 import { createLogger } from "@utils/logger.ts";
-import { activeSessionsGauge, sessionDurationSeconds, sessionsTotal } from "@utils/metrics.ts";
+import {
+  activeSessionsGauge,
+  remindersDeliveredTotal,
+  sessionDurationSeconds,
+  sessionsTotal,
+} from "@utils/metrics.ts";
 import { AgentConnector } from "@acp/agent-connector.ts";
 import * as acp from "@agentclientprotocol/sdk";
 import {
@@ -25,6 +30,8 @@ import type { AgentConnectorOptions, ClientConfig } from "@acp/types.ts";
 import { dirname, join } from "@std/path";
 import type { RssItem } from "@utils/rss-fetcher.ts";
 import type { WorkspaceInfo } from "../types/workspace.ts";
+import type { ResolvedReminder } from "../types/reminder.ts";
+import type { ReminderStore } from "./reminder-store.ts";
 
 const logger = createLogger("SessionOrchestrator");
 
@@ -237,6 +244,12 @@ export class SessionOrchestrator {
         // Clear reaction state before prompting
         const reactionHandler = this.skillRegistry.getReactionHandler();
         reactionHandler.clearReactionState(workspace.key, event.channelId);
+
+        // Clear reminder session state before prompting
+        const reminderHandler = this.skillRegistry.getReminderHandler();
+        if (reminderHandler) {
+          reminderHandler.clearSessionState(workspace.key, event.channelId);
+        }
 
         // Send prompt to agent (with image ContentBlocks if supported)
         const promptContent = await this.buildPromptContent(
@@ -914,6 +927,225 @@ export class SessionOrchestrator {
   }
 
   /**
+   * Process a due reminder — creates a new ACP session to deliver the reminder via DM.
+   * Pattern follows processSpontaneousPost() but with reminder-specific context.
+   */
+  async processReminder(
+    reminder: ResolvedReminder,
+    platformAdapter: PlatformAdapter,
+    reminderStore: ReminderStore,
+  ): Promise<SessionResponse> {
+    const platform = reminder.platform as Platform;
+    const sessionLoggerName = `reminder:${platform}:${reminder.userId}:${reminder.id}`;
+    const sessionLogger = logger.child(sessionLoggerName);
+
+    sessionLogger.info("Processing due reminder {reminderId}", {
+      reminderId: reminder.id,
+      userId: reminder.userId,
+      scheduledAt: reminder.scheduledAt,
+    });
+
+    const sessionStartTime = Date.now();
+    activeSessionsGauge.inc();
+    let result: SessionResponse;
+
+    try {
+      // 1. Resolve DM channel
+      const dmChannelId = await platformAdapter.getDmChannelId(reminder.userId);
+      if (!dmChannelId) {
+        sessionLogger.warn(
+          "Cannot resolve DM channel for user {userId}, disabling reminder {reminderId}",
+          { userId: reminder.userId, reminderId: reminder.id },
+        );
+        // Create workspace to access reminder store
+        const syntheticEvent: NormalizedEvent = {
+          platform,
+          channelId: "internal",
+          userId: reminder.userId,
+          messageId: `reminder_cancel_${Date.now()}`,
+          isDm: true,
+          guildId: "",
+          content: "",
+          timestamp: new Date(),
+        };
+        const ws = await this.workspaceManager.getOrCreateWorkspace(syntheticEvent);
+        await reminderStore.cancelReminder(ws, reminder.id);
+        result = {
+          success: false,
+          replySent: false,
+          error: "Cannot resolve DM channel — reminder disabled",
+        };
+        return result;
+      }
+
+      // 2. Create synthetic DM event
+      const syntheticEvent: NormalizedEvent = {
+        platform,
+        channelId: dmChannelId,
+        userId: reminder.userId,
+        messageId: `reminder_${reminder.id}_${Date.now()}`,
+        isDm: true,
+        guildId: "",
+        content: "",
+        timestamp: new Date(),
+      };
+      const workspace = await this.workspaceManager.getOrCreateWorkspace(syntheticEvent);
+      const agentWorkspacePath = await this.workspaceManager.getOrCreateAgentWorkspace();
+
+      // 3. Register shell session
+      let shellSessionId: string | null = null;
+      if (this.config.skillApi?.enabled) {
+        shellSessionId = this.sessionRegistry.register({
+          platform,
+          channelId: dmChannelId,
+          userId: reminder.userId,
+          isDm: true,
+          workspace,
+          platformAdapter,
+          timeoutMs: this.config.skillApi.sessionTimeoutMs,
+          agentWorkspacePath,
+        });
+
+        const sessionIdFile = join(workspace.path, "SESSION_ID");
+        await Deno.writeTextFile(sessionIdFile, shellSessionId);
+        sessionLogger.info("Shell session {shellSessionId} registered", { shellSessionId });
+      }
+
+      // 4. Build reminder prompt
+      const fullPrompt = await this.buildReminderPrompt(reminder, shellSessionId);
+
+      // 5. Create client config
+      const clientConfig: ClientConfig = {
+        workingDir: workspace.path,
+        agentWorkspacePath,
+        platform,
+        userId: reminder.userId,
+        channelId: dmChannelId,
+        isDM: true,
+        yolo: this.yolo,
+      };
+
+      // 6. Build and execute ACP connector
+      const agentType = getDefaultAgentType(this.config);
+      const connector = this.createConnector({
+        agentConfig: createAgentConfig(
+          agentType,
+          workspace.path,
+          this.config,
+          this.yolo,
+          agentWorkspacePath,
+        ),
+        clientConfig,
+        skillRegistry: this.skillRegistry,
+        logger: sessionLogger,
+      });
+
+      try {
+        await connector.connect();
+        sessionLogger.info("Agent connected");
+
+        const sessionId = await connector.createSession();
+        const routingContext: ModelRoutingContext = {
+          sessionType: "reminder",
+          platform,
+          userId: reminder.userId,
+          channelId: dmChannelId,
+        };
+        const resolvedModel = resolveModel(
+          this.config.agent.modelRouting,
+          routingContext,
+          this.config.agent.model,
+        );
+        await connector.setSessionModel(sessionId, resolvedModel);
+
+        // Clear reply state
+        const replyHandler = this.skillRegistry.getReplyHandler();
+        replyHandler.clearReplyState(workspace.key, dmChannelId);
+
+        // Send prompt
+        const response = await connector.prompt(sessionId, fullPrompt);
+        sessionLogger.info("Agent session completed with stopReason {stopReason}", {
+          stopReason: response.stopReason,
+        });
+
+        let replySent = replyHandler.hasReplySent(workspace.key, dmChannelId);
+
+        // Retry if no reply sent
+        if (!replySent && response.stopReason === "end_turn") {
+          sessionLogger.warn("Agent completed without reply, retrying");
+
+          const retryStrategy = getRetryPromptStrategy(agentType);
+          for (let attempt = 0; attempt < retryStrategy.maxRetries; attempt++) {
+            replyHandler.clearReplyState(workspace.key, dmChannelId);
+
+            const retryResponse = await connector.prompt(
+              sessionId,
+              retryStrategy.retryPromptMessage,
+            );
+
+            replySent = replyHandler.hasReplySent(workspace.key, dmChannelId);
+            if (replySent || retryResponse.stopReason !== "end_turn") break;
+          }
+
+          replySent = replyHandler.hasReplySent(workspace.key, dmChannelId);
+        }
+
+        // 7. Disable reminder on success
+        if (replySent) {
+          await reminderStore.cancelReminder(workspace, reminder.id);
+          remindersDeliveredTotal.labels(platform, "success").inc();
+          sessionLogger.info("Reminder {reminderId} delivered and disabled", {
+            reminderId: reminder.id,
+          });
+        } else {
+          remindersDeliveredTotal.labels(platform, "failure").inc();
+        }
+
+        result = {
+          success: replySent,
+          replySent,
+          error: replySent ? undefined : "Agent did not send a reply",
+        };
+        return result;
+      } finally {
+        await connector.disconnect();
+        sessionLogger.debug("Agent disconnected");
+
+        if (shellSessionId) {
+          this.sessionRegistry.remove(shellSessionId);
+          const sessionIdFile = join(workspace.path, "SESSION_ID");
+          try {
+            await Deno.remove(sessionIdFile);
+          } catch (error) {
+            if (!(error instanceof Deno.errors.NotFound)) {
+              sessionLogger.warn("Failed to remove SESSION_ID file", {
+                error: error instanceof Error ? error.message : String(error),
+              });
+            }
+          }
+        }
+      }
+    } catch (error) {
+      sessionLogger.error("Reminder session failed", {
+        reminderId: reminder.id,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      result = {
+        success: false,
+        replySent: false,
+        error: error instanceof Error ? error.message : "Unknown error",
+      };
+      return result;
+    } finally {
+      activeSessionsGauge.dec();
+      const durationSec = (Date.now() - sessionStartTime) / 1000;
+      const status = result!.success ? "success" : "failure";
+      sessionsTotal.labels(platform, "reminder", status).inc();
+      sessionDurationSeconds.labels(platform, "reminder", status).observe(durationSec);
+    }
+  }
+
+  /**
    * Create an AgentConnector instance.
    * Protected to allow test subclasses to inject mocks.
    */
@@ -1137,5 +1369,35 @@ export class SessionOrchestrator {
     }
 
     return JSON.stringify(allMemories, null, 2);
+  }
+
+  /**
+   * Build the full prompt for a reminder delivery session
+   */
+  private async buildReminderPrompt(
+    reminder: ResolvedReminder,
+    sessionId: string | null,
+  ): Promise<string> {
+    const promptDir = dirname(this.config.agent.systemPromptPath);
+    const instructionsPath = join(promptDir, "system_reminder.md");
+    const env = createTemplateEngine(promptDir);
+
+    const variables: TemplateVariables = {
+      isDm: true,
+      platform: reminder.platform as Platform,
+      userId: reminder.userId,
+      channelId: "",
+      guildId: "",
+      sessionId: sessionId ?? "",
+      reminderMessage: reminder.message,
+      reminderCreatedAt: reminder.createdAt,
+      reminderScheduledAt: reminder.scheduledAt,
+    };
+
+    return await renderTemplate(
+      env,
+      instructionsPath,
+      variables as unknown as Record<string, unknown>,
+    );
   }
 }

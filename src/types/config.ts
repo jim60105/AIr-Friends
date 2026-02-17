@@ -73,7 +73,12 @@ export interface AgentConfig {
 /**
  * Session type for model routing rules
  */
-export type SessionType = "message" | "spontaneous" | "self-research" | "memory-maintenance";
+export type SessionType =
+  | "message"
+  | "spontaneous"
+  | "self-research"
+  | "memory-maintenance"
+  | "reminder";
 
 /**
  * Match condition for a model routing rule.
@@ -321,6 +326,27 @@ export interface GitBackupConfig {
 }
 
 /**
+ * Scheduled reminders configuration.
+ * When enabled, the agent can set future reminders for users.
+ */
+export interface RemindersConfig {
+  /** Enable scheduled reminders (default: false) */
+  enabled: boolean;
+
+  /** Maximum number of active reminders per user (default: 20) */
+  maxRemindersPerUser: number;
+
+  /** Minimum allowed reminder interval from now in milliseconds (default: 60000 = 1 minute) */
+  minIntervalMs: number;
+
+  /** File name for reminder persistence within each workspace (default: "reminders.jsonl") */
+  persistPath: string;
+
+  /** How often the scheduler checks for due reminders in milliseconds (default: 30000 = 30 seconds) */
+  checkIntervalMs: number;
+}
+
+/**
  * Complete application configuration
  */
 export interface Config {
@@ -339,6 +365,8 @@ export interface Config {
   metrics?: MetricsConfig;
   /** Git backup configuration (optional) */
   gitBackup?: GitBackupConfig;
+  /** Scheduled reminders configuration (optional) */
+  reminders?: RemindersConfig;
 }
 
 /**

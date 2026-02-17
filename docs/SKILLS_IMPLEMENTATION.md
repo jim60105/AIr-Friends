@@ -99,6 +99,29 @@ Located in `.github/skills/`, these files follow the [Agent Skills Standard](htt
 - **Returns**: Statistics object with public/private/summary counts (total, enabled, disabled, high-importance, normal-importance)
 - **Privacy**: Private statistics only included in DM contexts
 
+### 7. set-reminder
+
+- **Purpose**: Set a one-time reminder to be delivered via DM at a future time
+- **Parameters**:
+  - `scheduledAt` (required): ISO 8601 UTC timestamp for when the reminder should fire
+  - `message` (required): The reminder message content
+- **Constraints**: DM-only, one per session, minimum 1 minute in the future, max 20 active per user
+- **Returns**: `reminderId` and `scheduledAt` on success
+
+### 8. cancel-reminder
+
+- **Purpose**: Cancel a previously set reminder by its ID
+- **Parameters**:
+  - `reminderId` (required): The ID of the reminder to cancel (returned by set-reminder)
+- **Constraints**: DM-only, can only cancel own reminders
+
+### 9. list-reminders
+
+- **Purpose**: List all active (pending) reminders for the current user
+- **Parameters**: None
+- **Constraints**: DM-only
+- **Returns**: Array of active reminders with id, message, scheduledAt, createdAt
+
 ## Skill Handlers Implementation
 
 ### Type Definitions (src/skills/types.ts)

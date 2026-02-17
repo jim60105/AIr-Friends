@@ -90,6 +90,7 @@ After writing, review your entire note and verify:
 {{ browserAutomationContent }}
 
 {{ if sessionId }}
+
 ## Session Information
 
 Your session ID is: {{ sessionId }}

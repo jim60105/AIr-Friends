@@ -11,6 +11,7 @@ Your AIr friends custom chatbot with integrated shell and skills. Powered by ACP
 - 🤖 **Multi-Platform**: Currently works on Discord and Misskey
 - 🧠 **Persistent Memory**: Remembers conversations across different channels
 - 🗜️ **Memory Maintenance**: Optional scheduled agent task to summarize and compact old memories
+- ⏰ **Scheduled Reminders**: Users can set one-time reminders via DM, delivered at the specified time
 - 📝 **Agent Knowledge Base**: Personal workspace for long-term knowledge notes and reflections
 - 🔒 **Privacy First**: Isolated workspaces per user with access control
 - 💾 **Git Backup**: Automatic versioned backup of memories and notes to GitHub
@@ -122,6 +123,23 @@ rateLimit:
   windowMs: 600000    # 10-minute sliding window
   cooldownMs: 600000  # Cooldown after limit exceeded
 ```
+
+## ⏰ Scheduled Reminders
+
+Allow users to set one-time reminders via DM. The bot delivers them at the scheduled time:
+
+```yaml
+reminders:
+  enabled: false
+  maxRemindersPerUser: 20      # Max active reminders per user
+  minIntervalMs: 60000         # Minimum delay from now (1 minute)
+  checkIntervalMs: 30000       # How often to check for due reminders
+```
+
+- **DM-only**: Reminders can only be set and are delivered in direct messages
+- **One-time**: Each reminder fires exactly once (no recurring support)
+- **Restart-safe**: Overdue reminders are picked up automatically after bot restart
+- Skills: `set-reminder`, `cancel-reminder`, `list-reminders`
 
 ## 🔀 Model Routing
 

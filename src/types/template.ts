@@ -50,4 +50,13 @@ export interface TemplateVariables {
 
   /** Pre-formatted user context message (normal message prompt only) */
   userContextMessage?: string;
+
+  /** Reminder message content (reminder delivery prompt only) */
+  reminderMessage?: string;
+
+  /** Reminder creation timestamp (reminder delivery prompt only) */
+  reminderCreatedAt?: string;
+
+  /** Reminder scheduled timestamp (reminder delivery prompt only) */
+  reminderScheduledAt?: string;
 }

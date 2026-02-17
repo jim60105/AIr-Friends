@@ -956,6 +956,45 @@ See `config.example.yaml` for the `memoryMaintenance` section. Environment varia
 
 ---
 
+## Scheduled Reminders
+
+Enables users to set one-time reminders via DM conversations. The bot polls for due reminders at fixed intervals and delivers them via DM using an ACP agent session.
+
+### Components
+
+| Component | File | Purpose |
+| --- | --- | --- |
+| Store | `src/core/reminder-store.ts` | Append-only JSONL persistence per workspace |
+| Scheduler | `src/core/reminder-scheduler.ts` | Fixed-interval polling for due reminders |
+| Handler | `src/skills/reminder-handler.ts` | Skill handlers for set/cancel/list |
+| Orchestrator | `src/core/session-orchestrator.ts` | `processReminder()` — ACP delivery session |
+| Shell Skills | `skills/set-reminder/`, `skills/cancel-reminder/`, `skills/list-reminders/` | Agent-facing skill scripts |
+| Prompt | `prompts/system_reminder.md` | Delivery prompt template |
+
+### Flow
+
+1. User sends DM asking to set a reminder → Agent calls `set-reminder` skill
+2. `ReminderHandler` validates, stores entry in `{workspace}/reminders.jsonl`
+3. `ReminderScheduler` polls every `checkIntervalMs` (default: 30s)
+4. Due reminders found → `SessionOrchestrator.processReminder()` creates ACP session
+5. Agent delivers reminder via `send-reply` skill to user's DM
+6. On success, reminder is disabled via patch event
+
+### Key Constraints
+
+- **DM-only**: All reminder operations require DM context
+- **One-time**: No recurring/cron support
+- **One per session**: Only one `set-reminder` call per conversation turn
+- **Per-user limit**: Maximum active reminders configurable (default: 20)
+- **Restart-safe**: Polling picks up overdue reminders automatically
+- **Permanent failure**: If DM channel cannot be resolved, reminder is auto-cancelled
+
+### Configuration
+
+See `config.example.yaml` for the `reminders` section. Environment variables: `REMINDERS_ENABLED`, `REMINDERS_MAX_PER_USER`, `REMINDERS_MIN_INTERVAL_MS`, `REMINDERS_PERSIST_PATH`, `REMINDERS_CHECK_INTERVAL_MS`.
+
+---
+
 ## Appendix: Performance Metrics
 
 The system should collect:

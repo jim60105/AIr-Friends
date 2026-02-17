@@ -12,6 +12,7 @@ import type {
   GitBackupConfig,
   MemoryMaintenanceConfig,
   RateLimitConfig,
+  RemindersConfig,
 } from "../types/config.ts";
 import { ConfigError, ErrorCode } from "../types/errors.ts";
 
@@ -99,6 +100,17 @@ const DEFAULT_GIT_BACKUP: GitBackupConfig = {
   intervalMs: 3600000, // 1 hour
   authorName: "AIr-Friends Backup",
   authorEmail: "airfriends-backup@noreply.github.com",
+};
+
+/**
+ * Default reminders configuration
+ */
+const DEFAULT_REMINDERS: RemindersConfig = {
+  enabled: false,
+  maxRemindersPerUser: 20,
+  minIntervalMs: 60000, // 1 minute
+  persistPath: "reminders.jsonl",
+  checkIntervalMs: 30000, // 30 seconds
 };
 
 /**
@@ -337,6 +349,30 @@ function validateConfig(config: Record<string, unknown>): void {
     };
   }
 
+  // Reminders defaults and validation
+  if (!config.reminders) {
+    config.reminders = { ...DEFAULT_REMINDERS };
+  } else {
+    config.reminders = {
+      ...DEFAULT_REMINDERS,
+      ...(config.reminders as Record<string, unknown>),
+    };
+  }
+
+  const rem = config.reminders as Record<string, unknown>;
+  if ((rem.minIntervalMs as number) < 10000) {
+    logger.warn("reminders.minIntervalMs too small, clamping to 10000");
+    rem.minIntervalMs = 10000;
+  }
+  if ((rem.checkIntervalMs as number) < 5000) {
+    logger.warn("reminders.checkIntervalMs too small, clamping to 5000");
+    rem.checkIntervalMs = 5000;
+  }
+  if ((rem.maxRemindersPerUser as number) < 1) {
+    logger.warn("reminders.maxRemindersPerUser too small, clamping to 1");
+    rem.maxRemindersPerUser = 1;
+  }
+
   // Model routing defaults and validation
   const agentConfig = config.agent as Record<string, unknown>;
   if (!agentConfig.modelRouting) {
@@ -347,7 +383,13 @@ function validateConfig(config: Record<string, unknown>): void {
     if (!Array.isArray(mr.rules)) mr.rules = [];
 
     if (mr.enabled === true) {
-      const validSessionTypes = ["message", "spontaneous", "self-research", "memory-maintenance"];
+      const validSessionTypes = [
+        "message",
+        "spontaneous",
+        "self-research",
+        "memory-maintenance",
+        "reminder",
+      ];
       const whitelistPattern = /^(discord|misskey)\/(account|channel)\/[a-zA-Z0-9_\-@.]+$/;
       const validRules: unknown[] = [];
 

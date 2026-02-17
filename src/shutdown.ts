@@ -86,6 +86,12 @@ export class ShutdownHandler {
         this.context.memoryMaintenanceScheduler.stop();
       }
 
+      // Stop reminder scheduler
+      if (this.context.reminderScheduler) {
+        logger.info("Stopping reminder scheduler");
+        this.context.reminderScheduler.stop();
+      }
+
       // Stop git backup scheduler and perform final backup
       if (this.context.gitBackupScheduler) {
         logger.info("Stopping git backup scheduler");

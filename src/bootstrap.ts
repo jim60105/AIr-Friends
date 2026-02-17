@@ -6,6 +6,7 @@ import { AgentCore } from "@core/agent-core.ts";
 import { SpontaneousScheduler } from "@core/spontaneous-scheduler.ts";
 import { SelfResearchScheduler } from "@core/self-research-scheduler.ts";
 import { MemoryMaintenanceScheduler } from "@core/memory-maintenance-scheduler.ts";
+import { ReminderScheduler } from "@core/reminder-scheduler.ts";
 import { GitBackupScheduler } from "@core/git-backup-scheduler.ts";
 import { GitBackupService } from "@core/git-backup-service.ts";
 import { determineSpontaneousTarget } from "@core/spontaneous-target.ts";
@@ -33,6 +34,7 @@ export interface AppContext {
   memoryMaintenanceScheduler: MemoryMaintenanceScheduler | null;
   gitBackupScheduler: GitBackupScheduler | null;
   gitBackupService: GitBackupService | null;
+  reminderScheduler: ReminderScheduler | null;
   yolo: boolean;
 }
 
@@ -250,6 +252,68 @@ export async function bootstrap(configPath?: string, yolo = false): Promise<AppC
     });
   }
 
+  // Initialize Reminder Scheduler
+  let reminderScheduler: ReminderScheduler | null = null;
+  if (config.reminders?.enabled) {
+    const reminderStore = agentCore.getReminderStore()!;
+    reminderScheduler = new ReminderScheduler(config.reminders);
+
+    reminderScheduler.setCallback(async () => {
+      const orchestrator = agentCore.getOrchestrator();
+      const workspaceManager = agentCore.getWorkspaceManager();
+      const workspaceKeys = await workspaceManager.listWorkspaces();
+
+      for (const workspaceKey of workspaceKeys) {
+        try {
+          const [platformStr, userId] = workspaceKey.split("/");
+          if ((platformStr !== "discord" && platformStr !== "misskey") || !userId) {
+            continue;
+          }
+
+          const workspaceInfo = await workspaceManager.getOrCreateWorkspace({
+            platform: platformStr,
+            userId,
+            channelId: "internal",
+            messageId: `reminder_check_${Date.now()}`,
+            isDm: true,
+            guildId: "",
+            content: "",
+            timestamp: new Date(),
+          });
+
+          const dueReminders = await reminderStore.getDueReminders(workspaceInfo);
+
+          for (const reminder of dueReminders) {
+            try {
+              const adapter = platformRegistry.getAdapter(reminder.platform as Platform);
+              if (!adapter) {
+                logger.warn("No adapter for platform {platform}, skipping reminder {reminderId}", {
+                  platform: reminder.platform,
+                  reminderId: reminder.id,
+                });
+                continue;
+              }
+
+              await orchestrator.processReminder(reminder, adapter, reminderStore);
+            } catch (error) {
+              logger.error("Failed to process reminder {reminderId}: {error}", {
+                reminderId: reminder.id,
+                error: error instanceof Error ? error.message : String(error),
+              });
+            }
+          }
+        } catch (error) {
+          logger.error("Failed to check reminders for workspace {workspaceKey}: {error}", {
+            workspaceKey,
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
+      }
+    });
+
+    logger.info("Reminder scheduler initialized");
+  }
+
   logger.info("Bootstrap completed");
 
   const context: AppContext = {
@@ -262,6 +326,7 @@ export async function bootstrap(configPath?: string, yolo = false): Promise<AppC
     memoryMaintenanceScheduler,
     gitBackupScheduler,
     gitBackupService,
+    reminderScheduler,
     yolo,
   };
 
@@ -307,6 +372,11 @@ export async function startPlatforms(context: AppContext): Promise<void> {
   // Start git backup scheduler (independent of platforms)
   if (context.gitBackupScheduler) {
     context.gitBackupScheduler.start();
+  }
+
+  // Start reminder scheduler (independent of platforms, but needs them connected)
+  if (context.reminderScheduler) {
+    context.reminderScheduler.start();
   }
 
   logger.info("All platforms connected");
