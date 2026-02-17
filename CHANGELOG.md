@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- Dynamic model routing for per-user/per-context LLM model selection (`agent.modelRouting`)
+  - Rule-based system with first-match-wins evaluation strategy
+  - Match by whitelist entry (account/channel) or session type
+  - Fallback chain: routing rules → section-specific model → `agent.model`
+  - Environment variable overrides: `MODEL_ROUTING_ENABLED`, `MODEL_ROUTING_RULES`
+
 ## [0.7.2] - 2026-02-15
 
 ### Changed

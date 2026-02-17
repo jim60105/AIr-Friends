@@ -574,6 +574,8 @@ workspace:
 | `GEMINI_API_KEY`     | Gemini API key for Gemini CLI/OpenCode           |
 | `OPENCODE_API_KEY`   | OpenCode API key                                 |
 | `OPENROUTER_API_KEY` | OpenRouter API key                               |
+| `MODEL_ROUTING_ENABLED` | Enable model routing (true/false, default: false) |
+| `MODEL_ROUTING_RULES` | Model routing rules as JSON string |
 
 ### Multi-Environment Support
 
