@@ -70,7 +70,7 @@ Deno.test("AgentConnector - capabilities checking", async (t) => {
   });
 });
 
-Deno.test("AgentConnector - MCP transport validation", async (t) => {
+Deno.test("AgentConnector - MCP transport filtering", async (t) => {
   await t.step("should allow stdio transport (always supported)", () => {
     const connector = createMockConnectorWithCapabilities({
       mcpCapabilities: {},
@@ -82,8 +82,9 @@ Deno.test("AgentConnector - MCP transport validation", async (t) => {
       args: ["--stdio"],
     };
 
-    // Should not throw
-    connector["validateMCPServerTransports"]([stdioServer]);
+    const result = connector.filterSupportedMCPServers([stdioServer]);
+    assertEquals(result.length, 1);
+    assertEquals(result[0], stdioServer);
   });
 
   await t.step("should allow HTTP transport when supported", () => {
@@ -98,11 +99,12 @@ Deno.test("AgentConnector - MCP transport validation", async (t) => {
       headers: [],
     };
 
-    // Should not throw
-    connector["validateMCPServerTransports"]([httpServer]);
+    const result = connector.filterSupportedMCPServers([httpServer]);
+    assertEquals(result.length, 1);
+    assertEquals(result[0], httpServer);
   });
 
-  await t.step("should reject HTTP transport when not supported", () => {
+  await t.step("should skip HTTP transport when not supported", () => {
     const connector = createMockConnectorWithCapabilities({
       mcpCapabilities: { http: false },
     });
@@ -113,15 +115,8 @@ Deno.test("AgentConnector - MCP transport validation", async (t) => {
       url: "https://api.example.com/mcp",
     };
 
-    try {
-      connector["validateMCPServerTransports"]([httpServer]);
-      throw new Error("Should have thrown error");
-    } catch (error) {
-      assertEquals(
-        (error as Error).message,
-        "Agent does not support HTTP transport for MCP servers (server: http-server)",
-      );
-    }
+    const result = connector.filterSupportedMCPServers([httpServer]);
+    assertEquals(result.length, 0);
   });
 
   await t.step("should allow SSE transport when supported", () => {
@@ -135,11 +130,12 @@ Deno.test("AgentConnector - MCP transport validation", async (t) => {
       url: "https://events.example.com/mcp",
     };
 
-    // Should not throw
-    connector["validateMCPServerTransports"]([sseServer]);
+    const result = connector.filterSupportedMCPServers([sseServer]);
+    assertEquals(result.length, 1);
+    assertEquals(result[0], sseServer);
   });
 
-  await t.step("should reject SSE transport when not supported", () => {
+  await t.step("should skip SSE transport when not supported", () => {
     const connector = createMockConnectorWithCapabilities({
       mcpCapabilities: {},
     });
@@ -150,18 +146,11 @@ Deno.test("AgentConnector - MCP transport validation", async (t) => {
       url: "https://events.example.com/mcp",
     };
 
-    try {
-      connector["validateMCPServerTransports"]([sseServer]);
-      throw new Error("Should have thrown error");
-    } catch (error) {
-      assertEquals(
-        (error as Error).message,
-        "Agent does not support SSE transport for MCP servers (server: sse-server)",
-      );
-    }
+    const result = connector.filterSupportedMCPServers([sseServer]);
+    assertEquals(result.length, 0);
   });
 
-  await t.step("should validate multiple servers correctly", () => {
+  await t.step("should filter mixed servers correctly", () => {
     const connector = createMockConnectorWithCapabilities({
       mcpCapabilities: { http: true, sse: false },
     });
@@ -179,11 +168,11 @@ Deno.test("AgentConnector - MCP transport validation", async (t) => {
       },
     ];
 
-    // Should not throw - stdio always works, http is supported
-    connector["validateMCPServerTransports"](servers);
+    const result = connector.filterSupportedMCPServers(servers);
+    assertEquals(result.length, 2);
   });
 
-  await t.step("should reject when one server uses unsupported transport", () => {
+  await t.step("should skip unsupported server in mixed list", () => {
     const connector = createMockConnectorWithCapabilities({
       mcpCapabilities: { http: true, sse: false },
     });
@@ -201,15 +190,9 @@ Deno.test("AgentConnector - MCP transport validation", async (t) => {
       },
     ];
 
-    try {
-      connector["validateMCPServerTransports"](servers);
-      throw new Error("Should have thrown error");
-    } catch (error) {
-      assertEquals(
-        (error as Error).message,
-        "Agent does not support SSE transport for MCP servers (server: sse-server)",
-      );
-    }
+    const result = connector.filterSupportedMCPServers(servers);
+    assertEquals(result.length, 1);
+    assertEquals(result[0].name, "stdio-server");
   });
 });
 
