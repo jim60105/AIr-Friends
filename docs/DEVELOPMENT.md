@@ -333,6 +333,12 @@ The following variables are available in all prompt templates:
 | `rssItems`     | `system_self_research.md`         | Formatted RSS feed items        |
 | `workspaceKey` | `system_memory_maintenance.md`    | User workspace identifier       |
 | `memoriesDump` | `system_memory_maintenance.md`    | JSON dump of enabled memories   |
+| `recentMessagesFetched` | `system_spontaneous.md`  | Whether recent messages were fetched |
+| `importantMemories` | `system_spontaneous.md`       | Formatted important memories text |
+| `recentMessages` | `system_spontaneous.md`          | Formatted recent messages text  |
+| `availableEmojis` | `system_spontaneous.md`         | Formatted available emojis text |
+| `systemPrompt` | `system_message.md`              | Rendered system prompt content  |
+| `userContextMessage` | `system_message.md`          | Pre-formatted user context message |
 
 #### Examples
 

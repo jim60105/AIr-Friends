@@ -111,6 +111,13 @@ Feature: Spontaneous Posting
     Then there is approximately a 50% chance recent messages are included
     And if not fetched, the context should still be valid
 
+  Scenario: Spontaneous post prompt uses Vento template
+    Given the scheduler triggers a spontaneous post
+    When the prompt is built
+    Then the prompt should be rendered from system_spontaneous.md template
+    And the template should receive recentMessagesFetched, importantMemories, recentMessages, availableEmojis variables
+    And the rendered prompt should include session information when a session ID is present
+
   # ── Platform targets ──
 
   Scenario: Discord spontaneous target is selected from whitelist

@@ -62,3 +62,18 @@
   情境: 渲染後的最終結果去除首尾空白
     假設系統成功渲染提示詞
     那麼渲染結果的首尾空白必須被去除
+
+  情境: Spontaneous Post 提示詞使用 Vento 模板渲染
+    假設 prompts/system_spontaneous.md 使用 Vento 語法
+    而且模板包含 recentMessagesFetched、importantMemories、recentMessages、availableEmojis 等變數
+    當系統以 recentMessagesFetched=true 渲染提示詞
+    那麼輸出包含「reference recent conversation topics」指示
+    當系統以 recentMessagesFetched=false 渲染提示詞
+    那麼輸出包含「Create something entirely original」指示
+
+  情境: 一般訊息回覆提示詞使用 Vento 模板渲染
+    假設 prompts/system_message.md 使用 Vento 語法
+    而且模板包含 systemPrompt 和 userContextMessage 變數
+    當系統以 sessionId 渲染提示詞
+    那麼輸出包含 Session Information 區塊
+    而且輸出包含 Instructions 區塊
