@@ -4,6 +4,7 @@ import { createLogger } from "@utils/logger.ts";
 import { combinedTokenCount, estimateTokens } from "@utils/token-counter.ts";
 import { MemoryStore } from "./memory-store.ts";
 import { loadSystemPrompt } from "./config-loader.ts";
+import type { TemplateVariables } from "../types/template.ts";
 import type {
   AssembledContext,
   AssembledSpontaneousContext,
@@ -21,7 +22,6 @@ const logger = createLogger("ContextAssembler");
 export class ContextAssembler {
   private readonly memoryStore: MemoryStore;
   private readonly config: ContextAssemblyConfig;
-  private systemPromptCache: string | null = null;
 
   constructor(memoryStore: MemoryStore, config: ContextAssemblyConfig) {
     this.memoryStore = memoryStore;
@@ -29,17 +29,15 @@ export class ContextAssembler {
   }
 
   /**
-   * Load and cache system prompt
+   * Load system prompt rendered with template variables
    */
-  private async getSystemPrompt(): Promise<string> {
-    if (this.systemPromptCache === null) {
-      this.systemPromptCache = await loadSystemPrompt(this.config.systemPromptPath);
-      logger.debug("System prompt loaded", {
-        path: this.config.systemPromptPath,
-        length: this.systemPromptCache.length,
-      });
-    }
-    return this.systemPromptCache;
+  private async getSystemPrompt(variables: TemplateVariables): Promise<string> {
+    const result = await loadSystemPrompt(this.config.systemPromptPath, variables);
+    logger.debug("System prompt loaded", {
+      path: this.config.systemPromptPath,
+      length: result.length,
+    });
+    return result;
   }
 
   /**
@@ -49,14 +47,25 @@ export class ContextAssembler {
     event: NormalizedEvent,
     workspace: WorkspaceInfo,
     messageFetcher: MessageFetcher,
+    sessionId?: string,
   ): Promise<AssembledContext> {
     logger.info("Assembling context", {
       workspaceKey: workspace.key,
       channelId: event.channelId,
     });
 
+    // Build template variables for the system prompt
+    const templateVars: TemplateVariables = {
+      isDm: event.isDm,
+      platform: event.platform,
+      userId: event.userId,
+      channelId: event.channelId,
+      guildId: event.guildId ?? "",
+      sessionId: sessionId ?? "",
+    };
+
     // Load system prompt
-    const systemPrompt = await this.getSystemPrompt();
+    const systemPrompt = await this.getSystemPrompt(templateVars);
 
     // Get important memories
     const importantMemories = await this.memoryStore.getImportantMemories(workspace);
@@ -571,6 +580,7 @@ export class ContextAssembler {
     workspace: WorkspaceInfo,
     messageFetcher: MessageFetcher,
     options: { fetchRecentMessages: boolean },
+    sessionId?: string,
   ): Promise<AssembledSpontaneousContext> {
     logger.info("Assembling spontaneous context", {
       platform,
@@ -578,7 +588,16 @@ export class ContextAssembler {
       fetchRecentMessages: options.fetchRecentMessages,
     });
 
-    const systemPrompt = await this.getSystemPrompt();
+    const templateVars: TemplateVariables = {
+      isDm: workspace.isDm,
+      platform,
+      userId: "",
+      channelId,
+      guildId: "",
+      sessionId: sessionId ?? "",
+    };
+
+    const systemPrompt = await this.getSystemPrompt(templateVars);
     const importantMemories = await this.memoryStore.getImportantMemories(workspace);
 
     let recentMessages: PlatformMessage[] = [];
@@ -696,10 +715,11 @@ export class ContextAssembler {
   }
 
   /**
-   * Invalidate system prompt cache (for hot reload)
+   * Invalidate system prompt cache (no-op after Vento migration;
+   * Vento uses its own internal compilation cache)
    */
   invalidateSystemPromptCache(): void {
-    this.systemPromptCache = null;
+    // Vento handles caching internally; no application-level cache to clear
   }
 
   /**

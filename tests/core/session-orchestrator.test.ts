@@ -1108,7 +1108,7 @@ Deno.test("SessionOrchestrator - processSelfResearch creates workspace and runs 
     // Create system_self_research.md prompt file
     await Deno.writeTextFile(
       `${tempDir}/prompts/system_self_research.md`,
-      "Research instructions for {{character_name}}\n{rss_items_placeholder}",
+      "Research instructions\n{{ rssItems }}",
     );
 
     const rssItems = [
@@ -1157,7 +1157,7 @@ Deno.test("SessionOrchestrator - processSelfResearch returns error on cancelled 
 
     await Deno.writeTextFile(
       `${tempDir}/prompts/system_self_research.md`,
-      "Research instructions\n{rss_items_placeholder}",
+      "Research instructions\n{{ rssItems }}",
     );
 
     const rssItems = [
@@ -1223,7 +1223,7 @@ Deno.test("SessionOrchestrator - processSelfResearch handles agent connection fa
     );
     await Deno.writeTextFile(
       `${tempDir}/prompts/system_self_research.md`,
-      "Research\n{rss_items_placeholder}",
+      "Research\n{{ rssItems }}",
     );
 
     const contextAssembler = new ContextAssembler(memoryStore, {
@@ -1274,7 +1274,7 @@ Deno.test("SessionOrchestrator - processSelfResearch formats RSS items in prompt
 
     await Deno.writeTextFile(
       `${tempDir}/prompts/system_self_research.md`,
-      "# Research\n\n{rss_items_placeholder}\n\n## End",
+      "# Research\n\n{{ rssItems }}\n\n## End",
     );
 
     const rssItems = [
@@ -1334,7 +1334,7 @@ Deno.test("SessionOrchestrator - processSelfResearch without skillApi", async ()
 
     await Deno.writeTextFile(
       `${tempDir}/prompts/system_self_research.md`,
-      "Research\n{rss_items_placeholder}",
+      "Research\n{{ rssItems }}",
     );
 
     orchestrator.setConnectorSetup((connector) => {
@@ -1372,7 +1372,7 @@ Deno.test("SessionOrchestrator - processMemoryMaintenance returns success on end
 
     await Deno.writeTextFile(
       `${tempDir}/prompts/system_memory_maintenance.md`,
-      "Maintenance for {workspace_key}\nSession: {session_id}\nMemories:\n{memories_dump}",
+      "Maintenance for {{ workspaceKey }}\nSession: {{ sessionId }}\nMemories:\n{{ memoriesDump }}",
     );
 
     orchestrator.setConnectorSetup((connector) => {
@@ -1408,7 +1408,7 @@ Deno.test("SessionOrchestrator - processMemoryMaintenance returns failure on can
 
     await Deno.writeTextFile(
       `${tempDir}/prompts/system_memory_maintenance.md`,
-      "Maintenance for {workspace_key}\n{session_id}\n{memories_dump}",
+      "Maintenance for {{ workspaceKey }}\n{{ sessionId }}\n{{ memoriesDump }}",
     );
 
     orchestrator.setConnectorSetup((connector) => {
@@ -1516,7 +1516,7 @@ Deno.test("SessionOrchestrator - processMemoryMaintenance handles agent connecti
     );
     await Deno.writeTextFile(
       `${tempDir}/prompts/system_memory_maintenance.md`,
-      "Maintenance\n{workspace_key}\n{session_id}\n{memories_dump}",
+      "Maintenance\n{{ workspaceKey }}\n{{ sessionId }}\n{{ memoriesDump }}",
     );
 
     const contextAssembler = new ContextAssembler(memoryStore, {
@@ -1566,7 +1566,7 @@ Deno.test("SessionOrchestrator - processMemoryMaintenance without skillApi", asy
 
     await Deno.writeTextFile(
       `${tempDir}/prompts/system_memory_maintenance.md`,
-      "Maintenance\n{workspace_key}\n{session_id}\n{memories_dump}",
+      "Maintenance\n{{ workspaceKey }}\n{{ sessionId }}\n{{ memoriesDump }}",
     );
 
     orchestrator.setConnectorSetup((connector) => {
@@ -1603,7 +1603,7 @@ Deno.test("SessionOrchestrator - processMemoryMaintenance embeds memories in pro
 
     await Deno.writeTextFile(
       `${tempDir}/prompts/system_memory_maintenance.md`,
-      "Maintenance for {workspace_key}\nSession: {session_id}\nMemories:\n{memories_dump}",
+      "Maintenance for {{ workspaceKey }}\nSession: {{ sessionId }}\nMemories:\n{{ memoriesDump }}",
     );
 
     // Create workspace and write memory file
@@ -1668,7 +1668,7 @@ Deno.test("SessionOrchestrator - processMemoryMaintenance shows no memories mess
 
     await Deno.writeTextFile(
       `${tempDir}/prompts/system_memory_maintenance.md`,
-      "Maintenance\n{workspace_key}\n{session_id}\n{memories_dump}",
+      "Maintenance\n{{ workspaceKey }}\n{{ sessionId }}\n{{ memoriesDump }}",
     );
 
     let capturedPrompt = "";
@@ -1935,38 +1935,42 @@ Deno.test({
   },
 });
 
-Deno.test("SessionOrchestrator - oversized images are skipped", async () => {
-  const tempDir = await Deno.makeTempDir();
-  try {
-    const { orchestrator, sessionRegistry } = await createTestableOrchestrator(
-      tempDir,
-    );
-    const event = createTestEvent();
-    event.attachments = [{
-      id: "a1",
-      url: "https://example.com/huge.png",
-      mimeType: "image/png",
-      filename: "huge.png",
-      size: 30 * 1024 * 1024, // 30MB - over 20MB limit
-      isImage: true,
-    }];
-    let receivedArg: string | unknown[] | null = null;
-    orchestrator.setConnectorSetup((connector) => {
-      connector.supportsImageContent = () => true;
-      connector.prompt = (_sessionId: string, text: string | unknown[]) => {
-        receivedArg = text;
-        return Promise.resolve({ stopReason: "end_turn" } as PromptResponse);
-      };
-    });
+Deno.test({
+  name: "SessionOrchestrator - oversized images are skipped",
+  sanitizeResources: false,
+  fn: async () => {
+    const tempDir = await Deno.makeTempDir();
+    try {
+      const { orchestrator, sessionRegistry } = await createTestableOrchestrator(
+        tempDir,
+      );
+      const event = createTestEvent();
+      event.attachments = [{
+        id: "a1",
+        url: "https://example.com/huge.png",
+        mimeType: "image/png",
+        filename: "huge.png",
+        size: 30 * 1024 * 1024, // 30MB - over 20MB limit
+        isImage: true,
+      }];
+      let receivedArg: string | unknown[] | null = null;
+      orchestrator.setConnectorSetup((connector) => {
+        connector.supportsImageContent = () => true;
+        connector.prompt = (_sessionId: string, text: string | unknown[]) => {
+          receivedArg = text;
+          return Promise.resolve({ stopReason: "end_turn" } as PromptResponse);
+        };
+      });
 
-    const platformAdapter = new MockPlatformAdapter() as unknown as PlatformAdapter;
-    await orchestrator.processMessage(event, platformAdapter);
+      const platformAdapter = new MockPlatformAdapter() as unknown as PlatformAdapter;
+      await orchestrator.processMessage(event, platformAdapter);
 
-    // Oversized image should be skipped, prompt should be string
-    assertEquals(typeof receivedArg, "string");
+      // Oversized image should be skipped, prompt should be string
+      assertEquals(typeof receivedArg, "string");
 
-    sessionRegistry.stop();
-  } finally {
-    await Deno.remove(tempDir, { recursive: true });
-  }
+      sessionRegistry.stop();
+    } finally {
+      await Deno.remove(tempDir, { recursive: true });
+    }
+  },
 });

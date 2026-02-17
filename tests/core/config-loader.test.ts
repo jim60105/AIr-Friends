@@ -1,8 +1,18 @@
 // tests/core/config-loader.test.ts
 
-import { assertEquals, assertRejects, assertStringIncludes } from "@std/assert";
+import { assertEquals, assertRejects } from "@std/assert";
 import { loadConfig, loadSystemPrompt } from "@core/config-loader.ts";
 import { ConfigError } from "../../src/types/errors.ts";
+import type { TemplateVariables } from "../../src/types/template.ts";
+
+const defaultVars: TemplateVariables = {
+  isDm: false,
+  platform: "discord",
+  userId: "user123",
+  channelId: "channel456",
+  guildId: "guild789",
+  sessionId: "sess_abc",
+};
 
 // Test with a temporary directory containing test config files
 async function withTestConfig(
@@ -253,80 +263,72 @@ async function withPromptDir(
   }
 }
 
-Deno.test("loadSystemPrompt - should replace single placeholder with fragment file content", async () => {
+Deno.test("loadSystemPrompt - should include fragment file content via Vento include", async () => {
   await withPromptDir(
     {
-      "system.md": "Hello, I am {{character_name}}!",
+      "system.md":
+        '{{- set charName }}{{ include "./character_name.md" }}{{ /set -}}\nHello, I am {{ charName }}!',
       "character_name.md": "Yuna",
     },
     async (path) => {
-      const result = await loadSystemPrompt(path);
+      const result = await loadSystemPrompt(path, defaultVars);
       assertEquals(result, "Hello, I am Yuna!");
     },
   );
 });
 
-Deno.test("loadSystemPrompt - should replace multiple different placeholders", async () => {
+Deno.test("loadSystemPrompt - should include multiple different fragments", async () => {
   await withPromptDir(
     {
-      "system.md": "Name: {{char_name}}, Info: {{char_info}}",
+      "system.md":
+        '{{- set charName }}{{ include "./char_name.md" }}{{ /set -}}\n{{- set charInfo }}{{ include "./char_info.md" }}{{ /set -}}\nName: {{ charName }}, Info: {{ charInfo }}',
       "char_name.md": "Yuna",
       "char_info.md": "An AI assistant",
     },
     async (path) => {
-      const result = await loadSystemPrompt(path);
+      const result = await loadSystemPrompt(path, defaultVars);
       assertEquals(result, "Name: Yuna, Info: An AI assistant");
     },
   );
 });
 
-Deno.test("loadSystemPrompt - should replace same placeholder appearing multiple times", async () => {
+Deno.test("loadSystemPrompt - should reuse set variable appearing multiple times", async () => {
   await withPromptDir(
     {
-      "system.md": "I am {{name}}. Call me {{name}}.",
+      "system.md":
+        '{{- set name }}{{ include "./name.md" }}{{ /set -}}\nI am {{ name }}. Call me {{ name }}.',
       "name.md": "Yuna",
     },
     async (path) => {
-      const result = await loadSystemPrompt(path);
+      const result = await loadSystemPrompt(path, defaultVars);
       assertEquals(result, "I am Yuna. Call me Yuna.");
     },
   );
 });
 
-Deno.test("loadSystemPrompt - should leave placeholder unchanged when fragment file is missing", async () => {
+Deno.test("loadSystemPrompt - should throw error when included file is missing", async () => {
   await withPromptDir(
     {
-      "system.md": "Hello {{missing_fragment}}!",
+      "system.md": '{{ include "./missing_fragment.md" }}',
     },
     async (path) => {
-      const result = await loadSystemPrompt(path);
-      assertStringIncludes(result, "{{missing_fragment}}");
+      await assertRejects(
+        () => loadSystemPrompt(path, defaultVars),
+        Error,
+      );
     },
   );
 });
 
-Deno.test("loadSystemPrompt - should not use system.md as a fragment source", async () => {
+Deno.test("loadSystemPrompt - include uses explicit file paths", async () => {
   await withPromptDir(
     {
-      "system.md": "Hello {{system}}!",
+      "system.md": '{{ include "./character_name.md" }}',
+      "character_name.md": "Yuna",
     },
     async (path) => {
-      const result = await loadSystemPrompt(path);
-      // {{system}} should remain because system.md is excluded
-      assertStringIncludes(result, "{{system}}");
-    },
-  );
-});
-
-Deno.test("loadSystemPrompt - should trim fragment content", async () => {
-  await withPromptDir(
-    {
-      "system.md": "Name: {{char_name}}.",
-      "char_name.md": "  Yuna  \n",
-    },
-    async (path) => {
-      const result = await loadSystemPrompt(path);
-      assertEquals(result, "Name: Yuna.");
+      const result = await loadSystemPrompt(path, defaultVars);
+      assertEquals(result, "Yuna");
     },
   );
 });
@@ -337,7 +339,7 @@ Deno.test("loadSystemPrompt - should trim final result", async () => {
       "system.md": "\n  Hello World  \n",
     },
     async (path) => {
-      const result = await loadSystemPrompt(path);
+      const result = await loadSystemPrompt(path, defaultVars);
       assertEquals(result, "Hello World");
     },
   );
@@ -345,7 +347,7 @@ Deno.test("loadSystemPrompt - should trim final result", async () => {
 
 Deno.test("loadSystemPrompt - should throw when system prompt file not found", async () => {
   await assertRejects(
-    () => loadSystemPrompt("/nonexistent/path/system.md"),
+    () => loadSystemPrompt("/nonexistent/path/system.md", defaultVars),
     ConfigError,
     "System prompt file not found",
   );
@@ -358,7 +360,7 @@ Deno.test("loadSystemPrompt - should handle prompt with no placeholders", async 
       "unused.md": "This should not matter.",
     },
     async (path) => {
-      const result = await loadSystemPrompt(path);
+      const result = await loadSystemPrompt(path, defaultVars);
       assertEquals(result, "A plain prompt with no placeholders.");
     },
   );

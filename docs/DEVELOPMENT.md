@@ -298,33 +298,114 @@ I recommend checking out my blog post, ["🤖 AI Can Cosplay Too? A Beginner's G
 
 ### Prompt Template System
 
-The system prompt (`prompts/system.md`) supports a template placeholder system. Any `{{placeholder}}` in the file is automatically replaced with the content of the corresponding `.md` file in the same directory.
+The system prompt (`prompts/system.md`) uses [Vento](https://vento.js.org/) as its template engine. Vento is a JavaScript-based template engine that uses `{{ }}` syntax for both interpolation and control flow.
 
-For example, if `system.md` contains `{{character_name}}`, the system loads `prompts/character_name.md` and replaces all occurrences of `{{character_name}}` with its trimmed content.
+#### Key Features
 
-It does not support nesting and will only replace the content within {{ double curly braces }} in system.md.
+- **Variable interpolation**: `{{ variableName }}` outputs the value of a variable
+- **Conditionals**: `{{ if condition }}...{{ else }}...{{ /if }}`
+- **Loops**: `{{ for item of collection }}...{{ /for }}`
+- **Include**: `{{ include "./filename.md" }}` to include other template files
+- **Set**: `{{ set varName }}...{{ /set }}` to assign content to a variable
+- **JavaScript expressions**: Any valid JS expression works inside `{{ }}`
+- **Comments**: `{{# This is a comment #}}` (not included in output)
+- **Trimming**: `{{- ... -}}` removes surrounding whitespace
 
-#### How It Works
+For complete Vento documentation, visit <https://vento.js.org/>
 
-1. On startup, the system reads `prompts/system.md`
-2. It scans the `prompts/` directory for other `.md` files (excluding `system.md` itself)
-3. For each file, it maps the filename (without `.md` extension) to the file's trimmed content
-4. All `{{filename}}` placeholders in `system.md` are replaced with the corresponding content
-5. Placeholders without a matching file are left unchanged and a warning is logged
+#### Available Template Variables
 
-#### Example
+The following variables are available in all prompt templates:
 
-```text
-prompts/
-├── system.md                    # Main prompt: "Hello, I am {{character_name}}!"
-├── character_name.md            # "Yuna"
-├── character_info.md            # Character background details
-├── character_personality.md     # Personality description
-├── character_speaking_style.md  # Speaking style guide
-└── character_reference_terms.md # Reference phrases
+| Variable    | Type      | Description                                    | Example                  |
+| ----------- | --------- | ---------------------------------------------- | ------------------------ |
+| `isDm`      | `boolean` | Whether this is a direct message conversation  | `true`                   |
+| `platform`  | `string`  | Platform name                                  | `"discord"`, `"misskey"` |
+| `userId`    | `string`  | User's platform ID                             | `"560842157351763989"`   |
+| `channelId` | `string`  | Channel/conversation ID                        | `"873618490202931231"`   |
+| `guildId`   | `string`  | Server/guild ID (empty string if N/A)          | `""`                     |
+| `sessionId` | `string`  | Current skill API session ID                   | `"sess_abc123"`          |
+
+**Special prompt variables** (only available in specific prompt types):
+
+| Variable       | Available In                      | Description                     |
+| -------------- | --------------------------------- | ------------------------------- |
+| `rssItems`     | `system_self_research.md`         | Formatted RSS feed items        |
+| `workspaceKey` | `system_memory_maintenance.md`    | User workspace identifier       |
+| `memoriesDump` | `system_memory_maintenance.md`    | JSON dump of enabled memories   |
+
+#### Examples
+
+**DM-specific instructions:**
+
+```markdown
+{{ if isDm }}
+This is a private conversation. You can discuss personal topics freely.
+{{ else }}
+This is a public channel. Be mindful of other participants.
+{{ /if }}
 ```
 
-To customize the bot's character, simply edit the individual fragment files without touching `system.md`.
+**Platform-specific formatting:**
+
+```markdown
+{{ if platform === "discord" }}
+Use Discord Markdown for formatting (bold, italic, code blocks).
+Message limit: 2000 characters.
+{{ else if platform === "misskey" }}
+Use MFM (Misskey Flavored Markdown) for formatting.
+{{ /if }}
+```
+
+**Including fragment files:**
+
+```markdown
+{{- set myVariable }}{{ include "./my_fragment.md" }}{{ /set -}}
+
+Hello, I am {{ myVariable }}.
+```
+
+**Using JavaScript expressions:**
+
+```markdown
+{{ new Date().toLocaleDateString("zh-TW") }}
+
+{{ isDm ? "私訊模式" : "公開頻道模式" }}
+```
+
+#### Customizing Prompts
+
+To customize the bot's character, edit individual fragment files (e.g., `character_name.md`, `character_info.md`) without touching `system.md`. You can also override any prompt file by mounting your custom version:
+
+```yaml
+# compose.yml
+volumes:
+  - ./my-prompts/system.md:/app/prompts/system.md:ro,Z
+  - ./my-prompts/character_name.md:/app/prompts/character_name.md:ro,Z
+```
+
+- Only override the files you need; others keep their container defaults
+- Fragment files (e.g., `character_name.md`) can be plain text or use Vento syntax
+- Your custom templates have access to all the template variables listed above
+
+#### Migrating from Old Syntax
+
+If you have custom prompt files using the old `{{placeholder}}` syntax, you need to update them:
+
+| Old Syntax              | New Syntax                              |
+| ----------------------- | --------------------------------------- |
+| `{{character_name}}`    | `{{ include "./character_name.md" }}`   |
+| `{{character_info}}`    | `{{ include "./character_info.md" }}`   |
+
+For fragment values used multiple times, use `set` to load once:
+
+```markdown
+{{- set charName }}{{ include "./character_name.md" }}{{ /set -}}
+Hello, I am {{ charName }}. {{ charName }} is my name.
+```
+
+> [!WARNING]
+> This is a **breaking change**. The old `{{placeholder}}` syntax is no longer supported. In Vento, `{{placeholder}}` is interpreted as a variable reference, not a fragment include. If the variable is undefined, it will output an empty string or an error depending on the template engine configuration.
 
 #### Customizing Prompts in Container Deployments
 

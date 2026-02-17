@@ -1,52 +1,64 @@
 # language: zh-TW
-功能: 提示詞模板系統——依據 prompts 目錄下的檔案自動替換佔位符
+功能: 提示詞模板系統——使用 Vento 模板引擎渲染提示詞
 
   背景:
-    假設 Bot 的系統提示詞檔案為 prompts/system.md
-    而且 prompts 目錄下存在多個 Markdown 檔案作為模板片段
-    而且 system.md 中使用 {{檔案名稱}} 格式的佔位符來引用其他檔案內容
-    而且檔案名稱不含副檔名（例如 {{character_name}} 對應 character_name.md）
+    假設 Bot 使用 Vento 模板引擎處理提示詞
+    而且 prompts 目錄下存在 system.md 作為主模板
+    而且 system.md 使用 Vento 語法（include、if、變數插值等）
 
-  情境: 載入系統提示詞時自動替換佔位符
-    假設 prompts/system.md 包含佔位符 "{{character_name}}"
+  情境: 使用 include 載入片段檔案
+    假設 prompts/system.md 包含 include "./character_name.md" 指令
     而且 prompts/character_name.md 的內容為 "蘭堂悠奈 (Randou Yuna)"
-    當系統載入系統提示詞
-    那麼 "{{character_name}}" 必須被替換為 character_name.md 的內容
-    而且替換後的提示詞中不得殘留 "{{character_name}}" 佔位符
+    當系統載入並渲染系統提示詞
+    那麼 include 指令必須被替換為 character_name.md 的內容
 
-  情境: 支援多個不同的佔位符替換
-    假設 prompts/system.md 包含以下佔位符
-      | 佔位符                       | 對應檔案                      |
-      | {{character_name}}           | character_name.md             |
-      | {{character_info}}           | character_info.md             |
-      | {{character_personality}}    | character_personality.md      |
-      | {{character_speaking_style}} | character_speaking_style.md   |
-      | {{character_reference_terms}}| character_reference_terms.md  |
-    當系統載入系統提示詞
-    那麼所有佔位符都必須被替換為對應檔案的內容
-    而且替換後的提示詞中不得殘留任何已定義的佔位符
+  情境: 使用 set 載入片段並重複使用
+    假設 prompts/system.md 使用 set 將 character_name.md 的內容存為變數
+    而且模板中多次使用該變數
+    當系統載入並渲染系統提示詞
+    那麼所有變數引用都被替換為相同的片段內容
 
-  情境: 同一佔位符在 system.md 中出現多次
-    假設 prompts/system.md 中 "{{character_name}}" 出現多次
-    而且 prompts/character_name.md 的內容為 "蘭堂悠奈"
-    當系統載入系統提示詞
-    那麼所有出現的 "{{character_name}}" 都必須被替換
-    而且替換結果一致
+  情境: 條件式渲染——DM 模式
+    假設 prompts/system.md 包含 isDm 條件判斷區塊
+    當系統以 isDm=true 渲染提示詞
+    那麼輸出包含 DM 專用內容
+    當系統以 isDm=false 渲染提示詞
+    那麼輸出不包含 DM 專用內容
 
-  情境: 佔位符對應的檔案不存在時保留原樣
-    假設 prompts/system.md 包含佔位符 "{{nonexistent_file}}"
-    而且 prompts 目錄下不存在 nonexistent_file.md
-    當系統載入系統提示詞
-    那麼 "{{nonexistent_file}}" 佔位符保留原樣不替換
-    而且系統記錄警告訊息
+  情境: 平台變數注入
+    假設 prompts/system.md 引用 platform 變數
+    當系統以 platform="discord" 渲染提示詞
+    那麼輸出包含 "discord" 對應的平台內容
 
-  情境: system.md 自身不作為替換來源
-    假設 prompts 目錄下存在 system.md 與 character_name.md
-    當系統掃描 prompts 目錄的模板片段檔案
-    那麼 system.md 不得被當作佔位符替換的來源
-    而且只有非 system.md 的 .md 檔案才作為替換來源
+  情境: 模板變數由系統注入
+    假設系統提供以下模板變數
+      | 變數名稱    | 說明                         |
+      | isDm        | 是否為私訊對話               |
+      | platform    | 平台名稱（discord / misskey）|
+      | userId      | 使用者 ID                    |
+      | channelId   | 頻道 ID                      |
+      | guildId     | 伺服器 ID（無則為空字串）    |
+      | sessionId   | Skill API 的 session ID      |
+    當系統渲染提示詞
+    那麼所有變數可在模板中以 {{ variableName }} 語法使用
 
-  情境: 替換後的內容會被去除首尾空白
-    假設 prompts/character_name.md 的內容前後有多餘空白或換行
-    當系統載入並替換佔位符
-    那麼替換用的內容必須去除首尾空白（trim）
+  情境: include 檔案不存在時拋出錯誤
+    假設 prompts/system.md include 一個不存在的檔案 "./missing.md"
+    當系統載入並渲染系統提示詞
+    那麼系統拋出錯誤
+    而且錯誤訊息包含檔案名稱
+
+  情境: 片段檔案中支援 Vento 語法
+    假設某片段檔案包含條件判斷語法
+    而且 prompts/system.md 使用 include 引入該片段
+    當系統以特定變數值渲染提示詞
+    那麼片段中的條件語法被正確處理
+
+  情境: JavaScript 表達式支援
+    假設 prompts/system.md 包含 JavaScript 表達式
+    當系統渲染提示詞
+    那麼表達式被正確求值並輸出結果
+
+  情境: 渲染後的最終結果去除首尾空白
+    假設系統成功渲染提示詞
+    那麼渲染結果的首尾空白必須被去除
