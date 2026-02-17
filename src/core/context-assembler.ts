@@ -700,16 +700,16 @@ export class ContextAssembler {
 
     if (hasRecentMessages) {
       lines.push(
-        "- You may reference recent conversation topics for inspiration, but do not reply to them directly",
-      );
-      lines.push(
-        "- Feel free to draw on themes or ideas from recent messages, but your post should stand on its own and not be the same as any recent message",
+        "- You may reference recent conversation topics for inspiration, but do not reply to them or reuse the same theme directly",
       );
     } else {
       lines.push(
         "- Create something entirely original — share a thought, observation, or topic you find interesting",
       );
     }
+      lines.push(
+        "- Search your memories for good topics to post about.",
+      );
 
     return lines.join("\n");
   }
