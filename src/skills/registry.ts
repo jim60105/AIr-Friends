@@ -5,8 +5,11 @@ import { MemoryHandler } from "./memory-handler.ts";
 import { ReplyHandler } from "./reply-handler.ts";
 import { ReactionHandler } from "./reaction-handler.ts";
 import { ContextHandler } from "./context-handler.ts";
+import { ReminderHandler } from "./reminder-handler.ts";
+import type { ReminderStore } from "@core/reminder-store.ts";
 import type { SkillContext, SkillHandler, SkillResult } from "./types.ts";
 import type { MemoryStore } from "@core/memory-store.ts";
+import type { RemindersConfig } from "../types/config.ts";
 
 const logger = createLogger("SkillRegistry");
 
@@ -19,12 +22,21 @@ export class SkillRegistry {
   private replyHandler: ReplyHandler;
   private reactionHandler: ReactionHandler;
   private contextHandler: ContextHandler;
+  private reminderHandler: ReminderHandler | null = null;
 
-  constructor(memoryStore: MemoryStore) {
+  constructor(
+    memoryStore: MemoryStore,
+    remindersConfig?: RemindersConfig,
+    reminderStore?: ReminderStore,
+  ) {
     this.memoryHandler = new MemoryHandler(memoryStore);
     this.replyHandler = new ReplyHandler();
     this.reactionHandler = new ReactionHandler();
     this.contextHandler = new ContextHandler();
+
+    if (remindersConfig?.enabled && reminderStore) {
+      this.reminderHandler = new ReminderHandler(reminderStore, remindersConfig);
+    }
 
     this.registerSkills();
   }
@@ -49,6 +61,13 @@ export class SkillRegistry {
 
     // Reaction skill
     this.handlers.set("react-message", this.reactionHandler.handleReactMessage);
+
+    // Reminder skills (conditional)
+    if (this.reminderHandler) {
+      this.handlers.set("set-reminder", this.reminderHandler.handleSetReminder);
+      this.handlers.set("cancel-reminder", this.reminderHandler.handleCancelReminder);
+      this.handlers.set("list-reminders", this.reminderHandler.handleListReminders);
+    }
 
     logger.info("Skills registered: {count} skills ({skillNames})", {
       count: this.handlers.size,
@@ -126,5 +145,12 @@ export class SkillRegistry {
    */
   getReactionHandler(): ReactionHandler {
     return this.reactionHandler;
+  }
+
+  /**
+   * Get reminder handler for session state management
+   */
+  getReminderHandler(): ReminderHandler | null {
+    return this.reminderHandler;
   }
 }

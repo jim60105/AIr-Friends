@@ -7,6 +7,7 @@ import { ReplyDispatcher } from "./reply-dispatcher.ts";
 import { WorkspaceManager } from "./workspace-manager.ts";
 import { ContextAssembler } from "./context-assembler.ts";
 import { MemoryStore } from "./memory-store.ts";
+import { ReminderStore } from "./reminder-store.ts";
 import { ReplyPolicyEvaluator } from "./reply-policy.ts";
 import { SkillRegistry } from "@skills/registry.ts";
 import { SessionRegistry } from "../skill-api/session-registry.ts";
@@ -33,6 +34,7 @@ export class AgentCore {
   private yolo: boolean;
   private workspaceManager: WorkspaceManager;
   private memoryStore: MemoryStore;
+  private reminderStore: ReminderStore | null = null;
 
   constructor(config: Config, yolo = false) {
     this.config = config;
@@ -53,7 +55,12 @@ export class AgentCore {
     });
 
     // Initialize skill registry
-    const skillRegistry = new SkillRegistry(this.memoryStore);
+    let reminderStore: ReminderStore | undefined;
+    if (config.reminders?.enabled) {
+      reminderStore = new ReminderStore(config.reminders.persistPath);
+      this.reminderStore = reminderStore;
+    }
+    const skillRegistry = new SkillRegistry(this.memoryStore, config.reminders, reminderStore);
 
     // Initialize session registry
     this.sessionRegistry = new SessionRegistry();
@@ -221,6 +228,13 @@ export class AgentCore {
    */
   getMemoryStore(): MemoryStore {
     return this.memoryStore;
+  }
+
+  /**
+   * Get the ReminderStore instance (null if reminders disabled)
+   */
+  getReminderStore(): ReminderStore | null {
+    return this.reminderStore;
   }
 
   /**

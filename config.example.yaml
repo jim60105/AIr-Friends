@@ -144,3 +144,12 @@ gitBackup:
   intervalMs: 3600000             # Backup interval in ms (default: 1 hour); override with env GIT_BACKUP_INTERVAL_MS
   authorName: "AIr-Friends Backup"    # Git author name; override with env GIT_BACKUP_AUTHOR_NAME
   authorEmail: "airfriends-backup@noreply.github.com" # Git author email; override with env GIT_BACKUP_AUTHOR_EMAIL
+
+# Scheduled reminders - allows the agent to set future reminders for users
+# Reminders can only be set in DM conversations, and are always delivered via DM
+reminders:
+  enabled: false                    # Enable scheduled reminders (default: false); override with env REMINDERS_ENABLED
+  maxRemindersPerUser: 20           # Max active reminders per user (default: 20); override with env REMINDERS_MAX_PER_USER
+  minIntervalMs: 60000             # Minimum reminder delay from now in ms (default: 1 minute); override with env REMINDERS_MIN_INTERVAL_MS
+  persistPath: "reminders.jsonl"   # File name for reminder data within workspace (default: reminders.jsonl); override with env REMINDERS_PERSIST_PATH
+  checkIntervalMs: 30000           # How often to check for due reminders in ms (default: 30 seconds); override with env REMINDERS_CHECK_INTERVAL_MS

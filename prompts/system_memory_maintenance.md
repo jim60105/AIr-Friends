@@ -37,6 +37,7 @@ Below is the complete list of all enabled memories for this workspace. Use this 
 - Do NOT call `send-reply`; this is an internal maintenance task.
 
 {{ if sessionId }}
+
 ### Session Information
 
 Session ID: `{{ sessionId }}`

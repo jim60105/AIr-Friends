@@ -71,6 +71,13 @@ export const ENV_MAPPINGS = {
   GIT_BACKUP_INTERVAL_MS: "gitBackup.intervalMs",
   GIT_BACKUP_AUTHOR_NAME: "gitBackup.authorName",
   GIT_BACKUP_AUTHOR_EMAIL: "gitBackup.authorEmail",
+
+  // Scheduled reminders settings
+  REMINDERS_ENABLED: "reminders.enabled",
+  REMINDERS_MAX_PER_USER: "reminders.maxRemindersPerUser",
+  REMINDERS_MIN_INTERVAL_MS: "reminders.minIntervalMs",
+  REMINDERS_PERSIST_PATH: "reminders.persistPath",
+  REMINDERS_CHECK_INTERVAL_MS: "reminders.checkIntervalMs",
 } as const;
 
 /**

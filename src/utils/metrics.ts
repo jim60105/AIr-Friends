@@ -77,3 +77,29 @@ export const activeSessionsGauge = new client.Gauge({
   help: "Number of currently active agent sessions",
   registers: [metricsRegistry],
 });
+
+// --- Reminder Counters ---
+
+/** Total reminders set */
+export const remindersSetTotal = new client.Counter({
+  name: "airfriends_reminders_set_total",
+  help: "Total number of reminders set by users",
+  labelNames: ["platform"] as const,
+  registers: [metricsRegistry],
+});
+
+/** Total reminders delivered */
+export const remindersDeliveredTotal = new client.Counter({
+  name: "airfriends_reminders_delivered_total",
+  help: "Total number of reminders successfully delivered",
+  labelNames: ["platform", "status"] as const,
+  registers: [metricsRegistry],
+});
+
+/** Total reminders cancelled */
+export const remindersCancelledTotal = new client.Counter({
+  name: "airfriends_reminders_cancelled_total",
+  help: "Total number of reminders cancelled by users",
+  labelNames: ["platform"] as const,
+  registers: [metricsRegistry],
+});
