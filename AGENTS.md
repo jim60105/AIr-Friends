@@ -397,8 +397,8 @@ We use `@agentclientprotocol/sdk` for Client-side connection:
 const connector = new AgentConnector({ agentConfig, clientConfig, skillRegistry });
 await connector.connect();
 
-// 2. Create session with workspace
-const sessionId = await connector.createSession();
+// 2. Create session with workspace and optional MCP servers
+const sessionId = await connector.createSession(mcpServers);
 await connector.setSessionModel(sessionId, "gpt-4");
 
 // 3. Send prompt and get response
@@ -422,6 +422,13 @@ await connector.disconnect();
 - Set via `agent.defaultAgentType` in config or `AGENT_DEFAULT_TYPE` env var
 - Valid values: `"copilot"`, `"gemini"`, or `"opencode"`
 - Container includes pre-installed binaries for all three agents
+
+**External MCP Servers**:
+
+- Configured via `agent.mcpServers` in config or `AGENT_MCP_SERVERS` env var (JSON string)
+- MCP servers are registered with the Agent during session creation
+- All agents support stdio transport; HTTP/SSE support depends on Agent capabilities
+- Values in `env`, `headers`, and `url` support `${ENV_VAR}` expansion
 
 **Retry on Missing Reply**:
 
@@ -965,6 +972,13 @@ agent:
   model: "gpt-4"
   system_prompt_path: "./prompts/system_reply.md"
   token_limit: 4096
+  # External MCP servers (optional, see config.example.yaml for full examples)
+  # mcpServers:
+  #   - name: "github"
+  #     command: "npx"
+  #     args: ["-y", "@modelcontextprotocol/server-github"]
+  #     env:
+  #       GITHUB_TOKEN: "${GITHUB_TOKEN}"
 
 memory:
   search_limit: 10

@@ -1510,3 +1510,271 @@ workspace:
     assertEquals(result.agent.modelRouting?.rules[1].model, "spontaneous-model");
   });
 });
+
+// --- MCP Server config validation tests ---
+
+import { convertUserMCPServerConfigs } from "@core/config-loader.ts";
+
+const baseMCPConfig = `
+platforms:
+  discord:
+    token: "test-token"
+    enabled: true
+  misskey:
+    host: "misskey.example.com"
+    token: "test-token"
+    enabled: false
+workspace:
+  repoPath: "./data"
+  workspacesDir: "workspaces"
+`;
+
+function mcpAgentConfig(mcpServersYaml: string): string {
+  return baseMCPConfig + `
+agent:
+  model: "gpt-4"
+  systemPromptPath: "./prompts/system_reply.md"
+  tokenLimit: 20000
+${mcpServersYaml}
+`;
+}
+
+Deno.test("config-loader - mcpServers", async (t) => {
+  await t.step("valid stdio server is loaded", async () => {
+    const config = mcpAgentConfig(`  mcpServers:
+    - name: "test-server"
+      command: "echo"
+      args: ["hello"]`);
+    await withTestConfig(config, async (dir) => {
+      const result = await loadConfig(dir);
+      assertEquals(result.agent.mcpServers?.length, 1);
+      assertEquals(result.agent.mcpServers![0].name, "test-server");
+      assertEquals(result.agent.mcpServers![0].command, "echo");
+      assertEquals(result.agent.mcpServers![0].args, ["hello"]);
+    });
+  });
+
+  await t.step("valid http server is loaded", async () => {
+    const config = mcpAgentConfig(`  mcpServers:
+    - name: "http-server"
+      transport: "http"
+      url: "http://localhost:3002/mcp"`);
+    await withTestConfig(config, async (dir) => {
+      const result = await loadConfig(dir);
+      assertEquals(result.agent.mcpServers?.length, 1);
+      assertEquals(result.agent.mcpServers![0].name, "http-server");
+      assertEquals(result.agent.mcpServers![0].transport, "http");
+      assertEquals(result.agent.mcpServers![0].url, "http://localhost:3002/mcp");
+    });
+  });
+
+  await t.step("server with missing name is skipped", async () => {
+    const config = mcpAgentConfig(`  mcpServers:
+    - command: "echo"
+      args: ["hello"]`);
+    await withTestConfig(config, async (dir) => {
+      const result = await loadConfig(dir);
+      assertEquals(result.agent.mcpServers?.length, 0);
+    });
+  });
+
+  await t.step("server with duplicate name is skipped", async () => {
+    const config = mcpAgentConfig(`  mcpServers:
+    - name: "dup"
+      command: "echo"
+      args: ["first"]
+    - name: "dup"
+      command: "echo"
+      args: ["second"]`);
+    await withTestConfig(config, async (dir) => {
+      const result = await loadConfig(dir);
+      assertEquals(result.agent.mcpServers?.length, 1);
+      assertEquals(result.agent.mcpServers![0].args, ["first"]);
+    });
+  });
+
+  await t.step("stdio server with missing command is skipped", async () => {
+    const config = mcpAgentConfig(`  mcpServers:
+    - name: "no-cmd"
+      args: ["hello"]`);
+    await withTestConfig(config, async (dir) => {
+      const result = await loadConfig(dir);
+      assertEquals(result.agent.mcpServers?.length, 0);
+    });
+  });
+
+  await t.step("http server with missing url is skipped", async () => {
+    const config = mcpAgentConfig(`  mcpServers:
+    - name: "no-url"
+      transport: "http"`);
+    await withTestConfig(config, async (dir) => {
+      const result = await loadConfig(dir);
+      assertEquals(result.agent.mcpServers?.length, 0);
+    });
+  });
+
+  await t.step("unknown transport is skipped", async () => {
+    const config = mcpAgentConfig(`  mcpServers:
+    - name: "bad-transport"
+      transport: "grpc"
+      url: "http://example.com"`);
+    await withTestConfig(config, async (dir) => {
+      const result = await loadConfig(dir);
+      assertEquals(result.agent.mcpServers?.length, 0);
+    });
+  });
+
+  await t.step("${ENV_VAR} in env values is expanded", async () => {
+    Deno.env.set("TEST_MCP_TOKEN", "secret123");
+    try {
+      const config = mcpAgentConfig(`  mcpServers:
+    - name: "env-test"
+      command: "echo"
+      env:
+        MY_TOKEN: "\${TEST_MCP_TOKEN}"`);
+      await withTestConfig(config, async (dir) => {
+        const result = await loadConfig(dir);
+        assertEquals(result.agent.mcpServers?.length, 1);
+        assertEquals(result.agent.mcpServers![0].env!["MY_TOKEN"], "secret123");
+      });
+    } finally {
+      Deno.env.delete("TEST_MCP_TOKEN");
+    }
+  });
+
+  await t.step("${ENV_VAR} in url is expanded", async () => {
+    Deno.env.set("TEST_MCP_HOST", "myhost.example.com");
+    try {
+      const config = mcpAgentConfig(`  mcpServers:
+    - name: "url-test"
+      transport: "http"
+      url: "http://\${TEST_MCP_HOST}:3002/mcp"`);
+      await withTestConfig(config, async (dir) => {
+        const result = await loadConfig(dir);
+        assertEquals(result.agent.mcpServers?.length, 1);
+        assertEquals(result.agent.mcpServers![0].url, "http://myhost.example.com:3002/mcp");
+      });
+    } finally {
+      Deno.env.delete("TEST_MCP_HOST");
+    }
+  });
+
+  await t.step("${ENV_VAR} in headers is expanded", async () => {
+    Deno.env.set("TEST_MCP_BEARER", "bearer-token");
+    try {
+      const config = mcpAgentConfig(`  mcpServers:
+    - name: "header-test"
+      transport: "http"
+      url: "http://localhost:3002/mcp"
+      headers:
+        Authorization: "Bearer \${TEST_MCP_BEARER}"`);
+      await withTestConfig(config, async (dir) => {
+        const result = await loadConfig(dir);
+        assertEquals(result.agent.mcpServers?.length, 1);
+        assertEquals(
+          result.agent.mcpServers![0].headers!["Authorization"],
+          "Bearer bearer-token",
+        );
+      });
+    } finally {
+      Deno.env.delete("TEST_MCP_BEARER");
+    }
+  });
+
+  await t.step("unset ${ENV_VAR} expands to empty string", async () => {
+    Deno.env.delete("NONEXISTENT_MCP_VAR_12345");
+    const config = mcpAgentConfig(`  mcpServers:
+    - name: "unset-test"
+      command: "echo"
+      env:
+        MISSING: "\${NONEXISTENT_MCP_VAR_12345}"`);
+    await withTestConfig(config, async (dir) => {
+      const result = await loadConfig(dir);
+      assertEquals(result.agent.mcpServers?.length, 1);
+      assertEquals(result.agent.mcpServers![0].env!["MISSING"], "");
+    });
+  });
+
+  await t.step("empty mcpServers array is valid", async () => {
+    const config = mcpAgentConfig("  mcpServers: []");
+    await withTestConfig(config, async (dir) => {
+      const result = await loadConfig(dir);
+      assertEquals(result.agent.mcpServers?.length, 0);
+    });
+  });
+
+  await t.step("missing mcpServers field is valid", async () => {
+    const config = mcpAgentConfig("");
+    await withTestConfig(config, async (dir) => {
+      const result = await loadConfig(dir);
+      assertEquals(result.agent.mcpServers, undefined);
+    });
+  });
+});
+
+Deno.test("convertUserMCPServerConfigs", async (t) => {
+  await t.step("converts stdio config correctly", () => {
+    const result = convertUserMCPServerConfigs([{
+      name: "stdio-test",
+      command: "/usr/bin/echo",
+      args: ["hello"],
+      env: { KEY: "val" },
+    }]);
+    assertEquals(result.length, 1);
+    assertEquals("type" in result[0], false);
+    assertEquals((result[0] as { command: string }).command, "/usr/bin/echo");
+    assertEquals((result[0] as { args: string[] }).args, ["hello"]);
+    assertEquals(
+      (result[0] as { env: { name: string; value: string }[] }).env,
+      [{ name: "KEY", value: "val" }],
+    );
+  });
+
+  await t.step("converts http config correctly", () => {
+    const result = convertUserMCPServerConfigs([{
+      name: "http-test",
+      transport: "http",
+      url: "http://localhost:3002/mcp",
+      headers: { Authorization: "Bearer token" },
+    }]);
+    assertEquals(result.length, 1);
+    assertEquals((result[0] as { type: string }).type, "http");
+    assertEquals((result[0] as { url: string }).url, "http://localhost:3002/mcp");
+    assertEquals(
+      (result[0] as { headers: { name: string; value: string }[] }).headers,
+      [{ name: "Authorization", value: "Bearer token" }],
+    );
+  });
+
+  await t.step("converts sse config correctly", () => {
+    const result = convertUserMCPServerConfigs([{
+      name: "sse-test",
+      transport: "sse",
+      url: "https://events.example.com/mcp",
+    }]);
+    assertEquals(result.length, 1);
+    assertEquals((result[0] as { type: string }).type, "sse");
+    assertEquals((result[0] as { url: string }).url, "https://events.example.com/mcp");
+  });
+
+  await t.step("handles missing optional fields", () => {
+    const result = convertUserMCPServerConfigs([{
+      name: "minimal-stdio",
+      command: "echo",
+    }]);
+    assertEquals(result.length, 1);
+    assertEquals((result[0] as { args: string[] }).args, []);
+    assertEquals((result[0] as { env?: unknown }).env, undefined);
+  });
+
+  await t.step("default transport is stdio", () => {
+    const result = convertUserMCPServerConfigs([{
+      name: "no-transport",
+      command: "echo",
+      args: [],
+    }]);
+    assertEquals(result.length, 1);
+    assertEquals("type" in result[0], false);
+    assertEquals((result[0] as { command: string }).command, "echo");
+  });
+});

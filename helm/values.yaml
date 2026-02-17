@@ -52,6 +52,9 @@ env:
   MODEL_ROUTING_ENABLED: 'false'
   MODEL_ROUTING_RULES: '[]'
 
+  # External MCP Servers (JSON string array)
+  AGENT_MCP_SERVERS: '[]'
+
   # Logging
   LOG_LEVEL: 'INFO'
 

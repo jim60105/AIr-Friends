@@ -406,3 +406,31 @@ Deno.test("applyEnvOverrides - MODEL_ROUTING_RULES skips on invalid JSON", () =>
     Deno.env.delete("MODEL_ROUTING_RULES");
   }
 });
+
+Deno.test("applyEnvOverrides - AGENT_MCP_SERVERS parses valid JSON", () => {
+  Deno.env.set(
+    "AGENT_MCP_SERVERS",
+    '[{"name":"github","command":"npx","args":["-y","@modelcontextprotocol/server-github"]}]',
+  );
+  try {
+    const config: Record<string, unknown> = { agent: {} };
+    applyEnvOverrides(config);
+    const agent = config.agent as { mcpServers: unknown[] };
+    assertEquals(agent.mcpServers.length, 1);
+    assertEquals((agent.mcpServers[0] as { name: string }).name, "github");
+  } finally {
+    Deno.env.delete("AGENT_MCP_SERVERS");
+  }
+});
+
+Deno.test("applyEnvOverrides - AGENT_MCP_SERVERS skips invalid JSON", () => {
+  Deno.env.set("AGENT_MCP_SERVERS", "not-valid-json");
+  try {
+    const config: Record<string, unknown> = { agent: { mcpServers: [] } };
+    applyEnvOverrides(config);
+    const agent = config.agent as { mcpServers: unknown[] };
+    assertEquals(agent.mcpServers.length, 0);
+  } finally {
+    Deno.env.delete("AGENT_MCP_SERVERS");
+  }
+});

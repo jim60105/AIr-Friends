@@ -17,6 +17,7 @@ import {
 import { ContextAssembler } from "./context-assembler.ts";
 import { WorkspaceManager } from "./workspace-manager.ts";
 import { MemoryStore } from "./memory-store.ts";
+import { convertUserMCPServerConfigs } from "./config-loader.ts";
 import { createTemplateEngine, renderTemplate } from "./template-renderer.ts";
 import type { TemplateVariables } from "../types/template.ts";
 import { resolveModel } from "./model-router.ts";
@@ -26,7 +27,7 @@ import type { SessionRegistry } from "../skill-api/session-registry.ts";
 import type { Config, MemoryMaintenanceConfig, SelfResearchConfig } from "../types/config.ts";
 import type { NormalizedEvent, Platform } from "../types/events.ts";
 import type { PlatformAdapter } from "@platforms/platform-adapter.ts";
-import type { AgentConnectorOptions, ClientConfig } from "@acp/types.ts";
+import type { AgentConnectorOptions, ClientConfig, MCPServerConfig } from "@acp/types.ts";
 import { dirname, join } from "@std/path";
 import type { RssItem } from "@utils/rss-fetcher.ts";
 import type { WorkspaceInfo } from "../types/workspace.ts";
@@ -80,6 +81,13 @@ export class SessionOrchestrator {
     this.memoryStore = memoryStore;
     this.config = config;
     this.yolo = yolo;
+  }
+
+  private getMCPServers(): MCPServerConfig[] {
+    if (!this.config.agent.mcpServers || this.config.agent.mcpServers.length === 0) {
+      return [];
+    }
+    return convertUserMCPServerConfigs(this.config.agent.mcpServers);
   }
 
   /**
@@ -216,7 +224,7 @@ export class SessionOrchestrator {
         const supportsImage = connector.supportsImageContent();
         sessionLogger.info("Agent capabilities checked", { supportsImage });
 
-        const sessionId = await connector.createSession();
+        const sessionId = await connector.createSession(this.getMCPServers());
         sessionLogger.info("Agent session {sessionId} created", { sessionId });
 
         // Set the model for the session
@@ -518,7 +526,7 @@ export class SessionOrchestrator {
         await connector.connect();
         sessionLogger.info("Agent connected");
 
-        const sessionId = await connector.createSession();
+        const sessionId = await connector.createSession(this.getMCPServers());
         const routingContext: ModelRoutingContext = {
           sessionType: "spontaneous",
           platform,
@@ -702,7 +710,7 @@ export class SessionOrchestrator {
         await connector.connect();
         sessionLogger.info("Agent connected");
 
-        const sessionId = await connector.createSession();
+        const sessionId = await connector.createSession(this.getMCPServers());
         // Fallback chain: routing rules → selfResearch.model → agent.model
         const routingContext: ModelRoutingContext = {
           sessionType: "self-research",
@@ -864,7 +872,7 @@ export class SessionOrchestrator {
         await connector.connect();
         sessionLogger.info("Agent connected");
 
-        const sessionId = await connector.createSession();
+        const sessionId = await connector.createSession(this.getMCPServers());
         // Fallback chain: routing rules → memoryMaintenance.model → agent.model
         const routingContext: ModelRoutingContext = {
           sessionType: "memory-maintenance",
@@ -1044,7 +1052,7 @@ export class SessionOrchestrator {
         await connector.connect();
         sessionLogger.info("Agent connected");
 
-        const sessionId = await connector.createSession();
+        const sessionId = await connector.createSession(this.getMCPServers());
         const routingContext: ModelRoutingContext = {
           sessionType: "reminder",
           platform,

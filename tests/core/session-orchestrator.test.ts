@@ -422,6 +422,7 @@ class MockAgentConnector {
   modelSet = false;
   lastModelId = "";
   disconnected = false;
+  lastMCPServers: unknown[] = [];
   onPrompt?: (callCount: number) => void;
 
   constructor(_options: AgentConnectorOptions) {}
@@ -435,7 +436,8 @@ class MockAgentConnector {
     return false;
   }
 
-  async createSession(): Promise<string> {
+  async createSession(mcpServers?: unknown[]): Promise<string> {
+    this.lastMCPServers = mcpServers ?? [];
     return await Promise.resolve(this.sessionId);
   }
 
@@ -2169,6 +2171,89 @@ Deno.test({
 
       const connector = orchestrator.mockConnector!;
       assertEquals(connector.lastModelId, "spontaneous-model");
+
+      sessionRegistry.stop();
+    } finally {
+      await Deno.remove(tempDir, { recursive: true });
+    }
+  },
+});
+
+Deno.test({
+  name: "SessionOrchestrator - passes mcpServers from config to createSession",
+  sanitizeResources: false,
+  sanitizeOps: false,
+  fn: async () => {
+    const tempDir = await Deno.makeTempDir();
+    try {
+      const { orchestrator, skillRegistry, sessionRegistry, workspaceManager } =
+        await createTestableOrchestrator(tempDir);
+
+      // Configure mcpServers
+      const config = (orchestrator as unknown as { config: Config }).config;
+      config.agent.mcpServers = [
+        { name: "test-server", command: "echo", args: ["hello"] },
+        { name: "http-server", transport: "http", url: "http://localhost:3002/mcp" },
+      ];
+
+      const event = createTestEvent();
+      const platformAdapter = new MockPlatformAdapter() as unknown as PlatformAdapter;
+      const replyHandler = skillRegistry.getReplyHandler();
+
+      orchestrator.setConnectorSetup((connector) => {
+        connector.promptResponses = [
+          { stopReason: "end_turn" } as PromptResponse,
+        ];
+        connector.onPrompt = () => {
+          const workspace = workspaceManager.getWorkspaceKeyFromEvent(event);
+          const key = `${workspace}:${event.channelId}`;
+          // deno-lint-ignore no-explicit-any
+          (replyHandler as any).replySentMap.set(key, true);
+        };
+      });
+
+      await orchestrator.processMessage(event, platformAdapter);
+
+      const connector = orchestrator.mockConnector!;
+      assertEquals(connector.lastMCPServers.length, 2);
+
+      sessionRegistry.stop();
+    } finally {
+      await Deno.remove(tempDir, { recursive: true });
+    }
+  },
+});
+
+Deno.test({
+  name: "SessionOrchestrator - passes empty mcpServers when not configured",
+  sanitizeResources: false,
+  sanitizeOps: false,
+  fn: async () => {
+    const tempDir = await Deno.makeTempDir();
+    try {
+      const { orchestrator, skillRegistry, sessionRegistry, workspaceManager } =
+        await createTestableOrchestrator(tempDir);
+
+      const event = createTestEvent();
+      const platformAdapter = new MockPlatformAdapter() as unknown as PlatformAdapter;
+      const replyHandler = skillRegistry.getReplyHandler();
+
+      orchestrator.setConnectorSetup((connector) => {
+        connector.promptResponses = [
+          { stopReason: "end_turn" } as PromptResponse,
+        ];
+        connector.onPrompt = () => {
+          const workspace = workspaceManager.getWorkspaceKeyFromEvent(event);
+          const key = `${workspace}:${event.channelId}`;
+          // deno-lint-ignore no-explicit-any
+          (replyHandler as any).replySentMap.set(key, true);
+        };
+      });
+
+      await orchestrator.processMessage(event, platformAdapter);
+
+      const connector = orchestrator.mockConnector!;
+      assertEquals(connector.lastMCPServers.length, 0);
 
       sessionRegistry.stop();
     } finally {

@@ -109,6 +109,11 @@ export class AgentConnector {
         image: this.capabilities?.promptCapabilities?.image ?? false,
         audio: this.capabilities?.promptCapabilities?.audio ?? false,
       });
+
+      (logger as Logger).info("Agent MCP transport capabilities", {
+        http: this.capabilities?.mcpCapabilities?.http ?? false,
+        sse: this.capabilities?.mcpCapabilities?.sse ?? false,
+      });
     } catch (error) {
       // Clean up on initialization failure
       await this.disconnect();
@@ -119,7 +124,6 @@ export class AgentConnector {
   /**
    * Create a new session with the Agent
    * @param mcpServers Optional MCP servers to connect to
-   * @throws Error if MCP servers use unsupported transport types
    */
   async createSession(mcpServers: MCPServerConfig[] = []): Promise<string> {
     if (!this.connection) {
@@ -128,42 +132,45 @@ export class AgentConnector {
 
     const logger = this.options.logger as Logger;
 
-    // Validate MCP server transports before creating session
-    if (mcpServers.length > 0) {
-      this.validateMCPServerTransports(mcpServers);
-    }
+    // Filter out MCP servers with unsupported transports (skip + warn)
+    const supportedServers = this.filterSupportedMCPServers(mcpServers);
 
     const result = await this.connection.newSession({
       cwd: this.options.agentConfig.cwd,
-      mcpServers: mcpServers.map((server) => this.convertMCPServerConfig(server)),
+      mcpServers: supportedServers.map((server) => this.convertMCPServerConfig(server)),
     });
 
     logger.info("Session {sessionId} created with {mcpServerCount} MCP servers", {
       sessionId: result.sessionId,
-      mcpServerCount: mcpServers.length,
+      mcpServerCount: supportedServers.length,
     });
     return result.sessionId;
   }
 
   /**
-   * Validate that all MCP server transports are supported by the Agent
-   * @throws Error if any server uses unsupported transport type
+   * Filter MCP servers to only those with transports supported by the Agent.
+   * Unsupported servers are skipped with a warning log instead of throwing errors,
+   * following the design principle that a single error should not crash the session.
    */
-  private validateMCPServerTransports(servers: MCPServerConfig[]): void {
+  filterSupportedMCPServers(servers: MCPServerConfig[]): MCPServerConfig[] {
     const logger = this.options.logger as Logger;
+    const supported: MCPServerConfig[] = [];
 
     for (const server of servers) {
       // Stdio transport is always supported
       if (!("type" in server)) {
+        supported.push(server);
         continue;
       }
 
       // Check HTTP transport support
       if (server.type === "http") {
         if (!this.supportsHTTPTransport()) {
-          throw new Error(
-            `Agent does not support HTTP transport for MCP servers (server: ${server.name})`,
+          logger.warn(
+            "Skipping MCP server {serverName}: Agent does not support HTTP transport",
+            { serverName: server.name },
           );
+          continue;
         }
         logger.debug("HTTP transport validated for server {serverName}", {
           serverName: server.name,
@@ -173,15 +180,28 @@ export class AgentConnector {
       // Check SSE transport support
       if (server.type === "sse") {
         if (!this.supportsSSETransport()) {
-          throw new Error(
-            `Agent does not support SSE transport for MCP servers (server: ${server.name})`,
+          logger.warn(
+            "Skipping MCP server {serverName}: Agent does not support SSE transport",
+            { serverName: server.name },
           );
+          continue;
         }
         logger.debug("SSE transport validated for server {serverName}", {
           serverName: server.name,
         });
       }
+
+      supported.push(server);
     }
+
+    if (supported.length < servers.length) {
+      logger.info(
+        "{skippedCount} MCP server(s) skipped due to unsupported transport",
+        { skippedCount: servers.length - supported.length },
+      );
+    }
+
+    return supported;
   }
 
   /**
