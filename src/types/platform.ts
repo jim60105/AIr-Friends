@@ -107,6 +107,25 @@ export interface PlatformEmoji {
 }
 
 /**
+ * Options for sending a file to a channel
+ */
+export interface SendFileOptions {
+  /** Reply to a specific message (thread) */
+  replyToMessageId?: string;
+  /** Optional text message to accompany the file */
+  comment?: string;
+}
+
+/**
+ * Result of sending a file
+ */
+export interface SendFileResult {
+  success: boolean;
+  messageId?: string;
+  error?: string;
+}
+
+/**
  * Result of adding a reaction to a message
  */
 export interface ReactionResult {

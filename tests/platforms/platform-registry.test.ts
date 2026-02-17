@@ -10,6 +10,7 @@ import {
   type PlatformEmoji,
   type ReactionResult,
   type ReplyResult,
+  type SendFileResult,
 } from "../../src/types/platform.ts";
 
 // Mock adapter for testing
@@ -52,6 +53,18 @@ class MockAdapter extends PlatformAdapter {
     _newContent: string,
   ): Promise<ReplyResult> {
     return Promise.resolve({ success: true, messageId });
+  }
+
+  sendFile(
+    _channelId: string,
+    _fileContent: Uint8Array,
+    _fileName: string,
+  ): Promise<SendFileResult> {
+    return Promise.resolve({ success: true, messageId: "file-msg-1" });
+  }
+
+  getDmChannelId(userId: string): Promise<string | null> {
+    return Promise.resolve(`dm-${userId}`);
   }
 
   fetchRecentMessages(

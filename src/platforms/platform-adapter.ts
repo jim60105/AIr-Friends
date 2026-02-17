@@ -11,6 +11,8 @@ import {
   type ReactionResult,
   type ReplyOptions,
   type ReplyResult,
+  type SendFileOptions,
+  type SendFileResult,
 } from "../types/platform.ts";
 import type { MessageFetcher } from "../types/context.ts";
 
@@ -199,6 +201,21 @@ export abstract class PlatformAdapter implements MessageFetcher {
   ): Promise<ReplyResult>;
 
   /**
+   * Send a file to a channel
+   *
+   * @param channelId - Target channel ID
+   * @param fileContent - File content as Uint8Array
+   * @param fileName - File name (e.g., "memory-export.md")
+   * @param options - Optional: reply threading, comment text
+   */
+  abstract sendFile(
+    channelId: string,
+    fileContent: Uint8Array,
+    fileName: string,
+    options?: SendFileOptions,
+  ): Promise<SendFileResult>;
+
+  /**
    * Get username for a user ID
    */
   abstract getUsername(userId: string): Promise<string>;
@@ -212,4 +229,14 @@ export abstract class PlatformAdapter implements MessageFetcher {
    * Get the bot user ID (null if not yet connected)
    */
   abstract getBotId(): string | null;
+
+  /**
+   * Get or create a DM channel with a user.
+   * Discord: creates/fetches a DM channel, returns channel ID
+   * Misskey: returns "chat:{userId}" convention string
+   *
+   * @param userId - The target user's platform ID
+   * @returns DM channel ID string, or null if DM creation failed
+   */
+  abstract getDmChannelId(userId: string): Promise<string | null>;
 }

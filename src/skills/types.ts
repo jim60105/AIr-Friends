@@ -80,6 +80,18 @@ export interface MemoryPatchParams {
 }
 
 /**
+ * Parameters for memory-export skill
+ */
+export interface MemoryExportParams {
+  /** Output format: "markdown" (default) or "json" */
+  format?: "markdown" | "json";
+  /** Filter by importance: "high", "normal", or "all" (default: "all") */
+  importance?: "high" | "normal" | "all";
+  /** Only include enabled memories (default: true) */
+  enabled_only?: boolean;
+}
+
+/**
  * Parameters for send-reply skill
  */
 export interface SendReplyParams {

@@ -11,6 +11,8 @@ import {
   type ReactionResult,
   type ReplyOptions,
   type ReplyResult,
+  type SendFileOptions,
+  type SendFileResult,
 } from "../../types/platform.ts";
 import { ErrorCode, PlatformError } from "../../types/errors.ts";
 import { MisskeyClient } from "./misskey-client.ts";
@@ -264,19 +266,13 @@ export class MisskeyAdapter extends PlatformAdapter {
 
       // Handle spontaneous post to bot's own timeline
       if (channelId === "timeline:self") {
-        const result = await this.client.request<{ createdNote: MisskeyNote }>(
-          "notes/create",
-          { text: truncatedContent },
-        );
+        const result = await this.createNote(truncatedContent);
 
         logger.debug("Spontaneous note posted", {
-          noteId: result.createdNote.id,
+          noteId: result.messageId,
         });
 
-        return {
-          success: true,
-          messageId: result.createdNote.id,
-        };
+        return result;
       }
 
       // Handle chat messages
@@ -285,40 +281,16 @@ export class MisskeyAdapter extends PlatformAdapter {
       }
 
       // Handle notes
-      const params: Record<string, unknown> = {
-        text: truncatedContent,
-      };
-
-      // If replying to a specific note, set visibility appropriately
-      if (options?.replyToMessageId) {
-        params.replyId = options.replyToMessageId;
-
-        // Get original note to determine visibility
-        const originalNote = await this.client.request<MisskeyNote>(
-          "notes/show",
-          { noteId: options.replyToMessageId },
-        );
-
-        const replyParams = buildReplyParams(originalNote);
-        Object.assign(params, replyParams);
-      }
-
-      const createdNote = await this.client.request<
-        { createdNote: MisskeyNote }
-      >(
-        "notes/create",
-        params,
-      );
+      const result = await this.createNote(truncatedContent, {
+        replyToMessageId: options?.replyToMessageId,
+      });
 
       logger.debug("Reply sent", {
-        noteId: createdNote.createdNote.id,
+        noteId: result.messageId,
         contentLength: content.length,
       });
 
-      return {
-        success: true,
-        messageId: createdNote.createdNote.id,
-      };
+      return result;
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
 
@@ -339,23 +311,29 @@ export class MisskeyAdapter extends PlatformAdapter {
    */
   private async sendChatMessage(
     channelId: string,
-    content: string,
+    content: string | null,
+    fileId?: string,
   ): Promise<ReplyResult> {
     const userId = channelId.slice(5); // Remove "chat:" prefix
 
     try {
+      const params: Record<string, unknown> = {
+        toUserId: userId,
+        text: content,
+      };
+      if (fileId) {
+        params.fileId = fileId;
+      }
+
       const result = await this.client.request<ChatMessageLite>(
         "chat/messages/create-to-user",
-        {
-          toUserId: userId,
-          text: content,
-        },
+        params,
       );
 
       logger.debug("Chat message sent", {
         messageId: result.id,
         toUserId: userId,
-        contentLength: content.length,
+        contentLength: content?.length ?? 0,
       });
 
       return {
@@ -375,6 +353,44 @@ export class MisskeyAdapter extends PlatformAdapter {
         error: errorMessage,
       };
     }
+  }
+
+  /**
+   * Create a note with optional file attachment and reply threading
+   */
+  private async createNote(
+    text: string | null,
+    options?: { replyToMessageId?: string; fileIds?: string[] },
+  ): Promise<ReplyResult> {
+    const params: Record<string, unknown> = {
+      text,
+    };
+
+    if (options?.fileIds) {
+      params.fileIds = options.fileIds;
+    }
+
+    if (options?.replyToMessageId) {
+      params.replyId = options.replyToMessageId;
+
+      const originalNote = await this.client.request<MisskeyNote>(
+        "notes/show",
+        { noteId: options.replyToMessageId },
+      );
+
+      const replyParams = buildReplyParams(originalNote);
+      Object.assign(params, replyParams);
+    }
+
+    const createdNote = await this.client.request<{ createdNote: MisskeyNote }>(
+      "notes/create",
+      params,
+    );
+
+    return {
+      success: true,
+      messageId: createdNote.createdNote.id,
+    };
   }
 
   /**
@@ -829,6 +845,60 @@ export class MisskeyAdapter extends PlatformAdapter {
       logger.error("Failed to edit chat message", { messageId, error: errorMessage });
       return { success: false, error: `Failed to edit chat message: ${errorMessage}` };
     }
+  }
+
+  /**
+   * Send a file to a channel.
+   * For chat channels, uploads to Drive then sends via chat message.
+   * For note channels, uploads to Drive then creates a note with file attachment.
+   */
+  async sendFile(
+    channelId: string,
+    fileContent: Uint8Array,
+    fileName: string,
+    options?: SendFileOptions,
+  ): Promise<SendFileResult> {
+    try {
+      // Step 1: Upload file to Misskey Drive
+      const driveFile = await this.client.uploadFile(fileContent, fileName);
+
+      // Step 2: Send via appropriate channel type
+      if (channelId.startsWith("chat:")) {
+        return await this.sendChatMessage(
+          channelId,
+          options?.comment ?? null,
+          driveFile.id,
+        );
+      }
+
+      // Note with file attachment
+      return await this.createNote(options?.comment ?? null, {
+        replyToMessageId: options?.replyToMessageId,
+        fileIds: [driveFile.id],
+      });
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+
+      logger.error("Failed to send file", {
+        channelId,
+        fileName,
+        error: errorMessage,
+      });
+
+      return {
+        success: false,
+        error: errorMessage,
+      };
+    }
+  }
+
+  /**
+   * Get or create a DM channel with a user.
+   * Misskey uses chat channel convention.
+   */
+  async getDmChannelId(userId: string): Promise<string | null> {
+    // Misskey DM uses chat channel convention
+    return await Promise.resolve(`chat:${userId}`);
   }
 
   /**

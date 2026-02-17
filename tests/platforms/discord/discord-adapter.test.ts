@@ -351,3 +351,115 @@ Deno.test({
     assertEquals(capturedContent.endsWith("..."), true);
   },
 });
+
+// ============ DiscordAdapter.sendFile tests ============
+
+Deno.test({
+  name: "DiscordAdapter.sendFile - sends file successfully",
+  sanitizeOps: false,
+  sanitizeResources: false,
+  fn: async () => {
+    const adapter = createMockDiscordAdapter();
+    let sentFiles: any[] = [];
+    const mockChannel = {
+      type: 0,
+      send: (opts: any) => {
+        sentFiles = opts.files;
+        return Promise.resolve({ id: "sent_msg_123" });
+      },
+    };
+    mockDiscordClient(adapter, mockChannel);
+
+    const fileContent = new TextEncoder().encode("test content");
+    const result = await adapter.sendFile("ch123", fileContent, "test.md");
+    assertEquals(result.success, true);
+    assertEquals(result.messageId, "sent_msg_123");
+    assertEquals(sentFiles.length, 1);
+  },
+});
+
+Deno.test({
+  name: "DiscordAdapter.sendFile - handles channel not found",
+  sanitizeOps: false,
+  sanitizeResources: false,
+  fn: async () => {
+    const adapter = createMockDiscordAdapter();
+    mockDiscordClient(adapter, null);
+
+    const fileContent = new TextEncoder().encode("test content");
+    const result = await adapter.sendFile("ch123", fileContent, "test.md");
+    assertEquals(result.success, false);
+    assertEquals(result.error, "Channel not found or not text-based");
+  },
+});
+
+Deno.test({
+  name: "DiscordAdapter.sendFile - includes comment when provided",
+  sanitizeOps: false,
+  sanitizeResources: false,
+  fn: async () => {
+    const adapter = createMockDiscordAdapter();
+    let capturedContent: string | undefined;
+    const mockChannel = {
+      type: 0,
+      send: (opts: any) => {
+        capturedContent = opts.content;
+        return Promise.resolve({ id: "sent_msg_456" });
+      },
+    };
+    mockDiscordClient(adapter, mockChannel);
+
+    const fileContent = new TextEncoder().encode("test content");
+    const result = await adapter.sendFile("ch123", fileContent, "test.md", {
+      comment: "Here is the file",
+    });
+    assertEquals(result.success, true);
+    assertEquals(capturedContent, "Here is the file");
+  },
+});
+
+Deno.test({
+  name: "DiscordAdapter.sendFile - includes reply reference when provided",
+  sanitizeOps: false,
+  sanitizeResources: false,
+  fn: async () => {
+    const adapter = createMockDiscordAdapter();
+    let capturedReply: any;
+    const mockChannel = {
+      type: 0,
+      send: (opts: any) => {
+        capturedReply = opts.reply;
+        return Promise.resolve({ id: "sent_msg_789" });
+      },
+    };
+    mockDiscordClient(adapter, mockChannel);
+
+    const fileContent = new TextEncoder().encode("test content");
+    const result = await adapter.sendFile("ch123", fileContent, "test.md", {
+      replyToMessageId: "original_msg_id",
+    });
+    assertEquals(result.success, true);
+    assertEquals(capturedReply.messageReference, "original_msg_id");
+  },
+});
+
+Deno.test({
+  name: "DiscordAdapter.sendFile - handles send error",
+  sanitizeOps: false,
+  sanitizeResources: false,
+  fn: async () => {
+    const adapter = createMockDiscordAdapter();
+    const mockChannel = {
+      type: 0,
+      send: () => {
+        throw new Error("Permission denied");
+      },
+    };
+    mockDiscordClient(adapter, mockChannel);
+
+    const fileContent = new TextEncoder().encode("test content");
+    const result = await adapter.sendFile("ch123", fileContent, "test.md");
+    assertEquals(result.success, false);
+    assertEquals(result.error, "Permission denied");
+  },
+});
