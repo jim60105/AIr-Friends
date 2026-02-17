@@ -73,6 +73,32 @@ agent:
     #   - match: { sessionType: "memory-maintenance" }
     #     model: "openrouter/deepseek/deepseek-v3.2"
 
+  # External MCP Servers: register MCP-compatible servers for the Agent to use.
+  # The Agent connects to these servers during session creation and can call their tools.
+  # All Agents support stdio transport. HTTP/SSE support depends on the Agent's capabilities.
+  # Values support ${ENV_VAR} syntax for environment variable expansion.
+  # Override with env AGENT_MCP_SERVERS (JSON string).
+  mcpServers: []
+  # Example configurations:
+  #   # Stdio transport (default) — spawns a subprocess
+  #   - name: "github"
+  #     command: "npx"
+  #     args: ["-y", "@modelcontextprotocol/server-github"]
+  #     env:
+  #       GITHUB_TOKEN: "${GITHUB_TOKEN}"
+  #
+  #   # HTTP transport — connects to a running server
+  #   - name: "database"
+  #     transport: "http"
+  #     url: "http://localhost:3002/mcp"
+  #     headers:
+  #       Authorization: "Bearer ${API_TOKEN}"
+  #
+  #   # SSE transport (deprecated) — connects to an SSE endpoint
+  #   - name: "events"
+  #     transport: "sse"
+  #     url: "https://events.example.com/mcp"
+
 # Memory system configuration
 memory:
   searchLimit: 10 # Max number of search results (default: 10)

@@ -13,7 +13,9 @@ import type {
   MemoryMaintenanceConfig,
   RateLimitConfig,
   RemindersConfig,
+  UserMCPServerConfig,
 } from "../types/config.ts";
+import type { MCPServerConfig } from "../acp/types.ts";
 import { ConfigError, ErrorCode } from "../types/errors.ts";
 
 const logger = createLogger("ConfigLoader");
@@ -123,6 +125,16 @@ const REQUIRED_FIELDS = [
   "workspace.repoPath",
   "workspace.workspacesDir",
 ] as const;
+
+/**
+ * Expand ${ENV_VAR} references in a string with actual environment variable values.
+ * Unresolved references (env var not set) are replaced with empty string.
+ */
+function expandEnvVars(value: string): string {
+  return value.replace(/\$\{([^}]+)\}/g, (_match, varName) => {
+    return Deno.env.get(varName) ?? "";
+  });
+}
 
 /**
  * Validate that all required fields are present
@@ -439,6 +451,126 @@ function validateConfig(config: Record<string, unknown>): void {
       mr.rules = validRules;
     }
   }
+
+  // MCP Servers validation
+  const mcpServers = agentConfig.mcpServers as unknown[] | undefined;
+  if (mcpServers && Array.isArray(mcpServers)) {
+    const validServers: unknown[] = [];
+    const seenNames = new Set<string>();
+
+    for (const server of mcpServers as Record<string, unknown>[]) {
+      // Validate name (required, unique)
+      if (typeof server.name !== "string" || server.name.trim() === "") {
+        logger.warn("MCP server config missing name, skipping", { server });
+        continue;
+      }
+      if (seenNames.has(server.name)) {
+        logger.warn("Duplicate MCP server name, skipping", { name: server.name });
+        continue;
+      }
+
+      const transport = (server.transport as string) ?? "stdio";
+
+      // Expand environment variables before validation
+      if (server.env && typeof server.env === "object" && !Array.isArray(server.env)) {
+        const expandedEnv: Record<string, string> = {};
+        for (const [key, val] of Object.entries(server.env as Record<string, unknown>)) {
+          expandedEnv[key] = expandEnvVars(String(val));
+        }
+        server.env = expandedEnv;
+      }
+      if (server.headers && typeof server.headers === "object" && !Array.isArray(server.headers)) {
+        const expandedHeaders: Record<string, string> = {};
+        for (const [key, val] of Object.entries(server.headers as Record<string, unknown>)) {
+          expandedHeaders[key] = expandEnvVars(String(val));
+        }
+        server.headers = expandedHeaders;
+      }
+      if (server.url && typeof server.url === "string") {
+        server.url = expandEnvVars(server.url);
+      }
+
+      if (transport === "stdio") {
+        // Validate stdio: command is required
+        if (typeof server.command !== "string" || server.command.trim() === "") {
+          logger.warn("Stdio MCP server missing command, skipping", { name: server.name });
+          continue;
+        }
+        if (!Array.isArray(server.args)) {
+          server.args = [];
+        }
+      } else if (transport === "http" || transport === "sse") {
+        // Validate http/sse: url is required
+        if (typeof server.url !== "string" || server.url.trim() === "") {
+          logger.warn("{transport} MCP server missing url, skipping", {
+            transport,
+            name: server.name,
+          });
+          continue;
+        }
+      } else {
+        logger.warn("Unknown MCP server transport, skipping", {
+          transport,
+          name: server.name,
+        });
+        continue;
+      }
+
+      seenNames.add(server.name as string);
+      validServers.push(server);
+    }
+
+    agentConfig.mcpServers = validServers;
+
+    if (validServers.length > 0) {
+      logger.info("Validated {count} MCP server(s)", { count: validServers.length });
+    }
+  }
+}
+
+/**
+ * Convert user-facing MCP server config to internal MCPServerConfig format.
+ * User format uses explicit "transport" field and Record for env/headers.
+ * Internal format uses union type discrimination (type field presence) and Array<{name, value}>.
+ */
+export function convertUserMCPServerConfigs(
+  userConfigs: UserMCPServerConfig[],
+): MCPServerConfig[] {
+  return userConfigs.map((cfg) => {
+    const transport = cfg.transport ?? "stdio";
+
+    if (transport === "stdio") {
+      return {
+        name: cfg.name,
+        command: cfg.command!,
+        args: cfg.args ?? [],
+        env: cfg.env
+          ? Object.entries(cfg.env).map(([name, value]) => ({ name, value }))
+          : undefined,
+      };
+    }
+
+    if (transport === "http") {
+      return {
+        type: "http" as const,
+        name: cfg.name,
+        url: cfg.url!,
+        headers: cfg.headers
+          ? Object.entries(cfg.headers).map(([name, value]) => ({ name, value }))
+          : undefined,
+      };
+    }
+
+    // sse
+    return {
+      type: "sse" as const,
+      name: cfg.name,
+      url: cfg.url!,
+      headers: cfg.headers
+        ? Object.entries(cfg.headers).map(([name, value]) => ({ name, value }))
+        : undefined,
+    };
+  });
 }
 
 /**

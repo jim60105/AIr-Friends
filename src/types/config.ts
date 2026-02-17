@@ -39,6 +39,34 @@ export interface PlatformsConfig {
 }
 
 /**
+ * User-facing MCP Server configuration.
+ * Uses explicit "transport" field as discriminator for clarity in YAML config.
+ * Internally converted to MCPServerConfig (from src/acp/types.ts) at load time.
+ */
+export interface UserMCPServerConfig {
+  /** Human-readable identifier for the server (must be unique) */
+  name: string;
+
+  /** Transport type: "stdio" (default), "http", or "sse" */
+  transport?: "stdio" | "http" | "sse";
+
+  /** Command to execute (required for stdio transport) */
+  command?: string;
+
+  /** Command-line arguments (required for stdio transport) */
+  args?: string[];
+
+  /** Environment variables for stdio transport (supports ${ENV_VAR} expansion) */
+  env?: Record<string, string>;
+
+  /** Server URL (required for http/sse transport, supports ${ENV_VAR} expansion) */
+  url?: string;
+
+  /** HTTP headers (for http/sse transport, values support ${ENV_VAR} expansion) */
+  headers?: Record<string, string>;
+}
+
+/**
  * Agent/LLM configuration
  */
 export interface AgentConfig {
@@ -68,6 +96,9 @@ export interface AgentConfig {
 
   /** Model routing configuration (optional) */
   modelRouting?: ModelRoutingConfig;
+
+  /** External MCP servers to register with the ACP Agent (optional) */
+  mcpServers?: UserMCPServerConfig[];
 }
 
 /**

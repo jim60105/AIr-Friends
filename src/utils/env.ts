@@ -65,6 +65,9 @@ export const ENV_MAPPINGS = {
   MODEL_ROUTING_ENABLED: "agent.modelRouting.enabled",
   MODEL_ROUTING_RULES: "agent.modelRouting.rules",
 
+  // MCP Server configuration
+  AGENT_MCP_SERVERS: "agent.mcpServers",
+
   // Git backup settings
   GIT_BACKUP_ENABLED: "gitBackup.enabled",
   GIT_BACKUP_REMOTE_URL: "gitBackup.remoteUrl",
@@ -153,6 +156,14 @@ export function applyEnvOverrides(config: Record<string, unknown>): void {
         }
       } // Handle JSON string for SELF_RESEARCH_RSS_FEEDS
       else if (envName === "SELF_RESEARCH_RSS_FEEDS") {
+        try {
+          parsedValue = JSON.parse(value);
+        } catch {
+          // If JSON parse fails, skip this override
+          continue;
+        }
+      } // Handle JSON string for AGENT_MCP_SERVERS
+      else if (envName === "AGENT_MCP_SERVERS") {
         try {
           parsedValue = JSON.parse(value);
         } catch {

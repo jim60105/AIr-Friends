@@ -72,6 +72,15 @@ export async function bootstrap(configPath?: string, yolo = false): Promise<AppC
     gelfTransport,
   });
 
+  // Log configured MCP servers
+  if (config.agent.mcpServers && config.agent.mcpServers.length > 0) {
+    logger.info("External MCP servers configured: {servers}", {
+      servers: config.agent.mcpServers.map((s) => `${s.name} (${s.transport ?? "stdio"})`).join(
+        ", ",
+      ),
+    });
+  }
+
   // Initialize agent core (this initializes all necessary components)
   logger.info("Initializing agent core");
   const agentCore = new AgentCore(config, yolo);
