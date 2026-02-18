@@ -186,3 +186,11 @@ reminders:
   minIntervalMs: 60000             # Minimum reminder delay from now in ms (default: 1 minute); override with env REMINDERS_MIN_INTERVAL_MS
   persistPath: "reminders.jsonl"   # File name for reminder data within workspace (default: reminders.jsonl); override with env REMINDERS_PERSIST_PATH
   checkIntervalMs: 30000           # How often to check for due reminders in ms (default: 30 seconds); override with env REMINDERS_CHECK_INTERVAL_MS
+
+# ─── Skills Configuration ─────────────────────────────
+skills:
+  sendFile:
+    enabled: false              # Enable send-file skill (default: false, disabled for security); override with env SKILL_SEND_FILE_ENABLED
+    maxFileSizeMb: 25           # File size limit in MB, 0 = use platform default; override with env SKILL_SEND_FILE_MAX_SIZE_MB
+    allowedExtensions: []       # Allowed file extension whitelist, empty = no restriction; override with env SKILL_SEND_FILE_ALLOWED_EXTENSIONS
+                                # Example: [".png", ".jpg", ".gif", ".pdf", ".txt", ".md"]

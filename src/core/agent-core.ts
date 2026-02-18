@@ -60,7 +60,12 @@ export class AgentCore {
       reminderStore = new ReminderStore(config.reminders.persistPath);
       this.reminderStore = reminderStore;
     }
-    const skillRegistry = new SkillRegistry(this.memoryStore, config.reminders, reminderStore);
+    const skillRegistry = new SkillRegistry(
+      this.memoryStore,
+      config.reminders,
+      reminderStore,
+      config.skills?.sendFile,
+    );
 
     // Initialize session registry
     this.sessionRegistry = new SessionRegistry();

@@ -6,10 +6,11 @@ import { ReplyHandler } from "./reply-handler.ts";
 import { ReactionHandler } from "./reaction-handler.ts";
 import { ContextHandler } from "./context-handler.ts";
 import { ReminderHandler } from "./reminder-handler.ts";
+import { FileHandler } from "./file-handler.ts";
 import type { ReminderStore } from "@core/reminder-store.ts";
 import type { SkillContext, SkillHandler, SkillResult } from "./types.ts";
 import type { MemoryStore } from "@core/memory-store.ts";
-import type { RemindersConfig } from "../types/config.ts";
+import type { RemindersConfig, SendFileSkillConfig } from "../types/config.ts";
 
 const logger = createLogger("SkillRegistry");
 
@@ -23,11 +24,13 @@ export class SkillRegistry {
   private reactionHandler: ReactionHandler;
   private contextHandler: ContextHandler;
   private reminderHandler: ReminderHandler | null = null;
+  private fileHandler: FileHandler | null = null;
 
   constructor(
     memoryStore: MemoryStore,
     remindersConfig?: RemindersConfig,
     reminderStore?: ReminderStore,
+    sendFileConfig?: SendFileSkillConfig,
   ) {
     this.memoryHandler = new MemoryHandler(memoryStore);
     this.replyHandler = new ReplyHandler();
@@ -36,6 +39,10 @@ export class SkillRegistry {
 
     if (remindersConfig?.enabled && reminderStore) {
       this.reminderHandler = new ReminderHandler(reminderStore, remindersConfig);
+    }
+
+    if (sendFileConfig?.enabled) {
+      this.fileHandler = new FileHandler(sendFileConfig);
     }
 
     this.registerSkills();
@@ -67,6 +74,11 @@ export class SkillRegistry {
       this.handlers.set("set-reminder", this.reminderHandler.handleSetReminder);
       this.handlers.set("cancel-reminder", this.reminderHandler.handleCancelReminder);
       this.handlers.set("list-reminders", this.reminderHandler.handleListReminders);
+    }
+
+    // File skill (conditional)
+    if (this.fileHandler) {
+      this.handlers.set("send-file", this.fileHandler.handleSendFile);
     }
 
     logger.info("Skills registered: {count} skills ({skillNames})", {

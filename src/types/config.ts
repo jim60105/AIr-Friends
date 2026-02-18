@@ -417,6 +417,27 @@ export interface Config {
   gitBackup?: GitBackupConfig;
   /** Scheduled reminders configuration (optional) */
   reminders?: RemindersConfig;
+  /** Skills configuration (optional) */
+  skills?: SkillsConfig;
+}
+
+/**
+ * Skills configuration namespace
+ */
+export interface SkillsConfig {
+  sendFile?: SendFileSkillConfig;
+}
+
+/**
+ * Send-file skill configuration
+ */
+export interface SendFileSkillConfig {
+  /** Enable send-file skill (default: false) */
+  enabled?: boolean;
+  /** File size limit in MB, 0 = use platform default */
+  maxFileSizeMb?: number;
+  /** Allowed file extensions whitelist (e.g. [".png", ".jpg"]), empty = no restriction */
+  allowedExtensions?: string[];
 }
 
 /**
