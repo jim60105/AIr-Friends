@@ -40,6 +40,10 @@ class MockAdapter extends PlatformAdapter {
     return Promise.resolve();
   }
 
+  sendTyping(_channelId: string): Promise<void> {
+    return Promise.resolve();
+  }
+
   sendReply(
     _channelId: string,
     _content: string,

@@ -26,6 +26,9 @@ export const ENV_MAPPINGS = {
   DISCORD_SPONTANEOUS_CONTEXT_FETCH_PROBABILITY:
     "platforms.discord.spontaneousPost.contextFetchProbability",
 
+  // Typing indicator settings - Discord
+  DISCORD_TYPING_INDICATOR_ENABLED: "platforms.discord.typingIndicator.enabled",
+
   // Spontaneous post settings - Misskey
   MISSKEY_SPONTANEOUS_ENABLED: "platforms.misskey.spontaneousPost.enabled",
   MISSKEY_SPONTANEOUS_MIN_INTERVAL_MS: "platforms.misskey.spontaneousPost.minIntervalMs",

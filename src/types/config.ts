@@ -18,6 +18,8 @@ export interface DiscordConfig extends BasePlatformConfig {
   guildIds?: string[];
   /** Spontaneous posting configuration */
   spontaneousPost?: SpontaneousPostConfig;
+  /** Typing indicator configuration (Discord only) */
+  typingIndicator?: TypingIndicatorConfig;
 }
 
 /**
@@ -246,6 +248,16 @@ export interface SpontaneousPostConfig {
    * (default: 0.5)
    */
   contextFetchProbability: number;
+}
+
+/**
+ * Typing indicator configuration.
+ * When enabled, the bot shows a "typing..." indicator in Discord
+ * while processing a message through the ACP Agent.
+ */
+export interface TypingIndicatorConfig {
+  /** Enable typing indicator during ACP sessions (default: false) */
+  enabled: boolean;
 }
 
 /**

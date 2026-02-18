@@ -54,6 +54,12 @@ class MockPlatformAdapter implements Partial<PlatformAdapter> {
 
   onEvent() {}
   offEvent() {}
+  supportsTypingIndicator() {
+    return false;
+  }
+  sendTyping(_channelId: string) {
+    return Promise.resolve();
+  }
 }
 
 // Helper to create test config

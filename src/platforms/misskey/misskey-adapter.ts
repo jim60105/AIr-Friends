@@ -248,6 +248,13 @@ export class MisskeyAdapter extends PlatformAdapter {
   }
 
   /**
+   * Send a typing indicator — no-op for Misskey (no native typing API).
+   */
+  async sendTyping(_channelId: string): Promise<void> {
+    // Misskey does not have a typing indicator API
+  }
+
+  /**
    * Send a reply (create a note or chat message based on channel type)
    */
   async sendReply(
