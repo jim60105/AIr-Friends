@@ -308,10 +308,13 @@ Deno.test(
 
     try {
       const response = await fetch("http://localhost:8087/ready");
-      assertEquals(response.status, 200);
 
       const data = await response.json();
-      assertEquals(data.ready, true);
+      assertEquals(data.platforms, true);
+      assertEquals(typeof data.skillReadiness, "object");
+      assertEquals(typeof data.skillReadiness.allReady, "boolean");
+      // Overall ready depends on both platforms AND skill readiness (binary availability)
+      assertEquals(data.ready, data.platforms && data.skillReadiness.allReady);
     } finally {
       await server.stop();
     }
