@@ -123,6 +123,9 @@ export interface AgentConfig {
 
   /** Sandbox settings for agent subprocess isolation (optional) */
   sandbox?: SandboxConfig;
+
+  /** Path to skills directory (default: "skills") */
+  skillsDir?: string;
 }
 
 /**

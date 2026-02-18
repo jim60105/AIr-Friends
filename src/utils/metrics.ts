@@ -78,6 +78,14 @@ export const activeSessionsGauge = new client.Gauge({
   registers: [metricsRegistry],
 });
 
+/** Skill readiness status (1 = ready, 0 = not ready) */
+export const skillReadinessGauge = new client.Gauge({
+  name: "airfriends_skill_readiness",
+  help: "Readiness status of each skill dependency (1=ready, 0=not ready)",
+  labelNames: ["skill"] as const,
+  registers: [metricsRegistry],
+});
+
 /** Total files sent via send-file skill */
 export const filesSentTotal = new client.Counter({
   name: "airfriends_files_sent_total",
