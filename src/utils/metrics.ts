@@ -119,3 +119,13 @@ export const remindersCancelledTotal = new client.Counter({
   labelNames: ["platform"] as const,
   registers: [metricsRegistry],
 });
+
+// --- Audit Counters ---
+
+/** Total audit log entries written */
+export const auditEntriesTotal = new client.Counter({
+  name: "airfriends_audit_entries_total",
+  help: "Total audit log entries written",
+  labelNames: ["phase"] as const,
+  registers: [metricsRegistry],
+});

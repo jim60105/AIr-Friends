@@ -1,6 +1,7 @@
 // src/types/config.ts
 
 import type { LogLevel } from "./logger.ts";
+import type { AuditPhase } from "./audit.ts";
 
 /**
  * Base platform configuration
@@ -430,6 +431,21 @@ export interface RemindersConfig {
 }
 
 /**
+ * Session audit log configuration.
+ * When enabled, each session produces a JSONL audit log for replay and debugging.
+ */
+export interface AuditConfig {
+  /** Enable audit logging (default: false) */
+  enabled: boolean;
+  /** Log retention in days, older files are auto-deleted (default: 7) */
+  retentionDays: number;
+  /** SHA-256 hash user content in audit entries (default: true) */
+  hashContent: boolean;
+  /** Only record these phases; empty array = record all */
+  includedPhases: AuditPhase[];
+}
+
+/**
  * Complete application configuration
  */
 export interface Config {
@@ -450,6 +466,8 @@ export interface Config {
   gitBackup?: GitBackupConfig;
   /** Scheduled reminders configuration (optional) */
   reminders?: RemindersConfig;
+  /** Session audit log configuration (optional) */
+  audit?: AuditConfig;
   /** Skills configuration (optional) */
   skills?: SkillsConfig;
 }

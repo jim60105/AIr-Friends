@@ -99,6 +99,12 @@ export const ENV_MAPPINGS = {
   REMINDERS_MIN_INTERVAL_MS: "reminders.minIntervalMs",
   REMINDERS_PERSIST_PATH: "reminders.persistPath",
   REMINDERS_CHECK_INTERVAL_MS: "reminders.checkIntervalMs",
+
+  // Session audit log settings
+  AUDIT_ENABLED: "audit.enabled",
+  AUDIT_RETENTION_DAYS: "audit.retentionDays",
+  AUDIT_HASH_CONTENT: "audit.hashContent",
+  AUDIT_INCLUDED_PHASES: "audit.includedPhases",
 } as const;
 
 /**
@@ -164,7 +170,7 @@ export function applyEnvOverrides(config: Record<string, unknown>): void {
       // Handle comma-separated arrays
       else if (
         envName === "WHITELIST" || envName === "SKILL_SEND_FILE_ALLOWED_EXTENSIONS" ||
-        envName === "AGENT_SANDBOX_ALLOWED_ENV_VARS"
+        envName === "AGENT_SANDBOX_ALLOWED_ENV_VARS" || envName === "AUDIT_INCLUDED_PHASES"
       ) {
         parsedValue = value.split(",").map((s) => s.trim()).filter((s) => s !== "");
       } // Handle JSON string for MODEL_ROUTING_RULES

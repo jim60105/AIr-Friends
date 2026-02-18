@@ -6,6 +6,7 @@ import { SkillRegistry } from "@skills/registry.ts";
 import type { SkillContext } from "@skills/types.ts";
 
 import { skillApiCallsTotal } from "@utils/metrics.ts";
+import { sanitizeSkillParams, sha256Hash } from "@utils/hash.ts";
 
 const logger = createLogger("SkillAPIServer");
 
@@ -278,11 +279,30 @@ export class SkillAPIServer {
       sessionId: body.sessionId,
     });
 
+    const auditWriter = session.auditWriter;
+    const skillStartTime = Date.now();
+
+    // Sanitize params for audit before execution (fire-and-forget safe)
+    const sanitizedParams = auditWriter
+      ? await sanitizeSkillParams(
+        body.parameters ?? {},
+        auditWriter.getConfig().hashContent,
+      )
+      : undefined;
+
     const result = await this.skillRegistry.executeSkill(
       skillName,
       body.parameters ?? {},
       skillContext,
     );
+
+    // Audit: skill_call
+    await auditWriter?.write("skill_call", {
+      skillName,
+      skillParams: sanitizedParams,
+      skillResult: { success: result.success, error: result.error },
+      skillDurationMs: Date.now() - skillStartTime,
+    });
 
     // Rollback if send-reply failed
     if (skillName === "send-reply" && !result.success) {
@@ -290,6 +310,20 @@ export class SkillAPIServer {
       logger.warn("Send-reply failed, unmarked session", {
         sessionId: body.sessionId,
         error: result.error,
+      });
+    }
+
+    // Audit: reply_sent (when send-reply succeeds)
+    if (skillName === "send-reply" && result.success && auditWriter) {
+      const replyContent = typeof (body.parameters ?? {}).message === "string"
+        ? (body.parameters as Record<string, string>).message
+        : "";
+      await auditWriter.write("reply_sent", {
+        replyContentHash: auditWriter.getConfig().hashContent
+          ? `sha256:${await sha256Hash(replyContent)}`
+          : undefined,
+        replyLength: replyContent.length,
+        platform: session.platform,
       });
     }
 

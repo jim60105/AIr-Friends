@@ -144,6 +144,12 @@ env:
   AGENT_SANDBOX_NETWORK_ISOLATION: 'false'
   AGENT_SANDBOX_ALLOWED_ENV_VARS: ''
 
+  # Session Audit Log
+  AUDIT_ENABLED: ''
+  AUDIT_RETENTION_DAYS: ''
+  AUDIT_HASH_CONTENT: ''
+  AUDIT_INCLUDED_PHASES: ''
+
 # ServiceMonitor for Prometheus Operator (optional)
 serviceMonitor:
   enabled: false
