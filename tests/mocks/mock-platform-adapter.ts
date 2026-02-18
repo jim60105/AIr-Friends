@@ -46,6 +46,10 @@ export class MockPlatformAdapter extends PlatformAdapter {
     await Promise.resolve();
   }
 
+  async sendTyping(_channelId: string): Promise<void> {
+    // no-op for mock
+  }
+
   async sendReply(
     channelId: string,
     content: string,

@@ -65,6 +65,14 @@ export abstract class PlatformAdapter implements MessageFetcher {
   }
 
   /**
+   * Whether this platform supports and has enabled typing indicator.
+   * Override in subclasses to return true when typing is supported and configured.
+   */
+  supportsTypingIndicator(): boolean {
+    return false;
+  }
+
+  /**
    * Emit an event to all handlers
    */
   protected async emitEvent(event: NormalizedEvent): Promise<void> {
@@ -138,6 +146,12 @@ export abstract class PlatformAdapter implements MessageFetcher {
    * Disconnect from the platform
    */
   abstract disconnect(): Promise<void>;
+
+  /**
+   * Send a typing indicator to a channel.
+   * Platforms that do not support typing should implement as no-op.
+   */
+  abstract sendTyping(channelId: string): Promise<void>;
 
   /**
    * Send a reply to a channel

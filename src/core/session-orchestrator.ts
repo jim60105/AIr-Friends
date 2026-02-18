@@ -314,6 +314,15 @@ export class SessionOrchestrator {
         logger: sessionLogger,
       });
 
+      // Start typing indicator if platform supports it
+      let typingInterval: ReturnType<typeof setInterval> | undefined;
+      if (platformAdapter.supportsTypingIndicator()) {
+        platformAdapter.sendTyping(event.channelId);
+        typingInterval = setInterval(() => {
+          platformAdapter.sendTyping(event.channelId);
+        }, 10_000);
+      }
+
       // 6. Execute agent session
       try {
         await connector.connect();
@@ -475,6 +484,11 @@ export class SessionOrchestrator {
         };
         return result;
       } finally {
+        // Clear typing indicator interval
+        if (typingInterval) {
+          clearInterval(typingInterval);
+        }
+
         await connector.disconnect();
         sessionLogger.debug("Agent disconnected");
 

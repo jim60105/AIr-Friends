@@ -93,6 +93,12 @@ class MockPlatformAdapter implements Partial<PlatformAdapter> {
 
   onEvent() {}
   offEvent() {}
+  supportsTypingIndicator() {
+    return false;
+  }
+  sendTyping(_channelId: string) {
+    return Promise.resolve();
+  }
 }
 
 function createTestConfig(tempDir: string, dryRunEnabled = true): Config {

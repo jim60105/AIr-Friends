@@ -26,6 +26,11 @@ export interface DiscordAdapterConfig {
 
   /** Prefix for command triggering (optional) */
   commandPrefix?: string;
+
+  /** Typing indicator configuration */
+  typingIndicator?: {
+    enabled: boolean;
+  };
 }
 
 /**

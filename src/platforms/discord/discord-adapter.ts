@@ -243,6 +243,31 @@ export class DiscordAdapter extends PlatformAdapter {
   }
 
   /**
+   * Send a typing indicator to a channel.
+   * Silently fails — typing failure should never interrupt a session.
+   */
+  async sendTyping(channelId: string): Promise<void> {
+    try {
+      const channel = await this.client.channels.fetch(channelId);
+      if (this.isTextBasedChannel(channel)) {
+        await channel.sendTyping();
+      }
+    } catch (error) {
+      logger.debug("Failed to send typing indicator to {channelId}", {
+        channelId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  /**
+   * Whether typing indicator is supported and enabled via config.
+   */
+  override supportsTypingIndicator(): boolean {
+    return this.config.typingIndicator?.enabled ?? false;
+  }
+
+  /**
    * Send a reply to a channel
    */
   async sendReply(
