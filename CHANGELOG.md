@@ -7,13 +7,77 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-02-18
+
 ### Added
 
-- Dynamic model routing for per-user/per-context LLM model selection (`agent.modelRouting`)
-  - Rule-based system with first-match-wins evaluation strategy
-  - Match by whitelist entry (account/channel) or session type
-  - Fallback chain: routing rules → section-specific model → `agent.model`
-  - Environment variable overrides: `MODEL_ROUTING_ENABLED`, `MODEL_ROUTING_RULES`
+- Session audit log for replay and debugging (Feature 25)
+  - Per-session JSONL audit trail tracking full lifecycle: context assembly, agent connection, prompt, skill calls, reply, and session end
+  - SessionAuditWriter with fire-and-forget design (I/O errors never crash sessions)
+  - Phase filtering via `audit.includedPhases` config (empty = record all phases)
+  - SHA-256 content hashing with recursive sanitization when `audit.hashContent` is enabled
+  - Retention cleanup at startup and every 24 hours via `audit.retentionDays`
+  - Prometheus counter `airfriends_audit_entries_total` with phase label
+  - Skill-level auditing in Skill API Server for `skill_call` and `reply_sent` phases
+  - Environment variable overrides: `AUDIT_ENABLED`, `AUDIT_RETENTION_DAYS`, `AUDIT_HASH_CONTENT`, `AUDIT_INCLUDED_PHASES`
+  - Audit files stored at `data/audit/{platform}/{userId}/{sessionId}.jsonl`
+  - BDD feature spec: `docs/features/25-session-audit-log.feature`
+- Memory relationship fields for semantic graph tracking
+  - New `relatedTo` and `supersedes` optional fields on `MemoryEntry`, `MemoryPatch`, and `ResolvedMemory`
+  - Union-merge strategy for patches (append and deduplicate IDs)
+  - Skill handler validation and shell script support in `memory-save` and `memory-patch`
+  - Updated `SKILL.md` documentation and memory maintenance prompt
+  - Backward compatible: all fields are optional, existing memories default to empty arrays
+- Skill dependency health check to readiness probe
+  - Extended `/ready` and `/readyz` endpoints with skill readiness checks
+  - Verifies skill script existence for all registered skills
+  - Checks required binary availability (`rg`, `deno`, `git`)
+  - Validates Skill API Server connectivity
+  - Checks workspace directory write permissions
+  - Prometheus gauge `airfriends_skill_readiness{skill=...}` (0 = not ready, 1 = ready)
+  - Result caching with 30s TTL to avoid excessive subprocess spawning
+- Per-user agent sandbox hardening for subprocess isolation
+  - New `SandboxManager` module for centralized environment variable filtering and network isolation
+  - Configurable environment variable whitelist via `agent.sandbox.filterEnv` (default: enabled)
+  - Optional Linux network namespace isolation via `agent.sandbox.networkIsolation` using `unshare --net` (default: disabled)
+  - Custom allowed environment variables via `agent.sandbox.allowedEnvVars`
+  - Graceful degradation on non-Linux platforms or when `unshare` is unavailable
+  - Environment variable overrides: `AGENT_SANDBOX_FILTER_ENV`, `AGENT_SANDBOX_NETWORK_ISOLATION`, `AGENT_SANDBOX_ALLOWED_ENV_VARS`
+  - Installed `util-linux` package in container for `unshare` command
+- Discord typing indicator during ACP sessions for better UX
+  - New abstract `sendTyping()` method on `PlatformAdapter`
+  - DiscordAdapter implementation sends typing indicator every 10 seconds during agent sessions
+  - MisskeyAdapter no-op implementation (Misskey has no native typing API)
+  - Configurable via `platforms.discord.typingIndicator.enabled` (default: disabled)
+  - Environment variable override: `DISCORD_TYPING_INDICATOR_ENABLED`
+  - Automatic cleanup on session completion via finally block
+- send-file skill for workspace file sharing
+  - Allows Agent to send files from workspace directories to platform channels (Discord/Misskey)
+  - New `SendFileSkillConfig` type under `SkillsConfig` namespace
+  - FileHandler with path validation, size limits, and extension whitelist
+  - Security: disabled by default, requires explicit admin enablement
+  - Path traversal prevention via `..` check and `resolve()` prefix matching
+  - Supports workspace and agent-workspace directories
+  - Configurable file size limit (default: 25MB) and extension whitelist
+  - Prometheus counter `airfriends_files_sent_total`
+  - Environment variable overrides: `SKILL_SEND_FILE_ENABLED`, `SKILL_SEND_FILE_MAX_FILE_SIZE_MB`, `SKILL_SEND_FILE_ALLOWED_EXTENSIONS`
+- Dry run / debug mode for agent sessions
+  - `--dry-run` CLI flag and `agent.dryRun` configuration option
+  - Zero-cost context debugging: fully executes workspace creation, session registration, context assembly, and prompt rendering
+  - Writes assembled prompt to file without calling ACP Agent
+  - Optional mock reply via platform adapter when `dryRun.mockReply` is non-empty
+  - Output files named `{sessionType}_{timestamp}_{sessionIdPrefix}.md`
+  - Supports all 5 session types (message, spontaneous, self-research, memory-maintenance, reminder)
+  - Environment variable overrides: `DRY_RUN_ENABLED`, `DRY_RUN_OUTPUT_PATH`, `DRY_RUN_MOCK_REPLY`
+  - BDD feature spec: `docs/features/24-dry-run-debug-mode.feature`
+- External MCP server registration via config
+  - Register MCP servers through `config.yaml` or `AGENT_MCP_SERVERS` environment variable
+  - Support for stdio, HTTP, and SSE transports (Agent capability-dependent)
+  - Environment variable expansion (`${ENV_VAR}`) in `env`, `headers`, and `url` fields
+  - Config validation with name uniqueness checks and transport-specific required fields
+  - MCP servers passed to Agent during session creation for all 5 session types
+  - Environment variable override: `AGENT_MCP_SERVERS` (JSON string)
+  - Example configurations in `config.example.yaml`, `.env.example`, and `helm/values.yaml`
 - Scheduled reminders feature (Feature 23)
   - Users can set one-time reminders via DM using `set-reminder` skill
   - Reminders delivered via DM at scheduled time using ACP agent session
@@ -21,9 +85,71 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   - Polling-based scheduler (configurable interval, default 30s)
   - Restart-safe: overdue reminders picked up automatically
   - Per-user limit (default: 20 active reminders)
+  - DM-only: reminders can only be set and delivered in DM context
+  - One per session: only one set-reminder call per conversation turn
+  - Permanent failure handling: undeliverable reminders are auto-cancelled
   - Prometheus metrics: `remindersSetTotal`, `remindersDeliveredTotal`, `remindersCancelledTotal`
-  - Configuration: `reminders` section in config.yaml
-  - Environment variable overrides: `REMINDERS_ENABLED`, `REMINDERS_MAX_PER_USER`, etc.
+  - Environment variable overrides: `REMINDERS_ENABLED`, `REMINDERS_MAX_PER_USER`, `REMINDERS_CHECK_INTERVAL_MS`, etc.
+- memory-export skill for user memory data portability
+  - Allows users to export their memories as a file sent via DM
+  - Supports markdown and JSON formats
+  - Filters by importance (high/normal) and enabled status
+  - Always sends export via private message for privacy protection
+  - Does not consume `send-reply` quota (uses `sendFile` independently)
+  - Platform adapter enhancements: new `sendFile()` and `getDmChannelId()` abstract methods
+  - Discord implementation using `AttachmentBuilder`
+  - Misskey implementation with Drive upload (`uploadFile()`) + chat message/note delivery
+- Dynamic model routing for per-user/per-context LLM model selection (`agent.modelRouting`)
+  - Rule-based system with first-match-wins evaluation strategy
+  - Match by whitelist entry (account/channel) or session type
+  - Fallback chain: routing rules → section-specific model → `agent.model`
+  - Supports all 4 session types (message, spontaneous, self-research, memory-maintenance)
+  - Environment variable overrides: `MODEL_ROUTING_ENABLED`, `MODEL_ROUTING_RULES`
+  - Config validation with silent rule skipping on errors (warnings logged, service not interrupted)
+  - BDD feature spec: `docs/features/22-model-routing.feature`
+
+### Changed
+
+- Migrated prompt template system from custom `{{placeholder}}` to Vento template engine (v2.2.0)
+  - Enables conditionals, loops, `{{ include }}` directives, and JavaScript expressions in templates
+  - New `src/core/template-renderer.ts` module wrapping Vento engine
+  - New `src/types/template.ts` defining `TemplateVariables` interface
+  - All system prompts updated to Vento syntax: `system_reply.md`, `system_spontaneous.md`, `system_self_research.md`, `system_memory_maintenance.md`
+  - Character fragments loaded via `{{ set }}` + `{{ include }}`
+  - Platform-specific instructions use `{{ if platform === "discord" }}` conditionals
+  - BREAKING CHANGE: Custom prompt files using old `{{placeholder}}` syntax must be updated to Vento syntax
+  - Documentation updated: `docs/DEVELOPMENT.md`, `AGENTS.md`, BDD feature specs
+- Refactored prompt file naming to consistent `system_<purpose>.md` convention
+  - Renamed `prompts/system.md` to `prompts/system_reply.md`
+  - Merged `prompts/system_message.md` into `system_reply.md` using conditional blocks
+  - Session info, context, and instructions sections now guarded by `{{ if userContextMessage }}`
+- Refactored Git backup initialization with intelligent directory state handling
+  - Case A (empty directory): clone remote repository
+  - Case B (non-empty non-Git): git init, commit existing files, push
+  - Case C (existing Git repo): commit uncommitted changes, push
+  - New `pushWithFallback()` three-tier strategy: direct push → fetch+rebase+retry → fallback branch
+  - Handles remote HEAD pointing to different default branch after clone
+  - Detects remote's default branch dynamically (prefers `master`, falls back to `main`)
+  - Ensures rebase abort cleans state before fallback branch creation
+- Git backup scheduler now executes first backup immediately on start instead of waiting for full interval
+  - Subsequent backups continue at `intervalMs` intervals
+  - Fire-and-forget async execution maintains non-blocking behavior
+- Migrated container image build to native multi-arch parallel build
+  - Native builds on architecture-specific runners (ubuntu-latest for amd64, ubuntu-24.04-arm for arm64)
+  - Removed QEMU emulation for significantly faster arm64 builds (~20-40 minutes faster)
+  - Split CI workflows into `build` (matrix) + `merge` (manifest) jobs
+  - Use push-by-digest with multi-registry outputs to prevent incomplete tags
+  - Separate cache keys per architecture (`cache-linux-amd64`, `cache-linux-arm64`)
+  - Containerfile refactored with `TARGETARCH` and `case` statements for dynamic binary selection
+
+### Fixed
+
+- Fixed sessionId being incorrectly nested inside userContextMessage conditional in `system_reply.md`
+  - Session Information block is now rendered whenever sessionId exists, regardless of userContextMessage
+  - Aligns with pattern used in `system_spontaneous.md`
+- Fixed Git safe.directory config rejecting relative paths in containers
+  - GitBackupService constructor now converts `dataDir` to absolute path using `resolve()`
+  - Fixes "safe.directory './data' not absolute" error when `config.workspace.repoPath` is relative
 
 ## [0.7.2] - 2026-02-15
 
@@ -425,7 +551,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ---
 
-[Unreleased]: https://github.com/jim60105/AIr-Friends/compare/v0.7.2...HEAD
+[Unreleased]: https://github.com/jim60105/AIr-Friends/compare/v0.8.0...HEAD
+[0.8.0]: https://github.com/jim60105/AIr-Friends/compare/v0.7.2...v0.8.0
 [0.7.2]: https://github.com/jim60105/AIr-Friends/compare/v0.7.1...v0.7.2
 [0.7.1]: https://github.com/jim60105/AIr-Friends/compare/v0.7.0...v0.7.1
 [0.7.0]: https://github.com/jim60105/AIr-Friends/compare/v0.6.0...v0.7.0
