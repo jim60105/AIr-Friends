@@ -131,6 +131,11 @@ env:
   REMINDERS_PERSIST_PATH: ''
   REMINDERS_CHECK_INTERVAL_MS: ''
 
+  # Send File Skill
+  SKILL_SEND_FILE_ENABLED: 'false'
+  SKILL_SEND_FILE_MAX_SIZE_MB: '25'
+  SKILL_SEND_FILE_ALLOWED_EXTENSIONS: ''
+
 # ServiceMonitor for Prometheus Operator (optional)
 serviceMonitor:
   enabled: false

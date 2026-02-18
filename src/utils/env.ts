@@ -80,6 +80,11 @@ export const ENV_MAPPINGS = {
   GIT_BACKUP_AUTHOR_NAME: "gitBackup.authorName",
   GIT_BACKUP_AUTHOR_EMAIL: "gitBackup.authorEmail",
 
+  // Send-file skill settings
+  SKILL_SEND_FILE_ENABLED: "skills.sendFile.enabled",
+  SKILL_SEND_FILE_MAX_SIZE_MB: "skills.sendFile.maxFileSizeMb",
+  SKILL_SEND_FILE_ALLOWED_EXTENSIONS: "skills.sendFile.allowedExtensions",
+
   // Scheduled reminders settings
   REMINDERS_ENABLED: "reminders.enabled",
   REMINDERS_MAX_PER_USER: "reminders.maxRemindersPerUser",
@@ -148,8 +153,8 @@ export function applyEnvOverrides(config: Record<string, unknown>): void {
       else if (value === "false") parsedValue = false;
       else if (/^\d+$/.test(value)) parsedValue = parseInt(value, 10);
       else if (/^\d+\.\d+$/.test(value)) parsedValue = parseFloat(value);
-      // Handle comma-separated array for WHITELIST
-      else if (envName === "WHITELIST") {
+      // Handle comma-separated arrays
+      else if (envName === "WHITELIST" || envName === "SKILL_SEND_FILE_ALLOWED_EXTENSIONS") {
         parsedValue = value.split(",").map((s) => s.trim()).filter((s) => s !== "");
       } // Handle JSON string for MODEL_ROUTING_RULES
       else if (envName === "MODEL_ROUTING_RULES") {

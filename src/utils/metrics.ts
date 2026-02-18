@@ -78,6 +78,14 @@ export const activeSessionsGauge = new client.Gauge({
   registers: [metricsRegistry],
 });
 
+/** Total files sent via send-file skill */
+export const filesSentTotal = new client.Counter({
+  name: "airfriends_files_sent_total",
+  help: "Total files sent via send-file skill",
+  labelNames: ["platform"] as const,
+  registers: [metricsRegistry],
+});
+
 // --- Reminder Counters ---
 
 /** Total reminders set */
