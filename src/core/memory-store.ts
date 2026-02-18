@@ -62,6 +62,8 @@ export class MemoryStore {
     options: {
       visibility?: MemoryVisibility;
       importance?: MemoryImportance;
+      relatedTo?: string[];
+      supersedes?: string[];
     } = {},
   ): Promise<MemoryEntry> {
     const visibility = options.visibility ?? "public";
@@ -75,6 +77,8 @@ export class MemoryStore {
       visibility,
       importance,
       content,
+      ...(options.relatedTo && { relatedTo: options.relatedTo }),
+      ...(options.supersedes && { supersedes: options.supersedes }),
     };
 
     const line = JSON.stringify(entry) + "\n";
@@ -104,6 +108,8 @@ export class MemoryStore {
       enabled?: boolean;
       visibility?: MemoryVisibility;
       importance?: MemoryImportance;
+      relatedTo?: string[];
+      supersedes?: string[];
     },
   ): Promise<MemoryPatch> {
     // First, find the original memory to determine which file it's in
@@ -124,6 +130,8 @@ export class MemoryStore {
       ...(patch.enabled !== undefined && { enabled: patch.enabled }),
       ...(patch.visibility !== undefined && { visibility: patch.visibility }),
       ...(patch.importance !== undefined && { importance: patch.importance }),
+      ...(patch.relatedTo !== undefined && { relatedTo: patch.relatedTo }),
+      ...(patch.supersedes !== undefined && { supersedes: patch.supersedes }),
     };
 
     // Write patch to the same file as the original memory
@@ -231,6 +239,8 @@ export class MemoryStore {
           content: event.content,
           createdAt: event.ts,
           lastModifiedAt: event.ts,
+          relatedTo: event.relatedTo ?? [],
+          supersedes: event.supersedes ?? [],
         });
       } else if (event.type === "patch") {
         const patches = patchesMap.get(event.targetId) ?? [];
@@ -251,6 +261,12 @@ export class MemoryStore {
         if (patch.enabled !== undefined) memory.enabled = patch.enabled;
         if (patch.visibility !== undefined) memory.visibility = patch.visibility;
         if (patch.importance !== undefined) memory.importance = patch.importance;
+        if (patch.relatedTo) {
+          memory.relatedTo = [...new Set([...memory.relatedTo, ...patch.relatedTo])];
+        }
+        if (patch.supersedes) {
+          memory.supersedes = [...new Set([...memory.supersedes, ...patch.supersedes])];
+        }
         memory.lastModifiedAt = patch.ts;
       }
     }

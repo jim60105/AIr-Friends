@@ -21,7 +21,7 @@ Below is the complete list of all enabled memories for this workspace. Use this 
 
 1. Review the memories listed above.
 2. Group semantically related memories (do not mix public/private visibility).
-3. For each group, create one concise summary using `memory-save`.
+3. For each group, create one concise summary using `memory-save` with `--supersedes` set to the comma-separated IDs of the source memories being summarized.
 4. After a summary is saved, disable the original memories with `memory-patch` (`enabled: false`).
 
 ### Quality and safety rules

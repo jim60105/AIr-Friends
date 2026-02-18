@@ -46,6 +46,12 @@ export interface MemoryEntry extends BaseMemoryEvent {
 
   /** Memory content (plain text) */
   content: string;
+
+  /** IDs of semantically related memories (set at creation time) */
+  relatedTo?: string[];
+
+  /** IDs of memories this entry supersedes (e.g., maintenance summary replacing old memories) */
+  supersedes?: string[];
 }
 
 /**
@@ -66,6 +72,12 @@ export interface MemoryPatch extends BaseMemoryEvent {
 
   /** New importance (optional) */
   importance?: MemoryImportance;
+
+  /** IDs of semantically related memories */
+  relatedTo?: string[];
+
+  /** IDs of memories this patch's target supersedes (maintenance lineage) */
+  supersedes?: string[];
 }
 
 /**
@@ -84,6 +96,12 @@ export interface ResolvedMemory {
   content: string;
   createdAt: string;
   lastModifiedAt: string;
+
+  /** IDs of semantically related memories (aggregated from entry + patches) */
+  relatedTo: string[];
+
+  /** IDs of memories this memory supersedes (aggregated from entry + patches) */
+  supersedes: string[];
 }
 
 /**

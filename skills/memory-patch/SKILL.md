@@ -22,6 +22,18 @@ ${HOME}/.agents/skills/memory-patch/scripts/memory-patch.ts \
   --session-id "$SESSION_ID" \
   --memory-id "mem_abc123" \
   --importance high
+
+# Mark a memory as superseding others (maintenance lineage)
+${HOME}/.agents/skills/memory-patch/scripts/memory-patch.ts \
+  --session-id "$SESSION_ID" \
+  --memory-id "mem_new_summary" \
+  --supersedes "mem_old1,mem_old2,mem_old3"
+
+# Add related memory links
+${HOME}/.agents/skills/memory-patch/scripts/memory-patch.ts \
+  --session-id "$SESSION_ID" \
+  --memory-id "mem_abc123" \
+  --related-to "mem_def456,mem_ghi789"
 ```
 
 ## Capabilities
@@ -29,6 +41,8 @@ ${HOME}/.agents/skills/memory-patch/scripts/memory-patch.ts \
 - Enable/disable memories (use --enabled or --disabled flag)
 - Change visibility level
 - Adjust importance level
+- Link related memories (--related-to, comma-separated IDs)
+- Mark supersession lineage (--supersedes, comma-separated IDs)
 
 ## Limitations
 

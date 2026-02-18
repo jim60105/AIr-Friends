@@ -6,7 +6,15 @@ import { callSkillApi, exitWithError, outputResult, parseBaseArgs } from "../../
 async function main() {
   try {
     const args = parse(Deno.args, {
-      string: ["session-id", "api-url", "memory-id", "visibility", "importance"],
+      string: [
+        "session-id",
+        "api-url",
+        "memory-id",
+        "visibility",
+        "importance",
+        "related-to",
+        "supersedes",
+      ],
       boolean: ["enabled", "disabled"],
       alias: { s: "session-id", a: "api-url", m: "memory-id" },
     });
@@ -39,6 +47,14 @@ async function main() {
         exitWithError("Invalid importance. Must be 'high' or 'normal'");
       }
       params.importance = args.importance;
+    }
+
+    if (args["related-to"]) {
+      params.relatedTo = args["related-to"].split(",").map((id: string) => id.trim());
+    }
+
+    if (args.supersedes) {
+      params.supersedes = args.supersedes.split(",").map((id: string) => id.trim());
     }
 
     const result = await callSkillApi(apiUrl, "memory-patch", sessionId, params);

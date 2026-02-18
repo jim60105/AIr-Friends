@@ -21,6 +21,8 @@ ${HOME}/.agents/skills/memory-save/scripts/memory-save.ts \
 
 - `--content`: (Required) The memory content to save
 - `--importance`: `normal` (default) or `high`
+- `--related-to`: (Optional) Comma-separated IDs of semantically related memories
+- `--supersedes`: (Optional) Comma-separated IDs of memories this new memory replaces
 
 ## Notes
 

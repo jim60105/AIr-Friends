@@ -52,12 +52,46 @@ export class MemoryHandler {
         };
       }
 
+      // Validate relatedTo
+      const relatedTo = (params as unknown as Record<string, unknown>).relatedTo as
+        | string[]
+        | undefined;
+      if (relatedTo !== undefined) {
+        if (
+          !Array.isArray(relatedTo) ||
+          !relatedTo.every((id: unknown) => typeof id === "string")
+        ) {
+          return {
+            success: false,
+            error: "Invalid 'relatedTo' parameter. Must be an array of strings",
+          };
+        }
+      }
+
+      // Validate supersedes
+      const supersedes = (params as unknown as Record<string, unknown>).supersedes as
+        | string[]
+        | undefined;
+      if (supersedes !== undefined) {
+        if (
+          !Array.isArray(supersedes) ||
+          !supersedes.every((id: unknown) => typeof id === "string")
+        ) {
+          return {
+            success: false,
+            error: "Invalid 'supersedes' parameter. Must be an array of strings",
+          };
+        }
+      }
+
       const entry = await this.memoryStore.addMemory(
         context.workspace,
         params.content,
         {
           visibility,
           importance,
+          ...(relatedTo && { relatedTo }),
+          ...(supersedes && { supersedes }),
         },
       );
 
@@ -77,6 +111,8 @@ export class MemoryHandler {
           visibility: entry.visibility,
           importance: entry.importance,
           timestamp: entry.ts,
+          ...(entry.relatedTo && { relatedTo: entry.relatedTo }),
+          ...(entry.supersedes && { supersedes: entry.supersedes }),
         },
       };
     } catch (error) {
@@ -142,6 +178,8 @@ export class MemoryHandler {
           content: m.content,
           createdAt: m.createdAt,
           lastModifiedAt: m.lastModifiedAt,
+          relatedTo: m.relatedTo,
+          supersedes: m.supersedes,
         })),
       };
 
@@ -228,6 +266,8 @@ export class MemoryHandler {
         enabled?: boolean;
         visibility?: MemoryVisibility;
         importance?: MemoryImportance;
+        relatedTo?: string[];
+        supersedes?: string[];
       } = {};
 
       if (params.enabled !== undefined) {
@@ -260,11 +300,38 @@ export class MemoryHandler {
         patch.importance = params.importance;
       }
 
+      if (params.relatedTo !== undefined) {
+        if (
+          !Array.isArray(params.relatedTo) ||
+          !params.relatedTo.every((id: unknown) => typeof id === "string")
+        ) {
+          return {
+            success: false,
+            error: "Invalid 'relatedTo' parameter. Must be an array of strings",
+          };
+        }
+        patch.relatedTo = params.relatedTo;
+      }
+
+      if (params.supersedes !== undefined) {
+        if (
+          !Array.isArray(params.supersedes) ||
+          !params.supersedes.every((id: unknown) => typeof id === "string")
+        ) {
+          return {
+            success: false,
+            error: "Invalid 'supersedes' parameter. Must be an array of strings",
+          };
+        }
+        patch.supersedes = params.supersedes;
+      }
+
       // At least one field must be provided
       if (Object.keys(patch).length === 0) {
         return {
           success: false,
-          error: "At least one of 'enabled', 'visibility', or 'importance' must be provided",
+          error:
+            "At least one of 'enabled', 'visibility', 'importance', 'relatedTo', or 'supersedes' must be provided",
         };
       }
 

@@ -59,3 +59,15 @@
     而且 patch 事件只能變更 enabled/visibility/importance
     而且 content 不得被覆寫
     而且系統不得提供任何 delete 記憶的能力
+
+  情境: Patch 事件可包含關聯欄位
+    假設 id=mem1 的記憶已存在
+    當 Agent 呼叫 "memory.patch" skill 並帶入 relatedTo=["mem2"] 和 supersedes=["mem3"]
+    那麼 patch 事件必須包含 relatedTo 和 supersedes 欄位
+    而且 resolve 後的記憶必須反映這些關聯
+    而且既有不含關聯欄位的記憶仍可正常 resolve
+
+  情境: 新建記憶可包含關聯欄位
+    當 Agent 呼叫 "memory-save" skill 並帶入 supersedes=["mem_old1","mem_old2"]
+    那麼 memory 事件必須包含 supersedes 欄位
+    而且 resolve 後的記憶必須反映 supersedes 關聯

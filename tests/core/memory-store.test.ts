@@ -347,6 +347,57 @@ Deno.test("MemoryStore - getMemoryStats - includes private in DM", async () => {
   });
 });
 
+Deno.test("MemoryStore - resolves relatedTo and supersedes from entry", async () => {
+  await withTestMemoryStore(false, async (store, workspace) => {
+    const memory = await store.addMemory(workspace, "Summary of old memories", {
+      supersedes: ["mem_old1", "mem_old2"],
+      relatedTo: ["mem_related1"],
+    });
+
+    const memories = await store.loadAllMemories(workspace, "public");
+    const resolved = memories.find((m) => m.id === memory.id)!;
+    assertEquals(resolved.supersedes, ["mem_old1", "mem_old2"]);
+    assertEquals(resolved.relatedTo, ["mem_related1"]);
+  });
+});
+
+Deno.test("MemoryStore - merges relatedTo from multiple patches", async () => {
+  await withTestMemoryStore(false, async (store, workspace) => {
+    const memory = await store.addMemory(workspace, "Test memory");
+
+    await store.patchMemory(workspace, memory.id, { relatedTo: ["mem_a"] });
+    await store.patchMemory(workspace, memory.id, { relatedTo: ["mem_b", "mem_a"] });
+
+    const memories = await store.loadAllMemories(workspace, "public");
+    const resolved = memories.find((m) => m.id === memory.id)!;
+    assertEquals(resolved.relatedTo.sort(), ["mem_a", "mem_b"]);
+  });
+});
+
+Deno.test("MemoryStore - merges supersedes from entry and patch", async () => {
+  await withTestMemoryStore(false, async (store, workspace) => {
+    const memory = await store.addMemory(workspace, "Summary", {
+      supersedes: ["mem_old1"],
+    });
+
+    await store.patchMemory(workspace, memory.id, { supersedes: ["mem_old2", "mem_old1"] });
+
+    const memories = await store.loadAllMemories(workspace, "public");
+    const resolved = memories.find((m) => m.id === memory.id)!;
+    assertEquals(resolved.supersedes.sort(), ["mem_old1", "mem_old2"]);
+  });
+});
+
+Deno.test("MemoryStore - defaults to empty arrays when relatedTo/supersedes absent", async () => {
+  await withTestMemoryStore(false, async (store, workspace) => {
+    await store.addMemory(workspace, "Plain memory");
+
+    const memories = await store.loadAllMemories(workspace, "public");
+    assertEquals(memories[0].relatedTo, []);
+    assertEquals(memories[0].supersedes, []);
+  });
+});
+
 Deno.test("MemoryStore - getMemoryStats - reflects patches correctly", async () => {
   await withTestMemoryStore(false, async (store, workspace) => {
     const mem1 = await store.addMemory(workspace, "Memory 1");
