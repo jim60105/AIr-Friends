@@ -48,6 +48,9 @@ env:
   # Default ACP agent type (copilot|gemini|opencode)
   AGENT_DEFAULT_TYPE: 'opencode'
 
+  # Skills directory path (default: skills)
+  AGENT_SKILLS_DIR: '/home/deno/.agents/skills'
+
   # Model routing
   MODEL_ROUTING_ENABLED: 'false'
   MODEL_ROUTING_RULES: '[]'

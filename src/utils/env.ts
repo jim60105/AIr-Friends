@@ -14,6 +14,7 @@ export const ENV_MAPPINGS = {
   GEMINI_API_KEY: "agent.geminiApiKey",
   OPENROUTER_API_KEY: "agent.openRouterApiKey",
   AGENT_DEFAULT_TYPE: "agent.defaultAgentType",
+  AGENT_SKILLS_DIR: "agent.skillsDir",
   LOG_LEVEL: "logging.level",
   HEALTH_PORT: "health.port",
   REPLY_TO: "accessControl.replyTo",

@@ -59,6 +59,7 @@ agent:
   opencodeApiKey: "${OPENCODE_API_KEY}" # Optional OpenCode API key (env: OPENCODE_API_KEY)
   openRouterApiKey: "${OPENROUTER_API_KEY}" # Optional OpenRouter API key (env: OPENROUTER_API_KEY)
   defaultAgentType: "${AGENT_DEFAULT_TYPE}" # Default ACP agent: "copilot", "gemini", or "opencode" (env: AGENT_DEFAULT_TYPE)
+  skillsDir: "skills" # Path to skills directory (default: "skills"); use "/home/deno/.agents/skills" for container deployment; override with env AGENT_SKILLS_DIR
 
   # Model routing: per-user/per-context model selection
   # When enabled, rules are evaluated in order (first-match wins).

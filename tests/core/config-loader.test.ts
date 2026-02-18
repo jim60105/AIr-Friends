@@ -198,6 +198,35 @@ workspace:
   }
 });
 
+Deno.test("loadConfig - AGENT_SKILLS_DIR env overrides config file", async () => {
+  const config = `
+platforms:
+  discord:
+    token: "test-token"
+    enabled: true
+  misskey:
+    enabled: false
+agent:
+  model: "gpt-4"
+  systemPromptPath: "./prompts/system_reply.md"
+  tokenLimit: 20000
+  skillsDir: "custom-skills"
+workspace:
+  repoPath: "./data"
+  workspacesDir: "workspaces"
+`;
+
+  Deno.env.set("AGENT_SKILLS_DIR", "/home/deno/.agents/skills");
+  try {
+    await withTestConfig(config, async (dir) => {
+      const result = await loadConfig(dir);
+      assertEquals(result.agent.skillsDir, "/home/deno/.agents/skills");
+    });
+  } finally {
+    Deno.env.delete("AGENT_SKILLS_DIR");
+  }
+});
+
 Deno.test("loadConfig - should throw on missing required fields", async () => {
   const config = `
 platforms:
