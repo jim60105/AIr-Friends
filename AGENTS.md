@@ -462,6 +462,29 @@ await connector.disconnect();
 - All agents support stdio transport; HTTP/SSE support depends on Agent capabilities
 - Values in `env`, `headers`, and `url` support `${ENV_VAR}` expansion
 
+**Agent Sandbox Hardening**:
+
+Agent subprocesses run with configurable sandbox isolation via `SandboxManager`:
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| `agent.sandbox.filterEnv` | `true` | Filter subprocess env vars to an allowed list only |
+| `agent.sandbox.networkIsolation` | `false` | Wrap command with `unshare --net` for network namespace isolation (Linux only) |
+| `agent.sandbox.allowedEnvVars` | `[]` | Additional env var names to pass through the filter |
+
+Environment variable overrides:
+
+| Environment Variable | Config Path | Type |
+|---------------------|-------------|------|
+| `AGENT_SANDBOX_FILTER_ENV` | `agent.sandbox.filterEnv` | `"true"` / `"false"` |
+| `AGENT_SANDBOX_NETWORK_ISOLATION` | `agent.sandbox.networkIsolation` | `"true"` / `"false"` |
+| `AGENT_SANDBOX_ALLOWED_ENV_VARS` | `agent.sandbox.allowedEnvVars` | Comma-separated |
+
+Degradation strategy:
+- `filterEnv: true` works on all platforms (pure TypeScript logic)
+- `networkIsolation: true` falls back gracefully on non-Linux or when `unshare` is unavailable (warns and skips)
+- Sandbox config errors do not prevent Agent startup
+
 **Retry on Missing Reply**:
 
 When an ACP Agent completes a prompt turn (`stopReason === "end_turn"`) without calling the `send-reply` skill, the system automatically retries:

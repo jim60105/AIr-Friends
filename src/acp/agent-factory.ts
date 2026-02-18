@@ -2,11 +2,11 @@
 
 import type { AgentConfig, AgentType, RetryPromptStrategy } from "./types.ts";
 import type { Config } from "../types/config.ts";
+import { SandboxManager } from "./sandbox-manager.ts";
 
 /**
- * Create ACP Agent configuration based on agent type
- * NOTE: The comment in the issue mentioned using "gh copilot chat --agent-mode",
- * but the actual correct command is "copilot --acp" as clarified in the comments.
+ * Create ACP Agent configuration based on agent type.
+ * Applies sandbox isolation (env filtering, network isolation) via SandboxManager.
  */
 export function createAgentConfig(
   type: AgentType,
@@ -15,10 +15,43 @@ export function createAgentConfig(
   yolo = false,
   agentWorkspacePath?: string,
 ): AgentConfig {
+  // Build the base (unfiltered) config for the agent type
+  const baseConfig = buildBaseAgentConfig(type, workingDir, appConfig, yolo, agentWorkspacePath);
+
+  // Apply sandbox if configured
+  const sandboxConfig = appConfig.agent.sandbox;
+  if (sandboxConfig) {
+    const sandbox = new SandboxManager(sandboxConfig);
+    const spawnOpts = sandbox.buildSpawnOptions(
+      type,
+      baseConfig.command,
+      baseConfig.args,
+      baseConfig.env ?? {},
+      baseConfig.cwd,
+    );
+    return {
+      command: spawnOpts.command,
+      args: spawnOpts.args,
+      cwd: spawnOpts.cwd,
+      env: spawnOpts.env,
+    };
+  }
+
+  return baseConfig;
+}
+
+/**
+ * Build base agent config with full environment (before sandbox filtering).
+ */
+function buildBaseAgentConfig(
+  type: AgentType,
+  workingDir: string,
+  appConfig: Config,
+  yolo: boolean,
+  agentWorkspacePath?: string,
+): AgentConfig {
   switch (type) {
     case "copilot": {
-      // GitHub Copilot CLI in ACP mode
-      // Command: copilot --acp (NOT "gh copilot chat --agent-mode")
       const githubToken = appConfig.agent.githubToken ??
         Deno.env.get("GITHUB_TOKEN");
 
@@ -29,13 +62,12 @@ export function createAgentConfig(
         );
       }
 
-      // Build environment: inherit critical env vars and add GITHUB_TOKEN
-      // Agent needs PATH to find deno, HOME for skills directory discovery
+      // Build full environment — SandboxManager will filter if enabled
       const env: Record<string, string> = {
         GITHUB_TOKEN: githubToken,
       };
 
-      // Inherit critical environment variables
+      // Inherit all potentially needed environment variables
       const inheritVars = ["PATH", "HOME", "DENO_DIR", "LANG", "LC_ALL", "USER"];
       for (const varName of inheritVars) {
         const value = Deno.env.get(varName);
@@ -43,8 +75,6 @@ export function createAgentConfig(
           env[varName] = value;
         }
       }
-
-      // Copilot seems doesn't have a solution to override system prompt.
 
       if (agentWorkspacePath) {
         env["AGENT_WORKSPACE"] = agentWorkspacePath;
@@ -59,7 +89,6 @@ export function createAgentConfig(
       ];
 
       if (!yolo) {
-        // We need at least bash tool to run deno scripts for skills.
         args.push("--available-tools");
         args.push("write_bash");
         args.push("--available-tools");
@@ -81,7 +110,6 @@ export function createAgentConfig(
     }
 
     case "gemini": {
-      // Gemini CLI in ACP mode
       const geminiApiKey = appConfig.agent.geminiApiKey ??
         Deno.env.get("GEMINI_API_KEY");
 
@@ -92,14 +120,11 @@ export function createAgentConfig(
         );
       }
 
-      // Build environment: inherit critical env vars and add GEMINI_API_KEY
-      // Agent needs PATH to find deno, HOME for skills directory discovery
       const env: Record<string, string> = {
         GEMINI_API_KEY: geminiApiKey,
         GEMINI_SYSTEM_MD: "/app/prompts/system_prompt_override.md",
       };
 
-      // Inherit critical environment variables
       const inheritVars = ["PATH", "HOME", "DENO_DIR", "LANG", "LC_ALL", "USER"];
       for (const varName of inheritVars) {
         const value = Deno.env.get(varName);
@@ -126,23 +151,18 @@ export function createAgentConfig(
     }
 
     case "opencode": {
-      // OpenCode CLI in ACP mode
-      // Build environment: inherit critical env vars
       const env: Record<string, string> = {};
 
-      // OpenCode can work without API key by using other providers
       const opencodeApiKey = appConfig.agent.opencodeApiKey ??
         Deno.env.get("OPENCODE_API_KEY");
       if (opencodeApiKey) {
         env["OPENCODE_API_KEY"] = opencodeApiKey;
       }
-      // OpenRouter
       const openRouterApiKey = appConfig.agent.openRouterApiKey ??
         Deno.env.get("OPENROUTER_API_KEY");
       if (openRouterApiKey) {
         env["OPENROUTER_API_KEY"] = openRouterApiKey;
       }
-      // Gemini
       const geminiApiKey = appConfig.agent.geminiApiKey ??
         Deno.env.get("GEMINI_API_KEY");
       if (geminiApiKey) {
@@ -150,8 +170,6 @@ export function createAgentConfig(
         env["GOOGLE_GENERATIVE_AI_API_KEY"] = geminiApiKey;
       }
 
-      // Inherit critical environment variables
-      // Agent needs PATH to find deno, HOME for skills directory discovery
       const inheritVars = ["PATH", "HOME", "DENO_DIR", "LANG", "LC_ALL", "USER"];
       for (const varName of inheritVars) {
         const value = Deno.env.get(varName);
@@ -169,8 +187,6 @@ export function createAgentConfig(
       if (!yolo) {
         // OpenCode permissions are configured in opencode.json.
       } else {
-        // OpenCode currently does not have a YOLO mode. This will be available after this PR is merged:
-        // https://github.com/anomalyco/opencode/pull/11833
         env["OPENCODE_YOLO"] = "true";
       }
 

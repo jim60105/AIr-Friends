@@ -139,6 +139,11 @@ env:
   SKILL_SEND_FILE_MAX_SIZE_MB: '25'
   SKILL_SEND_FILE_ALLOWED_EXTENSIONS: ''
 
+  # Agent Sandbox
+  AGENT_SANDBOX_FILTER_ENV: 'true'
+  AGENT_SANDBOX_NETWORK_ISOLATION: 'false'
+  AGENT_SANDBOX_ALLOWED_ENV_VARS: ''
+
 # ServiceMonitor for Prometheus Operator (optional)
 serviceMonitor:
   enabled: false

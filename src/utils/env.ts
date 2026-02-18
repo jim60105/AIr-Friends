@@ -88,6 +88,11 @@ export const ENV_MAPPINGS = {
   SKILL_SEND_FILE_MAX_SIZE_MB: "skills.sendFile.maxFileSizeMb",
   SKILL_SEND_FILE_ALLOWED_EXTENSIONS: "skills.sendFile.allowedExtensions",
 
+  // Agent sandbox settings
+  AGENT_SANDBOX_FILTER_ENV: "agent.sandbox.filterEnv",
+  AGENT_SANDBOX_NETWORK_ISOLATION: "agent.sandbox.networkIsolation",
+  AGENT_SANDBOX_ALLOWED_ENV_VARS: "agent.sandbox.allowedEnvVars",
+
   // Scheduled reminders settings
   REMINDERS_ENABLED: "reminders.enabled",
   REMINDERS_MAX_PER_USER: "reminders.maxRemindersPerUser",
@@ -157,7 +162,10 @@ export function applyEnvOverrides(config: Record<string, unknown>): void {
       else if (/^\d+$/.test(value)) parsedValue = parseInt(value, 10);
       else if (/^\d+\.\d+$/.test(value)) parsedValue = parseFloat(value);
       // Handle comma-separated arrays
-      else if (envName === "WHITELIST" || envName === "SKILL_SEND_FILE_ALLOWED_EXTENSIONS") {
+      else if (
+        envName === "WHITELIST" || envName === "SKILL_SEND_FILE_ALLOWED_EXTENSIONS" ||
+        envName === "AGENT_SANDBOX_ALLOWED_ENV_VARS"
+      ) {
         parsedValue = value.split(",").map((s) => s.trim()).filter((s) => s !== "");
       } // Handle JSON string for MODEL_ROUTING_RULES
       else if (envName === "MODEL_ROUTING_RULES") {

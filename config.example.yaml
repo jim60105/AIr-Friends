@@ -109,6 +109,12 @@ agent:
     outputPath: "./data/dry-run/"                        # Output directory for assembled prompts; override with env DRY_RUN_OUTPUT_PATH
     mockReply: "（Dry run 模式 — 此為測試回覆）"          # Mock reply text (empty = no reply); override with env DRY_RUN_MOCK_REPLY
 
+  # Sandbox settings for agent subprocess isolation
+  # sandbox:
+  #   filterEnv: true             # Filter subprocess environment variables (default: true); override with env AGENT_SANDBOX_FILTER_ENV
+  #   networkIsolation: false     # Linux network namespace isolation via unshare --net (default: false); override with env AGENT_SANDBOX_NETWORK_ISOLATION
+  #   allowedEnvVars: []          # Additional env var names to allow through the filter; override with env AGENT_SANDBOX_ALLOWED_ENV_VARS (comma-separated)
+
 # Memory system configuration
 memory:
   searchLimit: 10 # Max number of search results (default: 10)

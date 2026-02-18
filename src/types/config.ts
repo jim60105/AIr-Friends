@@ -120,6 +120,24 @@ export interface AgentConfig {
 
   /** Dry run / debug mode configuration (optional) */
   dryRun?: DryRunConfig;
+
+  /** Sandbox settings for agent subprocess isolation (optional) */
+  sandbox?: SandboxConfig;
+}
+
+/**
+ * Sandbox configuration for agent subprocess isolation.
+ * Controls environment variable filtering and network isolation.
+ */
+export interface SandboxConfig {
+  /** Filter subprocess environment variables to allowed list only (default: true) */
+  filterEnv: boolean;
+
+  /** Enable Linux network namespace isolation via unshare --net (default: false) */
+  networkIsolation: boolean;
+
+  /** Additional environment variable names to allow through the filter */
+  allowedEnvVars: string[];
 }
 
 /**

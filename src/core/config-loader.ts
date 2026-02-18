@@ -14,6 +14,7 @@ import type {
   MemoryMaintenanceConfig,
   RateLimitConfig,
   RemindersConfig,
+  SandboxConfig,
   UserMCPServerConfig,
 } from "../types/config.ts";
 import type { MCPServerConfig } from "../acp/types.ts";
@@ -123,6 +124,15 @@ const DEFAULT_DRY_RUN: DryRunConfig = {
   enabled: false,
   outputPath: "./data/dry-run/",
   mockReply: "（Dry run 模式 — 此為測試回覆）",
+};
+
+/**
+ * Default sandbox configuration
+ */
+const DEFAULT_SANDBOX: SandboxConfig = {
+  filterEnv: true,
+  networkIsolation: false,
+  allowedEnvVars: [],
 };
 
 /**
@@ -467,6 +477,16 @@ function validateConfig(config: Record<string, unknown>): void {
     agentConfig.dryRun = { ...DEFAULT_DRY_RUN };
   } else {
     agentConfig.dryRun = { ...DEFAULT_DRY_RUN, ...(agentConfig.dryRun as Record<string, unknown>) };
+  }
+
+  // Sandbox defaults
+  if (!agentConfig.sandbox) {
+    agentConfig.sandbox = { ...DEFAULT_SANDBOX };
+  } else {
+    agentConfig.sandbox = {
+      ...DEFAULT_SANDBOX,
+      ...(agentConfig.sandbox as Record<string, unknown>),
+    };
   }
 
   // MCP Servers validation
