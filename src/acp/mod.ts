@@ -8,6 +8,7 @@
 export { ChatbotClient } from "./client.ts";
 export { AgentConnector } from "./agent-connector.ts";
 export { createAgentConfig, getDefaultAgentType } from "./agent-factory.ts";
+export { SandboxManager } from "./sandbox-manager.ts";
 export type {
   AgentCapabilities,
   AgentConfig,

@@ -21,7 +21,8 @@ RUN --mount=type=cache,id=apt-$TARGETARCH$TARGETVARIANT,sharing=locked,target=/v
     build-essential ripgrep jq moreutils strace \
     zip file tree bc \
     python3 python3-pip python-is-python3 \
-    ffmpeg 7zip poppler-utils imagemagick exiftool
+    ffmpeg 7zip poppler-utils imagemagick exiftool \
+    util-linux
 
 ########################################
 # GitHub Copilot unpack stage
