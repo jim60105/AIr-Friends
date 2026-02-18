@@ -287,8 +287,15 @@ Deno.test(
   async () => {
     const server = new HealthCheckServer(8087);
     const mockContext = {
-      config: {},
-      agentCore: {},
+      config: {
+        agent: { skillsDir: "/nonexistent-skills-dir" },
+        workspace: { repoPath: "/tmp" },
+      },
+      agentCore: {
+        getSkillRegistry: () => ({
+          getAvailableSkills: () => [],
+        }),
+      },
       platformRegistry: {
         getAllAdapters: () => [],
         getStatus: () => new Map(),
@@ -314,8 +321,15 @@ Deno.test(
 Deno.test("HealthCheckServer - handles /readyz endpoint", async () => {
   const server = new HealthCheckServer(8088);
   const mockContext = {
-    config: {},
-    agentCore: {},
+    config: {
+      agent: { skillsDir: "/nonexistent-skills-dir" },
+      workspace: { repoPath: "/tmp" },
+    },
+    agentCore: {
+      getSkillRegistry: () => ({
+        getAvailableSkills: () => [],
+      }),
+    },
     platformRegistry: {
       getAllAdapters: () => [],
       getStatus: () => new Map(),

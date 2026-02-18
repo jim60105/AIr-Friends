@@ -35,6 +35,7 @@ export class AgentCore {
   private workspaceManager: WorkspaceManager;
   private memoryStore: MemoryStore;
   private reminderStore: ReminderStore | null = null;
+  private skillRegistry: SkillRegistry;
 
   constructor(config: Config, yolo = false) {
     this.config = config;
@@ -60,12 +61,13 @@ export class AgentCore {
       reminderStore = new ReminderStore(config.reminders.persistPath);
       this.reminderStore = reminderStore;
     }
-    const skillRegistry = new SkillRegistry(
+    this.skillRegistry = new SkillRegistry(
       this.memoryStore,
       config.reminders,
       reminderStore,
       config.skills?.sendFile,
     );
+    const skillRegistry = this.skillRegistry;
 
     // Initialize session registry
     this.sessionRegistry = new SessionRegistry();
@@ -240,6 +242,13 @@ export class AgentCore {
    */
   getReminderStore(): ReminderStore | null {
     return this.reminderStore;
+  }
+
+  /**
+   * Get the skill registry
+   */
+  getSkillRegistry(): SkillRegistry {
+    return this.skillRegistry;
   }
 
   /**
