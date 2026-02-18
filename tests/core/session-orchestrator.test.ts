@@ -62,6 +62,17 @@ class MockPlatformAdapter implements Partial<PlatformAdapter> {
   }
 }
 
+class TypingEnabledMockPlatformAdapter extends MockPlatformAdapter {
+  typingCalls: string[] = [];
+  override supportsTypingIndicator() {
+    return true;
+  }
+  override sendTyping(channelId: string) {
+    this.typingCalls.push(channelId);
+    return Promise.resolve();
+  }
+}
+
 // Helper to create test config
 function createTestConfig(tempDir: string): Config {
   return {
@@ -2260,6 +2271,115 @@ Deno.test({
 
       const connector = orchestrator.mockConnector!;
       assertEquals(connector.lastMCPServers.length, 0);
+
+      sessionRegistry.stop();
+    } finally {
+      await Deno.remove(tempDir, { recursive: true });
+    }
+  },
+});
+
+Deno.test({
+  name: "SessionOrchestrator - sends typing indicator when platform supports it",
+  sanitizeResources: false,
+  sanitizeOps: false,
+  fn: async () => {
+    const tempDir = await Deno.makeTempDir();
+    try {
+      const { orchestrator, skillRegistry, sessionRegistry, workspaceManager } =
+        await createTestableOrchestrator(tempDir);
+
+      const event = createTestEvent();
+      const platformAdapter = new TypingEnabledMockPlatformAdapter() as unknown as PlatformAdapter;
+      const replyHandler = skillRegistry.getReplyHandler();
+
+      orchestrator.setConnectorSetup((connector) => {
+        connector.promptResponses = [
+          { stopReason: "end_turn" } as PromptResponse,
+        ];
+        connector.onPrompt = () => {
+          const workspace = workspaceManager.getWorkspaceKeyFromEvent(event);
+          const key = `${workspace}:${event.channelId}`;
+          // deno-lint-ignore no-explicit-any
+          (replyHandler as any).replySentMap.set(key, true);
+        };
+      });
+
+      const response = await orchestrator.processMessage(event, platformAdapter);
+
+      assertEquals(response.success, true);
+      // Verify typing was called at least once (immediate call before interval)
+      const typingAdapter = platformAdapter as unknown as TypingEnabledMockPlatformAdapter;
+      assertEquals(typingAdapter.typingCalls.length >= 1, true);
+      assertEquals(typingAdapter.typingCalls[0], event.channelId);
+
+      sessionRegistry.stop();
+    } finally {
+      await Deno.remove(tempDir, { recursive: true });
+    }
+  },
+});
+
+Deno.test({
+  name: "SessionOrchestrator - does not send typing when platform does not support it",
+  sanitizeResources: false,
+  sanitizeOps: false,
+  fn: async () => {
+    const tempDir = await Deno.makeTempDir();
+    try {
+      const { orchestrator, skillRegistry, sessionRegistry, workspaceManager } =
+        await createTestableOrchestrator(tempDir);
+
+      const event = createTestEvent();
+      const platformAdapter = new MockPlatformAdapter() as unknown as PlatformAdapter;
+      const replyHandler = skillRegistry.getReplyHandler();
+
+      orchestrator.setConnectorSetup((connector) => {
+        connector.promptResponses = [
+          { stopReason: "end_turn" } as PromptResponse,
+        ];
+        connector.onPrompt = () => {
+          const workspace = workspaceManager.getWorkspaceKeyFromEvent(event);
+          const key = `${workspace}:${event.channelId}`;
+          // deno-lint-ignore no-explicit-any
+          (replyHandler as any).replySentMap.set(key, true);
+        };
+      });
+
+      const response = await orchestrator.processMessage(event, platformAdapter);
+
+      assertEquals(response.success, true);
+
+      sessionRegistry.stop();
+    } finally {
+      await Deno.remove(tempDir, { recursive: true });
+    }
+  },
+});
+
+Deno.test({
+  name: "SessionOrchestrator - typing interval is cleared on session error",
+  sanitizeResources: false,
+  sanitizeOps: false,
+  fn: async () => {
+    const tempDir = await Deno.makeTempDir();
+    try {
+      const { orchestrator, sessionRegistry } = await createTestableOrchestrator(tempDir);
+
+      const event = createTestEvent();
+      const platformAdapter = new TypingEnabledMockPlatformAdapter() as unknown as PlatformAdapter;
+
+      orchestrator.setConnectorSetup((connector) => {
+        connector.connect = () => Promise.reject(new Error("Connection failed"));
+      });
+
+      const response = await orchestrator.processMessage(event, platformAdapter);
+
+      // Session should fail but typing interval should be cleaned up
+      assertEquals(response.success, false);
+      // Typing was called at least once (immediate call before error)
+      const typingAdapter = platformAdapter as unknown as TypingEnabledMockPlatformAdapter;
+      assertEquals(typingAdapter.typingCalls.length >= 1, true);
 
       sessionRegistry.stop();
     } finally {
