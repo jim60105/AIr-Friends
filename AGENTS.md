@@ -146,9 +146,9 @@ deno run --allow-net --allow-read --allow-write --allow-env --allow-run src/main
 ```yaml
 agent:
   dryRun:
-    enabled: false                                       # Enable dry run mode (default: false)
-    outputPath: "./data/dry-run/"                        # Output directory for assembled prompts
-    mockReply: "（Dry run 模式 — 此為測試回覆）"          # Mock reply text (empty = no reply)
+    enabled: false # Enable dry run mode (default: false)
+    outputPath: "./data/dry-run/" # Output directory for assembled prompts
+    mockReply: "（Dry run 模式 — 此為測試回覆）" # Mock reply text (empty = no reply)
 ```
 
 **Environment Variable Overrides:**
@@ -470,21 +470,22 @@ await connector.disconnect();
 
 Agent subprocesses run with configurable sandbox isolation via `SandboxManager`:
 
-| Setting | Default | Description |
-|---------|---------|-------------|
-| `agent.sandbox.filterEnv` | `true` | Filter subprocess env vars to an allowed list only |
+| Setting                          | Default | Description                                                                    |
+| -------------------------------- | ------- | ------------------------------------------------------------------------------ |
+| `agent.sandbox.filterEnv`        | `true`  | Filter subprocess env vars to an allowed list only                             |
 | `agent.sandbox.networkIsolation` | `false` | Wrap command with `unshare --net` for network namespace isolation (Linux only) |
-| `agent.sandbox.allowedEnvVars` | `[]` | Additional env var names to pass through the filter |
+| `agent.sandbox.allowedEnvVars`   | `[]`    | Additional env var names to pass through the filter                            |
 
 Environment variable overrides:
 
-| Environment Variable | Config Path | Type |
-|---------------------|-------------|------|
-| `AGENT_SANDBOX_FILTER_ENV` | `agent.sandbox.filterEnv` | `"true"` / `"false"` |
+| Environment Variable              | Config Path                      | Type                 |
+| --------------------------------- | -------------------------------- | -------------------- |
+| `AGENT_SANDBOX_FILTER_ENV`        | `agent.sandbox.filterEnv`        | `"true"` / `"false"` |
 | `AGENT_SANDBOX_NETWORK_ISOLATION` | `agent.sandbox.networkIsolation` | `"true"` / `"false"` |
-| `AGENT_SANDBOX_ALLOWED_ENV_VARS` | `agent.sandbox.allowedEnvVars` | Comma-separated |
+| `AGENT_SANDBOX_ALLOWED_ENV_VARS`  | `agent.sandbox.allowedEnvVars`   | Comma-separated      |
 
 Degradation strategy:
+
 - `filterEnv: true` works on all platforms (pure TypeScript logic)
 - `networkIsolation: true` falls back gracefully on non-Linux or when `unshare` is unavailable (warns and skips)
 - Sandbox config errors do not prevent Agent startup
@@ -563,8 +564,8 @@ Prevents excessive API usage per user via a sliding window + cooldown mechanism.
 rateLimit:
   enabled: false
   maxRequestsPerWindow: 10
-  windowMs: 600000        # 10-minute sliding window
-  cooldownMs: 600000      # Cooldown after limit exceeded
+  windowMs: 600000 # 10-minute sliding window
+  cooldownMs: 600000 # Cooldown after limit exceeded
 ```
 
 **How It Works:**
@@ -646,8 +647,8 @@ selfResearch:
   rssFeeds:
     - url: "https://example.com/feed.xml"
       name: "Tech News"
-  minIntervalMs: 43200000  # 12 hours
-  maxIntervalMs: 86400000  # 24 hours
+  minIntervalMs: 43200000 # 12 hours
+  maxIntervalMs: 86400000 # 24 hours
 ```
 
 **Environment Variable Overrides:**
@@ -686,7 +687,7 @@ memoryMaintenance:
   enabled: false
   model: "gpt-5-mini"
   minMemoryCount: 50
-  intervalMs: 604800000  # 7 days
+  intervalMs: 604800000 # 7 days
 ```
 
 **Environment Variable Overrides:**
@@ -731,11 +732,11 @@ Trigger/history message → Platform adapter extracts attachment metadata (URL, 
 
 **Platform Attachment Sources:**
 
-| Platform | Source | Field |
-|----------|--------|-------|
-| Discord | `message.attachments` (Collection) | id, url, contentType, name, size, width, height |
-| Misskey Note | `note.files` (DriveFile[]) | id, url, type, name, size, properties.width/height |
-| Misskey Chat | `message.file` (DriveFile \| null) | Same as above |
+| Platform     | Source                             | Field                                              |
+| ------------ | ---------------------------------- | -------------------------------------------------- |
+| Discord      | `message.attachments` (Collection) | id, url, contentType, name, size, width, height    |
+| Misskey Note | `note.files` (DriveFile[])         | id, url, type, name, size, properties.width/height |
+| Misskey Chat | `message.file` (DriveFile \| null) | Same as above                                      |
 
 ### 12. Prometheus Metrics Export (Feature 19)
 
@@ -745,8 +746,8 @@ Exposes operational metrics via a Prometheus-compatible `/metrics` endpoint on t
 
 ```yaml
 metrics:
-  enabled: false              # Enable Prometheus metrics endpoint (default: false)
-  path: "/metrics"            # Metrics endpoint path (default: "/metrics")
+  enabled: false # Enable Prometheus metrics endpoint (default: false)
+  path: "/metrics" # Metrics endpoint path (default: "/metrics")
 ```
 
 **Environment Variable Overrides:**
@@ -756,16 +757,17 @@ metrics:
 
 **Exposed Metrics:**
 
-| Metric Name | Type | Labels | Description |
-|-------------|------|--------|-------------|
-| `airfriends_sessions_total` | Counter | `platform`, `type`, `status` | Total sessions (success/failure) |
-| `airfriends_session_duration_seconds` | Histogram | `platform`, `type`, `status` | Session processing time |
-| `airfriends_active_sessions` | Gauge | — | Currently active sessions |
-| `airfriends_messages_received_total` | Counter | `platform` | Messages received from platforms |
-| `airfriends_replies_sent_total` | Counter | `platform` | Replies sent to platforms |
-| `airfriends_memory_operations_total` | Counter | `operation`, `visibility` | Memory operations count |
-| `airfriends_skill_api_calls_total` | Counter | `skill`, `status` | Skill API call count |
-| `airfriends_rate_limit_rejections_total` | Counter | `platform` | Rate limit rejections |
+| Metric Name                              | Type      | Labels                       | Description                      |
+| ---------------------------------------- | --------- | ---------------------------- | -------------------------------- |
+| `airfriends_sessions_total`              | Counter   | `platform`, `type`, `status` | Total sessions (success/failure) |
+| `airfriends_session_duration_seconds`    | Histogram | `platform`, `type`, `status` | Session processing time          |
+| `airfriends_active_sessions`             | Gauge     | —                            | Currently active sessions        |
+| `airfriends_messages_received_total`     | Counter   | `platform`                   | Messages received from platforms |
+| `airfriends_replies_sent_total`          | Counter   | `platform`                   | Replies sent to platforms        |
+| `airfriends_memory_operations_total`     | Counter   | `operation`, `visibility`    | Memory operations count          |
+| `airfriends_skill_api_calls_total`       | Counter   | `skill`, `status`            | Skill API call count             |
+| `airfriends_rate_limit_rejections_total` | Counter   | `platform`                   | Rate limit rejections            |
+| `airfriends_audit_entries_total`         | Counter   | `phase`                      | Audit log entries written        |
 
 **Key Design Points:**
 
@@ -815,6 +817,50 @@ gitBackup:
 - `src/core/git-backup-service.ts` — Git operation encapsulation
 - `src/core/git-backup-scheduler.ts` — Fixed-interval scheduling
 
+### 14. Session Audit Log (Feature 25)
+
+Per-session JSONL audit trail for replay and debugging. Each session writes timestamped entries tracking the full lifecycle: context assembly, agent connection, prompt, skill calls, reply, and session end.
+
+**Configuration:**
+
+```yaml
+audit:
+  enabled: false
+  retentionDays: 7
+  hashContent: true
+  includedPhases:
+    - "skill_call"
+    - "reply_sent"
+    - "session_end"
+```
+
+**Environment Variable Overrides:**
+
+| Environment Variable    | Config Path            | Type                 |
+| ----------------------- | ---------------------- | -------------------- |
+| `AUDIT_ENABLED`         | `audit.enabled`        | `"true"` / `"false"` |
+| `AUDIT_RETENTION_DAYS`  | `audit.retentionDays`  | Integer string       |
+| `AUDIT_HASH_CONTENT`    | `audit.hashContent`    | `"true"` / `"false"` |
+| `AUDIT_INCLUDED_PHASES` | `audit.includedPhases` | Comma-separated      |
+
+**How It Works:**
+
+1. `SessionAuditWriter` is created per-session when audit is enabled
+2. Entries are written as append-only JSONL to `data/audit/{platform}/{userId}/{sessionId}.jsonl`
+3. `write()` is fire-and-forget — I/O errors never crash the session
+4. Phase filtering: when `includedPhases` is non-empty, only matching phases are recorded
+5. Content hashing: when `hashContent` is true, user content fields are SHA-256 hashed via `sanitizeSkillParams()`
+6. Retention cleanup runs at startup and every 24 hours, deleting files older than `retentionDays`
+7. Skill call auditing is done in the Skill API Server (`src/skill-api/server.ts`)
+
+**Key Components:**
+
+- `src/types/audit.ts` — `AuditPhase` and `SessionAuditEntry` types
+- `src/core/audit-logger.ts` — `SessionAuditWriter` (per-session JSONL writer)
+- `src/core/audit-retention.ts` — `cleanupAuditLogs()` (retention cleanup)
+- `src/core/audit-retention-scheduler.ts` — `AuditRetentionScheduler` (24h periodic cleanup)
+- `src/utils/hash.ts` — `sha256Hash()` and `sanitizeSkillParams()`
+
 ## Prompt Template System
 
 The system uses [Vento](https://vento.js.org/) as its prompt template engine, allowing easy customization without rebuilding containers.
@@ -827,6 +873,7 @@ The main system prompt (`prompts/system_reply.md`) uses Vento syntax. Fragment f
 
 ```markdown
 <!-- prompts/system_reply.md -->
+
 {{- set charName }}{{ include "./character_name.md" }}{{ /set -}}
 
 You are {{ charName }}. {{ if isDm }}This is a private chat.{{ /if }}
@@ -846,35 +893,35 @@ You are Yuna. This is a private chat.
 
 ### Template Processing Rules
 
-| Rule                 | Behavior                                                           |
-| -------------------- | ------------------------------------------------------------------ |
-| Variable format      | `{{ variableName }}` outputs a variable value                      |
-| Include syntax       | `{{ include "./filename.md" }}` loads a file from prompts directory |
-| Conditionals         | `{{ if condition }}...{{ else }}...{{ /if }}`                       |
-| Set variables        | `{{ set name }}...{{ /set }}` assigns content to a variable        |
-| Content trimming     | `{{- ... -}}` removes surrounding whitespace                      |
-| Missing includes     | Throws an error with the missing file name                         |
-| Final result         | Rendered output is trimmed of leading/trailing whitespace          |
-| Comments             | `{{# comment #}}` is excluded from output                         |
+| Rule             | Behavior                                                            |
+| ---------------- | ------------------------------------------------------------------- |
+| Variable format  | `{{ variableName }}` outputs a variable value                       |
+| Include syntax   | `{{ include "./filename.md" }}` loads a file from prompts directory |
+| Conditionals     | `{{ if condition }}...{{ else }}...{{ /if }}`                       |
+| Set variables    | `{{ set name }}...{{ /set }}` assigns content to a variable         |
+| Content trimming | `{{- ... -}}` removes surrounding whitespace                        |
+| Missing includes | Throws an error with the missing file name                          |
+| Final result     | Rendered output is trimmed of leading/trailing whitespace           |
+| Comments         | `{{# comment #}}` is excluded from output                           |
 
 ### Available Template Variables
 
-| Variable       | Type      | Description                                    |
-| -------------- | --------- | ---------------------------------------------- |
-| `isDm`         | `boolean` | Whether this is a direct message conversation  |
-| `platform`     | `string`  | Platform name (`"discord"` / `"misskey"`)      |
-| `userId`       | `string`  | User's platform ID                             |
-| `channelId`    | `string`  | Channel/conversation ID                        |
-| `guildId`      | `string`  | Server/guild ID (empty string if N/A)          |
-| `sessionId`    | `string`  | Current skill API session ID                   |
-| `rssItems`     | `string`  | RSS items (self-research prompt only)          |
-| `workspaceKey` | `string`  | Workspace key (memory maintenance prompt only) |
-| `memoriesDump` | `string`  | Memory JSON dump (memory maintenance only)     |
-| `recentMessagesFetched` | `boolean` | Whether recent messages were fetched (spontaneous post only) |
-| `importantMemories` | `string` | Formatted important memories text (spontaneous post only) |
-| `recentMessages` | `string` | Formatted recent messages text (spontaneous post only) |
-| `availableEmojis` | `string` | Formatted available emojis text (spontaneous post only) |
-| `userContextMessage` | `string` | Pre-formatted user context message (normal message prompt only) |
+| Variable                | Type      | Description                                                     |
+| ----------------------- | --------- | --------------------------------------------------------------- |
+| `isDm`                  | `boolean` | Whether this is a direct message conversation                   |
+| `platform`              | `string`  | Platform name (`"discord"` / `"misskey"`)                       |
+| `userId`                | `string`  | User's platform ID                                              |
+| `channelId`             | `string`  | Channel/conversation ID                                         |
+| `guildId`               | `string`  | Server/guild ID (empty string if N/A)                           |
+| `sessionId`             | `string`  | Current skill API session ID                                    |
+| `rssItems`              | `string`  | RSS items (self-research prompt only)                           |
+| `workspaceKey`          | `string`  | Workspace key (memory maintenance prompt only)                  |
+| `memoriesDump`          | `string`  | Memory JSON dump (memory maintenance only)                      |
+| `recentMessagesFetched` | `boolean` | Whether recent messages were fetched (spontaneous post only)    |
+| `importantMemories`     | `string`  | Formatted important memories text (spontaneous post only)       |
+| `recentMessages`        | `string`  | Formatted recent messages text (spontaneous post only)          |
+| `availableEmojis`       | `string`  | Formatted available emojis text (spontaneous post only)         |
+| `userContextMessage`    | `string`  | Pre-formatted user context message (normal message prompt only) |
 
 ### Container Deployment Considerations
 
@@ -983,6 +1030,7 @@ logger.info(`Session ${sessionId} model set to ${modelId}`, { sessionId, modelId
 ```
 
 **規則：**
+
 - `{PropertyName}` 中的名稱必須與 context 物件的 key 完全一致
 - 未匹配的佔位符保持原樣不替換
 - 使用 `{{` 和 `}}` 來跳脫字面大括號
@@ -1082,6 +1130,9 @@ AIr-Friends/
 │   │   ├── spontaneous-target.ts    # Platform-specific target selection
 │   │   ├── self-research-scheduler.ts # Self-research scheduling
 │   │   ├── memory-maintenance-scheduler.ts # Memory maintenance scheduling
+│   │   ├── audit-logger.ts          # Session audit JSONL writer
+│   │   ├── audit-retention.ts       # Audit log retention cleanup
+│   │   ├── audit-retention-scheduler.ts # Audit retention scheduling
 │   │   └── config-loader.ts        # Configuration loading
 │   ├── platforms/
 │   │   ├── platform-adapter.ts     # Platform adapter base class
@@ -1111,10 +1162,12 @@ AIr-Friends/
 │   │   ├── workspace.ts      # Workspace types
 │   │   ├── platform.ts       # Platform types
 │   │   ├── errors.ts         # Error classes
+│   │   ├── audit.ts          # Audit log types
 │   │   └── logger.ts         # Logger types
 │   └── utils/
 │       ├── logger.ts         # Structured JSON logging
 │       ├── rss-fetcher.ts    # RSS/Atom feed fetching and parsing
+│       ├── hash.ts           # SHA-256 hashing and content sanitization
 │       └── env.ts            # Environment utilities
 ├── skills/                   # Shell-based skill scripts
 │   ├── memory-save/

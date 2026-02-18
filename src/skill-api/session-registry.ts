@@ -4,6 +4,7 @@ import { createLogger } from "@utils/logger.ts";
 import type { NormalizedEvent } from "../types/events.ts";
 import type { WorkspaceInfo } from "../types/workspace.ts";
 import type { PlatformAdapter } from "@platforms/platform-adapter.ts";
+import type { SessionAuditWriter } from "@core/audit-logger.ts";
 
 const logger = createLogger("SessionRegistry");
 
@@ -37,6 +38,8 @@ export interface ActiveSession {
   replySent: boolean;
   /** Agent's global workspace path */
   agentWorkspacePath?: string;
+  /** Audit writer for this session (null if audit disabled) */
+  auditWriter?: SessionAuditWriter;
 }
 
 /**
@@ -142,6 +145,16 @@ export class SessionRegistry {
   hasReplySent(sessionId: string): boolean {
     const session = this.sessions.get(sessionId);
     return session?.replySent ?? false;
+  }
+
+  /**
+   * Attach an audit writer to an existing session
+   */
+  setAuditWriter(sessionId: string, writer: SessionAuditWriter): void {
+    const session = this.sessions.get(sessionId);
+    if (session) {
+      session.auditWriter = writer;
+    }
   }
 
   /**

@@ -17,6 +17,9 @@ import { MisskeyAdapter } from "@platforms/misskey/index.ts";
 import { HealthCheckServer } from "./healthcheck.ts";
 import { configureLogger, createLogger } from "@utils/logger.ts";
 import { GelfTransport } from "@utils/gelf-transport.ts";
+import { cleanupAuditLogs } from "@core/audit-retention.ts";
+import { AuditRetentionScheduler } from "@core/audit-retention-scheduler.ts";
+import { join } from "@std/path";
 import type { Platform } from "./types/events.ts";
 
 const logger = createLogger("Bootstrap");
@@ -35,6 +38,7 @@ export interface AppContext {
   gitBackupScheduler: GitBackupScheduler | null;
   gitBackupService: GitBackupService | null;
   reminderScheduler: ReminderScheduler | null;
+  auditRetentionScheduler: AuditRetentionScheduler | null;
   yolo: boolean;
 }
 
@@ -348,6 +352,19 @@ export async function bootstrap(
     logger.info("Reminder scheduler initialized");
   }
 
+  // Initialize Audit Log Retention Scheduler
+  let auditRetentionScheduler: AuditRetentionScheduler | null = null;
+  if (config.audit?.enabled && config.audit.retentionDays > 0) {
+    const auditBasePath = join(config.workspace.repoPath, "audit");
+    auditRetentionScheduler = new AuditRetentionScheduler(config.audit);
+    auditRetentionScheduler.setCallback(async () => {
+      await cleanupAuditLogs(auditBasePath, config.audit!.retentionDays);
+    });
+    logger.info("Audit retention scheduler initialized", {
+      retentionDays: config.audit.retentionDays,
+    });
+  }
+
   logger.info("Bootstrap completed");
 
   const context: AppContext = {
@@ -361,6 +378,7 @@ export async function bootstrap(
     gitBackupScheduler,
     gitBackupService,
     reminderScheduler,
+    auditRetentionScheduler,
     yolo,
   };
 
@@ -411,6 +429,11 @@ export async function startPlatforms(context: AppContext): Promise<void> {
   // Start reminder scheduler (independent of platforms, but needs them connected)
   if (context.reminderScheduler) {
     context.reminderScheduler.start();
+  }
+
+  // Start audit retention scheduler (independent of platforms)
+  if (context.auditRetentionScheduler) {
+    context.auditRetentionScheduler.start();
   }
 
   logger.info("All platforms connected");

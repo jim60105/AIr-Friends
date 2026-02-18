@@ -33,6 +33,7 @@ import type { RssItem } from "@utils/rss-fetcher.ts";
 import type { WorkspaceInfo } from "../types/workspace.ts";
 import type { ResolvedReminder } from "../types/reminder.ts";
 import type { ReminderStore } from "./reminder-store.ts";
+import { SessionAuditWriter } from "./audit-logger.ts";
 
 const logger = createLogger("SessionOrchestrator");
 
@@ -194,6 +195,7 @@ export class SessionOrchestrator {
     const sessionStartTime = Date.now();
     activeSessionsGauge.inc();
     let result: SessionResponse;
+    let auditWriter: SessionAuditWriter | null = null;
 
     try {
       // 1. Get or create workspace
@@ -231,6 +233,16 @@ export class SessionOrchestrator {
         });
       }
 
+      // Create audit writer if enabled
+      auditWriter = shellSessionId
+        ? this.createAuditWriter(event.platform, event.userId, shellSessionId)
+        : null;
+
+      // Attach audit writer to session registry for skill-level auditing
+      if (auditWriter && shellSessionId) {
+        this.sessionRegistry.setAuditWriter(shellSessionId, auditWriter);
+      }
+
       // 3. Assemble initial context
       const context = await this.contextAssembler.assembleContext(
         event,
@@ -239,6 +251,14 @@ export class SessionOrchestrator {
         shellSessionId ?? undefined,
       );
       sessionLogger.debug("Context assembled", {
+        memoriesCount: context.importantMemories.length,
+        recentMessagesCount: context.recentMessages.length,
+        relatedMessagesCount: context.relatedMessages?.length ?? 0,
+        estimatedTokens: context.estimatedTokens,
+      });
+
+      // Audit: context_assembly
+      await auditWriter?.write("context_assembly", {
         memoriesCount: context.importantMemories.length,
         recentMessagesCount: context.recentMessages.length,
         relatedMessagesCount: context.relatedMessages?.length ?? 0,
@@ -328,6 +348,11 @@ export class SessionOrchestrator {
         await connector.connect();
         sessionLogger.info("Agent connected");
 
+        // Audit: agent_connect
+        await auditWriter?.write("agent_connect", {
+          agentType: getDefaultAgentType(this.config),
+        });
+
         // Check Agent image capability
         const supportsImage = connector.supportsImageContent();
         sessionLogger.info("Agent capabilities checked", { supportsImage });
@@ -374,10 +399,33 @@ export class SessionOrchestrator {
           event,
           sessionLogger,
         );
+
+        // Audit: prompt_sent
+        const promptLen = typeof promptContent === "string"
+          ? promptContent.length
+          : promptContent.filter((b) => b.type === "text").reduce(
+            (sum, b) => sum + ("text" in b ? (b as { text: string }).text.length : 0),
+            0,
+          );
+        const imageCount = typeof promptContent === "string"
+          ? 0
+          : promptContent.filter((b) => b.type === "image").length;
+        await auditWriter?.write("prompt_sent", {
+          promptLength: promptLen,
+          imageCount,
+          modelId: resolvedModel,
+        });
+
         const response = await connector.prompt(sessionId, promptContent);
         sessionLogger.info("Agent session {sessionId} completed with stopReason {stopReason}", {
           sessionId,
           stopReason: response.stopReason,
+        });
+
+        // Audit: agent_response
+        await auditWriter?.write("agent_response", {
+          stopReason: response.stopReason,
+          isRetry: false,
         });
 
         // Check if reply or reaction was sent
@@ -449,6 +497,13 @@ export class SessionOrchestrator {
         }
 
         if (hasResponded) {
+          // Audit: session_end (success with response)
+          await auditWriter?.write("session_end", {
+            success: true,
+            replySent,
+            reactionSent,
+            durationMs: Date.now() - sessionStartTime,
+          });
           result = {
             success: true,
             replySent,
@@ -460,6 +515,12 @@ export class SessionOrchestrator {
         // Agent completed but didn't send reply or reaction even after retry
         if (response.stopReason === "end_turn") {
           sessionLogger.warn("Agent completed without sending reply after retry");
+          await auditWriter?.write("session_end", {
+            success: false,
+            replySent: false,
+            durationMs: Date.now() - sessionStartTime,
+            error: "Agent did not generate a reply",
+          });
           result = {
             success: false,
             replySent: false,
@@ -469,6 +530,12 @@ export class SessionOrchestrator {
         }
 
         if (response.stopReason === "cancelled") {
+          await auditWriter?.write("session_end", {
+            success: false,
+            replySent: false,
+            durationMs: Date.now() - sessionStartTime,
+            error: "Session was cancelled",
+          });
           result = {
             success: false,
             replySent: false,
@@ -477,6 +544,12 @@ export class SessionOrchestrator {
           return result;
         }
 
+        await auditWriter?.write("session_end", {
+          success: false,
+          replySent: false,
+          durationMs: Date.now() - sessionStartTime,
+          error: `Unexpected stop reason: ${response.stopReason}`,
+        });
         result = {
           success: false,
           replySent: false,
@@ -514,6 +587,12 @@ export class SessionOrchestrator {
       }
     } catch (error) {
       sessionLogger.error("Session failed", {
+        error: error instanceof Error ? error.message : String(error),
+      });
+      // Audit: session_end (exception) — auditWriter may be null if error occurs before creation
+      await auditWriter?.write("session_end", {
+        success: false,
+        durationMs: Date.now() - sessionStartTime,
         error: error instanceof Error ? error.message : String(error),
       });
       result = {
@@ -556,6 +635,7 @@ export class SessionOrchestrator {
     const sessionStartTime = Date.now();
     activeSessionsGauge.inc();
     let result: SessionResponse;
+    let auditWriter: SessionAuditWriter | null = null;
 
     try {
       // 1. Create workspace for the bot itself
@@ -590,6 +670,14 @@ export class SessionOrchestrator {
         const sessionIdFile = join(workspace.path, "SESSION_ID");
         await Deno.writeTextFile(sessionIdFile, shellSessionId);
         sessionLogger.info("Shell session {shellSessionId} registered", { shellSessionId });
+      }
+
+      // Create audit writer
+      auditWriter = shellSessionId
+        ? this.createAuditWriter(platform, options.botId, shellSessionId)
+        : null;
+      if (auditWriter && shellSessionId) {
+        this.sessionRegistry.setAuditWriter(shellSessionId, auditWriter);
       }
 
       // 3. Assemble spontaneous context
@@ -663,6 +751,11 @@ export class SessionOrchestrator {
         await connector.connect();
         sessionLogger.info("Agent connected");
 
+        // Audit: agent_connect
+        await auditWriter?.write("agent_connect", {
+          agentType: getDefaultAgentType(this.config),
+        });
+
         const sessionId = await connector.createSession(this.getMCPServers());
         const routingContext: ModelRoutingContext = {
           sessionType: "spontaneous",
@@ -681,10 +774,22 @@ export class SessionOrchestrator {
         const replyHandler = this.skillRegistry.getReplyHandler();
         replyHandler.clearReplyState(workspace.key, channelId);
 
+        // Audit: prompt_sent
+        await auditWriter?.write("prompt_sent", {
+          promptLength: fullPrompt.length,
+          modelId: resolvedModel,
+        });
+
         // Send prompt
         const response = await connector.prompt(sessionId, fullPrompt);
         sessionLogger.info("Agent session completed with stopReason {stopReason}", {
           stopReason: response.stopReason,
+        });
+
+        // Audit: agent_response
+        await auditWriter?.write("agent_response", {
+          stopReason: response.stopReason,
+          isRetry: false,
         });
 
         let replySent = replyHandler.hasReplySent(workspace.key, channelId);
@@ -708,6 +813,14 @@ export class SessionOrchestrator {
 
           replySent = replyHandler.hasReplySent(workspace.key, channelId);
         }
+
+        // Audit: session_end
+        await auditWriter?.write("session_end", {
+          success: replySent,
+          replySent,
+          durationMs: Date.now() - sessionStartTime,
+          error: replySent ? undefined : "Agent did not send a reply",
+        });
 
         result = {
           success: replySent,
@@ -737,6 +850,11 @@ export class SessionOrchestrator {
       sessionLogger.error("Spontaneous post session failed", {
         platform,
         channelId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      await auditWriter?.write("session_end", {
+        success: false,
+        durationMs: Date.now() - sessionStartTime,
         error: error instanceof Error ? error.message : String(error),
       });
       result = {
@@ -774,6 +892,7 @@ export class SessionOrchestrator {
     const sessionStartTime = Date.now();
     activeSessionsGauge.inc();
     let result: SessionResponse;
+    let auditWriter: SessionAuditWriter | null = null;
 
     try {
       // 1. Create workspace for self-research (uses special internal key)
@@ -807,6 +926,14 @@ export class SessionOrchestrator {
         const sessionIdFile = join(workspace.path, "SESSION_ID");
         await Deno.writeTextFile(sessionIdFile, shellSessionId);
         sessionLogger.info("Shell session {shellSessionId} registered", { shellSessionId });
+      }
+
+      // Create audit writer
+      auditWriter = shellSessionId
+        ? this.createAuditWriter("discord", "self-research", shellSessionId)
+        : null;
+      if (auditWriter && shellSessionId) {
+        this.sessionRegistry.setAuditWriter(shellSessionId, auditWriter);
       }
 
       // 3. Build self-research prompt
@@ -866,6 +993,7 @@ export class SessionOrchestrator {
       try {
         await connector.connect();
         sessionLogger.info("Agent connected");
+        await auditWriter?.write("agent_connect", { agentType: getDefaultAgentType(this.config) });
 
         const sessionId = await connector.createSession(this.getMCPServers());
         // Fallback chain: routing rules → selfResearch.model → agent.model
@@ -880,14 +1008,31 @@ export class SessionOrchestrator {
         );
         await connector.setSessionModel(sessionId, resolvedModel);
 
+        // Audit: prompt_sent
+        await auditWriter?.write("prompt_sent", {
+          promptLength: fullPrompt.length,
+          modelId: resolvedModel,
+        });
+
         // Send prompt
         const response = await connector.prompt(sessionId, fullPrompt);
         sessionLogger.info("Self-research agent session completed with stopReason {stopReason}", {
           stopReason: response.stopReason,
         });
+        await auditWriter?.write("agent_response", {
+          stopReason: response.stopReason,
+          isRetry: false,
+        });
 
         // Success is determined by agent completing normally
         const success = response.stopReason === "end_turn";
+
+        await auditWriter?.write("session_end", {
+          success,
+          replySent: false,
+          durationMs: Date.now() - sessionStartTime,
+          error: success ? undefined : `Unexpected stop reason: ${response.stopReason}`,
+        });
 
         result = {
           success,
@@ -915,6 +1060,11 @@ export class SessionOrchestrator {
       }
     } catch (error) {
       sessionLogger.error("Self-research session failed", {
+        error: error instanceof Error ? error.message : String(error),
+      });
+      await auditWriter?.write("session_end", {
+        success: false,
+        durationMs: Date.now() - sessionStartTime,
         error: error instanceof Error ? error.message : String(error),
       });
       result = {
@@ -961,6 +1111,7 @@ export class SessionOrchestrator {
     const sessionStartTime = Date.now();
     activeSessionsGauge.inc();
     let result: SessionResponse;
+    let auditWriter: SessionAuditWriter | null = null;
 
     try {
       // Create synthetic DM event to ensure private memory access
@@ -993,6 +1144,14 @@ export class SessionOrchestrator {
         const sessionIdFile = join(workspace.path, "SESSION_ID");
         await Deno.writeTextFile(sessionIdFile, shellSessionId);
         sessionLogger.info("Shell session {shellSessionId} registered", { shellSessionId });
+      }
+
+      // Create audit writer
+      auditWriter = shellSessionId
+        ? this.createAuditWriter(platform, userId, shellSessionId)
+        : null;
+      if (auditWriter && shellSessionId) {
+        this.sessionRegistry.setAuditWriter(shellSessionId, auditWriter);
       }
 
       const fullPrompt = await this.buildMemoryMaintenancePrompt(
@@ -1048,6 +1207,7 @@ export class SessionOrchestrator {
       try {
         await connector.connect();
         sessionLogger.info("Agent connected");
+        await auditWriter?.write("agent_connect", { agentType: getDefaultAgentType(this.config) });
 
         const sessionId = await connector.createSession(this.getMCPServers());
         // Fallback chain: routing rules → memoryMaintenance.model → agent.model
@@ -1062,12 +1222,26 @@ export class SessionOrchestrator {
         );
         await connector.setSessionModel(sessionId, resolvedModel);
 
+        await auditWriter?.write("prompt_sent", {
+          promptLength: fullPrompt.length,
+          modelId: resolvedModel,
+        });
         const response = await connector.prompt(sessionId, fullPrompt);
         sessionLogger.info("Memory maintenance session completed with stopReason {stopReason}", {
           stopReason: response.stopReason,
         });
+        await auditWriter?.write("agent_response", {
+          stopReason: response.stopReason,
+          isRetry: false,
+        });
 
         const success = response.stopReason === "end_turn";
+        await auditWriter?.write("session_end", {
+          success,
+          replySent: false,
+          durationMs: Date.now() - sessionStartTime,
+          error: success ? undefined : `Unexpected stop reason: ${response.stopReason}`,
+        });
         result = {
           success,
           replySent: false,
@@ -1094,6 +1268,11 @@ export class SessionOrchestrator {
       }
     } catch (error) {
       sessionLogger.error("Memory maintenance session failed", {
+        error: error instanceof Error ? error.message : String(error),
+      });
+      await auditWriter?.write("session_end", {
+        success: false,
+        durationMs: Date.now() - sessionStartTime,
         error: error instanceof Error ? error.message : String(error),
       });
       result = {
@@ -1133,6 +1312,7 @@ export class SessionOrchestrator {
     const sessionStartTime = Date.now();
     activeSessionsGauge.inc();
     let result: SessionResponse;
+    let auditWriter: SessionAuditWriter | null = null;
 
     try {
       // 1. Resolve DM channel
@@ -1196,6 +1376,14 @@ export class SessionOrchestrator {
         sessionLogger.info("Shell session {shellSessionId} registered", { shellSessionId });
       }
 
+      // Create audit writer
+      auditWriter = shellSessionId
+        ? this.createAuditWriter(platform, reminder.userId, shellSessionId)
+        : null;
+      if (auditWriter && shellSessionId) {
+        this.sessionRegistry.setAuditWriter(shellSessionId, auditWriter);
+      }
+
       // 4. Build reminder prompt
       const fullPrompt = await this.buildReminderPrompt(reminder, shellSessionId);
 
@@ -1248,6 +1436,7 @@ export class SessionOrchestrator {
       try {
         await connector.connect();
         sessionLogger.info("Agent connected");
+        await auditWriter?.write("agent_connect", { agentType: getDefaultAgentType(this.config) });
 
         const sessionId = await connector.createSession(this.getMCPServers());
         const routingContext: ModelRoutingContext = {
@@ -1267,10 +1456,20 @@ export class SessionOrchestrator {
         const replyHandler = this.skillRegistry.getReplyHandler();
         replyHandler.clearReplyState(workspace.key, dmChannelId);
 
+        // Audit: prompt_sent
+        await auditWriter?.write("prompt_sent", {
+          promptLength: fullPrompt.length,
+          modelId: resolvedModel,
+        });
+
         // Send prompt
         const response = await connector.prompt(sessionId, fullPrompt);
         sessionLogger.info("Agent session completed with stopReason {stopReason}", {
           stopReason: response.stopReason,
+        });
+        await auditWriter?.write("agent_response", {
+          stopReason: response.stopReason,
+          isRetry: false,
         });
 
         let replySent = replyHandler.hasReplySent(workspace.key, dmChannelId);
@@ -1306,6 +1505,14 @@ export class SessionOrchestrator {
           remindersDeliveredTotal.labels(platform, "failure").inc();
         }
 
+        // Audit: session_end (reminder)
+        await auditWriter?.write("session_end", {
+          success: replySent,
+          replySent,
+          durationMs: Date.now() - sessionStartTime,
+          error: replySent ? undefined : "Agent did not send a reply",
+        });
+
         result = {
           success: replySent,
           replySent,
@@ -1335,6 +1542,11 @@ export class SessionOrchestrator {
         reminderId: reminder.id,
         error: error instanceof Error ? error.message : String(error),
       });
+      await auditWriter?.write("session_end", {
+        success: false,
+        durationMs: Date.now() - sessionStartTime,
+        error: error instanceof Error ? error.message : String(error),
+      });
       result = {
         success: false,
         replySent: false,
@@ -1356,6 +1568,24 @@ export class SessionOrchestrator {
    */
   protected createConnector(options: AgentConnectorOptions): AgentConnector {
     return new AgentConnector(options);
+  }
+
+  /**
+   * Create a SessionAuditWriter if audit is enabled.
+   */
+  private createAuditWriter(
+    platform: string,
+    userId: string,
+    sessionId: string,
+  ): SessionAuditWriter | null {
+    if (!this.config.audit?.enabled) return null;
+    return new SessionAuditWriter(
+      join(this.config.workspace.repoPath, "audit"),
+      platform,
+      userId,
+      sessionId,
+      this.config.audit,
+    );
   }
 
   /**
