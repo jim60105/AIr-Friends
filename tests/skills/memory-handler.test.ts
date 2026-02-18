@@ -859,6 +859,164 @@ Deno.test("MemoryHandler - handleMemorySave accepts relatedTo and supersedes", a
   await Deno.remove(tempDir, { recursive: true });
 });
 
+Deno.test("MemoryHandler - handleMemorySave rejects invalid relatedTo", async () => {
+  const tempDir = await Deno.makeTempDir();
+  const workspaceManager = new WorkspaceManager({
+    repoPath: tempDir,
+    workspacesDir: "workspaces",
+  });
+  const memoryStore = new MemoryStore(workspaceManager, {
+    searchLimit: 10,
+    maxChars: 2000,
+  });
+  const handler = new MemoryHandler(memoryStore);
+
+  const workspace: WorkspaceInfo = {
+    key: "discord/123",
+    components: { platform: "discord", userId: "123" },
+    path: `${tempDir}/workspaces/discord/123`,
+    isDm: false,
+  };
+
+  await Deno.mkdir(workspace.path, { recursive: true });
+  await Deno.writeTextFile(`${workspace.path}/memory.public.jsonl`, "");
+  await Deno.writeTextFile(`${workspace.path}/memory.private.jsonl`, "");
+
+  const context: SkillContext = {
+    workspace,
+    platformAdapter: createMockPlatformAdapter(),
+    channelId: "456",
+    userId: "123",
+  };
+
+  const result = await handler.handleMemorySave(
+    { content: "test", relatedTo: "not-array" },
+    context,
+  );
+  assertEquals(result.success, false);
+  assertEquals(result.error, "Invalid 'relatedTo' parameter. Must be an array of strings");
+
+  await Deno.remove(tempDir, { recursive: true });
+});
+
+Deno.test("MemoryHandler - handleMemorySave rejects invalid supersedes", async () => {
+  const tempDir = await Deno.makeTempDir();
+  const workspaceManager = new WorkspaceManager({
+    repoPath: tempDir,
+    workspacesDir: "workspaces",
+  });
+  const memoryStore = new MemoryStore(workspaceManager, {
+    searchLimit: 10,
+    maxChars: 2000,
+  });
+  const handler = new MemoryHandler(memoryStore);
+
+  const workspace: WorkspaceInfo = {
+    key: "discord/123",
+    components: { platform: "discord", userId: "123" },
+    path: `${tempDir}/workspaces/discord/123`,
+    isDm: false,
+  };
+
+  await Deno.mkdir(workspace.path, { recursive: true });
+  await Deno.writeTextFile(`${workspace.path}/memory.public.jsonl`, "");
+  await Deno.writeTextFile(`${workspace.path}/memory.private.jsonl`, "");
+
+  const context: SkillContext = {
+    workspace,
+    platformAdapter: createMockPlatformAdapter(),
+    channelId: "456",
+    userId: "123",
+  };
+
+  const result = await handler.handleMemorySave(
+    { content: "test", supersedes: [123, 456] },
+    context,
+  );
+  assertEquals(result.success, false);
+  assertEquals(result.error, "Invalid 'supersedes' parameter. Must be an array of strings");
+
+  await Deno.remove(tempDir, { recursive: true });
+});
+
+Deno.test("MemoryHandler - handleMemoryPatch rejects invalid supersedes", async () => {
+  const tempDir = await Deno.makeTempDir();
+  const workspaceManager = new WorkspaceManager({
+    repoPath: tempDir,
+    workspacesDir: "workspaces",
+  });
+  const memoryStore = new MemoryStore(workspaceManager, {
+    searchLimit: 10,
+    maxChars: 2000,
+  });
+  const handler = new MemoryHandler(memoryStore);
+
+  const workspace: WorkspaceInfo = {
+    key: "discord/123",
+    components: { platform: "discord", userId: "123" },
+    path: `${tempDir}/workspaces/discord/123`,
+    isDm: true,
+  };
+
+  const context: SkillContext = {
+    workspace,
+    platformAdapter: createMockPlatformAdapter(),
+    channelId: "456",
+    userId: "123",
+  };
+
+  const result = await handler.handleMemoryPatch(
+    { memory_id: "test_id", supersedes: "not-an-array" },
+    context,
+  );
+  assertEquals(result.success, false);
+  assertEquals(result.error, "Invalid 'supersedes' parameter. Must be an array of strings");
+
+  await Deno.remove(tempDir, { recursive: true });
+});
+
+Deno.test("MemoryHandler - handleMemorySave without relatedTo/supersedes omits them from response", async () => {
+  const tempDir = await Deno.makeTempDir();
+  const workspaceManager = new WorkspaceManager({
+    repoPath: tempDir,
+    workspacesDir: "workspaces",
+  });
+  const memoryStore = new MemoryStore(workspaceManager, {
+    searchLimit: 10,
+    maxChars: 2000,
+  });
+  const handler = new MemoryHandler(memoryStore);
+
+  const workspace: WorkspaceInfo = {
+    key: "discord/123",
+    components: { platform: "discord", userId: "123" },
+    path: `${tempDir}/workspaces/discord/123`,
+    isDm: false,
+  };
+
+  await Deno.mkdir(workspace.path, { recursive: true });
+  await Deno.writeTextFile(`${workspace.path}/memory.public.jsonl`, "");
+  await Deno.writeTextFile(`${workspace.path}/memory.private.jsonl`, "");
+
+  const context: SkillContext = {
+    workspace,
+    platformAdapter: createMockPlatformAdapter(),
+    channelId: "456",
+    userId: "123",
+  };
+
+  const result = await handler.handleMemorySave(
+    { content: "plain memory" },
+    context,
+  );
+  assertEquals(result.success, true);
+  const data = result.data as Record<string, unknown>;
+  assertEquals(data.relatedTo, undefined);
+  assertEquals(data.supersedes, undefined);
+
+  await Deno.remove(tempDir, { recursive: true });
+});
+
 // ============ Agent Workspace Search Tests ============
 
 Deno.test("MemoryHandler - handleMemorySearch searches agent workspace notes", async () => {
