@@ -43,6 +43,12 @@ Feature: Memory maintenance (agent-driven summarization and compaction)
     Then remaining workspaces are still processed
     And the application remains healthy
 
+  Scenario: Maintenance summaries record supersession lineage
+    Given the agent summarizes a group of memories [mem1, mem2, mem3]
+    When the summary is saved via memory-save
+    Then the new summary entry contains supersedes: ["mem1", "mem2", "mem3"]
+    And the original memories are disabled via memory-patch
+
   Scenario: Override memoryMaintenance by environment variables
     Given MEMORY_MAINTENANCE_ENABLED is "true"
     And MEMORY_MAINTENANCE_MODEL is "gpt-5-mini"

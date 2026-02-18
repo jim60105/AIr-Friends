@@ -161,6 +161,61 @@ Deno.test({
 
 // Clean up test directory after all tests
 Deno.test({
+  name: "Integration: relatedTo and supersedes survive write-read cycle",
+  async fn() {
+    const memoryPath = join(TEST_DIR, "memory-relations");
+    await Deno.mkdir(memoryPath, { recursive: true });
+
+    const memoryFile = join(memoryPath, "memory.public.jsonl");
+
+    // Write memory entry with supersedes
+    const entry = {
+      type: "memory",
+      id: "mem_summary",
+      ts: new Date().toISOString(),
+      enabled: true,
+      visibility: "public",
+      importance: "high",
+      content: "Summary of old memories",
+      supersedes: ["mem_old1", "mem_old2"],
+      relatedTo: ["mem_related1"],
+    };
+
+    await Deno.writeTextFile(memoryFile, JSON.stringify(entry) + "\n");
+
+    // Write patch adding more relatedTo
+    const patch = {
+      type: "patch",
+      id: "patch_1",
+      ts: new Date().toISOString(),
+      targetId: "mem_summary",
+      relatedTo: ["mem_related2"],
+    };
+
+    await Deno.writeTextFile(
+      memoryFile,
+      JSON.stringify(patch) + "\n",
+      { append: true },
+    );
+
+    // Read and verify
+    const content = await Deno.readTextFile(memoryFile);
+    const lines = content.trim().split("\n");
+    assertEquals(lines.length, 2);
+
+    const parsedEntry = JSON.parse(lines[0]);
+    assertEquals(parsedEntry.supersedes, ["mem_old1", "mem_old2"]);
+    assertEquals(parsedEntry.relatedTo, ["mem_related1"]);
+
+    const parsedPatch = JSON.parse(lines[1]);
+    assertEquals(parsedPatch.relatedTo, ["mem_related2"]);
+  },
+  sanitizeResources: false,
+  sanitizeOps: false,
+});
+
+// Clean up test directory after all tests
+Deno.test({
   name: "Cleanup: Remove test directory",
   async fn() {
     try {

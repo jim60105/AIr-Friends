@@ -279,6 +279,8 @@ interface MemoryEvent {
   visibility: "public" | "private";
   importance: "high" | "normal";
   content: string; // Plain text
+  relatedTo?: string[]; // IDs of semantically related memories
+  supersedes?: string[]; // IDs of memories this entry supersedes
 }
 ```
 
@@ -293,6 +295,8 @@ interface PatchEvent {
     enabled?: boolean;
     visibility?: "public" | "private";
     importance?: "high" | "normal";
+    relatedTo?: string[]; // IDs of semantically related memories
+    supersedes?: string[]; // IDs of memories this patch's target supersedes
   };
 }
 ```

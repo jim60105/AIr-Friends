@@ -28,11 +28,11 @@ ${HOME}/.agents/skills/send-file/scripts/send-file.ts \
 
 ### Parameters
 
-| Parameter | Required | Description |
-|-----------|----------|-------------|
-| `--session-id` | Yes | Session ID from `$SESSION_ID` environment variable |
-| `--file-path` | Yes | File path relative to the workspace root |
-| `--caption` | No | Optional text message to accompany the file |
+| Parameter      | Required | Description                                        |
+| -------------- | -------- | -------------------------------------------------- |
+| `--session-id` | Yes      | Session ID from `$SESSION_ID` environment variable |
+| `--file-path`  | Yes      | File path relative to the workspace root           |
+| `--caption`    | No       | Optional text message to accompany the file        |
 
 ### Example
 

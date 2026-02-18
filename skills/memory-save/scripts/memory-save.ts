@@ -6,7 +6,7 @@ import { callSkillApi, exitWithError, outputResult, parseBaseArgs } from "../../
 async function main() {
   try {
     const args = parse(Deno.args, {
-      string: ["session-id", "api-url", "content", "importance"],
+      string: ["session-id", "api-url", "content", "importance", "related-to", "supersedes"],
       alias: { s: "session-id", a: "api-url", c: "content", i: "importance" },
     });
 
@@ -25,10 +25,20 @@ async function main() {
     }
 
     // Visibility is auto-determined by the server based on conversation context
-    const result = await callSkillApi(apiUrl, "memory-save", sessionId, {
+    const params: Record<string, unknown> = {
       content,
       importance,
-    });
+    };
+
+    if (args["related-to"]) {
+      params.relatedTo = args["related-to"].split(",").map((id: string) => id.trim());
+    }
+
+    if (args.supersedes) {
+      params.supersedes = args.supersedes.split(",").map((id: string) => id.trim());
+    }
+
+    const result = await callSkillApi(apiUrl, "memory-save", sessionId, params);
 
     outputResult(result);
 

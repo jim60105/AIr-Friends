@@ -77,6 +77,8 @@ export interface MemoryPatchParams {
   enabled?: boolean;
   visibility?: "public" | "private";
   importance?: "high" | "normal";
+  relatedTo?: string[];
+  supersedes?: string[];
 }
 
 /**
