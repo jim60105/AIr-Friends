@@ -155,11 +155,11 @@ Deno.test("applyEnvOverrides - empty WHITELIST does not override", () => {
   Deno.env.set("WHITELIST", "");
   try {
     const config: Record<string, unknown> = {
-      accessControl: { replyTo: "whitelist", whitelist: ["discord/account/original"] },
+      accessControl: { replyTo: "whitelist", whitelist: ["discord/account/11100000000000001"] },
     };
     applyEnvOverrides(config);
     const accessControl = config.accessControl as { whitelist: string[] };
-    assertEquals(accessControl.whitelist, ["discord/account/original"]);
+    assertEquals(accessControl.whitelist, ["discord/account/11100000000000001"]);
   } finally {
     Deno.env.delete("WHITELIST");
   }

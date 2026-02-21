@@ -35,7 +35,7 @@ Deno.test("resolveModel - should match whitelist account rule", () => {
   const context: ModelRoutingContext = {
     sessionType: "message",
     platform: "discord",
-    userId: "123",
+    userId: "12345678901234567",
   };
   assertEquals(resolveModel(config, context, FALLBACK_MODEL), "premium-model");
 });
@@ -48,7 +48,7 @@ Deno.test("resolveModel - should match whitelist channel rule", () => {
   const context: ModelRoutingContext = {
     sessionType: "message",
     platform: "discord",
-    channelId: "456",
+    channelId: "45678901234567890",
   };
   assertEquals(resolveModel(config, context, FALLBACK_MODEL), "channel-model");
 });
@@ -61,7 +61,7 @@ Deno.test("resolveModel - should not match whitelist when platform differs", () 
   const context: ModelRoutingContext = {
     sessionType: "message",
     platform: "misskey",
-    userId: "123",
+    userId: "12345678901234567",
   };
   assertEquals(resolveModel(config, context, FALLBACK_MODEL), FALLBACK_MODEL);
 });
@@ -74,7 +74,7 @@ Deno.test("resolveModel - should not match whitelist when user ID differs", () =
   const context: ModelRoutingContext = {
     sessionType: "message",
     platform: "discord",
-    userId: "999",
+    userId: "99900000000000001",
   };
   assertEquals(resolveModel(config, context, FALLBACK_MODEL), FALLBACK_MODEL);
 });
@@ -135,7 +135,7 @@ Deno.test("resolveModel - should use first matching rule when multiple rules mat
   const context: ModelRoutingContext = {
     sessionType: "message",
     platform: "discord",
-    userId: "123",
+    userId: "12345678901234567",
   };
   assertEquals(resolveModel(config, context, FALLBACK_MODEL), "first-model");
 });
@@ -151,7 +151,7 @@ Deno.test("resolveModel - should return fallback when no rules match", () => {
   const context: ModelRoutingContext = {
     sessionType: "message",
     platform: "discord",
-    userId: "123",
+    userId: "12345678901234567",
   };
   assertEquals(resolveModel(config, context, FALLBACK_MODEL), FALLBACK_MODEL);
 });
@@ -240,7 +240,7 @@ Deno.test("resolveModel - should match when whitelist AND contentKeywords both m
   const context: ModelRoutingContext = {
     sessionType: "message",
     platform: "discord",
-    userId: "123",
+    userId: "12345678901234567",
     messageContent: "我想做研究",
   };
   assertEquals(resolveModel(config, context, FALLBACK_MODEL), "combo-model");
@@ -257,7 +257,7 @@ Deno.test("resolveModel - should not match when whitelist matches but contentKey
   const context: ModelRoutingContext = {
     sessionType: "message",
     platform: "discord",
-    userId: "123",
+    userId: "12345678901234567",
     messageContent: "hello",
   };
   assertEquals(resolveModel(config, context, FALLBACK_MODEL), FALLBACK_MODEL);
@@ -274,7 +274,7 @@ Deno.test("resolveModel - should not match when contentKeywords matches but whit
   const context: ModelRoutingContext = {
     sessionType: "message",
     platform: "discord",
-    userId: "123",
+    userId: "12345678901234567",
     messageContent: "研究",
   };
   assertEquals(resolveModel(config, context, FALLBACK_MODEL), FALLBACK_MODEL);
@@ -291,7 +291,7 @@ Deno.test("resolveModel - should match when whitelist AND sessionType both match
   const context: ModelRoutingContext = {
     sessionType: "message",
     platform: "discord",
-    userId: "123",
+    userId: "12345678901234567",
   };
   assertEquals(resolveModel(config, context, FALLBACK_MODEL), "combo-model");
 });
@@ -311,7 +311,7 @@ Deno.test("resolveModel - should match when all three conditions match", () => {
   const context: ModelRoutingContext = {
     sessionType: "message",
     platform: "discord",
-    userId: "123",
+    userId: "12345678901234567",
     messageContent: "我想做研究",
   };
   assertEquals(resolveModel(config, context, FALLBACK_MODEL), "triple-model");
@@ -332,7 +332,7 @@ Deno.test("resolveModel - should not match when one of three conditions fails", 
   const context: ModelRoutingContext = {
     sessionType: "message",
     platform: "discord",
-    userId: "123",
+    userId: "12345678901234567",
     messageContent: "hello",
   };
   assertEquals(resolveModel(config, context, FALLBACK_MODEL), FALLBACK_MODEL);
@@ -357,7 +357,7 @@ Deno.test("resolveModel - backward compat: single whitelist condition still work
   const context: ModelRoutingContext = {
     sessionType: "message",
     platform: "discord",
-    userId: "123",
+    userId: "12345678901234567",
   };
   assertEquals(resolveModel(config, context, FALLBACK_MODEL), "premium-model");
 });

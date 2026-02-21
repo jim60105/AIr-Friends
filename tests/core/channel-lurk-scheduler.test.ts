@@ -38,11 +38,14 @@ Deno.test("extractDiscordChannelIds - filters discord channel entries", () => {
     "discord/channel/44400000000000000",
   ];
   const result = extractDiscordChannelIds(whitelist);
-  assertEquals(result, ["111", "444"]);
+  assertEquals(result, ["11100000000000000", "44400000000000000"]);
 });
 
 Deno.test("extractDiscordChannelIds - returns empty for no matches", () => {
-  const result = extractDiscordChannelIds(["discord/account/12345678901234567", "misskey/account/456"]);
+  const result = extractDiscordChannelIds([
+    "discord/account/12345678901234567",
+    "misskey/account/456",
+  ]);
   assertEquals(result, []);
 });
 

@@ -61,7 +61,7 @@ Deno.test("determineSpontaneousTarget - Discord returns null when whitelist is e
 });
 
 Deno.test("determineSpontaneousTarget - Discord handles DM creation failure", async () => {
-  const config = createConfig(["discord/account/nonexistent"]);
+  const config = createConfig(["discord/account/66600000000000001"]);
   // deno-lint-ignore no-explicit-any
   const adapter: any = {
     platform: "discord" as const,
@@ -89,7 +89,7 @@ Deno.test("determineSpontaneousTarget - Misskey always returns timeline:self", (
 });
 
 Deno.test("determineSpontaneousTarget - Discord handles DM creation exception", async () => {
-  const config = createConfig(["discord/account/erruser"]);
+  const config = createConfig(["discord/account/77700000000000001"]);
   // deno-lint-ignore no-explicit-any
   const adapter: any = {
     platform: "discord" as const,
@@ -121,7 +121,7 @@ Deno.test("determineSpontaneousTarget - Misskey via determineSpontaneousTarget",
 });
 
 Deno.test("determineSpontaneousTarget - Discord via determineSpontaneousTarget", async () => {
-  const config = createConfig(["discord/channel/555"]);
+  const config = createConfig(["discord/channel/55500000000000000"]);
   const adapter = createMockAdapter();
 
   const target = await determineSpontaneousTarget(
@@ -129,7 +129,7 @@ Deno.test("determineSpontaneousTarget - Discord via determineSpontaneousTarget",
     adapter as PlatformAdapter,
     config,
   );
-  assertEquals(target?.channelId, "555");
+  assertEquals(target?.channelId, "55500000000000000");
 });
 
 Deno.test("determineSpontaneousTarget - unsupported platform returns null", async () => {

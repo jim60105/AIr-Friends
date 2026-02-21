@@ -52,11 +52,11 @@ const mockPlatformAdapter = {} as PlatformAdapter;
 function createTestEvent(messageId: string): NormalizedEvent {
   return {
     platform: "discord",
-    channelId: "test_channel",
-    userId: "test_user",
+    channelId: "99988877766655544",
+    userId: "11122233344455566",
     messageId,
     isDm: false,
-    guildId: "test_guild",
+    guildId: "88877766655544433",
     content: "Hello bot!",
     timestamp: new Date(),
   };
@@ -252,7 +252,7 @@ Deno.test("MessageHandler - whitelisted account bypasses rate limit", async () =
   };
   const replyPolicy = new ReplyPolicyEvaluator({
     replyTo: "whitelist",
-    whitelist: ["discord/account/test_user"],
+    whitelist: ["discord/account/11122233344455566"],
   });
   const handler = new MessageHandler(orchestrator, rateLimitConfig, replyPolicy);
 
@@ -278,7 +278,7 @@ Deno.test("MessageHandler - whitelisted channel user still rate limited", async 
   };
   const replyPolicy = new ReplyPolicyEvaluator({
     replyTo: "whitelist",
-    whitelist: ["discord/channel/test_channel"],
+    whitelist: ["discord/channel/99988877766655544"],
   });
   const handler = new MessageHandler(orchestrator, rateLimitConfig, replyPolicy);
 
@@ -302,7 +302,7 @@ Deno.test("MessageHandler - non-whitelisted account rate limited normally", asyn
   };
   const replyPolicy = new ReplyPolicyEvaluator({
     replyTo: "whitelist",
-    whitelist: ["discord/account/other_user"],
+    whitelist: ["discord/account/99900000000000002"],
   });
   const handler = new MessageHandler(orchestrator, rateLimitConfig, replyPolicy);
 

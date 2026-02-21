@@ -207,7 +207,7 @@ Environment variable overrides:
 
 ```bash
 REPLY_TO=public
-WHITELIST=discord/account/12345678901234567,discord/channel/987654321,misskey/account/abcdef123
+WHITELIST=discord/account/12345678901234567,discord/channel/98765432109876543,misskey/account/abcdef123
 ```
 
 ### Model Routing
