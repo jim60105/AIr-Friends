@@ -108,12 +108,19 @@ jobs:
 
       - name: Check coverage threshold
         run: |
-          COVERAGE=$(deno coverage coverage --exclude='tests/' 2>&1 | grep -oP '[\d.]+(?=%)' | tail -1)
+          COVERAGE=$(deno coverage coverage --exclude='tests/' 2>&1 | sed 's/\x1b\[[0-9;]*m//g' | grep 'All files' | awk -F'|' '{gsub(/[[:space:]]/, "", $3); print $3}')
           echo "Coverage: ${COVERAGE}%"
+          if [ -z "$COVERAGE" ]; then
+            echo "::error::Failed to extract coverage percentage"
+            exit 1
+          fi
           if [ "$(echo "$COVERAGE < 75" | bc -l)" -eq 1 ]; then
             echo "::error::Test coverage ${COVERAGE}% is below the required 75% threshold"
             exit 1
           fi
+
+      - name: Generate LCOV report
+        run: deno coverage coverage --lcov --output=coverage.lcov --exclude='tests/'
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v5
