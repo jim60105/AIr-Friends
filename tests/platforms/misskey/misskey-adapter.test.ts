@@ -1405,3 +1405,15 @@ Deno.test("MisskeyAdapter.getDmChannelId - never returns null", async () => {
   assertEquals(result !== null, true);
   assertEquals(typeof result, "string");
 });
+
+Deno.test("MisskeyAdapter.hasBotReaction - always returns false", async () => {
+  const adapter = createMockMisskeyAdapter();
+  const result = await adapter.hasBotReaction("note:abc", "msg-123");
+  assertEquals(result, false);
+});
+
+Deno.test("MisskeyAdapter.hasBotMention - always returns false", async () => {
+  const adapter = createMockMisskeyAdapter();
+  const result = await adapter.hasBotMention("note:abc", "msg-123");
+  assertEquals(result, false);
+});

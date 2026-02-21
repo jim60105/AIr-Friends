@@ -180,3 +180,115 @@ Deno.test("ChannelLurkScheduler - disabled config does not start", async () => {
 
   assertEquals(triggered, false);
 });
+
+Deno.test("ChannelLurkScheduler - skips when bot mentioned in message", async () => {
+  const adapter = new MockPlatformAdapter();
+  const message = createMockMessage();
+  adapter.setMockMessages([message]);
+  // Override hasBotMention to return true
+  adapter.hasBotMention = () => Promise.resolve(true);
+
+  let triggered = false;
+  const scheduler = new ChannelLurkScheduler(
+    createConfig(),
+    adapter,
+    ["channel-1"],
+    () => {
+      triggered = true;
+    },
+  );
+
+  scheduler.start();
+  await new Promise((r) => setTimeout(r, 120));
+  scheduler.stop();
+
+  assertEquals(triggered, false);
+});
+
+Deno.test("ChannelLurkScheduler - skips when bot already reacted", async () => {
+  const adapter = new MockPlatformAdapter();
+  const message = createMockMessage();
+  adapter.setMockMessages([message]);
+  // Override hasBotReaction to return true
+  adapter.hasBotReaction = () => Promise.resolve(true);
+
+  let triggered = false;
+  const scheduler = new ChannelLurkScheduler(
+    createConfig(),
+    adapter,
+    ["channel-1"],
+    () => {
+      triggered = true;
+    },
+  );
+
+  scheduler.start();
+  await new Promise((r) => setTimeout(r, 120));
+  scheduler.stop();
+
+  assertEquals(triggered, false);
+});
+
+Deno.test("ChannelLurkScheduler - continues after single channel error", async () => {
+  const adapter = new MockPlatformAdapter();
+  const message = createMockMessage();
+  adapter.setMockMessages([message]);
+
+  let triggeredChannels: string[] = [];
+  let callCount = 0;
+
+  // Make fetchRecentMessages fail for channel-1 but succeed for channel-2
+  const origFetch = adapter.fetchRecentMessages.bind(adapter);
+  adapter.fetchRecentMessages = (channelId: string, limit: number) => {
+    callCount++;
+    if (channelId === "channel-1") {
+      return Promise.reject(new Error("API error"));
+    }
+    return origFetch(channelId, limit);
+  };
+
+  const scheduler = new ChannelLurkScheduler(
+    createConfig(),
+    adapter,
+    ["channel-1", "channel-2"],
+    (target) => {
+      triggeredChannels.push(target.channelId);
+    },
+  );
+
+  scheduler.start();
+  await new Promise((r) => setTimeout(r, 120));
+  scheduler.stop();
+
+  // channel-2 should still be checked despite channel-1 error
+  assertEquals(triggeredChannels.includes("channel-2"), true);
+});
+
+Deno.test("ChannelLurkScheduler - triggers for new messageId after previous", async () => {
+  const adapter = new MockPlatformAdapter();
+  const message1 = createMockMessage({ messageId: "msg-001" });
+  adapter.setMockMessages([message1]);
+
+  let triggerCount = 0;
+  const scheduler = new ChannelLurkScheduler(
+    createConfig({ intervalMs: 30 }),
+    adapter,
+    ["channel-1"],
+    () => {
+      triggerCount++;
+    },
+  );
+
+  scheduler.start();
+  await new Promise((r) => setTimeout(r, 80));
+
+  // Change to new message
+  const message2 = createMockMessage({ messageId: "msg-002" });
+  adapter.setMockMessages([message2]);
+
+  await new Promise((r) => setTimeout(r, 80));
+  scheduler.stop();
+
+  // Should trigger for both different messages
+  assertEquals(triggerCount, 2);
+});
