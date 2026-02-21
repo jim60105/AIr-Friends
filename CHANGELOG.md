@@ -7,14 +7,56 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-02-21
+
 ### Added
 
+- Discord Snowflake ID validation for whitelist entries
+  - Platform-specific validation: Discord IDs require 17-20 digit Snowflake format
+  - Misskey IDs retain generic pattern due to varying ID formats across instances
+  - Unified `isValidWhitelistEntry()` function for both `accessControl.whitelist` and `modelRouting.rules[].match.whitelist`
+  - Updated tests and documentation with valid Snowflake IDs
+- Model routing content keywords and multi-condition AND matching
+  - New `contentKeywords` field in `ModelRoutingMatch` for routing based on message content
+  - Keywords are case-insensitive with OR logic within the array
+  - Match logic changed from mutually exclusive to AND combination (all specified conditions must be met)
+  - Added `messageContent` to `ModelRoutingContext`, passed from `processMessage()`
+  - Native YAML `modelRouting` section in Helm chart values
+  - Environment variable support via `MODEL_ROUTING_RULES` JSON string
+- Misskey hasBotReaction and hasBotMention implementations
+  - `hasBotReaction()`: uses `notes/show` API to check `myReaction` field
+  - `hasBotMention()`: uses `notes/show` + `isMentionToBot` utility
+  - Both return false for `chat:` channels (no reaction/mention support)
+  - Fail-safe error handling (returns false on API errors)
 - Channel lurk reply: periodically check whitelisted Discord channels and auto-trigger reply when conditions are met (Feature 26)
   - `ChannelLurkScheduler` with fixed-interval scheduling and three-layer duplicate prevention
   - `hasBotReaction()` and `hasBotMention()` methods on `PlatformAdapter`
   - `processChannelLurkMessage()` reuses normal message flow with `channelLurk` session type
   - Configuration via `platforms.discord.channelLurk` with env var overrides
   - Discord-only feature (Misskey adapters return false for new methods)
+
+### Changed
+
+- Model routing match conditions now use AND logic instead of mutually exclusive
+  - All conditions specified in a rule must be satisfied for a match
+  - Config validation updated from "exactly one condition" to "at least one condition"
+  - Backward compatible: existing single-condition rules behave identically
+
+### Fixed
+
+- Fixed literal `\n` sequences in Agent-generated replies not converting to actual newlines
+  - Added `unescapeNewlines()` function in `reply-handler.ts` to convert string `\n` to real line breaks
+  - Applied to both `handleSendReply` and `handleEditReply` flows after XML tag stripping
+  - Affects both Discord and Misskey platforms
+- Fixed Discord premium emoji being included in `fetchEmojis()` results
+  - Added `isPremiumEmoji()` helper to identify subscription-restricted emoji
+  - Filters emoji where all associated roles are either `premiumSubscriberRole` or managed with `integrationId`
+  - Debug logging for filtered premium emoji count
+  - Bot can now only see and use emoji it has permission to use
+- Fixed readiness probe failure in container deployments due to skill path mismatch
+  - Added `AGENT_SKILLS_DIR` environment variable for configurable skill directory path
+  - Helm chart sets `AGENT_SKILLS_DIR=/home/deno/.agents/skills` by default
+  - Resolves 503 status when probe looks for skills at default `skills/` but container uses `/home/deno/.agents/skills/`
 
 ## [0.8.0] - 2026-02-18
 
@@ -560,7 +602,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ---
 
-[Unreleased]: https://github.com/jim60105/AIr-Friends/compare/v0.8.0...HEAD
+[Unreleased]: https://github.com/jim60105/AIr-Friends/compare/v0.9.0...HEAD
+[0.9.0]: https://github.com/jim60105/AIr-Friends/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/jim60105/AIr-Friends/compare/v0.7.2...v0.8.0
 [0.7.2]: https://github.com/jim60105/AIr-Friends/compare/v0.7.1...v0.7.2
 [0.7.1]: https://github.com/jim60105/AIr-Friends/compare/v0.7.0...v0.7.1
