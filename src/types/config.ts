@@ -156,13 +156,17 @@ export type SessionType =
 
 /**
  * Match condition for a model routing rule.
- * Exactly one field must be set (mutually exclusive).
+ * All specified fields must match (AND logic).
+ * Within contentKeywords, any keyword match is sufficient (OR logic).
  */
 export interface ModelRoutingMatch {
   /** Match a specific whitelist entry (format: "{platform}/account/{id}" or "{platform}/channel/{id}") */
   whitelist?: string;
   /** Match a session type */
   sessionType?: SessionType;
+  /** Match message content containing any of these keywords (case-insensitive, OR within array).
+   *  Only effective for sessionType "message" — ignored in other session types. */
+  contentKeywords?: string[];
 }
 
 /**
