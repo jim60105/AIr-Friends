@@ -111,9 +111,9 @@ env:
   # RSS Feed Research Settings
   SELF_RESEARCH_ENABLED: 'false'
   SELF_RESEARCH_MODEL: 'github-copilot/claude-opus-4.6'
-  # RSS feeds as a JSON string array. Example:
-  # [{"url":"https://example.com/feed.xml","name":"Tech News"}]
-  SELF_RESEARCH_RSS_FEEDS: '[{"url":"https://example.com/feed.xml","name":"Tech News"}]'
+  # RSS feeds: prefer using selfResearchRssFeeds section below (native YAML).
+  # Only set this if you need to override selfResearchRssFeeds with a raw JSON string.
+  # SELF_RESEARCH_RSS_FEEDS: '[{"url":"https://example.com/feed.xml","name":"Tech News"}]'
   SELF_RESEARCH_MIN_INTERVAL_MS: '43200000'
   SELF_RESEARCH_MAX_INTERVAL_MS: '86400000'
 
@@ -156,6 +156,16 @@ env:
   AUDIT_RETENTION_DAYS: ''
   AUDIT_HASH_CONTENT: ''
   AUDIT_INCLUDED_PHASES: ''
+
+# -- Self-research RSS feeds (native YAML, easier than JSON env var).
+# When selfResearchRssFeeds is non-empty, it takes precedence over
+# SELF_RESEARCH_RSS_FEEDS env var.
+selfResearchRssFeeds: []
+  # Example:
+  # - url: "https://example.com/feed.xml"
+  #   name: "Tech News"
+  # - url: "https://another.example.com/rss"
+  #   name: "Science Daily"
 
 # -- Model routing configuration (native YAML, easier than JSON env var).
 # When modelRouting.enabled is true, this section takes precedence over
