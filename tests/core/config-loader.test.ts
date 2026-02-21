@@ -1957,6 +1957,59 @@ Deno.test("config-loader - mcpServers", async (t) => {
   });
 });
 
+Deno.test("loadConfig - externalSkills validation", async (t) => {
+  const baseConfig = (extra: string) => `
+platforms:
+  discord:
+    token: "test-token"
+    enabled: true
+  misskey:
+    host: "misskey.example.com"
+    token: "test-token"
+    enabled: false
+agent:
+  model: "gpt-4"
+  systemPromptPath: "./prompts/system_reply.md"
+  tokenLimit: 4096
+${extra}
+workspace:
+  repoPath: "./data"
+  workspacesDir: "workspaces"
+`;
+
+  await t.step("valid externalSkills are preserved", async () => {
+    const config = baseConfig(`  externalSkills:
+    - repo: "jim60105/copilot-prompt"
+      skill: "create-blog-post"`);
+    await withTestConfig(config, async (dir) => {
+      const result = await loadConfig(dir);
+      assertEquals(result.agent.externalSkills?.length, 1);
+      assertEquals(result.agent.externalSkills![0].repo, "jim60105/copilot-prompt");
+      assertEquals(result.agent.externalSkills![0].skill, "create-blog-post");
+    });
+  });
+
+  await t.step("invalid externalSkills entries are filtered out", async () => {
+    const config = baseConfig(`  externalSkills:
+    - repo: ""
+      skill: "create-blog-post"
+    - repo: "valid/repo"
+      skill: ""`);
+    await withTestConfig(config, async (dir) => {
+      const result = await loadConfig(dir);
+      assertEquals(result.agent.externalSkills?.length, 0);
+    });
+  });
+
+  await t.step("missing externalSkills defaults to empty array", async () => {
+    const config = baseConfig("");
+    await withTestConfig(config, async (dir) => {
+      const result = await loadConfig(dir);
+      assertEquals(result.agent.externalSkills?.length, 0);
+    });
+  });
+});
+
 Deno.test("convertUserMCPServerConfigs", async (t) => {
   await t.step("converts stdio config correctly", () => {
     const result = convertUserMCPServerConfigs([{

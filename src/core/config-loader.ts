@@ -548,6 +548,25 @@ function validateConfig(config: Record<string, unknown>): void {
 
   // MCP Servers validation
   const mcpServers = agentConfig.mcpServers as unknown[] | undefined;
+
+  // External skills validation
+  if (agentConfig.externalSkills && Array.isArray(agentConfig.externalSkills)) {
+    const validSkills: unknown[] = [];
+    for (const skill of agentConfig.externalSkills as Record<string, unknown>[]) {
+      if (
+        typeof skill.repo !== "string" || skill.repo.trim() === "" ||
+        typeof skill.skill !== "string" || skill.skill.trim() === ""
+      ) {
+        logger.warn("Invalid externalSkills entry (missing repo or skill), skipping", { skill });
+        continue;
+      }
+      validSkills.push(skill);
+    }
+    agentConfig.externalSkills = validSkills;
+  } else {
+    agentConfig.externalSkills = [];
+  }
+
   if (mcpServers && Array.isArray(mcpServers)) {
     const validServers: unknown[] = [];
     const seenNames = new Set<string>();

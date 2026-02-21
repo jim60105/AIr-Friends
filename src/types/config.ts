@@ -129,6 +129,20 @@ export interface AgentConfig {
 
   /** Path to skills directory (default: "skills") */
   skillsDir?: string;
+
+  /** External skills to install at startup (optional) */
+  externalSkills?: ExternalSkillConfig[];
+}
+
+/**
+ * External skill configuration for automatic installation at startup.
+ * Each entry specifies a GitHub repo and skill name to install via `deno x -y skills add`.
+ */
+export interface ExternalSkillConfig {
+  /** GitHub repository (e.g. "jim60105/copilot-prompt") */
+  repo: string;
+  /** Skill name within the repository (e.g. "create-blog-post") */
+  skill: string;
 }
 
 /**

@@ -20,6 +20,7 @@ import { configureLogger, createLogger } from "@utils/logger.ts";
 import { GelfTransport } from "@utils/gelf-transport.ts";
 import { cleanupAuditLogs } from "@core/audit-retention.ts";
 import { AuditRetentionScheduler } from "@core/audit-retention-scheduler.ts";
+import { installExternalSkills } from "@core/skill-installer.ts";
 import { join } from "@std/path";
 import type { Platform } from "./types/events.ts";
 import { isValidPlatform } from "./types/events.ts";
@@ -111,6 +112,11 @@ export async function bootstrap(
       outputPath: config.agent.dryRun.outputPath,
       mockReply: config.agent.dryRun.mockReply ? "(configured)" : "(none)",
     });
+  }
+
+  // Install external skills before agent core initialization
+  if (config.agent.externalSkills && config.agent.externalSkills.length > 0) {
+    await installExternalSkills(config.agent.externalSkills);
   }
 
   // Initialize agent core (this initializes all necessary components)
