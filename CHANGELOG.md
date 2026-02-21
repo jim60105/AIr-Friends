@@ -7,6 +7,56 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-02-21
+
+### Added
+
+- Native YAML support for `selfResearchRssFeeds` in Helm chart
+  - New `selfResearchRssFeeds` top-level section in `values.yaml` following the same pattern as `modelRouting`
+  - When non-empty, the list is serialized to JSON and injected as `SELF_RESEARCH_RSS_FEEDS` environment variable via secret template
+  - Eliminates need for manual JSON string formatting in values override
+- Platform integration documentation guide (`docs/PLATFORM_INTEGRATION.md`)
+  - Complete step-by-step instructions for adding new platform support
+  - Covers adapter implementation, configuration, environment variables, validation, registration, and testing
+  - Includes architecture overview, prerequisites, and 18-item checklist
+  - Reference links to key source files and documentation
+- Type guard `isValidPlatform()` and `VALID_PLATFORMS` constant in `src/types/events.ts`
+  - Eliminates hardcoded platform validation across core modules
+  - Used in `session-orchestrator.ts`, `bootstrap.ts`, `config-loader.ts`, and `spontaneous-scheduler.ts`
+  - Centralized platform validation logic
+- 75% test coverage requirement enforcement
+  - Added `codecov.yml` with coverage threshold configuration
+  - CI workflow now fails PRs below 75% coverage on `src/` directory
+  - Updated documentation with coverage requirement and CI/CD checklist
+
+### Changed
+
+- **BREAKING**: Refactored platform-specific code from `core/` and `skills/` to `platforms/`
+  - Added `PlatformAdapter.determineSpontaneousTarget()` abstract method (all custom adapters must implement)
+  - Added `PlatformAdapter.getSearchGuildId()` method (default implementation returns empty string)
+  - Discord adapter: `determineSpontaneousTarget()` randomly selects from whitelist (channel or account DM)
+  - Discord adapter: `getSearchGuildId()` returns channelId for non-DM contexts
+  - Misskey adapter: `determineSpontaneousTarget()` returns `timeline:self`
+  - Moved `extractDiscordChannelIds()` from `src/core/channel-lurk-scheduler.ts` to `src/platforms/discord/discord-utils.ts`
+  - Extracted `selectDiscordSpontaneousEntry()` to `discord-utils.ts` for testability
+  - Simplified `spontaneous-target.ts` to interface-only file
+  - Removed platform checks from `context-handler.ts`
+  - Updated import paths in `bootstrap.ts` and test files
+- Updated Helm chart
+  - Chart version bumped from 0.1.0 to 0.2.0
+  - `appVersion` updated from 0.1.0 to 0.9.0
+  - Breaking change: `securityContext` renamed to `containerSecurityContext`
+  - Added `podSecurityContext` configuration
+  - Added ServiceMonitor support
+  - Added OpenCode authentication PVC
+  - Support for individual prompt file mounting
+  - Added `resource-policy: keep` annotations
+
+### Fixed
+
+- Fixed hardcoded `platform: "discord"` in `ChannelLurkScheduler.checkChannel()` (now uses `this.adapter.platform`)
+- Fixed scattered platform validation logic across codebase (now centralized in `isValidPlatform()`)
+
 ## [0.9.0] - 2026-02-21
 
 ### Added
@@ -602,7 +652,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ---
 
-[Unreleased]: https://github.com/jim60105/AIr-Friends/compare/v0.9.0...HEAD
+[Unreleased]: https://github.com/jim60105/AIr-Friends/compare/v0.10.0...HEAD
+[0.10.0]: https://github.com/jim60105/AIr-Friends/compare/v0.9.0...v0.10.0
 [0.9.0]: https://github.com/jim60105/AIr-Friends/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/jim60105/AIr-Friends/compare/v0.7.2...v0.8.0
 [0.7.2]: https://github.com/jim60105/AIr-Friends/compare/v0.7.1...v0.7.2
