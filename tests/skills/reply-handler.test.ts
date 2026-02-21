@@ -1,7 +1,7 @@
 // tests/skills/reply-handler.test.ts
 
 import { assertEquals } from "@std/assert";
-import { ReplyHandler, stripXmlTags } from "@skills/reply-handler.ts";
+import { ReplyHandler, stripXmlTags, unescapeNewlines } from "@skills/reply-handler.ts";
 import type { SkillContext } from "@skills/types.ts";
 import type { WorkspaceInfo } from "../../src/types/workspace.ts";
 import type { PlatformAdapter } from "@platforms/platform-adapter.ts";
@@ -664,4 +664,30 @@ Deno.test("ReplyHandler - handleEditReply strips XML tags from message", async (
 
   assertEquals(result.success, true);
   assertEquals(capturedContent, "edited 🎉");
+});
+
+// --- unescapeNewlines tests ---
+
+Deno.test("unescapeNewlines - converts literal backslash-n to newline", () => {
+  assertEquals(unescapeNewlines("hello\\nworld"), "hello\nworld");
+});
+
+Deno.test("unescapeNewlines - converts multiple occurrences", () => {
+  assertEquals(unescapeNewlines("a\\nb\\nc"), "a\nb\nc");
+});
+
+Deno.test("unescapeNewlines - preserves existing real newlines", () => {
+  assertEquals(unescapeNewlines("hello\nworld"), "hello\nworld");
+});
+
+Deno.test("unescapeNewlines - handles empty string", () => {
+  assertEquals(unescapeNewlines(""), "");
+});
+
+Deno.test("unescapeNewlines - handles string without newlines", () => {
+  assertEquals(unescapeNewlines("hello world"), "hello world");
+});
+
+Deno.test("unescapeNewlines - handles mixed real and literal newlines", () => {
+  assertEquals(unescapeNewlines("line1\nline2\\nline3"), "line1\nline2\nline3");
 });
