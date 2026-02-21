@@ -556,6 +556,8 @@ Run the test suite:
 deno task test
 ```
 
+> **Coverage Requirement:** Test coverage MUST be over 75%. CI enforces this threshold — PRs that drop below 75% coverage will not pass. All PRs will only be merged after all CI checks succeed.
+
 ### Data Directory Structure
 
 During development, data is stored under `./data/` (configurable via `workspace.repoPath`):
@@ -592,4 +594,6 @@ Please ensure your code follows the project's coding standards:
 1. Run `deno fmt` before committing
 2. Run `deno lint` to check for issues
 3. Ensure all tests pass with `deno test`
-4. Follow the architecture patterns described in [DESIGN.md](DESIGN.md)
+4. Ensure test coverage is over 75%
+5. All CI checks must pass before a PR can be merged
+6. Follow the architecture patterns described in [DESIGN.md](DESIGN.md)

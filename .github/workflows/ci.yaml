@@ -106,6 +106,15 @@ jobs:
       - name: Generate coverage report
         run: deno task coverage:report
 
+      - name: Check coverage threshold
+        run: |
+          COVERAGE=$(deno coverage coverage --exclude='tests/' 2>&1 | grep -oP '[\d.]+(?=%)' | tail -1)
+          echo "Coverage: ${COVERAGE}%"
+          if [ "$(echo "$COVERAGE < 75" | bc -l)" -eq 1 ]; then
+            echo "::error::Test coverage ${COVERAGE}% is below the required 75% threshold"
+            exit 1
+          fi
+
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v5
         with:

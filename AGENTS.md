@@ -1092,6 +1092,7 @@ GELF 輸出中，`messageTemplate` 會作為 `_messageTemplate` 自訂欄位傳�
 - Unit tests: `{module}.test.ts`
 - Integration tests: `{feature}.integration.test.ts`
 - Use `Deno.test()` with `@std/assert`
+- **Test coverage MUST be over 75%** — CI enforces this threshold; PRs below 75% coverage will fail
 
 ```typescript
 import { assertEquals } from "@std/assert";
@@ -1276,8 +1277,10 @@ Before committing, ensure:
 2. ✅ `deno lint src/ tests/` passes
 3. ✅ `deno check src/main.ts` passes
 4. ✅ `deno test` passes
-5. ✅ No sensitive data in code or logs
-6. ✅ When adding new configuration or environment variables, update **all** of:
+5. ✅ Test coverage is over 75%
+6. ✅ All CI checks pass — PRs will only be merged after all CI jobs succeed
+7. ✅ No sensitive data in code or logs
+8. ✅ When adding new configuration or environment variables, update **all** of:
    - `config.example.yaml`
    - `.env.example`
    - `helm/values.yaml` (under `env:` section)
