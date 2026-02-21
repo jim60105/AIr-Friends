@@ -83,9 +83,10 @@ export class ContextHandler {
             };
           }
 
-          const guildId = context.workspace.components.platform === "discord"
-            ? (context.workspace.isDm ? "" : context.channelId)
-            : "";
+          const guildId = context.platformAdapter.getSearchGuildId(
+            context.channelId,
+            context.workspace.isDm,
+          );
 
           const messages = await context.platformAdapter.searchRelatedMessages(
             guildId,

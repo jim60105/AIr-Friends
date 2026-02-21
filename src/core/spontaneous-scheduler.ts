@@ -2,6 +2,7 @@
 
 import { createLogger } from "@utils/logger.ts";
 import type { Config } from "../types/config.ts";
+import { VALID_PLATFORMS } from "../types/events.ts";
 import type { Platform } from "../types/events.ts";
 
 const logger = createLogger("SpontaneousScheduler");
@@ -56,7 +57,7 @@ export class SpontaneousScheduler {
     }
     this.started = true;
 
-    for (const platformName of ["discord", "misskey"] as const) {
+    for (const platformName of VALID_PLATFORMS) {
       const platformConfig = this.config.platforms[platformName];
       if (!platformConfig.enabled || !platformConfig.spontaneousPost?.enabled) {
         continue;

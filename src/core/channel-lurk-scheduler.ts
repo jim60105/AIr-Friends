@@ -24,15 +24,6 @@ export type ChannelLurkCallback = (
 ) => Promise<void> | void;
 
 /**
- * Extract Discord channel IDs from whitelist entries.
- */
-export function extractDiscordChannelIds(whitelist: string[]): string[] {
-  return whitelist
-    .filter((entry) => entry.startsWith("discord/channel/"))
-    .map((entry) => entry.replace("discord/channel/", ""));
-}
-
-/**
  * Periodically checks whitelisted Discord channels and triggers a callback
  * when the last message meets all conditions for a lurk reply.
  */
@@ -132,6 +123,6 @@ export class ChannelLurkScheduler {
       messageId: lastMessage.messageId,
     });
 
-    await this.callback({ platform: "discord", channelId }, lastMessage);
+    await this.callback({ platform: this.adapter.platform, channelId }, lastMessage);
   }
 }

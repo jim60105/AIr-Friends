@@ -16,6 +16,8 @@ import {
 import { createLogger } from "@utils/logger.ts";
 import { PlatformAdapter } from "@platforms/platform-adapter.ts";
 import type { Platform, PlatformMessage } from "../../types/events.ts";
+import type { Config } from "../../types/config.ts";
+import type { SpontaneousTarget } from "../../core/spontaneous-target.ts";
 import {
   ConnectionState,
   type PlatformCapabilities,
@@ -629,6 +631,54 @@ export class DiscordAdapter extends PlatformAdapter {
         error: errorMessage,
       };
     }
+  }
+
+  /**
+   * Determine the target for a spontaneous post on Discord.
+   * Randomly selects a channel or account from the whitelist.
+   */
+  async determineSpontaneousTarget(config: Config): Promise<SpontaneousTarget | null> {
+    const discordEntries = config.accessControl.whitelist.filter(
+      (entry) => entry.startsWith("discord/"),
+    );
+
+    if (discordEntries.length === 0) {
+      logger.warn("No Discord whitelist entries available for spontaneous post");
+      return null;
+    }
+
+    const selectedEntry = discordEntries[Math.floor(Math.random() * discordEntries.length)];
+    const parts = selectedEntry.split("/");
+    const type = parts[1]; // "account" or "channel"
+    const id = parts[2];
+
+    if (type === "channel") {
+      return { channelId: id };
+    }
+
+    if (type === "account") {
+      try {
+        const dmChannelId = await this.getDmChannelId(id);
+        if (!dmChannelId) {
+          logger.warn("Failed to create DM channel for user {userId}", { userId: id });
+          return null;
+        }
+        return { channelId: dmChannelId };
+      } catch (error) {
+        logger.error("Failed to resolve DM channel", {
+          userId: id,
+          error: error instanceof Error ? error.message : String(error),
+        });
+        return null;
+      }
+    }
+
+    logger.warn("Unknown whitelist entry type: {entry}", { entry: selectedEntry });
+    return null;
+  }
+
+  override getSearchGuildId(channelId: string, isDm: boolean): string {
+    return isDm ? "" : channelId;
   }
 
   /**

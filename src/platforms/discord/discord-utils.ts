@@ -145,3 +145,13 @@ export function shouldRespondToMessage(
 
   return false;
 }
+
+/**
+ * Extract Discord channel IDs from whitelist entries.
+ * Filters entries matching "discord/channel/{id}" pattern and extracts the ID.
+ */
+export function extractDiscordChannelIds(whitelist: string[]): string[] {
+  return whitelist
+    .filter((entry) => entry.startsWith("discord/channel/"))
+    .map((entry) => entry.replace("discord/channel/", ""));
+}

@@ -119,6 +119,10 @@ class MockAdapter extends PlatformAdapter {
     return this.selfId;
   }
 
+  determineSpontaneousTarget(): Promise<null> {
+    return Promise.resolve(null);
+  }
+
   // Helper for testing
   simulateEvent(event: NormalizedEvent): Promise<void> {
     return this.emitEvent(event);

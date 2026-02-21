@@ -59,6 +59,7 @@ const createMockPlatformAdapter = (
       return Promise.resolve(getUsernameResult);
     },
     isSelf: () => false,
+    getSearchGuildId: (channelId: string, isDm: boolean) => isDm ? "" : channelId,
   } as unknown as PlatformAdapter;
 };
 

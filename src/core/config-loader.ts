@@ -18,6 +18,7 @@ import type {
   UserMCPServerConfig,
 } from "../types/config.ts";
 import type { MCPServerConfig } from "../acp/types.ts";
+import { VALID_PLATFORMS } from "../types/events.ts";
 import { ConfigError, ErrorCode } from "../types/errors.ts";
 import { DISCORD_WHITELIST_PATTERN } from "../platforms/discord/discord-config.ts";
 import { MISSKEY_WHITELIST_PATTERN } from "../platforms/misskey/misskey-config.ts";
@@ -251,7 +252,7 @@ function validateConfig(config: Record<string, unknown>): void {
   }
 
   // Validate spontaneous post config for each platform
-  for (const platformName of ["discord", "misskey"] as const) {
+  for (const platformName of VALID_PLATFORMS) {
     const platformConfig = (config.platforms as Record<string, Record<string, unknown>>)?.[
       platformName
     ];

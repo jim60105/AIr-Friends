@@ -1,11 +1,8 @@
 // tests/core/channel-lurk-scheduler.test.ts
 
 import { assertEquals } from "@std/assert";
-import {
-  ChannelLurkScheduler,
-  type ChannelLurkTarget,
-  extractDiscordChannelIds,
-} from "@core/channel-lurk-scheduler.ts";
+import { ChannelLurkScheduler, type ChannelLurkTarget } from "@core/channel-lurk-scheduler.ts";
+import { extractDiscordChannelIds } from "@platforms/discord/index.ts";
 import type { ChannelLurkConfig } from "../../src/types/config.ts";
 import type { PlatformMessage } from "../../src/types/events.ts";
 import { MockPlatformAdapter } from "../mocks/mock-platform-adapter.ts";
