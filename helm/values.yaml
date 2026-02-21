@@ -151,6 +151,11 @@ env:
   AGENT_SANDBOX_NETWORK_ISOLATION: 'false'
   AGENT_SANDBOX_ALLOWED_ENV_VARS: ''
 
+  # External skills to install at startup
+  # Prefer using agentExternalSkills section below (native YAML).
+  # Only set this if you need to override agentExternalSkills with a raw JSON string.
+  # AGENT_EXTERNAL_SKILLS: '[{"repo":"jim60105/copilot-prompt","skill":"create-blog-post"}]'
+
   # Session Audit Log
   AUDIT_ENABLED: ''
   AUDIT_RETENTION_DAYS: ''
@@ -166,6 +171,14 @@ selfResearchRssFeeds: []
   #   name: "Tech News"
   # - url: "https://another.example.com/rss"
   #   name: "Science Daily"
+
+# -- External skills to install at startup (native YAML, easier than JSON env var).
+# When agentExternalSkills is non-empty, it takes precedence over
+# AGENT_EXTERNAL_SKILLS env var.
+agentExternalSkills: []
+  # Example:
+  # - repo: "jim60105/copilot-prompt"
+  #   skill: "create-blog-post"
 
 # -- Model routing configuration (native YAML, easier than JSON env var).
 # When modelRouting.enabled is true, this section takes precedence over

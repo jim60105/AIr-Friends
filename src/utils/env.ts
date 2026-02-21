@@ -93,6 +93,9 @@ export const ENV_MAPPINGS = {
   SKILL_SEND_FILE_MAX_SIZE_MB: "skills.sendFile.maxFileSizeMb",
   SKILL_SEND_FILE_ALLOWED_EXTENSIONS: "skills.sendFile.allowedExtensions",
 
+  // External skills installation
+  AGENT_EXTERNAL_SKILLS: "agent.externalSkills",
+
   // Agent sandbox settings
   AGENT_SANDBOX_FILTER_ENV: "agent.sandbox.filterEnv",
   AGENT_SANDBOX_NETWORK_ISOLATION: "agent.sandbox.networkIsolation",
@@ -188,6 +191,14 @@ export function applyEnvOverrides(config: Record<string, unknown>): void {
         }
       } // Handle JSON string for SELF_RESEARCH_RSS_FEEDS
       else if (envName === "SELF_RESEARCH_RSS_FEEDS") {
+        try {
+          parsedValue = JSON.parse(value);
+        } catch {
+          // If JSON parse fails, skip this override
+          continue;
+        }
+      } // Handle JSON string for AGENT_EXTERNAL_SKILLS
+      else if (envName === "AGENT_EXTERNAL_SKILLS") {
         try {
           parsedValue = JSON.parse(value);
         } catch {

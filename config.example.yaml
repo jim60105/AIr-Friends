@@ -65,6 +65,12 @@ agent:
   defaultAgentType: "${AGENT_DEFAULT_TYPE}" # Default ACP agent: "copilot", "gemini", or "opencode" (env: AGENT_DEFAULT_TYPE)
   skillsDir: "skills" # Path to skills directory (default: "skills"); use "/home/deno/.agents/skills" for container deployment; override with env AGENT_SKILLS_DIR
 
+  # External skills to install at startup (optional)
+  # Each entry specifies a GitHub repo and skill name to install via `deno x -y skills add`
+  # externalSkills:
+  #   - repo: "jim60105/copilot-prompt"
+  #     skill: "create-blog-post"
+
   # Model routing: per-user/per-context model selection
   # When enabled, rules are evaluated in order (first-match wins).
   # All conditions in a rule's match are AND-combined; contentKeywords entries are OR-combined.
