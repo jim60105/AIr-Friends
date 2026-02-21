@@ -1286,6 +1286,7 @@ Before committing, ensure:
 
 - [docs/DESIGN.md](docs/DESIGN.md) - Detailed design document
 - [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) - Development setup and customization guide
+- [docs/PLATFORM_INTEGRATION.md](docs/PLATFORM_INTEGRATION.md) - Guide for adding new platform support
 - [docs/features/](docs/features/) - BDD feature specifications
 - [ACP Protocol Spec](https://agentclientprotocol.org/) - Agent Client Protocol
 - [Agent Skills Standard](https://agentskills.io/) - SKILL.md format
