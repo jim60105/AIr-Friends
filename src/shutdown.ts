@@ -75,6 +75,12 @@ export class ShutdownHandler {
         this.context.spontaneousScheduler.stop();
       }
 
+      // Stop channel lurk scheduler
+      if (this.context.channelLurkScheduler) {
+        logger.info("Stopping channel lurk scheduler");
+        this.context.channelLurkScheduler.stop();
+      }
+
       // Stop self-research scheduler
       if (this.context.selfResearchScheduler) {
         logger.info("Stopping self-research scheduler");

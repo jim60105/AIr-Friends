@@ -65,6 +65,14 @@ const DEFAULT_SPONTANEOUS_POST = {
 };
 
 /**
+ * Default channel lurk configuration
+ */
+const DEFAULT_CHANNEL_LURK = {
+  enabled: false,
+  intervalMs: 1800000, // 30 minutes
+};
+
+/**
  * Default self-research configuration
  */
 const DEFAULT_SELF_RESEARCH = {
@@ -287,6 +295,27 @@ function validateConfig(config: Record<string, unknown>): void {
     }
   }
 
+  // Apply default channel lurk config for Discord only
+  {
+    const discordConfig = (config.platforms as Record<string, Record<string, unknown>>)?.discord;
+    if (discordConfig) {
+      if (!discordConfig.channelLurk) {
+        discordConfig.channelLurk = { ...DEFAULT_CHANNEL_LURK };
+      } else {
+        discordConfig.channelLurk = {
+          ...DEFAULT_CHANNEL_LURK,
+          ...(discordConfig.channelLurk as Record<string, unknown>),
+        };
+      }
+
+      const cl = discordConfig.channelLurk as Record<string, unknown>;
+      if ((cl.intervalMs as number) < 60000) {
+        logger.warn("channelLurk.intervalMs < 1 minute, clamping to 60000");
+        cl.intervalMs = 60000;
+      }
+    }
+  }
+
   // Validate selfResearch config
   if (!config.selfResearch) {
     config.selfResearch = { ...DEFAULT_SELF_RESEARCH };
@@ -421,6 +450,7 @@ function validateConfig(config: Record<string, unknown>): void {
         "self-research",
         "memory-maintenance",
         "reminder",
+        "channelLurk",
       ];
       const whitelistPattern = /^(discord|misskey)\/(account|channel)\/[a-zA-Z0-9_\-@.]+$/;
       const validRules: unknown[] = [];

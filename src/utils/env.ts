@@ -30,6 +30,10 @@ export const ENV_MAPPINGS = {
   // Typing indicator settings - Discord
   DISCORD_TYPING_INDICATOR_ENABLED: "platforms.discord.typingIndicator.enabled",
 
+  // Channel lurk reply settings - Discord
+  DISCORD_CHANNEL_LURK_ENABLED: "platforms.discord.channelLurk.enabled",
+  DISCORD_CHANNEL_LURK_INTERVAL_MS: "platforms.discord.channelLurk.intervalMs",
+
   // Spontaneous post settings - Misskey
   MISSKEY_SPONTANEOUS_ENABLED: "platforms.misskey.spontaneousPost.enabled",
   MISSKEY_SPONTANEOUS_MIN_INTERVAL_MS: "platforms.misskey.spontaneousPost.minIntervalMs",

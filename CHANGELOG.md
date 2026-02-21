@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- Channel lurk reply: periodically check whitelisted Discord channels and auto-trigger reply when conditions are met (Feature 26)
+  - `ChannelLurkScheduler` with fixed-interval scheduling and three-layer duplicate prevention
+  - `hasBotReaction()` and `hasBotMention()` methods on `PlatformAdapter`
+  - `processChannelLurkMessage()` reuses normal message flow with `channelLurk` session type
+  - Configuration via `platforms.discord.channelLurk` with env var overrides
+  - Discord-only feature (Misskey adapters return false for new methods)
+
 ## [0.8.0] - 2026-02-18
 
 ### Added

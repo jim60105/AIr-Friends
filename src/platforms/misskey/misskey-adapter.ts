@@ -916,6 +916,22 @@ export class MisskeyAdapter extends PlatformAdapter {
   }
 
   /**
+   * Check if the bot has reacted to a specific message.
+   * Channel lurk is not supported on Misskey.
+   */
+  hasBotReaction(_channelId: string, _messageId: string): Promise<boolean> {
+    return Promise.resolve(false);
+  }
+
+  /**
+   * Check if a specific message mentions the bot.
+   * Channel lurk is not supported on Misskey.
+   */
+  hasBotMention(_channelId: string, _messageId: string): Promise<boolean> {
+    return Promise.resolve(false);
+  }
+
+  /**
    * Get the bot user ID
    */
   getBotId(): string | null {

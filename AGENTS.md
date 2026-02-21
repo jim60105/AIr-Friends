@@ -634,6 +634,50 @@ platforms:
 - `SessionOrchestrator.processSpontaneousPost()` — Triggerless session flow
 - `ContextAssembler.assembleSpontaneousContext()` — Context assembly without trigger message
 
+### 8a. Channel Lurk Reply (Feature 26)
+
+Periodically checks whitelisted Discord channels and auto-replies when conditions are met. Discord only.
+
+**Configuration:**
+
+```yaml
+platforms:
+  discord:
+    channelLurk:
+      enabled: false              # Enable channel lurk reply (default: false)
+      intervalMs: 1800000         # Check interval: 30 minutes (default)
+```
+
+**Environment Variable Overrides:**
+
+| Environment Variable | Config Path |
+|---------------------|-------------|
+| `DISCORD_CHANNEL_LURK_ENABLED` | `platforms.discord.channelLurk.enabled` |
+| `DISCORD_CHANNEL_LURK_INTERVAL_MS` | `platforms.discord.channelLurk.intervalMs` |
+
+**Trigger Conditions (all must be true):**
+
+1. Last message sender is not the bot itself (`isSelf()`)
+2. Last message does not mention the bot (`hasBotMention()`)
+3. Bot has not reacted to the last message (`hasBotReaction()`)
+4. Message has not been processed before (`lastProcessedMessageId` map)
+
+**Differences from Spontaneous Posting:**
+
+| Aspect | Spontaneous Post | Channel Lurk Reply |
+|--------|-----------------|-------------------|
+| Trigger | Random interval | Fixed interval + condition check |
+| Target | Random whitelist entry | All whitelist channels |
+| Trigger message | None (self-initiated) | Last message in channel |
+| Session type | `spontaneous` | `channelLurk` |
+| Prompt template | `system_spontaneous.md` | `system_reply.md` (reuse) |
+| Platform support | Discord + Misskey | Discord only |
+
+**Key Components:**
+
+- `src/core/channel-lurk-scheduler.ts` — Timer and condition checking
+- `SessionOrchestrator.processChannelLurkMessage()` — Reuses normal message flow
+
 ### 9. Self-Research via RSS/Atom Feeds (Feature 16)
 
 Enables the agent to periodically read RSS feeds, pick a topic as its character, research it, and write study notes to the agent workspace.
@@ -1128,6 +1172,7 @@ AIr-Friends/
 │   │   ├── reply-policy.ts         # Access control & reply policy
 │   │   ├── spontaneous-scheduler.ts # Spontaneous posting scheduler
 │   │   ├── spontaneous-target.ts    # Platform-specific target selection
+│   │   ├── channel-lurk-scheduler.ts # Channel lurk reply scheduler (Discord only)
 │   │   ├── self-research-scheduler.ts # Self-research scheduling
 │   │   ├── memory-maintenance-scheduler.ts # Memory maintenance scheduling
 │   │   ├── audit-logger.ts          # Session audit JSONL writer

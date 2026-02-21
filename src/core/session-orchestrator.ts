@@ -168,9 +168,27 @@ export class SessionOrchestrator {
   /**
    * Process a message event through the full orchestration flow
    */
-  async processMessage(
+  processMessage(
     event: NormalizedEvent,
     platformAdapter: PlatformAdapter,
+  ): Promise<SessionResponse> {
+    return this.processMessageInternal(event, platformAdapter, "message");
+  }
+
+  /**
+   * Process a channel lurk message (same as processMessage but with channelLurk session type)
+   */
+  processChannelLurkMessage(
+    event: NormalizedEvent,
+    platformAdapter: PlatformAdapter,
+  ): Promise<SessionResponse> {
+    return this.processMessageInternal(event, platformAdapter, "channelLurk");
+  }
+
+  private async processMessageInternal(
+    event: NormalizedEvent,
+    platformAdapter: PlatformAdapter,
+    sessionType: "message" | "channelLurk",
   ): Promise<SessionResponse> {
     const sessionLoggerName = `${event.platform}:${event.channelId}`;
     const sessionLogger = logger.child(sessionLoggerName);
@@ -285,7 +303,7 @@ export class SessionOrchestrator {
 
       // === DRY RUN CHECK ===
       const dryRunResult = await this.handleDryRun(
-        "message",
+        sessionType,
         fullPrompt,
         sessionLogger,
         {
@@ -362,7 +380,7 @@ export class SessionOrchestrator {
 
         // Set the model for the session
         const routingContext: ModelRoutingContext = {
-          sessionType: "message",
+          sessionType,
           platform: event.platform,
           userId: event.userId,
           channelId: event.channelId,
@@ -606,8 +624,8 @@ export class SessionOrchestrator {
       activeSessionsGauge.dec();
       const durationSec = (Date.now() - sessionStartTime) / 1000;
       const status = result!.success ? "success" : "failure";
-      sessionsTotal.labels(event.platform, "message", status).inc();
-      sessionDurationSeconds.labels(event.platform, "message", status).observe(durationSec);
+      sessionsTotal.labels(event.platform, sessionType, status).inc();
+      sessionDurationSeconds.labels(event.platform, sessionType, status).observe(durationSec);
     }
   }
 

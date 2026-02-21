@@ -93,6 +93,10 @@ env:
   # Discord typing indicator
   DISCORD_TYPING_INDICATOR_ENABLED: 'false'
 
+  # Channel Lurk Reply (Discord only)
+  DISCORD_CHANNEL_LURK_ENABLED: 'false'
+  DISCORD_CHANNEL_LURK_INTERVAL_MS: '1800000'
+
   # Spontaneous post settings - Misskey
   MISSKEY_SPONTANEOUS_ENABLED: 'false'
   MISSKEY_SPONTANEOUS_MIN_INTERVAL_MS: '10800000'

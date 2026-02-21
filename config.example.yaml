@@ -30,6 +30,10 @@ platforms:
     # Typing indicator: show "typing..." in Discord while processing
     typingIndicator:
       enabled: false          # Show typing indicator during ACP sessions (default: false, security consideration)
+    # Channel lurk reply: periodically check whitelisted channels and auto-reply
+    channelLurk:
+      enabled: false              # Enable channel lurk reply (default: false)
+      intervalMs: 1800000         # Check interval: 30 minutes (default)
 
   misskey:
     enabled: false # true/false (default: false); override with env MISSKEY_ENABLED

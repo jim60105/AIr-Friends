@@ -122,6 +122,14 @@ export class MockPlatformAdapter extends PlatformAdapter {
     return userId === "bot-123";
   }
 
+  hasBotReaction(_channelId: string, _messageId: string): Promise<boolean> {
+    return Promise.resolve(false);
+  }
+
+  hasBotMention(_channelId: string, _messageId: string): Promise<boolean> {
+    return Promise.resolve(false);
+  }
+
   getBotId(): string | null {
     return "bot-123";
   }
