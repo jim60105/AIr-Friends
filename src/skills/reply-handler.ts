@@ -21,6 +21,15 @@ export function stripXmlTags(message: string): string {
   return message.replace(/<\/?[a-zA-Z][a-zA-Z0-9_]*>/g, "");
 }
 
+/**
+ * Convert literal backslash-n sequences to actual newline characters.
+ * Agent output may contain escaped "\\n" (two chars: backslash + n)
+ * that should be rendered as real line breaks in platform messages.
+ */
+export function unescapeNewlines(text: string): string {
+  return text.replaceAll("\\n", "\n");
+}
+
 export class ReplyHandler {
   private replySentMap: Map<string, boolean> = new Map();
 
@@ -121,10 +130,13 @@ export class ReplyHandler {
       // Strip XML-like tags from message content
       const cleanedMessage = stripXmlTags(params.message);
 
+      // Convert literal \n to actual newline characters
+      const formattedMessage = unescapeNewlines(cleanedMessage);
+
       // Send reply via platform adapter
       const result = await context.platformAdapter.sendReply(
         context.channelId,
-        cleanedMessage,
+        formattedMessage,
         { replyToMessageId: context.replyToMessageId },
       );
 
@@ -215,11 +227,14 @@ export class ReplyHandler {
       // Strip XML-like tags from message content
       const cleanedMessage = stripXmlTags(params.message);
 
+      // Convert literal \n to actual newline characters
+      const formattedMessage = unescapeNewlines(cleanedMessage);
+
       // Edit message via platform adapter
       const result = await context.platformAdapter.editMessage(
         context.channelId,
         params.messageId,
-        cleanedMessage,
+        formattedMessage,
         context.replyToMessageId,
       );
 
