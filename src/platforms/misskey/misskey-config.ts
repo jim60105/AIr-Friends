@@ -55,3 +55,6 @@ export const MISSKEY_STREAMING_CHANNELS = {
   /** Global timeline */
   GLOBAL_TIMELINE: "globalTimeline",
 } as const;
+
+/** Misskey IDs vary by instance (aid, aidx, meid, ulid, etc.), keep generic pattern */
+export const MISSKEY_WHITELIST_PATTERN = /^misskey\/(account|channel)\/[a-zA-Z0-9_\-@.]+$/;
