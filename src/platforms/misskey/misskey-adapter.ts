@@ -4,6 +4,8 @@ import { ChannelConnection, type Channels } from "misskey-js";
 import { createLogger } from "@utils/logger.ts";
 import { PlatformAdapter } from "@platforms/platform-adapter.ts";
 import type { Platform, PlatformMessage } from "../../types/events.ts";
+import type { Config } from "../../types/config.ts";
+import type { SpontaneousTarget } from "../../core/spontaneous-target.ts";
 import {
   ConnectionState,
   PlatformCapabilities,
@@ -898,6 +900,14 @@ export class MisskeyAdapter extends PlatformAdapter {
         error: errorMessage,
       };
     }
+  }
+
+  /**
+   * Determine the target for a spontaneous post on Misskey.
+   * Always returns the bot's own timeline (creates a new note).
+   */
+  determineSpontaneousTarget(_config: Config): Promise<SpontaneousTarget | null> {
+    return Promise.resolve({ channelId: "timeline:self" });
   }
 
   /**

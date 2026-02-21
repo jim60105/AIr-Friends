@@ -2,6 +2,7 @@
 
 import { PlatformAdapter } from "../../src/platforms/platform-adapter.ts";
 import type { NormalizedEvent, Platform, PlatformMessage } from "../../src/types/events.ts";
+import type { SpontaneousTarget } from "../../src/core/spontaneous-target.ts";
 import {
   ConnectionState,
   PlatformCapabilities,
@@ -132,6 +133,10 @@ export class MockPlatformAdapter extends PlatformAdapter {
 
   getBotId(): string | null {
     return "bot-123";
+  }
+
+  determineSpontaneousTarget(_config: unknown): Promise<SpontaneousTarget | null> {
+    return Promise.resolve({ channelId: "mock-channel" });
   }
 
   /**

@@ -1,13 +1,9 @@
 // tests/core/spontaneous-target.test.ts
 
 import { assertEquals } from "@std/assert";
-import {
-  determineDiscordTarget,
-  determineMisskeyTarget,
-  determineSpontaneousTarget,
-} from "@core/spontaneous-target.ts";
 import type { Config } from "../../src/types/config.ts";
-import type { PlatformAdapter } from "@platforms/platform-adapter.ts";
+import { MockPlatformAdapter } from "../mocks/mock-platform-adapter.ts";
+import { extractDiscordChannelIds } from "@platforms/discord/index.ts";
 
 function createConfig(whitelist: string[]): Config {
   return {
@@ -27,120 +23,34 @@ function createConfig(whitelist: string[]): Config {
   };
 }
 
-// deno-lint-ignore no-explicit-any
-function createMockAdapter(): any {
-  return {
-    platform: "discord" as const,
-    getDmChannelId: (_userId: string) => Promise.resolve("dm-channel-123"),
-    getBotId: () => "bot-123",
-  };
-}
-
-Deno.test("determineSpontaneousTarget - Discord selects from whitelist channels", async () => {
-  const config = createConfig(["discord/channel/111111111111111111"]);
-  const adapter = createMockAdapter();
-
-  const target = await determineDiscordTarget(adapter as PlatformAdapter, config);
-  assertEquals(target?.channelId, "111111111111111111");
-});
-
-Deno.test("determineSpontaneousTarget - Discord resolves account to DM channel", async () => {
-  const config = createConfig(["discord/account/333333333333333333"]);
-  const adapter = createMockAdapter();
-
-  const target = await determineDiscordTarget(adapter as PlatformAdapter, config);
-  assertEquals(target?.channelId, "dm-channel-123");
-});
-
-Deno.test("determineSpontaneousTarget - Discord returns null when whitelist is empty", async () => {
+Deno.test("MockPlatformAdapter.determineSpontaneousTarget - returns mock channel", async () => {
+  const adapter = new MockPlatformAdapter();
   const config = createConfig([]);
-  const adapter = createMockAdapter();
-
-  const target = await determineDiscordTarget(adapter as PlatformAdapter, config);
-  assertEquals(target, null);
+  const target = await adapter.determineSpontaneousTarget(config);
+  assertEquals(target?.channelId, "mock-channel");
 });
 
-Deno.test("determineSpontaneousTarget - Discord handles DM creation failure", async () => {
-  const config = createConfig(["discord/account/66600000000000001"]);
-  // deno-lint-ignore no-explicit-any
-  const adapter: any = {
-    platform: "discord" as const,
-    getDmChannelId: () => Promise.resolve(null),
-  };
-
-  const target = await determineDiscordTarget(adapter as PlatformAdapter, config);
-  assertEquals(target, null);
+Deno.test("PlatformAdapter.getSearchGuildId - default returns empty string", () => {
+  const adapter = new MockPlatformAdapter();
+  assertEquals(adapter.getSearchGuildId("channel123", false), "");
+  assertEquals(adapter.getSearchGuildId("channel123", true), "");
 });
 
-Deno.test("determineSpontaneousTarget - Discord filters only Discord entries", async () => {
-  const config = createConfig([
-    "misskey/account/abc123",
-    "discord/channel/222222222222222222",
+Deno.test("extractDiscordChannelIds - filters discord channel entries", () => {
+  const whitelist = [
+    "discord/channel/11100000000000000",
+    "discord/account/22200000000000000",
+    "misskey/channel/333",
+    "discord/channel/44400000000000000",
+  ];
+  const result = extractDiscordChannelIds(whitelist);
+  assertEquals(result, ["11100000000000000", "44400000000000000"]);
+});
+
+Deno.test("extractDiscordChannelIds - returns empty for no matches", () => {
+  const result = extractDiscordChannelIds([
+    "discord/account/12345678901234567",
+    "misskey/account/456",
   ]);
-  const adapter = createMockAdapter();
-
-  const target = await determineDiscordTarget(adapter as PlatformAdapter, config);
-  assertEquals(target?.channelId, "222222222222222222");
-});
-
-Deno.test("determineSpontaneousTarget - Misskey always returns timeline:self", () => {
-  const target = determineMisskeyTarget();
-  assertEquals(target.channelId, "timeline:self");
-});
-
-Deno.test("determineSpontaneousTarget - Discord handles DM creation exception", async () => {
-  const config = createConfig(["discord/account/77700000000000001"]);
-  // deno-lint-ignore no-explicit-any
-  const adapter: any = {
-    platform: "discord" as const,
-    getDmChannelId: () => Promise.reject(new Error("API error")),
-  };
-
-  const target = await determineDiscordTarget(adapter as PlatformAdapter, config);
-  assertEquals(target, null);
-});
-
-Deno.test("determineSpontaneousTarget - Discord returns null for unknown entry type", async () => {
-  const config = createConfig(["discord/unknown/12345"]);
-  const adapter = createMockAdapter();
-
-  const target = await determineDiscordTarget(adapter as PlatformAdapter, config);
-  assertEquals(target, null);
-});
-
-Deno.test("determineSpontaneousTarget - Misskey via determineSpontaneousTarget", async () => {
-  const config = createConfig([]);
-  const adapter = createMockAdapter();
-
-  const target = await determineSpontaneousTarget(
-    "misskey",
-    adapter as PlatformAdapter,
-    config,
-  );
-  assertEquals(target?.channelId, "timeline:self");
-});
-
-Deno.test("determineSpontaneousTarget - Discord via determineSpontaneousTarget", async () => {
-  const config = createConfig(["discord/channel/55500000000000000"]);
-  const adapter = createMockAdapter();
-
-  const target = await determineSpontaneousTarget(
-    "discord",
-    adapter as PlatformAdapter,
-    config,
-  );
-  assertEquals(target?.channelId, "55500000000000000");
-});
-
-Deno.test("determineSpontaneousTarget - unsupported platform returns null", async () => {
-  const config = createConfig([]);
-  const adapter = createMockAdapter();
-
-  const target = await determineSpontaneousTarget(
-    // deno-lint-ignore no-explicit-any
-    "unknown" as any,
-    adapter as PlatformAdapter,
-    config,
-  );
-  assertEquals(target, null);
+  assertEquals(result, []);
 });

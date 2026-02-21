@@ -16,6 +16,8 @@ import {
 import { createLogger } from "@utils/logger.ts";
 import { PlatformAdapter } from "@platforms/platform-adapter.ts";
 import type { Platform, PlatformMessage } from "../../types/events.ts";
+import type { Config } from "../../types/config.ts";
+import type { SpontaneousTarget } from "../../core/spontaneous-target.ts";
 import {
   ConnectionState,
   type PlatformCapabilities,
@@ -33,6 +35,7 @@ import {
   messageToPltatformMessage,
   normalizeDiscordMessage,
   removeBotMention,
+  selectDiscordSpontaneousEntry,
   shouldRespondToMessage,
 } from "./discord-utils.ts";
 
@@ -629,6 +632,46 @@ export class DiscordAdapter extends PlatformAdapter {
         error: errorMessage,
       };
     }
+  }
+
+  /**
+   * Determine the target for a spontaneous post on Discord.
+   * Randomly selects a channel or account from the whitelist.
+   */
+  async determineSpontaneousTarget(config: Config): Promise<SpontaneousTarget | null> {
+    const entry = selectDiscordSpontaneousEntry(config.accessControl.whitelist);
+    if (!entry) {
+      logger.warn("No Discord whitelist entries available for spontaneous post");
+      return null;
+    }
+
+    if (entry.type === "channel") {
+      return { channelId: entry.id };
+    }
+
+    if (entry.type === "account") {
+      try {
+        const dmChannelId = await this.getDmChannelId(entry.id);
+        if (!dmChannelId) {
+          logger.warn("Failed to create DM channel for user {userId}", { userId: entry.id });
+          return null;
+        }
+        return { channelId: dmChannelId };
+      } catch (error) {
+        logger.error("Failed to resolve DM channel", {
+          userId: entry.id,
+          error: error instanceof Error ? error.message : String(error),
+        });
+        return null;
+      }
+    }
+
+    logger.warn("Unknown whitelist entry type: {type}", { type: entry.type });
+    return null;
+  }
+
+  override getSearchGuildId(channelId: string, isDm: boolean): string {
+    return isDm ? "" : channelId;
   }
 
   /**

@@ -2,6 +2,8 @@
 
 import { createLogger } from "@utils/logger.ts";
 import type { NormalizedEvent, Platform, PlatformMessage } from "../types/events.ts";
+import type { SpontaneousTarget } from "../core/spontaneous-target.ts";
+import type { Config } from "../types/config.ts";
 import {
   ConnectionState,
   type ConnectionStatus,
@@ -135,7 +137,25 @@ export abstract class PlatformAdapter implements MessageFetcher {
     });
   }
 
+  /**
+   * Get the guild/server ID used for message search scope.
+   * Default returns empty string (no guild concept).
+   * Override for platforms with guild/server support.
+   */
+  getSearchGuildId(_channelId: string, _isDm: boolean): string {
+    return "";
+  }
+
   // ============ Abstract methods to be implemented by each platform ============
+
+  /**
+   * Determine the target for a spontaneous post on this platform.
+   * Each platform implements its own target selection strategy.
+   *
+   * @param config - Application configuration (for whitelist access etc.)
+   * @returns Target with channelId, or null if no valid target found
+   */
+  abstract determineSpontaneousTarget(config: Config): Promise<SpontaneousTarget | null>;
 
   /**
    * Connect to the platform

@@ -145,3 +145,28 @@ export function shouldRespondToMessage(
 
   return false;
 }
+
+/**
+ * Extract Discord channel IDs from whitelist entries.
+ * Filters entries matching "discord/channel/{id}" pattern and extracts the ID.
+ */
+export function extractDiscordChannelIds(whitelist: string[]): string[] {
+  return whitelist
+    .filter((entry) => entry.startsWith("discord/channel/"))
+    .map((entry) => entry.replace("discord/channel/", ""));
+}
+
+/**
+ * Select a random Discord whitelist entry and parse its type and ID.
+ * Returns null if no Discord entries exist.
+ */
+export function selectDiscordSpontaneousEntry(
+  whitelist: string[],
+): { type: string; id: string } | null {
+  const discordEntries = whitelist.filter((entry) => entry.startsWith("discord/"));
+  if (discordEntries.length === 0) return null;
+
+  const selectedEntry = discordEntries[Math.floor(Math.random() * discordEntries.length)];
+  const parts = selectedEntry.split("/");
+  return { type: parts[1], id: parts[2] };
+}

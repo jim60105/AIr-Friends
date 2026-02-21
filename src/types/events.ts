@@ -5,6 +5,16 @@
  */
 export type Platform = "discord" | "misskey";
 
+/** All valid platform identifiers, kept in sync with Platform type */
+export const VALID_PLATFORMS: readonly Platform[] = ["discord", "misskey"] as const;
+
+/**
+ * Type guard: check if a string is a valid Platform identifier.
+ */
+export function isValidPlatform(value: string): value is Platform {
+  return (VALID_PLATFORMS as readonly string[]).includes(value);
+}
+
 /**
  * Attachment from a message (image, file, sticker, etc.)
  */

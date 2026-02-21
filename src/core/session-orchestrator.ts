@@ -25,6 +25,7 @@ import type { ModelRoutingContext } from "./model-router.ts";
 import type { SkillRegistry } from "@skills/registry.ts";
 import type { SessionRegistry } from "../skill-api/session-registry.ts";
 import type { Config, MemoryMaintenanceConfig, SelfResearchConfig } from "../types/config.ts";
+import { isValidPlatform } from "../types/events.ts";
 import type { NormalizedEvent, Platform } from "../types/events.ts";
 import type { PlatformAdapter } from "@platforms/platform-adapter.ts";
 import type { AgentConnectorOptions, ClientConfig, MCPServerConfig } from "@acp/types.ts";
@@ -915,6 +916,12 @@ export class SessionOrchestrator {
 
     try {
       // 1. Create workspace for self-research (uses special internal key)
+      // Self-research doesn't belong to any real platform.
+      // "discord" is used as a placeholder to satisfy NormalizedEvent's required
+      // platform field. The workspace key becomes "discord/self-research", which
+      // is functionally correct but semantically imprecise.
+      // A proper fix would require extending Platform type or redesigning
+      // workspace key generation for non-platform sessions.
       const botEvent: NormalizedEvent = {
         platform: "discord",
         channelId: "internal",
@@ -932,7 +939,7 @@ export class SessionOrchestrator {
       let shellSessionId: string | null = null;
       if (this.config.skillApi?.enabled) {
         shellSessionId = this.sessionRegistry.register({
-          platform: "discord",
+          platform: "discord", // Placeholder — see comment above on botEvent
           channelId: "internal",
           userId: "self-research",
           isDm: false,
@@ -949,7 +956,7 @@ export class SessionOrchestrator {
 
       // Create audit writer
       auditWriter = shellSessionId
-        ? this.createAuditWriter("discord", "self-research", shellSessionId)
+        ? this.createAuditWriter("discord", "self-research", shellSessionId) // Placeholder platform
         : null;
       if (auditWriter && shellSessionId) {
         this.sessionRegistry.setAuditWriter(shellSessionId, auditWriter);
@@ -1113,7 +1120,7 @@ export class SessionOrchestrator {
     const sessionLogger = logger.child(sessionLoggerName);
 
     const [platformStr, userId] = workspaceKey.split("/");
-    if ((platformStr !== "discord" && platformStr !== "misskey") || !userId) {
+    if (!isValidPlatform(platformStr) || !userId) {
       return {
         success: false,
         replySent: false,

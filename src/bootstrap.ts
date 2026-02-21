@@ -4,13 +4,13 @@ import { loadConfig } from "@core/config-loader.ts";
 import type { Config } from "./types/config.ts";
 import { AgentCore } from "@core/agent-core.ts";
 import { SpontaneousScheduler } from "@core/spontaneous-scheduler.ts";
-import { ChannelLurkScheduler, extractDiscordChannelIds } from "@core/channel-lurk-scheduler.ts";
+import { ChannelLurkScheduler } from "@core/channel-lurk-scheduler.ts";
+import { extractDiscordChannelIds } from "@platforms/discord/index.ts";
 import { SelfResearchScheduler } from "@core/self-research-scheduler.ts";
 import { MemoryMaintenanceScheduler } from "@core/memory-maintenance-scheduler.ts";
 import { ReminderScheduler } from "@core/reminder-scheduler.ts";
 import { GitBackupScheduler } from "@core/git-backup-scheduler.ts";
 import { GitBackupService } from "@core/git-backup-service.ts";
-import { determineSpontaneousTarget } from "@core/spontaneous-target.ts";
 import { fetchRssItems, pickRandom } from "@utils/rss-fetcher.ts";
 import { getPlatformRegistry } from "@platforms/platform-registry.ts";
 import { DiscordAdapter } from "@platforms/discord/index.ts";
@@ -22,6 +22,7 @@ import { cleanupAuditLogs } from "@core/audit-retention.ts";
 import { AuditRetentionScheduler } from "@core/audit-retention-scheduler.ts";
 import { join } from "@std/path";
 import type { Platform } from "./types/events.ts";
+import { isValidPlatform } from "./types/events.ts";
 
 const logger = createLogger("Bootstrap");
 
@@ -164,7 +165,7 @@ export async function bootstrap(
       return;
     }
 
-    const target = await determineSpontaneousTarget(platform, adapter, config);
+    const target = await adapter.determineSpontaneousTarget(config);
     if (!target) {
       logger.warn("No valid target for spontaneous post on {platform}", { platform });
       return;
@@ -279,7 +280,7 @@ export async function bootstrap(
       for (const workspaceKey of workspaceKeys) {
         try {
           const [platform, userId] = workspaceKey.split("/");
-          if ((platform !== "discord" && platform !== "misskey") || !userId) {
+          if (!isValidPlatform(platform) || !userId) {
             logger.warn("Skipping invalid workspace key", { workspaceKey });
             continue;
           }
@@ -354,7 +355,7 @@ export async function bootstrap(
       for (const workspaceKey of workspaceKeys) {
         try {
           const [platformStr, userId] = workspaceKey.split("/");
-          if ((platformStr !== "discord" && platformStr !== "misskey") || !userId) {
+          if (!isValidPlatform(platformStr) || !userId) {
             continue;
           }
 
