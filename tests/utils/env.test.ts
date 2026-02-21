@@ -99,7 +99,7 @@ Deno.test("applyEnvOverrides - REPLY_TO sets accessControl.replyTo", () => {
 Deno.test("applyEnvOverrides - WHITELIST parses comma-separated entries", () => {
   Deno.env.set(
     "WHITELIST",
-    "discord/account/123,discord/channel/456,misskey/account/abc",
+    "discord/account/12345678901234567,discord/channel/45678901234567890,misskey/account/abc",
   );
   try {
     const config: Record<string, unknown> = {
@@ -108,8 +108,8 @@ Deno.test("applyEnvOverrides - WHITELIST parses comma-separated entries", () => 
     applyEnvOverrides(config);
     const accessControl = config.accessControl as { whitelist: string[] };
     assertEquals(accessControl.whitelist, [
-      "discord/account/123",
-      "discord/channel/456",
+      "discord/account/12345678901234567",
+      "discord/channel/45678901234567890",
       "misskey/account/abc",
     ]);
   } finally {
@@ -118,7 +118,7 @@ Deno.test("applyEnvOverrides - WHITELIST parses comma-separated entries", () => 
 });
 
 Deno.test("applyEnvOverrides - WHITELIST trims whitespace from entries", () => {
-  Deno.env.set("WHITELIST", "  discord/account/123  ,  misskey/channel/456  ");
+  Deno.env.set("WHITELIST", "  discord/account/12345678901234567  ,  misskey/channel/456  ");
   try {
     const config: Record<string, unknown> = {
       accessControl: { replyTo: "whitelist", whitelist: [] },
@@ -126,7 +126,7 @@ Deno.test("applyEnvOverrides - WHITELIST trims whitespace from entries", () => {
     applyEnvOverrides(config);
     const accessControl = config.accessControl as { whitelist: string[] };
     assertEquals(accessControl.whitelist, [
-      "discord/account/123",
+      "discord/account/12345678901234567",
       "misskey/channel/456",
     ]);
   } finally {
@@ -135,7 +135,7 @@ Deno.test("applyEnvOverrides - WHITELIST trims whitespace from entries", () => {
 });
 
 Deno.test("applyEnvOverrides - WHITELIST filters out empty entries", () => {
-  Deno.env.set("WHITELIST", "discord/account/123,,misskey/channel/456,  ,");
+  Deno.env.set("WHITELIST", "discord/account/12345678901234567,,misskey/channel/456,  ,");
   try {
     const config: Record<string, unknown> = {
       accessControl: { replyTo: "whitelist", whitelist: [] },
@@ -143,7 +143,7 @@ Deno.test("applyEnvOverrides - WHITELIST filters out empty entries", () => {
     applyEnvOverrides(config);
     const accessControl = config.accessControl as { whitelist: string[] };
     assertEquals(accessControl.whitelist, [
-      "discord/account/123",
+      "discord/account/12345678901234567",
       "misskey/channel/456",
     ]);
   } finally {
@@ -378,7 +378,7 @@ Deno.test("applyEnvOverrides - MODEL_ROUTING_ENABLED sets boolean", () => {
 
 Deno.test("applyEnvOverrides - MODEL_ROUTING_RULES applies JSON", () => {
   const rules = JSON.stringify([
-    { match: { whitelist: "discord/account/123" }, model: "test-model" },
+    { match: { whitelist: "discord/account/12345678901234567" }, model: "test-model" },
   ]);
   Deno.env.set("MODEL_ROUTING_RULES", rules);
   try {

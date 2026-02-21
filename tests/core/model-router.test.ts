@@ -30,7 +30,7 @@ Deno.test("resolveModel - should return fallback when rules array is empty", () 
 Deno.test("resolveModel - should match whitelist account rule", () => {
   const config: ModelRoutingConfig = {
     enabled: true,
-    rules: [{ match: { whitelist: "discord/account/123" }, model: "premium-model" }],
+    rules: [{ match: { whitelist: "discord/account/12345678901234567" }, model: "premium-model" }],
   };
   const context: ModelRoutingContext = {
     sessionType: "message",
@@ -43,7 +43,7 @@ Deno.test("resolveModel - should match whitelist account rule", () => {
 Deno.test("resolveModel - should match whitelist channel rule", () => {
   const config: ModelRoutingConfig = {
     enabled: true,
-    rules: [{ match: { whitelist: "discord/channel/456" }, model: "channel-model" }],
+    rules: [{ match: { whitelist: "discord/channel/45678901234567890" }, model: "channel-model" }],
   };
   const context: ModelRoutingContext = {
     sessionType: "message",
@@ -56,7 +56,7 @@ Deno.test("resolveModel - should match whitelist channel rule", () => {
 Deno.test("resolveModel - should not match whitelist when platform differs", () => {
   const config: ModelRoutingConfig = {
     enabled: true,
-    rules: [{ match: { whitelist: "discord/account/123" }, model: "premium-model" }],
+    rules: [{ match: { whitelist: "discord/account/12345678901234567" }, model: "premium-model" }],
   };
   const context: ModelRoutingContext = {
     sessionType: "message",
@@ -69,7 +69,7 @@ Deno.test("resolveModel - should not match whitelist when platform differs", () 
 Deno.test("resolveModel - should not match whitelist when user ID differs", () => {
   const config: ModelRoutingConfig = {
     enabled: true,
-    rules: [{ match: { whitelist: "discord/account/123" }, model: "premium-model" }],
+    rules: [{ match: { whitelist: "discord/account/12345678901234567" }, model: "premium-model" }],
   };
   const context: ModelRoutingContext = {
     sessionType: "message",
@@ -128,7 +128,7 @@ Deno.test("resolveModel - should use first matching rule when multiple rules mat
   const config: ModelRoutingConfig = {
     enabled: true,
     rules: [
-      { match: { whitelist: "discord/account/123" }, model: "first-model" },
+      { match: { whitelist: "discord/account/12345678901234567" }, model: "first-model" },
       { match: { sessionType: "message" }, model: "second-model" },
     ],
   };
@@ -144,7 +144,7 @@ Deno.test("resolveModel - should return fallback when no rules match", () => {
   const config: ModelRoutingConfig = {
     enabled: true,
     rules: [
-      { match: { whitelist: "discord/account/999" }, model: "wrong-model" },
+      { match: { whitelist: "discord/account/99900000000000000" }, model: "wrong-model" },
       { match: { sessionType: "spontaneous" }, model: "also-wrong" },
     ],
   };
@@ -233,7 +233,7 @@ Deno.test("resolveModel - should match when whitelist AND contentKeywords both m
   const config: ModelRoutingConfig = {
     enabled: true,
     rules: [{
-      match: { whitelist: "discord/account/123", contentKeywords: ["研究"] },
+      match: { whitelist: "discord/account/12345678901234567", contentKeywords: ["研究"] },
       model: "combo-model",
     }],
   };
@@ -250,7 +250,7 @@ Deno.test("resolveModel - should not match when whitelist matches but contentKey
   const config: ModelRoutingConfig = {
     enabled: true,
     rules: [{
-      match: { whitelist: "discord/account/123", contentKeywords: ["研究"] },
+      match: { whitelist: "discord/account/12345678901234567", contentKeywords: ["研究"] },
       model: "combo-model",
     }],
   };
@@ -267,7 +267,7 @@ Deno.test("resolveModel - should not match when contentKeywords matches but whit
   const config: ModelRoutingConfig = {
     enabled: true,
     rules: [{
-      match: { whitelist: "discord/account/999", contentKeywords: ["研究"] },
+      match: { whitelist: "discord/account/99900000000000000", contentKeywords: ["研究"] },
       model: "combo-model",
     }],
   };
@@ -284,7 +284,7 @@ Deno.test("resolveModel - should match when whitelist AND sessionType both match
   const config: ModelRoutingConfig = {
     enabled: true,
     rules: [{
-      match: { whitelist: "discord/account/123", sessionType: "message" },
+      match: { whitelist: "discord/account/12345678901234567", sessionType: "message" },
       model: "combo-model",
     }],
   };
@@ -301,7 +301,7 @@ Deno.test("resolveModel - should match when all three conditions match", () => {
     enabled: true,
     rules: [{
       match: {
-        whitelist: "discord/account/123",
+        whitelist: "discord/account/12345678901234567",
         sessionType: "message",
         contentKeywords: ["研究"],
       },
@@ -322,7 +322,7 @@ Deno.test("resolveModel - should not match when one of three conditions fails", 
     enabled: true,
     rules: [{
       match: {
-        whitelist: "discord/account/123",
+        whitelist: "discord/account/12345678901234567",
         sessionType: "message",
         contentKeywords: ["研究"],
       },
@@ -352,7 +352,7 @@ Deno.test("resolveModel - should not match when match object has no conditions",
 Deno.test("resolveModel - backward compat: single whitelist condition still works", () => {
   const config: ModelRoutingConfig = {
     enabled: true,
-    rules: [{ match: { whitelist: "discord/account/123" }, model: "premium-model" }],
+    rules: [{ match: { whitelist: "discord/account/12345678901234567" }, model: "premium-model" }],
   };
   const context: ModelRoutingContext = {
     sessionType: "message",

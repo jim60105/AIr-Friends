@@ -551,7 +551,7 @@ accessControl:
 
 ```bash
 REPLY_TO=public
-WHITELIST=discord/account/123456789,discord/channel/987654321,misskey/account/abcdef123
+WHITELIST=discord/account/12345678901234567,discord/channel/987654321,misskey/account/abcdef123
 ```
 
 ### 7a. Rate Limiting & Cooldown
@@ -1142,7 +1142,7 @@ workspace:
 accessControl:
   replyTo: "whitelist"
   whitelist:
-    - "discord/account/123456789"
+    - "discord/account/12345678901234567"
 ```
 
 Environment variables override config file values.
