@@ -1490,3 +1490,13 @@ Deno.test("MisskeyAdapter.hasBotMention - returns false on API error", async () 
   const result = await adapter.hasBotMention("note:abc", "note1");
   assertEquals(result, false);
 });
+
+// ============ MisskeyAdapter.determineSpontaneousTarget tests ============
+
+Deno.test("MisskeyAdapter.determineSpontaneousTarget - returns timeline:self", async () => {
+  const adapter = createMockMisskeyAdapter();
+  // deno-lint-ignore no-explicit-any
+  const config = {} as any;
+  const target = await adapter.determineSpontaneousTarget(config);
+  assertEquals(target?.channelId, "timeline:self");
+});

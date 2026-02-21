@@ -513,3 +513,125 @@ Deno.test("selectDiscordSpontaneousEntry - parses unknown type entries", () => {
   assertEquals(entry?.type, "unknown");
   assertEquals(entry?.id, "789");
 });
+
+// ============ DiscordAdapter.determineSpontaneousTarget tests ============
+
+function createTestConfig(whitelist: string[]): any {
+  return {
+    platforms: {
+      discord: { token: "test", enabled: true },
+      misskey: { host: "test.com", token: "test", enabled: false },
+    },
+    accessControl: { replyTo: "whitelist", whitelist },
+  };
+}
+
+Deno.test({
+  name: "DiscordAdapter.determineSpontaneousTarget - selects channel entry",
+  sanitizeOps: false,
+  sanitizeResources: false,
+  fn: async () => {
+    const adapter = createMockDiscordAdapter();
+    const config = createTestConfig(["discord/channel/123456789"]);
+    const target = await adapter.determineSpontaneousTarget(config);
+    assertEquals(target?.channelId, "123456789");
+  },
+});
+
+Deno.test({
+  name: "DiscordAdapter.determineSpontaneousTarget - returns null for empty whitelist",
+  sanitizeOps: false,
+  sanitizeResources: false,
+  fn: async () => {
+    const adapter = createMockDiscordAdapter();
+    const config = createTestConfig([]);
+    const target = await adapter.determineSpontaneousTarget(config);
+    assertEquals(target, null);
+  },
+});
+
+Deno.test({
+  name: "DiscordAdapter.determineSpontaneousTarget - returns null for non-discord entries",
+  sanitizeOps: false,
+  sanitizeResources: false,
+  fn: async () => {
+    const adapter = createMockDiscordAdapter();
+    const config = createTestConfig(["misskey/account/abc"]);
+    const target = await adapter.determineSpontaneousTarget(config);
+    assertEquals(target, null);
+  },
+});
+
+Deno.test({
+  name: "DiscordAdapter.determineSpontaneousTarget - account entry with DM failure returns null",
+  sanitizeOps: false,
+  sanitizeResources: false,
+  fn: async () => {
+    const adapter = createMockDiscordAdapter();
+    // Mock getDmChannelId to return null
+    (adapter as any).getDmChannelId = () => Promise.resolve(null);
+    const config = createTestConfig(["discord/account/999"]);
+    const target = await adapter.determineSpontaneousTarget(config);
+    assertEquals(target, null);
+  },
+});
+
+Deno.test({
+  name: "DiscordAdapter.determineSpontaneousTarget - account entry with DM exception returns null",
+  sanitizeOps: false,
+  sanitizeResources: false,
+  fn: async () => {
+    const adapter = createMockDiscordAdapter();
+    (adapter as any).getDmChannelId = () => Promise.reject(new Error("API error"));
+    const config = createTestConfig(["discord/account/999"]);
+    const target = await adapter.determineSpontaneousTarget(config);
+    assertEquals(target, null);
+  },
+});
+
+Deno.test({
+  name: "DiscordAdapter.determineSpontaneousTarget - account entry with DM success",
+  sanitizeOps: false,
+  sanitizeResources: false,
+  fn: async () => {
+    const adapter = createMockDiscordAdapter();
+    (adapter as any).getDmChannelId = () => Promise.resolve("dm-ch-123");
+    const config = createTestConfig(["discord/account/999"]);
+    const target = await adapter.determineSpontaneousTarget(config);
+    assertEquals(target?.channelId, "dm-ch-123");
+  },
+});
+
+Deno.test({
+  name: "DiscordAdapter.determineSpontaneousTarget - unknown entry type returns null",
+  sanitizeOps: false,
+  sanitizeResources: false,
+  fn: async () => {
+    const adapter = createMockDiscordAdapter();
+    const config = createTestConfig(["discord/unknown/123"]);
+    const target = await adapter.determineSpontaneousTarget(config);
+    assertEquals(target, null);
+  },
+});
+
+// ============ DiscordAdapter.getSearchGuildId tests ============
+
+Deno.test({
+  name: "DiscordAdapter.getSearchGuildId - returns channelId for non-DM",
+  sanitizeOps: false,
+  sanitizeResources: false,
+  fn: () => {
+    const adapter = createMockDiscordAdapter();
+    assertEquals(adapter.getSearchGuildId("channel123", false), "channel123");
+  },
+});
+
+Deno.test({
+  name: "DiscordAdapter.getSearchGuildId - returns empty for DM",
+  sanitizeOps: false,
+  sanitizeResources: false,
+  fn: () => {
+    const adapter = createMockDiscordAdapter();
+    assertEquals(adapter.getSearchGuildId("channel123", true), "");
+  },
+});
