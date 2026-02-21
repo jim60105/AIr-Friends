@@ -6,6 +6,7 @@ import {
   ChannelType,
   Client,
   type DMChannel,
+  type GuildEmoji,
   type Message,
   type NewsChannel,
   REST,
@@ -413,11 +414,16 @@ export class DiscordAdapter extends PlatformAdapter {
     }
 
     const emojis: PlatformEmoji[] = [];
+    let premiumFilteredCount = 0;
 
     // Fetch guild emojis from cache
     for (const guild of this.client.guilds.cache.values()) {
       for (const emoji of guild.emojis.cache.values()) {
         if (!emoji.name || !emoji.id) continue;
+        if (isPremiumEmoji(emoji)) {
+          premiumFilteredCount++;
+          continue;
+        }
 
         emojis.push({
           name: emoji.name,
@@ -463,7 +469,10 @@ export class DiscordAdapter extends PlatformAdapter {
     this.emojiCache = emojis;
     this.emojiCacheTimestamp = now;
 
-    logger.debug("Fetched Discord emojis", { count: emojis.length });
+    logger.debug("Fetched Discord emojis", {
+      count: emojis.length,
+      premiumFiltered: premiumFilteredCount,
+    });
     return emojis;
   }
 
@@ -678,4 +687,19 @@ export class DiscordAdapter extends PlatformAdapter {
   getBotId(): string | null {
     return this.botId;
   }
+}
+
+/**
+ * Check if a guild emoji is a premium emoji.
+ * Premium emoji are restricted to subscription roles only and cannot be used by bots.
+ * An emoji is premium if it has role restrictions and ALL roles are subscription roles.
+ */
+export function isPremiumEmoji(emoji: GuildEmoji): boolean {
+  if (emoji.roles.cache.size === 0) return false;
+
+  return [...emoji.roles.cache.values()].every((role) => {
+    if (role.tags?.premiumSubscriberRole) return true;
+    if (role.managed && role.tags?.integrationId) return true;
+    return false;
+  });
 }
