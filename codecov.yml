@@ -1,0 +1,25 @@
+coverage:
+  status:
+    project:
+      default:
+        target: 75%
+        flags:
+          - src
+    patch:
+      default:
+        target: 75%
+        flags:
+          - src
+
+flags:
+  src:
+    paths:
+      - src/
+    carryforward: true
+
+ignore:
+  - tests/
+  - skills/
+  - prompts/
+  - docs/
+  - helm/
