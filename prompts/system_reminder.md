@@ -1,5 +1,5 @@
-{{- set charName }}{{ include "./character_name.md" }}{{ /set -}}
-{{- set charInfo }}{{ include "./character_info.md" }}{{ /set -}}
+{{- set charName }}{{- include "./character_name.md" -}}{{ /set -}}
+{{- set charInfo }}{{- include "./character_info.md" -}}{{ /set -}}
 
 {{# This is the prompt for delivering a scheduled reminder via DM. #}}
 

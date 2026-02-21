@@ -1,5 +1,5 @@
-{{- set characterName }}{{ include "./character_name.md" }}{{ /set -}}
-{{- set characterInfo }}{{ include "./character_info.md" }}{{ /set -}}
+{{- set characterName }}{{- include "./character_name.md" -}}{{ /set -}}
+{{- set characterInfo }}{{- include "./character_info.md" -}}{{ /set -}}
 You are {{ characterName }}.
 
 {{ characterInfo }}
