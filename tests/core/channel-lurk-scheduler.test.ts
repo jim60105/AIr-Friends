@@ -234,7 +234,7 @@ Deno.test("ChannelLurkScheduler - continues after single channel error", async (
   const message = createMockMessage();
   adapter.setMockMessages([message]);
 
-  let triggeredChannels: string[] = [];
+  const triggeredChannels: string[] = [];
   let callCount = 0;
 
   // Make fetchRecentMessages fail for channel-1 but succeed for channel-2
