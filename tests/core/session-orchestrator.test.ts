@@ -109,11 +109,11 @@ function createTestConfig(tempDir: string): Config {
 function createTestEvent(): NormalizedEvent {
   return {
     platform: "discord",
-    channelId: "test_channel",
-    userId: "test_user",
+    channelId: "99988877766655544",
+    userId: "11122233344455566",
     messageId: "test_msg",
     isDm: false,
-    guildId: "test_guild",
+    guildId: "88877766655544433",
     content: "Hello bot!",
     timestamp: new Date(),
   };
@@ -869,7 +869,7 @@ Deno.test("SessionOrchestrator - processSpontaneousPost sends reply successfully
       connector.onPrompt = (callCount) => {
         if (callCount === 1) {
           const replyHandler = skillRegistry.getReplyHandler();
-          const key = `discord/bot_id:test_channel`;
+          const key = `discord/bot_id:99988877766655544`;
           // deno-lint-ignore no-explicit-any
           (replyHandler as any).replySentMap.set(key, true);
         }
@@ -878,7 +878,7 @@ Deno.test("SessionOrchestrator - processSpontaneousPost sends reply successfully
 
     const response = await orchestrator.processSpontaneousPost(
       "discord",
-      "test_channel",
+      "99988877766655544",
       platformAdapter,
       { botId: "bot_id", fetchRecentMessages: false },
     );
@@ -908,7 +908,7 @@ Deno.test("SessionOrchestrator - processSpontaneousPost returns error when no re
 
     const response = await orchestrator.processSpontaneousPost(
       "discord",
-      "test_channel",
+      "99988877766655544",
       platformAdapter,
       { botId: "bot_id", fetchRecentMessages: false },
     );
@@ -941,7 +941,7 @@ Deno.test("SessionOrchestrator - processSpontaneousPost retries on no reply", as
         // Simulate reply on retry (2nd prompt)
         if (callCount === 2) {
           const replyHandler = skillRegistry.getReplyHandler();
-          const key = `discord/bot_id:test_channel`;
+          const key = `discord/bot_id:99988877766655544`;
           // deno-lint-ignore no-explicit-any
           (replyHandler as any).replySentMap.set(key, true);
         }
@@ -950,7 +950,7 @@ Deno.test("SessionOrchestrator - processSpontaneousPost retries on no reply", as
 
     const response = await orchestrator.processSpontaneousPost(
       "discord",
-      "test_channel",
+      "99988877766655544",
       platformAdapter,
       { botId: "bot_id", fetchRecentMessages: true },
     );
@@ -981,7 +981,7 @@ Deno.test("SessionOrchestrator - processSpontaneousPost retry stops on non-end_t
 
     const response = await orchestrator.processSpontaneousPost(
       "discord",
-      "test_channel",
+      "99988877766655544",
       platformAdapter,
       { botId: "bot_id", fetchRecentMessages: false },
     );
@@ -1008,7 +1008,7 @@ Deno.test("SessionOrchestrator - processSpontaneousPost handles connector error"
 
     const response = await orchestrator.processSpontaneousPost(
       "discord",
-      "test_channel",
+      "99988877766655544",
       platformAdapter,
       { botId: "bot_id", fetchRecentMessages: false },
     );
@@ -1076,7 +1076,7 @@ Deno.test("SessionOrchestrator - processSpontaneousPost with skillApi disabled",
       connector.onPrompt = (callCount) => {
         if (callCount === 1) {
           const replyHandler = skillRegistry.getReplyHandler();
-          const key = `discord/bot_id:test_channel`;
+          const key = `discord/bot_id:99988877766655544`;
           // deno-lint-ignore no-explicit-any
           (replyHandler as any).replySentMap.set(key, true);
         }
@@ -1085,7 +1085,7 @@ Deno.test("SessionOrchestrator - processSpontaneousPost with skillApi disabled",
 
     const response = await orchestrator.processSpontaneousPost(
       "discord",
-      "test_channel",
+      "99988877766655544",
       platformAdapter,
       { botId: "bot_id", fetchRecentMessages: false },
     );
@@ -1120,7 +1120,7 @@ Deno.test("SessionOrchestrator - buildSpontaneousPrompt uses Vento template", as
       };
       connector.onPrompt = () => {
         const replyHandler = skillRegistry.getReplyHandler();
-        const key = `discord/bot_id:test_channel`;
+        const key = `discord/bot_id:99988877766655544`;
         // deno-lint-ignore no-explicit-any
         (replyHandler as any).replySentMap.set(key, true);
       };
@@ -1128,7 +1128,7 @@ Deno.test("SessionOrchestrator - buildSpontaneousPrompt uses Vento template", as
 
     await orchestrator.processSpontaneousPost(
       "discord",
-      "test_channel",
+      "99988877766655544",
       platformAdapter,
       { botId: "bot_id", fetchRecentMessages: false },
     );
@@ -1457,7 +1457,7 @@ Deno.test("SessionOrchestrator - processMemoryMaintenance returns success on end
     });
 
     const response = await orchestrator.processMemoryMaintenance(
-      "discord/test_user",
+      "discord/11122233344455566",
       {
         enabled: true,
         model: "gpt-5-mini",
@@ -1493,7 +1493,7 @@ Deno.test("SessionOrchestrator - processMemoryMaintenance returns failure on can
     });
 
     const response = await orchestrator.processMemoryMaintenance(
-      "discord/test_user",
+      "discord/11122233344455566",
       {
         enabled: true,
         model: "gpt-5-mini",
@@ -1613,7 +1613,7 @@ Deno.test("SessionOrchestrator - processMemoryMaintenance handles agent connecti
     );
 
     const response = await orchestrator.processMemoryMaintenance(
-      "discord/test_user",
+      "discord/11122233344455566",
       {
         enabled: true,
         model: "gpt-5-mini",
@@ -2066,7 +2066,7 @@ Deno.test({
       config.agent.modelRouting = {
         enabled: true,
         rules: [
-          { match: { whitelist: "discord/account/test_user" }, model: "premium-model" },
+          { match: { whitelist: "discord/account/11122233344455566" }, model: "premium-model" },
         ],
       };
 
@@ -2080,7 +2080,7 @@ Deno.test({
         connector.onPrompt = (callCount) => {
           if (callCount === 1) {
             const replyHandler = skillRegistry.getReplyHandler();
-            const key = `discord/test_user:test_channel`;
+            const key = `discord/11122233344455566:99988877766655544`;
             // deno-lint-ignore no-explicit-any
             (replyHandler as any).replySentMap.set(key, true);
           }
@@ -2113,7 +2113,7 @@ Deno.test({
       config.agent.modelRouting = {
         enabled: false,
         rules: [
-          { match: { whitelist: "discord/account/test_user" }, model: "premium-model" },
+          { match: { whitelist: "discord/account/11122233344455566" }, model: "premium-model" },
         ],
       };
 
@@ -2127,7 +2127,7 @@ Deno.test({
         connector.onPrompt = (callCount) => {
           if (callCount === 1) {
             const replyHandler = skillRegistry.getReplyHandler();
-            const key = `discord/test_user:test_channel`;
+            const key = `discord/11122233344455566:99988877766655544`;
             // deno-lint-ignore no-explicit-any
             (replyHandler as any).replySentMap.set(key, true);
           }
@@ -2172,7 +2172,7 @@ Deno.test({
         connector.onPrompt = (callCount) => {
           if (callCount === 1) {
             const replyHandler = skillRegistry.getReplyHandler();
-            const key = `discord/bot_id:test_channel`;
+            const key = `discord/bot_id:99988877766655544`;
             // deno-lint-ignore no-explicit-any
             (replyHandler as any).replySentMap.set(key, true);
           }
@@ -2181,7 +2181,7 @@ Deno.test({
 
       await orchestrator.processSpontaneousPost(
         "discord",
-        "test_channel",
+        "99988877766655544",
         platformAdapter,
         { botId: "bot_id", fetchRecentMessages: false },
       );

@@ -6,11 +6,11 @@ import type { ReplyPolicy } from "../../src/types/config.ts";
 function createEvent(overrides: Partial<NormalizedEvent> = {}): NormalizedEvent {
   return {
     platform: "discord",
-    channelId: "channel_123",
-    userId: "user_456",
+    channelId: "12300000000000001",
+    userId: "45600000000000001",
     messageId: "msg_789",
     isDm: false,
-    guildId: "guild_001",
+    guildId: "00100000000000001",
     content: "Hello",
     timestamp: new Date(),
     ...overrides,
@@ -41,37 +41,40 @@ Deno.test("ReplyPolicy - public mode allows public messages", () => {
 
 Deno.test("ReplyPolicy - public mode denies DM from non-whitelisted user", () => {
   const evaluator = createEvaluator("public");
-  const event = createEvent({ isDm: true, userId: "stranger" });
+  const event = createEvent({ isDm: true, userId: "66600000000000001" });
   assertEquals(evaluator.shouldReply(event), false);
 });
 
 Deno.test("ReplyPolicy - public mode allows DM from whitelisted account", () => {
-  const evaluator = createEvaluator("public", ["discord/account/user_456"]);
-  const event = createEvent({ isDm: true, userId: "user_456" });
+  const evaluator = createEvaluator("public", ["discord/account/45600000000000001"]);
+  const event = createEvent({ isDm: true, userId: "45600000000000001" });
   assertEquals(evaluator.shouldReply(event), true);
 });
 
 Deno.test("ReplyPolicy - public mode allows DM from whitelisted channel", () => {
-  const evaluator = createEvaluator("public", ["discord/channel/dm_channel_99"]);
-  const event = createEvent({ isDm: true, channelId: "dm_channel_99" });
+  const evaluator = createEvaluator("public", ["discord/channel/99000000000000001"]);
+  const event = createEvent({ isDm: true, channelId: "99000000000000001" });
   assertEquals(evaluator.shouldReply(event), true);
 });
 
 Deno.test("ReplyPolicy - whitelist mode allows whitelisted account and channel", () => {
   const evaluator = createEvaluator("whitelist", [
-    "discord/account/user_456",
-    "discord/channel/channel_123",
+    "discord/account/45600000000000001",
+    "discord/channel/12300000000000001",
   ]);
-  const eventByAccount = createEvent({ userId: "user_456", channelId: "unknown" });
-  const eventByChannel = createEvent({ userId: "unknown", channelId: "channel_123" });
+  const eventByAccount = createEvent({ userId: "45600000000000001", channelId: "unknown" });
+  const eventByChannel = createEvent({
+    userId: "44400000000000001",
+    channelId: "12300000000000001",
+  });
 
   assertEquals(evaluator.shouldReply(eventByAccount), true);
   assertEquals(evaluator.shouldReply(eventByChannel), true);
 });
 
 Deno.test("ReplyPolicy - whitelist mode denies non-whitelisted event", () => {
-  const evaluator = createEvaluator("whitelist", ["discord/account/other_user"]);
-  const event = createEvent({ userId: "user_456" });
+  const evaluator = createEvaluator("whitelist", ["discord/account/77700000000000001"]);
+  const event = createEvent({ userId: "45600000000000001" });
   assertEquals(evaluator.shouldReply(event), false);
 });
 
@@ -83,11 +86,11 @@ Deno.test("ReplyPolicy - whitelist mode with empty whitelist denies all", () => 
 
 Deno.test("ReplyPolicy - cross-platform whitelist entries do not match", () => {
   const evaluator = createEvaluator("whitelist", [
-    "discord/account/discord_user",
-    "misskey/account/misskey_user",
+    "discord/account/55500000000000001",
+    "misskey/account/misskey_user_id",
   ]);
-  const misskeyEvent = createEvent({ platform: "misskey", userId: "discord_user" });
-  const discordEvent = createEvent({ platform: "discord", userId: "misskey_user" });
+  const misskeyEvent = createEvent({ platform: "misskey", userId: "55500000000000001" });
+  const discordEvent = createEvent({ platform: "discord", userId: "misskey_user_id" });
 
   assertEquals(evaluator.shouldReply(misskeyEvent), false);
   assertEquals(evaluator.shouldReply(discordEvent), false);
@@ -95,11 +98,11 @@ Deno.test("ReplyPolicy - cross-platform whitelist entries do not match", () => {
 
 Deno.test("ReplyPolicy - supports matching entries from multiple platforms", () => {
   const evaluator = createEvaluator("whitelist", [
-    "discord/account/discord_user",
-    "misskey/account/misskey_user",
+    "discord/account/55500000000000001",
+    "misskey/account/misskey_user_id",
   ]);
-  const discordEvent = createEvent({ platform: "discord", userId: "discord_user" });
-  const misskeyEvent = createEvent({ platform: "misskey", userId: "misskey_user" });
+  const discordEvent = createEvent({ platform: "discord", userId: "55500000000000001" });
+  const misskeyEvent = createEvent({ platform: "misskey", userId: "misskey_user_id" });
 
   assertEquals(evaluator.shouldReply(discordEvent), true);
   assertEquals(evaluator.shouldReply(misskeyEvent), true);
@@ -107,13 +110,13 @@ Deno.test("ReplyPolicy - supports matching entries from multiple platforms", () 
 
 Deno.test("ReplyPolicy - ignores invalid whitelist entries", () => {
   const evaluator = createEvaluator("whitelist", [
-    "discord/account/valid_user",
+    "discord/account/88800000000000001",
     "invalid_entry",
     "telegram/account/123",
     "",
   ]);
 
-  const validEvent = createEvent({ userId: "valid_user" });
+  const validEvent = createEvent({ userId: "88800000000000001" });
   const invalidEvent = createEvent({ userId: "123" });
 
   assertEquals(evaluator.shouldReply(validEvent), true);
@@ -121,16 +124,19 @@ Deno.test("ReplyPolicy - ignores invalid whitelist entries", () => {
 });
 
 Deno.test("ReplyPolicy - isWhitelistedAccount returns true for account entries", () => {
-  const evaluator = createEvaluator("whitelist", ["discord/account/123", "discord/channel/456"]);
-  assertEquals(evaluator.isWhitelistedAccount("discord", "123"), true);
+  const evaluator = createEvaluator("whitelist", [
+    "discord/account/12345678901234567",
+    "discord/channel/45678901234567890",
+  ]);
+  assertEquals(evaluator.isWhitelistedAccount("discord", "12345678901234567"), true);
 });
 
 Deno.test("ReplyPolicy - isWhitelistedAccount returns false for channel entries", () => {
-  const evaluator = createEvaluator("whitelist", ["discord/channel/456"]);
-  assertEquals(evaluator.isWhitelistedAccount("discord", "456"), false);
+  const evaluator = createEvaluator("whitelist", ["discord/channel/45678901234567890"]);
+  assertEquals(evaluator.isWhitelistedAccount("discord", "45678901234567890"), false);
 });
 
 Deno.test("ReplyPolicy - isWhitelistedAccount returns false for different platform", () => {
-  const evaluator = createEvaluator("whitelist", ["discord/account/123"]);
+  const evaluator = createEvaluator("whitelist", ["discord/account/12345678901234567"]);
   assertEquals(evaluator.isWhitelistedAccount("misskey", "123"), false);
 });

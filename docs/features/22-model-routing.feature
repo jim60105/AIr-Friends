@@ -24,19 +24,19 @@ Feature: Dynamic Model Routing — Per-User / Per-Context Model Selection
 
   Scenario: Whitelist account match
     Given modelRouting.enabled is true
-    And a rule matches whitelist "discord/account/123" with model "premium-model"
+    And a rule matches whitelist "discord/account/12345678901234567" with model "premium-model"
     When a message session is created for discord user "123"
     Then the session uses model "premium-model"
 
   Scenario: Whitelist channel match
     Given modelRouting.enabled is true
-    And a rule matches whitelist "discord/channel/456" with model "channel-model"
+    And a rule matches whitelist "discord/channel/45678901234567890" with model "channel-model"
     When a message session is created in discord channel "456"
     Then the session uses model "channel-model"
 
   Scenario: Whitelist does not match different platform
     Given modelRouting.enabled is true
-    And a rule matches whitelist "discord/account/123" with model "premium-model"
+    And a rule matches whitelist "discord/account/12345678901234567" with model "premium-model"
     When a message session is created for misskey user "123"
     Then the session uses the default model "gpt-4"
 
@@ -66,7 +66,7 @@ Feature: Dynamic Model Routing — Per-User / Per-Context Model Selection
     Given modelRouting.enabled is true
     And the following rules in order:
       | match                              | model        |
-      | whitelist: discord/account/123     | first-model  |
+      | whitelist: discord/account/12345678901234567     | first-model  |
       | sessionType: message               | second-model |
     When a message session is created for discord user "123"
     Then the session uses model "first-model"
@@ -144,13 +144,13 @@ Feature: Dynamic Model Routing — Per-User / Per-Context Model Selection
 
   Scenario: AND combination of whitelist and contentKeywords
     Given modelRouting.enabled is true
-    And a rule matching whitelist "discord/account/123" AND contentKeywords ["研究"]
+    And a rule matching whitelist "discord/account/12345678901234567" AND contentKeywords ["研究"]
     When user "123" on "discord" sends a message containing "研究"
     Then the session model should match the combined rule's model
 
   Scenario: AND combination fails when one condition is not met
     Given modelRouting.enabled is true
-    And a rule matching whitelist "discord/account/123" AND contentKeywords ["研究"]
+    And a rule matching whitelist "discord/account/12345678901234567" AND contentKeywords ["研究"]
     When user "123" on "discord" sends a message NOT containing "研究"
     Then the session model should fall back to the default model
 

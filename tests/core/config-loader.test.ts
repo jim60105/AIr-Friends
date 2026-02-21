@@ -543,12 +543,12 @@ accessControl:
   whitelist: []
 `;
 
-  Deno.env.set("WHITELIST", "  discord/account/123  ,  misskey/channel/456  ");
+  Deno.env.set("WHITELIST", "  discord/account/12345678901234567  ,  misskey/channel/456  ");
   try {
     await withTestConfig(config, async (dir) => {
       const result = await loadConfig(dir);
       assertEquals(result.accessControl.whitelist, [
-        "discord/account/123",
+        "discord/account/12345678901234567",
         "misskey/channel/456",
       ]);
     });
@@ -688,6 +688,99 @@ accessControl:
       "misskey/account/abcdef1234567890",
       "misskey/channel/xyz9876543210",
     ]);
+  });
+});
+
+Deno.test("loadConfig - should reject Discord whitelist entries with non-numeric IDs", async () => {
+  const config = `
+platforms:
+  discord:
+    token: "test-token"
+    enabled: true
+  misskey:
+    enabled: false
+agent:
+  model: "gpt-4"
+  systemPromptPath: "./prompts/system_reply.md"
+  tokenLimit: 20000
+workspace:
+  repoPath: "./data"
+  workspacesDir: "workspaces"
+accessControl:
+  replyTo: "whitelist"
+  whitelist:
+    - "discord/account/abcdef1234567890"
+    - "discord/channel/not-a-snowflake"
+    - "discord/account/123456789012345678"
+`;
+
+  await withTestConfig(config, async (dir) => {
+    const result = await loadConfig(dir);
+    assertEquals(result.accessControl.whitelist, [
+      "discord/account/123456789012345678",
+    ]);
+  });
+});
+
+Deno.test("loadConfig - should reject Discord IDs that are too short or too long", async () => {
+  const config = `
+platforms:
+  discord:
+    token: "test-token"
+    enabled: true
+  misskey:
+    enabled: false
+agent:
+  model: "gpt-4"
+  systemPromptPath: "./prompts/system_reply.md"
+  tokenLimit: 20000
+workspace:
+  repoPath: "./data"
+  workspacesDir: "workspaces"
+accessControl:
+  replyTo: "whitelist"
+  whitelist:
+    - "discord/account/1234567890123456"
+    - "discord/account/123456789012345678901"
+    - "discord/account/12345678901234567"
+    - "discord/account/12345678901234567890"
+`;
+
+  await withTestConfig(config, async (dir) => {
+    const result = await loadConfig(dir);
+    assertEquals(result.accessControl.whitelist, [
+      "discord/account/12345678901234567",
+      "discord/account/12345678901234567890",
+    ]);
+  });
+});
+
+Deno.test("loadConfig - should still accept Misskey IDs with various formats", async () => {
+  const config = `
+platforms:
+  discord:
+    token: "test-token"
+    enabled: true
+  misskey:
+    enabled: false
+agent:
+  model: "gpt-4"
+  systemPromptPath: "./prompts/system_reply.md"
+  tokenLimit: 20000
+workspace:
+  repoPath: "./data"
+  workspacesDir: "workspaces"
+accessControl:
+  replyTo: "whitelist"
+  whitelist:
+    - "misskey/account/abcdef1234"
+    - "misskey/account/abcdef1234567890ab"
+    - "misskey/channel/0123456789abcdef01234567"
+`;
+
+  await withTestConfig(config, async (dir) => {
+    const result = await loadConfig(dir);
+    assertEquals(result.accessControl.whitelist.length, 3);
   });
 });
 
@@ -1493,7 +1586,7 @@ agent:
   modelRouting:
     enabled: true
     rules:
-      - match: { whitelist: "discord/account/123", sessionType: "message" }
+      - match: { whitelist: "discord/account/12345678901234567", sessionType: "message" }
         model: "some-model"
 workspace:
   repoPath: "./data"
@@ -1522,7 +1615,7 @@ agent:
   modelRouting:
     enabled: true
     rules:
-      - match: { whitelist: "discord/account/123" }
+      - match: { whitelist: "discord/account/12345678901234567" }
         model: "valid-model"
       - match: { whitelist: "invalid-format" }
         model: "bad-model"
@@ -1615,7 +1708,7 @@ agent:
     enabled: true
     rules:
       - match:
-          whitelist: "discord/account/123"
+          whitelist: "discord/account/12345678901234567"
           contentKeywords: ["研究", "research"]
         model: "combo-model"
 workspace:
@@ -1627,7 +1720,10 @@ workspace:
     const result = await loadConfig(dir);
     assertEquals(result.agent.modelRouting?.rules.length, 1);
     assertEquals(result.agent.modelRouting?.rules[0].model, "combo-model");
-    assertEquals(result.agent.modelRouting?.rules[0].match.whitelist, "discord/account/123");
+    assertEquals(
+      result.agent.modelRouting?.rules[0].match.whitelist,
+      "discord/account/12345678901234567",
+    );
     assertEquals(result.agent.modelRouting?.rules[0].match.contentKeywords, ["研究", "research"]);
   });
 });

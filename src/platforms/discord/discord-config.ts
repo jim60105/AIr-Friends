@@ -50,3 +50,6 @@ export const DEFAULT_DISCORD_CONFIG: Partial<DiscordAdapterConfig> = {
   allowDm: true,
   respondToMention: true,
 };
+
+/** Discord IDs are Snowflake format: 17-20 digit integers */
+export const DISCORD_WHITELIST_PATTERN = /^discord\/(account|channel)\/\d{17,20}$/;

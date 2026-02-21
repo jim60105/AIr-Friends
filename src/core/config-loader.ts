@@ -19,8 +19,14 @@ import type {
 } from "../types/config.ts";
 import type { MCPServerConfig } from "../acp/types.ts";
 import { ConfigError, ErrorCode } from "../types/errors.ts";
+import { DISCORD_WHITELIST_PATTERN } from "../platforms/discord/discord-config.ts";
+import { MISSKEY_WHITELIST_PATTERN } from "../platforms/misskey/misskey-config.ts";
 
 const logger = createLogger("ConfigLoader");
+
+function isValidWhitelistEntry(entry: string): boolean {
+  return DISCORD_WHITELIST_PATTERN.test(entry) || MISSKEY_WHITELIST_PATTERN.test(entry);
+}
 
 /**
  * Default configuration values
@@ -226,13 +232,12 @@ function validateConfig(config: Record<string, unknown>): void {
   }
 
   // Validate accessControl.whitelist entries format
-  // Pattern allows alphanumeric, underscore, hyphen, and some special chars commonly used in IDs
-  // Excludes whitespace, path separators, and other potentially dangerous characters
-  const WHITELIST_ENTRY_PATTERN = /^(discord|misskey)\/(account|channel)\/[a-zA-Z0-9_\-@.]+$/;
+  // Discord IDs are Snowflake format: 17-20 digit integers
+  // Misskey IDs vary by instance (aid, aidx, meid, ulid, etc.), keep generic pattern
   if (accessControl?.whitelist && Array.isArray(accessControl.whitelist)) {
     const validEntries: string[] = [];
     for (const entry of accessControl.whitelist) {
-      if (typeof entry === "string" && WHITELIST_ENTRY_PATTERN.test(entry)) {
+      if (typeof entry === "string" && isValidWhitelistEntry(entry)) {
         validEntries.push(entry);
       } else {
         logger.warn("Invalid whitelist entry format, ignoring", {
@@ -452,7 +457,7 @@ function validateConfig(config: Record<string, unknown>): void {
         "reminder",
         "channelLurk",
       ];
-      const whitelistPattern = /^(discord|misskey)\/(account|channel)\/[a-zA-Z0-9_\-@.]+$/;
+
       const validRules: unknown[] = [];
 
       for (const rule of mr.rules as Record<string, unknown>[]) {
@@ -476,7 +481,7 @@ function validateConfig(config: Record<string, unknown>): void {
 
         // Validate whitelist format
         if (match.whitelist !== undefined) {
-          if (typeof match.whitelist !== "string" || !whitelistPattern.test(match.whitelist)) {
+          if (typeof match.whitelist !== "string" || !isValidWhitelistEntry(match.whitelist)) {
             logger.warn("Invalid whitelist format in model routing rule, skipping", {
               whitelist: match.whitelist,
             });

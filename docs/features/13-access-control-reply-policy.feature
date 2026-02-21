@@ -24,7 +24,7 @@ Feature: Access Control and Reply Policy
       accessControl:
         replyTo: "public"
         whitelist:
-          - "discord/account/123456789"
+          - "discord/account/12345678901234567"
           - "misskey/account/abcdef123"
       """
     Then the reply policy should be "public"
@@ -36,19 +36,19 @@ Feature: Access Control and Reply Policy
     Then the effective reply policy should be "all"
 
   Scenario: WHITELIST environment variable overrides config.yaml
-    Given config.yaml sets accessControl.whitelist to ["discord/account/111"]
-    And environment variable WHITELIST is set to "discord/account/222,misskey/account/333"
-    Then the effective whitelist should be ["discord/account/222", "misskey/account/333"]
-    And the original config.yaml whitelist entry "discord/account/111" should not be present
+    Given config.yaml sets accessControl.whitelist to ["discord/account/11100000000000000"]
+    And environment variable WHITELIST is set to "discord/account/22200000000000000,misskey/account/333"
+    Then the effective whitelist should be ["discord/account/22200000000000000", "misskey/account/333"]
+    And the original config.yaml whitelist entry "discord/account/11100000000000000" should not be present
 
   Scenario: WHITELIST environment variable trims whitespace from entries
-    Given environment variable WHITELIST is set to " discord/account/123 , misskey/account/abc "
-    Then the effective whitelist should be ["discord/account/123", "misskey/account/abc"]
+    Given environment variable WHITELIST is set to " discord/account/12345678901234567 , misskey/account/abc "
+    Then the effective whitelist should be ["discord/account/12345678901234567", "misskey/account/abc"]
 
   Scenario: Empty WHITELIST environment variable does not override config
-    Given config.yaml sets accessControl.whitelist to ["discord/account/111"]
+    Given config.yaml sets accessControl.whitelist to ["discord/account/11100000000000000"]
     And environment variable WHITELIST is set to ""
-    Then the effective whitelist should still be ["discord/account/111"]
+    Then the effective whitelist should still be ["discord/account/11100000000000000"]
 
   # ── Whitelist format validation ──
 
@@ -105,13 +105,13 @@ Feature: Access Control and Reply Policy
 
   Scenario: Allow DM from whitelisted account in "public" mode
     Given the access control is configured with replyTo "public"
-    And the whitelist contains "discord/account/12345"
+    And the whitelist contains "discord/account/12345000000000000"
     When a DM is received from Discord user "12345"
     Then the bot should process the message
 
   Scenario: Allow DM from whitelisted channel in "public" mode
     Given the access control is configured with replyTo "public"
-    And the whitelist contains "discord/channel/99999"
+    And the whitelist contains "discord/channel/99999000000000000"
     When a DM is received in Discord channel "99999"
     Then the bot should process the message
 
@@ -119,19 +119,19 @@ Feature: Access Control and Reply Policy
 
   Scenario: Allow message from whitelisted account in "whitelist" mode (public)
     Given the access control is configured with replyTo "whitelist"
-    And the whitelist contains "discord/account/12345"
+    And the whitelist contains "discord/account/12345000000000000"
     When a public message is received from Discord user "12345"
     Then the bot should process the message
 
   Scenario: Allow message from whitelisted account in "whitelist" mode (DM)
     Given the access control is configured with replyTo "whitelist"
-    And the whitelist contains "discord/account/12345"
+    And the whitelist contains "discord/account/12345000000000000"
     When a DM is received from Discord user "12345"
     Then the bot should process the message
 
   Scenario: Allow message from whitelisted channel in "whitelist" mode
     Given the access control is configured with replyTo "whitelist"
-    And the whitelist contains "discord/channel/67890"
+    And the whitelist contains "discord/channel/67890000000000000"
     When a message is received in Discord channel "67890"
     Then the bot should process the message
 
@@ -151,7 +151,7 @@ Feature: Access Control and Reply Policy
 
   Scenario: Discord whitelist does not match Misskey events
     Given the access control is configured with replyTo "whitelist"
-    And the whitelist contains "discord/account/12345"
+    And the whitelist contains "discord/account/12345000000000000"
     When a message is received from Misskey user "12345"
     Then the bot should ignore the message
 

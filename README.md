@@ -151,7 +151,7 @@ agent:
   modelRouting:
     enabled: true
     rules:
-      - match: { whitelist: "discord/account/123456789" }
+      - match: { whitelist: "discord/account/12345678901234567" }
         model: "openrouter/deepseek/deepseek-v3.2"
       - match: { sessionType: "spontaneous" }
         model: "openrouter/deepseek/deepseek-v3.2"
