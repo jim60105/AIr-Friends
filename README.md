@@ -17,7 +17,7 @@ Your AIr friends custom chatbot with integrated shell and skills. Powered by ACP
 - 💾 **Git Backup**: Automatic versioned backup of memories and notes to GitHub
 - 🐳 **Easy Deploy**: One-command container deployment
 - 🎨 **Customizable**: Template-based personality prompt system
-- 🔌 **Extensible**: Skill-based architecture
+- 🔌 **Extensible**: Skill-based architecture with external skill auto-installation
 
 ## 🚀 Quick Start
 

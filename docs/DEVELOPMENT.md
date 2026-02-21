@@ -176,6 +176,7 @@ Configuration is loaded from `config.yaml` (YAML format). See [config.example.ya
 | `REMINDERS_MIN_INTERVAL_MS` | Minimum reminder delay from now in ms (default: 60000) |
 | `REMINDERS_PERSIST_PATH` | Reminder persistence file name (default: reminders.jsonl) |
 | `REMINDERS_CHECK_INTERVAL_MS` | How often to check for due reminders in ms (default: 30000) |
+| `AGENT_EXTERNAL_SKILLS` | External skills to install at startup (JSON string, e.g. `[{"repo":"owner/repo","skill":"name"}]`) |
 
 ### Access Control & Reply Policy
 

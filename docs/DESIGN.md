@@ -576,6 +576,7 @@ workspace:
 | `OPENROUTER_API_KEY` | OpenRouter API key                               |
 | `MODEL_ROUTING_ENABLED` | Enable model routing (true/false, default: false) |
 | `MODEL_ROUTING_RULES` | Model routing rules as JSON string |
+| `AGENT_EXTERNAL_SKILLS` | External skills to install at startup (JSON string) |
 
 ### Multi-Environment Support
 
@@ -811,6 +812,7 @@ AIr-Friends/
 │   │   ├── message-handler.ts
 │   │   ├── reply-dispatcher.ts
 │   │   ├── reply-policy.ts
+│   │   ├── skill-installer.ts
 │   │   └── config-loader.ts
 │   ├── platforms/           # Platform adapters (Discord, Misskey)
 │   │   ├── platform-adapter.ts

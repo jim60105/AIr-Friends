@@ -861,6 +861,38 @@ gitBackup:
 - `src/core/git-backup-service.ts` — Git operation encapsulation
 - `src/core/git-backup-scheduler.ts` — Fixed-interval scheduling
 
+### 15. External Skill Auto-Installation (Feature 27)
+
+Enables automatic installation of external Agent Skills at startup via `deno x -y skills add`.
+
+**Configuration:**
+
+```yaml
+agent:
+  externalSkills:
+    - repo: "jim60105/copilot-prompt"
+      skill: "create-blog-post"
+```
+
+**Environment Variable Override:**
+
+- `AGENT_EXTERNAL_SKILLS` → `agent.externalSkills` (JSON string, e.g. `[{"repo":"owner/repo","skill":"skill-name"}]`)
+
+**How It Works:**
+
+1. Configured in `config.yaml` under `agent.externalSkills` or via `AGENT_EXTERNAL_SKILLS` env var
+2. `installExternalSkills()` runs during `bootstrap()`, after config loading and before `AgentCore` initialization
+3. Skills are installed sequentially to avoid filesystem conflicts in `~/.agents/skills/`
+4. Each skill is installed via `deno x -y skills add <repo> -a universal -s <skill> -g -y`
+5. Individual installation failures are logged but do **not** block application startup
+
+**Key Components:**
+
+- `src/core/skill-installer.ts` — Sequential skill installation logic
+- `src/types/config.ts` — `ExternalSkillConfig` interface
+- `src/utils/env.ts` — `AGENT_EXTERNAL_SKILLS` JSON parsing
+- `src/core/config-loader.ts` — Validation (filters invalid entries, defaults to empty array)
+
 ### 14. Session Audit Log (Feature 25)
 
 Per-session JSONL audit trail for replay and debugging. Each session writes timestamped entries tracking the full lifecycle: context assembly, agent connection, prompt, skill calls, reply, and session end.
@@ -1124,6 +1156,10 @@ agent:
   model: "gpt-4"
   system_prompt_path: "./prompts/system_reply.md"
   token_limit: 4096
+  # External skills to install at startup (optional)
+  # externalSkills:
+  #   - repo: "jim60105/copilot-prompt"
+  #     skill: "create-blog-post"
   # External MCP servers (optional, see config.example.yaml for full examples)
   # mcpServers:
   #   - name: "github"
@@ -1179,6 +1215,7 @@ AIr-Friends/
 │   │   ├── audit-logger.ts          # Session audit JSONL writer
 │   │   ├── audit-retention.ts       # Audit log retention cleanup
 │   │   ├── audit-retention-scheduler.ts # Audit retention scheduling
+│   │   ├── skill-installer.ts           # External skill auto-installation
 │   │   └── config-loader.ts        # Configuration loading
 │   ├── platforms/
 │   │   ├── platform-adapter.ts     # Platform adapter base class
