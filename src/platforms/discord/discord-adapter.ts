@@ -35,6 +35,7 @@ import {
   messageToPltatformMessage,
   normalizeDiscordMessage,
   removeBotMention,
+  selectDiscordSpontaneousEntry,
   shouldRespondToMessage,
 } from "./discord-utils.ts";
 
@@ -638,42 +639,34 @@ export class DiscordAdapter extends PlatformAdapter {
    * Randomly selects a channel or account from the whitelist.
    */
   async determineSpontaneousTarget(config: Config): Promise<SpontaneousTarget | null> {
-    const discordEntries = config.accessControl.whitelist.filter(
-      (entry) => entry.startsWith("discord/"),
-    );
-
-    if (discordEntries.length === 0) {
+    const entry = selectDiscordSpontaneousEntry(config.accessControl.whitelist);
+    if (!entry) {
       logger.warn("No Discord whitelist entries available for spontaneous post");
       return null;
     }
 
-    const selectedEntry = discordEntries[Math.floor(Math.random() * discordEntries.length)];
-    const parts = selectedEntry.split("/");
-    const type = parts[1]; // "account" or "channel"
-    const id = parts[2];
-
-    if (type === "channel") {
-      return { channelId: id };
+    if (entry.type === "channel") {
+      return { channelId: entry.id };
     }
 
-    if (type === "account") {
+    if (entry.type === "account") {
       try {
-        const dmChannelId = await this.getDmChannelId(id);
+        const dmChannelId = await this.getDmChannelId(entry.id);
         if (!dmChannelId) {
-          logger.warn("Failed to create DM channel for user {userId}", { userId: id });
+          logger.warn("Failed to create DM channel for user {userId}", { userId: entry.id });
           return null;
         }
         return { channelId: dmChannelId };
       } catch (error) {
         logger.error("Failed to resolve DM channel", {
-          userId: id,
+          userId: entry.id,
           error: error instanceof Error ? error.message : String(error),
         });
         return null;
       }
     }
 
-    logger.warn("Unknown whitelist entry type: {entry}", { entry: selectedEntry });
+    logger.warn("Unknown whitelist entry type: {type}", { type: entry.type });
     return null;
   }
 

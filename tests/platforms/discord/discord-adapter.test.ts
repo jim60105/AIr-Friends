@@ -5,9 +5,11 @@
 import { assertEquals } from "@std/assert";
 import type { Message } from "discord.js";
 import {
+  extractDiscordChannelIds,
   isBotMentioned,
   normalizeDiscordMessage,
   removeBotMention,
+  selectDiscordSpontaneousEntry,
   shouldRespondToMessage,
 } from "@platforms/discord/discord-utils.ts";
 
@@ -462,4 +464,52 @@ Deno.test({
     assertEquals(result.success, false);
     assertEquals(result.error, "Permission denied");
   },
+});
+
+// ============ extractDiscordChannelIds tests ============
+
+Deno.test("extractDiscordChannelIds - extracts channel IDs from whitelist", () => {
+  const whitelist = [
+    "discord/channel/111",
+    "discord/account/222",
+    "misskey/channel/333",
+    "discord/channel/444",
+  ];
+  assertEquals(extractDiscordChannelIds(whitelist), ["111", "444"]);
+});
+
+Deno.test("extractDiscordChannelIds - returns empty for no channel entries", () => {
+  assertEquals(extractDiscordChannelIds(["discord/account/123", "misskey/account/456"]), []);
+});
+
+Deno.test("extractDiscordChannelIds - handles empty whitelist", () => {
+  assertEquals(extractDiscordChannelIds([]), []);
+});
+
+// ============ selectDiscordSpontaneousEntry tests ============
+
+Deno.test("selectDiscordSpontaneousEntry - selects from discord entries", () => {
+  const entry = selectDiscordSpontaneousEntry(["discord/channel/123"]);
+  assertEquals(entry?.type, "channel");
+  assertEquals(entry?.id, "123");
+});
+
+Deno.test("selectDiscordSpontaneousEntry - returns null for empty whitelist", () => {
+  assertEquals(selectDiscordSpontaneousEntry([]), null);
+});
+
+Deno.test("selectDiscordSpontaneousEntry - ignores non-discord entries", () => {
+  assertEquals(selectDiscordSpontaneousEntry(["misskey/account/abc"]), null);
+});
+
+Deno.test("selectDiscordSpontaneousEntry - parses account entries", () => {
+  const entry = selectDiscordSpontaneousEntry(["discord/account/456"]);
+  assertEquals(entry?.type, "account");
+  assertEquals(entry?.id, "456");
+});
+
+Deno.test("selectDiscordSpontaneousEntry - parses unknown type entries", () => {
+  const entry = selectDiscordSpontaneousEntry(["discord/unknown/789"]);
+  assertEquals(entry?.type, "unknown");
+  assertEquals(entry?.id, "789");
 });
