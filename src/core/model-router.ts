@@ -17,35 +17,58 @@ export interface ModelRoutingContext {
   userId?: string;
   /** Channel ID on the platform */
   channelId?: string;
+  /** Trigger message content (only available for "message" session type) */
+  messageContent?: string;
 }
 
 /**
  * Check if a routing rule matches the given context.
+ * All specified conditions must match (AND logic).
  */
 function matchesRule(
   match: ModelRoutingMatch,
   context: ModelRoutingContext,
 ): boolean {
-  if (match.whitelist) {
+  // whitelist condition
+  if (match.whitelist !== undefined) {
     const entry = match.whitelist;
+    let whitelistMatched = false;
     if (context.platform && context.userId) {
       if (entry === `${context.platform}/account/${context.userId}`) {
-        return true;
+        whitelistMatched = true;
       }
     }
-    if (context.platform && context.channelId) {
+    if (!whitelistMatched && context.platform && context.channelId) {
       if (entry === `${context.platform}/channel/${context.channelId}`) {
-        return true;
+        whitelistMatched = true;
       }
     }
-    return false;
+    if (!whitelistMatched) return false;
   }
 
-  if (match.sessionType) {
-    return match.sessionType === context.sessionType;
+  // sessionType condition
+  if (match.sessionType !== undefined) {
+    if (match.sessionType !== context.sessionType) return false;
   }
 
-  return false;
+  // contentKeywords condition (OR within keywords, only for "message" sessions)
+  if (match.contentKeywords !== undefined && match.contentKeywords.length > 0) {
+    if (context.sessionType !== "message" || !context.messageContent) {
+      return false;
+    }
+    const lowerContent = context.messageContent.toLowerCase();
+    const keywordMatched = match.contentKeywords.some(
+      (kw) => lowerContent.includes(kw.toLowerCase()),
+    );
+    if (!keywordMatched) return false;
+  }
+
+  // All specified conditions passed
+  // Empty match object should not match anything
+  const hasAnyCondition = match.whitelist !== undefined ||
+    match.sessionType !== undefined ||
+    (match.contentKeywords !== undefined && match.contentKeywords.length > 0);
+  return hasAnyCondition;
 }
 
 /**

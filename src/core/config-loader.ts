@@ -435,12 +435,12 @@ function validateConfig(config: Record<string, unknown>): void {
           continue;
         }
 
-        // Validate mutual exclusivity
+        // Validate at least one condition
         const matchKeys = Object.keys(match).filter((k) =>
           match[k] !== undefined && match[k] !== null
         );
-        if (matchKeys.length !== 1) {
-          logger.warn("Model routing rule match must have exactly one field, skipping", { match });
+        if (matchKeys.length === 0) {
+          logger.warn("Model routing rule match must have at least one field, skipping", { match });
           continue;
         }
 
@@ -462,6 +462,27 @@ function validateConfig(config: Record<string, unknown>): void {
               validValues: validSessionTypes,
             });
             continue;
+          }
+        }
+
+        // Validate contentKeywords
+        if (match.contentKeywords !== undefined) {
+          if (!Array.isArray(match.contentKeywords)) {
+            logger.warn("contentKeywords must be an array in model routing rule, skipping", {
+              contentKeywords: match.contentKeywords,
+            });
+            continue;
+          }
+          const validKeywords = (match.contentKeywords as unknown[]).filter(
+            (kw): kw is string => typeof kw === "string" && kw.trim() !== "",
+          );
+          if (validKeywords.length === 0 && match.contentKeywords.length > 0) {
+            logger.warn("contentKeywords contains no valid keywords, removing field", {
+              contentKeywords: match.contentKeywords,
+            });
+            delete match.contentKeywords;
+          } else {
+            match.contentKeywords = validKeywords;
           }
         }
 

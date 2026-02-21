@@ -111,11 +111,11 @@ Feature: Dynamic Model Routing — Per-User / Per-Context Model Selection
     When the configuration is loaded
     Then the rule is skipped
 
-  Scenario: Rules with multiple match fields are skipped
+  Scenario: Rules with multiple match fields are accepted as AND combination
     Given modelRouting.enabled is true
     And a rule with both whitelist and sessionType set
     When the configuration is loaded
-    Then the rule is skipped due to mutual exclusivity violation
+    Then the rule is accepted (AND combination of all conditions)
 
   # --- Environment variable overrides ---
 
@@ -133,3 +133,30 @@ Feature: Dynamic Model Routing — Per-User / Per-Context Model Selection
     Given MODEL_ROUTING_RULES is set to an invalid JSON string
     When the configuration is loaded
     Then the rules from the config file are preserved
+
+  # --- Content keyword matching ---
+
+  Scenario: Content keyword matching routes to research model
+    Given modelRouting.enabled is true
+    And a rule with contentKeywords ["研究", "research"] and model "research-model"
+    When a user sends a message containing "我想做研究"
+    Then the session model should be set to "research-model"
+
+  Scenario: AND combination of whitelist and contentKeywords
+    Given modelRouting.enabled is true
+    And a rule matching whitelist "discord/account/123" AND contentKeywords ["研究"]
+    When user "123" on "discord" sends a message containing "研究"
+    Then the session model should match the combined rule's model
+
+  Scenario: AND combination fails when one condition is not met
+    Given modelRouting.enabled is true
+    And a rule matching whitelist "discord/account/123" AND contentKeywords ["研究"]
+    When user "123" on "discord" sends a message NOT containing "研究"
+    Then the session model should fall back to the default model
+
+  Scenario: contentKeywords ignored for non-message session types
+    Given modelRouting.enabled is true
+    And a rule with contentKeywords ["研究"] and model "research-model"
+    When a spontaneous post session is created
+    Then the contentKeywords rule should not match
+    And the session uses the default model

@@ -1478,7 +1478,7 @@ workspace:
   });
 });
 
-Deno.test("loadConfig - should skip rules with multiple match fields", async () => {
+Deno.test("loadConfig - should accept rules with multiple match conditions (AND)", async () => {
   const config = `
 platforms:
   discord:
@@ -1502,7 +1502,8 @@ workspace:
 
   await withTestConfig(config, async (dir) => {
     const result = await loadConfig(dir);
-    assertEquals(result.agent.modelRouting?.rules.length, 0);
+    assertEquals(result.agent.modelRouting?.rules.length, 1);
+    assertEquals(result.agent.modelRouting?.rules[0].model, "some-model");
   });
 });
 
@@ -1537,6 +1538,125 @@ workspace:
     assertEquals(result.agent.modelRouting?.rules.length, 2);
     assertEquals(result.agent.modelRouting?.rules[0].model, "valid-model");
     assertEquals(result.agent.modelRouting?.rules[1].model, "spontaneous-model");
+  });
+});
+
+Deno.test("loadConfig - should validate contentKeywords as array", async () => {
+  const config = `
+platforms:
+  discord:
+    token: "test-token"
+    enabled: true
+  misskey:
+    enabled: false
+agent:
+  model: "gpt-4"
+  systemPromptPath: "./prompts/system_reply.md"
+  tokenLimit: 20000
+  modelRouting:
+    enabled: true
+    rules:
+      - match: { contentKeywords: "not-an-array" }
+        model: "bad-model"
+workspace:
+  repoPath: "./data"
+  workspacesDir: "workspaces"
+`;
+
+  await withTestConfig(config, async (dir) => {
+    const result = await loadConfig(dir);
+    assertEquals(result.agent.modelRouting?.rules.length, 0);
+  });
+});
+
+Deno.test("loadConfig - should filter empty contentKeywords entries", async () => {
+  const config = `
+platforms:
+  discord:
+    token: "test-token"
+    enabled: true
+  misskey:
+    enabled: false
+agent:
+  model: "gpt-4"
+  systemPromptPath: "./prompts/system_reply.md"
+  tokenLimit: 20000
+  modelRouting:
+    enabled: true
+    rules:
+      - match:
+          contentKeywords: ["研究", "", "research"]
+        model: "research-model"
+workspace:
+  repoPath: "./data"
+  workspacesDir: "workspaces"
+`;
+
+  await withTestConfig(config, async (dir) => {
+    const result = await loadConfig(dir);
+    assertEquals(result.agent.modelRouting?.rules.length, 1);
+    assertEquals(result.agent.modelRouting?.rules[0].match.contentKeywords, ["研究", "research"]);
+  });
+});
+
+Deno.test("loadConfig - should accept rule with whitelist + contentKeywords", async () => {
+  const config = `
+platforms:
+  discord:
+    token: "test-token"
+    enabled: true
+  misskey:
+    enabled: false
+agent:
+  model: "gpt-4"
+  systemPromptPath: "./prompts/system_reply.md"
+  tokenLimit: 20000
+  modelRouting:
+    enabled: true
+    rules:
+      - match:
+          whitelist: "discord/account/123"
+          contentKeywords: ["研究", "research"]
+        model: "combo-model"
+workspace:
+  repoPath: "./data"
+  workspacesDir: "workspaces"
+`;
+
+  await withTestConfig(config, async (dir) => {
+    const result = await loadConfig(dir);
+    assertEquals(result.agent.modelRouting?.rules.length, 1);
+    assertEquals(result.agent.modelRouting?.rules[0].model, "combo-model");
+    assertEquals(result.agent.modelRouting?.rules[0].match.whitelist, "discord/account/123");
+    assertEquals(result.agent.modelRouting?.rules[0].match.contentKeywords, ["研究", "research"]);
+  });
+});
+
+Deno.test("loadConfig - should skip rule with empty match object", async () => {
+  const config = `
+platforms:
+  discord:
+    token: "test-token"
+    enabled: true
+  misskey:
+    enabled: false
+agent:
+  model: "gpt-4"
+  systemPromptPath: "./prompts/system_reply.md"
+  tokenLimit: 20000
+  modelRouting:
+    enabled: true
+    rules:
+      - match: {}
+        model: "empty-model"
+workspace:
+  repoPath: "./data"
+  workspacesDir: "workspaces"
+`;
+
+  await withTestConfig(config, async (dir) => {
+    const result = await loadConfig(dir);
+    assertEquals(result.agent.modelRouting?.rules.length, 0);
   });
 });
 

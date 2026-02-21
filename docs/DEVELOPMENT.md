@@ -231,11 +231,17 @@ agent:
   modelRouting:
     enabled: true
     rules:
-      # Premium model for a specific user
+      # Specific account + research keywords → research model
+      - match:
+          whitelist: "discord/account/123456789"
+          contentKeywords: ["研究", "research"]
+        model: "openrouter/google/gemini-2.5-pro"
+      # Any message with research keywords → research model
+      - match:
+          contentKeywords: ["研究", "research", "論文", "paper"]
+        model: "openrouter/google/gemini-2.5-pro"
+      # Premium model for a specific user (any content)
       - match: { whitelist: "discord/account/123456789" }
-        model: "openrouter/deepseek/deepseek-v3.2"
-      # Cheaper model for a specific channel
-      - match: { whitelist: "discord/channel/987654321" }
         model: "openrouter/deepseek/deepseek-v3.2"
       # Cheaper model for spontaneous posts
       - match: { sessionType: "spontaneous" }
@@ -243,26 +249,24 @@ agent:
       # Premium model for self-research
       - match: { sessionType: "self-research" }
         model: "github-copilot/claude-opus-4.6"
-      # Cheaper model for memory maintenance
-      - match: { sessionType: "memory-maintenance" }
-        model: "openrouter/deepseek/deepseek-v3.2"
 ```
 
 Via environment variables:
 
 ```bash
 MODEL_ROUTING_ENABLED=true
-MODEL_ROUTING_RULES='[{"match":{"whitelist":"discord/account/123"},"model":"openrouter/deepseek/deepseek-v3.2"},{"match":{"sessionType":"spontaneous"},"model":"openrouter/deepseek/deepseek-v3.2"}]'
+MODEL_ROUTING_RULES='[{"match":{"whitelist":"discord/account/123","contentKeywords":["研究","research"]},"model":"openrouter/google/gemini-2.5-pro"},{"match":{"sessionType":"spontaneous"},"model":"openrouter/deepseek/deepseek-v3.2"}]'
 ```
 
 #### Match Conditions
 
-Each rule's `match` object supports one of (mutually exclusive):
+Each rule's `match` object supports multiple conditions combined with AND logic. All specified conditions must match for the rule to apply:
 
 | Field | Example | Description |
 |-------|---------|-------------|
 | `whitelist` | `"discord/account/123"` | Match a specific whitelist entry |
 | `sessionType` | `"message"` | Match a session type |
+| `contentKeywords` | `["研究", "research"]` | Match message content containing any keyword (OR within array, case-insensitive). Only effective for `sessionType: "message"` |
 
 Valid `sessionType` values: `"message"`, `"spontaneous"`, `"self-research"`, `"memory-maintenance"`
 

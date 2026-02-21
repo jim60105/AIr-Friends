@@ -366,6 +366,7 @@ export class SessionOrchestrator {
           platform: event.platform,
           userId: event.userId,
           channelId: event.channelId,
+          messageContent: event.content,
         };
         const resolvedModel = resolveModel(
           this.config.agent.modelRouting,
