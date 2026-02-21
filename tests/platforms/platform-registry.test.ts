@@ -107,6 +107,14 @@ class MockAdapter extends PlatformAdapter {
     return userId === this.selfId;
   }
 
+  hasBotReaction(_channelId: string, _messageId: string): Promise<boolean> {
+    return Promise.resolve(false);
+  }
+
+  hasBotMention(_channelId: string, _messageId: string): Promise<boolean> {
+    return Promise.resolve(false);
+  }
+
   getBotId(): string | null {
     return this.selfId;
   }

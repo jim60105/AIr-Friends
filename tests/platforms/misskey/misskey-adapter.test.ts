@@ -1405,3 +1405,88 @@ Deno.test("MisskeyAdapter.getDmChannelId - never returns null", async () => {
   assertEquals(result !== null, true);
   assertEquals(typeof result, "string");
 });
+
+Deno.test("MisskeyAdapter.hasBotReaction - returns true when myReaction exists", async () => {
+  const adapter = createMockMisskeyAdapter();
+  mockClientRequest(adapter, (endpoint: string) => {
+    if (endpoint === "notes/show") {
+      return Promise.resolve({ id: "note1", myReaction: "👍" });
+    }
+    return Promise.resolve(null);
+  });
+  const result = await adapter.hasBotReaction("note:abc", "note1");
+  assertEquals(result, true);
+});
+
+Deno.test("MisskeyAdapter.hasBotReaction - returns false when myReaction is null", async () => {
+  const adapter = createMockMisskeyAdapter();
+  mockClientRequest(adapter, (endpoint: string) => {
+    if (endpoint === "notes/show") {
+      return Promise.resolve({ id: "note1", myReaction: null });
+    }
+    return Promise.resolve(null);
+  });
+  const result = await adapter.hasBotReaction("note:abc", "note1");
+  assertEquals(result, false);
+});
+
+Deno.test("MisskeyAdapter.hasBotReaction - returns false for chat messages", async () => {
+  const adapter = createMockMisskeyAdapter();
+  const result = await adapter.hasBotReaction("chat:user1", "msg1");
+  assertEquals(result, false);
+});
+
+Deno.test("MisskeyAdapter.hasBotReaction - returns false on API error", async () => {
+  const adapter = createMockMisskeyAdapter();
+  mockClientRequest(adapter, () => {
+    return Promise.reject(new Error("API error"));
+  });
+  const result = await adapter.hasBotReaction("note:abc", "note1");
+  assertEquals(result, false);
+});
+
+Deno.test("MisskeyAdapter.hasBotMention - returns true when mention matches", async () => {
+  const adapter = createMockMisskeyAdapter();
+  // Set botUsername
+  // deno-lint-ignore no-explicit-any
+  (adapter as any).botUsername = "testbot";
+  mockClientRequest(adapter, (endpoint: string) => {
+    if (endpoint === "notes/show") {
+      return Promise.resolve({ id: "note1", text: "Hey @testbot check this out" });
+    }
+    return Promise.resolve(null);
+  });
+  const result = await adapter.hasBotMention("note:abc", "note1");
+  assertEquals(result, true);
+});
+
+Deno.test("MisskeyAdapter.hasBotMention - returns false when no mention", async () => {
+  const adapter = createMockMisskeyAdapter();
+  // deno-lint-ignore no-explicit-any
+  (adapter as any).botUsername = "testbot";
+  mockClientRequest(adapter, (endpoint: string) => {
+    if (endpoint === "notes/show") {
+      return Promise.resolve({ id: "note1", text: "Just a normal message" });
+    }
+    return Promise.resolve(null);
+  });
+  const result = await adapter.hasBotMention("note:abc", "note1");
+  assertEquals(result, false);
+});
+
+Deno.test("MisskeyAdapter.hasBotMention - returns false for chat messages", async () => {
+  const adapter = createMockMisskeyAdapter();
+  const result = await adapter.hasBotMention("chat:user1", "msg1");
+  assertEquals(result, false);
+});
+
+Deno.test("MisskeyAdapter.hasBotMention - returns false on API error", async () => {
+  const adapter = createMockMisskeyAdapter();
+  // deno-lint-ignore no-explicit-any
+  (adapter as any).botUsername = "testbot";
+  mockClientRequest(adapter, () => {
+    return Promise.reject(new Error("API error"));
+  });
+  const result = await adapter.hasBotMention("note:abc", "note1");
+  assertEquals(result, false);
+});

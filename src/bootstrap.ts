@@ -4,6 +4,7 @@ import { loadConfig } from "@core/config-loader.ts";
 import type { Config } from "./types/config.ts";
 import { AgentCore } from "@core/agent-core.ts";
 import { SpontaneousScheduler } from "@core/spontaneous-scheduler.ts";
+import { ChannelLurkScheduler, extractDiscordChannelIds } from "@core/channel-lurk-scheduler.ts";
 import { SelfResearchScheduler } from "@core/self-research-scheduler.ts";
 import { MemoryMaintenanceScheduler } from "@core/memory-maintenance-scheduler.ts";
 import { ReminderScheduler } from "@core/reminder-scheduler.ts";
@@ -33,6 +34,7 @@ export interface AppContext {
   platformRegistry: ReturnType<typeof getPlatformRegistry>;
   healthCheckServer: HealthCheckServer | null;
   spontaneousScheduler: SpontaneousScheduler | null;
+  channelLurkScheduler: ChannelLurkScheduler | null;
   selfResearchScheduler: SelfResearchScheduler | null;
   memoryMaintenanceScheduler: MemoryMaintenanceScheduler | null;
   gitBackupScheduler: GitBackupScheduler | null;
@@ -194,6 +196,54 @@ export async function bootstrap(
 
   // Initialize Self-Research Scheduler
   let selfResearchScheduler: SelfResearchScheduler | null = null;
+
+  // Initialize Channel Lurk Scheduler (Discord only)
+  let channelLurkScheduler: ChannelLurkScheduler | null = null;
+  if (config.platforms.discord?.enabled && config.platforms.discord.channelLurk?.enabled) {
+    const discordAdapter = platformRegistry.getAdapter("discord");
+    const channelIds = extractDiscordChannelIds(config.accessControl.whitelist);
+
+    if (discordAdapter && channelIds.length > 0) {
+      channelLurkScheduler = new ChannelLurkScheduler(
+        config.platforms.discord.channelLurk,
+        discordAdapter,
+        channelIds,
+        async (target, lastMessage) => {
+          const adapter = platformRegistry.getAdapter("discord");
+          if (!adapter) return;
+
+          // Build NormalizedEvent from the last message
+          const event = {
+            platform: "discord" as const,
+            channelId: target.channelId,
+            userId: lastMessage.userId,
+            messageId: lastMessage.messageId,
+            isDm: false,
+            guildId: "",
+            content: lastMessage.content,
+            timestamp: lastMessage.timestamp,
+            attachments: lastMessage.attachments,
+          };
+
+          const response = await agentCore.getOrchestrator().processChannelLurkMessage(
+            event,
+            adapter,
+          );
+
+          if (!response.success) {
+            logger.warn("Channel lurk reply did not succeed", {
+              channelId: target.channelId,
+              error: response.error,
+            });
+          }
+        },
+      );
+      logger.info("Channel lurk scheduler initialized", { channelCount: channelIds.length });
+    } else if (channelIds.length === 0) {
+      logger.info("Channel lurk enabled but no Discord channels in whitelist");
+    }
+  }
+
   if (config.selfResearch?.enabled) {
     selfResearchScheduler = new SelfResearchScheduler(config);
     selfResearchScheduler.setCallback(async () => {
@@ -373,6 +423,7 @@ export async function bootstrap(
     platformRegistry,
     healthCheckServer,
     spontaneousScheduler,
+    channelLurkScheduler,
     selfResearchScheduler,
     memoryMaintenanceScheduler,
     gitBackupScheduler,
@@ -410,6 +461,11 @@ export async function startPlatforms(context: AppContext): Promise<void> {
   // Start spontaneous scheduler after platforms are connected
   if (context.spontaneousScheduler) {
     context.spontaneousScheduler.start();
+  }
+
+  // Start channel lurk scheduler after platforms are connected
+  if (context.channelLurkScheduler) {
+    context.channelLurkScheduler.start();
   }
 
   // Start self-research scheduler (independent of platforms)

@@ -21,6 +21,8 @@ export interface DiscordConfig extends BasePlatformConfig {
   spontaneousPost?: SpontaneousPostConfig;
   /** Typing indicator configuration (Discord only) */
   typingIndicator?: TypingIndicatorConfig;
+  /** Channel lurk reply configuration (Discord only) */
+  channelLurk?: ChannelLurkConfig;
 }
 
 /**
@@ -152,7 +154,8 @@ export type SessionType =
   | "spontaneous"
   | "self-research"
   | "memory-maintenance"
-  | "reminder";
+  | "reminder"
+  | "channelLurk";
 
 /**
  * Match condition for a model routing rule.
@@ -274,6 +277,18 @@ export interface SpontaneousPostConfig {
    * (default: 0.5)
    */
   contextFetchProbability: number;
+}
+
+/**
+ * Channel lurk reply configuration (Discord only).
+ * When enabled, the bot periodically checks whitelisted channels and
+ * auto-replies when conditions are met.
+ */
+export interface ChannelLurkConfig {
+  /** Enable channel lurk reply (default: false) */
+  enabled: boolean;
+  /** Check interval in milliseconds (default: 1800000 = 30 minutes) */
+  intervalMs: number;
 }
 
 /**

@@ -669,6 +669,49 @@ export class DiscordAdapter extends PlatformAdapter {
   }
 
   /**
+   * Check if the bot has reacted to a specific message.
+   */
+  async hasBotReaction(channelId: string, messageId: string): Promise<boolean> {
+    try {
+      const channel = await this.client.channels.fetch(channelId);
+      if (!channel || !this.isTextBasedChannel(channel)) return false;
+
+      const message = await (channel as TextBasedChannel).messages.fetch(messageId);
+      for (const reaction of message.reactions.cache.values()) {
+        if (reaction.me) return true;
+      }
+      return false;
+    } catch (error) {
+      logger.warn("Failed to check bot reaction on message {messageId}", {
+        messageId,
+        channelId,
+        error: (error as Error).message,
+      });
+      return false;
+    }
+  }
+
+  /**
+   * Check if a specific message mentions the bot.
+   */
+  async hasBotMention(channelId: string, messageId: string): Promise<boolean> {
+    try {
+      const channel = await this.client.channels.fetch(channelId);
+      if (!channel || !this.isTextBasedChannel(channel)) return false;
+
+      const message = await (channel as TextBasedChannel).messages.fetch(messageId);
+      return message.mentions.users.has(this.botId!);
+    } catch (error) {
+      logger.warn("Failed to check bot mention on message {messageId}", {
+        messageId,
+        channelId,
+        error: (error as Error).message,
+      });
+      return false;
+    }
+  }
+
+  /**
    * Type guard for text-based channels
    */
   private isTextBasedChannel(channel: unknown): channel is TextBasedChannel {

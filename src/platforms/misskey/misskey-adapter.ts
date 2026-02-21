@@ -25,6 +25,7 @@ import {
   buildReplyParams,
   ChatMessageLite,
   chatMessageToPlatformMessage,
+  isMentionToBot,
   MisskeyMessage,
   MisskeyNote,
   normalizeMisskeyChatMessage,
@@ -913,6 +914,54 @@ export class MisskeyAdapter extends PlatformAdapter {
    */
   isSelf(userId: string): boolean {
     return userId === this.botId;
+  }
+
+  /**
+   * Check if the bot has reacted to a specific message.
+   * Uses notes/show API to check myReaction field.
+   */
+  async hasBotReaction(channelId: string, messageId: string): Promise<boolean> {
+    // Chat messages don't support reactions
+    if (channelId.startsWith("chat:")) return false;
+
+    try {
+      const note = await this.client.request<MisskeyNote>("notes/show", {
+        noteId: messageId,
+      });
+      return note.myReaction != null;
+    } catch (error) {
+      logger.warn("Failed to check bot reaction on note {messageId}", {
+        messageId,
+        channelId,
+        error: (error as Error).message,
+      });
+      return false;
+    }
+  }
+
+  /**
+   * Check if a specific message mentions the bot.
+   * Uses isMentionToBot utility for text-based mention detection.
+   */
+  async hasBotMention(channelId: string, messageId: string): Promise<boolean> {
+    // Chat messages are 1-on-1, mention concept doesn't apply
+    if (channelId.startsWith("chat:")) return false;
+
+    if (!this.botUsername) return false;
+
+    try {
+      const note = await this.client.request<MisskeyNote>("notes/show", {
+        noteId: messageId,
+      });
+      return isMentionToBot(note, this.botUsername);
+    } catch (error) {
+      logger.warn("Failed to check bot mention on note {messageId}", {
+        messageId,
+        channelId,
+        error: (error as Error).message,
+      });
+      return false;
+    }
   }
 
   /**

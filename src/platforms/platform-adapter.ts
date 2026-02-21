@@ -253,4 +253,16 @@ export abstract class PlatformAdapter implements MessageFetcher {
    * @returns DM channel ID string, or null if DM creation failed
    */
   abstract getDmChannelId(userId: string): Promise<string | null>;
+
+  /**
+   * Check if the bot has reacted to a specific message.
+   * Used by channel lurk scheduler to avoid duplicate responses.
+   */
+  abstract hasBotReaction(channelId: string, messageId: string): Promise<boolean>;
+
+  /**
+   * Check if a specific message mentions the bot.
+   * Used by channel lurk scheduler to skip already-handled mentions.
+   */
+  abstract hasBotMention(channelId: string, messageId: string): Promise<boolean>;
 }
