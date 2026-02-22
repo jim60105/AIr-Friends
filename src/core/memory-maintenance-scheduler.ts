@@ -1,5 +1,7 @@
 import { createLogger } from "@utils/logger.ts";
 import type { MemoryMaintenanceConfig } from "../types/config.ts";
+import type { SchedulerStateStore } from "@core/scheduler-state-store.ts";
+import { resolveScheduleTime } from "@core/scheduler-state-store.ts";
 
 const logger = createLogger("MemoryMaintenanceScheduler");
 
@@ -16,6 +18,7 @@ export class MemoryMaintenanceScheduler {
   private isRunning = false;
   private lastExecutedAt: Date | null = null;
   private nextScheduledAt: Date | null = null;
+  private stateStore: SchedulerStateStore | null = null;
 
   constructor(config: MemoryMaintenanceConfig) {
     this.config = config;
@@ -25,7 +28,14 @@ export class MemoryMaintenanceScheduler {
     this.callback = callback;
   }
 
-  start(): void {
+  /**
+   * Set the state store for persisting schedule times.
+   */
+  setStateStore(store: SchedulerStateStore): void {
+    this.stateStore = store;
+  }
+
+  start(restoredState?: Record<string, string>): void {
     if (!this.config.enabled) {
       logger.info("Memory maintenance is disabled");
       return;
@@ -36,7 +46,29 @@ export class MemoryMaintenanceScheduler {
       intervalMs: this.config.intervalMs,
       minMemoryCount: this.config.minMemoryCount,
     });
-    this.scheduleNext();
+
+    const restoredNextAt = restoredState?.["memoryMaintenance"]
+      ? new Date(restoredState["memoryMaintenance"])
+      : undefined;
+
+    if (restoredNextAt && !isNaN(restoredNextAt.getTime())) {
+      const { delayMs, nextAt } = resolveScheduleTime(
+        restoredNextAt,
+        this.config.intervalMs,
+        this.config.intervalMs,
+        () => this.config.intervalMs,
+      );
+      this.nextScheduledAt = nextAt;
+      this.stateStore?.save("memoryMaintenance", nextAt);
+
+      if (delayMs === 0) {
+        this.execute();
+      } else {
+        this.timerId = setTimeout(() => this.execute(), delayMs);
+      }
+    } else {
+      this.scheduleNext();
+    }
   }
 
   stop(): void {
@@ -66,6 +98,10 @@ export class MemoryMaintenanceScheduler {
 
     const intervalMs = this.config.intervalMs;
     this.nextScheduledAt = new Date(Date.now() + intervalMs);
+
+    // Persist the scheduled time
+    this.stateStore?.save("memoryMaintenance", this.nextScheduledAt);
+
     logger.info("Next memory maintenance scheduled", {
       nextAt: this.nextScheduledAt.toISOString(),
     });
