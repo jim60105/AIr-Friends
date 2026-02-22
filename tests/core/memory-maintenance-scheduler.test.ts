@@ -155,8 +155,9 @@ Deno.test("MemoryMaintenanceScheduler - uses restored schedule time within valid
 Deno.test("MemoryMaintenanceScheduler - executes immediately when restored time is past", async () => {
   const scheduler = new MemoryMaintenanceScheduler(createConfig({ intervalMs: 5000 }));
   let executed = false;
-  scheduler.setCallback(async () => {
+  scheduler.setCallback(() => {
     executed = true;
+    return Promise.resolve();
   });
 
   scheduler.start({ memoryMaintenance: new Date(Date.now() - 60000).toISOString() });

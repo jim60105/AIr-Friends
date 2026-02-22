@@ -301,7 +301,7 @@ Deno.test("ChannelLurkScheduler - uses restored schedule time within valid range
     createConfig({ intervalMs: 5000 }),
     adapter,
     ["ch-1"],
-    async () => {},
+    () => Promise.resolve(),
   );
 
   const futureTime = new Date(Date.now() + 2000);
@@ -321,8 +321,9 @@ Deno.test("ChannelLurkScheduler - executes immediately when restored time is pas
     createConfig({ intervalMs: 5000 }),
     adapter,
     ["ch-1"],
-    async () => {
+    (_target, _msg) => {
       triggered = true;
+      return Promise.resolve();
     },
   );
 
@@ -333,7 +334,7 @@ Deno.test("ChannelLurkScheduler - executes immediately when restored time is pas
   scheduler.stop();
 });
 
-Deno.test("ChannelLurkScheduler - persists next time via stateStore", async () => {
+Deno.test("ChannelLurkScheduler - persists next time via stateStore", () => {
   const adapter = new MockPlatformAdapter();
   adapter.setMockMessages([createMockMessage()]);
 
@@ -342,7 +343,7 @@ Deno.test("ChannelLurkScheduler - persists next time via stateStore", async () =
     createConfig({ intervalMs: 50 }),
     adapter,
     ["ch-1"],
-    async () => {},
+    () => Promise.resolve(),
   );
   scheduler.setStateStore({
     save: (key: string, nextAt: Date) => {

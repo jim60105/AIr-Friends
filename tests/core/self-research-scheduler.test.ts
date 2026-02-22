@@ -172,8 +172,9 @@ Deno.test("SelfResearchScheduler - executes immediately when restored time is pa
   const config = createConfig({ enabled: true, minIntervalMs: 100, maxIntervalMs: 5000 });
   const scheduler = new SelfResearchScheduler(config);
   let executed = false;
-  scheduler.setCallback(async () => {
+  scheduler.setCallback(() => {
     executed = true;
+    return Promise.resolve();
   });
 
   scheduler.start({ selfResearch: new Date(Date.now() - 60000).toISOString() });

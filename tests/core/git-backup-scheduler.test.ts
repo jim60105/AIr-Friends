@@ -183,8 +183,9 @@ Deno.test("GitBackupScheduler - uses restored schedule time within valid range",
 Deno.test("GitBackupScheduler - executes immediately when restored time is past", async () => {
   const scheduler = new GitBackupScheduler(createConfig({ intervalMs: 5000 }));
   let executed = false;
-  scheduler.setCallback(async () => {
+  scheduler.setCallback(() => {
     executed = true;
+    return Promise.resolve();
   });
 
   scheduler.start({ gitBackup: new Date(Date.now() - 60000).toISOString() });
@@ -197,8 +198,9 @@ Deno.test("GitBackupScheduler - executes immediately when restored time is past"
 Deno.test("GitBackupScheduler - waits when restored time is in future", async () => {
   const scheduler = new GitBackupScheduler(createConfig({ intervalMs: 5000 }));
   let executed = false;
-  scheduler.setCallback(async () => {
+  scheduler.setCallback(() => {
     executed = true;
+    return Promise.resolve();
   });
 
   const futureTime = new Date(Date.now() + 3000);
