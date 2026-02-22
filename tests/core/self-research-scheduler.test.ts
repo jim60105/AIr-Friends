@@ -153,3 +153,74 @@ Deno.test("SelfResearchScheduler - lastExecutedAt is set after callback runs", a
 
   scheduler.stop();
 });
+
+// === State Restoration Tests ===
+
+Deno.test("SelfResearchScheduler - uses restored schedule time within valid range", () => {
+  const config = createConfig({ enabled: true, minIntervalMs: 100, maxIntervalMs: 5000 });
+  const scheduler = new SelfResearchScheduler(config);
+  scheduler.setCallback(async () => {});
+
+  const futureTime = new Date(Date.now() + 2000);
+  scheduler.start({ selfResearch: futureTime.toISOString() });
+
+  assertEquals(scheduler.getStatus().nextScheduledAt?.toISOString(), futureTime.toISOString());
+  scheduler.stop();
+});
+
+Deno.test("SelfResearchScheduler - executes immediately when restored time is past", async () => {
+  const config = createConfig({ enabled: true, minIntervalMs: 100, maxIntervalMs: 5000 });
+  const scheduler = new SelfResearchScheduler(config);
+  let executed = false;
+  scheduler.setCallback(async () => {
+    executed = true;
+  });
+
+  scheduler.start({ selfResearch: new Date(Date.now() - 60000).toISOString() });
+  await new Promise((resolve) => setTimeout(resolve, 100));
+
+  assertEquals(executed, true);
+  scheduler.stop();
+});
+
+Deno.test("SelfResearchScheduler - reschedules when restored time exceeds max range", () => {
+  const config = createConfig({ enabled: true, minIntervalMs: 100, maxIntervalMs: 200 });
+  const scheduler = new SelfResearchScheduler(config);
+  scheduler.setCallback(async () => {});
+
+  scheduler.start({ selfResearch: new Date(Date.now() + 999999999).toISOString() });
+
+  const delta = scheduler.getStatus().nextScheduledAt!.getTime() - Date.now();
+  assertEquals(delta <= 300, true);
+  assertEquals(delta >= 0, true);
+  scheduler.stop();
+});
+
+Deno.test("SelfResearchScheduler - works normally without restored state", () => {
+  const config = createConfig({ enabled: true });
+  const scheduler = new SelfResearchScheduler(config);
+  scheduler.setCallback(async () => {});
+  scheduler.start();
+
+  assertEquals(scheduler.getStatus().nextScheduledAt instanceof Date, true);
+  scheduler.stop();
+});
+
+Deno.test("SelfResearchScheduler - persists next time via stateStore", () => {
+  const config = createConfig({ enabled: true, minIntervalMs: 50, maxIntervalMs: 100 });
+  const scheduler = new SelfResearchScheduler(config);
+
+  const saved: { key: string; nextAt: Date }[] = [];
+  scheduler.setStateStore({
+    save: (key: string, nextAt: Date) => {
+      saved.push({ key, nextAt });
+      return Promise.resolve();
+    },
+  } as never);
+  scheduler.setCallback(async () => {});
+  scheduler.start();
+
+  assertEquals(saved.length >= 1, true);
+  assertEquals(saved[0].key, "selfResearch");
+  scheduler.stop();
+});

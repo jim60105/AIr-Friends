@@ -292,3 +292,66 @@ Deno.test("ChannelLurkScheduler - triggers for new messageId after previous", as
   // Should trigger for both different messages
   assertEquals(triggerCount, 2);
 });
+
+// === State Restoration Tests ===
+
+Deno.test("ChannelLurkScheduler - uses restored schedule time within valid range", () => {
+  const adapter = new MockPlatformAdapter();
+  const scheduler = new ChannelLurkScheduler(
+    createConfig({ intervalMs: 5000 }),
+    adapter,
+    ["ch-1"],
+    async () => {},
+  );
+
+  const futureTime = new Date(Date.now() + 2000);
+  scheduler.start({ channelLurk: futureTime.toISOString() });
+
+  // Should not execute immediately — waiting for future time
+  scheduler.stop();
+});
+
+Deno.test("ChannelLurkScheduler - executes immediately when restored time is past", async () => {
+  const adapter = new MockPlatformAdapter();
+  const message = createMockMessage();
+  adapter.setMockMessages([message]);
+
+  let triggered = false;
+  const scheduler = new ChannelLurkScheduler(
+    createConfig({ intervalMs: 5000 }),
+    adapter,
+    ["ch-1"],
+    async () => {
+      triggered = true;
+    },
+  );
+
+  scheduler.start({ channelLurk: new Date(Date.now() - 60000).toISOString() });
+  await new Promise((resolve) => setTimeout(resolve, 200));
+
+  assertEquals(triggered, true);
+  scheduler.stop();
+});
+
+Deno.test("ChannelLurkScheduler - persists next time via stateStore", async () => {
+  const adapter = new MockPlatformAdapter();
+  adapter.setMockMessages([createMockMessage()]);
+
+  const saved: { key: string; nextAt: Date }[] = [];
+  const scheduler = new ChannelLurkScheduler(
+    createConfig({ intervalMs: 50 }),
+    adapter,
+    ["ch-1"],
+    async () => {},
+  );
+  scheduler.setStateStore({
+    save: (key: string, nextAt: Date) => {
+      saved.push({ key, nextAt });
+      return Promise.resolve();
+    },
+  } as never);
+  scheduler.start();
+
+  assertEquals(saved.some((s) => s.key === "channelLurk"), true);
+  scheduler.stop();
+});
