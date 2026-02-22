@@ -21,6 +21,7 @@ import { GelfTransport } from "@utils/gelf-transport.ts";
 import { cleanupAuditLogs } from "@core/audit-retention.ts";
 import { AuditRetentionScheduler } from "@core/audit-retention-scheduler.ts";
 import { installExternalSkills } from "@core/skill-installer.ts";
+import { SchedulerStateStore } from "@core/scheduler-state-store.ts";
 import { join } from "@std/path";
 import type { Platform } from "./types/events.ts";
 import { isValidPlatform } from "./types/events.ts";
@@ -43,6 +44,8 @@ export interface AppContext {
   gitBackupService: GitBackupService | null;
   reminderScheduler: ReminderScheduler | null;
   auditRetentionScheduler: AuditRetentionScheduler | null;
+  schedulerStateStore: SchedulerStateStore | null;
+  savedSchedulerState: Record<string, string>;
   yolo: boolean;
 }
 
@@ -424,6 +427,20 @@ export async function bootstrap(
 
   logger.info("Bootstrap completed");
 
+  // Initialize scheduler state store
+  const schedulerStateStore = new SchedulerStateStore(
+    join(config.workspace.repoPath, "scheduler-state.json"),
+  );
+  const savedSchedulerState = await schedulerStateStore.load();
+
+  // Inject state store into schedulers
+  spontaneousScheduler.setStateStore(schedulerStateStore);
+  if (selfResearchScheduler) selfResearchScheduler.setStateStore(schedulerStateStore);
+  if (memoryMaintenanceScheduler) memoryMaintenanceScheduler.setStateStore(schedulerStateStore);
+  if (gitBackupScheduler) gitBackupScheduler.setStateStore(schedulerStateStore);
+  if (auditRetentionScheduler) auditRetentionScheduler.setStateStore(schedulerStateStore);
+  if (channelLurkScheduler) channelLurkScheduler.setStateStore(schedulerStateStore);
+
   const context: AppContext = {
     config,
     agentCore,
@@ -437,6 +454,8 @@ export async function bootstrap(
     gitBackupService,
     reminderScheduler,
     auditRetentionScheduler,
+    schedulerStateStore,
+    savedSchedulerState,
     yolo,
   };
 
@@ -467,26 +486,26 @@ export async function startPlatforms(context: AppContext): Promise<void> {
 
   // Start spontaneous scheduler after platforms are connected
   if (context.spontaneousScheduler) {
-    context.spontaneousScheduler.start();
+    context.spontaneousScheduler.start(context.savedSchedulerState);
   }
 
   // Start channel lurk scheduler after platforms are connected
   if (context.channelLurkScheduler) {
-    context.channelLurkScheduler.start();
+    context.channelLurkScheduler.start(context.savedSchedulerState);
   }
 
   // Start self-research scheduler (independent of platforms)
   if (context.selfResearchScheduler) {
-    context.selfResearchScheduler.start();
+    context.selfResearchScheduler.start(context.savedSchedulerState);
   }
 
   if (context.memoryMaintenanceScheduler) {
-    context.memoryMaintenanceScheduler.start();
+    context.memoryMaintenanceScheduler.start(context.savedSchedulerState);
   }
 
   // Start git backup scheduler (independent of platforms)
   if (context.gitBackupScheduler) {
-    context.gitBackupScheduler.start();
+    context.gitBackupScheduler.start(context.savedSchedulerState);
   }
 
   // Start reminder scheduler (independent of platforms, but needs them connected)
@@ -494,9 +513,9 @@ export async function startPlatforms(context: AppContext): Promise<void> {
     context.reminderScheduler.start();
   }
 
-  // Start audit retention scheduler (independent of platforms)
+  // Start audit retention scheduler with restored state
   if (context.auditRetentionScheduler) {
-    context.auditRetentionScheduler.start();
+    context.auditRetentionScheduler.start(context.savedSchedulerState);
   }
 
   logger.info("All platforms connected");

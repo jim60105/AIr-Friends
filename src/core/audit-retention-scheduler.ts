@@ -2,6 +2,8 @@
 
 import { createLogger } from "@utils/logger.ts";
 import type { AuditConfig } from "../types/config.ts";
+import type { SchedulerStateStore } from "@core/scheduler-state-store.ts";
+import { resolveScheduleTime } from "@core/scheduler-state-store.ts";
 
 const logger = createLogger("AuditRetentionScheduler");
 
@@ -21,6 +23,7 @@ export class AuditRetentionScheduler {
   private isRunning = false;
   private lastExecutedAt: Date | null = null;
   private nextScheduledAt: Date | null = null;
+  private stateStore: SchedulerStateStore | null = null;
 
   constructor(config: AuditConfig) {
     this.config = config;
@@ -30,7 +33,14 @@ export class AuditRetentionScheduler {
     this.callback = callback;
   }
 
-  start(): void {
+  /**
+   * Set the state store for persisting schedule times.
+   */
+  setStateStore(store: SchedulerStateStore): void {
+    this.stateStore = store;
+  }
+
+  start(restoredState?: Record<string, string>): void {
     if (!this.config.enabled || this.config.retentionDays <= 0) {
       logger.info("Audit retention cleanup is disabled");
       return;
@@ -41,8 +51,30 @@ export class AuditRetentionScheduler {
       retentionDays: this.config.retentionDays,
       intervalMs: CLEANUP_INTERVAL_MS,
     });
-    // Execute immediately on start, then schedule subsequent runs
-    this.execute();
+
+    const restoredNextAt = restoredState?.["auditRetention"]
+      ? new Date(restoredState["auditRetention"])
+      : undefined;
+
+    if (restoredNextAt && !isNaN(restoredNextAt.getTime())) {
+      const { delayMs, nextAt } = resolveScheduleTime(
+        restoredNextAt,
+        CLEANUP_INTERVAL_MS,
+        CLEANUP_INTERVAL_MS,
+        () => CLEANUP_INTERVAL_MS,
+      );
+      this.nextScheduledAt = nextAt;
+      this.stateStore?.save("auditRetention", nextAt);
+
+      if (delayMs === 0) {
+        this.execute();
+      } else {
+        this.timerId = setTimeout(() => this.execute(), delayMs);
+      }
+    } else {
+      // No restored state — execute immediately (current behavior)
+      this.execute();
+    }
   }
 
   stop(): void {
@@ -70,6 +102,10 @@ export class AuditRetentionScheduler {
   private scheduleNext(): void {
     if (!this.started) return;
     this.nextScheduledAt = new Date(Date.now() + CLEANUP_INTERVAL_MS);
+
+    // Persist the scheduled time
+    this.stateStore?.save("auditRetention", this.nextScheduledAt);
+
     logger.info("Next audit cleanup scheduled at {nextAt}", {
       nextAt: this.nextScheduledAt.toISOString(),
     });

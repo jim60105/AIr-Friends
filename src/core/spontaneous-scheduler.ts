@@ -4,6 +4,8 @@ import { createLogger } from "@utils/logger.ts";
 import type { Config } from "../types/config.ts";
 import { VALID_PLATFORMS } from "../types/events.ts";
 import type { Platform } from "../types/events.ts";
+import type { SchedulerStateStore } from "@core/scheduler-state-store.ts";
+import { resolveScheduleTime } from "@core/scheduler-state-store.ts";
 
 const logger = createLogger("SpontaneousScheduler");
 
@@ -33,6 +35,7 @@ export class SpontaneousScheduler {
   private callback: SpontaneousPostCallback | null = null;
   private readonly config: Config;
   private started = false;
+  private stateStore: SchedulerStateStore | null = null;
 
   constructor(config: Config) {
     this.config = config;
@@ -47,10 +50,17 @@ export class SpontaneousScheduler {
   }
 
   /**
+   * Set the state store for persisting schedule times.
+   */
+  setStateStore(store: SchedulerStateStore): void {
+    this.stateStore = store;
+  }
+
+  /**
    * Start scheduling for all enabled platforms.
    * Only schedules for platforms that have spontaneousPost.enabled = true.
    */
-  start(): void {
+  start(restoredState?: Record<string, string>): void {
     if (this.started) {
       logger.warn("Scheduler already started");
       return;
@@ -71,7 +81,29 @@ export class SpontaneousScheduler {
         nextScheduledAt: null,
       };
       this.states.set(platformName, state);
-      this.scheduleNext(platformName);
+
+      const key = `spontaneous:${platformName}`;
+      const restoredNextAt = restoredState?.[key] ? new Date(restoredState[key]) : undefined;
+
+      if (restoredNextAt && !isNaN(restoredNextAt.getTime())) {
+        const sp = platformConfig.spontaneousPost!;
+        const { delayMs, nextAt } = resolveScheduleTime(
+          restoredNextAt,
+          sp.minIntervalMs,
+          sp.maxIntervalMs,
+          () => this.getRandomInterval(platformName),
+        );
+        state.nextScheduledAt = nextAt;
+        this.stateStore?.save(key, nextAt);
+
+        if (delayMs === 0) {
+          this.execute(platformName);
+        } else {
+          state.timerId = setTimeout(() => this.execute(platformName), delayMs);
+        }
+      } else {
+        this.scheduleNext(platformName);
+      }
 
       logger.info("Spontaneous posting enabled for {platform}", {
         platform: platformName,
@@ -140,6 +172,9 @@ export class SpontaneousScheduler {
     const interval = this.getRandomInterval(platform);
     const nextTime = new Date(Date.now() + interval);
     state.nextScheduledAt = nextTime;
+
+    // Persist the scheduled time
+    this.stateStore?.save(`spontaneous:${platform}`, nextTime);
 
     logger.info("Next spontaneous post for {platform} scheduled at {scheduledAt}", {
       platform,

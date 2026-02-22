@@ -2,6 +2,8 @@
 
 import { createLogger } from "@utils/logger.ts";
 import type { Config } from "../types/config.ts";
+import type { SchedulerStateStore } from "@core/scheduler-state-store.ts";
+import { resolveScheduleTime } from "@core/scheduler-state-store.ts";
 
 const logger = createLogger("SelfResearchScheduler");
 
@@ -22,6 +24,7 @@ export class SelfResearchScheduler {
   private callback: SelfResearchCallback | null = null;
   private readonly config: Config;
   private started = false;
+  private stateStore: SchedulerStateStore | null = null;
 
   constructor(config: Config) {
     this.config = config;
@@ -36,9 +39,16 @@ export class SelfResearchScheduler {
   }
 
   /**
+   * Set the state store for persisting schedule times.
+   */
+  setStateStore(store: SchedulerStateStore): void {
+    this.stateStore = store;
+  }
+
+  /**
    * Start scheduling self-research sessions.
    */
-  start(): void {
+  start(restoredState?: Record<string, string>): void {
     if (this.started) {
       logger.warn("Self-research scheduler already started");
       return;
@@ -46,7 +56,30 @@ export class SelfResearchScheduler {
     if (!this.config.selfResearch?.enabled) return;
 
     this.started = true;
-    this.scheduleNext();
+
+    const restoredNextAt = restoredState?.["selfResearch"]
+      ? new Date(restoredState["selfResearch"])
+      : undefined;
+
+    if (restoredNextAt && !isNaN(restoredNextAt.getTime())) {
+      const { delayMs, nextAt } = resolveScheduleTime(
+        restoredNextAt,
+        this.config.selfResearch!.minIntervalMs,
+        this.config.selfResearch!.maxIntervalMs,
+        () => this.getRandomInterval(),
+      );
+      this.nextScheduledAt = nextAt;
+      this.stateStore?.save("selfResearch", nextAt);
+
+      if (delayMs === 0) {
+        this.execute();
+      } else {
+        this.timerId = setTimeout(() => this.execute(), delayMs);
+      }
+    } else {
+      this.scheduleNext();
+    }
+
     logger.info("Self-research scheduler started", {
       minIntervalMs: this.config.selfResearch.minIntervalMs,
       maxIntervalMs: this.config.selfResearch.maxIntervalMs,
@@ -99,6 +132,9 @@ export class SelfResearchScheduler {
     const interval = this.getRandomInterval();
     const nextTime = new Date(Date.now() + interval);
     this.nextScheduledAt = nextTime;
+
+    // Persist the scheduled time
+    this.stateStore?.save("selfResearch", nextTime);
 
     logger.info("Next self-research session scheduled at {scheduledAt}", {
       intervalMs: interval,

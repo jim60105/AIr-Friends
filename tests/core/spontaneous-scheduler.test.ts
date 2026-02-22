@@ -218,3 +218,117 @@ Deno.test("SpontaneousScheduler - lastExecutedAt is set after callback runs", as
 
   scheduler.stop();
 });
+
+// === State Restoration Tests ===
+
+Deno.test("SpontaneousScheduler - uses restored schedule time within valid range", () => {
+  const config = createConfig({
+    discordEnabled: true,
+    discordSpontaneous: true,
+    minIntervalMs: 100,
+    maxIntervalMs: 5000,
+  });
+  const scheduler = new SpontaneousScheduler(config);
+  scheduler.setCallback(async () => {});
+
+  const futureTime = new Date(Date.now() + 2000);
+  scheduler.start({ "spontaneous:discord": futureTime.toISOString() });
+
+  const status = scheduler.getStatus();
+  assertEquals(status.discord.nextScheduledAt?.toISOString(), futureTime.toISOString());
+
+  scheduler.stop();
+});
+
+Deno.test("SpontaneousScheduler - executes immediately when restored time is past", async () => {
+  const config = createConfig({
+    discordEnabled: true,
+    discordSpontaneous: true,
+    minIntervalMs: 100,
+    maxIntervalMs: 5000,
+  });
+  const scheduler = new SpontaneousScheduler(config);
+  let executed = false;
+  scheduler.setCallback(() => {
+    executed = true;
+    return Promise.resolve();
+  });
+
+  const pastTime = new Date(Date.now() - 60000);
+  scheduler.start({ "spontaneous:discord": pastTime.toISOString() });
+
+  await new Promise((resolve) => setTimeout(resolve, 100));
+  assertEquals(executed, true);
+
+  scheduler.stop();
+});
+
+Deno.test("SpontaneousScheduler - reschedules when restored time exceeds max range", () => {
+  const config = createConfig({
+    discordEnabled: true,
+    discordSpontaneous: true,
+    minIntervalMs: 100,
+    maxIntervalMs: 200,
+  });
+  const scheduler = new SpontaneousScheduler(config);
+  scheduler.setCallback(() => Promise.resolve());
+
+  const farFuture = new Date(Date.now() + 999999999);
+  scheduler.start({ "spontaneous:discord": farFuture.toISOString() });
+
+  const status = scheduler.getStatus();
+  const delta = status.discord.nextScheduledAt!.getTime() - Date.now();
+  assertEquals(delta <= 300, true); // Within max range
+  assertEquals(delta >= 0, true);
+
+  scheduler.stop();
+});
+
+Deno.test("SpontaneousScheduler - works normally without restored state", () => {
+  const config = createConfig({
+    discordEnabled: true,
+    discordSpontaneous: true,
+    minIntervalMs: 100,
+    maxIntervalMs: 200,
+  });
+  const scheduler = new SpontaneousScheduler(config);
+  scheduler.setCallback(async () => {});
+  scheduler.start();
+
+  const status = scheduler.getStatus();
+  assertEquals(status.discord.nextScheduledAt instanceof Date, true);
+
+  scheduler.stop();
+});
+
+Deno.test("SpontaneousScheduler - persists next time via stateStore in scheduleNext", () => {
+  const config = createConfig({
+    discordEnabled: true,
+    discordSpontaneous: true,
+    minIntervalMs: 50,
+    maxIntervalMs: 100,
+  });
+  const scheduler = new SpontaneousScheduler(config);
+
+  const saved: { key: string; nextAt: Date }[] = [];
+  const mockStore = {
+    save: (key: string, nextAt: Date) => {
+      saved.push({ key, nextAt });
+      return Promise.resolve();
+    },
+  };
+  scheduler.setStateStore(mockStore as never);
+
+  let callCount = 0;
+  scheduler.setCallback(() => {
+    callCount++;
+    return Promise.resolve();
+  });
+  scheduler.start();
+
+  // Initial scheduleNext should have saved
+  assertEquals(saved.length >= 1, true);
+  assertEquals(saved[0].key, "spontaneous:discord");
+
+  scheduler.stop();
+});

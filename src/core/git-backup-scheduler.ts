@@ -1,5 +1,7 @@
 import { createLogger } from "@utils/logger.ts";
 import type { GitBackupConfig } from "../types/config.ts";
+import type { SchedulerStateStore } from "@core/scheduler-state-store.ts";
+import { resolveScheduleTime } from "@core/scheduler-state-store.ts";
 
 const logger = createLogger("GitBackupScheduler");
 
@@ -16,6 +18,7 @@ export class GitBackupScheduler {
   private isRunning = false;
   private lastExecutedAt: Date | null = null;
   private nextScheduledAt: Date | null = null;
+  private stateStore: SchedulerStateStore | null = null;
 
   constructor(config: GitBackupConfig) {
     this.config = config;
@@ -25,7 +28,14 @@ export class GitBackupScheduler {
     this.callback = callback;
   }
 
-  start(): void {
+  /**
+   * Set the state store for persisting schedule times.
+   */
+  setStateStore(store: SchedulerStateStore): void {
+    this.stateStore = store;
+  }
+
+  start(restoredState?: Record<string, string>): void {
     if (!this.config.enabled) {
       logger.info("Git backup is disabled");
       return;
@@ -35,8 +45,30 @@ export class GitBackupScheduler {
     logger.info("Git backup scheduler started", {
       intervalMs: this.config.intervalMs,
     });
-    // Execute immediately on start, then schedule subsequent runs at intervalMs
-    this.execute();
+
+    const restoredNextAt = restoredState?.["gitBackup"]
+      ? new Date(restoredState["gitBackup"])
+      : undefined;
+
+    if (restoredNextAt && !isNaN(restoredNextAt.getTime())) {
+      const { delayMs, nextAt } = resolveScheduleTime(
+        restoredNextAt,
+        this.config.intervalMs,
+        this.config.intervalMs,
+        () => this.config.intervalMs,
+      );
+      this.nextScheduledAt = nextAt;
+      this.stateStore?.save("gitBackup", nextAt);
+
+      if (delayMs === 0) {
+        this.execute();
+      } else {
+        this.timerId = setTimeout(() => this.execute(), delayMs);
+      }
+    } else {
+      // No restored state — execute immediately (current behavior)
+      this.execute();
+    }
   }
 
   stop(): void {
@@ -65,6 +97,10 @@ export class GitBackupScheduler {
     if (!this.started) return;
     const intervalMs = this.config.intervalMs;
     this.nextScheduledAt = new Date(Date.now() + intervalMs);
+
+    // Persist the scheduled time
+    this.stateStore?.save("gitBackup", this.nextScheduledAt);
+
     logger.info("Next git backup scheduled at {nextAt}", {
       nextAt: this.nextScheduledAt.toISOString(),
     });

@@ -135,3 +135,62 @@ Deno.test("MemoryMaintenanceScheduler - execute without callback", async () => {
   // Should not throw - lastExecutedAt should be set even without callback
   assertEquals(scheduler.getStatus().lastExecutedAt instanceof Date, true);
 });
+
+// === State Restoration Tests ===
+
+Deno.test("MemoryMaintenanceScheduler - uses restored schedule time within valid range", () => {
+  const scheduler = new MemoryMaintenanceScheduler(createConfig({ intervalMs: 5000 }));
+  scheduler.setCallback(async () => {});
+
+  const futureTime = new Date(Date.now() + 2000);
+  scheduler.start({ memoryMaintenance: futureTime.toISOString() });
+
+  assertEquals(
+    scheduler.getStatus().nextScheduledAt?.toISOString(),
+    futureTime.toISOString(),
+  );
+  scheduler.stop();
+});
+
+Deno.test("MemoryMaintenanceScheduler - executes immediately when restored time is past", async () => {
+  const scheduler = new MemoryMaintenanceScheduler(createConfig({ intervalMs: 5000 }));
+  let executed = false;
+  scheduler.setCallback(() => {
+    executed = true;
+    return Promise.resolve();
+  });
+
+  scheduler.start({ memoryMaintenance: new Date(Date.now() - 60000).toISOString() });
+  await new Promise((resolve) => setTimeout(resolve, 100));
+
+  assertEquals(executed, true);
+  scheduler.stop();
+});
+
+Deno.test("MemoryMaintenanceScheduler - reschedules when restored time exceeds max", () => {
+  const scheduler = new MemoryMaintenanceScheduler(createConfig({ intervalMs: 200 }));
+  scheduler.setCallback(async () => {});
+
+  scheduler.start({ memoryMaintenance: new Date(Date.now() + 999999999).toISOString() });
+
+  const delta = scheduler.getStatus().nextScheduledAt!.getTime() - Date.now();
+  assertEquals(delta <= 300, true);
+  scheduler.stop();
+});
+
+Deno.test("MemoryMaintenanceScheduler - persists next time via stateStore", () => {
+  const scheduler = new MemoryMaintenanceScheduler(createConfig({ intervalMs: 100 }));
+  const saved: { key: string; nextAt: Date }[] = [];
+  scheduler.setStateStore({
+    save: (key: string, nextAt: Date) => {
+      saved.push({ key, nextAt });
+      return Promise.resolve();
+    },
+  } as never);
+  scheduler.setCallback(async () => {});
+  scheduler.start();
+
+  assertEquals(saved.length >= 1, true);
+  assertEquals(saved[0].key, "memoryMaintenance");
+  scheduler.stop();
+});

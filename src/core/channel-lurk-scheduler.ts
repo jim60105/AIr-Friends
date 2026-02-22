@@ -4,6 +4,8 @@ import { createLogger } from "@utils/logger.ts";
 import type { ChannelLurkConfig } from "../types/config.ts";
 import type { PlatformAdapter } from "@platforms/platform-adapter.ts";
 import type { PlatformMessage } from "../types/events.ts";
+import type { SchedulerStateStore } from "@core/scheduler-state-store.ts";
+import { resolveScheduleTime } from "@core/scheduler-state-store.ts";
 
 const logger = createLogger("ChannelLurkScheduler");
 
@@ -31,6 +33,7 @@ export class ChannelLurkScheduler {
   private timer?: ReturnType<typeof setTimeout>;
   private running = false;
   private lastProcessedMessageId: Map<string, string> = new Map();
+  private stateStore: SchedulerStateStore | null = null;
 
   constructor(
     private readonly config: ChannelLurkConfig,
@@ -39,7 +42,14 @@ export class ChannelLurkScheduler {
     private readonly callback: ChannelLurkCallback,
   ) {}
 
-  start(): void {
+  /**
+   * Set the state store for persisting schedule times.
+   */
+  setStateStore(store: SchedulerStateStore): void {
+    this.stateStore = store;
+  }
+
+  start(restoredState?: Record<string, string>): void {
     if (!this.config.enabled) return;
 
     logger.info("Channel lurk scheduler started", {
@@ -47,7 +57,37 @@ export class ChannelLurkScheduler {
       intervalMs: this.config.intervalMs,
     });
 
-    this.scheduleNext();
+    const restoredNextAt = restoredState?.["channelLurk"]
+      ? new Date(restoredState["channelLurk"])
+      : undefined;
+
+    if (restoredNextAt && !isNaN(restoredNextAt.getTime())) {
+      const { delayMs, nextAt } = resolveScheduleTime(
+        restoredNextAt,
+        this.config.intervalMs,
+        this.config.intervalMs,
+        () => this.config.intervalMs,
+      );
+      this.stateStore?.save("channelLurk", nextAt);
+
+      if (delayMs === 0) {
+        this.execute().catch((error) => {
+          logger.error("Channel lurk execution failed", {
+            error: (error as Error).message,
+          });
+        });
+      } else {
+        this.timer = setTimeout(() => {
+          this.execute().catch((error) => {
+            logger.error("Channel lurk execution failed", {
+              error: (error as Error).message,
+            });
+          });
+        }, delayMs);
+      }
+    } else {
+      this.scheduleNext();
+    }
   }
 
   stop(): void {
@@ -60,6 +100,10 @@ export class ChannelLurkScheduler {
 
   private scheduleNext(): void {
     if (!this.config.enabled) return;
+
+    // Persist the scheduled time
+    const nextTime = new Date(Date.now() + this.config.intervalMs);
+    this.stateStore?.save("channelLurk", nextTime);
 
     this.timer = setTimeout(() => {
       this.execute().catch((error) => {

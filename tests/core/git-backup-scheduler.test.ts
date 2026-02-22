@@ -163,3 +163,67 @@ Deno.test("GitBackupScheduler - execute without callback", async () => {
 
   assertEquals(scheduler.getStatus().lastExecutedAt instanceof Date, true);
 });
+
+// === State Restoration Tests ===
+
+Deno.test("GitBackupScheduler - uses restored schedule time within valid range", () => {
+  const scheduler = new GitBackupScheduler(createConfig({ intervalMs: 5000 }));
+  scheduler.setCallback(async () => {});
+
+  const futureTime = new Date(Date.now() + 2000);
+  scheduler.start({ gitBackup: futureTime.toISOString() });
+
+  assertEquals(
+    scheduler.getStatus().nextScheduledAt?.toISOString(),
+    futureTime.toISOString(),
+  );
+  scheduler.stop();
+});
+
+Deno.test("GitBackupScheduler - executes immediately when restored time is past", async () => {
+  const scheduler = new GitBackupScheduler(createConfig({ intervalMs: 5000 }));
+  let executed = false;
+  scheduler.setCallback(() => {
+    executed = true;
+    return Promise.resolve();
+  });
+
+  scheduler.start({ gitBackup: new Date(Date.now() - 60000).toISOString() });
+  await new Promise((resolve) => setTimeout(resolve, 100));
+
+  assertEquals(executed, true);
+  scheduler.stop();
+});
+
+Deno.test("GitBackupScheduler - waits when restored time is in future", async () => {
+  const scheduler = new GitBackupScheduler(createConfig({ intervalMs: 5000 }));
+  let executed = false;
+  scheduler.setCallback(() => {
+    executed = true;
+    return Promise.resolve();
+  });
+
+  const futureTime = new Date(Date.now() + 3000);
+  scheduler.start({ gitBackup: futureTime.toISOString() });
+  await new Promise((resolve) => setTimeout(resolve, 100));
+
+  assertEquals(executed, false);
+  scheduler.stop();
+});
+
+Deno.test("GitBackupScheduler - persists next time via stateStore", async () => {
+  const scheduler = new GitBackupScheduler(createConfig({ intervalMs: 100 }));
+  const saved: { key: string; nextAt: Date }[] = [];
+  scheduler.setStateStore({
+    save: (key: string, nextAt: Date) => {
+      saved.push({ key, nextAt });
+      return Promise.resolve();
+    },
+  } as never);
+  scheduler.setCallback(async () => {});
+  scheduler.start();
+
+  await new Promise((resolve) => setTimeout(resolve, 100));
+  assertEquals(saved.some((s) => s.key === "gitBackup"), true);
+  scheduler.stop();
+});
