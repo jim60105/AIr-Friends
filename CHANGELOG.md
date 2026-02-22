@@ -7,6 +7,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-02-22
+
+### Added
+
+- Scheduler state persistence for restart recovery
+  - New `SchedulerStateStore` module with in-memory cache strategy to avoid read-merge-write race conditions
+  - All 6 schedulers (Spontaneous, SelfResearch, MemoryMaintenance, GitBackup, AuditRetention, ChannelLurk) now support state restoration via `setStateStore()` and `start(restoredState?)`
+  - Added `resolveScheduleTime()` utility function for validating restored schedule times against configured min/max intervals
+  - Integrated `SchedulerStateStore` in bootstrap flow with `AppContext` extension
+  - Restored state validation: expired times trigger immediate execution, out-of-range times are recalculated, valid times are preserved
+  - Backward compatible: schedulers without `stateStore` behave exactly as before
+  - Comprehensive tests covering restoration logic for all schedulers
+- External skill auto-installation at startup
+  - Users can configure skills through `config.yaml` (`agent.externalSkills`), environment variable (`AGENT_EXTERNAL_SKILLS` as JSON), or Helm values (`agentExternalSkills`)
+  - New `ExternalSkillConfig` type and `skill-installer.ts` module
+  - Skills are installed sequentially via `deno x -y skills add <repo> -a universal -s <skill> -g -y` during bootstrap
+  - Individual installation failures are logged but do not block application startup
+  - Installed before `AgentCore` initialization to ensure skills are available when agent starts
+  - Full Helm chart integration with native YAML section and secret template transformation
+
+### Changed
+
+- Prompt template formatting: added `{{-` and `-}}` to all `{{ include }}` statements to remove surrounding whitespace
+- Language preference: assistant now responds primarily in Traditional Chinese (正體中文) unless user's language preference indicates otherwise
+
+### Fixed
+
+- Fixed lint errors in scheduler restoration tests by replacing async arrow functions without await with explicit `Promise.resolve()` returns
+- Fixed CI coverage threshold check by replacing Perl regex with POSIX-compatible grep pattern
+- Fixed missing LCOV report generation step before Codecov upload
+
 ## [0.10.0] - 2026-02-21
 
 ### Added
@@ -652,7 +683,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ---
 
-[Unreleased]: https://github.com/jim60105/AIr-Friends/compare/v0.10.0...HEAD
+[Unreleased]: https://github.com/jim60105/AIr-Friends/compare/v0.11.0...HEAD
+[0.11.0]: https://github.com/jim60105/AIr-Friends/compare/v0.10.0...v0.11.0
 [0.10.0]: https://github.com/jim60105/AIr-Friends/compare/v0.9.0...v0.10.0
 [0.9.0]: https://github.com/jim60105/AIr-Friends/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/jim60105/AIr-Friends/compare/v0.7.2...v0.8.0
