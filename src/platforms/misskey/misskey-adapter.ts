@@ -671,12 +671,25 @@ export class MisskeyAdapter extends PlatformAdapter {
     messageId: string,
     emoji: string,
   ): Promise<ReactionResult> {
-    // Chat messages don't support reactions
+    // Chat messages use a different API endpoint for reactions
     if (channelId.startsWith("chat:")) {
-      return {
-        success: false,
-        error: "Reactions are not supported for chat messages",
-      };
+      try {
+        await this.client.request("chat/messages/react", {
+          messageId: messageId,
+          reaction: emoji,
+        });
+
+        logger.debug("Chat reaction added", { messageId, emoji });
+        return { success: true };
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        logger.error("Failed to add chat reaction", {
+          messageId,
+          emoji,
+          error: errorMessage,
+        });
+        return { success: false, error: `Failed to add chat reaction: ${errorMessage}` };
+      }
     }
 
     try {
@@ -932,8 +945,23 @@ export class MisskeyAdapter extends PlatformAdapter {
    * Uses notes/show API to check myReaction field.
    */
   async hasBotReaction(channelId: string, messageId: string): Promise<boolean> {
-    // Chat messages don't support reactions
-    if (channelId.startsWith("chat:")) return false;
+    // Chat messages use chat/messages/show to check reactions
+    if (channelId.startsWith("chat:")) {
+      try {
+        const message = await this.client.request<{
+          reactions: Array<{ reaction: string; user: { id: string } }>;
+        }>("chat/messages/show", { messageId });
+
+        return message.reactions.some((r) => r.user.id === this.botId);
+      } catch (error) {
+        logger.warn("Failed to check bot reaction on chat message {messageId}", {
+          messageId,
+          channelId,
+          error: (error as Error).message,
+        });
+        return false;
+      }
+    }
 
     try {
       const note = await this.client.request<MisskeyNote>("notes/show", {
