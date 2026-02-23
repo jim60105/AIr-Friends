@@ -653,6 +653,42 @@ Deno.test("fetchRecentMessages - note: channel handles ancestor fetch error grac
   assertEquals(messages[0].messageId, "c");
 });
 
+// ==================== MisskeyAdapter.fetchRecentMessages (chat: channel) Tests ====================
+
+Deno.test("fetchRecentMessages - chat channel returns messages sorted oldest-first", async () => {
+  const newestFirst = [
+    createMockChatMessage({
+      id: "3",
+      fromUserId: "user1",
+      text: "newest",
+      createdAt: "2024-01-03T00:00:00Z",
+    }),
+    createMockChatMessage({
+      id: "2",
+      fromUserId: "user1",
+      text: "middle",
+      createdAt: "2024-01-02T00:00:00Z",
+    }),
+    createMockChatMessage({
+      id: "1",
+      fromUserId: "user1",
+      text: "oldest",
+      createdAt: "2024-01-01T00:00:00Z",
+    }),
+  ];
+
+  const adapter = createAdapterWithMockClient(
+    (_endpoint: string, _params: Record<string, unknown>) => newestFirst,
+  );
+
+  const result = await adapter.fetchRecentMessages("chat:user1", 20);
+
+  assertEquals(result.length, 3);
+  assertEquals(result[0].content, "oldest");
+  assertEquals(result[1].content, "middle");
+  assertEquals(result[2].content, "newest");
+});
+
 // ==================== Replies Fallback Chain Tests ====================
 
 Deno.test("fetchRecentMessages - note: falls back to notes/replies when notes/children fails", async () => {
