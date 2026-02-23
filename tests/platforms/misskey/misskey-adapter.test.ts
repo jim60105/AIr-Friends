@@ -1466,10 +1466,73 @@ Deno.test("MisskeyAdapter.hasBotReaction - returns false when myReaction is null
   assertEquals(result, false);
 });
 
-Deno.test("MisskeyAdapter.hasBotReaction - returns false for chat messages", async () => {
+Deno.test("MisskeyAdapter.hasBotReaction - returns true when bot reacted to chat message", async () => {
   const adapter = createMockMisskeyAdapter();
+  // deno-lint-ignore no-explicit-any
+  (adapter as any).botId = "bot123";
+  mockClientRequest(adapter, (endpoint: string) => {
+    if (endpoint === "chat/messages/show") {
+      return Promise.resolve({
+        reactions: [{ reaction: "👍", user: { id: "bot123" } }],
+      });
+    }
+    return Promise.resolve({});
+  });
+  const result = await adapter.hasBotReaction("chat:user1", "msg1");
+  assertEquals(result, true);
+});
+
+Deno.test("MisskeyAdapter.hasBotReaction - returns false when bot has not reacted to chat message", async () => {
+  const adapter = createMockMisskeyAdapter();
+  // deno-lint-ignore no-explicit-any
+  (adapter as any).botId = "bot123";
+  mockClientRequest(adapter, (endpoint: string) => {
+    if (endpoint === "chat/messages/show") {
+      return Promise.resolve({ reactions: [] });
+    }
+    return Promise.resolve({});
+  });
   const result = await adapter.hasBotReaction("chat:user1", "msg1");
   assertEquals(result, false);
+});
+
+Deno.test("MisskeyAdapter.hasBotReaction - returns false on chat API error", async () => {
+  const adapter = createMockMisskeyAdapter();
+  // deno-lint-ignore no-explicit-any
+  (adapter as any).botId = "bot123";
+  mockClientRequest(adapter, (endpoint: string) => {
+    if (endpoint === "chat/messages/show") {
+      return Promise.reject(new Error("API error"));
+    }
+    return Promise.resolve({});
+  });
+  const result = await adapter.hasBotReaction("chat:user1", "msg1");
+  assertEquals(result, false);
+});
+
+Deno.test("MisskeyAdapter.addReaction - adds reaction to chat message successfully", async () => {
+  const adapter = createMockMisskeyAdapter();
+  let calledEndpoint = "";
+  let calledParams: Record<string, unknown> = {};
+  mockClientRequest(adapter, (endpoint: string, params: Record<string, unknown>) => {
+    calledEndpoint = endpoint;
+    calledParams = params;
+    return Promise.resolve();
+  });
+  const result = await adapter.addReaction("chat:user1", "msg1", "👍");
+  assertEquals(result, { success: true });
+  assertEquals(calledEndpoint, "chat/messages/react");
+  assertEquals(calledParams, { messageId: "msg1", reaction: "👍" });
+});
+
+Deno.test("MisskeyAdapter.addReaction - handles chat reaction failure", async () => {
+  const adapter = createMockMisskeyAdapter();
+  mockClientRequest(adapter, () => {
+    return Promise.reject(new Error("reaction failed"));
+  });
+  const result = await adapter.addReaction("chat:user1", "msg1", "👍");
+  assertEquals(result.success, false);
+  assertEquals(typeof result.error, "string");
 });
 
 Deno.test("MisskeyAdapter.hasBotReaction - returns false on API error", async () => {
