@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-02-23
+
+### Added
+
+- Discord sticker messages now displayed in conversation context — stickers are formatted as `[Sticker: name (tags)]` and appended to message content (rather than treated as file attachments), preserving intent/emotion semantics without modifying the `Attachment` type
+- Multiple `send-reply` calls now allowed per session — the Agent can send several messages in a single turn; the "at least one reply or reaction" requirement and retry mechanism remain unchanged
+- Misskey chat message reaction support — `addReaction()` and `hasBotReaction()` now work for `chat:` channels via `chat/messages/react` and `chat/messages/show` API endpoints, with graceful error handling (returns `false` on API failure)
+
+### Changed
+
+- Modularized SCENARIO prompt into a reusable `prompts/scenario.md` fragment included by all system prompt files (`system_reply.md`, `system_spontaneous.md`, `system_self_research.md`, `system_reminder.md`, `system_memory_maintenance.md`)
+- Refined memory maintenance and scheduled reminder prompt wording for clearer role framing and DM chat delivery
+- Improved prompt template whitespace handling by trimming `{{ include }}` directive output to avoid stray newlines
+
+### Fixed
+
+- Fixed Misskey chat messages being returned newest-first from `fetchRecentMessages()`, causing `/clear` to drop recent messages instead of old ones — messages are now sorted oldest-first, consistent with Discord and Misskey note channel handling
+
 ## [0.11.0] - 2026-02-22
 
 ### Added
@@ -683,7 +701,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ---
 
-[Unreleased]: https://github.com/jim60105/AIr-Friends/compare/v0.11.0...HEAD
+[Unreleased]: https://github.com/jim60105/AIr-Friends/compare/v0.12.0...HEAD
+[0.12.0]: https://github.com/jim60105/AIr-Friends/compare/v0.11.0...v0.12.0
 [0.11.0]: https://github.com/jim60105/AIr-Friends/compare/v0.10.0...v0.11.0
 [0.10.0]: https://github.com/jim60105/AIr-Friends/compare/v0.9.0...v0.10.0
 [0.9.0]: https://github.com/jim60105/AIr-Friends/compare/v0.8.0...v0.9.0
