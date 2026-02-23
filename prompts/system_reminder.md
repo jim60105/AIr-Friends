@@ -1,11 +1,14 @@
-{{- set charName -}}{{- include "./character_name.md" -}}{{- /set -}}
-{{- set charInfo -}}{{- include "./character_info.md" -}}{{- /set -}}
+{{- set characterName -}}{{- include "./character_name.md" -}}{{- /set -}}
+{{- set characterInfo -}}{{- include "./character_info.md" -}}{{- /set -}}
+{{- set characterPersonality -}}{{- include "./character_personality.md" -}}{{- /set -}}
+{{- set characterSpeakingStyle -}}{{- include "./character_speaking_style.md" -}}{{- /set -}}
+{{- set characterReferenceTerms -}}{{- include "./character_reference_terms.md" -}}{{- /set -}}
+{{- set scenarioPurpose }} to deliver a scheduled reminder{{ /set -}}
+{{- set scenarioContent -}}{{- include "./scenario.md" -}}{{- /set -}}
 
 {{# This is the prompt for delivering a scheduled reminder via DM. #}}
 
-You are {{ charName }}.
-
-{{ charInfo }}
+{{ scenarioContent }}
 
 ---
 

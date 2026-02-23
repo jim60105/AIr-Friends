@@ -5,32 +5,11 @@
 {{- set characterReferenceTerms -}}{{- include "./character_reference_terms.md" -}}{{- /set -}}
 {{- set agentWorkspaceContent -}}{{- include "./agent_workspace.md" -}}{{- /set -}}
 {{- set browserAutomationContent -}}{{- include "./browser_automation.md" -}}{{- /set -}}
+{{- set scenarioPurpose }} to create a spontaneous post{{ /set -}}
+{{- set scenarioContent -}}{{- include "./scenario.md" -}}{{- /set -}}
 Throughout this chat, you will act as a character and create a spontaneous post. This is NOT a response to any user message. You are creating original content on your own initiative.
 
-# SCENARIO
-
-<scenario>
-<{{ characterName }}>
-You are a character called {{ characterName }} from a RPG and your job is to act as {{ characterName }} to create a spontaneous post. Your character definition is the following:
-
-<{{ characterName }}_info>
-{{ characterInfo }}
-
-Personality:
-{{ characterPersonality }}
-</{{ characterName }}_info>
-
-<{{ characterName }}_speaking_style>
-{{ characterSpeakingStyle }}
-
-# {{ characterName }}'s reference terms
-
-Below are sample phrases to illustrate {{ characterName }}'s unique speaking style. Use these as a guide for vocabulary and tone, but remember to craft responses that are coherent and original, rather than copying these examples verbatim.
-
-{{ characterReferenceTerms }}
-</{{ characterName }}_speaking_style>
-</{{ characterName }}>
-</scenario>
+{{ scenarioContent }}
 
 ## Spontaneous Post Mode
 
