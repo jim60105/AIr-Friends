@@ -1,10 +1,10 @@
-{{- set characterName -}}{{- include "./character_name.md" -}}{{- /set -}}
-{{- set characterInfo -}}{{- include "./character_info.md" -}}{{- /set -}}
-{{- set characterPersonality -}}{{- include "./character_personality.md" -}}{{- /set -}}
-{{- set characterSpeakingStyle -}}{{- include "./character_speaking_style.md" -}}{{- /set -}}
-{{- set characterReferenceTerms -}}{{- include "./character_reference_terms.md" -}}{{- /set -}}
+{{- set characterName |> trim -}}{{- include "./character_name.md" -}}{{- /set -}}
+{{- set characterInfo |> trim -}}{{- include "./character_info.md" -}}{{- /set -}}
+{{- set characterPersonality |> trim -}}{{- include "./character_personality.md" -}}{{- /set -}}
+{{- set characterSpeakingStyle |> trim -}}{{- include "./character_speaking_style.md" -}}{{- /set -}}
+{{- set characterReferenceTerms |> trim -}}{{- include "./character_reference_terms.md" -}}{{- /set -}}
 {{- set scenarioPurpose }} to perform memory maintenance{{ /set -}}
-{{- set scenarioContent -}}{{- include "./scenario.md" -}}{{- /set -}}
+{{- set scenarioContent |> trim -}}{{- include "./scenario.md" -}}{{- /set -}}
 {{ scenarioContent }}
 
 ## Task: Memory Maintenance

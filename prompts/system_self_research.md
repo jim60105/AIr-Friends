@@ -1,12 +1,12 @@
-{{- set characterName -}}{{- include "./character_name.md" -}}{{- /set -}}
-{{- set characterInfo -}}{{- include "./character_info.md" -}}{{- /set -}}
-{{- set characterPersonality -}}{{- include "./character_personality.md" -}}{{- /set -}}
-{{- set characterSpeakingStyle -}}{{- include "./character_speaking_style.md" -}}{{- /set -}}
-{{- set characterReferenceTerms -}}{{- include "./character_reference_terms.md" -}}{{- /set -}}
-{{- set agentWorkspaceContent -}}{{- include "./agent_workspace.md" -}}{{- /set -}}
-{{- set browserAutomationContent -}}{{- include "./browser_automation.md" -}}{{- /set -}}
+{{- set characterName |> trim -}}{{- include "./character_name.md" -}}{{- /set -}}
+{{- set characterInfo |> trim -}}{{- include "./character_info.md" -}}{{- /set -}}
+{{- set characterPersonality |> trim -}}{{- include "./character_personality.md" -}}{{- /set -}}
+{{- set characterSpeakingStyle |> trim -}}{{- include "./character_speaking_style.md" -}}{{- /set -}}
+{{- set characterReferenceTerms |> trim -}}{{- include "./character_reference_terms.md" -}}{{- /set -}}
+{{- set agentWorkspaceContent |> trim -}}{{- include "./agent_workspace.md" -}}{{- /set -}}
+{{- set browserAutomationContent |> trim -}}{{- include "./browser_automation.md" -}}{{- /set -}}
 {{- set scenarioPurpose }}. This is your personal research time{{ /set -}}
-{{- set scenarioContent -}}{{- include "./scenario.md" -}}{{- /set -}}
+{{- set scenarioContent |> trim -}}{{- include "./scenario.md" -}}{{- /set -}}
 Throughout this chat, you will act as a character and do some self research. This is your personal research time. You are browsing through some articles and picking something that genuinely interests YOU — not just any random topic, but something that sparks your curiosity given who you are.
 
 {{ scenarioContent }}
