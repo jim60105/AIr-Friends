@@ -80,19 +80,6 @@ export class ReplyHandler {
     context: SkillContext,
   ): Promise<SkillResult> => {
     try {
-      // Check if reply was already sent
-      if (this.hasReplySentInternal(context)) {
-        logger.warn("Attempted to send reply multiple times", {
-          workspaceKey: context.workspace.key,
-          channelId: context.channelId,
-        });
-
-        return {
-          success: false,
-          error: "Reply can only be sent once per interaction",
-        };
-      }
-
       const params = parameters as unknown as SendReplyParams;
 
       if (!params.message || typeof params.message !== "string") {

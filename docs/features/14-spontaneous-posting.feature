@@ -90,11 +90,10 @@ Feature: Spontaneous Posting
     Then a workspace should be created using the bot's own user ID
     And the workspace key should be "{platform}/{bot_user_id}"
 
-  Scenario: Spontaneous session respects single reply rule
+  Scenario: Spontaneous session allows multiple replies
     Given a spontaneous post session is active
-    When the agent calls send-reply
-    Then the reply should be sent to the target channel
-    And subsequent send-reply calls should return 409 Conflict
+    When the agent calls send-reply multiple times
+    Then each reply should be sent to the target channel successfully
 
   # ── Context assembly ──
 

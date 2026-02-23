@@ -103,9 +103,9 @@ Deno.test("SessionRegistry - tracks reply sent status", () => {
   assertEquals(marked, true);
   assertEquals(registry.hasReplySent(sessionId), true);
 
-  // Try to mark again - should fail
+  // Try to mark again - should succeed (multiple replies allowed)
   const remarked = registry.markReplySent(sessionId);
-  assertEquals(remarked, false);
+  assertEquals(remarked, true);
 
   registry.stop();
 });

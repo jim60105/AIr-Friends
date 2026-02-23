@@ -325,11 +325,11 @@ interface PatchEvent {
 | `send-reply`    | Send final reply (max 1)     | POST /api/skill/send-reply    |
 | `edit-reply`    | Edit last sent reply         | POST /api/skill/edit-reply    |
 
-**Single Reply Rule**:
+**Reply Rule**:
 
 - Only `send-reply` skill sends content externally
-- Maximum **one reply per session** (enforced by SessionRegistry)
-- Attempting second reply returns 409 Conflict error
+- Multiple replies are allowed per session — each call sends a separate message
+- At least **one reply (or reaction) per session** is required; if absent, retry mechanism triggers
 - All other outputs (tool calls, reasoning) stay internal
 - **Reply Threading**: When triggered from a message/note, replies are threaded to the original message using `replyToMessageId` from SkillContext
 
@@ -337,7 +337,6 @@ interface PatchEvent {
 
 - `edit-reply` skill allows the Agent to edit a previously sent reply
 - Requires the `messageId` returned by `send-reply`
-- Not subject to the single reply rule — editing is not a new reply
 - Can be called multiple times within the same session
 - Only edits messages sent by the bot
 

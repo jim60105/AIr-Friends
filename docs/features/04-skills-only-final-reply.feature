@@ -13,11 +13,11 @@
     直到 Agent 呼叫 "platform.send_reply" skill
     那麼系統才會把該 skill 的 payload 送到對外平台
 
-  情境: 一次互動最多只能對外送出一則最終回覆
-    假設 Agent 在同一 run 中多次呼叫 "platform.send_reply"
+  情境: Agent 可以在同一 session 中多次回覆
+    假設 Agent 在同一 run 中多次呼叫 "send-reply"
     當第二次呼叫發生
-    那麼系統必須拒絕該呼叫或視為錯誤
-    而且不得造成平台端出現多則回覆
+    那麼系統應正常處理該呼叫
+    而且平台端會收到多則回覆
 
   情境: 工具與檢索結果僅注入當次 session
     當 Agent 呼叫 "platform.fetch_more_context" 或 "memory.search" 或 "web.search"

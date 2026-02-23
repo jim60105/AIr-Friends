@@ -69,7 +69,7 @@ Deno.test("ReplyHandler - handleSendReply sends reply successfully", async () =>
   assertEquals(typeof result.data, "object");
 });
 
-Deno.test("ReplyHandler - handleSendReply prevents multiple replies", async () => {
+Deno.test("ReplyHandler - handleSendReply allows multiple replies", async () => {
   const handler = new ReplyHandler();
 
   const workspace: WorkspaceInfo = {
@@ -99,7 +99,7 @@ Deno.test("ReplyHandler - handleSendReply prevents multiple replies", async () =
 
   assertEquals(result1.success, true);
 
-  // Second reply should fail
+  // Second reply should also succeed
   const result2 = await handler.handleSendReply(
     {
       message: "Second reply",
@@ -107,8 +107,7 @@ Deno.test("ReplyHandler - handleSendReply prevents multiple replies", async () =
     context,
   );
 
-  assertEquals(result2.success, false);
-  assertEquals(result2.error, "Reply can only be sent once per interaction");
+  assertEquals(result2.success, true);
 });
 
 Deno.test("ReplyHandler - handleSendReply validates message parameter", async () => {
