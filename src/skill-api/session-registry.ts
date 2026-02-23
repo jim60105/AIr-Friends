@@ -111,17 +111,11 @@ export class SessionRegistry {
 
   /**
    * Mark reply as sent for a session
-   * Returns true if marking succeeded (was not already marked)
-   * Returns false if reply was already marked as sent
+   * Returns true if session exists, false if session not found
    */
   markReplySent(sessionId: string): boolean {
     const session = this.sessions.get(sessionId);
     if (!session) return false;
-
-    if (session.replySent) {
-      logger.warn("Reply already sent for session {sessionId}", { sessionId });
-      return false;
-    }
 
     session.replySent = true;
     logger.debug("Reply marked as sent for session {sessionId}", { sessionId });

@@ -44,12 +44,11 @@
     而且 主程式透過 MemoryStore 搜尋記憶
     而且 返回符合的記憶列表（JSON 格式）
 
-  情境: 單次回覆限制仍然生效
+  情境: Agent 可以多次呼叫 send-reply
     假設 Agent 已經呼叫過一次 send-reply
     當 Agent 再次嘗試呼叫 send-reply
-    那麼 Skill API 會檢查 session 狀態
-    而且 發現已經發送過回覆
-    而且 返回錯誤訊息拒絕第二次回覆
+    那麼 Skill API 應正常處理第二次呼叫
+    而且回傳成功結果
 
   情境: Session 過期處理
     假設 一個 session 已經超過設定的 timeout 時間

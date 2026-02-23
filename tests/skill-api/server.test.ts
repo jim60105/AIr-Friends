@@ -329,7 +329,7 @@ Deno.test("SkillAPIServer - validates skill name", async () => {
   }
 });
 
-Deno.test("SkillAPIServer - enforces single reply rule", async () => {
+Deno.test("SkillAPIServer - allows multiple replies in same session", async () => {
   const tempDir = await Deno.makeTempDir();
   try {
     const sessionRegistry = new SessionRegistry();
@@ -402,7 +402,7 @@ Deno.test("SkillAPIServer - enforces single reply rule", async () => {
     const body1 = await response1.json();
     assertEquals(body1.success, true);
 
-    // Second reply should fail
+    // Second reply should also succeed
     const response2 = await fetch(`http://localhost:${port}/api/skill/send-reply`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -412,10 +412,9 @@ Deno.test("SkillAPIServer - enforces single reply rule", async () => {
       }),
     });
 
-    assertEquals(response2.status, 409);
+    assertEquals(response2.status, 200);
     const body2 = await response2.json();
-    assertEquals(body2.success, false);
-    assertEquals(body2.error, "Reply already sent for this session");
+    assertEquals(body2.success, true);
 
     await server.stop();
     sessionRegistry.stop();

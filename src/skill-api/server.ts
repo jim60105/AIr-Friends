@@ -250,15 +250,14 @@ export class SkillAPIServer {
       };
     }
 
-    // Special handling for send-reply (single reply rule)
-    // Mark as sent BEFORE execution to prevent race condition
+    // Mark reply as sent BEFORE execution for session tracking
     if (skillName === "send-reply") {
       const marked = this.sessionRegistry.markReplySent(body.sessionId);
       if (!marked) {
         return {
           success: false,
-          error: "Reply already sent for this session",
-          statusCode: 409,
+          error: "Session not found",
+          statusCode: 404,
         };
       }
     }
