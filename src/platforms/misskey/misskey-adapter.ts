@@ -436,7 +436,8 @@ export class MisskeyAdapter extends PlatformAdapter {
           { userId, limit },
         );
 
-        return messages.map((msg) => chatMessageToPlatformMessage(msg, this.botId!));
+        return messages.map((msg) => chatMessageToPlatformMessage(msg, this.botId!))
+          .sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
       }
 
       // If channelId starts with "dm:", fetch DM history via notes
