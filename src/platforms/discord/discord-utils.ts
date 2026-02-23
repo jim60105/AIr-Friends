@@ -1,6 +1,6 @@
 // src/platforms/discord/discord-utils.ts
 
-import type { GuildMember, Message, User } from "discord.js";
+import type { GuildMember, Message, Sticker, User } from "discord.js";
 import type { Attachment, NormalizedEvent, Platform, PlatformMessage } from "../../types/events.ts";
 
 /**
@@ -30,6 +30,22 @@ function discordAttachmentToAttachment(
 }
 
 /**
+ * Format Discord stickers as text representation for context.
+ * Stickers are separate from attachments and carry meaning (name/tags).
+ */
+function formatStickersAsText(stickers: Map<string, Sticker>): string {
+  if (stickers.size === 0) return "";
+
+  const parts = Array.from(stickers.values()).map((sticker) => {
+    return sticker.tags
+      ? `[Sticker: ${sticker.name} (${sticker.tags})]`
+      : `[Sticker: ${sticker.name}]`;
+  });
+
+  return parts.join(" ");
+}
+
+/**
  * Convert Discord Message to NormalizedEvent
  */
 export function normalizeDiscordMessage(
@@ -38,6 +54,11 @@ export function normalizeDiscordMessage(
 ): NormalizedEvent {
   const isDm = message.channel.isDMBased();
 
+  const stickerText = formatStickersAsText(message.stickers);
+  const content = stickerText
+    ? (message.content ? `${message.content} ${stickerText}` : stickerText)
+    : message.content;
+
   return {
     platform: "discord" as Platform,
     channelId: message.channelId,
@@ -45,7 +66,7 @@ export function normalizeDiscordMessage(
     messageId: message.id,
     isDm,
     guildId: message.guildId ?? "",
-    content: message.content,
+    content,
     timestamp: message.createdAt,
     attachments: message.attachments.size > 0
       ? Array.from(message.attachments.values()).map((att) => discordAttachmentToAttachment(att))
@@ -65,11 +86,16 @@ export function messageToPltatformMessage(
     ? Array.from(message.attachments.values()).map((att) => discordAttachmentToAttachment(att))
     : undefined;
 
+  const stickerText = formatStickersAsText(message.stickers);
+  const content = stickerText
+    ? (message.content ? `${message.content} ${stickerText}` : stickerText)
+    : message.content;
+
   return {
     messageId: message.id,
     userId: message.author.id,
     username: message.author.displayName ?? message.author.username,
-    content: message.content,
+    content,
     timestamp: message.createdAt,
     isBot: message.author.id === botId || message.author.bot,
     attachments,
