@@ -34,6 +34,7 @@ function createMockMessage(overrides: Record<string, unknown> = {}): any {
       users: new Map(),
     },
     attachments: new Map(),
+    stickers: new Map(),
     ...overrides,
   };
 }
@@ -250,6 +251,69 @@ Deno.test("messageToPltatformMessage - without attachments", () => {
   const message = createMockMessage();
   const pm = messageToPltatformMessage(message as any, "bot123");
   assertEquals(pm.attachments, undefined);
+});
+
+// ============ Sticker tests ============
+
+Deno.test("normalizeDiscordMessage - sticker only message", () => {
+  const sticker = { id: "s1", name: "wave_hello", tags: "hello, hi, wave" };
+  const message = createMockMessage({
+    content: "",
+    stickers: new Map([["s1", sticker]]),
+  });
+  const event = normalizeDiscordMessage(message as Message, "bot123");
+  assertEquals(event.content, "[Sticker: wave_hello (hello, hi, wave)]");
+});
+
+Deno.test("normalizeDiscordMessage - text with sticker", () => {
+  const sticker = { id: "s1", name: "laugh", tags: "lol, funny" };
+  const message = createMockMessage({
+    content: "看看這個",
+    stickers: new Map([["s1", sticker]]),
+  });
+  const event = normalizeDiscordMessage(message as Message, "bot123");
+  assertEquals(event.content, "看看這個 [Sticker: laugh (lol, funny)]");
+});
+
+Deno.test("normalizeDiscordMessage - sticker without tags", () => {
+  const sticker = { id: "s1", name: "custom_sticker", tags: null };
+  const message = createMockMessage({
+    content: "",
+    stickers: new Map([["s1", sticker]]),
+  });
+  const event = normalizeDiscordMessage(message as Message, "bot123");
+  assertEquals(event.content, "[Sticker: custom_sticker]");
+});
+
+Deno.test("normalizeDiscordMessage - multiple stickers", () => {
+  const s1 = { id: "s1", name: "wave", tags: "hello" };
+  const s2 = { id: "s2", name: "heart", tags: "love" };
+  const message = createMockMessage({
+    content: "",
+    stickers: new Map([["s1", s1], ["s2", s2]]),
+  });
+  const event = normalizeDiscordMessage(message as Message, "bot123");
+  assertEquals(event.content, "[Sticker: wave (hello)] [Sticker: heart (love)]");
+});
+
+Deno.test("messageToPltatformMessage - with sticker", () => {
+  const sticker = { id: "s1", name: "wave_hello", tags: "hello, hi" };
+  const message = createMockMessage({
+    content: "",
+    stickers: new Map([["s1", sticker]]),
+  });
+  const pm = messageToPltatformMessage(message as any, "bot123");
+  assertEquals(pm.content, "[Sticker: wave_hello (hello, hi)]");
+});
+
+Deno.test("messageToPltatformMessage - text with sticker", () => {
+  const sticker = { id: "s1", name: "laugh", tags: "lol" };
+  const message = createMockMessage({
+    content: "check this",
+    stickers: new Map([["s1", sticker]]),
+  });
+  const pm = messageToPltatformMessage(message as any, "bot123");
+  assertEquals(pm.content, "check this [Sticker: laugh (lol)]");
 });
 
 // ============ DiscordAdapter.editMessage tests ============

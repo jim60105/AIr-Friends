@@ -778,6 +778,7 @@ Trigger/history message → Platform adapter extracts attachment metadata (URL, 
 | Platform     | Source                             | Field                                              |
 | ------------ | ---------------------------------- | -------------------------------------------------- |
 | Discord      | `message.attachments` (Collection) | id, url, contentType, name, size, width, height    |
+| Discord      | `message.stickers` (Collection)    | Formatted as `[Sticker: name (tags)]` in content   |
 | Misskey Note | `note.files` (DriveFile[])         | id, url, type, name, size, properties.width/height |
 | Misskey Chat | `message.file` (DriveFile \| null) | Same as above                                      |
 
