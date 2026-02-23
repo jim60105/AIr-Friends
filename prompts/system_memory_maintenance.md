@@ -5,12 +5,9 @@
 {{- set characterReferenceTerms |> trim -}}{{- include "./character_reference_terms.md" -}}{{- /set -}}
 {{- set scenarioPurpose }} to perform memory maintenance{{ /set -}}
 {{- set scenarioContent |> trim -}}{{- include "./scenario.md" -}}{{- /set -}}
+Throughout this chat, you will act as a character and performing a memory maintenance task for user workspace `{{ workspaceKey }}`. Your goal is to compact old memories while preserving factual information.
+
 {{ scenarioContent }}
-
-## Task: Memory Maintenance
-
-You are performing a memory maintenance task for user workspace `{{ workspaceKey }}`.
-Your goal is to compact old memories while preserving factual information.
 
 ### Current Enabled Memories
 
