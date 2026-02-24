@@ -501,6 +501,44 @@ Deno.test("getRetryPromptStrategy - all strategies have maxRetries of 1", () => 
   }
 });
 
+Deno.test("getRetryPromptStrategy - retryPromptMessage starts with system message intro", () => {
+  const strategy = getRetryPromptStrategy("copilot");
+  assertStringIncludes(strategy.retryPromptMessage, "System message:");
+  assertStringIncludes(
+    strategy.retryPromptMessage,
+    "You must communicate with the user by using send-reply or react-message before ending the session.",
+  );
+});
+
+Deno.test("getRetryPromptStrategy - retryPromptMessage contains section separators", () => {
+  const strategy = getRetryPromptStrategy("copilot");
+  // Should have at least two --- separators between the three sections
+  const separatorCount = (strategy.retryPromptMessage.match(/\n---\n/g) ?? []).length;
+  assertEquals(separatorCount >= 2, true, "Should contain at least 2 --- separators");
+});
+
+Deno.test("getRetryPromptStrategy - retryPromptMessage includes send-reply SKILL.md content", () => {
+  const strategy = getRetryPromptStrategy("copilot");
+  // Content loaded from skills/send-reply/SKILL.md
+  assertStringIncludes(strategy.retryPromptMessage, "# Send Reply Skill");
+  assertStringIncludes(strategy.retryPromptMessage, "At least one reply required");
+});
+
+Deno.test("getRetryPromptStrategy - retryPromptMessage includes react-message SKILL.md content", () => {
+  const strategy = getRetryPromptStrategy("copilot");
+  // Content loaded from skills/react-message/SKILL.md
+  assertStringIncludes(strategy.retryPromptMessage, "# React Message Skill");
+  assertStringIncludes(strategy.retryPromptMessage, "Use appropriate emoji");
+});
+
+Deno.test("getRetryPromptStrategy - all agent types share the same retryPromptMessage content", () => {
+  const types: Array<"copilot" | "opencode" | "gemini"> = ["copilot", "opencode", "gemini"];
+  const messages = types.map((t) => getRetryPromptStrategy(t).retryPromptMessage);
+  // All agent types use the same default message
+  assertEquals(messages[0], messages[1], "copilot and opencode should share the same message");
+  assertEquals(messages[1], messages[2], "opencode and gemini should share the same message");
+});
+
 // ============ Agent Workspace Env Var Tests ============
 
 Deno.test("createAgentConfig - includes AGENT_WORKSPACE env var for copilot", () => {

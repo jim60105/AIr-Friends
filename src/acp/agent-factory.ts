@@ -216,8 +216,25 @@ export function getDefaultAgentType(appConfig: Config): AgentType {
  * Each agent type may need different retry prompt messages or behaviors.
  */
 export function getRetryPromptStrategy(type: AgentType): RetryPromptStrategy {
+  const skillsDir = `${import.meta.dirname}/../../skills`;
+
+  let sendReplyContent: string;
+  try {
+    sendReplyContent = Deno.readTextFileSync(`${skillsDir}/send-reply/SKILL.md`);
+  } catch {
+    sendReplyContent = "# Send Reply Skill\n\nUse send-reply to send a message to the user.";
+  }
+
+  let reactMessageContent: string;
+  try {
+    reactMessageContent = Deno.readTextFileSync(`${skillsDir}/react-message/SKILL.md`);
+  } catch {
+    reactMessageContent =
+      "# React Message Skill\n\nUse react-message to add an emoji reaction to the trigger message.";
+  }
+
   const defaultRetryMessage =
-    "System message: You have a special turn. Regardless of whether you have already sent-reply or react-message, please send another send-reply or react-message.";
+    `System message: You have a special turn. You must communicate with the user by using send-reply or react-message before ending the session.\n\n---\n\n${sendReplyContent}\n\n---\n\n${reactMessageContent}`;
 
   switch (type) {
     case "copilot":
