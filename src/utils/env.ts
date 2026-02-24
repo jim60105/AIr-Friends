@@ -26,6 +26,7 @@ export const ENV_MAPPINGS = {
   DISCORD_SPONTANEOUS_MAX_INTERVAL_MS: "platforms.discord.spontaneousPost.maxIntervalMs",
   DISCORD_SPONTANEOUS_CONTEXT_FETCH_PROBABILITY:
     "platforms.discord.spontaneousPost.contextFetchProbability",
+  DISCORD_SPONTANEOUS_ALLOW_DM: "platforms.discord.spontaneousPost.allowDm",
 
   // Typing indicator settings - Discord
   DISCORD_TYPING_INDICATOR_ENABLED: "platforms.discord.typingIndicator.enabled",
@@ -40,6 +41,7 @@ export const ENV_MAPPINGS = {
   MISSKEY_SPONTANEOUS_MAX_INTERVAL_MS: "platforms.misskey.spontaneousPost.maxIntervalMs",
   MISSKEY_SPONTANEOUS_CONTEXT_FETCH_PROBABILITY:
     "platforms.misskey.spontaneousPost.contextFetchProbability",
+  MISSKEY_SPONTANEOUS_ALLOW_DM: "platforms.misskey.spontaneousPost.allowDm",
 
   // GELF log output settings
   GELF_ENABLED: "logging.gelf.enabled",

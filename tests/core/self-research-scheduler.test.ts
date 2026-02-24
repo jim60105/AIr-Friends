@@ -19,6 +19,7 @@ function createConfig(overrides?: {
           minIntervalMs: 100,
           maxIntervalMs: 200,
           contextFetchProbability: 0.5,
+          allowDm: true,
         },
       },
       misskey: {
@@ -30,6 +31,7 @@ function createConfig(overrides?: {
           minIntervalMs: 100,
           maxIntervalMs: 200,
           contextFetchProbability: 0.5,
+          allowDm: true,
         },
       },
     },

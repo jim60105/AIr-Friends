@@ -1599,3 +1599,73 @@ Deno.test("MisskeyAdapter.determineSpontaneousTarget - returns timeline:self", a
   const target = await adapter.determineSpontaneousTarget(config);
   assertEquals(target?.channelId, "timeline:self");
 });
+
+Deno.test("MisskeyAdapter.determineSpontaneousTarget - allowDm=false only returns timeline:self", async () => {
+  const adapter = createMockMisskeyAdapter();
+  const config = {
+    platforms: {
+      misskey: {
+        spontaneousPost: {
+          allowDm: false,
+          enabled: true,
+          minIntervalMs: 10800000,
+          maxIntervalMs: 43200000,
+          contextFetchProbability: 0.5,
+        },
+      },
+    },
+    accessControl: { whitelist: ["misskey/account/user123"] },
+    // deno-lint-ignore no-explicit-any
+  } as any;
+  for (let i = 0; i < 20; i++) {
+    const target = await adapter.determineSpontaneousTarget(config);
+    assertEquals(target?.channelId, "timeline:self");
+  }
+});
+
+Deno.test("MisskeyAdapter.determineSpontaneousTarget - allowDm=true includes DM targets", async () => {
+  const adapter = createMockMisskeyAdapter();
+  const config = {
+    platforms: {
+      misskey: {
+        spontaneousPost: {
+          allowDm: true,
+          enabled: true,
+          minIntervalMs: 10800000,
+          maxIntervalMs: 43200000,
+          contextFetchProbability: 0.5,
+        },
+      },
+    },
+    accessControl: { whitelist: ["misskey/account/user123"] },
+    // deno-lint-ignore no-explicit-any
+  } as any;
+  const results = new Set<string>();
+  for (let i = 0; i < 100; i++) {
+    const target = await adapter.determineSpontaneousTarget(config);
+    if (target) results.add(target.channelId);
+  }
+  assertEquals(results.has("timeline:self"), true);
+  assertEquals(results.has("chat:user123"), true);
+});
+
+Deno.test("MisskeyAdapter.determineSpontaneousTarget - no account entries always returns timeline:self", async () => {
+  const adapter = createMockMisskeyAdapter();
+  const config = {
+    platforms: {
+      misskey: {
+        spontaneousPost: {
+          allowDm: true,
+          enabled: true,
+          minIntervalMs: 10800000,
+          maxIntervalMs: 43200000,
+          contextFetchProbability: 0.5,
+        },
+      },
+    },
+    accessControl: { whitelist: ["discord/account/123"] },
+    // deno-lint-ignore no-explicit-any
+  } as any;
+  const target = await adapter.determineSpontaneousTarget(config);
+  assertEquals(target?.channelId, "timeline:self");
+});

@@ -639,7 +639,8 @@ export class DiscordAdapter extends PlatformAdapter {
    * Randomly selects a channel or account from the whitelist.
    */
   async determineSpontaneousTarget(config: Config): Promise<SpontaneousTarget | null> {
-    const entry = selectDiscordSpontaneousEntry(config.accessControl.whitelist);
+    const allowDm = config.platforms.discord.spontaneousPost?.allowDm ?? true;
+    const entry = selectDiscordSpontaneousEntry(config.accessControl.whitelist, allowDm);
     if (!entry) {
       logger.warn("No Discord whitelist entries available for spontaneous post");
       return null;

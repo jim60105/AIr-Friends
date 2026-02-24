@@ -578,12 +578,63 @@ Deno.test("selectDiscordSpontaneousEntry - parses unknown type entries", () => {
   assertEquals(entry?.id, "789");
 });
 
+Deno.test("selectDiscordSpontaneousEntry - allowDm=true includes account entries", () => {
+  const whitelist = ["discord/account/123", "discord/channel/456"];
+  const results = new Set<string>();
+  for (let i = 0; i < 100; i++) {
+    const entry = selectDiscordSpontaneousEntry(whitelist, true);
+    if (entry) results.add(entry.type);
+  }
+  assertEquals(results.has("account"), true);
+  assertEquals(results.has("channel"), true);
+});
+
+Deno.test("selectDiscordSpontaneousEntry - allowDm=false excludes account entries", () => {
+  const whitelist = ["discord/account/123", "discord/channel/456"];
+  for (let i = 0; i < 50; i++) {
+    const entry = selectDiscordSpontaneousEntry(whitelist, false);
+    assertEquals(entry?.type, "channel");
+  }
+});
+
+Deno.test("selectDiscordSpontaneousEntry - allowDm=false with only account entries returns null", () => {
+  const whitelist = ["discord/account/123", "discord/account/456"];
+  const entry = selectDiscordSpontaneousEntry(whitelist, false);
+  assertEquals(entry, null);
+});
+
+Deno.test("selectDiscordSpontaneousEntry - allowDm defaults to true when not specified", () => {
+  const whitelist = ["discord/account/123"];
+  const entry = selectDiscordSpontaneousEntry(whitelist);
+  assertEquals(entry?.type, "account");
+});
+
 // ============ DiscordAdapter.determineSpontaneousTarget tests ============
 
 function createTestConfig(whitelist: string[]): any {
   return {
     platforms: {
       discord: { token: "test", enabled: true },
+      misskey: { host: "test.com", token: "test", enabled: false },
+    },
+    accessControl: { replyTo: "whitelist", whitelist },
+  };
+}
+
+function createTestConfigWithAllowDm(whitelist: string[], allowDm: boolean): any {
+  return {
+    platforms: {
+      discord: {
+        token: "test",
+        enabled: true,
+        spontaneousPost: {
+          enabled: true,
+          minIntervalMs: 10800000,
+          maxIntervalMs: 43200000,
+          contextFetchProbability: 0.5,
+          allowDm,
+        },
+      },
       misskey: { host: "test.com", token: "test", enabled: false },
     },
     accessControl: { replyTo: "whitelist", whitelist },
@@ -673,6 +724,34 @@ Deno.test({
   fn: async () => {
     const adapter = createMockDiscordAdapter();
     const config = createTestConfig(["discord/unknown/123"]);
+    const target = await adapter.determineSpontaneousTarget(config);
+    assertEquals(target, null);
+  },
+});
+
+Deno.test({
+  name: "DiscordAdapter.determineSpontaneousTarget - allowDm=false excludes account entries",
+  sanitizeOps: false,
+  sanitizeResources: false,
+  fn: async () => {
+    const adapter = createMockDiscordAdapter();
+    const config = createTestConfigWithAllowDm(
+      ["discord/account/999", "discord/channel/123"],
+      false,
+    );
+    const target = await adapter.determineSpontaneousTarget(config);
+    assertEquals(target?.channelId, "123");
+  },
+});
+
+Deno.test({
+  name:
+    "DiscordAdapter.determineSpontaneousTarget - allowDm=false with only account entries returns null",
+  sanitizeOps: false,
+  sanitizeResources: false,
+  fn: async () => {
+    const adapter = createMockDiscordAdapter();
+    const config = createTestConfigWithAllowDm(["discord/account/999"], false);
     const target = await adapter.determineSpontaneousTarget(config);
     assertEquals(target, null);
   },
