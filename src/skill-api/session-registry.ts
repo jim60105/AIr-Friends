@@ -36,6 +36,8 @@ export interface ActiveSession {
   timeoutMs: number;
   /** Whether reply has been sent */
   replySent: boolean;
+  /** Number of replies sent in this session */
+  replyCount: number;
   /** Agent's global workspace path */
   agentWorkspacePath?: string;
   /** Audit writer for this session (null if audit disabled) */
@@ -66,13 +68,14 @@ export class SessionRegistry {
   /**
    * Register a new session
    */
-  register(session: Omit<ActiveSession, "id" | "startedAt" | "replySent">): string {
+  register(session: Omit<ActiveSession, "id" | "startedAt" | "replySent" | "replyCount">): string {
     const id = this.generateSessionId();
     const activeSession: ActiveSession = {
       ...session,
       id,
       startedAt: new Date(),
       replySent: false,
+      replyCount: 0,
     };
 
     this.sessions.set(id, activeSession);
@@ -131,6 +134,31 @@ export class SessionRegistry {
       session.replySent = false;
       logger.debug("Reply unmarked (rollback) for session {sessionId}", { sessionId });
     }
+  }
+
+  /**
+   * Increment the reply count for a session.
+   * Returns the new count, or -1 if session not found.
+   */
+  incrementReplyCount(sessionId: string): number {
+    const session = this.sessions.get(sessionId);
+    if (!session) return -1;
+
+    session.replyCount += 1;
+    logger.debug("Reply count incremented to {replyCount} for session {sessionId}", {
+      sessionId,
+      replyCount: session.replyCount,
+    });
+    return session.replyCount;
+  }
+
+  /**
+   * Get the current reply count for a session.
+   * Returns 0 if session not found.
+   */
+  getReplyCount(sessionId: string): number {
+    const session = this.sessions.get(sessionId);
+    return session?.replyCount ?? 0;
   }
 
   /**

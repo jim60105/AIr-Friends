@@ -10,6 +10,9 @@ import { sanitizeSkillParams, sha256Hash } from "@utils/hash.ts";
 
 const logger = createLogger("SkillAPIServer");
 
+/** Maximum number of send-reply calls allowed per session */
+const MAX_REPLIES_PER_SESSION = 3;
+
 export interface SkillAPIConfig {
   port: number;
   host: string; // Should be "localhost" or "127.0.0.1"
@@ -252,6 +255,24 @@ export class SkillAPIServer {
 
     // Mark reply as sent BEFORE execution for session tracking
     if (skillName === "send-reply") {
+      const currentCount = this.sessionRegistry.getReplyCount(body.sessionId);
+      if (currentCount >= MAX_REPLIES_PER_SESSION) {
+        logger.warn(
+          "Reply limit reached for session {sessionId} ({replyCount}/{maxReplies})",
+          {
+            sessionId: body.sessionId,
+            replyCount: currentCount,
+            maxReplies: MAX_REPLIES_PER_SESSION,
+          },
+        );
+        return {
+          success: false,
+          error: `Reply limit reached (${MAX_REPLIES_PER_SESSION}/${MAX_REPLIES_PER_SESSION}). ` +
+            "Use edit-reply to modify your last sent message instead of sending a new one.",
+          statusCode: 429,
+        };
+      }
+
       const marked = this.sessionRegistry.markReplySent(body.sessionId);
       if (!marked) {
         return {
@@ -310,6 +331,11 @@ export class SkillAPIServer {
         sessionId: body.sessionId,
         error: result.error,
       });
+    }
+
+    // Increment reply count on successful send-reply
+    if (skillName === "send-reply" && result.success) {
+      this.sessionRegistry.incrementReplyCount(body.sessionId);
     }
 
     // Audit: reply_sent (when send-reply succeeds)
