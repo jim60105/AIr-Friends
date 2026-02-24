@@ -69,6 +69,7 @@ const DEFAULT_SPONTANEOUS_POST = {
   minIntervalMs: 10800000, // 3 hours
   maxIntervalMs: 43200000, // 12 hours
   contextFetchProbability: 0.5,
+  allowDm: true,
 };
 
 /**

@@ -598,6 +598,7 @@ platforms:
       minIntervalMs: 10800000 # Minimum interval: 3 hours (default)
       maxIntervalMs: 43200000 # Maximum interval: 12 hours (default)
       contextFetchProbability: 0.5 # Probability of including recent messages (0.0-1.0)
+      allowDm: true                # Allow spontaneous posts via DM (default: true)
 ```
 
 **How It Works:**
@@ -615,8 +616,8 @@ platforms:
 
 | Platform | Target Selection                                               |
 | -------- | -------------------------------------------------------------- |
-| Discord  | Random channel/account from whitelist (DM for account entries) |
-| Misskey  | Bot's own timeline (`timeline:self`) — creates a new note      |
+| Discord  | Random channel/account from whitelist (DM for account entries; account entries excluded when `allowDm: false`) |
+| Misskey  | Bot's own timeline (`timeline:self`) + random DM to whitelist account entries (when `allowDm: true`); `timeline:self` only when `allowDm: false` |
 
 **Environment Variable Overrides:**
 
@@ -624,6 +625,7 @@ platforms:
 - `DISCORD_SPONTANEOUS_MIN_INTERVAL_MS` → `platforms.discord.spontaneousPost.minIntervalMs`
 - `DISCORD_SPONTANEOUS_MAX_INTERVAL_MS` → `platforms.discord.spontaneousPost.maxIntervalMs`
 - `DISCORD_SPONTANEOUS_CONTEXT_FETCH_PROBABILITY` → `platforms.discord.spontaneousPost.contextFetchProbability`
+- `DISCORD_SPONTANEOUS_ALLOW_DM` → `platforms.discord.spontaneousPost.allowDm`
 - Same pattern for Misskey with `MISSKEY_SPONTANEOUS_*` prefix
 
 **Key Components:**

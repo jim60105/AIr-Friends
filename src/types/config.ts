@@ -291,6 +291,13 @@ export interface SpontaneousPostConfig {
    * (default: 0.5)
    */
   contextFetchProbability: number;
+
+  /**
+   * Whether spontaneous posts can be sent via DM (direct message).
+   * When false, only channel targets from the whitelist are used.
+   * (default: true)
+   */
+  allowDm: boolean;
 }
 
 /**

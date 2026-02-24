@@ -184,12 +184,19 @@ export function extractDiscordChannelIds(whitelist: string[]): string[] {
 
 /**
  * Select a random Discord whitelist entry and parse its type and ID.
- * Returns null if no Discord entries exist.
+ * When allowDm is false, account entries (which result in DMs) are excluded.
+ * Returns null if no eligible entries exist.
  */
 export function selectDiscordSpontaneousEntry(
   whitelist: string[],
+  allowDm: boolean = true,
 ): { type: string; id: string } | null {
-  const discordEntries = whitelist.filter((entry) => entry.startsWith("discord/"));
+  let discordEntries = whitelist.filter((entry) => entry.startsWith("discord/"));
+
+  if (!allowDm) {
+    discordEntries = discordEntries.filter((entry) => !entry.startsWith("discord/account/"));
+  }
+
   if (discordEntries.length === 0) return null;
 
   const selectedEntry = discordEntries[Math.floor(Math.random() * discordEntries.length)];

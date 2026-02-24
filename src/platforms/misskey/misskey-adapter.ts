@@ -918,10 +918,29 @@ export class MisskeyAdapter extends PlatformAdapter {
 
   /**
    * Determine the target for a spontaneous post on Misskey.
-   * Always returns the bot's own timeline (creates a new note).
+   * When allowDm is true and whitelist contains misskey/account entries,
+   * randomly chooses between timeline:self and a DM target.
+   * When allowDm is false, always posts to timeline:self.
    */
-  determineSpontaneousTarget(_config: Config): Promise<SpontaneousTarget | null> {
-    return Promise.resolve({ channelId: "timeline:self" });
+  async determineSpontaneousTarget(config: Config): Promise<SpontaneousTarget | null> {
+    const allowDm = config.platforms?.misskey?.spontaneousPost?.allowDm ?? true;
+
+    const targets: SpontaneousTarget[] = [{ channelId: "timeline:self" }];
+
+    if (allowDm) {
+      const misskeyAccountEntries = (config.accessControl?.whitelist ?? [])
+        .filter((entry) => entry.startsWith("misskey/account/"))
+        .map((entry) => entry.replace("misskey/account/", ""));
+
+      for (const userId of misskeyAccountEntries) {
+        const dmChannelId = await this.getDmChannelId(userId);
+        if (dmChannelId) {
+          targets.push({ channelId: dmChannelId });
+        }
+      }
+    }
+
+    return targets[Math.floor(Math.random() * targets.length)];
   }
 
   /**
