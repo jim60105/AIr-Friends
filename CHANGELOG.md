@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-02-24
+
+### Added
+
+- Added `spontaneousPost.allowDm` boolean setting (default: `true`) to control whether spontaneous posts can target DM channels
+  - Discord: when `allowDm=false`, account whitelist entries are excluded from spontaneous target selection
+  - Misskey: when `allowDm=true`, whitelist account entries are included as DM targets alongside `timeline:self`; when `false`, only `timeline:self` is used
+  - New environment variable overrides: `DISCORD_SPONTANEOUS_ALLOW_DM`, `MISSKEY_SPONTANEOUS_ALLOW_DM`
+  - Default behavior unchanged (`allowDm: true`), existing deployments unaffected
+- Added `send-reply` skill per-session call limit of 3 — when the limit is exceeded the API returns HTTP 429 with guidance to use `edit-reply` instead
+  - New `MAX_REPLIES_PER_SESSION = 3` constant in Skill API Server
+  - `SessionRegistry` tracks `replyCount` per session; only successful `send-reply` calls are counted
+  - `edit-reply` is not subject to the limit
+
+### Changed
+
+- Refined system prompt to enforce one-shot final replies: Agent must call `#send-reply` for the final output and exit the session immediately afterward, with no second retry attempt
+
 ## [0.12.0] - 2026-02-23
 
 ### Added
@@ -701,7 +719,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ---
 
-[Unreleased]: https://github.com/jim60105/AIr-Friends/compare/v0.12.0...HEAD
+[Unreleased]: https://github.com/jim60105/AIr-Friends/compare/v0.13.0...HEAD
+[0.13.0]: https://github.com/jim60105/AIr-Friends/compare/v0.12.0...v0.13.0
 [0.12.0]: https://github.com/jim60105/AIr-Friends/compare/v0.11.0...v0.12.0
 [0.11.0]: https://github.com/jim60105/AIr-Friends/compare/v0.10.0...v0.11.0
 [0.10.0]: https://github.com/jim60105/AIr-Friends/compare/v0.9.0...v0.10.0
