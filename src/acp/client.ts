@@ -17,6 +17,9 @@ export class ChatbotClient implements acp.Client {
   private config: ClientConfig;
   private replyAlreadySent: boolean = false;
 
+  /** Timestamp of the last activity received from the Agent */
+  private lastActivityTimestamp: number = Date.now();
+
   constructor(
     skillRegistry: SkillRegistry,
     logger: Logger,
@@ -28,6 +31,26 @@ export class ChatbotClient implements acp.Client {
   }
 
   /**
+   * Get the timestamp of the last activity from the Agent.
+   * Used by AgentConnector for idle timeout detection.
+   */
+  getLastActivityTimestamp(): number {
+    return this.lastActivityTimestamp;
+  }
+
+  /**
+   * Reset the idle timeout tracker without affecting other client state.
+   * Called after a successful liveness check to grant another timeout window.
+   */
+  touchActivity(): void {
+    this.lastActivityTimestamp = Date.now();
+  }
+
+  private updateActivity(): void {
+    this.lastActivityTimestamp = Date.now();
+  }
+
+  /**
    * Handle permission requests from the Agent
    * Auto-approves our registered skills and access to skills directory
    * In YOLO mode, auto-approves ALL permission requests
@@ -35,6 +58,7 @@ export class ChatbotClient implements acp.Client {
   requestPermission(
     params: acp.RequestPermissionRequest,
   ): Promise<acp.RequestPermissionResponse> {
+    this.updateActivity();
     this.logger.debug("Permission requested", {
       toolCall: params.toolCall,
       kind: params.toolCall.kind,
@@ -158,6 +182,7 @@ export class ChatbotClient implements acp.Client {
    * Logs various agent activities but doesn't send them externally
    */
   sessionUpdate(params: acp.SessionNotification): Promise<void> {
+    this.updateActivity();
     const update = params.update;
 
     switch (update.sessionUpdate) {
@@ -257,6 +282,7 @@ export class ChatbotClient implements acp.Client {
   async readTextFile(
     params: acp.ReadTextFileRequest,
   ): Promise<acp.ReadTextFileResponse> {
+    this.updateActivity();
     this.logger.debug("Read file requested", { path: params.path });
 
     // Validate path is within working directory
@@ -285,6 +311,7 @@ export class ChatbotClient implements acp.Client {
   async writeTextFile(
     params: acp.WriteTextFileRequest,
   ): Promise<acp.WriteTextFileResponse> {
+    this.updateActivity();
     this.logger.debug("Write file requested", { path: params.path });
 
     // Validate path is within working directory
@@ -359,6 +386,7 @@ export class ChatbotClient implements acp.Client {
    */
   reset(): void {
     this.replyAlreadySent = false;
+    this.lastActivityTimestamp = Date.now();
   }
 
   /**

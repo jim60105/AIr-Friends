@@ -1,5 +1,7 @@
 // src/acp/types.ts
 
+import type { IdleTimeoutConfig } from "../types/config.ts";
+
 /**
  * Configuration for ACP Client
  */
@@ -155,4 +157,5 @@ export interface AgentConnectorOptions {
   clientConfig: ClientConfig;
   skillRegistry: unknown; // SkillRegistry type - using unknown to avoid circular deps
   logger: unknown; // Logger type - using unknown to avoid circular deps
+  idleTimeoutConfig?: IdleTimeoutConfig;
 }

@@ -129,3 +129,11 @@ export const auditEntriesTotal = new client.Counter({
   labelNames: ["phase"] as const,
   registers: [metricsRegistry],
 });
+
+/** Total idle timeout detections */
+export const idleTimeoutTotal = new client.Counter({
+  name: "airfriends_idle_timeout_total",
+  help: "Total idle timeout detections",
+  labelNames: ["platform", "outcome"] as const,
+  registers: [metricsRegistry],
+});

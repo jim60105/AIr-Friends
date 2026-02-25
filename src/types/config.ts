@@ -132,6 +132,9 @@ export interface AgentConfig {
 
   /** External skills to install at startup (optional) */
   externalSkills?: ExternalSkillConfig[];
+
+  /** Idle timeout detection for ACP connections (optional) */
+  idleTimeout?: IdleTimeoutConfig;
 }
 
 /**
@@ -143,6 +146,21 @@ export interface ExternalSkillConfig {
   repo: string;
   /** Skill name within the repository (e.g. "create-blog-post") */
   skill: string;
+}
+
+/**
+ * Idle timeout detection configuration for ACP connections.
+ * Detects silently disconnected Agent connections and attempts recovery.
+ */
+export interface IdleTimeoutConfig {
+  /** Enable idle timeout detection (default: true) */
+  enabled: boolean;
+
+  /** Idle timeout in milliseconds before liveness check (default: 300000 = 5 minutes) */
+  timeoutMs: number;
+
+  /** Interval in milliseconds between idle checks (default: 30000 = 30 seconds) */
+  checkIntervalMs: number;
 }
 
 /**
