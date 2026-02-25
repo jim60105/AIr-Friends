@@ -507,6 +507,30 @@ The retry strategy is configured per agent type via `getRetryPromptStrategy()` i
 | OpenCode | 1           | Yes             |
 | Gemini   | 1           | Yes             |
 
+**Idle Timeout Detection**:
+
+When an ACP Agent connection becomes silently unresponsive (no session updates for a configurable period), the system automatically detects and handles it:
+
+1. **Activity Tracking**: All Agent callbacks (sessionUpdate, requestPermission, readTextFile, writeTextFile) update a `lastActivityTimestamp` in ChatbotClient
+2. **Idle Monitor**: During `prompt()`, a periodic check runs every `checkIntervalMs` (default: 30s)
+3. **Liveness Check**: After `timeoutMs` (default: 5 min) of inactivity:
+   - Checks if the Agent subprocess is still alive via `process.status`
+   - Attempts `connection.cancel()` as a connectivity probe
+   - If alive → resets timer and continues waiting
+   - If dead → throws error for upstream handling
+4. **Session Resumption**: On connection death, `SessionOrchestrator` attempts to reconnect and reload the same session via `loadSession()` (requires Agent support). Currently, no agents support `loadSession`, so this is a forward-looking design.
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| `agent.idleTimeout.enabled` | `true` | Enable idle timeout detection |
+| `agent.idleTimeout.timeoutMs` | `300000` | Idle timeout in ms (5 min) |
+| `agent.idleTimeout.checkIntervalMs` | `30000` | Check interval in ms (30s) |
+
+Environment variable overrides:
+- `AGENT_IDLE_TIMEOUT_ENABLED`
+- `AGENT_IDLE_TIMEOUT_MS`
+- `AGENT_IDLE_TIMEOUT_CHECK_INTERVAL_MS`
+
 ### 7. Access Control & Reply Policy (Feature 13)
 
 Controls bot reply behavior through the `accessControl` section in `config.yaml`.

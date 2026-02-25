@@ -20,6 +20,16 @@ const DISCONNECT_TIMEOUT_MS = 2000;
 const DUMB_INIT_PATH = "dumb-init";
 
 /**
+ * Default idle timeout in milliseconds (5 minutes)
+ */
+const IDLE_TIMEOUT_MS = 5 * 60 * 1000;
+
+/**
+ * Default interval in milliseconds between idle checks (30 seconds)
+ */
+const IDLE_CHECK_INTERVAL_MS = 30 * 1000;
+
+/**
  * AgentConnector manages the lifecycle of ACP Agent connections
  * Handles spawning, connecting, and communicating with external ACP Agents
  */
@@ -29,6 +39,7 @@ export class AgentConnector {
   private client: ChatbotClient | null = null;
   private options: AgentConnectorOptions;
   private capabilities: AgentCapabilities | null = null;
+  private currentIdleMonitorIntervalId: ReturnType<typeof setInterval> | null = null;
 
   constructor(options: AgentConnectorOptions) {
     this.options = options;
@@ -58,6 +69,9 @@ export class AgentConnector {
     });
 
     this.process = command.spawn();
+
+    // Monitor for unexpected process exit
+    this.monitorProcessExit(logger as Logger);
 
     // Pipe stderr to logger (doesn't block the process)
     this.readStderr(this.process.stderr, logger as Logger).catch((error) => {
@@ -295,6 +309,7 @@ export class AgentConnector {
   /**
    * Send a prompt to the Agent and wait for response.
    * Accepts either a plain text string or an array of ContentBlock.
+   * Includes idle timeout detection when enabled.
    */
   async prompt(
     sessionId: string,
@@ -314,18 +329,28 @@ export class AgentConnector {
       ? [{ type: "text", text: content }]
       : content;
 
-    const result = await this.connection.prompt({
-      sessionId,
-      prompt,
-    });
+    try {
+      let result: acp.PromptResponse;
 
-    logger.info("Prompt completed for session {sessionId} with stopReason {stopReason}", {
-      sessionId,
-      stopReason: result.stopReason,
-      contentBlockCount: prompt.length,
-    });
+      if (this.idleTimeoutEnabled) {
+        result = await Promise.race([
+          this.connection.prompt({ sessionId, prompt }),
+          this.monitorIdleTimeout(sessionId, logger),
+        ]);
+      } else {
+        result = await this.connection.prompt({ sessionId, prompt });
+      }
 
-    return result;
+      logger.info("Prompt completed for session {sessionId} with stopReason {stopReason}", {
+        sessionId,
+        stopReason: result.stopReason,
+        contentBlockCount: prompt.length,
+      });
+
+      return result;
+    } finally {
+      this.clearIdleMonitor();
+    }
   }
 
   /**
@@ -347,6 +372,8 @@ export class AgentConnector {
    * Uses best-effort cleanup with timeout (following GitHub's ACP example)
    */
   async disconnect(): Promise<void> {
+    this.clearIdleMonitor();
+
     if (this.process) {
       try {
         this.process.kill("SIGTERM");
@@ -375,6 +402,23 @@ export class AgentConnector {
    */
   get isConnected(): boolean {
     return this.connection !== null && this.process !== null;
+  }
+
+  /**
+   * Monitor agent subprocess for unexpected exit.
+   * Logs an error when the process exits while still referenced.
+   */
+  private monitorProcessExit(logger: Logger): void {
+    if (!this.process) return;
+    this.process.status.then((status) => {
+      if (this.process !== null) {
+        logger.error("Agent process exited unexpectedly", {
+          code: status.code,
+          signal: status.signal,
+          success: status.success,
+        });
+      }
+    }).catch(() => {/* Ignore */});
   }
 
   /**
@@ -414,5 +458,132 @@ export class AgentConnector {
    */
   getClient(): ChatbotClient | null {
     return this.client;
+  }
+
+  /**
+   * Monitor for idle timeout. Only rejects (never resolves normally).
+   * Used with Promise.race() against the actual prompt call.
+   */
+  private monitorIdleTimeout(
+    sessionId: string,
+    logger: Logger,
+  ): Promise<acp.PromptResponse> {
+    return new Promise((_resolve, reject) => {
+      const intervalId = setInterval(async () => {
+        const lastActivity = this.client?.getLastActivityTimestamp() ?? Date.now();
+        const idleMs = Date.now() - lastActivity;
+
+        if (idleMs < this.idleTimeoutMs) return;
+
+        logger.warn(
+          "Idle timeout reached for session {sessionId}, idle for {idleMs}ms. Performing liveness check...",
+          { sessionId, idleMs },
+        );
+
+        // Liveness check 1: Process alive?
+        const processAlive = await this.isProcessAlive();
+        if (!processAlive) {
+          clearInterval(intervalId);
+          logger.error("Agent process exited unexpectedly for session {sessionId}", { sessionId });
+          reject(
+            new Error(
+              `ACP agent process exited unexpectedly after ${idleMs}ms of inactivity`,
+            ),
+          );
+          return;
+        }
+
+        // Liveness check 2: cancel() as connectivity probe
+        try {
+          await this.connection?.cancel({ sessionId });
+          // cancel() succeeded → agent alive but slow, grant another window
+          logger.info(
+            "Liveness check passed for session {sessionId}: Agent is alive but slow.",
+            { sessionId },
+          );
+          this.client?.touchActivity();
+        } catch (error) {
+          // cancel() failed → connection is dead
+          clearInterval(intervalId);
+          logger.error(
+            "Liveness check failed for session {sessionId}: cancel() threw error",
+            { sessionId, error: error instanceof Error ? error.message : String(error) },
+          );
+          reject(
+            new Error(
+              `ACP connection dead: no activity for ${idleMs}ms and liveness check failed: ${
+                error instanceof Error ? error.message : String(error)
+              }`,
+            ),
+          );
+        }
+      }, this.idleCheckIntervalMs);
+
+      this.currentIdleMonitorIntervalId = intervalId;
+    });
+  }
+
+  /**
+   * Check if the agent subprocess is still alive.
+   */
+  private async isProcessAlive(): Promise<boolean> {
+    if (!this.process) return false;
+    const result = await Promise.race([
+      this.process.status.then(() => "exited" as const),
+      new Promise<"running">((resolve) => setTimeout(() => resolve("running"), 100)),
+    ]);
+    return result === "running";
+  }
+
+  private clearIdleMonitor(): void {
+    if (this.currentIdleMonitorIntervalId !== null) {
+      clearInterval(this.currentIdleMonitorIntervalId);
+      this.currentIdleMonitorIntervalId = null;
+    }
+  }
+
+  /**
+   * Attempt to reconnect and resume an existing session.
+   * Returns true if reconnection succeeded and session was loaded.
+   * Returns false if session resumption is not supported.
+   */
+  async reconnectAndResumeSession(sessionId: string): Promise<boolean> {
+    const logger = this.options.logger as Logger;
+
+    logger.info("Attempting to reconnect and resume session {sessionId}", { sessionId });
+
+    // Disconnect old connection
+    await this.disconnect();
+
+    // Spawn new process and initialize
+    await this.connect();
+
+    // Check if agent supports loading previous sessions
+    if (!this.supportsLoadSession()) {
+      logger.warn(
+        "Agent does not support loadSession. Cannot resume session {sessionId}.",
+        { sessionId },
+      );
+      await this.disconnect();
+      return false;
+    }
+
+    // TODO: Call connection.loadSession() when ACP SDK supports it.
+    // For now, since SDK v0.14.1 doesn't have this method,
+    // this path is unreachable (supportsLoadSession() returns false for all current agents).
+    await this.disconnect();
+    return false;
+  }
+
+  private get idleTimeoutMs(): number {
+    return this.options.idleTimeoutConfig?.timeoutMs ?? IDLE_TIMEOUT_MS;
+  }
+
+  private get idleCheckIntervalMs(): number {
+    return this.options.idleTimeoutConfig?.checkIntervalMs ?? IDLE_CHECK_INTERVAL_MS;
+  }
+
+  private get idleTimeoutEnabled(): boolean {
+    return this.options.idleTimeoutConfig?.enabled !== false;
   }
 }

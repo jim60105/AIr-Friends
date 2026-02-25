@@ -103,6 +103,11 @@ export const ENV_MAPPINGS = {
   AGENT_SANDBOX_NETWORK_ISOLATION: "agent.sandbox.networkIsolation",
   AGENT_SANDBOX_ALLOWED_ENV_VARS: "agent.sandbox.allowedEnvVars",
 
+  // Agent idle timeout settings
+  AGENT_IDLE_TIMEOUT_ENABLED: "agent.idleTimeout.enabled",
+  AGENT_IDLE_TIMEOUT_MS: "agent.idleTimeout.timeoutMs",
+  AGENT_IDLE_TIMEOUT_CHECK_INTERVAL_MS: "agent.idleTimeout.checkIntervalMs",
+
   // Scheduled reminders settings
   REMINDERS_ENABLED: "reminders.enabled",
   REMINDERS_MAX_PER_USER: "reminders.maxRemindersPerUser",

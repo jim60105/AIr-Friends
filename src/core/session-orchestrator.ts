@@ -351,6 +351,7 @@ export class SessionOrchestrator {
         clientConfig,
         skillRegistry: this.skillRegistry,
         logger: sessionLogger,
+        idleTimeoutConfig: this.config.agent.idleTimeout,
       });
 
       // Start typing indicator if platform supports it
@@ -436,7 +437,24 @@ export class SessionOrchestrator {
           modelId: resolvedModel,
         });
 
-        const response = await connector.prompt(sessionId, promptContent);
+        const response = await this.promptWithIdleTimeoutHandling(
+          connector,
+          sessionId,
+          promptContent,
+        );
+
+        if (response === null) {
+          sessionLogger.warn(
+            "Session {sessionId} ended without agent response after reconnect",
+            { sessionId },
+          );
+          return {
+            success: false,
+            replySent: false,
+            error: "Session lost due to idle timeout and reconnection failure",
+          };
+        }
+
         sessionLogger.info("Agent session {sessionId} completed with stopReason {stopReason}", {
           sessionId,
           stopReason: response.stopReason,
@@ -765,6 +783,7 @@ export class SessionOrchestrator {
         clientConfig,
         skillRegistry: this.skillRegistry,
         logger: sessionLogger,
+        idleTimeoutConfig: this.config.agent.idleTimeout,
       });
 
       try {
@@ -801,7 +820,17 @@ export class SessionOrchestrator {
         });
 
         // Send prompt
-        const response = await connector.prompt(sessionId, fullPrompt);
+        const response = await this.promptWithIdleTimeoutHandling(
+          connector,
+          sessionId,
+          fullPrompt,
+        );
+
+        if (response === null) {
+          sessionLogger.warn("Spontaneous session ended without response after reconnect");
+          return { success: false, replySent: false, error: "Session lost due to idle timeout" };
+        }
+
         sessionLogger.info("Agent session completed with stopReason {stopReason}", {
           stopReason: response.stopReason,
         });
@@ -1014,6 +1043,7 @@ export class SessionOrchestrator {
         clientConfig,
         skillRegistry: this.skillRegistry,
         logger: sessionLogger,
+        idleTimeoutConfig: this.config.agent.idleTimeout,
       });
 
       try {
@@ -1041,7 +1071,17 @@ export class SessionOrchestrator {
         });
 
         // Send prompt
-        const response = await connector.prompt(sessionId, fullPrompt);
+        const response = await this.promptWithIdleTimeoutHandling(
+          connector,
+          sessionId,
+          fullPrompt,
+        );
+
+        if (response === null) {
+          sessionLogger.warn("Self-research session ended without response after reconnect");
+          return { success: false, replySent: false, error: "Session lost due to idle timeout" };
+        }
+
         sessionLogger.info("Self-research agent session completed with stopReason {stopReason}", {
           stopReason: response.stopReason,
         });
@@ -1228,6 +1268,7 @@ export class SessionOrchestrator {
         clientConfig,
         skillRegistry: this.skillRegistry,
         logger: sessionLogger,
+        idleTimeoutConfig: this.config.agent.idleTimeout,
       });
 
       try {
@@ -1252,7 +1293,17 @@ export class SessionOrchestrator {
           promptLength: fullPrompt.length,
           modelId: resolvedModel,
         });
-        const response = await connector.prompt(sessionId, fullPrompt);
+        const response = await this.promptWithIdleTimeoutHandling(
+          connector,
+          sessionId,
+          fullPrompt,
+        );
+
+        if (response === null) {
+          sessionLogger.warn("Memory maintenance session ended without response after reconnect");
+          return { success: false, replySent: false, error: "Session lost due to idle timeout" };
+        }
+
         sessionLogger.info("Memory maintenance session completed with stopReason {stopReason}", {
           stopReason: response.stopReason,
         });
@@ -1457,6 +1508,7 @@ export class SessionOrchestrator {
         clientConfig,
         skillRegistry: this.skillRegistry,
         logger: sessionLogger,
+        idleTimeoutConfig: this.config.agent.idleTimeout,
       });
 
       try {
@@ -1489,7 +1541,17 @@ export class SessionOrchestrator {
         });
 
         // Send prompt
-        const response = await connector.prompt(sessionId, fullPrompt);
+        const response = await this.promptWithIdleTimeoutHandling(
+          connector,
+          sessionId,
+          fullPrompt,
+        );
+
+        if (response === null) {
+          sessionLogger.warn("Reminder session ended without response after reconnect");
+          return { success: false, replySent: false, error: "Session lost due to idle timeout" };
+        }
+
         sessionLogger.info("Agent session completed with stopReason {stopReason}", {
           stopReason: response.stopReason,
         });
@@ -1585,6 +1647,66 @@ export class SessionOrchestrator {
       const status = result!.success ? "success" : "failure";
       sessionsTotal.labels(platform, "reminder", status).inc();
       sessionDurationSeconds.labels(platform, "reminder", status).observe(durationSec);
+    }
+  }
+
+  /**
+   * Execute a prompt with idle timeout handling and session resumption.
+   *
+   * On idle timeout:
+   * 1. Attempts to reconnect and resume the SAME session (not a new one)
+   * 2. If session resumed and agent is still working → wait for completion
+   * 3. If session cannot be resumed (loadSession unsupported) → throw error
+   */
+  private async promptWithIdleTimeoutHandling(
+    connector: AgentConnector,
+    sessionId: string,
+    content: string | acp.ContentBlock[],
+  ): Promise<acp.PromptResponse | null> {
+    try {
+      return await connector.prompt(sessionId, content);
+    } catch (error) {
+      const isIdleTimeout = error instanceof Error &&
+        (error.message.includes("ACP connection dead") ||
+          error.message.includes("ACP agent process exited unexpectedly"));
+
+      if (!isIdleTimeout) {
+        throw error;
+      }
+
+      logger.warn(
+        "Idle timeout detected for session {sessionId}, attempting reconnect and resume...",
+        { sessionId },
+      );
+
+      const resumed = await connector.reconnectAndResumeSession(sessionId);
+
+      if (!resumed) {
+        logger.error(
+          "Cannot resume session {sessionId}: loadSession not supported by agent. Session lost.",
+          { sessionId },
+        );
+        throw new Error(
+          `ACP session ${sessionId} lost: connection died and agent does not support session resumption`,
+        );
+      }
+
+      // Session resumed — wait for agent to complete or confirm idle
+      logger.info(
+        "Session {sessionId} resumed. Waiting for agent to complete or confirm idle...",
+        { sessionId },
+      );
+
+      try {
+        return await connector.prompt(sessionId, []);
+      } catch (_resumeError) {
+        logger.error(
+          "Resumed session {sessionId} also timed out. Giving up.",
+          { sessionId },
+        );
+        await connector.disconnect();
+        return null;
+      }
     }
   }
 

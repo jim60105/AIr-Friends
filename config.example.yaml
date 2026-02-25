@@ -131,6 +131,13 @@ agent:
   #   networkIsolation: false     # Linux network namespace isolation via unshare --net (default: false); override with env AGENT_SANDBOX_NETWORK_ISOLATION
   #   allowedEnvVars: []          # Additional env var names to allow through the filter; override with env AGENT_SANDBOX_ALLOWED_ENV_VARS (comma-separated)
 
+  # Idle timeout detection for ACP connections
+  # Detects silently disconnected Agent connections and attempts recovery
+  idleTimeout:
+    enabled: true                  # Enable idle timeout detection (default: true); override with env AGENT_IDLE_TIMEOUT_ENABLED
+    timeoutMs: 300000              # Idle timeout in ms (default: 300000 = 5 minutes); override with env AGENT_IDLE_TIMEOUT_MS
+    checkIntervalMs: 30000         # Check interval in ms (default: 30000 = 30 seconds); override with env AGENT_IDLE_TIMEOUT_CHECK_INTERVAL_MS
+
 # Memory system configuration
 memory:
   searchLimit: 10 # Max number of search results (default: 10)

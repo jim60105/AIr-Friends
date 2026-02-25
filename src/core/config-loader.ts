@@ -11,6 +11,7 @@ import type {
   Config,
   DryRunConfig,
   GitBackupConfig,
+  IdleTimeoutConfig,
   MemoryMaintenanceConfig,
   RateLimitConfig,
   RemindersConfig,
@@ -149,6 +150,15 @@ const DEFAULT_SANDBOX: SandboxConfig = {
   filterEnv: true,
   networkIsolation: false,
   allowedEnvVars: [],
+};
+
+/**
+ * Default idle timeout configuration
+ */
+const DEFAULT_IDLE_TIMEOUT: IdleTimeoutConfig = {
+  enabled: true,
+  timeoutMs: 300000, // 5 minutes
+  checkIntervalMs: 30000, // 30 seconds
 };
 
 /**
@@ -544,6 +554,16 @@ function validateConfig(config: Record<string, unknown>): void {
     agentConfig.sandbox = {
       ...DEFAULT_SANDBOX,
       ...(agentConfig.sandbox as Record<string, unknown>),
+    };
+  }
+
+  // Idle timeout defaults
+  if (!agentConfig.idleTimeout) {
+    agentConfig.idleTimeout = { ...DEFAULT_IDLE_TIMEOUT };
+  } else {
+    agentConfig.idleTimeout = {
+      ...DEFAULT_IDLE_TIMEOUT,
+      ...(agentConfig.idleTimeout as Record<string, unknown>),
     };
   }
 

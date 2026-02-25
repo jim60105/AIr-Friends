@@ -153,6 +153,11 @@ env:
   AGENT_SANDBOX_NETWORK_ISOLATION: 'false'
   AGENT_SANDBOX_ALLOWED_ENV_VARS: ''
 
+  # Agent Idle Timeout
+  AGENT_IDLE_TIMEOUT_ENABLED: 'true'
+  AGENT_IDLE_TIMEOUT_MS: '300000'
+  AGENT_IDLE_TIMEOUT_CHECK_INTERVAL_MS: '30000'
+
   # External skills to install at startup
   # Prefer using agentExternalSkills section below (native YAML).
   # Only set this if you need to override agentExternalSkills with a raw JSON string.
