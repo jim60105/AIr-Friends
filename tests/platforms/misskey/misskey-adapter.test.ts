@@ -1669,3 +1669,129 @@ Deno.test("MisskeyAdapter.determineSpontaneousTarget - no account entries always
   const target = await adapter.determineSpontaneousTarget(config);
   assertEquals(target?.channelId, "timeline:self");
 });
+
+// ==================== MisskeyAdapter heartbeat & reconnect cleanup Tests ====================
+
+Deno.test("MisskeyAdapter - connect cleans up existing stream before reconnecting", async () => {
+  const adapter = new MisskeyAdapter({
+    host: "misskey.test",
+    token: "test-token",
+    secure: false,
+  });
+
+  // deno-lint-ignore no-explicit-any
+  const adapterAny = adapter as any;
+
+  const disposed: string[] = [];
+
+  // Mock existing mainChannel
+  adapterAny.mainChannel = {
+    dispose: () => disposed.push("mainChannel"),
+    on: () => {},
+  };
+
+  // Mock client
+  const disconnectCalls: string[] = [];
+  adapterAny.client = {
+    getSelf: () => Promise.resolve({ id: "bot1", username: "testbot" }),
+    connectStream: () => ({
+      useChannel: () => ({ on: () => {} }),
+      on: () => {},
+    }),
+    disconnectStream: () => disconnectCalls.push("disconnectStream"),
+    getStream: () => null,
+  };
+
+  await adapter.connect();
+
+  assertEquals(disposed.length, 1);
+  assertEquals(disconnectCalls.length >= 1, true);
+});
+
+Deno.test("MisskeyAdapter - heartbeat starts and stops correctly", () => {
+  const adapter = new MisskeyAdapter({
+    host: "misskey.test",
+    token: "test-token",
+    secure: false,
+  });
+
+  // deno-lint-ignore no-explicit-any
+  const adapterAny = adapter as any;
+
+  assertEquals(adapterAny.heartbeatIntervalId, null);
+
+  adapterAny.client = {
+    getStream: () => ({
+      heartbeat: () => {},
+    }),
+  };
+
+  adapterAny.startHeartbeat();
+  assertEquals(adapterAny.heartbeatIntervalId !== null, true);
+
+  adapterAny.stopHeartbeat();
+  assertEquals(adapterAny.heartbeatIntervalId, null);
+});
+
+Deno.test("MisskeyAdapter - stopHeartbeat is idempotent", () => {
+  const adapter = new MisskeyAdapter({
+    host: "misskey.test",
+    token: "test-token",
+    secure: false,
+  });
+
+  // deno-lint-ignore no-explicit-any
+  const adapterAny = adapter as any;
+
+  adapterAny.client = {
+    getStream: () => ({ heartbeat: () => {} }),
+  };
+
+  adapterAny.startHeartbeat();
+  adapterAny.stopHeartbeat();
+  assertEquals(adapterAny.heartbeatIntervalId, null);
+
+  // Second call is safe
+  adapterAny.stopHeartbeat();
+  assertEquals(adapterAny.heartbeatIntervalId, null);
+});
+
+Deno.test("MisskeyAdapter - disconnect stops heartbeat", async () => {
+  const adapter = new MisskeyAdapter({
+    host: "misskey.test",
+    token: "test-token",
+    secure: false,
+  });
+
+  // deno-lint-ignore no-explicit-any
+  const adapterAny = adapter as any;
+
+  adapterAny.client = {
+    getStream: () => ({ heartbeat: () => {} }),
+    disconnectStream: () => {},
+  };
+
+  adapterAny.startHeartbeat();
+  assertEquals(adapterAny.heartbeatIntervalId !== null, true);
+
+  await adapter.disconnect();
+  assertEquals(adapterAny.heartbeatIntervalId, null);
+});
+
+Deno.test("MisskeyAdapter - startHeartbeat does nothing without stream", () => {
+  const adapter = new MisskeyAdapter({
+    host: "misskey.test",
+    token: "test-token",
+    secure: false,
+  });
+
+  // deno-lint-ignore no-explicit-any
+  const adapterAny = adapter as any;
+
+  adapterAny.client = {
+    getStream: () => null,
+  };
+
+  adapterAny.startHeartbeat();
+  assertEquals(adapterAny.heartbeatIntervalId, null);
+});

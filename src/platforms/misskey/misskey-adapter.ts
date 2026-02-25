@@ -56,7 +56,8 @@ export class MisskeyAdapter extends PlatformAdapter {
   private botId: string | null = null;
   private botUsername: string | null = null;
   private mainChannel: ChannelConnection<Channels["main"]> | null = null;
-  private reconnectAttempts = 0;
+  private heartbeatIntervalId: ReturnType<typeof setInterval> | null = null;
+  private readonly HEARTBEAT_INTERVAL_MS = 60_000; // 60 seconds
   private emojiCache: PlatformEmoji[] | null = null;
   private emojiCacheTimestamp = 0;
   private readonly EMOJI_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
@@ -78,6 +79,14 @@ export class MisskeyAdapter extends PlatformAdapter {
   async connect(): Promise<void> {
     logger.info("Connecting to Misskey", { host: this.config.host });
     this.updateConnectionState(ConnectionState.CONNECTING);
+
+    // Clean up existing stream before reconnecting
+    this.stopHeartbeat();
+    if (this.mainChannel) {
+      this.mainChannel.dispose();
+      this.mainChannel = null;
+    }
+    this.client.disconnectStream();
 
     try {
       // Get bot info
@@ -102,8 +111,8 @@ export class MisskeyAdapter extends PlatformAdapter {
 
       // Handle stream events
       stream.on("_connected_", () => {
-        this.reconnectAttempts = 0;
         this.updateConnectionState(ConnectionState.CONNECTED);
+        this.startHeartbeat();
         logger.info("Connected to Misskey streaming API", {
           host: this.config.host,
           botUsername: this.botUsername,
@@ -112,8 +121,10 @@ export class MisskeyAdapter extends PlatformAdapter {
 
       stream.on("_disconnected_", () => {
         logger.warn("Disconnected from Misskey streaming API");
+        this.stopHeartbeat();
         this.updateConnectionState(ConnectionState.DISCONNECTED);
-        this.handleReconnect();
+        // reconnecting-websocket will automatically attempt reconnection
+        // If it also fails, ConnectionManager will detect and rebuild
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -194,43 +205,37 @@ export class MisskeyAdapter extends PlatformAdapter {
   }
 
   /**
-   * Handle reconnection
+   * Start periodic heartbeat to detect silent disconnections
    */
-  private handleReconnect(): void {
-    if (!this.config.reconnect.enabled) {
-      return;
-    }
+  private startHeartbeat(): void {
+    this.stopHeartbeat();
 
-    if (this.reconnectAttempts >= (this.config.reconnect.maxAttempts ?? 5)) {
-      logger.error("Max reconnect attempts reached");
-      this.updateConnectionState(
-        ConnectionState.ERROR,
-        "Max reconnect attempts reached",
-      );
-      return;
-    }
+    const stream = this.client.getStream();
+    if (!stream) return;
 
-    this.reconnectAttempts++;
-    const delay = (this.config.reconnect.baseDelay ?? 1000) *
-      Math.pow(2, this.reconnectAttempts - 1);
-
-    logger.info("Scheduling reconnect in {delay}ms (attempt {attempt})", {
-      attempt: this.reconnectAttempts,
-      delay,
-    });
-
-    this.updateConnectionState(ConnectionState.RECONNECTING);
-
-    setTimeout(async () => {
+    this.heartbeatIntervalId = setInterval(() => {
       try {
-        await this.connect();
+        stream.heartbeat();
       } catch (error) {
-        logger.error("Reconnect failed", {
+        logger.warn("Heartbeat send failed, connection may be stale", {
           error: error instanceof Error ? error.message : String(error),
         });
-        this.handleReconnect();
       }
-    }, delay);
+    }, this.HEARTBEAT_INTERVAL_MS);
+
+    logger.debug("Heartbeat started", {
+      intervalMs: this.HEARTBEAT_INTERVAL_MS,
+    });
+  }
+
+  /**
+   * Stop the heartbeat timer
+   */
+  private stopHeartbeat(): void {
+    if (this.heartbeatIntervalId !== null) {
+      clearInterval(this.heartbeatIntervalId);
+      this.heartbeatIntervalId = null;
+    }
   }
 
   /**
@@ -238,6 +243,7 @@ export class MisskeyAdapter extends PlatformAdapter {
    */
   disconnect(): Promise<void> {
     logger.info("Disconnecting from Misskey");
+    this.stopHeartbeat();
 
     if (this.mainChannel) {
       this.mainChannel.dispose();
