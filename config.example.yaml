@@ -43,10 +43,6 @@ platforms:
     secure: true # Use wss/https when connecting (true/false, default: true)
     respondToMention: true # Respond to mentions (default: true)
     allowDm: true # Respond to DMs (default: true)
-    reconnect:
-      enabled: true # Auto-reconnect (default: true)
-      maxAttempts: 5 # Max reconnect attempts (default: 5)
-      baseDelay: 1000 # Base delay between reconnect attempts in ms (default: 1000)
     # Spontaneous posting: agent posts notes on its own schedule
     spontaneousPost:
       enabled: false # Enable spontaneous posting (default: false)

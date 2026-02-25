@@ -18,16 +18,6 @@ export interface MisskeyAdapterConfig {
 
   /** Whether to respond to DMs */
   allowDm?: boolean;
-
-  /** Reconnect options */
-  reconnect?: {
-    /** Whether to auto-reconnect */
-    enabled: boolean;
-    /** Max reconnect attempts */
-    maxAttempts?: number;
-    /** Base delay between attempts (ms) */
-    baseDelay?: number;
-  };
 }
 
 /**
@@ -37,11 +27,6 @@ export const DEFAULT_MISSKEY_CONFIG: Partial<MisskeyAdapterConfig> = {
   secure: true,
   respondToMention: true,
   allowDm: true,
-  reconnect: {
-    enabled: true,
-    maxAttempts: 5,
-    baseDelay: 1000,
-  },
 };
 
 /**

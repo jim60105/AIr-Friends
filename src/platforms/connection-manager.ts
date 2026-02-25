@@ -151,7 +151,7 @@ export class ConnectionManager {
           });
         });
       }
-    }, 5000);
+    }, 30_000);
   }
 
   /**
