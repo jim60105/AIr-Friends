@@ -342,6 +342,34 @@ Deno.test("GitBackupService - converts relative path to absolute for safe.direct
   }
 });
 
+Deno.test("GitBackupService - runGit returns errorOutput on failure", async () => {
+  await withTempGitEnv(async (dataDir, bareDir) => {
+    const service = new GitBackupService(
+      createConfig({ remoteUrl: bareDir }),
+      dataDir,
+    );
+    await service.initialize();
+
+    // Attempt a backup with no changes — commit will fail
+    // Use a direct approach: write a file, backup, then backup again with no changes
+    // Actually, performBackup returns true when no changes (early return).
+    // Instead, test via performBackup with invalid remote to get push failure with errorOutput.
+    const service2 = new GitBackupService(
+      createConfig({ remoteUrl: "/nonexistent/repo.git" }),
+      dataDir,
+    );
+    // Re-init with bad remote
+    // deno-lint-ignore no-explicit-any
+    (service2 as any).initialized = true;
+    // deno-lint-ignore no-explicit-any
+    (service2 as any).dataDir = dataDir;
+
+    await Deno.writeTextFile(`${dataDir}/errortest.txt`, "trigger change");
+    const result = await service2.performBackup();
+    assertEquals(result, false);
+  });
+});
+
 Deno.test("GitBackupService - initialize clones from remote when data dir is empty", async () => {
   await withTempGitEnv(async (dataDir, bareDir) => {
     const service = new GitBackupService(

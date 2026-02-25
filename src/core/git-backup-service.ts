@@ -292,7 +292,7 @@ export class GitBackupService {
     // Stage all changes
     const add = await this.runGit(["add", "-A"]);
     if (!add.success) {
-      logger.error("Git add failed");
+      logger.error("Git add failed", { stderr: add.errorOutput });
       return false;
     }
 
@@ -307,7 +307,7 @@ export class GitBackupService {
     const timestamp = new Date().toISOString();
     const commit = await this.runGit(["commit", "-m", `backup: ${timestamp}`]);
     if (!commit.success) {
-      logger.error("Git commit failed");
+      logger.error("Git commit failed", { stderr: commit.errorOutput, stdout: commit.output });
       return false;
     }
 
@@ -328,17 +328,19 @@ export class GitBackupService {
         ]);
         const rebase = await this.runGit(["rebase", `origin/${this.defaultBranch}`]);
         if (!rebase.success) {
-          logger.error("Rebase failed, backup push aborted");
+          logger.error("Rebase failed, backup push aborted", { stderr: rebase.errorOutput });
           await this.runGit(["rebase", "--abort"]);
           return false;
         }
       } else {
-        logger.error("Fetch for rebase failed, backup push aborted");
+        logger.error("Fetch for rebase failed, backup push aborted", {
+          stderr: fetch.errorOutput,
+        });
         return false;
       }
       push = await this.runGit(["push", authUrl, this.defaultBranch]);
       if (!push.success) {
-        logger.error("Push retry failed after rebase");
+        logger.error("Push retry failed after rebase", { stderr: push.errorOutput });
         return false;
       }
     }
@@ -364,7 +366,9 @@ export class GitBackupService {
   }
 
   /** Execute a git command in the data directory. */
-  private async runGit(args: string[]): Promise<{ success: boolean; output: string }> {
+  private async runGit(
+    args: string[],
+  ): Promise<{ success: boolean; output: string; errorOutput: string }> {
     const command = new Deno.Command("git", {
       args,
       cwd: this.dataDir,
@@ -389,10 +393,11 @@ export class GitBackupService {
         args: args.map((a) => a.includes("@") ? "[REDACTED_URL]" : a),
         exitCode: code,
         stderr: errorOutput.replace(/x-access-token:[^@]+@/g, "x-access-token:***@"),
+        stdout: output.replace(/x-access-token:[^@]+@/g, "x-access-token:***@"),
       });
     }
 
-    return { success: code === 0, output };
+    return { success: code === 0, output, errorOutput };
   }
 
   /** Ensure .gitignore exists with required exclusions. */
