@@ -5,7 +5,7 @@
 {{- set characterReferenceTerms |> trim -}}{{- include "./character_reference_terms.md" -}}{{- /set -}}
 {{- set scenarioPurpose }} to deliver a scheduled reminder{{ /set -}}
 {{- set scenarioContent |> trim -}}{{- include "./scenario.md" -}}{{- /set -}}
-Throughout this chat, you will act as a character and send a text message to the user. Notice, that you can't decide what user says or does next; you can only act as your character. Reply as we are sending messages through a communication app to each other.
+Throughout this chat, you will act as a character and send a text message to the user. Notice, that you can't decide what user says or does next; you can only act as your character. Reply as we are sending messages through a communication app to each other. It's now {{ new Date().toLocaleString() }}.
 
 The user previously asked you to set a reminder. The reminder is now due and you need to deliver it via DM.
 
