@@ -133,9 +133,10 @@ export class GitBackupService {
     const hasHead = await this.runGit(["rev-parse", "--verify", "HEAD"]);
     if (!hasHead.success) {
       logger.info("Remote repository is empty, creating initial commit");
+      await this.deregisterSubmodules();
       await this.runGit(["add", "-A"]);
-      const status = await this.runGit(["status", "--porcelain"]);
-      if (status.success && status.output.trim() !== "") {
+      const diff = await this.runGit(["diff", "--cached", "--quiet"]);
+      if (!diff.success) {
         const timestamp = new Date().toISOString();
         await this.runGit(["commit", "-m", `initial: ${timestamp}`]);
         await this.pushWithFallback();
@@ -144,9 +145,10 @@ export class GitBackupService {
     }
 
     // Remote had commits: commit .gitignore changes if any, and push
+    await this.deregisterSubmodules();
     await this.runGit(["add", "-A"]);
-    const status = await this.runGit(["status", "--porcelain"]);
-    if (status.success && status.output.trim() !== "") {
+    const diff = await this.runGit(["diff", "--cached", "--quiet"]);
+    if (!diff.success) {
       const timestamp = new Date().toISOString();
       await this.runGit(["commit", "-m", `backup: ${timestamp}`]);
       await this.pushWithFallback();
@@ -169,9 +171,10 @@ export class GitBackupService {
     await this.configureRemote();
 
     // Commit all existing files
+    await this.deregisterSubmodules();
     await this.runGit(["add", "-A"]);
-    const status = await this.runGit(["status", "--porcelain"]);
-    if (status.success && status.output.trim() !== "") {
+    const diff = await this.runGit(["diff", "--cached", "--quiet"]);
+    if (!diff.success) {
       const timestamp = new Date().toISOString();
       await this.runGit(["commit", "-m", `initial: ${timestamp}`]);
     }
@@ -199,9 +202,10 @@ export class GitBackupService {
     }
 
     // Commit any uncommitted changes
+    await this.deregisterSubmodules();
     await this.runGit(["add", "-A"]);
-    const status = await this.runGit(["status", "--porcelain"]);
-    if (status.success && status.output.trim() !== "") {
+    const diff = await this.runGit(["diff", "--cached", "--quiet"]);
+    if (!diff.success) {
       const timestamp = new Date().toISOString();
       await this.runGit(["commit", "-m", `backup: ${timestamp}`]);
       logger.info("Committed uncommitted changes during initialization");
@@ -289,6 +293,9 @@ export class GitBackupService {
   }
 
   private async performBackupInternal(): Promise<boolean> {
+    // De-register submodules before staging
+    await this.deregisterSubmodules();
+
     // Stage all changes
     const add = await this.runGit(["add", "-A"]);
     if (!add.success) {
@@ -296,9 +303,9 @@ export class GitBackupService {
       return false;
     }
 
-    // Check for changes
-    const status = await this.runGit(["status", "--porcelain"]);
-    if (status.success && status.output.trim() === "") {
+    // Check for staged changes (git diff --cached --quiet exits with 1 if there are staged changes)
+    const diff = await this.runGit(["diff", "--cached", "--quiet"]);
+    if (diff.success) {
       logger.info("No changes to backup");
       return true;
     }
@@ -400,11 +407,28 @@ export class GitBackupService {
     return { success: code === 0, output, errorOutput };
   }
 
+  /** De-register any submodules so nested .git directories are not tracked as submodules. */
+  private async deregisterSubmodules(): Promise<void> {
+    // Remove all submodule registrations; ignore errors if no submodules exist
+    await this.runGit(["submodule", "deinit", "--all", "--force"]);
+
+    // Also remove .gitmodules if it was auto-created
+    const gitmodulesPath = `${this.dataDir}/.gitmodules`;
+    try {
+      await Deno.remove(gitmodulesPath);
+    } catch {
+      // .gitmodules doesn't exist — this is the normal case
+    }
+  }
+
   /** Ensure .gitignore exists with required exclusions. */
   private async ensureGitignore(): Promise<void> {
     const gitignorePath = `${this.dataDir}/.gitignore`;
     const content = `# Temporary session files
 SESSION_ID
+
+# Ignore nested git repositories (agent-created repos in workspaces)
+**/.git
 
 # OS generated files
 .DS_Store
