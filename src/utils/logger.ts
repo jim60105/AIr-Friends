@@ -13,14 +13,30 @@ const DEFAULT_SENSITIVE_PATTERNS: RegExp[] = [
 export class Logger {
   private config: LoggerConfig;
   private module: string;
+  private defaultContext: Record<string, unknown>;
 
-  constructor(module: string, config?: Partial<LoggerConfig>) {
+  constructor(
+    module: string,
+    config?: Partial<LoggerConfig>,
+    defaultContext?: Record<string, unknown>,
+  ) {
     this.module = module;
     this.config = {
       level: config?.level ?? LogLevel.INFO,
       sensitivePatterns: config?.sensitivePatterns ?? DEFAULT_SENSITIVE_PATTERNS,
       gelfTransport: config?.gelfTransport,
     };
+    this.defaultContext = defaultContext ?? {};
+  }
+
+  /**
+   * Create a new Logger with additional default context fields.
+   * These fields are automatically merged into every log call's context.
+   * Call-site context takes precedence over default context.
+   */
+  withContext(ctx: Record<string, unknown>): Logger {
+    const merged = { ...this.defaultContext, ...ctx };
+    return new Logger(this.module, this.config, merged);
   }
 
   private shouldLog(level: LogLevel): boolean {
@@ -58,11 +74,16 @@ export class Logger {
     message: string,
     context?: Record<string, unknown>,
   ): LogEntry {
+    // Merge defaultContext with call-site context (call-site takes precedence)
+    const mergedContext = Object.keys(this.defaultContext).length > 0 || context
+      ? { ...this.defaultContext, ...context }
+      : undefined;
+
     const hasTemplate = /\{[a-zA-Z_][a-zA-Z0-9_]*\}/.test(message);
 
     let renderedMessage = message;
-    if (hasTemplate && context) {
-      renderedMessage = this.renderTemplate(message, context);
+    if (hasTemplate && mergedContext) {
+      renderedMessage = this.renderTemplate(message, mergedContext);
     }
 
     const entry: LogEntry = {
@@ -70,7 +91,7 @@ export class Logger {
       level,
       module: this.module,
       message: renderedMessage,
-      context: context ? this.sanitize(context) as Record<string, unknown> : undefined,
+      context: mergedContext ? this.sanitize(mergedContext) as Record<string, unknown> : undefined,
     };
 
     if (hasTemplate) {
@@ -150,9 +171,9 @@ export class Logger {
     }
   }
 
-  // Create a child logger with inherited config
+  // Create a child logger with inherited config and default context
   child(subModule: string): Logger {
-    return new Logger(`${this.module}:${subModule}`, this.config);
+    return new Logger(`${this.module}:${subModule}`, this.config, this.defaultContext);
   }
 }
 
