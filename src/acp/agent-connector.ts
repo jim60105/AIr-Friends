@@ -40,6 +40,7 @@ export class AgentConnector {
   private options: AgentConnectorOptions;
   private capabilities: AgentCapabilities | null = null;
   private currentIdleMonitorIntervalId: ReturnType<typeof setInterval> | null = null;
+  private promptCompleted = false;
 
   constructor(options: AgentConnectorOptions) {
     this.options = options;
@@ -323,6 +324,7 @@ export class AgentConnector {
 
     // Reset client state for new prompt
     this.client?.reset();
+    this.promptCompleted = false;
 
     // If content is a plain string, wrap as text ContentBlock (backward compatible)
     const prompt: acp.ContentBlock[] = typeof content === "string"
@@ -340,6 +342,8 @@ export class AgentConnector {
       } else {
         result = await this.connection.prompt({ sessionId, prompt });
       }
+
+      this.promptCompleted = true;
 
       logger.info("Prompt completed for session {sessionId} with stopReason {stopReason}", {
         sessionId,
@@ -411,8 +415,14 @@ export class AgentConnector {
   private monitorProcessExit(logger: Logger): void {
     if (!this.process) return;
     this.process.status.then((status) => {
-      if (this.process !== null) {
+      if (this.process !== null && !this.promptCompleted) {
         logger.error("Agent process exited unexpectedly", {
+          code: status.code,
+          signal: status.signal,
+          success: status.success,
+        });
+      } else if (this.process !== null) {
+        logger.debug("Agent process exited after prompt completion", {
           code: status.code,
           signal: status.signal,
           success: status.success,
