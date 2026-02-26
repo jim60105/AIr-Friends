@@ -296,3 +296,129 @@ Deno.test("Logger - sends messageTemplate to GELF transport", () => {
     console.log = originalLog;
   }
 });
+
+// withContext() tests
+
+Deno.test("Logger - withContext() adds default context to all log calls", () => {
+  const logs: string[] = [];
+  const originalLog = console.log;
+  console.log = (msg: string) => logs.push(msg);
+
+  try {
+    const base = new Logger("TestModule", { level: LogLevel.DEBUG });
+    const tracked = base.withContext({ sessionId: "sess_123" });
+    tracked.info("test message");
+
+    const entry = JSON.parse(logs[0]);
+    assertEquals(entry.context.sessionId, "sess_123");
+  } finally {
+    console.log = originalLog;
+  }
+});
+
+Deno.test("Logger - withContext() merges with call-site context", () => {
+  const logs: string[] = [];
+  const originalLog = console.log;
+  console.log = (msg: string) => logs.push(msg);
+
+  try {
+    const tracked = new Logger("TestModule", { level: LogLevel.DEBUG })
+      .withContext({ sessionId: "sess_123" });
+    tracked.info("test", { userId: "user_456" });
+
+    const entry = JSON.parse(logs[0]);
+    assertEquals(entry.context.sessionId, "sess_123");
+    assertEquals(entry.context.userId, "user_456");
+  } finally {
+    console.log = originalLog;
+  }
+});
+
+Deno.test("Logger - withContext() call-site context takes precedence", () => {
+  const logs: string[] = [];
+  const originalLog = console.log;
+  console.log = (msg: string) => logs.push(msg);
+
+  try {
+    const tracked = new Logger("TestModule", { level: LogLevel.DEBUG })
+      .withContext({ sessionId: "default" });
+    tracked.info("test", { sessionId: "override" });
+
+    const entry = JSON.parse(logs[0]);
+    assertEquals(entry.context.sessionId, "override");
+  } finally {
+    console.log = originalLog;
+  }
+});
+
+Deno.test("Logger - withContext() chained calls merge all fields", () => {
+  const logs: string[] = [];
+  const originalLog = console.log;
+  console.log = (msg: string) => logs.push(msg);
+
+  try {
+    const tracked = new Logger("TestModule", { level: LogLevel.DEBUG })
+      .withContext({ a: 1 })
+      .withContext({ b: 2 });
+    tracked.info("test");
+
+    const entry = JSON.parse(logs[0]);
+    assertEquals(entry.context.a, 1);
+    assertEquals(entry.context.b, 2);
+  } finally {
+    console.log = originalLog;
+  }
+});
+
+Deno.test("Logger - child() inherits defaultContext", () => {
+  const logs: string[] = [];
+  const originalLog = console.log;
+  console.log = (msg: string) => logs.push(msg);
+
+  try {
+    const tracked = new Logger("Parent", { level: LogLevel.DEBUG })
+      .withContext({ sessionId: "sess_123" });
+    const child = tracked.child("Sub");
+    child.info("child message");
+
+    const entry = JSON.parse(logs[0]);
+    assertEquals(entry.module, "Parent:Sub");
+    assertEquals(entry.context.sessionId, "sess_123");
+  } finally {
+    console.log = originalLog;
+  }
+});
+
+Deno.test("Logger - withContext() works with message templates", () => {
+  const logs: string[] = [];
+  const originalLog = console.log;
+  console.log = (msg: string) => logs.push(msg);
+
+  try {
+    const tracked = new Logger("TestModule", { level: LogLevel.DEBUG })
+      .withContext({ sessionId: "sess_123" });
+    tracked.info("Session {sessionId} started");
+
+    const entry = JSON.parse(logs[0]);
+    assertEquals(entry.message, "Session sess_123 started");
+    assertEquals(entry.messageTemplate, "Session {sessionId} started");
+  } finally {
+    console.log = originalLog;
+  }
+});
+
+Deno.test("Logger - empty defaultContext does not affect existing behavior", () => {
+  const logs: string[] = [];
+  const originalLog = console.log;
+  console.log = (msg: string) => logs.push(msg);
+
+  try {
+    const base = new Logger("TestModule", { level: LogLevel.DEBUG });
+    base.info("test");
+
+    const entry = JSON.parse(logs[0]);
+    assertEquals(entry.context, undefined);
+  } finally {
+    console.log = originalLog;
+  }
+});

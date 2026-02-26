@@ -192,7 +192,7 @@ export class SessionOrchestrator {
     sessionType: "message" | "channelLurk",
   ): Promise<SessionResponse> {
     const sessionLoggerName = `${event.platform}:${event.channelId}`;
-    const sessionLogger = logger.child(sessionLoggerName);
+    let sessionLogger = logger.child(sessionLoggerName);
 
     sessionLogger.info("Processing message", {
       platform: event.platform,
@@ -250,6 +250,8 @@ export class SessionOrchestrator {
           shellSessionId,
           sessionIdFile,
         });
+
+        sessionLogger = sessionLogger.withContext({ shellSessionId });
       }
 
       // Create audit writer if enabled
@@ -379,6 +381,7 @@ export class SessionOrchestrator {
 
         const sessionId = await connector.createSession(this.getMCPServers());
         sessionLogger.info("Agent session {sessionId} created", { sessionId });
+        sessionLogger = sessionLogger.withContext({ sessionId });
 
         // Set the model for the session
         const routingContext: ModelRoutingContext = {
@@ -662,7 +665,7 @@ export class SessionOrchestrator {
     },
   ): Promise<SessionResponse> {
     const sessionLoggerName = `spontaneous:${platform}:${channelId}`;
-    const sessionLogger = logger.child(sessionLoggerName);
+    let sessionLogger = logger.child(sessionLoggerName);
 
     sessionLogger.info("Processing spontaneous post", {
       platform,
@@ -708,6 +711,8 @@ export class SessionOrchestrator {
         const sessionIdFile = join(workspace.path, "SESSION_ID");
         await Deno.writeTextFile(sessionIdFile, shellSessionId);
         sessionLogger.info("Shell session {shellSessionId} registered", { shellSessionId });
+
+        sessionLogger = sessionLogger.withContext({ shellSessionId });
       }
 
       // Create audit writer
@@ -796,6 +801,7 @@ export class SessionOrchestrator {
         });
 
         const sessionId = await connector.createSession(this.getMCPServers());
+        sessionLogger = sessionLogger.withContext({ sessionId });
         const routingContext: ModelRoutingContext = {
           sessionType: "spontaneous",
           platform,
@@ -931,7 +937,7 @@ export class SessionOrchestrator {
     selfResearchConfig: SelfResearchConfig,
   ): Promise<SessionResponse> {
     const sessionLoggerName = "self-research";
-    const sessionLogger = logger.child(sessionLoggerName);
+    let sessionLogger = logger.child(sessionLoggerName);
 
     sessionLogger.info("Processing self-research session", {
       rssItemCount: rssItems.length,
@@ -981,6 +987,8 @@ export class SessionOrchestrator {
         const sessionIdFile = join(workspace.path, "SESSION_ID");
         await Deno.writeTextFile(sessionIdFile, shellSessionId);
         sessionLogger.info("Shell session {shellSessionId} registered", { shellSessionId });
+
+        sessionLogger = sessionLogger.withContext({ shellSessionId });
       }
 
       // Create audit writer
@@ -1052,6 +1060,7 @@ export class SessionOrchestrator {
         await auditWriter?.write("agent_connect", { agentType: getDefaultAgentType(this.config) });
 
         const sessionId = await connector.createSession(this.getMCPServers());
+        sessionLogger = sessionLogger.withContext({ sessionId });
         // Fallback chain: routing rules → selfResearch.model → agent.model
         const routingContext: ModelRoutingContext = {
           sessionType: "self-research",
@@ -1157,7 +1166,7 @@ export class SessionOrchestrator {
     memoryMaintenanceConfig: MemoryMaintenanceConfig,
   ): Promise<SessionResponse> {
     const sessionLoggerName = `memory-maintenance:${workspaceKey}`;
-    const sessionLogger = logger.child(sessionLoggerName);
+    let sessionLogger = logger.child(sessionLoggerName);
 
     const [platformStr, userId] = workspaceKey.split("/");
     if (!isValidPlatform(platformStr) || !userId) {
@@ -1210,6 +1219,8 @@ export class SessionOrchestrator {
         const sessionIdFile = join(workspace.path, "SESSION_ID");
         await Deno.writeTextFile(sessionIdFile, shellSessionId);
         sessionLogger.info("Shell session {shellSessionId} registered", { shellSessionId });
+
+        sessionLogger = sessionLogger.withContext({ shellSessionId });
       }
 
       // Create audit writer
@@ -1277,6 +1288,7 @@ export class SessionOrchestrator {
         await auditWriter?.write("agent_connect", { agentType: getDefaultAgentType(this.config) });
 
         const sessionId = await connector.createSession(this.getMCPServers());
+        sessionLogger = sessionLogger.withContext({ sessionId });
         // Fallback chain: routing rules → memoryMaintenance.model → agent.model
         const routingContext: ModelRoutingContext = {
           sessionType: "memory-maintenance",
@@ -1378,7 +1390,7 @@ export class SessionOrchestrator {
   ): Promise<SessionResponse> {
     const platform = reminder.platform as Platform;
     const sessionLoggerName = `reminder:${platform}:${reminder.userId}:${reminder.id}`;
-    const sessionLogger = logger.child(sessionLoggerName);
+    let sessionLogger = logger.child(sessionLoggerName);
 
     sessionLogger.info("Processing due reminder {reminderId}", {
       reminderId: reminder.id,
@@ -1451,6 +1463,8 @@ export class SessionOrchestrator {
         const sessionIdFile = join(workspace.path, "SESSION_ID");
         await Deno.writeTextFile(sessionIdFile, shellSessionId);
         sessionLogger.info("Shell session {shellSessionId} registered", { shellSessionId });
+
+        sessionLogger = sessionLogger.withContext({ shellSessionId });
       }
 
       // Create audit writer
@@ -1517,6 +1531,7 @@ export class SessionOrchestrator {
         await auditWriter?.write("agent_connect", { agentType: getDefaultAgentType(this.config) });
 
         const sessionId = await connector.createSession(this.getMCPServers());
+        sessionLogger = sessionLogger.withContext({ sessionId });
         const routingContext: ModelRoutingContext = {
           sessionType: "reminder",
           platform,
