@@ -632,3 +632,121 @@ Deno.test("GitBackupService - initialize pushes to fallback branch on non-fast-f
     await Deno.remove(tempDir, { recursive: true });
   });
 });
+
+Deno.test("GitBackupService - performBackup handles submodule modified content correctly", async () => {
+  await withTempGitEnv(async (dataDir, bareDir) => {
+    const service = new GitBackupService(
+      createConfig({ remoteUrl: bareDir }),
+      dataDir,
+    );
+    await service.initialize();
+
+    // Create a nested git repo (simulating agent-created repo in workspace)
+    const nestedDir = `${dataDir}/workspaces/user1/cloned-repo`;
+    await Deno.mkdir(nestedDir, { recursive: true });
+    await new Deno.Command("git", {
+      args: ["init", nestedDir],
+      stdout: "piped",
+      stderr: "piped",
+    }).output();
+    for (
+      const cmd of [
+        ["git", "-C", nestedDir, "config", "user.name", "Nested"],
+        ["git", "-C", nestedDir, "config", "user.email", "nested@test.com"],
+      ]
+    ) {
+      await new Deno.Command(cmd[0], {
+        args: cmd.slice(1),
+        stdout: "piped",
+        stderr: "piped",
+      }).output();
+    }
+    await Deno.writeTextFile(`${nestedDir}/file.txt`, "nested content");
+    for (
+      const cmd of [
+        ["git", "-C", nestedDir, "add", "-A"],
+        ["git", "-C", nestedDir, "commit", "-m", "nested init"],
+      ]
+    ) {
+      await new Deno.Command(cmd[0], {
+        args: cmd.slice(1),
+        stdout: "piped",
+        stderr: "piped",
+      }).output();
+    }
+
+    // Modify a file in the nested repo (creating "modified content" state)
+    await Deno.writeTextFile(`${nestedDir}/file.txt`, "modified nested content");
+
+    // performBackup should succeed (not fail with "no changes added to commit")
+    const result = await service.performBackup();
+    assertEquals(result, true);
+  });
+});
+
+Deno.test("GitBackupService - ensureGitignore includes **/.git rule", async () => {
+  await withTempGitEnv(async (dataDir, bareDir) => {
+    const service = new GitBackupService(
+      createConfig({ remoteUrl: bareDir }),
+      dataDir,
+    );
+    await service.initialize();
+
+    const gitignore = await Deno.readTextFile(`${dataDir}/.gitignore`);
+    assertEquals(gitignore.includes("**/.git"), true);
+  });
+});
+
+Deno.test("GitBackupService - performBackup skips commit when only submodule changes exist", async () => {
+  await withTempGitEnv(async (dataDir, bareDir) => {
+    const service = new GitBackupService(
+      createConfig({ remoteUrl: bareDir }),
+      dataDir,
+    );
+    await service.initialize();
+
+    // Create a nested git repo
+    const nestedDir = `${dataDir}/workspaces/user1/nested-repo`;
+    await Deno.mkdir(nestedDir, { recursive: true });
+    await new Deno.Command("git", {
+      args: ["init", nestedDir],
+      stdout: "piped",
+      stderr: "piped",
+    }).output();
+    for (
+      const cmd of [
+        ["git", "-C", nestedDir, "config", "user.name", "Nested"],
+        ["git", "-C", nestedDir, "config", "user.email", "nested@test.com"],
+      ]
+    ) {
+      await new Deno.Command(cmd[0], {
+        args: cmd.slice(1),
+        stdout: "piped",
+        stderr: "piped",
+      }).output();
+    }
+    await Deno.writeTextFile(`${nestedDir}/file.txt`, "content");
+    for (
+      const cmd of [
+        ["git", "-C", nestedDir, "add", "-A"],
+        ["git", "-C", nestedDir, "commit", "-m", "init"],
+      ]
+    ) {
+      await new Deno.Command(cmd[0], {
+        args: cmd.slice(1),
+        stdout: "piped",
+        stderr: "piped",
+      }).output();
+    }
+
+    // First backup to commit the nested repo directory structure
+    await service.performBackup();
+
+    // Modify a file inside the nested repo only
+    await Deno.writeTextFile(`${nestedDir}/file.txt`, "modified");
+
+    // Second backup — only submodule has "modified content", no real staged changes
+    const result = await service.performBackup();
+    assertEquals(result, true);
+  });
+});
