@@ -104,6 +104,7 @@ RUN install -d -m 775 -o $UID -g 0 /app && \
     install -d -m 775 -o $UID -g 0 /deno-dir/ && \
     install -d -m 775 -o $UID -g 0 /home/deno/ && \
     install -d -m 775 -o $UID -g 0 /home/deno/.local && \
+    install -d -m 775 -o $UID -g 0 /home/deno/.local/bin && \
     install -d -m 775 -o $UID -g 0 /home/deno/.local/share/opencode && \
     install -d -m 775 -o $UID -g 0 /home/deno/.config/opencode
 
@@ -163,6 +164,8 @@ VOLUME ["/app/prompts"]
 
 # Set HOME environment variable for copilot skills discovery
 ENV HOME=/home/deno
+
+ENV PATH="/home/deno/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 
 # Switch to non-privileged user
 USER $UID
