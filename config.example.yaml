@@ -27,7 +27,7 @@ platforms:
       minIntervalMs: 10800000 # Minimum interval: 3 hours (default)
       maxIntervalMs: 43200000 # Maximum interval: 12 hours (default)
       contextFetchProbability: 0.5 # Probability of including recent messages (0.0-1.0, default: 0.5)
-      allowDm: true                # Allow spontaneous posts to DM (default: true); override with env DISCORD_SPONTANEOUS_ALLOW_DM
+      allowDm: false                # Allow spontaneous posts to DM (default: true); override with env DISCORD_SPONTANEOUS_ALLOW_DM
     # Typing indicator: show "typing..." in Discord while processing
     typingIndicator:
       enabled: false          # Show typing indicator during ACP sessions (default: false, security consideration)
@@ -49,7 +49,7 @@ platforms:
       minIntervalMs: 10800000 # Minimum interval: 3 hours (default)
       maxIntervalMs: 43200000 # Maximum interval: 12 hours (default)
       contextFetchProbability: 0.5 # Probability of including recent messages (0.0-1.0, default: 0.5)
-      allowDm: true                # Allow spontaneous posts to DM (default: true); override with env MISSKEY_SPONTANEOUS_ALLOW_DM
+      allowDm: false                # Allow spontaneous posts to DM (default: true); override with env MISSKEY_SPONTANEOUS_ALLOW_DM
 
 # Agent/LLM configuration
 agent:

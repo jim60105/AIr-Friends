@@ -929,7 +929,7 @@ export class MisskeyAdapter extends PlatformAdapter {
    * When allowDm is false, always posts to timeline:self.
    */
   async determineSpontaneousTarget(config: Config): Promise<SpontaneousTarget | null> {
-    const allowDm = config.platforms?.misskey?.spontaneousPost?.allowDm ?? true;
+    const allowDm = config.platforms?.misskey?.spontaneousPost?.allowDm ?? false;
 
     const targets: SpontaneousTarget[] = [{ channelId: "timeline:self" }];
 

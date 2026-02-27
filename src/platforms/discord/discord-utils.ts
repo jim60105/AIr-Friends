@@ -189,7 +189,7 @@ export function extractDiscordChannelIds(whitelist: string[]): string[] {
  */
 export function selectDiscordSpontaneousEntry(
   whitelist: string[],
-  allowDm: boolean = true,
+  allowDm: boolean = false,
 ): { type: string; id: string } | null {
   let discordEntries = whitelist.filter((entry) => entry.startsWith("discord/"));
 

@@ -622,7 +622,7 @@ platforms:
       minIntervalMs: 10800000 # Minimum interval: 3 hours (default)
       maxIntervalMs: 43200000 # Maximum interval: 12 hours (default)
       contextFetchProbability: 0.5 # Probability of including recent messages (0.0-1.0)
-      allowDm: true                # Allow spontaneous posts via DM (default: true)
+      allowDm: false                # Allow spontaneous posts via DM (default: true)
 ```
 
 **How It Works:**

@@ -567,7 +567,7 @@ Deno.test("selectDiscordSpontaneousEntry - ignores non-discord entries", () => {
 });
 
 Deno.test("selectDiscordSpontaneousEntry - parses account entries", () => {
-  const entry = selectDiscordSpontaneousEntry(["discord/account/456"]);
+  const entry = selectDiscordSpontaneousEntry(["discord/account/456"], true);
   assertEquals(entry?.type, "account");
   assertEquals(entry?.id, "456");
 });
@@ -603,10 +603,10 @@ Deno.test("selectDiscordSpontaneousEntry - allowDm=false with only account entri
   assertEquals(entry, null);
 });
 
-Deno.test("selectDiscordSpontaneousEntry - allowDm defaults to true when not specified", () => {
+Deno.test("selectDiscordSpontaneousEntry - allowDm defaults to false when not specified", () => {
   const whitelist = ["discord/account/123"];
   const entry = selectDiscordSpontaneousEntry(whitelist);
-  assertEquals(entry?.type, "account");
+  assertEquals(entry, null);
 });
 
 // ============ DiscordAdapter.determineSpontaneousTarget tests ============
@@ -711,7 +711,7 @@ Deno.test({
   fn: async () => {
     const adapter = createMockDiscordAdapter();
     (adapter as any).getDmChannelId = () => Promise.resolve("dm-ch-123");
-    const config = createTestConfig(["discord/account/999"]);
+    const config = createTestConfigWithAllowDm(["discord/account/999"], true);
     const target = await adapter.determineSpontaneousTarget(config);
     assertEquals(target?.channelId, "dm-ch-123");
   },

@@ -26,7 +26,7 @@ export interface MisskeyAdapterConfig {
 export const DEFAULT_MISSKEY_CONFIG: Partial<MisskeyAdapterConfig> = {
   secure: true,
   respondToMention: true,
-  allowDm: true,
+  allowDm: false,
 };
 
 /**
