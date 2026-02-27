@@ -427,6 +427,9 @@ export class GitBackupService {
     const content = `# Temporary session files
 SESSION_ID
 
+# Scheduler state (runtime-only, frequently updated)
+scheduler-state.json
+
 # Ignore nested git repositories (agent-created repos in workspaces)
 **/.git
 
@@ -436,6 +439,19 @@ Thumbs.db
 `;
     try {
       await Deno.writeTextFile(gitignorePath, content);
+
+      // Remove scheduler-state.json from index if previously tracked
+      const rmResult = await this.runGit([
+        "rm",
+        "--cached",
+        "--ignore-unmatch",
+        "scheduler-state.json",
+      ]);
+      if (!rmResult.success) {
+        logger.warn("Failed to remove scheduler-state.json from Git index", {
+          error: rmResult.output,
+        });
+      }
     } catch (error) {
       logger.error("Failed to write .gitignore", {
         error: error instanceof Error ? error.message : String(error),
