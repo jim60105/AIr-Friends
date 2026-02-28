@@ -566,8 +566,8 @@ workspace:
 | `MISSKEY_TOKEN`      | Misskey access token                             |
 | `AGENT_MODEL`        | LLM model identifier (e.g., "gpt-5-mini")        |
 | `AGENT_DEFAULT_TYPE` | Default ACP agent type (copilot/gemini/opencode) |
-| `REPLY_TO`           | Reply policy mode (`all`/`public`/`whitelist`)    |
-| `WHITELIST`          | Whitelist entries (comma-separated, replaces config) |
+| `REPLY_POLICY`        | Reply policy mode (`all`/`public`/`channels`) (REPLY_TO accepted as alias) |
+| `CHANNELS`           | Channel entries (JSON array, replaces config) |
 | `LOG_LEVEL`          | Logging level (DEBUG/INFO/WARN/ERROR)            |
 | `DENO_ENV`           | Environment name (dev/prod)                      |
 | `GITHUB_TOKEN`       | GitHub token for Copilot                         |

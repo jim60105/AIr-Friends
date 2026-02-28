@@ -79,17 +79,17 @@ env:
   # OpenRouter API Key (optional - for OpenRouter provider)
   OPENROUTER_API_KEY: 'your-openrouter-api-key'
 
-  # Access Control & Reply Policy (all|public|whitelist)
-  REPLY_TO: 'whitelist'
-  # Comma-separated list of user/channel IDs allowed to interact with the bot when REPLY_TO is set to 'whitelist'.
-  WHITELIST: '' 
+  # Reply Policy & Channel Settings (all|public|channels)
+  REPLY_POLICY: 'channels'
+  # JSON string of channel configurations. Example:
+  # [{"id":"discord/account/123","spontaneousPost":true},{"id":"discord/channel/456","channelLurk":true}]
+  CHANNELS: ''
 
   # Spontaneous post settings - Discord
   DISCORD_SPONTANEOUS_ENABLED: 'false'
   DISCORD_SPONTANEOUS_MIN_INTERVAL_MS: '10800000'
   DISCORD_SPONTANEOUS_MAX_INTERVAL_MS: '43200000 '
   DISCORD_SPONTANEOUS_CONTEXT_FETCH_PROBABILITY: '0.5'
-  DISCORD_SPONTANEOUS_ALLOW_DM: 'false'
 
   # Discord typing indicator
   DISCORD_TYPING_INDICATOR_ENABLED: 'false'
@@ -103,7 +103,6 @@ env:
   MISSKEY_SPONTANEOUS_MIN_INTERVAL_MS: '10800000'
   MISSKEY_SPONTANEOUS_MAX_INTERVAL_MS: '43200000'
   MISSKEY_SPONTANEOUS_CONTEXT_FETCH_PROBABILITY: '0.5'
-  MISSKEY_SPONTANEOUS_ALLOW_DM: 'false'
 
   # GELF Logging configuration
   GELF_ENABLED: 'false'
@@ -197,16 +196,34 @@ modelRouting:
   rules: []
   # Example rules:
   #   - match:
-  #       whitelist: "discord/account/12345678901234567"
+  #       channel: "discord/account/12345678901234567"
   #       contentKeywords: ["研究", "research"]
   #     model: "openrouter/google/gemini-2.5-pro"
   #   - match:
   #       contentKeywords: ["研究", "research", "論文", "paper"]
   #     model: "openrouter/google/gemini-2.5-pro"
-  #   - match: { whitelist: "discord/account/12345678901234567" }
+  #   - match: { channel: "discord/account/12345678901234567" }
   #     model: "openrouter/deepseek/deepseek-v3.2"
   #   - match: { sessionType: "spontaneous" }
   #     model: "openrouter/deepseek/deepseek-v3.2"
+
+# -- Reply policy (native YAML).
+replyPolicy: "channels"
+
+# -- Channel configurations (native YAML, easier than JSON env var).
+# When channels is non-empty, it takes precedence over CHANNELS env var.
+channels: []
+  # Example:
+  # - id: "discord/account/123456789012345678"
+  #   enabled: true
+  #   spontaneousPost: false
+  #   rateLimitBypass: true
+  # - id: "discord/channel/987654321098765432"
+  #   enabled: true
+  #   spontaneousPost: true
+  #   channelLurk: true
+  # - id: "misskey/timeline/self"
+  #   spontaneousPost: true
 
 # ServiceMonitor for Prometheus Operator (optional)
 serviceMonitor:

@@ -8,6 +8,7 @@ import { applyEnvOverrides, getEnvironment } from "@utils/env.ts";
 import { createTemplateEngine, renderTemplate } from "./template-renderer.ts";
 import type { TemplateVariables } from "../types/template.ts";
 import type {
+  ChannelConfig,
   Config,
   DryRunConfig,
   GitBackupConfig,
@@ -26,8 +27,52 @@ import { MISSKEY_WHITELIST_PATTERN } from "../platforms/misskey/misskey-config.t
 
 const logger = createLogger("ConfigLoader");
 
-function isValidWhitelistEntry(entry: string): boolean {
-  return DISCORD_WHITELIST_PATTERN.test(entry) || MISSKEY_WHITELIST_PATTERN.test(entry);
+/** Validate channel ID format */
+const MISSKEY_TIMELINE_PATTERN = /^misskey\/timeline\/self$/;
+
+function isValidChannelId(id: string): boolean {
+  return (
+    DISCORD_WHITELIST_PATTERN.test(id) ||
+    MISSKEY_WHITELIST_PATTERN.test(id) ||
+    MISSKEY_TIMELINE_PATTERN.test(id)
+  );
+}
+
+/** Load and normalize channel configs from raw input */
+function loadChannels(rawChannels: unknown[]): ChannelConfig[] {
+  const channels: ChannelConfig[] = [];
+
+  for (const raw of rawChannels) {
+    if (typeof raw === "string") {
+      if (isValidChannelId(raw)) {
+        channels.push({
+          id: raw,
+          enabled: true,
+          spontaneousPost: false,
+          channelLurk: false,
+          rateLimitBypass: false,
+        });
+      } else {
+        logger.warn("Invalid channel ID format, ignoring", { id: raw });
+      }
+    } else if (typeof raw === "object" && raw !== null) {
+      const obj = raw as Record<string, unknown>;
+      const id = String(obj.id ?? "");
+      if (!isValidChannelId(id)) {
+        logger.warn("Invalid channel ID format, ignoring", { id });
+        continue;
+      }
+      channels.push({
+        id,
+        enabled: obj.enabled !== false,
+        spontaneousPost: obj.spontaneousPost === true,
+        channelLurk: obj.channelLurk === true,
+        rateLimitBypass: obj.rateLimitBypass === true,
+      });
+    }
+  }
+
+  return channels;
 }
 
 /**
@@ -56,10 +101,8 @@ const DEFAULT_CONFIG: Partial<Config> = {
     host: "127.0.0.1",
     sessionTimeoutMs: 1800000, // 30 minutes
   },
-  accessControl: {
-    replyTo: "whitelist",
-    whitelist: [],
-  },
+  replyPolicy: "channels" as const,
+  channels: [],
 };
 
 /**
@@ -70,7 +113,6 @@ const DEFAULT_SPONTANEOUS_POST = {
   minIntervalMs: 10800000, // 3 hours
   maxIntervalMs: 43200000, // 12 hours
   contextFetchProbability: 0.5,
-  allowDm: false,
 };
 
 /**
@@ -226,40 +268,25 @@ function validateConfig(config: Record<string, unknown>): void {
     );
   }
 
-  // Validate accessControl.replyTo value
-  const accessControl = config.accessControl as
-    | { replyTo?: unknown; whitelist?: unknown[] }
-    | undefined;
-  if (accessControl?.replyTo !== undefined) {
-    const validReplyPolicies = ["all", "public", "whitelist"];
-    if (!validReplyPolicies.includes(String(accessControl.replyTo))) {
+  // Validate replyPolicy value
+  if (config.replyPolicy !== undefined) {
+    const validReplyPolicies = ["all", "public", "channels"];
+    if (!validReplyPolicies.includes(String(config.replyPolicy))) {
       throw new ConfigError(
         ErrorCode.CONFIG_INVALID,
-        `Invalid accessControl.replyTo value: "${accessControl.replyTo}". Must be one of: ${
+        `Invalid replyPolicy value: "${config.replyPolicy}". Must be one of: ${
           validReplyPolicies.join(", ")
         }`,
-        { replyTo: accessControl.replyTo, validValues: validReplyPolicies },
+        { replyPolicy: config.replyPolicy, validValues: validReplyPolicies },
       );
     }
   }
 
-  // Validate accessControl.whitelist entries format
-  // Discord IDs are Snowflake format: 17-20 digit integers
-  // Misskey IDs vary by instance (aid, aidx, meid, ulid, etc.), keep generic pattern
-  if (accessControl?.whitelist && Array.isArray(accessControl.whitelist)) {
-    const validEntries: string[] = [];
-    for (const entry of accessControl.whitelist) {
-      if (typeof entry === "string" && isValidWhitelistEntry(entry)) {
-        validEntries.push(entry);
-      } else {
-        logger.warn("Invalid whitelist entry format, ignoring", {
-          entry,
-          expectedFormat: "{platform}/account/{id} or {platform}/channel/{id}",
-        });
-      }
-    }
-    // Replace whitelist with only valid entries
-    accessControl.whitelist = validEntries;
+  // Validate and normalize channels configuration
+  if (config.channels && Array.isArray(config.channels)) {
+    config.channels = loadChannels(config.channels as unknown[]);
+  } else {
+    config.channels = [];
   }
 
   // Validate spontaneous post config for each platform
@@ -491,11 +518,11 @@ function validateConfig(config: Record<string, unknown>): void {
           continue;
         }
 
-        // Validate whitelist format
-        if (match.whitelist !== undefined) {
-          if (typeof match.whitelist !== "string" || !isValidWhitelistEntry(match.whitelist)) {
-            logger.warn("Invalid whitelist format in model routing rule, skipping", {
-              whitelist: match.whitelist,
+        // Validate channel format
+        if (match.channel !== undefined) {
+          if (typeof match.channel !== "string" || !isValidChannelId(match.channel)) {
+            logger.warn("Invalid channel format in model routing rule, skipping", {
+              channel: match.channel,
             });
             continue;
           }

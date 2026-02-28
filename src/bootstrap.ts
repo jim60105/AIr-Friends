@@ -5,7 +5,7 @@ import type { Config } from "./types/config.ts";
 import { AgentCore } from "@core/agent-core.ts";
 import { SpontaneousScheduler } from "@core/spontaneous-scheduler.ts";
 import { ChannelLurkScheduler } from "@core/channel-lurk-scheduler.ts";
-import { extractDiscordChannelIds } from "@platforms/discord/index.ts";
+import { extractChannelLurkIds } from "@platforms/discord/index.ts";
 import { SelfResearchScheduler } from "@core/self-research-scheduler.ts";
 import { MemoryMaintenanceScheduler } from "@core/memory-maintenance-scheduler.ts";
 import { ReminderScheduler } from "@core/reminder-scheduler.ts";
@@ -211,7 +211,7 @@ export async function bootstrap(
   let channelLurkScheduler: ChannelLurkScheduler | null = null;
   if (config.platforms.discord?.enabled && config.platforms.discord.channelLurk?.enabled) {
     const discordAdapter = platformRegistry.getAdapter("discord");
-    const channelIds = extractDiscordChannelIds(config.accessControl.whitelist);
+    const channelIds = extractChannelLurkIds(config.channels);
 
     if (discordAdapter && channelIds.length > 0) {
       channelLurkScheduler = new ChannelLurkScheduler(
@@ -250,7 +250,7 @@ export async function bootstrap(
       );
       logger.info("Channel lurk scheduler initialized", { channelCount: channelIds.length });
     } else if (channelIds.length === 0) {
-      logger.info("Channel lurk enabled but no Discord channels in whitelist");
+      logger.info("Channel lurk enabled but no Discord channels configured for lurk");
     }
   }
 

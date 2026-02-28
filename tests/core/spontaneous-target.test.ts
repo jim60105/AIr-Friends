@@ -3,7 +3,8 @@
 import { assertEquals } from "@std/assert";
 import type { Config } from "../../src/types/config.ts";
 import { MockPlatformAdapter } from "../mocks/mock-platform-adapter.ts";
-import { extractDiscordChannelIds } from "@platforms/discord/index.ts";
+import { extractChannelLurkIds } from "@platforms/discord/index.ts";
+import type { ChannelConfig } from "../../src/types/config.ts";
 
 function createConfig(whitelist: string[]): Config {
   return {
@@ -19,7 +20,8 @@ function createConfig(whitelist: string[]): Config {
     memory: { searchLimit: 10, maxChars: 2000, recentMessageLimit: 20 },
     workspace: { repoPath: "./data", workspacesDir: "workspaces" },
     logging: { level: "INFO" },
-    accessControl: { replyTo: "whitelist", whitelist },
+    replyPolicy: "channels",
+    channels: whitelist.map((id) => ({ id, enabled: true } as ChannelConfig)),
   };
 }
 
@@ -43,14 +45,18 @@ Deno.test("extractDiscordChannelIds - filters discord channel entries", () => {
     "misskey/channel/333",
     "discord/channel/44400000000000000",
   ];
-  const result = extractDiscordChannelIds(whitelist);
+  const channels: ChannelConfig[] = whitelist.map((
+    id,
+  ) => ({ id, channelLurk: true } as ChannelConfig));
+  const result = extractChannelLurkIds(channels);
   assertEquals(result, ["11100000000000000", "44400000000000000"]);
 });
 
 Deno.test("extractDiscordChannelIds - returns empty for no matches", () => {
-  const result = extractDiscordChannelIds([
-    "discord/account/12345678901234567",
-    "misskey/account/456",
-  ]);
+  const channels: ChannelConfig[] = [
+    { id: "discord/account/12345678901234567" },
+    { id: "misskey/account/456" },
+  ];
+  const result = extractChannelLurkIds(channels);
   assertEquals(result, []);
 });

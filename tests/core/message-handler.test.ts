@@ -15,10 +15,7 @@ const DEFAULT_RATE_LIMIT: RateLimitConfig = {
   cooldownMs: 600000,
 };
 
-const DEFAULT_REPLY_POLICY = new ReplyPolicyEvaluator({
-  replyTo: "all",
-  whitelist: [],
-});
+const DEFAULT_REPLY_POLICY = new ReplyPolicyEvaluator("all", []);
 
 // Mock SessionOrchestrator that implements the interface
 class MockSessionOrchestrator {
@@ -250,10 +247,12 @@ Deno.test("MessageHandler - whitelisted account bypasses rate limit", async () =
     windowMs: 600000,
     cooldownMs: 600000,
   };
-  const replyPolicy = new ReplyPolicyEvaluator({
-    replyTo: "whitelist",
-    whitelist: ["discord/account/11122233344455566"],
-  });
+  const channels = [{
+    id: "discord/account/11122233344455566",
+    enabled: true,
+    rateLimitBypass: true,
+  }];
+  const replyPolicy = new ReplyPolicyEvaluator("channels", channels);
   const handler = new MessageHandler(orchestrator, rateLimitConfig, replyPolicy);
 
   // Send more than maxRequestsPerWindow messages — all should succeed
@@ -276,10 +275,8 @@ Deno.test("MessageHandler - whitelisted channel user still rate limited", async 
     windowMs: 600000,
     cooldownMs: 600000,
   };
-  const replyPolicy = new ReplyPolicyEvaluator({
-    replyTo: "whitelist",
-    whitelist: ["discord/channel/99988877766655544"],
-  });
+  const channels = [{ id: "discord/channel/99988877766655544", enabled: true }];
+  const replyPolicy = new ReplyPolicyEvaluator("channels", channels);
   const handler = new MessageHandler(orchestrator, rateLimitConfig, replyPolicy);
 
   const r1 = await handler.handleEvent(createTestEvent("msg_ch_1"), mockPlatformAdapter);
@@ -300,10 +297,8 @@ Deno.test("MessageHandler - non-whitelisted account rate limited normally", asyn
     windowMs: 600000,
     cooldownMs: 600000,
   };
-  const replyPolicy = new ReplyPolicyEvaluator({
-    replyTo: "whitelist",
-    whitelist: ["discord/account/99900000000000002"],
-  });
+  const channels = [{ id: "discord/account/99900000000000002", enabled: true }];
+  const replyPolicy = new ReplyPolicyEvaluator("channels", channels);
   const handler = new MessageHandler(orchestrator, rateLimitConfig, replyPolicy);
 
   const r1 = await handler.handleEvent(createTestEvent("msg_nwl_1"), mockPlatformAdapter);

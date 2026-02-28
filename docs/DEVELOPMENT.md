@@ -148,8 +148,8 @@ Configuration is loaded from `config.yaml` (YAML format). See [config.example.ya
 | `MISSKEY_TOKEN`      | Misskey access token                                 |
 | `AGENT_MODEL`        | LLM model identifier (e.g., "gpt-5-mini")            |
 | `AGENT_DEFAULT_TYPE` | Default ACP agent type (copilot/gemini/opencode)     |
-| `REPLY_TO`           | Reply policy mode (`all`/`public`/`whitelist`)       |
-| `WHITELIST`          | Whitelist entries (comma-separated, replaces config) |
+| `REPLY_POLICY`        | Reply policy mode (`all`/`public`/`channels`) (REPLY_TO accepted as alias) |
+| `CHANNELS`           | Channels entries (JSON array, replaces config) |
 | `LOG_LEVEL`          | Logging level (DEBUG/INFO/WARN/ERROR)                |
 | `DENO_ENV`           | Environment name (dev/prod)                          |
 | `GITHUB_TOKEN`       | GitHub token for Copilot                             |
@@ -178,15 +178,15 @@ Configuration is loaded from `config.yaml` (YAML format). See [config.example.ya
 | `REMINDERS_CHECK_INTERVAL_MS` | How often to check for due reminders in ms (default: 30000) |
 | `AGENT_EXTERNAL_SKILLS` | External skills to install at startup (JSON string, e.g. `[{"repo":"owner/repo","skill":"name"}]`) |
 
-### Access Control & Reply Policy
+### Reply Policy
 
-AIr-Friends can centrally control whether an incoming event is processed by `AgentCore` using `accessControl`:
+AIr-Friends can centrally control whether an incoming event is processed by `AgentCore` using a top-level `replyPolicy` and a `channels` list:
 
 - `all`: reply to all events in public channels and DMs.
-- `public`: always reply in public channels; for DMs, reply only if account/channel is whitelisted.
-- `whitelist`: reply only when account/channel is whitelisted (default).
+- `public`: always reply in public channels; for DMs, reply only if account/channel is configured with `rateLimitBypass`.
+- `channels`: reply only when account/channel is listed in the `channels` config (default).
 
-Whitelist entry format:
+Channel config entry format:
 
 ```text
 {platform}/account/{account_ID}
@@ -196,19 +196,30 @@ Whitelist entry format:
 Example configuration:
 
 ```yaml
-accessControl:
-  replyTo: "whitelist"
-  whitelist:
-    - "discord/account/123456789012345678"
-    - "discord/channel/987654321098765432"
-    - "misskey/account/abcdef1234567890"
+replyPolicy: "channels"
+channels:
+  - id: "discord/account/123456789012345678"
+    enabled: true
+    spontaneousPost: false
+    channelLurk: false
+    rateLimitBypass: false
+  - id: "discord/channel/987654321098765432"
+    enabled: true
+    spontaneousPost: true
+    channelLurk: true
+    rateLimitBypass: false
+  - id: "misskey/account/abcdef1234567890"
+    enabled: true
+    spontaneousPost: false
+    channelLurk: false
+    rateLimitBypass: true
 ```
 
 Environment variable overrides:
 
 ```bash
-REPLY_TO=public
-WHITELIST=discord/account/12345678901234567,discord/channel/98765432109876543,misskey/account/abcdef123
+REPLY_POLICY=public  # (REPLY_TO is still accepted as an alias)
+CHANNELS='[{"id":"discord/account/12345678901234567","enabled":true}]'  # JSON array replaces config
 ```
 
 ### Model Routing
@@ -234,7 +245,7 @@ agent:
     rules:
       # Specific account + research keywords → research model
       - match:
-          whitelist: "discord/account/12345678901234567"
+          channels: [{ id: "discord/account/12345678901234567" }]
           contentKeywords: ["研究", "research"]
         model: "openrouter/google/gemini-2.5-pro"
       # Any message with research keywords → research model
@@ -242,7 +253,7 @@ agent:
           contentKeywords: ["研究", "research", "論文", "paper"]
         model: "openrouter/google/gemini-2.5-pro"
       # Premium model for a specific user (any content)
-      - match: { whitelist: "discord/account/12345678901234567" }
+      - match: { channel: "discord/account/12345678901234567" }
         model: "openrouter/deepseek/deepseek-v3.2"
       # Cheaper model for spontaneous posts
       - match: { sessionType: "spontaneous" }
@@ -256,7 +267,7 @@ Via environment variables:
 
 ```bash
 MODEL_ROUTING_ENABLED=true
-MODEL_ROUTING_RULES='[{"match":{"whitelist":"discord/account/12345678901234567","contentKeywords":["研究","research"]},"model":"openrouter/google/gemini-2.5-pro"},{"match":{"sessionType":"spontaneous"},"model":"openrouter/deepseek/deepseek-v3.2"}]'
+MODEL_ROUTING_RULES='[{"match":{"channel":"discord/account/12345678901234567","contentKeywords":["研究","research"]},"model":"openrouter/google/gemini-2.5-pro"},{"match":{"sessionType":"spontaneous"},"model":"openrouter/deepseek/deepseek-v3.2"}]'
 ```
 
 #### Match Conditions
@@ -265,7 +276,7 @@ Each rule's `match` object supports multiple conditions combined with AND logic.
 
 | Field | Example | Description |
 |-------|---------|-------------|
-| `whitelist` | `"discord/account/12345678901234567"` | Match a specific whitelist entry |
+| `channel` | `"discord/account/12345678901234567"` | Match a specific channel entry |
 | `sessionType` | `"message"` | Match a session type |
 | `contentKeywords` | `["研究", "research"]` | Match message content containing any keyword (OR within array, case-insensitive). Only effective for `sessionType: "message"` |
 

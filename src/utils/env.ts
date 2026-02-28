@@ -17,8 +17,9 @@ export const ENV_MAPPINGS = {
   AGENT_SKILLS_DIR: "agent.skillsDir",
   LOG_LEVEL: "logging.level",
   HEALTH_PORT: "health.port",
-  REPLY_TO: "accessControl.replyTo",
-  WHITELIST: "accessControl.whitelist",
+  REPLY_POLICY: "replyPolicy",
+  REPLY_TO: "replyPolicy",
+  CHANNELS: "channels",
 
   // Spontaneous post settings - Discord
   DISCORD_SPONTANEOUS_ENABLED: "platforms.discord.spontaneousPost.enabled",
@@ -26,7 +27,6 @@ export const ENV_MAPPINGS = {
   DISCORD_SPONTANEOUS_MAX_INTERVAL_MS: "platforms.discord.spontaneousPost.maxIntervalMs",
   DISCORD_SPONTANEOUS_CONTEXT_FETCH_PROBABILITY:
     "platforms.discord.spontaneousPost.contextFetchProbability",
-  DISCORD_SPONTANEOUS_ALLOW_DM: "platforms.discord.spontaneousPost.allowDm",
 
   // Typing indicator settings - Discord
   DISCORD_TYPING_INDICATOR_ENABLED: "platforms.discord.typingIndicator.enabled",
@@ -41,7 +41,6 @@ export const ENV_MAPPINGS = {
   MISSKEY_SPONTANEOUS_MAX_INTERVAL_MS: "platforms.misskey.spontaneousPost.maxIntervalMs",
   MISSKEY_SPONTANEOUS_CONTEXT_FETCH_PROBABILITY:
     "platforms.misskey.spontaneousPost.contextFetchProbability",
-  MISSKEY_SPONTANEOUS_ALLOW_DM: "platforms.misskey.spontaneousPost.allowDm",
 
   // GELF log output settings
   GELF_ENABLED: "logging.gelf.enabled",
@@ -184,10 +183,23 @@ export function applyEnvOverrides(config: Record<string, unknown>): void {
       else if (/^\d+\.\d+$/.test(value)) parsedValue = parseFloat(value);
       // Handle comma-separated arrays
       else if (
-        envName === "WHITELIST" || envName === "SKILL_SEND_FILE_ALLOWED_EXTENSIONS" ||
+        envName === "SKILL_SEND_FILE_ALLOWED_EXTENSIONS" ||
         envName === "AGENT_SANDBOX_ALLOWED_ENV_VARS" || envName === "AUDIT_INCLUDED_PHASES"
       ) {
         parsedValue = value.split(",").map((s) => s.trim()).filter((s) => s !== "");
+      } // Handle REPLY_POLICY / REPLY_TO: map "whitelist" → "channels" for backward compat
+      else if (envName === "REPLY_POLICY" || envName === "REPLY_TO") {
+        parsedValue = value === "whitelist" ? "channels" : value;
+      } // Handle JSON string for CHANNELS
+      else if (envName === "CHANNELS") {
+        try {
+          parsedValue = JSON.parse(value);
+          if (!Array.isArray(parsedValue)) {
+            continue;
+          }
+        } catch {
+          continue;
+        }
       } // Handle JSON string for MODEL_ROUTING_RULES
       else if (envName === "MODEL_ROUTING_RULES") {
         try {

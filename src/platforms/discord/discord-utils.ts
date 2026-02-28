@@ -172,34 +172,39 @@ export function shouldRespondToMessage(
   return false;
 }
 
+import type { ChannelConfig } from "../../types/config.ts";
+import { parseChannelId } from "../../types/config.ts";
+
 /**
- * Extract Discord channel IDs from whitelist entries.
- * Filters entries matching "discord/channel/{id}" pattern and extracts the ID.
+ * Extract Discord channel IDs that have channelLurk enabled.
+ * Only discord/channel/* type entries are valid for channel lurk.
  */
-export function extractDiscordChannelIds(whitelist: string[]): string[] {
-  return whitelist
-    .filter((entry) => entry.startsWith("discord/channel/"))
-    .map((entry) => entry.replace("discord/channel/", ""));
+export function extractChannelLurkIds(channels: ChannelConfig[]): string[] {
+  return channels
+    .filter((ch) => {
+      if (ch.enabled === false || !ch.channelLurk) return false;
+      const parsed = parseChannelId(ch.id);
+      return parsed?.platform === "discord" && parsed.type === "channel";
+    })
+    .map((ch) => parseChannelId(ch.id)!.value);
 }
 
 /**
- * Select a random Discord whitelist entry and parse its type and ID.
- * When allowDm is false, account entries (which result in DMs) are excluded.
- * Returns null if no eligible entries exist.
+ * Select a random Discord channel configured for spontaneous posting.
+ * Returns the channel type and ID, or null if no valid targets exist.
  */
-export function selectDiscordSpontaneousEntry(
-  whitelist: string[],
-  allowDm: boolean = false,
+export function selectDiscordSpontaneousTarget(
+  channels: ChannelConfig[],
 ): { type: string; id: string } | null {
-  let discordEntries = whitelist.filter((entry) => entry.startsWith("discord/"));
+  const targets = channels.filter((ch) => {
+    if (ch.enabled === false || !ch.spontaneousPost) return false;
+    const parsed = parseChannelId(ch.id);
+    return parsed?.platform === "discord";
+  });
 
-  if (!allowDm) {
-    discordEntries = discordEntries.filter((entry) => !entry.startsWith("discord/account/"));
-  }
+  if (targets.length === 0) return null;
 
-  if (discordEntries.length === 0) return null;
-
-  const selectedEntry = discordEntries[Math.floor(Math.random() * discordEntries.length)];
-  const parts = selectedEntry.split("/");
-  return { type: parts[1], id: parts[2] };
+  const selected = targets[Math.floor(Math.random() * targets.length)];
+  const parsed = parseChannelId(selected.id)!;
+  return { type: parsed.type, id: parsed.value };
 }

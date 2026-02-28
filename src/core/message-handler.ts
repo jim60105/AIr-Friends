@@ -72,12 +72,13 @@ export class MessageHandler {
       // Rate limit check (after duplicate check, before any resource allocation)
       // Whitelisted accounts bypass rate limiting
       const userKey = `${event.platform}:${event.userId}`;
-      const isWhitelistedAccount = this.replyPolicy.isWhitelistedAccount(
+      const isRateLimitBypassed = this.replyPolicy.isRateLimitBypassed(
         event.platform,
         event.userId,
+        event.channelId,
       );
 
-      if (!isWhitelistedAccount && !this.rateLimiter.isAllowed(userKey)) {
+      if (!isRateLimitBypassed && !this.rateLimiter.isAllowed(userKey)) {
         logger.info("Rate limited user {userId} on {platform}", {
           platform: event.platform,
           userId: event.userId,

@@ -1594,50 +1594,31 @@ Deno.test("MisskeyAdapter.hasBotMention - returns false on API error", async () 
 
 Deno.test("MisskeyAdapter.determineSpontaneousTarget - returns timeline:self", async () => {
   const adapter = createMockMisskeyAdapter();
-  // deno-lint-ignore no-explicit-any
-  const config = {} as any;
+  const config = {
+    channels: [{ id: "misskey/timeline/self", spontaneousPost: true }],
+    // deno-lint-ignore no-explicit-any
+  } as any;
   const target = await adapter.determineSpontaneousTarget(config);
   assertEquals(target?.channelId, "timeline:self");
 });
 
-Deno.test("MisskeyAdapter.determineSpontaneousTarget - allowDm=false only returns timeline:self", async () => {
+Deno.test("MisskeyAdapter.determineSpontaneousTarget - no spontaneousPost channels returns null", async () => {
   const adapter = createMockMisskeyAdapter();
   const config = {
-    platforms: {
-      misskey: {
-        spontaneousPost: {
-          allowDm: false,
-          enabled: true,
-          minIntervalMs: 10800000,
-          maxIntervalMs: 43200000,
-          contextFetchProbability: 0.5,
-        },
-      },
-    },
-    accessControl: { whitelist: ["misskey/account/user123"] },
+    channels: [{ id: "misskey/account/user123" }],
     // deno-lint-ignore no-explicit-any
   } as any;
-  for (let i = 0; i < 20; i++) {
-    const target = await adapter.determineSpontaneousTarget(config);
-    assertEquals(target?.channelId, "timeline:self");
-  }
+  const target = await adapter.determineSpontaneousTarget(config);
+  assertEquals(target, null);
 });
 
-Deno.test("MisskeyAdapter.determineSpontaneousTarget - allowDm=true includes DM targets", async () => {
+Deno.test("MisskeyAdapter.determineSpontaneousTarget - includes DM targets with spontaneousPost", async () => {
   const adapter = createMockMisskeyAdapter();
   const config = {
-    platforms: {
-      misskey: {
-        spontaneousPost: {
-          allowDm: true,
-          enabled: true,
-          minIntervalMs: 10800000,
-          maxIntervalMs: 43200000,
-          contextFetchProbability: 0.5,
-        },
-      },
-    },
-    accessControl: { whitelist: ["misskey/account/user123"] },
+    channels: [
+      { id: "misskey/timeline/self", spontaneousPost: true },
+      { id: "misskey/account/user123", spontaneousPost: true },
+    ],
     // deno-lint-ignore no-explicit-any
   } as any;
   const results = new Set<string>();
@@ -1649,25 +1630,14 @@ Deno.test("MisskeyAdapter.determineSpontaneousTarget - allowDm=true includes DM 
   assertEquals(results.has("chat:user123"), true);
 });
 
-Deno.test("MisskeyAdapter.determineSpontaneousTarget - no account entries always returns timeline:self", async () => {
+Deno.test("MisskeyAdapter.determineSpontaneousTarget - only non-misskey entries returns null", async () => {
   const adapter = createMockMisskeyAdapter();
   const config = {
-    platforms: {
-      misskey: {
-        spontaneousPost: {
-          allowDm: true,
-          enabled: true,
-          minIntervalMs: 10800000,
-          maxIntervalMs: 43200000,
-          contextFetchProbability: 0.5,
-        },
-      },
-    },
-    accessControl: { whitelist: ["discord/account/123"] },
+    channels: [{ id: "discord/account/123", spontaneousPost: true }],
     // deno-lint-ignore no-explicit-any
   } as any;
   const target = await adapter.determineSpontaneousTarget(config);
-  assertEquals(target?.channelId, "timeline:self");
+  assertEquals(target, null);
 });
 
 // ==================== MisskeyAdapter heartbeat & reconnect cleanup Tests ====================

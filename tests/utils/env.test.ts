@@ -86,82 +86,64 @@ Deno.test("applyEnvOverrides - REPLY_TO sets accessControl.replyTo", () => {
   Deno.env.set("REPLY_TO", "public");
   try {
     const config: Record<string, unknown> = {
-      accessControl: { replyTo: "whitelist", whitelist: [] },
+      replyPolicy: "channels",
+      channels: [],
     };
     applyEnvOverrides(config);
-    const accessControl = config.accessControl as { replyTo: string };
-    assertEquals(accessControl.replyTo, "public");
+    const replyPolicy = config.replyPolicy as string;
+    assertEquals(replyPolicy, "public");
   } finally {
     Deno.env.delete("REPLY_TO");
   }
 });
 
-Deno.test("applyEnvOverrides - WHITELIST parses comma-separated entries", () => {
+Deno.test("applyEnvOverrides - CHANNELS parses JSON entries", () => {
   Deno.env.set(
-    "WHITELIST",
-    "discord/account/12345678901234567,discord/channel/45678901234567890,misskey/account/abc",
+    "CHANNELS",
+    '[{"id":"discord/account/12345678901234567"},{"id":"discord/channel/45678901234567890"},{"id":"misskey/account/abc"}]',
   );
   try {
     const config: Record<string, unknown> = {
-      accessControl: { replyTo: "whitelist", whitelist: [] },
+      replyPolicy: "channels",
+      channels: [],
     };
     applyEnvOverrides(config);
-    const accessControl = config.accessControl as { whitelist: string[] };
-    assertEquals(accessControl.whitelist, [
+    const channels = config.channels as { id: string }[];
+    assertEquals(channels.map((c) => c.id), [
       "discord/account/12345678901234567",
       "discord/channel/45678901234567890",
       "misskey/account/abc",
     ]);
   } finally {
-    Deno.env.delete("WHITELIST");
+    Deno.env.delete("CHANNELS");
   }
 });
 
-Deno.test("applyEnvOverrides - WHITELIST trims whitespace from entries", () => {
-  Deno.env.set("WHITELIST", "  discord/account/12345678901234567  ,  misskey/channel/456  ");
+Deno.test("applyEnvOverrides - CHANNELS with invalid JSON is skipped", () => {
+  Deno.env.set("CHANNELS", "not-json");
   try {
     const config: Record<string, unknown> = {
-      accessControl: { replyTo: "whitelist", whitelist: [] },
+      channels: [{ id: "discord/account/11100000000000001" }],
     };
     applyEnvOverrides(config);
-    const accessControl = config.accessControl as { whitelist: string[] };
-    assertEquals(accessControl.whitelist, [
-      "discord/account/12345678901234567",
-      "misskey/channel/456",
-    ]);
+    const channels = config.channels as { id: string }[];
+    assertEquals(channels, [{ id: "discord/account/11100000000000001" }]);
   } finally {
-    Deno.env.delete("WHITELIST");
+    Deno.env.delete("CHANNELS");
   }
 });
 
-Deno.test("applyEnvOverrides - WHITELIST filters out empty entries", () => {
-  Deno.env.set("WHITELIST", "discord/account/12345678901234567,,misskey/channel/456,  ,");
+Deno.test("applyEnvOverrides - empty CHANNELS does not override", () => {
+  Deno.env.set("CHANNELS", "");
   try {
     const config: Record<string, unknown> = {
-      accessControl: { replyTo: "whitelist", whitelist: [] },
+      channels: [{ id: "discord/account/11100000000000001" }],
     };
     applyEnvOverrides(config);
-    const accessControl = config.accessControl as { whitelist: string[] };
-    assertEquals(accessControl.whitelist, [
-      "discord/account/12345678901234567",
-      "misskey/channel/456",
-    ]);
+    const channels = config.channels as { id: string }[];
+    assertEquals(channels, [{ id: "discord/account/11100000000000001" }]);
   } finally {
-    Deno.env.delete("WHITELIST");
-  }
-});
-
-Deno.test("applyEnvOverrides - empty WHITELIST does not override", () => {
-  Deno.env.set("WHITELIST", "");
-  try {
-    const config: Record<string, unknown> = {
-      accessControl: { replyTo: "whitelist", whitelist: ["discord/account/11100000000000001"] },
-    };
-    applyEnvOverrides(config);
-    const accessControl = config.accessControl as { whitelist: string[] };
-    assertEquals(accessControl.whitelist, ["discord/account/11100000000000001"]);
-  } finally {
-    Deno.env.delete("WHITELIST");
+    Deno.env.delete("CHANNELS");
   }
 });
 

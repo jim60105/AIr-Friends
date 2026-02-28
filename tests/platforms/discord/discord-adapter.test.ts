@@ -5,11 +5,11 @@
 import { assertEquals } from "@std/assert";
 import type { Message } from "discord.js";
 import {
-  extractDiscordChannelIds,
+  extractChannelLurkIds,
   isBotMentioned,
   normalizeDiscordMessage,
   removeBotMention,
-  selectDiscordSpontaneousEntry,
+  selectDiscordSpontaneousTarget,
   shouldRespondToMessage,
 } from "@platforms/discord/discord-utils.ts";
 
@@ -530,114 +530,103 @@ Deno.test({
   },
 });
 
-// ============ extractDiscordChannelIds tests ============
+// ============ extractChannelLurkIds tests ============
 
-Deno.test("extractDiscordChannelIds - extracts channel IDs from whitelist", () => {
-  const whitelist = [
-    "discord/channel/111",
-    "discord/account/222",
-    "misskey/channel/333",
-    "discord/channel/444",
+import type { ChannelConfig } from "../../../src/types/config.ts";
+
+// Helper to create ChannelConfig from id string
+function ch(id: string, opts: Partial<ChannelConfig> = {}): ChannelConfig {
+  return { id, enabled: true, ...opts };
+}
+
+Deno.test("extractChannelLurkIds - extracts channel IDs with channelLurk enabled", () => {
+  const channels: ChannelConfig[] = [
+    ch("discord/channel/111", { channelLurk: true }),
+    ch("discord/account/222"),
+    ch("misskey/channel/333", { channelLurk: true }),
+    ch("discord/channel/444", { channelLurk: true }),
   ];
-  assertEquals(extractDiscordChannelIds(whitelist), ["111", "444"]);
+  assertEquals(extractChannelLurkIds(channels), ["111", "444"]);
 });
 
-Deno.test("extractDiscordChannelIds - returns empty for no channel entries", () => {
-  assertEquals(extractDiscordChannelIds(["discord/account/123", "misskey/account/456"]), []);
+Deno.test("extractChannelLurkIds - returns empty for no channelLurk entries", () => {
+  assertEquals(extractChannelLurkIds([ch("discord/account/123"), ch("misskey/account/456")]), []);
 });
 
-Deno.test("extractDiscordChannelIds - handles empty whitelist", () => {
-  assertEquals(extractDiscordChannelIds([]), []);
+Deno.test("extractChannelLurkIds - handles empty channels", () => {
+  assertEquals(extractChannelLurkIds([]), []);
 });
 
-// ============ selectDiscordSpontaneousEntry tests ============
+// ============ selectDiscordSpontaneousTarget tests ============
 
-Deno.test("selectDiscordSpontaneousEntry - selects from discord entries", () => {
-  const entry = selectDiscordSpontaneousEntry(["discord/channel/123"]);
+Deno.test("selectDiscordSpontaneousTarget - selects from discord entries with spontaneousPost", () => {
+  const entry = selectDiscordSpontaneousTarget([
+    ch("discord/channel/123", { spontaneousPost: true }),
+  ]);
   assertEquals(entry?.type, "channel");
   assertEquals(entry?.id, "123");
 });
 
-Deno.test("selectDiscordSpontaneousEntry - returns null for empty whitelist", () => {
-  assertEquals(selectDiscordSpontaneousEntry([]), null);
+Deno.test("selectDiscordSpontaneousTarget - returns null for empty channels", () => {
+  assertEquals(selectDiscordSpontaneousTarget([]), null);
 });
 
-Deno.test("selectDiscordSpontaneousEntry - ignores non-discord entries", () => {
-  assertEquals(selectDiscordSpontaneousEntry(["misskey/account/abc"]), null);
+Deno.test("selectDiscordSpontaneousTarget - ignores non-discord entries", () => {
+  assertEquals(
+    selectDiscordSpontaneousTarget([ch("misskey/account/abc", { spontaneousPost: true })]),
+    null,
+  );
 });
 
-Deno.test("selectDiscordSpontaneousEntry - parses account entries", () => {
-  const entry = selectDiscordSpontaneousEntry(["discord/account/456"], true);
+Deno.test("selectDiscordSpontaneousTarget - parses account entries with spontaneousPost", () => {
+  const entry = selectDiscordSpontaneousTarget([
+    ch("discord/account/456", { spontaneousPost: true }),
+  ]);
   assertEquals(entry?.type, "account");
   assertEquals(entry?.id, "456");
 });
 
-Deno.test("selectDiscordSpontaneousEntry - parses unknown type entries", () => {
-  const entry = selectDiscordSpontaneousEntry(["discord/unknown/789"]);
-  assertEquals(entry?.type, "unknown");
-  assertEquals(entry?.id, "789");
-});
-
-Deno.test("selectDiscordSpontaneousEntry - allowDm=true includes account entries", () => {
-  const whitelist = ["discord/account/123", "discord/channel/456"];
+Deno.test("selectDiscordSpontaneousTarget - includes both account and channel with spontaneousPost", () => {
+  const channels: ChannelConfig[] = [
+    ch("discord/account/123", { spontaneousPost: true }),
+    ch("discord/channel/456", { spontaneousPost: true }),
+  ];
   const results = new Set<string>();
   for (let i = 0; i < 100; i++) {
-    const entry = selectDiscordSpontaneousEntry(whitelist, true);
+    const entry = selectDiscordSpontaneousTarget(channels);
     if (entry) results.add(entry.type);
   }
   assertEquals(results.has("account"), true);
   assertEquals(results.has("channel"), true);
 });
 
-Deno.test("selectDiscordSpontaneousEntry - allowDm=false excludes account entries", () => {
-  const whitelist = ["discord/account/123", "discord/channel/456"];
+Deno.test("selectDiscordSpontaneousTarget - excludes entries without spontaneousPost", () => {
+  const channels: ChannelConfig[] = [
+    ch("discord/account/123"),
+    ch("discord/channel/456", { spontaneousPost: true }),
+  ];
   for (let i = 0; i < 50; i++) {
-    const entry = selectDiscordSpontaneousEntry(whitelist, false);
+    const entry = selectDiscordSpontaneousTarget(channels);
     assertEquals(entry?.type, "channel");
   }
 });
 
-Deno.test("selectDiscordSpontaneousEntry - allowDm=false with only account entries returns null", () => {
-  const whitelist = ["discord/account/123", "discord/account/456"];
-  const entry = selectDiscordSpontaneousEntry(whitelist, false);
-  assertEquals(entry, null);
-});
-
-Deno.test("selectDiscordSpontaneousEntry - allowDm defaults to false when not specified", () => {
-  const whitelist = ["discord/account/123"];
-  const entry = selectDiscordSpontaneousEntry(whitelist);
+Deno.test("selectDiscordSpontaneousTarget - returns null with no spontaneousPost entries", () => {
+  const channels: ChannelConfig[] = [ch("discord/account/123"), ch("discord/account/456")];
+  const entry = selectDiscordSpontaneousTarget(channels);
   assertEquals(entry, null);
 });
 
 // ============ DiscordAdapter.determineSpontaneousTarget tests ============
 
-function createTestConfig(whitelist: string[]): any {
+function createTestConfig(channels: ChannelConfig[]): any {
   return {
     platforms: {
       discord: { token: "test", enabled: true },
       misskey: { host: "test.com", token: "test", enabled: false },
     },
-    accessControl: { replyTo: "whitelist", whitelist },
-  };
-}
-
-function createTestConfigWithAllowDm(whitelist: string[], allowDm: boolean): any {
-  return {
-    platforms: {
-      discord: {
-        token: "test",
-        enabled: true,
-        spontaneousPost: {
-          enabled: true,
-          minIntervalMs: 10800000,
-          maxIntervalMs: 43200000,
-          contextFetchProbability: 0.5,
-          allowDm,
-        },
-      },
-      misskey: { host: "test.com", token: "test", enabled: false },
-    },
-    accessControl: { replyTo: "whitelist", whitelist },
+    replyPolicy: "channels",
+    channels,
   };
 }
 
@@ -647,14 +636,14 @@ Deno.test({
   sanitizeResources: false,
   fn: async () => {
     const adapter = createMockDiscordAdapter();
-    const config = createTestConfig(["discord/channel/123456789"]);
+    const config = createTestConfig([ch("discord/channel/123456789", { spontaneousPost: true })]);
     const target = await adapter.determineSpontaneousTarget(config);
     assertEquals(target?.channelId, "123456789");
   },
 });
 
 Deno.test({
-  name: "DiscordAdapter.determineSpontaneousTarget - returns null for empty whitelist",
+  name: "DiscordAdapter.determineSpontaneousTarget - returns null for empty channels",
   sanitizeOps: false,
   sanitizeResources: false,
   fn: async () => {
@@ -671,7 +660,7 @@ Deno.test({
   sanitizeResources: false,
   fn: async () => {
     const adapter = createMockDiscordAdapter();
-    const config = createTestConfig(["misskey/account/abc"]);
+    const config = createTestConfig([ch("misskey/account/abc", { spontaneousPost: true })]);
     const target = await adapter.determineSpontaneousTarget(config);
     assertEquals(target, null);
   },
@@ -683,9 +672,8 @@ Deno.test({
   sanitizeResources: false,
   fn: async () => {
     const adapter = createMockDiscordAdapter();
-    // Mock getDmChannelId to return null
     (adapter as any).getDmChannelId = () => Promise.resolve(null);
-    const config = createTestConfig(["discord/account/999"]);
+    const config = createTestConfig([ch("discord/account/999", { spontaneousPost: true })]);
     const target = await adapter.determineSpontaneousTarget(config);
     assertEquals(target, null);
   },
@@ -698,7 +686,7 @@ Deno.test({
   fn: async () => {
     const adapter = createMockDiscordAdapter();
     (adapter as any).getDmChannelId = () => Promise.reject(new Error("API error"));
-    const config = createTestConfig(["discord/account/999"]);
+    const config = createTestConfig([ch("discord/account/999", { spontaneousPost: true })]);
     const target = await adapter.determineSpontaneousTarget(config);
     assertEquals(target, null);
   },
@@ -711,47 +699,34 @@ Deno.test({
   fn: async () => {
     const adapter = createMockDiscordAdapter();
     (adapter as any).getDmChannelId = () => Promise.resolve("dm-ch-123");
-    const config = createTestConfigWithAllowDm(["discord/account/999"], true);
+    const config = createTestConfig([ch("discord/account/999", { spontaneousPost: true })]);
     const target = await adapter.determineSpontaneousTarget(config);
     assertEquals(target?.channelId, "dm-ch-123");
   },
 });
 
 Deno.test({
-  name: "DiscordAdapter.determineSpontaneousTarget - unknown entry type returns null",
+  name: "DiscordAdapter.determineSpontaneousTarget - excludes entries without spontaneousPost",
   sanitizeOps: false,
   sanitizeResources: false,
   fn: async () => {
     const adapter = createMockDiscordAdapter();
-    const config = createTestConfig(["discord/unknown/123"]);
-    const target = await adapter.determineSpontaneousTarget(config);
-    assertEquals(target, null);
-  },
-});
-
-Deno.test({
-  name: "DiscordAdapter.determineSpontaneousTarget - allowDm=false excludes account entries",
-  sanitizeOps: false,
-  sanitizeResources: false,
-  fn: async () => {
-    const adapter = createMockDiscordAdapter();
-    const config = createTestConfigWithAllowDm(
-      ["discord/account/999", "discord/channel/123"],
-      false,
-    );
+    const config = createTestConfig([
+      ch("discord/account/999"),
+      ch("discord/channel/123", { spontaneousPost: true }),
+    ]);
     const target = await adapter.determineSpontaneousTarget(config);
     assertEquals(target?.channelId, "123");
   },
 });
 
 Deno.test({
-  name:
-    "DiscordAdapter.determineSpontaneousTarget - allowDm=false with only account entries returns null",
+  name: "DiscordAdapter.determineSpontaneousTarget - no spontaneousPost entries returns null",
   sanitizeOps: false,
   sanitizeResources: false,
   fn: async () => {
     const adapter = createMockDiscordAdapter();
-    const config = createTestConfigWithAllowDm(["discord/account/999"], false);
+    const config = createTestConfig([ch("discord/account/999")]);
     const target = await adapter.determineSpontaneousTarget(config);
     assertEquals(target, null);
   },

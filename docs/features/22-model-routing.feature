@@ -22,21 +22,21 @@ Feature: Dynamic Model Routing — Per-User / Per-Context Model Selection
 
   # --- Whitelist matching ---
 
-  Scenario: Whitelist account match
+  Scenario: Channel account match
     Given modelRouting.enabled is true
-    And a rule matches whitelist "discord/account/12345678901234567" with model "premium-model"
+    And a rule matches channel "discord/account/12345678901234567" with model "premium-model"
     When a message session is created for discord user "123"
     Then the session uses model "premium-model"
 
-  Scenario: Whitelist channel match
+  Scenario: Channel match for channel
     Given modelRouting.enabled is true
-    And a rule matches whitelist "discord/channel/45678901234567890" with model "channel-model"
+    And a rule matches channel "discord/channel/45678901234567890" with model "channel-model"
     When a message session is created in discord channel "456"
     Then the session uses model "channel-model"
 
-  Scenario: Whitelist does not match different platform
+  Scenario: Channel does not match different platform
     Given modelRouting.enabled is true
-    And a rule matches whitelist "discord/account/12345678901234567" with model "premium-model"
+    And a rule matches channel "discord/account/12345678901234567" with model "premium-model"
     When a message session is created for misskey user "123"
     Then the session uses the default model "gpt-4"
 
@@ -66,7 +66,7 @@ Feature: Dynamic Model Routing — Per-User / Per-Context Model Selection
     Given modelRouting.enabled is true
     And the following rules in order:
       | match                              | model        |
-      | whitelist: discord/account/12345678901234567     | first-model  |
+      | channel: discord/account/12345678901234567       | first-model  |
       | sessionType: message               | second-model |
     When a message session is created for discord user "123"
     Then the session uses model "first-model"

@@ -98,10 +98,8 @@ function createTestConfig(tempDir: string): Config {
     logging: {
       level: "FATAL",
     },
-    accessControl: {
-      replyTo: "whitelist",
-      whitelist: [],
-    },
+    replyPolicy: "channels",
+    channels: [],
   };
 }
 
@@ -2066,7 +2064,7 @@ Deno.test({
       config.agent.modelRouting = {
         enabled: true,
         rules: [
-          { match: { whitelist: "discord/account/11122233344455566" }, model: "premium-model" },
+          { match: { channel: "discord/account/11122233344455566" }, model: "premium-model" },
         ],
       };
 
@@ -2113,7 +2111,7 @@ Deno.test({
       config.agent.modelRouting = {
         enabled: false,
         rules: [
-          { match: { whitelist: "discord/account/11122233344455566" }, model: "premium-model" },
+          { match: { channel: "discord/account/11122233344455566" }, model: "premium-model" },
         ],
       };
 

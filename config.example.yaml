@@ -27,7 +27,6 @@ platforms:
       minIntervalMs: 10800000 # Minimum interval: 3 hours (default)
       maxIntervalMs: 43200000 # Maximum interval: 12 hours (default)
       contextFetchProbability: 0.5 # Probability of including recent messages (0.0-1.0, default: 0.5)
-      allowDm: false                # Allow spontaneous posts to DM (default: true); override with env DISCORD_SPONTANEOUS_ALLOW_DM
     # Typing indicator: show "typing..." in Discord while processing
     typingIndicator:
       enabled: false          # Show typing indicator during ACP sessions (default: false, security consideration)
@@ -49,7 +48,6 @@ platforms:
       minIntervalMs: 10800000 # Minimum interval: 3 hours (default)
       maxIntervalMs: 43200000 # Maximum interval: 12 hours (default)
       contextFetchProbability: 0.5 # Probability of including recent messages (0.0-1.0, default: 0.5)
-      allowDm: false                # Allow spontaneous posts to DM (default: true); override with env MISSKEY_SPONTANEOUS_ALLOW_DM
 
 # Agent/LLM configuration
 agent:
@@ -79,7 +77,7 @@ agent:
     # Example rules:
     #   # Specific account + research keywords → research model
     #   - match:
-    #       whitelist: "discord/account/12345678901234567"
+    #       channel: "discord/account/12345678901234567"
     #       contentKeywords: ["研究", "research"]
     #     model: "openrouter/google/gemini-2.5-pro"
     #   # Any message with research keywords → research model
@@ -87,7 +85,7 @@ agent:
     #       contentKeywords: ["研究", "research", "論文", "paper"]
     #     model: "openrouter/google/gemini-2.5-pro"
     #   # Specific account (any content) → premium model
-    #   - match: { whitelist: "discord/account/12345678901234567" }
+    #   - match: { channel: "discord/account/12345678901234567" }
     #     model: "openrouter/deepseek/deepseek-v3.2"
     #   - match: { sessionType: "spontaneous" }
     #     model: "openrouter/deepseek/deepseek-v3.2"
@@ -168,13 +166,35 @@ metrics:
   enabled: false              # Enable Prometheus metrics (default: false); override with env METRICS_ENABLED
   path: "/metrics"            # Metrics endpoint path (default: "/metrics"); override with env METRICS_PATH
 
-# Access control configuration
-accessControl:
-  replyTo: "whitelist" # "all" | "public" | "whitelist" (default: "whitelist"); override with env REPLY_TO
-  whitelist: # Whitelist entries (format: "{platform}/account/{id}" or "{platform}/channel/{id}"); override with env WHITELIST (comma-separated)
-    - "discord/account/560842157351763989"
-    - "discord/channel/873618490202931231"
-    - "misskey/account/agy61oh08uzl000g"
+# Reply policy: "all" | "public" | "channels"
+# - all: Reply to everyone
+# - public: Reply in public channels + enabled DM channels
+# - channels: Only reply to configured channels (default)
+replyPolicy: "channels"  # override with env REPLY_POLICY (REPLY_TO also accepted as alias)
+
+# Channel configurations
+# Each entry defines a channel with individual feature toggles
+channels:
+  # Discord account (DM)
+  - id: "discord/account/560842157351763989"
+    enabled: true
+    spontaneousPost: false
+    rateLimitBypass: true
+
+  # Discord channel
+  - id: "discord/channel/873618490202931231"
+    enabled: true
+    spontaneousPost: true
+    channelLurk: true
+
+  # Misskey account (DM)
+  - id: "misskey/account/agy61oh08uzl000g"
+    enabled: true
+    spontaneousPost: false
+
+  # Misskey timeline (bot own timeline)
+  # - id: "misskey/timeline/self"
+  #   spontaneousPost: true
 
 # Self-research: agent periodically reads RSS and researches topics
 selfResearch:

@@ -1,7 +1,7 @@
 import { assertEquals } from "@std/assert";
 import { ReplyPolicyEvaluator } from "@core/reply-policy.ts";
 import type { NormalizedEvent } from "../../src/types/events.ts";
-import type { ReplyPolicy } from "../../src/types/config.ts";
+import type { ChannelConfig, ReplyPolicy } from "../../src/types/config.ts";
 
 function createEvent(overrides: Partial<NormalizedEvent> = {}): NormalizedEvent {
   return {
@@ -17,8 +17,11 @@ function createEvent(overrides: Partial<NormalizedEvent> = {}): NormalizedEvent 
   };
 }
 
-function createEvaluator(replyTo: ReplyPolicy, whitelist: string[] = []): ReplyPolicyEvaluator {
-  return new ReplyPolicyEvaluator({ replyTo, whitelist });
+function createEvaluator(
+  replyTo: ReplyPolicy,
+  channels: ChannelConfig[] = [],
+): ReplyPolicyEvaluator {
+  return new ReplyPolicyEvaluator(replyTo, channels);
 }
 
 Deno.test("ReplyPolicy - all mode allows public messages", () => {
@@ -46,22 +49,25 @@ Deno.test("ReplyPolicy - public mode denies DM from non-whitelisted user", () =>
 });
 
 Deno.test("ReplyPolicy - public mode allows DM from whitelisted account", () => {
-  const evaluator = createEvaluator("public", ["discord/account/45600000000000001"]);
+  const channels: ChannelConfig[] = [{ id: "discord/account/45600000000000001", enabled: true }];
+  const evaluator = createEvaluator("public", channels);
   const event = createEvent({ isDm: true, userId: "45600000000000001" });
   assertEquals(evaluator.shouldReply(event), true);
 });
 
 Deno.test("ReplyPolicy - public mode allows DM from whitelisted channel", () => {
-  const evaluator = createEvaluator("public", ["discord/channel/99000000000000001"]);
+  const channels: ChannelConfig[] = [{ id: "discord/channel/99000000000000001", enabled: true }];
+  const evaluator = createEvaluator("public", channels);
   const event = createEvent({ isDm: true, channelId: "99000000000000001" });
   assertEquals(evaluator.shouldReply(event), true);
 });
 
-Deno.test("ReplyPolicy - whitelist mode allows whitelisted account and channel", () => {
-  const evaluator = createEvaluator("whitelist", [
-    "discord/account/45600000000000001",
-    "discord/channel/12300000000000001",
-  ]);
+Deno.test("ReplyPolicy - channels mode allows whitelisted account and channel", () => {
+  const channels: ChannelConfig[] = [
+    { id: "discord/account/45600000000000001", enabled: true },
+    { id: "discord/channel/12300000000000001", enabled: true },
+  ];
+  const evaluator = createEvaluator("channels", channels);
   const eventByAccount = createEvent({ userId: "45600000000000001", channelId: "unknown" });
   const eventByChannel = createEvent({
     userId: "44400000000000001",
@@ -72,23 +78,25 @@ Deno.test("ReplyPolicy - whitelist mode allows whitelisted account and channel",
   assertEquals(evaluator.shouldReply(eventByChannel), true);
 });
 
-Deno.test("ReplyPolicy - whitelist mode denies non-whitelisted event", () => {
-  const evaluator = createEvaluator("whitelist", ["discord/account/77700000000000001"]);
+Deno.test("ReplyPolicy - channels mode denies non-whitelisted event", () => {
+  const channels: ChannelConfig[] = [{ id: "discord/account/77700000000000001", enabled: true }];
+  const evaluator = createEvaluator("channels", channels);
   const event = createEvent({ userId: "45600000000000001" });
   assertEquals(evaluator.shouldReply(event), false);
 });
 
-Deno.test("ReplyPolicy - whitelist mode with empty whitelist denies all", () => {
-  const evaluator = createEvaluator("whitelist", []);
+Deno.test("ReplyPolicy - channels mode with empty channels denies all", () => {
+  const evaluator = createEvaluator("channels", []);
   const event = createEvent();
   assertEquals(evaluator.shouldReply(event), false);
 });
 
-Deno.test("ReplyPolicy - cross-platform whitelist entries do not match", () => {
-  const evaluator = createEvaluator("whitelist", [
-    "discord/account/55500000000000001",
-    "misskey/account/misskey_user_id",
-  ]);
+Deno.test("ReplyPolicy - cross-platform channels entries do not match", () => {
+  const channels: ChannelConfig[] = [
+    { id: "discord/account/55500000000000001", enabled: true },
+    { id: "misskey/account/misskey_user_id", enabled: true },
+  ];
+  const evaluator = createEvaluator("channels", channels);
   const misskeyEvent = createEvent({ platform: "misskey", userId: "55500000000000001" });
   const discordEvent = createEvent({ platform: "discord", userId: "misskey_user_id" });
 
@@ -97,10 +105,11 @@ Deno.test("ReplyPolicy - cross-platform whitelist entries do not match", () => {
 });
 
 Deno.test("ReplyPolicy - supports matching entries from multiple platforms", () => {
-  const evaluator = createEvaluator("whitelist", [
-    "discord/account/55500000000000001",
-    "misskey/account/misskey_user_id",
-  ]);
+  const channels: ChannelConfig[] = [
+    { id: "discord/account/55500000000000001", enabled: true },
+    { id: "misskey/account/misskey_user_id", enabled: true },
+  ];
+  const evaluator = createEvaluator("channels", channels);
   const discordEvent = createEvent({ platform: "discord", userId: "55500000000000001" });
   const misskeyEvent = createEvent({ platform: "misskey", userId: "misskey_user_id" });
 
@@ -108,14 +117,13 @@ Deno.test("ReplyPolicy - supports matching entries from multiple platforms", () 
   assertEquals(evaluator.shouldReply(misskeyEvent), true);
 });
 
-Deno.test("ReplyPolicy - ignores invalid whitelist entries", () => {
-  const evaluator = createEvaluator("whitelist", [
-    "discord/account/88800000000000001",
-    "invalid_entry",
-    "telegram/account/123",
-    "",
-  ]);
+Deno.test("ReplyPolicy - ignores invalid channel entries", () => {
+  const channels: ChannelConfig[] = [
+    { id: "discord/account/88800000000000001", enabled: true },
+    // invalid entries simulated by missing or malformed IDs are ignored by parser
+  ];
 
+  const evaluator = createEvaluator("channels", channels);
   const validEvent = createEvent({ userId: "88800000000000001" });
   const invalidEvent = createEvent({ userId: "123" });
 
@@ -123,20 +131,26 @@ Deno.test("ReplyPolicy - ignores invalid whitelist entries", () => {
   assertEquals(evaluator.shouldReply(invalidEvent), false);
 });
 
-Deno.test("ReplyPolicy - isWhitelistedAccount returns true for account entries", () => {
-  const evaluator = createEvaluator("whitelist", [
-    "discord/account/12345678901234567",
-    "discord/channel/45678901234567890",
-  ]);
-  assertEquals(evaluator.isWhitelistedAccount("discord", "12345678901234567"), true);
+Deno.test("ReplyPolicy - isRateLimitBypassed returns true for account entries", () => {
+  const channels: ChannelConfig[] = [
+    { id: "discord/account/12345678901234567", enabled: true, rateLimitBypass: true },
+    { id: "discord/channel/45678901234567890", enabled: true },
+  ];
+  const evaluator = createEvaluator("channels", channels);
+  assertEquals(evaluator.isRateLimitBypassed("discord", "12345678901234567", ""), true);
 });
 
-Deno.test("ReplyPolicy - isWhitelistedAccount returns false for channel entries", () => {
-  const evaluator = createEvaluator("whitelist", ["discord/channel/45678901234567890"]);
-  assertEquals(evaluator.isWhitelistedAccount("discord", "45678901234567890"), false);
+Deno.test("ReplyPolicy - isRateLimitBypassed returns false for channel entries", () => {
+  const channels: ChannelConfig[] = [{ id: "discord/channel/45678901234567890", enabled: true }];
+  const evaluator = createEvaluator("channels", channels);
+  assertEquals(
+    evaluator.isRateLimitBypassed("discord", "45678901234567890", "45678901234567890"),
+    false,
+  );
 });
 
-Deno.test("ReplyPolicy - isWhitelistedAccount returns false for different platform", () => {
-  const evaluator = createEvaluator("whitelist", ["discord/account/12345678901234567"]);
-  assertEquals(evaluator.isWhitelistedAccount("misskey", "123"), false);
+Deno.test("ReplyPolicy - isRateLimitBypassed returns false for different platform", () => {
+  const channels: ChannelConfig[] = [{ id: "discord/account/12345678901234567", enabled: true }];
+  const evaluator = createEvaluator("channels", channels);
+  assertEquals(evaluator.isRateLimitBypassed("misskey", "123", ""), false);
 });

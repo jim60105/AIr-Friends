@@ -19,7 +19,6 @@ function createConfig(overrides?: {
           minIntervalMs: 100,
           maxIntervalMs: 200,
           contextFetchProbability: 0.5,
-          allowDm: false,
         },
       },
       misskey: {
@@ -31,7 +30,6 @@ function createConfig(overrides?: {
           minIntervalMs: 100,
           maxIntervalMs: 200,
           contextFetchProbability: 0.5,
-          allowDm: false,
         },
       },
     },
@@ -43,7 +41,8 @@ function createConfig(overrides?: {
     memory: { searchLimit: 10, maxChars: 2000, recentMessageLimit: 20 },
     workspace: { repoPath: "./data", workspacesDir: "workspaces" },
     logging: { level: "INFO" },
-    accessControl: { replyTo: "whitelist", whitelist: [] },
+    replyPolicy: "channels",
+    channels: [],
     selfResearch: {
       enabled: overrides?.enabled ?? true,
       model: "gpt-5-mini",

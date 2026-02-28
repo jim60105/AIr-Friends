@@ -22,7 +22,6 @@ function createConfig(overrides?: {
           minIntervalMs: overrides?.minIntervalMs ?? 100,
           maxIntervalMs: overrides?.maxIntervalMs ?? 200,
           contextFetchProbability: 0.5,
-          allowDm: false,
         },
       },
       misskey: {
@@ -34,7 +33,6 @@ function createConfig(overrides?: {
           minIntervalMs: overrides?.minIntervalMs ?? 100,
           maxIntervalMs: overrides?.maxIntervalMs ?? 200,
           contextFetchProbability: 0.5,
-          allowDm: false,
         },
       },
     },
@@ -46,7 +44,8 @@ function createConfig(overrides?: {
     memory: { searchLimit: 10, maxChars: 2000, recentMessageLimit: 20 },
     workspace: { repoPath: "./data", workspacesDir: "workspaces" },
     logging: { level: "INFO" },
-    accessControl: { replyTo: "whitelist", whitelist: [] },
+    replyPolicy: "channels",
+    channels: [],
   };
 }
 
