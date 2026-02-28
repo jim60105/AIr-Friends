@@ -68,7 +68,7 @@ function buildBaseAgentConfig(
       };
 
       // Inherit all potentially needed environment variables
-      const inheritVars = ["PATH", "HOME", "DENO_DIR", "LANG", "LC_ALL", "USER"];
+      const inheritVars = ["PATH", "HOME", "DENO_DIR", "LANG", "LC_ALL", "USER", "TMPDIR"];
       for (const varName of inheritVars) {
         const value = Deno.env.get(varName);
         if (value !== undefined) {
@@ -79,6 +79,9 @@ function buildBaseAgentConfig(
       if (agentWorkspacePath) {
         env["AGENT_WORKSPACE"] = agentWorkspacePath;
       }
+
+      // Set TMPDIR to workspace-scoped tmp directory
+      env["TMPDIR"] = `${workingDir}/tmp`;
 
       const args = [
         "--disable-builtin-mcps",
@@ -125,7 +128,7 @@ function buildBaseAgentConfig(
         GEMINI_SYSTEM_MD: "/app/prompts/system_prompt_override.md",
       };
 
-      const inheritVars = ["PATH", "HOME", "DENO_DIR", "LANG", "LC_ALL", "USER"];
+      const inheritVars = ["PATH", "HOME", "DENO_DIR", "LANG", "LC_ALL", "USER", "TMPDIR"];
       for (const varName of inheritVars) {
         const value = Deno.env.get(varName);
         if (value !== undefined) {
@@ -136,6 +139,9 @@ function buildBaseAgentConfig(
       if (agentWorkspacePath) {
         env["AGENT_WORKSPACE"] = agentWorkspacePath;
       }
+
+      // Set TMPDIR to workspace-scoped tmp directory
+      env["TMPDIR"] = `${workingDir}/tmp`;
 
       const args = ["--experimental-acp"];
       if (yolo) {
@@ -170,7 +176,7 @@ function buildBaseAgentConfig(
         env["GOOGLE_GENERATIVE_AI_API_KEY"] = geminiApiKey;
       }
 
-      const inheritVars = ["PATH", "HOME", "DENO_DIR", "LANG", "LC_ALL", "USER"];
+      const inheritVars = ["PATH", "HOME", "DENO_DIR", "LANG", "LC_ALL", "USER", "TMPDIR"];
       for (const varName of inheritVars) {
         const value = Deno.env.get(varName);
         if (value !== undefined) {
@@ -181,6 +187,9 @@ function buildBaseAgentConfig(
       if (agentWorkspacePath) {
         env["AGENT_WORKSPACE"] = agentWorkspacePath;
       }
+
+      // Set TMPDIR to workspace-scoped tmp directory
+      env["TMPDIR"] = `${workingDir}/tmp`;
 
       const args = ["acp"];
 

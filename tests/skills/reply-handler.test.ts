@@ -48,6 +48,7 @@ Deno.test("ReplyHandler - handleSendReply sends reply successfully", async () =>
       userId: "123",
     },
     path: "/tmp/workspaces/discord/123",
+    tmpPath: "/tmp/workspaces/discord/123/tmp",
     isDm: true,
   };
 
@@ -79,6 +80,7 @@ Deno.test("ReplyHandler - handleSendReply allows multiple replies", async () => 
       userId: "789",
     },
     path: "/tmp/workspaces/discord/789",
+    tmpPath: "/tmp/workspaces/discord/789/tmp",
     isDm: true,
   };
 
@@ -120,6 +122,7 @@ Deno.test("ReplyHandler - handleSendReply validates message parameter", async ()
       userId: "345",
     },
     path: "/tmp/workspaces/discord/345",
+    tmpPath: "/tmp/workspaces/discord/345/tmp",
     isDm: true,
   };
 
@@ -151,6 +154,7 @@ Deno.test("ReplyHandler - clearReplyState clears state", async () => {
       userId: "111",
     },
     path: "/tmp/workspaces/discord/111",
+    tmpPath: "/tmp/workspaces/discord/111/tmp",
     isDm: true,
   };
 
@@ -182,6 +186,7 @@ Deno.test("ReplyHandler - handleSendReply handles platform failure", async () =>
       userId: "999",
     },
     path: "/tmp/workspaces/discord/999",
+    tmpPath: "/tmp/workspaces/discord/999/tmp",
     isDm: true,
   };
 
@@ -211,6 +216,7 @@ Deno.test("ReplyHandler - handleSendReply validates attachments type", async () 
       userId: "777",
     },
     path: "/tmp/workspaces/discord/777",
+    tmpPath: "/tmp/workspaces/discord/777/tmp",
     isDm: true,
   };
 
@@ -240,6 +246,7 @@ Deno.test("ReplyHandler - handleSendReply logs warning for attachments", async (
       userId: "555",
     },
     path: "/tmp/workspaces/discord/555",
+    tmpPath: "/tmp/workspaces/discord/555/tmp",
     isDm: true,
   };
 
@@ -271,6 +278,7 @@ Deno.test("ReplyHandler - handleEditReply succeeds after send-reply", async () =
     key: "discord/edit1",
     components: { platform: "discord", userId: "edit1" },
     path: "/tmp/workspaces/discord/edit1",
+    tmpPath: "/tmp/workspaces/discord/edit1/tmp",
     isDm: true,
   };
 
@@ -304,6 +312,7 @@ Deno.test("ReplyHandler - handleEditReply fails without prior send-reply", async
     key: "discord/edit2",
     components: { platform: "discord", userId: "edit2" },
     path: "/tmp/workspaces/discord/edit2",
+    tmpPath: "/tmp/workspaces/discord/edit2/tmp",
     isDm: true,
   };
 
@@ -330,6 +339,7 @@ Deno.test("ReplyHandler - handleEditReply validates messageId parameter", async 
     key: "discord/edit3",
     components: { platform: "discord", userId: "edit3" },
     path: "/tmp/workspaces/discord/edit3",
+    tmpPath: "/tmp/workspaces/discord/edit3/tmp",
     isDm: true,
   };
 
@@ -354,6 +364,7 @@ Deno.test("ReplyHandler - handleEditReply validates message parameter", async ()
     key: "discord/edit4",
     components: { platform: "discord", userId: "edit4" },
     path: "/tmp/workspaces/discord/edit4",
+    tmpPath: "/tmp/workspaces/discord/edit4/tmp",
     isDm: true,
   };
 
@@ -384,6 +395,7 @@ Deno.test("ReplyHandler - handleEditReply handles platform failure", async () =>
     key: "discord/edit5",
     components: { platform: "discord", userId: "edit5" },
     path: "/tmp/workspaces/discord/edit5",
+    tmpPath: "/tmp/workspaces/discord/edit5/tmp",
     isDm: true,
   };
 
@@ -415,6 +427,7 @@ Deno.test("ReplyHandler - handleEditReply allows multiple edits", async () => {
     key: "discord/edit6",
     components: { platform: "discord", userId: "edit6" },
     path: "/tmp/workspaces/discord/edit6",
+    tmpPath: "/tmp/workspaces/discord/edit6/tmp",
     isDm: true,
   };
 
@@ -450,6 +463,7 @@ Deno.test("ReplyHandler - handleEditReply handles thrown exception", async () =>
     key: "discord/edit7",
     components: { platform: "discord", userId: "edit7" },
     path: "/tmp/workspaces/discord/edit7",
+    tmpPath: "/tmp/workspaces/discord/edit7/tmp",
     isDm: true,
   };
 
@@ -483,6 +497,7 @@ Deno.test("ReplyHandler - handleEditReply handles non-Error exception", async ()
     key: "discord/edit8",
     components: { platform: "discord", userId: "edit8" },
     path: "/tmp/workspaces/discord/edit8",
+    tmpPath: "/tmp/workspaces/discord/edit8/tmp",
     isDm: true,
   };
 
@@ -516,6 +531,7 @@ Deno.test("ReplyHandler - handleEditReply passes replyToMessageId to editMessage
     key: "discord/edit9",
     components: { platform: "discord", userId: "edit9" },
     path: "/tmp/workspaces/discord/edit9",
+    tmpPath: "/tmp/workspaces/discord/edit9/tmp",
     isDm: true,
   };
 
@@ -606,6 +622,7 @@ Deno.test("ReplyHandler - handleSendReply strips XML tags from message", async (
     key: "discord/xml1",
     components: { platform: "discord", userId: "xml1" },
     path: "/tmp/workspaces/discord/xml1",
+    tmpPath: "/tmp/workspaces/discord/xml1/tmp",
     isDm: true,
   };
 
@@ -643,6 +660,7 @@ Deno.test("ReplyHandler - handleEditReply strips XML tags from message", async (
     key: "discord/xml2",
     components: { platform: "discord", userId: "xml2" },
     path: "/tmp/workspaces/discord/xml2",
+    tmpPath: "/tmp/workspaces/discord/xml2/tmp",
     isDm: true,
   };
 

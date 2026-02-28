@@ -1,6 +1,7 @@
 // src/core/session-orchestrator.ts
 
 import { createLogger } from "@utils/logger.ts";
+import type { ReplyPolicyEvaluator } from "./reply-policy.ts";
 import {
   activeSessionsGauge,
   remindersDeliveredTotal,
@@ -66,6 +67,7 @@ export class SessionOrchestrator {
   private memoryStore: MemoryStore;
   private config: Config;
   private yolo: boolean;
+  private replyPolicy?: ReplyPolicyEvaluator;
 
   constructor(
     workspaceManager: WorkspaceManager,
@@ -75,6 +77,7 @@ export class SessionOrchestrator {
     sessionRegistry: SessionRegistry,
     memoryStore: MemoryStore,
     yolo = false,
+    replyPolicy?: ReplyPolicyEvaluator,
   ) {
     this.workspaceManager = workspaceManager;
     this.contextAssembler = contextAssembler;
@@ -83,6 +86,16 @@ export class SessionOrchestrator {
     this.memoryStore = memoryStore;
     this.config = config;
     this.yolo = yolo;
+    this.replyPolicy = replyPolicy;
+  }
+
+  /**
+   * Compute effective YOLO mode for a given context.
+   * Global --yolo flag OR per-channel yolo config.
+   */
+  private getEffectiveYolo(platform: string, userId: string, channelId: string): boolean {
+    if (this.yolo) return true;
+    return this.replyPolicy?.isYoloEnabled(platform, userId, channelId) ?? false;
   }
 
   private getMCPServers(): MCPServerConfig[] {
@@ -330,6 +343,11 @@ export class SessionOrchestrator {
       // === END DRY RUN CHECK ===
 
       // 4. Create client config for ACP
+      const effectiveYolo = this.getEffectiveYolo(
+        event.platform,
+        event.userId,
+        event.channelId,
+      );
       const clientConfig: ClientConfig = {
         workingDir: workspace.path,
         agentWorkspacePath,
@@ -337,7 +355,7 @@ export class SessionOrchestrator {
         userId: event.userId,
         channelId: event.channelId,
         isDM: event.isDm,
-        yolo: this.yolo,
+        yolo: effectiveYolo,
       };
 
       // 5. Build ACP connector
@@ -347,7 +365,7 @@ export class SessionOrchestrator {
           agentType,
           workspace.path,
           this.config,
-          this.yolo,
+          effectiveYolo,
           agentWorkspacePath,
         ),
         clientConfig,
@@ -765,6 +783,7 @@ export class SessionOrchestrator {
       // === END DRY RUN CHECK ===
 
       // 5. Create client config for ACP
+      const effectiveYolo = this.getEffectiveYolo(platform, options.botId, channelId);
       const clientConfig: ClientConfig = {
         workingDir: workspace.path,
         agentWorkspacePath,
@@ -772,7 +791,7 @@ export class SessionOrchestrator {
         userId: options.botId,
         channelId,
         isDM: false,
-        yolo: this.yolo,
+        yolo: effectiveYolo,
       };
 
       // 6. Build and execute ACP connector
@@ -782,7 +801,7 @@ export class SessionOrchestrator {
           agentType,
           workspace.path,
           this.config,
-          this.yolo,
+          effectiveYolo,
           agentWorkspacePath,
         ),
         clientConfig,
@@ -1499,6 +1518,7 @@ export class SessionOrchestrator {
       // === END DRY RUN CHECK ===
 
       // 5. Create client config
+      const effectiveYolo = this.getEffectiveYolo(platform, reminder.userId, dmChannelId);
       const clientConfig: ClientConfig = {
         workingDir: workspace.path,
         agentWorkspacePath,
@@ -1506,7 +1526,7 @@ export class SessionOrchestrator {
         userId: reminder.userId,
         channelId: dmChannelId,
         isDM: true,
-        yolo: this.yolo,
+        yolo: effectiveYolo,
       };
 
       // 6. Build and execute ACP connector
@@ -1516,7 +1536,7 @@ export class SessionOrchestrator {
           agentType,
           workspace.path,
           this.config,
-          this.yolo,
+          effectiveYolo,
           agentWorkspacePath,
         ),
         clientConfig,

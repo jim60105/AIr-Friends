@@ -180,12 +180,14 @@ channels:
     enabled: true
     spontaneousPost: false
     rateLimitBypass: true
+    yolo: true  # Run Agent in YOLO mode for this account
 
   # Discord channel
   - id: "discord/channel/873618490202931231"
     enabled: true
     spontaneousPost: true
     channelLurk: true
+    yolo: false  # Default: restricted mode
 
   # Misskey account (DM)
   - id: "misskey/account/agy61oh08uzl000g"

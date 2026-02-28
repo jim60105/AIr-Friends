@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- 🔒 Per-channel YOLO mode via `yolo` field in `channels` configuration — allows fine-grained control over which channels/accounts run Agent in YOLO mode
+- ✨ Workspace `tmp/` directory — each workspace now includes a `tmp/` subdirectory, exposed to Agent via `TMPDIR` environment variable
+- 🔒 Agent permission control hardening — whitelist-based skill command matching (script paths + command prefixes) replaces loose `includes` check; explicit `edit` tool blocking in non-YOLO mode
+
+### Changed
+
+- **BREAKING**: Removed default `--yolo` flag from Containerfile CMD — YOLO mode must now be explicitly enabled via `--yolo` CLI flag or per-channel `yolo: true` configuration
+- `TMPDIR` added to sandbox `BASE_ALLOWED_ENV_VARS` for workspace-scoped temp directory
+
+### Security
+
+- Non-YOLO mode now blocks `edit`/`write` tools with explicit logging
+- Skill command approval uses whitelist built from scanning `skills/` directory at startup
+
 ## [0.15.0] - 2026-02-28
 
 ### Changed

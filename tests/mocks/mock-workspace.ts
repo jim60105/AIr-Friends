@@ -56,6 +56,7 @@ export class MockWorkspaceManager {
         userId,
       },
       path: `${this.root}/${key}`,
+      tmpPath: `${this.root}/${key}/tmp`,
       isDm,
     };
   }

@@ -99,6 +99,10 @@ export class WorkspaceManager {
       }
     }
 
+    // Ensure tmp/ subdirectory exists (always, even for existing workspaces)
+    const tmpPath = join(path, "tmp");
+    await ensureDirectory(tmpPath);
+
     return {
       key,
       components: {
@@ -106,6 +110,7 @@ export class WorkspaceManager {
         userId: event.userId,
       },
       path,
+      tmpPath,
       isDm: event.isDm,
       createdAt,
     };

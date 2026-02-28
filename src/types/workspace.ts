@@ -23,6 +23,9 @@ export interface WorkspaceInfo {
   /** Absolute path to the workspace directory */
   path: string;
 
+  /** Absolute path to the workspace tmp directory */
+  tmpPath: string;
+
   /** Whether this workspace is for a DM conversation */
   isDm: boolean;
 

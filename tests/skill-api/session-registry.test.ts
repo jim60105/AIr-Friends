@@ -28,6 +28,7 @@ Deno.test("SessionRegistry - registers and retrieves sessions", () => {
       userId: "123",
     },
     path: "/tmp/test",
+    tmpPath: "/tmp/test/tmp",
     isDm: false,
   };
 
@@ -81,6 +82,7 @@ Deno.test("SessionRegistry - tracks reply sent status", () => {
       userId: "123",
     },
     path: "/tmp/test",
+    tmpPath: "/tmp/test/tmp",
     isDm: false,
   };
 
@@ -120,6 +122,7 @@ Deno.test("SessionRegistry - removes sessions", () => {
       userId: "123",
     },
     path: "/tmp/test",
+    tmpPath: "/tmp/test/tmp",
     isDm: false,
   };
 
@@ -157,6 +160,7 @@ Deno.test("SessionRegistry - cleans up expired sessions", async () => {
       userId: "123",
     },
     path: "/tmp/test",
+    tmpPath: "/tmp/test/tmp",
     isDm: false,
   };
 
@@ -194,6 +198,7 @@ Deno.test("SessionRegistry - replyCount initializes to 0", () => {
     key: "test/123",
     components: { platform: "discord" as const, userId: "123" },
     path: "/tmp/test",
+    tmpPath: "/tmp/test/tmp",
     isDm: false,
   };
 
@@ -221,6 +226,7 @@ Deno.test("SessionRegistry - incrementReplyCount increments correctly", () => {
     key: "test/123",
     components: { platform: "discord" as const, userId: "123" },
     path: "/tmp/test",
+    tmpPath: "/tmp/test/tmp",
     isDm: false,
   };
 
@@ -266,6 +272,7 @@ Deno.test("SessionRegistry - register session without triggerEvent", () => {
       userId: "bot-123",
     },
     path: "/tmp/test",
+    tmpPath: "/tmp/test/tmp",
     isDm: false,
   };
 

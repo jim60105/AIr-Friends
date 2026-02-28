@@ -97,6 +97,9 @@ export class AgentCore {
       memoryMaxChars: config.memory.maxChars,
     });
 
+    // Initialize reply policy (needed by orchestrator and message handler)
+    this.replyPolicy = new ReplyPolicyEvaluator(config.replyPolicy, config.channels);
+
     // Initialize orchestrator
     this.orchestrator = new SessionOrchestrator(
       this.workspaceManager,
@@ -106,9 +109,8 @@ export class AgentCore {
       this.sessionRegistry,
       this.memoryStore,
       this.yolo,
+      this.replyPolicy,
     );
-
-    this.replyPolicy = new ReplyPolicyEvaluator(config.replyPolicy, config.channels);
 
     // Initialize message handler and reply dispatcher
     const rateLimitConfig = config.rateLimit ?? {

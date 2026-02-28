@@ -44,6 +44,7 @@ const createWorkspace = (): WorkspaceInfo => ({
   key: "discord/123",
   components: { platform: "discord", userId: "123" },
   path: "/tmp/test-workspace",
+  tmpPath: "/tmp/test-workspace/tmp",
   isDm: true,
 });
 
@@ -110,6 +111,7 @@ Deno.test("FileHandler - allows path within agent-workspace", async () => {
     key: "discord/123",
     components: { platform: "discord", userId: "123" },
     path: agentDir,
+    tmpPath: agentDir + "/tmp",
     isDm: true,
   };
 
@@ -139,6 +141,7 @@ Deno.test("FileHandler - returns error when file exceeds size limit", async () =
     key: "discord/123",
     components: { platform: "discord", userId: "123" },
     path: tmpDir,
+    tmpPath: tmpDir + "/tmp",
     isDm: true,
   };
 
@@ -165,6 +168,7 @@ Deno.test("FileHandler - returns error when extension not in whitelist", async (
     key: "discord/123",
     components: { platform: "discord", userId: "123" },
     path: tmpDir,
+    tmpPath: tmpDir + "/tmp",
     isDm: true,
   };
 
@@ -194,6 +198,7 @@ Deno.test("FileHandler - allows any extension when whitelist is empty", async ()
     key: "discord/123",
     components: { platform: "discord", userId: "123" },
     path: tmpDir,
+    tmpPath: tmpDir + "/tmp",
     isDm: true,
   };
 
@@ -219,6 +224,7 @@ Deno.test("FileHandler - successful file send returns messageId", async () => {
     key: "discord/123",
     components: { platform: "discord", userId: "123" },
     path: tmpDir,
+    tmpPath: tmpDir + "/tmp",
     isDm: true,
   };
 
@@ -245,6 +251,7 @@ Deno.test("FileHandler - returns error when platform sendFile fails", async () =
     key: "discord/123",
     components: { platform: "discord", userId: "123" },
     path: tmpDir,
+    tmpPath: tmpDir + "/tmp",
     isDm: true,
   };
 
@@ -285,6 +292,7 @@ Deno.test("FileHandler - caption is passed to sendFile options", async () => {
     key: "discord/123",
     components: { platform: "discord", userId: "123" },
     path: tmpDir,
+    tmpPath: tmpDir + "/tmp",
     isDm: true,
   };
 

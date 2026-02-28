@@ -54,6 +54,7 @@ Deno.test("MemoryHandler - handleMemorySave saves memory in DM as private", asyn
       userId: "123",
     },
     path: `${tempDir}/workspaces/discord/123`,
+    tmpPath: `${tempDir}/workspaces/discord/123/tmp`,
     isDm: true,
   };
 
@@ -105,6 +106,7 @@ Deno.test("MemoryHandler - handleMemorySave saves memory in guild as public", as
       userId: "123",
     },
     path: `${tempDir}/workspaces/discord/123`,
+    tmpPath: `${tempDir}/workspaces/discord/123/tmp`,
     isDm: false,
   };
 
@@ -156,6 +158,7 @@ Deno.test("MemoryHandler - handleMemorySave validates parameters", async () => {
       userId: "123",
     },
     path: `${tempDir}/workspaces/discord/123`,
+    tmpPath: `${tempDir}/workspaces/discord/123/tmp`,
     isDm: true,
   };
 
@@ -194,6 +197,7 @@ Deno.test("MemoryHandler - handleMemorySearch searches memories in DM context", 
       userId: "123",
     },
     path: `${tempDir}/workspaces/discord/123`,
+    tmpPath: `${tempDir}/workspaces/discord/123/tmp`,
     isDm: true,
   };
 
@@ -253,6 +257,7 @@ Deno.test("MemoryHandler - handleMemoryPatch patches memory", async () => {
       userId: "123",
     },
     path: `${tempDir}/workspaces/discord/123`,
+    tmpPath: `${tempDir}/workspaces/discord/123/tmp`,
     isDm: true,
   };
 
@@ -314,6 +319,7 @@ Deno.test("MemoryHandler - handleMemorySave ignores agent-provided visibility in
       userId: "123",
     },
     path: `${tempDir}/workspaces/discord/123`,
+    tmpPath: `${tempDir}/workspaces/discord/123/tmp`,
     isDm: true,
   };
 
@@ -361,6 +367,7 @@ Deno.test("MemoryHandler - handleMemorySave validates invalid importance", async
       userId: "123",
     },
     path: `${tempDir}/workspaces/discord/123`,
+    tmpPath: `${tempDir}/workspaces/discord/123/tmp`,
     isDm: true,
   };
 
@@ -402,6 +409,7 @@ Deno.test("MemoryHandler - handleMemorySave ignores agent-provided visibility in
       userId: "123",
     },
     path: `${tempDir}/workspaces/discord/123`,
+    tmpPath: `${tempDir}/workspaces/discord/123/tmp`,
     isDm: false, // Not a DM
   };
 
@@ -449,6 +457,7 @@ Deno.test("MemoryHandler - handleMemorySearch validates invalid limit", async ()
       userId: "123",
     },
     path: `${tempDir}/workspaces/discord/123`,
+    tmpPath: `${tempDir}/workspaces/discord/123/tmp`,
     isDm: true,
   };
 
@@ -490,6 +499,7 @@ Deno.test("MemoryHandler - handleMemoryPatch validates missing memory_id", async
       userId: "123",
     },
     path: `${tempDir}/workspaces/discord/123`,
+    tmpPath: `${tempDir}/workspaces/discord/123/tmp`,
     isDm: true,
   };
 
@@ -528,6 +538,7 @@ Deno.test("MemoryHandler - handleMemoryPatch validates invalid enabled", async (
       userId: "123",
     },
     path: `${tempDir}/workspaces/discord/123`,
+    tmpPath: `${tempDir}/workspaces/discord/123/tmp`,
     isDm: true,
   };
 
@@ -569,6 +580,7 @@ Deno.test("MemoryHandler - handleMemoryPatch validates invalid visibility", asyn
       userId: "123",
     },
     path: `${tempDir}/workspaces/discord/123`,
+    tmpPath: `${tempDir}/workspaces/discord/123/tmp`,
     isDm: true,
   };
 
@@ -610,6 +622,7 @@ Deno.test("MemoryHandler - handleMemoryPatch validates invalid importance", asyn
       userId: "123",
     },
     path: `${tempDir}/workspaces/discord/123`,
+    tmpPath: `${tempDir}/workspaces/discord/123/tmp`,
     isDm: true,
   };
 
@@ -651,6 +664,7 @@ Deno.test("MemoryHandler - handleMemoryPatch requires at least one field", async
       userId: "123",
     },
     path: `${tempDir}/workspaces/discord/123`,
+    tmpPath: `${tempDir}/workspaces/discord/123/tmp`,
     isDm: true,
   };
 
@@ -694,6 +708,7 @@ Deno.test("MemoryHandler - handleMemoryPatch accepts relatedTo parameter", async
     key: "discord/123",
     components: { platform: "discord", userId: "123" },
     path: `${tempDir}/workspaces/discord/123`,
+    tmpPath: `${tempDir}/workspaces/discord/123/tmp`,
     isDm: true,
   };
 
@@ -740,6 +755,7 @@ Deno.test("MemoryHandler - handleMemoryPatch rejects invalid relatedTo", async (
     key: "discord/123",
     components: { platform: "discord", userId: "123" },
     path: `${tempDir}/workspaces/discord/123`,
+    tmpPath: `${tempDir}/workspaces/discord/123/tmp`,
     isDm: true,
   };
 
@@ -777,6 +793,7 @@ Deno.test("MemoryHandler - handleMemoryPatch accepts supersedes parameter", asyn
     key: "discord/123",
     components: { platform: "discord", userId: "123" },
     path: `${tempDir}/workspaces/discord/123`,
+    tmpPath: `${tempDir}/workspaces/discord/123/tmp`,
     isDm: true,
   };
 
@@ -823,6 +840,7 @@ Deno.test("MemoryHandler - handleMemorySave accepts relatedTo and supersedes", a
     key: "discord/123",
     components: { platform: "discord", userId: "123" },
     path: `${tempDir}/workspaces/discord/123`,
+    tmpPath: `${tempDir}/workspaces/discord/123/tmp`,
     isDm: false,
   };
 
@@ -875,6 +893,7 @@ Deno.test("MemoryHandler - handleMemorySave rejects invalid relatedTo", async ()
     key: "discord/123",
     components: { platform: "discord", userId: "123" },
     path: `${tempDir}/workspaces/discord/123`,
+    tmpPath: `${tempDir}/workspaces/discord/123/tmp`,
     isDm: false,
   };
 
@@ -915,6 +934,7 @@ Deno.test("MemoryHandler - handleMemorySave rejects invalid supersedes", async (
     key: "discord/123",
     components: { platform: "discord", userId: "123" },
     path: `${tempDir}/workspaces/discord/123`,
+    tmpPath: `${tempDir}/workspaces/discord/123/tmp`,
     isDm: false,
   };
 
@@ -955,6 +975,7 @@ Deno.test("MemoryHandler - handleMemoryPatch rejects invalid supersedes", async 
     key: "discord/123",
     components: { platform: "discord", userId: "123" },
     path: `${tempDir}/workspaces/discord/123`,
+    tmpPath: `${tempDir}/workspaces/discord/123/tmp`,
     isDm: true,
   };
 
@@ -991,6 +1012,7 @@ Deno.test("MemoryHandler - handleMemorySave without relatedTo/supersedes omits t
     key: "discord/123",
     components: { platform: "discord", userId: "123" },
     path: `${tempDir}/workspaces/discord/123`,
+    tmpPath: `${tempDir}/workspaces/discord/123/tmp`,
     isDm: false,
   };
 
@@ -1035,6 +1057,7 @@ Deno.test("MemoryHandler - handleMemorySearch searches agent workspace notes", a
     key: "discord/123",
     components: { platform: "discord", userId: "123" },
     path: `${tempDir}/workspaces/discord/123`,
+    tmpPath: `${tempDir}/workspaces/discord/123/tmp`,
     isDm: false,
   };
 
@@ -1092,6 +1115,7 @@ Deno.test("MemoryHandler - handleMemorySearch returns empty agentNotes when no w
     key: "discord/123",
     components: { platform: "discord", userId: "123" },
     path: `${tempDir}/workspaces/discord/123`,
+    tmpPath: `${tempDir}/workspaces/discord/123/tmp`,
     isDm: false,
   };
 
@@ -1136,6 +1160,7 @@ Deno.test("MemoryHandler - memory-stats - returns statistics", async () => {
     key: "discord/123",
     components: { platform: "discord", userId: "123" },
     path: `${tempDir}/workspaces/discord/123`,
+    tmpPath: `${tempDir}/workspaces/discord/123/tmp`,
     isDm: true,
   };
 
@@ -1186,6 +1211,7 @@ Deno.test("MemoryHandler - memory-stats - respects DM privacy", async () => {
     key: "discord/123",
     components: { platform: "discord", userId: "123" },
     path: `${tempDir}/workspaces/discord/123`,
+    tmpPath: `${tempDir}/workspaces/discord/123/tmp`,
     isDm: false,
   };
 
@@ -1230,6 +1256,7 @@ Deno.test("MemoryHandler - handleMemoryExport returns empty file when no memorie
     key: "discord/123",
     components: { platform: "discord", userId: "123" },
     path: `${tempDir}/workspaces/discord/123`,
+    tmpPath: `${tempDir}/workspaces/discord/123/tmp`,
     isDm: false,
   };
 
@@ -1282,6 +1309,7 @@ Deno.test("MemoryHandler - handleMemoryExport sends file via DM in markdown form
     key: "discord/123",
     components: { platform: "discord", userId: "123" },
     path: `${tempDir}/workspaces/discord/123`,
+    tmpPath: `${tempDir}/workspaces/discord/123/tmp`,
     isDm: false,
   };
 
@@ -1342,6 +1370,7 @@ Deno.test("MemoryHandler - handleMemoryExport sends file via DM in json format",
     key: "discord/123",
     components: { platform: "discord", userId: "123" },
     path: `${tempDir}/workspaces/discord/123`,
+    tmpPath: `${tempDir}/workspaces/discord/123/tmp`,
     isDm: true,
   };
 
@@ -1393,6 +1422,7 @@ Deno.test("MemoryHandler - handleMemoryExport always includes both public and pr
     key: "discord/123",
     components: { platform: "discord", userId: "123" },
     path: `${tempDir}/workspaces/discord/123`,
+    tmpPath: `${tempDir}/workspaces/discord/123/tmp`,
     isDm: false,
   };
 
@@ -1459,6 +1489,7 @@ Deno.test("MemoryHandler - handleMemoryExport filters by importance", async () =
     key: "discord/123",
     components: { platform: "discord", userId: "123" },
     path: `${tempDir}/workspaces/discord/123`,
+    tmpPath: `${tempDir}/workspaces/discord/123/tmp`,
     isDm: false,
   };
 
@@ -1517,6 +1548,7 @@ Deno.test("MemoryHandler - handleMemoryExport filters enabled_only", async () =>
     key: "discord/123",
     components: { platform: "discord", userId: "123" },
     path: `${tempDir}/workspaces/discord/123`,
+    tmpPath: `${tempDir}/workspaces/discord/123/tmp`,
     isDm: false,
   };
 
@@ -1579,6 +1611,7 @@ Deno.test("MemoryHandler - handleMemoryExport includes disabled when enabled_onl
     key: "discord/123",
     components: { platform: "discord", userId: "123" },
     path: `${tempDir}/workspaces/discord/123`,
+    tmpPath: `${tempDir}/workspaces/discord/123/tmp`,
     isDm: false,
   };
 
@@ -1641,6 +1674,7 @@ Deno.test("MemoryHandler - handleMemoryExport validates format parameter", async
     key: "discord/123",
     components: { platform: "discord", userId: "123" },
     path: `${tempDir}/workspaces/discord/123`,
+    tmpPath: `${tempDir}/workspaces/discord/123/tmp`,
     isDm: false,
   };
 
@@ -1678,6 +1712,7 @@ Deno.test("MemoryHandler - handleMemoryExport validates importance parameter", a
     key: "discord/123",
     components: { platform: "discord", userId: "123" },
     path: `${tempDir}/workspaces/discord/123`,
+    tmpPath: `${tempDir}/workspaces/discord/123/tmp`,
     isDm: false,
   };
 
@@ -1715,6 +1750,7 @@ Deno.test("MemoryHandler - handleMemoryExport returns error when getDmChannelId 
     key: "discord/123",
     components: { platform: "discord", userId: "123" },
     path: `${tempDir}/workspaces/discord/123`,
+    tmpPath: `${tempDir}/workspaces/discord/123/tmp`,
     isDm: false,
   };
 
@@ -1762,6 +1798,7 @@ Deno.test("MemoryHandler - handleMemoryExport returns error when sendFile fails"
     key: "discord/123",
     components: { platform: "discord", userId: "123" },
     path: `${tempDir}/workspaces/discord/123`,
+    tmpPath: `${tempDir}/workspaces/discord/123/tmp`,
     isDm: false,
   };
 
@@ -1809,6 +1846,7 @@ Deno.test("MemoryHandler - handleMemoryExport json format contains correct field
     key: "discord/123",
     components: { platform: "discord", userId: "123" },
     path: `${tempDir}/workspaces/discord/123`,
+    tmpPath: `${tempDir}/workspaces/discord/123/tmp`,
     isDm: false,
   };
 
@@ -1877,6 +1915,7 @@ Deno.test("MemoryHandler - handleMemoryExport markdown shows lastModifiedAt when
     key: "discord/123",
     components: { platform: "discord", userId: "123" },
     path: `${tempDir}/workspaces/discord/123`,
+    tmpPath: `${tempDir}/workspaces/discord/123/tmp`,
     isDm: false,
   };
 
@@ -1943,6 +1982,7 @@ Deno.test("MemoryHandler - handleMemoryExport handles unexpected error gracefull
     key: "discord/123",
     components: { platform: "discord", userId: "123" },
     path: `${tempDir}/workspaces/discord/123`,
+    tmpPath: `${tempDir}/workspaces/discord/123/tmp`,
     isDm: false,
   };
 
@@ -1993,6 +2033,7 @@ Deno.test("MemoryHandler - handleMemoryExport defaults to markdown and all impor
     key: "discord/123",
     components: { platform: "discord", userId: "123" },
     path: `${tempDir}/workspaces/discord/123`,
+    tmpPath: `${tempDir}/workspaces/discord/123/tmp`,
     isDm: false,
   };
 

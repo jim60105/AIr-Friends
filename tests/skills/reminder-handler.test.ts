@@ -43,6 +43,7 @@ const makeWorkspace = (
     key: `${platform}/${userId}`,
     components: { platform, userId },
     path,
+    tmpPath: `${path}/tmp`,
     isDm,
   };
 };

@@ -106,6 +106,20 @@ Deno.test("WorkspaceManager - should always create both memory files", async () 
   });
 });
 
+Deno.test("WorkspaceManager - should create tmp directory in workspace", async () => {
+  await withTestWorkspace(async (manager) => {
+    const event = createTestEvent({ isDm: false });
+    const workspace = await manager.getOrCreateWorkspace(event);
+
+    // tmpPath should be set
+    assertEquals(workspace.tmpPath, `${workspace.path}/tmp`);
+
+    // tmp directory should exist
+    const tmpStat = await Deno.stat(workspace.tmpPath);
+    assertEquals(tmpStat.isDirectory, true);
+  });
+});
+
 Deno.test("WorkspaceManager - should prevent path traversal", async () => {
   await withTestWorkspace(async (manager) => {
     const event = createTestEvent();
