@@ -65,11 +65,50 @@ export class ChatbotClient implements acp.Client {
       yolo: this.config.yolo,
     });
 
+    // Extract and log key permission details at INFO level for operational visibility
+    const title = params.toolCall.title ?? "";
+    const kind = params.toolCall.kind ?? "unknown";
+    const rawInput = params.toolCall.rawInput as Record<string, unknown> | undefined;
+    const locations = params.toolCall.locations ?? [];
+
+    // Log external directory access requests
+    if (title === "external_directory" || (kind === "other" && title.includes("directory"))) {
+      const paths = locations.map((l) => l.path).filter(Boolean);
+      this.logger.info(
+        "Agent requested external directory access: {title}",
+        {
+          title,
+          kind,
+          paths: paths.length > 0 ? paths : undefined,
+          rawInput: rawInput && Object.keys(rawInput).length > 0 ? rawInput : undefined,
+          toolCallId: params.toolCall.toolCallId,
+        },
+      );
+    }
+
+    // Log bash/shell command execution requests (non-skill commands)
+    if (kind === "execute" || title === "bash" || title === "terminal") {
+      const commands = (rawInput?.commands as string[]) ??
+        (rawInput?.command ? [rawInput.command as string] : []);
+      this.logger.info(
+        "Agent requested command execution: {title}",
+        {
+          title,
+          kind,
+          commands,
+          rawInput: rawInput && Object.keys(rawInput).length > 0 ? rawInput : undefined,
+          toolCallId: params.toolCall.toolCallId,
+        },
+      );
+    }
+
     // YOLO mode: auto-approve everything
     if (this.config.yolo) {
       this.logger.info("YOLO mode: auto-approving permission for {title}", {
         kind: params.toolCall.kind,
         title: params.toolCall.title,
+        rawInput: rawInput && Object.keys(rawInput).length > 0 ? rawInput : undefined,
+        locations: locations.length > 0 ? locations.map((l) => l.path) : undefined,
       });
 
       const allowOption = params.options.find((o) => o.kind === "allow_once") ??

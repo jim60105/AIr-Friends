@@ -804,3 +804,167 @@ Deno.test("ChatbotClient - rejects paths outside both workspaces", async () => {
     Deno.removeSync(agentWorkspace, { recursive: true });
   }
 });
+
+// ============ Permission Request Logging Tests ============
+
+Deno.test("ChatbotClient - requestPermission logs external directory access at INFO level", async () => {
+  const tempDir = Deno.makeTempDirSync();
+  try {
+    const infoLogs: Array<{ message: string; context: unknown }> = [];
+    const testLogger = new Logger("test", { level: LogLevel.DEBUG });
+    const originalInfo = testLogger.info.bind(testLogger);
+    testLogger.info = (message: string, context?: Record<string, unknown>) => {
+      infoLogs.push({ message, context });
+      originalInfo(message, context);
+    };
+
+    const skillRegistry = createTestSkillRegistry();
+    const config = {
+      workingDir: tempDir,
+      platform: "discord",
+      userId: "123",
+      channelId: "456",
+      isDM: false,
+    };
+
+    const client = new ChatbotClient(skillRegistry, testLogger, config);
+
+    const request: acp.RequestPermissionRequest = {
+      sessionId: "test-session",
+      toolCall: {
+        title: "external_directory",
+        kind: "other",
+        status: "pending" as const,
+        rawInput: {},
+        content: [],
+        toolCallId: "test-dir-id",
+        locations: [{ path: "/home/user/documents" }],
+      },
+      options: [
+        { kind: "allow_once", optionId: "allow-1", name: "Allow once" },
+        { kind: "reject_once", optionId: "reject-1", name: "Reject once" },
+      ],
+    };
+
+    await client.requestPermission(request);
+
+    const dirLogs = infoLogs.filter((log) =>
+      log.message === "Agent requested external directory access: {title}"
+    );
+    assertEquals(dirLogs.length, 1);
+    const context = dirLogs[0].context as Record<string, unknown>;
+    assertEquals(context.title, "external_directory");
+    assertEquals(context.paths, ["/home/user/documents"]);
+    assertEquals(context.toolCallId, "test-dir-id");
+  } finally {
+    Deno.removeSync(tempDir, { recursive: true });
+  }
+});
+
+Deno.test("ChatbotClient - requestPermission logs bash command execution at INFO level", async () => {
+  const tempDir = Deno.makeTempDirSync();
+  try {
+    const infoLogs: Array<{ message: string; context: unknown }> = [];
+    const testLogger = new Logger("test", { level: LogLevel.DEBUG });
+    const originalInfo = testLogger.info.bind(testLogger);
+    testLogger.info = (message: string, context?: Record<string, unknown>) => {
+      infoLogs.push({ message, context });
+      originalInfo(message, context);
+    };
+
+    const skillRegistry = createTestSkillRegistry();
+    const config = {
+      workingDir: tempDir,
+      platform: "discord",
+      userId: "123",
+      channelId: "456",
+      isDM: false,
+    };
+
+    const client = new ChatbotClient(skillRegistry, testLogger, config);
+
+    const request: acp.RequestPermissionRequest = {
+      sessionId: "test-session",
+      toolCall: {
+        title: "Execute shell command",
+        kind: "execute",
+        status: "pending" as const,
+        content: [],
+        toolCallId: "test-exec-id",
+        rawInput: {
+          command: "ls -la /etc",
+        },
+      },
+      options: [
+        { kind: "allow_once", optionId: "allow-1", name: "Allow once" },
+        { kind: "reject_once", optionId: "reject-1", name: "Reject once" },
+      ],
+    };
+
+    await client.requestPermission(request);
+
+    const execLogs = infoLogs.filter((log) =>
+      log.message === "Agent requested command execution: {title}"
+    );
+    assertEquals(execLogs.length, 1);
+    const context = execLogs[0].context as Record<string, unknown>;
+    assertEquals(context.commands, ["ls -la /etc"]);
+    assertEquals(context.toolCallId, "test-exec-id");
+  } finally {
+    Deno.removeSync(tempDir, { recursive: true });
+  }
+});
+
+Deno.test("ChatbotClient - YOLO mode logs enhanced context with rawInput and locations", async () => {
+  const tempDir = Deno.makeTempDirSync();
+  try {
+    const infoLogs: Array<{ message: string; context: unknown }> = [];
+    const testLogger = new Logger("test", { level: LogLevel.DEBUG });
+    const originalInfo = testLogger.info.bind(testLogger);
+    testLogger.info = (message: string, context?: Record<string, unknown>) => {
+      infoLogs.push({ message, context });
+      originalInfo(message, context);
+    };
+
+    const skillRegistry = createTestSkillRegistry();
+    const config = {
+      workingDir: tempDir,
+      platform: "discord",
+      userId: "123",
+      channelId: "456",
+      isDM: false,
+      yolo: true,
+    };
+
+    const client = new ChatbotClient(skillRegistry, testLogger, config);
+
+    const request: acp.RequestPermissionRequest = {
+      sessionId: "test-session",
+      toolCall: {
+        title: "external_directory",
+        kind: "other",
+        status: "pending" as const,
+        rawInput: { path: "/sensitive/dir" },
+        content: [],
+        toolCallId: "test-yolo-id",
+        locations: [{ path: "/sensitive/dir" }],
+      },
+      options: [
+        { kind: "allow_once", optionId: "allow-1", name: "Allow once" },
+        { kind: "reject_once", optionId: "reject-1", name: "Reject once" },
+      ],
+    };
+
+    await client.requestPermission(request);
+
+    const yoloLogs = infoLogs.filter((log) =>
+      log.message === "YOLO mode: auto-approving permission for {title}"
+    );
+    assertEquals(yoloLogs.length, 1);
+    const context = yoloLogs[0].context as Record<string, unknown>;
+    assertEquals(context.rawInput, { path: "/sensitive/dir" });
+    assertEquals(context.locations, ["/sensitive/dir"]);
+  } finally {
+    Deno.removeSync(tempDir, { recursive: true });
+  }
+});
