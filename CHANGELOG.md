@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.14.0] - 2026-02-28
+
+### Added
+
+- Added `Logger.withContext()` method for centralized session context injection — creates a new Logger instance with default context fields automatically merged into every log call, eliminating manual `sessionId` passing at each call site; `SessionOrchestrator` now injects `shellSessionId` and ACP `sessionId` automatically for all 5 session types
+- Added idle timeout detection and auto-recovery for ACP Agent connections — when no activity is received for a configurable period (default 5 min), the system performs liveness checks via `process.status` and `cancel()` probe; configurable via `agent.idleTimeout.*` settings and environment variables `AGENT_IDLE_TIMEOUT_ENABLED`, `AGENT_IDLE_TIMEOUT_MS`, `AGENT_IDLE_TIMEOUT_CHECK_INTERVAL_MS`; added `airfriends_idle_timeout_total` Prometheus metric
+- Added current local date and time to system prompts for clearer temporal context in Agent conversations
+
+### Changed
+
+- Changed `spontaneousPost.allowDm` default value from `true` to `false` — existing deployments relying on the default will no longer send spontaneous DM posts; set `allowDm: true` explicitly to restore previous behavior
+- Changed retry prompt strategy to load content from `skills/send-reply/SKILL.md` and `skills/react-message/SKILL.md` at runtime instead of hardcoded strings, keeping retry messages in sync with skill definitions automatically
+- Changed send-reply rules in system prompts to use bullet points with inline code formatting; added dedicated self-research skill usage instructions and stronger emphasis against follow-up messages after `send-reply`
+
+### Fixed
+
+- Fixed false `ERROR` log from `monitorProcessExit()` when Agent process exits normally after completing a session — now logs at `DEBUG` level when `promptCompleted` flag is set, and resets the flag at the start of each new prompt
+- Fixed Git staging area check to use `git diff --cached --quiet` instead of `git status --porcelain`, correctly handling submodule modified content that was causing spurious `git commit` failures; added `deregisterSubmodules()` to remove nested `.git` directory tracking before `git add`, and updated `.gitignore` to exclude `**/.git`
+- Fixed `GitBackupService` error logs now include `stderr`/`stdout` context from `runGit()` for all failure paths, improving diagnosability of backup failures
+- Fixed Misskey WebSocket silent disconnect causing Agent to stop responding — removed conflicting internal reconnect logic, added 60-second periodic heartbeat via `stream.heartbeat()`, cleaned up existing stream in `connect()` to prevent resource leaks, and increased `ConnectionManager` polling interval from 5s to 30s
+- Fixed Deno user bin directory (`~/.deno/bin`) not included in `PATH`, ensuring user-installed executables (e.g. CLI tools) are discoverable at runtime
+- Fixed `scheduler-state.json` being included in Git backup commits by adding it to the auto-generated `.gitignore` managed by `GitBackupService`
+
 ## [0.13.0] - 2026-02-24
 
 ### Added
@@ -719,7 +742,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ---
 
-[Unreleased]: https://github.com/jim60105/AIr-Friends/compare/v0.13.0...HEAD
+[Unreleased]: https://github.com/jim60105/AIr-Friends/compare/v0.14.0...HEAD
+[0.14.0]: https://github.com/jim60105/AIr-Friends/compare/v0.13.0...v0.14.0
 [0.13.0]: https://github.com/jim60105/AIr-Friends/compare/v0.12.0...v0.13.0
 [0.12.0]: https://github.com/jim60105/AIr-Friends/compare/v0.11.0...v0.12.0
 [0.11.0]: https://github.com/jim60105/AIr-Friends/compare/v0.10.0...v0.11.0
