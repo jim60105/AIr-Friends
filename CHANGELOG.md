@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.15.0] - 2026-02-28
+
+### Changed
+
+- **BREAKING**: Replaced `accessControl.replyTo`/`whitelist` configuration with a new top-level `replyPolicy`/`channels` structure — existing `config.yaml` files must be migrated to the new format
+- **BREAKING**: `ReplyPolicy` value `'whitelist'` renamed to `'channels'`; the environment variable alias `REPLY_TO=whitelist` is preserved for backward compatibility
+- **BREAKING**: `SpontaneousPostConfig.allowDm` option removed — control spontaneous DM targeting via per-channel `spontaneousPost: true` flag on account entries instead
+- **BREAKING**: `ModelRoutingMatch.whitelist` renamed to `ModelRoutingMatch.channel` in model routing rule match conditions
+- Changed Channel Lurk configuration to use per-channel `channelLurk` boolean flag instead of deriving from whitelist entries
+- Changed rate limiting bypass to use per-channel `rateLimitBypass` flag instead of account-based bypass detection
+- Added `misskey/timeline/self` channel ID support in the `channels` list for Misskey spontaneous posting
+- Updated `config.example.yaml`, `.env.example`, `helm/values.yaml`, and Helm secret template to reflect new configuration structure
+
 ## [0.14.0] - 2026-02-28
 
 ### Added
@@ -742,7 +755,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ---
 
-[Unreleased]: https://github.com/jim60105/AIr-Friends/compare/v0.14.0...HEAD
+[Unreleased]: https://github.com/jim60105/AIr-Friends/compare/v0.15.0...HEAD
+[0.15.0]: https://github.com/jim60105/AIr-Friends/compare/v0.14.0...v0.15.0
 [0.14.0]: https://github.com/jim60105/AIr-Friends/compare/v0.13.0...v0.14.0
 [0.13.0]: https://github.com/jim60105/AIr-Friends/compare/v0.12.0...v0.13.0
 [0.12.0]: https://github.com/jim60105/AIr-Friends/compare/v0.11.0...v0.12.0
