@@ -195,8 +195,8 @@ export type SessionType =
  * Within contentKeywords, any keyword match is sufficient (OR logic).
  */
 export interface ModelRoutingMatch {
-  /** Match a specific whitelist entry (format: "{platform}/account/{id}" or "{platform}/channel/{id}") */
-  whitelist?: string;
+  /** Match a specific channel entry (format: "{platform}/account/{id}" or "{platform}/channel/{id}") */
+  channel?: string;
   /** Match a session type */
   sessionType?: SessionType;
   /** Match message content containing any of these keywords (case-insensitive, OR within array).
@@ -309,13 +309,6 @@ export interface SpontaneousPostConfig {
    * (default: 0.5)
    */
   contextFetchProbability: number;
-
-  /**
-   * Whether spontaneous posts can be sent via DM (direct message).
-   * When false, only channel targets from the whitelist are used.
-   * (default: true)
-   */
-  allowDm: boolean;
 }
 
 /**
@@ -360,17 +353,52 @@ export interface SkillAPIConfig {
 /**
  * Reply policy mode
  */
-export type ReplyPolicy = "all" | "public" | "whitelist";
+export type ReplyPolicy = "all" | "public" | "channels";
 
 /**
- * Access control configuration
+ * Single channel configuration
  */
-export interface AccessControlConfig {
-  /** Reply policy mode (default: "whitelist") */
-  replyTo: ReplyPolicy;
+export interface ChannelConfig {
+  /** Channel identifier: {platform}/account/{id}, {platform}/channel/{id}, or misskey/timeline/self */
+  id: string;
+  /** Whether this channel is enabled (enabled = allow reply) (default: true) */
+  enabled?: boolean;
+  /** Whether to enable Spontaneous Post on this channel (default: false) */
+  spontaneousPost?: boolean;
+  /** Whether to enable Channel Lurk on this channel (only valid for discord/channel/*) (default: false) */
+  channelLurk?: boolean;
+  /** Whether to bypass rate limiting (default: false) */
+  rateLimitBypass?: boolean;
+}
 
-  /** Whitelist entries in format "{platform}/account/{id}" or "{platform}/channel/{id}" */
-  whitelist: string[];
+/**
+ * Get enabled channels for a specific platform matching filter criteria
+ */
+export function getEnabledChannels(
+  channels: ChannelConfig[],
+  platform: string,
+  filter?: Partial<Pick<ChannelConfig, "spontaneousPost" | "channelLurk">>,
+): ChannelConfig[] {
+  return channels.filter((ch) => {
+    if (ch.enabled === false) return false;
+    if (!ch.id.startsWith(`${platform}/`)) return false;
+    if (filter?.spontaneousPost !== undefined && ch.spontaneousPost !== filter.spontaneousPost) {
+      return false;
+    }
+    if (filter?.channelLurk !== undefined && ch.channelLurk !== filter.channelLurk) return false;
+    return true;
+  });
+}
+
+/**
+ * Parse a channel ID string into structured components
+ */
+export function parseChannelId(
+  id: string,
+): { platform: string; type: string; value: string } | null {
+  const match = id.match(/^(\w+)\/(account|channel|timeline)\/(.+)$/);
+  if (!match) return null;
+  return { platform: match[1], type: match[2], value: match[3] };
 }
 
 /**
@@ -514,7 +542,10 @@ export interface Config {
   logging: LoggingConfig;
   health?: HealthConfig;
   skillApi?: SkillAPIConfig;
-  accessControl: AccessControlConfig;
+  /** Reply policy mode */
+  replyPolicy: ReplyPolicy;
+  /** Channel configurations */
+  channels: ChannelConfig[];
   selfResearch?: SelfResearchConfig;
   memoryMaintenance?: MemoryMaintenanceConfig;
   rateLimit?: RateLimitConfig;

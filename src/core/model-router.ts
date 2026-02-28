@@ -29,21 +29,21 @@ function matchesRule(
   match: ModelRoutingMatch,
   context: ModelRoutingContext,
 ): boolean {
-  // whitelist condition
-  if (match.whitelist !== undefined) {
-    const entry = match.whitelist;
-    let whitelistMatched = false;
+  // channel condition
+  if (match.channel !== undefined) {
+    const entry = match.channel;
+    let channelMatched = false;
     if (context.platform && context.userId) {
       if (entry === `${context.platform}/account/${context.userId}`) {
-        whitelistMatched = true;
+        channelMatched = true;
       }
     }
-    if (!whitelistMatched && context.platform && context.channelId) {
+    if (!channelMatched && context.platform && context.channelId) {
       if (entry === `${context.platform}/channel/${context.channelId}`) {
-        whitelistMatched = true;
+        channelMatched = true;
       }
     }
-    if (!whitelistMatched) return false;
+    if (!channelMatched) return false;
   }
 
   // sessionType condition
@@ -65,7 +65,7 @@ function matchesRule(
 
   // All specified conditions passed
   // Empty match object should not match anything
-  const hasAnyCondition = match.whitelist !== undefined ||
+  const hasAnyCondition = match.channel !== undefined ||
     match.sessionType !== undefined ||
     (match.contentKeywords !== undefined && match.contentKeywords.length > 0);
   return hasAnyCondition;

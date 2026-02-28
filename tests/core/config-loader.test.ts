@@ -416,8 +416,8 @@ workspace:
 
   await withTestConfig(config, async (dir) => {
     const result = await loadConfig(dir);
-    assertEquals(result.accessControl.replyTo, "whitelist");
-    assertEquals(result.accessControl.whitelist, []);
+    assertEquals(result.replyPolicy, "channels");
+    assertEquals(result.channels, []);
   });
 });
 
@@ -436,17 +436,16 @@ agent:
 workspace:
   repoPath: "./data"
   workspacesDir: "workspaces"
-accessControl:
-  replyTo: "public"
-  whitelist:
-    - "discord/account/123456789012345678"
-    - "misskey/channel/abcdef1234567890"
+replyPolicy: "public"
+channels:
+  - id: "discord/account/123456789012345678"
+  - id: "misskey/channel/abcdef1234567890"
 `;
 
   await withTestConfig(config, async (dir) => {
     const result = await loadConfig(dir);
-    assertEquals(result.accessControl.replyTo, "public");
-    assertEquals(result.accessControl.whitelist, [
+    assertEquals(result.replyPolicy, "public");
+    assertEquals(result.channels.map((c) => c.id), [
       "discord/account/123456789012345678",
       "misskey/channel/abcdef1234567890",
     ]);
@@ -468,23 +467,22 @@ agent:
 workspace:
   repoPath: "./data"
   workspacesDir: "workspaces"
-accessControl:
-  replyTo: "whitelist"
-  whitelist: []
+replyPolicy: "channels"
+channels: []
 `;
 
   Deno.env.set("REPLY_TO", "all");
   try {
     await withTestConfig(config, async (dir) => {
       const result = await loadConfig(dir);
-      assertEquals(result.accessControl.replyTo, "all");
+      assertEquals(result.replyPolicy, "all");
     });
   } finally {
     Deno.env.delete("REPLY_TO");
   }
 });
 
-Deno.test("loadConfig - WHITELIST env overrides config file with comma-separated values", async () => {
+Deno.test("loadConfig - CHANNELS env overrides config file with JSON values", async () => {
   const config = `
 platforms:
   discord:
@@ -499,31 +497,30 @@ agent:
 workspace:
   repoPath: "./data"
   workspacesDir: "workspaces"
-accessControl:
-  replyTo: "whitelist"
-  whitelist:
-    - "discord/account/111111111111111111"
+replyPolicy: "channels"
+channels:
+    - id: "discord/account/111111111111111111"
 `;
 
   Deno.env.set(
-    "WHITELIST",
-    "discord/account/123456789012345678,discord/channel/987654321098765432,misskey/account/abcdef1234567890",
+    "CHANNELS",
+    '[{"id":"discord/account/123456789012345678"},{"id":"discord/channel/987654321098765432"},{"id":"misskey/account/abcdef1234567890"}]',
   );
   try {
     await withTestConfig(config, async (dir) => {
       const result = await loadConfig(dir);
-      assertEquals(result.accessControl.whitelist, [
+      assertEquals(result.channels.map((c) => c.id), [
         "discord/account/123456789012345678",
         "discord/channel/987654321098765432",
         "misskey/account/abcdef1234567890",
       ]);
     });
   } finally {
-    Deno.env.delete("WHITELIST");
+    Deno.env.delete("CHANNELS");
   }
 });
 
-Deno.test("loadConfig - WHITELIST env trims whitespace from entries", async () => {
+Deno.test("loadConfig - CHANNELS env trims whitespace handled via JSON", async () => {
   const config = `
 platforms:
   discord:
@@ -538,26 +535,28 @@ agent:
 workspace:
   repoPath: "./data"
   workspacesDir: "workspaces"
-accessControl:
-  replyTo: "whitelist"
-  whitelist: []
+replyPolicy: "channels"
+channels: []
 `;
 
-  Deno.env.set("WHITELIST", "  discord/account/12345678901234567  ,  misskey/channel/456  ");
+  Deno.env.set(
+    "CHANNELS",
+    '[{"id":"discord/account/12345678901234567"},{"id":"misskey/channel/456"}]',
+  );
   try {
     await withTestConfig(config, async (dir) => {
       const result = await loadConfig(dir);
-      assertEquals(result.accessControl.whitelist, [
+      assertEquals(result.channels.map((c) => c.id), [
         "discord/account/12345678901234567",
         "misskey/channel/456",
       ]);
     });
   } finally {
-    Deno.env.delete("WHITELIST");
+    Deno.env.delete("CHANNELS");
   }
 });
 
-Deno.test("loadConfig - empty WHITELIST env does not override config file", async () => {
+Deno.test("loadConfig - empty CHANNELS env does not override config file", async () => {
   const config = `
 platforms:
   discord:
@@ -572,22 +571,21 @@ agent:
 workspace:
   repoPath: "./data"
   workspacesDir: "workspaces"
-accessControl:
-  replyTo: "whitelist"
-  whitelist:
-    - "discord/account/123456789012345678"
+replyPolicy: "channels"
+channels:
+    - id: "discord/account/123456789012345678"
 `;
 
-  Deno.env.set("WHITELIST", "");
+  Deno.env.set("CHANNELS", "");
   try {
     await withTestConfig(config, async (dir) => {
       const result = await loadConfig(dir);
-      assertEquals(result.accessControl.whitelist, [
+      assertEquals(result.channels.map((c) => c.id), [
         "discord/account/123456789012345678",
       ]);
     });
   } finally {
-    Deno.env.delete("WHITELIST");
+    Deno.env.delete("CHANNELS");
   }
 });
 
@@ -606,16 +604,15 @@ agent:
 workspace:
   repoPath: "./data"
   workspacesDir: "workspaces"
-accessControl:
-  replyTo: "invalid-value"
-  whitelist: []
+replyPolicy: "invalid-value"
+channels: []
 `;
 
   await withTestConfig(config, async (dir) => {
     await assertRejects(
       () => loadConfig(dir),
       ConfigError,
-      'Invalid accessControl.replyTo value: "invalid-value"',
+      'Invalid replyPolicy value: "invalid-value"',
     );
   });
 });
@@ -635,20 +632,19 @@ agent:
 workspace:
   repoPath: "./data"
   workspacesDir: "workspaces"
-accessControl:
-  replyTo: "whitelist"
-  whitelist:
-    - "discord/account/123456789012345678"
-    - "invalid-format"
-    - "misskey/channel/abc123"
-    - "twitter/account/123"
+replyPolicy: "channels"
+channels:
+    - id: "discord/account/123456789012345678"
+    - id: "invalid-format"
+    - id: "misskey/channel/abc123"
+    - id: "twitter/account/123"
     - ""
 `;
 
   await withTestConfig(config, async (dir) => {
     const result = await loadConfig(dir);
     // Only valid entries should be kept
-    assertEquals(result.accessControl.whitelist, [
+    assertEquals(result.channels.map((c) => c.id), [
       "discord/account/123456789012345678",
       "misskey/channel/abc123",
     ]);
@@ -670,19 +666,19 @@ agent:
 workspace:
   repoPath: "./data"
   workspacesDir: "workspaces"
-accessControl:
-  replyTo: "whitelist"
-  whitelist:
-    - "discord/account/123456789012345678"
-    - "discord/channel/987654321098765432"
-    - "misskey/account/abcdef1234567890"
-    - "misskey/channel/xyz9876543210"
+replyPolicy: "channels"
+channels:
+    - id: "discord/account/123456789012345678"
+    - id: "discord/channel/987654321098765432"
+    - id: "misskey/account/abcdef1234567890"
+    - id: "misskey/channel/xyz9876543210"
 `;
 
   await withTestConfig(config, async (dir) => {
     const result = await loadConfig(dir);
-    assertEquals(result.accessControl.whitelist.length, 4);
-    assertEquals(result.accessControl.whitelist, [
+    assertEquals(result.channels.length, 4);
+    assertEquals(result.channels.map((c) => c.id).length, 4);
+    assertEquals(result.channels.map((c) => c.id), [
       "discord/account/123456789012345678",
       "discord/channel/987654321098765432",
       "misskey/account/abcdef1234567890",
@@ -706,17 +702,16 @@ agent:
 workspace:
   repoPath: "./data"
   workspacesDir: "workspaces"
-accessControl:
-  replyTo: "whitelist"
-  whitelist:
-    - "discord/account/abcdef1234567890"
-    - "discord/channel/not-a-snowflake"
-    - "discord/account/123456789012345678"
+replyPolicy: "channels"
+channels:
+    - id: "discord/account/abcdef1234567890"
+    - id: "discord/channel/not-a-snowflake"
+    - id: "discord/account/123456789012345678"
 `;
 
   await withTestConfig(config, async (dir) => {
     const result = await loadConfig(dir);
-    assertEquals(result.accessControl.whitelist, [
+    assertEquals(result.channels.map((c) => c.id), [
       "discord/account/123456789012345678",
     ]);
   });
@@ -737,18 +732,17 @@ agent:
 workspace:
   repoPath: "./data"
   workspacesDir: "workspaces"
-accessControl:
-  replyTo: "whitelist"
-  whitelist:
-    - "discord/account/1234567890123456"
-    - "discord/account/123456789012345678901"
-    - "discord/account/12345678901234567"
-    - "discord/account/12345678901234567890"
+replyPolicy: "channels"
+channels:
+    - id: "discord/account/1234567890123456"
+    - id: "discord/account/123456789012345678901"
+    - id: "discord/account/12345678901234567"
+    - id: "discord/account/12345678901234567890"
 `;
 
   await withTestConfig(config, async (dir) => {
     const result = await loadConfig(dir);
-    assertEquals(result.accessControl.whitelist, [
+    assertEquals(result.channels.map((c) => c.id), [
       "discord/account/12345678901234567",
       "discord/account/12345678901234567890",
     ]);
@@ -770,17 +764,16 @@ agent:
 workspace:
   repoPath: "./data"
   workspacesDir: "workspaces"
-accessControl:
-  replyTo: "whitelist"
-  whitelist:
-    - "misskey/account/abcdef1234"
-    - "misskey/account/abcdef1234567890ab"
-    - "misskey/channel/0123456789abcdef01234567"
+replyPolicy: "channels"
+channels:
+    - id: "misskey/account/abcdef1234"
+    - id: "misskey/account/abcdef1234567890ab"
+    - id: "misskey/channel/0123456789abcdef01234567"
 `;
 
   await withTestConfig(config, async (dir) => {
     const result = await loadConfig(dir);
-    assertEquals(result.accessControl.whitelist.length, 3);
+    assertEquals(result.channels.length, 3);
   });
 });
 
@@ -1530,7 +1523,7 @@ agent:
   modelRouting:
     enabled: true
     rules:
-      - match: { whitelist: "invalid-format" }
+      - match: { channel: "invalid-format" }
         model: "some-model"
 workspace:
   repoPath: "./data"
@@ -1586,7 +1579,7 @@ agent:
   modelRouting:
     enabled: true
     rules:
-      - match: { whitelist: "discord/account/12345678901234567", sessionType: "message" }
+      - match: { channel: "discord/account/12345678901234567", sessionType: "message" }
         model: "some-model"
 workspace:
   repoPath: "./data"
@@ -1615,9 +1608,9 @@ agent:
   modelRouting:
     enabled: true
     rules:
-      - match: { whitelist: "discord/account/12345678901234567" }
+      - match: { channel: "discord/account/12345678901234567" }
         model: "valid-model"
-      - match: { whitelist: "invalid-format" }
+      - match: { channel: "invalid-format" }
         model: "bad-model"
       - match: { sessionType: "spontaneous" }
         model: "spontaneous-model"
@@ -1708,7 +1701,7 @@ agent:
     enabled: true
     rules:
       - match:
-          whitelist: "discord/account/12345678901234567"
+          channel: "discord/account/12345678901234567"
           contentKeywords: ["研究", "research"]
         model: "combo-model"
 workspace:
@@ -1721,7 +1714,7 @@ workspace:
     assertEquals(result.agent.modelRouting?.rules.length, 1);
     assertEquals(result.agent.modelRouting?.rules[0].model, "combo-model");
     assertEquals(
-      result.agent.modelRouting?.rules[0].match.whitelist,
+      result.agent.modelRouting?.rules[0].match.channel,
       "discord/account/12345678901234567",
     );
     assertEquals(result.agent.modelRouting?.rules[0].match.contentKeywords, ["研究", "research"]);

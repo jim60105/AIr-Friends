@@ -2,7 +2,7 @@
 
 import { assertEquals } from "@std/assert";
 import { ChannelLurkScheduler, type ChannelLurkTarget } from "@core/channel-lurk-scheduler.ts";
-import { extractDiscordChannelIds } from "@platforms/discord/index.ts";
+import { extractChannelLurkIds } from "@platforms/discord/index.ts";
 import type { ChannelLurkConfig } from "../../src/types/config.ts";
 import type { PlatformMessage } from "../../src/types/events.ts";
 import { MockPlatformAdapter } from "../mocks/mock-platform-adapter.ts";
@@ -28,20 +28,20 @@ function createMockMessage(overrides?: Partial<PlatformMessage>): PlatformMessag
 }
 
 Deno.test("extractDiscordChannelIds - filters discord channel entries", () => {
-  const whitelist = [
-    "discord/channel/11100000000000000",
-    "discord/account/22200000000000000",
-    "misskey/channel/333",
-    "discord/channel/44400000000000000",
+  const channels = [
+    { id: "discord/channel/11100000000000000", enabled: true, channelLurk: true },
+    { id: "discord/account/22200000000000000", enabled: true, channelLurk: false },
+    { id: "misskey/channel/333", enabled: true, channelLurk: false },
+    { id: "discord/channel/44400000000000000", enabled: true, channelLurk: true },
   ];
-  const result = extractDiscordChannelIds(whitelist);
+  const result = extractChannelLurkIds(channels);
   assertEquals(result, ["11100000000000000", "44400000000000000"]);
 });
 
-Deno.test("extractDiscordChannelIds - returns empty for no matches", () => {
-  const result = extractDiscordChannelIds([
-    "discord/account/12345678901234567",
-    "misskey/account/456",
+Deno.test("extractChannelLurkIds - returns empty for no matches", () => {
+  const result = extractChannelLurkIds([
+    { id: "discord/account/12345678901234567", enabled: true, channelLurk: false },
+    { id: "misskey/account/456", enabled: true, channelLurk: false },
   ]);
   assertEquals(result, []);
 });

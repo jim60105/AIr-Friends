@@ -108,7 +108,7 @@ export class AgentCore {
       this.yolo,
     );
 
-    this.replyPolicy = new ReplyPolicyEvaluator(config.accessControl);
+    this.replyPolicy = new ReplyPolicyEvaluator(config.replyPolicy, config.channels);
 
     // Initialize message handler and reply dispatcher
     const rateLimitConfig = config.rateLimit ?? {
@@ -168,7 +168,7 @@ export class AgentCore {
         channelId: event.channelId,
         userId: event.userId,
         messageId: event.messageId,
-        policy: this.config.accessControl.replyTo,
+        policy: this.config.replyPolicy,
       });
       return;
     }

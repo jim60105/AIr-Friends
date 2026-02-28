@@ -1,29 +1,24 @@
 import { createLogger } from "@utils/logger.ts";
-import type { AccessControlConfig, ReplyPolicy } from "../types/config.ts";
-import type { NormalizedEvent, Platform } from "../types/events.ts";
+import type { ChannelConfig, ReplyPolicy } from "../types/config.ts";
+import { parseChannelId } from "../types/config.ts";
+import type { NormalizedEvent } from "../types/events.ts";
 
 const logger = createLogger("ReplyPolicy");
 
-interface WhitelistEntry {
-  platform: Platform;
-  type: "account" | "channel";
-  id: string;
-}
-
 /**
- * Evaluates whether to reply to a given event based on access control config.
+ * Evaluates whether to reply to a given event based on channel configuration.
  */
 export class ReplyPolicyEvaluator {
   private readonly policy: ReplyPolicy;
-  private readonly entries: WhitelistEntry[];
+  private readonly channels: ChannelConfig[];
 
-  constructor(config: AccessControlConfig) {
-    this.policy = config.replyTo;
-    this.entries = this.parseWhitelist(config.whitelist);
+  constructor(policy: ReplyPolicy, channels: ChannelConfig[]) {
+    this.policy = policy;
+    this.channels = channels;
 
     logger.info("Reply policy initialized", {
       policy: this.policy,
-      whitelistEntries: this.entries.length,
+      channelEntries: this.channels.length,
     });
   }
 
@@ -31,8 +26,6 @@ export class ReplyPolicyEvaluator {
    * Determine if the bot should reply to this event.
    */
   shouldReply(event: NormalizedEvent): boolean {
-    const whitelisted = this.isWhitelisted(event);
-
     switch (this.policy) {
       case "all":
         return true;
@@ -40,9 +33,9 @@ export class ReplyPolicyEvaluator {
         if (!event.isDm) {
           return true;
         }
-        return whitelisted;
-      case "whitelist":
-        return whitelisted;
+        return this.isChannelEnabled(event);
+      case "channels":
+        return this.isChannelEnabled(event);
       default:
         logger.warn("Unknown reply policy, defaulting to deny", { policy: this.policy });
         return false;
@@ -50,56 +43,48 @@ export class ReplyPolicyEvaluator {
   }
 
   /**
-   * Check if a user is whitelisted as an account (not channel).
-   * Used by rate limiter to bypass rate limits for trusted accounts.
+   * Check if rate limiting should be bypassed for a given event.
+   * Works for both account type (match by userId) and channel type (match by channelId).
    */
-  isWhitelistedAccount(platform: string, userId: string): boolean {
-    return this.entries.some((entry) =>
-      entry.platform === platform &&
-      entry.type === "account" &&
-      entry.id === userId
-    );
-  }
+  isRateLimitBypassed(platform: string, userId: string, channelId: string): boolean {
+    return this.channels.some((ch) => {
+      if (ch.enabled === false || !ch.rateLimitBypass) return false;
+      const parsed = parseChannelId(ch.id);
+      if (!parsed || parsed.platform !== platform) return false;
 
-  /**
-   * Check whether an event matches any whitelist entry.
-   */
-  private isWhitelisted(event: NormalizedEvent): boolean {
-    return this.entries.some((entry) => {
-      if (entry.platform !== event.platform) {
-        return false;
+      if (parsed.type === "account") {
+        return parsed.value === userId;
       }
-
-      switch (entry.type) {
-        case "account":
-          return entry.id === event.userId;
-        case "channel":
-          return entry.id === event.channelId;
+      if (parsed.type === "channel") {
+        return parsed.value === channelId;
       }
+      return false;
     });
   }
 
   /**
-   * Parse whitelist string entries into structured format.
+   * Get the channel configuration for a specific channel ID string.
    */
-  private parseWhitelist(whitelist: string[]): WhitelistEntry[] {
-    const pattern = /^(discord|misskey)\/(account|channel)\/(\S+)$/;
-    const entries: WhitelistEntry[] = [];
+  getChannelConfig(channelId: string): ChannelConfig | undefined {
+    return this.channels.find((ch) => ch.id === channelId);
+  }
 
-    for (const raw of whitelist) {
-      const match = raw.match(pattern);
-      if (!match) {
-        logger.warn("Invalid whitelist entry, skipping", { entry: raw });
-        continue;
+  /**
+   * Check whether an event matches any enabled channel entry.
+   */
+  private isChannelEnabled(event: NormalizedEvent): boolean {
+    return this.channels.some((ch) => {
+      if (ch.enabled === false) return false;
+      const parsed = parseChannelId(ch.id);
+      if (!parsed || parsed.platform !== event.platform) return false;
+
+      if (parsed.type === "account") {
+        return parsed.value === event.userId;
       }
-
-      entries.push({
-        platform: match[1] as Platform,
-        type: match[2] as "account" | "channel",
-        id: match[3],
-      });
-    }
-
-    return entries;
+      if (parsed.type === "channel") {
+        return parsed.value === event.channelId;
+      }
+      return false;
+    });
   }
 }

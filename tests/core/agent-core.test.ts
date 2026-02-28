@@ -76,7 +76,8 @@ class MockPlatformAdapter implements Partial<PlatformAdapter> {
 // Helper to create test config
 function createTestConfig(
   tempDir: string,
-  accessControl: Config["accessControl"] = { replyTo: "whitelist", whitelist: [] },
+  replyPolicy: Config["replyPolicy"] = "channels",
+  channels: Config["channels"] = [],
 ): Config {
   return {
     platforms: {
@@ -101,7 +102,8 @@ function createTestConfig(
     logging: {
       level: "FATAL",
     },
-    accessControl,
+    replyPolicy,
+    channels,
   };
 }
 
@@ -178,10 +180,7 @@ Deno.test("AgentCore - handles events from registered platforms", async () => {
       "You are a helpful assistant.",
     );
 
-    const config = createTestConfig(tempDir, {
-      replyTo: "all",
-      whitelist: [],
-    });
+    const config = createTestConfig(tempDir, "all", []);
     const agentCore = new AgentCore(config);
     const mockAdapter = new MockPlatformAdapter();
     const adapter = mockAdapter as unknown as PlatformAdapter;
@@ -218,10 +217,7 @@ Deno.test("AgentCore - filters events blocked by access control", async () => {
     );
 
     // Default whitelist mode with empty whitelist should block all events.
-    const config = createTestConfig(tempDir, {
-      replyTo: "whitelist",
-      whitelist: [],
-    });
+    const config = createTestConfig(tempDir, "channels", []);
     const agentCore = new AgentCore(config);
     const mockAdapter = new MockPlatformAdapter();
     const adapter = mockAdapter as unknown as PlatformAdapter;

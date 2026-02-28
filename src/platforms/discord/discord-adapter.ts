@@ -35,7 +35,7 @@ import {
   messageToPltatformMessage,
   normalizeDiscordMessage,
   removeBotMention,
-  selectDiscordSpontaneousEntry,
+  selectDiscordSpontaneousTarget,
   shouldRespondToMessage,
 } from "./discord-utils.ts";
 
@@ -639,10 +639,9 @@ export class DiscordAdapter extends PlatformAdapter {
    * Randomly selects a channel or account from the whitelist.
    */
   async determineSpontaneousTarget(config: Config): Promise<SpontaneousTarget | null> {
-    const allowDm = config.platforms.discord.spontaneousPost?.allowDm ?? false;
-    const entry = selectDiscordSpontaneousEntry(config.accessControl.whitelist, allowDm);
+    const entry = selectDiscordSpontaneousTarget(config.channels);
     if (!entry) {
-      logger.warn("No Discord whitelist entries available for spontaneous post");
+      logger.warn("No Discord channels configured for spontaneous posting");
       return null;
     }
 
@@ -667,7 +666,7 @@ export class DiscordAdapter extends PlatformAdapter {
       }
     }
 
-    logger.warn("Unknown whitelist entry type: {type}", { type: entry.type });
+    logger.warn("Unknown channel entry type: {type}", { type: entry.type });
     return null;
   }
 

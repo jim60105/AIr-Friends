@@ -55,10 +55,8 @@ const createTestConfig = (
       port: healthPort,
     }
     : undefined,
-  accessControl: {
-    replyTo: "whitelist",
-    whitelist: [],
-  },
+  replyPolicy: "channels",
+  channels: [],
 });
 
 Deno.test({

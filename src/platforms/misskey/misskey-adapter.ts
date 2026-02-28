@@ -5,6 +5,7 @@ import { createLogger } from "@utils/logger.ts";
 import { PlatformAdapter } from "@platforms/platform-adapter.ts";
 import type { Platform, PlatformMessage } from "../../types/events.ts";
 import type { Config } from "../../types/config.ts";
+import { parseChannelId } from "../../types/config.ts";
 import type { SpontaneousTarget } from "../../core/spontaneous-target.ts";
 import {
   ConnectionState,
@@ -924,26 +925,30 @@ export class MisskeyAdapter extends PlatformAdapter {
 
   /**
    * Determine the target for a spontaneous post on Misskey.
-   * When allowDm is true and whitelist contains misskey/account entries,
-   * randomly chooses between timeline:self and a DM target.
-   * When allowDm is false, always posts to timeline:self.
+   * Selects from channels configured with spontaneousPost: true.
+   * Supports misskey/timeline/self, misskey/account/* (DM), and misskey/channel/*.
    */
   async determineSpontaneousTarget(config: Config): Promise<SpontaneousTarget | null> {
-    const allowDm = config.platforms?.misskey?.spontaneousPost?.allowDm ?? false;
+    const targets: SpontaneousTarget[] = [];
 
-    const targets: SpontaneousTarget[] = [{ channelId: "timeline:self" }];
+    for (const ch of config.channels) {
+      if (ch.enabled === false || !ch.spontaneousPost) continue;
+      const parsed = parseChannelId(ch.id);
+      if (!parsed || parsed.platform !== "misskey") continue;
 
-    if (allowDm) {
-      const misskeyAccountEntries = (config.accessControl?.whitelist ?? [])
-        .filter((entry) => entry.startsWith("misskey/account/"))
-        .map((entry) => entry.replace("misskey/account/", ""));
-
-      for (const userId of misskeyAccountEntries) {
-        const dmChannelId = await this.getDmChannelId(userId);
+      if (parsed.type === "timeline" && parsed.value === "self") {
+        targets.push({ channelId: "timeline:self" });
+      } else if (parsed.type === "account") {
+        const dmChannelId = await this.getDmChannelId(parsed.value);
         if (dmChannelId) {
           targets.push({ channelId: dmChannelId });
         }
       }
+    }
+
+    if (targets.length === 0) {
+      logger.warn("No Misskey channels configured for spontaneous posting");
+      return null;
     }
 
     return targets[Math.floor(Math.random() * targets.length)];

@@ -86,7 +86,8 @@ function createTestOrchestrator(): { orchestrator: TestableOrchestrator; cleanup
       workspacesDir: "workspaces",
     },
     logging: { level: "FATAL" },
-    accessControl: { replyTo: "all", whitelist: [] },
+    replyPolicy: "channels",
+    channels: [],
   };
 
   const workspaceManager = new WorkspaceManager({
