@@ -277,6 +277,7 @@ Deno.test("SkillAPIServer - validates skill name", async () => {
         userId: "123",
       },
       path: tempDir,
+      tmpPath: tempDir + "/tmp",
       isDm: false,
     };
 
@@ -351,6 +352,7 @@ Deno.test("SkillAPIServer - allows multiple replies within limit", async () => {
         userId: "123",
       },
       path: tempDir,
+      tmpPath: tempDir + "/tmp",
       isDm: false,
     };
 
@@ -432,6 +434,7 @@ Deno.test("SkillAPIServer - send-reply rejected after reaching limit", async () 
         userId: "123",
       },
       path: tempDir,
+      tmpPath: tempDir + "/tmp",
       isDm: false,
     };
 
@@ -525,6 +528,7 @@ Deno.test("SkillAPIServer - reply count not incremented on failed send-reply", a
         userId: "123",
       },
       path: tempDir,
+      tmpPath: tempDir + "/tmp",
       isDm: false,
     };
 
@@ -604,6 +608,7 @@ Deno.test("SkillAPIServer - edit-reply not affected by reply limit", async () =>
         userId: "123",
       },
       path: tempDir,
+      tmpPath: tempDir + "/tmp",
       isDm: false,
     };
 

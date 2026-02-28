@@ -185,8 +185,8 @@ STOPSIGNAL SIGTERM
 # Use dumb-init as PID 1 for proper signal handling
 ENTRYPOINT ["dumb-init", "--"]
 
-# Default command to run the chatbot with --yolo flag (safe in container environment)
-CMD ["deno", "run", "--allow-net", "--allow-read", "--allow-write", "--allow-env", "--allow-run", "src/main.ts", "--yolo"]
+# Default command to run the chatbot
+CMD ["deno", "run", "--allow-net", "--allow-read", "--allow-write", "--allow-env", "--allow-run", "src/main.ts"]
 
 ARG VERSION
 ARG RELEASE

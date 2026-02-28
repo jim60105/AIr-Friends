@@ -70,6 +70,7 @@ Deno.test("Integration: Agent workspace end-to-end flow", async () => {
       key: "discord/testuser",
       components: { platform: "discord", userId: "testuser" },
       path: `${tempDir}/workspaces/discord/testuser`,
+      tmpPath: `${tempDir}/workspaces/discord/testuser/tmp`,
       isDm: false,
     };
 

@@ -23,6 +23,8 @@ const BASE_ALLOWED_ENV = [
   "SESSION_ID",
   // Agent workspace
   "AGENT_WORKSPACE",
+  // Workspace-scoped temp directory
+  "TMPDIR",
 ];
 
 // Agent-type-specific authentication environment variables

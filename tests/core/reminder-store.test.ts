@@ -8,6 +8,7 @@ function makeWorkspace(dir: string): WorkspaceInfo {
     key: "test/workspace",
     components: { platform: "discord", userId: "user1" },
     path: dir,
+    tmpPath: dir + "/tmp",
     isDm: true,
   } as WorkspaceInfo;
 }

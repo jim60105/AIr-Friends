@@ -154,3 +154,51 @@ Deno.test("ReplyPolicy - isRateLimitBypassed returns false for different platfor
   const evaluator = createEvaluator("channels", channels);
   assertEquals(evaluator.isRateLimitBypassed("misskey", "123", ""), false);
 });
+
+Deno.test("ReplyPolicy - isYoloEnabled returns true for account with yolo: true", () => {
+  const channels: ChannelConfig[] = [
+    { id: "discord/account/12345678901234567", enabled: true, yolo: true },
+  ];
+  const evaluator = createEvaluator("channels", channels);
+  assertEquals(evaluator.isYoloEnabled("discord", "12345678901234567", ""), true);
+});
+
+Deno.test("ReplyPolicy - isYoloEnabled returns true for channel with yolo: true", () => {
+  const channels: ChannelConfig[] = [
+    { id: "discord/channel/99900000000000001", enabled: true, yolo: true },
+  ];
+  const evaluator = createEvaluator("channels", channels);
+  assertEquals(evaluator.isYoloEnabled("discord", "anyuser", "99900000000000001"), true);
+});
+
+Deno.test("ReplyPolicy - isYoloEnabled returns false when yolo not set", () => {
+  const channels: ChannelConfig[] = [
+    { id: "discord/account/12345678901234567", enabled: true },
+  ];
+  const evaluator = createEvaluator("channels", channels);
+  assertEquals(evaluator.isYoloEnabled("discord", "12345678901234567", ""), false);
+});
+
+Deno.test("ReplyPolicy - isYoloEnabled returns false when yolo: false", () => {
+  const channels: ChannelConfig[] = [
+    { id: "discord/account/12345678901234567", enabled: true, yolo: false },
+  ];
+  const evaluator = createEvaluator("channels", channels);
+  assertEquals(evaluator.isYoloEnabled("discord", "12345678901234567", ""), false);
+});
+
+Deno.test("ReplyPolicy - isYoloEnabled returns false when channel disabled", () => {
+  const channels: ChannelConfig[] = [
+    { id: "discord/account/12345678901234567", enabled: false, yolo: true },
+  ];
+  const evaluator = createEvaluator("channels", channels);
+  assertEquals(evaluator.isYoloEnabled("discord", "12345678901234567", ""), false);
+});
+
+Deno.test("ReplyPolicy - isYoloEnabled returns false for different platform", () => {
+  const channels: ChannelConfig[] = [
+    { id: "discord/account/12345678901234567", enabled: true, yolo: true },
+  ];
+  const evaluator = createEvaluator("channels", channels);
+  assertEquals(evaluator.isYoloEnabled("misskey", "12345678901234567", ""), false);
+});

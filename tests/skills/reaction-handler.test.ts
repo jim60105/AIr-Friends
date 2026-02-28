@@ -47,6 +47,7 @@ function createTestWorkspace(key = "discord/123"): WorkspaceInfo {
       userId: parts[1],
     },
     path: `/tmp/workspaces/${key}`,
+    tmpPath: `/tmp/workspaces/${key}/tmp`,
     isDm: true,
   };
 }

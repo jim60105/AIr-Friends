@@ -369,6 +369,8 @@ export interface ChannelConfig {
   channelLurk?: boolean;
   /** Whether to bypass rate limiting (default: false) */
   rateLimitBypass?: boolean;
+  /** Whether to run Agent in YOLO mode for this channel/account (default: false) */
+  yolo?: boolean;
 }
 
 /**

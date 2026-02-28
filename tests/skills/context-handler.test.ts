@@ -71,6 +71,7 @@ const createTestContext = (platformAdapter: PlatformAdapter): SkillContext => {
       userId: "123",
     },
     path: "/tmp/workspaces/discord/123",
+    tmpPath: "/tmp/workspaces/discord/123/tmp",
     isDm: true,
   };
 

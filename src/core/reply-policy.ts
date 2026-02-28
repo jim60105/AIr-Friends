@@ -63,6 +63,21 @@ export class ReplyPolicyEvaluator {
   }
 
   /**
+   * Check if YOLO mode should be active for the given event.
+   * Returns true if the matching channel config has yolo: true.
+   */
+  isYoloEnabled(platform: string, userId: string, channelId: string): boolean {
+    return this.channels.some((ch) => {
+      if (ch.enabled === false || !ch.yolo) return false;
+      const parsed = parseChannelId(ch.id);
+      if (!parsed || parsed.platform !== platform) return false;
+      if (parsed.type === "account") return parsed.value === userId;
+      if (parsed.type === "channel") return parsed.value === channelId;
+      return false;
+    });
+  }
+
+  /**
    * Get the channel configuration for a specific channel ID string.
    */
   getChannelConfig(channelId: string): ChannelConfig | undefined {

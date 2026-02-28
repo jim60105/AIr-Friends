@@ -1,11 +1,52 @@
 // src/acp/client.ts
 
 import * as acp from "@agentclientprotocol/sdk";
-import { resolve } from "@std/path";
+import { join, resolve } from "@std/path";
 import type { SkillRegistry } from "@skills/registry.ts";
 import type { Logger } from "@utils/logger.ts";
 import type { ClientConfig } from "./types.ts";
 import type { SkillContext } from "@skills/types.ts";
+
+/**
+ * Allowed skill lists built by scanning the skills directory.
+ */
+export interface SkillAllowList {
+  /** Script skill path suffixes: "skills/memory-save/scripts/memory-save.ts" */
+  scriptPaths: Set<string>;
+  /** Command skill prefixes: "agent-browser" */
+  commandPrefixes: Set<string>;
+}
+
+/**
+ * Build allowed skill lists by scanning the skills directory.
+ * Script-based skills have a scripts/ subdirectory; command-based skills do not.
+ */
+export function buildSkillAllowList(skillsDir: string): SkillAllowList {
+  const scriptPaths = new Set<string>();
+  const commandPrefixes = new Set<string>();
+
+  try {
+    for (const entry of Deno.readDirSync(skillsDir)) {
+      if (!entry.isDirectory || entry.name === "lib") continue;
+
+      const scriptsPath = join(skillsDir, entry.name, "scripts");
+      try {
+        for (const script of Deno.readDirSync(scriptsPath)) {
+          if (script.isFile && script.name.endsWith(".ts")) {
+            scriptPaths.add(`skills/${entry.name}/scripts/${script.name}`);
+          }
+        }
+      } catch {
+        // No scripts dir — this is a command-based skill
+        commandPrefixes.add(entry.name);
+      }
+    }
+  } catch {
+    // Skills directory not found — return empty lists
+  }
+
+  return { scriptPaths, commandPrefixes };
+}
 
 /**
  * ChatbotClient implements the ACP Client interface
@@ -16,6 +57,7 @@ export class ChatbotClient implements acp.Client {
   private logger: Logger;
   private config: ClientConfig;
   private replyAlreadySent: boolean = false;
+  private skillAllowList: SkillAllowList;
 
   /** Timestamp of the last activity received from the Agent */
   private lastActivityTimestamp: number = Date.now();
@@ -24,10 +66,13 @@ export class ChatbotClient implements acp.Client {
     skillRegistry: SkillRegistry,
     logger: Logger,
     config: ClientConfig,
+    skillAllowList?: SkillAllowList,
   ) {
     this.skillRegistry = skillRegistry;
     this.logger = logger;
     this.config = config;
+    this.skillAllowList = skillAllowList ??
+      buildSkillAllowList(join(Deno.cwd(), "skills"));
   }
 
   /**
@@ -147,17 +192,28 @@ export class ChatbotClient implements acp.Client {
       }
     }
 
-    // Auto-approve shell execution for our skill commands
-    // Our skills are invoked via 'deno run skills/...' commands
+    // Auto-approve shell execution for our skill commands (whitelist-based)
     if (params.toolCall.kind === "execute") {
       const rawInput = params.toolCall.rawInput as
         | { command?: string; commands?: string[] }
         | undefined;
       const commands = rawInput?.commands ?? (rawInput?.command ? [rawInput.command] : []);
 
-      // Check if all commands are our skill commands
+      // Check if all commands match our skill allow list
       const isSkillCommand = commands.length > 0 &&
-        commands.every((cmd) => cmd.includes("skills/") && cmd.includes("skill.ts"));
+        commands.every((cmd) => {
+          // Check script-based skills (path suffix match)
+          const matchesScript = Array.from(this.skillAllowList.scriptPaths).some(
+            (allowedPath) => cmd.includes(allowedPath),
+          );
+          if (matchesScript) return true;
+
+          // Check command-based skills (command prefix match)
+          const matchesCommand = Array.from(this.skillAllowList.commandPrefixes).some(
+            (prefix) => cmd.trimStart().startsWith(prefix),
+          );
+          return matchesCommand;
+        });
 
       if (isSkillCommand) {
         this.logger.info("Auto-approving skill shell execution: {command}", {
@@ -196,6 +252,15 @@ export class ChatbotClient implements acp.Client {
           outcome: "selected",
           optionId: allowOption.optionId,
         },
+      });
+    }
+
+    // Explicit edit/write tool rejection with logging
+    if (title === "edit" || title === "edit_file" || kind === "write" as string) {
+      this.logger.warn("Rejecting edit/write tool in non-YOLO mode: {title}", {
+        title,
+        kind,
+        paths: locations.map((l) => l.path),
       });
     }
 

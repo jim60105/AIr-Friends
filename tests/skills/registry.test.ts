@@ -98,6 +98,7 @@ Deno.test("SkillRegistry - executeSkill executes known skill", async () => {
       userId: "123",
     },
     path: `${tempDir}/workspaces/discord/123`,
+    tmpPath: `${tempDir}/workspaces/discord/123/tmp`,
     isDm: true,
   };
 
@@ -147,6 +148,7 @@ Deno.test("SkillRegistry - executeSkill returns error for unknown skill", async 
       userId: "123",
     },
     path: `${tempDir}/workspaces/discord/123`,
+    tmpPath: `${tempDir}/workspaces/discord/123/tmp`,
     isDm: true,
   };
 
@@ -223,6 +225,7 @@ Deno.test("SkillRegistry - executeSkill handles handler exceptions", async () =>
       userId: "123",
     },
     path: `${tempDir}/workspaces/discord/123`,
+    tmpPath: `${tempDir}/workspaces/discord/123/tmp`,
     isDm: true,
   };
 

@@ -119,11 +119,21 @@ The `--yolo` flag enables automatic approval of ALL permission requests from the
 deno run --allow-net --allow-read --allow-write --allow-env src/main.ts --yolo
 ```
 
+YOLO mode can also be configured per-channel via the `yolo` field in `channels` configuration:
+
+```yaml
+channels:
+  - id: "discord/account/560842157351763989"
+    enabled: true
+    yolo: true  # This account runs Agent in YOLO mode
+```
+
+**Effective YOLO logic**: `effectiveYolo = globalYoloFlag || channelConfig.yolo`
+
 **Use cases**:
 
-- Container environments (enabled by default in Containerfile)
-- Testing and development
-- Trusted execution environments
+- Testing and development (global `--yolo` flag)
+- Trusted channels/accounts (per-channel `yolo: true`)
 
 **Warning**: Only use YOLO mode in isolated/trusted environments. It bypasses all permission checks for agent actions.
 
@@ -215,6 +225,8 @@ Available aliases:
 ```typescript
 // Workspace path structure
 const workspacePath = `${config.workspace.repo_path}/workspaces/${platform}/${userId}`;
+// Each workspace includes a tmp/ subdirectory, exposed via TMPDIR env var to Agent
+const tmpPath = `${workspacePath}/tmp`;
 ```
 
 #### Agent Global Workspace (Feature 15)
@@ -419,9 +431,8 @@ We use `@agentclientprotocol/sdk` for Client-side connection:
 
 **Permission Handling**:
 
-- **Normal mode**: Auto-approves registered skills and skills directory access
-- **YOLO mode** (`--yolo` flag): Auto-approves ALL permission requests
-  - Enabled by default in container deployments
+- **Normal mode**: Auto-approves registered skills, skills directory access, and whitelist-matched skill commands (script paths + command prefixes built from scanning `skills/` directory). Explicitly rejects `edit`/`write` tools with logging.
+- **YOLO mode** (global `--yolo` flag or per-channel `yolo: true`): Auto-approves ALL permission requests
   - Useful for trusted/isolated environments
   - Bypasses all permission validation
 
@@ -567,11 +578,13 @@ channels:
     spontaneousPost: false
     channelLurk: false
     rateLimitBypass: false
+    yolo: true  # Run Agent in YOLO mode for this account
   - id: "discord/channel/987654321098765432"
     enabled: true
     spontaneousPost: true
     channelLurk: true
     rateLimitBypass: false
+    yolo: false  # Default: restricted mode
   - id: "misskey/account/abcdef1234567890"
     enabled: true
     spontaneousPost: false
@@ -1216,6 +1229,7 @@ replyPolicy: "channels"
 channels:
   - id: "discord/account/12345678901234567"
     rateLimitBypass: true
+    yolo: true  # Run Agent in YOLO mode for this account
 ```
 
 Environment variables override config file values.
