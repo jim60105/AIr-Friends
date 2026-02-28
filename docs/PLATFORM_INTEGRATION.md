@@ -31,7 +31,7 @@ Create the following files under `src/platforms/{platform}/`:
 | File | Purpose |
 |---|---|
 | `{platform}-adapter.ts` | Main adapter extending `PlatformAdapter` |
-| `{platform}-config.ts` | Configuration types, defaults, and whitelist pattern |
+| `{platform}-config.ts` | Configuration types, defaults, and channel config pattern |
 | `{platform}-utils.ts` | Message conversion helpers |
 | `{platform}-client.ts` | Platform API client wrapper (if needed) |
 | `index.ts` | Barrel export |
@@ -81,7 +81,7 @@ interface PlatformCapabilities {
 | `getDmChannelId(userId)` | `(userId: string): Promise<string \| null>` | Get or create a DM channel | Discord: `User.createDM()`, Misskey: `chat:{userId}` |
 | `hasBotReaction(channelId, messageId)` | See source | Check if bot already reacted | Used by channel lurk scheduler |
 | `hasBotMention(channelId, messageId)` | See source | Check if message mentions bot | Used by channel lurk scheduler |
-| `determineSpontaneousTarget(config)` | `(config: Config): Promise<SpontaneousTarget \| null>` | Select target for spontaneous post | Discord: random whitelist entry; Misskey: `timeline:self` |
+| `determineSpontaneousTarget(config)` | `(config: Config): Promise<SpontaneousTarget \| null>` | Select target for spontaneous post | Discord: random channel/account from `channels` list; Misskey: `timeline:self` |
 
 #### Overridable Methods (with defaults)
 
@@ -109,11 +109,11 @@ export interface PlatformsConfig {
 **Create `src/platforms/{platform}/{platform}-config.ts`:**
 
 - Define default config values (`DEFAULT_{PLATFORM}_CONFIG`)
-- Define the whitelist validation pattern:
+- Define the channel config validation pattern:
 
 ```typescript
 // Format: {platform}/(account|channel)/{id}
-export const {PLATFORM}_WHITELIST_PATTERN = /^{platform}\/(account|channel)\/[a-zA-Z0-9_\-]+$/;
+export const {PLATFORM}_CHANNEL_PATTERN = /^{platform}\/(account|channel)\/[a-zA-Z0-9_\-]+$/;
 ```
 
 ### 3.4 Add Environment Variable Mappings
@@ -163,7 +163,7 @@ import { {PLATFORM}_WHITELIST_PATTERN } from "../platforms/{platform}/{platform}
 2. Add it to the `isValidWhitelistEntry()` function:
 
 ```typescript
-function isValidWhitelistEntry(entry: string): boolean {
+function isValidChannelEntry(entry: string): boolean {
   return DISCORD_WHITELIST_PATTERN.test(entry)
     || MISSKEY_WHITELIST_PATTERN.test(entry)
     || {PLATFORM}_WHITELIST_PATTERN.test(entry);

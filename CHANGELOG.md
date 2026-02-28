@@ -127,8 +127,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   - Discord adapter: `determineSpontaneousTarget()` randomly selects from whitelist (channel or account DM)
   - Discord adapter: `getSearchGuildId()` returns channelId for non-DM contexts
   - Misskey adapter: `determineSpontaneousTarget()` returns `timeline:self`
-  - Moved `extractDiscordChannelIds()` from `src/core/channel-lurk-scheduler.ts` to `src/platforms/discord/discord-utils.ts`
-  - Extracted `selectDiscordSpontaneousEntry()` to `discord-utils.ts` for testability
+  - Moved `extractChannelLurkIds()` from `src/core/channel-lurk-scheduler.ts` to `src/platforms/discord/discord-utils.ts`
+  - Extracted `selectDiscordSpontaneousTarget()` to `discord-utils.ts` for testability
   - Simplified `spontaneous-target.ts` to interface-only file
   - Removed platform checks from `context-handler.ts`
   - Updated import paths in `bootstrap.ts` and test files

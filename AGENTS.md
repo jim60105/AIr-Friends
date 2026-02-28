@@ -520,30 +520,31 @@ When an ACP Agent connection becomes silently unresponsive (no session updates f
    - If dead → throws error for upstream handling
 4. **Session Resumption**: On connection death, `SessionOrchestrator` attempts to reconnect and reload the same session via `loadSession()` (requires Agent support). Currently, no agents support `loadSession`, so this is a forward-looking design.
 
-| Setting | Default | Description |
-|---------|---------|-------------|
-| `agent.idleTimeout.enabled` | `true` | Enable idle timeout detection |
-| `agent.idleTimeout.timeoutMs` | `300000` | Idle timeout in ms (5 min) |
-| `agent.idleTimeout.checkIntervalMs` | `30000` | Check interval in ms (30s) |
+| Setting                             | Default  | Description                   |
+| ----------------------------------- | -------- | ----------------------------- |
+| `agent.idleTimeout.enabled`         | `true`   | Enable idle timeout detection |
+| `agent.idleTimeout.timeoutMs`       | `300000` | Idle timeout in ms (5 min)    |
+| `agent.idleTimeout.checkIntervalMs` | `30000`  | Check interval in ms (30s)    |
 
 Environment variable overrides:
+
 - `AGENT_IDLE_TIMEOUT_ENABLED`
 - `AGENT_IDLE_TIMEOUT_MS`
 - `AGENT_IDLE_TIMEOUT_CHECK_INTERVAL_MS`
 
-### 7. Access Control & Reply Policy (Feature 13)
+### 7. Reply Policy (Feature 13)
 
-Controls bot reply behavior through the `accessControl` section in `config.yaml`.
+Controls bot reply behavior through the top-level `replyPolicy` and `channels` list in `config.yaml`.
 
 **Reply Policy Modes:**
 
-| Mode        | Behavior                                                                      |
-| ----------- | ----------------------------------------------------------------------------- |
-| `all`       | Reply to everyone in both public channels and DMs                             |
-| `public`    | Reply in public channels only; DMs only if the account/channel is whitelisted |
-| `whitelist` | Reply only to whitelisted accounts/channels (default)                         |
+| Mode       | Behavior                                                                                 |
+| ---------- | ---------------------------------------------------------------------------------------- |
+| `all`      | Reply to everyone in both public channels and DMs                                        |
+| `public`   | Reply in public channels only; DMs only if the account/channel has `rateLimitBypass` set |
+| `channels` | Reply only to configured channels/accounts in the `channels` list (default)              |
 
-**Whitelist Format:**
+**Channel ID Format:**
 
 ```text
 {platform}/account/{account_ID}
@@ -553,28 +554,39 @@ Controls bot reply behavior through the `accessControl` section in `config.yaml`
 **Processing Order:**
 
 1. Platform-level filters (bot self-check, `allowDm`, `respondToMention`)
-2. Access control (`ReplyPolicyEvaluator.shouldReply()`)
+2. Reply policy (`ReplyPolicyEvaluator.shouldReply()`)
 3. Message handling and agent execution
 
 **Configuration Example:**
 
 ```yaml
-accessControl:
-  replyTo: "whitelist"
-  whitelist:
-    - "discord/account/123456789012345678"
-    - "discord/channel/987654321098765432"
-    - "misskey/account/abcdef1234567890"
+replyPolicy: "channels"
+channels:
+  - id: "discord/account/123456789012345678"
+    enabled: true
+    spontaneousPost: false
+    channelLurk: false
+    rateLimitBypass: false
+  - id: "discord/channel/987654321098765432"
+    enabled: true
+    spontaneousPost: true
+    channelLurk: true
+    rateLimitBypass: false
+  - id: "misskey/account/abcdef1234567890"
+    enabled: true
+    spontaneousPost: false
+    channelLurk: false
+    rateLimitBypass: true
 ```
 
 **Environment Variable Overrides:**
 
-- `REPLY_TO` -> sets `accessControl.replyTo`
-- `WHITELIST` -> sets `accessControl.whitelist` (comma-separated, fully replaces config file value)
+- `REPLY_POLICY` -> sets `replyPolicy` (REPLY_TO is still accepted as an alias)
+- `CHANNELS` -> sets `channels` (JSON array, fully replaces config file value)
 
 ```bash
-REPLY_TO=public
-WHITELIST=discord/account/12345678901234567,discord/channel/98765432109876543,misskey/account/abcdef123
+REPLY_POLICY=public
+CHANNELS='[{"id":"discord/account/12345678901234567","enabled":true}]'
 ```
 
 ### 7a. Rate Limiting & Cooldown
@@ -622,7 +634,6 @@ platforms:
       minIntervalMs: 10800000 # Minimum interval: 3 hours (default)
       maxIntervalMs: 43200000 # Maximum interval: 12 hours (default)
       contextFetchProbability: 0.5 # Probability of including recent messages (0.0-1.0)
-      allowDm: false                # Allow spontaneous posts via DM (default: true)
 ```
 
 **How It Works:**
@@ -630,7 +641,7 @@ platforms:
 1. `SpontaneousScheduler` manages per-platform independent timers
 2. Each execution picks a random interval between min and max
 3. On trigger, the scheduler:
-   - Determines a target (Discord: random whitelist entry; Misskey: `timeline:self`)
+   - Determines a target from channels configured with `spontaneousPost: true`
    - Randomly decides whether to fetch recent messages based on `contextFetchProbability`
    - Calls `SessionOrchestrator.processSpontaneousPost()` to run the agent
 4. The agent receives a special prompt instructing it to create original content
@@ -638,10 +649,10 @@ platforms:
 
 **Platform Target Selection:**
 
-| Platform | Target Selection                                               |
-| -------- | -------------------------------------------------------------- |
-| Discord  | Random channel/account from whitelist (DM for account entries; account entries excluded when `allowDm: false`) |
-| Misskey  | Bot's own timeline (`timeline:self`) + random DM to whitelist account entries (when `allowDm: true`); `timeline:self` only when `allowDm: false` |
+| Platform | Target Selection                                                                                |
+| -------- | ----------------------------------------------------------------------------------------------- |
+| Discord  | Random channel from `channels` with `spontaneousPost: true` (account entries create DM targets) |
+| Misskey  | Random channel from `channels` with `spontaneousPost: true` (supports `misskey/timeline/self`)  |
 
 **Environment Variable Overrides:**
 
@@ -649,7 +660,6 @@ platforms:
 - `DISCORD_SPONTANEOUS_MIN_INTERVAL_MS` → `platforms.discord.spontaneousPost.minIntervalMs`
 - `DISCORD_SPONTANEOUS_MAX_INTERVAL_MS` → `platforms.discord.spontaneousPost.maxIntervalMs`
 - `DISCORD_SPONTANEOUS_CONTEXT_FETCH_PROBABILITY` → `platforms.discord.spontaneousPost.contextFetchProbability`
-- `DISCORD_SPONTANEOUS_ALLOW_DM` → `platforms.discord.spontaneousPost.allowDm`
 - Same pattern for Misskey with `MISSKEY_SPONTANEOUS_*` prefix
 
 **Key Components:**
@@ -669,15 +679,15 @@ Periodically checks whitelisted Discord channels and auto-replies when condition
 platforms:
   discord:
     channelLurk:
-      enabled: false              # Enable channel lurk reply (default: false)
-      intervalMs: 1800000         # Check interval: 30 minutes (default)
+      enabled: false # Enable channel lurk reply (default: false)
+      intervalMs: 1800000 # Check interval: 30 minutes (default)
 ```
 
 **Environment Variable Overrides:**
 
-| Environment Variable | Config Path |
-|---------------------|-------------|
-| `DISCORD_CHANNEL_LURK_ENABLED` | `platforms.discord.channelLurk.enabled` |
+| Environment Variable               | Config Path                                |
+| ---------------------------------- | ------------------------------------------ |
+| `DISCORD_CHANNEL_LURK_ENABLED`     | `platforms.discord.channelLurk.enabled`    |
 | `DISCORD_CHANNEL_LURK_INTERVAL_MS` | `platforms.discord.channelLurk.intervalMs` |
 
 **Trigger Conditions (all must be true):**
@@ -689,14 +699,14 @@ platforms:
 
 **Differences from Spontaneous Posting:**
 
-| Aspect | Spontaneous Post | Channel Lurk Reply |
-|--------|-----------------|-------------------|
-| Trigger | Random interval | Fixed interval + condition check |
-| Target | Random whitelist entry | All whitelist channels |
-| Trigger message | None (self-initiated) | Last message in channel |
-| Session type | `spontaneous` | `channelLurk` |
-| Prompt template | `system_spontaneous.md` | `system_reply.md` (reuse) |
-| Platform support | Discord + Misskey | Discord only |
+| Aspect           | Spontaneous Post        | Channel Lurk Reply               |
+| ---------------- | ----------------------- | -------------------------------- |
+| Trigger          | Random interval         | Fixed interval + condition check |
+| Target           | Random whitelist entry  | All whitelist channels           |
+| Trigger message  | None (self-initiated)   | Last message in channel          |
+| Session type     | `spontaneous`           | `channelLurk`                    |
+| Prompt template  | `system_spontaneous.md` | `system_reply.md` (reuse)        |
+| Platform support | Discord + Misskey       | Discord only                     |
 
 **Key Components:**
 
@@ -1202,10 +1212,10 @@ workspace:
   repo_path: "./data"
   workspaces_dir: "workspaces"
 
-accessControl:
-  replyTo: "whitelist"
-  whitelist:
-    - "discord/account/12345678901234567"
+replyPolicy: "channels"
+channels:
+  - id: "discord/account/12345678901234567"
+    rateLimitBypass: true
 ```
 
 Environment variables override config file values.

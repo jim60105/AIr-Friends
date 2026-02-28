@@ -119,15 +119,15 @@ Feature: Spontaneous Posting
 
   # ── Platform targets ──
 
-  Scenario: Discord spontaneous target is selected from whitelist
-    Given the whitelist contains Discord channel and account entries
+  Scenario: Discord spontaneous target is selected from channels list
+    Given the channels list contains Discord channel and account entries
     When the scheduler triggers a Discord spontaneous post
-    Then a random whitelist entry for Discord should be selected
+    Then a random Discord channel config with spontaneousPost=true or account entry should be selected
     And if it's a channel entry, the message is sent to that channel
     And if it's an account entry, a DM channel is created
 
-  Scenario: Discord returns null when whitelist has no Discord entries
-    Given the whitelist is empty or contains only Misskey entries
+  Scenario: Discord returns null when channels list has no Discord entries
+    Given the channels list is empty or contains only Misskey entries
     When the scheduler triggers a Discord spontaneous post
     Then no target should be returned
     And the spontaneous post should be skipped

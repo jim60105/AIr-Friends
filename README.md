@@ -98,16 +98,23 @@ prompts:
 
 See [Development Guide -- Customizing the Bot](docs/DEVELOPMENT.md#customizing-the-bot) section for details.
 
-## 🔐 Access Control
+## 🔐 Reply Policy
 
-Control who can interact with your bot using the whitelist feature:
+Control who can interact with your bot using the channels-based reply policy:
 
 ```yaml
-accessControl:
-  replyTo: "whitelist" # Options: all, public, whitelist
-  whitelist:
-    - "discord/account/123456789012345678"
-    - "misskey/account/abcdef1234567890"
+replyPolicy: "channels" # Options: all, public, channels
+channels:
+  - id: "discord/account/123456789012345678"
+    enabled: true
+    spontaneousPost: false
+    channelLurk: false
+    rateLimitBypass: false
+  - id: "misskey/account/abcdef1234567890"
+    enabled: true
+    spontaneousPost: false
+    channelLurk: false
+    rateLimitBypass: false
 ```
 
 See [Development Guide -- Access Control & Reply Policy](docs/DEVELOPMENT.md#access-control--reply-policy) section for details.
