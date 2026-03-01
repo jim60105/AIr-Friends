@@ -135,6 +135,15 @@ channels:
 - Testing and development (global `--yolo` flag)
 - Trusted channels/accounts (per-channel `yolo: true`)
 
+**Account-Level YOLO (Account-Level YOLO):**
+
+- When `channels` contains a `{platform}/account/{id}` entry with `yolo: true`,
+  that account triggers YOLO mode regardless of whether it sends from a DM, any channel, or any other trigger method
+- This differs from channel-level YOLO (`{platform}/channel/{id}` with `yolo: true`),
+  which only activates within a specific channel
+- The YOLO flag propagates through the full chain to `ChatbotClient.requestPermission()`,
+  affecting all permission types (tool call, external directory, edit/write, etc.)
+
 **Warning**: Only use YOLO mode in isolated/trusted environments. It bypasses all permission checks for agent actions.
 
 #### Dry Run Mode

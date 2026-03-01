@@ -5,6 +5,7 @@
  */
 export type AuditPhase =
   | "context_assembly"
+  | "yolo_resolution"
   | "agent_connect"
   | "prompt_sent"
   | "skill_call"

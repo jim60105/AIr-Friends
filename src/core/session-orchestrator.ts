@@ -1,7 +1,7 @@
 // src/core/session-orchestrator.ts
 
 import { createLogger } from "@utils/logger.ts";
-import type { ReplyPolicyEvaluator } from "./reply-policy.ts";
+import type { ReplyPolicyEvaluator, YoloDecision } from "./reply-policy.ts";
 import {
   activeSessionsGauge,
   remindersDeliveredTotal,
@@ -91,11 +91,47 @@ export class SessionOrchestrator {
 
   /**
    * Compute effective YOLO mode for a given context.
-   * Global --yolo flag OR per-channel yolo config.
+   *
+   * Resolution order:
+   *  1. Global --yolo CLI flag  → always wins, bypasses all checks.
+   *  2. Per-channel config      → account-level or channel-level yolo: true.
+   *  3. Default                 → YOLO disabled.
+   *
+   * Returns a structured {@link YoloDecision} so callers can log & audit the reason.
    */
-  private getEffectiveYolo(platform: string, userId: string, channelId: string): boolean {
-    if (this.yolo) return true;
-    return this.replyPolicy?.isYoloEnabled(platform, userId, channelId) ?? false;
+  private getEffectiveYolo(platform: string, userId: string, channelId: string): YoloDecision {
+    // 1. Global flag takes precedence over everything.
+    if (this.yolo) {
+      logger.info(
+        "YOLO enabled via global --yolo flag for {platform} user {userId} channel {channelId}",
+        { platform, userId, channelId },
+      );
+      return { enabled: true, source: "global_flag" };
+    }
+
+    // 2. Delegate to per-channel config evaluation.
+    if (this.replyPolicy) {
+      const decision = this.replyPolicy.resolveYoloDecision(platform, userId, channelId);
+      logger.info(
+        "YOLO resolution for {platform} user {userId} channel {channelId}: {yoloEnabled} via {yoloSource}",
+        {
+          platform,
+          userId,
+          channelId,
+          yoloEnabled: decision.enabled,
+          yoloSource: decision.source,
+          matchedConfigId: decision.matchedConfigId,
+        },
+      );
+      return decision;
+    }
+
+    // 3. No reply policy configured — YOLO stays off.
+    logger.debug(
+      "YOLO disabled (no reply policy) for {platform} user {userId} channel {channelId}",
+      { platform, userId, channelId },
+    );
+    return { enabled: false, source: "none" };
   }
 
   private getMCPServers(): MCPServerConfig[] {
@@ -343,11 +379,22 @@ export class SessionOrchestrator {
       // === END DRY RUN CHECK ===
 
       // 4. Create client config for ACP
-      const effectiveYolo = this.getEffectiveYolo(
+      const yoloDecision = this.getEffectiveYolo(
         event.platform,
         event.userId,
         event.channelId,
       );
+
+      // Audit: yolo_resolution
+      await auditWriter?.write("yolo_resolution", {
+        yoloEnabled: yoloDecision.enabled,
+        yoloSource: yoloDecision.source,
+        matchedConfigId: yoloDecision.matchedConfigId,
+        platform: event.platform,
+        userId: event.userId,
+        channelId: event.channelId,
+      });
+
       const clientConfig: ClientConfig = {
         workingDir: workspace.path,
         agentWorkspacePath,
@@ -355,7 +402,7 @@ export class SessionOrchestrator {
         userId: event.userId,
         channelId: event.channelId,
         isDM: event.isDm,
-        yolo: effectiveYolo,
+        yolo: yoloDecision.enabled,
       };
 
       // 5. Build ACP connector
@@ -365,7 +412,7 @@ export class SessionOrchestrator {
           agentType,
           workspace.path,
           this.config,
-          effectiveYolo,
+          yoloDecision.enabled,
           agentWorkspacePath,
         ),
         clientConfig,
@@ -783,7 +830,18 @@ export class SessionOrchestrator {
       // === END DRY RUN CHECK ===
 
       // 5. Create client config for ACP
-      const effectiveYolo = this.getEffectiveYolo(platform, options.botId, channelId);
+      const yoloDecision = this.getEffectiveYolo(platform, options.botId, channelId);
+
+      // Audit: yolo_resolution
+      await auditWriter?.write("yolo_resolution", {
+        yoloEnabled: yoloDecision.enabled,
+        yoloSource: yoloDecision.source,
+        matchedConfigId: yoloDecision.matchedConfigId,
+        platform,
+        userId: options.botId,
+        channelId,
+      });
+
       const clientConfig: ClientConfig = {
         workingDir: workspace.path,
         agentWorkspacePath,
@@ -791,7 +849,7 @@ export class SessionOrchestrator {
         userId: options.botId,
         channelId,
         isDM: false,
-        yolo: effectiveYolo,
+        yolo: yoloDecision.enabled,
       };
 
       // 6. Build and execute ACP connector
@@ -801,7 +859,7 @@ export class SessionOrchestrator {
           agentType,
           workspace.path,
           this.config,
-          effectiveYolo,
+          yoloDecision.enabled,
           agentWorkspacePath,
         ),
         clientConfig,
@@ -1518,7 +1576,18 @@ export class SessionOrchestrator {
       // === END DRY RUN CHECK ===
 
       // 5. Create client config
-      const effectiveYolo = this.getEffectiveYolo(platform, reminder.userId, dmChannelId);
+      const yoloDecision = this.getEffectiveYolo(platform, reminder.userId, dmChannelId);
+
+      // Audit: yolo_resolution
+      await auditWriter?.write("yolo_resolution", {
+        yoloEnabled: yoloDecision.enabled,
+        yoloSource: yoloDecision.source,
+        matchedConfigId: yoloDecision.matchedConfigId,
+        platform,
+        userId: reminder.userId,
+        channelId: dmChannelId,
+      });
+
       const clientConfig: ClientConfig = {
         workingDir: workspace.path,
         agentWorkspacePath,
@@ -1526,7 +1595,7 @@ export class SessionOrchestrator {
         userId: reminder.userId,
         channelId: dmChannelId,
         isDM: true,
-        yolo: effectiveYolo,
+        yolo: yoloDecision.enabled,
       };
 
       // 6. Build and execute ACP connector
@@ -1536,7 +1605,7 @@ export class SessionOrchestrator {
           agentType,
           workspace.path,
           this.config,
-          effectiveYolo,
+          yoloDecision.enabled,
           agentWorkspacePath,
         ),
         clientConfig,
