@@ -109,12 +109,19 @@ channels:
     enabled: true
     spontaneousPost: false
     channelLurk: false
-    rateLimitBypass: false
+    rateLimitBypass: true
+    yolo: true
   - id: "misskey/account/abcdef1234567890"
     enabled: true
     spontaneousPost: false
     channelLurk: false
     rateLimitBypass: false
+    yolo: false
+  - id: "discord/channel/873618490202931231"
+    enabled: true
+    spontaneousPost: true
+    channelLurk: true
+    yolo: false
 ```
 
 See [Development Guide -- Access Control & Reply Policy](docs/DEVELOPMENT.md#access-control--reply-policy) section for details.
@@ -158,7 +165,7 @@ agent:
   modelRouting:
     enabled: true
     rules:
-      - match: { whitelist: "discord/account/12345678901234567" }
+      - match: { channel: "discord/account/12345678901234567" }
         model: "openrouter/deepseek/deepseek-v3.2"
       - match: { sessionType: "spontaneous" }
         model: "openrouter/deepseek/deepseek-v3.2"
