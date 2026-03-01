@@ -3,6 +3,24 @@ import type { ChannelConfig, ReplyPolicy } from "../types/config.ts";
 import { parseChannelId } from "../types/config.ts";
 import type { NormalizedEvent } from "../types/events.ts";
 
+/**
+ * Structured result describing how a YOLO decision was made.
+ */
+export interface YoloDecision {
+  /** Whether YOLO mode is enabled for this context. */
+  enabled: boolean;
+  /**
+   * Which mechanism activated YOLO:
+   *  - "global_flag"   : the global --yolo CLI flag is active (resolved externally)
+   *  - "account_config": matched an account-level channel config entry
+   *  - "channel_config": matched a channel-level channel config entry
+   *  - "none"          : no config entry grants YOLO
+   */
+  source: "global_flag" | "account_config" | "channel_config" | "none";
+  /** The id field of the matched ChannelConfig entry, if any. */
+  matchedConfigId?: string;
+}
+
 const logger = createLogger("ReplyPolicy");
 
 /**
@@ -73,27 +91,53 @@ export class ReplyPolicyEvaluator {
    * The check walks through every config entry and returns true as soon as one matches.
    */
   isYoloEnabled(platform: string, userId: string, channelId: string): boolean {
-    return this.channels.some((ch) => {
+    return this.resolveYoloDecision(platform, userId, channelId).enabled;
+  }
+
+  /**
+   * Resolve how YOLO mode was determined for the given context.
+   * Returns a structured decision that includes the boolean result, the source
+   * of the decision, and the matched config entry id (if any).
+   *
+   * NOTE: This only evaluates per-channel config. The global --yolo flag is
+   * handled externally by SessionOrchestrator.getEffectiveYolo().
+   */
+  resolveYoloDecision(platform: string, userId: string, channelId: string): YoloDecision {
+    for (const ch of this.channels) {
       // Skip entries that are disabled or haven't opted into YOLO.
-      if (ch.enabled === false || !ch.yolo) return false;
+      if (ch.enabled === false || !ch.yolo) continue;
 
       // Parse "{platform}/account/{id}" or "{platform}/channel/{id}" into components.
-      // Return false if the ID format is unrecognized or belongs to a different platform.
       const parsed = parseChannelId(ch.id);
-      if (!parsed || parsed.platform !== platform) return false;
+      if (!parsed || parsed.platform !== platform) continue;
 
-      if (parsed.type === "account") {
+      if (parsed.type === "account" && parsed.value === userId) {
         // Account-level grant: YOLO follows the user across every channel they post in.
-        return parsed.value === userId;
+        logger.info(
+          "YOLO enabled via account config {matchedConfigId} for user {userId} on {platform}",
+          { matchedConfigId: ch.id, userId, platform, channelId },
+        );
+        return { enabled: true, source: "account_config", matchedConfigId: ch.id };
       }
-      if (parsed.type === "channel") {
+
+      if (parsed.type === "channel" && parsed.value === channelId) {
         // Channel-level grant: YOLO applies to everyone inside this specific channel.
-        return parsed.value === channelId;
+        logger.info(
+          "YOLO enabled via channel config {matchedConfigId} for channel {channelId} on {platform}",
+          { matchedConfigId: ch.id, channelId, platform, userId },
+        );
+        return { enabled: true, source: "channel_config", matchedConfigId: ch.id };
       }
 
       // Other entry types (e.g. "timeline") do not carry YOLO semantics.
-      return false;
-    });
+    }
+
+    // No config entry grants YOLO for this context.
+    logger.debug(
+      "YOLO not enabled by channel config for {platform} user {userId} channel {channelId}",
+      { platform, userId, channelId },
+    );
+    return { enabled: false, source: "none" };
   }
 
   /**
