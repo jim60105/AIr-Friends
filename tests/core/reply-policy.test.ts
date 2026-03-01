@@ -202,3 +202,90 @@ Deno.test("ReplyPolicy - isYoloEnabled returns false for different platform", ()
   const evaluator = createEvaluator("channels", channels);
   assertEquals(evaluator.isYoloEnabled("misskey", "12345678901234567", ""), false);
 });
+
+// ============ Account-Level YOLO Verification (Issue #240) ============
+
+Deno.test("ReplyPolicy - isYoloEnabled returns true for whitelisted account regardless of channelId", () => {
+  const channels: ChannelConfig[] = [
+    { id: "discord/account/12345678901234567", enabled: true, yolo: true },
+  ];
+  const evaluator = createEvaluator("channels", channels);
+  // DM channel ID (not in whitelist)
+  assertEquals(evaluator.isYoloEnabled("discord", "12345678901234567", "dm-channel-999"), true);
+  // Arbitrary channel ID
+  assertEquals(
+    evaluator.isYoloEnabled("discord", "12345678901234567", "random-channel-888"),
+    true,
+  );
+  // Empty channelId
+  assertEquals(evaluator.isYoloEnabled("discord", "12345678901234567", ""), true);
+});
+
+Deno.test("ReplyPolicy - isYoloEnabled returns false for whitelisted account with yolo: false in any channel", () => {
+  const channels: ChannelConfig[] = [
+    { id: "discord/account/12345678901234567", enabled: true, yolo: false },
+  ];
+  const evaluator = createEvaluator("channels", channels);
+  assertEquals(
+    evaluator.isYoloEnabled("discord", "12345678901234567", "dm-channel-999"),
+    false,
+  );
+  assertEquals(
+    evaluator.isYoloEnabled("discord", "12345678901234567", "random-channel-888"),
+    false,
+  );
+});
+
+Deno.test("ReplyPolicy - isYoloEnabled returns true for whitelisted account in whitelisted channel", () => {
+  const channels: ChannelConfig[] = [
+    { id: "discord/account/12345678901234567", enabled: true, yolo: true },
+    { id: "discord/channel/99900000000000001", enabled: true },
+  ];
+  const evaluator = createEvaluator("channels", channels);
+  assertEquals(
+    evaluator.isYoloEnabled("discord", "12345678901234567", "99900000000000001"),
+    true,
+  );
+});
+
+Deno.test("ReplyPolicy - isYoloEnabled returns true for non-whitelisted account in yolo channel", () => {
+  const channels: ChannelConfig[] = [
+    { id: "discord/channel/99900000000000001", enabled: true, yolo: true },
+  ];
+  const evaluator = createEvaluator("channels", channels);
+  assertEquals(evaluator.isYoloEnabled("discord", "789", "99900000000000001"), true);
+});
+
+Deno.test("ReplyPolicy - isYoloEnabled returns false for whitelisted account with enabled: false", () => {
+  const channels: ChannelConfig[] = [
+    { id: "discord/account/12345678901234567", enabled: false, yolo: true },
+  ];
+  const evaluator = createEvaluator("channels", channels);
+  assertEquals(
+    evaluator.isYoloEnabled("discord", "12345678901234567", "dm-channel-999"),
+    false,
+  );
+  assertEquals(
+    evaluator.isYoloEnabled("discord", "12345678901234567", "random-channel-888"),
+    false,
+  );
+});
+
+Deno.test("ReplyPolicy - isYoloEnabled returns true for Misskey whitelisted account across all channel types", () => {
+  const channels: ChannelConfig[] = [
+    { id: "misskey/account/abcdef1234567890", enabled: true, yolo: true },
+  ];
+  const evaluator = createEvaluator("channels", channels);
+  // DM channel
+  assertEquals(
+    evaluator.isYoloEnabled("misskey", "abcdef1234567890", "dm:abcdef1234567890"),
+    true,
+  );
+  // Chat channel
+  assertEquals(
+    evaluator.isYoloEnabled("misskey", "abcdef1234567890", "chat:abcdef1234567890"),
+    true,
+  );
+  // Note channel
+  assertEquals(evaluator.isYoloEnabled("misskey", "abcdef1234567890", "note:someid"), true);
+});
