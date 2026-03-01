@@ -64,15 +64,34 @@ export class ReplyPolicyEvaluator {
 
   /**
    * Check if YOLO mode should be active for the given event.
-   * Returns true if the matching channel config has yolo: true.
+   *
+   * YOLO mode makes the Agent auto-approve ALL permission requests without asking the user.
+   * It can be granted at two different scopes:
+   *   - Account level: a specific user gets YOLO everywhere, regardless of which channel they post in.
+   *   - Channel level: everyone posting in a specific channel gets YOLO.
+   *
+   * The check walks through every config entry and returns true as soon as one matches.
    */
   isYoloEnabled(platform: string, userId: string, channelId: string): boolean {
     return this.channels.some((ch) => {
+      // Skip entries that are disabled or haven't opted into YOLO.
       if (ch.enabled === false || !ch.yolo) return false;
+
+      // Parse "{platform}/account/{id}" or "{platform}/channel/{id}" into components.
+      // Return false if the ID format is unrecognized or belongs to a different platform.
       const parsed = parseChannelId(ch.id);
       if (!parsed || parsed.platform !== platform) return false;
-      if (parsed.type === "account") return parsed.value === userId;
-      if (parsed.type === "channel") return parsed.value === channelId;
+
+      if (parsed.type === "account") {
+        // Account-level grant: YOLO follows the user across every channel they post in.
+        return parsed.value === userId;
+      }
+      if (parsed.type === "channel") {
+        // Channel-level grant: YOLO applies to everyone inside this specific channel.
+        return parsed.value === channelId;
+      }
+
+      // Other entry types (e.g. "timeline") do not carry YOLO semantics.
       return false;
     });
   }
