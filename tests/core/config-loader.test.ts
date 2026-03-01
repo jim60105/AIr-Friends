@@ -2069,3 +2069,54 @@ Deno.test("convertUserMCPServerConfigs", async (t) => {
     assertEquals((result[0] as { command: string }).command, "echo");
   });
 });
+
+// --- yolo field in channels tests ---
+
+Deno.test("loadChannels - preserves yolo field from object format", async () => {
+  const config = `
+platforms:
+  discord:
+    token: "test-token"
+    enabled: true
+agent:
+  model: "gpt-4"
+  systemPromptPath: "./prompts/system_reply.md"
+  tokenLimit: 20000
+workspace:
+  repoPath: "./data"
+  workspacesDir: "workspaces"
+channels:
+  - id: "discord/account/123456789012345678"
+    enabled: true
+    yolo: true
+`;
+
+  await withTestConfig(config, async (dir) => {
+    const result = await loadConfig(dir);
+    assertEquals(result.channels[0].yolo, true);
+  });
+});
+
+Deno.test("loadChannels - yolo defaults to false when not specified", async () => {
+  const config = `
+platforms:
+  discord:
+    token: "test-token"
+    enabled: true
+agent:
+  model: "gpt-4"
+  systemPromptPath: "./prompts/system_reply.md"
+  tokenLimit: 20000
+workspace:
+  repoPath: "./data"
+  workspacesDir: "workspaces"
+channels:
+  - id: "discord/account/123456789012345678"
+    enabled: true
+`;
+
+  await withTestConfig(config, async (dir) => {
+    const result = await loadConfig(dir);
+    assertEquals(result.channels[0].yolo, false);
+  });
+});

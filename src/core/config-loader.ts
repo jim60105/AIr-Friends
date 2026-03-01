@@ -68,6 +68,7 @@ function loadChannels(rawChannels: unknown[]): ChannelConfig[] {
         spontaneousPost: obj.spontaneousPost === true,
         channelLurk: obj.channelLurk === true,
         rateLimitBypass: obj.rateLimitBypass === true,
+        yolo: obj.yolo === true,
       });
     }
   }
