@@ -7,16 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.16.0] - 2026-03-01
+
 ### Added
 
-- 🔒 Per-channel YOLO mode via `yolo` field in `channels` configuration — allows fine-grained control over which channels/accounts run Agent in YOLO mode
-- ✨ Workspace `tmp/` directory — each workspace now includes a `tmp/` subdirectory, exposed to Agent via `TMPDIR` environment variable
-- 🔒 Agent permission control hardening — whitelist-based skill command matching (script paths + command prefixes) replaces loose `includes` check; explicit `edit` tool blocking in non-YOLO mode
+- Per-channel YOLO mode via `yolo` field in `channels` configuration — allows fine-grained control over which channels/accounts run Agent in YOLO mode
+- Workspace `tmp/` directory — each workspace now includes a `tmp/` subdirectory, exposed to Agent via `TMPDIR` environment variable
+- Agent permission control hardening — whitelist-based skill command matching (script paths + command prefixes) replaces loose `includes` check; explicit `edit` tool blocking in non-YOLO mode
+- Structured INFO-level permission request logging — logs external directory access and bash command execution requests with `paths`, `commands`, `rawInput`, and `toolCallId` context before any approval/rejection decision
+- `yolo_resolution` audit phase — YOLO decision-making is now explicitly auditable; structured `YoloDecision` type records the decision source (global flag, account-level, channel-level) in audit log
 
 ### Changed
 
 - **BREAKING**: Removed default `--yolo` flag from Containerfile CMD — YOLO mode must now be explicitly enabled via `--yolo` CLI flag or per-channel `yolo: true` configuration
 - `TMPDIR` added to sandbox `BASE_ALLOWED_ENV_VARS` for workspace-scoped temp directory
+- YOLO resolution refactored to use structured `YoloDecision` type with logged decision source; `isYoloEnabled()` delegates to new `resolveYoloDecision()` for backward compatibility
+
+### Fixed
+
+- Fixed `yolo` field being silently dropped when parsing channel entries in `loadChannels()` — per-channel and per-account YOLO settings configured via `channels[].yolo: true` were always evaluated as `false`
 
 ### Security
 
@@ -771,7 +780,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ---
 
-[Unreleased]: https://github.com/jim60105/AIr-Friends/compare/v0.15.0...HEAD
+[Unreleased]: https://github.com/jim60105/AIr-Friends/compare/v0.16.0...HEAD
+[0.16.0]: https://github.com/jim60105/AIr-Friends/compare/v0.15.0...v0.16.0
 [0.15.0]: https://github.com/jim60105/AIr-Friends/compare/v0.14.0...v0.15.0
 [0.14.0]: https://github.com/jim60105/AIr-Friends/compare/v0.13.0...v0.14.0
 [0.13.0]: https://github.com/jim60105/AIr-Friends/compare/v0.12.0...v0.13.0
