@@ -1,7 +1,11 @@
 // tests/acp/client.test.ts
 
 import { assertEquals } from "@std/assert";
-import { buildSkillAllowList, ChatbotClient, type SkillAllowList } from "@acp/client.ts";
+import {
+  buildSkillAutoApproveList,
+  ChatbotClient,
+  type SkillAutoApproveList,
+} from "@acp/client.ts";
 import * as acp from "@agentclientprotocol/sdk";
 import { Logger, LogLevel } from "@utils/logger.ts";
 import { SkillRegistry } from "@skills/registry.ts";
@@ -976,7 +980,7 @@ Deno.test("ChatbotClient - YOLO mode logs enhanced context with rawInput and loc
 
 // ============ Permission Hardening Tests (Feature 28) ============
 
-Deno.test("ChatbotClient - requestPermission rejects edit tool in non-YOLO mode", async () => {
+Deno.test("ChatbotClient - requestPermission rejects edit tool in restricted mode", async () => {
   const tempDir = Deno.makeTempDirSync();
   try {
     const skillRegistry = createTestSkillRegistry();
@@ -988,7 +992,7 @@ Deno.test("ChatbotClient - requestPermission rejects edit tool in non-YOLO mode"
       channelId: "456",
       isDM: false,
     };
-    const allowList: SkillAllowList = {
+    const allowList: SkillAutoApproveList = {
       scriptPaths: new Set(),
       commandPrefixes: new Set(),
     };
@@ -1074,7 +1078,7 @@ Deno.test("ChatbotClient - requestPermission approves agent-browser command", as
       channelId: "456",
       isDM: false,
     };
-    const allowList: SkillAllowList = {
+    const allowList: SkillAutoApproveList = {
       scriptPaths: new Set(),
       commandPrefixes: new Set(["agent-browser"]),
     };
@@ -1120,7 +1124,7 @@ Deno.test("ChatbotClient - requestPermission rejects unknown skill command", asy
       channelId: "456",
       isDM: false,
     };
-    const allowList: SkillAllowList = {
+    const allowList: SkillAutoApproveList = {
       scriptPaths: new Set(["skills/memory-save/scripts/memory-save.ts"]),
       commandPrefixes: new Set(),
     };
@@ -1168,7 +1172,7 @@ Deno.test("ChatbotClient - requestPermission rejects arbitrary bash command", as
       channelId: "456",
       isDM: false,
     };
-    const allowList: SkillAllowList = {
+    const allowList: SkillAutoApproveList = {
       scriptPaths: new Set(["skills/memory-save/scripts/memory-save.ts"]),
       commandPrefixes: new Set(),
     };
@@ -1202,8 +1206,8 @@ Deno.test("ChatbotClient - requestPermission rejects arbitrary bash command", as
   }
 });
 
-Deno.test("buildSkillAllowList - correctly categorizes skills from project directory", () => {
-  const allowList = buildSkillAllowList("skills");
+Deno.test("buildSkillAutoApproveList - correctly categorizes skills from project directory", () => {
+  const allowList = buildSkillAutoApproveList("skills");
 
   // Should have script-based skills
   assertEquals(allowList.scriptPaths.has("skills/memory-save/scripts/memory-save.ts"), true);
@@ -1215,4 +1219,78 @@ Deno.test("buildSkillAllowList - correctly categorizes skills from project direc
   // lib should be excluded
   assertEquals(allowList.scriptPaths.has("skills/lib/client.ts"), false);
   assertEquals(allowList.commandPrefixes.has("lib"), false);
+});
+
+Deno.test("buildSkillAutoApproveList - uses config when configuredSkills provided", () => {
+  const allowList = buildSkillAutoApproveList("skills", ["memory-save", "agent-browser"]);
+
+  // memory-save has scripts/ dir, should be in scriptPaths
+  assertEquals(allowList.scriptPaths.has("skills/memory-save/scripts/memory-save.ts"), true);
+
+  // agent-browser has no scripts/ dir, should be in commandPrefixes
+  assertEquals(allowList.commandPrefixes.has("agent-browser"), true);
+
+  // Skills not in config should NOT be present
+  assertEquals(allowList.scriptPaths.has("skills/send-reply/scripts/send-reply.ts"), false);
+});
+
+Deno.test("buildSkillAutoApproveList - empty configuredSkills falls back to directory scan", () => {
+  const allowList = buildSkillAutoApproveList("skills", []);
+
+  // Should behave like directory scan (memory-save exists in skills/)
+  assertEquals(allowList.scriptPaths.has("skills/memory-save/scripts/memory-save.ts"), true);
+  assertEquals(allowList.commandPrefixes.has("agent-browser"), true);
+});
+
+Deno.test("buildSkillAutoApproveList - unknown skill name added as commandPrefix", () => {
+  const allowList = buildSkillAutoApproveList("skills", ["nonexistent-skill"]);
+
+  assertEquals(allowList.commandPrefixes.has("nonexistent-skill"), true);
+  assertEquals(allowList.scriptPaths.size, 0);
+});
+
+Deno.test("ChatbotClient - config-driven auto-approve list approves configured external skill", async () => {
+  const tempDir = Deno.makeTempDirSync();
+  try {
+    const skillRegistry = createTestSkillRegistry();
+    const logger = createTestLogger();
+    const config = {
+      workingDir: tempDir,
+      platform: "discord",
+      userId: "123",
+      channelId: "456",
+      isDM: false,
+    };
+    const allowList: SkillAutoApproveList = {
+      scriptPaths: new Set(),
+      commandPrefixes: new Set(["create-blog-post"]),
+    };
+    const client = new ChatbotClient(skillRegistry, logger, config, allowList);
+
+    const request: acp.RequestPermissionRequest = {
+      sessionId: "test-session",
+      toolCall: {
+        title: "Execute shell command",
+        kind: "execute",
+        status: "pending" as const,
+        content: [],
+        toolCallId: "test-id",
+        rawInput: {
+          commands: ["create-blog-post --session-id xxx"],
+        },
+      },
+      options: [
+        { kind: "allow_once", optionId: "allow-1", name: "Allow once" },
+        { kind: "reject_once", optionId: "reject-1", name: "Reject once" },
+      ],
+    };
+
+    const response = await client.requestPermission(request);
+    assertEquals(response.outcome.outcome, "selected");
+    if (response.outcome.outcome === "selected") {
+      assertEquals(response.outcome.optionId, "allow-1");
+    }
+  } finally {
+    Deno.removeSync(tempDir, { recursive: true });
+  }
 });

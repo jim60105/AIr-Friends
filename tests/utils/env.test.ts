@@ -416,3 +416,18 @@ Deno.test("applyEnvOverrides - AGENT_MCP_SERVERS skips invalid JSON", () => {
     Deno.env.delete("AGENT_MCP_SERVERS");
   }
 });
+
+Deno.test("applyEnvOverrides - AGENT_AUTO_APPROVE_SKILLS parses comma-separated list", () => {
+  Deno.env.set("AGENT_AUTO_APPROVE_SKILLS", "memory-save,send-reply,agent-browser");
+  try {
+    const config: Record<string, unknown> = { agent: {} };
+    applyEnvOverrides(config);
+    const agent = config.agent as { autoApproveSkills: string[] };
+    assertEquals(agent.autoApproveSkills.length, 3);
+    assertEquals(agent.autoApproveSkills[0], "memory-save");
+    assertEquals(agent.autoApproveSkills[1], "send-reply");
+    assertEquals(agent.autoApproveSkills[2], "agent-browser");
+  } finally {
+    Deno.env.delete("AGENT_AUTO_APPROVE_SKILLS");
+  }
+});

@@ -616,6 +616,18 @@ function validateConfig(config: Record<string, unknown>): void {
     agentConfig.externalSkills = [];
   }
 
+  // Auto-approve skills validation
+  if (agentConfig.autoApproveSkills && Array.isArray(agentConfig.autoApproveSkills)) {
+    agentConfig.autoApproveSkills = (agentConfig.autoApproveSkills as unknown[]).filter(
+      (s: unknown) => typeof s === "string" && (s as string).trim() !== "",
+    );
+    if ((agentConfig.autoApproveSkills as string[]).length === 0) {
+      delete agentConfig.autoApproveSkills;
+    }
+  } else {
+    delete agentConfig.autoApproveSkills;
+  }
+
   if (mcpServers && Array.isArray(mcpServers)) {
     const validServers: unknown[] = [];
     const seenNames = new Set<string>();

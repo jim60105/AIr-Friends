@@ -1,7 +1,8 @@
 // src/acp/agent-connector.ts
 
 import * as acp from "@agentclientprotocol/sdk";
-import { ChatbotClient } from "./client.ts";
+import { join } from "@std/path";
+import { buildSkillAutoApproveList, ChatbotClient } from "./client.ts";
 import type { AgentCapabilities, AgentConnectorOptions, MCPServerConfig } from "./types.ts";
 import type { SkillRegistry } from "@skills/registry.ts";
 import type { Logger } from "@utils/logger.ts";
@@ -87,10 +88,15 @@ export class AgentConnector {
     const input = this.process.stdout; // ReadableStream - we receive messages from agent
 
     // Create the Client implementation
+    const autoApproveList = buildSkillAutoApproveList(
+      join(Deno.cwd(), "skills"),
+      clientConfig.autoApproveSkills,
+    );
     this.client = new ChatbotClient(
       skillRegistry as SkillRegistry,
       logger as Logger,
       clientConfig,
+      autoApproveList,
     );
 
     // Create ClientSideConnection with proper stream order

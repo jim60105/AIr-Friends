@@ -135,6 +135,10 @@ export interface AgentConfig {
 
   /** Idle timeout detection for ACP connections (optional) */
   idleTimeout?: IdleTimeoutConfig;
+
+  /** Skill names to auto-approve in restricted (non-YOLO) mode.
+   *  When empty or undefined, falls back to scanning the built-in skills directory. */
+  autoApproveSkills?: string[];
 }
 
 /**

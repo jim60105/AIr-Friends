@@ -67,6 +67,28 @@ agent:
   #   - repo: "jim60105/copilot-prompt"
   #     skill: "create-blog-post"
 
+  # Skill Auto-Approve List: skills that are automatically approved in restricted (non-YOLO) mode.
+  # Each entry is a skill name. When empty or not set, falls back to scanning the built-in skills directory.
+  # Override with env AGENT_AUTO_APPROVE_SKILLS (comma-separated).
+  # autoApproveSkills:
+  #   - "memory-save"
+  #   - "memory-search"
+  #   - "memory-patch"
+  #   - "memory-stats"
+  #   - "memory-export"
+  #   - "fetch-context"
+  #   - "send-reply"
+  #   - "edit-reply"
+  #   - "send-file"
+  #   - "react-message"
+  #   - "set-reminder"
+  #   - "list-reminders"
+  #   - "cancel-reminder"
+  #   - "self-research"
+  #   - "agent-browser"
+  #   # External skills can also be listed here:
+  #   # - "create-blog-post"
+
   # Model routing: per-user/per-context model selection
   # When enabled, rules are evaluated in order (first-match wins).
   # All conditions in a rule's match are AND-combined; contentKeywords entries are OR-combined.
