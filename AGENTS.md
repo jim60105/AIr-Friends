@@ -440,7 +440,7 @@ We use `@agentclientprotocol/sdk` for Client-side connection:
 
 **Permission Handling**:
 
-- **Normal mode**: Auto-approves registered skills, skills directory access, and whitelist-matched skill commands (script paths + command prefixes built from scanning `skills/` directory). Explicitly rejects `edit`/`write` tools with logging.
+- **Restricted mode**: Auto-approves registered skills, skills directory access, and skill auto-approve list matched commands (script paths + command prefixes). The auto-approve list can be configured via `agent.autoApproveSkills` in config or `AGENT_AUTO_APPROVE_SKILLS` env var (comma-separated). When not configured, falls back to scanning the built-in `skills/` directory. Explicitly rejects `edit`/`write` tools with logging.
 - **YOLO mode** (global `--yolo` flag or per-channel `yolo: true`): Auto-approves ALL permission requests
   - Useful for trusted/isolated environments
   - Bypasses all permission validation

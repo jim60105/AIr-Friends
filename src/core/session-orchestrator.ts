@@ -403,6 +403,7 @@ export class SessionOrchestrator {
         channelId: event.channelId,
         isDM: event.isDm,
         yolo: yoloDecision.enabled,
+        autoApproveSkills: this.config.agent.autoApproveSkills,
       };
 
       // 5. Build ACP connector
@@ -850,6 +851,7 @@ export class SessionOrchestrator {
         channelId,
         isDM: false,
         yolo: yoloDecision.enabled,
+        autoApproveSkills: this.config.agent.autoApproveSkills,
       };
 
       // 6. Build and execute ACP connector
@@ -1113,6 +1115,7 @@ export class SessionOrchestrator {
         channelId: "internal",
         isDM: false,
         yolo: this.yolo,
+        autoApproveSkills: this.config.agent.autoApproveSkills,
       };
 
       // 5. Build and execute ACP connector (use selfResearch model)
@@ -1342,6 +1345,7 @@ export class SessionOrchestrator {
         channelId: "internal",
         isDM: true,
         yolo: this.yolo,
+        autoApproveSkills: this.config.agent.autoApproveSkills,
       };
 
       const agentType = getDefaultAgentType(this.config);
@@ -1596,6 +1600,7 @@ export class SessionOrchestrator {
         channelId: dmChannelId,
         isDM: true,
         yolo: yoloDecision.enabled,
+        autoApproveSkills: this.config.agent.autoApproveSkills,
       };
 
       // 6. Build and execute ACP connector

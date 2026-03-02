@@ -26,6 +26,9 @@ export interface ClientConfig {
 
   /** YOLO mode: auto-approve all permission requests */
   yolo?: boolean;
+
+  /** Skill names to auto-approve in restricted (non-YOLO) mode */
+  autoApproveSkills?: string[];
 }
 
 /**

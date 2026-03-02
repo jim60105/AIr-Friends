@@ -2003,6 +2003,67 @@ workspace:
   });
 });
 
+Deno.test("loadConfig - autoApproveSkills validation", async (t) => {
+  const baseConfig = (extra: string) => `
+platforms:
+  discord:
+    token: "test-token"
+    enabled: true
+  misskey:
+    host: "misskey.example.com"
+    token: "test-token"
+    enabled: false
+agent:
+  model: "gpt-4"
+  systemPromptPath: "./prompts/system_reply.md"
+  tokenLimit: 4096
+${extra}
+workspace:
+  repoPath: "./data"
+  workspacesDir: "workspaces"
+`;
+
+  await t.step("valid autoApproveSkills are preserved", async () => {
+    const config = baseConfig(`  autoApproveSkills:
+    - "memory-save"
+    - "send-reply"`);
+    await withTestConfig(config, async (dir) => {
+      const result = await loadConfig(dir);
+      assertEquals(result.agent.autoApproveSkills?.length, 2);
+      assertEquals(result.agent.autoApproveSkills![0], "memory-save");
+      assertEquals(result.agent.autoApproveSkills![1], "send-reply");
+    });
+  });
+
+  await t.step("empty strings are filtered out", async () => {
+    const config = baseConfig(`  autoApproveSkills:
+    - "memory-save"
+    - ""
+    - "  "`);
+    await withTestConfig(config, async (dir) => {
+      const result = await loadConfig(dir);
+      assertEquals(result.agent.autoApproveSkills?.length, 1);
+      assertEquals(result.agent.autoApproveSkills![0], "memory-save");
+    });
+  });
+
+  await t.step("missing autoApproveSkills is undefined", async () => {
+    const config = baseConfig("");
+    await withTestConfig(config, async (dir) => {
+      const result = await loadConfig(dir);
+      assertEquals(result.agent.autoApproveSkills, undefined);
+    });
+  });
+
+  await t.step("empty array results in undefined", async () => {
+    const config = baseConfig("  autoApproveSkills: []");
+    await withTestConfig(config, async (dir) => {
+      const result = await loadConfig(dir);
+      assertEquals(result.agent.autoApproveSkills, undefined);
+    });
+  });
+});
+
 Deno.test("convertUserMCPServerConfigs", async (t) => {
   await t.step("converts stdio config correctly", () => {
     const result = convertUserMCPServerConfigs([{

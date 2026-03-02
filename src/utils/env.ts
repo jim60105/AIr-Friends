@@ -102,6 +102,9 @@ export const ENV_MAPPINGS = {
   AGENT_SANDBOX_NETWORK_ISOLATION: "agent.sandbox.networkIsolation",
   AGENT_SANDBOX_ALLOWED_ENV_VARS: "agent.sandbox.allowedEnvVars",
 
+  // Agent skill auto-approve list
+  AGENT_AUTO_APPROVE_SKILLS: "agent.autoApproveSkills",
+
   // Agent idle timeout settings
   AGENT_IDLE_TIMEOUT_ENABLED: "agent.idleTimeout.enabled",
   AGENT_IDLE_TIMEOUT_MS: "agent.idleTimeout.timeoutMs",
@@ -184,7 +187,8 @@ export function applyEnvOverrides(config: Record<string, unknown>): void {
       // Handle comma-separated arrays
       else if (
         envName === "SKILL_SEND_FILE_ALLOWED_EXTENSIONS" ||
-        envName === "AGENT_SANDBOX_ALLOWED_ENV_VARS" || envName === "AUDIT_INCLUDED_PHASES"
+        envName === "AGENT_SANDBOX_ALLOWED_ENV_VARS" || envName === "AUDIT_INCLUDED_PHASES" ||
+        envName === "AGENT_AUTO_APPROVE_SKILLS"
       ) {
         parsedValue = value.split(",").map((s) => s.trim()).filter((s) => s !== "");
       } // Handle REPLY_POLICY / REPLY_TO: map "whitelist" → "channels" for backward compat

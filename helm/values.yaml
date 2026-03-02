@@ -162,6 +162,10 @@ env:
   # Only set this if you need to override agentExternalSkills with a raw JSON string.
   # AGENT_EXTERNAL_SKILLS: '[{"repo":"jim60105/copilot-prompt","skill":"create-blog-post"}]'
 
+  # Skill Auto-Approve List (comma-separated skill names for restricted/non-YOLO mode)
+  # When empty or not set, falls back to scanning the built-in skills directory.
+  # AGENT_AUTO_APPROVE_SKILLS: "memory-save,memory-search,memory-patch,memory-stats,memory-export,fetch-context,send-reply,edit-reply,send-file,react-message,set-reminder,list-reminders,cancel-reminder,self-research,agent-browser"
+
   # Session Audit Log
   AUDIT_ENABLED: ''
   AUDIT_RETENTION_DAYS: ''

@@ -8,9 +8,9 @@ import type { ClientConfig } from "./types.ts";
 import type { SkillContext } from "@skills/types.ts";
 
 /**
- * Allowed skill lists built by scanning the skills directory.
+ * Auto-approved skill lists for restricted (non-YOLO) mode.
  */
-export interface SkillAllowList {
+export interface SkillAutoApproveList {
   /** Script skill path suffixes: "skills/memory-save/scripts/memory-save.ts" */
   scriptPaths: Set<string>;
   /** Command skill prefixes: "agent-browser" */
@@ -18,10 +18,68 @@ export interface SkillAllowList {
 }
 
 /**
- * Build allowed skill lists by scanning the skills directory.
- * Script-based skills have a scripts/ subdirectory; command-based skills do not.
+ * Build skill auto-approve list.
+ * When configuredSkills is provided and non-empty, builds the list from config.
+ * Otherwise falls back to scanning the skills directory (backward compatible).
  */
-export function buildSkillAllowList(skillsDir: string): SkillAllowList {
+export function buildSkillAutoApproveList(
+  skillsDir: string,
+  configuredSkills?: string[],
+): SkillAutoApproveList {
+  if (configuredSkills && configuredSkills.length > 0) {
+    return buildFromConfig(skillsDir, configuredSkills);
+  }
+  return buildFromDirectory(skillsDir);
+}
+
+/**
+ * Build auto-approve list from configured skill names.
+ * Scans both the built-in skills directory and ~/.agents/skills/ for external skills.
+ */
+function buildFromConfig(
+  skillsDir: string,
+  configuredSkills: string[],
+): SkillAutoApproveList {
+  const scriptPaths = new Set<string>();
+  const commandPrefixes = new Set<string>();
+
+  const scanDirs = [skillsDir];
+  const homeSkillsDir = join(Deno.env.get("HOME") ?? "/home/deno", ".agents", "skills");
+  try {
+    Deno.statSync(homeSkillsDir);
+    scanDirs.push(homeSkillsDir);
+  } catch {
+    // External skills directory doesn't exist
+  }
+
+  for (const skillName of configuredSkills) {
+    let found = false;
+    for (const dir of scanDirs) {
+      const scriptsPath = join(dir, skillName, "scripts");
+      try {
+        for (const script of Deno.readDirSync(scriptsPath)) {
+          if (script.isFile && script.name.endsWith(".ts")) {
+            scriptPaths.add(`skills/${skillName}/scripts/${script.name}`);
+            found = true;
+          }
+        }
+      } catch {
+        // No scripts dir in this scan path
+      }
+    }
+    if (!found) {
+      // Command-based skill or not yet installed
+      commandPrefixes.add(skillName);
+    }
+  }
+
+  return { scriptPaths, commandPrefixes };
+}
+
+/**
+ * Build auto-approve list by scanning the skills directory (fallback).
+ */
+function buildFromDirectory(skillsDir: string): SkillAutoApproveList {
   const scriptPaths = new Set<string>();
   const commandPrefixes = new Set<string>();
 
@@ -57,7 +115,7 @@ export class ChatbotClient implements acp.Client {
   private logger: Logger;
   private config: ClientConfig;
   private replyAlreadySent: boolean = false;
-  private skillAllowList: SkillAllowList;
+  private skillAutoApproveList: SkillAutoApproveList;
 
   /** Timestamp of the last activity received from the Agent */
   private lastActivityTimestamp: number = Date.now();
@@ -66,13 +124,13 @@ export class ChatbotClient implements acp.Client {
     skillRegistry: SkillRegistry,
     logger: Logger,
     config: ClientConfig,
-    skillAllowList?: SkillAllowList,
+    skillAutoApproveList?: SkillAutoApproveList,
   ) {
     this.skillRegistry = skillRegistry;
     this.logger = logger;
     this.config = config;
-    this.skillAllowList = skillAllowList ??
-      buildSkillAllowList(join(Deno.cwd(), "skills"));
+    this.skillAutoApproveList = skillAutoApproveList ??
+      buildSkillAutoApproveList(join(Deno.cwd(), "skills"));
   }
 
   /**
@@ -203,13 +261,13 @@ export class ChatbotClient implements acp.Client {
       const isSkillCommand = commands.length > 0 &&
         commands.every((cmd) => {
           // Check script-based skills (path suffix match)
-          const matchesScript = Array.from(this.skillAllowList.scriptPaths).some(
+          const matchesScript = Array.from(this.skillAutoApproveList.scriptPaths).some(
             (allowedPath) => cmd.includes(allowedPath),
           );
           if (matchesScript) return true;
 
           // Check command-based skills (command prefix match)
-          const matchesCommand = Array.from(this.skillAllowList.commandPrefixes).some(
+          const matchesCommand = Array.from(this.skillAutoApproveList.commandPrefixes).some(
             (prefix) => cmd.trimStart().startsWith(prefix),
           );
           return matchesCommand;
@@ -257,7 +315,7 @@ export class ChatbotClient implements acp.Client {
 
     // Explicit edit/write tool rejection with logging
     if (title === "edit" || title === "edit_file" || kind === "write" as string) {
-      this.logger.warn("Rejecting edit/write tool in non-YOLO mode: {title}", {
+      this.logger.warn("Rejecting edit/write tool in restricted mode: {title}", {
         title,
         kind,
         paths: locations.map((l) => l.path),
