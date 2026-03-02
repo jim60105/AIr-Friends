@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.17.0] - 2026-03-03
+
+### Added
+
+- Config-driven skill auto-approve list (`agent.autoApproveSkills`) — replaces directory-scanning with a configurable list of skills to auto-approve in restricted (non-YOLO) mode; supports both built-in and external skills via config or `AGENT_AUTO_APPROVE_SKILLS` environment variable (comma-separated); falls back to directory scanning when not configured (backward compatible)
+- Native YAML support for `agentAutoApproveSkills` in Helm chart — new top-level value rendered as comma-separated `AGENT_AUTO_APPROVE_SKILLS` in secret template, consistent with `modelRouting` and `agentExternalSkills` handling
+
+### Changed
+
+- Renamed internal `SkillAllowList` → `SkillAutoApproveList` and `buildSkillAllowList()` → `buildSkillAutoApproveList()`; log messages updated from `non-YOLO` to `restricted mode` for clarity
+- Increased container memory limit to 2500Mi and raised resource requests to 1000m CPU / 1000Mi memory in Helm chart
+- Updated YAML policy examples for `yolo` flag and channel routing configuration in documentation
+
 ## [0.16.0] - 2026-03-01
 
 ### Added
@@ -780,7 +793,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ---
 
-[Unreleased]: https://github.com/jim60105/AIr-Friends/compare/v0.16.0...HEAD
+[Unreleased]: https://github.com/jim60105/AIr-Friends/compare/v0.17.0...HEAD
+[0.17.0]: https://github.com/jim60105/AIr-Friends/compare/v0.16.0...v0.17.0
 [0.16.0]: https://github.com/jim60105/AIr-Friends/compare/v0.15.0...v0.16.0
 [0.15.0]: https://github.com/jim60105/AIr-Friends/compare/v0.14.0...v0.15.0
 [0.14.0]: https://github.com/jim60105/AIr-Friends/compare/v0.13.0...v0.14.0
