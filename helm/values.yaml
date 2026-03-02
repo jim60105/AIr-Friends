@@ -190,6 +190,28 @@ agentExternalSkills: []
   # - repo: "jim60105/copilot-prompt"
   #   skill: "create-blog-post"
 
+# -- Skill Auto-Approve List (native YAML, easier than comma-separated env var).
+# When agentAutoApproveSkills is non-empty, it takes precedence over
+# AGENT_AUTO_APPROVE_SKILLS env var.
+agentAutoApproveSkills: []
+  # Example (list all built-in skills + any external skills to auto-approve):
+  # - "memory-save"
+  # - "memory-search"
+  # - "memory-patch"
+  # - "memory-stats"
+  # - "memory-export"
+  # - "fetch-context"
+  # - "send-reply"
+  # - "edit-reply"
+  # - "send-file"
+  # - "react-message"
+  # - "set-reminder"
+  # - "list-reminders"
+  # - "cancel-reminder"
+  # - "self-research"
+  # - "agent-browser"
+  # - "create-blog-post"  # external skill
+
 # -- Model routing configuration (native YAML, easier than JSON env var).
 # When modelRouting.enabled is true, this section takes precedence over
 # MODEL_ROUTING_ENABLED and MODEL_ROUTING_RULES env vars.
