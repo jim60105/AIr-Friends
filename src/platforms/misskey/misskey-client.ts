@@ -3,6 +3,7 @@
 import { api as MisskeyApi, Stream } from "misskey-js";
 import { MisskeyAdapterConfig } from "./misskey-config.ts";
 import { createLogger } from "@utils/logger.ts";
+import { ErrorCode, PlatformError } from "../../types/errors.ts";
 
 const logger = createLogger("MisskeyClient");
 
@@ -79,6 +80,20 @@ export class MisskeyClient {
       // deno-lint-ignore no-explicit-any
       return await this.api.request(endpoint as any, params as any);
     } catch (error) {
+      // Detect non-JSON responses (e.g., "Bad Gateway", "Service Unavailable")
+      // which indicate the server is unreachable rather than an API-level error
+      if (error instanceof SyntaxError && error.message.includes("is not valid JSON")) {
+        logger.error("Misskey server unreachable (non-JSON response)", {
+          endpoint,
+          error: error.message,
+        });
+        throw new PlatformError(
+          ErrorCode.PLATFORM_CONNECTION_FAILED,
+          `Misskey server returned non-JSON response: ${error.message}`,
+          { endpoint },
+        );
+      }
+
       const errorMessage = error instanceof Error
         ? error.message
         : (typeof error === "object" && error !== null)
@@ -129,7 +144,21 @@ export class MisskeyClient {
 
     if (!response.ok) {
       const errorBody = await response.text();
-      throw new Error(`Drive upload failed (${response.status}): ${errorBody}`);
+
+      // HTTP 502/503/504 indicate gateway-level issues
+      if (response.status >= 502 && response.status <= 504) {
+        throw new PlatformError(
+          ErrorCode.PLATFORM_CONNECTION_FAILED,
+          `Misskey server unavailable (${response.status}): ${errorBody}`,
+          { endpoint: "drive/files/create", status: response.status },
+        );
+      }
+
+      throw new PlatformError(
+        ErrorCode.PLATFORM_API_ERROR,
+        `Drive upload failed (${response.status}): ${errorBody}`,
+        { endpoint: "drive/files/create", status: response.status },
+      );
     }
 
     const result = await response.json();
