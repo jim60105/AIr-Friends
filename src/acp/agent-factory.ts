@@ -88,6 +88,7 @@ function buildBaseAgentConfig(
         "--no-ask-user",
         "--no-color",
         "--no-auto-update",
+        "--experimental",
         "--acp",
       ];
 
