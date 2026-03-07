@@ -95,6 +95,7 @@ export class AgentCore {
       recentMessageLimit: config.memory.recentMessageLimit,
       tokenLimit: config.agent.tokenLimit,
       memoryMaxChars: config.memory.maxChars,
+      agentType: config.agent.defaultAgentType,
     });
 
     // Initialize reply policy (needed by orchestrator and message handler)

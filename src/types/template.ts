@@ -27,6 +27,9 @@ export interface TemplateVariables {
   /** The session ID for skill API calls (empty string if skill API disabled) */
   sessionId: string;
 
+  /** The agent type used for this session (e.g. "copilot", "gemini", "opencode") */
+  agentType?: string;
+
   /** RSS items formatted block (for self-research prompt) */
   rssItems?: string;
 
@@ -59,4 +62,7 @@ export interface TemplateVariables {
 
   /** Reminder scheduled timestamp (reminder delivery prompt only) */
   reminderScheduledAt?: string;
+
+  /** Model identifier (e.g., "claude-opus-4.6", "gemini-2.5-pro") */
+  model?: string;
 }

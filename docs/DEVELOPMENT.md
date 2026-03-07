@@ -421,6 +421,8 @@ The following variables are available in all prompt templates:
 | `channelId` | `string`  | Channel/conversation ID                        | `"873618490202931231"`   |
 | `guildId`   | `string`  | Server/guild ID (empty string if N/A)          | `""`                     |
 | `sessionId` | `string`  | Current skill API session ID                   | `"sess_abc123"`          |
+| `agentType` | `string`  | ACP agent type (`"copilot"`, `"gemini"`, `"opencode"`) | `"copilot"`    |
+| `model`     | `string`  | Model identifier for the current session       | `"claude-opus-4.6"`     |
 
 **Special prompt variables** (only available in specific prompt types):
 

@@ -313,12 +313,27 @@ export class SessionOrchestrator {
         this.sessionRegistry.setAuditWriter(shellSessionId, auditWriter);
       }
 
+      // Pre-resolve model for template variables and later session model assignment
+      const routingContext: ModelRoutingContext = {
+        sessionType,
+        platform: event.platform,
+        userId: event.userId,
+        channelId: event.channelId,
+        messageContent: event.content,
+      };
+      const resolvedModel = resolveModel(
+        this.config.agent.modelRouting,
+        routingContext,
+        this.config.agent.model,
+      );
+
       // 3. Assemble initial context
       const context = await this.contextAssembler.assembleContext(
         event,
         workspace,
         platformAdapter,
         shellSessionId ?? undefined,
+        resolvedModel,
       );
       sessionLogger.debug("Context assembled", {
         memoriesCount: context.importantMemories.length,
@@ -343,6 +358,7 @@ export class SessionOrchestrator {
         event,
         shellSessionId ?? undefined,
         formattedContext.userMessage,
+        resolvedModel,
       );
 
       sessionLogger.debug("Prompt built", {
@@ -449,19 +465,7 @@ export class SessionOrchestrator {
         sessionLogger.info("Agent session {sessionId} created", { sessionId });
         sessionLogger = sessionLogger.withContext({ sessionId });
 
-        // Set the model for the session
-        const routingContext: ModelRoutingContext = {
-          sessionType,
-          platform: event.platform,
-          userId: event.userId,
-          channelId: event.channelId,
-          messageContent: event.content,
-        };
-        const resolvedModel = resolveModel(
-          this.config.agent.modelRouting,
-          routingContext,
-          this.config.agent.model,
-        );
+        // Set the model for the session (using pre-resolved model)
         await connector.setSessionModel(sessionId, resolvedModel);
         sessionLogger.info("Agent session {sessionId} model set to {model}", {
           sessionId,
@@ -789,6 +793,19 @@ export class SessionOrchestrator {
         this.sessionRegistry.setAuditWriter(shellSessionId, auditWriter);
       }
 
+      // Pre-resolve model for template variables and later session model assignment
+      const routingContext: ModelRoutingContext = {
+        sessionType: "spontaneous",
+        platform,
+        userId: options.botId,
+        channelId,
+      };
+      const resolvedModel = resolveModel(
+        this.config.agent.modelRouting,
+        routingContext,
+        this.config.agent.model,
+      );
+
       // 3. Assemble spontaneous context
       const context = await this.contextAssembler.assembleSpontaneousContext(
         platform,
@@ -797,10 +814,15 @@ export class SessionOrchestrator {
         platformAdapter,
         { fetchRecentMessages: options.fetchRecentMessages },
         shellSessionId ?? undefined,
+        resolvedModel,
       );
 
       // 4. Build prompt from template
-      const fullPrompt = await this.buildSpontaneousPromptFromTemplate(context, shellSessionId);
+      const fullPrompt = await this.buildSpontaneousPromptFromTemplate(
+        context,
+        shellSessionId,
+        resolvedModel,
+      );
 
       sessionLogger.debug("Spontaneous prompt built", {
         estimatedTokens: context.estimatedTokens,
@@ -881,17 +903,7 @@ export class SessionOrchestrator {
 
         const sessionId = await connector.createSession(this.getMCPServers());
         sessionLogger = sessionLogger.withContext({ sessionId });
-        const routingContext: ModelRoutingContext = {
-          sessionType: "spontaneous",
-          platform,
-          userId: options.botId,
-          channelId,
-        };
-        const resolvedModel = resolveModel(
-          this.config.agent.modelRouting,
-          routingContext,
-          this.config.agent.model,
-        );
+        // Set the model for the session (using pre-resolved model)
         await connector.setSessionModel(sessionId, resolvedModel);
 
         // Clear reply state
@@ -1078,10 +1090,23 @@ export class SessionOrchestrator {
         this.sessionRegistry.setAuditWriter(shellSessionId, auditWriter);
       }
 
+      // Pre-resolve model for template variables and later session model assignment
+      // Fallback chain: routing rules → selfResearch.model → agent.model
+      const routingContext: ModelRoutingContext = {
+        sessionType: "self-research",
+      };
+      const sectionFallback = selfResearchConfig.model || this.config.agent.model;
+      const resolvedModel = resolveModel(
+        this.config.agent.modelRouting,
+        routingContext,
+        sectionFallback,
+      );
+
       // 3. Build self-research prompt
       const fullPrompt = await this.buildSelfResearchPrompt(
         rssItems,
         shellSessionId,
+        resolvedModel,
       );
 
       sessionLogger.debug("Self-research prompt built");
@@ -1141,16 +1166,7 @@ export class SessionOrchestrator {
 
         const sessionId = await connector.createSession(this.getMCPServers());
         sessionLogger = sessionLogger.withContext({ sessionId });
-        // Fallback chain: routing rules → selfResearch.model → agent.model
-        const routingContext: ModelRoutingContext = {
-          sessionType: "self-research",
-        };
-        const sectionFallback = selfResearchConfig.model || this.config.agent.model;
-        const resolvedModel = resolveModel(
-          this.config.agent.modelRouting,
-          routingContext,
-          sectionFallback,
-        );
+        // Set the model for the session (using pre-resolved model)
         await connector.setSessionModel(sessionId, resolvedModel);
 
         // Audit: prompt_sent
@@ -1311,10 +1327,23 @@ export class SessionOrchestrator {
         this.sessionRegistry.setAuditWriter(shellSessionId, auditWriter);
       }
 
+      // Pre-resolve model for template variables and later session model assignment
+      // Fallback chain: routing rules → memoryMaintenance.model → agent.model
+      const routingContext: ModelRoutingContext = {
+        sessionType: "memory-maintenance",
+      };
+      const sectionFallback = memoryMaintenanceConfig.model || this.config.agent.model;
+      const resolvedModel = resolveModel(
+        this.config.agent.modelRouting,
+        routingContext,
+        sectionFallback,
+      );
+
       const fullPrompt = await this.buildMemoryMaintenancePrompt(
         workspaceKey,
         shellSessionId,
         workspace,
+        resolvedModel,
       );
 
       // === DRY RUN CHECK ===
@@ -1370,16 +1399,7 @@ export class SessionOrchestrator {
 
         const sessionId = await connector.createSession(this.getMCPServers());
         sessionLogger = sessionLogger.withContext({ sessionId });
-        // Fallback chain: routing rules → memoryMaintenance.model → agent.model
-        const routingContext: ModelRoutingContext = {
-          sessionType: "memory-maintenance",
-        };
-        const sectionFallback = memoryMaintenanceConfig.model || this.config.agent.model;
-        const resolvedModel = resolveModel(
-          this.config.agent.modelRouting,
-          routingContext,
-          sectionFallback,
-        );
+        // Set the model for the session (using pre-resolved model)
         await connector.setSessionModel(sessionId, resolvedModel);
 
         await auditWriter?.write("prompt_sent", {
@@ -1556,8 +1576,21 @@ export class SessionOrchestrator {
         this.sessionRegistry.setAuditWriter(shellSessionId, auditWriter);
       }
 
+      // Pre-resolve model for template variables and later session model assignment
+      const routingContext: ModelRoutingContext = {
+        sessionType: "reminder",
+        platform,
+        userId: reminder.userId,
+        channelId: dmChannelId,
+      };
+      const resolvedModel = resolveModel(
+        this.config.agent.modelRouting,
+        routingContext,
+        this.config.agent.model,
+      );
+
       // 4. Build reminder prompt
-      const fullPrompt = await this.buildReminderPrompt(reminder, shellSessionId);
+      const fullPrompt = await this.buildReminderPrompt(reminder, shellSessionId, resolvedModel);
 
       // === DRY RUN CHECK ===
       const dryRunResult = await this.handleDryRun(
@@ -1626,17 +1659,7 @@ export class SessionOrchestrator {
 
         const sessionId = await connector.createSession(this.getMCPServers());
         sessionLogger = sessionLogger.withContext({ sessionId });
-        const routingContext: ModelRoutingContext = {
-          sessionType: "reminder",
-          platform,
-          userId: reminder.userId,
-          channelId: dmChannelId,
-        };
-        const resolvedModel = resolveModel(
-          this.config.agent.modelRouting,
-          routingContext,
-          this.config.agent.model,
-        );
+        // Set the model for the session (using pre-resolved model)
         await connector.setSessionModel(sessionId, resolvedModel);
 
         // Clear reply state
@@ -1915,6 +1938,7 @@ export class SessionOrchestrator {
   private async buildSpontaneousPromptFromTemplate(
     context: import("../types/context.ts").AssembledSpontaneousContext,
     sessionId: string | null,
+    model?: string,
   ): Promise<string> {
     const promptDir = dirname(this.config.agent.systemPromptPath);
     const instructionsPath = join(promptDir, "system_spontaneous.md");
@@ -1942,6 +1966,8 @@ export class SessionOrchestrator {
       channelId: "",
       guildId: "",
       sessionId: sessionId ?? "",
+      agentType: getDefaultAgentType(this.config),
+      model,
       recentMessagesFetched: context.recentMessagesFetched,
       importantMemories: importantMemoriesText,
       recentMessages: recentMessagesText,
@@ -1961,6 +1987,7 @@ export class SessionOrchestrator {
   private async buildSelfResearchPrompt(
     rssItems: RssItem[],
     sessionId: string | null,
+    model?: string,
   ): Promise<string> {
     const promptDir = dirname(this.config.agent.systemPromptPath);
     const instructionsPath = join(promptDir, "system_self_research.md");
@@ -1980,6 +2007,8 @@ export class SessionOrchestrator {
       channelId: "",
       guildId: "",
       sessionId: sessionId ?? "",
+      agentType: getDefaultAgentType(this.config),
+      model,
       rssItems: rssBlock,
     };
 
@@ -1997,6 +2026,7 @@ export class SessionOrchestrator {
     workspaceKey: string,
     sessionId: string | null,
     workspace: WorkspaceInfo,
+    model?: string,
   ): Promise<string> {
     const promptDir = dirname(this.config.agent.systemPromptPath);
     const instructionsPath = join(promptDir, "system_memory_maintenance.md");
@@ -2012,6 +2042,8 @@ export class SessionOrchestrator {
       channelId: "",
       guildId: "",
       sessionId: sessionId ?? "",
+      agentType: getDefaultAgentType(this.config),
+      model,
       workspaceKey,
       memoriesDump,
     };
@@ -2069,6 +2101,7 @@ export class SessionOrchestrator {
   private async buildReminderPrompt(
     reminder: ResolvedReminder,
     sessionId: string | null,
+    model?: string,
   ): Promise<string> {
     const promptDir = dirname(this.config.agent.systemPromptPath);
     const instructionsPath = join(promptDir, "system_reminder.md");
@@ -2081,6 +2114,8 @@ export class SessionOrchestrator {
       channelId: "",
       guildId: "",
       sessionId: sessionId ?? "",
+      agentType: getDefaultAgentType(this.config),
+      model,
       reminderMessage: reminder.message,
       reminderCreatedAt: reminder.createdAt,
       reminderScheduledAt: reminder.scheduledAt,

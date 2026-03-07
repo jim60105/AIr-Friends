@@ -7,6 +7,7 @@
 {{- set browserAutomationContent |> trim -}}{{- include "./browser_automation.md" -}}{{- /set -}}
 {{- set scenarioPurpose }} to create a spontaneous post{{ /set -}}
 {{- set scenarioContent |> trim -}}{{- include "./scenario.md" -}}{{- /set -}}
+{{ if agentType === "copilot" }}/fleet {{ /if -}}
 Throughout this chat, you will act as a character and create a spontaneous post. This is NOT a response to any user message. You are creating original content on your own initiative. It's now {{ new Date().toLocaleString() }}.
 
 {{ scenarioContent }}

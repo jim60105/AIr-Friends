@@ -49,6 +49,7 @@ export class ContextAssembler {
     event: NormalizedEvent,
     sessionId: string | undefined,
     userContextMessage: string,
+    model?: string,
   ): Promise<string> {
     const templateVars: TemplateVariables = {
       isDm: event.isDm,
@@ -57,6 +58,8 @@ export class ContextAssembler {
       channelId: event.channelId,
       guildId: event.guildId ?? "",
       sessionId: sessionId ?? "",
+      agentType: this.config.agentType,
+      model,
       userContextMessage,
     };
 
@@ -71,6 +74,7 @@ export class ContextAssembler {
     workspace: WorkspaceInfo,
     messageFetcher: MessageFetcher,
     sessionId?: string,
+    model?: string,
   ): Promise<AssembledContext> {
     logger.info("Assembling context", {
       workspaceKey: workspace.key,
@@ -85,6 +89,8 @@ export class ContextAssembler {
       channelId: event.channelId,
       guildId: event.guildId ?? "",
       sessionId: sessionId ?? "",
+      agentType: this.config.agentType,
+      model,
     };
 
     // Load system prompt
@@ -604,6 +610,7 @@ export class ContextAssembler {
     messageFetcher: MessageFetcher,
     options: { fetchRecentMessages: boolean },
     sessionId?: string,
+    model?: string,
   ): Promise<AssembledSpontaneousContext> {
     logger.info("Assembling spontaneous context", {
       platform,
@@ -618,6 +625,8 @@ export class ContextAssembler {
       channelId,
       guildId: "",
       sessionId: sessionId ?? "",
+      agentType: this.config.agentType,
+      model,
     };
 
     const systemPrompt = await this.getSystemPrompt(templateVars);

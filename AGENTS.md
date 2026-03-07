@@ -1048,6 +1048,8 @@ You are Yuna. This is a private chat.
 | `channelId`             | `string`  | Channel/conversation ID                                         |
 | `guildId`               | `string`  | Server/guild ID (empty string if N/A)                           |
 | `sessionId`             | `string`  | Current skill API session ID                                    |
+| `agentType`             | `string`  | ACP agent type (`"copilot"` / `"gemini"` / `"opencode"`)       |
+| `model`                 | `string`  | Model identifier (e.g., `"claude-opus-4.6"`, `"gemini-2.5-pro"`) |
 | `rssItems`              | `string`  | RSS items (self-research prompt only)                           |
 | `workspaceKey`          | `string`  | Workspace key (memory maintenance prompt only)                  |
 | `memoriesDump`          | `string`  | Memory JSON dump (memory maintenance only)                      |
