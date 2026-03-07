@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.18.0] - 2026-03-07
+
+### Added
+
+- Dedicated `COPILOT_GITHUB_TOKEN` environment variable for Copilot CLI authentication — separates Copilot token from `GITHUB_TOKEN`, with automatic fallback for backward compatibility
+- Configurable Git Backup HTTPS credentials (`GIT_BACKUP_AUTH_USER` / `GIT_BACKUP_AUTH_PASSWORD`) — replaces implicit `GITHUB_TOKEN` usage with explicit auth configuration; falls back to `GITHUB_TOKEN` when not set
+- `agentType` and `model` template variables available in all Vento prompt templates — enables per-agent-type and per-model prompt customization (e.g., agent-specific instructions or model-tuned wording)
+- Copilot agent now launches with `--experimental` flag to enable experimental features
+
+### Fixed
+
+- Misskey 502 Bad Gateway responses with non-JSON bodies are now correctly classified as retryable `PlatformError` instead of a generic API error
+
 ## [0.17.0] - 2026-03-03
 
 ### Added
@@ -793,7 +806,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ---
 
-[Unreleased]: https://github.com/jim60105/AIr-Friends/compare/v0.17.0...HEAD
+[Unreleased]: https://github.com/jim60105/AIr-Friends/compare/v0.18.0...HEAD
+[0.18.0]: https://github.com/jim60105/AIr-Friends/compare/v0.17.0...v0.18.0
 [0.17.0]: https://github.com/jim60105/AIr-Friends/compare/v0.16.0...v0.17.0
 [0.16.0]: https://github.com/jim60105/AIr-Friends/compare/v0.15.0...v0.16.0
 [0.15.0]: https://github.com/jim60105/AIr-Friends/compare/v0.14.0...v0.15.0
