@@ -109,25 +109,26 @@ Deno.test("createAgentConfig - throws for copilot without GitHub token", () => {
       model: "test",
       systemPromptPath: "./test.md",
       tokenLimit: 20000,
+      copilotGithubToken: undefined,
       githubToken: undefined,
     },
   });
 
-  // Clear env var too
+  // Clear env vars too
   const originalToken = Deno.env.get("GITHUB_TOKEN");
+  const originalCopilotToken = Deno.env.get("COPILOT_GITHUB_TOKEN");
   Deno.env.delete("GITHUB_TOKEN");
+  Deno.env.delete("COPILOT_GITHUB_TOKEN");
 
   try {
     assertThrows(
       () => createAgentConfig("copilot", "/tmp/workspace", config),
       Error,
-      "GitHub token not configured",
+      "COPILOT_GITHUB_TOKEN or GITHUB_TOKEN",
     );
   } finally {
-    // Restore env var if it existed
-    if (originalToken) {
-      Deno.env.set("GITHUB_TOKEN", originalToken);
-    }
+    if (originalToken) Deno.env.set("GITHUB_TOKEN", originalToken);
+    if (originalCopilotToken) Deno.env.set("COPILOT_GITHUB_TOKEN", originalCopilotToken);
   }
 });
 
@@ -197,19 +198,26 @@ Deno.test("createAgentConfig - uses env var for GitHub token if config not set",
     },
   });
 
-  // Set env var
+  // Set GITHUB_TOKEN env var, clear COPILOT_GITHUB_TOKEN to ensure fallback path
   const originalToken = Deno.env.get("GITHUB_TOKEN");
   Deno.env.set("GITHUB_TOKEN", "env-github-token");
+  const originalCopilotToken = Deno.env.get("COPILOT_GITHUB_TOKEN");
+  Deno.env.delete("COPILOT_GITHUB_TOKEN");
 
   try {
     const agentConfig = createAgentConfig("copilot", "/tmp/workspace", config);
     assertEquals(agentConfig.env?.GITHUB_TOKEN, "env-github-token");
   } finally {
-    // Restore env var
+    // Restore env vars
     if (originalToken) {
       Deno.env.set("GITHUB_TOKEN", originalToken);
     } else {
       Deno.env.delete("GITHUB_TOKEN");
+    }
+    if (originalCopilotToken) {
+      Deno.env.set("COPILOT_GITHUB_TOKEN", originalCopilotToken);
+    } else {
+      Deno.env.delete("COPILOT_GITHUB_TOKEN");
     }
   }
 });
@@ -583,4 +591,132 @@ Deno.test("createAgentConfig - omits AGENT_WORKSPACE when not provided", () => {
   const config = createTestConfig();
   const agentConfig = createAgentConfig("copilot", "/tmp/workspace", config, false);
   assertEquals(agentConfig.env?.AGENT_WORKSPACE, undefined);
+});
+
+// ============ Copilot Separate Token Tests (Issue #248) ============
+
+Deno.test("createAgentConfig - copilot passes COPILOT_GITHUB_TOKEN and GITHUB_TOKEN separately", () => {
+  const config = createTestConfig({
+    agent: {
+      model: "test-model",
+      systemPromptPath: "./test.md",
+      tokenLimit: 20000,
+      copilotGithubToken: "copilot-specific-token",
+      githubToken: "generic-token",
+    },
+  });
+  const result = createAgentConfig("copilot", "/tmp/workspace", config);
+  assertEquals(result.env?.COPILOT_GITHUB_TOKEN, "copilot-specific-token");
+  assertEquals(result.env?.GITHUB_TOKEN, "generic-token");
+});
+
+Deno.test("createAgentConfig - copilot works with only copilotGithubToken", () => {
+  const config = createTestConfig({
+    agent: {
+      model: "test-model",
+      systemPromptPath: "./test.md",
+      tokenLimit: 20000,
+      copilotGithubToken: "copilot-only-token",
+      githubToken: undefined,
+    },
+  });
+
+  const originalGithubToken = Deno.env.get("GITHUB_TOKEN");
+  Deno.env.delete("GITHUB_TOKEN");
+  const originalCopilotToken = Deno.env.get("COPILOT_GITHUB_TOKEN");
+  Deno.env.delete("COPILOT_GITHUB_TOKEN");
+
+  try {
+    const result = createAgentConfig("copilot", "/tmp/workspace", config);
+    assertEquals(result.env?.COPILOT_GITHUB_TOKEN, "copilot-only-token");
+    assertEquals(result.env?.GITHUB_TOKEN, undefined);
+  } finally {
+    if (originalGithubToken) Deno.env.set("GITHUB_TOKEN", originalGithubToken);
+    if (originalCopilotToken) Deno.env.set("COPILOT_GITHUB_TOKEN", originalCopilotToken);
+  }
+});
+
+Deno.test("createAgentConfig - copilot falls back to githubToken when copilotGithubToken is unset", () => {
+  const config = createTestConfig({
+    agent: {
+      model: "test-model",
+      systemPromptPath: "./test.md",
+      tokenLimit: 20000,
+      copilotGithubToken: undefined,
+      githubToken: "generic-token",
+    },
+  });
+
+  const originalCopilotToken = Deno.env.get("COPILOT_GITHUB_TOKEN");
+  Deno.env.delete("COPILOT_GITHUB_TOKEN");
+
+  try {
+    const result = createAgentConfig("copilot", "/tmp/workspace", config);
+    assertEquals(result.env?.COPILOT_GITHUB_TOKEN, undefined);
+    assertEquals(result.env?.GITHUB_TOKEN, "generic-token");
+  } finally {
+    if (originalCopilotToken) Deno.env.set("COPILOT_GITHUB_TOKEN", originalCopilotToken);
+  }
+});
+
+Deno.test("createAgentConfig - copilot ENV vars take priority over config values", () => {
+  const config = createTestConfig({
+    agent: {
+      model: "test-model",
+      systemPromptPath: "./test.md",
+      tokenLimit: 20000,
+      copilotGithubToken: "config-copilot",
+      githubToken: "config-github",
+    },
+  });
+
+  const originalGithubToken = Deno.env.get("GITHUB_TOKEN");
+  const originalCopilotToken = Deno.env.get("COPILOT_GITHUB_TOKEN");
+  Deno.env.set("COPILOT_GITHUB_TOKEN", "env-copilot");
+  Deno.env.set("GITHUB_TOKEN", "env-github");
+
+  try {
+    const result = createAgentConfig("copilot", "/tmp/workspace", config);
+    assertEquals(result.env?.COPILOT_GITHUB_TOKEN, "env-copilot");
+    assertEquals(result.env?.GITHUB_TOKEN, "env-github");
+  } finally {
+    if (originalGithubToken) {
+      Deno.env.set("GITHUB_TOKEN", originalGithubToken);
+    } else {
+      Deno.env.delete("GITHUB_TOKEN");
+    }
+    if (originalCopilotToken) {
+      Deno.env.set("COPILOT_GITHUB_TOKEN", originalCopilotToken);
+    } else {
+      Deno.env.delete("COPILOT_GITHUB_TOKEN");
+    }
+  }
+});
+
+Deno.test("createAgentConfig - copilot throws when both tokens are unset", () => {
+  const config = createTestConfig({
+    agent: {
+      model: "test",
+      systemPromptPath: "./test.md",
+      tokenLimit: 20000,
+      copilotGithubToken: undefined,
+      githubToken: undefined,
+    },
+  });
+
+  const originalGithubToken = Deno.env.get("GITHUB_TOKEN");
+  const originalCopilotToken = Deno.env.get("COPILOT_GITHUB_TOKEN");
+  Deno.env.delete("GITHUB_TOKEN");
+  Deno.env.delete("COPILOT_GITHUB_TOKEN");
+
+  try {
+    assertThrows(
+      () => createAgentConfig("copilot", "/tmp/workspace", config),
+      Error,
+      "COPILOT_GITHUB_TOKEN or GITHUB_TOKEN",
+    );
+  } finally {
+    if (originalGithubToken) Deno.env.set("GITHUB_TOKEN", originalGithubToken);
+    if (originalCopilotToken) Deno.env.set("COPILOT_GITHUB_TOKEN", originalCopilotToken);
+  }
 });

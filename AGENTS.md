@@ -465,7 +465,7 @@ await connector.disconnect();
 
 **Supported Agents**:
 
-- **GitHub Copilot CLI** (`copilot`) - Commercial agent from GitHub, requires `GITHUB_TOKEN`
+- **GitHub Copilot CLI** (`copilot`) - Commercial agent from GitHub, requires `COPILOT_GITHUB_TOKEN` or `GITHUB_TOKEN`
 - **Gemini CLI** (`gemini`) - Google's Gemini CLI, requires `GEMINI_API_KEY`
 - **OpenCode CLI** (`opencode`) - Open source coding agent that supports multiple providers:
   - Gemini provider (uses `GEMINI_API_KEY` env var)
@@ -477,6 +477,7 @@ await connector.disconnect();
 - Set via `agent.defaultAgentType` in config or `AGENT_DEFAULT_TYPE` env var
 - Valid values: `"copilot"`, `"gemini"`, or `"opencode"`
 - Container includes pre-installed binaries for all three agents
+- Copilot agent accepts `COPILOT_GITHUB_TOKEN` (dedicated token) and/or `GITHUB_TOKEN`; both are passed to the subprocess separately
 
 **External MCP Servers**:
 
@@ -891,6 +892,8 @@ gitBackup:
   intervalMs: 3600000
   authorName: "AIr-Friends Backup"
   authorEmail: "airfriends-backup@noreply.github.com"
+  authUser: ""
+  authPassword: ""
 ```
 
 **Environment Variable Overrides:**
@@ -900,6 +903,8 @@ gitBackup:
 - `GIT_BACKUP_INTERVAL_MS` → `gitBackup.intervalMs`
 - `GIT_BACKUP_AUTHOR_NAME` → `gitBackup.authorName`
 - `GIT_BACKUP_AUTHOR_EMAIL` → `gitBackup.authorEmail`
+- `GIT_BACKUP_AUTH_USER` → `gitBackup.authUser`
+- `GIT_BACKUP_AUTH_PASSWORD` → `gitBackup.authPassword`
 
 **How It Works:**
 
@@ -910,7 +915,7 @@ gitBackup:
    - Existing Git repo: commit uncommitted changes + push
 3. Push conflicts during initialization trigger automatic rebase retry; if that also fails, a `backup-{datetime}` fallback branch is created and pushed
 4. `GitBackupService.performBackup()` executes add → commit → push
-5. Authentication uses the existing `GITHUB_TOKEN`, dynamically injected into the HTTPS URL
+5. Authentication uses configurable credentials (`GIT_BACKUP_AUTH_USER` / `GIT_BACKUP_AUTH_PASSWORD`), falling back to `GITHUB_TOKEN` for backward compatibility
 6. A final backup is performed during graceful shutdown
 7. Push conflicts during periodic backup trigger an automatic `pull --rebase` and one retry
 

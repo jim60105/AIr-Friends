@@ -52,20 +52,22 @@ function buildBaseAgentConfig(
 ): AgentConfig {
   switch (type) {
     case "copilot": {
-      const githubToken = appConfig.agent.githubToken ??
-        Deno.env.get("GITHUB_TOKEN");
+      const copilotToken = Deno.env.get("COPILOT_GITHUB_TOKEN") ??
+        appConfig.agent.copilotGithubToken;
+      const githubToken = Deno.env.get("GITHUB_TOKEN") ??
+        appConfig.agent.githubToken;
 
-      if (!githubToken) {
+      if (!copilotToken && !githubToken) {
         throw new Error(
           "GitHub token not configured for Copilot agent. " +
-            "Set agent.githubToken in config or GITHUB_TOKEN env var",
+            "Set COPILOT_GITHUB_TOKEN or GITHUB_TOKEN env var",
         );
       }
 
       // Build full environment — SandboxManager will filter if enabled
-      const env: Record<string, string> = {
-        GITHUB_TOKEN: githubToken,
-      };
+      const env: Record<string, string> = {};
+      if (copilotToken) env.COPILOT_GITHUB_TOKEN = copilotToken;
+      if (githubToken) env.GITHUB_TOKEN = githubToken;
 
       // Inherit all potentially needed environment variables
       const inheritVars = ["PATH", "HOME", "DENO_DIR", "LANG", "LC_ALL", "USER", "TMPDIR"];

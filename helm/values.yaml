@@ -72,6 +72,7 @@ env:
   # Agents API keys
   # GitHub Token for Copilot
   GITHUB_TOKEN: 'github_pat_your-token-here'
+  COPILOT_GITHUB_TOKEN: ''
   # Gemini API Key for Gemini CLI and OpenCode Gemini provider
   GEMINI_API_KEY: 'your-gemini-api-key'
   # OpenCode API Key (optional - can use GitHub/Gemini providers instead)
@@ -134,6 +135,8 @@ env:
   GIT_BACKUP_INTERVAL_MS: '3600000'
   GIT_BACKUP_AUTHOR_NAME: 'AIr-Friends Backup'
   GIT_BACKUP_AUTHOR_EMAIL: 'airfriends-backup@noreply.github.com'
+  GIT_BACKUP_AUTH_USER: ''
+  GIT_BACKUP_AUTH_PASSWORD: ''
 
   # Scheduled Reminders
   REMINDERS_ENABLED: ''

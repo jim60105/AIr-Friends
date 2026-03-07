@@ -29,7 +29,7 @@ const BASE_ALLOWED_ENV = [
 
 // Agent-type-specific authentication environment variables
 const AGENT_TYPE_ENV: Record<string, string[]> = {
-  copilot: ["GITHUB_TOKEN"],
+  copilot: ["GITHUB_TOKEN", "COPILOT_GITHUB_TOKEN"],
   gemini: ["GEMINI_API_KEY", "GEMINI_SYSTEM_MD"],
   opencode: [
     "GEMINI_API_KEY",

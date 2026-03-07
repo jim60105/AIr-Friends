@@ -100,6 +100,9 @@ export interface AgentConfig {
   /** Maximum tokens for context */
   tokenLimit: number;
 
+  /** Optional GitHub token dedicated to Copilot agent (takes priority over githubToken) */
+  copilotGithubToken?: string;
+
   /** GitHub token for GitHub Copilot CLI (optional) */
   githubToken?: string;
 
@@ -499,6 +502,10 @@ export interface GitBackupConfig {
   authorName: string;
   /** Git commit author email (default: "airfriends-backup@noreply.github.com") */
   authorEmail: string;
+  /** HTTPS authentication username (fallback: authorEmail → "x-access-token") */
+  authUser?: string;
+  /** HTTPS authentication password/token (fallback: GITHUB_TOKEN env → empty string) */
+  authPassword?: string;
 }
 
 /**

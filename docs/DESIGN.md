@@ -571,12 +571,15 @@ workspace:
 | `LOG_LEVEL`          | Logging level (DEBUG/INFO/WARN/ERROR)            |
 | `DENO_ENV`           | Environment name (dev/prod)                      |
 | `GITHUB_TOKEN`       | GitHub token for Copilot                         |
+| `COPILOT_GITHUB_TOKEN` | Dedicated Copilot token (falls back to GITHUB_TOKEN) |
 | `GEMINI_API_KEY`     | Gemini API key for Gemini CLI/OpenCode           |
 | `OPENCODE_API_KEY`   | OpenCode API key                                 |
 | `OPENROUTER_API_KEY` | OpenRouter API key                               |
 | `MODEL_ROUTING_ENABLED` | Enable model routing (true/false, default: false) |
 | `MODEL_ROUTING_RULES` | Model routing rules as JSON string |
 | `AGENT_EXTERNAL_SKILLS` | External skills to install at startup (JSON string) |
+| `GIT_BACKUP_AUTH_USER` | Git backup HTTPS auth username (default: authorEmail) |
+| `GIT_BACKUP_AUTH_PASSWORD` | Git backup HTTPS auth password/token (default: GITHUB_TOKEN) |
 
 ### Multi-Environment Support
 
