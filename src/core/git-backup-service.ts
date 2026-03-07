@@ -438,6 +438,9 @@ scheduler-state.json
 # Ignore nested git repositories (agent-created repos in workspaces)
 **/.git
 
+# Workspace temporary directories
+**/tmp/**
+
 # OS generated files
 .DS_Store
 Thumbs.db

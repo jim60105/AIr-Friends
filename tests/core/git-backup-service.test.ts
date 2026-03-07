@@ -695,6 +695,7 @@ Deno.test("GitBackupService - ensureGitignore includes **/.git rule", async () =
     const gitignore = await Deno.readTextFile(`${dataDir}/.gitignore`);
     assertEquals(gitignore.includes("**/.git"), true);
     assertStringIncludes(gitignore, "scheduler-state.json");
+    assertStringIncludes(gitignore, "**/tmp/**");
   });
 });
 
