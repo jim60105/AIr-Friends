@@ -11,6 +11,7 @@ export const ENV_MAPPINGS = {
   MISSKEY_ENABLED: "platforms.misskey.enabled",
   AGENT_MODEL: "agent.model",
   GITHUB_TOKEN: "agent.githubToken",
+  COPILOT_GITHUB_TOKEN: "agent.copilotGithubToken",
   GEMINI_API_KEY: "agent.geminiApiKey",
   OPENROUTER_API_KEY: "agent.openRouterApiKey",
   AGENT_DEFAULT_TYPE: "agent.defaultAgentType",
@@ -88,6 +89,8 @@ export const ENV_MAPPINGS = {
   GIT_BACKUP_INTERVAL_MS: "gitBackup.intervalMs",
   GIT_BACKUP_AUTHOR_NAME: "gitBackup.authorName",
   GIT_BACKUP_AUTHOR_EMAIL: "gitBackup.authorEmail",
+  GIT_BACKUP_AUTH_USER: "gitBackup.authUser",
+  GIT_BACKUP_AUTH_PASSWORD: "gitBackup.authPassword",
 
   // Send-file skill settings
   SKILL_SEND_FILE_ENABLED: "skills.sendFile.enabled",

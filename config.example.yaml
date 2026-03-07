@@ -55,6 +55,7 @@ agent:
   systemPromptPath: "./prompts/system_reply.md" # Path to the system prompt file
   tokenLimit: 20000 # Max tokens for context
   githubToken: "${GITHUB_TOKEN}" # Optional GitHub token for Copilot (env: GITHUB_TOKEN)
+  copilotGithubToken: "${COPILOT_GITHUB_TOKEN}" # Optional dedicated Copilot token (env: COPILOT_GITHUB_TOKEN); falls back to githubToken / GITHUB_TOKEN
   geminiApiKey: "${GEMINI_API_KEY}" # Optional Gemini API key (env: GEMINI_API_KEY)
   opencodeApiKey: "${OPENCODE_API_KEY}" # Optional OpenCode API key (env: OPENCODE_API_KEY)
   openRouterApiKey: "${OPENROUTER_API_KEY}" # Optional OpenRouter API key (env: OPENROUTER_API_KEY)
@@ -263,6 +264,8 @@ gitBackup:
   intervalMs: 3600000             # Backup interval in ms (default: 1 hour); override with env GIT_BACKUP_INTERVAL_MS
   authorName: "AIr-Friends Backup"    # Git author name; override with env GIT_BACKUP_AUTHOR_NAME
   authorEmail: "airfriends-backup@noreply.github.com" # Git author email; override with env GIT_BACKUP_AUTHOR_EMAIL
+  authUser: ""                    # HTTPS auth username (default: authorEmail → "x-access-token"); override with env GIT_BACKUP_AUTH_USER
+  authPassword: ""                # HTTPS auth password/token (default: GITHUB_TOKEN env); override with env GIT_BACKUP_AUTH_PASSWORD
 
 # Scheduled reminders - allows the agent to set future reminders for users
 # Reminders can only be set in DM conversations, and are always delivered via DM

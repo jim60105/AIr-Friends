@@ -176,3 +176,17 @@ Deno.test("SandboxManager - missing env vars are not included in filtered output
   assertEquals(opts.env["HOME"], undefined);
   assertEquals(opts.env["GITHUB_TOKEN"], undefined);
 });
+
+Deno.test("SandboxManager - copilot agent allows COPILOT_GITHUB_TOKEN", () => {
+  const sandbox = new SandboxManager(createSandboxConfig());
+  const baseEnv = {
+    PATH: "/usr/bin",
+    COPILOT_GITHUB_TOKEN: "copilot_token",
+    GITHUB_TOKEN: "ghp_xxx",
+    GEMINI_API_KEY: "gm_xxx",
+  };
+  const opts = sandbox.buildSpawnOptions("copilot", "copilot", [], baseEnv, "/tmp");
+  assertEquals(opts.env["COPILOT_GITHUB_TOKEN"], "copilot_token");
+  assertEquals(opts.env["GITHUB_TOKEN"], "ghp_xxx");
+  assertEquals(opts.env["GEMINI_API_KEY"], undefined);
+});

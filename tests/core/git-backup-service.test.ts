@@ -751,3 +751,78 @@ Deno.test("GitBackupService - performBackup skips commit when only submodule cha
     assertEquals(result, true);
   });
 });
+
+// ============ Configurable Auth Tests (Issue #248) ============
+
+Deno.test("getAuthenticatedUrl - uses authUser and authPassword from config", () => {
+  const config = createConfig({
+    remoteUrl: "https://github.com/user/repo.git",
+    authUser: "custom-user",
+    authPassword: "custom-password",
+  });
+  const service = new GitBackupService(config, "/tmp/data");
+  const url = (service as unknown as { getAuthenticatedUrl(): string }).getAuthenticatedUrl();
+  assertEquals(url, "https://custom-user:custom-password@github.com/user/repo.git");
+});
+
+Deno.test("getAuthenticatedUrl - authUser falls back to authorEmail", () => {
+  const config = createConfig({
+    remoteUrl: "https://github.com/user/repo.git",
+    authPassword: "my-token",
+    authorEmail: "bot@example.com",
+  });
+  const service = new GitBackupService(config, "/tmp/data");
+  const url = (service as unknown as { getAuthenticatedUrl(): string }).getAuthenticatedUrl();
+  assertStringIncludes(url, "bot%40example.com:my-token@");
+});
+
+Deno.test("getAuthenticatedUrl - authUser falls back to x-access-token when no authorEmail", () => {
+  const config = createConfig({
+    remoteUrl: "https://github.com/user/repo.git",
+    authPassword: "my-token",
+  });
+  // Set authorEmail to undefined to trigger x-access-token fallback
+  // deno-lint-ignore no-explicit-any
+  (config as any).authorEmail = undefined;
+  const service = new GitBackupService(config, "/tmp/data");
+  const url = (service as unknown as { getAuthenticatedUrl(): string }).getAuthenticatedUrl();
+  assertStringIncludes(url, "x-access-token:my-token@");
+});
+
+Deno.test("getAuthenticatedUrl - returns raw URL when no password available", () => {
+  const originalToken = Deno.env.get("GITHUB_TOKEN");
+  Deno.env.delete("GITHUB_TOKEN");
+
+  try {
+    const config = createConfig({
+      remoteUrl: "https://github.com/user/repo.git",
+      authPassword: undefined,
+    });
+    const service = new GitBackupService(config, "/tmp/data");
+    const url = (service as unknown as { getAuthenticatedUrl(): string }).getAuthenticatedUrl();
+    assertEquals(url, "https://github.com/user/repo.git");
+  } finally {
+    if (originalToken) Deno.env.set("GITHUB_TOKEN", originalToken);
+  }
+});
+
+Deno.test("getAuthenticatedUrl - falls back to GITHUB_TOKEN env when authPassword not set", () => {
+  const originalToken = Deno.env.get("GITHUB_TOKEN");
+  Deno.env.set("GITHUB_TOKEN", "env-github-token");
+
+  try {
+    const config = createConfig({
+      remoteUrl: "https://github.com/user/repo.git",
+      authPassword: undefined,
+    });
+    const service = new GitBackupService(config, "/tmp/data");
+    const url = (service as unknown as { getAuthenticatedUrl(): string }).getAuthenticatedUrl();
+    assertStringIncludes(url, "env-github-token@");
+  } finally {
+    if (originalToken) {
+      Deno.env.set("GITHUB_TOKEN", originalToken);
+    } else {
+      Deno.env.delete("GITHUB_TOKEN");
+    }
+  }
+});

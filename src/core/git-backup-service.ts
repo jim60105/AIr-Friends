@@ -356,15 +356,20 @@ export class GitBackupService {
     return true;
   }
 
-  /** Build the authenticated remote URL with GITHUB_TOKEN injected. */
+  /** Build the authenticated remote URL with credentials injected. */
   private getAuthenticatedUrl(): string {
-    const token = Deno.env.get("GITHUB_TOKEN") || "";
-    if (!token) return this.config.remoteUrl;
+    const password = this.config.authPassword ??
+      Deno.env.get("GITHUB_TOKEN") ?? "";
+    if (!password) return this.config.remoteUrl;
+
+    const username = this.config.authUser ??
+      this.config.authorEmail ??
+      "x-access-token";
 
     try {
       const url = new URL(this.config.remoteUrl);
-      url.username = "x-access-token";
-      url.password = token;
+      url.username = username;
+      url.password = password;
       return url.toString();
     } catch {
       // Not a valid URL (e.g., local path) — return as-is
@@ -399,8 +404,8 @@ export class GitBackupService {
       logger.error("Git command failed", {
         args: args.map((a) => a.includes("@") ? "[REDACTED_URL]" : a),
         exitCode: code,
-        stderr: errorOutput.replace(/x-access-token:[^@]+@/g, "x-access-token:***@"),
-        stdout: output.replace(/x-access-token:[^@]+@/g, "x-access-token:***@"),
+        stderr: errorOutput.replace(/\/\/[^:]+:[^@]+@/g, "//***:***@"),
+        stdout: output.replace(/\/\/[^:]+:[^@]+@/g, "//***:***@"),
       });
     }
 
