@@ -60,6 +60,7 @@ Deno.test("createAgentConfig - creates copilot config correctly", () => {
     "--no-ask-user",
     "--no-color",
     "--no-auto-update",
+    "--experimental",
     "--acp",
     "--available-tools",
     "write_bash",
@@ -380,6 +381,7 @@ Deno.test("createAgentConfig - adds --yolo flag to copilot when yolo is true", (
     "--no-ask-user",
     "--no-color",
     "--no-auto-update",
+    "--experimental",
     "--acp",
     "--yolo",
   ]);
@@ -396,6 +398,7 @@ Deno.test("createAgentConfig - does not add --yolo flag to copilot when yolo is 
     "--no-ask-user",
     "--no-color",
     "--no-auto-update",
+    "--experimental",
     "--acp",
     "--available-tools",
     "write_bash",
