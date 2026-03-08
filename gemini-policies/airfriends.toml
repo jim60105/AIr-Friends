@@ -1,0 +1,90 @@
+# ============================================================
+# AIr-Friends — Gemini CLI Permission Policies
+# Mirrors opencode.json permission rules for defense-in-depth
+# ============================================================
+# Priority: higher number = higher priority (overrides lower)
+# Modes: rules without "modes" field are always active
+# In YOLO mode: Gemini built-in yolo policy (priority 999+)
+#               overrides all rules below
+
+# ============================================================
+# 1. Deny write/edit tools (not our editing mechanism)
+# ============================================================
+# Equivalent to opencode.json: "edit": { "*": "deny" }
+# Note: modes excludes "yolo" so YOLO mode restores full access
+[[rule]]
+toolName = ["write_file", "replace"]
+decision = "deny"
+priority = 200
+modes = ["default", "auto_edit", "plan"]
+
+# ============================================================
+# 2. Deny interactive tools (no human to answer)
+# ============================================================
+# Equivalent to opencode.json: "question": "deny"
+# No modes filter — always denied, even in YOLO (no human)
+[[rule]]
+toolName = "ask_user"
+decision = "deny"
+priority = 200
+
+# ============================================================
+# 3. Deny save_memory (not our memory system)
+# ============================================================
+# Our memory system uses skills/memory-save, not Gemini native
+[[rule]]
+toolName = "save_memory"
+decision = "deny"
+priority = 200
+modes = ["default", "auto_edit", "plan"]
+
+# ============================================================
+# 4. Shell commands — Default deny all
+# ============================================================
+# Equivalent to opencode.json: "bash": { "*": "deny" }
+[[rule]]
+toolName = "run_shell_command"
+decision = "deny"
+priority = 10
+modes = ["default", "auto_edit", "plan"]
+
+# ============================================================
+# 5. Shell commands — Allow safe commands
+# ============================================================
+# Equivalent to opencode.json allowed bash commands
+
+# Allow skill scripts
+[[rule]]
+toolName = "run_shell_command"
+commandPrefix = "deno run"
+decision = "allow"
+priority = 100
+modes = ["default", "auto_edit", "plan"]
+
+# Allow read-only and utility commands
+[[rule]]
+toolName = "run_shell_command"
+commandPrefix = ["rg ", "curl ", "cat ", "head ", "tail ", "ls ", "find ", "wc "]
+decision = "allow"
+priority = 100
+modes = ["default", "auto_edit", "plan"]
+
+# Allow agent-browser
+[[rule]]
+toolName = "run_shell_command"
+commandPrefix = "agent-browser"
+decision = "allow"
+priority = 100
+modes = ["default", "auto_edit", "plan"]
+
+# ============================================================
+# 6. Shell commands — Explicitly deny dangerous commands
+# ============================================================
+# Equivalent to opencode.json: "git *": "deny", "echo *": "deny", "mkdir *": "deny"
+# Highest priority to override any allows
+[[rule]]
+toolName = "run_shell_command"
+commandPrefix = ["git ", "echo ", "mkdir "]
+decision = "deny"
+priority = 200
+modes = ["default", "auto_edit", "plan"]

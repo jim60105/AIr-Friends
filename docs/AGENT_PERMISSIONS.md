@@ -7,7 +7,7 @@ This document describes AIr-Friends' multi-layer permission model for controllin
 - [Design Principles](#design-principles)
 - [Permission Layers Overview](#permission-layers-overview)
 - [Layer 1 — Agent-Level Tool Restrictions](#layer-1--agent-level-tool-restrictions)
-- [Layer 2 — OpenCode Permission Configuration](#layer-2--opencode-permission-configuration)
+- [Layer 2 — Agent-Specific Permission Configuration](#layer-2--agent-specific-permission-configuration)
 - [Layer 3 — ACP Client Permission Gate](#layer-3--acp-client-permission-gate)
 - [Layer 4 — File Access Boundary](#layer-4--file-access-boundary)
 - [Layer 5 — Sandbox Isolation](#layer-5--sandbox-isolation)
@@ -64,15 +64,23 @@ Before the ACP permission callback is ever invoked, the agent CLI itself can be 
 
 ### Copilot (non-YOLO)
 
-In restricted mode, Copilot is launched with `--available-tools` flags that limit it to **only bash-related tools**:
+In restricted mode, Copilot is launched with `--available-tools` flags that limit it to **only bash-related tools**, plus `--deny-tool` flags that block dangerous shell commands:
 
 ```
 copilot --available-tools write_bash --available-tools read_bash \
         --available-tools stop_bash --available-tools bash \
+        --deny-tool 'shell(git:*)' --deny-tool 'shell(echo:*)' \
+        --deny-tool 'shell(mkdir:*)' \
         --disable-builtin-mcps --no-ask-user --acp
 ```
 
-This means Copilot cannot use its own native `edit`, `read`, or other tools — it can only run bash commands, which are then gated by Layer 3.
+This means Copilot cannot use its own native `edit`, `read`, or other tools — it can only run bash commands. The `--deny-tool` flags provide Layer 1 defense-in-depth by blocking dangerous commands (git, echo, mkdir) before they reach Layer 3's ACP permission gate.
+
+| `--deny-tool` Pattern | Blocks | opencode.json Equivalent |
+| ---------------------- | ------ | ------------------------ |
+| `shell(git:*)` | All git commands | `"git *": "deny"` |
+| `shell(echo:*)` | echo (prevents file writes via redirection) | `"echo *": "deny"` |
+| `shell(mkdir:*)` | mkdir (prevents arbitrary directory creation) | `"mkdir *": "deny"` |
 
 ### Copilot (YOLO)
 
@@ -82,9 +90,37 @@ copilot --yolo --disable-builtin-mcps --no-ask-user --acp
 
 All tools are available. The `--yolo` flag tells Copilot to auto-approve all actions internally.
 
-### Gemini
+### Gemini (non-YOLO)
 
-Gemini does not support tool restriction flags. In restricted mode, it runs with `--experimental-acp` only. In YOLO mode, `--yolo` is added.
+In restricted mode, Gemini uses **Policy Engine TOML rules** (`gemini-policies/airfriends.toml`) and **settings.json** (`gemini-settings.json`) for permission control. These files are copied to `~/.gemini/` in the container.
+
+**settings.json** configures:
+- `defaultApprovalMode: "default"` — all tool calls require permission check
+- `enableAutoUpdate: false` — no auto-updates in container
+- `folderTrust.enabled: false` — no trust dialogs (non-interactive)
+
+**Policy Engine rules** mirror `opencode.json`:
+
+| Rule | Decision | Priority | opencode.json Equivalent |
+| ---- | -------- | -------- | ------------------------ |
+| `write_file`, `replace` | deny | 200 | `"edit": { "*": "deny" }` |
+| `ask_user` | deny (all modes) | 200 | `"question": "deny"` |
+| `save_memory` | deny | 200 | N/A (Gemini-specific) |
+| `run_shell_command` (default) | deny | 10 | `"bash": { "*": "deny" }` |
+| `run_shell_command` (`deno run`) | allow | 100 | `"deno run *skills/*": "allow"` |
+| `run_shell_command` (`rg`, `curl`, etc.) | allow | 100 | `"rg *": "allow"`, etc. |
+| `run_shell_command` (`agent-browser`) | allow | 100 | `"agent-browser *": "allow"` |
+| `run_shell_command` (`git`, `echo`, `mkdir`) | deny | 200 | `"git *": "deny"`, etc. |
+
+Rules with `modes = ["default", "auto_edit", "plan"]` are inactive in YOLO mode. The `ask_user` rule has no `modes` field — it is always active (no human to answer).
+
+### Gemini (YOLO)
+
+```
+gemini --experimental-acp --yolo
+```
+
+The `--yolo` flag activates Gemini's built-in yolo policy (priority 999+), which overrides all custom rules with `modes` fields. The `ask_user` deny rule remains active since it has no `modes` field.
 
 ### OpenCode
 
@@ -94,9 +130,11 @@ OpenCode does not support tool restriction via CLI flags. In restricted mode, pe
 
 ---
 
-## Layer 2 — OpenCode Permission Configuration
+## Layer 2 — Agent-Specific Permission Configuration
 
-OpenCode uses a JSON configuration file (`opencode.json`) for fine-grained permission control. This layer is **only applicable to the OpenCode agent** — Copilot and Gemini do not use this configuration.
+Agent-specific permission configurations provide fine-grained control at the agent level. Currently used by OpenCode (`opencode.json`) and Gemini (`settings.json` + Policy Engine TOML).
+
+OpenCode uses a JSON configuration file (`opencode.json`) for fine-grained permission control. Gemini uses `settings.json` and Policy Engine TOML files for equivalent control (see [Layer 1](#layer-1--agent-level-tool-restrictions) for details).
 
 > **Reference**: [OpenCode Permissions Documentation](https://opencode.ai/docs/permissions/)
 
@@ -336,15 +374,15 @@ These sessions use synthetic identifiers (e.g., platform=`"discord"`, userId=`"s
 | **Binary**                      | `copilot`                                                                                     | `gemini`              | `opencode`                   |
 | **ACP flag**                    | `--acp`                                                                                       | `--experimental-acp`  | `acp` (subcommand)           |
 | **YOLO flag**                   | `--yolo`                                                                                      | `--yolo`              | `OPENCODE_YOLO=true` env var |
-| **Tool restriction** (non-YOLO) | `--available-tools bash,read_bash,write_bash,stop_bash`                                       | None (no CLI support) | `opencode.json` (Layer 2)    |
-| **Config-based permissions**    | Not supported                                                                                 | Not supported         | ✅ `opencode.json`           |
+| **Tool restriction** (non-YOLO) | `--available-tools (bash only) + --deny-tool (git, echo, mkdir)`                              | Policy Engine TOML rules | `opencode.json` (Layer 2)    |
+| **Config-based permissions**    | Not supported                                                                                 | ✅ settings.json + policies/*.toml | ✅ `opencode.json`           |
 | **Extra CLI flags**             | `--disable-builtin-mcps`, `--no-ask-user`, `--no-color`, `--no-auto-update`, `--experimental` | —                     | —                            |
 
 ### How Each Agent's Permissions Interact with Layers
 
 **Copilot** relies primarily on Layer 1 (CLI tool restriction) and Layer 3 (ACP permission gate). In non-YOLO mode, it can only use bash tools — all bash commands are then validated by Layer 3's skill auto-approve list.
 
-**Gemini** has no CLI-level tool restriction. It relies on Layer 3 (ACP permission gate) as the primary enforcer. Any tool call Gemini attempts that isn't in the whitelist is rejected at Layer 3.
+**Gemini** uses Policy Engine TOML rules and settings.json for Layer 1/2 permission control. These rules mirror the OpenCode permission model. Layer 3 (ACP permission gate) acts as a secondary enforcer.
 
 **OpenCode** has the most granular control through Layer 2 (`opencode.json`). Permission decisions are made at the opencode.json level first, then Layer 3 acts as a secondary gate for the ACP protocol.
 
@@ -466,7 +504,7 @@ Permission audit phases respect the `audit.includedPhases` configuration. When `
 
 ### Known Limitations
 
-1. **Gemini has no Layer 1 restriction**: Unlike Copilot, Gemini cannot be restricted at the CLI level. It relies entirely on Layer 3 (ACP permission gate) to reject unauthorized tools. If the ACP protocol changes or has bugs, Gemini has fewer safeguards.
+1. **Gemini Policy Engine effectiveness in ACP mode**: Gemini's Policy Engine rules may or may not be enforced before the ACP `requestPermission()` callback. If the Policy Engine acts as a pre-filter, it provides genuine Layer 1/2 defense. If not, Layer 3 (ACP permission gate) remains the effective enforcer. Either way, the configuration provides defense-in-depth documentation and intent.
 
 2. **OpenCode's Layer 2 is only as strong as opencode.json**: If the configuration file is modified or the `OPENCODE_YOLO=true` env var leaks through, all Layer 2 protections are bypassed.
 
@@ -524,7 +562,11 @@ audit:
 
 ### OpenCode-Specific
 
-The `opencode.json` file in the project root configures OpenCode agent permissions. See [Layer 2](#layer-2--opencode-permission-configuration) for details. This file is only used when the agent type is `opencode`.
+The `opencode.json` file in the project root configures OpenCode agent permissions. See [Layer 2](#layer-2--agent-specific-permission-configuration) for details. This file is only used when the agent type is `opencode`.
+
+### Gemini-Specific
+
+The `gemini-settings.json` and `gemini-policies/airfriends.toml` files in the project root configure Gemini agent permissions. These are copied to `~/.gemini/settings.json` and `~/.gemini/policies/airfriends.toml` in the container. See [Layer 1](#layer-1--agent-level-tool-restrictions) for details.
 
 ---
 
