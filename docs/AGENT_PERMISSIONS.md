@@ -187,7 +187,8 @@ Shell commands use default-deny with specific allowed patterns:
 
 | Pattern                            | Purpose                                                 |
 | ---------------------------------- | ------------------------------------------------------- |
-| `deno run *skills/*/scripts/*.ts*` | Execute skill scripts (memory-save, send-reply, etc.)   |
+| `deno run *skills/*/scripts/*.ts*` | Execute skill scripts via `deno run`                    |
+| `*/skills/*/scripts/*.ts*`         | Execute skill scripts directly (shebang-based)          |
 | `agent-browser *`                  | Browser automation skill (command-based)                |
 | `rg *`                             | ripgrep for memory search                               |
 | `curl *`                           | HTTP requests for web research                          |

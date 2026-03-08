@@ -110,10 +110,12 @@ function buildFromDirectory(skillsDir: string): SkillAutoApproveList {
 
 /**
  * Check if a command string contains shell operators that could enable injection.
- * Rejects commands containing: ; | & ` $() > < # and newlines.
+ * Rejects commands containing: ; | & ` ( ) > < # and newlines.
+ * Note: $ is intentionally allowed for shell variable expansion ($HOME, ${VAR}).
+ * Command substitution $() is still caught because ( is rejected.
  */
 export function containsShellOperators(cmd: string): boolean {
-  return /[;|&`$()><#\n]/.test(cmd);
+  return /[;|&`()><#\n]/.test(cmd);
 }
 
 /**

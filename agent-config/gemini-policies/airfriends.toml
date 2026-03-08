@@ -57,10 +57,10 @@ modes = ["default", "auto_edit", "plan"]
 # ============================================================
 # Equivalent to agent-config/opencode.json allowed bash commands
 
-# Allow skill scripts
+# Allow skill scripts (via deno run or direct execution)
 [[rule]]
 toolName = "run_shell_command"
-commandPrefix = "deno run"
+commandPrefix = ["deno run", "/home/deno/.agents/skills/", "${HOME}/.agents/skills/"]
 decision = "allow"
 priority = 100
 modes = ["default", "auto_edit", "plan"]

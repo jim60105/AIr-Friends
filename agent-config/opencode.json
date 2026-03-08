@@ -54,6 +54,7 @@
         "bash": {
           "*": "deny",
           "deno run *skills/*/scripts/*.ts*": "allow",
+          "*/skills/*/scripts/*.ts*": "allow",
           "agent-browser *": "allow",
           "rg *": "allow",
           "curl *": "allow",
