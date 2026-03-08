@@ -41,7 +41,13 @@
         "codesearch": "allow",
         "doom_loop": "deny",
         "question": "deny",
-        "edit": "deny",
+        "edit": {
+          "*": "deny",
+          "data/agent-workspace/**": "allow",
+          "$AGENT_WORKSPACE/**": "allow",
+          "/app/data/agent-workspace/**": "allow",
+          "$TMPDIR/**": "allow"
+        },
         "bash": {
           "*": "deny",
           "deno run *skills/*/scripts/*.ts*": "allow",
