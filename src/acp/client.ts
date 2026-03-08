@@ -107,6 +107,36 @@ function buildFromDirectory(skillsDir: string): SkillAutoApproveList {
 }
 
 /**
+ * Check if a command string contains shell operators that could enable injection.
+ * Rejects commands containing: ; | & ` $() > < # and newlines.
+ */
+export function containsShellOperators(cmd: string): boolean {
+  return /[;|&`$()><#\n]/.test(cmd);
+}
+
+/**
+ * Check if a command contains an allowed script path as a complete token.
+ * First rejects commands with shell injection characters,
+ * then verifies the path appears as a whitespace-delimited token.
+ */
+export function matchesScriptPath(cmd: string, allowedPath: string): boolean {
+  if (containsShellOperators(cmd)) return false;
+  const tokens = cmd.trim().split(/\s+/);
+  return tokens.some((token) => token === allowedPath || token.endsWith(`/${allowedPath}`));
+}
+
+/**
+ * Check if the first token of a command exactly matches an allowed command name.
+ * First rejects commands with shell injection characters,
+ * then verifies the prefix is the exact first whitespace-delimited token.
+ */
+export function matchesCommandPrefix(cmd: string, prefix: string): boolean {
+  if (containsShellOperators(cmd)) return false;
+  const firstToken = cmd.trim().split(/\s+/)[0];
+  return firstToken === prefix;
+}
+
+/**
  * ChatbotClient implements the ACP Client interface
  * Handles callbacks from external ACP Agents (GitHub Copilot CLI, Gemini CLI)
  */
@@ -260,17 +290,17 @@ export class ChatbotClient implements acp.Client {
       // Check if all commands match our skill allow list
       const isSkillCommand = commands.length > 0 &&
         commands.every((cmd) => {
-          // Check script-based skills (path suffix match)
-          const matchesScript = Array.from(this.skillAutoApproveList.scriptPaths).some(
-            (allowedPath) => cmd.includes(allowedPath),
+          // Check script-based skills (safe token match against allowed paths)
+          const isScript = Array.from(this.skillAutoApproveList.scriptPaths).some(
+            (allowedPath) => matchesScriptPath(cmd, allowedPath),
           );
-          if (matchesScript) return true;
+          if (isScript) return true;
 
-          // Check command-based skills (command prefix match)
-          const matchesCommand = Array.from(this.skillAutoApproveList.commandPrefixes).some(
-            (prefix) => cmd.trimStart().startsWith(prefix),
+          // Check command-based skills (safe first-token match against allowed prefixes)
+          const isCommand = Array.from(this.skillAutoApproveList.commandPrefixes).some(
+            (prefix) => matchesCommandPrefix(cmd, prefix),
           );
-          return matchesCommand;
+          return isCommand;
         });
 
       if (isSkillCommand) {

