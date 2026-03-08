@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.19.0] - 2026-03-08
+
+### Added
+
+- Copilot CLI now launches with `--deny-tool` flag in restricted (non-YOLO) mode, and Gemini CLI receives `gemini-settings.json` and Policy Engine `airfriends.toml` for Layer 1/2 permission enforcement — aligns all three agents with the defense-in-depth permission standard
+- Permission approval/rejection decisions are now recorded in the per-session JSONL audit log as `permission_approval` and `permission_rejection` phases, including tool type, affected paths, and decision reason
+- `requestPermission()` now auto-approves `edit`/`write` tool calls only when ALL requested paths are within the agent workspace or workspace TMPDIR; paths outside this boundary are rejected (`agent_workspace_write` approval reason recorded in audit)
+- File extension restrictions for agent workspace writes in restricted (non-YOLO) mode — Agent is limited to `.md` and `.txt` files by default; configurable via `agent.sandbox.allowedWriteExtensions` or `AGENT_SANDBOX_ALLOWED_WRITE_EXTENSIONS` env var; TMPDIR writes and YOLO mode are exempt; `writeTextFile` callback enforces the same restriction as defense-in-depth
+- `yolo` boolean template variable added to all Vento prompt templates; new `prompts/agent_permissions.md` fragment is included in `system_reply.md` to provide YOLO-conditional capability instructions to the Agent
+- Git backup now excludes workspace `tmp/` directories — `**/tmp/**` pattern added to the programmatic `.gitignore` so agent TMPDIR contents no longer trigger unnecessary backup commits
+- Added `pandoc` to the container image's installed system packages
+
+### Fixed
+
+- Shell injection bypass prevented in skill whitelist matching — replaced substring `includes()` and loose `startsWith()` with exact path equality and anchored prefix matching, blocking path traversal attacks against whitelisted skill commands
+- OpenCode `edit` permission scoped to agent-workspace directories only — the previous blanket `edit: deny` in `opencode.json` blocked self-research note writing; Agent can now write notes to `$AGENT_WORKSPACE/notes/` while all other paths remain denied
+
+### Changed
+
+- Agent config files (`opencode.json`, `gemini-settings.json`, `gemini-policies/`) relocated to `agent-config/` directory; Containerfile COPY source paths updated; container destinations unchanged
+
+### Security
+
+- Shell injection bypass prevented in skill whitelist command matching (see Fixed)
+
 ## [0.18.0] - 2026-03-07
 
 ### Added
@@ -806,7 +831,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ---
 
-[Unreleased]: https://github.com/jim60105/AIr-Friends/compare/v0.18.0...HEAD
+[Unreleased]: https://github.com/jim60105/AIr-Friends/compare/v0.19.0...HEAD
+[0.19.0]: https://github.com/jim60105/AIr-Friends/compare/v0.18.0...v0.19.0
 [0.18.0]: https://github.com/jim60105/AIr-Friends/compare/v0.17.0...v0.18.0
 [0.17.0]: https://github.com/jim60105/AIr-Friends/compare/v0.16.0...v0.17.0
 [0.16.0]: https://github.com/jim60105/AIr-Friends/compare/v0.15.0...v0.16.0
