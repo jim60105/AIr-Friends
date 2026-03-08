@@ -426,6 +426,7 @@ The following variables are available in all prompt templates:
 | `sessionId` | `string`  | Current skill API session ID                   | `"sess_abc123"`          |
 | `agentType` | `string`  | ACP agent type (`"copilot"`, `"gemini"`, `"opencode"`) | `"copilot"`    |
 | `model`     | `string`  | Model identifier for the current session       | `"claude-opus-4.6"`     |
+| `yolo`      | `boolean` | Whether YOLO mode is enabled (bypasses permission restrictions) | `true`       |
 
 **Special prompt variables** (only available in specific prompt types):
 
@@ -460,6 +461,16 @@ Use Discord Markdown for formatting (bold, italic, code blocks).
 Message limit: 2000 characters.
 {{ else if platform === "misskey" }}
 Use MFM (Misskey Flavored Markdown) for formatting.
+{{ /if }}
+```
+
+**YOLO-conditional agent permissions:**
+
+```markdown
+{{ if yolo }}
+You have full unrestricted access to all tools and commands.
+{{ else }}
+You are in restricted mode. Only registered skill scripts are permitted.
 {{ /if }}
 ```
 
