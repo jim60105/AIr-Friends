@@ -103,6 +103,11 @@ function buildBaseAgentConfig(
         args.push("stop_bash");
         args.push("--available-tools");
         args.push("bash");
+
+        // Layer 1: Deny dangerous shell commands (defense-in-depth with Layer 3)
+        args.push("--deny-tool", "shell(git:*)");
+        args.push("--deny-tool", "shell(echo:*)");
+        args.push("--deny-tool", "shell(mkdir:*)");
       } else {
         args.push("--yolo");
       }

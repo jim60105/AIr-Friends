@@ -106,7 +106,9 @@ RUN install -d -m 775 -o $UID -g 0 /app && \
     install -d -m 775 -o $UID -g 0 /home/deno/.local && \
     install -d -m 775 -o $UID -g 0 /home/deno/.local/bin && \
     install -d -m 775 -o $UID -g 0 /home/deno/.local/share/opencode && \
-    install -d -m 775 -o $UID -g 0 /home/deno/.config/opencode
+    install -d -m 775 -o $UID -g 0 /home/deno/.config/opencode && \
+    install -d -m 775 -o $UID -g 0 /home/deno/.gemini && \
+    install -d -m 775 -o $UID -g 0 /home/deno/.gemini/policies
 
 # Copy license file (OpenShift Policy)
 COPY --link --chown=$UID:0 --chmod=775 LICENSE /licenses/LICENSE
@@ -144,6 +146,10 @@ RUN npm install -g @google/gemini-cli && \
 
 # Copy OpenCode configuration
 COPY --link --chown=$UID:0 --chmod=775 opencode.json /home/deno/.config/opencode/opencode.json
+
+# Copy Gemini CLI configuration
+COPY --link --chown=$UID:0 --chmod=775 gemini-settings.json /home/deno/.gemini/settings.json
+COPY --link --chown=$UID:0 --chmod=775 gemini-policies/ /home/deno/.gemini/policies/
 
 # Copy application files
 COPY --link --chown=$UID:0 --chmod=775 deno.json deno.lock /app/

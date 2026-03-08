@@ -1,0 +1,11 @@
+{
+  "general": {
+    "defaultApprovalMode": "default",
+    "enableAutoUpdate": false
+  },
+  "security": {
+    "folderTrust": {
+      "enabled": false
+    }
+  }
+}

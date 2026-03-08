@@ -70,6 +70,12 @@ Deno.test("createAgentConfig - creates copilot config correctly", () => {
     "stop_bash",
     "--available-tools",
     "bash",
+    "--deny-tool",
+    "shell(git:*)",
+    "--deny-tool",
+    "shell(echo:*)",
+    "--deny-tool",
+    "shell(mkdir:*)",
   ]);
   assertEquals(agentConfig.cwd, "/tmp/workspace");
   assertEquals(agentConfig.env?.GITHUB_TOKEN, "test-github-token");
@@ -416,8 +422,46 @@ Deno.test("createAgentConfig - does not add --yolo flag to copilot when yolo is 
     "stop_bash",
     "--available-tools",
     "bash",
+    "--deny-tool",
+    "shell(git:*)",
+    "--deny-tool",
+    "shell(echo:*)",
+    "--deny-tool",
+    "shell(mkdir:*)",
   ]);
   assertEquals(agentConfig.cwd, "/tmp/workspace");
+});
+
+Deno.test("createAgentConfig - copilot non-YOLO includes deny-tool flags", () => {
+  const config = createTestConfig();
+  const agentConfig = createAgentConfig("copilot", "/tmp/workspace", config, false);
+  const args = agentConfig.args;
+
+  // Verify deny-tool flags are present
+  const denyToolIndices = args
+    .map((arg, i) => arg === "--deny-tool" ? i : -1)
+    .filter((i) => i >= 0);
+
+  assertEquals(denyToolIndices.length, 3, "Should have exactly 3 --deny-tool flags");
+
+  // Verify specific denied commands
+  const denyPatterns = denyToolIndices.map((i) => args[i + 1]);
+  assertEquals(denyPatterns.includes("shell(git:*)"), true, "Should deny git commands");
+  assertEquals(denyPatterns.includes("shell(echo:*)"), true, "Should deny echo commands");
+  assertEquals(denyPatterns.includes("shell(mkdir:*)"), true, "Should deny mkdir commands");
+});
+
+Deno.test("createAgentConfig - copilot YOLO mode does NOT include deny-tool flags", () => {
+  const config = createTestConfig();
+  const agentConfig = createAgentConfig("copilot", "/tmp/workspace", config, true);
+  const args = agentConfig.args;
+
+  assertEquals(
+    args.includes("--deny-tool"),
+    false,
+    "YOLO mode should not include --deny-tool flags",
+  );
+  assertEquals(args.includes("--yolo"), true, "YOLO mode should include --yolo flag");
 });
 
 Deno.test("createAgentConfig - adds --yolo flag to gemini when yolo is true", () => {
