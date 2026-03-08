@@ -15,6 +15,7 @@ This document describes AIr-Friends' multi-layer permission model for controllin
 - [Per-Session-Type Permission Behavior](#per-session-type-permission-behavior)
 - [Per-Agent-Type Differences](#per-agent-type-differences)
 - [Skill Auto-Approve List](#skill-auto-approve-list)
+- [Permission Audit Logging](#permission-audit-logging)
 - [Security Considerations](#security-considerations)
 - [Configuration Reference](#configuration-reference)
 
@@ -405,18 +406,63 @@ Additionally, path matching uses strict token validation:
 
 ---
 
+## Permission Audit Logging
+
+All permission decisions (both approved and denied) can be recorded in the per-session JSONL audit log for security analysis and compliance.
+
+### Audit Phases
+
+| Phase                 | Description                       |
+| --------------------- | --------------------------------- |
+| `permission_approved` | A permission request was approved |
+| `permission_denied`   | A permission request was denied   |
+
+### Audit Entry Data
+
+Each permission audit entry includes:
+
+| Field            | Type                     | Description                                                         |
+| ---------------- | ------------------------ | ------------------------------------------------------------------- |
+| `toolName`       | `string`                 | The tool or skill name that requested permission                    |
+| `permissionKind` | `string`                 | The kind of permission requested (e.g., `execute`, `read`, `write`) |
+| `command`        | `string?`                | The command content (hashed when `audit.hashContent` is `true`)     |
+| `decision`       | `"approved" \| "denied"` | The permission decision outcome                                     |
+| `reason`         | `string`                 | The reason for the decision                                         |
+
+### Decision Reasons
+
+| Reason                    | Decision | Description                                      |
+| ------------------------- | -------- | ------------------------------------------------ |
+| `yolo_mode`               | approved | YOLO mode auto-approved the request              |
+| `skills_directory_access` | approved | Read access to the skills directory              |
+| `skill_whitelist`         | approved | Command matched the skill auto-approve list      |
+| `registered_skill`        | approved | Tool matched a registered skill name             |
+| `rejected_edit_write`     | denied   | Edit/write operation rejected in restricted mode |
+| `rejected_unknown`        | denied   | Unknown tool rejected by default-deny policy     |
+
+### Content Hashing
+
+When `audit.hashContent` is `true`, the `command` field is SHA-256 hashed and prefixed with `sha256:` to prevent sensitive command content from appearing in audit logs.
+
+### Phase Filtering
+
+Permission audit phases respect the `audit.includedPhases` configuration. When `includedPhases` is empty (default), all phases including permission phases are recorded. To selectively enable permission auditing, add `permission_approved` and/or `permission_denied` to the `includedPhases` list.
+
+---
+
 ## Security Considerations
 
 ### What Each Layer Prevents
 
-| Threat                                  | Prevented by                                                                                          |
-| --------------------------------------- | ----------------------------------------------------------------------------------------------------- |
-| Agent modifying source code             | Layer 1 (no edit tool for Copilot), Layer 2 (edit denied for OpenCode), Layer 3 (edit/write rejected) |
-| Agent running arbitrary commands        | Layer 2 (bash whitelist for OpenCode), Layer 3 (skill auto-approve list)                              |
-| Agent accessing other users' data       | Layer 4 (file access boundary — workspace isolation)                                                  |
-| Agent exfiltrating secrets via env vars | Layer 5 (env var filtering)                                                                           |
-| Agent making unauthorized network calls | Layer 5 (optional network isolation)                                                                  |
-| Agent committing/pushing to git         | Layer 2 (git denied for OpenCode), Layer 3 (not in skill list)                                        |
+| Threat                                  | Prevented by                                                                                            |
+| --------------------------------------- | ------------------------------------------------------------------------------------------------------- |
+| Agent modifying source code             | Layer 1 (no edit tool for Copilot), Layer 2 (edit denied for OpenCode), Layer 3 (edit/write rejected)   |
+| Agent running arbitrary commands        | Layer 2 (bash whitelist for OpenCode), Layer 3 (skill auto-approve list)                                |
+| Agent accessing other users' data       | Layer 4 (file access boundary — workspace isolation)                                                    |
+| Agent exfiltrating secrets via env vars | Layer 5 (env var filtering)                                                                             |
+| Agent making unauthorized network calls | Layer 5 (optional network isolation)                                                                    |
+| Agent committing/pushing to git         | Layer 2 (git denied for OpenCode), Layer 3 (not in skill list)                                          |
+| Permission bypass undetected            | All permission decisions (approved and denied) are recorded in per-session audit logs with full context |
 
 ### Known Limitations
 
@@ -453,6 +499,18 @@ channels:
   - id: "discord/account/123456789012345678"
     enabled: true
     yolo: true
+
+# Audit logging (includes permission audit phases)
+audit:
+  enabled: false
+  retentionDays: 7
+  hashContent: true
+  includedPhases:
+    - "skill_call"
+    - "reply_sent"
+    - "session_end"
+    - "permission_approved"
+    - "permission_denied"
 ```
 
 ### Environment Variables

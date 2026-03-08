@@ -457,6 +457,11 @@ export class SessionOrchestrator {
           agentType: getDefaultAgentType(this.config),
         });
 
+        // Inject audit writer for permission decision auditing
+        if (auditWriter) {
+          connector.getClient()?.setAuditWriter(auditWriter);
+        }
+
         // Check Agent image capability
         const supportsImage = connector.supportsImageContent();
         sessionLogger.info("Agent capabilities checked", { supportsImage });
@@ -901,6 +906,11 @@ export class SessionOrchestrator {
           agentType: getDefaultAgentType(this.config),
         });
 
+        // Inject audit writer for permission decision auditing
+        if (auditWriter) {
+          connector.getClient()?.setAuditWriter(auditWriter);
+        }
+
         const sessionId = await connector.createSession(this.getMCPServers());
         sessionLogger = sessionLogger.withContext({ sessionId });
         // Set the model for the session (using pre-resolved model)
@@ -1164,6 +1174,11 @@ export class SessionOrchestrator {
         sessionLogger.info("Agent connected");
         await auditWriter?.write("agent_connect", { agentType: getDefaultAgentType(this.config) });
 
+        // Inject audit writer for permission decision auditing
+        if (auditWriter) {
+          connector.getClient()?.setAuditWriter(auditWriter);
+        }
+
         const sessionId = await connector.createSession(this.getMCPServers());
         sessionLogger = sessionLogger.withContext({ sessionId });
         // Set the model for the session (using pre-resolved model)
@@ -1396,6 +1411,11 @@ export class SessionOrchestrator {
         await connector.connect();
         sessionLogger.info("Agent connected");
         await auditWriter?.write("agent_connect", { agentType: getDefaultAgentType(this.config) });
+
+        // Inject audit writer for permission decision auditing
+        if (auditWriter) {
+          connector.getClient()?.setAuditWriter(auditWriter);
+        }
 
         const sessionId = await connector.createSession(this.getMCPServers());
         sessionLogger = sessionLogger.withContext({ sessionId });
@@ -1656,6 +1676,11 @@ export class SessionOrchestrator {
         await connector.connect();
         sessionLogger.info("Agent connected");
         await auditWriter?.write("agent_connect", { agentType: getDefaultAgentType(this.config) });
+
+        // Inject audit writer for permission decision auditing
+        if (auditWriter) {
+          connector.getClient()?.setAuditWriter(auditWriter);
+        }
 
         const sessionId = await connector.createSession(this.getMCPServers());
         sessionLogger = sessionLogger.withContext({ sessionId });

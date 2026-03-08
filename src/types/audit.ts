@@ -11,7 +11,9 @@ export type AuditPhase =
   | "skill_call"
   | "agent_response"
   | "reply_sent"
-  | "session_end";
+  | "session_end"
+  | "permission_approved"
+  | "permission_denied";
 
 /**
  * A single audit log entry written as one line in JSONL
@@ -59,6 +61,13 @@ export interface SessionAuditEntry {
     reactionSent?: boolean;
     durationMs?: number;
     error?: string;
+
+    // permission_approved / permission_denied
+    toolName?: string;
+    permissionKind?: string;
+    command?: string;
+    decision?: "approved" | "denied";
+    reason?: string;
 
     // common
     [key: string]: unknown;
