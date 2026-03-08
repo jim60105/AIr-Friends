@@ -6,6 +6,8 @@ import type { SkillRegistry } from "@skills/registry.ts";
 import type { Logger } from "@utils/logger.ts";
 import type { ClientConfig } from "./types.ts";
 import type { SkillContext } from "@skills/types.ts";
+import type { SessionAuditWriter } from "@core/audit-logger.ts";
+import { sha256Hash } from "@utils/hash.ts";
 
 /**
  * Auto-approved skill lists for restricted (non-YOLO) mode.
@@ -146,6 +148,7 @@ export class ChatbotClient implements acp.Client {
   private config: ClientConfig;
   private replyAlreadySent: boolean = false;
   private skillAutoApproveList: SkillAutoApproveList;
+  private auditWriter?: SessionAuditWriter;
 
   /** Timestamp of the last activity received from the Agent */
   private lastActivityTimestamp: number = Date.now();
@@ -179,8 +182,39 @@ export class ChatbotClient implements acp.Client {
     this.lastActivityTimestamp = Date.now();
   }
 
+  /**
+   * Set the audit writer for permission decision auditing.
+   * Called after session creation when audit writer becomes available.
+   */
+  setAuditWriter(writer: SessionAuditWriter): void {
+    this.auditWriter = writer;
+  }
+
   private updateActivity(): void {
     this.lastActivityTimestamp = Date.now();
+  }
+
+  /**
+   * Write a permission decision to the audit log.
+   * Fire-and-forget: audit failures never affect permission decisions.
+   */
+  private async writePermissionAudit(
+    phase: "permission_approved" | "permission_denied",
+    toolName: string,
+    permissionKind: string,
+    command: string | undefined,
+    reason: string,
+  ): Promise<void> {
+    if (!this.auditWriter) return;
+    const hashContent = this.auditWriter.getConfig().hashContent;
+    const commandValue = hashContent && command ? `sha256:${await sha256Hash(command)}` : command;
+    void this.auditWriter.write(phase, {
+      toolName,
+      permissionKind,
+      command: commandValue,
+      decision: phase === "permission_approved" ? "approved" : "denied",
+      reason,
+    });
   }
 
   /**
@@ -244,6 +278,8 @@ export class ChatbotClient implements acp.Client {
         locations: locations.length > 0 ? locations.map((l) => l.path) : undefined,
       });
 
+      void this.writePermissionAudit("permission_approved", title, kind, undefined, "yolo_mode");
+
       const allowOption = params.options.find((o) => o.kind === "allow_once") ??
         params.options[0];
 
@@ -267,6 +303,14 @@ export class ChatbotClient implements acp.Client {
         this.logger.info("Auto-approving skills directory read: {path}", {
           path: params.toolCall.locations.map((l) => l.path).join(", "),
         });
+
+        void this.writePermissionAudit(
+          "permission_approved",
+          title,
+          kind,
+          undefined,
+          "skills_directory_access",
+        );
 
         const allowOption = params.options.find((o) => o.kind === "allow_once") ??
           params.options[0];
@@ -308,6 +352,14 @@ export class ChatbotClient implements acp.Client {
           command: commands.join("; "),
         });
 
+        void this.writePermissionAudit(
+          "permission_approved",
+          title,
+          kind,
+          commands.join("; "),
+          "skill_whitelist",
+        );
+
         const allowOption = params.options.find((o) => o.kind === "allow_once") ??
           params.options[0];
 
@@ -331,6 +383,14 @@ export class ChatbotClient implements acp.Client {
     if (skillName && this.skillRegistry.hasSkill(skillName)) {
       this.logger.info("Auto-approving registered skill: {skillName}", { skillName });
 
+      void this.writePermissionAudit(
+        "permission_approved",
+        skillName,
+        kind,
+        undefined,
+        "registered_skill",
+      );
+
       // Find "allow_once" option, or default to first option
       const allowOption = params.options.find((o) => o.kind === "allow_once") ??
         params.options[0];
@@ -350,13 +410,29 @@ export class ChatbotClient implements acp.Client {
         kind,
         paths: locations.map((l) => l.path),
       });
-    }
 
-    // For unknown tool calls, reject
-    this.logger.warn("Rejecting unknown tool call", {
-      skillName,
-      title: params.toolCall.title,
-    });
+      void this.writePermissionAudit(
+        "permission_denied",
+        title,
+        kind,
+        undefined,
+        "rejected_edit_write",
+      );
+    } else {
+      // For unknown tool calls, reject
+      this.logger.warn("Rejecting unknown tool call", {
+        skillName,
+        title: params.toolCall.title,
+      });
+
+      void this.writePermissionAudit(
+        "permission_denied",
+        title,
+        kind,
+        undefined,
+        "rejected_unknown",
+      );
+    }
 
     const rejectOption = params.options.find((o) => o.kind === "reject_once") ??
       params.options[0];
@@ -579,6 +655,7 @@ export class ChatbotClient implements acp.Client {
   reset(): void {
     this.replyAlreadySent = false;
     this.lastActivityTimestamp = Date.now();
+    this.auditWriter = undefined;
   }
 
   /**

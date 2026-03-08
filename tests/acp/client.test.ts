@@ -14,6 +14,10 @@ import { Logger, LogLevel } from "@utils/logger.ts";
 import { SkillRegistry } from "@skills/registry.ts";
 import { MemoryStore } from "@core/memory-store.ts";
 import { WorkspaceManager } from "@core/workspace-manager.ts";
+import { SessionAuditWriter } from "@core/audit-logger.ts";
+import type { AuditConfig } from "../../src/types/config.ts";
+import type { SessionAuditEntry } from "../../src/types/audit.ts";
+import { join } from "@std/path";
 
 // Create a minimal logger for testing
 const createTestLogger = (): Logger => {
@@ -1577,6 +1581,518 @@ Deno.test("ChatbotClient - config-driven auto-approve list approves configured e
     if (response.outcome.outcome === "selected") {
       assertEquals(response.outcome.optionId, "allow-1");
     }
+  } finally {
+    Deno.removeSync(tempDir, { recursive: true });
+  }
+});
+
+// --- Permission Audit Logging Tests ---
+
+/** Helper: read JSONL audit entries from a file */
+async function readAuditEntries(filePath: string): Promise<SessionAuditEntry[]> {
+  const text = await Deno.readTextFile(filePath);
+  return text.trim().split("\n").filter((l) => l.length > 0).map((l) =>
+    JSON.parse(l) as SessionAuditEntry
+  );
+}
+
+/** Helper: build a default AuditConfig for tests */
+function createTestAuditConfig(
+  overrides: Partial<AuditConfig> = {},
+): AuditConfig {
+  return {
+    enabled: true,
+    retentionDays: 7,
+    hashContent: false,
+    includedPhases: [],
+    ...overrides,
+  };
+}
+
+Deno.test("Permission audit - approved permission writes audit entry (YOLO)", async () => {
+  const tempDir = Deno.makeTempDirSync();
+  try {
+    const skillRegistry = createTestSkillRegistry();
+    const logger = createTestLogger();
+    const config = {
+      workingDir: tempDir,
+      platform: "discord",
+      userId: "123",
+      channelId: "456",
+      isDM: false,
+      yolo: true,
+    };
+
+    const client = new ChatbotClient(skillRegistry, logger, config);
+    const auditConfig = createTestAuditConfig();
+    const writer = new SessionAuditWriter(tempDir, "discord", "123", "sess-1", auditConfig);
+    client.setAuditWriter(writer);
+
+    const request: acp.RequestPermissionRequest = {
+      sessionId: "sess-1",
+      toolCall: {
+        title: "some-tool",
+        kind: "execute",
+        status: "pending" as const,
+        content: [],
+        toolCallId: "test-id",
+        rawInput: { command: "echo hello" },
+      },
+      options: [
+        { kind: "allow_once", optionId: "allow-1", name: "Allow once" },
+        { kind: "reject_once", optionId: "reject-1", name: "Reject once" },
+      ],
+    };
+
+    const response = await client.requestPermission(request);
+    assertEquals(response.outcome.outcome, "selected");
+
+    // Wait for fire-and-forget audit write to complete
+    await new Promise((resolve) => setTimeout(resolve, 100));
+
+    const filePath = join(tempDir, "discord", "123", "sess-1.jsonl");
+    const entries = await readAuditEntries(filePath);
+    assertEquals(entries.length, 1);
+    assertEquals(entries[0].phase, "permission_approved");
+    assertEquals(entries[0].data.decision, "approved");
+    assertEquals(entries[0].data.reason, "yolo_mode");
+    assertEquals(entries[0].data.toolName, "some-tool");
+    assertEquals(entries[0].data.permissionKind, "execute");
+  } finally {
+    Deno.removeSync(tempDir, { recursive: true });
+  }
+});
+
+Deno.test("Permission audit - denied permission writes audit entry (rejected_unknown)", async () => {
+  const tempDir = Deno.makeTempDirSync();
+  try {
+    const skillRegistry = createTestSkillRegistry();
+    const logger = createTestLogger();
+    const config = {
+      workingDir: tempDir,
+      platform: "discord",
+      userId: "123",
+      channelId: "456",
+      isDM: false,
+    };
+
+    const client = new ChatbotClient(skillRegistry, logger, config);
+    const auditConfig = createTestAuditConfig();
+    const writer = new SessionAuditWriter(tempDir, "discord", "123", "sess-2", auditConfig);
+    client.setAuditWriter(writer);
+
+    const request: acp.RequestPermissionRequest = {
+      sessionId: "sess-2",
+      toolCall: {
+        title: "unknown-tool",
+        kind: null,
+        status: "pending" as const,
+        content: [],
+        toolCallId: "test-id",
+        rawInput: {},
+      },
+      options: [
+        { kind: "allow_once", optionId: "allow-1", name: "Allow once" },
+        { kind: "reject_once", optionId: "reject-1", name: "Reject once" },
+      ],
+    };
+
+    const response = await client.requestPermission(request);
+    assertEquals(response.outcome.outcome, "selected");
+    if (response.outcome.outcome === "selected") {
+      assertEquals(response.outcome.optionId, "reject-1");
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, 100));
+
+    const filePath = join(tempDir, "discord", "123", "sess-2.jsonl");
+    const entries = await readAuditEntries(filePath);
+    assertEquals(entries.length, 1);
+    assertEquals(entries[0].phase, "permission_denied");
+    assertEquals(entries[0].data.decision, "denied");
+    assertEquals(entries[0].data.reason, "rejected_unknown");
+  } finally {
+    Deno.removeSync(tempDir, { recursive: true });
+  }
+});
+
+Deno.test("Permission audit - hashContent hashes command", async () => {
+  const tempDir = Deno.makeTempDirSync();
+  try {
+    const skillRegistry = createTestSkillRegistry();
+    const logger = createTestLogger();
+    const config = {
+      workingDir: tempDir,
+      platform: "discord",
+      userId: "123",
+      channelId: "456",
+      isDM: false,
+    };
+    const autoApproveList: SkillAutoApproveList = {
+      scriptPaths: new Set(),
+      commandPrefixes: new Set(["agent-browser"]),
+    };
+
+    const client = new ChatbotClient(skillRegistry, logger, config, autoApproveList);
+    const auditConfig = createTestAuditConfig({ hashContent: true });
+    const writer = new SessionAuditWriter(tempDir, "discord", "123", "sess-3", auditConfig);
+    client.setAuditWriter(writer);
+
+    const request: acp.RequestPermissionRequest = {
+      sessionId: "sess-3",
+      toolCall: {
+        title: "Execute command",
+        kind: "execute",
+        status: "pending" as const,
+        content: [],
+        toolCallId: "test-id",
+        rawInput: {
+          command: "agent-browser navigate https://example.com",
+        },
+      },
+      options: [
+        { kind: "allow_once", optionId: "allow-1", name: "Allow once" },
+        { kind: "reject_once", optionId: "reject-1", name: "Reject once" },
+      ],
+    };
+
+    const response = await client.requestPermission(request);
+    assertEquals(response.outcome.outcome, "selected");
+
+    await new Promise((resolve) => setTimeout(resolve, 100));
+
+    const filePath = join(tempDir, "discord", "123", "sess-3.jsonl");
+    const entries = await readAuditEntries(filePath);
+    assertEquals(entries.length, 1);
+    assertEquals(entries[0].phase, "permission_approved");
+    assertEquals(entries[0].data.reason, "skill_whitelist");
+    assertEquals(
+      typeof entries[0].data.command === "string" &&
+        entries[0].data.command.startsWith("sha256:"),
+      true,
+    );
+  } finally {
+    Deno.removeSync(tempDir, { recursive: true });
+  }
+});
+
+Deno.test("Permission audit - no hashContent preserves command", async () => {
+  const tempDir = Deno.makeTempDirSync();
+  try {
+    const skillRegistry = createTestSkillRegistry();
+    const logger = createTestLogger();
+    const config = {
+      workingDir: tempDir,
+      platform: "discord",
+      userId: "123",
+      channelId: "456",
+      isDM: false,
+    };
+    const autoApproveList: SkillAutoApproveList = {
+      scriptPaths: new Set(),
+      commandPrefixes: new Set(["agent-browser"]),
+    };
+
+    const client = new ChatbotClient(skillRegistry, logger, config, autoApproveList);
+    const auditConfig = createTestAuditConfig({ hashContent: false });
+    const writer = new SessionAuditWriter(tempDir, "discord", "123", "sess-4", auditConfig);
+    client.setAuditWriter(writer);
+
+    const rawCommand = "agent-browser navigate https://example.com";
+    const request: acp.RequestPermissionRequest = {
+      sessionId: "sess-4",
+      toolCall: {
+        title: "Execute command",
+        kind: "execute",
+        status: "pending" as const,
+        content: [],
+        toolCallId: "test-id",
+        rawInput: {
+          command: rawCommand,
+        },
+      },
+      options: [
+        { kind: "allow_once", optionId: "allow-1", name: "Allow once" },
+        { kind: "reject_once", optionId: "reject-1", name: "Reject once" },
+      ],
+    };
+
+    const response = await client.requestPermission(request);
+    assertEquals(response.outcome.outcome, "selected");
+
+    await new Promise((resolve) => setTimeout(resolve, 100));
+
+    const filePath = join(tempDir, "discord", "123", "sess-4.jsonl");
+    const entries = await readAuditEntries(filePath);
+    assertEquals(entries.length, 1);
+    assertEquals(entries[0].phase, "permission_approved");
+    assertEquals(entries[0].data.command, rawCommand);
+  } finally {
+    Deno.removeSync(tempDir, { recursive: true });
+  }
+});
+
+Deno.test("Permission audit - no audit writer does not throw", async () => {
+  const tempDir = Deno.makeTempDirSync();
+  try {
+    const skillRegistry = createTestSkillRegistry();
+    const logger = createTestLogger();
+    const config = {
+      workingDir: tempDir,
+      platform: "discord",
+      userId: "123",
+      channelId: "456",
+      isDM: false,
+      yolo: true,
+    };
+
+    // No setAuditWriter call — auditWriter is undefined
+    const client = new ChatbotClient(skillRegistry, logger, config);
+
+    const request: acp.RequestPermissionRequest = {
+      sessionId: "test-session",
+      toolCall: {
+        title: "some-tool",
+        kind: "execute",
+        status: "pending" as const,
+        content: [],
+        toolCallId: "test-id",
+        rawInput: { command: "echo hello" },
+      },
+      options: [
+        { kind: "allow_once", optionId: "allow-1", name: "Allow once" },
+        { kind: "reject_once", optionId: "reject-1", name: "Reject once" },
+      ],
+    };
+
+    // Should complete without throwing
+    const response = await client.requestPermission(request);
+    assertEquals(response.outcome.outcome, "selected");
+  } finally {
+    Deno.removeSync(tempDir, { recursive: true });
+  }
+});
+
+Deno.test("Permission audit - edit/write rejection writes denied entry", async () => {
+  const tempDir = Deno.makeTempDirSync();
+  try {
+    const skillRegistry = createTestSkillRegistry();
+    const logger = createTestLogger();
+    const config = {
+      workingDir: tempDir,
+      platform: "discord",
+      userId: "123",
+      channelId: "456",
+      isDM: false,
+    };
+
+    const client = new ChatbotClient(skillRegistry, logger, config);
+    const auditConfig = createTestAuditConfig();
+    const writer = new SessionAuditWriter(tempDir, "discord", "123", "sess-6", auditConfig);
+    client.setAuditWriter(writer);
+
+    const request: acp.RequestPermissionRequest = {
+      sessionId: "sess-6",
+      toolCall: {
+        title: "edit",
+        kind: null,
+        status: "pending" as const,
+        content: [],
+        toolCallId: "test-id",
+        rawInput: {},
+      },
+      options: [
+        { kind: "allow_once", optionId: "allow-1", name: "Allow once" },
+        { kind: "reject_once", optionId: "reject-1", name: "Reject once" },
+      ],
+    };
+
+    const response = await client.requestPermission(request);
+    assertEquals(response.outcome.outcome, "selected");
+    if (response.outcome.outcome === "selected") {
+      assertEquals(response.outcome.optionId, "reject-1");
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, 100));
+
+    const filePath = join(tempDir, "discord", "123", "sess-6.jsonl");
+    const entries = await readAuditEntries(filePath);
+    assertEquals(entries.length, 1);
+    assertEquals(entries[0].phase, "permission_denied");
+    assertEquals(entries[0].data.decision, "denied");
+    assertEquals(entries[0].data.reason, "rejected_edit_write");
+    assertEquals(entries[0].data.toolName, "edit");
+  } finally {
+    Deno.removeSync(tempDir, { recursive: true });
+  }
+});
+
+Deno.test("Permission audit - skills directory access writes approved entry", async () => {
+  const tempDir = Deno.makeTempDirSync();
+  try {
+    const skillRegistry = createTestSkillRegistry();
+    const logger = createTestLogger();
+    const config = {
+      workingDir: tempDir,
+      platform: "discord",
+      userId: "123",
+      channelId: "456",
+      isDM: false,
+    };
+
+    const client = new ChatbotClient(skillRegistry, logger, config);
+    const auditConfig = createTestAuditConfig();
+    const writer = new SessionAuditWriter(tempDir, "discord", "123", "sess-7", auditConfig);
+    client.setAuditWriter(writer);
+
+    const request: acp.RequestPermissionRequest = {
+      sessionId: "sess-7",
+      toolCall: {
+        title: "Read file",
+        kind: "read",
+        status: "pending" as const,
+        content: [],
+        toolCallId: "test-id",
+        rawInput: {},
+        locations: [{ path: "/home/deno/.copilot/skills/memory-save/SKILL.md" }],
+      },
+      options: [
+        { kind: "allow_once", optionId: "allow-1", name: "Allow once" },
+        { kind: "reject_once", optionId: "reject-1", name: "Reject once" },
+      ],
+    };
+
+    const response = await client.requestPermission(request);
+    assertEquals(response.outcome.outcome, "selected");
+    if (response.outcome.outcome === "selected") {
+      assertEquals(response.outcome.optionId, "allow-1");
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, 100));
+
+    const filePath = join(tempDir, "discord", "123", "sess-7.jsonl");
+    const entries = await readAuditEntries(filePath);
+    assertEquals(entries.length, 1);
+    assertEquals(entries[0].phase, "permission_approved");
+    assertEquals(entries[0].data.decision, "approved");
+    assertEquals(entries[0].data.reason, "skills_directory_access");
+  } finally {
+    Deno.removeSync(tempDir, { recursive: true });
+  }
+});
+
+Deno.test("Permission audit - registered skill writes approved entry", async () => {
+  const tempDir = Deno.makeTempDirSync();
+  try {
+    const skillRegistry = createTestSkillRegistry();
+    const logger = createTestLogger();
+    const config = {
+      workingDir: tempDir,
+      platform: "discord",
+      userId: "123",
+      channelId: "456",
+      isDM: false,
+    };
+
+    const client = new ChatbotClient(skillRegistry, logger, config);
+    const auditConfig = createTestAuditConfig();
+    const writer = new SessionAuditWriter(tempDir, "discord", "123", "sess-8", auditConfig);
+    client.setAuditWriter(writer);
+
+    const request: acp.RequestPermissionRequest = {
+      sessionId: "sess-8",
+      toolCall: {
+        title: "memory-save",
+        kind: null,
+        status: "pending" as const,
+        rawInput: { skill: "memory-save" },
+        content: [],
+        toolCallId: "test-id",
+      },
+      options: [
+        { kind: "allow_once", optionId: "allow-1", name: "Allow once" },
+        { kind: "reject_once", optionId: "reject-1", name: "Reject once" },
+      ],
+    };
+
+    const response = await client.requestPermission(request);
+    assertEquals(response.outcome.outcome, "selected");
+    if (response.outcome.outcome === "selected") {
+      assertEquals(response.outcome.optionId, "allow-1");
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, 100));
+
+    const filePath = join(tempDir, "discord", "123", "sess-8.jsonl");
+    const entries = await readAuditEntries(filePath);
+    assertEquals(entries.length, 1);
+    assertEquals(entries[0].phase, "permission_approved");
+    assertEquals(entries[0].data.decision, "approved");
+    assertEquals(entries[0].data.reason, "registered_skill");
+    assertEquals(entries[0].data.toolName, "memory-save");
+  } finally {
+    Deno.removeSync(tempDir, { recursive: true });
+  }
+});
+
+Deno.test("Permission audit - includedPhases filtering works", async () => {
+  const tempDir = Deno.makeTempDirSync();
+  try {
+    const skillRegistry = createTestSkillRegistry();
+    const logger = createTestLogger();
+    const config = {
+      workingDir: tempDir,
+      platform: "discord",
+      userId: "123",
+      channelId: "456",
+      isDM: false,
+      yolo: true,
+    };
+
+    const client = new ChatbotClient(skillRegistry, logger, config);
+    // Only record session_end — permission_approved should be filtered out
+    const auditConfig = createTestAuditConfig({
+      includedPhases: ["session_end"],
+    });
+    const writer = new SessionAuditWriter(tempDir, "discord", "123", "sess-9", auditConfig);
+    client.setAuditWriter(writer);
+
+    const request: acp.RequestPermissionRequest = {
+      sessionId: "sess-9",
+      toolCall: {
+        title: "some-tool",
+        kind: "execute",
+        status: "pending" as const,
+        content: [],
+        toolCallId: "test-id",
+        rawInput: { command: "echo hello" },
+      },
+      options: [
+        { kind: "allow_once", optionId: "allow-1", name: "Allow once" },
+        { kind: "reject_once", optionId: "reject-1", name: "Reject once" },
+      ],
+    };
+
+    const response = await client.requestPermission(request);
+    assertEquals(response.outcome.outcome, "selected");
+
+    await new Promise((resolve) => setTimeout(resolve, 100));
+
+    // The JSONL file should not exist or be empty since phase was filtered
+    const filePath = join(tempDir, "discord", "123", "sess-9.jsonl");
+    let fileExists = false;
+    try {
+      await Deno.stat(filePath);
+      fileExists = true;
+    } catch {
+      fileExists = false;
+    }
+
+    if (fileExists) {
+      const text = await Deno.readTextFile(filePath);
+      assertEquals(text.trim(), "");
+    }
+    // If file doesn't exist, that's also correct — nothing was written
   } finally {
     Deno.removeSync(tempDir, { recursive: true });
   }
