@@ -50,6 +50,7 @@ This document lists all common tools pre-installed in the AIr-Friends container 
 | `imagemagick` | `magick`, `convert`, `identify`, `mogrify` | Image manipulation suite for converting, resizing, cropping, and transforming images across hundreds of formats. |
 | `exiftool` | `exiftool` | Read, write, and edit metadata (EXIF, IPTC, XMP) in image, audio, video, and document files. Useful for inspecting media file properties. |
 | `poppler-utils` | `pdftotext`, `pdfinfo`, `pdfimages`, `pdftoppm` | PDF processing utilities. `pdftotext` extracts text from PDFs; `pdfinfo` shows document metadata; `pdftoppm` converts PDF pages to images. |
+| `pandoc` | `pandoc` | Universal document converter. Convert between formats like Markdown, HTML, DOCX, PDF, and more. Useful for generating reports or converting user-submitted documents. |
 
 ## System & Debugging
 

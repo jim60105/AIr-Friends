@@ -22,7 +22,8 @@ RUN --mount=type=cache,id=apt-$TARGETARCH$TARGETVARIANT,sharing=locked,target=/v
     zip file tree bc \
     python3 python3-pip python-is-python3 \
     ffmpeg 7zip poppler-utils imagemagick exiftool \
-    util-linux
+    util-linux \
+    pandoc
 
 ########################################
 # GitHub Copilot unpack stage
