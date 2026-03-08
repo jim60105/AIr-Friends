@@ -2181,3 +2181,102 @@ channels:
     assertEquals(result.channels[0].yolo, false);
   });
 });
+
+// --- allowedWriteExtensions sandbox config tests ---
+
+Deno.test("loadConfig - default sandbox includes allowedWriteExtensions [.md, .txt]", async () => {
+  const config = `
+platforms:
+  discord:
+    token: "test-token"
+    enabled: true
+agent:
+  model: "gpt-4"
+  systemPromptPath: "./prompts/system_reply.md"
+  tokenLimit: 20000
+workspace:
+  repoPath: "./data"
+  workspacesDir: "workspaces"
+`;
+
+  await withTestConfig(config, async (dir) => {
+    const result = await loadConfig(dir);
+    assertEquals(result.agent.sandbox?.allowedWriteExtensions, [".md", ".txt"]);
+  });
+});
+
+Deno.test("loadConfig - custom allowedWriteExtensions from config is preserved", async () => {
+  const config = `
+platforms:
+  discord:
+    token: "test-token"
+    enabled: true
+agent:
+  model: "gpt-4"
+  systemPromptPath: "./prompts/system_reply.md"
+  tokenLimit: 20000
+  sandbox:
+    allowedWriteExtensions:
+      - ".json"
+      - ".yaml"
+      - ".csv"
+workspace:
+  repoPath: "./data"
+  workspacesDir: "workspaces"
+`;
+
+  await withTestConfig(config, async (dir) => {
+    const result = await loadConfig(dir);
+    assertEquals(result.agent.sandbox?.allowedWriteExtensions, [".json", ".yaml", ".csv"]);
+  });
+});
+
+Deno.test("loadConfig - invalid allowedWriteExtensions entries (non-dot-prefixed) are filtered out", async () => {
+  const config = `
+platforms:
+  discord:
+    token: "test-token"
+    enabled: true
+agent:
+  model: "gpt-4"
+  systemPromptPath: "./prompts/system_reply.md"
+  tokenLimit: 20000
+  sandbox:
+    allowedWriteExtensions:
+      - ".md"
+      - "txt"
+      - ".json"
+      - "no-dot"
+workspace:
+  repoPath: "./data"
+  workspacesDir: "workspaces"
+`;
+
+  await withTestConfig(config, async (dir) => {
+    const result = await loadConfig(dir);
+    assertEquals(result.agent.sandbox?.allowedWriteExtensions, [".md", ".json"]);
+  });
+});
+
+Deno.test("loadConfig - non-array allowedWriteExtensions is replaced with default", async () => {
+  const config = `
+platforms:
+  discord:
+    token: "test-token"
+    enabled: true
+agent:
+  model: "gpt-4"
+  systemPromptPath: "./prompts/system_reply.md"
+  tokenLimit: 20000
+  sandbox:
+    allowedWriteExtensions: "not-an-array"
+workspace:
+  repoPath: "./data"
+  workspacesDir: "workspaces"
+`;
+
+  await withTestConfig(config, async (dir) => {
+    const result = await loadConfig(dir);
+    assertEquals(result.agent.sandbox?.allowedWriteExtensions, [".md", ".txt"]);
+  });
+});

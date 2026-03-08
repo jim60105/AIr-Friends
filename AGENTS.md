@@ -495,6 +495,7 @@ Agent subprocesses run with configurable sandbox isolation via `SandboxManager`:
 | `agent.sandbox.filterEnv`        | `true`  | Filter subprocess env vars to an allowed list only                             |
 | `agent.sandbox.networkIsolation` | `false` | Wrap command with `unshare --net` for network namespace isolation (Linux only) |
 | `agent.sandbox.allowedEnvVars`   | `[]`    | Additional env var names to pass through the filter                            |
+| `agent.sandbox.allowedWriteExtensions` | `[".md", ".txt"]` | Allowed file extensions for agent workspace writes in restricted mode |
 
 Environment variable overrides:
 
@@ -503,6 +504,7 @@ Environment variable overrides:
 | `AGENT_SANDBOX_FILTER_ENV`        | `agent.sandbox.filterEnv`        | `"true"` / `"false"` |
 | `AGENT_SANDBOX_NETWORK_ISOLATION` | `agent.sandbox.networkIsolation` | `"true"` / `"false"` |
 | `AGENT_SANDBOX_ALLOWED_ENV_VARS`  | `agent.sandbox.allowedEnvVars`   | Comma-separated      |
+| `AGENT_SANDBOX_ALLOWED_WRITE_EXTENSIONS` | `agent.sandbox.allowedWriteExtensions` | Comma-separated |
 
 Degradation strategy:
 

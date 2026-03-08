@@ -183,6 +183,9 @@ export interface SandboxConfig {
 
   /** Additional environment variable names to allow through the filter */
   allowedEnvVars: string[];
+
+  /** Allowed file extensions for agent workspace writes in restricted mode (default: [".md", ".txt"]) */
+  allowedWriteExtensions: string[];
 }
 
 /**

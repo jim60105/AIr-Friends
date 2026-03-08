@@ -104,6 +104,7 @@ export const ENV_MAPPINGS = {
   AGENT_SANDBOX_FILTER_ENV: "agent.sandbox.filterEnv",
   AGENT_SANDBOX_NETWORK_ISOLATION: "agent.sandbox.networkIsolation",
   AGENT_SANDBOX_ALLOWED_ENV_VARS: "agent.sandbox.allowedEnvVars",
+  AGENT_SANDBOX_ALLOWED_WRITE_EXTENSIONS: "agent.sandbox.allowedWriteExtensions",
 
   // Agent skill auto-approve list
   AGENT_AUTO_APPROVE_SKILLS: "agent.autoApproveSkills",
@@ -190,7 +191,9 @@ export function applyEnvOverrides(config: Record<string, unknown>): void {
       // Handle comma-separated arrays
       else if (
         envName === "SKILL_SEND_FILE_ALLOWED_EXTENSIONS" ||
-        envName === "AGENT_SANDBOX_ALLOWED_ENV_VARS" || envName === "AUDIT_INCLUDED_PHASES" ||
+        envName === "AGENT_SANDBOX_ALLOWED_ENV_VARS" ||
+        envName === "AGENT_SANDBOX_ALLOWED_WRITE_EXTENSIONS" ||
+        envName === "AUDIT_INCLUDED_PHASES" ||
         envName === "AGENT_AUTO_APPROVE_SKILLS"
       ) {
         parsedValue = value.split(",").map((s) => s.trim()).filter((s) => s !== "");

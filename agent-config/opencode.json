@@ -43,9 +43,12 @@
         "question": "deny",
         "edit": {
           "*": "deny",
-          "data/agent-workspace/**": "allow",
-          "$AGENT_WORKSPACE/**": "allow",
-          "/app/data/agent-workspace/**": "allow",
+          "data/agent-workspace/**/*.md": "allow",
+          "data/agent-workspace/**/*.txt": "allow",
+          "$AGENT_WORKSPACE/**/*.md": "allow",
+          "$AGENT_WORKSPACE/**/*.txt": "allow",
+          "/app/data/agent-workspace/**/*.md": "allow",
+          "/app/data/agent-workspace/**/*.txt": "allow",
           "$TMPDIR/**": "allow"
         },
         "bash": {

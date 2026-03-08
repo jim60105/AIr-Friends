@@ -431,3 +431,20 @@ Deno.test("applyEnvOverrides - AGENT_AUTO_APPROVE_SKILLS parses comma-separated 
     Deno.env.delete("AGENT_AUTO_APPROVE_SKILLS");
   }
 });
+
+Deno.test("applyEnvOverrides - AGENT_SANDBOX_ALLOWED_WRITE_EXTENSIONS parses comma-separated list", () => {
+  Deno.env.set("AGENT_SANDBOX_ALLOWED_WRITE_EXTENSIONS", ".md,.txt,.json");
+  try {
+    const config: Record<string, unknown> = {
+      agent: { sandbox: { allowedWriteExtensions: [] } },
+    };
+    applyEnvOverrides(config);
+    const agent = config.agent as { sandbox: { allowedWriteExtensions: string[] } };
+    assertEquals(agent.sandbox.allowedWriteExtensions.length, 3);
+    assertEquals(agent.sandbox.allowedWriteExtensions[0], ".md");
+    assertEquals(agent.sandbox.allowedWriteExtensions[1], ".txt");
+    assertEquals(agent.sandbox.allowedWriteExtensions[2], ".json");
+  } finally {
+    Deno.env.delete("AGENT_SANDBOX_ALLOWED_WRITE_EXTENSIONS");
+  }
+});

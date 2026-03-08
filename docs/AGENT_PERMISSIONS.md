@@ -169,14 +169,17 @@ File editing is denied by default, with exceptions for the agent workspace:
 ```json
 "edit": {
   "*": "deny",
-  "data/agent-workspace/**": "allow",
-  "$AGENT_WORKSPACE/**": "allow",
-  "/app/data/agent-workspace/**": "allow",
+  "data/agent-workspace/**/*.md": "allow",
+  "data/agent-workspace/**/*.txt": "allow",
+  "$AGENT_WORKSPACE/**/*.md": "allow",
+  "$AGENT_WORKSPACE/**/*.txt": "allow",
+  "/app/data/agent-workspace/**/*.md": "allow",
+  "/app/data/agent-workspace/**/*.txt": "allow",
   "$TMPDIR/**": "allow"
 }
 ```
 
-This allows the self-research feature to write study notes to the agent workspace while preventing the agent from modifying source code, configuration files, or user workspace data.
+This allows the self-research feature to write study notes (`.md`, `.txt`) to the agent workspace while preventing the agent from modifying source code, configuration files, or user workspace data. The extension restriction (`allowedWriteExtensions`) applies only in restricted (non-YOLO) mode; TMPDIR writes remain unrestricted regardless of extension.
 
 ### Bash Permission (Whitelist)
 
@@ -233,7 +236,7 @@ The method evaluates permission requests in this order:
 
 4. **Registered skill check** — Extract skill name from `rawInput.skill` or `toolCall.title` and check against the `SkillRegistry`.
 
-5. **Edit/write scoping** — For `edit`, `edit_file`, and `write` kind requests, check if **all** target paths (from `locations[]`) are within `config.agentWorkspacePath` or workspace TMPDIR. If so, auto-approve (equivalent to opencode.json `"edit": { "data/agent-workspace/**": "allow", "$TMPDIR/**": "allow" }`). Otherwise, reject with warning logs. Requests with no location paths are rejected as a safe default.
+5. **Edit/write scoping** — For `edit`, `edit_file`, and `write` kind requests, check if **all** target paths (from `locations[]`) are within `config.agentWorkspacePath` or workspace TMPDIR. For agent workspace paths (not TMPDIR), additionally verify that file extensions match `allowedWriteExtensions` (default: `[".md", ".txt"]`). If all checks pass, auto-approve. Otherwise, reject with warning logs. Requests with no location paths are rejected as a safe default.
 
 6. **Default rejection** — All unrecognized tool calls are rejected with `reject_once`.
 
@@ -257,6 +260,7 @@ When the external agent uses ACP-level file operations (`readTextFile`, `writeTe
 - Files must be within `config.workingDir` (the user's workspace directory) **or** `config.agentWorkspacePath` (the global agent workspace)
 - Path validation uses `resolve()` + `startsWith()` to prevent directory traversal attacks
 - Requests outside these boundaries are denied with an error
+- For `writeTextFile` in the agent workspace (non-YOLO mode), file extensions are checked against `allowedWriteExtensions` as a defense-in-depth measure (mirroring Layer 3's extension check). TMPDIR writes are exempt from extension filtering.
 
 This is independent of the agent's own file access — it applies to the ACP protocol's file operation callbacks.
 
@@ -500,6 +504,7 @@ Permission audit phases respect the `audit.includedPhases` configuration. When `
 | Agent exfiltrating secrets via env vars | Layer 5 (env var filtering)                                                                             |
 | Agent making unauthorized network calls | Layer 5 (optional network isolation)                                                                    |
 | Agent committing/pushing to git         | Layer 2 (git denied for OpenCode), Layer 3 (not in skill list)                                          |
+| Agent writing non-allowed file types    | Layer 2 (extension patterns in opencode.json), Layer 3 (extension check), Layer 4 (writeTextFile check) |
 | Permission bypass undetected            | All permission decisions (approved and denied) are recorded in per-session audit logs with full context |
 
 ### Known Limitations
@@ -525,6 +530,7 @@ agent:
     filterEnv: true # Filter env vars to allowed list (default: true)
     networkIsolation: false # Linux network namespace isolation (default: false)
     allowedEnvVars: [] # Additional env var names to allow through
+    allowedWriteExtensions: [".md", ".txt"] # Allowed file extensions for agent workspace writes in restricted mode
 
   # Skill auto-approve list (optional — falls back to scanning skills/ dir)
   autoApproveSkills:
@@ -558,6 +564,7 @@ audit:
 | `AGENT_SANDBOX_FILTER_ENV`        | `agent.sandbox.filterEnv`        | `"true"` / `"false"` |
 | `AGENT_SANDBOX_NETWORK_ISOLATION` | `agent.sandbox.networkIsolation` | `"true"` / `"false"` |
 | `AGENT_SANDBOX_ALLOWED_ENV_VARS`  | `agent.sandbox.allowedEnvVars`   | Comma-separated list |
+| `AGENT_SANDBOX_ALLOWED_WRITE_EXTENSIONS` | `agent.sandbox.allowedWriteExtensions` | Comma-separated list |
 | `AGENT_AUTO_APPROVE_SKILLS`       | `agent.autoApproveSkills`        | Comma-separated list |
 
 ### OpenCode-Specific

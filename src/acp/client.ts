@@ -410,28 +410,54 @@ export class ChatbotClient implements acp.Client {
         paths.every((p) => this.isAgentWorkspacePath(p!));
 
       if (isAgentWorkspaceWrite) {
-        this.logger.info(
-          "Auto-approving edit/write to agent workspace: {title}",
-          { title, kind, paths },
-        );
-
-        void this.writePermissionAudit(
-          "permission_approved",
-          title,
-          kind,
-          undefined,
-          "agent_workspace_write",
-        );
-
-        const allowOption = params.options.find((o) => o.kind === "allow_once") ??
-          params.options[0];
-
-        return Promise.resolve({
-          outcome: {
-            outcome: "selected",
-            optionId: allowOption.optionId,
-          },
+        // Check extension restrictions for non-TMPDIR agent workspace paths
+        const disallowedPaths = paths.filter((p) => {
+          const resolved = resolve(p!);
+          return !this.isWithinTmpDir(resolved) && !this.hasAllowedWriteExtension(p!);
         });
+
+        if (disallowedPaths.length > 0) {
+          this.logger.warn(
+            "Rejecting edit/write due to disallowed file extension: {title}",
+            {
+              title,
+              kind,
+              paths: disallowedPaths,
+              allowedExtensions: this.config.allowedWriteExtensions,
+            },
+          );
+
+          void this.writePermissionAudit(
+            "permission_denied",
+            title,
+            kind,
+            undefined,
+            "rejected_write_extension",
+          );
+        } else {
+          this.logger.info(
+            "Auto-approving edit/write to agent workspace: {title}",
+            { title, kind, paths },
+          );
+
+          void this.writePermissionAudit(
+            "permission_approved",
+            title,
+            kind,
+            undefined,
+            "agent_workspace_write",
+          );
+
+          const allowOption = params.options.find((o) => o.kind === "allow_once") ??
+            params.options[0];
+
+          return Promise.resolve({
+            outcome: {
+              outcome: "selected",
+              optionId: allowOption.optionId,
+            },
+          });
+        }
       }
 
       this.logger.warn("Rejecting edit/write tool in restricted mode: {title}", {
@@ -619,6 +645,29 @@ export class ChatbotClient implements acp.Client {
       );
     }
 
+    // Defense-in-depth: check extension for agent workspace writes in restricted mode
+    if (!this.config.yolo) {
+      const resolvedPath = resolve(params.path);
+      const agentWorkspacePath = this.config.agentWorkspacePath
+        ? resolve(this.config.agentWorkspacePath)
+        : null;
+      const tmpDir = resolve(this.config.workingDir, "tmp");
+
+      if (
+        agentWorkspacePath && resolvedPath.startsWith(agentWorkspacePath) &&
+        !resolvedPath.startsWith(tmpDir)
+      ) {
+        if (!this.hasAllowedWriteExtension(params.path)) {
+          throw new acp.RequestError(
+            -32600,
+            `Access denied: file extension not allowed for agent workspace writes (permitted: ${
+              this.config.allowedWriteExtensions?.join(", ")
+            })`,
+          );
+        }
+      }
+    }
+
     try {
       await Deno.writeTextFile(params.path, params.content);
       return {};
@@ -687,13 +736,37 @@ export class ChatbotClient implements acp.Client {
       }
 
       // Check workspace TMPDIR
-      const tmpDir = resolve(`${this.config.workingDir}/tmp`);
-      if (normalizedPath.startsWith(tmpDir)) return true;
+      if (this.isWithinTmpDir(normalizedPath)) return true;
 
       return false;
     } catch {
       return false;
     }
+  }
+
+  /**
+   * Check if a resolved path is within the workspace TMPDIR
+   */
+  private isWithinTmpDir(resolvedPath: string): boolean {
+    try {
+      const tmpDir = resolve(this.config.workingDir, "tmp");
+      return resolvedPath.startsWith(tmpDir);
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * Check if a file path has an allowed write extension for agent workspace writes.
+   * Returns true if no restrictions are configured or if the extension is in the allowed list.
+   */
+  private hasAllowedWriteExtension(filePath: string): boolean {
+    const extensions = this.config.allowedWriteExtensions;
+    if (!extensions || extensions.length === 0) return true;
+    const dotIndex = filePath.lastIndexOf(".");
+    if (dotIndex === -1 || dotIndex === filePath.length - 1) return false;
+    const ext = filePath.substring(dotIndex).toLowerCase();
+    return extensions.some((e) => ext === e.toLowerCase());
   }
 
   /**

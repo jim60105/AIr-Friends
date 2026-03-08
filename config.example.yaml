@@ -151,6 +151,7 @@ agent:
   #   filterEnv: true             # Filter subprocess environment variables (default: true); override with env AGENT_SANDBOX_FILTER_ENV
   #   networkIsolation: false     # Linux network namespace isolation via unshare --net (default: false); override with env AGENT_SANDBOX_NETWORK_ISOLATION
   #   allowedEnvVars: []          # Additional env var names to allow through the filter; override with env AGENT_SANDBOX_ALLOWED_ENV_VARS (comma-separated)
+  #   allowedWriteExtensions: [".md", ".txt"]  # Allowed file extensions for agent workspace writes in restricted mode; override with env AGENT_SANDBOX_ALLOWED_WRITE_EXTENSIONS (comma-separated)
 
   # Idle timeout detection for ACP connections
   # Detects silently disconnected Agent connections and attempts recovery
