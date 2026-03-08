@@ -8,15 +8,18 @@
 #               overrides all rules below
 
 # ============================================================
-# 1. Deny write/edit tools (not our editing mechanism)
+# 1. Write/edit tools — scoped to agent workspace
 # ============================================================
-# Equivalent to opencode.json: "edit": { "*": "deny" }
-# Note: modes excludes "yolo" so YOLO mode restores full access
-[[rule]]
-toolName = ["write_file", "replace"]
-decision = "deny"
-priority = 200
-modes = ["default", "auto_edit", "plan"]
+# Equivalent to opencode.json:
+#   "edit": { "*": "deny", "data/agent-workspace/**": "allow",
+#             "$AGENT_WORKSPACE/**": "allow", "$TMPDIR/**": "allow" }
+#
+# Gemini Policy Engine does not support file-path scoping for
+# write tools. Write permissions are enforced by:
+#   - Layer 3: ACP requestPermission() allows writes only to
+#     agentWorkspacePath and workspace TMPDIR
+#   - Layer 4: writeTextFile() validates path boundaries
+# No blanket deny here — Layer 3/4 provide the scoping.
 
 # ============================================================
 # 2. Deny interactive tools (no human to answer)

@@ -403,12 +403,41 @@ export class ChatbotClient implements acp.Client {
       });
     }
 
-    // Explicit edit/write tool rejection with logging
+    // Scoped edit/write: allow if ALL paths are within agent workspace or TMPDIR
     if (title === "edit" || title === "edit_file" || kind === "write" as string) {
+      const paths = locations.map((l) => l.path).filter(Boolean);
+      const isAgentWorkspaceWrite = paths.length > 0 &&
+        paths.every((p) => this.isAgentWorkspacePath(p!));
+
+      if (isAgentWorkspaceWrite) {
+        this.logger.info(
+          "Auto-approving edit/write to agent workspace: {title}",
+          { title, kind, paths },
+        );
+
+        void this.writePermissionAudit(
+          "permission_approved",
+          title,
+          kind,
+          undefined,
+          "agent_workspace_write",
+        );
+
+        const allowOption = params.options.find((o) => o.kind === "allow_once") ??
+          params.options[0];
+
+        return Promise.resolve({
+          outcome: {
+            outcome: "selected",
+            optionId: allowOption.optionId,
+          },
+        });
+      }
+
       this.logger.warn("Rejecting edit/write tool in restricted mode: {title}", {
         title,
         kind,
-        paths: locations.map((l) => l.path),
+        paths,
       });
 
       void this.writePermissionAudit(
@@ -635,6 +664,31 @@ export class ChatbotClient implements acp.Client {
         const normalizedAgentWorkspace = resolve(this.config.agentWorkspacePath);
         if (normalizedPath.startsWith(normalizedAgentWorkspace)) return true;
       }
+
+      return false;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * Check if a path is within the agent workspace or workspace TMPDIR.
+   * Used to scope edit/write permissions for self-research.
+   * Equivalent to opencode.json: "edit": { "data/agent-workspace/**": "allow", "$TMPDIR/**": "allow" }
+   */
+  private isAgentWorkspacePath(path: string): boolean {
+    try {
+      const normalizedPath = resolve(path);
+
+      // Check agent workspace path
+      if (this.config.agentWorkspacePath) {
+        const normalizedAgentWorkspace = resolve(this.config.agentWorkspacePath);
+        if (normalizedPath.startsWith(normalizedAgentWorkspace)) return true;
+      }
+
+      // Check workspace TMPDIR
+      const tmpDir = resolve(`${this.config.workingDir}/tmp`);
+      if (normalizedPath.startsWith(tmpDir)) return true;
 
       return false;
     } catch {

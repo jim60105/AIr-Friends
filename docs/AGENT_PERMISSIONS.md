@@ -233,7 +233,7 @@ The method evaluates permission requests in this order:
 
 4. **Registered skill check** — Extract skill name from `rawInput.skill` or `toolCall.title` and check against the `SkillRegistry`.
 
-5. **Edit/write rejection** — Explicitly reject `edit`, `edit_file`, and `write` kind requests with warning logs.
+5. **Edit/write scoping** — For `edit`, `edit_file`, and `write` kind requests, check if **all** target paths (from `locations[]`) are within `config.agentWorkspacePath` or workspace TMPDIR. If so, auto-approve (equivalent to opencode.json `"edit": { "data/agent-workspace/**": "allow", "$TMPDIR/**": "allow" }`). Otherwise, reject with warning logs. Requests with no location paths are rejected as a safe default.
 
 6. **Default rejection** — All unrecognized tool calls are rejected with `reject_once`.
 
@@ -494,7 +494,7 @@ Permission audit phases respect the `audit.includedPhases` configuration. When `
 
 | Threat                                  | Prevented by                                                                                            |
 | --------------------------------------- | ------------------------------------------------------------------------------------------------------- |
-| Agent modifying source code             | Layer 1 (no edit tool for Copilot), Layer 2 (edit denied for OpenCode), Layer 3 (edit/write rejected)   |
+| Agent modifying source code             | Layer 1 (no edit tool for Copilot), Layer 2 (edit denied for OpenCode), Layer 3 (edit/write scoped to agent workspace only) |
 | Agent running arbitrary commands        | Layer 2 (bash whitelist for OpenCode), Layer 3 (skill auto-approve list)                                |
 | Agent accessing other users' data       | Layer 4 (file access boundary — workspace isolation)                                                    |
 | Agent exfiltrating secrets via env vars | Layer 5 (env var filtering)                                                                             |
