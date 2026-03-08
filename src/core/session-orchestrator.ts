@@ -327,6 +327,23 @@ export class SessionOrchestrator {
         this.config.agent.model,
       );
 
+      // Compute YOLO decision early so it's available for context assembly and prompt rendering
+      const yoloDecision = this.getEffectiveYolo(
+        event.platform,
+        event.userId,
+        event.channelId,
+      );
+
+      // Audit: yolo_resolution
+      await auditWriter?.write("yolo_resolution", {
+        yoloEnabled: yoloDecision.enabled,
+        yoloSource: yoloDecision.source,
+        matchedConfigId: yoloDecision.matchedConfigId,
+        platform: event.platform,
+        userId: event.userId,
+        channelId: event.channelId,
+      });
+
       // 3. Assemble initial context
       const context = await this.contextAssembler.assembleContext(
         event,
@@ -334,6 +351,7 @@ export class SessionOrchestrator {
         platformAdapter,
         shellSessionId ?? undefined,
         resolvedModel,
+        yoloDecision.enabled,
       );
       sessionLogger.debug("Context assembled", {
         memoriesCount: context.importantMemories.length,
@@ -359,6 +377,7 @@ export class SessionOrchestrator {
         shellSessionId ?? undefined,
         formattedContext.userMessage,
         resolvedModel,
+        yoloDecision.enabled,
       );
 
       sessionLogger.debug("Prompt built", {
@@ -395,21 +414,6 @@ export class SessionOrchestrator {
       // === END DRY RUN CHECK ===
 
       // 4. Create client config for ACP
-      const yoloDecision = this.getEffectiveYolo(
-        event.platform,
-        event.userId,
-        event.channelId,
-      );
-
-      // Audit: yolo_resolution
-      await auditWriter?.write("yolo_resolution", {
-        yoloEnabled: yoloDecision.enabled,
-        yoloSource: yoloDecision.source,
-        matchedConfigId: yoloDecision.matchedConfigId,
-        platform: event.platform,
-        userId: event.userId,
-        channelId: event.channelId,
-      });
 
       const clientConfig: ClientConfig = {
         workingDir: workspace.path,
@@ -811,6 +815,19 @@ export class SessionOrchestrator {
         this.config.agent.model,
       );
 
+      // Compute YOLO decision early so it's available for context assembly and prompt rendering
+      const yoloDecision = this.getEffectiveYolo(platform, options.botId, channelId);
+
+      // Audit: yolo_resolution
+      await auditWriter?.write("yolo_resolution", {
+        yoloEnabled: yoloDecision.enabled,
+        yoloSource: yoloDecision.source,
+        matchedConfigId: yoloDecision.matchedConfigId,
+        platform,
+        userId: options.botId,
+        channelId,
+      });
+
       // 3. Assemble spontaneous context
       const context = await this.contextAssembler.assembleSpontaneousContext(
         platform,
@@ -820,6 +837,7 @@ export class SessionOrchestrator {
         { fetchRecentMessages: options.fetchRecentMessages },
         shellSessionId ?? undefined,
         resolvedModel,
+        yoloDecision.enabled,
       );
 
       // 4. Build prompt from template
@@ -827,6 +845,7 @@ export class SessionOrchestrator {
         context,
         shellSessionId,
         resolvedModel,
+        yoloDecision.enabled,
       );
 
       sessionLogger.debug("Spontaneous prompt built", {
@@ -858,17 +877,6 @@ export class SessionOrchestrator {
       // === END DRY RUN CHECK ===
 
       // 5. Create client config for ACP
-      const yoloDecision = this.getEffectiveYolo(platform, options.botId, channelId);
-
-      // Audit: yolo_resolution
-      await auditWriter?.write("yolo_resolution", {
-        yoloEnabled: yoloDecision.enabled,
-        yoloSource: yoloDecision.source,
-        matchedConfigId: yoloDecision.matchedConfigId,
-        platform,
-        userId: options.botId,
-        channelId,
-      });
 
       const clientConfig: ClientConfig = {
         workingDir: workspace.path,
@@ -1117,6 +1125,7 @@ export class SessionOrchestrator {
         rssItems,
         shellSessionId,
         resolvedModel,
+        this.yolo,
       );
 
       sessionLogger.debug("Self-research prompt built");
@@ -1359,6 +1368,7 @@ export class SessionOrchestrator {
         shellSessionId,
         workspace,
         resolvedModel,
+        this.yolo,
       );
 
       // === DRY RUN CHECK ===
@@ -1609,8 +1619,26 @@ export class SessionOrchestrator {
         this.config.agent.model,
       );
 
+      // Compute YOLO decision early so it's available for prompt rendering
+      const yoloDecision = this.getEffectiveYolo(platform, reminder.userId, dmChannelId);
+
+      // Audit: yolo_resolution
+      await auditWriter?.write("yolo_resolution", {
+        yoloEnabled: yoloDecision.enabled,
+        yoloSource: yoloDecision.source,
+        matchedConfigId: yoloDecision.matchedConfigId,
+        platform,
+        userId: reminder.userId,
+        channelId: dmChannelId,
+      });
+
       // 4. Build reminder prompt
-      const fullPrompt = await this.buildReminderPrompt(reminder, shellSessionId, resolvedModel);
+      const fullPrompt = await this.buildReminderPrompt(
+        reminder,
+        shellSessionId,
+        resolvedModel,
+        yoloDecision.enabled,
+      );
 
       // === DRY RUN CHECK ===
       const dryRunResult = await this.handleDryRun(
@@ -1633,17 +1661,6 @@ export class SessionOrchestrator {
       // === END DRY RUN CHECK ===
 
       // 5. Create client config
-      const yoloDecision = this.getEffectiveYolo(platform, reminder.userId, dmChannelId);
-
-      // Audit: yolo_resolution
-      await auditWriter?.write("yolo_resolution", {
-        yoloEnabled: yoloDecision.enabled,
-        yoloSource: yoloDecision.source,
-        matchedConfigId: yoloDecision.matchedConfigId,
-        platform,
-        userId: reminder.userId,
-        channelId: dmChannelId,
-      });
 
       const clientConfig: ClientConfig = {
         workingDir: workspace.path,
@@ -1964,6 +1981,7 @@ export class SessionOrchestrator {
     context: import("../types/context.ts").AssembledSpontaneousContext,
     sessionId: string | null,
     model?: string,
+    yolo?: boolean,
   ): Promise<string> {
     const promptDir = dirname(this.config.agent.systemPromptPath);
     const instructionsPath = join(promptDir, "system_spontaneous.md");
@@ -1993,6 +2011,7 @@ export class SessionOrchestrator {
       sessionId: sessionId ?? "",
       agentType: getDefaultAgentType(this.config),
       model,
+      yolo,
       recentMessagesFetched: context.recentMessagesFetched,
       importantMemories: importantMemoriesText,
       recentMessages: recentMessagesText,
@@ -2013,6 +2032,7 @@ export class SessionOrchestrator {
     rssItems: RssItem[],
     sessionId: string | null,
     model?: string,
+    yolo?: boolean,
   ): Promise<string> {
     const promptDir = dirname(this.config.agent.systemPromptPath);
     const instructionsPath = join(promptDir, "system_self_research.md");
@@ -2034,6 +2054,7 @@ export class SessionOrchestrator {
       sessionId: sessionId ?? "",
       agentType: getDefaultAgentType(this.config),
       model,
+      yolo,
       rssItems: rssBlock,
     };
 
@@ -2052,6 +2073,7 @@ export class SessionOrchestrator {
     sessionId: string | null,
     workspace: WorkspaceInfo,
     model?: string,
+    yolo?: boolean,
   ): Promise<string> {
     const promptDir = dirname(this.config.agent.systemPromptPath);
     const instructionsPath = join(promptDir, "system_memory_maintenance.md");
@@ -2069,6 +2091,7 @@ export class SessionOrchestrator {
       sessionId: sessionId ?? "",
       agentType: getDefaultAgentType(this.config),
       model,
+      yolo,
       workspaceKey,
       memoriesDump,
     };
@@ -2127,6 +2150,7 @@ export class SessionOrchestrator {
     reminder: ResolvedReminder,
     sessionId: string | null,
     model?: string,
+    yolo?: boolean,
   ): Promise<string> {
     const promptDir = dirname(this.config.agent.systemPromptPath);
     const instructionsPath = join(promptDir, "system_reminder.md");
@@ -2141,6 +2165,7 @@ export class SessionOrchestrator {
       sessionId: sessionId ?? "",
       agentType: getDefaultAgentType(this.config),
       model,
+      yolo,
       reminderMessage: reminder.message,
       reminderCreatedAt: reminder.createdAt,
       reminderScheduledAt: reminder.scheduledAt,

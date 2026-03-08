@@ -65,4 +65,7 @@ export interface TemplateVariables {
 
   /** Model identifier (e.g., "claude-opus-4.6", "gemini-2.5-pro") */
   model?: string;
+
+  /** Whether YOLO mode is enabled for this session (bypasses permission restrictions) */
+  yolo?: boolean;
 }

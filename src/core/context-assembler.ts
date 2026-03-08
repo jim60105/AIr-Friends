@@ -50,6 +50,7 @@ export class ContextAssembler {
     sessionId: string | undefined,
     userContextMessage: string,
     model?: string,
+    yolo?: boolean,
   ): Promise<string> {
     const templateVars: TemplateVariables = {
       isDm: event.isDm,
@@ -60,6 +61,7 @@ export class ContextAssembler {
       sessionId: sessionId ?? "",
       agentType: this.config.agentType,
       model,
+      yolo,
       userContextMessage,
     };
 
@@ -75,6 +77,7 @@ export class ContextAssembler {
     messageFetcher: MessageFetcher,
     sessionId?: string,
     model?: string,
+    yolo?: boolean,
   ): Promise<AssembledContext> {
     logger.info("Assembling context", {
       workspaceKey: workspace.key,
@@ -91,6 +94,7 @@ export class ContextAssembler {
       sessionId: sessionId ?? "",
       agentType: this.config.agentType,
       model,
+      yolo,
     };
 
     // Load system prompt
@@ -611,6 +615,7 @@ export class ContextAssembler {
     options: { fetchRecentMessages: boolean },
     sessionId?: string,
     model?: string,
+    yolo?: boolean,
   ): Promise<AssembledSpontaneousContext> {
     logger.info("Assembling spontaneous context", {
       platform,
@@ -627,6 +632,7 @@ export class ContextAssembler {
       sessionId: sessionId ?? "",
       agentType: this.config.agentType,
       model,
+      yolo,
     };
 
     const systemPrompt = await this.getSystemPrompt(templateVars);

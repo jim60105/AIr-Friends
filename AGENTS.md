@@ -1062,6 +1062,7 @@ You are Yuna. This is a private chat.
 | `importantMemories`     | `string`  | Formatted important memories text (spontaneous post only)       |
 | `recentMessages`        | `string`  | Formatted recent messages text (spontaneous post only)          |
 | `availableEmojis`       | `string`  | Formatted available emojis text (spontaneous post only)         |
+| `yolo`                  | `boolean` | Whether YOLO mode is enabled (bypasses permission restrictions) |
 | `userContextMessage`    | `string`  | Pre-formatted user context message (normal message prompt only) |
 
 ### Container Deployment Considerations
