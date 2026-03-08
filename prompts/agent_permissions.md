@@ -12,7 +12,7 @@ You are operating in **restricted mode**. Only the following actions are permitt
 
 **You CANNOT:**
 
-- Edit or write files (except in `$AGENT_WORKSPACE` and `$TMPDIR`)
+- Edit or write files (except `.md` and `.txt` files in `$AGENT_WORKSPACE`, and any files in `$TMPDIR`)
 - Run `git`, `echo`, or `mkdir` commands
 - Execute arbitrary shell commands
 

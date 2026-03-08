@@ -193,6 +193,7 @@ const DEFAULT_SANDBOX: SandboxConfig = {
   filterEnv: true,
   networkIsolation: false,
   allowedEnvVars: [],
+  allowedWriteExtensions: [".md", ".txt"],
 };
 
 /**
@@ -583,6 +584,17 @@ function validateConfig(config: Record<string, unknown>): void {
       ...DEFAULT_SANDBOX,
       ...(agentConfig.sandbox as Record<string, unknown>),
     };
+  }
+
+  // Validate allowedWriteExtensions: must be an array of strings starting with "."
+  const sandbox = agentConfig.sandbox as SandboxConfig;
+  if (sandbox.allowedWriteExtensions) {
+    if (!Array.isArray(sandbox.allowedWriteExtensions)) {
+      sandbox.allowedWriteExtensions = [...DEFAULT_SANDBOX.allowedWriteExtensions];
+    } else {
+      sandbox.allowedWriteExtensions = sandbox.allowedWriteExtensions
+        .filter((ext: unknown): ext is string => typeof ext === "string" && ext.startsWith("."));
+    }
   }
 
   // Idle timeout defaults

@@ -8,6 +8,7 @@ const createSandboxConfig = (overrides: Partial<SandboxConfig> = {}): SandboxCon
   filterEnv: true,
   networkIsolation: false,
   allowedEnvVars: [],
+  allowedWriteExtensions: [".md", ".txt"],
   ...overrides,
 });
 

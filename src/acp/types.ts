@@ -29,6 +29,9 @@ export interface ClientConfig {
 
   /** Skill names to auto-approve in restricted (non-YOLO) mode */
   autoApproveSkills?: string[];
+
+  /** Allowed file extensions for agent workspace writes in restricted mode */
+  allowedWriteExtensions?: string[];
 }
 
 /**

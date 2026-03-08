@@ -14,10 +14,11 @@
 #   "edit": { "*": "deny", "data/agent-workspace/**": "allow",
 #             "$AGENT_WORKSPACE/**": "allow", "$TMPDIR/**": "allow" }
 #
-# Gemini Policy Engine does not support file-path scoping for
-# write tools. Write permissions are enforced by:
+# Gemini Policy Engine does not support file-path scoping or
+# extension-based filtering for write tools. Write permissions
+# (including .md/.txt extension restriction) are enforced by:
 #   - Layer 3: ACP requestPermission() allows writes only to
-#     agentWorkspacePath and workspace TMPDIR
+#     agentWorkspacePath and workspace TMPDIR, with extension checks
 #   - Layer 4: writeTextFile() validates path boundaries
 # No blanket deny here — Layer 3/4 provide the scoping.
 
