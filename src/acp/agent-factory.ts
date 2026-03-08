@@ -204,6 +204,8 @@ function buildBaseAgentConfig(
       if (!yolo) {
         // OpenCode permissions are configured in agent-config/opencode.json.
       } else {
+        // Not merged yet, but set env var to enable YOLO mode in OpenCode once the PR is merged.
+        // https://github.com/anomalyco/opencode/pull/11833
         env["OPENCODE_YOLO"] = "true";
       }
 

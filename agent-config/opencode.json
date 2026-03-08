@@ -34,11 +34,11 @@
         "lsp": "allow",
         "todoread": "allow",
         "todowrite": "allow",
-        "task": "allow",
         "skill": "allow",
         "webfetch": "allow",
         "websearch": "allow",
         "codesearch": "allow",
+        "task": "deny",
         "doom_loop": "deny",
         "question": "deny",
         "edit": {
@@ -53,6 +53,8 @@
         },
         "bash": {
           "*": "deny",
+          "||": "deny",
+          "&&": "deny",
           "deno run *skills/*/scripts/*.ts*": "allow",
           "*/skills/*/scripts/*.ts*": "allow",
           "agent-browser *": "allow",
@@ -64,9 +66,8 @@
           "ls *": "allow",
           "find *": "allow",
           "wc *": "allow",
-          "git *": "deny",
           "echo *": "deny",
-          "mkdir *": "deny"
+          "zola *": "allow"
         },
         "external_directory": {
           "*": "deny",
