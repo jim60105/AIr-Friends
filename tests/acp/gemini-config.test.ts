@@ -16,8 +16,10 @@ Deno.test("gemini-policies/airfriends.toml contains required deny rules", async 
   const content = await Deno.readTextFile("gemini-policies/airfriends.toml");
 
   // Verify critical deny rules exist
-  assert(content.includes("write_file"), "Should deny write_file");
-  assert(content.includes("replace"), "Should deny replace");
+  // write_file/replace are NOT denied in TOML — scoping handled by Layer 3/4
+  // Verify the comment about Layer 3/4 scoping exists
+  assert(content.includes("Layer 3"), "Should reference Layer 3 for write scoping");
+  assert(content.includes("Layer 4"), "Should reference Layer 4 for write scoping");
   assert(content.includes("ask_user"), "Should deny ask_user");
   assert(content.includes("save_memory"), "Should deny save_memory");
 
