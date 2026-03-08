@@ -236,13 +236,29 @@ replyHandler.clearReplyState(workspaceKey, channelId);
 4. **Once-per-interaction**: Reply sending enforced to prevent spam
 5. **Error Handling**: All errors caught and logged without crashing
 
+## Skill Permissions
+
+Skill permissions are enforced through a whitelist mechanism managed by `SkillAutoApproveList` in `src/acp/client.ts`. In restricted (non-YOLO) mode, only whitelisted skill commands are auto-approved; all other execution requests are rejected.
+
+### Whitelist Matching
+
+The auto-approve list uses two matching methods:
+
+- **Script path matching** (`scriptPaths`): For skills with a `scripts/` directory, path suffixes like `skills/memory-save/scripts/memory-save.ts` are stored. A command is approved if any whitespace-delimited token exactly equals or ends with a stored path suffix.
+- **Command prefix matching** (`commandPrefixes`): For command-based skills without a `scripts/` directory (e.g., `agent-browser`), the first whitespace-delimited token is checked for an exact match against stored prefixes.
+
+### Configuration
+
+The list can be configured explicitly via `agent.autoApproveSkills` in `config.yaml` or the `AGENT_AUTO_APPROVE_SKILLS` environment variable (comma-separated). When neither is configured, the system falls back to scanning the built-in `skills/` directory automatically.
+
+For detailed documentation on permission layers and shell injection protection, see [Skill Auto-Approve List in AGENT_PERMISSIONS.md](AGENT_PERMISSIONS.md#skill-auto-approve-list).
+
 ## Future Enhancements
 
 1. **Attachment Support**: Full implementation of file/image attachments in send-reply
 2. **Memory Compression**: Automatic memory summarization for large contexts
 3. **Advanced Search**: Semantic search in memories using embeddings
-4. **Skill Permissions**: Fine-grained control over which skills can be called
-5. **Skill Analytics**: Track skill usage and performance metrics
+4. **Skill Analytics**: Track skill usage and performance metrics
 
 ## Conclusion
 
