@@ -92,7 +92,7 @@ All tools are available. The `--yolo` flag tells Copilot to auto-approve all act
 
 ### Gemini (non-YOLO)
 
-In restricted mode, Gemini uses **Policy Engine TOML rules** (`gemini-policies/airfriends.toml`) and **settings.json** (`gemini-settings.json`) for permission control. These files are copied to `~/.gemini/` in the container.
+In restricted mode, Gemini uses **Policy Engine TOML rules** (`agent-config/gemini-policies/airfriends.toml`) and **settings.json** (`agent-config/gemini-settings.json`) for permission control. These files are copied to `~/.gemini/` in the container.
 
 **settings.json** configures:
 - `defaultApprovalMode: "default"` — all tool calls require permission check
@@ -147,7 +147,7 @@ OpenCode uses a JSON configuration file (`opencode.json`) for fine-grained permi
 
 ### Current Configuration
 
-The `opencode.json` in the project root configures permissions for the `build` agent (OpenCode's primary agent):
+The `agent-config/opencode.json` in the project configures permissions for the `build` agent (OpenCode's primary agent):
 
 | Category                                                    | Permission   | Rationale                               |
 | ----------------------------------------------------------- | ------------ | --------------------------------------- |
@@ -562,11 +562,11 @@ audit:
 
 ### OpenCode-Specific
 
-The `opencode.json` file in the project root configures OpenCode agent permissions. See [Layer 2](#layer-2--agent-specific-permission-configuration) for details. This file is only used when the agent type is `opencode`.
+The `agent-config/opencode.json` file configures OpenCode agent permissions. See [Layer 2](#layer-2--agent-specific-permission-configuration) for details. This file is only used when the agent type is `opencode`.
 
 ### Gemini-Specific
 
-The `gemini-settings.json` and `gemini-policies/airfriends.toml` files in the project root configure Gemini agent permissions. These are copied to `~/.gemini/settings.json` and `~/.gemini/policies/airfriends.toml` in the container. See [Layer 1](#layer-1--agent-level-tool-restrictions) for details.
+The `agent-config/gemini-settings.json` and `agent-config/gemini-policies/airfriends.toml` files configure Gemini agent permissions. These are copied to `~/.gemini/settings.json` and `~/.gemini/policies/airfriends.toml` in the container. See [Layer 1](#layer-1--agent-level-tool-restrictions) for details.
 
 ---
 

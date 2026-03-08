@@ -3,7 +3,7 @@
 import { assert, assertEquals } from "@std/assert";
 
 Deno.test("gemini-settings.json is valid JSON with required fields", async () => {
-  const content = await Deno.readTextFile("gemini-settings.json");
+  const content = await Deno.readTextFile("agent-config/gemini-settings.json");
   const settings = JSON.parse(content);
 
   // Verify critical settings
@@ -13,7 +13,7 @@ Deno.test("gemini-settings.json is valid JSON with required fields", async () =>
 });
 
 Deno.test("gemini-policies/airfriends.toml contains required deny rules", async () => {
-  const content = await Deno.readTextFile("gemini-policies/airfriends.toml");
+  const content = await Deno.readTextFile("agent-config/gemini-policies/airfriends.toml");
 
   // Verify critical deny rules exist
   // write_file/replace are NOT denied in TOML — scoping handled by Layer 3/4
@@ -36,7 +36,7 @@ Deno.test("gemini-policies/airfriends.toml contains required deny rules", async 
 });
 
 Deno.test("gemini-policies/airfriends.toml has correct YOLO mode behavior", async () => {
-  const content = await Deno.readTextFile("gemini-policies/airfriends.toml");
+  const content = await Deno.readTextFile("agent-config/gemini-policies/airfriends.toml");
 
   // Verify modes field excludes "yolo" for shell/edit deny rules
   // Rules with modes should use ["default", "auto_edit", "plan"] (no "yolo")
@@ -64,7 +64,7 @@ Deno.test("gemini-policies/airfriends.toml has correct YOLO mode behavior", asyn
 });
 
 Deno.test("gemini-policies/airfriends.toml deny rules have higher priority than allow rules", async () => {
-  const content = await Deno.readTextFile("gemini-policies/airfriends.toml");
+  const content = await Deno.readTextFile("agent-config/gemini-policies/airfriends.toml");
 
   // Parse all rules to verify priority ordering
   const rules = content.split("[[rule]]").slice(1);

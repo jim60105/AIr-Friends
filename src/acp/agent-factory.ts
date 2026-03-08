@@ -202,7 +202,7 @@ function buildBaseAgentConfig(
       const args = ["acp"];
 
       if (!yolo) {
-        // OpenCode permissions are configured in opencode.json.
+        // OpenCode permissions are configured in agent-config/opencode.json.
       } else {
         env["OPENCODE_YOLO"] = "true";
       }

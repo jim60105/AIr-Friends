@@ -646,7 +646,7 @@ COPY prompts/ /app/prompts/
 # Copy skills to ~/.agents/skills/ for agent discovery
 COPY skills/ /home/deno/.agents/skills/
 # Copy OpenCode configuration
-COPY opencode.json /home/deno/.config/opencode/opencode.json
+COPY agent-config/opencode.json /home/deno/.config/opencode/opencode.json
 
 USER deno
 ENTRYPOINT ["dumb-init", "--"]

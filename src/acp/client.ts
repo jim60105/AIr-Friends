@@ -674,7 +674,7 @@ export class ChatbotClient implements acp.Client {
   /**
    * Check if a path is within the agent workspace or workspace TMPDIR.
    * Used to scope edit/write permissions for self-research.
-   * Equivalent to opencode.json: "edit": { "data/agent-workspace/**": "allow", "$TMPDIR/**": "allow" }
+   * Equivalent to agent-config/opencode.json: "edit": { "data/agent-workspace/**": "allow", "$TMPDIR/**": "allow" }
    */
   private isAgentWorkspacePath(path: string): boolean {
     try {

@@ -145,11 +145,11 @@ RUN npm install -g @google/gemini-cli && \
     npm cache clean --force
 
 # Copy OpenCode configuration
-COPY --link --chown=$UID:0 --chmod=775 opencode.json /home/deno/.config/opencode/opencode.json
+COPY --link --chown=$UID:0 --chmod=775 agent-config/opencode.json /home/deno/.config/opencode/opencode.json
 
 # Copy Gemini CLI configuration
-COPY --link --chown=$UID:0 --chmod=775 gemini-settings.json /home/deno/.gemini/settings.json
-COPY --link --chown=$UID:0 --chmod=775 gemini-policies/ /home/deno/.gemini/policies/
+COPY --link --chown=$UID:0 --chmod=775 agent-config/gemini-settings.json /home/deno/.gemini/settings.json
+COPY --link --chown=$UID:0 --chmod=775 agent-config/gemini-policies/ /home/deno/.gemini/policies/
 
 # Copy application files
 COPY --link --chown=$UID:0 --chmod=775 deno.json deno.lock /app/

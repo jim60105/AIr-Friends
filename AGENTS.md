@@ -470,7 +470,7 @@ await connector.disconnect();
 - **OpenCode CLI** (`opencode`) - Open source coding agent that supports multiple providers:
   - Gemini provider (uses `GEMINI_API_KEY` env var)
   - OpenRouter provider (uses `OPENROUTER_API_KEY` env var)
-  - Pre-configured in container with `opencode.json`
+  - Pre-configured in container with `agent-config/opencode.json`
 
 **Agent Selection**:
 
@@ -1366,6 +1366,11 @@ AIr-Friends/
 │   ├── integration/
 │   ├── mocks/
 │   └── main.test.ts
+├── agent-config/             # Agent CLI configuration files
+│   ├── opencode.json         # OpenCode CLI configuration
+│   ├── gemini-settings.json  # Gemini CLI settings
+│   └── gemini-policies/      # Gemini Policy Engine rules
+│       └── airfriends.toml
 ├── deno.json                 # Deno configuration
 ├── deno.lock                 # Dependency lock file
 ├── config.yaml               # Runtime configuration

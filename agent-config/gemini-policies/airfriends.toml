@@ -1,6 +1,6 @@
 # ============================================================
 # AIr-Friends — Gemini CLI Permission Policies
-# Mirrors opencode.json permission rules for defense-in-depth
+# Mirrors agent-config/opencode.json permission rules for defense-in-depth
 # ============================================================
 # Priority: higher number = higher priority (overrides lower)
 # Modes: rules without "modes" field are always active
@@ -10,7 +10,7 @@
 # ============================================================
 # 1. Write/edit tools — scoped to agent workspace
 # ============================================================
-# Equivalent to opencode.json:
+# Equivalent to agent-config/opencode.json:
 #   "edit": { "*": "deny", "data/agent-workspace/**": "allow",
 #             "$AGENT_WORKSPACE/**": "allow", "$TMPDIR/**": "allow" }
 #
@@ -24,7 +24,7 @@
 # ============================================================
 # 2. Deny interactive tools (no human to answer)
 # ============================================================
-# Equivalent to opencode.json: "question": "deny"
+# Equivalent to agent-config/opencode.json: "question": "deny"
 # No modes filter — always denied, even in YOLO (no human)
 [[rule]]
 toolName = "ask_user"
@@ -44,7 +44,7 @@ modes = ["default", "auto_edit", "plan"]
 # ============================================================
 # 4. Shell commands — Default deny all
 # ============================================================
-# Equivalent to opencode.json: "bash": { "*": "deny" }
+# Equivalent to agent-config/opencode.json: "bash": { "*": "deny" }
 [[rule]]
 toolName = "run_shell_command"
 decision = "deny"
@@ -54,7 +54,7 @@ modes = ["default", "auto_edit", "plan"]
 # ============================================================
 # 5. Shell commands — Allow safe commands
 # ============================================================
-# Equivalent to opencode.json allowed bash commands
+# Equivalent to agent-config/opencode.json allowed bash commands
 
 # Allow skill scripts
 [[rule]]
@@ -83,7 +83,7 @@ modes = ["default", "auto_edit", "plan"]
 # ============================================================
 # 6. Shell commands — Explicitly deny dangerous commands
 # ============================================================
-# Equivalent to opencode.json: "git *": "deny", "echo *": "deny", "mkdir *": "deny"
+# Equivalent to agent-config/opencode.json: "git *": "deny", "echo *": "deny", "mkdir *": "deny"
 # Highest priority to override any allows
 [[rule]]
 toolName = "run_shell_command"
