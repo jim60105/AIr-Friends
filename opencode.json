@@ -26,11 +26,54 @@
       "mode": "primary",
       "prompt": "{file:/app/prompts/system_prompt_override.md}",
       "permission": {
-        "external_directory": {
-          "data/agent-workspace/**/*": "allow",
-          "$AGENT_WORKSPACE/**/*": "allow",
-          "/app/data/agent-workspace/**/*": "allow"
+        "*": "deny",
+        "read": "allow",
+        "list": "allow",
+        "glob": "allow",
+        "grep": "allow",
+        "lsp": "allow",
+        "todoread": "allow",
+        "todowrite": "allow",
+        "task": "allow",
+        "skill": "allow",
+        "webfetch": "allow",
+        "websearch": "allow",
+        "codesearch": "allow",
+        "question": "deny",
+        "edit": "deny",
+        "bash": {
+          "*": "deny",
+          "deno run *skills/*/scripts/*.ts*": "allow",
+          "agent-browser *": "allow",
+          "self-research *": "allow",
+          "rg *": "allow",
+          "git status*": "allow",
+          "git diff*": "allow",
+          "git log*": "allow",
+          "git show*": "allow",
+          "git branch*": "allow",
+          "git remote*": "allow",
+          "git fetch*": "allow",
+          "curl *": "allow",
+          "cat *": "allow",
+          "head *": "allow",
+          "tail *": "allow",
+          "ls *": "allow",
+          "find *": "allow",
+          "wc *": "allow",
+          "echo *": "allow",
+          "mkdir *": "allow"
         },
+        "external_directory": {
+          "*": "deny",
+          "~/.agents/skills/**": "allow",
+          "/home/deno/.agents/skills/**": "allow",
+          "/home/deno/.copilot/skills/**": "allow",
+          "data/agent-workspace/**": "allow",
+          "$AGENT_WORKSPACE/**": "allow",
+          "/app/data/agent-workspace/**": "allow",
+          "$TMPDIR/**": "allow"
+        }
       }
     }
   }
