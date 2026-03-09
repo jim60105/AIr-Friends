@@ -456,10 +456,16 @@ await connector.connect();
 const sessionId = await connector.createSession(mcpServers);
 await connector.setSessionModel(sessionId, "gpt-4");
 
-// 3. Send prompt and get response
+// 3. Switch to YOLO mode agent for OpenCode when YOLO is enabled
+const modeOverride = getSessionModeOverride(agentType, yolo);
+if (modeOverride) {
+  await connector.setSessionMode(sessionId, modeOverride);
+}
+
+// 4. Send prompt and get response
 const response = await connector.prompt(sessionId, assembledContext);
 
-// 4. Disconnect when done
+// 5. Disconnect when done
 await connector.disconnect();
 ```
 
@@ -511,6 +517,21 @@ Degradation strategy:
 - `filterEnv: true` works on all platforms (pure TypeScript logic)
 - `networkIsolation: true` falls back gracefully on non-Linux or when `unshare` is unavailable (warns and skips)
 - Sandbox config errors do not prevent Agent startup
+
+**OpenCode YOLO Mode (Agent Mode Switching)**:
+
+When YOLO mode is enabled for an OpenCode session, the system switches to the `yolo` agent
+defined in `agent-config/opencode.json` via ACP `setSessionMode("yolo")`. This agent has
+`"*": "allow"` permissions, matching the unrestricted behavior of Copilot and Gemini `--yolo` flags.
+
+| Mode | OpenCode Agent | Permission Default |
+|------|---------------|-------------------|
+| Restricted | `build` (default) | `"*": "deny"` + whitelist |
+| YOLO | `yolo` | `"*": "allow"` |
+
+Note: The `OPENCODE_YOLO` env var has been removed since upstream OpenCode YOLO mode
+(PR anomalyco/opencode#11833) was never functional. YOLO is fully handled via
+ACP `setSessionMode("yolo")`.
 
 **Retry on Missing Reply**:
 

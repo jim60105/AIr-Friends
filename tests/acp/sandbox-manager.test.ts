@@ -80,7 +80,6 @@ Deno.test("SandboxManager - opencode agent allows multiple API keys", () => {
     OPENROUTER_API_KEY: "or_xxx",
     OPENCODE_API_KEY: "oc_xxx",
     GOOGLE_GENERATIVE_AI_API_KEY: "gg_xxx",
-    OPENCODE_YOLO: "true",
     GITHUB_TOKEN: "ghp_xxx",
   };
   const opts = sandbox.buildSpawnOptions("opencode", "opencode", [], baseEnv, "/tmp");
@@ -88,7 +87,6 @@ Deno.test("SandboxManager - opencode agent allows multiple API keys", () => {
   assertEquals(opts.env["OPENROUTER_API_KEY"], "or_xxx");
   assertEquals(opts.env["OPENCODE_API_KEY"], "oc_xxx");
   assertEquals(opts.env["GOOGLE_GENERATIVE_AI_API_KEY"], "gg_xxx");
-  assertEquals(opts.env["OPENCODE_YOLO"], "true");
   assertEquals(opts.env["GITHUB_TOKEN"], undefined);
 });
 

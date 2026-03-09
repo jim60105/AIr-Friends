@@ -203,10 +203,11 @@ function buildBaseAgentConfig(
 
       if (!yolo) {
         // OpenCode permissions are configured in agent-config/opencode.json.
+        // The restricted "build" agent is used by default (set via default_agent in opencode.json).
       } else {
-        // Not merged yet, but set env var to enable YOLO mode in OpenCode once the PR is merged.
-        // https://github.com/anomalyco/opencode/pull/11833
-        env["OPENCODE_YOLO"] = "true";
+        // OpenCode YOLO mode is achieved by switching to the "yolo" agent via ACP setSessionMode()
+        // in SessionOrchestrator. The "yolo" agent is defined in agent-config/opencode.json with
+        // permissive permissions ("*": "allow"), bypassing Layer 2 restrictions.
       }
 
       return {
@@ -220,6 +221,17 @@ function buildBaseAgentConfig(
     default:
       throw new Error(`Unknown agent type: ${type}`);
   }
+}
+
+/**
+ * Returns the ACP session mode override for the given agent type and YOLO state.
+ * Returns null if no mode override is needed (agent uses its default mode).
+ */
+export function getSessionModeOverride(agentType: AgentType, yolo: boolean): string | null {
+  if (agentType === "opencode" && yolo) {
+    return "yolo";
+  }
+  return null;
 }
 
 /**

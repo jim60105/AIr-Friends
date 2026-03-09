@@ -14,6 +14,7 @@ import {
   createAgentConfig,
   getDefaultAgentType,
   getRetryPromptStrategy,
+  getSessionModeOverride,
 } from "@acp/agent-factory.ts";
 import { ContextAssembler } from "./context-assembler.ts";
 import { WorkspaceManager } from "./workspace-manager.ts";
@@ -477,6 +478,10 @@ export class SessionOrchestrator {
 
         // Set the model for the session (using pre-resolved model)
         await connector.setSessionModel(sessionId, resolvedModel);
+        const modeOverride = getSessionModeOverride(agentType, yoloDecision.enabled);
+        if (modeOverride) {
+          await connector.setSessionMode(sessionId, modeOverride);
+        }
         sessionLogger.info("Agent session {sessionId} model set to {model}", {
           sessionId,
           model: resolvedModel,
@@ -925,6 +930,10 @@ export class SessionOrchestrator {
         sessionLogger = sessionLogger.withContext({ sessionId });
         // Set the model for the session (using pre-resolved model)
         await connector.setSessionModel(sessionId, resolvedModel);
+        const modeOverride = getSessionModeOverride(agentType, yoloDecision.enabled);
+        if (modeOverride) {
+          await connector.setSessionMode(sessionId, modeOverride);
+        }
 
         // Clear reply state
         const replyHandler = this.skillRegistry.getReplyHandler();
@@ -1195,6 +1204,10 @@ export class SessionOrchestrator {
         sessionLogger = sessionLogger.withContext({ sessionId });
         // Set the model for the session (using pre-resolved model)
         await connector.setSessionModel(sessionId, resolvedModel);
+        const modeOverride = getSessionModeOverride(agentType, this.yolo);
+        if (modeOverride) {
+          await connector.setSessionMode(sessionId, modeOverride);
+        }
 
         // Audit: prompt_sent
         await auditWriter?.write("prompt_sent", {
@@ -1435,6 +1448,10 @@ export class SessionOrchestrator {
         sessionLogger = sessionLogger.withContext({ sessionId });
         // Set the model for the session (using pre-resolved model)
         await connector.setSessionModel(sessionId, resolvedModel);
+        const modeOverride = getSessionModeOverride(agentType, this.yolo);
+        if (modeOverride) {
+          await connector.setSessionMode(sessionId, modeOverride);
+        }
 
         await auditWriter?.write("prompt_sent", {
           promptLength: fullPrompt.length,
@@ -1708,6 +1725,10 @@ export class SessionOrchestrator {
         sessionLogger = sessionLogger.withContext({ sessionId });
         // Set the model for the session (using pre-resolved model)
         await connector.setSessionModel(sessionId, resolvedModel);
+        const modeOverride = getSessionModeOverride(agentType, yoloDecision.enabled);
+        if (modeOverride) {
+          await connector.setSessionMode(sessionId, modeOverride);
+        }
 
         // Clear reply state
         const replyHandler = this.skillRegistry.getReplyHandler();

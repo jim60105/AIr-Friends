@@ -36,7 +36,6 @@ const AGENT_TYPE_ENV: Record<string, string[]> = {
     "OPENROUTER_API_KEY",
     "OPENCODE_API_KEY",
     "GOOGLE_GENERATIVE_AI_API_KEY",
-    "OPENCODE_YOLO",
   ],
 };
 

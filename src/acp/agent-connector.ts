@@ -307,6 +307,24 @@ export class AgentConnector {
   }
 
   /**
+   * Set the mode for a session (e.g., switch to YOLO agent in OpenCode)
+   */
+  async setSessionMode(sessionId: string, modeId: string): Promise<void> {
+    if (!this.connection) {
+      throw new Error("Not connected to agent");
+    }
+
+    const logger = this.options.logger as Logger;
+
+    await this.connection.setSessionMode({
+      sessionId,
+      modeId,
+    });
+
+    logger.info("Session mode set to {modeId} for session {sessionId}", { sessionId, modeId });
+  }
+
+  /**
    * Check if the connected Agent supports image content in prompts
    */
   supportsImageContent(): boolean {

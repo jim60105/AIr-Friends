@@ -59,9 +59,9 @@ Feature: Agent Subprocess Sandbox Hardening
 
   Scenario: OpenCode agent receives multiple provider API keys
     Given the sandbox config has filterEnv: true
-    And the parent process has GEMINI_API_KEY, OPENROUTER_API_KEY, OPENCODE_API_KEY, GOOGLE_GENERATIVE_AI_API_KEY, OPENCODE_YOLO, and GITHUB_TOKEN
+    And the parent process has GEMINI_API_KEY, OPENROUTER_API_KEY, OPENCODE_API_KEY, GOOGLE_GENERATIVE_AI_API_KEY, and GITHUB_TOKEN
     When the Agent subprocess is spawned for agent type "opencode"
-    Then the subprocess receives GEMINI_API_KEY, OPENROUTER_API_KEY, OPENCODE_API_KEY, GOOGLE_GENERATIVE_AI_API_KEY, and OPENCODE_YOLO
+    Then the subprocess receives GEMINI_API_KEY, OPENROUTER_API_KEY, OPENCODE_API_KEY, and GOOGLE_GENERATIVE_AI_API_KEY
     And the subprocess does NOT receive GITHUB_TOKEN
 
   Scenario: Unknown agent type only receives base allowed env vars

@@ -66,3 +66,26 @@ Feature: Per-Channel YOLO Mode and Agent Permission Hardening
     Given channel "discord/account/789" has enabled: false and yolo: true
     When user "789" sends a message
     Then YOLO is NOT enabled for that session
+
+  # --- OpenCode Agent Mode Switching ---
+
+  Scenario: OpenCode Agent switches to YOLO mode
+    Given the agent type is "opencode"
+    And YOLO mode is enabled
+    When a session is created
+    Then setSessionMode("yolo") is called after setSessionModel
+    And the OpenCode agent uses permissive permissions
+
+  Scenario: OpenCode Agent uses restricted mode by default
+    Given the agent type is "opencode"
+    And YOLO mode is disabled
+    When a session is created
+    Then setSessionMode is not called
+    And the OpenCode agent uses the "build" agent with deny-by-default permissions
+
+  Scenario: Copilot Agent does not use setSessionMode
+    Given the agent type is "copilot"
+    And YOLO mode is enabled
+    When a session is created
+    Then setSessionMode is not called
+    And the Copilot agent uses --yolo CLI flag instead
