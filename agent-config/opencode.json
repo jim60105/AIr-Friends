@@ -66,8 +66,6 @@
           "ls *": "allow",
           "find *": "allow",
           "wc *": "allow",
-          "git *": "allow",
-          "mkdir *": "allow",
           "echo *": "deny",
           "zola *": "allow"
         },
@@ -79,8 +77,7 @@
           "data/agent-workspace/**": "allow",
           "$AGENT_WORKSPACE/**": "allow",
           "/app/data/agent-workspace/**": "allow",
-          "$TMPDIR/**": "allow",
-          "/tmp/**": "allow"
+          "$TMPDIR/**": "allow"
         }
       }
     }
