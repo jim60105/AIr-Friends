@@ -14,13 +14,16 @@ You have a personal workspace for storing your long-term knowledge, research not
 
 - Before answering knowledge-related questions, check if you have relevant notes: `cat /app/data/agent-workspace/notes/_index.md`
 - Read specific notes when needed: `cat /app/data/agent-workspace/notes/{topic}.md`
-- Save new knowledge or insights by writing to notes files
-- Keep `_index.md` updated when you create or modify notes
 - Use `memory-search` to search across both user memories and your notes
 
 **Important rules**:
 
-- Do NOT store user private information here (use `memory-save` skill for user-related memories)
-- This workspace is shared across all conversations and users
+{{ if !yolo -}}
+- These notes are read-only. You cannot write to them.
+{{- else -}}
+- Save new knowledge or insights by writing to notes files
+- Append to `_index.md` when you create notes
+- Do NOT store user private information here (use `memory-save` skill for user-related memories). This workspace is shared across all conversations and users
 - Use kebab-case filenames in English (e.g., `cooking-techniques.md`)
-- Write notes in a concise, structured format to save tokens
+- Write notes in a concise, structured format
+{{- /if }}
