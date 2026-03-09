@@ -1,6 +1,6 @@
 // tests/acp/agent-connector.test.ts
 
-import { assertEquals } from "@std/assert";
+import { assertEquals, assertRejects } from "@std/assert";
 import { AgentConnector } from "@acp/agent-connector.ts";
 import type {
   AgentCapabilities,
@@ -312,4 +312,34 @@ Deno.test("AgentConnector - supportsImageContent cases", () => {
   assertEquals(connectorFalse.supportsImageContent(), false);
   assertEquals(connectorMissing.supportsImageContent(), false);
   assertEquals(connectorEmpty.supportsImageContent(), false);
+});
+
+Deno.test("AgentConnector - setSessionMode calls connection.setSessionMode with correct params", async () => {
+  const connector = createMockConnectorWithCapabilities({});
+  const calls: { sessionId: string; modeId: string }[] = [];
+
+  // Inject a mock connection
+  connector["connection"] = {
+    setSessionMode: (params: { sessionId: string; modeId: string }) => {
+      calls.push(params);
+      return Promise.resolve();
+    },
+  } as unknown as typeof connector["connection"];
+
+  await connector.setSessionMode("sess_123", "yolo");
+
+  assertEquals(calls.length, 1);
+  assertEquals(calls[0].sessionId, "sess_123");
+  assertEquals(calls[0].modeId, "yolo");
+});
+
+Deno.test("AgentConnector - setSessionMode throws when not connected", async () => {
+  const connector = createMockConnectorWithCapabilities({});
+  // connection is null by default (not connected)
+
+  await assertRejects(
+    () => connector.setSessionMode("sess_123", "yolo"),
+    Error,
+    "Not connected to agent",
+  );
 });

@@ -5,6 +5,7 @@ import {
   createAgentConfig,
   getDefaultAgentType,
   getRetryPromptStrategy,
+  getSessionModeOverride,
 } from "@acp/agent-factory.ts";
 import type { Config } from "../../src/types/config.ts";
 
@@ -482,7 +483,7 @@ Deno.test("createAgentConfig - does not add --yolo flag to gemini when yolo is f
   assertEquals(agentConfig.cwd, "/tmp/workspace");
 });
 
-Deno.test("createAgentConfig - adds OPENCODE_YOLO env var when yolo is true", () => {
+Deno.test("createAgentConfig - does not add OPENCODE_YOLO env var when yolo is true", () => {
   const config = createTestConfig({
     agent: {
       model: "test-model",
@@ -496,7 +497,7 @@ Deno.test("createAgentConfig - adds OPENCODE_YOLO env var when yolo is true", ()
   assertEquals(agentConfig.command, "opencode");
   assertEquals(agentConfig.args, ["acp"]);
   assertExists(agentConfig.env);
-  assertEquals(agentConfig.env!["OPENCODE_YOLO"], "true");
+  assertEquals(agentConfig.env!["OPENCODE_YOLO"], undefined);
   assertEquals(agentConfig.cwd, "/tmp/workspace");
 });
 
@@ -763,4 +764,20 @@ Deno.test("createAgentConfig - copilot throws when both tokens are unset", () =>
     if (originalGithubToken) Deno.env.set("GITHUB_TOKEN", originalGithubToken);
     if (originalCopilotToken) Deno.env.set("COPILOT_GITHUB_TOKEN", originalCopilotToken);
   }
+});
+
+Deno.test("getSessionModeOverride - returns yolo for opencode with yolo enabled", () => {
+  assertEquals(getSessionModeOverride("opencode", true), "yolo");
+});
+
+Deno.test("getSessionModeOverride - returns null for opencode without yolo", () => {
+  assertEquals(getSessionModeOverride("opencode", false), null);
+});
+
+Deno.test("getSessionModeOverride - returns null for copilot with yolo", () => {
+  assertEquals(getSessionModeOverride("copilot", true), null);
+});
+
+Deno.test("getSessionModeOverride - returns null for gemini with yolo", () => {
+  assertEquals(getSessionModeOverride("gemini", true), null);
 });

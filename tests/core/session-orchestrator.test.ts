@@ -462,6 +462,14 @@ class MockAgentConnector {
     await Promise.resolve();
   }
 
+  modeSet = false;
+  lastModeId = "";
+  async setSessionMode(_sessionId: string, modeId: string): Promise<void> {
+    this.modeSet = true;
+    this.lastModeId = modeId;
+    await Promise.resolve();
+  }
+
   async prompt(_sessionId: string, _text: string): Promise<PromptResponse> {
     const response = this.promptResponses[this.promptCallCount] ??
       { stopReason: "end_turn" } as PromptResponse;
@@ -2378,6 +2386,132 @@ Deno.test({
       // Typing was called at least once (immediate call before error)
       const typingAdapter = platformAdapter as unknown as TypingEnabledMockPlatformAdapter;
       assertEquals(typingAdapter.typingCalls.length >= 1, true);
+
+      sessionRegistry.stop();
+    } finally {
+      await Deno.remove(tempDir, { recursive: true });
+    }
+  },
+});
+
+// --- setSessionMode tests ---
+
+Deno.test({
+  name: "SessionOrchestrator - setSessionMode called with opencode + YOLO",
+  sanitizeResources: false,
+  sanitizeOps: false,
+  async fn() {
+    const tempDir = await Deno.makeTempDir();
+    try {
+      const { orchestrator, skillRegistry, workspaceManager, sessionRegistry, config } =
+        await createTestableOrchestrator(tempDir);
+
+      // Switch to opencode agent with YOLO enabled
+      config.agent.defaultAgentType = "opencode";
+      // deno-lint-ignore no-explicit-any
+      (orchestrator as any).yolo = true;
+
+      const event = createTestEvent();
+      const platformAdapter = new MockPlatformAdapter() as unknown as PlatformAdapter;
+      const replyHandler = skillRegistry.getReplyHandler();
+
+      orchestrator.setConnectorSetup((connector) => {
+        connector.promptResponses = [{ stopReason: "end_turn" } as PromptResponse];
+        connector.onPrompt = (callCount) => {
+          if (callCount === 1) {
+            const workspace = workspaceManager.getWorkspaceKeyFromEvent(event);
+            const key = `${workspace}:${event.channelId}`;
+            // deno-lint-ignore no-explicit-any
+            (replyHandler as any).replySentMap.set(key, true);
+          }
+        };
+      });
+
+      await orchestrator.processMessage(event, platformAdapter);
+
+      assertEquals(orchestrator.mockConnector!.modeSet, true);
+      assertEquals(orchestrator.mockConnector!.lastModeId, "yolo");
+
+      sessionRegistry.stop();
+    } finally {
+      await Deno.remove(tempDir, { recursive: true });
+    }
+  },
+});
+
+Deno.test({
+  name: "SessionOrchestrator - setSessionMode NOT called with opencode + non-YOLO",
+  sanitizeResources: false,
+  sanitizeOps: false,
+  async fn() {
+    const tempDir = await Deno.makeTempDir();
+    try {
+      const { orchestrator, skillRegistry, workspaceManager, sessionRegistry, config } =
+        await createTestableOrchestrator(tempDir);
+
+      // Switch to opencode agent without YOLO
+      config.agent.defaultAgentType = "opencode";
+
+      const event = createTestEvent();
+      const platformAdapter = new MockPlatformAdapter() as unknown as PlatformAdapter;
+      const replyHandler = skillRegistry.getReplyHandler();
+
+      orchestrator.setConnectorSetup((connector) => {
+        connector.promptResponses = [{ stopReason: "end_turn" } as PromptResponse];
+        connector.onPrompt = (callCount) => {
+          if (callCount === 1) {
+            const workspace = workspaceManager.getWorkspaceKeyFromEvent(event);
+            const key = `${workspace}:${event.channelId}`;
+            // deno-lint-ignore no-explicit-any
+            (replyHandler as any).replySentMap.set(key, true);
+          }
+        };
+      });
+
+      await orchestrator.processMessage(event, platformAdapter);
+
+      assertEquals(orchestrator.mockConnector!.modeSet, false);
+
+      sessionRegistry.stop();
+    } finally {
+      await Deno.remove(tempDir, { recursive: true });
+    }
+  },
+});
+
+Deno.test({
+  name: "SessionOrchestrator - setSessionMode NOT called with copilot + YOLO",
+  sanitizeResources: false,
+  sanitizeOps: false,
+  async fn() {
+    const tempDir = await Deno.makeTempDir();
+    try {
+      const { orchestrator, skillRegistry, workspaceManager, sessionRegistry } =
+        await createTestableOrchestrator(tempDir);
+
+      // copilot is the default agent type; enable YOLO
+      // deno-lint-ignore no-explicit-any
+      (orchestrator as any).yolo = true;
+
+      const event = createTestEvent();
+      const platformAdapter = new MockPlatformAdapter() as unknown as PlatformAdapter;
+      const replyHandler = skillRegistry.getReplyHandler();
+
+      orchestrator.setConnectorSetup((connector) => {
+        connector.promptResponses = [{ stopReason: "end_turn" } as PromptResponse];
+        connector.onPrompt = (callCount) => {
+          if (callCount === 1) {
+            const workspace = workspaceManager.getWorkspaceKeyFromEvent(event);
+            const key = `${workspace}:${event.channelId}`;
+            // deno-lint-ignore no-explicit-any
+            (replyHandler as any).replySentMap.set(key, true);
+          }
+        };
+      });
+
+      await orchestrator.processMessage(event, platformAdapter);
+
+      assertEquals(orchestrator.mockConnector!.modeSet, false);
 
       sessionRegistry.stop();
     } finally {

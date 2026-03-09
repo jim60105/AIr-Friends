@@ -21,6 +21,7 @@
     "auto": true,
     "prune": true
   },
+  "default_agent": "build",
   "agent": {
     "build": {
       "mode": "primary",
@@ -79,6 +80,13 @@
           "/app/data/agent-workspace/**": "allow",
           "$TMPDIR/**": "allow"
         }
+      }
+    },
+    "yolo": {
+      "mode": "primary",
+      "prompt": "{file:/app/prompts/system_prompt_override.md}",
+      "permission": {
+        "*": "allow"
       }
     }
   }

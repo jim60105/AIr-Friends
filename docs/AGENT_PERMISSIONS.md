@@ -124,7 +124,7 @@ The `--yolo` flag activates Gemini's built-in yolo policy (priority 999+), which
 
 ### OpenCode
 
-OpenCode does not support tool restriction via CLI flags. In restricted mode, permissions are configured entirely through `opencode.json` (Layer 2). In YOLO mode, `OPENCODE_YOLO=true` is set as an environment variable.
+OpenCode does not support tool restriction via CLI flags. In restricted mode, permissions are configured entirely through `opencode.json` (Layer 2). In YOLO mode, the system switches to the `yolo` agent defined in `opencode.json` via ACP `setSessionMode("yolo")`, which has `"*": "allow"` permissions.
 
 **Reference**: `src/acp/agent-factory.ts`
 
@@ -294,7 +294,7 @@ When `sandbox.filterEnv` is `true` (default), the agent subprocess only receives
 | -------- | ----------------------------------------------------------------------------------------------------------- |
 | Copilot  | `GITHUB_TOKEN`, `COPILOT_GITHUB_TOKEN`                                                                      |
 | Gemini   | `GEMINI_API_KEY`, `GEMINI_SYSTEM_MD`                                                                        |
-| OpenCode | `GEMINI_API_KEY`, `OPENROUTER_API_KEY`, `OPENCODE_API_KEY`, `GOOGLE_GENERATIVE_AI_API_KEY`, `OPENCODE_YOLO` |
+| OpenCode | `GEMINI_API_KEY`, `OPENROUTER_API_KEY`, `OPENCODE_API_KEY`, `GOOGLE_GENERATIVE_AI_API_KEY` |
 
 Additional env vars can be added via `sandbox.allowedEnvVars` config array.
 
@@ -315,8 +315,8 @@ YOLO mode bypasses permission restrictions at multiple layers simultaneously:
 
 | Layer                   | YOLO Behavior                                                                                                               |
 | ----------------------- | --------------------------------------------------------------------------------------------------------------------------- |
-| Layer 1 (Agent CLI)     | Copilot: `--yolo` flag, no `--available-tools` restrictions. Gemini: `--yolo` flag. OpenCode: `OPENCODE_YOLO=true` env var. |
-| Layer 2 (opencode.json) | Overridden by `OPENCODE_YOLO=true` — all permissions become `allow`.                                                        |
+| Layer 1 (Agent CLI)     | Copilot: `--yolo` flag, no `--available-tools` restrictions. Gemini: `--yolo` flag. OpenCode: ACP `setSessionMode("yolo")`. |
+| Layer 2 (opencode.json) | OpenCode switches to `yolo` agent via `setSessionMode` — all permissions become `allow`.                                     |
 | Layer 3 (ACP Client)    | `requestPermission()` auto-approves every request.                                                                          |
 | Layer 4 (File Boundary) | Unchanged — path boundaries still enforced.                                                                                 |
 | Layer 5 (Sandbox)       | Unchanged — env filtering and network isolation still apply.                                                                |
@@ -378,7 +378,7 @@ These sessions use synthetic identifiers (e.g., platform=`"discord"`, userId=`"s
 | ------------------------------- | --------------------------------------------------------------------------------------------- | --------------------- | ---------------------------- |
 | **Binary**                      | `copilot`                                                                                     | `gemini`              | `opencode`                   |
 | **ACP flag**                    | `--acp`                                                                                       | `--experimental-acp`  | `acp` (subcommand)           |
-| **YOLO flag**                   | `--yolo`                                                                                      | `--yolo`              | `OPENCODE_YOLO=true` env var |
+| **YOLO flag**                   | `--yolo`                                                                                      | `--yolo`              | ACP `setSessionMode("yolo")` |
 | **Tool restriction** (non-YOLO) | `--available-tools (bash only) + --deny-tool (git, echo, mkdir)`                              | Policy Engine TOML rules | `opencode.json` (Layer 2)    |
 | **Config-based permissions**    | Not supported                                                                                 | ✅ settings.json + policies/*.toml | ✅ `opencode.json`           |
 | **Extra CLI flags**             | `--disable-builtin-mcps`, `--no-ask-user`, `--no-color`, `--no-auto-update`, `--experimental` | —                     | —                            |
@@ -512,7 +512,7 @@ Permission audit phases respect the `audit.includedPhases` configuration. When `
 
 1. **Gemini Policy Engine effectiveness in ACP mode**: Gemini's Policy Engine rules may or may not be enforced before the ACP `requestPermission()` callback. If the Policy Engine acts as a pre-filter, it provides genuine Layer 1/2 defense. If not, Layer 3 (ACP permission gate) remains the effective enforcer. Either way, the configuration provides defense-in-depth documentation and intent.
 
-2. **OpenCode's Layer 2 is only as strong as opencode.json**: If the configuration file is modified or the `OPENCODE_YOLO=true` env var leaks through, all Layer 2 protections are bypassed.
+2. **OpenCode's Layer 2 is only as strong as opencode.json**: If the configuration file is modified, all Layer 2 protections are bypassed. YOLO mode is controlled via ACP `setSessionMode("yolo")`, which switches to the permissive `yolo` agent defined in `opencode.json`.
 
 3. **Layer 3 relies on shell operator detection**: Layer 3 rejects commands containing shell meta-characters (`;`, `|`, `&`, `` ` ``, `$()`, `>`, `<`, `#`, newlines) and validates script paths as complete whitespace-delimited tokens and command prefixes as exact first-token matches. While this prevents known injection patterns (command chaining, piping, comment hiding), novel shell features or encoding tricks not covered by the character set could theoretically bypass the check.
 
