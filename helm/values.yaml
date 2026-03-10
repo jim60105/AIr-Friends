@@ -25,38 +25,38 @@ containerSecurityContext:
 # Security context for the pod (required for PVC write permissions)
 podSecurityContext:
   fsGroup: 0
-  fsGroupChangePolicy: "OnRootMismatch"
+  fsGroupChangePolicy: 'OnRootMismatch'
 
 # -- Environment variables for bot credentials and configuration.
 # These are stored in a Kubernetes Secret.
 env:
   # Timezone
-  TZ: "Asia/Taipei"
+  TZ: 'Asia/Taipei'
 
   # Platform tokens
-  DISCORD_TOKEN: "your-discord-bot-token"
-  MISSKEY_TOKEN: "your-misskey-access-token"
-  MISSKEY_HOST: "misskey.example.com"
+  DISCORD_TOKEN: 'your-discord-bot-token'
+  MISSKEY_TOKEN: 'your-misskey-access-token'
+  MISSKEY_HOST: 'misskey.example.com'
 
   # Platform enable flags (true/false). These can override the corresponding
-  DISCORD_ENABLED: "true"
-  MISSKEY_ENABLED: "false"
+  DISCORD_ENABLED: 'true'
+  MISSKEY_ENABLED: 'false'
 
   # Agent configuration
-  AGENT_MODEL: "github-copilot/gpt-5-mini"
+  AGENT_MODEL: 'github-copilot/gpt-5-mini'
 
   # Default ACP agent type (copilot|gemini|opencode)
-  AGENT_DEFAULT_TYPE: "opencode"
+  AGENT_DEFAULT_TYPE: 'opencode'
 
   # Skills directory path (default: skills)
-  AGENT_SKILLS_DIR: "/home/deno/.agents/skills"
+  AGENT_SKILLS_DIR: '/home/deno/.agents/skills'
 
   # Model routing
-  MODEL_ROUTING_ENABLED: "false"
-  MODEL_ROUTING_RULES: "[]"
+  MODEL_ROUTING_ENABLED: 'false'
+  MODEL_ROUTING_RULES: '[]'
 
   # External MCP Servers (JSON string array)
-  AGENT_MCP_SERVERS: "[]"
+  AGENT_MCP_SERVERS: '[]'
 
   # Dry Run / Debug Mode
   # DRY_RUN_ENABLED: 'false'
@@ -64,102 +64,102 @@ env:
   # DRY_RUN_MOCK_REPLY: '（Dry run 模式 — 此為測試回覆）'
 
   # Logging
-  LOG_LEVEL: "INFO"
+  LOG_LEVEL: 'INFO'
 
   # Environment
-  DENO_ENV: "development"
+  DENO_ENV: 'development'
 
   # Agents API keys
   # GitHub Token for Copilot
-  GITHUB_TOKEN: "github_pat_your-token-here"
-  COPILOT_GITHUB_TOKEN: ""
+  GITHUB_TOKEN: 'github_pat_your-token-here'
+  COPILOT_GITHUB_TOKEN: ''
   # Gemini API Key for Gemini CLI and OpenCode Gemini provider
-  GEMINI_API_KEY: "your-gemini-api-key"
+  GEMINI_API_KEY: 'your-gemini-api-key'
   # OpenCode API Key (optional - can use GitHub/Gemini providers instead)
-  OPENCODE_API_KEY: "your-opencode-api-key"
+  OPENCODE_API_KEY: 'your-opencode-api-key'
   # OpenRouter API Key (optional - for OpenRouter provider)
-  OPENROUTER_API_KEY: "your-openrouter-api-key"
+  OPENROUTER_API_KEY: 'your-openrouter-api-key'
 
   # Reply Policy & Channel Settings (all|public|channels)
-  REPLY_POLICY: "channels"
+  REPLY_POLICY: 'channels'
   # JSON string of channel configurations. Example:
   # [{"id":"discord/account/123","spontaneousPost":true},{"id":"discord/channel/456","channelLurk":true}]
-  CHANNELS: ""
+  CHANNELS: ''
 
   # Spontaneous post settings - Discord
-  DISCORD_SPONTANEOUS_ENABLED: "false"
-  DISCORD_SPONTANEOUS_MIN_INTERVAL_MS: "10800000"
-  DISCORD_SPONTANEOUS_MAX_INTERVAL_MS: "43200000"
-  DISCORD_SPONTANEOUS_CONTEXT_FETCH_PROBABILITY: "0.5"
+  DISCORD_SPONTANEOUS_ENABLED: 'false'
+  DISCORD_SPONTANEOUS_MIN_INTERVAL_MS: '10800000'
+  DISCORD_SPONTANEOUS_MAX_INTERVAL_MS: '43200000'
+  DISCORD_SPONTANEOUS_CONTEXT_FETCH_PROBABILITY: '0.5'
 
   # Discord typing indicator
-  DISCORD_TYPING_INDICATOR_ENABLED: "false"
+  DISCORD_TYPING_INDICATOR_ENABLED: 'false'
 
   # Channel Lurk Reply (Discord only)
-  DISCORD_CHANNEL_LURK_ENABLED: "false"
-  DISCORD_CHANNEL_LURK_INTERVAL_MS: "1800000"
+  DISCORD_CHANNEL_LURK_ENABLED: 'false'
+  DISCORD_CHANNEL_LURK_INTERVAL_MS: '1800000'
 
   # Spontaneous post settings - Misskey
-  MISSKEY_SPONTANEOUS_ENABLED: "false"
-  MISSKEY_SPONTANEOUS_MIN_INTERVAL_MS: "10800000"
-  MISSKEY_SPONTANEOUS_MAX_INTERVAL_MS: "43200000"
-  MISSKEY_SPONTANEOUS_CONTEXT_FETCH_PROBABILITY: "0.5"
+  MISSKEY_SPONTANEOUS_ENABLED: 'false'
+  MISSKEY_SPONTANEOUS_MIN_INTERVAL_MS: '10800000'
+  MISSKEY_SPONTANEOUS_MAX_INTERVAL_MS: '43200000'
+  MISSKEY_SPONTANEOUS_CONTEXT_FETCH_PROBABILITY: '0.5'
 
   # GELF Logging configuration
-  GELF_ENABLED: "false"
-  GELF_ENDPOINT: "http://your-gelf-endpoint:12201"
-  GELF_HOSTNAME: "air-friends"
+  GELF_ENABLED: 'false'
+  GELF_ENDPOINT: 'http://your-gelf-endpoint:12201'
+  GELF_HOSTNAME: 'air-friends'
 
   # RSS Feed Research Settings
-  SELF_RESEARCH_ENABLED: "false"
-  SELF_RESEARCH_MODEL: "github-copilot/claude-opus-4.6"
+  SELF_RESEARCH_ENABLED: 'false'
+  SELF_RESEARCH_MODEL: 'github-copilot/claude-opus-4.6'
   # RSS feeds: prefer using selfResearchRssFeeds section below (native YAML).
   # Only set this if you need to override selfResearchRssFeeds with a raw JSON string.
   # SELF_RESEARCH_RSS_FEEDS: '[{"url":"https://example.com/feed.xml","name":"Tech News"}]'
-  SELF_RESEARCH_MIN_INTERVAL_MS: "43200000"
-  SELF_RESEARCH_MAX_INTERVAL_MS: "86400000"
+  SELF_RESEARCH_MIN_INTERVAL_MS: '43200000'
+  SELF_RESEARCH_MAX_INTERVAL_MS: '86400000'
 
   # Rate Limiting
-  RATE_LIMIT_ENABLED: "false"
-  RATE_LIMIT_MAX_REQUESTS_PER_WINDOW: "10"
-  RATE_LIMIT_WINDOW_MS: "600000"
-  RATE_LIMIT_COOLDOWN_MS: "600000"
+  RATE_LIMIT_ENABLED: 'false'
+  RATE_LIMIT_MAX_REQUESTS_PER_WINDOW: '10'
+  RATE_LIMIT_WINDOW_MS: '600000'
+  RATE_LIMIT_COOLDOWN_MS: '600000'
 
   # Prometheus Metrics
-  METRICS_ENABLED: "false"
-  METRICS_PATH: "/metrics"
+  METRICS_ENABLED: 'false'
+  METRICS_PATH: '/metrics'
 
   # Git Backup - backs up data/ directory to a remote Git repository
-  GIT_BACKUP_ENABLED: "false"
-  GIT_BACKUP_REMOTE_URL: "https://github.com/your-username/your-backup-repo.git"
-  GIT_BACKUP_INTERVAL_MS: "3600000"
-  GIT_BACKUP_AUTHOR_NAME: "AIr-Friends Backup"
-  GIT_BACKUP_AUTHOR_EMAIL: "airfriends-backup@noreply.github.com"
-  GIT_BACKUP_AUTH_USER: ""
-  GIT_BACKUP_AUTH_PASSWORD: ""
+  GIT_BACKUP_ENABLED: 'false'
+  GIT_BACKUP_REMOTE_URL: 'https://github.com/your-username/your-backup-repo.git'
+  GIT_BACKUP_INTERVAL_MS: '3600000'
+  GIT_BACKUP_AUTHOR_NAME: 'AIr-Friends Backup'
+  GIT_BACKUP_AUTHOR_EMAIL: 'airfriends-backup@noreply.github.com'
+  GIT_BACKUP_AUTH_USER: ''
+  GIT_BACKUP_AUTH_PASSWORD: ''
 
   # Scheduled Reminders
-  REMINDERS_ENABLED: ""
-  REMINDERS_MAX_PER_USER: ""
-  REMINDERS_MIN_INTERVAL_MS: ""
-  REMINDERS_PERSIST_PATH: ""
-  REMINDERS_CHECK_INTERVAL_MS: ""
+  REMINDERS_ENABLED: ''
+  REMINDERS_MAX_PER_USER: ''
+  REMINDERS_MIN_INTERVAL_MS: ''
+  REMINDERS_PERSIST_PATH: ''
+  REMINDERS_CHECK_INTERVAL_MS: ''
 
   # Send File Skill
-  SKILL_SEND_FILE_ENABLED: "false"
-  SKILL_SEND_FILE_MAX_SIZE_MB: "25"
-  SKILL_SEND_FILE_ALLOWED_EXTENSIONS: ""
+  SKILL_SEND_FILE_ENABLED: 'false'
+  SKILL_SEND_FILE_MAX_SIZE_MB: '25'
+  SKILL_SEND_FILE_ALLOWED_EXTENSIONS: ''
 
   # Agent Sandbox
-  AGENT_SANDBOX_FILTER_ENV: "true"
-  AGENT_SANDBOX_NETWORK_ISOLATION: "false"
-  AGENT_SANDBOX_ALLOWED_ENV_VARS: ""
-  AGENT_SANDBOX_ALLOWED_WRITE_EXTENSIONS: ".md,.txt"
+  AGENT_SANDBOX_FILTER_ENV: 'true'
+  AGENT_SANDBOX_NETWORK_ISOLATION: 'false'
+  AGENT_SANDBOX_ALLOWED_ENV_VARS: ''
+  AGENT_SANDBOX_ALLOWED_WRITE_EXTENSIONS: '.md,.txt'
 
   # Agent Idle Timeout
-  AGENT_IDLE_TIMEOUT_ENABLED: "true"
-  AGENT_IDLE_TIMEOUT_MS: "300000"
-  AGENT_IDLE_TIMEOUT_CHECK_INTERVAL_MS: "30000"
+  AGENT_IDLE_TIMEOUT_ENABLED: 'true'
+  AGENT_IDLE_TIMEOUT_MS: '300000'
+  AGENT_IDLE_TIMEOUT_CHECK_INTERVAL_MS: '30000'
 
   ## Git Credential Store (for agent subprocess, YOLO mode only)
   # AGENT_GIT_CREDENTIAL_ENABLED: 'false'
@@ -175,50 +175,50 @@ env:
   # AGENT_AUTO_APPROVE_SKILLS: "memory-save,memory-search,memory-patch,memory-stats,memory-export,fetch-context,send-reply,edit-reply,send-file,react-message,set-reminder,list-reminders,cancel-reminder,self-research,agent-browser"
 
   # Session Audit Log
-  AUDIT_ENABLED: ""
-  AUDIT_RETENTION_DAYS: ""
-  AUDIT_HASH_CONTENT: ""
-  AUDIT_INCLUDED_PHASES: ""
+  AUDIT_ENABLED: ''
+  AUDIT_RETENTION_DAYS: ''
+  AUDIT_HASH_CONTENT: ''
+  AUDIT_INCLUDED_PHASES: ''
 
 # -- Self-research RSS feeds (native YAML, easier than JSON env var).
 # When selfResearchRssFeeds is non-empty, it takes precedence over
 # SELF_RESEARCH_RSS_FEEDS env var.
 selfResearchRssFeeds: []
-# Example:
-# - url: "https://example.com/feed.xml"
-#   name: "Tech News"
-# - url: "https://another.example.com/rss"
-#   name: "Science Daily"
+  # Example:
+  # - url: "https://example.com/feed.xml"
+  #   name: "Tech News"
+  # - url: "https://another.example.com/rss"
+  #   name: "Science Daily"
 
 # -- External skills to install at startup (native YAML, easier than JSON env var).
 # When agentExternalSkills is non-empty, it takes precedence over
 # AGENT_EXTERNAL_SKILLS env var.
 agentExternalSkills: []
-# Example:
-# - repo: "jim60105/copilot-prompt"
-#   skill: "create-blog-post"
+  # Example:
+  # - repo: "jim60105/copilot-prompt"
+  #   skill: "create-blog-post"
 
 # -- Skill Auto-Approve List (native YAML, easier than comma-separated env var).
 # When agentAutoApproveSkills is non-empty, it takes precedence over
 # AGENT_AUTO_APPROVE_SKILLS env var.
 agentAutoApproveSkills: []
-# Example (list all built-in skills + any external skills to auto-approve):
-# - "memory-save"
-# - "memory-search"
-# - "memory-patch"
-# - "memory-stats"
-# - "memory-export"
-# - "fetch-context"
-# - "send-reply"
-# - "edit-reply"
-# - "send-file"
-# - "react-message"
-# - "set-reminder"
-# - "list-reminders"
-# - "cancel-reminder"
-# - "self-research"
-# - "agent-browser"
-# - "create-blog-post"  # external skill
+  # Example (list all built-in skills + any external skills to auto-approve):
+  # - "memory-save"
+  # - "memory-search"
+  # - "memory-patch"
+  # - "memory-stats"
+  # - "memory-export"
+  # - "fetch-context"
+  # - "send-reply"
+  # - "edit-reply"
+  # - "send-file"
+  # - "react-message"
+  # - "set-reminder"
+  # - "list-reminders"
+  # - "cancel-reminder"
+  # - "self-research"
+  # - "agent-browser"
+  # - "create-blog-post"  # external skill
 
 # -- Model routing configuration (native YAML, easier than JSON env var).
 # When modelRouting.enabled is true, this section takes precedence over
@@ -247,17 +247,17 @@ replyPolicy: "channels"
 # -- Channel configurations (native YAML, easier than JSON env var).
 # When channels is non-empty, it takes precedence over CHANNELS env var.
 channels: []
-# Example:
-# - id: "discord/account/123456789012345678"
-#   enabled: true
-#   spontaneousPost: false
-#   rateLimitBypass: true
-# - id: "discord/channel/987654321098765432"
-#   enabled: true
-#   spontaneousPost: true
-#   channelLurk: true
-# - id: "misskey/timeline/self"
-#   spontaneousPost: true
+  # Example:
+  # - id: "discord/account/123456789012345678"
+  #   enabled: true
+  #   spontaneousPost: false
+  #   rateLimitBypass: true
+  # - id: "discord/channel/987654321098765432"
+  #   enabled: true
+  #   spontaneousPost: true
+  #   channelLurk: true
+  # - id: "misskey/timeline/self"
+  #   spontaneousPost: true
 
 # ServiceMonitor for Prometheus Operator (optional)
 serviceMonitor:
@@ -275,12 +275,12 @@ extraEnv: []
 # Persistent volume for bot data (workspaces and memory)
 persistence:
   enabled: true
-  storageClass: "openebs-jiva-csi-default"
+  storageClass: 'openebs-jiva-csi-default'
   accessModes:
     - ReadWriteOnce
   size: 200Mi
   # -- Use an existing PVC instead of creating a new one.
-  existingClaim: ""
+  existingClaim: ''
 
 # -- Mount custom prompt files via a ConfigMap.
 # Set enabled=true and provide prompt file contents to override specific prompt files.
@@ -299,10 +299,10 @@ prompts:
 # This file is regularly renewed by OpenCode CLI in the container, so it must be writable.
 openCodeAuth:
   enabled: true
-  storageClass: ""
+  storageClass: ''
   size: 1Mi
   # -- Use an existing PVC instead of creating a new one.
-  existingClaim: ""
+  existingClaim: ''
 
 # Health check endpoint configuration
 health:
