@@ -156,7 +156,7 @@ export class ReplyHandler {
         data: {
           messageId: result.messageId,
           timestamp: new Date().toISOString(),
-          nextAction: "You have done your job. EXIT IMMEDIATELY"
+          nextAction: "You have done your job. EXIT IMMEDIATELY",
         },
       };
     } catch (error) {
