@@ -160,6 +160,15 @@ agent:
     timeoutMs: 300000              # Idle timeout in ms (default: 300000 = 5 minutes); override with env AGENT_IDLE_TIMEOUT_MS
     checkIntervalMs: 30000         # Check interval in ms (default: 30000 = 30 seconds); override with env AGENT_IDLE_TIMEOUT_CHECK_INTERVAL_MS
 
+
+# Git credential store for agent subprocesses (effective only in YOLO mode)
+# Configures git credential.helper = store at startup so the agent can use
+# git push/pull/clone without exposing PATs in environment variables or prompts.
+# Credentials are shared from gitBackup.authUser/authPassword (or GITHUB_TOKEN).
+# gitCredential:
+#   enabled: false
+#   # host: "github.com"         # Override host (default: from gitBackup.remoteUrl)
+
 # Memory system configuration
 memory:
   searchLimit: 10 # Max number of search results (default: 10)

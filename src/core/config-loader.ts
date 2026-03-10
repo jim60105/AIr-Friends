@@ -12,6 +12,7 @@ import type {
   Config,
   DryRunConfig,
   GitBackupConfig,
+  GitCredentialConfig,
   IdleTimeoutConfig,
   MemoryMaintenanceConfig,
   RateLimitConfig,
@@ -184,6 +185,13 @@ const DEFAULT_DRY_RUN: DryRunConfig = {
   enabled: false,
   outputPath: "./data/dry-run/",
   mockReply: "（Dry run 模式 — 此為測試回覆）",
+};
+
+/**
+ * Default git credential configuration
+ */
+const DEFAULT_GIT_CREDENTIAL: GitCredentialConfig = {
+  enabled: false,
 };
 
 /**
@@ -574,6 +582,16 @@ function validateConfig(config: Record<string, unknown>): void {
     agentConfig.dryRun = { ...DEFAULT_DRY_RUN };
   } else {
     agentConfig.dryRun = { ...DEFAULT_DRY_RUN, ...(agentConfig.dryRun as Record<string, unknown>) };
+  }
+
+  // Git credential defaults
+  if (!agentConfig.gitCredential) {
+    agentConfig.gitCredential = { ...DEFAULT_GIT_CREDENTIAL };
+  } else {
+    agentConfig.gitCredential = {
+      ...DEFAULT_GIT_CREDENTIAL,
+      ...(agentConfig.gitCredential as Record<string, unknown>),
+    };
   }
 
   // Sandbox defaults

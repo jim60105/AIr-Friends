@@ -88,6 +88,20 @@ export interface DryRunConfig {
 }
 
 /**
+ * Git credential store configuration for agent subprocesses.
+ */
+export interface GitCredentialConfig {
+  /** Enable git credential store setup at startup (default: false) */
+  enabled: boolean;
+
+  /**
+   * Override the git host for credential store.
+   * Default: extracted from gitBackup.remoteUrl, or "github.com" if not configured.
+   */
+  host?: string;
+}
+
+/**
  * Agent/LLM configuration
  */
 export interface AgentConfig {
@@ -126,6 +140,9 @@ export interface AgentConfig {
 
   /** Dry run / debug mode configuration (optional) */
   dryRun?: DryRunConfig;
+
+  /** Git credential store config for agent subprocesses (optional) */
+  gitCredential?: GitCredentialConfig;
 
   /** Sandbox settings for agent subprocess isolation (optional) */
   sandbox?: SandboxConfig;

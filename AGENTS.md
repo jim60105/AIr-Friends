@@ -125,7 +125,7 @@ YOLO mode can also be configured per-channel via the `yolo` field in `channels` 
 channels:
   - id: "discord/account/560842157351763989"
     enabled: true
-    yolo: true  # This account runs Agent in YOLO mode
+    yolo: true # This account runs Agent in YOLO mode
 ```
 
 **Effective YOLO logic**: `effectiveYolo = globalYoloFlag || channelConfig.yolo`
@@ -496,21 +496,21 @@ await connector.disconnect();
 
 Agent subprocesses run with configurable sandbox isolation via `SandboxManager`:
 
-| Setting                          | Default | Description                                                                    |
-| -------------------------------- | ------- | ------------------------------------------------------------------------------ |
-| `agent.sandbox.filterEnv`        | `true`  | Filter subprocess env vars to an allowed list only                             |
-| `agent.sandbox.networkIsolation` | `false` | Wrap command with `unshare --net` for network namespace isolation (Linux only) |
-| `agent.sandbox.allowedEnvVars`   | `[]`    | Additional env var names to pass through the filter                            |
-| `agent.sandbox.allowedWriteExtensions` | `[".md", ".txt"]` | Allowed file extensions for agent workspace writes in restricted mode |
+| Setting                                | Default           | Description                                                                    |
+| -------------------------------------- | ----------------- | ------------------------------------------------------------------------------ |
+| `agent.sandbox.filterEnv`              | `true`            | Filter subprocess env vars to an allowed list only                             |
+| `agent.sandbox.networkIsolation`       | `false`           | Wrap command with `unshare --net` for network namespace isolation (Linux only) |
+| `agent.sandbox.allowedEnvVars`         | `[]`              | Additional env var names to pass through the filter                            |
+| `agent.sandbox.allowedWriteExtensions` | `[".md", ".txt"]` | Allowed file extensions for agent workspace writes in restricted mode          |
 
 Environment variable overrides:
 
-| Environment Variable              | Config Path                      | Type                 |
-| --------------------------------- | -------------------------------- | -------------------- |
-| `AGENT_SANDBOX_FILTER_ENV`        | `agent.sandbox.filterEnv`        | `"true"` / `"false"` |
-| `AGENT_SANDBOX_NETWORK_ISOLATION` | `agent.sandbox.networkIsolation` | `"true"` / `"false"` |
-| `AGENT_SANDBOX_ALLOWED_ENV_VARS`  | `agent.sandbox.allowedEnvVars`   | Comma-separated      |
-| `AGENT_SANDBOX_ALLOWED_WRITE_EXTENSIONS` | `agent.sandbox.allowedWriteExtensions` | Comma-separated |
+| Environment Variable                     | Config Path                            | Type                 |
+| ---------------------------------------- | -------------------------------------- | -------------------- |
+| `AGENT_SANDBOX_FILTER_ENV`               | `agent.sandbox.filterEnv`              | `"true"` / `"false"` |
+| `AGENT_SANDBOX_NETWORK_ISOLATION`        | `agent.sandbox.networkIsolation`       | `"true"` / `"false"` |
+| `AGENT_SANDBOX_ALLOWED_ENV_VARS`         | `agent.sandbox.allowedEnvVars`         | Comma-separated      |
+| `AGENT_SANDBOX_ALLOWED_WRITE_EXTENSIONS` | `agent.sandbox.allowedWriteExtensions` | Comma-separated      |
 
 Degradation strategy:
 
@@ -518,16 +518,36 @@ Degradation strategy:
 - `networkIsolation: true` falls back gracefully on non-Linux or when `unshare` is unavailable (warns and skips)
 - Sandbox config errors do not prevent Agent startup
 
+**Git Credential Store for Agent**:
+
+When `agent.gitCredential.enabled` is true, bootstrap writes a `~/.git-credentials` file and runs
+`git config --global credential.helper store` so YOLO-mode Agent subprocesses can use plain
+`git push` / `git pull` / `git clone` without embedding credentials in command strings.
+
+- Credential source is shared with `gitBackup`: `gitBackup.authPassword` → `GITHUB_TOKEN` for the password, and `gitBackup.authUser` → `gitBackup.authorEmail` → `x-access-token` for the username
+- Host resolution order is: `agent.gitCredential.host` → parsed from `gitBackup.remoteUrl` → `github.com`
+- The credential file lives under `$HOME`, so it is outside ACP workspace file reads and is not injected into prompt context
+- In restricted mode this configuration is effectively dormant because git shell access is still blocked by the existing defense layers
+- Copilot may still receive `GITHUB_TOKEN` for CLI auth, but credential store keeps git auth behavior consistent with Gemini and OpenCode and avoids constructing tokenized git URLs in prompts
+- Known limitation: in YOLO mode, the Agent can still read `~/.git-credentials` directly if it chooses to run `cat ~/.git-credentials`; this is an inherent YOLO trust-boundary tradeoff
+
+Environment variable overrides:
+
+| Environment Variable           | Config Path                   | Type                 |
+| ------------------------------ | ----------------------------- | -------------------- |
+| `AGENT_GIT_CREDENTIAL_ENABLED` | `agent.gitCredential.enabled` | `"true"` / `"false"` |
+| `AGENT_GIT_CREDENTIAL_HOST`    | `agent.gitCredential.host`    | String               |
+
 **OpenCode YOLO Mode (Agent Mode Switching)**:
 
 When YOLO mode is enabled for an OpenCode session, the system switches to the `yolo` agent
 defined in `agent-config/opencode.json` via ACP `setSessionMode("yolo")`. This agent has
 `"*": "allow"` permissions, matching the unrestricted behavior of Copilot and Gemini `--yolo` flags.
 
-| Mode | OpenCode Agent | Permission Default |
-|------|---------------|-------------------|
+| Mode       | OpenCode Agent    | Permission Default        |
+| ---------- | ----------------- | ------------------------- |
 | Restricted | `build` (default) | `"*": "deny"` + whitelist |
-| YOLO | `yolo` | `"*": "allow"` |
+| YOLO       | `yolo`            | `"*": "allow"`            |
 
 Note: The `OPENCODE_YOLO` env var has been removed since upstream OpenCode YOLO mode
 (PR anomalyco/opencode#11833) was never functional. YOLO is fully handled via
@@ -611,13 +631,13 @@ channels:
     spontaneousPost: false
     channelLurk: false
     rateLimitBypass: false
-    yolo: true  # Run Agent in YOLO mode for this account
+    yolo: true # Run Agent in YOLO mode for this account
   - id: "discord/channel/987654321098765432"
     enabled: true
     spontaneousPost: true
     channelLurk: true
     rateLimitBypass: false
-    yolo: false  # Default: restricted mode
+    yolo: false # Default: restricted mode
   - id: "misskey/account/abcdef1234567890"
     enabled: true
     spontaneousPost: false
@@ -1068,25 +1088,25 @@ You are Yuna. This is a private chat.
 
 ### Available Template Variables
 
-| Variable                | Type      | Description                                                     |
-| ----------------------- | --------- | --------------------------------------------------------------- |
-| `isDm`                  | `boolean` | Whether this is a direct message conversation                   |
-| `platform`              | `string`  | Platform name (`"discord"` / `"misskey"`)                       |
-| `userId`                | `string`  | User's platform ID                                              |
-| `channelId`             | `string`  | Channel/conversation ID                                         |
-| `guildId`               | `string`  | Server/guild ID (empty string if N/A)                           |
-| `sessionId`             | `string`  | Current skill API session ID                                    |
-| `agentType`             | `string`  | ACP agent type (`"copilot"` / `"gemini"` / `"opencode"`)       |
+| Variable                | Type      | Description                                                      |
+| ----------------------- | --------- | ---------------------------------------------------------------- |
+| `isDm`                  | `boolean` | Whether this is a direct message conversation                    |
+| `platform`              | `string`  | Platform name (`"discord"` / `"misskey"`)                        |
+| `userId`                | `string`  | User's platform ID                                               |
+| `channelId`             | `string`  | Channel/conversation ID                                          |
+| `guildId`               | `string`  | Server/guild ID (empty string if N/A)                            |
+| `sessionId`             | `string`  | Current skill API session ID                                     |
+| `agentType`             | `string`  | ACP agent type (`"copilot"` / `"gemini"` / `"opencode"`)         |
 | `model`                 | `string`  | Model identifier (e.g., `"claude-opus-4.6"`, `"gemini-2.5-pro"`) |
-| `rssItems`              | `string`  | RSS items (self-research prompt only)                           |
-| `workspaceKey`          | `string`  | Workspace key (memory maintenance prompt only)                  |
-| `memoriesDump`          | `string`  | Memory JSON dump (memory maintenance only)                      |
-| `recentMessagesFetched` | `boolean` | Whether recent messages were fetched (spontaneous post only)    |
-| `importantMemories`     | `string`  | Formatted important memories text (spontaneous post only)       |
-| `recentMessages`        | `string`  | Formatted recent messages text (spontaneous post only)          |
-| `availableEmojis`       | `string`  | Formatted available emojis text (spontaneous post only)         |
-| `yolo`                  | `boolean` | Whether YOLO mode is enabled (bypasses permission restrictions) |
-| `userContextMessage`    | `string`  | Pre-formatted user context message (normal message prompt only) |
+| `rssItems`              | `string`  | RSS items (self-research prompt only)                            |
+| `workspaceKey`          | `string`  | Workspace key (memory maintenance prompt only)                   |
+| `memoriesDump`          | `string`  | Memory JSON dump (memory maintenance only)                       |
+| `recentMessagesFetched` | `boolean` | Whether recent messages were fetched (spontaneous post only)     |
+| `importantMemories`     | `string`  | Formatted important memories text (spontaneous post only)        |
+| `recentMessages`        | `string`  | Formatted recent messages text (spontaneous post only)           |
+| `availableEmojis`       | `string`  | Formatted available emojis text (spontaneous post only)          |
+| `yolo`                  | `boolean` | Whether YOLO mode is enabled (bypasses permission restrictions)  |
+| `userContextMessage`    | `string`  | Pre-formatted user context message (normal message prompt only)  |
 
 ### Container Deployment Considerations
 
@@ -1269,7 +1289,7 @@ replyPolicy: "channels"
 channels:
   - id: "discord/account/12345678901234567"
     rateLimitBypass: true
-    yolo: true  # Run Agent in YOLO mode for this account
+    yolo: true # Run Agent in YOLO mode for this account
 ```
 
 Environment variables override config file values.

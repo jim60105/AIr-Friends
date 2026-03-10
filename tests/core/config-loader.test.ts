@@ -2280,3 +2280,53 @@ workspace:
     assertEquals(result.agent.sandbox?.allowedWriteExtensions, [".md", ".txt"]);
   });
 });
+
+Deno.test("loadConfig - default gitCredential config is applied", async () => {
+  const config = `
+platforms:
+  discord:
+    token: "test-token"
+    enabled: true
+  misskey:
+    enabled: false
+agent:
+  model: "gpt-4"
+  systemPromptPath: "./prompts/system_reply.md"
+  tokenLimit: 20000
+workspace:
+  repoPath: "./data"
+  workspacesDir: "workspaces"
+`;
+
+  await withTestConfig(config, async (dir) => {
+    const result = await loadConfig(dir);
+    assertEquals(result.agent.gitCredential?.enabled, false);
+    assertEquals(result.agent.gitCredential?.host, undefined);
+  });
+});
+
+Deno.test("loadConfig - gitCredential config merges with defaults", async () => {
+  const config = `
+platforms:
+  discord:
+    token: "test-token"
+    enabled: true
+  misskey:
+    enabled: false
+agent:
+  model: "gpt-4"
+  systemPromptPath: "./prompts/system_reply.md"
+  tokenLimit: 20000
+  gitCredential:
+    enabled: true
+workspace:
+  repoPath: "./data"
+  workspacesDir: "workspaces"
+`;
+
+  await withTestConfig(config, async (dir) => {
+    const result = await loadConfig(dir);
+    assertEquals(result.agent.gitCredential?.enabled, true);
+    assertEquals(result.agent.gitCredential?.host, undefined);
+  });
+});
