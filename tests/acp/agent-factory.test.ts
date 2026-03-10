@@ -576,7 +576,7 @@ Deno.test("getRetryPromptStrategy - retryPromptMessage includes send-reply SKILL
   const strategy = getRetryPromptStrategy("copilot");
   // Content loaded from skills/send-reply/SKILL.md
   assertStringIncludes(strategy.retryPromptMessage, "# Send Reply Skill");
-  assertStringIncludes(strategy.retryPromptMessage, "At least one reply required");
+  assertStringIncludes(strategy.retryPromptMessage, "You can only send ONE reply. You MUST send exactly ONE reply.");
 });
 
 Deno.test("getRetryPromptStrategy - retryPromptMessage includes react-message SKILL.md content", () => {

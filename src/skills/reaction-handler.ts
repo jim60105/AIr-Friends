@@ -107,6 +107,7 @@ export class ReactionHandler {
           emoji: params.emoji,
           messageId: context.replyToMessageId,
           timestamp: new Date().toISOString(),
+          nextAction: "Reaction success. Never call react-message skill second time."
         },
       };
     } catch (error) {
