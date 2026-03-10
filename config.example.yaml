@@ -8,9 +8,9 @@ logging:
   # GELF (Graylog Extended Log Format) output configuration
   # When enabled, log messages are also sent to a GELF-compatible log server via HTTP
   gelf:
-    enabled: false # Enable GELF log output (default: false)
-    endpoint: "" # GELF HTTP endpoint URL (e.g., "http://graylog.example.com:12202/gelf")
-    hostname: "air-friends" # Source hostname in GELF messages (default: "air-friends")
+    enabled: false            # Enable GELF log output (default: false)
+    endpoint: ""              # GELF HTTP endpoint URL (e.g., "http://graylog.example.com:12202/gelf")
+    hostname: "air-friends"   # Source hostname in GELF messages (default: "air-friends")
 
 # Platform configurations
 platforms:
@@ -29,11 +29,11 @@ platforms:
       contextFetchProbability: 0.5 # Probability of including recent messages (0.0-1.0, default: 0.5)
     # Typing indicator: show "typing..." in Discord while processing
     typingIndicator:
-      enabled: false # Show typing indicator during ACP sessions (default: false, security consideration)
+      enabled: false          # Show typing indicator during ACP sessions (default: false, security consideration)
     # Channel lurk reply: periodically check whitelisted channels and auto-reply
     channelLurk:
-      enabled: false # Enable channel lurk reply (default: false)
-      intervalMs: 1800000 # Check interval: 30 minutes (default)
+      enabled: false              # Enable channel lurk reply (default: false)
+      intervalMs: 1800000         # Check interval: 30 minutes (default)
 
   misskey:
     enabled: false # true/false (default: false); override with env MISSKEY_ENABLED
@@ -142,9 +142,9 @@ agent:
   # Dry run / debug mode: assemble context without calling Agent
   # Useful for prompt engineering, CI/CD smoke tests, and context debugging
   dryRun:
-    enabled: false # Enable dry run mode (default: false); override with env DRY_RUN_ENABLED
-    outputPath: "./data/dry-run/" # Output directory for assembled prompts; override with env DRY_RUN_OUTPUT_PATH
-    mockReply: "（Dry run 模式 — 此為測試回覆）" # Mock reply text (empty = no reply); override with env DRY_RUN_MOCK_REPLY
+    enabled: false                                       # Enable dry run mode (default: false); override with env DRY_RUN_ENABLED
+    outputPath: "./data/dry-run/"                        # Output directory for assembled prompts; override with env DRY_RUN_OUTPUT_PATH
+    mockReply: "（Dry run 模式 — 此為測試回覆）"          # Mock reply text (empty = no reply); override with env DRY_RUN_MOCK_REPLY
 
   # Sandbox settings for agent subprocess isolation
   # sandbox:
@@ -156,9 +156,10 @@ agent:
   # Idle timeout detection for ACP connections
   # Detects silently disconnected Agent connections and attempts recovery
   idleTimeout:
-    enabled: true # Enable idle timeout detection (default: true); override with env AGENT_IDLE_TIMEOUT_ENABLED
-    timeoutMs: 300000 # Idle timeout in ms (default: 300000 = 5 minutes); override with env AGENT_IDLE_TIMEOUT_MS
-    checkIntervalMs: 30000 # Check interval in ms (default: 30000 = 30 seconds); override with env AGENT_IDLE_TIMEOUT_CHECK_INTERVAL_MS
+    enabled: true                  # Enable idle timeout detection (default: true); override with env AGENT_IDLE_TIMEOUT_ENABLED
+    timeoutMs: 300000              # Idle timeout in ms (default: 300000 = 5 minutes); override with env AGENT_IDLE_TIMEOUT_MS
+    checkIntervalMs: 30000         # Check interval in ms (default: 30000 = 30 seconds); override with env AGENT_IDLE_TIMEOUT_CHECK_INTERVAL_MS
+
 
 # Git credential store for agent subprocesses (effective only in YOLO mode)
 # Configures git credential.helper = store at startup so the agent can use
@@ -178,8 +179,8 @@ memory:
 workspace:
   repoPath: "./data" # Root path for workspace data (default: ./data)
   workspacesDir: "workspaces" # Directory name under repoPath (default: workspaces)
-# Agent global workspace is auto-created at {repoPath}/agent-workspace/
-# This directory is managed by the agent for long-term knowledge notes
+  # Agent global workspace is auto-created at {repoPath}/agent-workspace/
+  # This directory is managed by the agent for long-term knowledge notes
 
 # Skill API (used by external shell-based skills)
 skillApi:
@@ -195,14 +196,14 @@ health:
 
 # Prometheus metrics endpoint (shared with health check server port)
 metrics:
-  enabled: false # Enable Prometheus metrics (default: false); override with env METRICS_ENABLED
-  path: "/metrics" # Metrics endpoint path (default: "/metrics"); override with env METRICS_PATH
+  enabled: false              # Enable Prometheus metrics (default: false); override with env METRICS_ENABLED
+  path: "/metrics"            # Metrics endpoint path (default: "/metrics"); override with env METRICS_PATH
 
 # Reply policy: "all" | "public" | "channels"
 # - all: Reply to everyone
 # - public: Reply in public channels + enabled DM channels
 # - channels: Only reply to configured channels (default)
-replyPolicy: "channels" # override with env REPLY_POLICY (REPLY_TO also accepted as alias)
+replyPolicy: "channels"  # override with env REPLY_POLICY (REPLY_TO also accepted as alias)
 
 # Channel configurations
 # Each entry defines a channel with individual feature toggles
@@ -212,14 +213,14 @@ channels:
     enabled: true
     spontaneousPost: false
     rateLimitBypass: true
-    yolo: true # Run Agent in YOLO mode for this account
+    yolo: true  # Run Agent in YOLO mode for this account
 
   # Discord channel
   - id: "discord/channel/873618490202931231"
     enabled: true
     spontaneousPost: true
     channelLurk: true
-    yolo: false # Default: restricted mode
+    yolo: false  # Default: restricted mode
 
   # Misskey account (DM)
   - id: "misskey/account/agy61oh08uzl000g"
@@ -232,63 +233,63 @@ channels:
 
 # Self-research: agent periodically reads RSS and researches topics
 selfResearch:
-  enabled: false # Enable self-research (default: false); override with env SELF_RESEARCH_ENABLED
-  model: "gpt-5-mini" # Model for research (separate from chat); override with env SELF_RESEARCH_MODEL
-  rssFeeds: # RSS feed sources; override with env SELF_RESEARCH_RSS_FEEDS (JSON string)
+  enabled: false                    # Enable self-research (default: false); override with env SELF_RESEARCH_ENABLED
+  model: "gpt-5-mini"              # Model for research (separate from chat); override with env SELF_RESEARCH_MODEL
+  rssFeeds:                         # RSS feed sources; override with env SELF_RESEARCH_RSS_FEEDS (JSON string)
     - url: "https://example.com/feed.xml"
       name: "Tech News"
     - url: "https://example.org/rss"
-  minIntervalMs: 43200000 # Minimum interval: 12 hours (default); override with env SELF_RESEARCH_MIN_INTERVAL_MS
-  maxIntervalMs: 86400000 # Maximum interval: 24 hours (default); override with env SELF_RESEARCH_MAX_INTERVAL_MS
+  minIntervalMs: 43200000          # Minimum interval: 12 hours (default); override with env SELF_RESEARCH_MIN_INTERVAL_MS
+  maxIntervalMs: 86400000          # Maximum interval: 24 hours (default); override with env SELF_RESEARCH_MAX_INTERVAL_MS
 
 # Memory maintenance: agent periodically summarizes and compacts old memories
 memoryMaintenance:
-  enabled: false # Enable memory maintenance (default: false); override with env MEMORY_MAINTENANCE_ENABLED
-  model: "gpt-5-mini" # Model for maintenance (separate from chat); override with env MEMORY_MAINTENANCE_MODEL
-  minMemoryCount: 50 # Minimum enabled memories required to run; override with env MEMORY_MAINTENANCE_MIN_MEMORY_COUNT
-  intervalMs: 604800000 # Fixed interval: 7 days (default); override with env MEMORY_MAINTENANCE_INTERVAL_MS
+  enabled: false                    # Enable memory maintenance (default: false); override with env MEMORY_MAINTENANCE_ENABLED
+  model: "gpt-5-mini"              # Model for maintenance (separate from chat); override with env MEMORY_MAINTENANCE_MODEL
+  minMemoryCount: 50                # Minimum enabled memories required to run; override with env MEMORY_MAINTENANCE_MIN_MEMORY_COUNT
+  intervalMs: 604800000             # Fixed interval: 7 days (default); override with env MEMORY_MAINTENANCE_INTERVAL_MS
 
 # Rate limiting - prevent excessive API usage per user
 # Complements accessControl: accessControl decides "who can", rateLimit decides "how often"
 rateLimit:
-  enabled: false # Enable rate limiting (default: false); override with env RATE_LIMIT_ENABLED
-  maxRequestsPerWindow: 10 # Max requests per user per sliding window; override with env RATE_LIMIT_MAX_REQUESTS_PER_WINDOW
-  windowMs: 600000 # Sliding window duration in ms (default: 10 min); override with env RATE_LIMIT_WINDOW_MS
-  cooldownMs: 600000 # Cooldown period after limit exceeded in ms (default: 10 min); override with env RATE_LIMIT_COOLDOWN_MS
+  enabled: false                  # Enable rate limiting (default: false); override with env RATE_LIMIT_ENABLED
+  maxRequestsPerWindow: 10       # Max requests per user per sliding window; override with env RATE_LIMIT_MAX_REQUESTS_PER_WINDOW
+  windowMs: 600000               # Sliding window duration in ms (default: 10 min); override with env RATE_LIMIT_WINDOW_MS
+  cooldownMs: 600000             # Cooldown period after limit exceeded in ms (default: 10 min); override with env RATE_LIMIT_COOLDOWN_MS
 
 # Session audit log - per-session JSONL audit trail for replay and debugging
 audit:
-  enabled: false # Enable audit logging (default: false); override with env AUDIT_ENABLED
-  retentionDays: 7 # Log retention in days (default: 7); override with env AUDIT_RETENTION_DAYS
-  hashContent: true # SHA-256 hash user content (default: true); override with env AUDIT_HASH_CONTENT
-  includedPhases: # Only record specified phases, empty = all; override with env AUDIT_INCLUDED_PHASES (comma-separated)
+  enabled: false                  # Enable audit logging (default: false); override with env AUDIT_ENABLED
+  retentionDays: 7                # Log retention in days (default: 7); override with env AUDIT_RETENTION_DAYS
+  hashContent: true               # SHA-256 hash user content (default: true); override with env AUDIT_HASH_CONTENT
+  includedPhases:                 # Only record specified phases, empty = all; override with env AUDIT_INCLUDED_PHASES (comma-separated)
     - "skill_call"
     - "reply_sent"
     - "session_end"
 
 # Git backup - backs up the entire data/ directory to a remote Git repository
 gitBackup:
-  enabled: false # Enable Git backup (default: false); override with env GIT_BACKUP_ENABLED
-  remoteUrl: "" # Remote Git repository URL (HTTPS); override with env GIT_BACKUP_REMOTE_URL
-  intervalMs: 3600000 # Backup interval in ms (default: 1 hour); override with env GIT_BACKUP_INTERVAL_MS
-  authorName: "AIr-Friends Backup" # Git author name; override with env GIT_BACKUP_AUTHOR_NAME
+  enabled: false                  # Enable Git backup (default: false); override with env GIT_BACKUP_ENABLED
+  remoteUrl: ""                   # Remote Git repository URL (HTTPS); override with env GIT_BACKUP_REMOTE_URL
+  intervalMs: 3600000             # Backup interval in ms (default: 1 hour); override with env GIT_BACKUP_INTERVAL_MS
+  authorName: "AIr-Friends Backup"    # Git author name; override with env GIT_BACKUP_AUTHOR_NAME
   authorEmail: "airfriends-backup@noreply.github.com" # Git author email; override with env GIT_BACKUP_AUTHOR_EMAIL
-  authUser: "" # HTTPS auth username (default: authorEmail → "x-access-token"); override with env GIT_BACKUP_AUTH_USER
-  authPassword: "" # HTTPS auth password/token (default: GITHUB_TOKEN env); override with env GIT_BACKUP_AUTH_PASSWORD
+  authUser: ""                    # HTTPS auth username (default: authorEmail → "x-access-token"); override with env GIT_BACKUP_AUTH_USER
+  authPassword: ""                # HTTPS auth password/token (default: GITHUB_TOKEN env); override with env GIT_BACKUP_AUTH_PASSWORD
 
 # Scheduled reminders - allows the agent to set future reminders for users
 # Reminders can only be set in DM conversations, and are always delivered via DM
 reminders:
-  enabled: false # Enable scheduled reminders (default: false); override with env REMINDERS_ENABLED
-  maxRemindersPerUser: 20 # Max active reminders per user (default: 20); override with env REMINDERS_MAX_PER_USER
-  minIntervalMs: 60000 # Minimum reminder delay from now in ms (default: 1 minute); override with env REMINDERS_MIN_INTERVAL_MS
-  persistPath: "reminders.jsonl" # File name for reminder data within workspace (default: reminders.jsonl); override with env REMINDERS_PERSIST_PATH
-  checkIntervalMs: 30000 # How often to check for due reminders in ms (default: 30 seconds); override with env REMINDERS_CHECK_INTERVAL_MS
+  enabled: false                    # Enable scheduled reminders (default: false); override with env REMINDERS_ENABLED
+  maxRemindersPerUser: 20           # Max active reminders per user (default: 20); override with env REMINDERS_MAX_PER_USER
+  minIntervalMs: 60000             # Minimum reminder delay from now in ms (default: 1 minute); override with env REMINDERS_MIN_INTERVAL_MS
+  persistPath: "reminders.jsonl"   # File name for reminder data within workspace (default: reminders.jsonl); override with env REMINDERS_PERSIST_PATH
+  checkIntervalMs: 30000           # How often to check for due reminders in ms (default: 30 seconds); override with env REMINDERS_CHECK_INTERVAL_MS
 
 # ─── Skills Configuration ─────────────────────────────
 skills:
   sendFile:
-    enabled: false # Enable send-file skill (default: false, disabled for security); override with env SKILL_SEND_FILE_ENABLED
-    maxFileSizeMb: 25 # File size limit in MB, 0 = use platform default; override with env SKILL_SEND_FILE_MAX_SIZE_MB
-    allowedExtensions: [] # Allowed file extension whitelist, empty = no restriction; override with env SKILL_SEND_FILE_ALLOWED_EXTENSIONS
-# Example: [".png", ".jpg", ".gif", ".pdf", ".txt", ".md"]
+    enabled: false              # Enable send-file skill (default: false, disabled for security); override with env SKILL_SEND_FILE_ENABLED
+    maxFileSizeMb: 25           # File size limit in MB, 0 = use platform default; override with env SKILL_SEND_FILE_MAX_SIZE_MB
+    allowedExtensions: []       # Allowed file extension whitelist, empty = no restriction; override with env SKILL_SEND_FILE_ALLOWED_EXTENSIONS
+                                # Example: [".png", ".jpg", ".gif", ".pdf", ".txt", ".md"]
