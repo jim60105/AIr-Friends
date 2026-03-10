@@ -122,6 +122,11 @@ export async function bootstrap(
     await installExternalSkills(config.agent.externalSkills);
   }
 
+  if (config.agent.gitCredential?.enabled) {
+    const { setupGitCredentials } = await import("@core/git-credential-setup.ts");
+    await setupGitCredentials(config.agent.gitCredential, config.gitBackup);
+  }
+
   // Initialize agent core (this initializes all necessary components)
   logger.info("Initializing agent core");
   const agentCore = new AgentCore(config, yolo);

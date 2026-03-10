@@ -83,6 +83,10 @@ export const ENV_MAPPINGS = {
   DRY_RUN_OUTPUT_PATH: "agent.dryRun.outputPath",
   DRY_RUN_MOCK_REPLY: "agent.dryRun.mockReply",
 
+  // Git credential store for agent subprocesses
+  AGENT_GIT_CREDENTIAL_ENABLED: "agent.gitCredential.enabled",
+  AGENT_GIT_CREDENTIAL_HOST: "agent.gitCredential.host",
+
   // Git backup settings
   GIT_BACKUP_ENABLED: "gitBackup.enabled",
   GIT_BACKUP_REMOTE_URL: "gitBackup.remoteUrl",
