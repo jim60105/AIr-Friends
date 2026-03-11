@@ -34,6 +34,8 @@ export interface SkillContext {
   replyToMessageId?: string;
   /** Agent's global workspace path for searching notes */
   agentWorkspacePath?: string;
+  /** Last message ID sent by the bot in this session */
+  lastSentMessageId?: string;
 }
 
 /**
@@ -138,4 +140,12 @@ export interface FetchContextParams {
 export interface FetchContextResult {
   type: string;
   data: PlatformMessage[] | Record<string, unknown>;
+}
+
+/**
+ * Parameters for get-message skill
+ */
+export interface GetMessageParams {
+  /** ID of the message to fetch (optional, defaults to last sent message) */
+  messageId?: string;
 }

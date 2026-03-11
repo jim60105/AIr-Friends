@@ -285,4 +285,13 @@ export abstract class PlatformAdapter implements MessageFetcher {
    * Used by channel lurk scheduler to skip already-handled mentions.
    */
   abstract hasBotMention(channelId: string, messageId: string): Promise<boolean>;
+
+  /**
+   * Fetch a single message by its ID.
+   * Returns null if the message is not found or cannot be fetched.
+   */
+  abstract fetchMessage(
+    channelId: string,
+    messageId: string,
+  ): Promise<PlatformMessage | null>;
 }

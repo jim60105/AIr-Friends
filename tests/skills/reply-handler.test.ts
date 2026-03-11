@@ -708,3 +708,241 @@ Deno.test("unescapeNewlines - handles string without newlines", () => {
 Deno.test("unescapeNewlines - handles mixed real and literal newlines", () => {
   assertEquals(unescapeNewlines("line1\nline2\\nline3"), "line1\nline2\nline3");
 });
+
+// ============ get-message tests ============
+
+Deno.test("ReplyHandler - handleGetMessage with explicit messageId success", async () => {
+  const handler = new ReplyHandler();
+
+  const workspace: WorkspaceInfo = {
+    key: "discord/gm1",
+    components: { platform: "discord", userId: "gm1" },
+    path: "/tmp/workspaces/discord/gm1",
+    tmpPath: "/tmp/workspaces/discord/gm1/tmp",
+    isDm: true,
+  };
+
+  const adapter = createMockPlatformAdapter();
+  (adapter as unknown as { fetchMessage: PlatformAdapter["fetchMessage"] }).fetchMessage = () =>
+    Promise.resolve({
+      messageId: "msg123",
+      userId: "user456",
+      username: "TestUser",
+      content: "Hello world",
+      timestamp: new Date("2024-06-01T12:00:00Z"),
+      isBot: false,
+    });
+
+  const context: SkillContext = {
+    workspace,
+    platformAdapter: adapter,
+    channelId: "ch_gm1",
+    userId: "gm1",
+  };
+
+  const result = await handler.handleGetMessage({ messageId: "msg123" }, context);
+
+  assertEquals(result.success, true);
+  const data = result.data as Record<string, unknown>;
+  assertEquals(data.messageId, "msg123");
+  assertEquals(data.userId, "user456");
+  assertEquals(data.username, "TestUser");
+  assertEquals(data.content, "Hello world");
+  assertEquals(data.isBot, false);
+});
+
+Deno.test("ReplyHandler - handleGetMessage uses lastSentMessageId fallback", async () => {
+  const handler = new ReplyHandler();
+
+  const workspace: WorkspaceInfo = {
+    key: "discord/gm2",
+    components: { platform: "discord", userId: "gm2" },
+    path: "/tmp/workspaces/discord/gm2",
+    tmpPath: "/tmp/workspaces/discord/gm2/tmp",
+    isDm: true,
+  };
+
+  let capturedMessageId = "";
+  const adapter = createMockPlatformAdapter();
+  (adapter as unknown as { fetchMessage: PlatformAdapter["fetchMessage"] }).fetchMessage = (
+    _channelId: string,
+    messageId: string,
+  ) => {
+    capturedMessageId = messageId;
+    return Promise.resolve({
+      messageId,
+      userId: "user789",
+      username: "BotUser",
+      content: "Bot reply",
+      timestamp: new Date("2024-06-01T13:00:00Z"),
+      isBot: true,
+    });
+  };
+
+  const context: SkillContext = {
+    workspace,
+    platformAdapter: adapter,
+    channelId: "ch_gm2",
+    userId: "gm2",
+    lastSentMessageId: "last_sent_999",
+  };
+
+  const result = await handler.handleGetMessage({}, context);
+
+  assertEquals(result.success, true);
+  assertEquals(capturedMessageId, "last_sent_999");
+});
+
+Deno.test("ReplyHandler - handleGetMessage fails with no messageId and no lastSentMessageId", async () => {
+  const handler = new ReplyHandler();
+
+  const workspace: WorkspaceInfo = {
+    key: "discord/gm3",
+    components: { platform: "discord", userId: "gm3" },
+    path: "/tmp/workspaces/discord/gm3",
+    tmpPath: "/tmp/workspaces/discord/gm3/tmp",
+    isDm: true,
+  };
+
+  const context: SkillContext = {
+    workspace,
+    platformAdapter: createMockPlatformAdapter(),
+    channelId: "ch_gm3",
+    userId: "gm3",
+  };
+
+  const result = await handler.handleGetMessage({}, context);
+
+  assertEquals(result.success, false);
+  assertEquals(
+    result.error,
+    "Missing 'messageId' parameter and no message has been sent yet in this session.",
+  );
+});
+
+Deno.test("ReplyHandler - handleGetMessage returns error when message not found", async () => {
+  const handler = new ReplyHandler();
+
+  const workspace: WorkspaceInfo = {
+    key: "discord/gm4",
+    components: { platform: "discord", userId: "gm4" },
+    path: "/tmp/workspaces/discord/gm4",
+    tmpPath: "/tmp/workspaces/discord/gm4/tmp",
+    isDm: true,
+  };
+
+  const adapter = createMockPlatformAdapter();
+  (adapter as unknown as { fetchMessage: PlatformAdapter["fetchMessage"] }).fetchMessage = () =>
+    Promise.resolve(null);
+
+  const context: SkillContext = {
+    workspace,
+    platformAdapter: adapter,
+    channelId: "ch_gm4",
+    userId: "gm4",
+  };
+
+  const result = await handler.handleGetMessage({ messageId: "nonexistent" }, context);
+
+  assertEquals(result.success, false);
+  assertEquals(result.error, "Message not found: nonexistent");
+});
+
+Deno.test("ReplyHandler - handleGetMessage handles platform error", async () => {
+  const handler = new ReplyHandler();
+
+  const workspace: WorkspaceInfo = {
+    key: "discord/gm5",
+    components: { platform: "discord", userId: "gm5" },
+    path: "/tmp/workspaces/discord/gm5",
+    tmpPath: "/tmp/workspaces/discord/gm5/tmp",
+    isDm: true,
+  };
+
+  const adapter = createMockPlatformAdapter();
+  (adapter as unknown as { fetchMessage: PlatformAdapter["fetchMessage"] }).fetchMessage = () => {
+    throw new Error("API connection failed");
+  };
+
+  const context: SkillContext = {
+    workspace,
+    platformAdapter: adapter,
+    channelId: "ch_gm5",
+    userId: "gm5",
+  };
+
+  const result = await handler.handleGetMessage({ messageId: "msg123" }, context);
+
+  assertEquals(result.success, false);
+  assertEquals(result.error, "API connection failed");
+});
+
+Deno.test("ReplyHandler - handleGetMessage handles non-Error exception", async () => {
+  const handler = new ReplyHandler();
+
+  const workspace: WorkspaceInfo = {
+    key: "discord/gm6",
+    components: { platform: "discord", userId: "gm6" },
+    path: "/tmp/workspaces/discord/gm6",
+    tmpPath: "/tmp/workspaces/discord/gm6/tmp",
+    isDm: true,
+  };
+
+  const adapter = createMockPlatformAdapter();
+  (adapter as unknown as { fetchMessage: PlatformAdapter["fetchMessage"] }).fetchMessage = () => {
+    throw "string error";
+  };
+
+  const context: SkillContext = {
+    workspace,
+    platformAdapter: adapter,
+    channelId: "ch_gm6",
+    userId: "gm6",
+  };
+
+  const result = await handler.handleGetMessage({ messageId: "msg123" }, context);
+
+  assertEquals(result.success, false);
+  assertEquals(result.error, "Unknown error");
+});
+
+Deno.test("ReplyHandler - handleGetMessage prefers explicit messageId over lastSentMessageId", async () => {
+  const handler = new ReplyHandler();
+
+  const workspace: WorkspaceInfo = {
+    key: "discord/gm7",
+    components: { platform: "discord", userId: "gm7" },
+    path: "/tmp/workspaces/discord/gm7",
+    tmpPath: "/tmp/workspaces/discord/gm7/tmp",
+    isDm: true,
+  };
+
+  let capturedMessageId = "";
+  const adapter = createMockPlatformAdapter();
+  (adapter as unknown as { fetchMessage: PlatformAdapter["fetchMessage"] }).fetchMessage = (
+    _channelId: string,
+    messageId: string,
+  ) => {
+    capturedMessageId = messageId;
+    return Promise.resolve({
+      messageId,
+      userId: "user1",
+      username: "User",
+      content: "Content",
+      timestamp: new Date(),
+      isBot: false,
+    });
+  };
+
+  const context: SkillContext = {
+    workspace,
+    platformAdapter: adapter,
+    channelId: "ch_gm7",
+    userId: "gm7",
+    lastSentMessageId: "fallback_id",
+  };
+
+  await handler.handleGetMessage({ messageId: "explicit_id" }, context);
+
+  assertEquals(capturedMessageId, "explicit_id");
+});

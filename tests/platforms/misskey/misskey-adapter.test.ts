@@ -1765,3 +1765,65 @@ Deno.test("MisskeyAdapter - startHeartbeat does nothing without stream", () => {
   adapterAny.startHeartbeat();
   assertEquals(adapterAny.heartbeatIntervalId, null);
 });
+
+// ==================== MisskeyAdapter.fetchMessage Tests ====================
+
+Deno.test("MisskeyAdapter.fetchMessage - fetches note (non-chat channelId)", async () => {
+  const adapter = createMockMisskeyAdapter();
+  // deno-lint-ignore no-explicit-any
+  (adapter as any).botId = "bot123";
+
+  let capturedEndpoint = "";
+  let capturedParams: Record<string, unknown> = {};
+  mockClientRequest(adapter, (endpoint: string, params: Record<string, unknown>) => {
+    capturedEndpoint = endpoint;
+    capturedParams = params;
+    return Promise.resolve(createMockNote({
+      id: "note_fetched",
+      text: "Fetched note content",
+    }));
+  });
+
+  const result = await adapter.fetchMessage("note:someNote", "note_fetched");
+  assertEquals(result !== null, true);
+  assertEquals(result!.messageId, "note_fetched");
+  assertEquals(result!.content, "Fetched note content");
+  assertEquals(capturedEndpoint, "notes/show");
+  assertEquals(capturedParams.noteId, "note_fetched");
+});
+
+Deno.test("MisskeyAdapter.fetchMessage - fetches chat message (channelId starts with chat:)", async () => {
+  const adapter = createMockMisskeyAdapter();
+  // deno-lint-ignore no-explicit-any
+  (adapter as any).botId = "bot123";
+
+  let capturedEndpoint = "";
+  let capturedParams: Record<string, unknown> = {};
+  mockClientRequest(adapter, (endpoint: string, params: Record<string, unknown>) => {
+    capturedEndpoint = endpoint;
+    capturedParams = params;
+    return Promise.resolve(createMockChatMessage({
+      id: "chat_fetched",
+      text: "Fetched chat content",
+    }));
+  });
+
+  const result = await adapter.fetchMessage("chat:user456", "chat_fetched");
+  assertEquals(result !== null, true);
+  assertEquals(result!.messageId, "chat_fetched");
+  assertEquals(result!.content, "Fetched chat content");
+  assertEquals(capturedEndpoint, "chat/messages/show");
+  assertEquals(capturedParams.messageId, "chat_fetched");
+});
+
+Deno.test("MisskeyAdapter.fetchMessage - returns null on error", async () => {
+  const adapter = createMockMisskeyAdapter();
+  // deno-lint-ignore no-explicit-any
+  (adapter as any).botId = "bot123";
+  mockClientRequest(adapter, () => {
+    return Promise.reject(new Error("Not found"));
+  });
+
+  const result = await adapter.fetchMessage("note:someNote", "nonexistent");
+  assertEquals(result, null);
+});

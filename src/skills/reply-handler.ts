@@ -3,6 +3,7 @@
 import { createLogger } from "@utils/logger.ts";
 import type {
   EditReplyParams,
+  GetMessageParams,
   SendReplyParams,
   SkillContext,
   SkillHandler,
@@ -261,6 +262,62 @@ export class ReplyHandler {
         channelId: context.channelId,
       });
 
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : "Unknown error",
+      };
+    }
+  };
+
+  /**
+   * Handle get-message skill
+   */
+  handleGetMessage: SkillHandler = async (
+    parameters: Record<string, unknown>,
+    context: SkillContext,
+  ): Promise<SkillResult> => {
+    try {
+      const params = parameters as unknown as GetMessageParams;
+
+      // Use provided messageId or fall back to last sent message
+      const messageId = params.messageId || context.lastSentMessageId;
+
+      if (!messageId) {
+        return {
+          success: false,
+          error: "Missing 'messageId' parameter and no message has been sent yet in this session.",
+        };
+      }
+
+      // Fetch message from platform
+      const message = await context.platformAdapter.fetchMessage(
+        context.channelId,
+        messageId,
+      );
+
+      if (!message) {
+        return {
+          success: false,
+          error: `Message not found: ${messageId}`,
+        };
+      }
+
+      return {
+        success: true,
+        data: {
+          messageId: message.messageId,
+          content: message.content,
+          userId: message.userId,
+          username: message.username,
+          timestamp: message.timestamp.toISOString(),
+          isBot: message.isBot,
+        },
+      };
+    } catch (error) {
+      logger.error("Failed to get message", {
+        error: error instanceof Error ? error.message : String(error),
+        channelId: context.channelId,
+      });
       return {
         success: false,
         error: error instanceof Error ? error.message : "Unknown error",

@@ -735,6 +735,30 @@ export class DiscordAdapter extends PlatformAdapter {
   }
 
   /**
+   * Fetch a single message by its ID.
+   * Returns null if the message is not found or cannot be fetched.
+   */
+  async fetchMessage(
+    channelId: string,
+    messageId: string,
+  ): Promise<PlatformMessage | null> {
+    try {
+      const channel = await this.client.channels.fetch(channelId);
+      if (!channel || !this.isTextBasedChannel(channel)) return null;
+
+      const message = await (channel as TextBasedChannel).messages.fetch(messageId);
+      return messageToPltatformMessage(message, this.botId!);
+    } catch (error) {
+      logger.warn("Failed to fetch message {messageId}", {
+        messageId,
+        channelId,
+        error: (error as Error).message,
+      });
+      return null;
+    }
+  }
+
+  /**
    * Check if a specific message mentions the bot.
    */
   async hasBotMention(channelId: string, messageId: string): Promise<boolean> {

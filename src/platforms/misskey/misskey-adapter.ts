@@ -1034,6 +1034,38 @@ export class MisskeyAdapter extends PlatformAdapter {
   }
 
   /**
+   * Fetch a single message by its ID.
+   * Returns null if the message is not found or cannot be fetched.
+   */
+  async fetchMessage(
+    channelId: string,
+    messageId: string,
+  ): Promise<PlatformMessage | null> {
+    try {
+      if (channelId.startsWith("chat:")) {
+        const message = await this.client.request<MisskeyMessage>(
+          "chat/messages/show",
+          { messageId },
+        );
+        return chatMessageToPlatformMessage(message, this.botId!);
+      }
+
+      const note = await this.client.request<MisskeyNote>(
+        "notes/show",
+        { noteId: messageId },
+      );
+      return noteToPlatformMessage(note, this.botId!);
+    } catch (error) {
+      logger.warn("Failed to fetch message {messageId}", {
+        messageId,
+        channelId,
+        error: (error as Error).message,
+      });
+      return null;
+    }
+  }
+
+  /**
    * Get the bot user ID
    */
   getBotId(): string | null {

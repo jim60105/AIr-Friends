@@ -44,6 +44,8 @@ export interface ActiveSession {
   auditWriter?: SessionAuditWriter;
   /** Callback to request agent process termination (doom-loop protection) */
   onTerminateRequest?: () => Promise<void>;
+  /** Last message ID sent by the bot in this session */
+  lastSentMessageId?: string;
 }
 
 /**
@@ -190,6 +192,23 @@ export class SessionRegistry {
     if (session) {
       session.onTerminateRequest = callback;
     }
+  }
+
+  /**
+   * Set the last message ID sent by the bot in a session.
+   */
+  setLastSentMessageId(sessionId: string, messageId: string): void {
+    const session = this.sessions.get(sessionId);
+    if (session) {
+      session.lastSentMessageId = messageId;
+    }
+  }
+
+  /**
+   * Get the last message ID sent by the bot in a session.
+   */
+  getLastSentMessageId(sessionId: string): string | undefined {
+    return this.sessions.get(sessionId)?.lastSentMessageId;
   }
 
   /**

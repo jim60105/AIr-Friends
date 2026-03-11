@@ -965,3 +965,378 @@ Deno.test("SkillAPIServer - no crash when onTerminateRequest not set on doom-loo
     await Deno.remove(tempDir, { recursive: true });
   }
 });
+
+Deno.test("SkillAPIServer - send-reply success updates lastSentMessageId", async () => {
+  const tempDir = await Deno.makeTempDir();
+  try {
+    const sessionRegistry = new SessionRegistry();
+    const workspaceManager = new WorkspaceManager({
+      repoPath: tempDir,
+      workspacesDir: "workspaces",
+    });
+    const memoryStore = new MemoryStore(workspaceManager, {
+      searchLimit: 10,
+      maxChars: 2000,
+    });
+    const skillRegistry = new SkillRegistry(memoryStore);
+
+    const mockWorkspace = {
+      key: "test/123",
+      components: {
+        platform: "discord" as const,
+        userId: "123",
+      },
+      path: tempDir,
+      tmpPath: tempDir + "/tmp",
+      isDm: false,
+    };
+
+    const mockAdapter = {
+      sendReply: () => Promise.resolve({ success: true, messageId: "sent_msg_001" }),
+      // deno-lint-ignore no-explicit-any
+    } as any;
+
+    const sessionId = sessionRegistry.register({
+      platform: "discord",
+      channelId: "456",
+      userId: "123",
+      isDm: false,
+      workspace: mockWorkspace,
+      platformAdapter: mockAdapter,
+      triggerEvent: {
+        platform: "discord",
+        channelId: "456",
+        userId: "123",
+        messageId: "msg_trigger",
+        isDm: false,
+        guildId: "",
+        content: "",
+        timestamp: new Date(),
+      },
+      timeoutMs: 60000,
+    });
+
+    // Verify no lastSentMessageId initially
+    assertEquals(sessionRegistry.getLastSentMessageId(sessionId), undefined);
+
+    const port = 3016;
+    const server = new SkillAPIServer(sessionRegistry, skillRegistry, {
+      port,
+      host: "127.0.0.1",
+    });
+
+    server.start();
+    await waitForServer(port);
+
+    const response = await fetch(`http://localhost:${port}/api/skill/send-reply`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        sessionId,
+        parameters: { message: "Hello!" },
+      }),
+    });
+
+    assertEquals(response.status, 200);
+    const body = await response.json();
+    assertEquals(body.success, true);
+
+    // Verify lastSentMessageId was updated
+    assertEquals(sessionRegistry.getLastSentMessageId(sessionId), "sent_msg_001");
+
+    await server.stop();
+    sessionRegistry.stop();
+  } finally {
+    await Deno.remove(tempDir, { recursive: true });
+  }
+});
+
+Deno.test("SkillAPIServer - edit-reply success updates lastSentMessageId", async () => {
+  const tempDir = await Deno.makeTempDir();
+  try {
+    const sessionRegistry = new SessionRegistry();
+    const workspaceManager = new WorkspaceManager({
+      repoPath: tempDir,
+      workspacesDir: "workspaces",
+    });
+    const memoryStore = new MemoryStore(workspaceManager, {
+      searchLimit: 10,
+      maxChars: 2000,
+    });
+    const skillRegistry = new SkillRegistry(memoryStore);
+
+    const mockWorkspace = {
+      key: "test/123",
+      components: {
+        platform: "discord" as const,
+        userId: "123",
+      },
+      path: tempDir,
+      tmpPath: tempDir + "/tmp",
+      isDm: false,
+    };
+
+    const mockAdapter = {
+      sendReply: () => Promise.resolve({ success: true, messageId: "original_msg" }),
+      editMessage: () => Promise.resolve({ success: true, messageId: "edited_msg_new" }),
+      // deno-lint-ignore no-explicit-any
+    } as any;
+
+    const sessionId = sessionRegistry.register({
+      platform: "discord",
+      channelId: "456",
+      userId: "123",
+      isDm: false,
+      workspace: mockWorkspace,
+      platformAdapter: mockAdapter,
+      triggerEvent: {
+        platform: "discord",
+        channelId: "456",
+        userId: "123",
+        messageId: "msg_trigger",
+        isDm: false,
+        guildId: "",
+        content: "",
+        timestamp: new Date(),
+      },
+      timeoutMs: 60000,
+    });
+
+    const port = 3017;
+    const server = new SkillAPIServer(sessionRegistry, skillRegistry, {
+      port,
+      host: "127.0.0.1",
+    });
+
+    server.start();
+    await waitForServer(port);
+
+    // First send a reply
+    const sendResponse = await fetch(`http://localhost:${port}/api/skill/send-reply`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        sessionId,
+        parameters: { message: "Original" },
+      }),
+    });
+    await sendResponse.json();
+    assertEquals(sessionRegistry.getLastSentMessageId(sessionId), "original_msg");
+
+    // Now edit the reply
+    const editResponse = await fetch(`http://localhost:${port}/api/skill/edit-reply`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        sessionId,
+        parameters: { messageId: "original_msg", message: "Edited" },
+      }),
+    });
+
+    assertEquals(editResponse.status, 200);
+    const editBody = await editResponse.json();
+    assertEquals(editBody.success, true);
+
+    // Verify lastSentMessageId was updated to the new ID from edit
+    assertEquals(sessionRegistry.getLastSentMessageId(sessionId), "edited_msg_new");
+
+    await server.stop();
+    sessionRegistry.stop();
+  } finally {
+    await Deno.remove(tempDir, { recursive: true });
+  }
+});
+
+Deno.test("SkillAPIServer - get-message skill via API", async () => {
+  const tempDir = await Deno.makeTempDir();
+  try {
+    const sessionRegistry = new SessionRegistry();
+    const workspaceManager = new WorkspaceManager({
+      repoPath: tempDir,
+      workspacesDir: "workspaces",
+    });
+    const memoryStore = new MemoryStore(workspaceManager, {
+      searchLimit: 10,
+      maxChars: 2000,
+    });
+    const skillRegistry = new SkillRegistry(memoryStore);
+
+    const mockWorkspace = {
+      key: "test/123",
+      components: {
+        platform: "discord" as const,
+        userId: "123",
+      },
+      path: tempDir,
+      tmpPath: tempDir + "/tmp",
+      isDm: false,
+    };
+
+    const mockAdapter = {
+      fetchMessage: () =>
+        Promise.resolve({
+          messageId: "fetched_msg",
+          userId: "user_abc",
+          username: "SomeUser",
+          content: "Hello from platform",
+          timestamp: new Date("2024-07-01T10:00:00Z"),
+          isBot: false,
+        }),
+      // deno-lint-ignore no-explicit-any
+    } as any;
+
+    const sessionId = sessionRegistry.register({
+      platform: "discord",
+      channelId: "456",
+      userId: "123",
+      isDm: false,
+      workspace: mockWorkspace,
+      platformAdapter: mockAdapter,
+      triggerEvent: {
+        platform: "discord",
+        channelId: "456",
+        userId: "123",
+        messageId: "msg_trigger",
+        isDm: false,
+        guildId: "",
+        content: "",
+        timestamp: new Date(),
+      },
+      timeoutMs: 60000,
+    });
+
+    const port = 3018;
+    const server = new SkillAPIServer(sessionRegistry, skillRegistry, {
+      port,
+      host: "127.0.0.1",
+    });
+
+    server.start();
+    await waitForServer(port);
+
+    const response = await fetch(`http://localhost:${port}/api/skill/get-message`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        sessionId,
+        parameters: { messageId: "fetched_msg" },
+      }),
+    });
+
+    assertEquals(response.status, 200);
+    const body = await response.json();
+    assertEquals(body.success, true);
+    assertEquals(body.data.messageId, "fetched_msg");
+    assertEquals(body.data.userId, "user_abc");
+    assertEquals(body.data.content, "Hello from platform");
+
+    await server.stop();
+    sessionRegistry.stop();
+  } finally {
+    await Deno.remove(tempDir, { recursive: true });
+  }
+});
+
+Deno.test("SkillAPIServer - get-message uses lastSentMessageId from session", async () => {
+  const tempDir = await Deno.makeTempDir();
+  try {
+    const sessionRegistry = new SessionRegistry();
+    const workspaceManager = new WorkspaceManager({
+      repoPath: tempDir,
+      workspacesDir: "workspaces",
+    });
+    const memoryStore = new MemoryStore(workspaceManager, {
+      searchLimit: 10,
+      maxChars: 2000,
+    });
+    const skillRegistry = new SkillRegistry(memoryStore);
+
+    const mockWorkspace = {
+      key: "test/123",
+      components: {
+        platform: "discord" as const,
+        userId: "123",
+      },
+      path: tempDir,
+      tmpPath: tempDir + "/tmp",
+      isDm: false,
+    };
+
+    let capturedMessageId = "";
+    const mockAdapter = {
+      sendReply: () => Promise.resolve({ success: true, messageId: "sent_for_get" }),
+      fetchMessage: (_channelId: string, messageId: string) => {
+        capturedMessageId = messageId;
+        return Promise.resolve({
+          messageId,
+          userId: "bot_user",
+          username: "Bot",
+          content: "Bot's message",
+          timestamp: new Date("2024-07-01T12:00:00Z"),
+          isBot: true,
+        });
+      },
+      // deno-lint-ignore no-explicit-any
+    } as any;
+
+    const sessionId = sessionRegistry.register({
+      platform: "discord",
+      channelId: "456",
+      userId: "123",
+      isDm: false,
+      workspace: mockWorkspace,
+      platformAdapter: mockAdapter,
+      triggerEvent: {
+        platform: "discord",
+        channelId: "456",
+        userId: "123",
+        messageId: "msg_trigger",
+        isDm: false,
+        guildId: "",
+        content: "",
+        timestamp: new Date(),
+      },
+      timeoutMs: 60000,
+    });
+
+    const port = 3019;
+    const server = new SkillAPIServer(sessionRegistry, skillRegistry, {
+      port,
+      host: "127.0.0.1",
+    });
+
+    server.start();
+    await waitForServer(port);
+
+    // First send a reply to set lastSentMessageId
+    const sendResponse = await fetch(`http://localhost:${port}/api/skill/send-reply`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        sessionId,
+        parameters: { message: "Hello!" },
+      }),
+    });
+    await sendResponse.json();
+
+    // Now call get-message without messageId — should use lastSentMessageId
+    const getResponse = await fetch(`http://localhost:${port}/api/skill/get-message`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        sessionId,
+        parameters: {},
+      }),
+    });
+
+    assertEquals(getResponse.status, 200);
+    const body = await getResponse.json();
+    assertEquals(body.success, true);
+    assertEquals(capturedMessageId, "sent_for_get");
+
+    await server.stop();
+    sessionRegistry.stop();
+  } finally {
+    await Deno.remove(tempDir, { recursive: true });
+  }
+});
