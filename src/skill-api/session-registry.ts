@@ -38,6 +38,8 @@ export interface ActiveSession {
   replySent: boolean;
   /** Number of replies sent in this session */
   replyCount: number;
+  /** Number of edit-reply calls in this session */
+  editCount: number;
   /** Agent's global workspace path */
   agentWorkspacePath?: string;
   /** Audit writer for this session (null if audit disabled) */
@@ -72,7 +74,9 @@ export class SessionRegistry {
   /**
    * Register a new session
    */
-  register(session: Omit<ActiveSession, "id" | "startedAt" | "replySent" | "replyCount">): string {
+  register(
+    session: Omit<ActiveSession, "id" | "startedAt" | "replySent" | "replyCount" | "editCount">,
+  ): string {
     const id = this.generateSessionId();
     const activeSession: ActiveSession = {
       ...session,
@@ -80,6 +84,7 @@ export class SessionRegistry {
       startedAt: new Date(),
       replySent: false,
       replyCount: 0,
+      editCount: 0,
     };
 
     this.sessions.set(id, activeSession);
@@ -163,6 +168,31 @@ export class SessionRegistry {
   getReplyCount(sessionId: string): number {
     const session = this.sessions.get(sessionId);
     return session?.replyCount ?? 0;
+  }
+
+  /**
+   * Increment the edit count for a session.
+   * Returns the new count, or -1 if session not found.
+   */
+  incrementEditCount(sessionId: string): number {
+    const session = this.sessions.get(sessionId);
+    if (!session) return -1;
+
+    session.editCount += 1;
+    logger.debug("Edit count incremented to {editCount} for session {sessionId}", {
+      sessionId,
+      editCount: session.editCount,
+    });
+    return session.editCount;
+  }
+
+  /**
+   * Get the current edit count for a session.
+   * Returns 0 if session not found.
+   */
+  getEditCount(sessionId: string): number {
+    const session = this.sessions.get(sessionId);
+    return session?.editCount ?? 0;
   }
 
   /**

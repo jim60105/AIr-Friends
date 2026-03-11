@@ -1340,3 +1340,440 @@ Deno.test("SkillAPIServer - get-message uses lastSentMessageId from session", as
     await Deno.remove(tempDir, { recursive: true });
   }
 });
+
+Deno.test("SkillAPIServer - edit-reply succeeds for first 2 calls", async () => {
+  const tempDir = await Deno.makeTempDir();
+  try {
+    const sessionRegistry = new SessionRegistry();
+    const workspaceManager = new WorkspaceManager({
+      repoPath: tempDir,
+      workspacesDir: "workspaces",
+    });
+    const memoryStore = new MemoryStore(workspaceManager, {
+      searchLimit: 10,
+      maxChars: 2000,
+    });
+    const skillRegistry = new SkillRegistry(memoryStore);
+
+    const mockWorkspace = {
+      key: "test/123",
+      components: {
+        platform: "discord" as const,
+        userId: "123",
+      },
+      path: tempDir,
+      tmpPath: tempDir + "/tmp",
+      isDm: false,
+    };
+
+    const mockAdapter = {
+      sendReply: () => Promise.resolve({ success: true, messageId: "sent_msg_001" }),
+      editMessage: () => Promise.resolve({ success: true, messageId: "edited_msg_001" }),
+      // deno-lint-ignore no-explicit-any
+    } as any;
+
+    const sessionId = sessionRegistry.register({
+      platform: "discord",
+      channelId: "456",
+      userId: "123",
+      isDm: false,
+      workspace: mockWorkspace,
+      platformAdapter: mockAdapter,
+      triggerEvent: {
+        platform: "discord",
+        channelId: "456",
+        userId: "123",
+        messageId: "msg_trigger",
+        isDm: false,
+        guildId: "",
+        content: "",
+        timestamp: new Date(),
+      },
+      timeoutMs: 60000,
+    });
+
+    const port = 3020;
+    const server = new SkillAPIServer(sessionRegistry, skillRegistry, {
+      port,
+      host: "127.0.0.1",
+    });
+
+    server.start();
+    await waitForServer(port);
+
+    // Send initial reply to get a messageId
+    const sendResponse = await fetch(`http://localhost:${port}/api/skill/send-reply`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        sessionId,
+        parameters: { message: "Initial message" },
+      }),
+    });
+    await sendResponse.json();
+
+    // First edit — should succeed (editCount: 0 → 1)
+    const editResponse1 = await fetch(`http://localhost:${port}/api/skill/edit-reply`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        sessionId,
+        parameters: { messageId: "sent_msg_001", message: "First edit" },
+      }),
+    });
+    assertEquals(editResponse1.status, 200);
+    const editBody1 = await editResponse1.json();
+    assertEquals(editBody1.success, true);
+    assertEquals(sessionRegistry.getEditCount(sessionId), 1);
+
+    // Second edit — should succeed (editCount: 1 → 2)
+    const editResponse2 = await fetch(`http://localhost:${port}/api/skill/edit-reply`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        sessionId,
+        parameters: { messageId: "edited_msg_001", message: "Second edit" },
+      }),
+    });
+    assertEquals(editResponse2.status, 200);
+    const editBody2 = await editResponse2.json();
+    assertEquals(editBody2.success, true);
+    assertEquals(sessionRegistry.getEditCount(sessionId), 2);
+
+    await server.stop();
+    sessionRegistry.stop();
+  } finally {
+    await Deno.remove(tempDir, { recursive: true });
+  }
+});
+
+Deno.test("SkillAPIServer - edit-reply rejected on 3rd call and triggers termination", async () => {
+  const tempDir = await Deno.makeTempDir();
+  try {
+    const sessionRegistry = new SessionRegistry();
+    const workspaceManager = new WorkspaceManager({
+      repoPath: tempDir,
+      workspacesDir: "workspaces",
+    });
+    const memoryStore = new MemoryStore(workspaceManager, {
+      searchLimit: 10,
+      maxChars: 2000,
+    });
+    const skillRegistry = new SkillRegistry(memoryStore);
+
+    const mockWorkspace = {
+      key: "test/123",
+      components: {
+        platform: "discord" as const,
+        userId: "123",
+      },
+      path: tempDir,
+      tmpPath: tempDir + "/tmp",
+      isDm: false,
+    };
+
+    const mockAdapter = {
+      sendReply: () => Promise.resolve({ success: true, messageId: "sent_msg_001" }),
+      editMessage: () => Promise.resolve({ success: true, messageId: "edited_msg_001" }),
+      // deno-lint-ignore no-explicit-any
+    } as any;
+
+    const sessionId = sessionRegistry.register({
+      platform: "discord",
+      channelId: "456",
+      userId: "123",
+      isDm: false,
+      workspace: mockWorkspace,
+      platformAdapter: mockAdapter,
+      triggerEvent: {
+        platform: "discord",
+        channelId: "456",
+        userId: "123",
+        messageId: "msg_trigger",
+        isDm: false,
+        guildId: "",
+        content: "",
+        timestamp: new Date(),
+      },
+      timeoutMs: 60000,
+    });
+
+    let terminateCalled = false;
+    sessionRegistry.setTerminateCallback(sessionId, () => {
+      terminateCalled = true;
+      return Promise.resolve();
+    });
+
+    const port = 3021;
+    const server = new SkillAPIServer(sessionRegistry, skillRegistry, {
+      port,
+      host: "127.0.0.1",
+    });
+
+    server.start();
+    await waitForServer(port);
+
+    // Send initial reply
+    await fetch(`http://localhost:${port}/api/skill/send-reply`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        sessionId,
+        parameters: { message: "Initial message" },
+      }),
+    }).then((r) => r.json());
+
+    // Edit 1 — succeeds (editCount: 0 → 1)
+    await fetch(`http://localhost:${port}/api/skill/edit-reply`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        sessionId,
+        parameters: { messageId: "sent_msg_001", message: "First edit" },
+      }),
+    }).then((r) => r.json());
+
+    // Edit 2 — succeeds (editCount: 1 → 2)
+    await fetch(`http://localhost:${port}/api/skill/edit-reply`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        sessionId,
+        parameters: { messageId: "edited_msg_001", message: "Second edit" },
+      }),
+    }).then((r) => r.json());
+
+    assertEquals(sessionRegistry.getEditCount(sessionId), 2);
+
+    // Edit 3 — should be rejected (editCount=2 >= 3) and trigger termination
+    const editResponse3 = await fetch(`http://localhost:${port}/api/skill/edit-reply`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        sessionId,
+        parameters: { messageId: "edited_msg_001", message: "Third edit" },
+      }),
+    });
+    assertEquals(editResponse3.status, 429);
+    const editBody3 = await editResponse3.json();
+    assertEquals(editBody3.success, false);
+    assertEquals(editBody3.error?.includes("Edit limit reached"), true);
+
+    // editCount should NOT increment on rejected call (rejection happens before execution)
+    assertEquals(sessionRegistry.getEditCount(sessionId), 2);
+
+    // Wait for setTimeout(100ms) to fire
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    assertEquals(terminateCalled, true);
+
+    await server.stop();
+    sessionRegistry.stop();
+  } finally {
+    await Deno.remove(tempDir, { recursive: true });
+  }
+});
+
+Deno.test("SkillAPIServer - edit-reply no crash when onTerminateRequest not set", async () => {
+  const tempDir = await Deno.makeTempDir();
+  try {
+    const sessionRegistry = new SessionRegistry();
+    const workspaceManager = new WorkspaceManager({
+      repoPath: tempDir,
+      workspacesDir: "workspaces",
+    });
+    const memoryStore = new MemoryStore(workspaceManager, {
+      searchLimit: 10,
+      maxChars: 2000,
+    });
+    const skillRegistry = new SkillRegistry(memoryStore);
+
+    const mockWorkspace = {
+      key: "test/123",
+      components: {
+        platform: "discord" as const,
+        userId: "123",
+      },
+      path: tempDir,
+      tmpPath: tempDir + "/tmp",
+      isDm: false,
+    };
+
+    const mockAdapter = {
+      sendReply: () => Promise.resolve({ success: true, messageId: "sent_msg_001" }),
+      editMessage: () => Promise.resolve({ success: true, messageId: "edited_msg_001" }),
+      // deno-lint-ignore no-explicit-any
+    } as any;
+
+    const sessionId = sessionRegistry.register({
+      platform: "discord",
+      channelId: "456",
+      userId: "123",
+      isDm: false,
+      workspace: mockWorkspace,
+      platformAdapter: mockAdapter,
+      triggerEvent: {
+        platform: "discord",
+        channelId: "456",
+        userId: "123",
+        messageId: "msg_trigger",
+        isDm: false,
+        guildId: "",
+        content: "",
+        timestamp: new Date(),
+      },
+      timeoutMs: 60000,
+    });
+
+    // Do NOT set onTerminateRequest
+
+    const port = 3022;
+    const server = new SkillAPIServer(sessionRegistry, skillRegistry, {
+      port,
+      host: "127.0.0.1",
+    });
+
+    server.start();
+    await waitForServer(port);
+
+    // Send initial reply
+    await fetch(`http://localhost:${port}/api/skill/send-reply`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        sessionId,
+        parameters: { message: "Initial message" },
+      }),
+    }).then((r) => r.json());
+
+    // Execute 2 successful edits to bring editCount to 2
+    for (let i = 1; i <= 2; i++) {
+      await fetch(`http://localhost:${port}/api/skill/edit-reply`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          sessionId,
+          parameters: { messageId: "sent_msg_001", message: `Edit ${i}` },
+        }),
+      }).then((r) => r.json());
+    }
+
+    // 3rd edit should be rejected but not crash (no termination callback)
+    const editResponse3 = await fetch(`http://localhost:${port}/api/skill/edit-reply`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        sessionId,
+        parameters: { messageId: "edited_msg_001", message: "Third edit" },
+      }),
+    });
+    assertEquals(editResponse3.status, 429);
+    const editBody3 = await editResponse3.json();
+    assertEquals(editBody3.success, false);
+
+    // Wait for setTimeout to fire (should be no-op)
+    await new Promise((resolve) => setTimeout(resolve, 200));
+
+    // No crash — test passes
+    assertEquals(sessionRegistry.getEditCount(sessionId), 2);
+
+    await server.stop();
+    sessionRegistry.stop();
+  } finally {
+    await Deno.remove(tempDir, { recursive: true });
+  }
+});
+
+Deno.test("SkillAPIServer - edit-reply count independent from reply count", async () => {
+  const tempDir = await Deno.makeTempDir();
+  try {
+    const sessionRegistry = new SessionRegistry();
+    const workspaceManager = new WorkspaceManager({
+      repoPath: tempDir,
+      workspacesDir: "workspaces",
+    });
+    const memoryStore = new MemoryStore(workspaceManager, {
+      searchLimit: 10,
+      maxChars: 2000,
+    });
+    const skillRegistry = new SkillRegistry(memoryStore);
+
+    const mockWorkspace = {
+      key: "test/123",
+      components: {
+        platform: "discord" as const,
+        userId: "123",
+      },
+      path: tempDir,
+      tmpPath: tempDir + "/tmp",
+      isDm: false,
+    };
+
+    const mockAdapter = {
+      sendReply: () => Promise.resolve({ success: true, messageId: "sent_msg_001" }),
+      editMessage: () => Promise.resolve({ success: true, messageId: "edited_msg_001" }),
+      // deno-lint-ignore no-explicit-any
+    } as any;
+
+    const sessionId = sessionRegistry.register({
+      platform: "discord",
+      channelId: "456",
+      userId: "123",
+      isDm: false,
+      workspace: mockWorkspace,
+      platformAdapter: mockAdapter,
+      triggerEvent: {
+        platform: "discord",
+        channelId: "456",
+        userId: "123",
+        messageId: "msg_trigger",
+        isDm: false,
+        guildId: "",
+        content: "",
+        timestamp: new Date(),
+      },
+      timeoutMs: 60000,
+    });
+
+    const port = 3023;
+    const server = new SkillAPIServer(sessionRegistry, skillRegistry, {
+      port,
+      host: "127.0.0.1",
+    });
+
+    server.start();
+    await waitForServer(port);
+
+    // Send 1 reply — replyCount=1, editCount=0
+    const sendResponse = await fetch(`http://localhost:${port}/api/skill/send-reply`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        sessionId,
+        parameters: { message: "Initial message" },
+      }),
+    });
+    assertEquals(sendResponse.status, 200);
+    await sendResponse.json();
+    assertEquals(sessionRegistry.getReplyCount(sessionId), 1);
+    assertEquals(sessionRegistry.getEditCount(sessionId), 0);
+
+    // Edit reply once — editCount=1, replyCount still 1
+    const editResponse = await fetch(`http://localhost:${port}/api/skill/edit-reply`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        sessionId,
+        parameters: { messageId: "sent_msg_001", message: "Edited" },
+      }),
+    });
+    assertEquals(editResponse.status, 200);
+    await editResponse.json();
+    assertEquals(sessionRegistry.getEditCount(sessionId), 1);
+    assertEquals(sessionRegistry.getReplyCount(sessionId), 1);
+
+    await server.stop();
+    sessionRegistry.stop();
+  } finally {
+    await Deno.remove(tempDir, { recursive: true });
+  }
+});

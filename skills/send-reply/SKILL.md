@@ -30,3 +30,4 @@ ${HOME}/.agents/skills/send-reply/scripts/send-reply.ts \
 - Maximum **1 reply** per session. After sending the first reply, subsequent calls will be rejected.
 - If rejected, use `edit-reply` to modify the existing message instead.
 - Excessive retry attempts will cause the agent process to be terminated.
+- Ultrathink carefully and ensure you have all the text prepared before proceeding, as you may not get another chance.
