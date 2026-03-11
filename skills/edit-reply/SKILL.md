@@ -43,6 +43,7 @@ ${HOME}/.agents/skills/edit-reply/scripts/edit-reply.ts \
 
 ## Limits
 
-- Maximum **1 edit** per session. After editing the reply, subsequent calls will be rejected.
-- Excessive retry attempts will cause the agent process to be terminated.
-- Ultrathink and make sure you have all the text ready before executing this skill, as you won't get a second chance to edit the reply after the first attempt.
+- Maximum **2 successful edits** per session. The 3rd call will be rejected and the
+  agent process will be terminated.
+- Each successful edit includes a `nextAction` field instructing you to exit immediately.
+  Ignoring this instruction will result in process termination.

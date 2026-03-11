@@ -467,3 +467,110 @@ Deno.test("SessionRegistry - setTerminateCallback overwrites previous callback",
 
   registry.stop();
 });
+
+Deno.test("SessionRegistry - editCount initializes to 0", () => {
+  const registry = new SessionRegistry();
+
+  const mockWorkspace = {
+    key: "test/123",
+    components: { platform: "discord" as const, userId: "123" },
+    path: "/tmp/test",
+    tmpPath: "/tmp/test/tmp",
+    isDm: false,
+  };
+
+  const sessionId = registry.register({
+    platform: "discord",
+    channelId: "456",
+    userId: "123",
+    isDm: false,
+    workspace: mockWorkspace,
+    // deno-lint-ignore no-explicit-any
+    platformAdapter: {} as any,
+    // deno-lint-ignore no-explicit-any
+    triggerEvent: {} as any,
+    timeoutMs: 60000,
+  });
+
+  assertEquals(registry.getEditCount(sessionId), 0);
+  registry.stop();
+});
+
+Deno.test("SessionRegistry - incrementEditCount increments correctly", () => {
+  const registry = new SessionRegistry();
+
+  const mockWorkspace = {
+    key: "test/123",
+    components: { platform: "discord" as const, userId: "123" },
+    path: "/tmp/test",
+    tmpPath: "/tmp/test/tmp",
+    isDm: false,
+  };
+
+  const sessionId = registry.register({
+    platform: "discord",
+    channelId: "456",
+    userId: "123",
+    isDm: false,
+    workspace: mockWorkspace,
+    // deno-lint-ignore no-explicit-any
+    platformAdapter: {} as any,
+    // deno-lint-ignore no-explicit-any
+    triggerEvent: {} as any,
+    timeoutMs: 60000,
+  });
+
+  assertEquals(registry.incrementEditCount(sessionId), 1);
+  assertEquals(registry.incrementEditCount(sessionId), 2);
+  assertEquals(registry.incrementEditCount(sessionId), 3);
+  assertEquals(registry.getEditCount(sessionId), 3);
+  registry.stop();
+});
+
+Deno.test("SessionRegistry - incrementEditCount returns -1 for unknown session", () => {
+  const registry = new SessionRegistry();
+  assertEquals(registry.incrementEditCount("nonexistent"), -1);
+  registry.stop();
+});
+
+Deno.test("SessionRegistry - getEditCount returns 0 for unknown session", () => {
+  const registry = new SessionRegistry();
+  assertEquals(registry.getEditCount("nonexistent"), 0);
+  registry.stop();
+});
+
+Deno.test("SessionRegistry - editCount and replyCount are independent", () => {
+  const registry = new SessionRegistry();
+
+  const mockWorkspace = {
+    key: "test/123",
+    components: { platform: "discord" as const, userId: "123" },
+    path: "/tmp/test",
+    tmpPath: "/tmp/test/tmp",
+    isDm: false,
+  };
+
+  const sessionId = registry.register({
+    platform: "discord",
+    channelId: "456",
+    userId: "123",
+    isDm: false,
+    workspace: mockWorkspace,
+    // deno-lint-ignore no-explicit-any
+    platformAdapter: {} as any,
+    // deno-lint-ignore no-explicit-any
+    triggerEvent: {} as any,
+    timeoutMs: 60000,
+  });
+
+  registry.incrementReplyCount(sessionId);
+  registry.incrementReplyCount(sessionId);
+  assertEquals(registry.getReplyCount(sessionId), 2);
+  assertEquals(registry.getEditCount(sessionId), 0);
+
+  registry.incrementEditCount(sessionId);
+  assertEquals(registry.getEditCount(sessionId), 1);
+  assertEquals(registry.getReplyCount(sessionId), 2);
+
+  registry.stop();
+});

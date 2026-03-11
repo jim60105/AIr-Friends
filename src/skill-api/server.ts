@@ -13,6 +13,7 @@ const logger = createLogger("SkillAPIServer");
 /** Maximum number of send-reply calls allowed per session */
 const MAX_REPLIES_PER_SESSION = 1;
 const MAX_REPLY_ATTEMPTS_BEFORE_TERMINATE = 4;
+const MAX_EDIT_CALLS_BEFORE_TERMINATE = 3;
 
 export interface SkillAPIConfig {
   port: number;
@@ -313,6 +314,42 @@ export class SkillAPIServer {
       }
     }
 
+    // Edit-reply count limiting and doom-loop protection
+    if (skillName === "edit-reply") {
+      const currentEditCount = this.sessionRegistry.getEditCount(body.sessionId);
+
+      if (currentEditCount + 1 >= MAX_EDIT_CALLS_BEFORE_TERMINATE) {
+        logger.error(
+          "Doom-loop detected: edit-reply calls {editCount} reached threshold {threshold}, terminating agent",
+          {
+            sessionId: body.sessionId,
+            editCount: currentEditCount + 1,
+            threshold: MAX_EDIT_CALLS_BEFORE_TERMINATE,
+          },
+        );
+
+        // Schedule termination after response is sent
+        const session = this.sessionRegistry.get(body.sessionId);
+        if (session?.onTerminateRequest) {
+          setTimeout(() => {
+            session.onTerminateRequest!().catch((err: unknown) => {
+              logger.error("Failed to terminate agent process", {
+                error: err instanceof Error ? err.message : String(err),
+              });
+            });
+          }, 100);
+        }
+
+        return {
+          success: false,
+          error:
+            `Edit limit reached (${currentEditCount + 1}/${MAX_EDIT_CALLS_BEFORE_TERMINATE}). ` +
+            "Agent process will be terminated.",
+          statusCode: 429,
+        };
+      }
+    }
+
     // Build skill context
     const skillContext: SkillContext = {
       workspace: session.workspace,
@@ -385,6 +422,11 @@ export class SkillAPIServer {
           (result.data as Record<string, unknown>).messageId as string,
         );
       }
+    }
+
+    // Increment edit count on successful edit-reply
+    if (skillName === "edit-reply" && result.success) {
+      this.sessionRegistry.incrementEditCount(body.sessionId);
     }
 
     // Audit: reply_sent (when send-reply succeeds)
