@@ -34,6 +34,7 @@ const createMockPlatformAdapter = (
       Promise.resolve(editMessageResult ?? { success: true, messageId: "msg_123" }),
     fetchRecentMessages: () => Promise.resolve([]),
     getUsername: (userId: string) => Promise.resolve(`user_${userId}`),
+    fetchMessage: () => Promise.resolve(null),
     isSelf: () => false,
   } as unknown as PlatformAdapter;
 };
@@ -681,6 +682,247 @@ Deno.test("ReplyHandler - handleEditReply strips XML tags from message", async (
 
   assertEquals(result.success, true);
   assertEquals(capturedContent, "edited 🎉");
+});
+
+Deno.test("ReplyHandler - handleEditReply skips edit when content is unchanged", async () => {
+  const handler = new ReplyHandler();
+
+  const workspace: WorkspaceInfo = {
+    key: "discord/cmp1",
+    components: { platform: "discord", userId: "cmp1" },
+    path: "/tmp/workspaces/discord/cmp1",
+    tmpPath: "/tmp/workspaces/discord/cmp1/tmp",
+    isDm: true,
+  };
+
+  const adapter = createMockPlatformAdapter({ success: true, messageId: "msg_cmp1" });
+  (adapter as unknown as { fetchMessage: PlatformAdapter["fetchMessage"] }).fetchMessage = () =>
+    Promise.resolve({
+      messageId: "msg_cmp1",
+      userId: "user1",
+      username: "TestUser",
+      content: "Same content",
+      timestamp: new Date(),
+      isBot: false,
+    });
+
+  const context: SkillContext = {
+    workspace,
+    platformAdapter: adapter,
+    channelId: "ch_cmp1",
+    userId: "cmp1",
+  };
+
+  await handler.handleSendReply({ message: "First reply" }, context);
+
+  const result = await handler.handleEditReply(
+    { messageId: "msg_cmp1", message: "Same content" },
+    context,
+  );
+
+  assertEquals(result.success, false);
+  assertEquals(
+    result.error,
+    "The edit content is the same as the current message content. No changes were made.",
+  );
+});
+
+Deno.test("ReplyHandler - handleEditReply proceeds when content is different", async () => {
+  const handler = new ReplyHandler();
+
+  const workspace: WorkspaceInfo = {
+    key: "discord/cmp2",
+    components: { platform: "discord", userId: "cmp2" },
+    path: "/tmp/workspaces/discord/cmp2",
+    tmpPath: "/tmp/workspaces/discord/cmp2/tmp",
+    isDm: true,
+  };
+
+  const adapter = createMockPlatformAdapter(
+    { success: true, messageId: "msg_cmp2" },
+    { success: true, messageId: "msg_cmp2" },
+  );
+  (adapter as unknown as { fetchMessage: PlatformAdapter["fetchMessage"] }).fetchMessage = () =>
+    Promise.resolve({
+      messageId: "msg_cmp2",
+      userId: "user1",
+      username: "TestUser",
+      content: "Old content",
+      timestamp: new Date(),
+      isBot: false,
+    });
+
+  const context: SkillContext = {
+    workspace,
+    platformAdapter: adapter,
+    channelId: "ch_cmp2",
+    userId: "cmp2",
+  };
+
+  await handler.handleSendReply({ message: "First reply" }, context);
+
+  const result = await handler.handleEditReply(
+    { messageId: "msg_cmp2", message: "New content" },
+    context,
+  );
+
+  assertEquals(result.success, true);
+  assertEquals((result.data as Record<string, unknown>).messageId, "msg_cmp2");
+});
+
+Deno.test("ReplyHandler - handleEditReply proceeds when fetchMessage returns null", async () => {
+  const handler = new ReplyHandler();
+
+  const workspace: WorkspaceInfo = {
+    key: "discord/cmp3",
+    components: { platform: "discord", userId: "cmp3" },
+    path: "/tmp/workspaces/discord/cmp3",
+    tmpPath: "/tmp/workspaces/discord/cmp3/tmp",
+    isDm: true,
+  };
+
+  const adapter = createMockPlatformAdapter(
+    { success: true, messageId: "msg_cmp3" },
+    { success: true, messageId: "msg_cmp3" },
+  );
+  (adapter as unknown as { fetchMessage: PlatformAdapter["fetchMessage"] }).fetchMessage = () =>
+    Promise.resolve(null);
+
+  const context: SkillContext = {
+    workspace,
+    platformAdapter: adapter,
+    channelId: "ch_cmp3",
+    userId: "cmp3",
+  };
+
+  await handler.handleSendReply({ message: "First reply" }, context);
+
+  const result = await handler.handleEditReply(
+    { messageId: "msg_cmp3", message: "Updated content" },
+    context,
+  );
+
+  assertEquals(result.success, true);
+});
+
+Deno.test("ReplyHandler - handleEditReply proceeds when fetchMessage throws", async () => {
+  const handler = new ReplyHandler();
+
+  const workspace: WorkspaceInfo = {
+    key: "discord/cmp4",
+    components: { platform: "discord", userId: "cmp4" },
+    path: "/tmp/workspaces/discord/cmp4",
+    tmpPath: "/tmp/workspaces/discord/cmp4/tmp",
+    isDm: true,
+  };
+
+  const adapter = createMockPlatformAdapter(
+    { success: true, messageId: "msg_cmp4" },
+    { success: true, messageId: "msg_cmp4" },
+  );
+  (adapter as unknown as { fetchMessage: PlatformAdapter["fetchMessage"] }).fetchMessage = () => {
+    throw new Error("API error");
+  };
+
+  const context: SkillContext = {
+    workspace,
+    platformAdapter: adapter,
+    channelId: "ch_cmp4",
+    userId: "cmp4",
+  };
+
+  await handler.handleSendReply({ message: "First reply" }, context);
+
+  const result = await handler.handleEditReply(
+    { messageId: "msg_cmp4", message: "Updated content" },
+    context,
+  );
+
+  assertEquals(result.success, true);
+});
+
+Deno.test("ReplyHandler - handleEditReply compares content after XML strip and unescape", async () => {
+  const handler = new ReplyHandler();
+
+  const workspace: WorkspaceInfo = {
+    key: "discord/cmp5",
+    components: { platform: "discord", userId: "cmp5" },
+    path: "/tmp/workspaces/discord/cmp5",
+    tmpPath: "/tmp/workspaces/discord/cmp5/tmp",
+    isDm: true,
+  };
+
+  const adapter = createMockPlatformAdapter({ success: true, messageId: "msg_cmp5" });
+  // Current content is "hello\nworld" (real newline), new content is "hello\\nworld" (escaped)
+  // After unescapeNewlines they should be the same → skips edit
+  (adapter as unknown as { fetchMessage: PlatformAdapter["fetchMessage"] }).fetchMessage = () =>
+    Promise.resolve({
+      messageId: "msg_cmp5",
+      userId: "user1",
+      username: "TestUser",
+      content: "hello\nworld",
+      timestamp: new Date(),
+      isBot: false,
+    });
+
+  const context: SkillContext = {
+    workspace,
+    platformAdapter: adapter,
+    channelId: "ch_cmp5",
+    userId: "cmp5",
+  };
+
+  await handler.handleSendReply({ message: "First reply" }, context);
+
+  // "hello\\nworld" becomes "hello\nworld" after unescape — same as current
+  const result = await handler.handleEditReply(
+    { messageId: "msg_cmp5", message: "hello\\nworld" },
+    context,
+  );
+
+  assertEquals(result.success, false);
+  assertEquals(
+    result.error,
+    "The edit content is the same as the current message content. No changes were made.",
+  );
+});
+
+Deno.test("ReplyHandler - handleEditReply success response includes nextAction", async () => {
+  const handler = new ReplyHandler();
+
+  const workspace: WorkspaceInfo = {
+    key: "discord/cmp6",
+    components: { platform: "discord", userId: "cmp6" },
+    path: "/tmp/workspaces/discord/cmp6",
+    tmpPath: "/tmp/workspaces/discord/cmp6/tmp",
+    isDm: true,
+  };
+
+  const adapter = createMockPlatformAdapter(
+    { success: true, messageId: "msg_cmp6" },
+    { success: true, messageId: "msg_cmp6" },
+  );
+
+  const context: SkillContext = {
+    workspace,
+    platformAdapter: adapter,
+    channelId: "ch_cmp6",
+    userId: "cmp6",
+  };
+
+  await handler.handleSendReply({ message: "First reply" }, context);
+
+  const result = await handler.handleEditReply(
+    { messageId: "msg_cmp6", message: "Edited content" },
+    context,
+  );
+
+  assertEquals(result.success, true);
+  const data = result.data as Record<string, unknown>;
+  assertEquals(
+    data.nextAction,
+    "You have done your job. EXIT IMMEDIATELY or you will be terminated.",
+  );
 });
 
 // --- unescapeNewlines tests ---

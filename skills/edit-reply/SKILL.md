@@ -40,3 +40,9 @@ ${HOME}/.agents/skills/edit-reply/scripts/edit-reply.ts \
 
 - **Discord**: Uses native message edit API. The `messageId` remains the same after editing.
 - **Misskey**: Uses delete-and-recreate strategy (Misskey has no edit API). The returned `messageId` will be **different** from the original. Use the new `messageId` for subsequent edits.
+
+## Limits
+
+- Maximum **1 edit** per session. After editing the reply, subsequent calls will be rejected.
+- Excessive retry attempts will cause the agent process to be terminated.
+- Ultrathink and make sure you have all the text ready before executing this skill, as you won't get a second chance to edit the reply after the first attempt.
