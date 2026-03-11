@@ -246,6 +246,9 @@ export class SkillAPIServer {
       };
     }
 
+    // Refresh session activity timestamp to prevent timeout during long-running agents
+    this.sessionRegistry.touch(body.sessionId);
+
     // Check if skill exists
     if (!this.skillRegistry.hasSkill(skillName)) {
       return {

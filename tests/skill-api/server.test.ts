@@ -1777,3 +1777,85 @@ Deno.test("SkillAPIServer - edit-reply count independent from reply count", asyn
     await Deno.remove(tempDir, { recursive: true });
   }
 });
+
+Deno.test("SkillAPIServer - skill API call refreshes session timeout", async () => {
+  const tempDir = await Deno.makeTempDir();
+  try {
+    // Create workspace directory structure for memory-stats
+    await Deno.mkdir(`${tempDir}/workspaces/discord/123`, { recursive: true });
+
+    const sessionRegistry = new SessionRegistry();
+    const workspaceManager = new WorkspaceManager({
+      repoPath: tempDir,
+      workspacesDir: "workspaces",
+    });
+    const memoryStore = new MemoryStore(workspaceManager, {
+      searchLimit: 10,
+      maxChars: 2000,
+    });
+    const skillRegistry = new SkillRegistry(memoryStore);
+
+    const port = 3024;
+    const server = new SkillAPIServer(sessionRegistry, skillRegistry, {
+      port,
+      host: "127.0.0.1",
+    });
+
+    server.start();
+    await waitForServer(port);
+
+    // Register session with short timeout (500ms)
+    const sessionId = sessionRegistry.register({
+      platform: "discord",
+      channelId: "456",
+      userId: "123",
+      isDm: false,
+      workspace: {
+        key: "discord/123",
+        components: { platform: "discord" as const, userId: "123" },
+        path: `${tempDir}/workspaces/discord/123`,
+        tmpPath: `${tempDir}/workspaces/discord/123/tmp`,
+        isDm: false,
+      },
+      // deno-lint-ignore no-explicit-any
+      platformAdapter: { platform: "discord" } as any,
+      triggerEvent: {
+        platform: "discord",
+        channelId: "456",
+        userId: "123",
+        messageId: "789",
+        isDm: false,
+        guildId: "",
+        content: "test",
+        timestamp: new Date(),
+        // deno-lint-ignore no-explicit-any
+      } as any,
+      timeoutMs: 500,
+    });
+
+    // Wait 300ms (past half the original timeout)
+    await new Promise((r) => setTimeout(r, 300));
+
+    // Make a skill API call to refresh timeout
+    const response = await fetch(`http://localhost:${port}/api/skill/memory-stats`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ sessionId, parameters: {} }),
+    });
+    const result = await response.json();
+    assertEquals(result.success, true);
+
+    // Wait another 300ms (total 600ms from start, exceeds original 500ms timeout,
+    // but only 300ms from the touch via API call)
+    await new Promise((r) => setTimeout(r, 300));
+
+    // Session should still be valid because the API call refreshed the timeout
+    const session = sessionRegistry.get(sessionId);
+    assertExists(session);
+
+    await server.stop();
+    sessionRegistry.stop();
+  } finally {
+    await Deno.remove(tempDir, { recursive: true });
+  }
+});
