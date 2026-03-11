@@ -11,7 +11,8 @@ import { sanitizeSkillParams, sha256Hash } from "@utils/hash.ts";
 const logger = createLogger("SkillAPIServer");
 
 /** Maximum number of send-reply calls allowed per session */
-const MAX_REPLIES_PER_SESSION = 3;
+const MAX_REPLIES_PER_SESSION = 1;
+const MAX_REPLY_ATTEMPTS_BEFORE_TERMINATE = 4;
 
 export interface SkillAPIConfig {
   port: number;
@@ -257,14 +258,43 @@ export class SkillAPIServer {
     if (skillName === "send-reply") {
       const currentCount = this.sessionRegistry.getReplyCount(body.sessionId);
       if (currentCount >= MAX_REPLIES_PER_SESSION) {
+        // Still increment count even when rejecting (doom-loop tracking)
+        this.sessionRegistry.incrementReplyCount(body.sessionId);
+        const newCount = currentCount + 1;
+
         logger.warn(
           "Reply limit reached for session {sessionId} ({replyCount}/{maxReplies})",
           {
             sessionId: body.sessionId,
-            replyCount: currentCount,
+            replyCount: newCount,
             maxReplies: MAX_REPLIES_PER_SESSION,
           },
         );
+
+        // Check doom-loop threshold
+        if (newCount >= MAX_REPLY_ATTEMPTS_BEFORE_TERMINATE) {
+          logger.error(
+            "Doom-loop detected: reply attempts {replyCount} reached threshold {threshold}, terminating agent",
+            {
+              sessionId: body.sessionId,
+              replyCount: newCount,
+              threshold: MAX_REPLY_ATTEMPTS_BEFORE_TERMINATE,
+            },
+          );
+
+          // Schedule termination after response is sent
+          const session = this.sessionRegistry.get(body.sessionId);
+          if (session?.onTerminateRequest) {
+            setTimeout(() => {
+              session.onTerminateRequest!().catch((err: unknown) => {
+                logger.error("Failed to terminate agent process", {
+                  error: err instanceof Error ? err.message : String(err),
+                });
+              });
+            }, 100);
+          }
+        }
+
         return {
           success: false,
           error: `Reply limit reached (${MAX_REPLIES_PER_SESSION}/${MAX_REPLIES_PER_SESSION}). ` +

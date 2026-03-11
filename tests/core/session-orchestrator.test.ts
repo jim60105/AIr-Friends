@@ -2519,3 +2519,64 @@ Deno.test({
     }
   },
 });
+
+Deno.test({
+  name: "SessionOrchestrator - sets terminate callback that disconnects connector",
+  sanitizeResources: false,
+  sanitizeOps: false,
+  async fn() {
+    const tempDir = await Deno.makeTempDir();
+    try {
+      const { orchestrator, skillRegistry, workspaceManager, sessionRegistry } =
+        await createTestableOrchestrator(tempDir);
+
+      const event = createTestEvent();
+      const platformAdapter = new MockPlatformAdapter() as unknown as PlatformAdapter;
+      const replyHandler = skillRegistry.getReplyHandler();
+
+      // Track setTerminateCallback calls
+      let terminateCallbackSessionId: string | null = null;
+      let terminateCallback: (() => Promise<void>) | null = null;
+      const originalSetTerminateCallback = sessionRegistry.setTerminateCallback.bind(
+        sessionRegistry,
+      );
+      sessionRegistry.setTerminateCallback = (
+        sessionId: string,
+        callback: () => Promise<void>,
+      ) => {
+        terminateCallbackSessionId = sessionId;
+        terminateCallback = callback;
+        originalSetTerminateCallback(sessionId, callback);
+      };
+
+      orchestrator.setConnectorSetup((connector) => {
+        connector.promptResponses = [{ stopReason: "end_turn" } as PromptResponse];
+        connector.onPrompt = (callCount) => {
+          if (callCount === 1) {
+            const workspace = workspaceManager.getWorkspaceKeyFromEvent(event);
+            const key = `${workspace}:${event.channelId}`;
+            // deno-lint-ignore no-explicit-any
+            (replyHandler as any).replySentMap.set(key, true);
+          }
+        };
+      });
+
+      await orchestrator.processMessage(event, platformAdapter);
+
+      // Verify setTerminateCallback was called with a valid session ID
+      assertExists(terminateCallbackSessionId);
+      assertEquals((terminateCallbackSessionId as string).startsWith("sess_"), true);
+      assertExists(terminateCallback);
+
+      // Verify the callback calls connector.disconnect()
+      // Reset disconnected state (it was already set in the finally block)
+      orchestrator.mockConnector!.disconnected = false;
+      await (terminateCallback as () => Promise<void>)();
+      assertEquals(orchestrator.mockConnector!.disconnected, true);
+
+      sessionRegistry.stop();
+    } finally {
+      await Deno.remove(tempDir, { recursive: true });
+    }
+  },
+});

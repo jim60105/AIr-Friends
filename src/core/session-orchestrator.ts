@@ -444,6 +444,16 @@ export class SessionOrchestrator {
         idleTimeoutConfig: this.config.agent.idleTimeout,
       });
 
+      // Set doom-loop protection: terminate agent if reply attempts exceed threshold
+      if (shellSessionId) {
+        this.sessionRegistry.setTerminateCallback(shellSessionId, async () => {
+          sessionLogger.warn(
+            "Agent process termination requested by skill API (doom-loop detected)",
+          );
+          await connector.disconnect();
+        });
+      }
+
       // Start typing indicator if platform supports it
       let typingInterval: ReturnType<typeof setInterval> | undefined;
       if (platformAdapter.supportsTypingIndicator()) {
@@ -912,6 +922,16 @@ export class SessionOrchestrator {
         idleTimeoutConfig: this.config.agent.idleTimeout,
       });
 
+      // Set doom-loop protection: terminate agent if reply attempts exceed threshold
+      if (shellSessionId) {
+        this.sessionRegistry.setTerminateCallback(shellSessionId, async () => {
+          sessionLogger.warn(
+            "Agent process termination requested by skill API (doom-loop detected)",
+          );
+          await connector.disconnect();
+        });
+      }
+
       try {
         await connector.connect();
         sessionLogger.info("Agent connected");
@@ -1190,6 +1210,16 @@ export class SessionOrchestrator {
         idleTimeoutConfig: this.config.agent.idleTimeout,
       });
 
+      // Set doom-loop protection: terminate agent if reply attempts exceed threshold
+      if (shellSessionId) {
+        this.sessionRegistry.setTerminateCallback(shellSessionId, async () => {
+          sessionLogger.warn(
+            "Agent process termination requested by skill API (doom-loop detected)",
+          );
+          await connector.disconnect();
+        });
+      }
+
       try {
         await connector.connect();
         sessionLogger.info("Agent connected");
@@ -1433,6 +1463,16 @@ export class SessionOrchestrator {
         logger: sessionLogger,
         idleTimeoutConfig: this.config.agent.idleTimeout,
       });
+
+      // Set doom-loop protection: terminate agent if reply attempts exceed threshold
+      if (shellSessionId) {
+        this.sessionRegistry.setTerminateCallback(shellSessionId, async () => {
+          sessionLogger.warn(
+            "Agent process termination requested by skill API (doom-loop detected)",
+          );
+          await connector.disconnect();
+        });
+      }
 
       try {
         await connector.connect();
@@ -1710,6 +1750,16 @@ export class SessionOrchestrator {
         logger: sessionLogger,
         idleTimeoutConfig: this.config.agent.idleTimeout,
       });
+
+      // Set doom-loop protection: terminate agent if reply attempts exceed threshold
+      if (shellSessionId) {
+        this.sessionRegistry.setTerminateCallback(shellSessionId, async () => {
+          sessionLogger.warn(
+            "Agent process termination requested by skill API (doom-loop detected)",
+          );
+          await connector.disconnect();
+        });
+      }
 
       try {
         await connector.connect();

@@ -295,3 +295,96 @@ Deno.test("SessionRegistry - register session without triggerEvent", () => {
 
   registry.stop();
 });
+
+Deno.test("SessionRegistry - setTerminateCallback stores callback", async () => {
+  const registry = new SessionRegistry();
+
+  const mockWorkspace = {
+    key: "test/123",
+    components: { platform: "discord" as const, userId: "123" },
+    path: "/tmp/test",
+    tmpPath: "/tmp/test/tmp",
+    isDm: false,
+  };
+
+  const sessionId = registry.register({
+    platform: "discord",
+    channelId: "456",
+    userId: "123",
+    isDm: false,
+    workspace: mockWorkspace,
+    // deno-lint-ignore no-explicit-any
+    platformAdapter: {} as any,
+    // deno-lint-ignore no-explicit-any
+    triggerEvent: {} as any,
+    timeoutMs: 60000,
+  });
+
+  let called = false;
+  registry.setTerminateCallback(sessionId, () => {
+    called = true;
+    return Promise.resolve();
+  });
+
+  const session = registry.get(sessionId);
+  assertExists(session?.onTerminateRequest);
+
+  await session!.onTerminateRequest!();
+  assertEquals(called, true);
+
+  registry.stop();
+});
+
+Deno.test("SessionRegistry - setTerminateCallback ignores unknown session", () => {
+  const registry = new SessionRegistry();
+
+  // Should not throw
+  registry.setTerminateCallback("nonexistent", async () => {});
+
+  registry.stop();
+});
+
+Deno.test("SessionRegistry - setTerminateCallback overwrites previous callback", async () => {
+  const registry = new SessionRegistry();
+
+  const mockWorkspace = {
+    key: "test/123",
+    components: { platform: "discord" as const, userId: "123" },
+    path: "/tmp/test",
+    tmpPath: "/tmp/test/tmp",
+    isDm: false,
+  };
+
+  const sessionId = registry.register({
+    platform: "discord",
+    channelId: "456",
+    userId: "123",
+    isDm: false,
+    workspace: mockWorkspace,
+    // deno-lint-ignore no-explicit-any
+    platformAdapter: {} as any,
+    // deno-lint-ignore no-explicit-any
+    triggerEvent: {} as any,
+    timeoutMs: 60000,
+  });
+
+  let firstCalled = false;
+  let secondCalled = false;
+
+  registry.setTerminateCallback(sessionId, () => {
+    firstCalled = true;
+    return Promise.resolve();
+  });
+  registry.setTerminateCallback(sessionId, () => {
+    secondCalled = true;
+    return Promise.resolve();
+  });
+
+  const session = registry.get(sessionId);
+  await session!.onTerminateRequest!();
+
+  assertEquals(firstCalled, false);
+  assertEquals(secondCalled, true);
+
+  registry.stop();
+});

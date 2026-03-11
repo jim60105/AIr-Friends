@@ -24,3 +24,9 @@ ${HOME}/.agents/skills/send-reply/scripts/send-reply.ts \
   --session-id "$SESSION_ID" \
   --message "Your reply message here"
 ```
+
+## Limits
+
+- Maximum **1 reply** per session. After sending the first reply, subsequent calls will be rejected.
+- If rejected, use `edit-reply` to modify the existing message instead.
+- Excessive retry attempts (4+) will cause the agent process to be terminated.
