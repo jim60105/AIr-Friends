@@ -42,6 +42,8 @@ export interface ActiveSession {
   agentWorkspacePath?: string;
   /** Audit writer for this session (null if audit disabled) */
   auditWriter?: SessionAuditWriter;
+  /** Callback to request agent process termination (doom-loop protection) */
+  onTerminateRequest?: () => Promise<void>;
 }
 
 /**
@@ -176,6 +178,17 @@ export class SessionRegistry {
     const session = this.sessions.get(sessionId);
     if (session) {
       session.auditWriter = writer;
+    }
+  }
+
+  /**
+   * Set a callback to terminate the agent process for a given session.
+   * Called by SessionOrchestrator after creating the connector.
+   */
+  setTerminateCallback(sessionId: string, callback: () => Promise<void>): void {
+    const session = this.sessions.get(sessionId);
+    if (session) {
+      session.onTerminateRequest = callback;
     }
   }
 
