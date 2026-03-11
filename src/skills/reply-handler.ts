@@ -219,6 +219,33 @@ export class ReplyHandler {
       // Convert literal \n to actual newline characters
       const formattedMessage = unescapeNewlines(cleanedMessage);
 
+      // Fetch current message content and compare before editing
+      try {
+        const currentMessage = await context.platformAdapter.fetchMessage(
+          context.channelId,
+          params.messageId,
+        );
+
+        if (currentMessage && currentMessage.content === formattedMessage) {
+          logger.info(
+            "Edit-reply skipped: content unchanged for message {messageId}",
+            {
+              workspaceKey: context.workspace.key,
+              channelId: context.channelId,
+              messageId: params.messageId,
+            },
+          );
+
+          return {
+            success: false,
+            error:
+              "The edit content is the same as the current message content. No changes were made.",
+          };
+        }
+      } catch {
+        // fetchMessage failure should not block editing — proceed with the edit
+      }
+
       // Edit message via platform adapter
       const result = await context.platformAdapter.editMessage(
         context.channelId,
@@ -253,6 +280,7 @@ export class ReplyHandler {
         data: {
           messageId: result.messageId,
           timestamp: new Date().toISOString(),
+          nextAction: "You have done your job. EXIT IMMEDIATELY or you will be terminated.",
         },
       };
     } catch (error) {

@@ -40,3 +40,33 @@ ${HOME}/.agents/skills/edit-reply/scripts/edit-reply.ts \
 
 - **Discord**: Uses native message edit API. The `messageId` remains the same after editing.
 - **Misskey**: Uses delete-and-recreate strategy (Misskey has no edit API). The returned `messageId` will be **different** from the original. Use the new `messageId` for subsequent edits.
+
+## Important Notes
+
+- **Content comparison**: Before editing, the skill checks if the new content is identical
+  to the current message. If they match, the edit is rejected with an error.
+- **Exit after edit**: On success, the response includes a `nextAction` field instructing
+  you to exit immediately. Continuing to call edit-reply after success may result in
+  process termination.
+
+## Response
+
+### Success
+```json
+{
+  "success": true,
+  "data": {
+    "messageId": "msg_123",
+    "timestamp": "2024-01-15T10:30:45.123Z",
+    "nextAction": "You have done your job. EXIT IMMEDIATELY or you will be terminated."
+  }
+}
+```
+
+### Failure (same content)
+```json
+{
+  "success": false,
+  "error": "The edit content is the same as the current message content. No changes were made."
+}
+```
