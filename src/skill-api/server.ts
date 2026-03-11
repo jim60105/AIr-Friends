@@ -321,6 +321,7 @@ export class SkillAPIServer {
       platformAdapter: session.platformAdapter,
       replyToMessageId: session.triggerEvent?.messageId,
       agentWorkspacePath: session.agentWorkspacePath,
+      lastSentMessageId: session.lastSentMessageId,
     };
 
     // Execute skill
@@ -366,6 +367,24 @@ export class SkillAPIServer {
     // Increment reply count on successful send-reply
     if (skillName === "send-reply" && result.success) {
       this.sessionRegistry.incrementReplyCount(body.sessionId);
+      // Track last sent message ID
+      if (result.data && typeof result.data === "object" && "messageId" in result.data) {
+        this.sessionRegistry.setLastSentMessageId(
+          body.sessionId,
+          (result.data as Record<string, unknown>).messageId as string,
+        );
+      }
+    }
+
+    // Track last sent message ID after successful edit-reply
+    // (Misskey returns new ID after delete-recreate)
+    if (skillName === "edit-reply" && result.success) {
+      if (result.data && typeof result.data === "object" && "messageId" in result.data) {
+        this.sessionRegistry.setLastSentMessageId(
+          body.sessionId,
+          (result.data as Record<string, unknown>).messageId as string,
+        );
+      }
     }
 
     // Audit: reply_sent (when send-reply succeeds)

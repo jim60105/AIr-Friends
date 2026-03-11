@@ -753,3 +753,73 @@ Deno.test({
     assertEquals(adapter.getSearchGuildId("channel123", true), "");
   },
 });
+
+// ============ DiscordAdapter.fetchMessage tests ============
+
+Deno.test({
+  name: "DiscordAdapter.fetchMessage - returns PlatformMessage on success",
+  sanitizeOps: false,
+  sanitizeResources: false,
+  fn: async () => {
+    const adapter = createMockDiscordAdapter();
+    const mockMessage = {
+      id: "msg_fetch_1",
+      channelId: "ch123",
+      content: "Fetched content",
+      createdAt: new Date("2024-07-01T10:00:00Z"),
+      author: {
+        id: "user123",
+        username: "TestUser",
+        displayName: "Test User",
+        bot: false,
+      },
+      attachments: new Map(),
+      stickers: new Map(),
+    };
+    const mockChannel = {
+      type: 0,
+      messages: {
+        fetch: () => Promise.resolve(mockMessage),
+      },
+    };
+    mockDiscordClient(adapter, mockChannel);
+
+    const result = await adapter.fetchMessage("ch123", "msg_fetch_1");
+    assertEquals(result !== null, true);
+    assertEquals(result!.messageId, "msg_fetch_1");
+    assertEquals(result!.content, "Fetched content");
+    assertEquals(result!.isBot, false);
+  },
+});
+
+Deno.test({
+  name: "DiscordAdapter.fetchMessage - returns null on channel not found",
+  sanitizeOps: false,
+  sanitizeResources: false,
+  fn: async () => {
+    const adapter = createMockDiscordAdapter();
+    mockDiscordClient(adapter, null);
+
+    const result = await adapter.fetchMessage("ch_bad", "msg123");
+    assertEquals(result, null);
+  },
+});
+
+Deno.test({
+  name: "DiscordAdapter.fetchMessage - returns null on fetch error",
+  sanitizeOps: false,
+  sanitizeResources: false,
+  fn: async () => {
+    const adapter = createMockDiscordAdapter();
+    const mockChannel = {
+      type: 0,
+      messages: {
+        fetch: () => Promise.reject(new Error("Unknown message")),
+      },
+    };
+    mockDiscordClient(adapter, mockChannel);
+
+    const result = await adapter.fetchMessage("ch123", "msg_nonexistent");
+    assertEquals(result, null);
+  },
+});

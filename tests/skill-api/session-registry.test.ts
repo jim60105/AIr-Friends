@@ -344,6 +344,85 @@ Deno.test("SessionRegistry - setTerminateCallback ignores unknown session", () =
   registry.stop();
 });
 
+Deno.test("SessionRegistry - setLastSentMessageId and getLastSentMessageId", () => {
+  const registry = new SessionRegistry();
+
+  const mockWorkspace = {
+    key: "test/123",
+    components: { platform: "discord" as const, userId: "123" },
+    path: "/tmp/test",
+    tmpPath: "/tmp/test/tmp",
+    isDm: false,
+  };
+
+  const sessionId = registry.register({
+    platform: "discord",
+    channelId: "456",
+    userId: "123",
+    isDm: false,
+    workspace: mockWorkspace,
+    // deno-lint-ignore no-explicit-any
+    platformAdapter: {} as any,
+    // deno-lint-ignore no-explicit-any
+    triggerEvent: {} as any,
+    timeoutMs: 60000,
+  });
+
+  registry.setLastSentMessageId(sessionId, "msg_abc");
+  assertEquals(registry.getLastSentMessageId(sessionId), "msg_abc");
+
+  // Overwrite with a new ID
+  registry.setLastSentMessageId(sessionId, "msg_def");
+  assertEquals(registry.getLastSentMessageId(sessionId), "msg_def");
+
+  registry.stop();
+});
+
+Deno.test("SessionRegistry - getLastSentMessageId returns undefined for non-existent session", () => {
+  const registry = new SessionRegistry();
+  assertEquals(registry.getLastSentMessageId("nonexistent"), undefined);
+  registry.stop();
+});
+
+Deno.test("SessionRegistry - getLastSentMessageId returns undefined when not set", () => {
+  const registry = new SessionRegistry();
+
+  const mockWorkspace = {
+    key: "test/123",
+    components: { platform: "discord" as const, userId: "123" },
+    path: "/tmp/test",
+    tmpPath: "/tmp/test/tmp",
+    isDm: false,
+  };
+
+  const sessionId = registry.register({
+    platform: "discord",
+    channelId: "456",
+    userId: "123",
+    isDm: false,
+    workspace: mockWorkspace,
+    // deno-lint-ignore no-explicit-any
+    platformAdapter: {} as any,
+    // deno-lint-ignore no-explicit-any
+    triggerEvent: {} as any,
+    timeoutMs: 60000,
+  });
+
+  assertEquals(registry.getLastSentMessageId(sessionId), undefined);
+
+  registry.stop();
+});
+
+Deno.test("SessionRegistry - setLastSentMessageId ignores unknown session", () => {
+  const registry = new SessionRegistry();
+
+  // Should not throw
+  registry.setLastSentMessageId("nonexistent", "msg_xyz");
+  assertEquals(registry.getLastSentMessageId("nonexistent"), undefined);
+
+  registry.stop();
+});
+
 Deno.test("SessionRegistry - setTerminateCallback overwrites previous callback", async () => {
   const registry = new SessionRegistry();
 

@@ -131,6 +131,15 @@ export class MockPlatformAdapter extends PlatformAdapter {
     return Promise.resolve(false);
   }
 
+  async fetchMessage(
+    _channelId: string,
+    _messageId: string,
+  ): Promise<PlatformMessage | null> {
+    return await Promise.resolve(
+      this.mockMessages.find((m) => m.messageId === _messageId) ?? null,
+    );
+  }
+
   getBotId(): string | null {
     return "bot-123";
   }

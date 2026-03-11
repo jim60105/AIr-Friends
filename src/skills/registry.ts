@@ -62,6 +62,7 @@ export class SkillRegistry {
     // Reply skills
     this.handlers.set("send-reply", this.replyHandler.handleSendReply);
     this.handlers.set("edit-reply", this.replyHandler.handleEditReply);
+    this.handlers.set("get-message", this.replyHandler.handleGetMessage);
 
     // Context skill
     this.handlers.set("fetch-context", this.contextHandler.handleFetchContext);
