@@ -32,6 +32,8 @@ export interface ActiveSession {
   triggerEvent?: NormalizedEvent;
   /** Session start time */
   startedAt: Date;
+  /** Last activity timestamp (refreshed on skill API calls) */
+  lastActivityAt: Date;
   /** Session timeout (ms) */
   timeoutMs: number;
   /** Whether reply has been sent */
@@ -75,13 +77,17 @@ export class SessionRegistry {
    * Register a new session
    */
   register(
-    session: Omit<ActiveSession, "id" | "startedAt" | "replySent" | "replyCount" | "editCount">,
+    session: Omit<
+      ActiveSession,
+      "id" | "startedAt" | "lastActivityAt" | "replySent" | "replyCount" | "editCount"
+    >,
   ): string {
     const id = this.generateSessionId();
     const activeSession: ActiveSession = {
       ...session,
       id,
       startedAt: new Date(),
+      lastActivityAt: new Date(),
       replySent: false,
       replyCount: 0,
       editCount: 0,
@@ -242,6 +248,17 @@ export class SessionRegistry {
   }
 
   /**
+   * Refresh session activity timestamp to prevent timeout expiration.
+   * Called on each successful skill API request.
+   */
+  touch(sessionId: string): void {
+    const session = this.sessions.get(sessionId);
+    if (session) {
+      session.lastActivityAt = new Date();
+    }
+  }
+
+  /**
    * Remove a session
    */
   remove(sessionId: string): void {
@@ -260,7 +277,7 @@ export class SessionRegistry {
    * Check if a session is expired
    */
   private isExpired(session: ActiveSession): boolean {
-    const elapsed = Date.now() - session.startedAt.getTime();
+    const elapsed = Date.now() - session.lastActivityAt.getTime();
     return elapsed > session.timeoutMs;
   }
 

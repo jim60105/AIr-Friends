@@ -574,3 +574,100 @@ Deno.test("SessionRegistry - editCount and replyCount are independent", () => {
 
   registry.stop();
 });
+
+Deno.test("SessionRegistry - touch refreshes lastActivityAt", async () => {
+  const registry = new SessionRegistry();
+
+  const mockWorkspace = {
+    key: "test/123",
+    components: { platform: "discord" as const, userId: "123" },
+    path: "/tmp/test",
+    tmpPath: "/tmp/test/tmp",
+    isDm: false,
+  };
+
+  const sessionId = registry.register({
+    platform: "discord",
+    channelId: "456",
+    userId: "123",
+    isDm: false,
+    workspace: mockWorkspace,
+    // deno-lint-ignore no-explicit-any
+    platformAdapter: { platform: "discord" } as any,
+    triggerEvent: {
+      platform: "discord",
+      channelId: "456",
+      userId: "123",
+      messageId: "789",
+      isDm: false,
+      guildId: "",
+      content: "test",
+      timestamp: new Date(),
+      // deno-lint-ignore no-explicit-any
+    } as any,
+    timeoutMs: 200, // 200ms timeout
+  });
+
+  // Wait until session would be halfway to expiry
+  await new Promise((r) => setTimeout(r, 120));
+
+  // Touch to refresh
+  registry.touch(sessionId);
+
+  // Wait another 120ms (total 240ms from start, but only 120ms from touch)
+  await new Promise((r) => setTimeout(r, 120));
+
+  // Session should still be valid because touch refreshed it
+  const session = registry.get(sessionId);
+  assertExists(session);
+
+  registry.stop();
+});
+
+Deno.test("SessionRegistry - session without touch still expires", async () => {
+  const registry = new SessionRegistry();
+
+  const mockWorkspace = {
+    key: "test/123",
+    components: { platform: "discord" as const, userId: "123" },
+    path: "/tmp/test",
+    tmpPath: "/tmp/test/tmp",
+    isDm: false,
+  };
+
+  const sessionId = registry.register({
+    platform: "discord",
+    channelId: "456",
+    userId: "123",
+    isDm: false,
+    workspace: mockWorkspace,
+    // deno-lint-ignore no-explicit-any
+    platformAdapter: { platform: "discord" } as any,
+    triggerEvent: {
+      platform: "discord",
+      channelId: "456",
+      userId: "123",
+      messageId: "789",
+      isDm: false,
+      guildId: "",
+      content: "test",
+      timestamp: new Date(),
+      // deno-lint-ignore no-explicit-any
+    } as any,
+    timeoutMs: 100,
+  });
+
+  await new Promise((r) => setTimeout(r, 150));
+
+  // Should be expired
+  assertEquals(registry.get(sessionId), undefined);
+
+  registry.stop();
+});
+
+Deno.test("SessionRegistry - touch on non-existent session is no-op", () => {
+  const registry = new SessionRegistry();
+  // Should not throw
+  registry.touch("non_existent_session_id");
+  registry.stop();
+});
