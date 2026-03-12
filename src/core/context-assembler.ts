@@ -165,7 +165,7 @@ export class ContextAssembler {
     const triggerMessage: PlatformMessage = {
       messageId: event.messageId,
       userId: event.userId,
-      username: event.userId, // Will be enriched by platform adapter
+      username: event.username ?? event.userId,
       content: event.content,
       timestamp: event.timestamp,
       isBot: false,
@@ -550,7 +550,8 @@ export class ContextAssembler {
    * Format trigger message section
    */
   private formatTriggerSection(triggerMessage: PlatformMessage): string {
-    let section = `## Current Message\n\n${triggerMessage.username}: ${triggerMessage.content}`;
+    let section =
+      `## Current Message\n\n[User] ${triggerMessage.username}(${triggerMessage.userId}): ${triggerMessage.content}`;
 
     if (triggerMessage.attachments && triggerMessage.attachments.length > 0) {
       const attachmentDescs = triggerMessage.attachments.map((att) => {
@@ -589,7 +590,8 @@ export class ContextAssembler {
     // Add current message
     parts.push("## Current Message");
     parts.push("");
-    let triggerLine = `${triggerMessage.username}: ${triggerMessage.content}`;
+    let triggerLine =
+      `[User] ${triggerMessage.username}(${triggerMessage.userId}): ${triggerMessage.content}`;
     if (triggerMessage.attachments && triggerMessage.attachments.length > 0) {
       const attachmentDescs = triggerMessage.attachments.map((att) => {
         const sizeStr = att.size ? ` ${formatFileSize(att.size)}` : "";
@@ -696,7 +698,7 @@ export class ContextAssembler {
    */
   private formatMessageLine(msg: PlatformMessage): string {
     const prefix = msg.isBot ? "[Bot]" : "[User]";
-    let line = `${prefix} ${msg.username}: ${msg.content}`;
+    let line = `${prefix} ${msg.username}(${msg.userId}): ${msg.content}`;
 
     if (msg.attachments && msg.attachments.length > 0) {
       const attachmentDescs = msg.attachments.map((att) => {

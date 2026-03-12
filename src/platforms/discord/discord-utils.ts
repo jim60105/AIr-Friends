@@ -63,6 +63,7 @@ export function normalizeDiscordMessage(
     platform: "discord" as Platform,
     channelId: message.channelId,
     userId: message.author.id,
+    username: message.author.displayName ?? message.author.username,
     messageId: message.id,
     isDm,
     guildId: message.guildId ?? "",

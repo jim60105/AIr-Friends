@@ -161,7 +161,7 @@ Deno.test("ContextAssembler - should format context correctly", async () => {
 
     // Check user message contains conversation
     assertStringIncludes(formatted.userMessage, "Recent Conversation");
-    assertStringIncludes(formatted.userMessage, "Alice: Hi there");
+    assertStringIncludes(formatted.userMessage, "Alice(other): Hi there");
 
     // Check user message contains trigger
     assertStringIncludes(formatted.userMessage, "Current Message");
@@ -290,19 +290,19 @@ Deno.test("ContextAssembler - should not truncate messages mid-content", async (
     if (hasFirstMessage) {
       assertStringIncludes(
         formatted.userMessage,
-        "Alice: This is the first message with some content",
+        "Alice(user1): This is the first message with some content",
       );
     }
     if (hasSecondMessage) {
       assertStringIncludes(
         formatted.userMessage,
-        "Bob: This is the second message with more content",
+        "Bob(user2): This is the second message with more content",
       );
     }
     if (hasThirdMessage) {
       assertStringIncludes(
         formatted.userMessage,
-        "Charlie: This is the third message with even more content",
+        "Charlie(user3): This is the third message with even more content",
       );
     }
 

@@ -58,6 +58,9 @@ export interface NormalizedEvent {
   /** User identifier of the message author */
   userId: string;
 
+  /** Display name of the message author (platform-resolved) */
+  username?: string;
+
   /** Original message identifier */
   messageId: string;
 

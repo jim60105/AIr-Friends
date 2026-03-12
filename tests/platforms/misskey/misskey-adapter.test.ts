@@ -182,7 +182,7 @@ Deno.test("noteToPlatformMessage - should convert correctly", () => {
 
   assertEquals(msg.messageId, "note123");
   assertEquals(msg.userId, "user123");
-  assertEquals(msg.username, "@Test User (user123)");
+  assertEquals(msg.username, "@Test User");
   assertEquals(msg.content, "Hello @testbot!");
   assertEquals(msg.isBot, false);
 });
@@ -289,7 +289,7 @@ Deno.test("chatMessageToPlatformMessage - should convert MisskeyMessage", () => 
 
   assertEquals(msg.messageId, "chat123");
   assertEquals(msg.userId, "user456");
-  assertEquals(msg.username, "@Chat User (user456)");
+  assertEquals(msg.username, "@Chat User");
   assertEquals(msg.content, "Hello from chat!");
   assertEquals(msg.isBot, false);
 });
@@ -300,7 +300,7 @@ Deno.test("chatMessageToPlatformMessage - should convert ChatMessageLite", () =>
 
   assertEquals(msg.messageId, "chatLite123");
   assertEquals(msg.userId, "user789");
-  assertEquals(msg.username, "@Lite User (user789)");
+  assertEquals(msg.username, "@Lite User");
   assertEquals(msg.content, "Hello from lite chat!");
   assertEquals(msg.isBot, false);
 });
@@ -334,7 +334,7 @@ Deno.test("chatMessageToPlatformMessage - should fallback to username if name is
   };
   const msg = chatMessageToPlatformMessage(message, "bot123");
 
-  assertEquals(msg.username, "@chatuser (user456)");
+  assertEquals(msg.username, "@chatuser");
 });
 
 Deno.test("chatMessageToPlatformMessage - should fallback to userId if fromUser is missing", () => {
@@ -342,7 +342,7 @@ Deno.test("chatMessageToPlatformMessage - should fallback to userId if fromUser 
   delete message.fromUser;
   const msg = chatMessageToPlatformMessage(message, "bot123");
 
-  assertEquals(msg.username, "@user789 (user789)");
+  assertEquals(msg.username, "@user789");
 });
 
 Deno.test("shouldRespondToChatMessage - should not respond to self", () => {

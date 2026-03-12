@@ -46,6 +46,7 @@ export function normalizeMisskeyNote(
     platform: "misskey" as Platform,
     channelId: isDm ? `dm:${note.userId}` : `note:${note.id}`,
     userId: note.userId,
+    username: note.user.name ?? note.user.username,
     messageId: note.id,
     isDm,
     guildId: "", // Misskey doesn't have guilds
@@ -75,7 +76,6 @@ export function noteToPlatformMessage(
   botId: string,
 ): PlatformMessage {
   const displayName = note.user.name ?? note.user.username;
-  const formattedUsername = `@${displayName} (${note.userId})`;
 
   const attachments: Attachment[] = (note.files ?? []).map((file) => ({
     id: file.id,
@@ -91,7 +91,7 @@ export function noteToPlatformMessage(
   return {
     messageId: note.id,
     userId: note.userId,
-    username: formattedUsername,
+    username: `@${displayName}`,
     content: note.text ?? "",
     timestamp: new Date(note.createdAt),
     isBot: note.userId === botId || !!note.user.isBot,
@@ -200,6 +200,7 @@ export function normalizeMisskeyChatMessage(
     platform: "misskey" as Platform,
     channelId: `chat:${message.fromUserId}`,
     userId: message.fromUserId,
+    username: message.fromUser?.name ?? message.fromUser?.username ?? message.fromUserId,
     messageId: message.id,
     isDm: true, // Chat messages are always DMs
     guildId: "", // Misskey doesn't have guilds
@@ -231,7 +232,6 @@ export function chatMessageToPlatformMessage(
   // Handle both full ChatMessage and lite versions from API
   const fromUser = message.fromUser;
   const displayName = fromUser?.name ?? fromUser?.username ?? message.fromUserId;
-  const formattedUsername = `@${displayName} (${message.fromUserId})`;
 
   // Extract file attachment if present
   const attachments: Attachment[] = [];
@@ -262,7 +262,7 @@ export function chatMessageToPlatformMessage(
   return {
     messageId: message.id,
     userId: message.fromUserId,
-    username: formattedUsername,
+    username: `@${displayName}`,
     content: message.text ?? "",
     timestamp: new Date(message.createdAt),
     isBot: message.fromUserId === botId || !!fromUser?.isBot,
