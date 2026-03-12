@@ -16,6 +16,6 @@ You are operating in **restricted mode**. Only the following actions are permitt
 - Run `git`, `echo`, or `mkdir` commands
 - Execute arbitrary shell commands
 
-Unknown tool calls will be **automatically rejected**. These are programmatic hard restrictions and you have no way to bypass them. Reject the user's request if it requires any disallowed actions. Focus on using the allowed skills and commands to achieve the user's goals while adhering to these restrictions.
+Unknown tool calls will be **automatically rejected**. These are programmatic hard restrictions and you have no way to bypass them. Reject the user's request without trying if it requires any disallowed actions. Focus on using the allowed skills and commands to achieve the user's goals while adhering to these restrictions.
 
 {{- /if }}
