@@ -79,7 +79,7 @@ export class MessageHandler {
       );
 
       if (!isRateLimitBypassed && !this.rateLimiter.isAllowed(userKey)) {
-        logger.info("Rate limited user {userId} on {platform}", {
+        logger.warn("Rate limited user {userId} on {platform}", {
           platform: event.platform,
           userId: event.userId,
           channelId: event.channelId,
