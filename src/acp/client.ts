@@ -514,7 +514,7 @@ export class ChatbotClient implements acp.Client {
       case "agent_message_chunk":
         // Agent is generating response - log but don't send
         if (update.content.type === "text") {
-          this.logger.debug("Agent message chunk", {
+          this.logger.debug("Agent message chunk: {text}", {
             text: update.content.text.substring(0, 100),
           });
         }
