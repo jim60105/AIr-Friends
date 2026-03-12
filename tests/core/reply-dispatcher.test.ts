@@ -154,6 +154,28 @@ Deno.test("ReplyDispatcher - skips error dispatch for cancelled errors", async (
   assertEquals(mockAdapter.sentReplies.length, 0);
 });
 
+Deno.test("ReplyDispatcher - does not dispatch error for rate limited", async () => {
+  const dispatcher = new ReplyDispatcher();
+  const mockAdapter = new MockPlatformAdapter();
+  const adapter = mockAdapter as unknown as PlatformAdapter;
+
+  const response: SessionResponse = {
+    success: false,
+    replySent: false,
+    error: "Rate limited",
+  };
+
+  const result = await dispatcher.dispatchErrorIfNeeded(
+    adapter,
+    "channel-1",
+    response,
+    "msg-1",
+  );
+
+  assertEquals(result, false);
+  assertEquals(mockAdapter.sentReplies.length, 0);
+});
+
 Deno.test("ReplyDispatcher - handles platform send failure gracefully", async () => {
   const dispatcher = new ReplyDispatcher();
   const mockAdapter = new MockPlatformAdapter();

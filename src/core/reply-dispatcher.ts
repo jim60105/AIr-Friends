@@ -28,7 +28,8 @@ export class ReplyDispatcher {
 
     // Don't send error messages for certain types of errors
     const skipErrorMessage = response.error?.includes("already being processed") ||
-      response.error?.includes("cancelled");
+      response.error?.includes("cancelled") ||
+      response.error?.includes("Rate limited");
 
     if (skipErrorMessage) {
       logger.debug("Skipping error message dispatch", {
