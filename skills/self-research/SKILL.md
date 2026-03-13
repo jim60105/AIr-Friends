@@ -1,6 +1,7 @@
 ---
 name: self-research
-description: Conduct a self-directed research session where you pick a topic from provided reference materials or your own curiosity, research it thoroughly using web search and browser tools, and write personal study notes to your agent workspace. Use in your personal research time, are given articles or topics to explore, or want to add new knowledge notes to your personal workspace at /app/data/agent-workspace/.
+description: Conduct a self-directed research session where you pick a topic from provided reference materials or your own curiosity, research it thoroughly using web search and browser tools, and write personal study notes to your agent workspace. Use in your personal research time, are given articles or topics to explore, or want to add new knowledge notes to your personal workspace at /app/data/agent-workspace/. **IMPORTANT - NEVER DELEGATE THIS SKILL TO SUBAGENTS OR ASSIGN IT AS A TASK.**
+compatibility: MUST BE PROCESSED BY THE AGENT ITSELF, DO NOT DELEGATED TO SUBAGENTS
 ---
 # Self-Research Skill
 
@@ -69,3 +70,7 @@ After writing, review your entire note and verify:
 - Your thoughts and opinions are welcome, but clearly distinguish them from facts
 - Write notes in a concise, structured format
 - Use kebab-case for filenames (e.g., `quantum-computing-basics.md`)
+
+**IMPORTANT - NEVER DELEGATE THIS SKILL TO SUBAGENTS OR ASSIGN IT AS A TASK.**
+**IMPORTANT - NEVER DELEGATE THIS SKILL TO SUBAGENTS OR ASSIGN IT AS A TASK.**
+**IMPORTANT - NEVER DELEGATE THIS SKILL TO SUBAGENTS OR ASSIGN IT AS A TASK.**
