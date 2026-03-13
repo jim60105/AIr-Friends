@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.20.0] - 2026-03-13
+
+### Added
+
+- GELF transport now supports TCP protocol — sends log messages as raw JSON with a null-byte delimiter (`\0`), maintaining a persistent connection with lazy reconnect on failure
+- GELF transport now supports UDP protocol with GZIP compression (default, per GELF spec) and automatic chunking for messages exceeding 8192 bytes, including magic-byte headers, sequence numbers, and message IDs per the GELF chunking specification
+- New `protocol` config option (`"http"` / `"tcp"` / `"udp"`) and `GELF_PROTOCOL` env var for selecting the GELF transport protocol
+- New `compress` config option and `GELF_COMPRESS` env var for controlling GZIP compression in UDP transport
+- Prompt message formatting now includes account IDs — recent messages are formatted as `[User] name(userId)` and `[Bot] name(userId)` for better agent context
+
+### Fixed
+
+- GELF payload spec compliance: `_id` additional field is now filtered (per GELF spec), field names are validated against `^[\w.\-]*$`, and boolean values are converted to strings (Graylog drops booleans on ingest)
+- Rate-limited users no longer receive a generic error message — the error dispatch is now silently skipped per the original design
+- Rate limit events are now logged at `WARN` level (previously `INFO`) for improved monitoring visibility
+
+### Changed
+
+- GELF transport gracefully closes connections on shutdown via a new `close()` method
+- Deno unstable net API (`"net"`) enabled for UDP datagram support
+- Self-research skill instructions strengthened to prevent delegation to subagents
+
 ## [0.19.0] - 2026-03-08
 
 ### Added
@@ -831,7 +853,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ---
 
-[Unreleased]: https://github.com/jim60105/AIr-Friends/compare/v0.19.0...HEAD
+[Unreleased]: https://github.com/jim60105/AIr-Friends/compare/v0.20.0...HEAD
+[0.20.0]: https://github.com/jim60105/AIr-Friends/compare/v0.19.0...v0.20.0
 [0.19.0]: https://github.com/jim60105/AIr-Friends/compare/v0.18.0...v0.19.0
 [0.18.0]: https://github.com/jim60105/AIr-Friends/compare/v0.17.0...v0.18.0
 [0.17.0]: https://github.com/jim60105/AIr-Friends/compare/v0.16.0...v0.17.0
