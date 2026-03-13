@@ -109,6 +109,8 @@ env:
   GELF_ENABLED: 'false'
   GELF_ENDPOINT: 'http://your-gelf-endpoint:12201'
   GELF_HOSTNAME: 'air-friends'
+  GELF_PROTOCOL: 'http'
+  GELF_COMPRESS: 'true'
 
   # RSS Feed Research Settings
   SELF_RESEARCH_ENABLED: 'false'

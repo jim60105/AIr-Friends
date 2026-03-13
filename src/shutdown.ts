@@ -129,6 +129,11 @@ export class ShutdownHandler {
       logger.info("Disconnecting platforms");
       await platformRegistry.disconnectAll();
 
+      // Close GELF transport (after all logging is done)
+      if (this.context.gelfTransport) {
+        this.context.gelfTransport.close();
+      }
+
       logger.info("Graceful shutdown completed");
       Deno.exit(0);
     } catch (error) {

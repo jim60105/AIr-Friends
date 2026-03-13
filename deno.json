@@ -2,6 +2,7 @@
   "name": "@air-friends/core",
   "version": "0.19.0",
   "exports": "./src/main.ts",
+  "unstable": ["net"],
   "imports": {
     "@std/assert": "jsr:@std/assert@^1.0.0",
     "@std/path": "jsr:@std/path@^1.0.0",

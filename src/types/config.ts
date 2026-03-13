@@ -283,7 +283,7 @@ export interface GelfConfig {
   /** Enable GELF log output (default: false) */
   enabled: boolean;
 
-  /** GELF HTTP endpoint URL (e.g., "http://graylog.example.com:12202/gelf") */
+  /** GELF endpoint URL (e.g., "http://graylog.example.com:12202/gelf") */
   endpoint: string;
 
   /**
@@ -292,6 +292,16 @@ export interface GelfConfig {
    * (default: "air-friends")
    */
   hostname?: string;
+
+  /** Transport protocol: "http" for HTTP POST, "tcp" for raw TCP, "udp" for UDP (default: "http") */
+  protocol?: "http" | "tcp" | "udp";
+
+  /**
+   * Enable GZIP compression for UDP transport.
+   * Per GELF spec, GZIP is the default for UDP. Has no effect on HTTP or TCP transports.
+   * (default: true when protocol is "udp")
+   */
+  compress?: boolean;
 }
 
 /**

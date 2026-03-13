@@ -46,6 +46,7 @@ export interface AppContext {
   auditRetentionScheduler: AuditRetentionScheduler | null;
   schedulerStateStore: SchedulerStateStore | null;
   savedSchedulerState: Record<string, string>;
+  gelfTransport: GelfTransport | null;
   yolo: boolean;
 }
 
@@ -65,7 +66,7 @@ export async function bootstrap(
   const config = await loadConfig(configPath ? configPath.replace(/\/[^/]+$/, "") : ".");
 
   // Initialize GELF transport if configured
-  let gelfTransport: GelfTransport | undefined;
+  let gelfTransport: GelfTransport | null = null;
   if (config.logging.gelf?.enabled && config.logging.gelf.endpoint) {
     gelfTransport = new GelfTransport(config.logging.gelf);
     console.log(JSON.stringify({
@@ -84,7 +85,7 @@ export async function bootstrap(
   configureLogger({
     level: config.logging.level,
     format: "json",
-    gelfTransport,
+    gelfTransport: gelfTransport ?? undefined,
   });
 
   // Log configured MCP servers
@@ -461,6 +462,7 @@ export async function bootstrap(
     auditRetentionScheduler,
     schedulerStateStore,
     savedSchedulerState,
+    gelfTransport,
     yolo,
   };
 

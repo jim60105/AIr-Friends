@@ -9,8 +9,10 @@ logging:
   # When enabled, log messages are also sent to a GELF-compatible log server via HTTP
   gelf:
     enabled: false            # Enable GELF log output (default: false)
-    endpoint: ""              # GELF HTTP endpoint URL (e.g., "http://graylog.example.com:12202/gelf")
+    endpoint: ""              # GELF endpoint URL (e.g., "http://graylog.example.com:12202/gelf")
     hostname: "air-friends"   # Source hostname in GELF messages (default: "air-friends")
+    protocol: "http"          # Transport protocol: "http", "tcp", or "udp" (default: "http")
+    # compress: true          # GZIP compression for UDP transport (default: true when protocol is "udp")
 
 # Platform configurations
 platforms:

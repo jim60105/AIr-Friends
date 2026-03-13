@@ -47,6 +47,8 @@ export const ENV_MAPPINGS = {
   GELF_ENABLED: "logging.gelf.enabled",
   GELF_ENDPOINT: "logging.gelf.endpoint",
   GELF_HOSTNAME: "logging.gelf.hostname",
+  GELF_PROTOCOL: "logging.gelf.protocol",
+  GELF_COMPRESS: "logging.gelf.compress",
 
   // Self-research settings
   SELF_RESEARCH_ENABLED: "selfResearch.enabled",
