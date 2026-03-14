@@ -2580,3 +2580,190 @@ Deno.test({
     }
   },
 });
+
+// === cleanupWorkspaceTmp tests ===
+
+Deno.test({
+  name: "cleanupWorkspaceTmp - removes tmp when no other sessions",
+  sanitizeResources: false,
+  sanitizeOps: false,
+  async fn() {
+    const tempDir = await Deno.makeTempDir();
+    try {
+      const { orchestrator, sessionRegistry } = await createTestableOrchestrator(tempDir);
+
+      // Create a workspace-like structure with a tmp directory
+      const workspacePath = `${tempDir}/workspaces/discord/testuser`;
+      const tmpPath = `${workspacePath}/tmp`;
+      await Deno.mkdir(tmpPath, { recursive: true });
+      // Put a file in tmp to verify it gets cleaned up
+      await Deno.writeTextFile(`${tmpPath}/test-file.txt`, "temporary data");
+
+      const workspace = {
+        key: "discord/testuser",
+        components: { platform: "discord" as const, userId: "testuser" },
+        path: workspacePath,
+        tmpPath,
+        isDm: false,
+      };
+
+      const { createLogger } = await import("@utils/logger.ts");
+      const logger = createLogger("test");
+
+      // No active sessions exist, so tmp should be removed
+      // deno-lint-ignore no-explicit-any
+      await (orchestrator as any).cleanupWorkspaceTmp(workspace, logger);
+
+      // Verify tmp directory was removed
+      let exists = true;
+      try {
+        await Deno.stat(tmpPath);
+      } catch (error) {
+        if (error instanceof Deno.errors.NotFound) {
+          exists = false;
+        }
+      }
+      assertEquals(exists, false);
+
+      sessionRegistry.stop();
+    } finally {
+      await Deno.remove(tempDir, { recursive: true });
+    }
+  },
+});
+
+Deno.test({
+  name: "cleanupWorkspaceTmp - skips cleanup when other sessions exist",
+  sanitizeResources: false,
+  sanitizeOps: false,
+  async fn() {
+    const tempDir = await Deno.makeTempDir();
+    try {
+      const { orchestrator, sessionRegistry } = await createTestableOrchestrator(tempDir);
+
+      // Create a workspace-like structure with a tmp directory
+      const workspacePath = `${tempDir}/workspaces/discord/testuser`;
+      const tmpPath = `${workspacePath}/tmp`;
+      await Deno.mkdir(tmpPath, { recursive: true });
+      await Deno.writeTextFile(`${tmpPath}/test-file.txt`, "temporary data");
+
+      const workspace = {
+        key: "discord/testuser",
+        components: { platform: "discord" as const, userId: "testuser" },
+        path: workspacePath,
+        tmpPath,
+        isDm: false,
+      };
+
+      // Register an active session for the same workspace
+      const activeSessionId = sessionRegistry.register({
+        workspace,
+        channelId: "some-channel",
+        platform: "discord",
+        userId: "testuser",
+        isDm: false,
+        platformAdapter: new MockPlatformAdapter() as unknown as PlatformAdapter,
+        timeoutMs: 60000,
+      });
+
+      const { createLogger } = await import("@utils/logger.ts");
+      const logger = createLogger("test");
+
+      // Should skip cleanup because another session exists
+      // deno-lint-ignore no-explicit-any
+      await (orchestrator as any).cleanupWorkspaceTmp(workspace, logger);
+
+      // Verify tmp directory still exists
+      const stat = await Deno.stat(tmpPath);
+      assertEquals(stat.isDirectory, true);
+
+      // Verify file still exists
+      const content = await Deno.readTextFile(`${tmpPath}/test-file.txt`);
+      assertEquals(content, "temporary data");
+
+      sessionRegistry.remove(activeSessionId);
+      sessionRegistry.stop();
+    } finally {
+      await Deno.remove(tempDir, { recursive: true });
+    }
+  },
+});
+
+Deno.test({
+  name: "cleanupWorkspaceTmp - handles NotFound gracefully",
+  sanitizeResources: false,
+  sanitizeOps: false,
+  async fn() {
+    const tempDir = await Deno.makeTempDir();
+    try {
+      const { orchestrator, sessionRegistry } = await createTestableOrchestrator(tempDir);
+
+      const workspace = {
+        key: "discord/nonexistent",
+        components: { platform: "discord" as const, userId: "nonexistent" },
+        path: `${tempDir}/workspaces/discord/nonexistent`,
+        tmpPath: `${tempDir}/workspaces/discord/nonexistent/tmp`,
+        isDm: false,
+      };
+
+      const { createLogger } = await import("@utils/logger.ts");
+      const logger = createLogger("test");
+
+      // Should not throw when tmp directory doesn't exist
+      // deno-lint-ignore no-explicit-any
+      await (orchestrator as any).cleanupWorkspaceTmp(workspace, logger);
+
+      // If we get here without throwing, the test passes
+      sessionRegistry.stop();
+    } finally {
+      await Deno.remove(tempDir, { recursive: true });
+    }
+  },
+});
+
+Deno.test({
+  name: "cleanupWorkspaceTmp - handles other errors gracefully",
+  sanitizeResources: false,
+  sanitizeOps: false,
+  async fn() {
+    const tempDir = await Deno.makeTempDir();
+    try {
+      const { orchestrator, sessionRegistry } = await createTestableOrchestrator(tempDir);
+
+      const workspace = {
+        key: "discord/erroruser",
+        components: { platform: "discord" as const, userId: "erroruser" },
+        path: `${tempDir}/workspaces/discord/erroruser`,
+        tmpPath: `${tempDir}/workspaces/discord/erroruser/tmp`,
+        isDm: false,
+      };
+
+      const { createLogger } = await import("@utils/logger.ts");
+      const logger = createLogger("test");
+
+      // Stub Deno.remove to throw a non-NotFound error
+      const originalRemove = Deno.remove;
+      let removeCalled = false;
+      // deno-lint-ignore no-explicit-any
+      (Deno as any).remove = (_path: string, _options?: Deno.RemoveOptions) => {
+        removeCalled = true;
+        throw new Error("Permission denied (mock)");
+      };
+
+      try {
+        // Should not throw — error is caught and logged
+        // deno-lint-ignore no-explicit-any
+        await (orchestrator as any).cleanupWorkspaceTmp(workspace, logger);
+        assertEquals(removeCalled, true);
+      } finally {
+        // Restore original Deno.remove
+        // deno-lint-ignore no-explicit-any
+        (Deno as any).remove = originalRemove;
+      }
+
+      sessionRegistry.stop();
+    } finally {
+      await Deno.remove(tempDir, { recursive: true });
+    }
+  },
+});

@@ -267,6 +267,19 @@ export class SessionRegistry {
   }
 
   /**
+   * Check if there are any active (non-expired) sessions for the given workspace key.
+   * Used to determine if it's safe to clean up the workspace tmp directory.
+   */
+  hasActiveSessionsForWorkspace(workspaceKey: string): boolean {
+    for (const [, session] of this.sessions) {
+      if (session.workspace.key === workspaceKey && !this.isExpired(session)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /**
    * Get all active sessions count
    */
   get activeCount(): number {
