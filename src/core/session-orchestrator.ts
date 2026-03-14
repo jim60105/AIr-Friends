@@ -408,6 +408,8 @@ export class SessionOrchestrator {
           try {
             await Deno.remove(sessionIdFile);
           } catch { /* ignore NotFound */ }
+          // Clean up tmp directory if no other sessions are using this workspace
+          this.cleanupWorkspaceTmp(workspace, sessionLogger);
         }
         result = dryRunResult;
         return result;
@@ -719,6 +721,9 @@ export class SessionOrchestrator {
               });
             }
           }
+
+          // Clean up tmp directory if no other sessions are using this workspace
+          this.cleanupWorkspaceTmp(workspace, sessionLogger);
         }
       }
     } catch (error) {
@@ -886,6 +891,8 @@ export class SessionOrchestrator {
           try {
             await Deno.remove(sessionIdFile);
           } catch { /* ignore NotFound */ }
+          // Clean up tmp directory if no other sessions are using this workspace
+          this.cleanupWorkspaceTmp(workspace, sessionLogger);
         }
         result = dryRunResult;
         return result;
@@ -1039,6 +1046,9 @@ export class SessionOrchestrator {
               });
             }
           }
+
+          // Clean up tmp directory if no other sessions are using this workspace
+          this.cleanupWorkspaceTmp(workspace, sessionLogger);
         }
       }
     } catch (error) {
@@ -1175,6 +1185,8 @@ export class SessionOrchestrator {
           try {
             await Deno.remove(sessionIdFile);
           } catch { /* ignore NotFound */ }
+          // Clean up tmp directory if no other sessions are using this workspace
+          this.cleanupWorkspaceTmp(workspace, sessionLogger);
         }
         result = dryRunResult;
         return result;
@@ -1297,6 +1309,9 @@ export class SessionOrchestrator {
               });
             }
           }
+
+          // Clean up tmp directory if no other sessions are using this workspace
+          this.cleanupWorkspaceTmp(workspace, sessionLogger);
         }
       }
     } catch (error) {
@@ -1431,6 +1446,8 @@ export class SessionOrchestrator {
           try {
             await Deno.remove(sessionIdFile);
           } catch { /* ignore NotFound */ }
+          // Clean up tmp directory if no other sessions are using this workspace
+          this.cleanupWorkspaceTmp(workspace, sessionLogger);
         }
         result = dryRunResult;
         return result;
@@ -1545,6 +1562,9 @@ export class SessionOrchestrator {
               });
             }
           }
+
+          // Clean up tmp directory if no other sessions are using this workspace
+          this.cleanupWorkspaceTmp(workspace, sessionLogger);
         }
       }
     } catch (error) {
@@ -1715,6 +1735,8 @@ export class SessionOrchestrator {
           try {
             await Deno.remove(sessionIdFile);
           } catch { /* ignore NotFound */ }
+          // Clean up tmp directory if no other sessions are using this workspace
+          this.cleanupWorkspaceTmp(workspace, sessionLogger);
         }
         result = dryRunResult;
         return result;
@@ -1873,6 +1895,9 @@ export class SessionOrchestrator {
               });
             }
           }
+
+          // Clean up tmp directory if no other sessions are using this workspace
+          this.cleanupWorkspaceTmp(workspace, sessionLogger);
         }
       }
     } catch (error) {
@@ -2252,5 +2277,40 @@ export class SessionOrchestrator {
       instructionsPath,
       variables as unknown as Record<string, unknown>,
     );
+  }
+
+  /**
+   * Clean up the workspace tmp directory if no other active sessions exist.
+   * This prevents leftover files from occupying disk space — particularly
+   * important for agent-browser which stores Chrome profiles, screenshots,
+   * and video recordings in TMPDIR.
+   */
+  private cleanupWorkspaceTmp(
+    workspace: WorkspaceInfo,
+    logger: ReturnType<typeof createLogger>,
+  ): void {
+    if (this.sessionRegistry.hasActiveSessionsForWorkspace(workspace.key)) {
+      logger.debug(
+        "Skipping tmp cleanup — other active sessions exist for workspace {workspaceKey}",
+        { workspaceKey: workspace.key },
+      );
+      return;
+    }
+
+    try {
+      // Keep the active-session check and tmp removal in one synchronous critical section
+      // so another same-workspace session cannot start and lose TMPDIR mid-cleanup.
+      Deno.removeSync(workspace.tmpPath, { recursive: true });
+      logger.debug("Cleaned up tmp directory for workspace {workspaceKey}", {
+        workspaceKey: workspace.key,
+      });
+    } catch (error) {
+      if (!(error instanceof Deno.errors.NotFound)) {
+        logger.warn("Failed to clean up tmp directory", {
+          error: error instanceof Error ? error.message : String(error),
+          path: workspace.tmpPath,
+        });
+      }
+    }
   }
 }

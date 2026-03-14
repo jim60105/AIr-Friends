@@ -671,3 +671,162 @@ Deno.test("SessionRegistry - touch on non-existent session is no-op", () => {
   registry.touch("non_existent_session_id");
   registry.stop();
 });
+
+Deno.test("SessionRegistry - hasActiveSessionsForWorkspace returns true when active sessions exist", () => {
+  const registry = new SessionRegistry();
+
+  const mockWorkspace = {
+    key: "discord/user1",
+    components: { platform: "discord" as const, userId: "user1" },
+    path: "/tmp/test",
+    tmpPath: "/tmp/test/tmp",
+    isDm: false,
+  };
+
+  const id1 = registry.register({
+    platform: "discord",
+    channelId: "456",
+    userId: "user1",
+    isDm: false,
+    workspace: mockWorkspace,
+    // deno-lint-ignore no-explicit-any
+    platformAdapter: {} as any,
+    // deno-lint-ignore no-explicit-any
+    triggerEvent: {} as any,
+    timeoutMs: 60000,
+  });
+
+  registry.register({
+    platform: "discord",
+    channelId: "789",
+    userId: "user1",
+    isDm: false,
+    workspace: mockWorkspace,
+    // deno-lint-ignore no-explicit-any
+    platformAdapter: {} as any,
+    // deno-lint-ignore no-explicit-any
+    triggerEvent: {} as any,
+    timeoutMs: 60000,
+  });
+
+  registry.remove(id1);
+
+  assertEquals(registry.hasActiveSessionsForWorkspace("discord/user1"), true);
+
+  registry.stop();
+});
+
+Deno.test("SessionRegistry - hasActiveSessionsForWorkspace returns false when no active sessions", () => {
+  const registry = new SessionRegistry();
+
+  const mockWorkspace = {
+    key: "discord/user1",
+    components: { platform: "discord" as const, userId: "user1" },
+    path: "/tmp/test",
+    tmpPath: "/tmp/test/tmp",
+    isDm: false,
+  };
+
+  const sessionId = registry.register({
+    platform: "discord",
+    channelId: "456",
+    userId: "user1",
+    isDm: false,
+    workspace: mockWorkspace,
+    // deno-lint-ignore no-explicit-any
+    platformAdapter: {} as any,
+    // deno-lint-ignore no-explicit-any
+    triggerEvent: {} as any,
+    timeoutMs: 60000,
+  });
+
+  registry.remove(sessionId);
+
+  assertEquals(registry.hasActiveSessionsForWorkspace("discord/user1"), false);
+
+  registry.stop();
+});
+
+Deno.test("SessionRegistry - hasActiveSessionsForWorkspace ignores expired sessions", async () => {
+  const registry = new SessionRegistry();
+
+  const mockWorkspace = {
+    key: "discord/user1",
+    components: { platform: "discord" as const, userId: "user1" },
+    path: "/tmp/test",
+    tmpPath: "/tmp/test/tmp",
+    isDm: false,
+  };
+
+  registry.register({
+    platform: "discord",
+    channelId: "456",
+    userId: "user1",
+    isDm: false,
+    workspace: mockWorkspace,
+    // deno-lint-ignore no-explicit-any
+    platformAdapter: {} as any,
+    // deno-lint-ignore no-explicit-any
+    triggerEvent: {} as any,
+    timeoutMs: 1,
+  });
+
+  await new Promise((r) => setTimeout(r, 10));
+
+  assertEquals(registry.hasActiveSessionsForWorkspace("discord/user1"), false);
+
+  registry.stop();
+});
+
+Deno.test("SessionRegistry - hasActiveSessionsForWorkspace different workspaces are independent", () => {
+  const registry = new SessionRegistry();
+
+  const workspaceA = {
+    key: "discord/userA",
+    components: { platform: "discord" as const, userId: "userA" },
+    path: "/tmp/testA",
+    tmpPath: "/tmp/testA/tmp",
+    isDm: false,
+  };
+
+  const workspaceB = {
+    key: "discord/userB",
+    components: { platform: "discord" as const, userId: "userB" },
+    path: "/tmp/testB",
+    tmpPath: "/tmp/testB/tmp",
+    isDm: false,
+  };
+
+  const idA = registry.register({
+    platform: "discord",
+    channelId: "456",
+    userId: "userA",
+    isDm: false,
+    workspace: workspaceA,
+    // deno-lint-ignore no-explicit-any
+    platformAdapter: {} as any,
+    // deno-lint-ignore no-explicit-any
+    triggerEvent: {} as any,
+    timeoutMs: 60000,
+  });
+
+  registry.register({
+    platform: "discord",
+    channelId: "789",
+    userId: "userB",
+    isDm: false,
+    workspace: workspaceB,
+    // deno-lint-ignore no-explicit-any
+    platformAdapter: {} as any,
+    // deno-lint-ignore no-explicit-any
+    triggerEvent: {} as any,
+    timeoutMs: 60000,
+  });
+
+  registry.remove(idA);
+
+  assertEquals(registry.hasActiveSessionsForWorkspace("discord/userA"), false);
+  assertEquals(registry.hasActiveSessionsForWorkspace("discord/userB"), true);
+
+  registry.stop();
+});

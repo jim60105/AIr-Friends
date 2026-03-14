@@ -117,6 +117,18 @@ function createTestEvent(): NormalizedEvent {
   };
 }
 
+async function pathExists(path: string): Promise<boolean> {
+  try {
+    await Deno.stat(path);
+    return true;
+  } catch (error) {
+    if (error instanceof Deno.errors.NotFound) {
+      return false;
+    }
+    throw error;
+  }
+}
+
 Deno.test("SessionOrchestrator - constructs successfully", async () => {
   const tempDir = await Deno.makeTempDir();
   try {
@@ -2573,6 +2585,431 @@ Deno.test({
       orchestrator.mockConnector!.disconnected = false;
       await (terminateCallback as () => Promise<void>)();
       assertEquals(orchestrator.mockConnector!.disconnected, true);
+
+      sessionRegistry.stop();
+    } finally {
+      await Deno.remove(tempDir, { recursive: true });
+    }
+  },
+});
+
+// --- processMessage tmp cleanup regression tests ---
+
+Deno.test({
+  name:
+    "SessionOrchestrator - processMessage success cleans tmp and SESSION_ID without removing workspace",
+  sanitizeResources: false,
+  sanitizeOps: false,
+  async fn() {
+    const tempDir = await Deno.makeTempDir();
+    try {
+      const { orchestrator, skillRegistry, workspaceManager, sessionRegistry } =
+        await createTestableOrchestrator(tempDir);
+
+      const event = createTestEvent();
+      const platformAdapter = new MockPlatformAdapter() as unknown as PlatformAdapter;
+      const replyHandler = skillRegistry.getReplyHandler();
+      const workspaceKey = workspaceManager.getWorkspaceKeyFromEvent(event);
+      const workspacePath = workspaceManager.getWorkspacePath(workspaceKey);
+      const tmpPath = `${workspacePath}/tmp`;
+      const tmpSentinel = `${tmpPath}/success-sentinel.txt`;
+      const sessionIdFile = `${workspacePath}/SESSION_ID`;
+      const observedSessionIds: string[] = [];
+
+      orchestrator.setConnectorSetup((connector) => {
+        connector.connect = () => {
+          observedSessionIds.push(Deno.readTextFileSync(sessionIdFile));
+          Deno.writeTextFileSync(tmpSentinel, "temporary data");
+          return Promise.resolve();
+        };
+        connector.promptResponses = [{ stopReason: "end_turn" } as PromptResponse];
+        connector.onPrompt = () => {
+          const key = `${workspaceKey}:${event.channelId}`;
+          // deno-lint-ignore no-explicit-any
+          (replyHandler as any).replySentMap.set(key, true);
+        };
+      });
+
+      const response = await orchestrator.processMessage(event, platformAdapter);
+
+      assertEquals(response.success, true);
+      assertEquals(response.replySent, true);
+      assertEquals(observedSessionIds.length, 1);
+      assertEquals(observedSessionIds[0].startsWith("sess_"), true);
+      assertEquals(await pathExists(sessionIdFile), false);
+      assertEquals(await pathExists(tmpPath), false);
+
+      const workspaceStat = await Deno.stat(workspacePath);
+      assertEquals(workspaceStat.isDirectory, true);
+      assertEquals(await pathExists(`${workspacePath}/memory.public.jsonl`), true);
+      assertEquals(await pathExists(`${workspacePath}/memory.private.jsonl`), true);
+
+      sessionRegistry.stop();
+    } finally {
+      await Deno.remove(tempDir, { recursive: true });
+    }
+  },
+});
+
+Deno.test({
+  name:
+    "SessionOrchestrator - processMessage dry run cleans tmp and SESSION_ID without creating connector",
+  sanitizeResources: false,
+  sanitizeOps: false,
+  async fn() {
+    const tempDir = await Deno.makeTempDir();
+    try {
+      const { orchestrator, workspaceManager, sessionRegistry, config } =
+        await createTestableOrchestrator(tempDir);
+
+      config.agent.dryRun = {
+        enabled: true,
+        outputPath: `${tempDir}/dry-run`,
+        mockReply: "Dry run reply",
+      };
+
+      const event = createTestEvent();
+      const workspaceKey = workspaceManager.getWorkspaceKeyFromEvent(event);
+      const workspacePath = workspaceManager.getWorkspacePath(workspaceKey);
+      const tmpPath = `${workspacePath}/tmp`;
+      const tmpSentinel = `${tmpPath}/dry-run-sentinel.txt`;
+      const sessionIdFile = `${workspacePath}/SESSION_ID`;
+      const observedSessionIds: string[] = [];
+
+      class InspectingDryRunPlatformAdapter extends MockPlatformAdapter {
+        override async sendReply(channelId: string, content: string): Promise<ReplyResult> {
+          observedSessionIds.push(Deno.readTextFileSync(sessionIdFile));
+          Deno.writeTextFileSync(tmpSentinel, "dry run data");
+          return await super.sendReply(channelId, content);
+        }
+      }
+
+      const platformAdapter = new InspectingDryRunPlatformAdapter() as unknown as PlatformAdapter;
+
+      const response = await orchestrator.processMessage(event, platformAdapter);
+
+      assertEquals(response.success, true);
+      assertEquals(response.replySent, true);
+      assertEquals(orchestrator.mockConnector, null);
+      assertEquals(observedSessionIds.length, 1);
+      assertEquals(observedSessionIds[0].startsWith("sess_"), true);
+      assertEquals(await pathExists(sessionIdFile), false);
+      assertEquals(await pathExists(tmpPath), false);
+
+      const dryRunFiles: string[] = [];
+      for await (const entry of Deno.readDir(config.agent.dryRun.outputPath)) {
+        dryRunFiles.push(entry.name);
+      }
+      assertEquals(dryRunFiles.length, 1);
+      assertEquals(dryRunFiles[0].startsWith("message_"), true);
+      assertEquals(dryRunFiles[0].endsWith(".md"), true);
+
+      const workspaceStat = await Deno.stat(workspacePath);
+      assertEquals(workspaceStat.isDirectory, true);
+      assertEquals(await pathExists(`${workspacePath}/memory.public.jsonl`), true);
+      assertEquals(await pathExists(`${workspacePath}/memory.private.jsonl`), true);
+
+      sessionRegistry.stop();
+    } finally {
+      await Deno.remove(tempDir, { recursive: true });
+    }
+  },
+});
+
+Deno.test({
+  name:
+    "SessionOrchestrator - processMessage keeps tmp when another session is active for the workspace",
+  sanitizeResources: false,
+  sanitizeOps: false,
+  async fn() {
+    const tempDir = await Deno.makeTempDir();
+    try {
+      const { orchestrator, skillRegistry, workspaceManager, sessionRegistry } =
+        await createTestableOrchestrator(tempDir);
+
+      const event = createTestEvent();
+      const platformAdapter = new MockPlatformAdapter() as unknown as PlatformAdapter;
+      const replyHandler = skillRegistry.getReplyHandler();
+      const workspace = await workspaceManager.getOrCreateWorkspace(event);
+      const tmpSentinel = `${workspace.tmpPath}/peer-protected.txt`;
+      const sessionIdFile = `${workspace.path}/SESSION_ID`;
+      let observedSessionId: string | null = null;
+
+      const peerSessionId = sessionRegistry.register({
+        workspace,
+        channelId: "peer-channel",
+        platform: event.platform,
+        userId: event.userId,
+        guildId: event.guildId,
+        isDm: event.isDm,
+        platformAdapter,
+        triggerEvent: event,
+        timeoutMs: 60_000,
+      });
+
+      orchestrator.setConnectorSetup((connector) => {
+        connector.connect = () => {
+          observedSessionId = Deno.readTextFileSync(sessionIdFile);
+          Deno.writeTextFileSync(tmpSentinel, "keep me");
+          return Promise.resolve();
+        };
+        connector.promptResponses = [{ stopReason: "end_turn" } as PromptResponse];
+        connector.onPrompt = () => {
+          const key = `${workspace.key}:${event.channelId}`;
+          // deno-lint-ignore no-explicit-any
+          (replyHandler as any).replySentMap.set(key, true);
+        };
+      });
+
+      const response = await orchestrator.processMessage(event, platformAdapter);
+
+      assertEquals(response.success, true);
+      assertEquals(response.replySent, true);
+      assertExists(observedSessionId);
+      assertEquals(await pathExists(sessionIdFile), false);
+      assertEquals(await pathExists(workspace.tmpPath), true);
+      assertEquals(await Deno.readTextFile(tmpSentinel), "keep me");
+      assertEquals(sessionRegistry.hasActiveSessionsForWorkspace(workspace.key), true);
+
+      const workspaceStat = await Deno.stat(workspace.path);
+      assertEquals(workspaceStat.isDirectory, true);
+
+      sessionRegistry.remove(peerSessionId);
+      sessionRegistry.stop();
+    } finally {
+      await Deno.remove(tempDir, { recursive: true });
+    }
+  },
+});
+
+Deno.test({
+  name: "SessionOrchestrator - processMessage connection errors still clean tmp and SESSION_ID",
+  sanitizeResources: false,
+  sanitizeOps: false,
+  async fn() {
+    const tempDir = await Deno.makeTempDir();
+    try {
+      const { orchestrator, workspaceManager, sessionRegistry } = await createTestableOrchestrator(
+        tempDir,
+      );
+
+      const event = createTestEvent();
+      const platformAdapter = new MockPlatformAdapter() as unknown as PlatformAdapter;
+      const workspaceKey = workspaceManager.getWorkspaceKeyFromEvent(event);
+      const workspacePath = workspaceManager.getWorkspacePath(workspaceKey);
+      const tmpPath = `${workspacePath}/tmp`;
+      const tmpSentinel = `${tmpPath}/error-sentinel.txt`;
+      const sessionIdFile = `${workspacePath}/SESSION_ID`;
+      let observedSessionId: string | null = null;
+
+      orchestrator.setConnectorSetup((connector) => {
+        connector.connect = () => {
+          observedSessionId = Deno.readTextFileSync(sessionIdFile);
+          Deno.writeTextFileSync(tmpSentinel, "cleanup after error");
+          return Promise.reject(new Error("Connection failed"));
+        };
+      });
+
+      const response = await orchestrator.processMessage(event, platformAdapter);
+
+      assertEquals(response.success, false);
+      assertEquals(response.replySent, false);
+      assertEquals(response.error, "Connection failed");
+      assertExists(observedSessionId);
+      assertEquals(await pathExists(sessionIdFile), false);
+      assertEquals(await pathExists(tmpPath), false);
+
+      const workspaceStat = await Deno.stat(workspacePath);
+      assertEquals(workspaceStat.isDirectory, true);
+      assertEquals(await pathExists(`${workspacePath}/memory.public.jsonl`), true);
+      assertEquals(await pathExists(`${workspacePath}/memory.private.jsonl`), true);
+
+      sessionRegistry.stop();
+    } finally {
+      await Deno.remove(tempDir, { recursive: true });
+    }
+  },
+});
+
+// === cleanupWorkspaceTmp tests ===
+
+Deno.test({
+  name: "cleanupWorkspaceTmp - removes tmp when no other sessions",
+  sanitizeResources: false,
+  sanitizeOps: false,
+  async fn() {
+    const tempDir = await Deno.makeTempDir();
+    try {
+      const { orchestrator, sessionRegistry } = await createTestableOrchestrator(tempDir);
+
+      // Create a workspace-like structure with a tmp directory
+      const workspacePath = `${tempDir}/workspaces/discord/testuser`;
+      const tmpPath = `${workspacePath}/tmp`;
+      await Deno.mkdir(tmpPath, { recursive: true });
+      // Put a file in tmp to verify it gets cleaned up
+      await Deno.writeTextFile(`${tmpPath}/test-file.txt`, "temporary data");
+
+      const workspace = {
+        key: "discord/testuser",
+        components: { platform: "discord" as const, userId: "testuser" },
+        path: workspacePath,
+        tmpPath,
+        isDm: false,
+      };
+
+      const { createLogger } = await import("@utils/logger.ts");
+      const logger = createLogger("test");
+
+      // No active sessions exist, so tmp should be removed
+      // deno-lint-ignore no-explicit-any
+      await (orchestrator as any).cleanupWorkspaceTmp(workspace, logger);
+
+      // Verify tmp directory was removed
+      let exists = true;
+      try {
+        await Deno.stat(tmpPath);
+      } catch (error) {
+        if (error instanceof Deno.errors.NotFound) {
+          exists = false;
+        }
+      }
+      assertEquals(exists, false);
+
+      sessionRegistry.stop();
+    } finally {
+      await Deno.remove(tempDir, { recursive: true });
+    }
+  },
+});
+
+Deno.test({
+  name: "cleanupWorkspaceTmp - skips cleanup when other sessions exist",
+  sanitizeResources: false,
+  sanitizeOps: false,
+  async fn() {
+    const tempDir = await Deno.makeTempDir();
+    try {
+      const { orchestrator, sessionRegistry } = await createTestableOrchestrator(tempDir);
+
+      // Create a workspace-like structure with a tmp directory
+      const workspacePath = `${tempDir}/workspaces/discord/testuser`;
+      const tmpPath = `${workspacePath}/tmp`;
+      await Deno.mkdir(tmpPath, { recursive: true });
+      await Deno.writeTextFile(`${tmpPath}/test-file.txt`, "temporary data");
+
+      const workspace = {
+        key: "discord/testuser",
+        components: { platform: "discord" as const, userId: "testuser" },
+        path: workspacePath,
+        tmpPath,
+        isDm: false,
+      };
+
+      // Register an active session for the same workspace
+      const activeSessionId = sessionRegistry.register({
+        workspace,
+        channelId: "some-channel",
+        platform: "discord",
+        userId: "testuser",
+        isDm: false,
+        platformAdapter: new MockPlatformAdapter() as unknown as PlatformAdapter,
+        timeoutMs: 60000,
+      });
+
+      const { createLogger } = await import("@utils/logger.ts");
+      const logger = createLogger("test");
+
+      // Should skip cleanup because another session exists
+      // deno-lint-ignore no-explicit-any
+      await (orchestrator as any).cleanupWorkspaceTmp(workspace, logger);
+
+      // Verify tmp directory still exists
+      const stat = await Deno.stat(tmpPath);
+      assertEquals(stat.isDirectory, true);
+
+      // Verify file still exists
+      const content = await Deno.readTextFile(`${tmpPath}/test-file.txt`);
+      assertEquals(content, "temporary data");
+
+      sessionRegistry.remove(activeSessionId);
+      sessionRegistry.stop();
+    } finally {
+      await Deno.remove(tempDir, { recursive: true });
+    }
+  },
+});
+
+Deno.test({
+  name: "cleanupWorkspaceTmp - handles NotFound gracefully",
+  sanitizeResources: false,
+  sanitizeOps: false,
+  async fn() {
+    const tempDir = await Deno.makeTempDir();
+    try {
+      const { orchestrator, sessionRegistry } = await createTestableOrchestrator(tempDir);
+
+      const workspace = {
+        key: "discord/nonexistent",
+        components: { platform: "discord" as const, userId: "nonexistent" },
+        path: `${tempDir}/workspaces/discord/nonexistent`,
+        tmpPath: `${tempDir}/workspaces/discord/nonexistent/tmp`,
+        isDm: false,
+      };
+
+      const { createLogger } = await import("@utils/logger.ts");
+      const logger = createLogger("test");
+
+      // Should not throw when tmp directory doesn't exist
+      // deno-lint-ignore no-explicit-any
+      await (orchestrator as any).cleanupWorkspaceTmp(workspace, logger);
+
+      // If we get here without throwing, the test passes
+      sessionRegistry.stop();
+    } finally {
+      await Deno.remove(tempDir, { recursive: true });
+    }
+  },
+});
+
+Deno.test({
+  name: "cleanupWorkspaceTmp - handles other errors gracefully",
+  sanitizeResources: false,
+  sanitizeOps: false,
+  async fn() {
+    const tempDir = await Deno.makeTempDir();
+    try {
+      const { orchestrator, sessionRegistry } = await createTestableOrchestrator(tempDir);
+
+      const workspace = {
+        key: "discord/erroruser",
+        components: { platform: "discord" as const, userId: "erroruser" },
+        path: `${tempDir}/workspaces/discord/erroruser`,
+        tmpPath: `${tempDir}/workspaces/discord/erroruser/tmp`,
+        isDm: false,
+      };
+
+      const { createLogger } = await import("@utils/logger.ts");
+      const logger = createLogger("test");
+
+      // Stub Deno.removeSync to throw a non-NotFound error
+      const originalRemoveSync = Deno.removeSync;
+      let removeCalled = false;
+      // deno-lint-ignore no-explicit-any
+      (Deno as any).removeSync = (_path: string, _options?: Deno.RemoveOptions) => {
+        removeCalled = true;
+        throw new Error("Permission denied (mock)");
+      };
+
+      try {
+        // Should not throw — error is caught and logged
+        // deno-lint-ignore no-explicit-any
+        await (orchestrator as any).cleanupWorkspaceTmp(workspace, logger);
+        assertEquals(removeCalled, true);
+      } finally {
+        // Restore original Deno.removeSync
+        // deno-lint-ignore no-explicit-any
+        (Deno as any).removeSync = originalRemoveSync;
+      }
 
       sessionRegistry.stop();
     } finally {
