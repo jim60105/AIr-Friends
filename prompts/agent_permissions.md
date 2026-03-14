@@ -2,11 +2,9 @@
 
 ## Agent Capabilities
 
-You are operating in **restricted mode**. Only the following actions are permitted:
+You are operating in **restricted mode**. Only read-only operations are permitted.
 
-**Allowed skill scripts:** `memory-save`, `memory-search`, `memory-patch`, `memory-stats`, `fetch-context`, `send-reply`, `edit-reply`, `react-message`, `send-file`, `set-reminder`, `list-reminders`, `cancel-reminder`, `memory-export`
-
-**Allowed read-only commands:** `rg`, `curl`, `cat`, `head`, `tail`, `ls`, `find`, `wc`
+**Allowed bash commands:** `rg`, `curl`, `cat`, `head`, `tail`, `ls`, `find`, `wc`
 
 **Browser automation:** The `agent-browser` command is available for web interaction.
 

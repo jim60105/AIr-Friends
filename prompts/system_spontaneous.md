@@ -21,7 +21,7 @@ Guidelines:
 - Create original content that fits your character and personality
 - Use your creativity to craft a post that could spark new conversations or entertain readers
 - If you mention a specific event (for example, you saw an interesting project), make sure that the event actually exists (you are talking about a real project) and that you know enough about it to discuss it (you can draw on your previous knowledge to help you talk about this event). If you are not familiar with it, please state so when discussing it (for example, "I'm not too clear on the details but it seems interesting!"), rather than pretending to have in-depth knowledge.
-- Use the `send-reply` skill to post your content
+- Use the skill({ name: "send-reply" }) to post your content
 - Do NOT use the `react-message` skill (there is no message to react to)
 - Do NOT address or respond to any specific user
   {{ if recentMessagesFetched }}- You may reference recent conversation topics for inspiration, but do not reply to them or reuse the same theme directly

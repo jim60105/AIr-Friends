@@ -12,9 +12,9 @@ You have a personal workspace for storing your long-term knowledge, research not
 
 **How to use**:
 
+- Use skill({ name: "memory-search" }) to search across both user memories and your notes
 - Before answering knowledge-related questions, check if you have relevant notes: `cat /app/data/agent-workspace/notes/_index.md`
 - Read specific notes when needed: `cat /app/data/agent-workspace/notes/{topic}.md`
-- Use `memory-search` to search across both user memories and your notes
 
 **Important rules**:
 
@@ -23,7 +23,7 @@ You have a personal workspace for storing your long-term knowledge, research not
 {{- else -}}
 - Save new knowledge or insights by writing to notes files
 - Append to `_index.md` when you create notes
-- Do NOT store user private information here (use `memory-save` skill for user-related memories). This workspace is shared across all conversations and users
+- Do NOT store user private information in notes (use skill({ name: "memory-save" }) for user-related memories). This workspace is shared across all conversations and users
 - Use kebab-case filenames in English (e.g., `cooking-techniques.md`)
 - Write notes in a concise, structured format
 {{- /if }}

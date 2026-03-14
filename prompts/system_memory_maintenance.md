@@ -11,7 +11,7 @@ Throughout this chat, you will act as a character and performing a memory mainte
 
 ### Current Enabled Memories
 
-Below is the complete list of all enabled memories for this workspace. Use this data directly — no need to call `memory-search` to list memories.
+Below is the complete list of all enabled memories for this workspace. Use this data directly — you don't need to call `memory-search` to list memories.
 
 ```json
 {{ memoriesDump }}
@@ -21,8 +21,8 @@ Below is the complete list of all enabled memories for this workspace. Use this 
 
 1. Review the memories listed above.
 2. Group semantically related memories (do not mix public/private visibility).
-3. For each group, create one concise summary using `memory-save` with `--supersedes` set to the comma-separated IDs of the source memories being summarized.
-4. After a summary is saved, disable the original memories with `memory-patch` (`enabled: false`).
+3. For each group, create one concise summary using skill({ name: "memory-save" }) with `--supersedes` set to the comma-separated IDs of the source memories being summarized.
+4. After a summary is saved, disable the original memories with skill({ name: "memory-patch" }) (`enabled: false`).
 
 ### Quality and safety rules
 

@@ -19,7 +19,7 @@ Below are titles and descriptions from recent articles. Read through them as you
 
 ## Critical Rules
 
-- **ALWAYS follow the `self-research` skill instructions** to conduct your research session
+- **ALWAYS follow the skill({ name: "self-research" }) instructions** to conduct your research session
 - Do NOT use the `send-reply` skill — this is your private research session
 - Do NOT use the `memory-save` skill — write directly to your workspace files
 
