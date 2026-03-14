@@ -103,7 +103,7 @@ In restricted mode, Gemini uses **Policy Engine TOML rules** (`agent-config/gemi
 
 | Rule | Decision | Priority | opencode.json Equivalent |
 | ---- | -------- | -------- | ------------------------ |
-| `write_file`, `replace` | deny | 200 | `"edit": { "*": "deny" }` |
+| `write_file`, `replace` | deny | 200 | `"edit": "ask"` (delegated to Layer 3) |
 | `ask_user` | deny (all modes) | 200 | `"question": "deny"` |
 | `save_memory` | deny | 200 | N/A (Gemini-specific) |
 | `run_shell_command` (default) | deny | 10 | `"bash": { "*": "deny" }` |
@@ -162,6 +162,16 @@ OpenCode's pattern matching uses a **regex-based engine**, not standard glob. Pa
 
 > **Reference**: [OpenCode wildcard.ts](https://github.com/anomalyco/opencode/blob/dev/packages/opencode/src/util/wildcard.ts), [OpenCode next.ts](https://github.com/anomalyco/opencode/blob/dev/packages/opencode/src/permission/next.ts)
 
+#### Path Resolution in Permission Patterns
+
+OpenCode's `edit`/`write` tools convert absolute file paths to **relative paths** before evaluating permission rules. The relative path is computed via `path.relative(Instance.worktree, filepath)`, where `worktree` is the agent's current working directory (cwd).
+
+This means **absolute path patterns in the `edit` permission section will never match**, because the actual path being evaluated is relative (e.g., `notes/topic.md` instead of `/app/data/agent-workspace/notes/topic.md`).
+
+This behavior is specific to the `edit` permission — other permissions (e.g., `bash`, `external_directory`) may handle paths differently.
+
+> **Reference**: [OpenCode edit.ts](https://github.com/anomalyco/opencode/blob/dev/packages/opencode/src/tool/edit.ts), [OpenCode write.ts](https://github.com/anomalyco/opencode/blob/dev/packages/opencode/src/tool/write.ts)
+
 ### Current Configuration
 
 The `agent-config/opencode.json` in the project configures permissions for the `build` agent (OpenCode's primary agent):
@@ -176,26 +186,29 @@ The `agent-config/opencode.json` in the project configures permissions for the `
 | **Web access** (`webfetch`, `websearch`, `codesearch`)      | `allow`      | Research and information gathering      |
 | **Interactive** (`question`)                                | `deny`       | No human operator to answer questions   |
 | **Loop protection** (`doom_loop`)                           | `deny`       | Prevent infinite retry loops            |
-| **File editing** (`edit`)                                   | Scoped allow | Agent workspace paths only (see below)  |
+| **File editing** (`edit`)                                   | `ask` (delegated) | Delegated to Layer 3 via `"ask"` (see below) |
 | **Shell commands** (`bash`)                                 | Whitelist    | Specific patterns only (see below)      |
 | **External directories**                                    | Restricted   | Skills and agent workspace only         |
 
-### Edit Permission (Scoped)
+### Edit Permission (Delegated via `"ask"`)
 
-File editing is denied by default, with exceptions for the agent workspace:
+File editing is delegated to Layer 3 (ChatbotClient) via the `"ask"` permission:
 
 ```json
-"edit": {
-  "*": "deny",
-  "/app/data/agent-workspace/**/*.md": "allow",
-  "/app/data/agent-workspace/**/*.txt": "allow",
-  "/app/data/workspaces/*/tmp/**": "allow"
-}
+"edit": "ask"
 ```
 
-This allows the self-research feature to write study notes (`.md`, `.txt`) to the agent workspace while preventing the agent from modifying source code, configuration files, or user workspace data. The extension restriction (`allowedWriteExtensions`) applies only in restricted (non-YOLO) mode.
+The `"ask"` value causes OpenCode to forward the permission decision to the ACP `requestPermission()` callback (Layer 3), rather than evaluating it internally at Layer 2. This is necessary because OpenCode's `edit`/`write` tools convert file paths to relative paths before evaluating permission rules (see [Path Resolution in Permission Patterns](#path-resolution-in-permission-patterns)), which makes absolute path patterns in `opencode.json` unreliable.
 
-The TMPDIR pattern (`/app/data/workspaces/*/tmp/**`) uses an absolute path to cover all user workspace tmp directories, since `$TMPDIR` environment variable expansion is not supported by OpenCode's pattern matching engine. Per-session isolation is enforced by Layers 3 and 4.
+The `write`, `patch`, and `multiedit` tools all use `permission: "edit"`, so this single rule covers all file-editing operations.
+
+**Edit/Write Permission Flow (Restricted Mode):**
+
+1. **Layer 2** → `"edit": "ask"` delegates the decision to Layer 3
+2. **Layer 3** → `ChatbotClient.requestPermission()` checks workspace boundary (agent workspace + TMPDIR) and file extension (`allowedWriteExtensions`)
+3. **Layer 4** → `writeTextFile()` enforces path boundary and extension checks as defense-in-depth
+
+This approach is consistent with Gemini, which also relies on Layer 3 for edit/write permission enforcement.
 
 ### Bash Permission (Whitelist)
 
@@ -403,7 +416,7 @@ These sessions use synthetic identifiers (e.g., platform=`"discord"`, userId=`"s
 
 **Gemini** uses Policy Engine TOML rules and settings.json for Layer 1/2 permission control. These rules mirror the OpenCode permission model. Layer 3 (ACP permission gate) acts as a secondary enforcer.
 
-**OpenCode** has the most granular control through Layer 2 (`opencode.json`). Permission decisions are made at the opencode.json level first, then Layer 3 acts as a secondary gate for the ACP protocol.
+**OpenCode** uses Layer 2 (`opencode.json`) for most permissions, but delegates edit/write decisions to Layer 3 via `"ask"`. This is because OpenCode's edit/write tools convert file paths to relative paths before evaluating Layer 2 patterns, making absolute path patterns unreliable (see [Path Resolution in Permission Patterns](#path-resolution-in-permission-patterns)). This approach is consistent with Gemini, which also relies on Layer 3 for edit/write enforcement.
 
 **Reference**: `src/acp/agent-factory.ts`
 
@@ -513,13 +526,13 @@ Permission audit phases respect the `audit.includedPhases` configuration. When `
 
 | Threat                                  | Prevented by                                                                                            |
 | --------------------------------------- | ------------------------------------------------------------------------------------------------------- |
-| Agent modifying source code             | Layer 1 (no edit tool for Copilot), Layer 2 (edit denied for OpenCode), Layer 3 (edit/write scoped to agent workspace only) |
+| Agent modifying source code             | Layer 1 (no edit tool for Copilot), Layer 2 (`"ask"` delegates to Layer 3 for OpenCode), Layer 3 (edit/write scoped to agent workspace only) |
 | Agent running arbitrary commands        | Layer 2 (bash whitelist for OpenCode), Layer 3 (skill auto-approve list)                                |
 | Agent accessing other users' data       | Layer 4 (file access boundary — workspace isolation)                                                    |
 | Agent exfiltrating secrets via env vars | Layer 5 (env var filtering)                                                                             |
 | Agent making unauthorized network calls | Layer 5 (optional network isolation)                                                                    |
 | Agent committing/pushing to git         | Layer 2 (git denied for OpenCode), Layer 3 (not in skill list)                                          |
-| Agent writing non-allowed file types    | Layer 2 (extension patterns in opencode.json), Layer 3 (extension check), Layer 4 (writeTextFile check) |
+| Agent writing non-allowed file types    | Layer 2 (`"ask"` delegates to Layer 3 for OpenCode), Layer 3 (extension check), Layer 4 (writeTextFile check) |
 | Permission bypass undetected            | All permission decisions (approved and denied) are recorded in per-session audit logs with full context |
 
 ### Known Limitations
@@ -533,6 +546,8 @@ Permission audit phases respect the `audit.includedPhases` configuration. When `
 4. **Self-research and memory maintenance always run in restricted mode**: There is no way to enable per-channel YOLO for these internal sessions — only the global `--yolo` flag works. This is by design (synthetic identifiers), but means trusted-channel YOLO configs don't apply to background tasks.
 
 5. **OpenCode pattern matching limitations**: OpenCode's wildcard engine only expands `~` and `$HOME` — other environment variables (`$TMPDIR`, `$AGENT_WORKSPACE`, `${HOME}`) are not supported. All `opencode.json` permission patterns must use absolute paths or `~/`-relative paths. The TMPDIR pattern uses a broader absolute path (`/app/data/workspaces/*/tmp/**`) that covers all user workspaces; per-session isolation relies on Layers 3 and 4.
+
+6. **OpenCode edit/write relative path resolution**: OpenCode's `edit`/`write` tools convert absolute file paths to relative paths (via `path.relative(Instance.worktree, filepath)`) before evaluating permission rules. This means file-path-based patterns in the `edit` permission section are unreliable — absolute paths will never match. The recommended approach is to set `"edit": "ask"` in `opencode.json` and rely on Layer 3 (`ChatbotClient.requestPermission()`) for edit/write permission enforcement. See [OpenCode edit.ts](https://github.com/anomalyco/opencode/blob/dev/packages/opencode/src/tool/edit.ts) and [OpenCode write.ts](https://github.com/anomalyco/opencode/blob/dev/packages/opencode/src/tool/write.ts).
 
 ---
 

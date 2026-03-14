@@ -42,12 +42,7 @@
         "task": "deny",
         "doom_loop": "deny",
         "question": "deny",
-        "edit": {
-          "*": "deny",
-          "/app/data/agent-workspace/**/*.md": "allow",
-          "/app/data/agent-workspace/**/*.txt": "allow",
-          "/app/data/workspaces/*/tmp/**": "allow"
-        },
+        "edit": "ask",
         "bash": {
           "*": "deny",
           "||": "deny",
