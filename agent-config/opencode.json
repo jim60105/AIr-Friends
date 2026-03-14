@@ -44,13 +44,9 @@
         "question": "deny",
         "edit": {
           "*": "deny",
-          "data/agent-workspace/**/*.md": "allow",
-          "data/agent-workspace/**/*.txt": "allow",
-          "$AGENT_WORKSPACE/**/*.md": "allow",
-          "$AGENT_WORKSPACE/**/*.txt": "allow",
           "/app/data/agent-workspace/**/*.md": "allow",
           "/app/data/agent-workspace/**/*.txt": "allow",
-          "$TMPDIR/**": "allow"
+          "/app/data/workspaces/*/tmp/**": "allow"
         },
         "bash": {
           "*": "deny",
@@ -75,10 +71,8 @@
           "~/.agents/skills/**": "allow",
           "/home/deno/.agents/skills/**": "allow",
           "/home/deno/.copilot/skills/**": "allow",
-          "data/agent-workspace/**": "allow",
-          "$AGENT_WORKSPACE/**": "allow",
           "/app/data/agent-workspace/**": "allow",
-          "$TMPDIR/**": "allow"
+          "/app/data/workspaces/*/tmp/**": "allow"
         }
       }
     },
