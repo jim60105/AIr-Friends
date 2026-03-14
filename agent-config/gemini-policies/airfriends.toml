@@ -81,14 +81,54 @@ decision = "allow"
 priority = 100
 modes = ["default", "auto_edit", "plan"]
 
+# Allow networking tools
+[[rule]]
+toolName = "run_shell_command"
+commandPrefix = ["wget "]
+decision = "allow"
+priority = 100
+modes = ["default", "auto_edit", "plan"]
+
+# Allow file inspection and text processing tools
+[[rule]]
+toolName = "run_shell_command"
+commandPrefix = ["file ", "tree ", "jq ", "bc "]
+decision = "allow"
+priority = 100
+modes = ["default", "auto_edit", "plan"]
+
+# Allow document processing tools (PDF, conversion)
+[[rule]]
+toolName = "run_shell_command"
+commandPrefix = ["pdftotext ", "pdfinfo ", "pdfimages ", "pdftoppm ", "pandoc ", "exiftool "]
+decision = "allow"
+priority = 100
+modes = ["default", "auto_edit", "plan"]
+
+# Allow multimedia processing tools
+[[rule]]
+toolName = "run_shell_command"
+commandPrefix = ["ffmpeg ", "ffprobe ", "magick ", "convert ", "identify ", "mogrify "]
+decision = "allow"
+priority = 100
+modes = ["default", "auto_edit", "plan"]
+
+# Allow archive tools
+[[rule]]
+toolName = "run_shell_command"
+commandPrefix = ["unzip ", "zip ", "7zz "]
+decision = "allow"
+priority = 100
+modes = ["default", "auto_edit", "plan"]
+
 # ============================================================
 # 6. Shell commands — Explicitly deny dangerous commands
 # ============================================================
-# Equivalent to agent-config/opencode.json: "git *": "deny", "echo *": "deny", "mkdir *": "deny"
+# Equivalent to agent-config/opencode.json explicit deny rules
 # Highest priority to override any allows
 [[rule]]
 toolName = "run_shell_command"
-commandPrefix = ["git ", "echo ", "mkdir "]
+commandPrefix = ["git ", "echo ", "mkdir ", "python ", "python3 ", "pip ", "pip3 ", "gcc ", "g++ ", "make ", "strace "]
 decision = "deny"
 priority = 200
 modes = ["default", "auto_edit", "plan"]
