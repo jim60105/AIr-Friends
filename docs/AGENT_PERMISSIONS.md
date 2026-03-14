@@ -140,10 +140,27 @@ OpenCode uses a JSON configuration file (`opencode.json`) for fine-grained permi
 
 ### Pattern Matching Rules
 
-- `*` matches zero or more of any character
-- `?` matches exactly one character
-- **Last-match-wins**: rules are evaluated in order; the last matching rule takes precedence
-- Home directory expansion: `~` and `$HOME` expand to the user's home directory
+OpenCode's pattern matching uses a **regex-based engine**, not standard glob. Patterns are converted to regular expressions via the following transformation:
+
+1. Special regex characters (`. + ^ $ { } ( ) | [ ] \`) are escaped
+2. `*` is converted to `.*` (matches any characters **including** `/` — crosses directory boundaries)
+3. `?` is converted to `.` (matches exactly one character)
+
+| Feature | Behavior |
+|---|---|
+| `*` | Matches any characters **including path separators** (`/`). Unlike standard glob where `*` only matches within a single directory level. |
+| `**` | Functionally equivalent to `*` (since `*` already crosses directories). |
+| `?` | Matches exactly one character. |
+| `~` | ✅ Expanded to user home directory. |
+| `$HOME` | ✅ Expanded to user home directory. |
+| `${HOME}` | ❌ **Not expanded** — braces are regex-escaped to literal characters. |
+| Other env vars | ❌ Not supported (`$TMPDIR`, `$AGENT_WORKSPACE`, etc. are not expanded). |
+| `{a,b}` | ❌ Brace expansion not supported — braces are escaped as literal characters. |
+| Rule priority | **Last-match-wins** — rules are evaluated in order; the last matching rule takes precedence. |
+
+> **Important**: Because only `~` and `$HOME` are expanded, all permission patterns in `opencode.json` must use either **absolute paths** (e.g., `/app/data/agent-workspace/**/*.md`) or **`~`/`$HOME`-relative paths** (e.g., `~/.agents/skills/**`). Other environment variables will be treated as literal strings and never match real file paths.
+
+> **Reference**: [OpenCode wildcard.ts](https://github.com/anomalyco/opencode/blob/dev/packages/opencode/src/util/wildcard.ts), [OpenCode next.ts](https://github.com/anomalyco/opencode/blob/dev/packages/opencode/src/permission/next.ts)
 
 ### Current Configuration
 
@@ -153,7 +170,8 @@ The `agent-config/opencode.json` in the project configures permissions for the `
 | ----------------------------------------------------------- | ------------ | --------------------------------------- |
 | **Default (`*`)**                                           | `deny`       | Non-interactive system rejects unknowns |
 | **Read-only tools** (`read`, `list`, `glob`, `grep`, `lsp`) | `allow`      | Safe exploration — no side effects      |
-| **Session management** (`todoread`, `todowrite`, `task`)    | `allow`      | Internal agent organization tools       |
+| **Session management** (`todoread`, `todowrite`)            | `allow`      | Internal agent organization tools       |
+| **Sub-task spawning** (`task`)                              | `deny`       | Non-interactive system — no sub-agent coordination |
 | **Skills** (`skill`)                                        | `allow`      | Core SKILL.md discovery and loading     |
 | **Web access** (`webfetch`, `websearch`, `codesearch`)      | `allow`      | Research and information gathering      |
 | **Interactive** (`question`)                                | `deny`       | No human operator to answer questions   |
@@ -169,17 +187,15 @@ File editing is denied by default, with exceptions for the agent workspace:
 ```json
 "edit": {
   "*": "deny",
-  "data/agent-workspace/**/*.md": "allow",
-  "data/agent-workspace/**/*.txt": "allow",
-  "$AGENT_WORKSPACE/**/*.md": "allow",
-  "$AGENT_WORKSPACE/**/*.txt": "allow",
   "/app/data/agent-workspace/**/*.md": "allow",
   "/app/data/agent-workspace/**/*.txt": "allow",
-  "$TMPDIR/**": "allow"
+  "/app/data/workspaces/*/tmp/**": "allow"
 }
 ```
 
-This allows the self-research feature to write study notes (`.md`, `.txt`) to the agent workspace while preventing the agent from modifying source code, configuration files, or user workspace data. The extension restriction (`allowedWriteExtensions`) applies only in restricted (non-YOLO) mode; TMPDIR writes remain unrestricted regardless of extension.
+This allows the self-research feature to write study notes (`.md`, `.txt`) to the agent workspace while preventing the agent from modifying source code, configuration files, or user workspace data. The extension restriction (`allowedWriteExtensions`) applies only in restricted (non-YOLO) mode.
+
+The TMPDIR pattern (`/app/data/workspaces/*/tmp/**`) uses an absolute path to cover all user workspace tmp directories, since `$TMPDIR` environment variable expansion is not supported by OpenCode's pattern matching engine. Per-session isolation is enforced by Layers 3 and 4.
 
 ### Bash Permission (Whitelist)
 
@@ -210,10 +226,8 @@ By default, OpenCode only allows file access within its working directory (the u
   "~/.agents/skills/**": "allow",
   "/home/deno/.agents/skills/**": "allow",
   "/home/deno/.copilot/skills/**": "allow",
-  "data/agent-workspace/**": "allow",
-  "$AGENT_WORKSPACE/**": "allow",
   "/app/data/agent-workspace/**": "allow",
-  "$TMPDIR/**": "allow"
+  "/app/data/workspaces/*/tmp/**": "allow"
 }
 ```
 
@@ -517,6 +531,8 @@ Permission audit phases respect the `audit.includedPhases` configuration. When `
 3. **Layer 3 relies on shell operator detection**: Layer 3 rejects commands containing shell meta-characters (`;`, `|`, `&`, `` ` ``, `$()`, `>`, `<`, `#`, newlines) and validates script paths as complete whitespace-delimited tokens and command prefixes as exact first-token matches. While this prevents known injection patterns (command chaining, piping, comment hiding), novel shell features or encoding tricks not covered by the character set could theoretically bypass the check.
 
 4. **Self-research and memory maintenance always run in restricted mode**: There is no way to enable per-channel YOLO for these internal sessions — only the global `--yolo` flag works. This is by design (synthetic identifiers), but means trusted-channel YOLO configs don't apply to background tasks.
+
+5. **OpenCode pattern matching limitations**: OpenCode's wildcard engine only expands `~` and `$HOME` — other environment variables (`$TMPDIR`, `$AGENT_WORKSPACE`, `${HOME}`) are not supported. All `opencode.json` permission patterns must use absolute paths or `~/`-relative paths. The TMPDIR pattern uses a broader absolute path (`/app/data/workspaces/*/tmp/**`) that covers all user workspaces; per-session isolation relies on Layers 3 and 4.
 
 ---
 
