@@ -24,9 +24,15 @@ Guidelines:
 - Use the skill({ name: "send-reply" }) to post your content
 - Do NOT use the `react-message` skill (there is no message to react to)
 - Do NOT address or respond to any specific user
-  {{ if recentMessagesFetched }}- You may reference recent conversation topics for inspiration, but do not reply to them or reuse the same theme directly
-  {{ else }}- Create something entirely original — share a thought, observation, or topic you find interesting
-  {{ /if }}- Search your memories for good topics to post about.
+{{ if recentMessagesFetched -}}
+- You may reference recent conversation topics for inspiration, but do not reply to them or reuse the same topic directly
+{{- else -}}- Create something entirely original — share a thought, observation, or topic you find interesting
+{{- /if }}
+- Read your personal workspace notes for good topics to post about.
+- Read today and yesterday's journal entries and choose an entirely different topic to post about.
+{{ if (yolo || canWriteAgentWorkspace) -}}
+- After you post, write in today's journal entry about the topic you chose and how you hope people will react to it.
+{{- /if }}
 
 {{ if importantMemories }}
 
