@@ -441,7 +441,7 @@ We use `@agentclientprotocol/sdk` for Client-side connection:
 **Permission Handling**:
 
 - **Restricted mode**: Auto-approves registered skills, skills directory access, and skill auto-approve list matched commands (script paths + command prefixes). The auto-approve list can be configured via `agent.autoApproveSkills` in config or `AGENT_AUTO_APPROVE_SKILLS` env var (comma-separated). When not configured, falls back to scanning the built-in `skills/` directory. Explicitly rejects `edit`/`write` tools with logging.
-- **Edit/Write Path Extraction**: When `locations` is empty in an edit/write permission request, the system attempts to extract file paths from `rawInput` (checking fields: `path`, `file_path`, `filePath`, `file`, `filename`, `paths`, `files`). Extracted paths go through the standard workspace boundary and extension checks. If paths cannot be extracted from either `locations` or `rawInput`, the request is rejected (conservative approach to maintain security boundaries).
+- **Edit/Write Path Extraction**: When `locations` is empty in an edit/write permission request, the system attempts to extract file paths from `rawInput` (checking fields: `path`, `file_path`, `filePath`, `filepath`, `file`, `filename`, `paths`, `files`). Extracted paths go through the standard workspace boundary and extension checks. If paths cannot be extracted from either `locations` or `rawInput`, the request is rejected (conservative approach to maintain security boundaries).
 - **YOLO mode** (global `--yolo` flag or per-channel `yolo: true`): Auto-approves ALL permission requests
   - Useful for trusted/isolated environments
   - Bypasses all permission validation
