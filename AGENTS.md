@@ -441,6 +441,7 @@ We use `@agentclientprotocol/sdk` for Client-side connection:
 **Permission Handling**:
 
 - **Restricted mode**: Auto-approves registered skills, skills directory access, and skill auto-approve list matched commands (script paths + command prefixes). The auto-approve list can be configured via `agent.autoApproveSkills` in config or `AGENT_AUTO_APPROVE_SKILLS` env var (comma-separated). When not configured, falls back to scanning the built-in `skills/` directory. Explicitly rejects `edit`/`write` tools with logging.
+- **Edit/Write Path Extraction**: When `locations` is empty in an edit/write permission request, the system attempts to extract file paths from `rawInput` (checking fields: `path`, `file_path`, `filePath`, `file`, `filename`, `paths`, `files`). Extracted paths go through the standard workspace boundary and extension checks. If paths cannot be extracted from either `locations` or `rawInput`, the request is rejected (conservative approach to maintain security boundaries).
 - **YOLO mode** (global `--yolo` flag or per-channel `yolo: true`): Auto-approves ALL permission requests
   - Useful for trusted/isolated environments
   - Bypasses all permission validation
@@ -814,6 +815,12 @@ selfResearch:
 6. Agent self-reviews for hallucinations and privacy
 7. No reply is sent to any platform — purely internal research
 
+> **Note**: Self-research sessions set `canWriteAgentWorkspace: true` in template variables, allowing
+> the prompt template to show write instructions (instead of "read-only") when rendering
+> `agent_workspace.md`. Combined with the rawInput path extraction in `requestPermission()`,
+> the agent can write research notes to `$AGENT_WORKSPACE/notes/` even in restricted (non-YOLO)
+> mode, as long as the edit/write permission request includes file path information.
+
 **Key Components:**
 
 - `src/core/self-research-scheduler.ts` — Timer management
@@ -1088,25 +1095,26 @@ You are Yuna. This is a private chat.
 
 ### Available Template Variables
 
-| Variable                | Type      | Description                                                      |
-| ----------------------- | --------- | ---------------------------------------------------------------- |
-| `isDm`                  | `boolean` | Whether this is a direct message conversation                    |
-| `platform`              | `string`  | Platform name (`"discord"` / `"misskey"`)                        |
-| `userId`                | `string`  | User's platform ID                                               |
-| `channelId`             | `string`  | Channel/conversation ID                                          |
-| `guildId`               | `string`  | Server/guild ID (empty string if N/A)                            |
-| `sessionId`             | `string`  | Current skill API session ID                                     |
-| `agentType`             | `string`  | ACP agent type (`"copilot"` / `"gemini"` / `"opencode"`)         |
-| `model`                 | `string`  | Model identifier (e.g., `"claude-opus-4.6"`, `"gemini-2.5-pro"`) |
-| `rssItems`              | `string`  | RSS items (self-research prompt only)                            |
-| `workspaceKey`          | `string`  | Workspace key (memory maintenance prompt only)                   |
-| `memoriesDump`          | `string`  | Memory JSON dump (memory maintenance only)                       |
-| `recentMessagesFetched` | `boolean` | Whether recent messages were fetched (spontaneous post only)     |
-| `importantMemories`     | `string`  | Formatted important memories text (spontaneous post only)        |
-| `recentMessages`        | `string`  | Formatted recent messages text (spontaneous post only)           |
-| `availableEmojis`       | `string`  | Formatted available emojis text (spontaneous post only)          |
-| `yolo`                  | `boolean` | Whether YOLO mode is enabled (bypasses permission restrictions)  |
-| `userContextMessage`    | `string`  | Pre-formatted user context message (normal message prompt only)  |
+| Variable                 | Type      | Description                                                      |
+| ------------------------ | --------- | ---------------------------------------------------------------- |
+| `isDm`                   | `boolean` | Whether this is a direct message conversation                    |
+| `platform`               | `string`  | Platform name (`"discord"` / `"misskey"`)                        |
+| `userId`                 | `string`  | User's platform ID                                               |
+| `channelId`              | `string`  | Channel/conversation ID                                          |
+| `guildId`                | `string`  | Server/guild ID (empty string if N/A)                            |
+| `sessionId`              | `string`  | Current skill API session ID                                     |
+| `agentType`              | `string`  | ACP agent type (`"copilot"` / `"gemini"` / `"opencode"`)         |
+| `model`                  | `string`  | Model identifier (e.g., `"claude-opus-4.6"`, `"gemini-2.5-pro"`) |
+| `rssItems`               | `string`  | RSS items (self-research prompt only)                            |
+| `workspaceKey`           | `string`  | Workspace key (memory maintenance prompt only)                   |
+| `memoriesDump`           | `string`  | Memory JSON dump (memory maintenance only)                       |
+| `recentMessagesFetched`  | `boolean` | Whether recent messages were fetched (spontaneous post only)     |
+| `importantMemories`      | `string`  | Formatted important memories text (spontaneous post only)        |
+| `recentMessages`         | `string`  | Formatted recent messages text (spontaneous post only)           |
+| `availableEmojis`        | `string`  | Formatted available emojis text (spontaneous post only)          |
+| `yolo`                   | `boolean` | Whether YOLO mode is enabled (bypasses permission restrictions)  |
+| `canWriteAgentWorkspace` | `boolean` | Whether this session allows writing to agent workspace           |
+| `userContextMessage`     | `string`  | Pre-formatted user context message (normal message prompt only)  |
 
 ### Container Deployment Considerations
 

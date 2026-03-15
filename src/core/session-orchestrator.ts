@@ -2156,6 +2156,7 @@ export class SessionOrchestrator {
       agentType: getDefaultAgentType(this.config),
       model,
       yolo,
+      canWriteAgentWorkspace: true,
       rssItems: rssBlock,
     };
 

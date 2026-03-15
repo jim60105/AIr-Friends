@@ -3160,3 +3160,353 @@ Deno.test("ChatbotClient - writeTextFile allows any extension in working directo
     Deno.removeSync(tempDir, { recursive: true });
   }
 });
+
+// ============ rawInput Path Extraction Tests ============
+
+Deno.test("ChatbotClient - requestPermission extracts path from rawInput.path when locations empty", async () => {
+  const tempDir = Deno.makeTempDirSync();
+  const agentWorkspace = Deno.makeTempDirSync();
+  try {
+    const skillRegistry = createTestSkillRegistry();
+    const logger = createTestLogger();
+    const config = {
+      workingDir: tempDir,
+      agentWorkspacePath: agentWorkspace,
+      platform: "discord",
+      userId: "123",
+      channelId: "456",
+      isDM: false,
+      allowedWriteExtensions: [".md", ".txt"],
+    };
+    const allowList: SkillAutoApproveList = {
+      scriptPaths: new Set(),
+      commandPrefixes: new Set(),
+    };
+    const client = new ChatbotClient(skillRegistry, logger, config, allowList);
+
+    const request: acp.RequestPermissionRequest = {
+      sessionId: "test-session",
+      toolCall: {
+        title: "edit",
+        kind: "edit",
+        status: "pending" as const,
+        content: [],
+        toolCallId: "test-id",
+        rawInput: { path: `${agentWorkspace}/notes/topic.md` },
+        locations: [],
+      },
+      options: [
+        { kind: "allow_once", optionId: "allow-1", name: "Allow once" },
+        { kind: "reject_once", optionId: "reject-1", name: "Reject once" },
+      ],
+    };
+
+    const response = await client.requestPermission(request);
+    assertEquals(response.outcome.outcome, "selected");
+    if (response.outcome.outcome === "selected") {
+      assertEquals(response.outcome.optionId, "allow-1");
+    }
+  } finally {
+    Deno.removeSync(tempDir, { recursive: true });
+    Deno.removeSync(agentWorkspace, { recursive: true });
+  }
+});
+
+Deno.test("ChatbotClient - requestPermission extracts path from rawInput.filePath when locations empty", async () => {
+  const tempDir = Deno.makeTempDirSync();
+  const agentWorkspace = Deno.makeTempDirSync();
+  try {
+    const skillRegistry = createTestSkillRegistry();
+    const logger = createTestLogger();
+    const config = {
+      workingDir: tempDir,
+      agentWorkspacePath: agentWorkspace,
+      platform: "discord",
+      userId: "123",
+      channelId: "456",
+      isDM: false,
+      allowedWriteExtensions: [".md", ".txt"],
+    };
+    const allowList: SkillAutoApproveList = {
+      scriptPaths: new Set(),
+      commandPrefixes: new Set(),
+    };
+    const client = new ChatbotClient(skillRegistry, logger, config, allowList);
+
+    const request: acp.RequestPermissionRequest = {
+      sessionId: "test-session",
+      toolCall: {
+        title: "edit",
+        kind: "edit",
+        status: "pending" as const,
+        content: [],
+        toolCallId: "test-id",
+        rawInput: { filePath: `${agentWorkspace}/notes/topic.md` },
+        locations: [],
+      },
+      options: [
+        { kind: "allow_once", optionId: "allow-1", name: "Allow once" },
+        { kind: "reject_once", optionId: "reject-1", name: "Reject once" },
+      ],
+    };
+
+    const response = await client.requestPermission(request);
+    assertEquals(response.outcome.outcome, "selected");
+    if (response.outcome.outcome === "selected") {
+      assertEquals(response.outcome.optionId, "allow-1");
+    }
+  } finally {
+    Deno.removeSync(tempDir, { recursive: true });
+    Deno.removeSync(agentWorkspace, { recursive: true });
+  }
+});
+
+Deno.test("ChatbotClient - requestPermission extracts paths from rawInput.paths array", async () => {
+  const tempDir = Deno.makeTempDirSync();
+  const agentWorkspace = Deno.makeTempDirSync();
+  try {
+    const skillRegistry = createTestSkillRegistry();
+    const logger = createTestLogger();
+    const config = {
+      workingDir: tempDir,
+      agentWorkspacePath: agentWorkspace,
+      platform: "discord",
+      userId: "123",
+      channelId: "456",
+      isDM: false,
+      allowedWriteExtensions: [".md", ".txt"],
+    };
+    const allowList: SkillAutoApproveList = {
+      scriptPaths: new Set(),
+      commandPrefixes: new Set(),
+    };
+    const client = new ChatbotClient(skillRegistry, logger, config, allowList);
+
+    const request: acp.RequestPermissionRequest = {
+      sessionId: "test-session",
+      toolCall: {
+        title: "edit",
+        kind: "edit",
+        status: "pending" as const,
+        content: [],
+        toolCallId: "test-id",
+        rawInput: {
+          paths: [
+            `${agentWorkspace}/notes/a.md`,
+            `${agentWorkspace}/notes/b.md`,
+          ],
+        },
+        locations: [],
+      },
+      options: [
+        { kind: "allow_once", optionId: "allow-1", name: "Allow once" },
+        { kind: "reject_once", optionId: "reject-1", name: "Reject once" },
+      ],
+    };
+
+    const response = await client.requestPermission(request);
+    assertEquals(response.outcome.outcome, "selected");
+    if (response.outcome.outcome === "selected") {
+      assertEquals(response.outcome.optionId, "allow-1");
+    }
+  } finally {
+    Deno.removeSync(tempDir, { recursive: true });
+    Deno.removeSync(agentWorkspace, { recursive: true });
+  }
+});
+
+Deno.test("ChatbotClient - requestPermission rejects rawInput path outside workspace", async () => {
+  const tempDir = Deno.makeTempDirSync();
+  const agentWorkspace = Deno.makeTempDirSync();
+  try {
+    const skillRegistry = createTestSkillRegistry();
+    const logger = createTestLogger();
+    const config = {
+      workingDir: tempDir,
+      agentWorkspacePath: agentWorkspace,
+      platform: "discord",
+      userId: "123",
+      channelId: "456",
+      isDM: false,
+      allowedWriteExtensions: [".md", ".txt"],
+    };
+    const allowList: SkillAutoApproveList = {
+      scriptPaths: new Set(),
+      commandPrefixes: new Set(),
+    };
+    const client = new ChatbotClient(skillRegistry, logger, config, allowList);
+
+    const request: acp.RequestPermissionRequest = {
+      sessionId: "test-session",
+      toolCall: {
+        title: "edit",
+        kind: "edit",
+        status: "pending" as const,
+        content: [],
+        toolCallId: "test-id",
+        rawInput: { path: "/etc/passwd" },
+        locations: [],
+      },
+      options: [
+        { kind: "allow_once", optionId: "allow-1", name: "Allow once" },
+        { kind: "reject_once", optionId: "reject-1", name: "Reject once" },
+      ],
+    };
+
+    const response = await client.requestPermission(request);
+    assertEquals(response.outcome.outcome, "selected");
+    if (response.outcome.outcome === "selected") {
+      assertEquals(response.outcome.optionId, "reject-1");
+    }
+  } finally {
+    Deno.removeSync(tempDir, { recursive: true });
+    Deno.removeSync(agentWorkspace, { recursive: true });
+  }
+});
+
+Deno.test("ChatbotClient - requestPermission rejects rawInput path with disallowed extension", async () => {
+  const tempDir = Deno.makeTempDirSync();
+  const agentWorkspace = Deno.makeTempDirSync();
+  try {
+    const skillRegistry = createTestSkillRegistry();
+    const logger = createTestLogger();
+    const config = {
+      workingDir: tempDir,
+      agentWorkspacePath: agentWorkspace,
+      platform: "discord",
+      userId: "123",
+      channelId: "456",
+      isDM: false,
+      allowedWriteExtensions: [".md", ".txt"],
+    };
+    const allowList: SkillAutoApproveList = {
+      scriptPaths: new Set(),
+      commandPrefixes: new Set(),
+    };
+    const client = new ChatbotClient(skillRegistry, logger, config, allowList);
+
+    const request: acp.RequestPermissionRequest = {
+      sessionId: "test-session",
+      toolCall: {
+        title: "edit",
+        kind: "edit",
+        status: "pending" as const,
+        content: [],
+        toolCallId: "test-id",
+        rawInput: { path: `${agentWorkspace}/notes/script.sh` },
+        locations: [],
+      },
+      options: [
+        { kind: "allow_once", optionId: "allow-1", name: "Allow once" },
+        { kind: "reject_once", optionId: "reject-1", name: "Reject once" },
+      ],
+    };
+
+    const response = await client.requestPermission(request);
+    assertEquals(response.outcome.outcome, "selected");
+    if (response.outcome.outcome === "selected") {
+      assertEquals(response.outcome.optionId, "reject-1");
+    }
+  } finally {
+    Deno.removeSync(tempDir, { recursive: true });
+    Deno.removeSync(agentWorkspace, { recursive: true });
+  }
+});
+
+Deno.test("ChatbotClient - requestPermission ignores non-string rawInput values", async () => {
+  const tempDir = Deno.makeTempDirSync();
+  const agentWorkspace = Deno.makeTempDirSync();
+  try {
+    const skillRegistry = createTestSkillRegistry();
+    const logger = createTestLogger();
+    const config = {
+      workingDir: tempDir,
+      agentWorkspacePath: agentWorkspace,
+      platform: "discord",
+      userId: "123",
+      channelId: "456",
+      isDM: false,
+      allowedWriteExtensions: [".md", ".txt"],
+    };
+    const allowList: SkillAutoApproveList = {
+      scriptPaths: new Set(),
+      commandPrefixes: new Set(),
+    };
+    const client = new ChatbotClient(skillRegistry, logger, config, allowList);
+
+    const request: acp.RequestPermissionRequest = {
+      sessionId: "test-session",
+      toolCall: {
+        title: "edit",
+        kind: "edit",
+        status: "pending" as const,
+        content: [],
+        toolCallId: "test-id",
+        rawInput: { path: 123, file: null, filePath: undefined },
+        locations: [],
+      },
+      options: [
+        { kind: "allow_once", optionId: "allow-1", name: "Allow once" },
+        { kind: "reject_once", optionId: "reject-1", name: "Reject once" },
+      ],
+    };
+
+    const response = await client.requestPermission(request);
+    assertEquals(response.outcome.outcome, "selected");
+    if (response.outcome.outcome === "selected") {
+      assertEquals(response.outcome.optionId, "reject-1");
+    }
+  } finally {
+    Deno.removeSync(tempDir, { recursive: true });
+    Deno.removeSync(agentWorkspace, { recursive: true });
+  }
+});
+
+Deno.test("ChatbotClient - requestPermission uses locations over rawInput when both present", async () => {
+  const tempDir = Deno.makeTempDirSync();
+  const agentWorkspace = Deno.makeTempDirSync();
+  try {
+    const skillRegistry = createTestSkillRegistry();
+    const logger = createTestLogger();
+    const config = {
+      workingDir: tempDir,
+      agentWorkspacePath: agentWorkspace,
+      platform: "discord",
+      userId: "123",
+      channelId: "456",
+      isDM: false,
+      allowedWriteExtensions: [".md", ".txt"],
+    };
+    const allowList: SkillAutoApproveList = {
+      scriptPaths: new Set(),
+      commandPrefixes: new Set(),
+    };
+    const client = new ChatbotClient(skillRegistry, logger, config, allowList);
+
+    const request: acp.RequestPermissionRequest = {
+      sessionId: "test-session",
+      toolCall: {
+        title: "edit",
+        kind: "edit",
+        status: "pending" as const,
+        content: [],
+        toolCallId: "test-id",
+        rawInput: { path: "/etc/bad-path" },
+        locations: [{ path: `${agentWorkspace}/notes/from-locations.md` }],
+      },
+      options: [
+        { kind: "allow_once", optionId: "allow-1", name: "Allow once" },
+        { kind: "reject_once", optionId: "reject-1", name: "Reject once" },
+      ],
+    };
+
+    const response = await client.requestPermission(request);
+    assertEquals(response.outcome.outcome, "selected");
+    if (response.outcome.outcome === "selected") {
+      assertEquals(response.outcome.optionId, "allow-1");
+    }
+  } finally {
+    Deno.removeSync(tempDir, { recursive: true });
+    Deno.removeSync(agentWorkspace, { recursive: true });
+  }
+});

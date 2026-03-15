@@ -68,4 +68,7 @@ export interface TemplateVariables {
 
   /** Whether YOLO mode is enabled for this session (bypasses permission restrictions) */
   yolo?: boolean;
+
+  /** Whether this session allows writing to agent workspace (regardless of YOLO mode) */
+  canWriteAgentWorkspace?: boolean;
 }

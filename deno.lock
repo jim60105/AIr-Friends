@@ -17,6 +17,7 @@
     "jsr:@std/streams@^1.0.9": "1.0.17",
     "jsr:@std/testing@^1.0.17": "1.0.17",
     "jsr:@std/yaml@1": "1.0.11",
+    "npm:@agentclientprotocol/sdk@0.14.1": "0.14.1_zod@3.25.76",
     "npm:@agentclientprotocol/sdk@~0.14.1": "0.14.1_zod@3.25.76",
     "npm:@google/gemini-cli@*": "0.27.0_zod@3.25.76_@modelcontextprotocol+sdk@1.25.3__zod@3.25.76__ajv@8.17.1__express@5.2.1_react@19.2.4",
     "npm:discord.js@14": "14.25.1",
@@ -3292,8 +3293,7 @@
         "minipass",
         "minizlib",
         "yallist"
-      ],
-      "deprecated": true
+      ]
     },
     "tdigest@0.1.2": {
       "integrity": "sha512-+G0LLgjjo9BZX2MfdvPfH+MKLCrxlXSYec5DaPYP1fe6Iyhf0/fSmJ0bFiZ1F8BT6cGXl2LpltQptzjXKWEkKA==",

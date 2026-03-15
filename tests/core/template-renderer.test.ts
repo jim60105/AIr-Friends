@@ -113,3 +113,48 @@ Deno.test("renderTemplateString - Vento comment syntax", async () => {
   const result = await renderTemplateString(env, template, {});
   assertEquals(result, "Hello");
 });
+
+// ============ canWriteAgentWorkspace Template Variable Tests ============
+
+Deno.test("canWriteAgentWorkspace - true with yolo false shows write instructions", async () => {
+  const env = createTemplateEngine(".");
+  const template =
+    `{{ if !(yolo || canWriteAgentWorkspace) }}read-only{{ else }}write-enabled{{ /if }}`;
+  const result = await renderTemplateString(env, template, {
+    yolo: false,
+    canWriteAgentWorkspace: true,
+  });
+  assertEquals(result, "write-enabled");
+});
+
+Deno.test("canWriteAgentWorkspace - false with yolo false shows read-only", async () => {
+  const env = createTemplateEngine(".");
+  const template =
+    `{{ if !(yolo || canWriteAgentWorkspace) }}read-only{{ else }}write-enabled{{ /if }}`;
+  const result = await renderTemplateString(env, template, {
+    yolo: false,
+    canWriteAgentWorkspace: false,
+  });
+  assertEquals(result, "read-only");
+});
+
+Deno.test("canWriteAgentWorkspace - false with yolo true shows write instructions", async () => {
+  const env = createTemplateEngine(".");
+  const template =
+    `{{ if !(yolo || canWriteAgentWorkspace) }}read-only{{ else }}write-enabled{{ /if }}`;
+  const result = await renderTemplateString(env, template, {
+    yolo: true,
+    canWriteAgentWorkspace: false,
+  });
+  assertEquals(result, "write-enabled");
+});
+
+Deno.test("canWriteAgentWorkspace - undefined with yolo false shows read-only (backward compat)", async () => {
+  const env = createTemplateEngine(".");
+  const template =
+    `{{ if !(yolo || canWriteAgentWorkspace) }}read-only{{ else }}write-enabled{{ /if }}`;
+  const result = await renderTemplateString(env, template, {
+    yolo: false,
+  });
+  assertEquals(result, "read-only");
+});
