@@ -779,7 +779,7 @@ export class ChatbotClient implements acp.Client {
     const paths: string[] = [];
 
     // Single path fields (common across agent types)
-    for (const field of ["path", "file_path", "filePath", "file", "filename"]) {
+    for (const field of ["path", "file_path", "filePath", "filepath", "file", "filename"]) {
       const value = rawInput[field];
       if (typeof value === "string" && value.length > 0) {
         paths.push(value);
