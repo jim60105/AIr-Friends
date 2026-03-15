@@ -377,6 +377,9 @@ export class AgentConnector {
 
       return result;
     } finally {
+      // Flush any remaining agent message chunks accumulated during this prompt.
+      // Placed in finally to ensure buffer is flushed even when prompt fails (e.g., idle timeout).
+      this.client?.flushMessageBuffer();
       this.clearIdleMonitor();
     }
   }

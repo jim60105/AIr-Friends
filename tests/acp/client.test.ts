@@ -3559,3 +3559,360 @@ Deno.test("ChatbotClient - requestPermission uses locations over rawInput when b
     Deno.removeSync(agentWorkspace, { recursive: true });
   }
 });
+
+// === Message Buffer Tests (Issue #307) ===
+
+Deno.test("ChatbotClient - flushMessageBuffer logs complete message after chunks", async () => {
+  const tempDir = Deno.makeTempDirSync();
+  try {
+    const infoLogs: Array<{ message: string; context: unknown }> = [];
+    const testLogger = new Logger("test", { level: LogLevel.DEBUG });
+    const originalInfo = testLogger.info.bind(testLogger);
+    testLogger.info = (message: string, context?: Record<string, unknown>) => {
+      infoLogs.push({ message, context });
+      originalInfo(message, context);
+    };
+
+    const skillRegistry = createTestSkillRegistry();
+    const config = {
+      workingDir: tempDir,
+      platform: "discord",
+      userId: "123",
+      channelId: "456",
+      isDM: false,
+    };
+
+    const client = new ChatbotClient(skillRegistry, testLogger, config);
+
+    // Send 2 agent_message_chunk updates
+    await client.sessionUpdate({
+      update: {
+        sessionUpdate: "agent_message_chunk",
+        content: { type: "text", text: "Hello " },
+      },
+    } as acp.SessionNotification);
+
+    await client.sessionUpdate({
+      update: {
+        sessionUpdate: "agent_message_chunk",
+        content: { type: "text", text: "world!" },
+      },
+    } as acp.SessionNotification);
+
+    // Verify no "Agent complete message" in infoLogs yet
+    const preFlushLogs = infoLogs.filter((log) =>
+      log.message === "Agent complete message ({chunkCount} chunks, {length} chars): {message}"
+    );
+    assertEquals(preFlushLogs.length, 0);
+
+    // Send a tool_call event to trigger flush
+    await client.sessionUpdate({
+      sessionId: "test-session",
+      update: {
+        sessionUpdate: "tool_call",
+        toolCallId: "test-id",
+        title: "test",
+        kind: null,
+        status: "pending" as const,
+      },
+    } as unknown as acp.SessionNotification);
+
+    // Verify exactly 1 "Agent complete message" log
+    const completeLogs = infoLogs.filter((log) =>
+      log.message === "Agent complete message ({chunkCount} chunks, {length} chars): {message}"
+    );
+    assertEquals(completeLogs.length, 1);
+    const context = completeLogs[0].context as Record<string, unknown>;
+    assertEquals(context.message, "Hello world!");
+    assertEquals(context.chunkCount, 2);
+    assertEquals(context.length, 12);
+  } finally {
+    Deno.removeSync(tempDir, { recursive: true });
+  }
+});
+
+Deno.test("ChatbotClient - handles multiple message sequences separated by tool calls", async () => {
+  const tempDir = Deno.makeTempDirSync();
+  try {
+    const infoLogs: Array<{ message: string; context: unknown }> = [];
+    const testLogger = new Logger("test", { level: LogLevel.DEBUG });
+    const originalInfo = testLogger.info.bind(testLogger);
+    testLogger.info = (message: string, context?: Record<string, unknown>) => {
+      infoLogs.push({ message, context });
+      originalInfo(message, context);
+    };
+
+    const skillRegistry = createTestSkillRegistry();
+    const config = {
+      workingDir: tempDir,
+      platform: "discord",
+      userId: "123",
+      channelId: "456",
+      isDM: false,
+    };
+
+    const client = new ChatbotClient(skillRegistry, testLogger, config);
+
+    // First sequence: "First " + "message" → tool_call
+    await client.sessionUpdate({
+      update: {
+        sessionUpdate: "agent_message_chunk",
+        content: { type: "text", text: "First " },
+      },
+    } as acp.SessionNotification);
+
+    await client.sessionUpdate({
+      update: {
+        sessionUpdate: "agent_message_chunk",
+        content: { type: "text", text: "message" },
+      },
+    } as acp.SessionNotification);
+
+    await client.sessionUpdate({
+      sessionId: "test-session",
+      update: {
+        sessionUpdate: "tool_call",
+        toolCallId: "test-id-1",
+        title: "test1",
+        kind: null,
+        status: "pending" as const,
+      },
+    } as unknown as acp.SessionNotification);
+
+    // Second sequence: "Second " + "message" → tool_call
+    await client.sessionUpdate({
+      update: {
+        sessionUpdate: "agent_message_chunk",
+        content: { type: "text", text: "Second " },
+      },
+    } as acp.SessionNotification);
+
+    await client.sessionUpdate({
+      update: {
+        sessionUpdate: "agent_message_chunk",
+        content: { type: "text", text: "message" },
+      },
+    } as acp.SessionNotification);
+
+    await client.sessionUpdate({
+      sessionId: "test-session",
+      update: {
+        sessionUpdate: "tool_call",
+        toolCallId: "test-id-2",
+        title: "test2",
+        kind: null,
+        status: "pending" as const,
+      },
+    } as unknown as acp.SessionNotification);
+
+    // Verify 2 separate "Agent complete message" logs
+    const completeLogs = infoLogs.filter((log) =>
+      log.message === "Agent complete message ({chunkCount} chunks, {length} chars): {message}"
+    );
+    assertEquals(completeLogs.length, 2);
+
+    const first = completeLogs[0].context as Record<string, unknown>;
+    assertEquals(first.message, "First message");
+    assertEquals(first.chunkCount, 2);
+
+    const second = completeLogs[1].context as Record<string, unknown>;
+    assertEquals(second.message, "Second message");
+    assertEquals(second.chunkCount, 2);
+  } finally {
+    Deno.removeSync(tempDir, { recursive: true });
+  }
+});
+
+Deno.test("ChatbotClient - flushMessageBuffer is safe when buffer is empty", async () => {
+  const tempDir = Deno.makeTempDirSync();
+  try {
+    const infoLogs: Array<{ message: string; context: unknown }> = [];
+    const testLogger = new Logger("test", { level: LogLevel.DEBUG });
+    const originalInfo = testLogger.info.bind(testLogger);
+    testLogger.info = (message: string, context?: Record<string, unknown>) => {
+      infoLogs.push({ message, context });
+      originalInfo(message, context);
+    };
+
+    const skillRegistry = createTestSkillRegistry();
+    const config = {
+      workingDir: tempDir,
+      platform: "discord",
+      userId: "123",
+      channelId: "456",
+      isDM: false,
+    };
+
+    const client = new ChatbotClient(skillRegistry, testLogger, config);
+
+    // Send a tool_call without any preceding chunks
+    await client.sessionUpdate({
+      sessionId: "test-session",
+      update: {
+        sessionUpdate: "tool_call",
+        toolCallId: "test-id",
+        title: "test",
+        kind: null,
+        status: "pending" as const,
+      },
+    } as unknown as acp.SessionNotification);
+
+    // Verify no "Agent complete message" log entry produced
+    const completeLogs = infoLogs.filter((log) =>
+      log.message === "Agent complete message ({chunkCount} chunks, {length} chars): {message}"
+    );
+    assertEquals(completeLogs.length, 0);
+  } finally {
+    Deno.removeSync(tempDir, { recursive: true });
+  }
+});
+
+Deno.test("ChatbotClient - reset flushes remaining message buffer", async () => {
+  const tempDir = Deno.makeTempDirSync();
+  try {
+    const infoLogs: Array<{ message: string; context: unknown }> = [];
+    const testLogger = new Logger("test", { level: LogLevel.DEBUG });
+    const originalInfo = testLogger.info.bind(testLogger);
+    testLogger.info = (message: string, context?: Record<string, unknown>) => {
+      infoLogs.push({ message, context });
+      originalInfo(message, context);
+    };
+
+    const skillRegistry = createTestSkillRegistry();
+    const config = {
+      workingDir: tempDir,
+      platform: "discord",
+      userId: "123",
+      channelId: "456",
+      isDM: false,
+    };
+
+    const client = new ChatbotClient(skillRegistry, testLogger, config);
+
+    // Send chunks
+    await client.sessionUpdate({
+      update: {
+        sessionUpdate: "agent_message_chunk",
+        content: { type: "text", text: "Buffered " },
+      },
+    } as acp.SessionNotification);
+
+    await client.sessionUpdate({
+      update: {
+        sessionUpdate: "agent_message_chunk",
+        content: { type: "text", text: "content" },
+      },
+    } as acp.SessionNotification);
+
+    // Call reset to flush
+    client.reset();
+
+    // Verify "Agent complete message" log
+    const completeLogs = infoLogs.filter((log) =>
+      log.message === "Agent complete message ({chunkCount} chunks, {length} chars): {message}"
+    );
+    assertEquals(completeLogs.length, 1);
+    const context = completeLogs[0].context as Record<string, unknown>;
+    assertEquals(context.message, "Buffered content");
+  } finally {
+    Deno.removeSync(tempDir, { recursive: true });
+  }
+});
+
+Deno.test("ChatbotClient - non-text content chunks do not affect message buffer", async () => {
+  const tempDir = Deno.makeTempDirSync();
+  try {
+    const infoLogs: Array<{ message: string; context: unknown }> = [];
+    const testLogger = new Logger("test", { level: LogLevel.DEBUG });
+    const originalInfo = testLogger.info.bind(testLogger);
+    testLogger.info = (message: string, context?: Record<string, unknown>) => {
+      infoLogs.push({ message, context });
+      originalInfo(message, context);
+    };
+
+    const skillRegistry = createTestSkillRegistry();
+    const config = {
+      workingDir: tempDir,
+      platform: "discord",
+      userId: "123",
+      channelId: "456",
+      isDM: false,
+    };
+
+    const client = new ChatbotClient(skillRegistry, testLogger, config);
+
+    // Send an image content chunk
+    await client.sessionUpdate({
+      update: {
+        sessionUpdate: "agent_message_chunk",
+        content: { type: "image", data: "base64data", mimeType: "image/png" },
+      },
+    } as unknown as acp.SessionNotification);
+
+    // Send a tool_call to trigger flush
+    await client.sessionUpdate({
+      sessionId: "test-session",
+      update: {
+        sessionUpdate: "tool_call",
+        toolCallId: "test-id",
+        title: "test",
+        kind: null,
+        status: "pending" as const,
+      },
+    } as unknown as acp.SessionNotification);
+
+    // Verify no "Agent complete message" log (buffer was empty)
+    const completeLogs = infoLogs.filter((log) =>
+      log.message === "Agent complete message ({chunkCount} chunks, {length} chars): {message}"
+    );
+    assertEquals(completeLogs.length, 0);
+  } finally {
+    Deno.removeSync(tempDir, { recursive: true });
+  }
+});
+
+Deno.test("ChatbotClient - single chunk produces complete message with chunkCount 1", async () => {
+  const tempDir = Deno.makeTempDirSync();
+  try {
+    const infoLogs: Array<{ message: string; context: unknown }> = [];
+    const testLogger = new Logger("test", { level: LogLevel.DEBUG });
+    const originalInfo = testLogger.info.bind(testLogger);
+    testLogger.info = (message: string, context?: Record<string, unknown>) => {
+      infoLogs.push({ message, context });
+      originalInfo(message, context);
+    };
+
+    const skillRegistry = createTestSkillRegistry();
+    const config = {
+      workingDir: tempDir,
+      platform: "discord",
+      userId: "123",
+      channelId: "456",
+      isDM: false,
+    };
+
+    const client = new ChatbotClient(skillRegistry, testLogger, config);
+
+    // Send exactly 1 agent_message_chunk
+    await client.sessionUpdate({
+      update: {
+        sessionUpdate: "agent_message_chunk",
+        content: { type: "text", text: "Single message" },
+      },
+    } as acp.SessionNotification);
+
+    // Call reset to flush
+    client.reset();
+
+    // Verify "Agent complete message" log with chunkCount=1, length=14
+    const completeLogs = infoLogs.filter((log) =>
+      log.message === "Agent complete message ({chunkCount} chunks, {length} chars): {message}"
+    );
+    assertEquals(completeLogs.length, 1);
+    const context = completeLogs[0].context as Record<string, unknown>;
+    assertEquals(context.chunkCount, 1);
+    assertEquals(context.length, 14);
+  } finally {
+    Deno.removeSync(tempDir, { recursive: true });
+  }
+});
