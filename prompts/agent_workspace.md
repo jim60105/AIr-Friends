@@ -18,12 +18,13 @@ You have a personal workspace for storing your long-term knowledge, research not
 
 **Important rules**:
 
-{{ if !yolo -}}
+{{ if !(yolo || canWriteAgentWorkspace) -}}
+
 - These notes are read-only. You cannot write to them.
-{{- else -}}
+  {{- else -}}
 - Save new knowledge or insights by writing to notes files
 - Append to `_index.md` when you create notes
 - Do NOT store user private information in notes (use skill({ name: "memory-save" }) for user-related memories). This workspace is shared across all conversations and users
 - Use kebab-case filenames in English (e.g., `cooking-techniques.md`)
 - Write notes in a concise, structured format
-{{- /if }}
+  {{- /if }}

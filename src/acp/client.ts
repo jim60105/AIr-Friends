@@ -407,7 +407,20 @@ export class ChatbotClient implements acp.Client {
 
     // Scoped edit/write: allow if ALL paths are within agent workspace or TMPDIR
     if (title === "edit" || title === "edit_file" || kind === "write" as string) {
-      const paths = locations.map((l) => l.path).filter(Boolean);
+      let paths = locations.map((l) => l.path).filter(Boolean) as string[];
+
+      // When locations are empty, try extracting paths from rawInput
+      if (paths.length === 0 && rawInput) {
+        const extracted = this.extractPathsFromRawInput(rawInput);
+        if (extracted.length > 0) {
+          paths = extracted;
+          this.logger.debug(
+            "Extracted paths from rawInput for edit/write permission: {paths}",
+            { paths },
+          );
+        }
+      }
+
       const isAgentWorkspaceWrite = paths.length > 0 &&
         paths.every((p) => this.isAgentWorkspacePath(p!));
 
@@ -756,6 +769,36 @@ export class ChatbotClient implements acp.Client {
     } catch {
       return false;
     }
+  }
+
+  /**
+   * Try to extract file paths from rawInput when locations are empty.
+   * Different ACP agents may include paths in various rawInput fields.
+   */
+  private extractPathsFromRawInput(rawInput: Record<string, unknown>): string[] {
+    const paths: string[] = [];
+
+    // Single path fields (common across agent types)
+    for (const field of ["path", "file_path", "filePath", "file", "filename"]) {
+      const value = rawInput[field];
+      if (typeof value === "string" && value.length > 0) {
+        paths.push(value);
+      }
+    }
+
+    // Array path fields
+    for (const field of ["paths", "files"]) {
+      const value = rawInput[field];
+      if (Array.isArray(value)) {
+        for (const item of value) {
+          if (typeof item === "string" && item.length > 0) {
+            paths.push(item);
+          }
+        }
+      }
+    }
+
+    return paths;
   }
 
   /**
