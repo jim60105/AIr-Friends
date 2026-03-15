@@ -131,7 +131,7 @@ jobs:
 
       - name: Build and push by digest
         id: build
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: ./Containerfile
@@ -157,7 +157,7 @@ jobs:
           echo "${digest#sha256:}" > /tmp/digests/${{ env.PLATFORM_PAIR }}
 
       - name: Upload digest
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: digests-${{ steps.extract_version.outputs.VERSION }}-${{ env.PLATFORM_PAIR }}
           path: /tmp/digests/*
@@ -178,7 +178,7 @@ jobs:
         run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
 
       - name: Download digests
-        uses: actions/download-artifact@v5
+        uses: actions/download-artifact@v8
         with:
           path: /tmp/digests
           pattern: digests-${{ steps.extract_version.outputs.VERSION }}-*

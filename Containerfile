@@ -95,7 +95,7 @@ ARG TARGETVARIANT
 ARG UID
 
 ARG NODE_ENV=production
-ENV NODE_ENV $NODE_ENV
+ENV NODE_ENV=$NODE_ENV
 
 # Set up directories with proper permissions
 # OpenShift compatibility: root group (GID 0) for arbitrary UID support
