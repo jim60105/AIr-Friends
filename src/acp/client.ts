@@ -154,6 +154,7 @@ export class ChatbotClient implements acp.Client {
 
   /** Timestamp of the last activity received from the Agent */
   private lastActivityTimestamp: number = Date.now();
+  private messageBuffer: string[] = [];
 
   constructor(
     skillRegistry: SkillRegistry,
@@ -530,10 +531,13 @@ export class ChatbotClient implements acp.Client {
           this.logger.debug("Agent message chunk: {text}", {
             text: update.content.text.substring(0, 100),
           });
+          // Accumulate text chunks for complete message logging
+          this.messageBuffer.push(update.content.text);
         }
         break;
 
       case "tool_call":
+        this.flushMessageBuffer();
         this.logger.info(
           "Tool call started: {title} (id: {id}, kind: {kind})",
           {
@@ -546,6 +550,7 @@ export class ChatbotClient implements acp.Client {
         break;
 
       case "tool_call_update": {
+        this.flushMessageBuffer();
         // Log tool call updates with full context
         const logContext: Record<string, unknown> = {
           id: update.toolCallId,
@@ -575,12 +580,14 @@ export class ChatbotClient implements acp.Client {
       }
 
       case "plan":
+        this.flushMessageBuffer();
         this.logger.debug("Agent plan", {
           entriesCount: update.entries?.length ?? 0,
         });
         break;
 
       case "agent_thought_chunk":
+        this.flushMessageBuffer();
         // Agent's thinking process - only log
         this.logger.debug("Agent thought", {
           hasContent: update.content?.type === "text",
@@ -589,6 +596,7 @@ export class ChatbotClient implements acp.Client {
         break;
 
       case "usage_update": {
+        this.flushMessageBuffer();
         // Token usage information from the agent
         const usageUpdate = update as unknown as {
           sessionUpdate: "usage_update";
@@ -605,6 +613,7 @@ export class ChatbotClient implements acp.Client {
       }
 
       default:
+        this.flushMessageBuffer();
         this.logger.debug("Session update", {
           type: (update as { sessionUpdate?: string }).sessionUpdate,
         });
@@ -822,9 +831,26 @@ export class ChatbotClient implements acp.Client {
   }
 
   /**
+   * Flush the accumulated agent message chunks as a single complete message log entry.
+   * Called when a non-chunk session update arrives or when the prompt completes.
+   */
+  flushMessageBuffer(): void {
+    if (this.messageBuffer.length === 0) return;
+
+    const completeMessage = this.messageBuffer.join("");
+    this.logger.info("Agent complete message ({chunkCount} chunks, {length} chars): {message}", {
+      message: completeMessage,
+      chunkCount: this.messageBuffer.length,
+      length: completeMessage.length,
+    });
+    this.messageBuffer = [];
+  }
+
+  /**
    * Reset client state for new session
    */
   reset(): void {
+    this.flushMessageBuffer();
     this.replyAlreadySent = false;
     this.lastActivityTimestamp = Date.now();
     this.auditWriter = undefined;
