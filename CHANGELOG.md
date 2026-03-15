@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.21.0] - 2026-03-15
+
+### Added
+
+- Agent message chunk buffering — `ChatbotClient` now accumulates consecutive `agent_message_chunk` text content and logs the complete message at INFO level when the event transitions or prompt completes
+- Automatic workspace `tmp/` directory cleanup when agent sessions end, preventing disk space waste from accumulated temporary files (browser screenshots, video recordings, Chrome profiles)
+- 20 container document processing tools now allowed in restricted (non-YOLO) mode: `wget`, `file`, `tree`, `jq`, `bc`, `pdftotext`, `pdfinfo`, `pdfimages`, `pdftoppm`, `pandoc`, `exiftool`, `ffmpeg`, `ffprobe`, `magick`, `convert`, `identify`, `mogrify`, `unzip`, `zip`, `7zz`
+- `canWriteAgentWorkspace` template variable for prompt templates, enabling self-research sessions to show write instructions even in restricted mode
+
+### Fixed
+
+- `rawInput` path extraction for edit/write permissions in restricted mode — when ACP agents send permission requests with empty `locations`, the system now falls back to extracting file paths from `rawInput` fields
+- Added `"filepath"` (all lowercase) to rawInput path extraction field list — Copilot CLI uses this variant for edit tool permission requests
+- OpenCode edit/write permission delegation to Layer 3 via `"ask"` — resolves path resolution mismatch caused by OpenCode converting absolute paths to relative before evaluating permission rules
+- Race condition in workspace tmp cleanup prevented by using synchronous removal within the active-session check critical section
+
+### Changed
+
+- Refined skill prompt instructions and cleanup guidance — standardized skill name references, clarified workspace and memory guidance, added browser automation cleanup step
+- CI Docker workflow actions updated for Node.js 24 compatibility
+
 ## [0.20.0] - 2026-03-13
 
 ### Added
@@ -853,7 +874,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ---
 
-[Unreleased]: https://github.com/jim60105/AIr-Friends/compare/v0.20.0...HEAD
+[Unreleased]: https://github.com/jim60105/AIr-Friends/compare/v0.21.0...HEAD
+[0.21.0]: https://github.com/jim60105/AIr-Friends/compare/v0.20.0...v0.21.0
 [0.20.0]: https://github.com/jim60105/AIr-Friends/compare/v0.19.0...v0.20.0
 [0.19.0]: https://github.com/jim60105/AIr-Friends/compare/v0.18.0...v0.19.0
 [0.18.0]: https://github.com/jim60105/AIr-Friends/compare/v0.17.0...v0.18.0
