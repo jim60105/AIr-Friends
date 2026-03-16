@@ -1108,6 +1108,7 @@ You are Yuna. This is a private chat.
 | `rssItems`               | `string`  | RSS items (self-research prompt only)                            |
 | `workspaceKey`           | `string`  | Workspace key (memory maintenance prompt only)                   |
 | `memoriesDump`           | `string`  | Memory JSON dump (memory maintenance only)                       |
+| `minMemoryCount`         | `number`  | Minimum memory count threshold (memory maintenance prompt only)  |
 | `recentMessagesFetched`  | `boolean` | Whether recent messages were fetched (spontaneous post only)     |
 | `importantMemories`      | `string`  | Formatted important memories text (spontaneous post only)        |
 | `recentMessages`         | `string`  | Formatted recent messages text (spontaneous post only)           |

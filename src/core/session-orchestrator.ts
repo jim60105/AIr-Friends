@@ -1430,6 +1430,7 @@ export class SessionOrchestrator {
         workspace,
         resolvedModel,
         this.yolo,
+        memoryMaintenanceConfig.minMemoryCount,
       );
 
       // === DRY RUN CHECK ===
@@ -2176,6 +2177,7 @@ export class SessionOrchestrator {
     workspace: WorkspaceInfo,
     model?: string,
     yolo?: boolean,
+    minMemoryCount?: number,
   ): Promise<string> {
     const promptDir = dirname(this.config.agent.systemPromptPath);
     const instructionsPath = join(promptDir, "system_memory_maintenance.md");
@@ -2196,6 +2198,7 @@ export class SessionOrchestrator {
       yolo,
       workspaceKey,
       memoriesDump,
+      minMemoryCount,
     };
 
     return await renderTemplate(

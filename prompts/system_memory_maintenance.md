@@ -5,7 +5,7 @@
 {{- set characterReferenceTerms |> trim -}}{{- include "./character_reference_terms.md" -}}{{- /set -}}
 {{- set scenarioPurpose }} to perform memory maintenance{{ /set -}}
 {{- set scenarioContent |> trim -}}{{- include "./scenario.md" -}}{{- /set -}}
-Throughout this chat, you will act as a character and performing a memory maintenance task for user workspace `{{ workspaceKey }}`. Your goal is to compact old memories while preserving factual information.
+Throughout this chat, you will act as a character and performing a memory maintenance task for user workspace `{{ workspaceKey }}`. Your goal is to compact old memories while preserving factual information, reducing the total number of enabled memories to below **{{ minMemoryCount }}**.
 
 {{ scenarioContent }}
 
@@ -16,6 +16,12 @@ Below is the complete list of all enabled memories for this workspace. Use this 
 ```json
 {{ memoriesDump }}
 ```
+
+### Target threshold
+
+The memory maintenance threshold is **{{ minMemoryCount }}** memories. This workspace currently has more than {{ minMemoryCount }} enabled memories, which is why this maintenance task was triggered. Your goal is to summarize and consolidate memories so that the total number of enabled memories drops below {{ minMemoryCount }}. This prevents the maintenance job from being triggered again on the next cycle.
+
+Prioritize merging the oldest and most redundant memories first. If you cannot reduce the count below {{ minMemoryCount }} without losing important information, get as close as possible while preserving all factual content.
 
 ### Required workflow
 

@@ -1696,7 +1696,7 @@ Deno.test("SessionOrchestrator - processMemoryMaintenance embeds memories in pro
 
     await Deno.writeTextFile(
       `${tempDir}/prompts/system_memory_maintenance.md`,
-      "Maintenance for {{ workspaceKey }}\nSession: {{ sessionId }}\nMemories:\n{{ memoriesDump }}",
+      "Maintenance for {{ workspaceKey }}\nThreshold: **{{ minMemoryCount }}**\nSession: {{ sessionId }}\nMemories:\n{{ memoriesDump }}",
     );
 
     // Create workspace and write memory file
@@ -1747,6 +1747,8 @@ Deno.test("SessionOrchestrator - processMemoryMaintenance embeds memories in pro
     assertEquals(response.success, true);
     assertEquals(capturedPrompt.includes("Test memory content"), true);
     assertEquals(capturedPrompt.includes("discord/mem_user"), true);
+    // Verify minMemoryCount is rendered in the prompt (real template uses **50**)
+    assertEquals(capturedPrompt.includes("**50**"), true);
 
     sessionRegistry.stop();
   } finally {

@@ -39,6 +39,9 @@ export interface TemplateVariables {
   /** JSON dump of enabled memories (for memory maintenance prompt) */
   memoriesDump?: string;
 
+  /** Minimum memory count threshold for maintenance (memory maintenance prompt only) */
+  minMemoryCount?: number;
+
   /** Whether recent messages were fetched (spontaneous post only) */
   recentMessagesFetched?: boolean;
 

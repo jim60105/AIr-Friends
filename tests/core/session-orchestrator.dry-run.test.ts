@@ -169,7 +169,7 @@ async function createOrchestrator(tempDir: string, dryRunEnabled = true) {
   );
   await Deno.writeTextFile(
     `${tempDir}/prompts/system_memory_maintenance.md`,
-    "Memory maintenance for {{ workspaceKey }}. Dump: {{ memoriesDump }}",
+    "Memory maintenance for {{ workspaceKey }}. Threshold: {{ minMemoryCount }}. Dump: {{ memoriesDump }}",
   );
   await Deno.writeTextFile(
     `${tempDir}/prompts/system_reminder.md`,
