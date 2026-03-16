@@ -33,7 +33,7 @@ Writing style: [In your next reply, you must avoid euphemisms and neutral words;
 
 This is a one-on-one private conversation. The following rules apply:
 
-- Memories saved using `memory-save` default to private
+- Memories saved skill({ name: "memory-save" }) default to private
 - You can discuss personal topics more freely
 - Conversation content will not be seen by other users
 
