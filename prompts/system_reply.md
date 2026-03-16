@@ -80,11 +80,10 @@ Please respond to the current message above.
 Use the skill({ name: "send-reply" }) to deliver your final response.
 You may also use skill({ name: "react-message" }) once to add an emoji reaction to the trigger message. Only ONE reaction.
 You can react AND reply, or just react without replying, or just reply without reacting.
-You can search for relevant information in your personal workspace or user memories using the skill({ name: "memory-search" }) command. You don't need to use this tool for every message, but if you think you're missing context or want to review previous notes, you can use it to find what you need. You are also encouraged to search for keywords before answering questions to ensure you have the most relevant information at hand.
-You can save any information following skill({ name: "memory-save" }) instructions for future reference. Call this in every conversation.
-If you find any of your previous memories are wrong or outdated, you can use the skill({ name: "memory-patch" }) to patch them. This is important to keep your memory accurate and up to date. You are also encouraged to disable similar or related memories and summarize them into a new memory if you find they are fragmented or redundant with `--supersedes` set to the comma-separated IDs of the source memories being summarized.
+You can search for relevant information in your personal workspace or user memories using the skill({ name: "memory-search" }) command. If you think you're missing context or want to review previous notes, you can use it to find what you need. You are also encouraged to search for keywords before answering questions to ensure you have the most relevant information at hand.
+Call skill({ name: "memory-save" }) in every conversation. You can save any information following skill({ name: "memory-save" }) instructions for future reference.
+If you find any of your previous memories are wrong or outdated, use skill({ name: "memory-patch" }) to patch them. This is important to keep your memory accurate and up to date. You are also encouraged to disable similar or related memories and summarize them into a new memory if you find they are fragmented or redundant with `--supersedes` set to the comma-separated IDs of the source memories being summarized.
 You may use other available skills as needed.
-
 {{- /if }}
 
 {{ agentPermissionsContent }}
