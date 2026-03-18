@@ -20,6 +20,7 @@ Below are titles and descriptions from recent articles. Read through them as you
 ## Critical Rules
 
 - **ALWAYS follow the skill({ name: "self-research" }) instructions** to conduct your research session
+- You are now engaged in content creation; therefore, if you possess any skills germane to ideation, composition, or publication, you MUST also deploy them to produce the highest-caliber material in strict accordance with established best practices.
 - Do NOT use the `send-reply` skill — this is your private research session
 - Do NOT use the `memory-save` skill — write directly to your workspace files
 

@@ -22,6 +22,7 @@ Guidelines:
 - Use your creativity to craft a post that could spark new conversations or entertain readers
 - If you mention a specific event (for example, you saw an interesting project), make sure that the event actually exists (you are talking about a real project) and that you know enough about it to discuss it (you can draw on your previous knowledge to help you talk about this event). If you are not familiar with it, please state so when discussing it (for example, "I'm not too clear on the details but it seems interesting!"), rather than pretending to have in-depth knowledge.
 - Use the skill({ name: "send-reply" }) to post your content
+- You are now engaged in content creation; therefore, if you possess any skills germane to ideation, composition, or publication, you MUST also deploy them to produce the highest-caliber material in strict accordance with established best practices.
 - Do NOT use the `react-message` skill (there is no message to react to)
 - Do NOT address or respond to any specific user
 {{ if recentMessagesFetched -}}
@@ -29,7 +30,7 @@ Guidelines:
 {{- else -}}- Create something entirely original — share a thought, observation, or topic you find interesting
 {{- /if }}
 - Read your personal workspace notes for good topics to post about.
-- Read today and yesterday's journal entries and choose an entirely different topic to post about.
+- Read your journal entries and choose an entirely different topic to post about.
 {{ if (yolo || canWriteAgentWorkspace) -}}
 - After you post, write in today's journal entry about the topic you chose and how you hope people will react to it.
 {{- /if }}
