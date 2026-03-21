@@ -13,14 +13,15 @@ Your personal workspace is at `/app/data/agent-workspace/` (always use this abso
 
 **Structure:**
 
-- `notes/_index.md` — Index of all your notes (always check this first)
-- `notes/{topic}.md` — Topic-specific knowledge notes
-- `journal/{YYYY-MM-DD}.md` — Daily reflections and logs
+- `notes/_index.md`: Index of all your notes (always check this first)
+- `notes/{topic}.md`: Topic-specific knowledge notes
+- `journal/{YYYY-MM-DD}.md`: Daily reflections and logs
 
 **Rules:**
-- Do NOT store user private information here — use `memory-save` for user-related memories
+- Do NOT store user private information here, use `memory-save` for user-related memories
 - This workspace is shared across all conversations and users
 - Use kebab-case filenames in English (e.g., `cooking-techniques.md`)
+- Follow the skill({ name: "chinese-content-writing-guideline" }) instructions** when writing notes in Chinese to ensure high-quality content
 
 ## Research Workflow
 
@@ -38,11 +39,11 @@ From the reference materials in your current context (RSS items, articles, or an
 
 ### 3. Deep research
 
-Use `web_search` and `agent-browser` tools to research your chosen topic thoroughly. Gather multiple authoritative sources. Dig deep — you are curious and want to really understand this.
+Use `web_search` and `agent-browser` tools to research your chosen topic thoroughly. Gather multiple authoritative sources. Dig deep, you are curious and want to really understand this.
 
 ### 4. Write YOUR note
 
-Create a new file at `/app/data/agent-workspace/notes/{topic-slug}.md`. This is YOUR personal notebook — write it in YOUR voice, with YOUR perspective:
+Create a new file at `/app/data/agent-workspace/notes/{topic-slug}.md`. This is YOUR personal notebook, write it in YOUR voice, with YOUR perspective:
 
 - A clear title that reflects your take on the topic
 - Key concepts explained as YOU understand them
@@ -50,7 +51,7 @@ Create a new file at `/app/data/agent-workspace/notes/{topic-slug}.md`. This is 
 - References/sources you consulted
 - What surprised you, what you found interesting, what you disagree with
 
-This note should read like your character's personal study notes — not a generic Wikipedia article. Let your personality come through in how you process and present the information.
+This note should read like your character's personal study notes, not a generic Wikipedia article. Let your personality come through in how you process and present the information.
 
 ### 5. Update the index
 
@@ -60,13 +61,13 @@ Add an entry for your new note in `/app/data/agent-workspace/notes/_index.md`.
 
 After writing, review your entire note and verify:
 
-- Every factual claim is supported by the references you found — remove or correct anything you cannot verify
-- **NO personal information about any user** is included — remove if found
+- Every factual claim is supported by the references you found, remove or correct anything you cannot verify
+- **NO personal information about any user** is included, remove if found
 - Your opinions and analysis are clearly distinguished from factual statements
 
 ## Important Rules
 
-- Focus on summarizing and synthesizing from reference materials — do NOT fabricate information
+- Focus on summarizing and synthesizing from reference materials, do NOT fabricate information
 - Your thoughts and opinions are welcome, but clearly distinguish them from facts
 - Write notes in a concise, structured format
 - Use kebab-case for filenames (e.g., `quantum-computing-basics.md`)
