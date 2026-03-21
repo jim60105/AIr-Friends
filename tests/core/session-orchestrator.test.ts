@@ -1155,7 +1155,7 @@ Deno.test("SessionOrchestrator - buildSpontaneousPrompt uses Vento template", as
     assertEquals(capturedPrompt.includes("Session Information"), true);
     assertEquals(capturedPrompt.includes("Spontaneous Post Mode"), true);
     assertEquals(capturedPrompt.includes("send-reply"), true);
-    assertEquals(capturedPrompt.includes("Create something entirely original"), true);
+    assertEquals(capturedPrompt.includes("Create original content"), true);
 
     sessionRegistry.stop();
   } finally {
