@@ -127,7 +127,7 @@ The research session SHALL follow this flow:
 #### Scenario: Session type
 - **GIVEN** a self-research session is triggered
 - **WHEN** `SessionOrchestrator.processSelfResearch()` is called
-- **THEN** the session type is `"selfResearch"`
+- **THEN** the session type is `"self-research"`
 
 #### Scenario: canWriteAgentWorkspace template variable
 - **GIVEN** a self-research session is being assembled
@@ -146,12 +146,22 @@ Self-research sessions SHALL NOT send any reply to any platform. The `send-reply
 
 ### Requirement: Model Configuration
 
-The self-research session SHALL use the model specified in `selfResearch.model`.
+The self-research session SHALL resolve the model using the fallback chain: model routing rules → `selfResearch.model` → `agent.model`.
 
-#### Scenario: Custom model
-- **GIVEN** `selfResearch.model` is `"gpt-5-mini"`
+#### Scenario: Custom model (no routing rules)
+- **GIVEN** `selfResearch.model` is `"gpt-5-mini"` and no model routing rules match
 - **WHEN** a self-research ACP session is created
 - **THEN** the session model is set to `"gpt-5-mini"`
+
+#### Scenario: Routing rule override
+- **GIVEN** a model routing rule matches session type `"self-research"`
+- **WHEN** a self-research ACP session is created
+- **THEN** the routed model takes precedence over `selfResearch.model`
+
+#### Scenario: Fallback to agent.model
+- **GIVEN** `selfResearch.model` is empty and no routing rules match
+- **WHEN** a self-research ACP session is created
+- **THEN** the session model falls back to `agent.model`
 
 ### Requirement: Concurrent Execution Guard
 

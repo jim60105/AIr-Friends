@@ -56,7 +56,7 @@ The system SHALL create a new session for each trigger event. The session's curr
 
 ### Requirement: Cross-Workspace Access Prevention
 
-The system SHALL prevent any file operation that would access paths outside the workspace boundary. The `validatePathWithinBoundary()` function SHALL throw a `WorkspaceError` if a resolved path escapes the workspace root. The `sanitizePathComponent()` function SHALL remove path traversal sequences (`..`), path separators (`/`, `\`), and leading dots from path components.
+The system SHALL prevent any file operation that would access paths outside the workspace boundary. The `validatePathWithinBoundary()` function SHALL throw a `WorkspaceError` if a resolved path escapes the workspace root. The `sanitizePathComponent()` function SHALL replace path separators (`/`, `\`) and path traversal sequences (`..`) with underscores (`_`), strip leading dots, and trim whitespace from path components.
 
 #### Scenario: Path traversal attempt blocked
 - **GIVEN** a workspace at `/data/workspaces/discord/123/`
@@ -84,7 +84,7 @@ The system SHALL provide a global agent workspace at `{repoPath}/agent-workspace
 
 ### Requirement: Workspace File Operations
 
-The system SHALL validate file access boundaries before every read, write, and append operation via `validateFileAccess()`. Write and append operations SHALL auto-create parent directories if they do not exist. The `readWorkspaceFile()` method SHALL throw a `WORKSPACE_NOT_FOUND` error when the target file does not exist.
+The system SHALL validate file access boundaries before every read, write, and append operation via `validateFileAccess()`. Write operations SHALL auto-create parent directories if they do not exist; append operations do not auto-create parent directories. The `readWorkspaceFile()` method SHALL throw a `WORKSPACE_NOT_FOUND` error when the target file does not exist.
 
 #### Scenario: Writing to a nested path auto-creates directories
 - **GIVEN** a workspace exists but the target subdirectory does not

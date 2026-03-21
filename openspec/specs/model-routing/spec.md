@@ -104,7 +104,7 @@ When `match.contentKeywords` is specified with a non-empty array, the system SHA
 
 ### Requirement: Section-Specific Fallback Chain
 
-The `fallbackModel` parameter passed to `resolveModel()` SHALL follow a fallback chain determined by the caller: section-specific model config (e.g., `selfResearch.model`, `memoryMaintenance.model`) → `agent.model` → hardcoded default. The `AGENT_MODEL` environment variable MAY override `agent.model`.
+The `fallbackModel` parameter passed to `resolveModel()` SHALL follow a fallback chain determined by the caller: section-specific model config (e.g., `selfResearch.model`, `memoryMaintenance.model`) → `agent.model`. The `AGENT_MODEL` environment variable MAY override `agent.model`.
 
 #### Scenario: Self-research routing rule overrides section model
 

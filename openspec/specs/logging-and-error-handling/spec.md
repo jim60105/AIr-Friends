@@ -145,9 +145,11 @@ The system SHALL support sending log entries to a GELF-compatible server via HTT
 - **GIVEN** a log entry has context with key `userId`
 - **WHEN** converted to GELF
 - **THEN** it SHALL appear as `_userId` (prefixed with underscore)
+- **AND** `null` or `undefined` values SHALL be skipped
 - **AND** keys named `id` SHALL be skipped
 - **AND** keys not matching `/^[\w.\-]*$/` SHALL be skipped
 - **AND** boolean values SHALL be converted to strings
+- **AND** object values SHALL be serialized with `JSON.stringify()`
 
 #### Scenario: TCP Transport
 
@@ -165,7 +167,7 @@ The system SHALL support sending log entries to a GELF-compatible server via HTT
 
 #### Scenario: GELF Initialization
 
-- **GIVEN** `logging.gelf.enabled` is `true` in config
+- **GIVEN** `logging.gelf.enabled` is `true` and `logging.gelf.endpoint` is set in config
 - **WHEN** bootstrap runs
 - **THEN** a `GelfTransport` instance SHALL be created and injected into the global logger config via `configureLogger`
 
@@ -266,7 +268,7 @@ The system SHALL provide HTTP health check endpoints when `health.enabled` is `t
 
 - **GIVEN** the health check server is running
 - **WHEN** `GET /ready` or `GET /readyz` is requested
-- **THEN** the response SHALL check: platform connections, skill script existence, required binaries (rg, deno, git), Skill API connectivity, and workspace directory writability
+- **THEN** the response SHALL check: platform connections, skill script existence, required binaries (rg, deno, git), Skill API connectivity (when `skillApi.enabled`), and workspace directory writability
 - **AND** HTTP 200 SHALL be returned only when all checks pass
 - **AND** readiness results SHALL be cached for 30 seconds to avoid excessive subprocess spawning
 

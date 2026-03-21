@@ -92,7 +92,7 @@ The system SHALL enforce the following reply limits per session:
 #### Scenario: edit-reply before send-reply fails
 - **GIVEN** a session where no reply has been sent yet
 - **WHEN** `edit-reply` is called
-- **THEN** the handler SHALL return an error "No reply has been sent yet"
+- **THEN** the handler SHALL return an error "No reply has been sent yet. Use send-reply first."
 
 ### Requirement: Retry on Missing Reply
 

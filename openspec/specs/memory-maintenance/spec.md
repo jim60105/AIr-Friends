@@ -115,12 +115,12 @@ Failures during maintenance of one workspace SHALL NOT prevent processing of oth
 
 ### Requirement: Session Type
 
-Memory maintenance sessions SHALL use session type `"memoryMaintenance"`.
+Memory maintenance sessions SHALL use session type `"memory-maintenance"`.
 
 #### Scenario: Session type
 - **GIVEN** a memory maintenance session is triggered
 - **WHEN** `SessionOrchestrator.processMemoryMaintenance()` is called
-- **THEN** the session type is `"memoryMaintenance"`
+- **THEN** the session type is `"memory-maintenance"`
 
 ### Requirement: Concurrent Execution Guard
 

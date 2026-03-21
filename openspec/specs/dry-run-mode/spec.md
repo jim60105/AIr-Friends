@@ -22,7 +22,7 @@ Dry run mode SHALL be activated when `agent.dryRun.enabled` is `true`. The `--dr
 
 ### Requirement: Normal Steps Execute
 
-When dry run mode is active, the system SHALL execute steps 1 through 6 of the session flow normally: workspace setup, session registration, context assembly, prompt rendering, and all related operations. The ACP Agent connector SHALL NOT be created and no Agent subprocess SHALL be spawned.
+When dry run mode is active, the system SHALL execute workspace setup, session registration, context assembly, and prompt rendering normally. The ACP Agent connector SHALL NOT be created and no Agent subprocess SHALL be spawned.
 
 #### Scenario: Context assembly in dry run
 - **GIVEN** dry run mode is enabled
@@ -37,11 +37,11 @@ The assembled prompt SHALL be written to a file in the configured output directo
 #### Scenario: Output file naming
 - **GIVEN** dry run mode is enabled with `outputPath` set to `"./data/dry-run/"`
 - **WHEN** a normal message session runs at `2025-01-15T10:30:00.000Z`
-- **THEN** the prompt SHALL be written to `./data/dry-run/reply_2025-01-15T10-30-00-000Z.md`
+- **THEN** the prompt SHALL be written to `./data/dry-run/message_2025-01-15T10-30-00-000Z.md`
 
 #### Scenario: All session types supported
 - **GIVEN** dry run mode is enabled
-- **WHEN** sessions of type `reply`, `spontaneous`, `self_research`, `memory_maintenance`, or `reminder` are processed
+- **WHEN** sessions of type `message`, `channelLurk`, `spontaneous`, `self_research`, `memory_maintenance`, or `reminder` are processed
 - **THEN** each SHALL write its assembled prompt to the output directory with the corresponding session type prefix
 
 ### Requirement: Mock Reply

@@ -76,13 +76,13 @@ All files in the agent workspace SHALL use `.md` (Markdown) format for token eff
 
 ### Requirement: Memory-Search Integration
 
-The `memory-search` skill SHALL search both user memories and agent workspace notes, returning results in separate sections (`userMemories` and `agentNotes`).
+The `memory-search` skill SHALL search both user memories and agent workspace notes, returning results in separate sections (`memories` and `agentNotes`).
 
 #### Scenario: Search returns both sections
 - **GIVEN** user memories contain "pasta recipe"
 - **AND** agent workspace `notes/cooking.md` contains "pasta recipe"
 - **WHEN** `memory-search` is invoked with query "pasta"
-- **THEN** the results include a `userMemories` section with user memory matches
+- **THEN** the results include a `memories` section with user memory matches
 - **AND** the results include an `agentNotes` section with workspace note matches
 
 ### Requirement: Privacy Boundary

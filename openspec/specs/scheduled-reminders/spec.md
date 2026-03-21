@@ -183,19 +183,19 @@ Reminders SHALL be persisted per-user workspace. Each workspace has its own `rem
 
 ### Requirement: Configuration and Defaults
 
-The `scheduledReminders` config section SHALL default to: `enabled: false`, `minIntervalMs: 60000`, `checkIntervalMs: 60000`, `maxRemindersPerUser: 50`. Environment variables `SCHEDULED_REMINDERS_ENABLED`, `SCHEDULED_REMINDERS_MIN_INTERVAL_MS`, `SCHEDULED_REMINDERS_CHECK_INTERVAL_MS`, and `SCHEDULED_REMINDERS_MAX_REMINDERS_PER_USER` MAY override config values. Configuration validation SHALL reject `minIntervalMs < 10000`, `checkIntervalMs < 5000`, and `maxRemindersPerUser < 1`.
+The `reminders` config section SHALL default to: `enabled: false`, `minIntervalMs: 60000`, `checkIntervalMs: 30000`, `maxRemindersPerUser: 20`, `persistPath: "reminders.jsonl"`. Environment variables `REMINDERS_ENABLED`, `REMINDERS_MIN_INTERVAL_MS`, `REMINDERS_CHECK_INTERVAL_MS`, `REMINDERS_MAX_PER_USER`, and `REMINDERS_PERSIST_PATH` MAY override config values. Configuration validation SHALL clamp `minIntervalMs` to a minimum of `10000`, `checkIntervalMs` to a minimum of `5000`, and `maxRemindersPerUser` to a minimum of `1`, logging a warning when clamping occurs.
 
 #### Scenario: Default configuration values
 
-- **GIVEN** no explicit `scheduledReminders` section in config
+- **GIVEN** no explicit `reminders` section in config
 - **WHEN** the system starts
-- **THEN** defaults SHALL be `enabled: false`, `minIntervalMs: 60000`, `checkIntervalMs: 60000`, `maxRemindersPerUser: 50`
+- **THEN** defaults SHALL be `enabled: false`, `minIntervalMs: 60000`, `checkIntervalMs: 30000`, `maxRemindersPerUser: 20`, `persistPath: "reminders.jsonl"`
 
-#### Scenario: Invalid minIntervalMs rejected
+#### Scenario: Invalid minIntervalMs clamped
 
-- **GIVEN** `scheduledReminders.minIntervalMs` is set to `5000`
+- **GIVEN** `reminders.minIntervalMs` is set to `5000`
 - **WHEN** configuration is validated
-- **THEN** startup SHALL fail with a configuration error
+- **THEN** the value SHALL be clamped to `10000` and a warning SHALL be logged
 
 ### Requirement: Metrics Integration
 

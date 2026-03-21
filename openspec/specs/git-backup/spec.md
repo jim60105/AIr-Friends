@@ -78,7 +78,7 @@ The `GitBackupScheduler` SHALL execute backups at a fixed interval defined by `g
 
 ### Requirement: Authentication
 
-The service SHALL build an authenticated URL by injecting credentials into the remote URL. The password SHALL be resolved from `gitBackup.authPassword`, falling back to the `GITHUB_TOKEN` environment variable. The username SHALL be resolved from `gitBackup.authUser`, then `gitBackup.authorEmail`, then `"x-access-token"`. If no password is available, the plain remote URL SHALL be used. Credentials in git command output SHALL be redacted in logs (replacing `//user:pass@` with `//***:***@`).
+The service SHALL build an authenticated URL by injecting credentials into the remote URL. The password SHALL be resolved from `gitBackup.authPassword`, falling back to the `GITHUB_TOKEN` environment variable. The username SHALL be resolved from `gitBackup.authUser`, then `gitBackup.authorEmail`, then `"x-access-token"`. If no password is available, the plain remote URL SHALL be used. Credentials in git command output SHALL be redacted in logs: stdout/stderr content replaces `//user:pass@` with `//***:***@`, and any command argument containing `@` SHALL be logged as `[REDACTED_URL]`.
 
 #### Scenario: Auth with configured credentials
 - **GIVEN** `authUser` is `"bot"` and `authPassword` is `"secret"`
@@ -95,7 +95,7 @@ The service SHALL build an authenticated URL by injecting credentials into the r
 When a direct push fails, the service SHALL attempt conflict resolution in order:
 
 1. **Attempt 1**: Direct `git push`
-2. **Attempt 2**: `git fetch` → `git rebase origin/{branch}` → `git push` (if rebase fails, abort rebase and reset to HEAD)
+2. **Attempt 2**: `git fetch` → `git rebase origin/{branch}` → `git push` (if rebase fails, abort rebase; if abort itself fails, fall back to `git reset --hard HEAD`)
 3. **Attempt 3**: Create a `backup-{datetime}` fallback branch → push to that branch → switch back to the default branch
 
 During periodic backups (`performBackup`), the conflict resolution SHALL be limited to: direct push → fetch + rebase + retry push. If the retry also fails, the backup SHALL return `false`.

@@ -150,7 +150,7 @@ The system SHALL support three agent types: `"copilot"`, `"gemini"`, and `"openc
 #### Scenario: Copilot agent configuration
 - **GIVEN** agent type `"copilot"`
 - **WHEN** `createAgentConfig()` builds the config
-- **THEN** it SHALL use command `copilot` with `--available-tools bash` and `--deny-tool shell(git:*,echo:*,mkdir:*)` in restricted mode, or `--yolo` flag in YOLO mode, and pass `COPILOT_GITHUB_TOKEN` and `GITHUB_TOKEN` env vars
+- **THEN** it SHALL use command `copilot` with base flags (`--disable-builtin-mcps`, `--no-ask-user`, `--no-color`, `--no-auto-update`, `--experimental`, `--acp`), and in restricted mode add `--available-tools write_bash`, `--available-tools read_bash`, `--available-tools stop_bash`, `--available-tools bash`, and separate `--deny-tool` entries for `shell(git:*)`, `shell(echo:*)`, `shell(mkdir:*)`; or `--yolo` flag in YOLO mode, and pass `COPILOT_GITHUB_TOKEN` and `GITHUB_TOKEN` env vars
 
 #### Scenario: Gemini agent configuration
 - **GIVEN** agent type `"gemini"`
@@ -174,7 +174,7 @@ All agent subprocesses SHALL receive common environment variables regardless of 
 #### Scenario: Common env vars
 - **GIVEN** any agent type
 - **WHEN** the subprocess is spawned
-- **THEN** the environment SHALL include `TMPDIR` (set to `{workingDir}/tmp`), `AGENT_WORKSPACE` (if provided), `PATH`, `HOME`, `DENO_DIR`, `LANG`, `LC_ALL`, `USER`, `SKILL_API_PORT`, and `SESSION_ID`
+- **THEN** the environment SHALL include `TMPDIR` (set to `{workingDir}/tmp`), `AGENT_WORKSPACE` (if provided), `PATH`, `HOME`, `DENO_DIR`, `LANG`, `LC_ALL`, and `USER`
 
 ---
 
@@ -206,7 +206,7 @@ The `SandboxManager` SHALL filter subprocess environment variables to a base all
 #### Scenario: Unfiltered environment
 - **GIVEN** `sandbox.filterEnv` is `false`
 - **WHEN** `buildSpawnOptions()` constructs the subprocess environment
-- **THEN** it SHALL pass all parent process environment variables unchanged
+- **THEN** it SHALL pass the agent configuration environment variables without additional sandbox filtering
 
 #### Scenario: Agent-specific environment variables
 - **GIVEN** agent type `"copilot"`

@@ -13,7 +13,7 @@ The system SHALL schedule spontaneous posts at random intervals between configur
 #### Scenario: Random interval selection
 - **GIVEN** `minIntervalMs` and `maxIntervalMs` configured for a platform
 - **WHEN** the scheduler calculates the next execution time
-- **THEN** it SHALL pick a random interval between `minIntervalMs` and `maxIntervalMs` (inclusive)
+- **THEN** it SHALL pick a random interval in the range `[minIntervalMs, maxIntervalMs)` (min inclusive, max exclusive)
 
 #### Scenario: Default interval values
 - **GIVEN** no explicit interval configuration
@@ -173,7 +173,7 @@ Spontaneous post sessions SHALL use the `system_spontaneous.md` Vento template w
 #### Scenario: Template variables
 - **GIVEN** a spontaneous post session
 - **WHEN** the prompt is rendered
-- **THEN** the template SHALL receive variables including `recentMessagesFetched` (boolean), `importantMemories` (formatted text), `recentMessages` (formatted text), `availableEmojis` (formatted text), `sessionId`, `platform`, `channelId`, `agentType`, `model`, and `yolo`
+- **THEN** the template SHALL receive variables including `recentMessagesFetched` (boolean), `importantMemories` (formatted text), `recentMessages` (formatted text), `availableEmojis` (formatted text), `sessionId`, `agentType`, `model`, `yolo`, `isDm` (hardcoded `false`), `platform` (hardcoded `"internal"`), `userId` (empty string), `channelId` (empty string), and `guildId` (empty string)
 
 #### Scenario: recentMessagesFetched flag
 - **GIVEN** recent messages were fetched successfully

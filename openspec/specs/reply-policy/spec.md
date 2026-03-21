@@ -207,19 +207,19 @@ The system SHALL track rate limits independently per user using a `{platform}:{u
 - **WHEN** `getRemainingRequests()` is called
 - **THEN** it SHALL return `maxRequestsPerWindow` minus the count of timestamps within the current window, or `0` if in cooldown
 
-### Requirement: Rate Limit Bypass — Account-Level Whitelist
+### Requirement: Rate Limit Bypass — Channel Configuration Whitelist
 
-Account-level channel entries with `rateLimitBypass: true` SHALL bypass rate limiting entirely.
+Channel entries (account-level or channel-level) with `rateLimitBypass: true` SHALL bypass rate limiting entirely.
 
 #### Scenario: Account-level bypass
 - **GIVEN** a channel entry `"{platform}/account/{userId}"` with `rateLimitBypass: true`
 - **WHEN** `isRateLimitBypassed()` is called for that platform and userId
 - **THEN** it SHALL return `true`
 
-#### Scenario: Channel-level does NOT bypass
+#### Scenario: Channel-level bypass
 - **GIVEN** a channel entry `"{platform}/channel/{channelId}"` with `rateLimitBypass: true`
-- **WHEN** `isRateLimitBypassed()` is called
-- **THEN** it SHALL NOT bypass rate limiting for users in that channel (only account-level entries grant bypass)
+- **WHEN** `isRateLimitBypassed()` is called for that platform and channelId
+- **THEN** it SHALL return `true` for all users in that channel
 
 ### Requirement: Rate Limit Timing
 

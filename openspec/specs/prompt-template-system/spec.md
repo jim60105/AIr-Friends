@@ -164,4 +164,4 @@ The system SHALL organize prompt templates in the `prompts/` directory. The main
 #### Scenario: Session-type prompt selection
 - **GIVEN** a normal message session
 - **WHEN** the system prompt is loaded
-- **THEN** the template at `agent.system_prompt_path` (default: `./prompts/system_reply.md`) SHALL be rendered
+- **THEN** the template at `agent.systemPromptPath` (default: `./prompts/system_reply.md`) SHALL be rendered

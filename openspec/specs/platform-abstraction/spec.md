@@ -8,12 +8,12 @@ Defines the unified platform abstraction layer that normalizes events across Dis
 
 ### Requirement: NormalizedEvent Model
 
-The system SHALL normalize all incoming platform events into a `NormalizedEvent` structure with fields: `platform` (Platform type), `channelId`, `userId`, `username`, `messageId`, `isDm`, `guildId` (optional), `content`, `timestamp`, `attachments` (optional array of `Attachment`), and `raw` (original platform object).
+The system SHALL normalize all incoming platform events into a `NormalizedEvent` structure with fields: `platform` (Platform type), `channelId`, `userId`, `username` (optional), `messageId`, `isDm`, `guildId` (empty string if not applicable), `content`, `timestamp`, `attachments` (optional array of `Attachment`), and `raw` (optional, original platform object).
 
 #### Scenario: Discord message normalization
 - **GIVEN** a Discord message is received
 - **WHEN** the adapter processes the message
-- **THEN** it SHALL produce a `NormalizedEvent` with `platform` set to `"discord"`, sticker content appended as `[Sticker: name (tags)]` in the content field, and attachments extracted from `message.attachments`
+- **THEN** it SHALL produce a `NormalizedEvent` with `platform` set to `"discord"`, sticker content appended as `[Sticker: name (tags)]` (or `[Sticker: name]` when tags are absent) in the content field, and attachments extracted from `message.attachments`
 
 #### Scenario: Misskey note normalization
 - **GIVEN** a Misskey note is received via WebSocket streaming
@@ -26,9 +26,9 @@ The system SHALL normalize all incoming platform events into a `NormalizedEvent`
 - **THEN** it SHALL produce a `NormalizedEvent` with `channelId` set to `"chat:{userId}"` and `isDm` set to `true`
 
 #### Scenario: Misskey DM normalization
-- **GIVEN** a Misskey note with visibility `"specified"` is received
+- **GIVEN** a Misskey note with visibility `"specified"` is received via the mention stream
 - **WHEN** the adapter processes the note
-- **THEN** it SHALL set `channelId` to `"dm:{userId}"` and `isDm` to `true`
+- **THEN** it SHALL normalize the note with `channelId` set to `"note:{noteId}"` and `isDm` set to `false`, with filtering controlled by the `allowDm` configuration
 
 ### Requirement: Platform Type Validation
 
@@ -181,7 +181,7 @@ The Discord adapter SHALL handle message events with filtering, normalization, a
 #### Scenario: Sticker handling
 - **GIVEN** a Discord message with stickers
 - **WHEN** normalized
-- **THEN** sticker content SHALL be appended to the message content as `[Sticker: name (tags)]`
+- **THEN** sticker content SHALL be appended to the message content as `[Sticker: name (tags)]` when sticker tags are present, or `[Sticker: name]` when tags are absent
 
 ### Requirement: Discord Typing Indicator
 
@@ -289,7 +289,7 @@ The Misskey adapter SHALL thread replies to the original note using `replyId`.
 #### Scenario: Visibility inheritance
 - **GIVEN** a reply to an existing note
 - **WHEN** `buildReplyParams()` is called
-- **THEN** it SHALL inherit the original note's visibility and `visibleUserIds`
+- **THEN** it SHALL inherit the original note's visibility and, for `"specified"` visibility, set `visibleUserIds` to `[originalNote.userId]`
 
 #### Scenario: Timeline post without reply
 - **GIVEN** a send-reply request for `"timeline:self"` channel
@@ -298,12 +298,12 @@ The Misskey adapter SHALL thread replies to the original note using `replyId`.
 
 ### Requirement: Misskey Username Format
 
-The Misskey adapter SHALL format usernames as `@DisplayName (userId)` in conversation history.
+The Misskey adapter SHALL format usernames as `@displayName` in conversation history.
 
 #### Scenario: Username formatting in history
 - **GIVEN** a Misskey note or chat message with user info
 - **WHEN** converted to `PlatformMessage`
-- **THEN** the `username` field SHALL be formatted as `@displayName` with userId context
+- **THEN** the `username` field SHALL be formatted as `@displayName` (using the user's display name or username)
 
 ### Requirement: Misskey Bot Message Filtering
 
