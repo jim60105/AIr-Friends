@@ -616,4 +616,4 @@ The `agent-config/gemini-settings.json` and `agent-config/gemini-policies/airfri
 - [OpenCode Skills](https://opencode.ai/docs/skills/) — Skills system and permissions
 - [ACP Protocol Spec](https://agentclientprotocol.org/) — Agent Client Protocol specification
 - [docs/DESIGN.md](DESIGN.md) — Overall system design including trust boundary model
-- [docs/features/28-per-channel-yolo-permission-hardening.feature](features/28-per-channel-yolo-permission-hardening.feature) — BDD specification for permission hardening
+- [openspec/specs/acp-integration/spec.md](../openspec/specs/acp-integration/spec.md) — OpenSpec specification for ACP integration and permission hardening

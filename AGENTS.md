@@ -1167,7 +1167,7 @@ To use new variables or conditionals in your templates:
 - Config Loader: `src/core/config-loader.ts` (`loadSystemPrompt`)
 - Type Definitions: `src/types/template.ts` (`TemplateVariables`)
 - Tests: `tests/core/template-renderer.test.ts`, `tests/core/config-loader.test.ts`
-- BDD Spec: `docs/features/12-prompt-template-system.feature`
+- OpenSpec Spec: `openspec/specs/prompt-template-system/spec.md`
 
 ## Error Handling
 
@@ -1451,6 +1451,6 @@ Before committing, ensure:
 - [docs/DESIGN.md](docs/DESIGN.md) - Detailed design document
 - [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) - Development setup and customization guide
 - [docs/PLATFORM_INTEGRATION.md](docs/PLATFORM_INTEGRATION.md) - Guide for adding new platform support
-- [docs/features/](docs/features/) - BDD feature specifications
+- [openspec/specs/](openspec/specs/) - OpenSpec specifications
 - [ACP Protocol Spec](https://agentclientprotocol.org/) - Agent Client Protocol
 - [Agent Skills Standard](https://agentskills.io/) - SKILL.md format
