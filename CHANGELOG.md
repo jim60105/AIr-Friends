@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.22.0] - 2025-05-01
+
+### Added
+
+- Chinese content writing guideline skill for Traditional Chinese — covers terminology standards, tone and structure guidelines, formatting rules, and rewrite quality checks
+- `minMemoryCount` threshold now passed to memory maintenance prompt template as a variable
+
+### Changed
+
+- Prompt templates updated for improved clarity and quality:
+  - Spontaneous posting workflow restructured with explicit step-by-step guidance
+  - Reply prompt strengthened with mandatory memory search and cleanup requirements
+  - Research flows now invoke Chinese writing guideline for Traditional Chinese text
+  - Memory tool guidance refined to emphasize searching before answering and saving conversation summaries
+  - Roleplay prompt enhanced to ensure fully in-character thinking and speaking
+  - All exported content must remain in-character, not just replies
+  - DM memory-save rule clarified for private chats
+  - Spontaneous posting guidance relaxed to use journal entries more broadly
+  - Post topic selection and journaling instructions refined
+- Character prompt files updated to Traditional Chinese with detailed appearance, background, personality traits, speaking style, and reference terms
+
+### Fixed
+
+- Test assertion updated to match simplified spontaneous post template wording
+
 ## [0.21.0] - 2026-03-15
 
 ### Added
@@ -874,7 +899,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ---
 
-[Unreleased]: https://github.com/jim60105/AIr-Friends/compare/v0.21.0...HEAD
+[Unreleased]: https://github.com/jim60105/AIr-Friends/compare/v0.22.0...HEAD
+[0.22.0]: https://github.com/jim60105/AIr-Friends/compare/v0.21.0...v0.22.0
 [0.21.0]: https://github.com/jim60105/AIr-Friends/compare/v0.20.0...v0.21.0
 [0.20.0]: https://github.com/jim60105/AIr-Friends/compare/v0.19.0...v0.20.0
 [0.19.0]: https://github.com/jim60105/AIr-Friends/compare/v0.18.0...v0.19.0
