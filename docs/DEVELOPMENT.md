@@ -54,7 +54,7 @@ This guide provides comprehensive instructions for developing and customizing AI
    deno run --allow-net --allow-read --allow-write --allow-env --allow-run src/main.ts --yolo
    ```
 
-> [!WARNING]  
+> [!WARNING]\
 > YOLO mode auto-approves ALL permission requests from the ACP agent. Only use this in trusted container environments or for testing purposes.
 
 ## Available Tasks
@@ -91,7 +91,27 @@ AIr-Friends/
 │   │   ├── message-handler.ts
 │   │   ├── reply-dispatcher.ts
 │   │   ├── reply-policy.ts
-│   │   └── config-loader.ts
+│   │   ├── config-loader.ts
+│   │   ├── template-renderer.ts
+│   │   ├── error-handler.ts
+│   │   ├── event-router.ts
+│   │   ├── model-router.ts
+│   │   ├── rate-limiter.ts
+│   │   ├── spontaneous-scheduler.ts
+│   │   ├── spontaneous-target.ts
+│   │   ├── channel-lurk-scheduler.ts
+│   │   ├── self-research-scheduler.ts
+│   │   ├── memory-maintenance-scheduler.ts
+│   │   ├── reminder-scheduler.ts
+│   │   ├── reminder-store.ts
+│   │   ├── scheduler-state-store.ts
+│   │   ├── audit-logger.ts
+│   │   ├── audit-retention.ts
+│   │   ├── audit-retention-scheduler.ts
+│   │   ├── git-backup-service.ts
+│   │   ├── git-backup-scheduler.ts
+│   │   ├── git-credential-setup.ts
+│   │   └── skill-installer.ts
 │   ├── platforms/           # Platform adapters (Discord, Misskey)
 │   │   ├── platform-adapter.ts
 │   │   ├── platform-registry.ts
@@ -99,21 +119,57 @@ AIr-Friends/
 │   │   └── misskey/
 │   ├── skills/              # Skill handlers
 │   │   ├── registry.ts
+│   │   ├── index.ts
 │   │   ├── memory-handler.ts
 │   │   ├── reply-handler.ts
 │   │   ├── context-handler.ts
+│   │   ├── file-handler.ts
+│   │   ├── reaction-handler.ts
+│   │   ├── reminder-handler.ts
 │   │   └── types.ts
 │   ├── skill-api/           # HTTP API for shell skills
 │   │   ├── server.ts
 │   │   └── session-registry.ts
 │   ├── types/               # TypeScript type definitions
+│   │   ├── audit.ts
+│   │   ├── config.ts
+│   │   ├── context.ts
+│   │   ├── errors.ts
+│   │   ├── events.ts
+│   │   ├── logger.ts
+│   │   ├── memory.ts
+│   │   ├── platform.ts
+│   │   ├── reminder.ts
+│   │   ├── template.ts
+│   │   └── workspace.ts
 │   └── utils/               # Utility functions
+│       ├── env.ts
+│       ├── logger.ts
+│       ├── gelf-transport.ts
+│       ├── hash.ts
+│       ├── metrics.ts
+│       ├── path-validator.ts
+│       ├── rss-fetcher.ts
+│       ├── text-search.ts
+│       └── token-counter.ts
 ├── skills/                  # Shell-based skill scripts
 │   ├── memory-save/
 │   ├── memory-search/
 │   ├── memory-patch/
+│   ├── memory-stats/
+│   ├── memory-export/
 │   ├── fetch-context/
+│   ├── get-message/
 │   ├── send-reply/
+│   ├── edit-reply/
+│   ├── send-file/
+│   ├── react-message/
+│   ├── set-reminder/
+│   ├── list-reminders/
+│   ├── cancel-reminder/
+│   ├── self-research/
+│   ├── agent-browser/
+│   ├── chinese-content-writing-guideline/
 │   └── lib/                 # Shared skill client library
 ├── prompts/                 # Bot prompt files (template system)
 │   ├── system_reply.md      # Normal message reply system prompt
@@ -139,47 +195,180 @@ Configuration is loaded from `config.yaml` (YAML format). See [config.example.ya
 
 ### Environment Variables
 
-| Variable             | Description                                          |
-| -------------------- | ---------------------------------------------------- |
-| `DISCORD_ENABLED`    | Enable Discord integration (true/false)              |
-| `MISSKEY_ENABLED`    | Enable Misskey integration (true/false)              |
-| `DISCORD_TOKEN`      | Discord bot token                                    |
-| `MISSKEY_HOST`       | Misskey instance host                                |
-| `MISSKEY_TOKEN`      | Misskey access token                                 |
-| `AGENT_MODEL`        | LLM model identifier (e.g., "gpt-5-mini")            |
-| `AGENT_DEFAULT_TYPE` | Default ACP agent type (copilot/gemini/opencode)     |
-| `REPLY_POLICY`        | Reply policy mode (`all`/`public`/`channels`) (REPLY_TO accepted as alias) |
-| `CHANNELS`           | Channels entries (JSON array, replaces config) |
-| `LOG_LEVEL`          | Logging level (DEBUG/INFO/WARN/ERROR)                |
-| `DENO_ENV`           | Environment name (dev/prod)                          |
-| `GITHUB_TOKEN`       | GitHub token for Copilot                             |
+**Platform & Auth:**
+
+| Variable               | Description                                          |
+| ---------------------- | ---------------------------------------------------- |
+| `DISCORD_ENABLED`      | Enable Discord integration (true/false)              |
+| `DISCORD_TOKEN`        | Discord bot token                                    |
+| `MISSKEY_ENABLED`      | Enable Misskey integration (true/false)              |
+| `MISSKEY_HOST`         | Misskey instance host                                |
+| `MISSKEY_TOKEN`        | Misskey access token                                 |
+| `GITHUB_TOKEN`         | GitHub token for Copilot                             |
 | `COPILOT_GITHUB_TOKEN` | Dedicated Copilot token (falls back to GITHUB_TOKEN) |
-| `GEMINI_API_KEY`     | Gemini API key for Gemini CLI/OpenCode               |
-| `OPENCODE_API_KEY`   | OpenCode API key                                     |
-| `OPENROUTER_API_KEY` | OpenRouter API key                                   |
-| `GELF_ENABLED`       | Enable GELF log output (true/false, default: false)  |
-| `GELF_ENDPOINT`      | GELF HTTP endpoint URL                               |
-| `GELF_HOSTNAME`      | Source hostname in GELF messages (default: air-friends) |
-| `SELF_RESEARCH_ENABLED` | Enable self-research (true/false, default: false) |
-| `SELF_RESEARCH_MODEL` | LLM model for self-research (separate from chat) |
-| `SELF_RESEARCH_RSS_FEEDS` | RSS feed sources as JSON string |
-| `SELF_RESEARCH_MIN_INTERVAL_MS` | Minimum interval between research sessions (default: 43200000) |
-| `SELF_RESEARCH_MAX_INTERVAL_MS` | Maximum interval between research sessions (default: 86400000) |
-| `GIT_BACKUP_ENABLED` | Enable Git backup (true/false, default: false) |
-| `GIT_BACKUP_REMOTE_URL` | Remote Git repository URL (HTTPS) |
-| `GIT_BACKUP_INTERVAL_MS` | Backup interval in ms (default: 3600000 = 1 hour) |
-| `GIT_BACKUP_AUTHOR_NAME` | Git commit author name |
-| `GIT_BACKUP_AUTHOR_EMAIL` | Git commit author email |
-| `GIT_BACKUP_AUTH_USER` | Git backup HTTPS auth username (default: authorEmail) |
-| `GIT_BACKUP_AUTH_PASSWORD` | Git backup HTTPS auth password/token (default: GITHUB_TOKEN) |
-| `MODEL_ROUTING_ENABLED` | Enable model routing (true/false, default: false) |
-| `MODEL_ROUTING_RULES` | Model routing rules as JSON string |
-| `REMINDERS_ENABLED` | Enable scheduled reminders (true/false, default: false) |
-| `REMINDERS_MAX_PER_USER` | Max active reminders per user (default: 20) |
-| `REMINDERS_MIN_INTERVAL_MS` | Minimum reminder delay from now in ms (default: 60000) |
-| `REMINDERS_PERSIST_PATH` | Reminder persistence file name (default: reminders.jsonl) |
+| `GEMINI_API_KEY`       | Gemini API key for Gemini CLI/OpenCode               |
+| `OPENCODE_API_KEY`     | OpenCode API key                                     |
+| `OPENROUTER_API_KEY`   | OpenRouter API key                                   |
+
+**Agent & Model:**
+
+| Variable                    | Description                                                                                        |
+| --------------------------- | -------------------------------------------------------------------------------------------------- |
+| `AGENT_MODEL`               | LLM model identifier (e.g., "gpt-5-mini")                                                          |
+| `AGENT_DEFAULT_TYPE`        | Default ACP agent type (copilot/gemini/opencode)                                                   |
+| `AGENT_SKILLS_DIR`          | Skills directory path (default: "skills")                                                          |
+| `AGENT_EXTERNAL_SKILLS`     | External skills to install at startup (JSON string, e.g. `[{"repo":"owner/repo","skill":"name"}]`) |
+| `AGENT_AUTO_APPROVE_SKILLS` | Skill names to auto-approve in restricted mode (comma-separated)                                   |
+| `AGENT_MCP_SERVERS`         | External MCP servers (JSON string array)                                                           |
+| `MODEL_ROUTING_ENABLED`     | Enable model routing (true/false, default: false)                                                  |
+| `MODEL_ROUTING_RULES`       | Model routing rules as JSON string                                                                 |
+
+**Agent Sandbox:**
+
+| Variable                                 | Description                                                                   |
+| ---------------------------------------- | ----------------------------------------------------------------------------- |
+| `AGENT_SANDBOX_FILTER_ENV`               | Filter subprocess env vars to allowed list only (true/false, default: true)   |
+| `AGENT_SANDBOX_NETWORK_ISOLATION`        | Enable Linux network namespace isolation (true/false, default: false)         |
+| `AGENT_SANDBOX_ALLOWED_ENV_VARS`         | Additional env var names to pass through filter (comma-separated)             |
+| `AGENT_SANDBOX_ALLOWED_WRITE_EXTENSIONS` | Allowed file extensions for agent writes (comma-separated, default: .md,.txt) |
+
+**Agent Idle Timeout:**
+
+| Variable                               | Description                                               |
+| -------------------------------------- | --------------------------------------------------------- |
+| `AGENT_IDLE_TIMEOUT_ENABLED`           | Enable idle timeout detection (true/false, default: true) |
+| `AGENT_IDLE_TIMEOUT_MS`                | Idle timeout in ms (default: 300000 = 5 min)              |
+| `AGENT_IDLE_TIMEOUT_CHECK_INTERVAL_MS` | Check interval in ms (default: 30000 = 30s)               |
+
+**Agent Git Credential Store:**
+
+| Variable                       | Description                                                                              |
+| ------------------------------ | ---------------------------------------------------------------------------------------- |
+| `AGENT_GIT_CREDENTIAL_ENABLED` | Enable git credential store for agent subprocesses (true/false, default: false)          |
+| `AGENT_GIT_CREDENTIAL_HOST`    | Override git host for credential store (default: from gitBackup.remoteUrl or github.com) |
+
+**Dry Run / Debug Mode:**
+
+| Variable              | Description                                                       |
+| --------------------- | ----------------------------------------------------------------- |
+| `DRY_RUN_ENABLED`     | Enable dry run mode (true/false, default: false)                  |
+| `DRY_RUN_OUTPUT_PATH` | Output directory for assembled prompts (default: ./data/dry-run/) |
+| `DRY_RUN_MOCK_REPLY`  | Mock reply text (empty = no reply)                                |
+
+**Reply Policy & Channels:**
+
+| Variable       | Description                                                                |
+| -------------- | -------------------------------------------------------------------------- |
+| `REPLY_POLICY` | Reply policy mode (`all`/`public`/`channels`) (REPLY_TO accepted as alias) |
+| `CHANNELS`     | Channels entries (JSON array, replaces config)                             |
+
+**Discord Platform:**
+
+| Variable                                        | Description                                                         |
+| ----------------------------------------------- | ------------------------------------------------------------------- |
+| `DISCORD_SPONTANEOUS_ENABLED`                   | Enable spontaneous posting (true/false, default: false)             |
+| `DISCORD_SPONTANEOUS_MIN_INTERVAL_MS`           | Min interval between posts in ms (default: 10800000)                |
+| `DISCORD_SPONTANEOUS_MAX_INTERVAL_MS`           | Max interval between posts in ms (default: 43200000)                |
+| `DISCORD_SPONTANEOUS_CONTEXT_FETCH_PROBABILITY` | Probability of fetching recent messages (0.0-1.0, default: 0.5)     |
+| `DISCORD_TYPING_INDICATOR_ENABLED`              | Show typing indicator while processing (true/false, default: false) |
+| `DISCORD_CHANNEL_LURK_ENABLED`                  | Enable channel lurk reply (true/false, default: false)              |
+| `DISCORD_CHANNEL_LURK_INTERVAL_MS`              | Channel lurk check interval in ms (default: 1800000)                |
+
+**Misskey Platform:**
+
+| Variable                                        | Description                                                     |
+| ----------------------------------------------- | --------------------------------------------------------------- |
+| `MISSKEY_SPONTANEOUS_ENABLED`                   | Enable spontaneous posting (true/false, default: false)         |
+| `MISSKEY_SPONTANEOUS_MIN_INTERVAL_MS`           | Min interval between posts in ms (default: 10800000)            |
+| `MISSKEY_SPONTANEOUS_MAX_INTERVAL_MS`           | Max interval between posts in ms (default: 43200000)            |
+| `MISSKEY_SPONTANEOUS_CONTEXT_FETCH_PROBABILITY` | Probability of fetching recent messages (0.0-1.0, default: 0.5) |
+
+**Rate Limiting:**
+
+| Variable                             | Description                                                  |
+| ------------------------------------ | ------------------------------------------------------------ |
+| `RATE_LIMIT_ENABLED`                 | Enable rate limiting (true/false, default: false)            |
+| `RATE_LIMIT_MAX_REQUESTS_PER_WINDOW` | Max requests per sliding window per user (default: 10)       |
+| `RATE_LIMIT_WINDOW_MS`               | Sliding window duration in ms (default: 600000)              |
+| `RATE_LIMIT_COOLDOWN_MS`             | Cooldown period in ms after limit exceeded (default: 600000) |
+
+**Self-Research:**
+
+| Variable                        | Description                                                |
+| ------------------------------- | ---------------------------------------------------------- |
+| `SELF_RESEARCH_ENABLED`         | Enable self-research (true/false, default: false)          |
+| `SELF_RESEARCH_MODEL`           | LLM model for self-research (separate from chat)           |
+| `SELF_RESEARCH_RSS_FEEDS`       | RSS feed sources as JSON string                            |
+| `SELF_RESEARCH_MIN_INTERVAL_MS` | Min interval between research sessions (default: 43200000) |
+| `SELF_RESEARCH_MAX_INTERVAL_MS` | Max interval between research sessions (default: 86400000) |
+
+**Memory Maintenance:**
+
+| Variable                              | Description                                                  |
+| ------------------------------------- | ------------------------------------------------------------ |
+| `MEMORY_MAINTENANCE_ENABLED`          | Enable memory maintenance (true/false, default: false)       |
+| `MEMORY_MAINTENANCE_MODEL`            | LLM model for memory maintenance                             |
+| `MEMORY_MAINTENANCE_MIN_MEMORY_COUNT` | Min enabled memories before maintenance runs (default: 50)   |
+| `MEMORY_MAINTENANCE_INTERVAL_MS`      | Interval between maintenance runs in ms (default: 604800000) |
+
+**Scheduled Reminders:**
+
+| Variable                      | Description                                                 |
+| ----------------------------- | ----------------------------------------------------------- |
+| `REMINDERS_ENABLED`           | Enable scheduled reminders (true/false, default: false)     |
+| `REMINDERS_MAX_PER_USER`      | Max active reminders per user (default: 20)                 |
+| `REMINDERS_MIN_INTERVAL_MS`   | Minimum reminder delay from now in ms (default: 60000)      |
+| `REMINDERS_PERSIST_PATH`      | Reminder persistence file name (default: reminders.jsonl)   |
 | `REMINDERS_CHECK_INTERVAL_MS` | How often to check for due reminders in ms (default: 30000) |
-| `AGENT_EXTERNAL_SKILLS` | External skills to install at startup (JSON string, e.g. `[{"repo":"owner/repo","skill":"name"}]`) |
+
+**Git Backup:**
+
+| Variable                   | Description                                                  |
+| -------------------------- | ------------------------------------------------------------ |
+| `GIT_BACKUP_ENABLED`       | Enable Git backup (true/false, default: false)               |
+| `GIT_BACKUP_REMOTE_URL`    | Remote Git repository URL (HTTPS)                            |
+| `GIT_BACKUP_INTERVAL_MS`   | Backup interval in ms (default: 3600000 = 1 hour)            |
+| `GIT_BACKUP_AUTHOR_NAME`   | Git commit author name                                       |
+| `GIT_BACKUP_AUTHOR_EMAIL`  | Git commit author email                                      |
+| `GIT_BACKUP_AUTH_USER`     | Git backup HTTPS auth username (default: authorEmail)        |
+| `GIT_BACKUP_AUTH_PASSWORD` | Git backup HTTPS auth password/token (default: GITHUB_TOKEN) |
+
+**Send File Skill:**
+
+| Variable                             | Description                                         |
+| ------------------------------------ | --------------------------------------------------- |
+| `SKILL_SEND_FILE_ENABLED`            | Enable send-file skill (true/false, default: false) |
+| `SKILL_SEND_FILE_MAX_SIZE_MB`        | File size limit in MB (0 = platform default)        |
+| `SKILL_SEND_FILE_ALLOWED_EXTENSIONS` | Allowed file extensions whitelist (comma-separated) |
+
+**Metrics & Health:**
+
+| Variable          | Description                                                     |
+| ----------------- | --------------------------------------------------------------- |
+| `METRICS_ENABLED` | Enable Prometheus metrics endpoint (true/false, default: false) |
+| `METRICS_PATH`    | Metrics endpoint path (default: /metrics)                       |
+| `HEALTH_PORT`     | Port for health check / metrics endpoint                        |
+
+**Session Audit Log:**
+
+| Variable                | Description                                                            |
+| ----------------------- | ---------------------------------------------------------------------- |
+| `AUDIT_ENABLED`         | Enable audit logging (true/false, default: false)                      |
+| `AUDIT_RETENTION_DAYS`  | Log retention in days (default: 7)                                     |
+| `AUDIT_HASH_CONTENT`    | SHA-256 hash user content in audit entries (true/false, default: true) |
+| `AUDIT_INCLUDED_PHASES` | Only record these phases (comma-separated, empty = all)                |
+
+**Logging & Environment:**
+
+| Variable        | Description                                             |
+| --------------- | ------------------------------------------------------- |
+| `LOG_LEVEL`     | Logging level (DEBUG/INFO/WARN/ERROR)                   |
+| `DENO_ENV`      | Environment name (dev/prod)                             |
+| `GELF_ENABLED`  | Enable GELF log output (true/false, default: false)     |
+| `GELF_ENDPOINT` | GELF endpoint URL                                       |
+| `GELF_HOSTNAME` | Source hostname in GELF messages (default: air-friends) |
+| `GELF_PROTOCOL` | GELF transport protocol: http/tcp/udp (default: http)   |
+| `GELF_COMPRESS` | Enable GZIP compression for UDP transport (true/false)  |
 
 ### Reply Policy
 
@@ -242,13 +431,13 @@ Via `config.yaml`:
 
 ```yaml
 agent:
-  model: "gpt-5-mini"  # default fallback model
+  model: "gpt-5-mini" # default fallback model
   modelRouting:
     enabled: true
     rules:
       # Specific account + research keywords → research model
       - match:
-          channels: [{ id: "discord/account/12345678901234567" }]
+          channel: "discord/account/12345678901234567"
           contentKeywords: ["研究", "research"]
         model: "openrouter/google/gemini-2.5-pro"
       # Any message with research keywords → research model
@@ -277,13 +466,13 @@ MODEL_ROUTING_RULES='[{"match":{"channel":"discord/account/12345678901234567","c
 
 Each rule's `match` object supports multiple conditions combined with AND logic. All specified conditions must match for the rule to apply:
 
-| Field | Example | Description |
-|-------|---------|-------------|
-| `channel` | `"discord/account/12345678901234567"` | Match a specific channel entry |
-| `sessionType` | `"message"` | Match a session type |
-| `contentKeywords` | `["研究", "research"]` | Match message content containing any keyword (OR within array, case-insensitive). Only effective for `sessionType: "message"` |
+| Field             | Example                               | Description                                                                                                                   |
+| ----------------- | ------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| `channel`         | `"discord/account/12345678901234567"` | Match a specific channel entry                                                                                                |
+| `sessionType`     | `"message"`                           | Match a session type                                                                                                          |
+| `contentKeywords` | `["研究", "research"]`                | Match message content containing any keyword (OR within array, case-insensitive). Only effective for `sessionType: "message"` |
 
-Valid `sessionType` values: `"message"`, `"spontaneous"`, `"self-research"`, `"memory-maintenance"`
+Valid `sessionType` values: `"message"`, `"spontaneous"`, `"self-research"`, `"memory-maintenance"`, `"reminder"`, `"channelLurk"`
 
 #### Fallback Chain
 
@@ -375,6 +564,8 @@ The container includes a pre-configured `opencode.json` that automatically sets 
 - **Auto-compaction**: Enabled for better token management
 - **Auto-update**: Disabled (container should be rebuilt for updates)
 
+The configuration defines a **dual-agent setup**: a `build` agent (default) for restricted mode with granular permission whitelisting (`"*": "deny"` + specific allows), and a `yolo` agent for unrestricted mode (`"*": "allow"`). When YOLO mode is enabled, the system switches to the `yolo` agent via ACP `setSessionMode("yolo")`.
+
 The configuration file is located at `~/.config/opencode/opencode.json` inside the container. OpenCode will automatically use the GitHub and Gemini providers when their respective tokens are available as environment variables.
 
 You can customize OpenCode behavior by mounting your own `opencode.json` configuration file:
@@ -416,30 +607,35 @@ For complete Vento documentation, visit <https://vento.js.org/>
 
 The following variables are available in all prompt templates:
 
-| Variable    | Type      | Description                                    | Example                  |
-| ----------- | --------- | ---------------------------------------------- | ------------------------ |
-| `isDm`      | `boolean` | Whether this is a direct message conversation  | `true`                   |
-| `platform`  | `string`  | Platform name                                  | `"discord"`, `"misskey"` |
-| `userId`    | `string`  | User's platform ID                             | `"560842157351763989"`   |
-| `channelId` | `string`  | Channel/conversation ID                        | `"873618490202931231"`   |
-| `guildId`   | `string`  | Server/guild ID (empty string if N/A)          | `""`                     |
-| `sessionId` | `string`  | Current skill API session ID                   | `"sess_abc123"`          |
-| `agentType` | `string`  | ACP agent type (`"copilot"`, `"gemini"`, `"opencode"`) | `"copilot"`    |
-| `model`     | `string`  | Model identifier for the current session       | `"claude-opus-4.6"`     |
-| `yolo`      | `boolean` | Whether YOLO mode is enabled (bypasses permission restrictions) | `true`       |
+| Variable                 | Type      | Description                                                     | Example                  |
+| ------------------------ | --------- | --------------------------------------------------------------- | ------------------------ |
+| `isDm`                   | `boolean` | Whether this is a direct message conversation                   | `true`                   |
+| `platform`               | `string`  | Platform name                                                   | `"discord"`, `"misskey"` |
+| `userId`                 | `string`  | User's platform ID                                              | `"560842157351763989"`   |
+| `channelId`              | `string`  | Channel/conversation ID                                         | `"873618490202931231"`   |
+| `guildId`                | `string`  | Server/guild ID (empty string if N/A)                           | `""`                     |
+| `sessionId`              | `string`  | Current skill API session ID                                    | `"sess_abc123"`          |
+| `agentType`              | `string`  | ACP agent type (`"copilot"`, `"gemini"`, `"opencode"`)          | `"copilot"`              |
+| `model`                  | `string`  | Model identifier for the current session                        | `"claude-opus-4.6"`      |
+| `yolo`                   | `boolean` | Whether YOLO mode is enabled (bypasses permission restrictions) | `true`                   |
+| `canWriteAgentWorkspace` | `boolean` | Whether this session allows writing to agent workspace          | `false`                  |
 
 **Special prompt variables** (only available in specific prompt types):
 
-| Variable       | Available In                      | Description                     |
-| -------------- | --------------------------------- | ------------------------------- |
-| `rssItems`     | `system_self_research.md`         | Formatted RSS feed items        |
-| `workspaceKey` | `system_memory_maintenance.md`    | User workspace identifier       |
-| `memoriesDump` | `system_memory_maintenance.md`    | JSON dump of enabled memories   |
-| `recentMessagesFetched` | `system_spontaneous.md`  | Whether recent messages were fetched |
-| `importantMemories` | `system_spontaneous.md`       | Formatted important memories text |
-| `recentMessages` | `system_spontaneous.md`          | Formatted recent messages text  |
-| `availableEmojis` | `system_spontaneous.md`         | Formatted available emojis text |
-| `userContextMessage` | `system_reply.md`          | Pre-formatted user context message |
+| Variable                | Available In                   | Description                                    |
+| ----------------------- | ------------------------------ | ---------------------------------------------- |
+| `rssItems`              | `system_self_research.md`      | Formatted RSS feed items                       |
+| `workspaceKey`          | `system_memory_maintenance.md` | User workspace identifier                      |
+| `memoriesDump`          | `system_memory_maintenance.md` | JSON dump of enabled memories                  |
+| `minMemoryCount`        | `system_memory_maintenance.md` | Minimum memory count threshold for maintenance |
+| `recentMessagesFetched` | `system_spontaneous.md`        | Whether recent messages were fetched           |
+| `importantMemories`     | `system_spontaneous.md`        | Formatted important memories text              |
+| `recentMessages`        | `system_spontaneous.md`        | Formatted recent messages text                 |
+| `availableEmojis`       | `system_spontaneous.md`        | Formatted available emojis text                |
+| `userContextMessage`    | `system_reply.md`              | Pre-formatted user context message             |
+| `reminderMessage`       | `system_reminder.md`           | Reminder message content                       |
+| `reminderCreatedAt`     | `system_reminder.md`           | Reminder creation timestamp                    |
+| `reminderScheduledAt`   | `system_reminder.md`           | Reminder scheduled timestamp                   |
 
 #### Examples
 
@@ -509,10 +705,10 @@ volumes:
 
 If you have custom prompt files using the old `{{placeholder}}` syntax, you need to update them:
 
-| Old Syntax              | New Syntax                              |
-| ----------------------- | --------------------------------------- |
-| `{{character_name}}`    | `{{ include "./character_name.md" }}`   |
-| `{{character_info}}`    | `{{ include "./character_info.md" }}`   |
+| Old Syntax           | New Syntax                            |
+| -------------------- | ------------------------------------- |
+| `{{character_name}}` | `{{ include "./character_name.md" }}` |
+| `{{character_info}}` | `{{ include "./character_info.md" }}` |
 
 For fragment values used multiple times, use `set` to load once:
 

@@ -28,13 +28,13 @@ Throughout this guide, replace `{platform}` with the lowercase platform name (e.
 
 Create the following files under `src/platforms/{platform}/`:
 
-| File | Purpose |
-|---|---|
-| `{platform}-adapter.ts` | Main adapter extending `PlatformAdapter` |
-| `{platform}-config.ts` | Configuration types, defaults, and channel config pattern |
-| `{platform}-utils.ts` | Message conversion helpers |
-| `{platform}-client.ts` | Platform API client wrapper (if needed) |
-| `index.ts` | Barrel export |
+| File                    | Purpose                                                   |
+| ----------------------- | --------------------------------------------------------- |
+| `{platform}-adapter.ts` | Main adapter extending `PlatformAdapter`                  |
+| `{platform}-config.ts`  | Configuration types, defaults, and channel config pattern |
+| `{platform}-utils.ts`   | Message conversion helpers                                |
+| `{platform}-client.ts`  | Platform API client wrapper (if needed)                   |
+| `index.ts`              | Barrel export                                             |
 
 Reference implementations: [`src/platforms/discord/`](../src/platforms/discord/), [`src/platforms/misskey/`](../src/platforms/misskey/).
 
@@ -44,52 +44,70 @@ Your adapter must extend `PlatformAdapter` (which also implements `MessageFetche
 
 #### Abstract Properties
 
-| Property | Type | Description |
-|---|---|---|
-| `platform` | `Platform` | Platform identifier string (e.g., `"slack"`) |
-| `capabilities` | `PlatformCapabilities` | Feature flags for the platform |
+| Property       | Type                   | Description                                  |
+| -------------- | ---------------------- | -------------------------------------------- |
+| `platform`     | `Platform`             | Platform identifier string (e.g., `"slack"`) |
+| `capabilities` | `PlatformCapabilities` | Feature flags for the platform               |
 
 `PlatformCapabilities` fields (from `src/types/platform.ts`):
 
 ```typescript
 interface PlatformCapabilities {
-  canFetchHistory: boolean;   // Can fetch message history
+  canFetchHistory: boolean; // Can fetch message history
   canSearchMessages: boolean; // Can search messages
-  supportsDm: boolean;        // Supports direct messages
-  supportsGuild: boolean;     // Supports guild/server concept
+  supportsDm: boolean; // Supports direct messages
+  supportsGuild: boolean; // Supports guild/server concept
   supportsReactions: boolean; // Supports message reactions
-  maxMessageLength: number;   // Maximum message length
+  maxMessageLength: number; // Maximum message length
 }
 ```
 
 #### Abstract Methods
 
-| Method | Signature | Purpose | Notes |
-|---|---|---|---|
-| `connect()` | `(): Promise<void>` | Connect to the platform API | Update connection state via `updateConnectionState()` |
-| `disconnect()` | `(): Promise<void>` | Disconnect from the platform | Clean up resources |
-| `sendTyping(channelId)` | `(channelId: string): Promise<void>` | Send typing indicator | Implement as no-op if unsupported |
-| `sendReply(channelId, content, options?)` | See source | Send a reply to a channel | Returns `ReplyResult` with `messageId` |
-| `editMessage(channelId, messageId, newContent, replyToMessageId?)` | See source | Edit a previously sent message | Misskey uses delete-and-recreate |
-| `sendFile(channelId, fileContent, fileName, options?)` | See source | Send a file attachment | Returns `SendFileResult` |
-| `fetchRecentMessages(channelId, limit)` | `(channelId: string, limit: number): Promise<PlatformMessage[]>` | Fetch recent channel messages | Part of `MessageFetcher` interface |
-| `fetchEmojis()` | `(): Promise<PlatformEmoji[]>` | Fetch available custom emojis | Cache results to reduce API calls |
-| `addReaction(channelId, messageId, emoji)` | See source | Add a reaction to a message | Returns `ReactionResult` |
-| `getUsername(userId)` | `(userId: string): Promise<string>` | Get display name for a user ID | — |
-| `isSelf(userId)` | `(userId: string): boolean` | Check if user ID is the bot | — |
-| `getBotId()` | `(): string \| null` | Get the bot's user ID | `null` if not yet connected |
-| `getDmChannelId(userId)` | `(userId: string): Promise<string \| null>` | Get or create a DM channel | Discord: `User.createDM()`, Misskey: `chat:{userId}` |
-| `hasBotReaction(channelId, messageId)` | See source | Check if bot already reacted | Used by channel lurk scheduler |
-| `hasBotMention(channelId, messageId)` | See source | Check if message mentions bot | Used by channel lurk scheduler |
-| `determineSpontaneousTarget(config)` | `(config: Config): Promise<SpontaneousTarget \| null>` | Select target for spontaneous post | Discord: random channel/account from `channels` list; Misskey: `timeline:self` |
+| Method                                                             | Signature                                                                  | Purpose                            | Notes                                                                          |
+| ------------------------------------------------------------------ | -------------------------------------------------------------------------- | ---------------------------------- | ------------------------------------------------------------------------------ |
+| `connect()`                                                        | `(): Promise<void>`                                                        | Connect to the platform API        | Update connection state via `updateConnectionState()`                          |
+| `disconnect()`                                                     | `(): Promise<void>`                                                        | Disconnect from the platform       | Clean up resources                                                             |
+| `sendTyping(channelId)`                                            | `(channelId: string): Promise<void>`                                       | Send typing indicator              | Implement as no-op if unsupported                                              |
+| `sendReply(channelId, content, options?)`                          | See source                                                                 | Send a reply to a channel          | Returns `ReplyResult` with `messageId`                                         |
+| `editMessage(channelId, messageId, newContent, replyToMessageId?)` | See source                                                                 | Edit a previously sent message     | Misskey uses delete-and-recreate                                               |
+| `sendFile(channelId, fileContent, fileName, options?)`             | See source                                                                 | Send a file attachment             | Returns `SendFileResult`                                                       |
+| `fetchRecentMessages(channelId, limit)`                            | `(channelId: string, limit: number): Promise<PlatformMessage[]>`           | Fetch recent channel messages      | Part of `MessageFetcher` interface                                             |
+| `fetchEmojis()`                                                    | `(): Promise<PlatformEmoji[]>`                                             | Fetch available custom emojis      | Cache results to reduce API calls                                              |
+| `addReaction(channelId, messageId, emoji)`                         | See source                                                                 | Add a reaction to a message        | Returns `ReactionResult`                                                       |
+| `getUsername(userId)`                                              | `(userId: string): Promise<string>`                                        | Get display name for a user ID     | —                                                                              |
+| `isSelf(userId)`                                                   | `(userId: string): boolean`                                                | Check if user ID is the bot        | —                                                                              |
+| `getBotId()`                                                       | `(): string \| null`                                                       | Get the bot's user ID              | `null` if not yet connected                                                    |
+| `getDmChannelId(userId)`                                           | `(userId: string): Promise<string \| null>`                                | Get or create a DM channel         | Discord: `User.createDM()`, Misskey: `chat:{userId}`                           |
+| `hasBotReaction(channelId, messageId)`                             | See source                                                                 | Check if bot already reacted       | Used by channel lurk scheduler                                                 |
+| `hasBotMention(channelId, messageId)`                              | See source                                                                 | Check if message mentions bot      | Used by channel lurk scheduler                                                 |
+| `fetchMessage(channelId, messageId)`                               | `(channelId: string, messageId: string): Promise<PlatformMessage \| null>` | Fetch a single message by ID       | Returns `null` if not found                                                    |
+| `determineSpontaneousTarget(config)`                               | `(config: Config): Promise<SpontaneousTarget \| null>`                     | Select target for spontaneous post | Discord: random channel/account from `channels` list; Misskey: `timeline:self` |
 
 #### Overridable Methods (with defaults)
 
-| Method | Default | Override When |
-|---|---|---|
-| `getSearchGuildId(channelId, isDm)` | Returns `""` | Platform has guild/server concept (e.g., Discord returns guild ID) |
-| `supportsTypingIndicator()` | Returns `false` | Platform supports and has enabled typing indicators |
-| `searchRelatedMessages(guildId, channelId, query, limit)` | Not defined (optional) | Platform supports message search |
+| Method                                                    | Default                | Override When                                                      |
+| --------------------------------------------------------- | ---------------------- | ------------------------------------------------------------------ |
+| `getSearchGuildId(channelId, isDm)`                       | Returns `""`           | Platform has guild/server concept (e.g., Discord returns guild ID) |
+| `supportsTypingIndicator()`                               | Returns `false`        | Platform supports and has enabled typing indicators                |
+| `searchRelatedMessages(guildId, channelId, query, limit)` | Not defined (optional) | Platform supports message search                                   |
+
+### 3.2a EventRouter (Optional Integration)
+
+The `EventRouter` (`src/core/event-router.ts`) routes `NormalizedEvent` instances to handlers based on condition predicates, evaluated in registration order. If no condition matches, an optional default fallback handler is used. Errors in one handler do not affect other routes.
+
+Predefined condition helpers:
+
+| Helper                         | Description                        |
+| ------------------------------ | ---------------------------------- |
+| `isDmEvent`                    | Match DM events only               |
+| `isGuildEvent`                 | Match guild/server events only     |
+| `isPlatform(...platforms)`     | Match specific platforms           |
+| `containsKeyword(...keywords)` | Match messages containing keywords |
+| `allOf(...conditions)`         | Combine conditions with AND logic  |
+| `anyOf(...conditions)`         | Combine conditions with OR logic   |
+
+Connect the router to a `PlatformRegistry` via `connectToRegistry(registry)` to automatically route all incoming platform events.
 
 ### 3.3 Define Platform Configuration Types
 
@@ -160,13 +178,13 @@ export const VALID_PLATFORMS: readonly Platform[] = ["discord", "misskey", "{pla
 import { {PLATFORM}_WHITELIST_PATTERN } from "../platforms/{platform}/{platform}-config.ts";
 ```
 
-2. Add it to the `isValidWhitelistEntry()` function:
+2. Add it to the `isValidChannelId()` function:
 
 ```typescript
-function isValidChannelEntry(entry: string): boolean {
-  return DISCORD_WHITELIST_PATTERN.test(entry)
-    || MISSKEY_WHITELIST_PATTERN.test(entry)
-    || {PLATFORM}_WHITELIST_PATTERN.test(entry);
+function isValidChannelId(id: string): boolean {
+  return DISCORD_WHITELIST_PATTERN.test(id)
+    || MISSKEY_WHITELIST_PATTERN.test(id)
+    || {PLATFORM}_WHITELIST_PATTERN.test(id);
 }
 ```
 
@@ -192,17 +210,17 @@ if (config.platforms.{platform}.enabled) {
 
 Convert platform-specific messages into `NormalizedEvent` (for incoming triggers) and `PlatformMessage` (for history). Key field mappings:
 
-| Field | Type | Notes |
-|---|---|---|
-| `platform` | `Platform` | Your platform name constant |
-| `channelId` | `string` | Use prefix conventions if needed (e.g., Misskey: `note:{id}`, `dm:{id}`, `chat:{id}`) |
-| `userId` | `string` | Sender's platform user ID |
-| `messageId` | `string` | Platform message ID |
-| `isDm` | `boolean` | Whether this is a direct/private message |
-| `guildId` | `string` | Server/guild ID; empty string if not applicable |
-| `content` | `string` | Message text content |
-| `timestamp` | `Date` | Must be a `Date` object |
-| `attachments` | `Attachment[]` | Optional; set `isImage` flag based on MIME type |
+| Field         | Type           | Notes                                                                                                  |
+| ------------- | -------------- | ------------------------------------------------------------------------------------------------------ |
+| `platform`    | `Platform`     | Your platform name constant                                                                            |
+| `channelId`   | `string`       | Use prefix conventions if needed (e.g., Misskey: `note:{id}`, `dm:{id}`, `chat:{id}`, `timeline:self`) |
+| `userId`      | `string`       | Sender's platform user ID                                                                              |
+| `messageId`   | `string`       | Platform message ID                                                                                    |
+| `isDm`        | `boolean`      | Whether this is a direct/private message                                                               |
+| `guildId`     | `string`       | Server/guild ID; empty string if not applicable                                                        |
+| `content`     | `string`       | Message text content                                                                                   |
+| `timestamp`   | `Date`         | Must be a `Date` object                                                                                |
+| `attachments` | `Attachment[]` | Optional; set `isImage` flag based on MIME type                                                        |
 
 Emit converted events via `this.emitEvent(normalizedEvent)` from within your adapter.
 
@@ -232,7 +250,7 @@ If the platform should support spontaneous posting:
 - [ ] `src/types/config.ts` — `{Platform}Config` interface and `PlatformsConfig` field added
 - [ ] `src/types/events.ts` — `Platform` type and `VALID_PLATFORMS` updated
 - [ ] `src/platforms/{name}/{name}-config.ts` — `{PLATFORM}_WHITELIST_PATTERN` defined
-- [ ] `src/core/config-loader.ts` — `isValidWhitelistEntry()` updated
+- [ ] `src/core/config-loader.ts` — `isValidChannelId()` updated
 - [ ] `src/utils/env.ts` — environment variable mappings added
 - [ ] `src/bootstrap.ts` — conditional adapter registration added
 - [ ] `config.example.yaml` — example configuration added
@@ -253,7 +271,7 @@ If the platform should support spontaneous posting:
 - [`src/types/events.ts`](../src/types/events.ts) — `Platform` type, `VALID_PLATFORMS`, `isValidPlatform()`
 - [`src/types/platform.ts`](../src/types/platform.ts) — `PlatformCapabilities`, `ReplyResult`, etc.
 - [`src/types/config.ts`](../src/types/config.ts) — Configuration type definitions
-- [`src/core/config-loader.ts`](../src/core/config-loader.ts) — `isValidWhitelistEntry()`, config validation
+- [`src/core/config-loader.ts`](../src/core/config-loader.ts) — `isValidChannelId()`, config validation
 - [`src/utils/env.ts`](../src/utils/env.ts) — Environment variable to config mappings
 - [`src/bootstrap.ts`](../src/bootstrap.ts) — Adapter registration
 - [`AGENTS.md`](../AGENTS.md) — Project architecture overview

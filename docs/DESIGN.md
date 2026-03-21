@@ -247,6 +247,7 @@ See [Memory System Design](#memory-system-design) for detailed specifications.
 **Architecture:**
 
 Skills are implemented as shell-based Deno TypeScript scripts that external ACP Agents can execute. Each skill:
+
 - Has a `SKILL.md` file describing its usage and parameters for the agent
 - Contains executable scripts in a `scripts/` subdirectory
 - Receives a `--session-id` parameter identifying the active session
@@ -257,13 +258,22 @@ During an active session, a `SESSION_ID` file is created in the workspace contai
 
 **Available Skills:**
 
-| Skill           | Purpose                      | HTTP Endpoint                 | Handler             |
-| --------------- | ---------------------------- | ----------------------------- | ------------------- |
-| `memory-save`   | Save new memory              | POST /api/skill/memory-save   | MemoryHandler       |
-| `memory-search` | Search existing memories     | POST /api/skill/memory-search | MemoryHandler       |
-| `memory-patch`  | Update memory attributes     | POST /api/skill/memory-patch  | MemoryHandler       |
-| `fetch-context` | Get additional platform data | POST /api/skill/fetch-context | ContextHandler      |
-| `send-reply`    | Send final reply (max 1)     | POST /api/skill/send-reply    | ReplyHandler        |
+| Skill             | Purpose                                 | HTTP Endpoint                   | Handler         |
+| ----------------- | --------------------------------------- | ------------------------------- | --------------- |
+| `memory-save`     | Save new memory                         | POST /api/skill/memory-save     | MemoryHandler   |
+| `memory-search`   | Search existing memories                | POST /api/skill/memory-search   | MemoryHandler   |
+| `memory-patch`    | Update memory attributes                | POST /api/skill/memory-patch    | MemoryHandler   |
+| `memory-stats`    | Get memory statistics                   | POST /api/skill/memory-stats    | MemoryHandler   |
+| `memory-export`   | Export memories                         | POST /api/skill/memory-export   | MemoryHandler   |
+| `send-reply`      | Send reply to platform                  | POST /api/skill/send-reply      | ReplyHandler    |
+| `edit-reply`      | Edit a previously sent reply            | POST /api/skill/edit-reply      | ReplyHandler    |
+| `get-message`     | Get a specific message                  | POST /api/skill/get-message     | ReplyHandler    |
+| `fetch-context`   | Get additional platform data            | POST /api/skill/fetch-context   | ContextHandler  |
+| `react-message`   | Add reaction to a message               | POST /api/skill/react-message   | ReactionHandler |
+| `set-reminder`    | Set a scheduled reminder (conditional)  | POST /api/skill/set-reminder    | ReminderHandler |
+| `cancel-reminder` | Cancel an active reminder (conditional) | POST /api/skill/cancel-reminder | ReminderHandler |
+| `list-reminders`  | List active reminders (conditional)     | POST /api/skill/list-reminders  | ReminderHandler |
+| `send-file`       | Send a file to platform (conditional)   | POST /api/skill/send-file       | FileHandler     |
 
 > [!IMPORTANT]
 > Only `send-reply` can send content externally. All other skills inject results into the agent's session context only.
@@ -360,6 +370,7 @@ Agent Output (internal)
 - Second `send-reply` call must be rejected/error
 - All non-reply outputs remain internal
 - Replies are threaded to the original message when applicable (platform-dependent)
+- `edit-reply` allows the Agent to edit a previously sent reply (requires the `messageId` returned by `send-reply`)
 
 ### Retry on Missing Reply
 
@@ -404,14 +415,16 @@ Both files exist in every workspace. Each line is a JSON event. No new files are
 }
 ```
 
-| Field        | Description                                   |
-| ------------ | --------------------------------------------- |
-| `id`         | Unique identifier                             |
-| `ts`         | ISO 8601 timestamp                            |
-| `enabled`    | Whether memory is active                      |
-| `visibility` | `public` or `private`                         |
-| `importance` | `high` (always loaded) or `normal` (searched) |
-| `content`    | Memory content (plain text)                   |
+| Field        | Description                                      |
+| ------------ | ------------------------------------------------ |
+| `id`         | Unique identifier                                |
+| `ts`         | ISO 8601 timestamp                               |
+| `enabled`    | Whether memory is active                         |
+| `visibility` | `public` or `private`                            |
+| `importance` | `high` (always loaded) or `normal` (searched)    |
+| `content`    | Memory content (plain text)                      |
+| `relatedTo`  | IDs of semantically related memories (optional)  |
+| `supersedes` | IDs of memories this entry supersedes (optional) |
 
 **Patch Event (type=patch):**
 
@@ -428,7 +441,7 @@ Both files exist in every workspace. Each line is a JSON event. No new files are
 
 **Patch Constraints:**
 
-- Can only modify: `enabled`, `visibility`, `importance`
+- Can only modify: `enabled`, `visibility`, `importance`, `relatedTo`, `supersedes`
 - Cannot modify: `content`, `id`, `ts`
 - Delete operations are forbidden—use `enabled: false` instead
 
@@ -445,6 +458,10 @@ Both files exist in every workspace. Each line is a JSON event. No new files are
 - Retrieved via full-text search using `rg` (ripgrep)
 - Results limited by hit count and total characters
 - Searched on demand or during initial assembly
+
+**Memory Statistics:**
+
+The `memory-stats` skill provides aggregate statistics about a workspace's memories (total counts, enabled/disabled breakdown, importance distribution) without returning actual memory content.
 
 **Private Memory Access:**
 
@@ -528,7 +545,7 @@ Each platform adapter must provide these methods:
 
 ### Configuration File Format
 
-Primary configuration file: `config.yaml` (YAML or JSON5 supported)
+Primary configuration file: `config.yaml` (YAML format)
 
 ```yaml
 # config.yaml
@@ -543,43 +560,43 @@ platforms:
 
 agent:
   model: "gpt-4"
-  system_prompt_path: "./prompts/system_reply.md"
-  token_limit: 4096
+  systemPromptPath: "./prompts/system_reply.md"
+  tokenLimit: 4096
 
 memory:
-  search_limit: 10
-  max_chars: 2000
+  searchLimit: 10
+  maxChars: 2000
 
 workspace:
-  repo_path: "./data"
-  workspaces_dir: "workspaces"
+  repoPath: "./data"
+  workspacesDir: "workspaces"
 ```
 
 ### Environment Variables
 
-| Variable             | Description                                      |
-| -------------------- | ------------------------------------------------ |
-| `DISCORD_ENABLED`    | Enable Discord integration (true/false)          |
-| `MISSKEY_ENABLED`    | Enable Misskey integration (true/false)          |
-| `DISCORD_TOKEN`      | Discord bot token                                |
-| `MISSKEY_HOST`       | Misskey instance host                            |
-| `MISSKEY_TOKEN`      | Misskey access token                             |
-| `AGENT_MODEL`        | LLM model identifier (e.g., "gpt-5-mini")        |
-| `AGENT_DEFAULT_TYPE` | Default ACP agent type (copilot/gemini/opencode) |
-| `REPLY_POLICY`        | Reply policy mode (`all`/`public`/`channels`) (REPLY_TO accepted as alias) |
-| `CHANNELS`           | Channel entries (JSON array, replaces config) |
-| `LOG_LEVEL`          | Logging level (DEBUG/INFO/WARN/ERROR)            |
-| `DENO_ENV`           | Environment name (dev/prod)                      |
-| `GITHUB_TOKEN`       | GitHub token for Copilot                         |
-| `COPILOT_GITHUB_TOKEN` | Dedicated Copilot token (falls back to GITHUB_TOKEN) |
-| `GEMINI_API_KEY`     | Gemini API key for Gemini CLI/OpenCode           |
-| `OPENCODE_API_KEY`   | OpenCode API key                                 |
-| `OPENROUTER_API_KEY` | OpenRouter API key                               |
-| `MODEL_ROUTING_ENABLED` | Enable model routing (true/false, default: false) |
-| `MODEL_ROUTING_RULES` | Model routing rules as JSON string |
-| `AGENT_EXTERNAL_SKILLS` | External skills to install at startup (JSON string) |
-| `GIT_BACKUP_AUTH_USER` | Git backup HTTPS auth username (default: authorEmail) |
-| `GIT_BACKUP_AUTH_PASSWORD` | Git backup HTTPS auth password/token (default: GITHUB_TOKEN) |
+| Variable                   | Description                                                                |
+| -------------------------- | -------------------------------------------------------------------------- |
+| `DISCORD_ENABLED`          | Enable Discord integration (true/false)                                    |
+| `MISSKEY_ENABLED`          | Enable Misskey integration (true/false)                                    |
+| `DISCORD_TOKEN`            | Discord bot token                                                          |
+| `MISSKEY_HOST`             | Misskey instance host                                                      |
+| `MISSKEY_TOKEN`            | Misskey access token                                                       |
+| `AGENT_MODEL`              | LLM model identifier (e.g., "gpt-5-mini")                                  |
+| `AGENT_DEFAULT_TYPE`       | Default ACP agent type (copilot/gemini/opencode)                           |
+| `REPLY_POLICY`             | Reply policy mode (`all`/`public`/`channels`) (REPLY_TO accepted as alias) |
+| `CHANNELS`                 | Channel entries (JSON array, replaces config)                              |
+| `LOG_LEVEL`                | Logging level (DEBUG/INFO/WARN/ERROR)                                      |
+| `DENO_ENV`                 | Environment name (dev/prod)                                                |
+| `GITHUB_TOKEN`             | GitHub token for Copilot                                                   |
+| `COPILOT_GITHUB_TOKEN`     | Dedicated Copilot token (falls back to GITHUB_TOKEN)                       |
+| `GEMINI_API_KEY`           | Gemini API key for Gemini CLI/OpenCode                                     |
+| `OPENCODE_API_KEY`         | OpenCode API key                                                           |
+| `OPENROUTER_API_KEY`       | OpenRouter API key                                                         |
+| `MODEL_ROUTING_ENABLED`    | Enable model routing (true/false, default: false)                          |
+| `MODEL_ROUTING_RULES`      | Model routing rules as JSON string                                         |
+| `AGENT_EXTERNAL_SKILLS`    | External skills to install at startup (JSON string)                        |
+| `GIT_BACKUP_AUTH_USER`     | Git backup HTTPS auth username (default: authorEmail)                      |
+| `GIT_BACKUP_AUTH_PASSWORD` | Git backup HTTPS auth password/token (default: GITHUB_TOKEN)               |
 
 ### Multi-Environment Support
 
@@ -816,8 +833,27 @@ AIr-Friends/
 │   │   ├── message-handler.ts
 │   │   ├── reply-dispatcher.ts
 │   │   ├── reply-policy.ts
+│   │   ├── config-loader.ts
+│   │   ├── template-renderer.ts
 │   │   ├── skill-installer.ts
-│   │   └── config-loader.ts
+│   │   ├── spontaneous-scheduler.ts
+│   │   ├── spontaneous-target.ts
+│   │   ├── channel-lurk-scheduler.ts
+│   │   ├── self-research-scheduler.ts
+│   │   ├── memory-maintenance-scheduler.ts
+│   │   ├── reminder-scheduler.ts
+│   │   ├── reminder-store.ts
+│   │   ├── rate-limiter.ts
+│   │   ├── model-router.ts
+│   │   ├── event-router.ts
+│   │   ├── error-handler.ts
+│   │   ├── audit-logger.ts
+│   │   ├── audit-retention.ts
+│   │   ├── audit-retention-scheduler.ts
+│   │   ├── git-backup-service.ts
+│   │   ├── git-backup-scheduler.ts
+│   │   ├── git-credential-setup.ts
+│   │   └── scheduler-state-store.ts
 │   ├── platforms/           # Platform adapters (Discord, Misskey)
 │   │   ├── platform-adapter.ts
 │   │   ├── platform-registry.ts
@@ -828,18 +864,53 @@ AIr-Friends/
 │   │   ├── memory-handler.ts
 │   │   ├── reply-handler.ts
 │   │   ├── context-handler.ts
+│   │   ├── reaction-handler.ts
+│   │   ├── reminder-handler.ts
+│   │   ├── file-handler.ts
 │   │   └── types.ts
 │   ├── skill-api/           # HTTP API for shell skills
 │   │   ├── server.ts
 │   │   └── session-registry.ts
 │   ├── types/               # TypeScript type definitions
+│   │   ├── audit.ts
+│   │   ├── config.ts
+│   │   ├── context.ts
+│   │   ├── errors.ts
+│   │   ├── events.ts
+│   │   ├── logger.ts
+│   │   ├── memory.ts
+│   │   ├── platform.ts
+│   │   ├── reminder.ts
+│   │   ├── template.ts
+│   │   └── workspace.ts
 │   └── utils/               # Utility functions
+│       ├── logger.ts
+│       ├── env.ts
+│       ├── metrics.ts
+│       ├── hash.ts
+│       ├── rss-fetcher.ts
+│       ├── gelf-transport.ts
+│       ├── path-validator.ts
+│       ├── text-search.ts
+│       └── token-counter.ts
 ├── skills/                  # Shell-based skill scripts
 │   ├── memory-save/
 │   ├── memory-search/
 │   ├── memory-patch/
-│   ├── fetch-context/
+│   ├── memory-stats/
+│   ├── memory-export/
 │   ├── send-reply/
+│   ├── edit-reply/
+│   ├── get-message/
+│   ├── fetch-context/
+│   ├── react-message/
+│   ├── set-reminder/
+│   ├── cancel-reminder/
+│   ├── list-reminders/
+│   ├── send-file/
+│   ├── self-research/
+│   ├── agent-browser/
+│   ├── chinese-content-writing-guideline/
 │   └── lib/                 # Shared skill client library
 ├── prompts/                 # Bot prompt files (template system)
 │   ├── system_reply.md      # Normal message reply system prompt
@@ -890,12 +961,13 @@ AIr-Friends/
 
 Required permissions for production:
 
-| Permission  | Flag            | Purpose                                 |
-| ----------- | --------------- | --------------------------------------- |
-| Network     | `--allow-net`   | Discord API, Misskey API, web search    |
-| Read        | `--allow-read`  | Local repo, working directories, config |
-| Write       | `--allow-write` | Memory log files in workspaces          |
-| Environment | `--allow-env`   | Read tokens and configuration           |
+| Permission  | Flag            | Purpose                                           |
+| ----------- | --------------- | ------------------------------------------------- |
+| Network     | `--allow-net`   | Discord API, Misskey API, web search              |
+| Read        | `--allow-read`  | Local repo, working directories, config           |
+| Write       | `--allow-write` | Memory log files in workspaces                    |
+| Environment | `--allow-env`   | Read tokens and configuration                     |
+| Run         | `--allow-run`   | Spawning ACP agent subprocesses and skill scripts |
 
 > [!WARNING]
 > Never use `--allow-all` or overly permissive settings. Permissions must be explicitly declared.
@@ -908,13 +980,13 @@ The self-research feature allows the agent to autonomously build knowledge by pe
 
 ### Components
 
-| Component | File | Purpose |
-| --- | --- | --- |
-| Config types | `src/types/config.ts` | `SelfResearchConfig`, `RssFeedSource` interfaces |
-| RSS Fetcher | `src/utils/rss-fetcher.ts` | Fetch and parse RSS 2.0 / Atom feeds |
-| Scheduler | `src/core/self-research-scheduler.ts` | Timer management (mirrors SpontaneousScheduler) |
-| Session Flow | `src/core/session-orchestrator.ts` | `processSelfResearch()` method |
-| Prompt | `prompts/system_self_research.md` | Research instructions with character placeholders |
+| Component    | File                                  | Purpose                                           |
+| ------------ | ------------------------------------- | ------------------------------------------------- |
+| Config types | `src/types/config.ts`                 | `SelfResearchConfig`, `RssFeedSource` interfaces  |
+| RSS Fetcher  | `src/utils/rss-fetcher.ts`            | Fetch and parse RSS 2.0 / Atom feeds              |
+| Scheduler    | `src/core/self-research-scheduler.ts` | Timer management (mirrors SpontaneousScheduler)   |
+| Session Flow | `src/core/session-orchestrator.ts`    | `processSelfResearch()` method                    |
+| Prompt       | `prompts/system_self_research.md`     | Research instructions with character placeholders |
 
 ### Flow
 
@@ -938,13 +1010,13 @@ The memory maintenance feature periodically compacts old memories in each user w
 
 ### Components
 
-| Component | File | Purpose |
-| --- | --- | --- |
-| Config types | `src/types/config.ts` | `MemoryMaintenanceConfig` interface |
-| Scheduler | `src/core/memory-maintenance-scheduler.ts` | Fixed-interval timer management |
-| Session Flow | `src/core/session-orchestrator.ts` | `processMemoryMaintenance()` method |
-| Prompt | `prompts/system_memory_maintenance.md` | English maintenance instructions with placeholders |
-| Integration | `src/bootstrap.ts` | Workspace iteration, threshold check, and per-workspace isolation |
+| Component    | File                                       | Purpose                                                           |
+| ------------ | ------------------------------------------ | ----------------------------------------------------------------- |
+| Config types | `src/types/config.ts`                      | `MemoryMaintenanceConfig` interface                               |
+| Scheduler    | `src/core/memory-maintenance-scheduler.ts` | Fixed-interval timer management                                   |
+| Session Flow | `src/core/session-orchestrator.ts`         | `processMemoryMaintenance()` method                               |
+| Prompt       | `prompts/system_memory_maintenance.md`     | English maintenance instructions with placeholders                |
+| Integration  | `src/bootstrap.ts`                         | Workspace iteration, threshold check, and per-workspace isolation |
 
 ### Flow
 
@@ -968,14 +1040,14 @@ Enables users to set one-time reminders via DM conversations. The bot polls for 
 
 ### Components
 
-| Component | File | Purpose |
-| --- | --- | --- |
-| Store | `src/core/reminder-store.ts` | Append-only JSONL persistence per workspace |
-| Scheduler | `src/core/reminder-scheduler.ts` | Fixed-interval polling for due reminders |
-| Handler | `src/skills/reminder-handler.ts` | Skill handlers for set/cancel/list |
-| Orchestrator | `src/core/session-orchestrator.ts` | `processReminder()` — ACP delivery session |
-| Shell Skills | `skills/set-reminder/`, `skills/cancel-reminder/`, `skills/list-reminders/` | Agent-facing skill scripts |
-| Prompt | `prompts/system_reminder.md` | Delivery prompt template |
+| Component    | File                                                                        | Purpose                                     |
+| ------------ | --------------------------------------------------------------------------- | ------------------------------------------- |
+| Store        | `src/core/reminder-store.ts`                                                | Append-only JSONL persistence per workspace |
+| Scheduler    | `src/core/reminder-scheduler.ts`                                            | Fixed-interval polling for due reminders    |
+| Handler      | `src/skills/reminder-handler.ts`                                            | Skill handlers for set/cancel/list          |
+| Orchestrator | `src/core/session-orchestrator.ts`                                          | `processReminder()` — ACP delivery session  |
+| Shell Skills | `skills/set-reminder/`, `skills/cancel-reminder/`, `skills/list-reminders/` | Agent-facing skill scripts                  |
+| Prompt       | `prompts/system_reminder.md`                                                | Delivery prompt template                    |
 
 ### Flow
 
@@ -1001,15 +1073,238 @@ See `config.example.yaml` for the `reminders` section. Environment variables: `R
 
 ---
 
-## Appendix: Performance Metrics
+## Rate Limiting & Cooldown
 
-The system should collect:
+Prevents excessive API usage per user via a sliding window + cooldown mechanism.
 
-| Metric                   | Description               |
-| ------------------------ | ------------------------- |
-| `agent_session_duration` | Time per agent execution  |
-| `platform_api_latency`   | Platform API call latency |
-| `memory_file_size`       | Memory file sizes         |
-| `active_sessions`        | Concurrent session count  |
+**Configuration:**
 
-Metrics can be exposed via logs or optional Prometheus integration.
+```yaml
+rateLimit:
+  enabled: false
+  maxRequestsPerWindow: 10
+  windowMs: 600000
+  cooldownMs: 600000
+```
+
+Each user is tracked by `{platform}:{userId}`. When `maxRequestsPerWindow` is exceeded, the user enters a cooldown period where all requests are silently rejected. After cooldown expires, the counter resets. Whitelisted accounts (`{platform}/account/{id}`) automatically bypass rate limiting.
+
+Environment variables: `RATE_LIMIT_ENABLED`, `RATE_LIMIT_MAX_REQUESTS_PER_WINDOW`, `RATE_LIMIT_WINDOW_MS`, `RATE_LIMIT_COOLDOWN_MS`.
+
+---
+
+## Session Audit Log
+
+Per-session JSONL audit trail for replay and debugging. Each session writes timestamped entries tracking the full lifecycle: context assembly, agent connection, prompt, skill calls, reply, and session end.
+
+**Configuration:**
+
+```yaml
+audit:
+  enabled: false
+  retentionDays: 7
+  hashContent: true
+  includedPhases:
+    - "skill_call"
+    - "reply_sent"
+    - "session_end"
+```
+
+Audit files are written to `data/audit/{platform}/{userId}/{sessionId}.jsonl`. Phase filtering controls which events are recorded. Content hashing (SHA-256) protects user content in audit entries. Retention cleanup runs at startup and every 24 hours.
+
+Environment variables: `AUDIT_ENABLED`, `AUDIT_RETENTION_DAYS`, `AUDIT_HASH_CONTENT`, `AUDIT_INCLUDED_PHASES` (comma-separated).
+
+**Key Components:** `src/core/audit-logger.ts`, `src/core/audit-retention.ts`, `src/core/audit-retention-scheduler.ts`, `src/types/audit.ts`.
+
+---
+
+## Channel Lurk Reply
+
+Periodically checks whitelisted Discord channels and auto-replies when conditions are met. Discord only.
+
+**Configuration:**
+
+```yaml
+platforms:
+  discord:
+    channelLurk:
+      enabled: false
+      intervalMs: 1800000
+```
+
+**Trigger conditions** (all must be true): last message sender is not the bot, message does not mention the bot, bot has not reacted to the message, and message has not been processed before. Uses the normal reply prompt template (`system_reply.md`).
+
+Environment variables: `DISCORD_CHANNEL_LURK_ENABLED`, `DISCORD_CHANNEL_LURK_INTERVAL_MS`.
+
+---
+
+## External Skill Auto-Installation
+
+Enables automatic installation of external Agent Skills at startup via `deno x -y skills add`.
+
+**Configuration:**
+
+```yaml
+agent:
+  externalSkills:
+    - repo: "jim60105/copilot-prompt"
+      skill: "create-blog-post"
+```
+
+Skills are installed sequentially during `bootstrap()`. Individual failures are logged but do not block startup.
+
+Environment variable: `AGENT_EXTERNAL_SKILLS` (JSON string, e.g. `[{"repo":"owner/repo","skill":"skill-name"}]`).
+
+---
+
+## Model Routing
+
+Enables dynamic model selection based on channel, session type, or message content keywords. First-match-wins evaluation with fallback to the default model.
+
+**Configuration:**
+
+```yaml
+agent:
+  modelRouting:
+    enabled: false
+    rules:
+      - match:
+          channel: "discord/account/123456"
+        model: "claude-opus-4.6"
+      - match:
+          sessionType: "self-research"
+        model: "gpt-5-mini"
+      - match:
+          contentKeywords: ["code", "programming"]
+        model: "claude-sonnet-4"
+```
+
+Match conditions use AND logic across fields; `contentKeywords` uses OR within the array (case-insensitive). `contentKeywords` is only effective for `sessionType: "message"`.
+
+Environment variables: `MODEL_ROUTING_ENABLED`, `MODEL_ROUTING_RULES` (JSON string).
+
+**Key Component:** `src/core/model-router.ts`.
+
+---
+
+## Multimedia Message Handling
+
+Supports passing image and file attachments from platform messages to the ACP Agent.
+
+Attachment metadata (URL, mimeType, filename, size) is extracted by platform adapters and carried in `NormalizedEvent` / `PlatformMessage`. Attachment info is always included as text descriptions in context. When the Agent supports `promptCapabilities.image`, trigger message images are downloaded and sent as image `ContentBlock`. History message images are described by URL only. Images over 20 MB or failing download (10s timeout) are described by URL instead.
+
+**Platform sources:** Discord `message.attachments` + `message.stickers`; Misskey `note.files` + `message.file`.
+
+---
+
+## Dry Run Mode
+
+When enabled, the system assembles context but does NOT call the ACP Agent. The assembled prompt is written to an output directory for prompt engineering and CI/CD smoke testing.
+
+**Configuration:**
+
+```yaml
+agent:
+  dryRun:
+    enabled: false
+    outputPath: "./data/dry-run/"
+    mockReply: "（Dry run 模式 — 此為測試回覆）"
+```
+
+Environment variables: `DRY_RUN_ENABLED`, `DRY_RUN_OUTPUT_PATH`, `DRY_RUN_MOCK_REPLY`.
+
+---
+
+## Git Backup
+
+Periodically backs up the `data/` directory to a remote GitHub repository using Git.
+
+**Configuration:**
+
+```yaml
+gitBackup:
+  enabled: false
+  remoteUrl: ""
+  intervalMs: 3600000
+  authorName: "AIr-Friends Backup"
+  authorEmail: "airfriends-backup@noreply.github.com"
+```
+
+Initialization is intelligent: handles empty directories (clone), non-Git directories (init + push), and existing repos (commit + push). Push conflicts trigger automatic rebase retry with `backup-{datetime}` fallback branch. A final backup runs during graceful shutdown.
+
+Environment variables: `GIT_BACKUP_ENABLED`, `GIT_BACKUP_REMOTE_URL`, `GIT_BACKUP_INTERVAL_MS`, `GIT_BACKUP_AUTHOR_NAME`, `GIT_BACKUP_AUTHOR_EMAIL`, `GIT_BACKUP_AUTH_USER`, `GIT_BACKUP_AUTH_PASSWORD`.
+
+**Key Components:** `src/core/git-backup-service.ts`, `src/core/git-backup-scheduler.ts`.
+
+---
+
+## Agent Sandbox Hardening
+
+Agent subprocesses run with configurable sandbox isolation via `SandboxManager`.
+
+| Setting                                | Default           | Description                                        |
+| -------------------------------------- | ----------------- | -------------------------------------------------- |
+| `agent.sandbox.filterEnv`              | `true`            | Filter subprocess env vars to an allowed list only |
+| `agent.sandbox.networkIsolation`       | `false`           | Wrap command with `unshare --net` (Linux only)     |
+| `agent.sandbox.allowedEnvVars`         | `[]`              | Additional env var names to pass through           |
+| `agent.sandbox.allowedWriteExtensions` | `[".md", ".txt"]` | Allowed file extensions for workspace writes       |
+
+Environment variables: `AGENT_SANDBOX_FILTER_ENV`, `AGENT_SANDBOX_NETWORK_ISOLATION`, `AGENT_SANDBOX_ALLOWED_ENV_VARS` (comma-separated), `AGENT_SANDBOX_ALLOWED_WRITE_EXTENSIONS` (comma-separated).
+
+---
+
+## Idle Timeout Detection
+
+Detects silently unresponsive ACP Agent connections and handles recovery. All Agent callbacks update a `lastActivityTimestamp`. A periodic monitor checks for inactivity, performs liveness checks (subprocess alive + `cancel()` probe), and throws on dead connections.
+
+| Setting                             | Default  | Description                   |
+| ----------------------------------- | -------- | ----------------------------- |
+| `agent.idleTimeout.enabled`         | `true`   | Enable idle timeout detection |
+| `agent.idleTimeout.timeoutMs`       | `300000` | Idle timeout (5 min)          |
+| `agent.idleTimeout.checkIntervalMs` | `30000`  | Check interval (30s)          |
+
+Environment variables: `AGENT_IDLE_TIMEOUT_ENABLED`, `AGENT_IDLE_TIMEOUT_MS`, `AGENT_IDLE_TIMEOUT_CHECK_INTERVAL_MS`.
+
+---
+
+## Git Credential Store for Agent
+
+When `agent.gitCredential.enabled` is true, bootstrap writes a `~/.git-credentials` file and configures `git config --global credential.helper store` so Agent subprocesses can use plain `git push`/`git pull` without embedding credentials in command strings. Credential source is shared with `gitBackup` config. Host resolution order: `agent.gitCredential.host` → parsed from `gitBackup.remoteUrl` → `github.com`.
+
+Environment variables: `AGENT_GIT_CREDENTIAL_ENABLED`, `AGENT_GIT_CREDENTIAL_HOST`.
+
+---
+
+## Prometheus Metrics Export
+
+Operational metrics are exposed via a Prometheus-compatible `/metrics` endpoint on the Health Check Server (shared port, no additional port needed). Uses `prom-client` with a dedicated Registry for test isolation.
+
+**Configuration:**
+
+```yaml
+metrics:
+  enabled: false
+  path: "/metrics"
+```
+
+Environment variables: `METRICS_ENABLED`, `METRICS_PATH`.
+
+**Exposed Metrics:**
+
+| Metric Name                              | Type      | Labels                       | Description                      |
+| ---------------------------------------- | --------- | ---------------------------- | -------------------------------- |
+| `airfriends_sessions_total`              | Counter   | `platform`, `type`, `status` | Total sessions (success/failure) |
+| `airfriends_session_duration_seconds`    | Histogram | `platform`, `type`, `status` | Session processing time          |
+| `airfriends_active_sessions`             | Gauge     | —                            | Currently active sessions        |
+| `airfriends_messages_received_total`     | Counter   | `platform`                   | Messages received from platforms |
+| `airfriends_replies_sent_total`          | Counter   | `platform`                   | Replies sent to platforms        |
+| `airfriends_memory_operations_total`     | Counter   | `operation`, `visibility`    | Memory operations count          |
+| `airfriends_skill_api_calls_total`       | Counter   | `skill`, `status`            | Skill API call count             |
+| `airfriends_rate_limit_rejections_total` | Counter   | `platform`                   | Rate limit rejections            |
+| `airfriends_audit_entries_total`         | Counter   | `phase`                      | Audit log entries written        |
+| `airfriends_skill_readiness`             | Gauge     | `skill`                      | Skill readiness (0/1)            |
+| `airfriends_files_sent_total`            | Counter   | `platform`                   | Files sent to platforms          |
+| `airfriends_reminders_set_total`         | Counter   | `platform`                   | Reminders set                    |
+| `airfriends_reminders_delivered_total`   | Counter   | `platform`, `status`         | Reminders delivered              |
+| `airfriends_reminders_cancelled_total`   | Counter   | `platform`                   | Reminders cancelled              |
+| `airfriends_idle_timeout_total`          | Counter   | `platform`, `outcome`        | Idle timeout detections          |
