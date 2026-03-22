@@ -30,7 +30,7 @@ function withSecurityHeaders(response: Response): Response {
   const newResponse = new Response(response.body, response);
   newResponse.headers.set(
     "Content-Security-Policy",
-    "default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'",
+    "default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://cdn.tailwindcss.com; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'",
   );
   newResponse.headers.set("X-Frame-Options", "DENY");
   newResponse.headers.set("X-Content-Type-Options", "nosniff");
