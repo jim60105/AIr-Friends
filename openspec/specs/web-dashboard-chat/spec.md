@@ -80,13 +80,17 @@ The chat interface model dropdown SHALL be populated dynamically from the server
 
 ### Requirement: Response Streaming
 
-`GET /api/chat/stream?chatSessionId=<id>` SHALL establish an SSE connection that streams agent session updates including thinking content (wrapped in `<think></think>`) and response text.
+`GET /api/chat/stream?chatSessionId=<id>` SHALL establish an SSE connection that streams agent session updates including thinking content (wrapped in `<think></think>`) and response text. The server SHALL send SSE events with event type `message` for agent response text chunks and event type `think` for agent thinking content chunks. A typing indicator SHALL be displayed in the chat UI while awaiting agent response.
 
 #### Scenario: Streams Partial Responses as They Arrive
 
-- **GIVEN** an active chat session with `chatSessionId` `"chat_abc123"`
-- **WHEN** a `GET /api/chat/stream?chatSessionId=chat_abc123` SSE connection is established
-- **THEN** the server SHALL send SSE events containing partial response text as the agent produces output
+- **WHEN** the ACP agent produces a text response chunk during an active SSE connection
+- **THEN** the server SHALL send an SSE event with event type `message` containing the partial response text
+
+#### Scenario: Streams Thinking Content
+
+- **WHEN** the ACP agent produces a thinking/reasoning chunk during an active SSE connection
+- **THEN** the server SHALL send an SSE event with event type `think` containing the thinking text
 
 #### Scenario: Sends Done Event When Agent Completes Turn
 
@@ -207,3 +211,30 @@ The system SHALL use `prompts/system_web_chat.md` for web chat sessions. This te
 - **GIVEN** the `system_web_chat.md` template is rendered
 - **WHEN** the prompt content is examined
 - **THEN** it SHALL contain instructions telling the agent to NOT use `send-reply`, `send-file`, or `react-message` skills
+
+### Requirement: Typing Indicator
+
+The chat UI SHALL display an animated typing indicator when a message is sent and the agent has not yet responded. The indicator SHALL be removed when the first `message` event, `done` event, `error` event, or `disconnect` event is received.
+
+#### Scenario: Typing indicator appears after sending message
+
+- **WHEN** the user sends a message via the chat input
+- **THEN** an animated typing indicator SHALL appear in the message area
+
+#### Scenario: Typing indicator removed on first response chunk
+
+- **GIVEN** a typing indicator is displayed
+- **WHEN** the first `message` SSE event is received from the agent
+- **THEN** the typing indicator SHALL be removed
+
+#### Scenario: Typing indicator removed on done event
+
+- **GIVEN** a typing indicator is displayed
+- **WHEN** a `done` SSE event is received
+- **THEN** the typing indicator SHALL be removed
+
+#### Scenario: Typing indicator removed on error
+
+- **GIVEN** a typing indicator is displayed
+- **WHEN** an `error` or `disconnect` SSE event is received
+- **THEN** the typing indicator SHALL be removed

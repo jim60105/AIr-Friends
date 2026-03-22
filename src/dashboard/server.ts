@@ -585,7 +585,7 @@ export class DashboardServer {
               "sessionUpdate" in update && update.sessionUpdate === "agent_message_chunk" &&
               "content" in update && update.content.type === "text"
             ) {
-              this.sendSSE(sseController, "sessionUpdate", {
+              this.sendSSE(sseController, "message", {
                 type: "text",
                 text: update.content.text,
               });
@@ -593,7 +593,7 @@ export class DashboardServer {
               "sessionUpdate" in update && update.sessionUpdate === "agent_thought_chunk" &&
               "text" in update
             ) {
-              this.sendSSE(sseController, "sessionUpdate", {
+              this.sendSSE(sseController, "think", {
                 type: "think",
                 text: (update as { text: string }).text,
               });

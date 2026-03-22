@@ -179,7 +179,7 @@
         </section>
 
         <!-- Workspace Tab -->
-        <section id="tab-workspace" class="tab-panel hidden">
+        <section id="tab-workspace" class="tab-panel hidden flex flex-col h-[calc(100vh-8rem)]">
           <div class="flex items-center justify-between mb-3">
             <h2 class="text-sm font-semibold text-indigo-300 uppercase tracking-wider">
               Agent Workspace
@@ -191,9 +191,9 @@
               ↻ Refresh
             </button>
           </div>
-          <div class="flex flex-col lg:flex-row gap-4">
+          <div class="flex flex-col lg:flex-row gap-4 flex-1 min-h-0 overflow-hidden">
             <div
-              class="lg:w-72 shrink-0 bg-surface-100 border border-indigo-900/20 rounded-xl p-3 max-h-[70vh] overflow-auto"
+              class="lg:w-72 shrink-0 bg-surface-100 border border-indigo-900/20 rounded-xl p-3 overflow-auto"
             >
               <div id="workspace-tree" class="text-sm">
                 <p class="text-gray-500 text-center py-4">Loading…</p>
@@ -209,7 +209,7 @@
               </div>
               <pre
                 id="file-content"
-                class="p-4 text-sm font-mono text-gray-300 whitespace-pre-wrap overflow-auto max-h-[65vh]"
+                class="p-4 text-sm font-mono text-gray-300 whitespace-pre-wrap overflow-auto flex-1"
               ><span class="text-gray-500">Select a file to view its contents</span></pre>
             </div>
           </div>

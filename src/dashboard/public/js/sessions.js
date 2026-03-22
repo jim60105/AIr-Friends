@@ -1,5 +1,7 @@
 // Session monitoring
 
+const expandedAuditSessions = new Set();
+
 async function pollActiveSessions() {
   try {
     const res = await fetch("/api/sessions/active");
@@ -52,6 +54,17 @@ async function pollHistory() {
       }"></span>${esc(s.status)}</span></td>
     </tr>`
     ).join("");
+    // Re-expand previously expanded audit rows
+    for (const sessionId of expandedAuditSessions) {
+      const rows = body.querySelectorAll("tr[onclick]");
+      for (const row of rows) {
+        const onclick = row.getAttribute("onclick") || "";
+        if (onclick.includes(sessionId)) {
+          toggleAudit(row, sessionId);
+          break;
+        }
+      }
+    }
   } catch (_) {}
 }
 
@@ -59,8 +72,10 @@ async function toggleAudit(row, sessionId) {
   const next = row.nextElementSibling;
   if (next && next.classList.contains("audit-row")) {
     next.remove();
+    expandedAuditSessions.delete(sessionId);
     return;
   }
+  expandedAuditSessions.add(sessionId);
   const tr = document.createElement("tr");
   tr.className = "audit-row";
   tr.innerHTML =
@@ -78,16 +93,21 @@ async function toggleAudit(row, sessionId) {
       return;
     }
     tr.querySelector("td").innerHTML =
-      `<div class="max-h-60 overflow-auto bg-surface-200 rounded-lg p-3 space-y-1 text-xs font-mono">
+      `<div class="max-h-96 overflow-auto bg-surface-200 rounded-lg p-3 space-y-1 text-xs font-mono">
       ${
         entries.map((e) =>
-          `<div class="flex gap-3"><span class="text-gray-500 shrink-0">${
-            formatTime(e.ts)
-          }</span><span class="text-indigo-300">${
-            esc(e.phase)
-          }</span><span class="text-gray-300 truncate">${
-            esc(JSON.stringify(e.data || {})).slice(0, 120)
-          }</span></div>`
+          `<details class="audit-entry">
+            <summary class="flex gap-3 cursor-pointer hover:bg-surface/50 rounded px-1 py-0.5 select-none">
+              <span class="text-gray-500 shrink-0">${formatTime(e.ts)}</span>
+              <span class="text-indigo-300">${esc(e.phase)}</span>
+              <span class="text-gray-500 truncate">${
+            esc(Object.keys(e.data || {}).join(", "))
+          }</span>
+            </summary>
+            <pre class="mt-1 mb-2 ml-4 p-2 bg-surface/50 rounded text-gray-300 whitespace-pre-wrap overflow-auto max-h-80 text-xs">${
+            esc(JSON.stringify(e.data || {}, null, 2))
+          }</pre>
+          </details>`
         ).join("")
       }
     </div>`;

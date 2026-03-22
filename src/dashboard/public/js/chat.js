@@ -56,6 +56,7 @@ async function chatConnect() {
     let currentAgentMsg = null;
 
     chatEventSource.addEventListener("message", (e) => {
+      removeTypingIndicator();
       const data = JSON.parse(e.data);
       if (!currentAgentMsg) {
         currentAgentMsg = appendMessage("agent", "");
@@ -66,6 +67,7 @@ async function chatConnect() {
     });
 
     chatEventSource.addEventListener("think", (e) => {
+      removeTypingIndicator();
       const data = JSON.parse(e.data);
       if (!currentAgentMsg) {
         currentAgentMsg = appendMessage("agent", "");
@@ -74,10 +76,12 @@ async function chatConnect() {
     });
 
     chatEventSource.addEventListener("done", () => {
+      removeTypingIndicator();
       currentAgentMsg = null;
     });
 
     chatEventSource.addEventListener("error", (e) => {
+      removeTypingIndicator();
       if (chatEventSource.readyState === EventSource.CLOSED) return;
       try {
         const data = JSON.parse(e.data);
@@ -89,6 +93,7 @@ async function chatConnect() {
     });
 
     chatEventSource.addEventListener("disconnect", (e) => {
+      removeTypingIndicator();
       try {
         const data = JSON.parse(e.data);
         if (data.reason === "idle_timeout") {
@@ -164,6 +169,7 @@ async function chatSend() {
   if (!msg || !chatSessionId) return;
   input.value = "";
   appendMessage("user", msg);
+  showTypingIndicator();
   try {
     await fetch("/api/chat/message", {
       method: "POST",
@@ -226,4 +232,21 @@ function appendSystemMessage(text) {
   div.textContent = text;
   container.appendChild(div);
   container.scrollTop = container.scrollHeight;
+}
+
+function showTypingIndicator() {
+  removeTypingIndicator();
+  const container = document.getElementById("chat-messages");
+  const div = document.createElement("div");
+  div.id = "typing-indicator";
+  div.className = "p-3 rounded-xl max-w-[85%] bg-surface-200 border border-indigo-900/20";
+  div.innerHTML =
+    '<div class="text-xs text-gray-400 mb-1">Agent</div><div class="typing-indicator"><span class="dot"></span><span class="dot"></span><span class="dot"></span></div>';
+  container.appendChild(div);
+  container.scrollTop = container.scrollHeight;
+}
+
+function removeTypingIndicator() {
+  const el = document.getElementById("typing-indicator");
+  if (el) el.remove();
 }
