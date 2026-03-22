@@ -58,7 +58,7 @@
 /* Tree toggle */
 .tree-folder > .tree-children {
   overflow: hidden;
-  max-height: 2000px;
+  max-height: 99999px;
   transition: max-height 0.2s ease-out;
 }
 .tree-folder.collapsed > .tree-children {
