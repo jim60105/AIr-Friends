@@ -311,6 +311,37 @@ openCodeAuth:
   # -- Use an existing PVC instead of creating a new one.
   existingClaim: ''
 
+# Dashboard exposure configuration
+# Creates Kubernetes Service and optional Ingress for the web dashboard.
+# The dashboard application is controlled by env.DASHBOARD_ENABLED / env.DASHBOARD_PORT above.
+dashboard:
+  service:
+    enabled: false
+    type: ClusterIP
+    port: 8090
+  ingress:
+    enabled: false
+    className: ""
+    annotations: {}
+    # -- Example: Traefik Ingress with TLS and middleware
+    #   traefik.ingress.kubernetes.io/router.entrypoints: websecure
+    #   traefik.ingress.kubernetes.io/router.tls: "true"
+    #   traefik.ingress.kubernetes.io/router.middlewares: default-redirect-https@kubernetescrd
+    #   cert-manager.io/cluster-issuer: letsencrypt
+    # -- Example: nginx-ingress
+    #   nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    hosts: []
+    # -- Example:
+    #   - host: dashboard.example.com
+    #     paths:
+    #       - path: /
+    #         pathType: Prefix
+    tls: []
+    # -- Example:
+    #   - secretName: dashboard-tls
+    #     hosts:
+    #       - dashboard.example.com
+
 # Health check endpoint configuration
 health:
   port: 8080
