@@ -6,6 +6,7 @@ import {
   clearSessionCookie,
   createSessionCookie,
   generateSessionToken,
+  LoginRateLimiter,
   parseCookies,
   tokenStore,
   validatePassphrase,
@@ -23,6 +24,19 @@ import type { SkillRegistry } from "@skills/registry.ts";
 import type { Registry } from "prom-client";
 
 const logger = createLogger("DashboardServer");
+
+/** Add security headers to a response */
+function withSecurityHeaders(response: Response): Response {
+  const newResponse = new Response(response.body, response);
+  newResponse.headers.set(
+    "Content-Security-Policy",
+    "default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'",
+  );
+  newResponse.headers.set("X-Frame-Options", "DENY");
+  newResponse.headers.set("X-Content-Type-Options", "nosniff");
+  newResponse.headers.set("Referrer-Policy", "strict-origin-when-cross-origin");
+  return newResponse;
+}
 
 /** Chat session idle timeout (10 minutes) */
 const CHAT_IDLE_TIMEOUT_MS = 10 * 60 * 1000;
@@ -66,6 +80,7 @@ export class DashboardServer {
   private server: Deno.HttpServer | null = null;
   private deps: DashboardServerDeps;
   private chatSession: ChatSession | null = null;
+  private loginRateLimiter = new LoginRateLimiter();
 
   constructor(deps: DashboardServerDeps) {
     this.deps = deps;
@@ -95,85 +110,104 @@ export class DashboardServer {
     const url = new URL(req.url);
     const path = url.pathname;
 
+    let response: Response;
     try {
       // Public endpoints (no auth required)
       if (path === "/api/auth/login" && req.method === "POST") {
-        return await this.handleLogin(req);
+        response = await this.handleLogin(req);
+        return withSecurityHeaders(response);
       }
 
       // Auth check for all other routes
       if (!this.isAuthenticated(req)) {
         if (!path.startsWith("/api/")) {
           // Serve static files (login page is rendered client-side)
-          return await this.serveStaticFile(path);
+          response = await this.serveStaticFile(path);
+          return withSecurityHeaders(response);
         }
-        return this.json({ error: "Unauthorized" }, 401);
+        response = this.json({ error: "Unauthorized" }, 401);
+        return withSecurityHeaders(response);
       }
 
       // Auth endpoints
       if (path === "/api/auth/logout" && req.method === "POST") {
-        return this.handleLogout(req);
+        response = this.handleLogout(req);
+        return withSecurityHeaders(response);
       }
       if (path === "/api/auth/status" && req.method === "GET") {
-        return this.json({ authenticated: true });
+        response = this.json({ authenticated: true });
+        return withSecurityHeaders(response);
       }
 
       // Session monitor endpoints
       if (path === "/api/sessions/active" && req.method === "GET") {
-        return this.handleActiveSessions();
+        response = this.handleActiveSessions();
+        return withSecurityHeaders(response);
       }
       if (path === "/api/sessions/history" && req.method === "GET") {
-        return this.handleSessionHistory();
+        response = this.handleSessionHistory();
+        return withSecurityHeaders(response);
       }
       if (path === "/api/stats" && req.method === "GET") {
-        return await this.handleStats();
+        response = await this.handleStats();
+        return withSecurityHeaders(response);
       }
       // Audit endpoint: /api/sessions/:id/audit
       const auditMatch = path.match(/^\/api\/sessions\/([^/]+)\/audit$/);
       if (auditMatch && req.method === "GET") {
-        return await this.handleSessionAudit(auditMatch[1]);
+        response = await this.handleSessionAudit(auditMatch[1]);
+        return withSecurityHeaders(response);
       }
 
       // Workspace browser endpoints
       if (path === "/api/workspace/tree" && req.method === "GET") {
-        return await this.handleWorkspaceTree();
+        response = await this.handleWorkspaceTree();
+        return withSecurityHeaders(response);
       }
       if (path === "/api/workspace/file" && req.method === "GET") {
-        return await this.handleWorkspaceFile(url);
+        response = await this.handleWorkspaceFile(url);
+        return withSecurityHeaders(response);
       }
 
       // Chat endpoints
       if (path === "/api/chat/connect" && req.method === "POST") {
-        return await this.handleChatConnect(req);
+        response = await this.handleChatConnect(req);
+        return withSecurityHeaders(response);
       }
       if (path === "/api/chat/message" && req.method === "POST") {
-        return await this.handleChatMessage(req);
+        response = await this.handleChatMessage(req);
+        return withSecurityHeaders(response);
       }
       if (path === "/api/chat/stream" && req.method === "GET") {
-        return this.handleChatStream(url);
+        response = this.handleChatStream(url);
+        return withSecurityHeaders(response);
       }
       if (path === "/api/chat/disconnect" && req.method === "POST") {
-        return await this.handleChatDisconnect(req);
+        response = await this.handleChatDisconnect(req);
+        return withSecurityHeaders(response);
       }
 
       // Restart endpoint
       if (path === "/api/restart" && req.method === "POST") {
-        return await this.handleRestart(req);
+        response = await this.handleRestart(req);
+        return withSecurityHeaders(response);
       }
 
       // Config endpoints
       if (path === "/api/config/models" && req.method === "GET") {
-        return this.handleConfigModels();
+        response = this.handleConfigModels();
+        return withSecurityHeaders(response);
       }
 
       // Static file serving
-      return await this.serveStaticFile(path);
+      response = await this.serveStaticFile(path);
+      return withSecurityHeaders(response);
     } catch (error) {
       logger.error("Request handler error: {error}", {
         error: error instanceof Error ? error.message : String(error),
         path,
       });
-      return this.json({ error: "Internal server error" }, 500);
+      return withSecurityHeaders(this.json({ error: "Internal server error" }, 500));
     }
   }
 
@@ -181,22 +215,41 @@ export class DashboardServer {
 
   private async handleLogin(req: Request): Promise<Response> {
     try {
+      const ip = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "unknown";
+
+      if (!this.loginRateLimiter.isAllowed(ip)) {
+        return new Response(JSON.stringify({ error: "Too many login attempts" }), {
+          status: 429,
+          headers: {
+            "Content-Type": "application/json",
+            "Retry-After": "60",
+          },
+        });
+      }
+
       const body = await req.json();
       const { passphrase } = body as { passphrase?: string };
 
-      if (!passphrase || !validatePassphrase(passphrase, this.deps.config.passphrase)) {
+      if (!passphrase || !(await validatePassphrase(passphrase, this.deps.config.passphrase))) {
+        this.loginRateLimiter.recordAttempt(ip);
         return this.json({ error: "Invalid passphrase" }, 401);
       }
 
+      this.loginRateLimiter.recordAttempt(ip);
       const token = generateSessionToken();
       tokenStore.add(token);
       logger.info("Dashboard login successful");
+
+      const secure = !!req.headers.get("x-forwarded-proto")?.includes("https");
 
       return new Response(JSON.stringify({ success: true }), {
         status: 200,
         headers: {
           "Content-Type": "application/json",
-          "Set-Cookie": createSessionCookie(token),
+          "Set-Cookie": createSessionCookie(token, {
+            maxAgeSeconds: Math.floor(tokenStore.maxAgeMs / 1000),
+            secure,
+          }),
         },
       });
     } catch {
@@ -295,6 +348,11 @@ export class DashboardServer {
   }
 
   private async handleSessionAudit(sessionId: string): Promise<Response> {
+    // Validate sessionId format
+    if (!/^sess_[a-zA-Z0-9]+$/.test(sessionId)) {
+      return this.json({ error: "Invalid session ID format" }, 400);
+    }
+
     if (!this.deps.auditConfig?.enabled) {
       return this.json({ error: "Audit logging is not enabled" }, 404);
     }
@@ -355,7 +413,16 @@ export class DashboardServer {
   private async buildDirectoryTree(
     rootPath: string,
     currentPath: string,
+    depth: number = 0,
+    counter: { count: number } = { count: 0 },
+    maxDepth: number = 10,
+    maxEntries: number = 1000,
   ): Promise<Record<string, unknown>> {
+    counter.count++;
+    if (counter.count > maxEntries) {
+      return { name: "…", path: "", type: "file", truncated: true };
+    }
+
     const stat = await Deno.stat(currentPath);
     const name = currentPath === rootPath ? "agent-workspace" : currentPath.split("/").pop() ?? "";
     const relativePath = currentPath === rootPath
@@ -366,10 +433,23 @@ export class DashboardServer {
       return { name, path: relativePath, type: "file", size: stat.size };
     }
 
+    if (depth >= maxDepth) {
+      return { name, path: relativePath, type: "directory", children: [], truncated: true };
+    }
+
     const children: Record<string, unknown>[] = [];
     for await (const entry of Deno.readDir(currentPath)) {
       const childPath = join(currentPath, entry.name);
-      children.push(await this.buildDirectoryTree(rootPath, childPath));
+      children.push(
+        await this.buildDirectoryTree(
+          rootPath,
+          childPath,
+          depth + 1,
+          counter,
+          maxDepth,
+          maxEntries,
+        ),
+      );
     }
 
     return { name, path: relativePath, type: "directory", children };
@@ -614,7 +694,7 @@ export class DashboardServer {
           error: error instanceof Error ? error.message : String(error),
         });
         this.sendSSE(session.sseController, "error", {
-          message: error instanceof Error ? error.message : String(error),
+          error: "Agent processing error",
         });
       }
     })();

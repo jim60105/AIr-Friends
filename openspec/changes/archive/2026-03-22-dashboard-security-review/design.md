@@ -121,12 +121,12 @@ container.addEventListener("click", (e) => {
 
 ### D8: SessionId Format Validation in Audit Lookups
 
-Add a UUID format check at the top of `handleSessionAudit()`:
+Add a `sess_` prefix + alphanumeric format check at the top of `handleSessionAudit()`:
 
 ```typescript
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-if (!UUID_RE.test(sessionId)) {
-  return this.json({ error: "Invalid session ID" }, 400);
+const SESSION_ID_RE = /^sess_[a-zA-Z0-9]+$/;
+if (!SESSION_ID_RE.test(sessionId)) {
+  return this.json({ error: "Invalid session ID format" }, 400);
 }
 ```
 

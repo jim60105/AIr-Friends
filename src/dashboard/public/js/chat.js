@@ -7,7 +7,7 @@
     if (res.ok) {
       const models = await res.json();
       const datalist = document.getElementById("model-suggestions");
-      datalist.innerHTML = models.map((m) => `<option value="${m}"></option>`).join("");
+      datalist.innerHTML = models.map((m) => `<option value="${esc(m)}"></option>`).join("");
     }
   } catch (_) { /* ignore */ }
 })();

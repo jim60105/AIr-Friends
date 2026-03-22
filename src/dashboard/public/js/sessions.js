@@ -39,9 +39,9 @@ async function pollHistory() {
       return;
     }
     body.innerHTML = sessions.map((s) =>
-      `<tr class="hover:bg-surface-200/50 cursor-pointer" onclick="toggleAudit(this, '${
+      `<tr class="hover:bg-surface-200/50 cursor-pointer" data-audit-id="${
         esc(s.auditSessionId || s.id)
-      }')">
+      }">
       <td class="px-4 py-2.5 font-mono text-xs text-indigo-300">${esc(s.id?.slice(0, 12))}…</td>
       <td class="px-4 py-2.5">${esc(s.type)}</td>
       <td class="px-4 py-2.5">${esc(s.platform)}</td>
@@ -56,10 +56,9 @@ async function pollHistory() {
     ).join("");
     // Re-expand previously expanded audit rows
     for (const sessionId of expandedAuditSessions) {
-      const rows = body.querySelectorAll("tr[onclick]");
+      const rows = body.querySelectorAll("tr[data-audit-id]");
       for (const row of rows) {
-        const onclick = row.getAttribute("onclick") || "";
-        if (onclick.includes(sessionId)) {
+        if (row.dataset.auditId === sessionId) {
           toggleAudit(row, sessionId);
           break;
         }
@@ -115,3 +114,11 @@ async function toggleAudit(row, sessionId) {
     tr.querySelector("td").innerHTML = '<p class="text-xs text-red-400">Failed to load audit</p>';
   }
 }
+
+// Delegated click handler for session history audit toggle
+document.getElementById("history-sessions-body").addEventListener("click", (e) => {
+  const row = e.target.closest("tr[data-audit-id]");
+  if (row) {
+    toggleAudit(row, row.dataset.auditId);
+  }
+});

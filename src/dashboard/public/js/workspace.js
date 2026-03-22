@@ -33,9 +33,9 @@ function renderTree(node) {
       <div class="tree-children ml-4">${children}</div>
     </div>`;
   }
-  return `<div class="flex items-center gap-1.5 py-1 px-1 pl-5 hover:bg-surface-200/50 rounded cursor-pointer" onclick="loadFile('${
+  return `<div class="flex items-center gap-1.5 py-1 px-1 pl-5 hover:bg-surface-200/50 rounded cursor-pointer" data-file-path="${
     esc(node.path)
-  }')">
+  }">
     <span>📄</span><span class="text-gray-300 truncate">${esc(node.name)}</span>
   </div>`;
 }
@@ -63,7 +63,9 @@ async function loadFile(path) {
     const isMd = path.endsWith(".md");
     content.textContent = data.content;
     if (isMd && typeof marked !== "undefined") {
-      rendered.innerHTML = marked.parse(data.content);
+      rendered.innerHTML = typeof DOMPurify !== "undefined"
+        ? DOMPurify.sanitize(marked.parse(data.content))
+        : marked.parse(data.content);
       content.classList.add("hidden");
       rendered.classList.remove("hidden");
       toggle.classList.remove("hidden");
@@ -91,3 +93,11 @@ function toggleMarkdownView() {
     toggle.dataset.showing = "rendered";
   }
 }
+
+// Delegated click handler for workspace file items
+document.getElementById("workspace-tree").addEventListener("click", (e) => {
+  const fileItem = e.target.closest("[data-file-path]");
+  if (fileItem) {
+    loadFile(fileItem.dataset.filePath);
+  }
+});

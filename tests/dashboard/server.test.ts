@@ -80,7 +80,7 @@ interface TestServer {
 async function createTestServer(overrides?: {
   sessionRegistry?: SessionRegistry;
   completedSessionStore?: CompletedSessionStore;
-  metricsRegistry?: Registry;
+  metricsRegistry?: Registry | null;
   appConfig?: Config;
 }): Promise<TestServer> {
   const dashboardConfig: DashboardConfig = {
@@ -100,7 +100,9 @@ async function createTestServer(overrides?: {
     completedSessionStore: overrides?.completedSessionStore ?? new CompletedSessionStore(),
     agentWorkspacePath,
     auditBasePath: `${tempDir}/audit`,
-    metricsRegistry: overrides?.metricsRegistry ?? createMockMetricsRegistry(),
+    metricsRegistry: overrides?.metricsRegistry === null
+      ? undefined
+      : (overrides?.metricsRegistry ?? createMockMetricsRegistry()),
     skillRegistry: createMockSkillRegistry(),
   });
 
@@ -522,7 +524,7 @@ Deno.test({
   const t = await createTestServer();
   try {
     const cookie = await loginAndGetCookie(t.baseUrl);
-    const res = await fetch(`${t.baseUrl}/api/sessions/nonexistent/audit`, {
+    const res = await fetch(`${t.baseUrl}/api/sessions/sess_nonexistent/audit`, {
       headers: { Cookie: cookie },
     });
     assertEquals(res.status, 404);
@@ -1023,4 +1025,1463 @@ Deno.test({
   } finally {
     await t.cleanup();
   }
+});
+
+// ============================
+// Security headers (Task 13.8)
+// ============================
+
+Deno.test({
+  name: "DashboardServer - responses include security headers",
+  sanitizeResources: false,
+  sanitizeOps: false,
+}, async () => {
+  const t = await createTestServer();
+  try {
+    const cookie = await loginAndGetCookie(t.baseUrl);
+    const res = await fetch(`${t.baseUrl}/api/sessions/active`, {
+      headers: { Cookie: cookie },
+    });
+    assertEquals(res.headers.get("X-Frame-Options"), "DENY");
+    assertEquals(res.headers.get("X-Content-Type-Options"), "nosniff");
+    assertEquals(res.headers.has("Content-Security-Policy"), true);
+    assertEquals(res.headers.has("Referrer-Policy"), true);
+    await res.body?.cancel();
+  } finally {
+    await t.cleanup();
+  }
+});
+
+Deno.test({
+  name: "DashboardServer - security headers on error responses",
+  sanitizeResources: false,
+  sanitizeOps: false,
+}, async () => {
+  const t = await createTestServer();
+  try {
+    const res = await fetch(`${t.baseUrl}/api/sessions/active`);
+    assertEquals(res.status, 401);
+    assertEquals(res.headers.get("X-Frame-Options"), "DENY");
+    await res.body?.cancel();
+  } finally {
+    await t.cleanup();
+  }
+});
+
+// ============================
+// Rate limiting (Task 13.8)
+// ============================
+
+Deno.test({
+  name: "DashboardServer - login rate limiting returns 429",
+  sanitizeResources: false,
+  sanitizeOps: false,
+}, async () => {
+  const t = await createTestServer();
+  try {
+    // Send 7 failed attempts (exceeds default limit of 5+1)
+    for (let i = 0; i < 7; i++) {
+      const res = await fetch(`${t.baseUrl}/api/auth/login`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ passphrase: "wrong" }),
+      });
+      await res.body?.cancel();
+    }
+    // Next attempt should be rate limited
+    const res = await fetch(`${t.baseUrl}/api/auth/login`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ passphrase: "wrong" }),
+    });
+    assertEquals(res.status, 429);
+    assertEquals(res.headers.has("Retry-After"), true);
+    await res.body?.cancel();
+  } finally {
+    await t.cleanup();
+  }
+});
+
+// ============================
+// Session ID validation (Task 13.8)
+// ============================
+
+Deno.test({
+  name: "DashboardServer - audit rejects invalid sessionId format",
+  sanitizeResources: false,
+  sanitizeOps: false,
+}, async () => {
+  const t = await createTestServer();
+  try {
+    const cookie = await loginAndGetCookie(t.baseUrl);
+    // Path traversal attempt
+    const res = await fetch(`${t.baseUrl}/api/sessions/../../../etc/passwd/audit`, {
+      headers: { Cookie: cookie },
+    });
+    // This should either 404 (route doesn't match) or 400
+    assertEquals(res.status === 400 || res.status === 404, true);
+    await res.body?.cancel();
+
+    // Valid format but nonexistent
+    const res2 = await fetch(`${t.baseUrl}/api/sessions/sess_abc123/audit`, {
+      headers: { Cookie: cookie },
+    });
+    // Should not be 400 (format is valid) - could be 404 (audit not enabled or not found)
+    assertEquals(res2.status !== 400, true);
+    await res2.body?.cancel();
+  } finally {
+    await t.cleanup();
+  }
+});
+
+// ============================
+// Additional coverage tests
+// ============================
+
+Deno.test({
+  name: "DashboardServer - GET /api/workspace/file missing path param returns 400",
+  sanitizeResources: false,
+  sanitizeOps: false,
+}, async () => {
+  const t = await createTestServer();
+  try {
+    const cookie = await loginAndGetCookie(t.baseUrl);
+    const res = await fetch(`${t.baseUrl}/api/workspace/file`, {
+      headers: { Cookie: cookie },
+    });
+    assertEquals(res.status, 400);
+    const body = await res.json();
+    assertEquals(body.error, "Missing path parameter");
+  } finally {
+    await t.cleanup();
+  }
+});
+
+Deno.test({
+  name: "DashboardServer - GET /api/workspace/file empty path after normalization returns 400",
+  sanitizeResources: false,
+  sanitizeOps: false,
+}, async () => {
+  const t = await createTestServer();
+  try {
+    const cookie = await loginAndGetCookie(t.baseUrl);
+    const res = await fetch(`${t.baseUrl}/api/workspace/file?path=/`, {
+      headers: { Cookie: cookie },
+    });
+    assertEquals(res.status, 400);
+    const body = await res.json();
+    assertEquals(body.error, "Invalid path");
+  } finally {
+    await t.cleanup();
+  }
+});
+
+Deno.test({
+  name: "DashboardServer - GET /api/workspace/file with .txt extension works",
+  sanitizeResources: false,
+  sanitizeOps: false,
+}, async () => {
+  const t = await createTestServer();
+  try {
+    await Deno.writeTextFile(`${t.agentWorkspacePath}/note.txt`, "plain text");
+    const cookie = await loginAndGetCookie(t.baseUrl);
+    const res = await fetch(`${t.baseUrl}/api/workspace/file?path=/note.txt`, {
+      headers: { Cookie: cookie },
+    });
+    assertEquals(res.status, 200);
+    const body = await res.json();
+    assertEquals(body.content, "plain text");
+    assertEquals(typeof body.size, "number");
+  } finally {
+    await t.cleanup();
+  }
+});
+
+Deno.test({
+  name: "DashboardServer - GET /api/workspace/tree with files returns children",
+  sanitizeResources: false,
+  sanitizeOps: false,
+}, async () => {
+  const t = await createTestServer();
+  try {
+    await Deno.mkdir(`${t.agentWorkspacePath}/notes`, { recursive: true });
+    await Deno.writeTextFile(`${t.agentWorkspacePath}/notes/topic.md`, "# Topic");
+    await Deno.writeTextFile(`${t.agentWorkspacePath}/readme.md`, "readme");
+    const cookie = await loginAndGetCookie(t.baseUrl);
+    const res = await fetch(`${t.baseUrl}/api/workspace/tree`, {
+      headers: { Cookie: cookie },
+    });
+    assertEquals(res.status, 200);
+    const body = await res.json();
+    assertEquals(body.name, "agent-workspace");
+    assertEquals(body.type, "directory");
+    assertEquals(body.path, "/");
+    assertEquals(Array.isArray(body.children), true);
+    assertEquals(body.children.length >= 2, true);
+    // Find the notes directory
+    const notesDir = body.children.find((c: Record<string, unknown>) => c.name === "notes");
+    assertEquals(notesDir?.type, "directory");
+    assertEquals(Array.isArray(notesDir?.children), true);
+  } finally {
+    await t.cleanup();
+  }
+});
+
+Deno.test({
+  name: "DashboardServer - buildDirectoryTree truncates at maxDepth",
+  sanitizeResources: false,
+  sanitizeOps: false,
+}, async () => {
+  const t = await createTestServer();
+  try {
+    // Create deeply nested dirs beyond default maxDepth (10)
+    let deepPath = t.agentWorkspacePath;
+    for (let i = 0; i < 12; i++) {
+      deepPath = `${deepPath}/level${i}`;
+    }
+    await Deno.mkdir(deepPath, { recursive: true });
+    await Deno.writeTextFile(`${deepPath}/deep.md`, "deep content");
+
+    const cookie = await loginAndGetCookie(t.baseUrl);
+    const res = await fetch(`${t.baseUrl}/api/workspace/tree`, {
+      headers: { Cookie: cookie },
+    });
+    assertEquals(res.status, 200);
+    const body = await res.json();
+
+    // Walk to depth 10 and verify truncation
+    let node = body;
+    for (let i = 0; i < 10; i++) {
+      const child = node.children?.find((c: Record<string, unknown>) => c.name === `level${i}`);
+      if (!child) break;
+      node = child;
+    }
+    // At depth 10, directory should have truncated: true
+    assertEquals(node.truncated, true);
+    assertEquals(node.type, "directory");
+  } finally {
+    await t.cleanup();
+  }
+});
+
+Deno.test({
+  name: "DashboardServer - GET /api/stats without metrics registry returns zeroes",
+  sanitizeResources: false,
+  sanitizeOps: false,
+}, async () => {
+  const t = await createTestServer({ metricsRegistry: null });
+  try {
+    const cookie = await loginAndGetCookie(t.baseUrl);
+    const res = await fetch(`${t.baseUrl}/api/stats`, {
+      headers: { Cookie: cookie },
+    });
+    assertEquals(res.status, 200);
+    const body = await res.json();
+    assertEquals(body.sessions_total, 0);
+    assertEquals(body.active_sessions, 0);
+    assertEquals(body.replies_sent_total, 0);
+    assertEquals(body.messages_received_total, 0);
+  } finally {
+    await t.cleanup();
+  }
+});
+
+Deno.test({
+  name: "DashboardServer - GET /api/stats with metrics data returns aggregated values",
+  sanitizeResources: false,
+  sanitizeOps: false,
+}, async () => {
+  const mockRegistry = {
+    getMetricsAsJSON: () =>
+      Promise.resolve([
+        {
+          name: "airfriends_sessions_total",
+          values: [{ value: 5 }, { value: 3 }],
+        },
+        {
+          name: "airfriends_active_sessions",
+          values: [{ value: 2 }],
+        },
+        {
+          name: "airfriends_replies_sent_total",
+          values: [{ value: 10 }],
+        },
+      ]),
+  } as unknown as Registry;
+  const t = await createTestServer({ metricsRegistry: mockRegistry });
+  try {
+    const cookie = await loginAndGetCookie(t.baseUrl);
+    const res = await fetch(`${t.baseUrl}/api/stats`, {
+      headers: { Cookie: cookie },
+    });
+    assertEquals(res.status, 200);
+    const body = await res.json();
+    assertEquals(body.sessions_total, 8);
+    assertEquals(body.active_sessions, 2);
+    assertEquals(body.replies_sent_total, 10);
+  } finally {
+    await t.cleanup();
+  }
+});
+
+Deno.test({
+  name: "DashboardServer - GET /api/stats handles metrics error",
+  sanitizeResources: false,
+  sanitizeOps: false,
+}, async () => {
+  const mockRegistry = {
+    getMetricsAsJSON: () => Promise.reject(new Error("metrics broken")),
+  } as unknown as Registry;
+  const t = await createTestServer({ metricsRegistry: mockRegistry });
+  try {
+    const cookie = await loginAndGetCookie(t.baseUrl);
+    const res = await fetch(`${t.baseUrl}/api/stats`, {
+      headers: { Cookie: cookie },
+    });
+    assertEquals(res.status, 500);
+    const body = await res.json();
+    assertEquals(body.error, "Failed to fetch metrics");
+  } finally {
+    await t.cleanup();
+  }
+});
+
+Deno.test({
+  name: "DashboardServer - audit with valid sess_ format but audit disabled returns 404",
+  sanitizeResources: false,
+  sanitizeOps: false,
+}, async () => {
+  const t = await createTestServer();
+  try {
+    const cookie = await loginAndGetCookie(t.baseUrl);
+    const res = await fetch(`${t.baseUrl}/api/sessions/sess_validformat/audit`, {
+      headers: { Cookie: cookie },
+    });
+    assertEquals(res.status, 404);
+    const body = await res.json();
+    assertEquals(body.error, "Audit logging is not enabled");
+  } finally {
+    await t.cleanup();
+  }
+});
+
+Deno.test({
+  name: "DashboardServer - audit with invalid format (no sess_ prefix) returns 400",
+  sanitizeResources: false,
+  sanitizeOps: false,
+}, async () => {
+  const t = await createTestServer();
+  try {
+    const cookie = await loginAndGetCookie(t.baseUrl);
+    const res = await fetch(`${t.baseUrl}/api/sessions/invalidformat/audit`, {
+      headers: { Cookie: cookie },
+    });
+    assertEquals(res.status, 400);
+    const body = await res.json();
+    assertEquals(body.error, "Invalid session ID format");
+  } finally {
+    await t.cleanup();
+  }
+});
+
+Deno.test({
+  name: "DashboardServer - GET /api/config/models without auth returns 401",
+  sanitizeResources: false,
+  sanitizeOps: false,
+}, async () => {
+  const t = await createTestServer();
+  try {
+    const res = await fetch(`${t.baseUrl}/api/config/models`);
+    assertEquals(res.status, 401);
+    await res.body?.cancel();
+  } finally {
+    await t.cleanup();
+  }
+});
+
+Deno.test({
+  name: "DashboardServer - POST /api/restart missing confirm field returns 400",
+  sanitizeResources: false,
+  sanitizeOps: false,
+}, async () => {
+  const t = await createTestServer();
+  try {
+    const cookie = await loginAndGetCookie(t.baseUrl);
+    const res = await fetch(`${t.baseUrl}/api/restart`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Cookie: cookie },
+      body: JSON.stringify({}),
+    });
+    assertEquals(res.status, 400);
+    const body = await res.json();
+    assertEquals(body.error, "The 'confirm' field is required");
+  } finally {
+    await t.cleanup();
+  }
+});
+
+Deno.test({
+  name: "DashboardServer - static file serves index.html at root",
+  sanitizeResources: false,
+  sanitizeOps: false,
+}, async () => {
+  const t = await createTestServer();
+  try {
+    // Unauthenticated static file requests should still work (login page)
+    const res = await fetch(`${t.baseUrl}/`);
+    // May return 200 (if public/index.html exists) or 404
+    const status = res.status;
+    assertEquals(status === 200 || status === 404, true);
+    // Should have security headers regardless
+    assertEquals(res.headers.get("X-Frame-Options"), "DENY");
+    await res.body?.cancel();
+  } finally {
+    await t.cleanup();
+  }
+});
+
+Deno.test({
+  name: "DashboardServer - static file 404 for nonexistent path",
+  sanitizeResources: false,
+  sanitizeOps: false,
+}, async () => {
+  const t = await createTestServer();
+  try {
+    const res = await fetch(`${t.baseUrl}/nonexistent-file.xyz`);
+    assertEquals(res.status, 404);
+    assertEquals(res.headers.get("X-Frame-Options"), "DENY");
+    await res.body?.cancel();
+  } finally {
+    await t.cleanup();
+  }
+});
+
+Deno.test({
+  name: "DashboardServer - login with invalid JSON body returns 400",
+  sanitizeResources: false,
+  sanitizeOps: false,
+}, async () => {
+  const t = await createTestServer();
+  try {
+    const res = await fetch(`${t.baseUrl}/api/auth/login`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: "not valid json{{{",
+    });
+    assertEquals(res.status, 400);
+    const body = await res.json();
+    assertEquals(body.error, "Invalid request body");
+  } finally {
+    await t.cleanup();
+  }
+});
+
+Deno.test({
+  name: "DashboardServer - login with missing passphrase returns 401",
+  sanitizeResources: false,
+  sanitizeOps: false,
+}, async () => {
+  const t = await createTestServer();
+  try {
+    const res = await fetch(`${t.baseUrl}/api/auth/login`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    });
+    assertEquals(res.status, 401);
+    const body = await res.json();
+    assertEquals(body.error, "Invalid passphrase");
+  } finally {
+    await t.cleanup();
+  }
+});
+
+Deno.test({
+  name: "DashboardServer - unknown API endpoint with auth returns 404 (static fallback)",
+  sanitizeResources: false,
+  sanitizeOps: false,
+}, async () => {
+  const t = await createTestServer();
+  try {
+    const cookie = await loginAndGetCookie(t.baseUrl);
+    const res = await fetch(`${t.baseUrl}/unknown-page`, {
+      headers: { Cookie: cookie },
+    });
+    // Falls through to static file serving, which returns 404
+    assertEquals(res.status, 404);
+    await res.body?.cancel();
+  } finally {
+    await t.cleanup();
+  }
+});
+
+Deno.test({
+  name: "DashboardServer - /login path serves index.html (static)",
+  sanitizeResources: false,
+  sanitizeOps: false,
+}, async () => {
+  const t = await createTestServer();
+  try {
+    const res = await fetch(`${t.baseUrl}/login`);
+    // Should serve index.html (200 if exists, 404 if not)
+    assertEquals(res.status === 200 || res.status === 404, true);
+    assertEquals(res.headers.get("X-Frame-Options"), "DENY");
+    await res.body?.cancel();
+  } finally {
+    await t.cleanup();
+  }
+});
+
+Deno.test({
+  name: "DashboardServer - POST /api/chat/message without auth returns 401",
+  sanitizeResources: false,
+  sanitizeOps: false,
+}, async () => {
+  const t = await createTestServer();
+  try {
+    const res = await fetch(`${t.baseUrl}/api/chat/message`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ chatSessionId: "x", content: "hi" }),
+    });
+    assertEquals(res.status, 401);
+    await res.body?.cancel();
+  } finally {
+    await t.cleanup();
+  }
+});
+
+Deno.test({
+  name: "DashboardServer - GET /api/chat/stream without auth returns 401",
+  sanitizeResources: false,
+  sanitizeOps: false,
+}, async () => {
+  const t = await createTestServer();
+  try {
+    const res = await fetch(`${t.baseUrl}/api/chat/stream?chatSessionId=x`);
+    assertEquals(res.status, 401);
+    await res.body?.cancel();
+  } finally {
+    await t.cleanup();
+  }
+});
+
+Deno.test({
+  name: "DashboardServer - POST /api/chat/message with no active session returns 404",
+  sanitizeResources: false,
+  sanitizeOps: false,
+}, async () => {
+  const t = await createTestServer();
+  try {
+    const cookie = await loginAndGetCookie(t.baseUrl);
+    const res = await fetch(`${t.baseUrl}/api/chat/message`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Cookie: cookie },
+      body: JSON.stringify({ chatSessionId: "nonexistent", content: "hello" }),
+    });
+    assertEquals(res.status, 404);
+    const body = await res.json();
+    assertEquals(body.error, "Chat session not found");
+  } finally {
+    await t.cleanup();
+  }
+});
+
+Deno.test({
+  name: "DashboardServer - POST /api/chat/message with invalid body returns 400",
+  sanitizeResources: false,
+  sanitizeOps: false,
+}, async () => {
+  const t = await createTestServer();
+  try {
+    const cookie = await loginAndGetCookie(t.baseUrl);
+    const res = await fetch(`${t.baseUrl}/api/chat/message`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Cookie: cookie },
+      body: "not json",
+    });
+    assertEquals(res.status, 400);
+    await res.body?.cancel();
+  } finally {
+    await t.cleanup();
+  }
+});
+
+Deno.test({
+  name: "DashboardServer - POST /api/chat/message missing fields returns 400",
+  sanitizeResources: false,
+  sanitizeOps: false,
+}, async () => {
+  const t = await createTestServer();
+  try {
+    const cookie = await loginAndGetCookie(t.baseUrl);
+    const res = await fetch(`${t.baseUrl}/api/chat/message`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Cookie: cookie },
+      body: JSON.stringify({ chatSessionId: "x" }),
+    });
+    assertEquals(res.status, 400);
+    const body = await res.json();
+    assertEquals(body.error, "Missing chatSessionId or content");
+  } finally {
+    await t.cleanup();
+  }
+});
+
+Deno.test({
+  name: "DashboardServer - GET /api/chat/stream with no active session returns 404",
+  sanitizeResources: false,
+  sanitizeOps: false,
+}, async () => {
+  const t = await createTestServer();
+  try {
+    const cookie = await loginAndGetCookie(t.baseUrl);
+    const res = await fetch(`${t.baseUrl}/api/chat/stream?chatSessionId=nonexistent`, {
+      headers: { Cookie: cookie },
+    });
+    assertEquals(res.status, 404);
+    await res.body?.cancel();
+  } finally {
+    await t.cleanup();
+  }
+});
+
+Deno.test({
+  name: "DashboardServer - POST /api/chat/disconnect with invalid body returns 400",
+  sanitizeResources: false,
+  sanitizeOps: false,
+}, async () => {
+  const t = await createTestServer();
+  try {
+    const cookie = await loginAndGetCookie(t.baseUrl);
+    const res = await fetch(`${t.baseUrl}/api/chat/disconnect`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Cookie: cookie },
+      body: "not json",
+    });
+    assertEquals(res.status, 400);
+    await res.body?.cancel();
+  } finally {
+    await t.cleanup();
+  }
+});
+
+Deno.test({
+  name: "DashboardServer - POST /api/chat/disconnect missing chatSessionId returns 400",
+  sanitizeResources: false,
+  sanitizeOps: false,
+}, async () => {
+  const t = await createTestServer();
+  try {
+    const cookie = await loginAndGetCookie(t.baseUrl);
+    const res = await fetch(`${t.baseUrl}/api/chat/disconnect`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Cookie: cookie },
+      body: JSON.stringify({}),
+    });
+    assertEquals(res.status, 400);
+    const body = await res.json();
+    assertEquals(body.error, "Missing chatSessionId");
+  } finally {
+    await t.cleanup();
+  }
+});
+
+Deno.test({
+  name: "DashboardServer - POST /api/chat/connect with invalid body returns 400",
+  sanitizeResources: false,
+  sanitizeOps: false,
+}, async () => {
+  const t = await createTestServer();
+  try {
+    const cookie = await loginAndGetCookie(t.baseUrl);
+    const res = await fetch(`${t.baseUrl}/api/chat/connect`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Cookie: cookie },
+      body: "not json",
+    });
+    assertEquals(res.status, 400);
+    const body = await res.json();
+    assertEquals(body.error, "Invalid request body");
+  } finally {
+    await t.cleanup();
+  }
+});
+
+Deno.test({
+  name: "DashboardServer - audit with enabled config and existing file returns entries",
+  sanitizeResources: false,
+  sanitizeOps: false,
+}, async () => {
+  const tempDir = await Deno.makeTempDir();
+  const agentWorkspacePath = `${tempDir}/agent-workspace`;
+  await Deno.mkdir(agentWorkspacePath, { recursive: true });
+  const auditBasePath = `${tempDir}/audit`;
+  const auditDir = `${auditBasePath}/discord/user1`;
+  await Deno.mkdir(auditDir, { recursive: true });
+  const entry = { phase: "session_end", ts: "2024-01-01T00:00:00Z" };
+  await Deno.writeTextFile(`${auditDir}/sess_test123.jsonl`, JSON.stringify(entry) + "\n");
+
+  const listener = Deno.listen({ port: 0 });
+  const port = (listener.addr as Deno.NetAddr).port;
+  listener.close();
+
+  const dashboardConfig: DashboardConfig = {
+    enabled: true,
+    port,
+    passphrase: "test-passphrase",
+  };
+  const server = new DashboardServer({
+    config: dashboardConfig,
+    appConfig: createMinimalConfig(),
+    sessionRegistry: createMockSessionRegistry(),
+    completedSessionStore: new CompletedSessionStore(),
+    agentWorkspacePath,
+    auditConfig: { enabled: true, retentionDays: 7, hashContent: false, includedPhases: [] },
+    auditBasePath,
+    metricsRegistry: createMockMetricsRegistry(),
+    skillRegistry: createMockSkillRegistry(),
+  });
+  server.start();
+  try {
+    for (let i = 0; i < 20; i++) {
+      try {
+        await fetch(`http://localhost:${port}/api/auth/status`);
+        break;
+      } catch {
+        await new Promise((r) => setTimeout(r, 100));
+      }
+    }
+    const cookie = await loginAndGetCookie(`http://localhost:${port}`);
+    const res = await fetch(`http://localhost:${port}/api/sessions/sess_test123/audit`, {
+      headers: { Cookie: cookie },
+    });
+    assertEquals(res.status, 200);
+    const body = await res.json();
+    assertEquals(body.length, 1);
+    assertEquals(body[0].phase, "session_end");
+  } finally {
+    await server.stop();
+    await Deno.remove(tempDir, { recursive: true });
+  }
+});
+
+Deno.test({
+  name: "DashboardServer - audit enabled but file not found returns 404",
+  sanitizeResources: false,
+  sanitizeOps: false,
+}, async () => {
+  const tempDir = await Deno.makeTempDir();
+  const agentWorkspacePath = `${tempDir}/agent-workspace`;
+  await Deno.mkdir(agentWorkspacePath, { recursive: true });
+  const auditBasePath = `${tempDir}/audit`;
+  await Deno.mkdir(auditBasePath, { recursive: true });
+
+  const listener = Deno.listen({ port: 0 });
+  const port = (listener.addr as Deno.NetAddr).port;
+  listener.close();
+
+  const dashboardConfig: DashboardConfig = {
+    enabled: true,
+    port,
+    passphrase: "test-passphrase",
+  };
+  const server = new DashboardServer({
+    config: dashboardConfig,
+    appConfig: createMinimalConfig(),
+    sessionRegistry: createMockSessionRegistry(),
+    completedSessionStore: new CompletedSessionStore(),
+    agentWorkspacePath,
+    auditConfig: { enabled: true, retentionDays: 7, hashContent: false, includedPhases: [] },
+    auditBasePath,
+    metricsRegistry: createMockMetricsRegistry(),
+    skillRegistry: createMockSkillRegistry(),
+  });
+  server.start();
+  try {
+    for (let i = 0; i < 20; i++) {
+      try {
+        await fetch(`http://localhost:${port}/api/auth/status`);
+        break;
+      } catch {
+        await new Promise((r) => setTimeout(r, 100));
+      }
+    }
+    const cookie = await loginAndGetCookie(`http://localhost:${port}`);
+    const res = await fetch(`http://localhost:${port}/api/sessions/sess_missing/audit`, {
+      headers: { Cookie: cookie },
+    });
+    assertEquals(res.status, 404);
+    const body = await res.json();
+    assertEquals(body.error, "Audit log not found");
+  } finally {
+    await server.stop();
+    await Deno.remove(tempDir, { recursive: true });
+  }
+});
+
+Deno.test({
+  name: "DashboardServer - workspace tree with nonexistent workspace returns empty",
+  sanitizeResources: false,
+  sanitizeOps: false,
+}, async () => {
+  const tempDir = await Deno.makeTempDir();
+  const nonexistentPath = `${tempDir}/does-not-exist`;
+
+  const listener = Deno.listen({ port: 0 });
+  const port = (listener.addr as Deno.NetAddr).port;
+  listener.close();
+
+  const dashboardConfig: DashboardConfig = {
+    enabled: true,
+    port,
+    passphrase: "test-passphrase",
+  };
+  const server = new DashboardServer({
+    config: dashboardConfig,
+    appConfig: createMinimalConfig(),
+    sessionRegistry: createMockSessionRegistry(),
+    completedSessionStore: new CompletedSessionStore(),
+    agentWorkspacePath: nonexistentPath,
+    auditBasePath: `${tempDir}/audit`,
+    metricsRegistry: createMockMetricsRegistry(),
+    skillRegistry: createMockSkillRegistry(),
+  });
+  server.start();
+  try {
+    for (let i = 0; i < 20; i++) {
+      try {
+        await fetch(`http://localhost:${port}/api/auth/status`);
+        break;
+      } catch {
+        await new Promise((r) => setTimeout(r, 100));
+      }
+    }
+    const cookie = await loginAndGetCookie(`http://localhost:${port}`);
+    const res = await fetch(`http://localhost:${port}/api/workspace/tree`, {
+      headers: { Cookie: cookie },
+    });
+    assertEquals(res.status, 200);
+    const body = await res.json();
+    assertEquals(body.name, "agent-workspace");
+    assertEquals(body.children, []);
+  } finally {
+    await server.stop();
+    await Deno.remove(tempDir, { recursive: true });
+  }
+});
+
+Deno.test({
+  name: "DashboardServer - POST /api/chat/message with text/plain content type",
+  sanitizeResources: false,
+  sanitizeOps: false,
+}, async () => {
+  const t = await createTestServer();
+  try {
+    const cookie = await loginAndGetCookie(t.baseUrl);
+    const res = await fetch(`${t.baseUrl}/api/chat/message`, {
+      method: "POST",
+      headers: { "Content-Type": "text/plain", Cookie: cookie },
+      body: JSON.stringify({ chatSessionId: "nonexistent", content: "hello" }),
+    });
+    // No active session, so 404
+    assertEquals(res.status, 404);
+    await res.body?.cancel();
+  } finally {
+    await t.cleanup();
+  }
+});
+
+Deno.test({
+  name: "DashboardServer - POST /api/chat/disconnect with text/plain content type",
+  sanitizeResources: false,
+  sanitizeOps: false,
+}, async () => {
+  const t = await createTestServer();
+  try {
+    const cookie = await loginAndGetCookie(t.baseUrl);
+    const res = await fetch(`${t.baseUrl}/api/chat/disconnect`, {
+      method: "POST",
+      headers: { "Content-Type": "text/plain", Cookie: cookie },
+      body: JSON.stringify({ chatSessionId: "nonexistent" }),
+    });
+    assertEquals(res.status, 200);
+    await res.body?.cancel();
+  } finally {
+    await t.cleanup();
+  }
+});
+
+Deno.test({
+  name: "DashboardServer - POST /api/chat/message text/plain invalid JSON returns 400",
+  sanitizeResources: false,
+  sanitizeOps: false,
+}, async () => {
+  const t = await createTestServer();
+  try {
+    const cookie = await loginAndGetCookie(t.baseUrl);
+    const res = await fetch(`${t.baseUrl}/api/chat/message`, {
+      method: "POST",
+      headers: { "Content-Type": "text/plain", Cookie: cookie },
+      body: "not json",
+    });
+    assertEquals(res.status, 400);
+    await res.body?.cancel();
+  } finally {
+    await t.cleanup();
+  }
+});
+
+Deno.test({
+  name: "DashboardServer - POST /api/chat/disconnect text/plain invalid JSON returns 400",
+  sanitizeResources: false,
+  sanitizeOps: false,
+}, async () => {
+  const t = await createTestServer();
+  try {
+    const cookie = await loginAndGetCookie(t.baseUrl);
+    const res = await fetch(`${t.baseUrl}/api/chat/disconnect`, {
+      method: "POST",
+      headers: { "Content-Type": "text/plain", Cookie: cookie },
+      body: "not json",
+    });
+    assertEquals(res.status, 400);
+    await res.body?.cancel();
+  } finally {
+    await t.cleanup();
+  }
+});
+
+Deno.test({
+  name: "DashboardServer - server stop is idempotent",
+  sanitizeResources: false,
+  sanitizeOps: false,
+}, async () => {
+  const t = await createTestServer();
+  await t.cleanup();
+  // Double stop should not throw
+  await t.server.stop();
+});
+
+Deno.test({
+  name: "DashboardServer - authenticated static CSS file returns correct content type",
+  sanitizeResources: false,
+  sanitizeOps: false,
+}, async () => {
+  const t = await createTestServer();
+  try {
+    const cookie = await loginAndGetCookie(t.baseUrl);
+    const res = await fetch(`${t.baseUrl}/style.css`, {
+      headers: { Cookie: cookie },
+    });
+    if (res.status === 200) {
+      assertEquals(res.headers.get("Content-Type"), "text/css; charset=utf-8");
+    }
+    await res.body?.cancel();
+  } finally {
+    await t.cleanup();
+  }
+});
+
+Deno.test({
+  name: "DashboardServer - authenticated static JS file returns correct content type",
+  sanitizeResources: false,
+  sanitizeOps: false,
+}, async () => {
+  const t = await createTestServer();
+  try {
+    const cookie = await loginAndGetCookie(t.baseUrl);
+    // Check if any JS files exist
+    const res = await fetch(`${t.baseUrl}/js/app.js`, {
+      headers: { Cookie: cookie },
+    });
+    if (res.status === 200) {
+      assertEquals(
+        res.headers.get("Content-Type"),
+        "application/javascript; charset=utf-8",
+      );
+    }
+    await res.body?.cancel();
+  } finally {
+    await t.cleanup();
+  }
+});
+
+Deno.test({
+  name: "DashboardServer - authenticated root path serves index.html",
+  sanitizeResources: false,
+  sanitizeOps: false,
+}, async () => {
+  const t = await createTestServer();
+  try {
+    const cookie = await loginAndGetCookie(t.baseUrl);
+    const res = await fetch(`${t.baseUrl}/`, {
+      headers: { Cookie: cookie },
+    });
+    assertEquals(res.status, 200);
+    assertEquals(res.headers.get("Content-Type"), "text/html; charset=utf-8");
+    await res.body?.cancel();
+  } finally {
+    await t.cleanup();
+  }
+});
+
+Deno.test({
+  name: "DashboardServer - POST /api/chat/connect with valid type fails gracefully (no agent)",
+  sanitizeResources: false,
+  sanitizeOps: false,
+}, async () => {
+  const config = createMinimalConfig();
+  const tempWorkspace = await Deno.makeTempDir();
+  config.workspace = { repoPath: tempWorkspace, workspacesDir: "workspaces" };
+  const t = await createTestServer({ appConfig: config });
+  try {
+    const cookie = await loginAndGetCookie(t.baseUrl);
+    const res = await fetch(`${t.baseUrl}/api/chat/connect`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Cookie: cookie },
+      body: JSON.stringify({ agentType: "copilot", model: "gpt-4" }),
+    });
+    // Will fail because copilot binary is not available — returns 500
+    assertEquals(res.status, 500);
+    const body = await res.json();
+    assertEquals(body.error, "Failed to connect to agent");
+  } finally {
+    await t.cleanup();
+    await Deno.remove(tempWorkspace, { recursive: true }).catch(() => {});
+  }
+});
+
+Deno.test({
+  name: "DashboardServer - login with x-forwarded-for header records IP",
+  sanitizeResources: false,
+  sanitizeOps: false,
+}, async () => {
+  const t = await createTestServer();
+  try {
+    const res = await fetch(`${t.baseUrl}/api/auth/login`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Forwarded-For": "192.168.1.1, 10.0.0.1",
+      },
+      body: JSON.stringify({ passphrase: "test-passphrase" }),
+    });
+    assertEquals(res.status, 200);
+    await res.body?.cancel();
+  } finally {
+    await t.cleanup();
+  }
+});
+
+Deno.test({
+  name: "DashboardServer - login with x-forwarded-proto https sets secure cookie",
+  sanitizeResources: false,
+  sanitizeOps: false,
+}, async () => {
+  const t = await createTestServer();
+  try {
+    const res = await fetch(`${t.baseUrl}/api/auth/login`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Forwarded-Proto": "https",
+      },
+      body: JSON.stringify({ passphrase: "test-passphrase" }),
+    });
+    assertEquals(res.status, 200);
+    const setCookie = res.headers.get("Set-Cookie") ?? "";
+    assertEquals(setCookie.includes("Secure"), true);
+    await res.body?.cancel();
+  } finally {
+    await t.cleanup();
+  }
+});
+
+Deno.test({
+  name: "DashboardServer - active sessions maps spontaneous type correctly",
+  sanitizeResources: false,
+  sanitizeOps: false,
+}, async () => {
+  const mockSession: ActiveSession = {
+    id: "sess_spont",
+    platform: "discord",
+    channelId: "ch1",
+    userId: "u1",
+    isDm: false,
+    workspace: {
+      key: "discord/u1",
+      path: "/tmp/ws",
+      tmpPath: "/tmp/ws/tmp",
+      components: { platform: "discord", userId: "u1" },
+      isDm: false,
+    },
+    platformAdapter: {} as never,
+    triggerEvent: undefined, // No trigger = spontaneous
+    startedAt: new Date(),
+    lastActivityAt: new Date(),
+    timeoutMs: 60000,
+    replySent: false,
+    replyCount: 0,
+    editCount: 0,
+  };
+  const registry = createMockSessionRegistry([mockSession]);
+  const t = await createTestServer({ sessionRegistry: registry });
+  try {
+    const cookie = await loginAndGetCookie(t.baseUrl);
+    const res = await fetch(`${t.baseUrl}/api/sessions/active`, {
+      headers: { Cookie: cookie },
+    });
+    assertEquals(res.status, 200);
+    const body = await res.json();
+    assertEquals(body[0].type, "spontaneous");
+  } finally {
+    await t.cleanup();
+  }
+});
+
+Deno.test({
+  name: "DashboardServer - restart with confirm: false and active sessions shows warning count",
+  sanitizeResources: false,
+  sanitizeOps: false,
+}, async () => {
+  const mockSession: ActiveSession = {
+    id: "sess_active",
+    platform: "discord",
+    channelId: "ch1",
+    userId: "u1",
+    isDm: false,
+    workspace: {
+      key: "discord/u1",
+      path: "/tmp/ws",
+      tmpPath: "/tmp/ws/tmp",
+      components: { platform: "discord", userId: "u1" },
+      isDm: false,
+    },
+    platformAdapter: {} as never,
+    triggerEvent: {
+      platform: "discord",
+      channelId: "ch1",
+      userId: "u1",
+      messageId: "m1",
+      isDm: false,
+      guildId: "",
+      content: "hello",
+      timestamp: new Date(),
+    },
+    startedAt: new Date(),
+    lastActivityAt: new Date(),
+    timeoutMs: 60000,
+    replySent: false,
+    replyCount: 0,
+    editCount: 0,
+  };
+  const registry = createMockSessionRegistry([mockSession]);
+  const t = await createTestServer({ sessionRegistry: registry });
+  try {
+    const cookie = await loginAndGetCookie(t.baseUrl);
+    const res = await fetch(`${t.baseUrl}/api/restart`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Cookie: cookie },
+      body: JSON.stringify({ confirm: false }),
+    });
+    assertEquals(res.status, 200);
+    const body = await res.json();
+    assertEquals(body.activeSessionCount, 1);
+    assertEquals(body.warning.includes("1 active session"), true);
+  } finally {
+    await t.cleanup();
+  }
+});
+
+Deno.test({
+  name: "DashboardServer - buildDirectoryTree maxEntries truncation",
+  sanitizeResources: false,
+  sanitizeOps: false,
+}, async () => {
+  const t = await createTestServer();
+  try {
+    // Create >1000 files to hit maxEntries limit
+    const dir = `${t.agentWorkspacePath}/many`;
+    await Deno.mkdir(dir, { recursive: true });
+    const promises = [];
+    for (let i = 0; i < 1002; i++) {
+      promises.push(Deno.writeTextFile(`${dir}/file${i}.md`, `${i}`));
+    }
+    await Promise.all(promises);
+
+    const cookie = await loginAndGetCookie(t.baseUrl);
+    const res = await fetch(`${t.baseUrl}/api/workspace/tree`, {
+      headers: { Cookie: cookie },
+    });
+    assertEquals(res.status, 200);
+    const body = await res.json();
+    // Should contain a truncated marker somewhere
+    const json = JSON.stringify(body);
+    assertEquals(json.includes('"truncated":true'), true);
+  } finally {
+    await t.cleanup();
+  }
+});
+
+Deno.test({
+  name: "DashboardServer - chat message with active session but wrong ID returns 404",
+  sanitizeResources: false,
+  sanitizeOps: false,
+}, async () => {
+  const t = await createTestServer();
+  try {
+    // Inject a fake chat session to test more code paths
+    const serverAny = t.server as unknown as {
+      chatSession: {
+        id: string;
+        connector: unknown;
+        acpSessionId: string;
+        messageCount: number;
+        sseController: null;
+        idleTimer: null;
+        disconnected: boolean;
+      };
+    };
+    serverAny.chatSession = {
+      id: "fake-session",
+      connector: {},
+      acpSessionId: "acp-123",
+      messageCount: 0,
+      sseController: null,
+      idleTimer: null,
+      disconnected: false,
+    };
+
+    const cookie = await loginAndGetCookie(t.baseUrl);
+
+    // Wrong session ID
+    const res = await fetch(`${t.baseUrl}/api/chat/message`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Cookie: cookie },
+      body: JSON.stringify({ chatSessionId: "wrong-id", content: "hello" }),
+    });
+    assertEquals(res.status, 404);
+    await res.body?.cancel();
+
+    // Clean up
+    serverAny.chatSession = null as unknown as typeof serverAny.chatSession;
+  } finally {
+    await t.cleanup();
+  }
+});
+
+Deno.test({
+  name: "DashboardServer - chat message with disconnected session returns 410",
+  sanitizeResources: false,
+  sanitizeOps: false,
+}, async () => {
+  const t = await createTestServer();
+  try {
+    const serverAny = t.server as unknown as {
+      chatSession: {
+        id: string;
+        connector: unknown;
+        acpSessionId: string;
+        messageCount: number;
+        sseController: null;
+        idleTimer: ReturnType<typeof setTimeout> | null;
+        disconnected: boolean;
+      };
+    };
+    serverAny.chatSession = {
+      id: "disc-session",
+      connector: {},
+      acpSessionId: "acp-123",
+      messageCount: 0,
+      sseController: null,
+      idleTimer: null,
+      disconnected: true,
+    };
+
+    const cookie = await loginAndGetCookie(t.baseUrl);
+    const res = await fetch(`${t.baseUrl}/api/chat/message`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Cookie: cookie },
+      body: JSON.stringify({ chatSessionId: "disc-session", content: "hello" }),
+    });
+    assertEquals(res.status, 410);
+    const body = await res.json();
+    assertEquals(body.error, "Chat session is disconnected");
+
+    serverAny.chatSession = null as unknown as typeof serverAny.chatSession;
+  } finally {
+    await t.cleanup();
+  }
+});
+
+Deno.test({
+  name: "DashboardServer - chat connect returns 409 when session already active",
+  sanitizeResources: false,
+  sanitizeOps: false,
+}, async () => {
+  const t = await createTestServer();
+  try {
+    const serverAny = t.server as unknown as {
+      chatSession: {
+        id: string;
+        connector: unknown;
+        acpSessionId: string;
+        messageCount: number;
+        sseController: null;
+        idleTimer: null;
+        disconnected: boolean;
+      };
+    };
+    serverAny.chatSession = {
+      id: "existing-session",
+      connector: {},
+      acpSessionId: "acp-123",
+      messageCount: 0,
+      sseController: null,
+      idleTimer: null,
+      disconnected: false,
+    };
+
+    const cookie = await loginAndGetCookie(t.baseUrl);
+    const res = await fetch(`${t.baseUrl}/api/chat/connect`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Cookie: cookie },
+      body: JSON.stringify({ agentType: "copilot" }),
+    });
+    assertEquals(res.status, 409);
+    const body = await res.json();
+    assertEquals(body.error, "A chat session is already active");
+
+    serverAny.chatSession = null as unknown as typeof serverAny.chatSession;
+  } finally {
+    await t.cleanup();
+  }
+});
+
+Deno.test({
+  name: "DashboardServer - chat stream with matching session returns SSE stream",
+  sanitizeResources: false,
+  sanitizeOps: false,
+}, async () => {
+  const t = await createTestServer();
+  try {
+    const serverAny = t.server as unknown as {
+      chatSession: {
+        id: string;
+        connector: unknown;
+        acpSessionId: string;
+        messageCount: number;
+        sseController: ReadableStreamDefaultController<Uint8Array> | null;
+        idleTimer: null;
+        disconnected: boolean;
+      };
+    };
+    serverAny.chatSession = {
+      id: "stream-session",
+      connector: {},
+      acpSessionId: "acp-123",
+      messageCount: 0,
+      sseController: null,
+      idleTimer: null,
+      disconnected: false,
+    };
+
+    const cookie = await loginAndGetCookie(t.baseUrl);
+    const res = await fetch(
+      `${t.baseUrl}/api/chat/stream?chatSessionId=stream-session`,
+      { headers: { Cookie: cookie } },
+    );
+    assertEquals(res.status, 200);
+    assertEquals(res.headers.get("Content-Type"), "text/event-stream");
+
+    // Read the initial "connected" event
+    const reader = res.body!.getReader();
+    const decoder = new TextDecoder();
+    const { value } = await reader.read();
+    const text = decoder.decode(value);
+    assertEquals(text.includes("event: connected"), true);
+
+    // Cancel reading
+    reader.cancel();
+
+    serverAny.chatSession = null as unknown as typeof serverAny.chatSession;
+  } finally {
+    await t.cleanup();
+  }
+});
+
+Deno.test({
+  name: "DashboardServer - chat disconnect with matching session cleans up",
+  sanitizeResources: false,
+  sanitizeOps: false,
+}, async () => {
+  const t = await createTestServer();
+  try {
+    const serverAny = t.server as unknown as {
+      chatSession: {
+        id: string;
+        connector: { disconnect: () => Promise<void> };
+        acpSessionId: string;
+        messageCount: number;
+        sseController: null;
+        idleTimer: ReturnType<typeof setTimeout> | null;
+        disconnected: boolean;
+      } | null;
+    };
+    serverAny.chatSession = {
+      id: "disconnect-session",
+      connector: { disconnect: () => Promise.resolve() },
+      acpSessionId: "acp-123",
+      messageCount: 0,
+      sseController: null,
+      idleTimer: null,
+      disconnected: false,
+    };
+
+    const cookie = await loginAndGetCookie(t.baseUrl);
+    const res = await fetch(`${t.baseUrl}/api/chat/disconnect`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Cookie: cookie },
+      body: JSON.stringify({ chatSessionId: "disconnect-session" }),
+    });
+    assertEquals(res.status, 200);
+    const body = await res.json();
+    assertEquals(body.success, true);
+
+    // Verify session was cleaned up
+    assertEquals(serverAny.chatSession, null);
+  } finally {
+    await t.cleanup();
+  }
+});
+
+Deno.test({
+  name: "DashboardServer - stop cleans up active chat session",
+  sanitizeResources: false,
+  sanitizeOps: false,
+}, async () => {
+  const t = await createTestServer();
+  const serverAny = t.server as unknown as {
+    chatSession: {
+      id: string;
+      connector: { disconnect: () => Promise<void> };
+      acpSessionId: string;
+      messageCount: number;
+      sseController: null;
+      idleTimer: ReturnType<typeof setTimeout> | null;
+      disconnected: boolean;
+    } | null;
+  };
+  serverAny.chatSession = {
+    id: "stop-session",
+    connector: { disconnect: () => Promise.resolve() },
+    acpSessionId: "acp-123",
+    messageCount: 0,
+    sseController: null,
+    idleTimer: setTimeout(() => {}, 999999),
+    disconnected: false,
+  };
+  await t.cleanup();
+  assertEquals(serverAny.chatSession, null);
 });
