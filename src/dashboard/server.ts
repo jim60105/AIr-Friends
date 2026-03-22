@@ -161,6 +161,11 @@ export class DashboardServer {
         return await this.handleRestart(req);
       }
 
+      // Config endpoints
+      if (path === "/api/config/models" && req.method === "GET") {
+        return this.handleConfigModels();
+      }
+
       // Static file serving
       return await this.serveStaticFile(path);
     } catch (error) {
@@ -247,6 +252,7 @@ export class DashboardServer {
       endTime: s.endedAt,
       status: s.status,
       durationMs: s.durationMs,
+      auditSessionId: s.auditSessionId,
     }));
     return this.json(mapped);
   }
@@ -375,18 +381,24 @@ export class DashboardServer {
       return this.json({ error: "Missing path parameter" }, 400);
     }
 
+    // Normalize: strip leading slash (tree builder generates absolute-style paths)
+    const normalizedPath = filePath.replace(/^\/+/, "");
+    if (!normalizedPath) {
+      return this.json({ error: "Invalid path" }, 400);
+    }
+
     // Path traversal protection
-    if (filePath.includes("..") || filePath.startsWith("/") || filePath.includes("%2F")) {
+    if (normalizedPath.includes("..") || normalizedPath.includes("%2F")) {
       return this.json({ error: "Invalid path" }, 400);
     }
 
     // Extension check
-    const ext = "." + filePath.split(".").pop()?.toLowerCase();
+    const ext = "." + normalizedPath.split(".").pop()?.toLowerCase();
     if (!ALLOWED_EXTENSIONS.has(ext)) {
       return this.json({ error: "File type not allowed. Only .md and .txt files." }, 400);
     }
 
-    const fullPath = resolve(this.deps.agentWorkspacePath, filePath);
+    const fullPath = resolve(this.deps.agentWorkspacePath, normalizedPath);
     const canonicalWs = resolve(this.deps.agentWorkspacePath);
 
     // Verify resolved path is within workspace
@@ -397,7 +409,7 @@ export class DashboardServer {
     try {
       const content = await Deno.readTextFile(fullPath);
       const stat = await Deno.stat(fullPath);
-      return this.json({ path: filePath, content, size: stat.size });
+      return this.json({ path: normalizedPath, content, size: stat.size });
     } catch (error) {
       if (error instanceof Deno.errors.NotFound) {
         return this.json({ error: "File not found" }, 404);
@@ -727,6 +739,21 @@ export class DashboardServer {
     } catch {
       // Controller may be closed
     }
+  }
+
+  // --- Config ---
+
+  private handleConfigModels(): Response {
+    const models = new Set<string>();
+    const defaultModel = this.deps.appConfig.agent.model;
+    if (defaultModel) models.add(defaultModel);
+
+    const rules = this.deps.appConfig.agent.modelRouting?.rules ?? [];
+    for (const rule of rules) {
+      if (rule.model) models.add(rule.model);
+    }
+
+    return this.json([...models]);
   }
 
   // --- Restart ---

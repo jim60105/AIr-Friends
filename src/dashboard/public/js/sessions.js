@@ -38,7 +38,7 @@ async function pollHistory() {
     }
     body.innerHTML = sessions.map((s) =>
       `<tr class="hover:bg-surface-200/50 cursor-pointer" onclick="toggleAudit(this, '${
-        esc(s.id)
+        esc(s.auditSessionId || s.id)
       }')">
       <td class="px-4 py-2.5 font-mono text-xs text-indigo-300">${esc(s.id?.slice(0, 12))}…</td>
       <td class="px-4 py-2.5">${esc(s.type)}</td>

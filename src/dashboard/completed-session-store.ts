@@ -22,6 +22,8 @@ export interface CompletedSession {
   status: "success" | "failure";
   /** Duration in milliseconds */
   durationMs: number;
+  /** Skill-API session ID for audit log lookup */
+  auditSessionId?: string;
 }
 
 const MAX_ENTRIES = 100;

@@ -274,6 +274,7 @@ export class SessionOrchestrator {
     activeSessionsGauge.inc();
     let result: SessionResponse;
     let auditWriter: SessionAuditWriter | null = null;
+    let shellSessionId: string | null = null;
 
     try {
       // 1. Get or create workspace
@@ -286,7 +287,6 @@ export class SessionOrchestrator {
       });
 
       // 2. Register session in SessionRegistry (if skill API is enabled)
-      let shellSessionId: string | null = null;
       if (this.config.skillApi?.enabled) {
         shellSessionId = this.sessionRegistry.register({
           platform: event.platform,
@@ -759,6 +759,7 @@ export class SessionOrchestrator {
       sessionDurationSeconds.labels(event.platform, sessionType, status).observe(durationSec);
       this.completedSessionStore?.add({
         id: `${sessionType}_${sessionStartTime}`,
+        auditSessionId: shellSessionId ?? undefined,
         type: sessionType === "channelLurk" ? "channelLurk" : "message",
         platform: event.platform,
         userId: event.userId,
@@ -796,6 +797,7 @@ export class SessionOrchestrator {
     activeSessionsGauge.inc();
     let result: SessionResponse;
     let auditWriter: SessionAuditWriter | null = null;
+    let shellSessionId: string | null = null;
 
     try {
       // 1. Create workspace for the bot itself
@@ -813,7 +815,6 @@ export class SessionOrchestrator {
       const agentWorkspacePath = await this.workspaceManager.getOrCreateAgentWorkspace();
 
       // 2. Register session WITHOUT triggerEvent
-      let shellSessionId: string | null = null;
       if (this.config.skillApi?.enabled) {
         shellSessionId = this.sessionRegistry.register({
           platform,
@@ -1095,6 +1096,7 @@ export class SessionOrchestrator {
       sessionDurationSeconds.labels(platform, "spontaneous", status).observe(durationSec);
       this.completedSessionStore?.add({
         id: `spontaneous_${sessionStartTime}`,
+        auditSessionId: shellSessionId ?? undefined,
         type: "spontaneous",
         platform,
         userId: options.botId,
@@ -1127,6 +1129,7 @@ export class SessionOrchestrator {
     activeSessionsGauge.inc();
     let result: SessionResponse;
     let auditWriter: SessionAuditWriter | null = null;
+    let shellSessionId: string | null = null;
 
     try {
       // 1. Create workspace for self-research (uses special internal key)
@@ -1150,7 +1153,6 @@ export class SessionOrchestrator {
       const agentWorkspacePath = await this.workspaceManager.getOrCreateAgentWorkspace();
 
       // 2. Register session (for skill API access, mainly for memory-search)
-      let shellSessionId: string | null = null;
       if (this.config.skillApi?.enabled) {
         shellSessionId = this.sessionRegistry.register({
           platform: "discord", // Placeholder — see comment above on botEvent
@@ -1366,6 +1368,7 @@ export class SessionOrchestrator {
       sessionDurationSeconds.labels("internal", "self_research", status).observe(durationSec);
       this.completedSessionStore?.add({
         id: `self_research_${sessionStartTime}`,
+        auditSessionId: shellSessionId ?? undefined,
         type: "self-research",
         platform: "internal",
         userId: "self-research",
@@ -1407,6 +1410,7 @@ export class SessionOrchestrator {
     activeSessionsGauge.inc();
     let result: SessionResponse;
     let auditWriter: SessionAuditWriter | null = null;
+    let shellSessionId: string | null = null;
 
     try {
       // Create synthetic DM event to ensure private memory access
@@ -1423,7 +1427,6 @@ export class SessionOrchestrator {
       const workspace = await this.workspaceManager.getOrCreateWorkspace(syntheticEvent);
       const agentWorkspacePath = await this.workspaceManager.getOrCreateAgentWorkspace();
 
-      let shellSessionId: string | null = null;
       if (this.config.skillApi?.enabled) {
         shellSessionId = this.sessionRegistry.register({
           platform,
@@ -1630,6 +1633,7 @@ export class SessionOrchestrator {
       sessionDurationSeconds.labels(platform, "memory_maintenance", status).observe(durationSec);
       this.completedSessionStore?.add({
         id: `memory_maintenance_${sessionStartTime}`,
+        auditSessionId: shellSessionId ?? undefined,
         type: "memory-maintenance",
         platform,
         userId,
@@ -1664,6 +1668,7 @@ export class SessionOrchestrator {
     activeSessionsGauge.inc();
     let result: SessionResponse;
     let auditWriter: SessionAuditWriter | null = null;
+    let shellSessionId: string | null = null;
 
     try {
       // 1. Resolve DM channel
@@ -1709,7 +1714,6 @@ export class SessionOrchestrator {
       const agentWorkspacePath = await this.workspaceManager.getOrCreateAgentWorkspace();
 
       // 3. Register shell session
-      let shellSessionId: string | null = null;
       if (this.config.skillApi?.enabled) {
         shellSessionId = this.sessionRegistry.register({
           platform,
@@ -1974,6 +1978,7 @@ export class SessionOrchestrator {
       sessionDurationSeconds.labels(platform, "reminder", status).observe(durationSec);
       this.completedSessionStore?.add({
         id: `reminder_${sessionStartTime}`,
+        auditSessionId: shellSessionId ?? undefined,
         type: "reminder",
         platform,
         userId: reminder.userId,

@@ -1,5 +1,17 @@
 // Chat
 
+// Populate model suggestions from server config
+(async function loadModelSuggestions() {
+  try {
+    const res = await fetch("/api/config/models");
+    if (res.ok) {
+      const models = await res.json();
+      const datalist = document.getElementById("model-suggestions");
+      datalist.innerHTML = models.map((m) => `<option value="${m}"></option>`).join("");
+    }
+  } catch (_) { /* ignore */ }
+})();
+
 async function chatConnect() {
   const agentType = document.getElementById("chat-agent-type").value;
   const model = document.getElementById("chat-model").value;
@@ -156,7 +168,7 @@ async function chatSend() {
     await fetch("/api/chat/message", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ chatSessionId, message: msg }),
+      body: JSON.stringify({ chatSessionId, content: msg }),
     });
   } catch (_) {
     appendSystemMessage("Failed to send message");

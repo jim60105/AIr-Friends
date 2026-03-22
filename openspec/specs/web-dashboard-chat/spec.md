@@ -37,7 +37,7 @@ Defines the interactive chat view with ACP agent connection management, message 
 
 ### Requirement: Send Message
 
-`POST /api/chat/message` SHALL accept `chatSessionId` and `content`, send the content as a prompt to the ACP agent on the existing session, and stream the response via SSE. The first message SHALL include the rendered `system_web_chat.md` prompt prepended.
+`POST /api/chat/message` SHALL accept a JSON body with `chatSessionId` and `content` field names (matching the server's expected schema), send the content as a prompt to the ACP agent on the existing session, and stream the response via SSE. The first message SHALL include the rendered `system_web_chat.md` prompt prepended.
 
 #### Scenario: Sends Message and Receives Streamed Response
 
@@ -63,6 +63,20 @@ Defines the interactive chat view with ACP agent connection management, message 
 - **GIVEN** the dashboard server is running
 - **WHEN** a `POST /api/chat/message` request is received without a valid session cookie
 - **THEN** the server SHALL return HTTP 401
+
+### Requirement: Model dropdown populated from config
+
+The chat interface model dropdown SHALL be populated dynamically from the server's `modelRouting` configuration. The system SHALL expose a `/api/config/models` endpoint that returns unique model names from `modelRouting.rules[].model` combined with the default `agent.model`. The frontend SHALL fetch this list on page load and populate the `<datalist>` options.
+
+#### Scenario: Model dropdown reflects config
+
+- **WHEN** the dashboard chat tab loads
+- **THEN** the model dropdown `<datalist>` contains options matching the unique models from `modelRouting.rules` and default `agent.model`
+
+#### Scenario: No model routing rules configured
+
+- **WHEN** `modelRouting.rules` is empty or not configured
+- **THEN** the model dropdown contains only the default `agent.model` value
 
 ### Requirement: Response Streaming
 

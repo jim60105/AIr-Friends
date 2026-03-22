@@ -31,7 +31,7 @@ Defines the session monitoring APIs for active session listing, session history,
 
 ### Requirement: Session History
 
-`GET /api/sessions/history` SHALL return recently completed sessions (up to 100, ring buffer). Each entry SHALL include `id`, `type`, `platform`, `userId`, `startTime`, `endTime`, `status`, and `durationMs`.
+`GET /api/sessions/history` SHALL return recently completed sessions (up to 100, ring buffer). Each entry SHALL include `id`, `type`, `platform`, `userId`, `startTime`, `endTime`, `status`, `durationMs`, and `auditSessionId` (the skill-API session ID in `sess_*` format, used for audit log file lookups).
 
 #### Scenario: Returns Empty Initially
 
@@ -43,7 +43,7 @@ Defines the session monitoring APIs for active session listing, session history,
 
 - **GIVEN** a session has completed with `status: "success"` and duration of 5000ms
 - **WHEN** a `GET /api/sessions/history` request is received with a valid session cookie
-- **THEN** the response SHALL include an entry with the session's `id`, `type`, `platform`, `userId`, `startTime`, `endTime`, `status`, and `durationMs`
+- **THEN** the response SHALL include an entry with the session's `id`, `type`, `platform`, `userId`, `startTime`, `endTime`, `status`, `durationMs`, and `auditSessionId`
 
 #### Scenario: Oldest Entries Evicted When Buffer Full
 
@@ -76,19 +76,24 @@ Defines the session monitoring APIs for active session listing, session history,
 
 ### Requirement: Session Detail View
 
-`GET /api/sessions/:id/audit` SHALL return audit log entries for a specific session by reading from the audit JSONL file.
+`GET /api/sessions/:id/audit` SHALL return audit log entries for a specific session by reading from the audit JSONL file. The `:id` parameter SHALL be the `auditSessionId` (skill-API session ID in `sess_*` format) from the `CompletedSession` record, which corresponds to the audit file naming convention. When a user clicks a session row to view audit data, the dashboard SHALL use `auditSessionId` (not the display ID) to query this endpoint.
 
 #### Scenario: Returns Audit Entries for Valid Session
 
-- **GIVEN** audit logging is enabled and a session with ID `"sess_abc123"` has audit entries
+- **GIVEN** audit logging is enabled and a session with `auditSessionId` `"sess_abc123"` has audit entries
 - **WHEN** a `GET /api/sessions/sess_abc123/audit` request is received with a valid session cookie
 - **THEN** the server SHALL return HTTP 200 with a JSON array of audit log entries
 
 #### Scenario: Returns 404 for Unknown Session
 
-- **GIVEN** no audit file exists for session ID `"sess_unknown"`
+- **GIVEN** no audit file exists for `auditSessionId` `"sess_unknown"`
 - **WHEN** a `GET /api/sessions/sess_unknown/audit` request is received with a valid session cookie
 - **THEN** the server SHALL return HTTP 404
+
+#### Scenario: Audit file not found for old session
+
+- **WHEN** a user clicks a session row whose audit file has been cleaned up by retention
+- **THEN** the dashboard displays "Audit log not found" (404 response)
 
 #### Scenario: Requires Authentication
 

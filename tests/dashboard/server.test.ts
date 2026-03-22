@@ -73,6 +73,7 @@ interface TestServer {
   server: DashboardServer;
   port: number;
   baseUrl: string;
+  agentWorkspacePath: string;
   cleanup: () => Promise<void>;
 }
 
@@ -80,6 +81,7 @@ async function createTestServer(overrides?: {
   sessionRegistry?: SessionRegistry;
   completedSessionStore?: CompletedSessionStore;
   metricsRegistry?: Registry;
+  appConfig?: Config;
 }): Promise<TestServer> {
   const dashboardConfig: DashboardConfig = {
     enabled: true,
@@ -93,7 +95,7 @@ async function createTestServer(overrides?: {
 
   const server = new DashboardServer({
     config: dashboardConfig,
-    appConfig: createMinimalConfig(),
+    appConfig: overrides?.appConfig ?? createMinimalConfig(),
     sessionRegistry: overrides?.sessionRegistry ?? createMockSessionRegistry(),
     completedSessionStore: overrides?.completedSessionStore ?? new CompletedSessionStore(),
     agentWorkspacePath,
@@ -126,6 +128,7 @@ async function createTestServer(overrides?: {
     server,
     port,
     baseUrl: `http://localhost:${port}`,
+    agentWorkspacePath,
     cleanup: async () => {
       await server.stop();
       await Deno.remove(tempDir, { recursive: true });
@@ -700,7 +703,10 @@ Deno.test({
   const t = await createTestServer();
   try {
     const cookie = await loginAndGetCookie(t.baseUrl);
-    const res = await fetch(`${t.baseUrl}/api/workspace/file?path=/etc/passwd.md`, {
+    // After leading-slash normalization, /etc/passwd.md becomes etc/passwd.md
+    // which is a valid relative path within workspace (returns 404 if not found).
+    // Use .. traversal to test actual path traversal rejection.
+    const res = await fetch(`${t.baseUrl}/api/workspace/file?path=/../etc/passwd.md`, {
       headers: { Cookie: cookie },
     });
     assertEquals(res.status, 400);
@@ -876,6 +882,144 @@ Deno.test({
     });
     assertEquals(res.status, 400);
     await res.body?.cancel();
+  } finally {
+    await t.cleanup();
+  }
+});
+
+// ============================
+// Workspace file path normalization (Task 1.2)
+// ============================
+
+Deno.test({
+  name: "DashboardServer - GET /api/workspace/file with leading slash is normalized and served",
+  sanitizeResources: false,
+  sanitizeOps: false,
+}, async () => {
+  const t = await createTestServer();
+  try {
+    // Create a file inside the agent workspace
+    const notesDir = `${t.agentWorkspacePath}/notes`;
+    await Deno.mkdir(notesDir, { recursive: true });
+    await Deno.writeTextFile(`${notesDir}/test.md`, "# Leading slash test");
+
+    const cookie = await loginAndGetCookie(t.baseUrl);
+    const res = await fetch(`${t.baseUrl}/api/workspace/file?path=/notes/test.md`, {
+      headers: { Cookie: cookie },
+    });
+    assertEquals(res.status, 200);
+    const body = await res.json();
+    assertEquals(body.content, "# Leading slash test");
+  } finally {
+    await t.cleanup();
+  }
+});
+
+Deno.test({
+  name: "DashboardServer - path traversal with leading slash /../ returns 400",
+  sanitizeResources: false,
+  sanitizeOps: false,
+}, async () => {
+  const t = await createTestServer();
+  try {
+    const cookie = await loginAndGetCookie(t.baseUrl);
+    const res = await fetch(`${t.baseUrl}/api/workspace/file?path=/../etc/passwd.md`, {
+      headers: { Cookie: cookie },
+    });
+    assertEquals(res.status, 400);
+    await res.body?.cancel();
+  } finally {
+    await t.cleanup();
+  }
+});
+
+// ============================
+// Model config endpoint (Task 3.3)
+// ============================
+
+Deno.test({
+  name: "DashboardServer - GET /api/config/models returns default model",
+  sanitizeResources: false,
+  sanitizeOps: false,
+}, async () => {
+  const t = await createTestServer();
+  try {
+    const cookie = await loginAndGetCookie(t.baseUrl);
+    const res = await fetch(`${t.baseUrl}/api/config/models`, {
+      headers: { Cookie: cookie },
+    });
+    assertEquals(res.status, 200);
+    const body = await res.json();
+    assertEquals(body, ["gpt-4"]);
+  } finally {
+    await t.cleanup();
+  }
+});
+
+Deno.test({
+  name:
+    "DashboardServer - GET /api/config/models returns unique models from routing rules + default",
+  sanitizeResources: false,
+  sanitizeOps: false,
+}, async () => {
+  const config = createMinimalConfig();
+  config.agent.modelRouting = {
+    enabled: true,
+    rules: [
+      { match: { channel: "discord/account/123" }, model: "claude-sonnet-4" },
+      { match: { sessionType: "spontaneous" }, model: "gemini-2.5-pro" },
+      { match: { channel: "discord/channel/456" }, model: "gpt-4" }, // duplicate of default
+    ],
+  };
+  const t = await createTestServer({ appConfig: config });
+  try {
+    const cookie = await loginAndGetCookie(t.baseUrl);
+    const res = await fetch(`${t.baseUrl}/api/config/models`, {
+      headers: { Cookie: cookie },
+    });
+    assertEquals(res.status, 200);
+    const body = await res.json() as string[];
+    assertEquals(body.length, 3); // gpt-4, claude-sonnet-4, gemini-2.5-pro (deduped)
+    assertEquals(body.includes("gpt-4"), true);
+    assertEquals(body.includes("claude-sonnet-4"), true);
+    assertEquals(body.includes("gemini-2.5-pro"), true);
+  } finally {
+    await t.cleanup();
+  }
+});
+
+// ============================
+// Audit session ID in history (Task 4.4)
+// ============================
+
+Deno.test({
+  name: "DashboardServer - GET /api/sessions/history includes auditSessionId",
+  sanitizeResources: false,
+  sanitizeOps: false,
+}, async () => {
+  const store = new CompletedSessionStore();
+  store.add({
+    id: "s_with_audit",
+    type: "message",
+    platform: "discord",
+    userId: "u1",
+    startedAt: new Date().toISOString(),
+    endedAt: new Date().toISOString(),
+    status: "success",
+    durationMs: 1200,
+    auditSessionId: "skill_sess_abc123",
+  });
+  const t = await createTestServer({ completedSessionStore: store });
+  try {
+    const cookie = await loginAndGetCookie(t.baseUrl);
+    const res = await fetch(`${t.baseUrl}/api/sessions/history`, {
+      headers: { Cookie: cookie },
+    });
+    assertEquals(res.status, 200);
+    const body = await res.json();
+    assertEquals(body.length, 1);
+    assertEquals(body[0].id, "s_with_audit");
+    assertEquals(body[0].auditSessionId, "skill_sess_abc123");
   } finally {
     await t.cleanup();
   }
