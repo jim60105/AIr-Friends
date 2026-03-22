@@ -76,7 +76,7 @@ spec:
             - name: health
               containerPort: {{ .Values.health.port }}
               protocol: TCP
-            {{- if and .Values.env.DASHBOARD_ENABLED (ne .Values.env.DASHBOARD_ENABLED "") }}
+            {{- if and .Values.env.DASHBOARD_ENABLED (ne (toString .Values.env.DASHBOARD_ENABLED) "") }}
             - name: dashboard
               containerPort: {{ .Values.env.DASHBOARD_PORT | default 8090 }}
               protocol: TCP
