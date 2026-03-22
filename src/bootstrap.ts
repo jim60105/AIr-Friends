@@ -25,6 +25,9 @@ import { SchedulerStateStore } from "@core/scheduler-state-store.ts";
 import { join } from "@std/path";
 import type { Platform } from "./types/events.ts";
 import { isValidPlatform } from "./types/events.ts";
+import { DashboardServer } from "./dashboard/server.ts";
+import { CompletedSessionStore } from "./dashboard/completed-session-store.ts";
+import { metricsRegistry } from "@utils/metrics.ts";
 
 const logger = createLogger("Bootstrap");
 
@@ -48,6 +51,8 @@ export interface AppContext {
   savedSchedulerState: Record<string, string>;
   gelfTransport: GelfTransport | null;
   yolo: boolean;
+  dashboardServer: DashboardServer | null;
+  completedSessionStore: CompletedSessionStore | null;
 }
 
 /**
@@ -433,6 +438,32 @@ export async function bootstrap(
 
   logger.info("Bootstrap completed");
 
+  // Initialize CompletedSessionStore
+  const completedSessionStore = new CompletedSessionStore();
+
+  // Pass completedSessionStore to SessionOrchestrator
+  agentCore.getOrchestrator().setCompletedSessionStore(completedSessionStore);
+
+  // Initialize Dashboard Server
+  let dashboardServer: DashboardServer | null = null;
+  if (config.dashboard?.enabled && config.dashboard.passphrase) {
+    const agentWorkspacePath = join(config.workspace.repoPath, "agent-workspace");
+    const auditBasePath = join(config.workspace.repoPath, "audit");
+    dashboardServer = new DashboardServer({
+      config: config.dashboard,
+      appConfig: config,
+      sessionRegistry: agentCore.getSessionRegistry(),
+      completedSessionStore,
+      agentWorkspacePath,
+      auditConfig: config.audit,
+      auditBasePath,
+      metricsRegistry: config.metrics?.enabled ? metricsRegistry : undefined,
+      skillRegistry: agentCore.getSkillRegistry(),
+    });
+    dashboardServer.start();
+    logger.info("Dashboard server initialized", { port: config.dashboard.port });
+  }
+
   // Initialize scheduler state store
   const schedulerStateStore = new SchedulerStateStore(
     join(config.workspace.repoPath, "scheduler-state.json"),
@@ -464,6 +495,8 @@ export async function bootstrap(
     savedSchedulerState,
     gelfTransport,
     yolo,
+    dashboardServer,
+    completedSessionStore,
   };
 
   // Set Health Check server context after all components initialized

@@ -575,6 +575,18 @@ export interface AuditConfig {
 }
 
 /**
+ * Web dashboard configuration
+ */
+export interface DashboardConfig {
+  /** Enable web dashboard (default: false) */
+  enabled: boolean;
+  /** Dashboard HTTP port (default: 8090) */
+  port: number;
+  /** Login passphrase (required when enabled) */
+  passphrase: string;
+}
+
+/**
  * Complete application configuration
  */
 export interface Config {
@@ -602,6 +614,8 @@ export interface Config {
   audit?: AuditConfig;
   /** Skills configuration (optional) */
   skills?: SkillsConfig;
+  /** Web dashboard configuration (optional) */
+  dashboard?: DashboardConfig;
 }
 
 /**

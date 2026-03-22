@@ -295,3 +295,9 @@ skills:
     maxFileSizeMb: 25           # File size limit in MB, 0 = use platform default; override with env SKILL_SEND_FILE_MAX_SIZE_MB
     allowedExtensions: []       # Allowed file extension whitelist, empty = no restriction; override with env SKILL_SEND_FILE_ALLOWED_EXTENSIONS
                                 # Example: [".png", ".jpg", ".gif", ".pdf", ".txt", ".md"]
+
+# ─── Web Dashboard ─────────────────────────────────────
+dashboard:
+  enabled: false                    # Enable web dashboard (default: false); override with env DASHBOARD_ENABLED
+  port: 8090                        # Dashboard HTTP port (default: 8090); override with env DASHBOARD_PORT
+  passphrase: ""                    # Login passphrase (required when enabled); override with env DASHBOARD_PASSPHRASE

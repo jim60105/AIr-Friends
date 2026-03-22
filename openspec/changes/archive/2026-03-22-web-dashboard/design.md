@@ -70,8 +70,18 @@ src/dashboard/
 │   └── pages.ts           # HTML page serving
 └── public/
     ├── index.html         # Main dashboard shell (tab-based SPA)
-    ├── app.js             # Client-side JavaScript (fetch, DOM, polling)
-    └── style.css          # Custom styles (minimal, most via Tailwind)
+    ├── style.css          # Custom styles (minimal, most via Tailwind)
+    └── js/
+        ├── utils.js       # Utility functions (esc, timeAgo, formatTime, formatDuration)
+        ├── app.js         # Global state and initialization
+        ├── auth.js        # Authentication (login, logout, checkAuth)
+        ├── tabs.js        # Tab navigation
+        ├── polling.js     # Polling management
+        ├── sessions.js    # Session monitoring (active, history, audit)
+        ├── stats.js       # Stats polling
+        ├── workspace.js   # Workspace browser
+        ├── chat.js        # Chat (connect, disconnect, SSE, messages)
+        └── restart.js     # Restart modal
 ```
 
 ### 3. Cookie-based session auth with passphrase

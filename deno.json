@@ -52,7 +52,8 @@
   "lint": {
     "rules": {
       "tags": ["recommended"]
-    }
+    },
+    "exclude": ["src/dashboard/public/"]
   },
   "compilerOptions": {
     "strict": true,

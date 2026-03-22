@@ -37,6 +37,7 @@ import type { WorkspaceInfo } from "../types/workspace.ts";
 import type { ResolvedReminder } from "../types/reminder.ts";
 import type { ReminderStore } from "./reminder-store.ts";
 import { SessionAuditWriter } from "./audit-logger.ts";
+import type { CompletedSessionStore } from "../dashboard/completed-session-store.ts";
 
 const logger = createLogger("SessionOrchestrator");
 
@@ -69,6 +70,7 @@ export class SessionOrchestrator {
   private config: Config;
   private yolo: boolean;
   private replyPolicy?: ReplyPolicyEvaluator;
+  private completedSessionStore?: CompletedSessionStore;
 
   constructor(
     workspaceManager: WorkspaceManager,
@@ -88,6 +90,13 @@ export class SessionOrchestrator {
     this.config = config;
     this.yolo = yolo;
     this.replyPolicy = replyPolicy;
+  }
+
+  /**
+   * Set the CompletedSessionStore for tracking finished sessions.
+   */
+  setCompletedSessionStore(store: CompletedSessionStore): void {
+    this.completedSessionStore = store;
   }
 
   /**
@@ -748,6 +757,16 @@ export class SessionOrchestrator {
       const status = result!.success ? "success" : "failure";
       sessionsTotal.labels(event.platform, sessionType, status).inc();
       sessionDurationSeconds.labels(event.platform, sessionType, status).observe(durationSec);
+      this.completedSessionStore?.add({
+        id: `${sessionType}_${sessionStartTime}`,
+        type: sessionType === "channelLurk" ? "channelLurk" : "message",
+        platform: event.platform,
+        userId: event.userId,
+        startedAt: new Date(sessionStartTime).toISOString(),
+        endedAt: new Date().toISOString(),
+        status,
+        durationMs: Date.now() - sessionStartTime,
+      });
     }
   }
 
@@ -1074,6 +1093,16 @@ export class SessionOrchestrator {
       const status = result!.success ? "success" : "failure";
       sessionsTotal.labels(platform, "spontaneous", status).inc();
       sessionDurationSeconds.labels(platform, "spontaneous", status).observe(durationSec);
+      this.completedSessionStore?.add({
+        id: `spontaneous_${sessionStartTime}`,
+        type: "spontaneous",
+        platform,
+        userId: options.botId,
+        startedAt: new Date(sessionStartTime).toISOString(),
+        endedAt: new Date().toISOString(),
+        status,
+        durationMs: Date.now() - sessionStartTime,
+      });
     }
   }
 
@@ -1335,6 +1364,16 @@ export class SessionOrchestrator {
       const status = result!.success ? "success" : "failure";
       sessionsTotal.labels("internal", "self_research", status).inc();
       sessionDurationSeconds.labels("internal", "self_research", status).observe(durationSec);
+      this.completedSessionStore?.add({
+        id: `self_research_${sessionStartTime}`,
+        type: "self-research",
+        platform: "internal",
+        userId: "self-research",
+        startedAt: new Date(sessionStartTime).toISOString(),
+        endedAt: new Date().toISOString(),
+        status,
+        durationMs: Date.now() - sessionStartTime,
+      });
     }
   }
 
@@ -1589,6 +1628,16 @@ export class SessionOrchestrator {
       const status = result!.success ? "success" : "failure";
       sessionsTotal.labels(platform, "memory_maintenance", status).inc();
       sessionDurationSeconds.labels(platform, "memory_maintenance", status).observe(durationSec);
+      this.completedSessionStore?.add({
+        id: `memory_maintenance_${sessionStartTime}`,
+        type: "memory-maintenance",
+        platform,
+        userId,
+        startedAt: new Date(sessionStartTime).toISOString(),
+        endedAt: new Date().toISOString(),
+        status,
+        durationMs: Date.now() - sessionStartTime,
+      });
     }
   }
 
@@ -1923,6 +1972,16 @@ export class SessionOrchestrator {
       const status = result!.success ? "success" : "failure";
       sessionsTotal.labels(platform, "reminder", status).inc();
       sessionDurationSeconds.labels(platform, "reminder", status).observe(durationSec);
+      this.completedSessionStore?.add({
+        id: `reminder_${sessionStartTime}`,
+        type: "reminder",
+        platform,
+        userId: reminder.userId,
+        startedAt: new Date(sessionStartTime).toISOString(),
+        endedAt: new Date().toISOString(),
+        status,
+        durationMs: Date.now() - sessionStartTime,
+      });
     }
   }
 

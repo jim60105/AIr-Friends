@@ -87,6 +87,24 @@ The system SHALL support environment variable overrides for configuration fields
 - **WHEN** `applyEnvOverrides` runs
 - **THEN** the value SHALL be mapped to `"channels"`
 
+#### Scenario: Dashboard Enabled Override
+
+- **GIVEN** `DASHBOARD_ENABLED` is set to `"true"`
+- **WHEN** `applyEnvOverrides` runs
+- **THEN** `dashboard.enabled` SHALL be set to boolean `true`
+
+#### Scenario: Dashboard Port Override
+
+- **GIVEN** `DASHBOARD_PORT` is set to `"9000"`
+- **WHEN** `applyEnvOverrides` runs
+- **THEN** `dashboard.port` SHALL be set to integer `9000`
+
+#### Scenario: Dashboard Passphrase Override
+
+- **GIVEN** `DASHBOARD_PASSPHRASE` is set to `"my-secret"`
+- **WHEN** `applyEnvOverrides` runs
+- **THEN** `dashboard.passphrase` SHALL be set to `"my-secret"`
+
 ### Requirement: Configuration Validation
 
 The system SHALL validate the final merged configuration and reject invalid configs.
@@ -128,7 +146,15 @@ The system SHALL validate the final merged configuration and reject invalid conf
 
 - **GIVEN** optional config sections are missing
 - **WHEN** validation runs
-- **THEN** defaults SHALL be applied for: `memory` (searchLimit=10, maxChars=2000, recentMessageLimit=20), `logging` (level="INFO"), `health` (enabled=false, port=8080), `skillApi` (enabled=true, port=3001, host="127.0.0.1"), `replyPolicy` ("channels"), `rateLimit`, `gitBackup`, `sandbox`, `idleTimeout`, and others
+- **THEN** defaults SHALL be applied for: `memory` (searchLimit=10, maxChars=2000, recentMessageLimit=20), `logging` (level="INFO"), `health` (enabled=false, port=8080), `skillApi` (enabled=true, port=3001, host="127.0.0.1"), `replyPolicy` ("channels"), `rateLimit`, `gitBackup`, `sandbox`, `idleTimeout`, `dashboard` (enabled=false, port=8090, passphrase=""), and others
+
+#### Scenario: Dashboard Config Defaults
+
+- **GIVEN** the `dashboard` config section is not present in the config file
+- **WHEN** validation runs
+- **THEN** `dashboard.enabled` SHALL default to `false`
+- **AND** `dashboard.port` SHALL default to `8090`
+- **AND** `dashboard.passphrase` SHALL default to `""`
 
 ### Requirement: MCP Server Config Validation
 
@@ -320,3 +346,54 @@ The system SHALL support automatic installation of external agent skills at star
 - **WHEN** config validation runs
 - **THEN** the invalid entry SHALL be logged as a warning and filtered out
 - **AND** `agent.externalSkills` SHALL default to an empty array when not configured
+
+### Requirement: Dashboard Configuration Section
+
+The configuration system SHALL support a `dashboard` config section with `enabled` (boolean, default `false`), `port` (number, default `8090`), and `passphrase` (string, required when enabled).
+
+#### Scenario: Dashboard Config in YAML
+
+- **GIVEN** `config.yaml` contains:
+  ```yaml
+  dashboard:
+    enabled: true
+    port: 8090
+    passphrase: "my-secret"
+  ```
+- **WHEN** the configuration is loaded
+- **THEN** `dashboard.enabled` SHALL be `true`
+- **AND** `dashboard.port` SHALL be `8090`
+- **AND** `dashboard.passphrase` SHALL be `"my-secret"`
+
+#### Scenario: Config Example and Env Example Updated
+
+- **GIVEN** the project documentation files
+- **WHEN** `config.example.yaml` and `.env.example` are examined
+- **THEN** they SHALL include the `dashboard` section with `enabled`, `port`, and `passphrase` fields
+
+### Requirement: Dashboard Passphrase as Kubernetes Secret
+
+The Helm chart SHALL store `DASHBOARD_PASSPHRASE` as a Kubernetes Secret and reference it in the deployment environment variables.
+
+#### Scenario: Helm Chart Secret
+
+- **GIVEN** the Helm chart templates
+- **WHEN** the deployment is rendered with `dashboard.passphrase` set
+- **THEN** `DASHBOARD_PASSPHRASE` SHALL be stored in a Kubernetes Secret resource
+- **AND** the deployment SHALL reference the Secret via `secretKeyRef` in its environment variables
+
+#### Scenario: Helm Values Updated
+
+- **GIVEN** the `helm/values.yaml` file
+- **WHEN** the values are examined
+- **THEN** it SHALL include `DASHBOARD_ENABLED`, `DASHBOARD_PORT`, and `DASHBOARD_PASSPHRASE` entries under the `env:` section
+
+### Requirement: Container Dashboard Port Exposure
+
+The Containerfile SHALL expose the dashboard port.
+
+#### Scenario: Dashboard Port Exposed
+
+- **GIVEN** the Containerfile is built
+- **WHEN** the final image is produced
+- **THEN** the dashboard port (default `8090`) SHALL be exposed via an `EXPOSE` directive

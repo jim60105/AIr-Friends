@@ -10,6 +10,7 @@ import type { TemplateVariables } from "../types/template.ts";
 import type {
   ChannelConfig,
   Config,
+  DashboardConfig,
   DryRunConfig,
   GitBackupConfig,
   GitCredentialConfig,
@@ -207,6 +208,15 @@ const DEFAULT_SANDBOX: SandboxConfig = {
 /**
  * Default idle timeout configuration
  */
+/**
+ * Default dashboard configuration
+ */
+const DEFAULT_DASHBOARD: DashboardConfig = {
+  enabled: false,
+  port: 8090,
+  passphrase: "",
+};
+
 const DEFAULT_IDLE_TIMEOUT: IdleTimeoutConfig = {
   enabled: true,
   timeoutMs: 300000, // 5 minutes
@@ -486,6 +496,25 @@ function validateConfig(config: Record<string, unknown>): void {
   if ((rem.maxRemindersPerUser as number) < 1) {
     logger.warn("reminders.maxRemindersPerUser too small, clamping to 1");
     rem.maxRemindersPerUser = 1;
+  }
+
+  // Dashboard defaults and validation
+  if (!config.dashboard) {
+    config.dashboard = { ...DEFAULT_DASHBOARD };
+  } else {
+    config.dashboard = {
+      ...DEFAULT_DASHBOARD,
+      ...(config.dashboard as Record<string, unknown>),
+    };
+  }
+
+  const dash = config.dashboard as Record<string, unknown>;
+  if (dash.enabled === true && (!dash.passphrase || String(dash.passphrase).trim() === "")) {
+    throw new ConfigError(
+      ErrorCode.CONFIG_INVALID,
+      "dashboard.passphrase is required when dashboard is enabled",
+      { field: "dashboard.passphrase" },
+    );
   }
 
   // Model routing defaults and validation

@@ -186,6 +186,9 @@ RUN for dir in /home/deno/.cache/ms-playwright/ffmpeg-*; do \
     ln -s /usr/bin/ffmpeg "$dir/ffmpeg-linux"; \
     done
 
+# Expose dashboard port
+EXPOSE 8090
+
 # Signal handling
 STOPSIGNAL SIGTERM
 

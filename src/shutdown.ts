@@ -63,6 +63,12 @@ export class ShutdownHandler {
     const { platformRegistry, agentCore, healthCheckServer } = this.context;
 
     try {
+      // Stop dashboard server
+      if (this.context.dashboardServer) {
+        logger.info("Stopping dashboard server");
+        await this.context.dashboardServer.stop();
+      }
+
       // Stop health check server first
       if (healthCheckServer) {
         logger.info("Stopping health check server");

@@ -45,6 +45,12 @@ The dashboard server SHALL serve HTML, CSS, and JavaScript assets for the web UI
 - **WHEN** a `GET /` request is received
 - **THEN** the server SHALL return the `index.html` file with `Content-Type: text/html`
 
+#### Scenario: Serves JavaScript Modules
+
+- **GIVEN** the dashboard server is running
+- **WHEN** a `GET /js/app.js` request is received
+- **THEN** the server SHALL return the JavaScript file with `Content-Type: application/javascript`
+
 #### Scenario: Returns 404 for Unknown Paths
 
 - **GIVEN** the dashboard server is running

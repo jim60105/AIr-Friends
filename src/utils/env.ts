@@ -132,6 +132,10 @@ export const ENV_MAPPINGS = {
   AUDIT_RETENTION_DAYS: "audit.retentionDays",
   AUDIT_HASH_CONTENT: "audit.hashContent",
   AUDIT_INCLUDED_PHASES: "audit.includedPhases",
+  // Dashboard settings
+  DASHBOARD_ENABLED: "dashboard.enabled",
+  DASHBOARD_PORT: "dashboard.port",
+  DASHBOARD_PASSPHRASE: "dashboard.passphrase",
 } as const;
 
 /**

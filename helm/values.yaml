@@ -182,6 +182,11 @@ env:
   AUDIT_HASH_CONTENT: ''
   AUDIT_INCLUDED_PHASES: ''
 
+  # Web Dashboard
+  DASHBOARD_ENABLED: ''
+  DASHBOARD_PORT: ''
+  DASHBOARD_PASSPHRASE: ''
+
 # -- Self-research RSS feeds (native YAML, easier than JSON env var).
 # When selfResearchRssFeeds is non-empty, it takes precedence over
 # SELF_RESEARCH_RSS_FEEDS env var.

@@ -255,6 +255,13 @@ export class AgentCore {
   }
 
   /**
+   * Get the session registry
+   */
+  getSessionRegistry(): SessionRegistry {
+    return this.sessionRegistry;
+  }
+
+  /**
    * Shutdown the core (cleanup resources)
    */
   async shutdown(): Promise<void> {
