@@ -452,6 +452,14 @@ export class DashboardServer {
       );
     }
 
+    // Sort: directories first, then alphabetically by name (case-insensitive)
+    children.sort((a, b) => {
+      const aIsDir = a.type === "directory" ? 0 : 1;
+      const bIsDir = b.type === "directory" ? 0 : 1;
+      if (aIsDir !== bIsDir) return aIsDir - bIsDir;
+      return (a.name as string).localeCompare(b.name as string, undefined, { sensitivity: "base" });
+    });
+
     return { name, path: relativePath, type: "directory", children };
   }
 

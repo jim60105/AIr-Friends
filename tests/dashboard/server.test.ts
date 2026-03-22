@@ -1265,6 +1265,49 @@ Deno.test({
 });
 
 Deno.test({
+  name:
+    "DashboardServer - workspace tree sorts directories before files, alphabetically case-insensitive",
+  sanitizeResources: false,
+  sanitizeOps: false,
+}, async () => {
+  const t = await createTestServer();
+  try {
+    // Create files and directories with intentionally unsorted names
+    await Deno.mkdir(`${t.agentWorkspacePath}/Zebra`, { recursive: true });
+    await Deno.mkdir(`${t.agentWorkspacePath}/alpha`, { recursive: true });
+    await Deno.writeTextFile(`${t.agentWorkspacePath}/Beta.md`, "b");
+    await Deno.writeTextFile(`${t.agentWorkspacePath}/gamma.md`, "g");
+    await Deno.writeTextFile(`${t.agentWorkspacePath}/Alpha.md`, "a");
+    // Nested: verify recursive sorting
+    await Deno.writeTextFile(`${t.agentWorkspacePath}/alpha/zebra.md`, "z");
+    await Deno.writeTextFile(`${t.agentWorkspacePath}/alpha/apple.md`, "a");
+
+    const cookie = await loginAndGetCookie(t.baseUrl);
+    const res = await fetch(`${t.baseUrl}/api/workspace/tree`, {
+      headers: { Cookie: cookie },
+    });
+    assertEquals(res.status, 200);
+    const body = await res.json();
+    const names = body.children.map((c: Record<string, unknown>) => c.name);
+
+    // Directories first (alpha, Zebra), then files (Alpha.md, Beta.md, gamma.md)
+    assertEquals(names[0], "alpha");
+    assertEquals(names[1], "Zebra");
+    assertEquals(names[2], "Alpha.md");
+    assertEquals(names[3], "Beta.md");
+    assertEquals(names[4], "gamma.md");
+
+    // Verify recursive sorting inside alpha/
+    const alphaDir = body.children.find((c: Record<string, unknown>) => c.name === "alpha");
+    const nestedNames = alphaDir.children.map((c: Record<string, unknown>) => c.name);
+    assertEquals(nestedNames[0], "apple.md");
+    assertEquals(nestedNames[1], "zebra.md");
+  } finally {
+    await t.cleanup();
+  }
+});
+
+Deno.test({
   name: "DashboardServer - GET /api/stats without metrics registry returns zeroes",
   sanitizeResources: false,
   sanitizeOps: false,
