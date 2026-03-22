@@ -104,11 +104,8 @@ export class DashboardServer {
       // Auth check for all other routes
       if (!this.isAuthenticated(req)) {
         if (!path.startsWith("/api/")) {
-          // Redirect to login page for non-API requests
-          return new Response(null, {
-            status: 302,
-            headers: { Location: "/login" },
-          });
+          // Serve static files (login page is rendered client-side)
+          return await this.serveStaticFile(path);
         }
         return this.json({ error: "Unauthorized" }, 401);
       }
