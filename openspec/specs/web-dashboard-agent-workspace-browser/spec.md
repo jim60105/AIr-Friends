@@ -33,6 +33,8 @@ Defines the read-only file browser for the agent workspace directory, including 
 
 `GET /api/workspace/file?path=<relative-path>` SHALL return the content of a file within `agent-workspace`. Only `.md` and `.txt` files SHALL be readable. The path parameter SHALL be normalized by stripping any leading `/` before validation. After normalization, the path MUST NOT contain `..` segments or `%2F` sequences. The resolved path MUST be within the agent workspace directory.
 
+The client-side file viewer SHALL differentiate between `.md` and `.txt` files: `.md` files SHALL be rendered as formatted HTML using a client-side markdown parser, while `.txt` files SHALL continue to be displayed as plain text in a `<pre>` block.
+
 #### Scenario: Returns File Content for Valid Markdown File
 
 - **GIVEN** `data/agent-workspace/notes/_index.md` exists with content `"# Index\n- Topic A"`

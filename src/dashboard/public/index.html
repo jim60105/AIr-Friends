@@ -204,13 +204,23 @@
             >
               <div
                 id="file-header"
-                class="hidden px-4 py-2.5 border-b border-indigo-900/20 text-xs text-gray-400 font-mono"
+                class="hidden px-4 py-2.5 border-b border-indigo-900/20 text-xs text-gray-400 font-mono flex items-center justify-between"
               >
+                <span id="file-header-path"></span>
+                <button
+                  id="md-view-toggle"
+                  class="hidden px-2 py-0.5 rounded border border-indigo-900/30 text-gray-400 hover:text-gray-200 hover:border-indigo-700/50 transition-colors text-[11px] tracking-wide uppercase"
+                  onclick="toggleMarkdownView()"
+                >Raw</button>
               </div>
               <pre
                 id="file-content"
                 class="p-4 text-sm font-mono text-gray-300 whitespace-pre-wrap overflow-auto flex-1"
               ><span class="text-gray-500">Select a file to view its contents</span></pre>
+              <div
+                id="file-content-rendered"
+                class="hidden p-6 text-sm text-gray-300 overflow-auto flex-1 md-rendered"
+              ></div>
             </div>
           </div>
         </section>
@@ -332,6 +342,7 @@
       </div>
     </div>
 
+    <script src="https://cdn.jsdelivr.net/npm/marked@15/marked.min.js"></script>
     <script src="/js/utils.js"></script>
     <script src="/js/auth.js"></script>
     <script src="/js/app.js"></script>

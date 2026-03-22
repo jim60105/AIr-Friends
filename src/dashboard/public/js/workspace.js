@@ -1,5 +1,10 @@
 // Workspace browser
 
+// Disable raw HTML passthrough in marked to prevent XSS
+if (typeof marked !== "undefined") {
+  marked.use({ renderer: { html: () => "" } });
+}
+
 async function loadWorkspaceTree() {
   const container = document.getElementById("workspace-tree");
   try {
@@ -37,10 +42,17 @@ function renderTree(node) {
 
 async function loadFile(path) {
   const header = document.getElementById("file-header");
+  const headerPath = document.getElementById("file-header-path");
   const content = document.getElementById("file-content");
+  const rendered = document.getElementById("file-content-rendered");
+  const toggle = document.getElementById("md-view-toggle");
   header.classList.remove("hidden");
-  header.textContent = path;
+  headerPath.textContent = path;
   content.textContent = "Loading…";
+  rendered.innerHTML = "";
+  rendered.classList.add("hidden");
+  content.classList.remove("hidden");
+  toggle.classList.add("hidden");
   try {
     const res = await fetch(`/api/workspace/file?path=${encodeURIComponent(path)}`);
     if (!res.ok) {
@@ -48,8 +60,34 @@ async function loadFile(path) {
       return;
     }
     const data = await res.json();
+    const isMd = path.endsWith(".md");
     content.textContent = data.content;
+    if (isMd && typeof marked !== "undefined") {
+      rendered.innerHTML = marked.parse(data.content);
+      content.classList.add("hidden");
+      rendered.classList.remove("hidden");
+      toggle.classList.remove("hidden");
+      toggle.textContent = "Raw";
+      toggle.dataset.showing = "rendered";
+    }
   } catch (_) {
     content.textContent = "Failed to load file";
+  }
+}
+
+function toggleMarkdownView() {
+  const content = document.getElementById("file-content");
+  const rendered = document.getElementById("file-content-rendered");
+  const toggle = document.getElementById("md-view-toggle");
+  if (toggle.dataset.showing === "rendered") {
+    rendered.classList.add("hidden");
+    content.classList.remove("hidden");
+    toggle.textContent = "Rendered";
+    toggle.dataset.showing = "raw";
+  } else {
+    content.classList.add("hidden");
+    rendered.classList.remove("hidden");
+    toggle.textContent = "Raw";
+    toggle.dataset.showing = "rendered";
   }
 }
