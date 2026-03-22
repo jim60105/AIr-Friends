@@ -11,10 +11,16 @@
           extend: {
             colors: {
               surface: {
-                DEFAULT: "#0f0d1a",
-                50: "#1a1726",
-                100: "#1e1b2e",
-                200: "#252236",
+                DEFAULT: "#1e1e1e",
+                50: "#252526",
+                100: "#2d2d30",
+                200: "#3c3c3c",
+              },
+              accent: {
+                DEFAULT: "#007acc",
+                light: "#3794ff",
+                dark: "#0e639c",
+                muted: "rgba(0, 122, 204, 0.15)",
               },
             },
           },
@@ -23,25 +29,25 @@
     </script>
     <link rel="stylesheet" href="/style.css">
   </head>
-  <body class="h-full bg-surface text-gray-200 font-sans">
+  <body class="h-full bg-surface text-[#cccccc] font-sans">
     <!-- Login Screen -->
     <div id="login-screen" class="hidden min-h-screen flex items-center justify-center px-4">
       <div
-        class="w-full max-w-sm bg-surface-100 border border-indigo-900/40 rounded-2xl shadow-2xl p-8"
+        class="w-full max-w-sm bg-surface-100 border border-accent-muted rounded-2xl shadow-2xl p-8"
       >
-        <h1 class="text-2xl font-bold text-center text-indigo-300 mb-1">AIr-Friends</h1>
+        <h1 class="text-2xl font-bold text-center text-accent-light mb-1">AIr-Friends</h1>
         <p class="text-sm text-gray-400 text-center mb-6">Dashboard Login</p>
         <form id="login-form" class="space-y-4">
           <input
             id="login-passphrase"
             type="password"
             placeholder="Passphrase"
-            class="w-full px-4 py-2.5 bg-surface-200 border border-indigo-800/30 rounded-lg text-gray-200 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+            class="w-full px-4 py-2.5 bg-surface-200 border border-accent/30 rounded-lg text-gray-200 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-accent focus:border-transparent"
             autocomplete="current-password"
           >
           <button
             type="submit"
-            class="w-full py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white font-medium rounded-lg transition-colors"
+            class="w-full py-2.5 bg-accent-dark hover:bg-accent text-white font-medium rounded-lg transition-colors"
           >
             Login
           </button>
@@ -54,9 +60,9 @@
     <div id="dashboard" class="hidden h-full flex flex-col">
       <!-- Header -->
       <header
-        class="bg-surface-100 border-b border-indigo-900/30 px-4 py-3 flex items-center justify-between shrink-0"
+        class="bg-surface-100 border-b border-accent-muted px-4 py-3 flex items-center justify-between shrink-0"
       >
-        <h1 class="text-lg font-bold text-indigo-300">AIr-Friends</h1>
+        <h1 class="text-lg font-bold text-accent-light">AIr-Friends</h1>
         <div class="flex items-center gap-3">
           <button
             onclick="doRestart()"
@@ -76,7 +82,7 @@
 
       <!-- Tabs -->
       <nav
-        class="bg-surface-100 border-b border-indigo-900/20 px-4 flex gap-1 shrink-0 overflow-x-auto"
+        class="bg-surface-100 border-b border-accent-muted px-4 flex gap-1 shrink-0 overflow-x-auto"
       >
         <button
           class="tab-btn px-4 py-2.5 text-sm font-medium rounded-t-lg transition-colors"
@@ -109,14 +115,14 @@
         <!-- Sessions Tab -->
         <section id="tab-sessions" class="tab-panel hidden space-y-6">
           <div>
-            <h2 class="text-sm font-semibold text-indigo-300 uppercase tracking-wider mb-3">
+            <h2 class="text-sm font-semibold text-accent-light uppercase tracking-wider mb-3">
               Active Sessions
             </h2>
-            <div class="bg-surface-100 border border-indigo-900/20 rounded-xl overflow-hidden">
+            <div class="bg-surface-100 border border-accent-muted rounded-xl overflow-hidden">
               <div class="overflow-x-auto">
                 <table class="w-full text-sm">
                   <thead>
-                    <tr class="border-b border-indigo-900/20 text-gray-400 text-xs uppercase">
+                    <tr class="border-b border-accent-muted text-gray-400 text-xs uppercase">
                       <th class="px-4 py-2.5 text-left">ID</th>
                       <th class="px-4 py-2.5 text-left">Type</th>
                       <th class="px-4 py-2.5 text-left">Platform</th>
@@ -126,7 +132,7 @@
                       <th class="px-4 py-2.5 text-left">Status</th>
                     </tr>
                   </thead>
-                  <tbody id="active-sessions-body" class="divide-y divide-indigo-900/10">
+                  <tbody id="active-sessions-body" class="divide-y divide-accent-muted">
                     <tr>
                       <td colspan="7" class="px-4 py-6 text-center text-gray-500">
                         No active sessions
@@ -139,14 +145,14 @@
           </div>
 
           <div>
-            <h2 class="text-sm font-semibold text-indigo-300 uppercase tracking-wider mb-3">
+            <h2 class="text-sm font-semibold text-accent-light uppercase tracking-wider mb-3">
               Session History
             </h2>
-            <div class="bg-surface-100 border border-indigo-900/20 rounded-xl overflow-hidden">
+            <div class="bg-surface-100 border border-accent-muted rounded-xl overflow-hidden">
               <div class="overflow-x-auto">
                 <table class="w-full text-sm">
                   <thead>
-                    <tr class="border-b border-indigo-900/20 text-gray-400 text-xs uppercase">
+                    <tr class="border-b border-accent-muted text-gray-400 text-xs uppercase">
                       <th class="px-4 py-2.5 text-left">ID</th>
                       <th class="px-4 py-2.5 text-left">Type</th>
                       <th class="px-4 py-2.5 text-left">Platform</th>
@@ -157,7 +163,7 @@
                       <th class="px-4 py-2.5 text-left">Status</th>
                     </tr>
                   </thead>
-                  <tbody id="history-sessions-body" class="divide-y divide-indigo-900/10">
+                  <tbody id="history-sessions-body" class="divide-y divide-accent-muted">
                     <tr>
                       <td colspan="8" class="px-4 py-6 text-center text-gray-500">
                         No session history
@@ -172,7 +178,7 @@
 
         <!-- Stats Tab -->
         <section id="tab-stats" class="tab-panel hidden">
-          <h2 class="text-sm font-semibold text-indigo-300 uppercase tracking-wider mb-3">
+          <h2 class="text-sm font-semibold text-accent-light uppercase tracking-wider mb-3">
             Statistics
           </h2>
           <div id="stats-grid" class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4"></div>
@@ -181,35 +187,35 @@
         <!-- Workspace Tab -->
         <section id="tab-workspace" class="tab-panel hidden flex flex-col h-[calc(100vh-8rem)]">
           <div class="flex items-center justify-between mb-3">
-            <h2 class="text-sm font-semibold text-indigo-300 uppercase tracking-wider">
+            <h2 class="text-sm font-semibold text-accent-light uppercase tracking-wider">
               Agent Workspace
             </h2>
             <button
               onclick="loadWorkspaceTree()"
-              class="text-xs px-3 py-1.5 bg-surface-200 hover:bg-indigo-900/30 border border-indigo-900/20 rounded-lg text-gray-300 transition-colors"
+              class="text-xs px-3 py-1.5 bg-surface-200 hover:bg-accent-muted border border-accent-muted rounded-lg text-gray-300 transition-colors"
             >
               ↻ Refresh
             </button>
           </div>
           <div class="flex flex-col lg:flex-row gap-4 flex-1 min-h-0 overflow-hidden">
             <div
-              class="lg:w-72 shrink-0 bg-surface-100 border border-indigo-900/20 rounded-xl p-3 overflow-auto"
+              class="lg:w-72 shrink-0 bg-surface-100 border border-accent-muted rounded-xl p-3 overflow-auto"
             >
               <div id="workspace-tree" class="text-sm">
                 <p class="text-gray-500 text-center py-4">Loading…</p>
               </div>
             </div>
             <div
-              class="flex-1 flex flex-col bg-surface-100 border border-indigo-900/20 rounded-xl overflow-hidden min-h-0"
+              class="flex-1 flex flex-col bg-surface-100 border border-accent-muted rounded-xl overflow-hidden min-h-0"
             >
               <div
                 id="file-header"
-                class="hidden px-4 py-2.5 border-b border-indigo-900/20 text-xs text-gray-400 font-mono flex items-center justify-between"
+                class="hidden px-4 py-2.5 border-b border-accent-muted text-xs text-gray-400 font-mono flex items-center justify-between"
               >
                 <span id="file-header-path"></span>
                 <button
                   id="md-view-toggle"
-                  class="hidden px-2 py-0.5 rounded border border-indigo-900/30 text-gray-400 hover:text-gray-200 hover:border-indigo-700/50 transition-colors text-[11px] tracking-wide uppercase"
+                  class="hidden px-2 py-0.5 rounded border border-accent-muted text-gray-400 hover:text-gray-200 hover:border-accent/50 transition-colors text-[11px] tracking-wide uppercase"
                   onclick="toggleMarkdownView()"
                 >
                   Raw
@@ -233,14 +239,14 @@
           <!-- Connection bar -->
           <div
             id="chat-connect-bar"
-            class="bg-surface-100 border border-indigo-900/20 rounded-xl p-4 mb-4 shrink-0"
+            class="bg-surface-100 border border-accent-muted rounded-xl p-4 mb-4 shrink-0"
           >
             <div class="flex flex-wrap items-end gap-3">
               <div>
                 <label class="block text-xs text-gray-400 mb-1">Agent</label>
                 <select
                   id="chat-agent-type"
-                  class="bg-surface-200 border border-indigo-800/30 rounded-lg px-3 py-2 text-sm text-gray-200 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  class="bg-surface-200 border border-accent/30 rounded-lg px-3 py-2 text-sm text-gray-200 focus:outline-none focus:ring-2 focus:ring-accent"
                 >
                   <option value="copilot">Copilot</option>
                   <option value="gemini">Gemini</option>
@@ -254,14 +260,14 @@
                   type="text"
                   list="model-suggestions"
                   placeholder="e.g. claude-sonnet-4"
-                  class="w-full bg-surface-200 border border-indigo-800/30 rounded-lg px-3 py-2 text-sm text-gray-200 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                  class="w-full bg-surface-200 border border-accent/30 rounded-lg px-3 py-2 text-sm text-gray-200 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-accent"
                 >
                 <datalist id="model-suggestions"></datalist>
               </div>
               <button
                 id="chat-connect-btn"
                 onclick="chatConnect()"
-                class="px-5 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-medium rounded-lg transition-colors"
+                class="px-5 py-2 bg-accent-dark hover:bg-accent text-white text-sm font-medium rounded-lg transition-colors"
               >
                 Connect
               </button>
@@ -279,7 +285,7 @@
           <!-- Messages -->
           <div
             id="chat-messages"
-            class="flex-1 overflow-auto bg-surface-100 border border-indigo-900/20 rounded-xl p-4 mb-4 space-y-3"
+            class="flex-1 overflow-auto bg-surface-100 border border-accent-muted rounded-xl p-4 mb-4 space-y-3"
           >
             <p class="text-gray-500 text-center text-sm py-8">
               Connect to an agent to start chatting
@@ -293,13 +299,13 @@
               rows="2"
               placeholder="Type a message…"
               disabled
-              class="flex-1 bg-surface-100 border border-indigo-900/20 rounded-xl px-4 py-2.5 text-sm text-gray-200 placeholder-gray-500 resize-none focus:outline-none focus:ring-2 focus:ring-indigo-500 disabled:opacity-40"
+              class="flex-1 bg-surface-100 border border-accent-muted rounded-xl px-4 py-2.5 text-sm text-gray-200 placeholder-gray-500 resize-none focus:outline-none focus:ring-2 focus:ring-accent disabled:opacity-40"
             ></textarea>
             <button
               id="chat-send-btn"
               onclick="chatSend()"
               disabled
-              class="px-5 bg-indigo-600 hover:bg-indigo-500 disabled:bg-indigo-900 disabled:opacity-40 text-white text-sm font-medium rounded-xl transition-colors"
+              class="px-5 bg-accent-dark hover:bg-accent disabled:bg-accent-dark disabled:opacity-40 text-white text-sm font-medium rounded-xl transition-colors"
             >
               Send
             </button>
@@ -309,7 +315,7 @@
           <div id="chat-reconnect" class="hidden mt-3 text-center">
             <button
               onclick="chatReset()"
-              class="px-5 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-medium rounded-lg transition-colors"
+              class="px-5 py-2 bg-accent-dark hover:bg-accent text-white text-sm font-medium rounded-lg transition-colors"
             >
               New Connection
             </button>
@@ -324,7 +330,7 @@
       class="hidden fixed inset-0 z-50 flex items-center justify-center bg-black/60"
     >
       <div
-        class="bg-surface-100 border border-indigo-900/30 rounded-2xl shadow-2xl p-6 max-w-sm w-full mx-4"
+        class="bg-surface-100 border border-accent-muted rounded-2xl shadow-2xl p-6 max-w-sm w-full mx-4"
       >
         <h3 class="text-lg font-semibold text-yellow-400 mb-2">Restart Process?</h3>
         <p id="restart-msg" class="text-sm text-gray-300 mb-5"></p>

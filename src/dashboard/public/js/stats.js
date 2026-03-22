@@ -39,7 +39,7 @@ async function pollStats() {
       },
     ];
     grid.innerHTML = cards.map((c) =>
-      `<div class="bg-surface-100 border border-indigo-900/20 rounded-xl p-5">
+      `<div class="bg-surface-100 border border-accent-muted rounded-xl p-5">
       <div class="text-2xl mb-2">${c.icon}</div>
       <div class="text-2xl font-bold text-gray-100">${c.value}</div>
       <div class="text-xs text-gray-400 mt-1">${c.label}</div>

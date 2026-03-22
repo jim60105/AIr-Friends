@@ -15,7 +15,7 @@ async function pollActiveSessions() {
     }
     body.innerHTML = sessions.map((s) =>
       `<tr class="hover:bg-surface-200/50">
-      <td class="px-4 py-2.5 font-mono text-xs text-indigo-300">${esc(s.id?.slice(0, 12))}…</td>
+      <td class="px-4 py-2.5 font-mono text-xs text-accent-light">${esc(s.id?.slice(0, 12))}…</td>
       <td class="px-4 py-2.5">${esc(s.type || "—")}</td>
       <td class="px-4 py-2.5">${esc(s.platform)}</td>
       <td class="px-4 py-2.5 font-mono text-xs">${esc(s.userId)}</td>
@@ -42,7 +42,7 @@ async function pollHistory() {
       `<tr class="hover:bg-surface-200/50 cursor-pointer" data-audit-id="${
         esc(s.auditSessionId || s.id)
       }">
-      <td class="px-4 py-2.5 font-mono text-xs text-indigo-300">${esc(s.id?.slice(0, 12))}…</td>
+      <td class="px-4 py-2.5 font-mono text-xs text-accent-light">${esc(s.id?.slice(0, 12))}…</td>
       <td class="px-4 py-2.5">${esc(s.type)}</td>
       <td class="px-4 py-2.5">${esc(s.platform)}</td>
       <td class="px-4 py-2.5 font-mono text-xs">${esc(s.userId)}</td>
@@ -98,7 +98,7 @@ async function toggleAudit(row, sessionId) {
           `<details class="audit-entry">
             <summary class="flex gap-3 cursor-pointer hover:bg-surface/50 rounded px-1 py-0.5 select-none">
               <span class="text-gray-500 shrink-0">${formatTime(e.ts)}</span>
-              <span class="text-indigo-300">${esc(e.phase)}</span>
+              <span class="text-accent-light">${esc(e.phase)}</span>
               <span class="text-gray-500 truncate">${
             esc(Object.keys(e.data || {}).join(", "))
           }</span>

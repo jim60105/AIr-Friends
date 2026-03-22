@@ -195,10 +195,10 @@ function appendMessage(role, text) {
   const isUser = role === "user";
   div.className = `p-3 rounded-xl max-w-[85%] ${
     isUser
-      ? "ml-auto bg-indigo-700/40 border border-indigo-600/30"
-      : "bg-surface-200 border border-indigo-900/20"
+      ? "ml-auto bg-accent/40 border border-accent-dark/30"
+      : "bg-surface-200 border border-accent-muted"
   }`;
-  div.innerHTML = `<div class="text-xs ${isUser ? "text-indigo-300" : "text-gray-400"} mb-1">${
+  div.innerHTML = `<div class="text-xs ${isUser ? "text-accent-light" : "text-gray-400"} mb-1">${
     isUser ? "You" : "Agent"
   }</div><div class="text-sm text-gray-200 whitespace-pre-wrap msg-content">${esc(text)}</div>`;
   container.appendChild(div);
@@ -216,9 +216,9 @@ function appendThinkBlock(el, text) {
   const content = el.querySelector(".msg-content");
   const details = document.createElement("details");
   details.className =
-    "think-block my-2 bg-surface/50 border border-indigo-900/20 rounded-lg overflow-hidden";
+    "think-block my-2 bg-surface/50 border border-accent-muted rounded-lg overflow-hidden";
   details.innerHTML =
-    `<summary class="px-3 py-1.5 text-xs text-indigo-400 cursor-pointer hover:bg-surface-200/30 select-none">💭 Thinking…</summary><div class="think-content px-3 py-2 text-xs text-gray-400 whitespace-pre-wrap border-t border-indigo-900/10">${
+    `<summary class="px-3 py-1.5 text-xs text-accent cursor-pointer hover:bg-surface-200/30 select-none">💭 Thinking…</summary><div class="think-content px-3 py-2 text-xs text-gray-400 whitespace-pre-wrap border-t border-accent-muted">${
       esc(text)
     }</div>`;
   content.appendChild(details);
@@ -239,7 +239,7 @@ function showTypingIndicator() {
   const container = document.getElementById("chat-messages");
   const div = document.createElement("div");
   div.id = "typing-indicator";
-  div.className = "p-3 rounded-xl max-w-[85%] bg-surface-200 border border-indigo-900/20";
+  div.className = "p-3 rounded-xl max-w-[85%] bg-surface-200 border border-accent-muted";
   div.innerHTML =
     '<div class="text-xs text-gray-400 mb-1">Agent</div><div class="typing-indicator"><span class="dot"></span><span class="dot"></span><span class="dot"></span></div>';
   container.appendChild(div);

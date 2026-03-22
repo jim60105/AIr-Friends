@@ -11,9 +11,9 @@ function switchTab(tab) {
   document.querySelectorAll(".tab-btn").forEach((b) => {
     const active = b.dataset.tab === tab;
     b.classList.toggle("bg-surface", active);
-    b.classList.toggle("text-indigo-300", active);
+    b.classList.toggle("text-accent-light", active);
     b.classList.toggle("border-b-2", active);
-    b.classList.toggle("border-indigo-500", active);
+    b.classList.toggle("border-accent", active);
     b.classList.toggle("text-gray-400", !active);
     b.classList.toggle("hover:text-gray-200", !active);
   });
