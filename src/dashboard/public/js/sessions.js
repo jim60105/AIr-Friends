@@ -15,7 +15,7 @@ async function pollActiveSessions() {
     }
     body.innerHTML = sessions.map((s) =>
       `<tr class="hover:bg-surface-200/50">
-      <td class="px-4 py-2.5 font-mono text-xs text-accent-light">${esc(s.id?.slice(0, 12))}…</td>
+      <td class="px-4 py-2.5 font-mono text-xs text-accent-light break-all">${esc(s.id)}</td>
       <td class="px-4 py-2.5">${esc(s.type || "—")}</td>
       <td class="px-4 py-2.5">${esc(s.platform)}</td>
       <td class="px-4 py-2.5 font-mono text-xs">${esc(s.userId)}</td>
@@ -42,12 +42,12 @@ async function pollHistory() {
       `<tr class="hover:bg-surface-200/50 cursor-pointer" data-audit-id="${
         esc(s.auditSessionId || s.id)
       }">
-      <td class="px-4 py-2.5 font-mono text-xs text-accent-light">${esc(s.id?.slice(0, 12))}…</td>
+      <td class="px-4 py-2.5 font-mono text-xs text-accent-light break-all">${esc(s.id)}</td>
       <td class="px-4 py-2.5">${esc(s.type)}</td>
       <td class="px-4 py-2.5">${esc(s.platform)}</td>
       <td class="px-4 py-2.5 font-mono text-xs">${esc(s.userId)}</td>
-      <td class="px-4 py-2.5 text-xs">${formatTime(s.startedAt)}</td>
-      <td class="px-4 py-2.5 text-xs">${formatTime(s.endedAt)}</td>
+      <td class="px-4 py-2.5 text-xs">${formatTime(s.startTime)}</td>
+      <td class="px-4 py-2.5 text-xs">${formatTime(s.endTime)}</td>
       <td class="px-4 py-2.5 text-xs">${formatDuration(s.durationMs)}</td>
       <td class="px-4 py-2.5"><span class="inline-flex items-center gap-1.5"><span class="w-2 h-2 rounded-full ${
         s.status === "success" ? "bg-green-400" : "bg-red-400"
