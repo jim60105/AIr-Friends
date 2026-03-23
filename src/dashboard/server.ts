@@ -349,7 +349,7 @@ export class DashboardServer {
 
   private async handleSessionAudit(sessionId: string): Promise<Response> {
     // Validate sessionId format
-    if (!/^sess_[a-zA-Z0-9]+$/.test(sessionId)) {
+    if (!/^sess_[a-zA-Z0-9_]+$/.test(sessionId)) {
       return this.json({ error: "Invalid session ID format" }, 400);
     }
 
