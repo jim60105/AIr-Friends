@@ -11,7 +11,6 @@ const defaultVars: TemplateVariables = {
   userId: "user123",
   channelId: "channel456",
   guildId: "guild789",
-  sessionId: "sess_abc",
 };
 
 // Test with a temporary directory containing test config files

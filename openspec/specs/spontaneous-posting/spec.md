@@ -237,7 +237,7 @@ Spontaneous post errors SHALL never crash the bot and SHALL always allow the nex
 #### Scenario: Cleanup guarantee
 - **GIVEN** a spontaneous post session (success or failure)
 - **WHEN** the session completes
-- **THEN** the `finally` block SHALL always disconnect the agent, remove the session from the registry, and clean up temporary files (tmp directory, SESSION_ID file)
+- **THEN** the `finally` block SHALL always disconnect the agent, remove the session from the registry, and clean up the tmp directory
 
 #### Scenario: Metrics recording
 - **GIVEN** a completed spontaneous post session

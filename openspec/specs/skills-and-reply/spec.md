@@ -16,6 +16,12 @@ Skills SHALL be implemented as Deno TypeScript scripts located in `skills/{skill
 - **THEN** the script SHALL receive `--session-id` as a parameter
 - **AND** the script SHALL call the Skill API HTTP endpoint to perform the operation
 
+#### Scenario: Skill receives session ID from environment variable
+- **GIVEN** a skill script is executed by the agent
+- **WHEN** the agent builds the bash command
+- **THEN** the agent SHALL use `--session-id "$SESSION_ID"` where `$SESSION_ID` is resolved from the environment variable set in the agent subprocess
+- **AND** the agent SHALL NOT need to know the actual session ID value
+
 ### Requirement: Skill API HTTP Server
 
 The system SHALL run an HTTP server (configurable host/port, typically `localhost:3001`) that exposes skill endpoints at `POST /api/skill/{skill-name}`. The server SHALL only accept POST requests (returning appropriate errors for other methods). OPTIONS requests SHALL return 204 for CORS preflight. The server SHALL implement a 1-second TTL request cache for deduplication of concurrent duplicate requests.

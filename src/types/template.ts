@@ -24,9 +24,6 @@ export interface TemplateVariables {
   /** Guild/server ID (empty string if not applicable) */
   guildId: string;
 
-  /** The session ID for skill API calls (empty string if skill API disabled) */
-  sessionId: string;
-
   /** The agent type used for this session (e.g. "copilot", "gemini", "opencode") */
   agentType?: string;
 

@@ -641,7 +641,6 @@ export class DashboardServer {
           userId: "dashboard",
           channelId: "web-chat",
           guildId: "",
-          sessionId: "",
           yolo: false,
           canWriteAgentWorkspace: false,
         };

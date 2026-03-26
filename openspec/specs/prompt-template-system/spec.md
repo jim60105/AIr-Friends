@@ -95,7 +95,6 @@ The `TemplateVariables` interface SHALL define the following variables available
 | `userId`               | `string`                        | User's platform ID                                   |
 | `channelId`            | `string`                        | Channel/conversation ID                              |
 | `guildId`              | `string`                        | Server/guild ID (empty string if N/A)                |
-| `sessionId`            | `string`                        | Skill API session ID (empty string if disabled)      |
 | `agentType`            | `string` (optional)             | ACP agent type (`"copilot"`, `"gemini"`, `"opencode"`) |
 | `model`                | `string` (optional)             | Model identifier                                     |
 | `yolo`                 | `boolean` (optional)            | Whether YOLO mode is enabled                         |
@@ -136,7 +135,7 @@ The `TemplateVariables` interface SHALL define the following variables available
 #### Scenario: Core variables available
 - **GIVEN** a normal message session
 - **WHEN** the template is rendered
-- **THEN** `isDm`, `platform`, `userId`, `channelId`, `guildId`, `sessionId`, and `userContextMessage` SHALL be available
+- **THEN** `isDm`, `platform`, `userId`, `channelId`, `guildId`, and `userContextMessage` SHALL be available
 
 #### Scenario: Spontaneous-specific variables
 - **GIVEN** a spontaneous post session

@@ -229,7 +229,7 @@ Available aliases:
 - Each workspace is an isolated directory under `repo/workspaces/`
 - Agent sessions use workspace path as current working directory (cwd)
 - No cross-workspace file access allowed
-- A `SESSION_ID` file is created in the workspace during active sessions
+- The `SESSION_ID` environment variable is set for the agent subprocess during active sessions
 
 ```typescript
 // Workspace path structure
@@ -332,7 +332,7 @@ interface PatchEvent {
 - Scripts use shared client library in `skills/lib/client.ts`
 - Scripts call back to main bot via HTTP API (Skill API Server on localhost:3001)
 - Session-based authentication ensures security
-- A `SESSION_ID` file is created in the workspace with the active session ID
+- The `SESSION_ID` environment variable is set for the agent subprocess with the active session ID
 
 **Available Skills**:
 

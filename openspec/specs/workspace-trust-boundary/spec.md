@@ -36,18 +36,17 @@ The system SHALL create workspace directories under `{repoPath}/workspaces/{work
 
 ### Requirement: Session Lifecycle
 
-The system SHALL create a new session for each trigger event. The session's current working directory (cwd) SHALL be set to the user's workspace path. A `SESSION_ID` file SHALL be written to the workspace directory at session start and removed at session end.
+The system SHALL create a new session for each trigger event. The session's current working directory (cwd) SHALL be set to the user's workspace path. The `SESSION_ID` SHALL be exposed to the agent subprocess via environment variable, NOT via a file in the workspace. Multiple concurrent sessions MAY share the same workspace by design.
 
-#### Scenario: Session start writes SESSION_ID file
+#### Scenario: Session start sets SESSION_ID env var
 - **GIVEN** a user triggers the bot
-- **WHEN** the session orchestrator begins processing
-- **THEN** the system SHALL write a `SESSION_ID` file containing the active session ID to `{workspace.path}/SESSION_ID`
+- **WHEN** the session orchestrator begins processing and creates an ACP session
+- **THEN** the system SHALL set `SESSION_ID` in the process environment for the agent subprocess to inherit (not write a file)
 
-#### Scenario: Session end removes SESSION_ID file
-- **GIVEN** a session is active with a `SESSION_ID` file in the workspace
+#### Scenario: Session end cleans up SESSION_ID
+- **GIVEN** a session is active
 - **WHEN** the session completes (success or failure)
-- **THEN** the system SHALL remove the `SESSION_ID` file from the workspace directory
-- **AND** if removal fails, the system SHALL log a warning but NOT crash
+- **THEN** the system SHALL remove `SESSION_ID` from the process environment
 
 #### Scenario: Each trigger creates a fresh session
 - **GIVEN** a user has previously interacted with the bot

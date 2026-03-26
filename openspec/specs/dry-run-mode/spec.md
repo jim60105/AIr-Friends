@@ -67,7 +67,7 @@ When `agent.dryRun.mockReply` is a non-empty string, the system SHALL send the m
 
 ### Requirement: Session Response
 
-The `handleDryRun` method SHALL return a `SessionResponse` with `success: true` and `replySent` set to whether a mock reply was actually sent. After dry run completes, the session SHALL be cleaned up normally (session registry removal, SESSION_ID file deletion, workspace tmp cleanup).
+The `handleDryRun` method SHALL return a `SessionResponse` with `success: true` and `replySent` set to whether a mock reply was actually sent. After dry run completes, the session SHALL be cleaned up normally (session registry removal, workspace tmp cleanup).
 
 #### Scenario: Successful dry run response
 - **GIVEN** dry run mode is enabled

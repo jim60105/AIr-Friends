@@ -429,10 +429,7 @@ export class GitBackupService {
   /** Ensure .gitignore exists with required exclusions. */
   private async ensureGitignore(): Promise<void> {
     const gitignorePath = `${this.dataDir}/.gitignore`;
-    const content = `# Temporary session files
-SESSION_ID
-
-# Scheduler state (runtime-only, frequently updated)
+    const content = `# Scheduler state (runtime-only, frequently updated)
 scheduler-state.json
 
 # Ignore nested git repositories (agent-created repos in workspaces)

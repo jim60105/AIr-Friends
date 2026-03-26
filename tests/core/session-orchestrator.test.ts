@@ -2615,17 +2615,16 @@ Deno.test({
       const workspacePath = workspaceManager.getWorkspacePath(workspaceKey);
       const tmpPath = `${workspacePath}/tmp`;
       const tmpSentinel = `${tmpPath}/success-sentinel.txt`;
-      const sessionIdFile = `${workspacePath}/SESSION_ID`;
       const observedSessionIds: string[] = [];
 
       orchestrator.setConnectorSetup((connector) => {
         connector.connect = () => {
-          observedSessionIds.push(Deno.readTextFileSync(sessionIdFile));
           Deno.writeTextFileSync(tmpSentinel, "temporary data");
           return Promise.resolve();
         };
         connector.promptResponses = [{ stopReason: "end_turn" } as PromptResponse];
         connector.onPrompt = () => {
+          observedSessionIds.push(Deno.env.get("SESSION_ID")!);
           const key = `${workspaceKey}:${event.channelId}`;
           // deno-lint-ignore no-explicit-any
           (replyHandler as any).replySentMap.set(key, true);
@@ -2637,8 +2636,8 @@ Deno.test({
       assertEquals(response.success, true);
       assertEquals(response.replySent, true);
       assertEquals(observedSessionIds.length, 1);
-      assertEquals(observedSessionIds[0].startsWith("sess_"), true);
-      assertEquals(await pathExists(sessionIdFile), false);
+      assertEquals(observedSessionIds[0], "mock-session-id");
+      assertEquals(Deno.env.get("SESSION_ID"), undefined);
       assertEquals(await pathExists(tmpPath), false);
 
       const workspaceStat = await Deno.stat(workspacePath);
@@ -2675,12 +2674,9 @@ Deno.test({
       const workspacePath = workspaceManager.getWorkspacePath(workspaceKey);
       const tmpPath = `${workspacePath}/tmp`;
       const tmpSentinel = `${tmpPath}/dry-run-sentinel.txt`;
-      const sessionIdFile = `${workspacePath}/SESSION_ID`;
-      const observedSessionIds: string[] = [];
 
       class InspectingDryRunPlatformAdapter extends MockPlatformAdapter {
         override async sendReply(channelId: string, content: string): Promise<ReplyResult> {
-          observedSessionIds.push(Deno.readTextFileSync(sessionIdFile));
           Deno.writeTextFileSync(tmpSentinel, "dry run data");
           return await super.sendReply(channelId, content);
         }
@@ -2693,9 +2689,7 @@ Deno.test({
       assertEquals(response.success, true);
       assertEquals(response.replySent, true);
       assertEquals(orchestrator.mockConnector, null);
-      assertEquals(observedSessionIds.length, 1);
-      assertEquals(observedSessionIds[0].startsWith("sess_"), true);
-      assertEquals(await pathExists(sessionIdFile), false);
+      assertEquals(Deno.env.get("SESSION_ID"), undefined);
       assertEquals(await pathExists(tmpPath), false);
 
       const dryRunFiles: string[] = [];
@@ -2734,7 +2728,6 @@ Deno.test({
       const replyHandler = skillRegistry.getReplyHandler();
       const workspace = await workspaceManager.getOrCreateWorkspace(event);
       const tmpSentinel = `${workspace.tmpPath}/peer-protected.txt`;
-      const sessionIdFile = `${workspace.path}/SESSION_ID`;
       let observedSessionId: string | null = null;
 
       const peerSessionId = sessionRegistry.register({
@@ -2751,12 +2744,12 @@ Deno.test({
 
       orchestrator.setConnectorSetup((connector) => {
         connector.connect = () => {
-          observedSessionId = Deno.readTextFileSync(sessionIdFile);
           Deno.writeTextFileSync(tmpSentinel, "keep me");
           return Promise.resolve();
         };
         connector.promptResponses = [{ stopReason: "end_turn" } as PromptResponse];
         connector.onPrompt = () => {
+          observedSessionId = Deno.env.get("SESSION_ID")!;
           const key = `${workspace.key}:${event.channelId}`;
           // deno-lint-ignore no-explicit-any
           (replyHandler as any).replySentMap.set(key, true);
@@ -2768,7 +2761,7 @@ Deno.test({
       assertEquals(response.success, true);
       assertEquals(response.replySent, true);
       assertExists(observedSessionId);
-      assertEquals(await pathExists(sessionIdFile), false);
+      assertEquals(Deno.env.get("SESSION_ID"), undefined);
       assertEquals(await pathExists(workspace.tmpPath), true);
       assertEquals(await Deno.readTextFile(tmpSentinel), "keep me");
       assertEquals(sessionRegistry.hasActiveSessionsForWorkspace(workspace.key), true);
@@ -2801,12 +2794,9 @@ Deno.test({
       const workspacePath = workspaceManager.getWorkspacePath(workspaceKey);
       const tmpPath = `${workspacePath}/tmp`;
       const tmpSentinel = `${tmpPath}/error-sentinel.txt`;
-      const sessionIdFile = `${workspacePath}/SESSION_ID`;
-      let observedSessionId: string | null = null;
 
       orchestrator.setConnectorSetup((connector) => {
         connector.connect = () => {
-          observedSessionId = Deno.readTextFileSync(sessionIdFile);
           Deno.writeTextFileSync(tmpSentinel, "cleanup after error");
           return Promise.reject(new Error("Connection failed"));
         };
@@ -2817,8 +2807,7 @@ Deno.test({
       assertEquals(response.success, false);
       assertEquals(response.replySent, false);
       assertEquals(response.error, "Connection failed");
-      assertExists(observedSessionId);
-      assertEquals(await pathExists(sessionIdFile), false);
+      assertEquals(Deno.env.get("SESSION_ID"), undefined);
       assertEquals(await pathExists(tmpPath), false);
 
       const workspaceStat = await Deno.stat(workspacePath);

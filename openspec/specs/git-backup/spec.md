@@ -132,7 +132,7 @@ A final backup SHALL be performed during the application's graceful shutdown seq
 
 ### Requirement: Gitignore Management
 
-The service SHALL ensure a `.gitignore` file exists in the data directory containing exclusions for: `SESSION_ID`, `scheduler-state.json`, `**/.git`, `**/tmp/**`, `.DS_Store`, and `Thumbs.db`. After writing `.gitignore`, the service SHALL remove `scheduler-state.json` from the git index if previously tracked.
+The service SHALL ensure a `.gitignore` file exists in the data directory containing exclusions for: `scheduler-state.json`, `**/.git`, `**/tmp/**`, `.DS_Store`, and `Thumbs.db`. After writing `.gitignore`, the service SHALL remove `scheduler-state.json` from the git index if previously tracked.
 
 #### Scenario: Gitignore creation
 - **GIVEN** the data directory has no `.gitignore`

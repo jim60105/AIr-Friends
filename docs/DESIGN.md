@@ -254,7 +254,7 @@ Skills are implemented as shell-based Deno TypeScript scripts that external ACP 
 - Calls back to the main bot via HTTP API (Skill API Server on localhost:3001)
 - Uses session-based authentication for security
 
-During an active session, a `SESSION_ID` file is created in the workspace containing the session identifier that skills must use.
+During an active session, the `SESSION_ID` environment variable is set for the agent subprocess, containing the session identifier that skills use via `--session-id "$SESSION_ID"`.
 
 **Available Skills:**
 

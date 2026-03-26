@@ -95,7 +95,7 @@ Deno.test("GitBackupService - initialize creates .git and .gitignore", async () 
     assertEquals(gitStat.isDirectory, true);
 
     const gitignore = await Deno.readTextFile(`${dataDir}/.gitignore`);
-    assertEquals(gitignore.includes("SESSION_ID"), true);
+    assertEquals(gitignore.includes("scheduler-state.json"), true);
   });
 });
 

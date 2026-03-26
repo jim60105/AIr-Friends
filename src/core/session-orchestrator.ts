@@ -301,13 +301,8 @@ export class SessionOrchestrator {
           agentWorkspacePath,
         });
 
-        // Create SESSION_ID file in workspace
-        const sessionIdFile = join(workspace.path, "SESSION_ID");
-        await Deno.writeTextFile(sessionIdFile, shellSessionId);
-
         sessionLogger.info("Shell session {shellSessionId} registered", {
           shellSessionId,
-          sessionIdFile,
         });
 
         sessionLogger = sessionLogger.withContext({ shellSessionId });
@@ -413,10 +408,7 @@ export class SessionOrchestrator {
       if (dryRunResult) {
         if (shellSessionId) {
           this.sessionRegistry.remove(shellSessionId);
-          const sessionIdFile = join(workspace.path, "SESSION_ID");
-          try {
-            await Deno.remove(sessionIdFile);
-          } catch { /* ignore NotFound */ }
+          Deno.env.delete("SESSION_ID");
           // Clean up tmp directory if no other sessions are using this workspace
           this.cleanupWorkspaceTmp(workspace, sessionLogger);
         }
@@ -494,6 +486,7 @@ export class SessionOrchestrator {
         sessionLogger.info("Agent capabilities checked", { supportsImage });
 
         const sessionId = await connector.createSession(this.getMCPServers());
+        Deno.env.set("SESSION_ID", sessionId);
         sessionLogger.info("Agent session {sessionId} created", { sessionId });
         sessionLogger = sessionLogger.withContext({ sessionId });
 
@@ -717,19 +710,7 @@ export class SessionOrchestrator {
           this.sessionRegistry.remove(shellSessionId);
           sessionLogger.debug("Shell session {shellSessionId} cleaned up", { shellSessionId });
 
-          // Remove SESSION_ID file
-          const sessionIdFile = join(workspace.path, "SESSION_ID");
-          try {
-            await Deno.remove(sessionIdFile);
-          } catch (error) {
-            // Only ignore NotFound errors; log other errors
-            if (!(error instanceof Deno.errors.NotFound)) {
-              sessionLogger.warn("Failed to remove SESSION_ID file", {
-                error: error instanceof Error ? error.message : String(error),
-                path: sessionIdFile,
-              });
-            }
-          }
+          Deno.env.delete("SESSION_ID");
 
           // Clean up tmp directory if no other sessions are using this workspace
           this.cleanupWorkspaceTmp(workspace, sessionLogger);
@@ -828,8 +809,6 @@ export class SessionOrchestrator {
           agentWorkspacePath,
         });
 
-        const sessionIdFile = join(workspace.path, "SESSION_ID");
-        await Deno.writeTextFile(sessionIdFile, shellSessionId);
         sessionLogger.info("Shell session {shellSessionId} registered", { shellSessionId });
 
         sessionLogger = sessionLogger.withContext({ shellSessionId });
@@ -907,10 +886,7 @@ export class SessionOrchestrator {
       if (dryRunResult) {
         if (shellSessionId) {
           this.sessionRegistry.remove(shellSessionId);
-          const sessionIdFile = join(workspace.path, "SESSION_ID");
-          try {
-            await Deno.remove(sessionIdFile);
-          } catch { /* ignore NotFound */ }
+          Deno.env.delete("SESSION_ID");
           // Clean up tmp directory if no other sessions are using this workspace
           this.cleanupWorkspaceTmp(workspace, sessionLogger);
         }
@@ -974,6 +950,7 @@ export class SessionOrchestrator {
         }
 
         const sessionId = await connector.createSession(this.getMCPServers());
+        Deno.env.set("SESSION_ID", sessionId);
         sessionLogger = sessionLogger.withContext({ sessionId });
         // Set the model for the session (using pre-resolved model)
         await connector.setSessionModel(sessionId, resolvedModel);
@@ -1056,16 +1033,7 @@ export class SessionOrchestrator {
 
         if (shellSessionId) {
           this.sessionRegistry.remove(shellSessionId);
-          const sessionIdFile = join(workspace.path, "SESSION_ID");
-          try {
-            await Deno.remove(sessionIdFile);
-          } catch (error) {
-            if (!(error instanceof Deno.errors.NotFound)) {
-              sessionLogger.warn("Failed to remove SESSION_ID file", {
-                error: error instanceof Error ? error.message : String(error),
-              });
-            }
-          }
+          Deno.env.delete("SESSION_ID");
 
           // Clean up tmp directory if no other sessions are using this workspace
           this.cleanupWorkspaceTmp(workspace, sessionLogger);
@@ -1165,8 +1133,6 @@ export class SessionOrchestrator {
           agentWorkspacePath,
         });
 
-        const sessionIdFile = join(workspace.path, "SESSION_ID");
-        await Deno.writeTextFile(sessionIdFile, shellSessionId);
         sessionLogger.info("Shell session {shellSessionId} registered", { shellSessionId });
 
         sessionLogger = sessionLogger.withContext({ shellSessionId });
@@ -1212,10 +1178,7 @@ export class SessionOrchestrator {
       if (dryRunResult) {
         if (shellSessionId) {
           this.sessionRegistry.remove(shellSessionId);
-          const sessionIdFile = join(workspace.path, "SESSION_ID");
-          try {
-            await Deno.remove(sessionIdFile);
-          } catch { /* ignore NotFound */ }
+          Deno.env.delete("SESSION_ID");
           // Clean up tmp directory if no other sessions are using this workspace
           this.cleanupWorkspaceTmp(workspace, sessionLogger);
         }
@@ -1274,6 +1237,7 @@ export class SessionOrchestrator {
         }
 
         const sessionId = await connector.createSession(this.getMCPServers());
+        Deno.env.set("SESSION_ID", sessionId);
         sessionLogger = sessionLogger.withContext({ sessionId });
         // Set the model for the session (using pre-resolved model)
         await connector.setSessionModel(sessionId, resolvedModel);
@@ -1330,16 +1294,7 @@ export class SessionOrchestrator {
 
         if (shellSessionId) {
           this.sessionRegistry.remove(shellSessionId);
-          const sessionIdFile = join(workspace.path, "SESSION_ID");
-          try {
-            await Deno.remove(sessionIdFile);
-          } catch (error) {
-            if (!(error instanceof Deno.errors.NotFound)) {
-              sessionLogger.warn("Failed to remove SESSION_ID file", {
-                error: error instanceof Error ? error.message : String(error),
-              });
-            }
-          }
+          Deno.env.delete("SESSION_ID");
 
           // Clean up tmp directory if no other sessions are using this workspace
           this.cleanupWorkspaceTmp(workspace, sessionLogger);
@@ -1439,8 +1394,6 @@ export class SessionOrchestrator {
           agentWorkspacePath,
         });
 
-        const sessionIdFile = join(workspace.path, "SESSION_ID");
-        await Deno.writeTextFile(sessionIdFile, shellSessionId);
         sessionLogger.info("Shell session {shellSessionId} registered", { shellSessionId });
 
         sessionLogger = sessionLogger.withContext({ shellSessionId });
@@ -1485,10 +1438,7 @@ export class SessionOrchestrator {
       if (dryRunResult) {
         if (shellSessionId) {
           this.sessionRegistry.remove(shellSessionId);
-          const sessionIdFile = join(workspace.path, "SESSION_ID");
-          try {
-            await Deno.remove(sessionIdFile);
-          } catch { /* ignore NotFound */ }
+          Deno.env.delete("SESSION_ID");
           // Clean up tmp directory if no other sessions are using this workspace
           this.cleanupWorkspaceTmp(workspace, sessionLogger);
         }
@@ -1545,6 +1495,7 @@ export class SessionOrchestrator {
         }
 
         const sessionId = await connector.createSession(this.getMCPServers());
+        Deno.env.set("SESSION_ID", sessionId);
         sessionLogger = sessionLogger.withContext({ sessionId });
         // Set the model for the session (using pre-resolved model)
         await connector.setSessionModel(sessionId, resolvedModel);
@@ -1595,16 +1546,7 @@ export class SessionOrchestrator {
 
         if (shellSessionId) {
           this.sessionRegistry.remove(shellSessionId);
-          const sessionIdFile = join(workspace.path, "SESSION_ID");
-          try {
-            await Deno.remove(sessionIdFile);
-          } catch (error) {
-            if (!(error instanceof Deno.errors.NotFound)) {
-              sessionLogger.warn("Failed to remove SESSION_ID file", {
-                error: error instanceof Error ? error.message : String(error),
-              });
-            }
-          }
+          Deno.env.delete("SESSION_ID");
 
           // Clean up tmp directory if no other sessions are using this workspace
           this.cleanupWorkspaceTmp(workspace, sessionLogger);
@@ -1726,8 +1668,6 @@ export class SessionOrchestrator {
           agentWorkspacePath,
         });
 
-        const sessionIdFile = join(workspace.path, "SESSION_ID");
-        await Deno.writeTextFile(sessionIdFile, shellSessionId);
         sessionLogger.info("Shell session {shellSessionId} registered", { shellSessionId });
 
         sessionLogger = sessionLogger.withContext({ shellSessionId });
@@ -1785,10 +1725,7 @@ export class SessionOrchestrator {
       if (dryRunResult) {
         if (shellSessionId) {
           this.sessionRegistry.remove(shellSessionId);
-          const sessionIdFile = join(workspace.path, "SESSION_ID");
-          try {
-            await Deno.remove(sessionIdFile);
-          } catch { /* ignore NotFound */ }
+          Deno.env.delete("SESSION_ID");
           // Clean up tmp directory if no other sessions are using this workspace
           this.cleanupWorkspaceTmp(workspace, sessionLogger);
         }
@@ -1848,6 +1785,7 @@ export class SessionOrchestrator {
         }
 
         const sessionId = await connector.createSession(this.getMCPServers());
+        Deno.env.set("SESSION_ID", sessionId);
         sessionLogger = sessionLogger.withContext({ sessionId });
         // Set the model for the session (using pre-resolved model)
         await connector.setSessionModel(sessionId, resolvedModel);
@@ -1939,16 +1877,7 @@ export class SessionOrchestrator {
 
         if (shellSessionId) {
           this.sessionRegistry.remove(shellSessionId);
-          const sessionIdFile = join(workspace.path, "SESSION_ID");
-          try {
-            await Deno.remove(sessionIdFile);
-          } catch (error) {
-            if (!(error instanceof Deno.errors.NotFound)) {
-              sessionLogger.warn("Failed to remove SESSION_ID file", {
-                error: error instanceof Error ? error.message : String(error),
-              });
-            }
-          }
+          Deno.env.delete("SESSION_ID");
 
           // Clean up tmp directory if no other sessions are using this workspace
           this.cleanupWorkspaceTmp(workspace, sessionLogger);
@@ -2145,7 +2074,7 @@ export class SessionOrchestrator {
    */
   private async buildSpontaneousPromptFromTemplate(
     context: import("../types/context.ts").AssembledSpontaneousContext,
-    sessionId: string | null,
+    _sessionId: string | null,
     model?: string,
     yolo?: boolean,
   ): Promise<string> {
@@ -2174,7 +2103,6 @@ export class SessionOrchestrator {
       userId: "",
       channelId: "",
       guildId: "",
-      sessionId: sessionId ?? "",
       agentType: getDefaultAgentType(this.config),
       model,
       yolo,
@@ -2196,7 +2124,7 @@ export class SessionOrchestrator {
    */
   private async buildSelfResearchPrompt(
     rssItems: RssItem[],
-    sessionId: string | null,
+    _sessionId: string | null,
     model?: string,
     yolo?: boolean,
   ): Promise<string> {
@@ -2217,7 +2145,6 @@ export class SessionOrchestrator {
       userId: "",
       channelId: "",
       guildId: "",
-      sessionId: sessionId ?? "",
       agentType: getDefaultAgentType(this.config),
       model,
       yolo,
@@ -2237,7 +2164,7 @@ export class SessionOrchestrator {
    */
   private async buildMemoryMaintenancePrompt(
     workspaceKey: string,
-    sessionId: string | null,
+    _sessionId: string | null,
     workspace: WorkspaceInfo,
     model?: string,
     yolo?: boolean,
@@ -2256,7 +2183,6 @@ export class SessionOrchestrator {
       userId: workspace.components.userId ?? "",
       channelId: "",
       guildId: "",
-      sessionId: sessionId ?? "",
       agentType: getDefaultAgentType(this.config),
       model,
       yolo,
@@ -2317,7 +2243,7 @@ export class SessionOrchestrator {
    */
   private async buildReminderPrompt(
     reminder: ResolvedReminder,
-    sessionId: string | null,
+    _sessionId: string | null,
     model?: string,
     yolo?: boolean,
   ): Promise<string> {
@@ -2331,7 +2257,6 @@ export class SessionOrchestrator {
       userId: reminder.userId,
       channelId: "",
       guildId: "",
-      sessionId: sessionId ?? "",
       agentType: getDefaultAgentType(this.config),
       model,
       yolo,

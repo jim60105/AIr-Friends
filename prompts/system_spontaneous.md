@@ -84,10 +84,6 @@ After you post, write in today's journal entry about the topic you chose and how
 
 {{ browserAutomationContent }}
 
-{{ if sessionId }}
-
 ## Session Information
 
-Your session ID is: {{ sessionId }}
-Use this session ID when calling skills that require --session-id parameter.
-{{ /if }}
+The `$SESSION_ID` environment variable is available in your shell. Use `--session-id "$SESSION_ID"` when calling skills.

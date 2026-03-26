@@ -42,11 +42,6 @@ Prioritize merging the oldest and most redundant memories first. If you cannot r
   - Summaries of private memories must stay private.
 - Do NOT call `send-reply`; this is an internal maintenance task.
 
-{{ if sessionId }}
-
 ### Session Information
 
-Session ID: `{{ sessionId }}`
-
-Use this session ID for all skill calls that require `--session-id`.
-{{ /if }}
+The `$SESSION_ID` environment variable is available in your shell. Use `--session-id "$SESSION_ID"` when calling skills.

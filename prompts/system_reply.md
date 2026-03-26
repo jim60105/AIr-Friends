@@ -59,14 +59,9 @@ This is a one-on-one private conversation. The following rules apply:
 
 {{ browserAutomationContent }}
 
-{{ if sessionId -}}
-
 # Session Information
 
-Your session ID is: {{ sessionId }}
-Use this session ID when calling skills that require --session-id parameter.
-
-{{- /if }}
+The `$SESSION_ID` environment variable is available in your shell. Use `--session-id "$SESSION_ID"` when calling skills.
 
 {{ if userContextMessage -}}
 

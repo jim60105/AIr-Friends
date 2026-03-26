@@ -47,7 +47,7 @@ export class ContextAssembler {
    */
   async renderFullPrompt(
     event: NormalizedEvent,
-    sessionId: string | undefined,
+    _sessionId: string | undefined,
     userContextMessage: string,
     model?: string,
     yolo?: boolean,
@@ -58,7 +58,6 @@ export class ContextAssembler {
       userId: event.userId,
       channelId: event.channelId,
       guildId: event.guildId ?? "",
-      sessionId: sessionId ?? "",
       agentType: this.config.agentType,
       model,
       yolo,
@@ -75,7 +74,7 @@ export class ContextAssembler {
     event: NormalizedEvent,
     workspace: WorkspaceInfo,
     messageFetcher: MessageFetcher,
-    sessionId?: string,
+    _sessionId?: string,
     model?: string,
     yolo?: boolean,
   ): Promise<AssembledContext> {
@@ -91,7 +90,6 @@ export class ContextAssembler {
       userId: event.userId,
       channelId: event.channelId,
       guildId: event.guildId ?? "",
-      sessionId: sessionId ?? "",
       agentType: this.config.agentType,
       model,
       yolo,
@@ -615,7 +613,7 @@ export class ContextAssembler {
     workspace: WorkspaceInfo,
     messageFetcher: MessageFetcher,
     options: { fetchRecentMessages: boolean },
-    sessionId?: string,
+    _sessionId?: string,
     model?: string,
     yolo?: boolean,
   ): Promise<AssembledSpontaneousContext> {
@@ -631,7 +629,6 @@ export class ContextAssembler {
       userId: "",
       channelId,
       guildId: "",
-      sessionId: sessionId ?? "",
       agentType: this.config.agentType,
       model,
       yolo,
