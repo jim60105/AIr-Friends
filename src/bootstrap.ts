@@ -341,6 +341,51 @@ export async function bootstrap(
           });
         }
       }
+
+      // Scan channel workspaces
+      const channelKeys = await workspaceManager.listChannelWorkspaces();
+      for (const channelKey of channelKeys) {
+        try {
+          const [platform, channelId] = channelKey.split("/");
+          if (!isValidPlatform(platform) || !channelId) {
+            logger.warn("Skipping invalid channel workspace key", { channelKey });
+            continue;
+          }
+
+          const channelWorkspace = await workspaceManager.getOrCreateChannelWorkspace(
+            platform,
+            channelId,
+          );
+          const channelMemories = await memoryStore.loadChannelMemories(channelWorkspace);
+          const enabledCount = channelMemories.filter((m) => m.enabled).length;
+          if (enabledCount < config.memoryMaintenance!.minMemoryCount) {
+            logger.debug("Skipping channel workspace, below memory maintenance threshold", {
+              channelKey,
+              count: enabledCount,
+              threshold: config.memoryMaintenance!.minMemoryCount,
+            });
+            continue;
+          }
+
+          logger.info("Starting memory maintenance for channel workspace {channelKey}", {
+            channelKey,
+            count: enabledCount,
+          });
+          await orchestrator.processChannelMemoryMaintenance(
+            channelKey,
+            channelWorkspace,
+            config.memoryMaintenance!,
+          );
+          logger.info("Memory maintenance completed for channel workspace {channelKey}", {
+            channelKey,
+          });
+        } catch (error) {
+          logger.error("Memory maintenance failed for channel workspace {channelKey}", {
+            channelKey,
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
+      }
     });
   }
 

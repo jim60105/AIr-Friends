@@ -4,6 +4,7 @@ import type { WorkspaceInfo } from "../types/workspace.ts";
 import type { PlatformAdapter } from "@platforms/platform-adapter.ts";
 import type { AgentNoteSearchResult, ResolvedMemory } from "../types/memory.ts";
 import type { PlatformMessage } from "../types/events.ts";
+import type { WorkspaceManager } from "@core/workspace-manager.ts";
 
 /**
  * Skill call parameters (from external Agent)
@@ -36,6 +37,8 @@ export interface SkillContext {
   agentWorkspacePath?: string;
   /** Last message ID sent by the bot in this session */
   lastSentMessageId?: string;
+  /** Workspace manager for channel workspace resolution */
+  workspaceManager?: WorkspaceManager;
 }
 
 /**
@@ -53,6 +56,10 @@ export interface MemorySaveParams {
   content: string;
   visibility?: "public" | "private";
   importance?: "high" | "normal";
+  tier?: string;
+  category?: string;
+  scope?: string;
+  decay?: number;
 }
 
 /**
@@ -61,6 +68,8 @@ export interface MemorySaveParams {
 export interface MemorySearchParams {
   query: string;
   limit?: number;
+  category?: string;
+  scope?: string;
 }
 
 /**
@@ -81,6 +90,9 @@ export interface MemoryPatchParams {
   importance?: "high" | "normal";
   relatedTo?: string[];
   supersedes?: string[];
+  tier?: string;
+  category?: string;
+  decay?: number;
 }
 
 /**

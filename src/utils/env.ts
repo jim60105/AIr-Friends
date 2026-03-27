@@ -127,6 +127,10 @@ export const ENV_MAPPINGS = {
   REMINDERS_PERSIST_PATH: "reminders.persistPath",
   REMINDERS_CHECK_INTERVAL_MS: "reminders.checkIntervalMs",
 
+  // Conversation summary settings
+  CONVERSATION_SUMMARY_ENABLED: "conversationSummary.enabled",
+  CONVERSATION_SUMMARY_MODEL: "conversationSummary.model",
+
   // Session audit log settings
   AUDIT_ENABLED: "audit.enabled",
   AUDIT_RETENTION_DAYS: "audit.retentionDays",

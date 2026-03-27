@@ -119,7 +119,7 @@ function createTestConfig(tempDir: string, dryRunEnabled = true): Config {
         mockReply: "（Dry run 模式 — 此為測試回覆）",
       },
     },
-    memory: { searchLimit: 10, maxChars: 2000, recentMessageLimit: 20 },
+    memory: { searchLimit: 10, maxChars: 2000, recentMessageLimit: 20, workingTierLimit: 20 },
     workspace: { repoPath: tempDir, workspacesDir: "workspaces" },
     logging: { level: "FATAL" },
     accessControl: { replyTo: "whitelist", whitelist: [] },

@@ -156,7 +156,7 @@ Deno.test("ContextAssembler - should format context correctly", async () => {
     assertEquals(formatted.systemMessage, "You are a helpful assistant.");
 
     // Check user message contains memories
-    assertStringIncludes(formatted.userMessage, "Important Memories");
+    assertStringIncludes(formatted.userMessage, "Core Memories (User)");
     assertStringIncludes(formatted.userMessage, "Important fact");
 
     // Check user message contains conversation

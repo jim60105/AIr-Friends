@@ -94,6 +94,7 @@ function createTestConfig(
       searchLimit: 10,
       maxChars: 2000,
       recentMessageLimit: 20,
+      workingTierLimit: 20,
     },
     workspace: {
       repoPath: tempDir,

@@ -53,6 +53,7 @@ export class AgentCore {
     this.memoryStore = new MemoryStore(this.workspaceManager, {
       searchLimit: config.memory.searchLimit,
       maxChars: config.memory.maxChars,
+      workingTierLimit: config.memory.workingTierLimit ?? 20,
     });
 
     // Initialize skill registry

@@ -35,6 +35,7 @@ const createTestConfig = (overrides: Partial<Config> = {}): Config => {
       searchLimit: 10,
       maxChars: 2000,
       recentMessageLimit: 20,
+      workingTierLimit: 20,
     },
     workspace: {
       repoPath: "/tmp/test",

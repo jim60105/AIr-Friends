@@ -4,7 +4,7 @@
 
 Implements temporal relevance decay scoring for memories, allowing search and maintenance to prioritize fresh, high-signal entries over stale ones.
 
-## ADDED Requirements
+## Requirements
 
 ### Requirement: Decay Field Range and Defaults
 
@@ -13,7 +13,7 @@ Each memory entry SHALL have a `decay` field of type `number` in the range 0.0 t
 | Tier      | Default Decay |
 | --------- | ------------- |
 | `core`    | `1.0`         |
-| `working` | `0.7`         |
+| `working` | `0.8`         |
 | `archive` | `0.5`         |
 
 #### Scenario: Core tier default decay
@@ -22,7 +22,7 @@ Each memory entry SHALL have a `decay` field of type `number` in the range 0.0 t
 
 #### Scenario: Working tier default decay
 - **WHEN** a memory is saved with `tier: "working"` and no `decay` specified
-- **THEN** the `decay` field SHALL default to `0.7`
+- **THEN** the `decay` field SHALL default to `0.8`
 
 #### Scenario: Archive tier default decay
 - **WHEN** a memory is saved with `tier: "archive"` and no `decay` specified

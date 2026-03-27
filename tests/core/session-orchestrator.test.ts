@@ -90,6 +90,7 @@ function createTestConfig(tempDir: string): Config {
       searchLimit: 10,
       maxChars: 2000,
       recentMessageLimit: 20,
+      workingTierLimit: 20,
     },
     workspace: {
       repoPath: tempDir,
@@ -100,6 +101,7 @@ function createTestConfig(tempDir: string): Config {
     },
     replyPolicy: "channels",
     channels: [],
+    conversationSummary: { enabled: false },
   };
 }
 

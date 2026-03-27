@@ -263,6 +263,9 @@ export interface MemoryConfig {
 
   /** Number of recent messages to include in context */
   recentMessageLimit: number;
+
+  /** Maximum number of working-tier entries to load at session start (default: 20) */
+  workingTierLimit: number;
 }
 
 /**
@@ -575,6 +578,18 @@ export interface AuditConfig {
 }
 
 /**
+ * Conversation summary configuration.
+ * Controls auto-generated summaries after each session.
+ */
+export interface ConversationSummaryConfig {
+  /** Enable conversation summaries (default: true) */
+  enabled: boolean;
+
+  /** LLM model to use for summary generation (default: same as agent.model) */
+  model?: string;
+}
+
+/**
  * Web dashboard configuration
  */
 export interface DashboardConfig {
@@ -612,6 +627,8 @@ export interface Config {
   reminders?: RemindersConfig;
   /** Session audit log configuration (optional) */
   audit?: AuditConfig;
+  /** Conversation summary configuration (optional) */
+  conversationSummary?: ConversationSummaryConfig;
   /** Skills configuration (optional) */
   skills?: SkillsConfig;
   /** Web dashboard configuration (optional) */

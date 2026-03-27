@@ -176,6 +176,13 @@ env:
   # When empty or not set, falls back to scanning the built-in skills directory.
   # AGENT_AUTO_APPROVE_SKILLS: "memory-save,memory-search,memory-patch,memory-stats,memory-export,fetch-context,send-reply,edit-reply,send-file,react-message,set-reminder,list-reminders,cancel-reminder,self-research,agent-browser"
 
+  # Memory Tiered Architecture
+  MEMORY_WORKING_TIER_LIMIT: '20'
+
+  # Conversation Summary (auto-generated after each session)
+  CONVERSATION_SUMMARY_ENABLED: 'true'
+  CONVERSATION_SUMMARY_MODEL: ''
+
   # Session Audit Log
   AUDIT_ENABLED: ''
   AUDIT_RETENTION_DAYS: ''

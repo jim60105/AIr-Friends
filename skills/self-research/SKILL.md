@@ -3,6 +3,7 @@ name: self-research
 description: Conduct a self-directed research session where you pick a topic from provided reference materials or your own curiosity, research it thoroughly using web search and browser tools, and write personal study notes to your agent workspace. Use in your personal research time, are given articles or topics to explore, or want to add new knowledge notes to your personal workspace at /app/data/agent-workspace/. **IMPORTANT - NEVER DELEGATE THIS SKILL TO SUBAGENTS OR ASSIGN IT AS A TASK.**
 compatibility: MUST BE PROCESSED BY THE AGENT ITSELF, DO NOT DELEGATED TO SUBAGENTS
 ---
+
 # Self-Research Skill
 
 This skill guides you through a complete personal research session: picking a topic, researching it thoroughly, and writing study notes to your personal workspace.
@@ -18,6 +19,7 @@ Your personal workspace is at `/app/data/agent-workspace/` (always use this abso
 - `journal/{YYYY-MM-DD}.md`: Daily reflections and logs
 
 **Rules:**
+
 - Do NOT store user private information here, use `memory-save` for user-related memories
 - This workspace is shared across all conversations and users
 - Use kebab-case filenames in English (e.g., `cooking-techniques.md`)

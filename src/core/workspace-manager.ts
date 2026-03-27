@@ -9,6 +9,7 @@ import {
   validatePathWithinBoundary,
 } from "@utils/path-validator.ts";
 import type {
+  ChannelWorkspaceInfo,
   WorkspaceInfo,
   WorkspaceKeyComponents,
   WorkspaceManagerConfig,
@@ -276,6 +277,76 @@ This is your personal workspace for long-term knowledge and notes.
     }
 
     logger.debug("Agent workspace files initialized", { workspacePath });
+  }
+
+  /**
+   * Get channel workspace path
+   */
+  getChannelWorkspacePath(platform: string, channelId: string): string {
+    const safePlatform = sanitizePathComponent(platform);
+    const safeChannelId = sanitizePathComponent(channelId);
+    const path = resolve(join(this.workspacesRoot, safePlatform, "channels", safeChannelId));
+    validatePathWithinBoundary(path, this.workspacesRoot);
+    return path;
+  }
+
+  /**
+   * Get or create channel workspace directory and memory file
+   */
+  async getOrCreateChannelWorkspace(
+    platform: string,
+    channelId: string,
+  ): Promise<ChannelWorkspaceInfo> {
+    const safePlatform = sanitizePathComponent(platform);
+    const safeChannelId = sanitizePathComponent(channelId);
+    const key = `${safePlatform}/${safeChannelId}`;
+    const path = this.getChannelWorkspacePath(platform, channelId);
+
+    const exists = await pathExists(path);
+    if (!exists) {
+      logger.info("Creating channel workspace: {key}", { key });
+      await ensureDirectory(path);
+
+      const channelMemoryPath = join(path, MemoryFileType.CHANNEL);
+      if (!(await pathExists(channelMemoryPath))) {
+        await Deno.writeTextFile(channelMemoryPath, "");
+      }
+    }
+
+    return { key, platform: safePlatform, channelId: safeChannelId, path };
+  }
+
+  /**
+   * Get the channel memory file path
+   */
+  getChannelMemoryFilePath(channelWorkspace: ChannelWorkspaceInfo): string {
+    return join(channelWorkspace.path, MemoryFileType.CHANNEL);
+  }
+
+  /**
+   * List all channel workspaces, optionally filtered by platform
+   */
+  async listChannelWorkspaces(platform?: string): Promise<string[]> {
+    const workspaces: string[] = [];
+    try {
+      for await (const platformEntry of Deno.readDir(this.workspacesRoot)) {
+        if (!platformEntry.isDirectory) continue;
+        if (platform && platformEntry.name !== platform) continue;
+
+        const channelsDir = join(this.workspacesRoot, platformEntry.name, "channels");
+        try {
+          for await (const channelEntry of Deno.readDir(channelsDir)) {
+            if (!channelEntry.isDirectory) continue;
+            workspaces.push(`${platformEntry.name}/${channelEntry.name}`);
+          }
+        } catch (error) {
+          if (!(error instanceof Deno.errors.NotFound)) throw error;
+        }
+      }
+    } catch (error) {
+      if (!(error instanceof Deno.errors.NotFound)) throw error;
+    }
+    return workspaces;
   }
 
   /**

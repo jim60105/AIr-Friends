@@ -15,7 +15,25 @@ ${HOME}/.agents/skills/memory-search/scripts/memory-search.ts \
   --session-id "$SESSION_ID" \
   --query "hiking preferences" \
   --limit 10
+
+# Filter by category and scope
+${HOME}/.agents/skills/memory-search/scripts/memory-search.ts \
+  --session-id "$SESSION_ID" \
+  --query "favorite food" \
+  --category preference \
+  --scope user
 ```
+
+## Parameters
+
+- `--query`: (Required) Search keywords
+- `--limit`: (Optional) Maximum number of results (default: 10)
+- `--category`: (Optional) Filter results by category: `fact`, `preference`, `episode`, `summary`, or `relationship`
+- `--scope`: (Optional) `user`, `channel`, or omit to search both user and channel memories
+
+## Response Format
+
+Results include `tier`, `category`, `scope`, and `decay` fields for each memory entry. Results are sorted by decay-weighted relevance (higher decay × relevance score = higher ranking).
 
 ## Critical Rules
 

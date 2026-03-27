@@ -12,7 +12,14 @@ import type {
   SkillHandler,
   SkillResult,
 } from "./types.ts";
-import type { MemoryImportance, MemoryVisibility, ResolvedMemory } from "../types/memory.ts";
+import type {
+  MemoryCategory,
+  MemoryImportance,
+  MemoryScope,
+  MemoryTier,
+  MemoryVisibility,
+  ResolvedMemory,
+} from "../types/memory.ts";
 
 import { memoryOperationsTotal } from "@utils/metrics.ts";
 
@@ -52,6 +59,53 @@ export class MemoryHandler {
         };
       }
 
+      // Validate tier
+      const tier = (params.tier ?? "archive") as MemoryTier;
+      if (tier !== "core" && tier !== "working" && tier !== "archive") {
+        return {
+          success: false,
+          error: "Invalid 'tier' parameter. Must be 'core', 'working', or 'archive'",
+        };
+      }
+
+      // Validate category
+      const category = (params.category ?? "fact") as MemoryCategory;
+      const validCategories: MemoryCategory[] = [
+        "fact",
+        "preference",
+        "episode",
+        "summary",
+        "relationship",
+      ];
+      if (!validCategories.includes(category)) {
+        return {
+          success: false,
+          error:
+            "Invalid 'category' parameter. Must be 'fact', 'preference', 'episode', 'summary', or 'relationship'",
+        };
+      }
+
+      // Validate scope
+      const scope = (params.scope ?? "user") as MemoryScope;
+      if (scope !== "user" && scope !== "channel") {
+        return {
+          success: false,
+          error: "Invalid 'scope' parameter. Must be 'user' or 'channel'",
+        };
+      }
+
+      // Validate and clamp decay to [0.0, 1.0]
+      let decay = params.decay;
+      if (decay !== undefined) {
+        if (typeof decay !== "number") {
+          return {
+            success: false,
+            error: "Invalid 'decay' parameter. Must be a number between 0.0 and 1.0",
+          };
+        }
+        decay = Math.max(0.0, Math.min(1.0, decay));
+      }
+
       // Validate relatedTo
       const relatedTo = (params as unknown as Record<string, unknown>).relatedTo as
         | string[]
@@ -84,23 +138,94 @@ export class MemoryHandler {
         }
       }
 
+      // Channel-scoped memory
+      if (scope === "channel") {
+        if (!context.channelId) {
+          return {
+            success: false,
+            error: "Cannot save channel memory: no channelId in context",
+          };
+        }
+        if (!context.workspaceManager) {
+          return {
+            success: false,
+            error: "Cannot save channel memory: workspaceManager not available",
+          };
+        }
+
+        const channelWorkspace = await context.workspaceManager.getOrCreateChannelWorkspace(
+          context.workspace.components.platform,
+          context.channelId,
+        );
+
+        const entry = await this.memoryStore.addChannelMemory(
+          channelWorkspace,
+          params.content,
+          {
+            importance,
+            tier,
+            category,
+            ...(decay !== undefined && { decay }),
+            ...(relatedTo && { relatedTo }),
+            ...(supersedes && { supersedes }),
+          },
+        );
+
+        logger.info(
+          "Channel memory {memoryId} saved via skill (tier={tier}, category={category})",
+          {
+            channelKey: channelWorkspace.key,
+            memoryId: entry.id,
+            tier,
+            category,
+          },
+        );
+        memoryOperationsTotal.labels("save", "public").inc();
+
+        return {
+          success: true,
+          data: {
+            id: entry.id,
+            content: entry.content,
+            visibility: entry.visibility,
+            importance: entry.importance,
+            tier: entry.tier,
+            category: entry.category,
+            scope: entry.scope,
+            decay: entry.decay,
+            timestamp: entry.ts,
+            ...(entry.relatedTo && { relatedTo: entry.relatedTo }),
+            ...(entry.supersedes && { supersedes: entry.supersedes }),
+          },
+        };
+      }
+
+      // User-scoped memory (default)
       const entry = await this.memoryStore.addMemory(
         context.workspace,
         params.content,
         {
           visibility,
           importance,
+          tier,
+          category,
+          scope,
+          ...(decay !== undefined && { decay }),
           ...(relatedTo && { relatedTo }),
           ...(supersedes && { supersedes }),
         },
       );
 
-      logger.info("Memory {memoryId} saved via skill ({visibility}, {importance})", {
-        workspaceKey: context.workspace.key,
-        memoryId: entry.id,
-        visibility,
-        importance,
-      });
+      logger.info(
+        "Memory {memoryId} saved via skill ({visibility}, {importance}, tier={tier})",
+        {
+          workspaceKey: context.workspace.key,
+          memoryId: entry.id,
+          visibility,
+          importance,
+          tier,
+        },
+      );
       memoryOperationsTotal.labels("save", visibility).inc();
 
       return {
@@ -110,6 +235,10 @@ export class MemoryHandler {
           content: entry.content,
           visibility: entry.visibility,
           importance: entry.importance,
+          tier: entry.tier,
+          category: entry.category,
+          scope: entry.scope,
+          decay: entry.decay,
           timestamp: entry.ts,
           ...(entry.relatedTo && { relatedTo: entry.relatedTo }),
           ...(entry.supersedes && { supersedes: entry.supersedes }),
@@ -153,24 +282,94 @@ export class MemoryHandler {
         };
       }
 
+      // Validate optional category filter
+      const category = params.category as MemoryCategory | undefined;
+      if (category !== undefined) {
+        const validCategories: MemoryCategory[] = [
+          "fact",
+          "preference",
+          "episode",
+          "summary",
+          "relationship",
+        ];
+        if (!validCategories.includes(category)) {
+          return {
+            success: false,
+            error:
+              "Invalid 'category' parameter. Must be 'fact', 'preference', 'episode', 'summary', or 'relationship'",
+          };
+        }
+      }
+
+      // Validate optional scope filter
+      const scope = params.scope as MemoryScope | undefined;
+      if (scope !== undefined && scope !== "user" && scope !== "channel") {
+        return {
+          success: false,
+          error: "Invalid 'scope' parameter. Must be 'user' or 'channel'",
+        };
+      }
+
       // Split query into keywords
       const keywords = params.query.trim().split(/\s+/);
 
-      const memories = await this.memoryStore.searchMemories(
-        context.workspace,
-        keywords,
-        { maxResults: limit },
-      );
+      // Search user memories (unless scope is explicitly "channel")
+      let memories: ResolvedMemory[] = [];
+      if (scope !== "channel") {
+        memories = await this.memoryStore.searchMemories(
+          context.workspace,
+          keywords,
+          { maxResults: limit },
+          category,
+        );
+      }
+
+      // Search channel memories if scope is "channel" or not specified and channelId available
+      let channelMemories: ResolvedMemory[] = [];
+      if (
+        (scope === "channel" || scope === undefined) &&
+        context.channelId &&
+        context.workspaceManager
+      ) {
+        try {
+          const channelWorkspace = await context.workspaceManager.getOrCreateChannelWorkspace(
+            context.workspace.components.platform,
+            context.channelId,
+          );
+          channelMemories = await this.memoryStore.searchChannelMemories(
+            channelWorkspace,
+            keywords,
+            { maxResults: limit },
+            category,
+          );
+        } catch (error) {
+          logger.warn("Failed to search channel memories", {
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
+      }
+
+      // Merge and deduplicate results
+      const seenIds = new Set<string>();
+      const mergedMemories: ResolvedMemory[] = [];
+      for (const m of [...memories, ...channelMemories]) {
+        if (!seenIds.has(m.id)) {
+          seenIds.add(m.id);
+          mergedMemories.push(m);
+        }
+      }
+      // Limit total results
+      const finalMemories = mergedMemories.slice(0, limit);
 
       logger.info("Memory search via skill: query returned {resultsCount} results", {
         workspaceKey: context.workspace.key,
         query: params.query,
-        resultsCount: memories.length,
+        resultsCount: finalMemories.length,
       });
       memoryOperationsTotal.labels("search", "public").inc();
 
       const result: MemorySearchResult = {
-        memories: memories.map((m) => ({
+        memories: finalMemories.map((m) => ({
           id: m.id,
           enabled: m.enabled,
           visibility: m.visibility,
@@ -178,6 +377,10 @@ export class MemoryHandler {
           content: m.content,
           createdAt: m.createdAt,
           lastModifiedAt: m.lastModifiedAt,
+          tier: m.tier,
+          category: m.category,
+          scope: m.scope,
+          decay: m.decay,
           relatedTo: m.relatedTo,
           supersedes: m.supersedes,
         })),
@@ -227,6 +430,22 @@ export class MemoryHandler {
       const includePrivate = context.workspace.isDm;
       const stats = await this.memoryStore.getMemoryStats(context.workspace, includePrivate);
 
+      // Include channel memory stats if channelId is available
+      if (context.channelId && context.workspaceManager) {
+        try {
+          const channelWorkspace = await context.workspaceManager.getOrCreateChannelWorkspace(
+            context.workspace.components.platform,
+            context.channelId,
+          );
+          const channelStats = await this.memoryStore.getChannelMemoryStats(channelWorkspace);
+          stats.channel = channelStats.channel ?? channelStats.public;
+        } catch (error) {
+          logger.warn("Failed to get channel memory stats", {
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
+      }
+
       return {
         success: true,
         data: stats,
@@ -266,6 +485,9 @@ export class MemoryHandler {
         enabled?: boolean;
         visibility?: MemoryVisibility;
         importance?: MemoryImportance;
+        tier?: MemoryTier;
+        category?: MemoryCategory;
+        decay?: number;
         relatedTo?: string[];
         supersedes?: string[];
       } = {};
@@ -326,12 +548,50 @@ export class MemoryHandler {
         patch.supersedes = params.supersedes;
       }
 
+      if (params.tier !== undefined) {
+        if (params.tier !== "core" && params.tier !== "working" && params.tier !== "archive") {
+          return {
+            success: false,
+            error: "Invalid 'tier' parameter. Must be 'core', 'working', or 'archive'",
+          };
+        }
+        patch.tier = params.tier as MemoryTier;
+      }
+
+      if (params.category !== undefined) {
+        const validCategories: MemoryCategory[] = [
+          "fact",
+          "preference",
+          "episode",
+          "summary",
+          "relationship",
+        ];
+        if (!validCategories.includes(params.category as MemoryCategory)) {
+          return {
+            success: false,
+            error:
+              "Invalid 'category' parameter. Must be 'fact', 'preference', 'episode', 'summary', or 'relationship'",
+          };
+        }
+        patch.category = params.category as MemoryCategory;
+      }
+
+      if (params.decay !== undefined) {
+        if (typeof params.decay !== "number") {
+          return {
+            success: false,
+            error: "Invalid 'decay' parameter. Must be a number between 0.0 and 1.0",
+          };
+        }
+        patch.decay = Math.max(0.0, Math.min(1.0, params.decay));
+      }
+
       // At least one field must be provided
       if (Object.keys(patch).length === 0) {
         return {
           success: false,
           error:
-            "At least one of 'enabled', 'visibility', 'importance', 'relatedTo', or 'supersedes' must be provided",
+            "At least one of 'enabled', 'visibility', 'importance', 'tier', 'category', 'decay', 'relatedTo', or 'supersedes' must be provided",
         };
       }
 

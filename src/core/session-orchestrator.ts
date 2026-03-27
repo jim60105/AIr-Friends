@@ -33,7 +33,7 @@ import type { PlatformAdapter } from "@platforms/platform-adapter.ts";
 import type { AgentConnectorOptions, ClientConfig, MCPServerConfig } from "@acp/types.ts";
 import { dirname, join } from "@std/path";
 import type { RssItem } from "@utils/rss-fetcher.ts";
-import type { WorkspaceInfo } from "../types/workspace.ts";
+import type { ChannelWorkspaceInfo, WorkspaceInfo } from "../types/workspace.ts";
 import type { ResolvedReminder } from "../types/reminder.ts";
 import type { ReminderStore } from "./reminder-store.ts";
 import { SessionAuditWriter } from "./audit-logger.ts";
@@ -643,6 +643,18 @@ export class SessionOrchestrator {
             reactionSent,
             durationMs: Date.now() - sessionStartTime,
           });
+
+          // Generate conversation summary (fire-and-forget)
+          if (replySent) {
+            await this.generateConversationSummary(
+              connector,
+              sessionId,
+              resolvedModel,
+              sessionType,
+              sessionLogger,
+            );
+          }
+
           result = {
             success: true,
             replySent,
@@ -1579,9 +1591,267 @@ export class SessionOrchestrator {
   }
 
   /**
-   * Process a due reminder — creates a new ACP session to deliver the reminder via DM.
-   * Pattern follows processSpontaneousPost() but with reminder-specific context.
+   * Run memory maintenance for a channel workspace.
+   * Mirrors processMemoryMaintenance but operates on channel memory files.
    */
+  async processChannelMemoryMaintenance(
+    channelKey: string,
+    channelWorkspace: ChannelWorkspaceInfo,
+    memoryMaintenanceConfig: MemoryMaintenanceConfig,
+  ): Promise<SessionResponse> {
+    const sessionLoggerName = `memory-maintenance:channel:${channelKey}`;
+    let sessionLogger = logger.child(sessionLoggerName);
+
+    const platform = channelWorkspace.platform;
+    if (!isValidPlatform(platform)) {
+      return {
+        success: false,
+        replySent: false,
+        error: `Invalid platform in channel key: ${channelKey}`,
+      };
+    }
+
+    sessionLogger.info("Processing channel memory maintenance session", {
+      channelKey,
+      model: memoryMaintenanceConfig.model,
+    });
+
+    const sessionStartTime = Date.now();
+    activeSessionsGauge.inc();
+    let result: SessionResponse;
+    let auditWriter: SessionAuditWriter | null = null;
+    let shellSessionId: string | null = null;
+
+    try {
+      // Use a synthetic user workspace for the agent session (channel maintenance is internal)
+      const syntheticEvent: NormalizedEvent = {
+        platform,
+        channelId: channelWorkspace.channelId,
+        userId: "channel-maintenance",
+        messageId: `channel_maintenance_${Date.now()}`,
+        isDm: false,
+        guildId: "",
+        content: "",
+        timestamp: new Date(),
+      };
+      const workspace = await this.workspaceManager.getOrCreateWorkspace(syntheticEvent);
+      const agentWorkspacePath = await this.workspaceManager.getOrCreateAgentWorkspace();
+
+      if (this.config.skillApi?.enabled) {
+        shellSessionId = this.sessionRegistry.register({
+          platform,
+          channelId: channelWorkspace.channelId,
+          userId: "channel-maintenance",
+          isDm: false,
+          workspace,
+          platformAdapter: undefined as unknown as PlatformAdapter,
+          timeoutMs: this.config.skillApi.sessionTimeoutMs,
+          agentWorkspacePath,
+        });
+
+        sessionLogger.info("Shell session {shellSessionId} registered", { shellSessionId });
+        sessionLogger = sessionLogger.withContext({ shellSessionId });
+      }
+
+      // Create audit writer
+      auditWriter = shellSessionId
+        ? this.createAuditWriter(platform, "channel-maintenance", shellSessionId)
+        : null;
+      if (auditWriter && shellSessionId) {
+        this.sessionRegistry.setAuditWriter(shellSessionId, auditWriter);
+      }
+
+      const routingContext: ModelRoutingContext = {
+        sessionType: "memory-maintenance",
+      };
+      const sectionFallback = memoryMaintenanceConfig.model || this.config.agent.model;
+      const resolvedModel = resolveModel(
+        this.config.agent.modelRouting,
+        routingContext,
+        sectionFallback,
+      );
+
+      const memoriesDump = await this.serializeChannelMemories(channelWorkspace);
+
+      const promptDir = dirname(this.config.agent.systemPromptPath);
+      const instructionsPath = join(promptDir, "system_memory_maintenance.md");
+      const env = createTemplateEngine(promptDir);
+
+      const variables: TemplateVariables = {
+        isDm: false,
+        platform,
+        userId: "",
+        channelId: channelWorkspace.channelId,
+        guildId: "",
+        agentType: getDefaultAgentType(this.config),
+        model: resolvedModel,
+        yolo: this.yolo,
+        workspaceKey: `channel:${channelKey}`,
+        memoriesDump,
+        minMemoryCount: memoryMaintenanceConfig.minMemoryCount,
+      };
+
+      const fullPrompt = await renderTemplate(
+        env,
+        instructionsPath,
+        variables as unknown as Record<string, unknown>,
+      );
+
+      // === DRY RUN CHECK ===
+      const dryRunResult = await this.handleDryRun(
+        "channel_memory_maintenance",
+        fullPrompt,
+        sessionLogger,
+        { shellSessionId },
+      );
+      if (dryRunResult) {
+        if (shellSessionId) {
+          this.sessionRegistry.remove(shellSessionId);
+          this.cleanupWorkspaceTmp(workspace, sessionLogger);
+        }
+        result = dryRunResult;
+        return result;
+      }
+      // === END DRY RUN CHECK ===
+
+      const clientConfig: ClientConfig = {
+        workingDir: channelWorkspace.path,
+        agentWorkspacePath,
+        platform,
+        userId: "channel-maintenance",
+        channelId: channelWorkspace.channelId,
+        isDM: false,
+        yolo: this.yolo,
+        autoApproveSkills: this.config.agent.autoApproveSkills,
+        allowedWriteExtensions: this.config.agent.sandbox?.allowedWriteExtensions,
+      };
+
+      const agentType = getDefaultAgentType(this.config);
+      const connector = this.createConnector({
+        agentConfig: createAgentConfig(
+          agentType,
+          channelWorkspace.path,
+          this.config,
+          this.yolo,
+          agentWorkspacePath,
+          shellSessionId ?? undefined,
+        ),
+        clientConfig,
+        skillRegistry: this.skillRegistry,
+        logger: sessionLogger,
+        idleTimeoutConfig: this.config.agent.idleTimeout,
+      });
+
+      if (shellSessionId) {
+        this.sessionRegistry.setTerminateCallback(shellSessionId, async () => {
+          sessionLogger.warn(
+            "Agent process termination requested by skill API (doom-loop detected)",
+          );
+          await connector.disconnect();
+        });
+      }
+
+      try {
+        await connector.connect();
+        sessionLogger.info("Agent connected");
+        await auditWriter?.write("agent_connect", { agentType });
+
+        if (auditWriter) {
+          connector.getClient()?.setAuditWriter(auditWriter);
+        }
+
+        const sessionId = await connector.createSession(this.getMCPServers());
+        sessionLogger = sessionLogger.withContext({ sessionId });
+        await connector.setSessionModel(sessionId, resolvedModel);
+        const modeOverride = getSessionModeOverride(agentType, this.yolo);
+        if (modeOverride) {
+          await connector.setSessionMode(sessionId, modeOverride);
+        }
+
+        await auditWriter?.write("prompt_sent", {
+          promptLength: fullPrompt.length,
+          modelId: resolvedModel,
+        });
+        const response = await this.promptWithIdleTimeoutHandling(
+          connector,
+          sessionId,
+          fullPrompt,
+        );
+
+        if (response === null) {
+          sessionLogger.warn(
+            "Channel memory maintenance session ended without response after reconnect",
+          );
+          return { success: false, replySent: false, error: "Session lost due to idle timeout" };
+        }
+
+        sessionLogger.info(
+          "Channel memory maintenance session completed with stopReason {stopReason}",
+          { stopReason: response.stopReason },
+        );
+        await auditWriter?.write("agent_response", {
+          stopReason: response.stopReason,
+          isRetry: false,
+        });
+
+        const success = response.stopReason === "end_turn";
+        await auditWriter?.write("session_end", {
+          success,
+          replySent: false,
+          durationMs: Date.now() - sessionStartTime,
+          error: success ? undefined : `Unexpected stop reason: ${response.stopReason}`,
+        });
+        result = {
+          success,
+          replySent: false,
+          error: success ? undefined : `Unexpected stop reason: ${response.stopReason}`,
+        };
+        return result;
+      } finally {
+        await connector.disconnect();
+        sessionLogger.debug("Agent disconnected");
+
+        if (shellSessionId) {
+          this.sessionRegistry.remove(shellSessionId);
+          this.cleanupWorkspaceTmp(workspace, sessionLogger);
+        }
+      }
+    } catch (error) {
+      sessionLogger.error("Channel memory maintenance session failed", {
+        error: error instanceof Error ? error.message : String(error),
+      });
+      await auditWriter?.write("session_end", {
+        success: false,
+        durationMs: Date.now() - sessionStartTime,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      result = {
+        success: false,
+        replySent: false,
+        error: error instanceof Error ? error.message : "Unknown error",
+      };
+      return result;
+    } finally {
+      activeSessionsGauge.dec();
+      const durationSec = (Date.now() - sessionStartTime) / 1000;
+      const status = result!.success ? "success" : "failure";
+      sessionsTotal.labels(platform, "channel_memory_maintenance", status).inc();
+      sessionDurationSeconds.labels(platform, "channel_memory_maintenance", status).observe(
+        durationSec,
+      );
+      this.completedSessionStore?.add({
+        id: `channel_memory_maintenance_${sessionStartTime}`,
+        auditSessionId: shellSessionId ?? undefined,
+        type: "memory-maintenance",
+        platform,
+        userId: "channel-maintenance",
+        startedAt: new Date(sessionStartTime).toISOString(),
+        endedAt: new Date().toISOString(),
+        status,
+        durationMs: Date.now() - sessionStartTime,
+      });
+    }
+  }
   async processReminder(
     reminder: ResolvedReminder,
     platformAdapter: PlatformAdapter,
@@ -2199,6 +2469,9 @@ export class SessionOrchestrator {
       id: string;
       visibility: string;
       importance: string;
+      tier: string;
+      category: string;
+      decay: number;
       content: string;
       createdAt: string;
     }[] = [];
@@ -2211,6 +2484,9 @@ export class SessionOrchestrator {
           id: m.id,
           visibility: m.visibility,
           importance: m.importance,
+          tier: m.tier,
+          category: m.category,
+          decay: m.decay,
           content: m.content,
           createdAt: m.createdAt,
         });
@@ -2219,6 +2495,34 @@ export class SessionOrchestrator {
 
     // Sort by creation date ascending
     allMemories.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+
+    if (allMemories.length === 0) {
+      return "(No enabled memories found)";
+    }
+
+    return JSON.stringify(allMemories, null, 2);
+  }
+
+  /**
+   * Load all enabled channel memories and serialize as JSON for prompt injection
+   */
+  private async serializeChannelMemories(
+    channelWorkspace: ChannelWorkspaceInfo,
+  ): Promise<string> {
+    const memories = await this.memoryStore.loadChannelMemories(channelWorkspace);
+    const allMemories = memories
+      .filter((m) => m.enabled)
+      .map((m) => ({
+        id: m.id,
+        visibility: m.visibility,
+        importance: m.importance,
+        tier: m.tier,
+        category: m.category,
+        decay: m.decay,
+        content: m.content,
+        createdAt: m.createdAt,
+      }))
+      .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
 
     if (allMemories.length === 0) {
       return "(No enabled memories found)";
@@ -2293,6 +2597,52 @@ export class SessionOrchestrator {
           path: workspace.tmpPath,
         });
       }
+    }
+  }
+
+  /**
+   * Generate a conversation summary after a successful session (fire-and-forget).
+   * Runs on the same ACP session. Errors are caught and logged, never propagated.
+   */
+  private async generateConversationSummary(
+    connector: AgentConnector,
+    sessionId: string,
+    currentModel: string,
+    sessionType: string,
+    sessionLogger: ReturnType<typeof createLogger>,
+  ): Promise<void> {
+    // Skip if disabled
+    if (this.config.conversationSummary?.enabled === false) return;
+
+    // Only for message and channelLurk session types
+    if (sessionType !== "message" && sessionType !== "channelLurk") return;
+
+    try {
+      const summaryModel = this.config.conversationSummary?.model || currentModel;
+      const modelSwitched = summaryModel !== currentModel;
+
+      if (modelSwitched) {
+        await connector.setSessionModel(sessionId, summaryModel);
+      }
+
+      try {
+        const promptDir = dirname(this.config.agent.systemPromptPath);
+        const summaryPromptPath = join(promptDir, "system_summary.md");
+        const env = createTemplateEngine(promptDir);
+        const summaryPrompt = await renderTemplate(env, summaryPromptPath, {});
+
+        sessionLogger.info("Generating conversation summary");
+        await connector.prompt(sessionId, summaryPrompt);
+        sessionLogger.info("Conversation summary generated");
+      } finally {
+        if (modelSwitched) {
+          await connector.setSessionModel(sessionId, currentModel);
+        }
+      }
+    } catch (error) {
+      sessionLogger.warn("Failed to generate conversation summary", {
+        error: error instanceof Error ? error.message : String(error),
+      });
     }
   }
 }

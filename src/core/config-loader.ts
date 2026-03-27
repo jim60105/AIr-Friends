@@ -86,6 +86,7 @@ const DEFAULT_CONFIG: Partial<Config> = {
     searchLimit: 10,
     maxChars: 2000,
     recentMessageLimit: 20,
+    workingTierLimit: 20,
   },
   logging: {
     level: "INFO",
@@ -515,6 +516,14 @@ function validateConfig(config: Record<string, unknown>): void {
       "dashboard.passphrase is required when dashboard is enabled",
       { field: "dashboard.passphrase" },
     );
+  }
+
+  // Conversation summary defaults
+  if (!config.conversationSummary) {
+    config.conversationSummary = { enabled: true };
+  } else {
+    const cs = config.conversationSummary as Record<string, unknown>;
+    if (cs.enabled === undefined) cs.enabled = true;
   }
 
   // Model routing defaults and validation

@@ -17,7 +17,7 @@ function createConfig(whitelist: string[]): Config {
       systemPromptPath: "./prompts/system_reply.md",
       tokenLimit: 20000,
     },
-    memory: { searchLimit: 10, maxChars: 2000, recentMessageLimit: 20 },
+    memory: { searchLimit: 10, maxChars: 2000, recentMessageLimit: 20, workingTierLimit: 20 },
     workspace: { repoPath: "./data", workspacesDir: "workspaces" },
     logging: { level: "INFO" },
     replyPolicy: "channels",

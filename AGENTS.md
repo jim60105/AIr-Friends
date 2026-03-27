@@ -284,6 +284,41 @@ The command only affects recent channel messages, not memories or guild-related 
 
 ### 3. Memory System (Feature 03)
 
+#### Tiered Memory Architecture
+
+Memories are organized into three tiers:
+
+| Tier      | Purpose                            | Decay Default | Working Limit      |
+| --------- | ---------------------------------- | ------------- | ------------------ |
+| `core`    | Persistent identity facts          | 1.0 (no decay)| N/A                |
+| `working` | Active, recent conversation context| 0.8           | Configurable (default: 20) |
+| `archive` | Long-term storage                  | 0.5           | N/A                |
+
+When the working tier exceeds `memory.workingTierLimit`, the oldest working memories are automatically demoted to archive tier.
+
+#### Memory Scope
+
+- **`user`** (default): Per-user memories shared across all channels the user interacts in
+- **`channel`**: Channel-scoped memories stored alongside the channel context (e.g., group conversation topics, channel-specific decisions)
+
+#### Categories
+
+Each memory has a category for classification:
+
+| Category       | Description                                      |
+| -------------- | ------------------------------------------------ |
+| `fact`         | Objective information (default)                  |
+| `preference`   | User preferences and likes/dislikes              |
+| `episode`      | Specific conversation events or experiences      |
+| `summary`      | Conversation summaries (auto-generated or manual)|
+| `relationship` | Relationship information between people          |
+
+#### Conversation Summaries
+
+After each session, the system can automatically generate a conversation summary using the `system_summary.md` prompt template. This is controlled by `conversationSummary.enabled` (default: `true`). Summaries are saved as working-tier memories with category `summary`.
+
+#### Storage Format
+
 Append-only JSONL files (both exist in every workspace):
 
 - `memory.public.jsonl` - Public memories
@@ -299,6 +334,10 @@ interface MemoryEvent {
   enabled: boolean;
   visibility: "public" | "private";
   importance: "high" | "normal";
+  tier: "core" | "working" | "archive"; // Memory tier (default: "archive")
+  category: "fact" | "preference" | "episode" | "summary" | "relationship"; // Classification (default: "fact")
+  scope: "user" | "channel"; // Memory scope (default: "user")
+  decay: number; // 0.0–1.0 temporal relevance (default varies by tier)
   content: string; // Plain text
   relatedTo?: string[]; // IDs of semantically related memories
   supersedes?: string[]; // IDs of memories this entry supersedes
@@ -316,11 +355,34 @@ interface PatchEvent {
     enabled?: boolean;
     visibility?: "public" | "private";
     importance?: "high" | "normal";
+    tier?: "core" | "working" | "archive";
+    category?: "fact" | "preference" | "episode" | "summary" | "relationship";
+    decay?: number; // 0.0–1.0 (ignored for core tier)
     relatedTo?: string[]; // IDs of semantically related memories
     supersedes?: string[]; // IDs of memories this patch's target supersedes
   };
 }
 ```
+
+#### Configuration
+
+```yaml
+memory:
+  searchLimit: 10
+  maxChars: 2000
+  recentMessageLimit: 20
+  workingTierLimit: 20  # Max working-tier memories before demotion to archive
+
+conversationSummary:
+  enabled: true          # Auto-generate conversation summaries (default: true)
+  model: ""              # Model for summaries (defaults to agent.model)
+```
+
+**Environment Variable Overrides:**
+
+- `MEMORY_WORKING_TIER_LIMIT` → `memory.workingTierLimit`
+- `CONVERSATION_SUMMARY_ENABLED` → `conversationSummary.enabled`
+- `CONVERSATION_SUMMARY_MODEL` → `conversationSummary.model`
 
 ### 4. Skills & Final Reply (Feature 04)
 

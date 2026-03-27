@@ -34,6 +34,19 @@ ${HOME}/.agents/skills/memory-patch/scripts/memory-patch.ts \
   --session-id "$SESSION_ID" \
   --memory-id "mem_abc123" \
   --related-to "mem_def456,mem_ghi789"
+
+# Change tier and category
+${HOME}/.agents/skills/memory-patch/scripts/memory-patch.ts \
+  --session-id "$SESSION_ID" \
+  --memory-id "mem_abc123" \
+  --tier core \
+  --category preference
+
+# Adjust decay value
+${HOME}/.agents/skills/memory-patch/scripts/memory-patch.ts \
+  --session-id "$SESSION_ID" \
+  --memory-id "mem_abc123" \
+  --decay 0.9
 ```
 
 ## Capabilities
@@ -41,6 +54,9 @@ ${HOME}/.agents/skills/memory-patch/scripts/memory-patch.ts \
 - Enable/disable memories (use --enabled or --disabled flag)
 - Change visibility level
 - Adjust importance level
+- Change memory tier (--tier: `core`, `working`, or `archive`)
+- Change memory category (--category: `fact`, `preference`, `episode`, `summary`, or `relationship`)
+- Adjust decay value (--decay: 0.0–1.0; ignored for core tier which always has decay=1.0)
 - Link related memories (--related-to, comma-separated IDs)
 - Mark supersession lineage (--supersedes, comma-separated IDs)
 

@@ -8,8 +8,20 @@ import type { PlatformEmoji } from "./platform.ts";
  * Assembled context for an Agent session
  */
 export interface AssembledContext {
-  /** Important memories (high importance, fully loaded) */
+  /** Important memories (high importance, fully loaded) — backward compat alias for coreMemories */
   importantMemories: ResolvedMemory[];
+
+  /** Core-tier memories (always fully loaded) */
+  coreMemories: ResolvedMemory[];
+
+  /** Working-tier memories (bounded, most recent) */
+  workingMemories: ResolvedMemory[];
+
+  /** Channel core-tier memories (non-DM only) */
+  channelCoreMemories: ResolvedMemory[];
+
+  /** Channel working-tier memories (non-DM only) */
+  channelWorkingMemories: ResolvedMemory[];
 
   /** Recent messages from the current channel */
   recentMessages: PlatformMessage[];
@@ -41,8 +53,14 @@ export interface AssembledSpontaneousContext {
   /** System prompt content */
   systemPrompt: string;
 
-  /** Important memories from the bot's workspace */
+  /** Important memories — backward compat alias for coreMemories */
   importantMemories: ResolvedMemory[];
+
+  /** Core-tier memories (always fully loaded) */
+  coreMemories: ResolvedMemory[];
+
+  /** Working-tier memories (bounded, most recent) */
+  workingMemories: ResolvedMemory[];
 
   /** Recent messages from the target channel (may be empty if not fetched) */
   recentMessages: PlatformMessage[];

@@ -683,7 +683,7 @@ Deno.test("MemoryHandler - handleMemoryPatch requires at least one field", async
   assertEquals(result.success, false);
   assertEquals(
     result.error,
-    "At least one of 'enabled', 'visibility', 'importance', 'relatedTo', or 'supersedes' must be provided",
+    "At least one of 'enabled', 'visibility', 'importance', 'tier', 'category', 'decay', 'relatedTo', or 'supersedes' must be provided",
   );
 
   // Cleanup

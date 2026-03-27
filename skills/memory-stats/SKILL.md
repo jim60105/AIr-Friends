@@ -15,6 +15,14 @@ ${HOME}/.agents/skills/memory-stats/scripts/memory-stats.ts \
   --session-id "$SESSION_ID"
 ```
 
+## Response Format
+
+Stats include:
+
+- Per-tier breakdown (core/working/archive counts)
+- Per-category breakdown (fact/preference/episode/summary/relationship counts)
+- Channel memory counts when available
+
 ## Critical Rules
 
 1. **Timeout**: The script won't run for more than 30 seconds. If it hangs, do stop_bash and do not retry, return an error message in JSON format.

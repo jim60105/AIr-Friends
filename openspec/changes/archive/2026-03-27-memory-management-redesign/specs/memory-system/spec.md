@@ -48,12 +48,12 @@ When new fields are not provided, the system SHALL apply the following defaults:
 
 | Field      | Default     |
 | ---------- | ----------- |
-| `tier`     | `"archive"` |
+| `tier`     | `"archive"` (or `"core"` when `importance` is `"high"` for backward compatibility) |
 | `category` | `"fact"`    |
 | `scope`    | `"user"`    |
-| `decay`    | `0.5`       |
+| `decay`    | Per-tier default (see importance-decay spec) |
 
-These defaults ensure that existing memory-save calls without the new fields continue to work, and that pre-migration memories loaded without these fields behave predictably.
+These defaults ensure that existing memory-save calls without the new fields continue to work, and that pre-migration memories loaded without these fields behave predictably. When `importance` is `"high"` and `tier` is not explicitly provided, the system SHALL derive `tier: "core"` to maintain backward compatibility with the legacy importance-based context loading.
 
 #### Scenario: Save without new fields uses defaults
 - **WHEN** `memory-save` is called with only `content`, `visibility`, and `importance`

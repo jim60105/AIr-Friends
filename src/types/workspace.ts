@@ -34,6 +34,20 @@ export interface WorkspaceInfo {
 }
 
 /**
+ * Channel workspace information (for channel-scoped shared memories)
+ */
+export interface ChannelWorkspaceInfo {
+  /** Channel key (e.g., "discord/general-chat") */
+  key: string;
+  /** Platform name */
+  platform: string;
+  /** Channel ID */
+  channelId: string;
+  /** Absolute path to the channel workspace directory */
+  path: string;
+}
+
+/**
  * Workspace manager configuration
  */
 export interface WorkspaceManagerConfig {
@@ -50,4 +64,6 @@ export interface WorkspaceManagerConfig {
 export enum MemoryFileType {
   PUBLIC = "memory.public.jsonl",
   PRIVATE = "memory.private.jsonl",
+  CHANNEL = "memory.channel.jsonl",
+  INDEX = "memory.index.jsonl",
 }

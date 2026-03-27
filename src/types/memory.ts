@@ -11,6 +11,21 @@ export type MemoryVisibility = "public" | "private";
 export type MemoryImportance = "high" | "normal";
 
 /**
+ * Memory storage tier (determines context loading behavior)
+ */
+export type MemoryTier = "core" | "working" | "archive";
+
+/**
+ * Memory content category (enables structured retrieval)
+ */
+export type MemoryCategory = "fact" | "preference" | "episode" | "summary" | "relationship";
+
+/**
+ * Memory scope (user-private or channel-shared)
+ */
+export type MemoryScope = "user" | "channel";
+
+/**
  * Event type in memory log
  */
 export type MemoryEventType = "memory" | "patch";
@@ -41,11 +56,23 @@ export interface MemoryEntry extends BaseMemoryEvent {
   /** Visibility scope */
   visibility: MemoryVisibility;
 
-  /** Importance level */
+  /** Importance level (legacy, retained for backward compatibility) */
   importance: MemoryImportance;
 
   /** Memory content (plain text) */
   content: string;
+
+  /** Storage tier: core (always loaded), working (recent N), archive (search only) */
+  tier?: MemoryTier;
+
+  /** Content category for structured retrieval */
+  category?: MemoryCategory;
+
+  /** Memory scope: user (per-user) or channel (per-channel, shared) */
+  scope?: MemoryScope;
+
+  /** Importance-weighted temporal relevance (0.0–1.0). Core=1.0, working=0.8, archive=0.5 */
+  decay?: number;
 
   /** IDs of semantically related memories (set at creation time) */
   relatedTo?: string[];
@@ -73,6 +100,15 @@ export interface MemoryPatch extends BaseMemoryEvent {
   /** New importance (optional) */
   importance?: MemoryImportance;
 
+  /** New storage tier (optional) */
+  tier?: MemoryTier;
+
+  /** New content category (optional) */
+  category?: MemoryCategory;
+
+  /** New decay value (optional, ignored for core tier) */
+  decay?: number;
+
   /** IDs of semantically related memories */
   relatedTo?: string[];
 
@@ -97,6 +133,18 @@ export interface ResolvedMemory {
   createdAt: string;
   lastModifiedAt: string;
 
+  /** Storage tier (defaults to "archive" for legacy entries without tier) */
+  tier: MemoryTier;
+
+  /** Content category (defaults to "fact" for legacy entries without category) */
+  category: MemoryCategory;
+
+  /** Memory scope (defaults to "user" for legacy entries without scope) */
+  scope: MemoryScope;
+
+  /** Temporal relevance decay (defaults based on tier) */
+  decay: number;
+
   /** IDs of semantically related memories (aggregated from entry + patches) */
   relatedTo: string[];
 
@@ -116,10 +164,29 @@ export interface MemoryStatCategory {
   normalImportance: number;
 }
 
+/** Per-tier memory statistics */
+export interface MemoryTierStats {
+  core: number;
+  working: number;
+  archive: number;
+}
+
+/** Per-category memory statistics */
+export interface MemoryCategoryStats {
+  fact: number;
+  preference: number;
+  episode: number;
+  summary: number;
+  relationship: number;
+}
+
 /** Complete memory statistics for a workspace */
 export interface MemoryStats {
   public: MemoryStatCategory;
   private: MemoryStatCategory | null;
+  channel?: MemoryStatCategory;
+  byTier: MemoryTierStats;
+  byCategory: MemoryCategoryStats;
   summary: {
     totalMemories: number;
     totalEnabled: number;
@@ -127,6 +194,28 @@ export interface MemoryStats {
     totalHighImportance: number;
     totalNormalImportance: number;
   };
+}
+
+/**
+ * Memory index entry for O(1) ID lookup
+ */
+export interface MemoryIndexEntry {
+  /** Memory ID */
+  id: string;
+  /** Storage tier */
+  tier: MemoryTier;
+  /** Content category */
+  category: MemoryCategory;
+  /** Whether memory is enabled */
+  enabled: boolean;
+  /** Memory scope */
+  scope: MemoryScope;
+  /** Visibility level */
+  visibility: MemoryVisibility;
+  /** Source file: "public", "private", or "channel" */
+  file: "public" | "private" | "channel";
+  /** Line number in the source JSONL file (1-based) */
+  lineNumber: number;
 }
 
 export interface AgentNoteSearchResult {

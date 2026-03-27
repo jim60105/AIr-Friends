@@ -3,6 +3,7 @@
 import { createLogger } from "@utils/logger.ts";
 import { combinedTokenCount, estimateTokens } from "@utils/token-counter.ts";
 import { MemoryStore } from "./memory-store.ts";
+import { WorkspaceManager } from "./workspace-manager.ts";
 import { loadSystemPrompt } from "./config-loader.ts";
 import type { TemplateVariables } from "../types/template.ts";
 import type {
@@ -22,10 +23,16 @@ const logger = createLogger("ContextAssembler");
 export class ContextAssembler {
   private readonly memoryStore: MemoryStore;
   private readonly config: ContextAssemblyConfig;
+  private readonly workspaceManager?: WorkspaceManager;
 
-  constructor(memoryStore: MemoryStore, config: ContextAssemblyConfig) {
+  constructor(
+    memoryStore: MemoryStore,
+    config: ContextAssemblyConfig,
+    workspaceManager?: WorkspaceManager,
+  ) {
     this.memoryStore = memoryStore;
     this.config = config;
+    this.workspaceManager = workspaceManager;
   }
 
   /**
@@ -98,9 +105,38 @@ export class ContextAssembler {
     // Load system prompt
     const systemPrompt = await this.getSystemPrompt(templateVars);
 
-    // Get important memories
-    const importantMemories = await this.memoryStore.getImportantMemories(workspace);
-    logger.debug("Loaded {count} important memories", { count: importantMemories.length });
+    // Load core-tier memories (always all)
+    const coreMemories = await this.memoryStore.getCoreTierMemories(workspace);
+    logger.debug("Loaded {count} core-tier memories", { count: coreMemories.length });
+
+    // Load recent working-tier memories (bounded)
+    const workingMemories = await this.memoryStore.getRecentWorkingMemories(workspace);
+    logger.debug("Loaded {count} working-tier memories", { count: workingMemories.length });
+
+    // Load channel memories if in a channel context
+    let channelCoreMemories: ResolvedMemory[] = [];
+    let channelWorkingMemories: ResolvedMemory[] = [];
+    if (!event.isDm && event.channelId && this.workspaceManager) {
+      try {
+        const channelWorkspace = await this.workspaceManager.getOrCreateChannelWorkspace(
+          event.platform,
+          event.channelId,
+        );
+        channelCoreMemories = await this.memoryStore.getChannelCoreTierMemories(channelWorkspace);
+        channelWorkingMemories = await this.memoryStore.getChannelRecentWorkingMemories(
+          channelWorkspace,
+        );
+        logger.debug("Loaded channel memories: {coreCount} core, {workingCount} working", {
+          coreCount: channelCoreMemories.length,
+          workingCount: channelWorkingMemories.length,
+        });
+      } catch (error) {
+        logger.warn("Failed to load channel memories", { error: String(error) });
+      }
+    }
+
+    // Backward compat: importantMemories = coreMemories
+    const importantMemories = coreMemories;
 
     // Fetch recent messages
     const rawRecentMessages = await messageFetcher.fetchRecentMessages(
@@ -171,9 +207,15 @@ export class ContextAssembler {
     };
 
     // Estimate token count
+    const allMemories = [
+      ...coreMemories,
+      ...workingMemories,
+      ...channelCoreMemories,
+      ...channelWorkingMemories,
+    ];
     const estimatedTokens = this.calculateTokenEstimate(
       systemPrompt,
-      importantMemories,
+      allMemories,
       recentMessages,
       relatedMessages,
       triggerMessage,
@@ -182,6 +224,10 @@ export class ContextAssembler {
 
     const context: AssembledContext = {
       importantMemories,
+      coreMemories,
+      workingMemories,
+      channelCoreMemories,
+      channelWorkingMemories,
       recentMessages,
       relatedMessages,
       systemPrompt,
@@ -191,11 +237,13 @@ export class ContextAssembler {
       assembledAt: new Date(),
     };
 
+    const totalMemoriesCount = allMemories.length;
+
     logger.info(
       "Context assembled: {memoriesCount} memories, {recentMessagesCount} recent, ~{estimatedTokens} tokens",
       {
         workspaceKey: workspace.key,
-        memoriesCount: importantMemories.length,
+        memoriesCount: totalMemoriesCount,
         recentMessagesCount: recentMessages.length,
         relatedMessagesCount: relatedMessages?.length ?? 0,
         estimatedTokens,
@@ -242,10 +290,13 @@ export class ContextAssembler {
   formatContext(context: AssembledContext): FormattedContext {
     const availableTokens = this.config.tokenLimit - estimateTokens(context.systemPrompt);
 
-    // Format memories section (always include all important memories)
-    const memoriesSection = context.importantMemories.length > 0
-      ? this.formatMemoriesSection(context.importantMemories)
-      : "";
+    // Format memories section (tiered)
+    const memoriesSection = this.formatTieredMemoriesSection(
+      context.coreMemories,
+      context.workingMemories,
+      context.channelCoreMemories,
+      context.channelWorkingMemories,
+    );
 
     // Calculate trigger message section
     const triggerSection = this.formatTriggerSection(context.triggerMessage);
@@ -301,6 +352,42 @@ export class ContextAssembler {
       "",
     ];
     return lines.join("\n");
+  }
+
+  /**
+   * Format tiered memory sections for context
+   */
+  formatTieredMemoriesSection(
+    coreMemories: ResolvedMemory[],
+    workingMemories: ResolvedMemory[],
+    channelCoreMemories: ResolvedMemory[],
+    channelWorkingMemories: ResolvedMemory[],
+  ): string {
+    const parts: string[] = [];
+
+    if (coreMemories.length > 0) {
+      parts.push("## Core Memories (User)");
+      parts.push("");
+      parts.push(...coreMemories.map((m, i) => `${i + 1}. ${m.content}`));
+      parts.push("");
+    }
+
+    if (workingMemories.length > 0) {
+      parts.push("## Recent Context (User)");
+      parts.push("");
+      parts.push(...workingMemories.map((m, i) => `${i + 1}. ${m.content}`));
+      parts.push("");
+    }
+
+    const channelMemories = [...channelCoreMemories, ...channelWorkingMemories];
+    if (channelMemories.length > 0) {
+      parts.push("## Channel Knowledge");
+      parts.push("");
+      parts.push(...channelMemories.map((m, i) => `${i + 1}. ${m.content}`));
+      parts.push("");
+    }
+
+    return parts.join("\n");
   }
 
   /**
@@ -635,7 +722,9 @@ export class ContextAssembler {
     };
 
     const systemPrompt = await this.getSystemPrompt(templateVars);
-    const importantMemories = await this.memoryStore.getImportantMemories(workspace);
+    const coreMemories = await this.memoryStore.getCoreTierMemories(workspace);
+    const workingMemories = await this.memoryStore.getRecentWorkingMemories(workspace);
+    const importantMemories = coreMemories;
 
     let recentMessages: PlatformMessage[] = [];
     if (options.fetchRecentMessages) {
@@ -667,7 +756,7 @@ export class ContextAssembler {
       }
     }
 
-    const memoriesText = importantMemories.map((m) => m.content).join("\n");
+    const memoriesText = [...coreMemories, ...workingMemories].map((m) => m.content).join("\n");
     const recentText = recentMessages.map((m) => `${m.username}: ${m.content}`).join("\n");
     const emojiText = availableEmojis?.map((e) => e.name).join(", ") ?? "";
     const estimatedTokens = combinedTokenCount(systemPrompt, memoriesText, recentText, emojiText);
@@ -675,6 +764,8 @@ export class ContextAssembler {
     return {
       systemPrompt,
       importantMemories,
+      coreMemories,
+      workingMemories,
       recentMessages,
       availableEmojis,
       recentMessagesFetched: options.fetchRecentMessages,

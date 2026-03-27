@@ -29,25 +29,28 @@ Each line in `memory.index.jsonl` SHALL be a JSON object with the following fiel
 | `category`   | `string`  | Memory category                                |
 | `enabled`    | `boolean` | Current enabled state (after patches applied)  |
 | `scope`      | `string`  | Memory scope (`user` or `channel`)             |
+| `file`       | `string`  | Source JSONL file (`public`, `private`, or `channel`) |
+| `visibility` | `string`  | Memory visibility (`public`, `private`, or `channel`) |
 | `lineNumber` | `number`  | 1-based line number in the source JSONL file   |
 
 #### Scenario: Index entry for a new memory
 - **WHEN** a memory with ID `mem_abc_123` is saved at line 42 of `memory.public.jsonl`
-- **THEN** the index SHALL contain `{"id":"mem_abc_123","tier":"archive","category":"fact","enabled":true,"scope":"user","lineNumber":42}`
+- **THEN** the index SHALL contain `{"id":"mem_abc_123","tier":"archive","category":"fact","enabled":true,"scope":"user","file":"public","visibility":"public","lineNumber":42}`
 
-### Requirement: Built on Startup
+### Requirement: Lazy-Loaded with Fallback
 
-The system SHALL build the index by scanning the memory JSONL files on application startup. The build process SHALL read all memory and patch events, apply patches chronologically, and write the resulting index.
+The system SHALL lazy-load the index on first access per workspace. If the index file does not exist, the system SHALL start with an empty in-memory map. Operations that depend on index lookup (e.g., `findMemoryById`) SHALL fall back to full JSONL file scanning when the index is empty or the entry is not found. A full rebuild from source JSONL files can be triggered explicitly via `rebuild()`.
 
-#### Scenario: Index built from existing memories
-- **GIVEN** a workspace has `memory.public.jsonl` with 100 events
-- **WHEN** the application starts
-- **THEN** the system SHALL scan the file and generate `memory.index.jsonl` with entries for all resolved memories
+#### Scenario: Index loaded on first access
+- **GIVEN** a workspace has `memory.index.jsonl`
+- **WHEN** the first memory operation is performed on that workspace
+- **THEN** the index SHALL be loaded into an in-memory map
 
-#### Scenario: Patches reflected in index
-- **GIVEN** memory `mem_abc_123` has a patch setting `enabled: false`
-- **WHEN** the index is built on startup
-- **THEN** the index entry for `mem_abc_123` SHALL have `enabled: false`
+#### Scenario: Missing index starts empty with fallback
+- **GIVEN** `memory.index.jsonl` does not exist but `memory.public.jsonl` has events
+- **WHEN** `findMemoryById` is called
+- **THEN** the in-memory index SHALL be empty
+- **AND** the system SHALL fall back to scanning the source JSONL files
 
 ### Requirement: Incremental Maintenance
 
@@ -61,20 +64,15 @@ When a new memory or patch event is appended to a JSONL file, the system SHALL i
 - **WHEN** a patch event disabling `mem_abc_123` is appended
 - **THEN** the index SHALL be updated to reflect `enabled: false` for `mem_abc_123`
 
-### Requirement: Rebuild Mechanism for Corruption Recovery
+### Requirement: Explicit Rebuild Mechanism
 
-The system SHALL provide a rebuild mechanism that regenerates the index from scratch by scanning the source JSONL files. This SHALL be triggered when the index file is missing, corrupted (unparseable), or explicitly requested.
+The system SHALL provide a `rebuild()` method that regenerates the index from scratch by scanning the source JSONL files. This can be triggered explicitly when the index is known to be stale or corrupted.
 
-#### Scenario: Missing index triggers rebuild
-- **GIVEN** `memory.index.jsonl` does not exist but `memory.public.jsonl` has events
-- **WHEN** the system attempts to load the index
+#### Scenario: Explicit rebuild regenerates index
+- **GIVEN** `memory.index.jsonl` is corrupted or stale
+- **WHEN** `rebuild()` is called with the source memory file paths
 - **THEN** a full rebuild SHALL be triggered from the source JSONL files
-
-#### Scenario: Corrupted index triggers rebuild
-- **GIVEN** `memory.index.jsonl` contains invalid JSON on line 5
-- **WHEN** the system attempts to load the index
-- **THEN** a full rebuild SHALL be triggered
-- **AND** the corrupted file SHALL be replaced
+- **AND** the corrupted/stale file SHALL be replaced
 
 ### Requirement: O(1) ID Lookup via Index
 

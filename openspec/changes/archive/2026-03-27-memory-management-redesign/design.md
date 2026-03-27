@@ -58,7 +58,7 @@ data/workspaces/{platform}/channels/{channelId}/
 └── memory.index.jsonl
 ```
 
-Channel memories use a new visibility value `"channel"` (extending `MemoryVisibility` to `"public" | "private" | "channel"`). The `scope` field on each entry is `"channel"` and the `visibility` is always `"public"` — there are no private channel memories.
+Channel memories use `scope: "channel"` to distinguish them from user memories. The `visibility` is always `"public"` — there are no private channel memories. `MemoryVisibility` remains `"public" | "private"` (no extension needed, since `scope` already distinguishes channel memories).
 
 **Context assembly rule**: When a session occurs in channel X, the context assembler loads:
 1. User's core-tier memories (public; + private if DM)
@@ -106,7 +106,7 @@ interface MemoryIndexEntry {
   category: MemoryCategory;
   enabled: boolean;              // Current resolved state
   scope: "user" | "channel";
-  visibility: "public" | "private" | "channel";
+  visibility: "public" | "private";          // Channel memories use "public"
   file: "public" | "private" | "channel"; // Which JSONL file contains this entry
   lineNumber: number;            // 1-based line number in the source file
 }
@@ -140,7 +140,7 @@ relevance = keyword_match_count * decay * recency_bonus
 
 Where `recency_bonus = 1.0 + (0.5 * (1.0 - age_days / 365))`, clamped to `[1.0, 1.5]`. Memories less than a day old get a 1.5x bonus; memories over a year old get no bonus.
 
-**Maintenance decay update**: During each maintenance cycle, for every archive-tier and working-tier entry that was not accessed (searched or loaded) since the last maintenance run, `decay *= 0.95`. This is applied via a patch event with the new decay value. Entries with `decay < 0.05` are candidates for disabling (agent decides).
+**Maintenance decay update**: During each maintenance cycle, for every archive-tier entry that was not accessed (searched or loaded) since the last maintenance run, `decay *= 0.95`. This is applied via a patch event with the new decay value. Working-tier entries are excluded from decay adjustment — they are auto-managed through consolidation by maintenance. Entries with `decay < 0.05` are candidates for disabling (agent decides).
 
 **Rationale**: Inspired by Field-Theoretic Memory's Ebbinghaus forgetting curve, but simplified to a single multiplicative factor. The decay value is stored in plain text, visible in `rg` output, and debuggable by inspecting the JSONL directly. No opaque embedding scores or hidden state. The 0.95 multiplier means an unaccessed archive memory reaches ~0.18 after 20 maintenance cycles (140 days at weekly intervals) — still searchable but ranked below fresh content.
 

@@ -176,6 +176,12 @@ memory:
   searchLimit: 10 # Max number of search results (default: 10)
   maxChars: 2000 # Max characters stored per memory (default: 2000)
   recentMessageLimit: 20 # Number of recent messages included in context (default: 20)
+  workingTierLimit: 20 # Max working-tier memories before auto-demotion to archive (default: 20); override with env MEMORY_WORKING_TIER_LIMIT
+
+# Conversation summary - auto-generate summaries after each session
+conversationSummary:
+  enabled: true                       # Enable post-session conversation summaries (default: true); override with env CONVERSATION_SUMMARY_ENABLED
+  model: ""                           # Model for summary generation (defaults to agent.model); override with env CONVERSATION_SUMMARY_MODEL
 
 # Workspace configuration
 workspace:

@@ -23,20 +23,35 @@ The memory maintenance threshold is **{{ minMemoryCount }}** memories. This work
 
 Prioritize merging the oldest and most redundant memories first. If you cannot reduce the count below {{ minMemoryCount }} without losing important information, get as close as possible while preserving all factual content.
 
+### Tier system
+
+Memories have a `tier` field: `core`, `working`, or `archive`. They also have `category` (`fact`, `preference`, `episode`, `summary`, `relationship`) and a `decay` value (0.0–1.0). Legacy memories without `tier` should be treated as `archive`.
+
+**Tier rules:**
+
+| Tier      | Consolidation                                        | Decay | Notes                                  |
+| --------- | ---------------------------------------------------- | ----- | -------------------------------------- |
+| `core`    | NEVER                                                | NEVER | Do not touch core-tier memories at all |
+| `working` | Summaries older than 7 days → consolidate to archive | No    | See step 2 below                       |
+| `archive` | Merge as before                                      | Yes   | Apply decay adjustment (step 3)        |
+
 ### Required workflow
 
-1. Review the memories listed above.
-2. Group semantically related memories (do not mix public/private visibility).
-3. For each group, create one concise summary using skill({ name: "memory-save" }) with `--supersedes` set to the comma-separated IDs of the source memories being summarized.
-4. After a summary is saved, disable the original memories with skill({ name: "memory-patch" }) (`enabled: false`).
+1. **Review and group** — Review the memories listed above. Group semantically related memories (do not mix public/private visibility). Respect tier boundaries when grouping.
+2. **Working-tier summary consolidation** — For `working`-tier memories with `category: "summary"` that are older than 7 days: create a consolidated archive-tier entry using skill({ name: "memory-save" }) with `--tier archive`, `--category summary`, and `--supersedes` set to the comma-separated IDs of the source memories. Then disable the originals via skill({ name: "memory-patch" }) with `enabled: false`.
+3. **Archive-tier decay adjustment** — For `archive`-tier entries that have not been referenced or superseded by recent memories, lower their `decay` value by calling skill({ name: "memory-patch" }) with `decay` set to `current_decay * 0.95`. Skip this for `core` and `working` tiers.
+4. **Low-decay flagging** — For entries with `decay < 0.05`, review whether they still contain useful information. If not, disable them via skill({ name: "memory-patch" }) with `enabled: false`.
+5. **Archive-tier merge** — For remaining `archive`-tier memories, group semantically related entries and create one concise summary using skill({ name: "memory-save" }) with `--tier archive`, `--category summary`, and `--supersedes` set to the comma-separated IDs of the source memories. Then disable the originals via skill({ name: "memory-patch" }) with `enabled: false`.
 
 ### Quality and safety rules
 
+- **Never consolidate or decay core-tier memories.**
 - Preserve all factual information from the source memories.
 - Do not invent or assume facts that are not present in source memories.
 - Summaries should usually merge 2-5 related memories.
-- Skip memories created in the last 7 days.
+- Skip memories created in the last 7 days (except for working-tier summary consolidation which uses its own 7-day threshold).
 - Set summary `importance` to `high`.
+- When creating summaries, always include `--tier` and `--category` parameters in memory-save calls.
 - Preserve visibility:
   - Summaries of public memories must stay public.
   - Summaries of private memories must stay private.
