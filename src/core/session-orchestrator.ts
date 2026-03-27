@@ -408,7 +408,6 @@ export class SessionOrchestrator {
       if (dryRunResult) {
         if (shellSessionId) {
           this.sessionRegistry.remove(shellSessionId);
-          Deno.env.delete("SESSION_ID");
           // Clean up tmp directory if no other sessions are using this workspace
           this.cleanupWorkspaceTmp(workspace, sessionLogger);
         }
@@ -440,6 +439,7 @@ export class SessionOrchestrator {
           this.config,
           yoloDecision.enabled,
           agentWorkspacePath,
+          shellSessionId ?? undefined,
         ),
         clientConfig,
         skillRegistry: this.skillRegistry,
@@ -486,7 +486,6 @@ export class SessionOrchestrator {
         sessionLogger.info("Agent capabilities checked", { supportsImage });
 
         const sessionId = await connector.createSession(this.getMCPServers());
-        Deno.env.set("SESSION_ID", sessionId);
         sessionLogger.info("Agent session {sessionId} created", { sessionId });
         sessionLogger = sessionLogger.withContext({ sessionId });
 
@@ -710,8 +709,6 @@ export class SessionOrchestrator {
           this.sessionRegistry.remove(shellSessionId);
           sessionLogger.debug("Shell session {shellSessionId} cleaned up", { shellSessionId });
 
-          Deno.env.delete("SESSION_ID");
-
           // Clean up tmp directory if no other sessions are using this workspace
           this.cleanupWorkspaceTmp(workspace, sessionLogger);
         }
@@ -886,7 +883,6 @@ export class SessionOrchestrator {
       if (dryRunResult) {
         if (shellSessionId) {
           this.sessionRegistry.remove(shellSessionId);
-          Deno.env.delete("SESSION_ID");
           // Clean up tmp directory if no other sessions are using this workspace
           this.cleanupWorkspaceTmp(workspace, sessionLogger);
         }
@@ -918,6 +914,7 @@ export class SessionOrchestrator {
           this.config,
           yoloDecision.enabled,
           agentWorkspacePath,
+          shellSessionId ?? undefined,
         ),
         clientConfig,
         skillRegistry: this.skillRegistry,
@@ -950,7 +947,6 @@ export class SessionOrchestrator {
         }
 
         const sessionId = await connector.createSession(this.getMCPServers());
-        Deno.env.set("SESSION_ID", sessionId);
         sessionLogger = sessionLogger.withContext({ sessionId });
         // Set the model for the session (using pre-resolved model)
         await connector.setSessionModel(sessionId, resolvedModel);
@@ -1033,7 +1029,6 @@ export class SessionOrchestrator {
 
         if (shellSessionId) {
           this.sessionRegistry.remove(shellSessionId);
-          Deno.env.delete("SESSION_ID");
 
           // Clean up tmp directory if no other sessions are using this workspace
           this.cleanupWorkspaceTmp(workspace, sessionLogger);
@@ -1178,7 +1173,6 @@ export class SessionOrchestrator {
       if (dryRunResult) {
         if (shellSessionId) {
           this.sessionRegistry.remove(shellSessionId);
-          Deno.env.delete("SESSION_ID");
           // Clean up tmp directory if no other sessions are using this workspace
           this.cleanupWorkspaceTmp(workspace, sessionLogger);
         }
@@ -1209,6 +1203,7 @@ export class SessionOrchestrator {
           this.config,
           this.yolo,
           agentWorkspacePath,
+          shellSessionId ?? undefined,
         ),
         clientConfig,
         skillRegistry: this.skillRegistry,
@@ -1237,7 +1232,6 @@ export class SessionOrchestrator {
         }
 
         const sessionId = await connector.createSession(this.getMCPServers());
-        Deno.env.set("SESSION_ID", sessionId);
         sessionLogger = sessionLogger.withContext({ sessionId });
         // Set the model for the session (using pre-resolved model)
         await connector.setSessionModel(sessionId, resolvedModel);
@@ -1294,7 +1288,6 @@ export class SessionOrchestrator {
 
         if (shellSessionId) {
           this.sessionRegistry.remove(shellSessionId);
-          Deno.env.delete("SESSION_ID");
 
           // Clean up tmp directory if no other sessions are using this workspace
           this.cleanupWorkspaceTmp(workspace, sessionLogger);
@@ -1438,7 +1431,6 @@ export class SessionOrchestrator {
       if (dryRunResult) {
         if (shellSessionId) {
           this.sessionRegistry.remove(shellSessionId);
-          Deno.env.delete("SESSION_ID");
           // Clean up tmp directory if no other sessions are using this workspace
           this.cleanupWorkspaceTmp(workspace, sessionLogger);
         }
@@ -1467,6 +1459,7 @@ export class SessionOrchestrator {
           this.config,
           this.yolo,
           agentWorkspacePath,
+          shellSessionId ?? undefined,
         ),
         clientConfig,
         skillRegistry: this.skillRegistry,
@@ -1495,7 +1488,6 @@ export class SessionOrchestrator {
         }
 
         const sessionId = await connector.createSession(this.getMCPServers());
-        Deno.env.set("SESSION_ID", sessionId);
         sessionLogger = sessionLogger.withContext({ sessionId });
         // Set the model for the session (using pre-resolved model)
         await connector.setSessionModel(sessionId, resolvedModel);
@@ -1546,7 +1538,6 @@ export class SessionOrchestrator {
 
         if (shellSessionId) {
           this.sessionRegistry.remove(shellSessionId);
-          Deno.env.delete("SESSION_ID");
 
           // Clean up tmp directory if no other sessions are using this workspace
           this.cleanupWorkspaceTmp(workspace, sessionLogger);
@@ -1725,7 +1716,6 @@ export class SessionOrchestrator {
       if (dryRunResult) {
         if (shellSessionId) {
           this.sessionRegistry.remove(shellSessionId);
-          Deno.env.delete("SESSION_ID");
           // Clean up tmp directory if no other sessions are using this workspace
           this.cleanupWorkspaceTmp(workspace, sessionLogger);
         }
@@ -1757,6 +1747,7 @@ export class SessionOrchestrator {
           this.config,
           yoloDecision.enabled,
           agentWorkspacePath,
+          shellSessionId ?? undefined,
         ),
         clientConfig,
         skillRegistry: this.skillRegistry,
@@ -1785,7 +1776,6 @@ export class SessionOrchestrator {
         }
 
         const sessionId = await connector.createSession(this.getMCPServers());
-        Deno.env.set("SESSION_ID", sessionId);
         sessionLogger = sessionLogger.withContext({ sessionId });
         // Set the model for the session (using pre-resolved model)
         await connector.setSessionModel(sessionId, resolvedModel);
@@ -1877,7 +1867,6 @@ export class SessionOrchestrator {
 
         if (shellSessionId) {
           this.sessionRegistry.remove(shellSessionId);
-          Deno.env.delete("SESSION_ID");
 
           // Clean up tmp directory if no other sessions are using this workspace
           this.cleanupWorkspaceTmp(workspace, sessionLogger);

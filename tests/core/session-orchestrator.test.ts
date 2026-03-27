@@ -451,8 +451,11 @@ class MockAgentConnector {
   disconnected = false;
   lastMCPServers: unknown[] = [];
   onPrompt?: (callCount: number) => void;
+  options: AgentConnectorOptions;
 
-  constructor(_options: AgentConnectorOptions) {}
+  constructor(options: AgentConnectorOptions) {
+    this.options = options;
+  }
 
   async connect(): Promise<void> {
     this.connected = true;
@@ -2598,8 +2601,7 @@ Deno.test({
 // --- processMessage tmp cleanup regression tests ---
 
 Deno.test({
-  name:
-    "SessionOrchestrator - processMessage success cleans tmp and SESSION_ID without removing workspace",
+  name: "SessionOrchestrator - processMessage success cleans tmp without removing workspace",
   sanitizeResources: false,
   sanitizeOps: false,
   async fn() {
@@ -2624,7 +2626,7 @@ Deno.test({
         };
         connector.promptResponses = [{ stopReason: "end_turn" } as PromptResponse];
         connector.onPrompt = () => {
-          observedSessionIds.push(Deno.env.get("SESSION_ID")!);
+          observedSessionIds.push(connector.options.agentConfig.env?.["SESSION_ID"] ?? "");
           const key = `${workspaceKey}:${event.channelId}`;
           // deno-lint-ignore no-explicit-any
           (replyHandler as any).replySentMap.set(key, true);
@@ -2636,7 +2638,7 @@ Deno.test({
       assertEquals(response.success, true);
       assertEquals(response.replySent, true);
       assertEquals(observedSessionIds.length, 1);
-      assertEquals(observedSessionIds[0], "mock-session-id");
+      assertEquals(observedSessionIds[0].startsWith("sess_"), true);
       assertEquals(Deno.env.get("SESSION_ID"), undefined);
       assertEquals(await pathExists(tmpPath), false);
 
@@ -2653,8 +2655,7 @@ Deno.test({
 });
 
 Deno.test({
-  name:
-    "SessionOrchestrator - processMessage dry run cleans tmp and SESSION_ID without creating connector",
+  name: "SessionOrchestrator - processMessage dry run cleans tmp without creating connector",
   sanitizeResources: false,
   sanitizeOps: false,
   async fn() {
@@ -2749,7 +2750,7 @@ Deno.test({
         };
         connector.promptResponses = [{ stopReason: "end_turn" } as PromptResponse];
         connector.onPrompt = () => {
-          observedSessionId = Deno.env.get("SESSION_ID")!;
+          observedSessionId = connector.options.agentConfig.env?.["SESSION_ID"] ?? "";
           const key = `${workspace.key}:${event.channelId}`;
           // deno-lint-ignore no-explicit-any
           (replyHandler as any).replySentMap.set(key, true);
@@ -2778,7 +2779,7 @@ Deno.test({
 });
 
 Deno.test({
-  name: "SessionOrchestrator - processMessage connection errors still clean tmp and SESSION_ID",
+  name: "SessionOrchestrator - processMessage connection errors still clean tmp",
   sanitizeResources: false,
   sanitizeOps: false,
   async fn() {

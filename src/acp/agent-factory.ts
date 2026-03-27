@@ -14,9 +14,17 @@ export function createAgentConfig(
   appConfig: Config,
   yolo = false,
   agentWorkspacePath?: string,
+  sessionId?: string,
 ): AgentConfig {
   // Build the base (unfiltered) config for the agent type
-  const baseConfig = buildBaseAgentConfig(type, workingDir, appConfig, yolo, agentWorkspacePath);
+  const baseConfig = buildBaseAgentConfig(
+    type,
+    workingDir,
+    appConfig,
+    yolo,
+    agentWorkspacePath,
+    sessionId,
+  );
 
   // Apply sandbox if configured
   const sandboxConfig = appConfig.agent.sandbox;
@@ -49,6 +57,7 @@ function buildBaseAgentConfig(
   appConfig: Config,
   yolo: boolean,
   agentWorkspacePath?: string,
+  sessionId?: string,
 ): AgentConfig {
   switch (type) {
     case "copilot": {
@@ -84,6 +93,10 @@ function buildBaseAgentConfig(
 
       // Set TMPDIR to workspace-scoped tmp directory
       env["TMPDIR"] = `${workingDir}/tmp`;
+
+      if (sessionId) {
+        env["SESSION_ID"] = sessionId;
+      }
 
       const args = [
         "--disable-builtin-mcps",
@@ -151,6 +164,10 @@ function buildBaseAgentConfig(
       // Set TMPDIR to workspace-scoped tmp directory
       env["TMPDIR"] = `${workingDir}/tmp`;
 
+      if (sessionId) {
+        env["SESSION_ID"] = sessionId;
+      }
+
       const args = ["--experimental-acp"];
       if (yolo) {
         args.push("--yolo");
@@ -198,6 +215,10 @@ function buildBaseAgentConfig(
 
       // Set TMPDIR to workspace-scoped tmp directory
       env["TMPDIR"] = `${workingDir}/tmp`;
+
+      if (sessionId) {
+        env["SESSION_ID"] = sessionId;
+      }
 
       const args = ["acp"];
 

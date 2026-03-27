@@ -784,3 +784,22 @@ Deno.test("getSessionModeOverride - returns null for copilot with yolo", () => {
 Deno.test("getSessionModeOverride - returns null for gemini with yolo", () => {
   assertEquals(getSessionModeOverride("gemini", true), null);
 });
+
+Deno.test("createAgentConfig - sets SESSION_ID in env when sessionId provided", () => {
+  const config = createTestConfig();
+  const agentConfig = createAgentConfig(
+    "copilot",
+    "/tmp/workspace",
+    config,
+    false,
+    undefined,
+    "sess_test123",
+  );
+  assertEquals(agentConfig.env?.["SESSION_ID"], "sess_test123");
+});
+
+Deno.test("createAgentConfig - does not set SESSION_ID when sessionId omitted", () => {
+  const config = createTestConfig();
+  const agentConfig = createAgentConfig("copilot", "/tmp/workspace", config);
+  assertEquals(agentConfig.env?.["SESSION_ID"], undefined);
+});
