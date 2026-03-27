@@ -3,14 +3,12 @@
 import { createLogger } from "@utils/logger.ts";
 import { searchMultipleKeywords, SearchOptions } from "@utils/text-search.ts";
 import { WorkspaceManager } from "./workspace-manager.ts";
-import { MemoryIndex } from "./memory-index.ts";
 import {
   AgentNoteSearchResult,
   MemoryCategory,
   MemoryCategoryStats,
   MemoryEntry,
   MemoryImportance,
-  MemoryIndexEntry,
   MemoryLogEvent,
   MemoryPatch,
   MemoryScope,
@@ -43,7 +41,6 @@ const DEFAULT_TIER_DECAY: Record<MemoryTier, number> = {
 export class MemoryStore {
   private readonly workspaceManager: WorkspaceManager;
   private readonly config: MemoryStoreConfig;
-  private readonly indexes: Map<string, MemoryIndex> = new Map();
 
   constructor(workspaceManager: WorkspaceManager, config: MemoryStoreConfig) {
     this.workspaceManager = workspaceManager;
@@ -117,23 +114,6 @@ export class MemoryStore {
       line,
     );
 
-    // Update index if available
-    try {
-      const index = await this.getOrCreateIndex(workspace);
-      await index.appendEntry({
-        id: entry.id,
-        tier,
-        category,
-        scope,
-        visibility,
-        enabled: true,
-        file: visibility === "private" ? "private" : "public",
-        lineNumber: 0, // Approximate; rebuilt on next full load
-      });
-    } catch {
-      // Index update is best-effort
-    }
-
     logger.info("Memory {memoryId} added ({visibility}, {importance}, tier={tier})", {
       workspaceKey: workspace.key,
       memoryId: entry.id,
@@ -200,20 +180,6 @@ export class MemoryStore {
       line,
     );
 
-    // Update index if available
-    try {
-      const index = await this.getOrCreateIndex(workspace);
-      const indexChanges: Partial<Pick<MemoryIndexEntry, "enabled" | "tier" | "category">> = {};
-      if (patch.enabled !== undefined) indexChanges.enabled = patch.enabled;
-      if (patch.tier !== undefined) indexChanges.tier = patch.tier;
-      if (patch.category !== undefined) indexChanges.category = patch.category;
-      if (Object.keys(indexChanges).length > 0) {
-        await index.updateEntry(targetId, indexChanges);
-      }
-    } catch {
-      // Index update is best-effort
-    }
-
     logger.info("Memory {targetId} patched", {
       workspaceKey: workspace.key,
       targetId,
@@ -230,20 +196,6 @@ export class MemoryStore {
     workspace: WorkspaceInfo,
     memoryId: string,
   ): Promise<ResolvedMemory | null> {
-    // Try index for O(1) lookup to determine which file to search
-    try {
-      const index = await this.getOrCreateIndex(workspace);
-      const indexEntry = index.lookupById(memoryId);
-      if (indexEntry) {
-        const visibility = indexEntry.file === "private" ? "private" : "public";
-        const memories = await this.loadAllMemories(workspace, visibility as MemoryVisibility);
-        const match = memories.find((m) => m.id === memoryId);
-        if (match) return match;
-      }
-    } catch {
-      // Fall through to full scan
-    }
-
     // Search public memories
     const publicMemories = await this.loadAllMemories(workspace, "public");
     const publicMatch = publicMemories.find((m) => m.id === memoryId);
@@ -654,19 +606,6 @@ export class MemoryStore {
       });
     }
     return files;
-  }
-
-  /**
-   * Get or create a MemoryIndex for a workspace (lazy-loaded, cached per workspace key)
-   */
-  private async getOrCreateIndex(workspace: WorkspaceInfo): Promise<MemoryIndex> {
-    const cached = this.indexes.get(workspace.key);
-    if (cached) return cached;
-
-    const index = new MemoryIndex(workspace.path);
-    await index.load();
-    this.indexes.set(workspace.key, index);
-    return index;
   }
 
   // ── Channel memory methods ──

@@ -65,5 +65,4 @@ export enum MemoryFileType {
   PUBLIC = "memory.public.jsonl",
   PRIVATE = "memory.private.jsonl",
   CHANNEL = "memory.channel.jsonl",
-  INDEX = "memory.index.jsonl",
 }

@@ -116,12 +116,10 @@ data/workspaces/
 ├── discord/
 │   ├── 123456789/                          # User workspace (userId)
 │   │   ├── memory.public.jsonl
-│   │   ├── memory.private.jsonl
-│   │   └── memory.index.jsonl
+│   │   └── memory.private.jsonl
 │   └── channels/
 │       └── 987654321/                      # Channel workspace (channelId)
-│           ├── memory.channel.jsonl
-│           └── memory.index.jsonl
+│           └── memory.channel.jsonl
 └── misskey/
     ├── abcdef1234/                         # User workspace
     │   └── ...
@@ -254,54 +252,7 @@ Entries with `decay < 0.05` are candidates for disabling (agent decides during m
 - Use `"relationship"` sparingly — only for explicitly stated interpersonal connections.
 - `memory-search` accepts an optional `category` filter for targeted retrieval.
 
-## 8. Memory Index
-
-### Index file format
-
-Each workspace contains a `memory.index.jsonl` co-located with its memory files. Each line is:
-
-```json
-{"id":"mem_abc","tier":"core","category":"fact","enabled":true,"scope":"user","visibility":"public","file":"public","lineNumber":42}
-```
-
-### MemoryIndexEntry schema
-
-```typescript
-interface MemoryIndexEntry {
-  id: string;
-  tier: MemoryTier;
-  category: MemoryCategory;
-  enabled: boolean;
-  scope: MemoryScope;
-  visibility: "public" | "private";
-  file: "public" | "private" | "channel";
-  lineNumber: number;  // 1-based line in source JSONL
-}
-```
-
-### O(1) lookup
-
-At runtime, the index is loaded into an in-memory `Map<string, MemoryIndexEntry>`. `findMemoryById(id)` reads the map to get `{file, lineNumber}`, then reads that single line from the JSONL — O(1) vs the previous O(n) full-file scan.
-
-### Lifecycle
-
-1. **Startup**: `initializeIndex()` scans all JSONL files, resolves patches, writes a fresh `memory.index.jsonl`. Always produces a correct index.
-2. **Runtime appends**: When `addMemory()` or `patchMemory()` appends a line, the in-memory map is updated and the new index entry is appended to the index file.
-3. **Filtered iteration**: `getCoreMemories()` iterates the in-memory map filtering `tier === "core" && enabled === true` — no file scan needed.
-
-### Rebuild procedure
-
-```bash
-# Programmatic
-await memoryStore.rebuildIndex(workspacePath);
-
-# Or delete the index file — it will be rebuilt on next startup
-rm data/workspaces/discord/123456/memory.index.jsonl
-```
-
-The index is a **pure derivation** of the source JSONL files. Deleting it is always safe.
-
-## 9. Context Assembly
+## 8. Context Assembly
 
 At session start, the context assembler loads memories in this order:
 
@@ -347,7 +298,7 @@ At session start, the context assembler loads memories in this order:
 
 The working-tier limit is configurable via `memory.workingTierLimit` (default: 20).
 
-## 10. Search Scoring
+## 9. Search Scoring
 
 When `memory-search` executes a keyword query:
 
@@ -363,7 +314,7 @@ score = keyword_match_count × decay × recency_bonus
 
 **Tier filtering**: Search accepts optional `tier` and `category` parameters. The index enables fast pre-filtering before hitting the JSONL files.
 
-## 11. Migration (v1 → v2)
+## 10. Migration (v1 → v2)
 
 ### Script: `scripts/migrate-memory-v2.ts`
 
@@ -385,8 +336,7 @@ deno run --allow-read --allow-write scripts/migrate-memory-v2.ts --data-dir ./da
 1. **Backup**: Each file → `{filename}.backup.jsonl`.
 2. **Transform**: Add `tier`, `category`, `scope`, `decay` to `type: "memory"` events missing `tier`. Patch events are unchanged.
 3. **Write**: Atomic write via temp file + rename.
-4. **Index**: Generate `memory.index.jsonl` per workspace.
-5. **Idempotent**: Lines with existing `tier` field are written unchanged.
+4. **Idempotent**: Lines with existing `tier` field are written unchanged.
 
 ### Rollback
 
@@ -409,7 +359,7 @@ New code handles missing fields gracefully:
 
 The system is fully functional without running the migration script — but working-tier and channel features require v2 fields.
 
-## 12. Configuration
+## 11. Configuration
 
 ### Memory config (`config.yaml`)
 

@@ -196,28 +196,6 @@ export interface MemoryStats {
   };
 }
 
-/**
- * Memory index entry for O(1) ID lookup
- */
-export interface MemoryIndexEntry {
-  /** Memory ID */
-  id: string;
-  /** Storage tier */
-  tier: MemoryTier;
-  /** Content category */
-  category: MemoryCategory;
-  /** Whether memory is enabled */
-  enabled: boolean;
-  /** Memory scope */
-  scope: MemoryScope;
-  /** Visibility level */
-  visibility: MemoryVisibility;
-  /** Source file: "public", "private", or "channel" */
-  file: "public" | "private" | "channel";
-  /** Line number in the source JSONL file (1-based) */
-  lineNumber: number;
-}
-
 export interface AgentNoteSearchResult {
   filePath: string;
   matchedLines: Array<{

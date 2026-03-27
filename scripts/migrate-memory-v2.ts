@@ -7,7 +7,6 @@
 // Usage:
 //   deno run --allow-read --allow-write scripts/migrate-memory-v2.ts --data-dir ./data
 
-import { MemoryIndex } from "../src/core/memory-index.ts";
 import { join } from "jsr:@std/path@^1/join";
 import { parseArgs } from "jsr:@std/cli@^1/parse-args";
 import { exists } from "jsr:@std/fs@^1/exists";
@@ -21,10 +20,6 @@ interface MigrationStats {
 }
 
 const MEMORY_FILES = ["memory.public.jsonl", "memory.private.jsonl"] as const;
-const FILE_LABEL: Record<string, "public" | "private"> = {
-  "memory.public.jsonl": "public",
-  "memory.private.jsonl": "private",
-};
 
 function parseCliArgs(): { dataDir: string } {
   const args = parseArgs(Deno.args, {
@@ -131,27 +126,6 @@ async function discoverWorkspaces(dataDir: string): Promise<string[]> {
   return workspacePaths;
 }
 
-async function rebuildIndex(workspacePath: string): Promise<void> {
-  const memoryFiles: Array<{ path: string; file: "public" | "private" | "channel" }> = [];
-  for (const fileName of MEMORY_FILES) {
-    const filePath = join(workspacePath, fileName);
-    if (await exists(filePath)) {
-      memoryFiles.push({ path: filePath, file: FILE_LABEL[fileName] });
-    }
-  }
-  // Also include channel file if present
-  const channelPath = join(workspacePath, "memory.channel.jsonl");
-  if (await exists(channelPath)) {
-    memoryFiles.push({ path: channelPath, file: "channel" });
-  }
-
-  if (memoryFiles.length === 0) return;
-
-  const index = new MemoryIndex(workspacePath);
-  const count = await index.rebuild(memoryFiles);
-  console.log(`  🔍 Index rebuilt: ${count} entries`);
-}
-
 async function main(): Promise<void> {
   const { dataDir } = parseCliArgs();
   console.log(`\n🚀 Memory v2 migration`);
@@ -196,15 +170,6 @@ async function main(): Promise<void> {
         stats.errors.push(msg);
         console.error(`  ❌ ${msg}`);
       }
-    }
-
-    // Rebuild index after migrating workspace files
-    try {
-      await rebuildIndex(wsPath);
-    } catch (error) {
-      const msg = `${relPath}/index: ${error instanceof Error ? error.message : String(error)}`;
-      stats.errors.push(msg);
-      console.error(`  ❌ Index rebuild failed: ${msg}`);
     }
   }
 
