@@ -2,7 +2,7 @@
 // scripts/migrate-memory-v2.ts
 //
 // Migration script: adds v2 fields (tier, category, scope, decay) to legacy memory entries.
-// Safe to run multiple times (idempotent). Creates .backup.jsonl before modifying any file.
+// Safe to run multiple times (idempotent). Removes empty memory files as cleanup.
 //
 // Usage:
 //   deno run --allow-read --allow-write scripts/migrate-memory-v2.ts --data-dir ./data
@@ -16,6 +16,7 @@ interface MigrationStats {
   files: number;
   entriesMigrated: number;
   entriesSkipped: number;
+  filesRemoved: number;
   errors: string[];
 }
 
@@ -94,14 +95,9 @@ async function migrateFile(
   return { migrated, skipped };
 }
 
-async function createBackup(filePath: string): Promise<void> {
-  const backupPath = filePath.replace(/\.jsonl$/, ".backup.jsonl");
-  if (await exists(backupPath)) {
-    console.log(`  ⏭  Backup already exists: ${backupPath}`);
-    return;
-  }
-  await Deno.copyFile(filePath, backupPath);
-  console.log(`  📦 Backup created: ${backupPath}`);
+async function isEmptyFile(filePath: string): Promise<boolean> {
+  const content = await Deno.readTextFile(filePath);
+  return content.trim().length === 0;
 }
 
 async function discoverWorkspaces(dataDir: string): Promise<string[]> {
@@ -136,6 +132,7 @@ async function main(): Promise<void> {
     files: 0,
     entriesMigrated: 0,
     entriesSkipped: 0,
+    filesRemoved: 0,
     errors: [],
   };
 
@@ -156,7 +153,13 @@ async function main(): Promise<void> {
 
       stats.files++;
       try {
-        await createBackup(filePath);
+        // Remove empty files as cleanup
+        if (await isEmptyFile(filePath)) {
+          await Deno.remove(filePath);
+          stats.filesRemoved++;
+          console.log(`  🗑  ${fileName}: empty file removed`);
+          continue;
+        }
         const result = await migrateFile(filePath);
         stats.entriesMigrated += result.migrated;
         stats.entriesSkipped += result.skipped;
@@ -180,6 +183,7 @@ async function main(): Promise<void> {
   console.log(`   Files processed:      ${stats.files}`);
   console.log(`   Entries migrated:     ${stats.entriesMigrated}`);
   console.log(`   Entries skipped:      ${stats.entriesSkipped}`);
+  console.log(`   Empty files removed:  ${stats.filesRemoved}`);
   if (stats.errors.length > 0) {
     console.log(`   Errors:               ${stats.errors.length}`);
     for (const err of stats.errors) {

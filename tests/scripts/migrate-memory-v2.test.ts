@@ -1,6 +1,6 @@
 // tests/scripts/migrate-memory-v2.test.ts
 
-import { assertEquals, assertStringIncludes } from "@std/assert";
+import { assertEquals } from "@std/assert";
 import { join } from "@std/path";
 import { exists } from "@std/fs";
 
@@ -124,29 +124,22 @@ Deno.test("migrateLine - empty line returns empty", () => {
 // ── File-level integration tests ──
 
 Deno.test({
-  name: "Migration - backup file creation",
+  name: "Migration - empty file is removed",
   async fn() {
     const tempDir = await Deno.makeTempDir({ prefix: "migrate-test-" });
     try {
       const filePath = join(tempDir, "memory.public.jsonl");
-      const entry = {
-        type: "memory",
-        id: "mem_1",
-        ts: "2024-01-01T00:00:00Z",
-        enabled: true,
-        visibility: "public",
-        importance: "normal",
-        content: "test",
-      };
-      await Deno.writeTextFile(filePath, JSON.stringify(entry) + "\n");
+      await Deno.writeTextFile(filePath, "");
 
-      // Simulate backup creation (same logic as the script)
-      const backupPath = filePath.replace(/\.jsonl$/, ".backup.jsonl");
-      await Deno.copyFile(filePath, backupPath);
+      assertEquals(await exists(filePath), true);
 
-      assertEquals(await exists(backupPath), true);
-      const backupContent = await Deno.readTextFile(backupPath);
-      assertStringIncludes(backupContent, '"mem_1"');
+      // Simulate empty file check and removal (same logic as the script)
+      const content = await Deno.readTextFile(filePath);
+      if (content.trim().length === 0) {
+        await Deno.remove(filePath);
+      }
+
+      assertEquals(await exists(filePath), false);
     } finally {
       await Deno.remove(tempDir, { recursive: true });
     }
