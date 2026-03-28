@@ -40,9 +40,9 @@ async function pollHistory() {
     }
     body.innerHTML = sessions.map((s) =>
       `<tr class="hover:bg-surface-200/50 cursor-pointer" data-audit-id="${
-        esc(s.auditSessionId || s.id)
+        esc(s.auditSessionId)
       }">
-      <td class="px-4 py-2.5 font-mono text-xs text-accent-light break-all">${esc(s.id)}</td>
+      <td class="px-4 py-2.5 font-mono text-xs text-accent-light break-all">${esc(s.auditSessionId)}</td>
       <td class="px-4 py-2.5">${esc(s.type)}</td>
       <td class="px-4 py-2.5">${esc(s.platform)}</td>
       <td class="px-4 py-2.5 font-mono text-xs">${esc(s.userId)}</td>
@@ -80,6 +80,14 @@ async function toggleAudit(row, sessionId) {
   tr.innerHTML =
     '<td colspan="8" class="px-4 py-3"><p class="text-xs text-gray-500">Loading audit…</p></td>';
   row.after(tr);
+
+  // Sessions without audit logs
+  if (sessionId.startsWith("sess_noaudit_")) {
+    tr.querySelector("td").innerHTML =
+      '<p class="text-xs text-gray-500">No audit log available</p>';
+    return;
+  }
+
   try {
     const res = await fetch(`/api/sessions/${sessionId}/audit`);
     if (!res.ok) {

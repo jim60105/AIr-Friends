@@ -749,8 +749,7 @@ export class SessionOrchestrator {
       sessionsTotal.labels(event.platform, sessionType, status).inc();
       sessionDurationSeconds.labels(event.platform, sessionType, status).observe(durationSec);
       this.completedSessionStore?.add({
-        id: `${sessionType}_${sessionStartTime}`,
-        auditSessionId: shellSessionId ?? undefined,
+        auditSessionId: shellSessionId ?? `sess_noaudit_${sessionStartTime}`,
         type: sessionType === "channelLurk" ? "channelLurk" : "message",
         platform: event.platform,
         userId: event.userId,
@@ -1072,8 +1071,7 @@ export class SessionOrchestrator {
       sessionsTotal.labels(platform, "spontaneous", status).inc();
       sessionDurationSeconds.labels(platform, "spontaneous", status).observe(durationSec);
       this.completedSessionStore?.add({
-        id: `spontaneous_${sessionStartTime}`,
-        auditSessionId: shellSessionId ?? undefined,
+        auditSessionId: shellSessionId ?? `sess_noaudit_${sessionStartTime}`,
         type: "spontaneous",
         platform,
         userId: options.botId,
@@ -1330,8 +1328,7 @@ export class SessionOrchestrator {
       sessionsTotal.labels("internal", "self_research", status).inc();
       sessionDurationSeconds.labels("internal", "self_research", status).observe(durationSec);
       this.completedSessionStore?.add({
-        id: `self_research_${sessionStartTime}`,
-        auditSessionId: shellSessionId ?? undefined,
+        auditSessionId: shellSessionId ?? `sess_noaudit_${sessionStartTime}`,
         type: "self-research",
         platform: "internal",
         userId: "self-research",
@@ -1581,8 +1578,7 @@ export class SessionOrchestrator {
       sessionsTotal.labels(platform, "memory_maintenance", status).inc();
       sessionDurationSeconds.labels(platform, "memory_maintenance", status).observe(durationSec);
       this.completedSessionStore?.add({
-        id: `memory_maintenance_${sessionStartTime}`,
-        auditSessionId: shellSessionId ?? undefined,
+        auditSessionId: shellSessionId ?? `sess_noaudit_${sessionStartTime}`,
         type: "memory-maintenance",
         platform,
         userId,
@@ -1845,8 +1841,7 @@ export class SessionOrchestrator {
         durationSec,
       );
       this.completedSessionStore?.add({
-        id: `channel_memory_maintenance_${sessionStartTime}`,
-        auditSessionId: shellSessionId ?? undefined,
+        auditSessionId: shellSessionId ?? `sess_noaudit_${sessionStartTime}`,
         type: "memory-maintenance",
         platform,
         userId: "channel-maintenance",
@@ -2171,8 +2166,7 @@ export class SessionOrchestrator {
       sessionsTotal.labels(platform, "reminder", status).inc();
       sessionDurationSeconds.labels(platform, "reminder", status).observe(durationSec);
       this.completedSessionStore?.add({
-        id: `reminder_${sessionStartTime}`,
-        auditSessionId: shellSessionId ?? undefined,
+        auditSessionId: shellSessionId ?? `sess_noaudit_${sessionStartTime}`,
         type: "reminder",
         platform,
         userId: reminder.userId,

@@ -31,26 +31,32 @@ Defines the session monitoring APIs for active session listing, session history,
 
 ### Requirement: Session History
 
-`GET /api/sessions/history` SHALL return recently completed sessions (up to 100, ring buffer). Each entry SHALL include `id`, `type`, `platform`, `userId`, `startTime`, `endTime`, `status`, `durationMs`, and `auditSessionId` (the skill-API session ID in `sess_*` format, used for audit log file lookups).
+`GET /api/sessions/history` SHALL return recently completed sessions (up to 100, ring buffer). Each entry SHALL include `auditSessionId` (string, primary identifier — the skill-API session ID in `sess_*` format, used for audit log file lookups), `type`, `platform`, `userId`, `startTime`, `endTime`, `status` ("success" | "failure"), and `durationMs`. Sessions SHALL be returned in descending order by `endedAt` (newest first). The response SHALL NOT include an `id` field separate from `auditSessionId`.
 
-#### Scenario: Returns Empty Initially
+#### Scenario: Session history returns newest first
 
-- **GIVEN** no sessions have completed since application startup
-- **WHEN** a `GET /api/sessions/history` request is received with a valid session cookie
-- **THEN** the server SHALL return HTTP 200 with an empty JSON array `[]`
+- **WHEN** a client sends `GET /api/sessions/history`
+- **THEN** the response SHALL be a JSON array of completed sessions sorted by `endedAt` in descending order (most recent session first)
 
-#### Scenario: Captures Completed Sessions
+#### Scenario: Session history uses auditSessionId as identifier
 
-- **GIVEN** a session has completed with `status: "success"` and duration of 5000ms
-- **WHEN** a `GET /api/sessions/history` request is received with a valid session cookie
-- **THEN** the response SHALL include an entry with the session's `id`, `type`, `platform`, `userId`, `startTime`, `endTime`, `status`, `durationMs`, and `auditSessionId`
+- **WHEN** a client sends `GET /api/sessions/history`
+- **THEN** each session object in the response SHALL contain `auditSessionId` as the primary identifier field and SHALL NOT contain a separate `id` field
 
-#### Scenario: Oldest Entries Evicted When Buffer Full
+#### Scenario: Session history includes audit-loaded sessions
 
-- **GIVEN** 100 completed sessions are stored in the history buffer
-- **WHEN** a 101st session completes
-- **THEN** the oldest session entry SHALL be evicted
-- **AND** the buffer SHALL contain exactly 100 entries
+- **WHEN** the system has loaded historical sessions from audit logs at startup
+- **THEN** `GET /api/sessions/history` SHALL include both in-memory sessions from the current runtime and historically loaded sessions from audit logs
+
+#### Scenario: Session without audit logging enabled
+
+- **WHEN** a session completes with `skillApi.enabled` set to false or audit logging disabled
+- **THEN** the session SHALL be recorded with a fallback `auditSessionId` in format `sess_noaudit_{timestamp}` and the audit detail view SHALL display "No audit log available"
+
+#### Scenario: Ring buffer capacity with mixed sources
+
+- **WHEN** historical sessions from audit logs and new sessions from the current runtime together exceed the store capacity (100)
+- **THEN** the oldest sessions (by `endedAt`) SHALL be evicted first, regardless of whether they were loaded from audit or recorded in the current runtime
 
 #### Scenario: Requires Authentication
 

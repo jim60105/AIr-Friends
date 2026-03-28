@@ -12,6 +12,7 @@ import {
   validatePassphrase,
 } from "./auth.ts";
 import type { CompletedSessionStore } from "./completed-session-store.ts";
+import { loadSessionsFromAuditLogs } from "./audit-history-loader.ts";
 import type { SessionRegistry } from "../skill-api/session-registry.ts";
 import type { AuditConfig, Config, DashboardConfig } from "../types/config.ts";
 import type { AgentType } from "@acp/types.ts";
@@ -91,6 +92,22 @@ export class DashboardServer {
     const port = this.deps.config.port;
     this.server = Deno.serve({ port, onListen: () => {} }, (req) => this.handleRequest(req));
     logger.info("Dashboard server started on port {port}", { port });
+
+    // Asynchronously load historical sessions from audit logs (non-blocking)
+    if (this.deps.auditConfig?.enabled && this.deps.auditBasePath) {
+      loadSessionsFromAuditLogs(this.deps.auditBasePath).then((sessions) => {
+        if (sessions.length > 0) {
+          this.deps.completedSessionStore.addMany(sessions);
+          logger.info("Loaded {count} historical sessions from audit logs", {
+            count: sessions.length,
+          });
+        }
+      }).catch((error) => {
+        logger.warn("Failed to load historical sessions from audit logs", {
+          error: error instanceof Error ? error.message : String(error),
+        });
+      });
+    }
   }
 
   /** Stop the dashboard server */
@@ -297,7 +314,7 @@ export class DashboardServer {
   private handleSessionHistory(): Response {
     const sessions = this.deps.completedSessionStore.getAll();
     const mapped = sessions.map((s) => ({
-      id: s.id,
+      auditSessionId: s.auditSessionId,
       type: s.type,
       platform: s.platform,
       userId: s.userId,
@@ -305,7 +322,6 @@ export class DashboardServer {
       endTime: s.endedAt,
       status: s.status,
       durationMs: s.durationMs,
-      auditSessionId: s.auditSessionId,
     }));
     return this.json(mapped);
   }

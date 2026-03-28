@@ -6,8 +6,8 @@ import type { SessionType } from "../types/config.ts";
  * Completed session record
  */
 export interface CompletedSession {
-  /** Session identifier */
-  id: string;
+  /** Skill-API session ID (primary identifier, links to audit log) */
+  auditSessionId: string;
   /** Session type */
   type: SessionType;
   /** Platform identifier */
@@ -22,8 +22,6 @@ export interface CompletedSession {
   status: "success" | "failure";
   /** Duration in milliseconds */
   durationMs: number;
-  /** Skill-API session ID for audit log lookup */
-  auditSessionId?: string;
 }
 
 const MAX_ENTRIES = 100;
@@ -43,8 +41,21 @@ export class CompletedSessionStore {
     this.buffer.push(session);
   }
 
-  /** Get all completed sessions (newest last) */
+  /** Get all completed sessions (newest first by endedAt) */
   getAll(): CompletedSession[] {
-    return [...this.buffer];
+    return [...this.buffer].sort((a, b) =>
+      new Date(b.endedAt).getTime() - new Date(a.endedAt).getTime()
+    );
+  }
+
+  /** Bulk-load sessions, maintaining capacity limit (oldest evicted first) */
+  addMany(sessions: CompletedSession[]): void {
+    // Sort oldest-first so newest entries end up at the tail of the buffer
+    const sorted = [...sessions].sort((a, b) =>
+      new Date(a.endedAt).getTime() - new Date(b.endedAt).getTime()
+    );
+    for (const session of sorted) {
+      this.add(session);
+    }
   }
 }

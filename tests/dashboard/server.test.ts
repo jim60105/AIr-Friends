@@ -442,7 +442,7 @@ Deno.test({
 }, async () => {
   const store = new CompletedSessionStore();
   store.add({
-    id: "s1",
+    auditSessionId: "sess_s1",
     type: "message",
     platform: "discord",
     userId: "u1",
@@ -460,7 +460,7 @@ Deno.test({
     assertEquals(res.status, 200);
     const body = await res.json();
     assertEquals(body.length, 1);
-    assertEquals(body[0].id, "s1");
+    assertEquals(body[0].auditSessionId, "sess_s1");
   } finally {
     await t.cleanup();
   }
@@ -1001,7 +1001,7 @@ Deno.test({
 }, async () => {
   const store = new CompletedSessionStore();
   store.add({
-    id: "s_with_audit",
+    auditSessionId: "skill_sess_abc123",
     type: "message",
     platform: "discord",
     userId: "u1",
@@ -1009,7 +1009,6 @@ Deno.test({
     endedAt: new Date().toISOString(),
     status: "success",
     durationMs: 1200,
-    auditSessionId: "skill_sess_abc123",
   });
   const t = await createTestServer({ completedSessionStore: store });
   try {
@@ -1020,7 +1019,6 @@ Deno.test({
     assertEquals(res.status, 200);
     const body = await res.json();
     assertEquals(body.length, 1);
-    assertEquals(body[0].id, "s_with_audit");
     assertEquals(body[0].auditSessionId, "skill_sess_abc123");
   } finally {
     await t.cleanup();
