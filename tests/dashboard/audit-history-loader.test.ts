@@ -6,7 +6,7 @@ import { join } from "@std/path";
 
 const TEST_DIR = await Deno.makeTempDir({ prefix: "audit_loader_test_" });
 
-async function writeAuditFile(
+async function _writeAuditFile(
   platform: string,
   userId: string,
   sessionId: string,
