@@ -5,6 +5,7 @@ import type { NormalizedEvent } from "../types/events.ts";
 import type { WorkspaceInfo } from "../types/workspace.ts";
 import type { PlatformAdapter } from "@platforms/platform-adapter.ts";
 import type { SessionAuditWriter } from "@core/audit-logger.ts";
+import type { WorkspaceManager } from "@core/workspace-manager.ts";
 
 const logger = createLogger("SessionRegistry");
 
@@ -50,6 +51,8 @@ export interface ActiveSession {
   onTerminateRequest?: () => Promise<void>;
   /** Last message ID sent by the bot in this session */
   lastSentMessageId?: string;
+  /** WorkspaceManager for channel workspace resolution */
+  workspaceManager?: WorkspaceManager;
 }
 
 /**

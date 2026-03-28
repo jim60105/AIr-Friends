@@ -299,6 +299,7 @@ export class SessionOrchestrator {
           triggerEvent: event,
           timeoutMs: this.config.skillApi.sessionTimeoutMs,
           agentWorkspacePath,
+          workspaceManager: this.workspaceManager,
         });
 
         sessionLogger.info("Shell session {shellSessionId} registered", {
@@ -816,6 +817,7 @@ export class SessionOrchestrator {
           // triggerEvent is omitted (undefined)
           timeoutMs: this.config.skillApi.sessionTimeoutMs,
           agentWorkspacePath,
+          workspaceManager: this.workspaceManager,
         });
 
         sessionLogger.info("Shell session {shellSessionId} registered", { shellSessionId });
@@ -1138,6 +1140,7 @@ export class SessionOrchestrator {
           platformAdapter: undefined as unknown as PlatformAdapter,
           timeoutMs: this.config.skillApi.sessionTimeoutMs,
           agentWorkspacePath,
+          workspaceManager: this.workspaceManager,
         });
 
         sessionLogger.info("Shell session {shellSessionId} registered", { shellSessionId });
@@ -1397,6 +1400,7 @@ export class SessionOrchestrator {
           platformAdapter: undefined as unknown as PlatformAdapter,
           timeoutMs: this.config.skillApi.sessionTimeoutMs,
           agentWorkspacePath,
+          workspaceManager: this.workspaceManager,
         });
 
         sessionLogger.info("Shell session {shellSessionId} registered", { shellSessionId });
@@ -1647,6 +1651,7 @@ export class SessionOrchestrator {
           platformAdapter: undefined as unknown as PlatformAdapter,
           timeoutMs: this.config.skillApi.sessionTimeoutMs,
           agentWorkspacePath,
+          workspaceManager: this.workspaceManager,
         });
 
         sessionLogger.info("Shell session {shellSessionId} registered", { shellSessionId });
@@ -1927,6 +1932,7 @@ export class SessionOrchestrator {
           platformAdapter,
           timeoutMs: this.config.skillApi.sessionTimeoutMs,
           agentWorkspacePath,
+          workspaceManager: this.workspaceManager,
         });
 
         sessionLogger.info("Shell session {shellSessionId} registered", { shellSessionId });

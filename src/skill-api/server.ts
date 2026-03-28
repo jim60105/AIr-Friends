@@ -362,6 +362,7 @@ export class SkillAPIServer {
       replyToMessageId: session.triggerEvent?.messageId,
       agentWorkspacePath: session.agentWorkspacePath,
       lastSentMessageId: session.lastSentMessageId,
+      workspaceManager: session.workspaceManager,
     };
 
     // Execute skill
