@@ -127,7 +127,6 @@ function createTestConfig(tempDir: string, dryRunEnabled = true): Config {
       enabled: true,
       port: 3998,
       host: "127.0.0.1",
-      sessionTimeoutMs: 60000,
     },
   } as unknown as Config;
 }

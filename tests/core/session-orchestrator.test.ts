@@ -534,7 +534,6 @@ async function createTestableOrchestrator(tempDir: string, options?: { skillApi?
       enabled: true,
       port: 3999,
       host: "127.0.0.1",
-      sessionTimeoutMs: 60000,
     };
   }
   const workspaceManager = new WorkspaceManager({
@@ -1301,7 +1300,6 @@ Deno.test("SessionOrchestrator - processSelfResearch handles agent connection fa
       enabled: true,
       port: 3998,
       host: "127.0.0.1",
-      sessionTimeoutMs: 60000,
     };
 
     const workspaceManager = new WorkspaceManager({
@@ -1594,7 +1592,6 @@ Deno.test("SessionOrchestrator - processMemoryMaintenance handles agent connecti
       enabled: true,
       port: 3997,
       host: "127.0.0.1",
-      sessionTimeoutMs: 60000,
     };
 
     const workspaceManager = new WorkspaceManager({
@@ -2744,7 +2741,6 @@ Deno.test({
         isDm: event.isDm,
         platformAdapter,
         triggerEvent: event,
-        timeoutMs: 60_000,
       });
 
       orchestrator.setConnectorSetup((connector) => {
@@ -2910,7 +2906,6 @@ Deno.test({
         userId: "testuser",
         isDm: false,
         platformAdapter: new MockPlatformAdapter() as unknown as PlatformAdapter,
-        timeoutMs: 60000,
       });
 
       const { createLogger } = await import("@utils/logger.ts");

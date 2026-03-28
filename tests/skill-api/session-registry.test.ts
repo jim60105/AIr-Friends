@@ -57,7 +57,6 @@ Deno.test("SessionRegistry - registers and retrieves sessions", () => {
     workspace: mockWorkspace,
     platformAdapter: mockAdapter,
     triggerEvent: mockEvent,
-    timeoutMs: 60000,
   });
 
   assertExists(sessionId);
@@ -96,7 +95,6 @@ Deno.test("SessionRegistry - tracks reply sent status", () => {
     platformAdapter: {} as any,
     // deno-lint-ignore no-explicit-any
     triggerEvent: {} as any,
-    timeoutMs: 60000,
   });
 
   assertEquals(registry.hasReplySent(sessionId), false);
@@ -136,7 +134,6 @@ Deno.test("SessionRegistry - removes sessions", () => {
     platformAdapter: {} as any,
     // deno-lint-ignore no-explicit-any
     triggerEvent: {} as any,
-    timeoutMs: 60000,
   });
 
   assertEquals(registry.has(sessionId), true);
@@ -150,7 +147,7 @@ Deno.test("SessionRegistry - removes sessions", () => {
   registry.stop();
 });
 
-Deno.test("SessionRegistry - cleans up expired sessions", async () => {
+Deno.test("SessionRegistry - sessions do not expire by time (only removed explicitly)", async () => {
   const registry = new SessionRegistry();
 
   const mockWorkspace = {
@@ -175,17 +172,20 @@ Deno.test("SessionRegistry - cleans up expired sessions", async () => {
     platformAdapter: {} as any,
     // deno-lint-ignore no-explicit-any
     triggerEvent: {} as any,
-    timeoutMs: 100, // 100ms timeout
   });
 
   assertEquals(registry.has(sessionId), true);
 
-  // Wait for expiration
+  // Wait past the old timeout
   await new Promise((resolve) => setTimeout(resolve, 150));
 
-  // Try to get - should return undefined due to expiration
+  // Session should still be valid — no time-based expiry
   const session = registry.get(sessionId);
-  assertEquals(session, undefined);
+  assertExists(session);
+  assertEquals(registry.has(sessionId), true);
+
+  // Only explicit remove clears it
+  registry.remove(sessionId);
   assertEquals(registry.has(sessionId), false);
 
   registry.stop();
@@ -212,7 +212,6 @@ Deno.test("SessionRegistry - replyCount initializes to 0", () => {
     platformAdapter: {} as any,
     // deno-lint-ignore no-explicit-any
     triggerEvent: {} as any,
-    timeoutMs: 60000,
   });
 
   assertEquals(registry.getReplyCount(sessionId), 0);
@@ -240,7 +239,6 @@ Deno.test("SessionRegistry - incrementReplyCount increments correctly", () => {
     platformAdapter: {} as any,
     // deno-lint-ignore no-explicit-any
     triggerEvent: {} as any,
-    timeoutMs: 60000,
   });
 
   assertEquals(registry.incrementReplyCount(sessionId), 1);
@@ -285,7 +283,6 @@ Deno.test("SessionRegistry - register session without triggerEvent", () => {
     // deno-lint-ignore no-explicit-any
     platformAdapter: {} as any,
     // triggerEvent is omitted
-    timeoutMs: 60000,
   });
 
   const session = registry.get(sessionId);
@@ -317,7 +314,6 @@ Deno.test("SessionRegistry - setTerminateCallback stores callback", async () => 
     platformAdapter: {} as any,
     // deno-lint-ignore no-explicit-any
     triggerEvent: {} as any,
-    timeoutMs: 60000,
   });
 
   let called = false;
@@ -365,7 +361,6 @@ Deno.test("SessionRegistry - setLastSentMessageId and getLastSentMessageId", () 
     platformAdapter: {} as any,
     // deno-lint-ignore no-explicit-any
     triggerEvent: {} as any,
-    timeoutMs: 60000,
   });
 
   registry.setLastSentMessageId(sessionId, "msg_abc");
@@ -405,7 +400,6 @@ Deno.test("SessionRegistry - getLastSentMessageId returns undefined when not set
     platformAdapter: {} as any,
     // deno-lint-ignore no-explicit-any
     triggerEvent: {} as any,
-    timeoutMs: 60000,
   });
 
   assertEquals(registry.getLastSentMessageId(sessionId), undefined);
@@ -444,7 +438,6 @@ Deno.test("SessionRegistry - setTerminateCallback overwrites previous callback",
     platformAdapter: {} as any,
     // deno-lint-ignore no-explicit-any
     triggerEvent: {} as any,
-    timeoutMs: 60000,
   });
 
   let firstCalled = false;
@@ -489,7 +482,6 @@ Deno.test("SessionRegistry - editCount initializes to 0", () => {
     platformAdapter: {} as any,
     // deno-lint-ignore no-explicit-any
     triggerEvent: {} as any,
-    timeoutMs: 60000,
   });
 
   assertEquals(registry.getEditCount(sessionId), 0);
@@ -517,7 +509,6 @@ Deno.test("SessionRegistry - incrementEditCount increments correctly", () => {
     platformAdapter: {} as any,
     // deno-lint-ignore no-explicit-any
     triggerEvent: {} as any,
-    timeoutMs: 60000,
   });
 
   assertEquals(registry.incrementEditCount(sessionId), 1);
@@ -560,7 +551,6 @@ Deno.test("SessionRegistry - editCount and replyCount are independent", () => {
     platformAdapter: {} as any,
     // deno-lint-ignore no-explicit-any
     triggerEvent: {} as any,
-    timeoutMs: 60000,
   });
 
   registry.incrementReplyCount(sessionId);
@@ -572,103 +562,6 @@ Deno.test("SessionRegistry - editCount and replyCount are independent", () => {
   assertEquals(registry.getEditCount(sessionId), 1);
   assertEquals(registry.getReplyCount(sessionId), 2);
 
-  registry.stop();
-});
-
-Deno.test("SessionRegistry - touch refreshes lastActivityAt", async () => {
-  const registry = new SessionRegistry();
-
-  const mockWorkspace = {
-    key: "test/123",
-    components: { platform: "discord" as const, userId: "123" },
-    path: "/tmp/test",
-    tmpPath: "/tmp/test/tmp",
-    isDm: false,
-  };
-
-  const sessionId = registry.register({
-    platform: "discord",
-    channelId: "456",
-    userId: "123",
-    isDm: false,
-    workspace: mockWorkspace,
-    // deno-lint-ignore no-explicit-any
-    platformAdapter: { platform: "discord" } as any,
-    triggerEvent: {
-      platform: "discord",
-      channelId: "456",
-      userId: "123",
-      messageId: "789",
-      isDm: false,
-      guildId: "",
-      content: "test",
-      timestamp: new Date(),
-      // deno-lint-ignore no-explicit-any
-    } as any,
-    timeoutMs: 200, // 200ms timeout
-  });
-
-  // Wait until session would be halfway to expiry
-  await new Promise((r) => setTimeout(r, 120));
-
-  // Touch to refresh
-  registry.touch(sessionId);
-
-  // Wait another 120ms (total 240ms from start, but only 120ms from touch)
-  await new Promise((r) => setTimeout(r, 120));
-
-  // Session should still be valid because touch refreshed it
-  const session = registry.get(sessionId);
-  assertExists(session);
-
-  registry.stop();
-});
-
-Deno.test("SessionRegistry - session without touch still expires", async () => {
-  const registry = new SessionRegistry();
-
-  const mockWorkspace = {
-    key: "test/123",
-    components: { platform: "discord" as const, userId: "123" },
-    path: "/tmp/test",
-    tmpPath: "/tmp/test/tmp",
-    isDm: false,
-  };
-
-  const sessionId = registry.register({
-    platform: "discord",
-    channelId: "456",
-    userId: "123",
-    isDm: false,
-    workspace: mockWorkspace,
-    // deno-lint-ignore no-explicit-any
-    platformAdapter: { platform: "discord" } as any,
-    triggerEvent: {
-      platform: "discord",
-      channelId: "456",
-      userId: "123",
-      messageId: "789",
-      isDm: false,
-      guildId: "",
-      content: "test",
-      timestamp: new Date(),
-      // deno-lint-ignore no-explicit-any
-    } as any,
-    timeoutMs: 100,
-  });
-
-  await new Promise((r) => setTimeout(r, 150));
-
-  // Should be expired
-  assertEquals(registry.get(sessionId), undefined);
-
-  registry.stop();
-});
-
-Deno.test("SessionRegistry - touch on non-existent session is no-op", () => {
-  const registry = new SessionRegistry();
-  // Should not throw
-  registry.touch("non_existent_session_id");
   registry.stop();
 });
 
@@ -693,7 +586,6 @@ Deno.test("SessionRegistry - hasActiveSessionsForWorkspace returns true when act
     platformAdapter: {} as any,
     // deno-lint-ignore no-explicit-any
     triggerEvent: {} as any,
-    timeoutMs: 60000,
   });
 
   registry.register({
@@ -706,7 +598,6 @@ Deno.test("SessionRegistry - hasActiveSessionsForWorkspace returns true when act
     platformAdapter: {} as any,
     // deno-lint-ignore no-explicit-any
     triggerEvent: {} as any,
-    timeoutMs: 60000,
   });
 
   registry.remove(id1);
@@ -737,7 +628,6 @@ Deno.test("SessionRegistry - hasActiveSessionsForWorkspace returns false when no
     platformAdapter: {} as any,
     // deno-lint-ignore no-explicit-any
     triggerEvent: {} as any,
-    timeoutMs: 60000,
   });
 
   registry.remove(sessionId);
@@ -747,7 +637,7 @@ Deno.test("SessionRegistry - hasActiveSessionsForWorkspace returns false when no
   registry.stop();
 });
 
-Deno.test("SessionRegistry - hasActiveSessionsForWorkspace ignores expired sessions", async () => {
+Deno.test("SessionRegistry - hasActiveSessionsForWorkspace returns false after remove", () => {
   const registry = new SessionRegistry();
 
   const mockWorkspace = {
@@ -758,7 +648,7 @@ Deno.test("SessionRegistry - hasActiveSessionsForWorkspace ignores expired sessi
     isDm: false,
   };
 
-  registry.register({
+  const sessionId = registry.register({
     platform: "discord",
     channelId: "456",
     userId: "user1",
@@ -768,10 +658,11 @@ Deno.test("SessionRegistry - hasActiveSessionsForWorkspace ignores expired sessi
     platformAdapter: {} as any,
     // deno-lint-ignore no-explicit-any
     triggerEvent: {} as any,
-    timeoutMs: 1,
   });
 
-  await new Promise((r) => setTimeout(r, 10));
+  assertEquals(registry.hasActiveSessionsForWorkspace("discord/user1"), true);
+
+  registry.remove(sessionId);
 
   assertEquals(registry.hasActiveSessionsForWorkspace("discord/user1"), false);
 
@@ -807,7 +698,6 @@ Deno.test("SessionRegistry - hasActiveSessionsForWorkspace different workspaces 
     platformAdapter: {} as any,
     // deno-lint-ignore no-explicit-any
     triggerEvent: {} as any,
-    timeoutMs: 60000,
   });
 
   registry.register({
@@ -820,7 +710,6 @@ Deno.test("SessionRegistry - hasActiveSessionsForWorkspace different workspaces 
     platformAdapter: {} as any,
     // deno-lint-ignore no-explicit-any
     triggerEvent: {} as any,
-    timeoutMs: 60000,
   });
 
   registry.remove(idA);

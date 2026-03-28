@@ -86,7 +86,6 @@ function createTestConfig(tempDir: string): Config {
       enabled: true,
       port: 3997,
       host: "127.0.0.1",
-      sessionTimeoutMs: 60000,
     },
   } as unknown as Config;
 }

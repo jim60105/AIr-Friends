@@ -299,7 +299,6 @@ Deno.test("SkillAPIServer - validates skill name", async () => {
         content: "",
         timestamp: new Date(),
       },
-      timeoutMs: 60000,
     });
 
     const port = 3008;
@@ -378,7 +377,6 @@ Deno.test("SkillAPIServer - allows multiple replies within limit", async () => {
         content: "",
         timestamp: new Date(),
       },
-      timeoutMs: 60000,
     });
 
     const port = 3009;
@@ -458,7 +456,6 @@ Deno.test("SkillAPIServer - send-reply rejected after reaching limit", async () 
         content: "",
         timestamp: new Date(),
       },
-      timeoutMs: 60000,
     });
 
     const port = 3010;
@@ -550,7 +547,6 @@ Deno.test("SkillAPIServer - reply count not incremented on failed send-reply", a
         content: "",
         timestamp: new Date(),
       },
-      timeoutMs: 60000,
     });
 
     const port = 3011;
@@ -631,7 +627,6 @@ Deno.test("SkillAPIServer - edit-reply not affected by reply limit", async () =>
         content: "",
         timestamp: new Date(),
       },
-      timeoutMs: 60000,
     });
 
     const port = 3012;
@@ -722,7 +717,6 @@ Deno.test("SkillAPIServer - reply count incremented even on rejection", async ()
         content: "",
         timestamp: new Date(),
       },
-      timeoutMs: 60000,
     });
 
     const port = 3013;
@@ -827,7 +821,6 @@ Deno.test("SkillAPIServer - doom-loop triggers agent termination on 4th attempt"
         content: "",
         timestamp: new Date(),
       },
-      timeoutMs: 60000,
     });
 
     // Set up termination callback tracker
@@ -919,7 +912,6 @@ Deno.test("SkillAPIServer - no crash when onTerminateRequest not set on doom-loo
         content: "",
         timestamp: new Date(),
       },
-      timeoutMs: 60000,
     });
 
     // Do NOT set onTerminateRequest callback
@@ -1013,7 +1005,6 @@ Deno.test("SkillAPIServer - send-reply success updates lastSentMessageId", async
         content: "",
         timestamp: new Date(),
       },
-      timeoutMs: 60000,
     });
 
     // Verify no lastSentMessageId initially
@@ -1099,7 +1090,6 @@ Deno.test("SkillAPIServer - edit-reply success updates lastSentMessageId", async
         content: "",
         timestamp: new Date(),
       },
-      timeoutMs: 60000,
     });
 
     const port = 3017;
@@ -1202,7 +1192,6 @@ Deno.test("SkillAPIServer - get-message skill via API", async () => {
         content: "",
         timestamp: new Date(),
       },
-      timeoutMs: 60000,
     });
 
     const port = 3018;
@@ -1296,7 +1285,6 @@ Deno.test("SkillAPIServer - get-message uses lastSentMessageId from session", as
         content: "",
         timestamp: new Date(),
       },
-      timeoutMs: 60000,
     });
 
     const port = 3019;
@@ -1389,7 +1377,6 @@ Deno.test("SkillAPIServer - edit-reply succeeds for first 2 calls", async () => 
         content: "",
         timestamp: new Date(),
       },
-      timeoutMs: 60000,
     });
 
     const port = 3020;
@@ -1495,7 +1482,6 @@ Deno.test("SkillAPIServer - edit-reply rejected on 3rd call and triggers termina
         content: "",
         timestamp: new Date(),
       },
-      timeoutMs: 60000,
     });
 
     let terminateCalled = false;
@@ -1621,7 +1607,6 @@ Deno.test("SkillAPIServer - edit-reply no crash when onTerminateRequest not set"
         content: "",
         timestamp: new Date(),
       },
-      timeoutMs: 60000,
     });
 
     // Do NOT set onTerminateRequest
@@ -1731,7 +1716,6 @@ Deno.test("SkillAPIServer - edit-reply count independent from reply count", asyn
         content: "",
         timestamp: new Date(),
       },
-      timeoutMs: 60000,
     });
 
     const port = 3023;
@@ -1830,7 +1814,6 @@ Deno.test("SkillAPIServer - skill API call refreshes session timeout", async () 
         timestamp: new Date(),
         // deno-lint-ignore no-explicit-any
       } as any,
-      timeoutMs: 500,
     });
 
     // Wait 300ms (past half the original timeout)

@@ -103,7 +103,6 @@ const DEFAULT_CONFIG: Partial<Config> = {
     enabled: true,
     port: 3001,
     host: "127.0.0.1",
-    sessionTimeoutMs: 1800000, // 30 minutes
   },
   replyPolicy: "channels" as const,
   channels: [],

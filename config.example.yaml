@@ -195,7 +195,6 @@ skillApi:
   enabled: true # Enable skill API server for shell-based skills (default: true)
   host: "127.0.0.1" # Host to bind (should be localhost)
   port: 3001 # Port for skill API server (default: 3001)
-  sessionTimeoutMs: 1800000 # Session timeout in ms (default: 1800000 = 30min)
 
 # Health check configuration (optional)
 health:

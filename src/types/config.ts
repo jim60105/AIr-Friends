@@ -385,9 +385,6 @@ export interface SkillAPIConfig {
 
   /** Host for skill API server (should be localhost) */
   host: string;
-
-  /** Session timeout in milliseconds */
-  sessionTimeoutMs: number;
 }
 
 /**

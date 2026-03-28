@@ -47,7 +47,6 @@ const createTestConfig = (
       enabled: true,
       host: "127.0.0.1",
       port: skillApiPort,
-      sessionTimeoutMs: 1800000,
     }
     : undefined,
   health: enableHealthCheck

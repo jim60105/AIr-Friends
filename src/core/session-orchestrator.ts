@@ -297,7 +297,6 @@ export class SessionOrchestrator {
           workspace,
           platformAdapter,
           triggerEvent: event,
-          timeoutMs: this.config.skillApi.sessionTimeoutMs,
           agentWorkspacePath,
           workspaceManager: this.workspaceManager,
         });
@@ -814,7 +813,6 @@ export class SessionOrchestrator {
           workspace,
           platformAdapter,
           // triggerEvent is omitted (undefined)
-          timeoutMs: this.config.skillApi.sessionTimeoutMs,
           agentWorkspacePath,
           workspaceManager: this.workspaceManager,
         });
@@ -1136,7 +1134,6 @@ export class SessionOrchestrator {
           isDm: false,
           workspace,
           platformAdapter: undefined as unknown as PlatformAdapter,
-          timeoutMs: this.config.skillApi.sessionTimeoutMs,
           agentWorkspacePath,
           workspaceManager: this.workspaceManager,
         });
@@ -1395,7 +1392,6 @@ export class SessionOrchestrator {
           isDm: true,
           workspace,
           platformAdapter: undefined as unknown as PlatformAdapter,
-          timeoutMs: this.config.skillApi.sessionTimeoutMs,
           agentWorkspacePath,
           workspaceManager: this.workspaceManager,
         });
@@ -1645,7 +1641,6 @@ export class SessionOrchestrator {
           isDm: false,
           workspace,
           platformAdapter: undefined as unknown as PlatformAdapter,
-          timeoutMs: this.config.skillApi.sessionTimeoutMs,
           agentWorkspacePath,
           workspaceManager: this.workspaceManager,
         });
@@ -1925,7 +1920,6 @@ export class SessionOrchestrator {
           isDm: true,
           workspace,
           platformAdapter,
-          timeoutMs: this.config.skillApi.sessionTimeoutMs,
           agentWorkspacePath,
           workspaceManager: this.workspaceManager,
         });

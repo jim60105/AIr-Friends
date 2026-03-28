@@ -39,10 +39,10 @@ async function pollHistory() {
       return;
     }
     body.innerHTML = sessions.map((s) =>
-      `<tr class="hover:bg-surface-200/50 cursor-pointer" data-audit-id="${
+      `<tr class="hover:bg-surface-200/50 cursor-pointer" data-audit-id="${esc(s.auditSessionId)}">
+      <td class="px-4 py-2.5 font-mono text-xs text-accent-light break-all">${
         esc(s.auditSessionId)
-      }">
-      <td class="px-4 py-2.5 font-mono text-xs text-accent-light break-all">${esc(s.auditSessionId)}</td>
+      }</td>
       <td class="px-4 py-2.5">${esc(s.type)}</td>
       <td class="px-4 py-2.5">${esc(s.platform)}</td>
       <td class="px-4 py-2.5 font-mono text-xs">${esc(s.userId)}</td>

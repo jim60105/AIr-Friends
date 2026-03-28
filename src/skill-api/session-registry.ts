@@ -33,10 +33,7 @@ export interface ActiveSession {
   triggerEvent?: NormalizedEvent;
   /** Session start time */
   startedAt: Date;
-  /** Last activity timestamp (refreshed on skill API calls) */
-  lastActivityAt: Date;
-  /** Session timeout (ms) */
-  timeoutMs: number;
+
   /** Whether reply has been sent */
   replySent: boolean;
   /** Number of replies sent in this session */
@@ -60,12 +57,6 @@ export interface ActiveSession {
  */
 export class SessionRegistry {
   private sessions: Map<string, ActiveSession> = new Map();
-  private cleanupInterval: ReturnType<typeof setInterval> | null = null;
-
-  constructor() {
-    // Start periodic cleanup
-    this.startCleanup();
-  }
 
   /**
    * Generate a secure session ID
@@ -82,7 +73,7 @@ export class SessionRegistry {
   register(
     session: Omit<
       ActiveSession,
-      "id" | "startedAt" | "lastActivityAt" | "replySent" | "replyCount" | "editCount"
+      "id" | "startedAt" | "replySent" | "replyCount" | "editCount"
     >,
   ): string {
     const id = this.generateSessionId();
@@ -90,7 +81,6 @@ export class SessionRegistry {
       ...session,
       id,
       startedAt: new Date(),
-      lastActivityAt: new Date(),
       replySent: false,
       replyCount: 0,
       editCount: 0,
@@ -112,15 +102,7 @@ export class SessionRegistry {
    * Get session by ID
    */
   get(sessionId: string): ActiveSession | undefined {
-    const session = this.sessions.get(sessionId);
-
-    if (session && this.isExpired(session)) {
-      logger.warn("Session {sessionId} expired", { sessionId });
-      this.sessions.delete(sessionId);
-      return undefined;
-    }
-
-    return session;
+    return this.sessions.get(sessionId);
   }
 
   /**
@@ -251,17 +233,6 @@ export class SessionRegistry {
   }
 
   /**
-   * Refresh session activity timestamp to prevent timeout expiration.
-   * Called on each successful skill API request.
-   */
-  touch(sessionId: string): void {
-    const session = this.sessions.get(sessionId);
-    if (session) {
-      session.lastActivityAt = new Date();
-    }
-  }
-
-  /**
    * Remove a session
    */
   remove(sessionId: string): void {
@@ -273,13 +244,7 @@ export class SessionRegistry {
    * Get all active (non-expired) sessions
    */
   getAll(): ActiveSession[] {
-    const result: ActiveSession[] = [];
-    for (const session of this.sessions.values()) {
-      if (!this.isExpired(session)) {
-        result.push(session);
-      }
-    }
-    return result;
+    return Array.from(this.sessions.values());
   }
 
   /**
@@ -288,7 +253,7 @@ export class SessionRegistry {
    */
   hasActiveSessionsForWorkspace(workspaceKey: string): boolean {
     for (const [, session] of this.sessions) {
-      if (session.workspace.key === workspaceKey && !this.isExpired(session)) {
+      if (session.workspace.key === workspaceKey) {
         return true;
       }
     }
@@ -303,35 +268,9 @@ export class SessionRegistry {
   }
 
   /**
-   * Check if a session is expired
-   */
-  private isExpired(session: ActiveSession): boolean {
-    const elapsed = Date.now() - session.lastActivityAt.getTime();
-    return elapsed > session.timeoutMs;
-  }
-
-  /**
-   * Start periodic cleanup of expired sessions
-   */
-  private startCleanup(): void {
-    this.cleanupInterval = setInterval(() => {
-      for (const [id, session] of this.sessions) {
-        if (this.isExpired(session)) {
-          logger.info("Cleaning up expired session {sessionId}", { sessionId: id });
-          this.sessions.delete(id);
-        }
-      }
-    }, 60_000); // Check every minute
-  }
-
-  /**
    * Stop the registry (cleanup)
    */
   stop(): void {
-    if (this.cleanupInterval) {
-      clearInterval(this.cleanupInterval);
-      this.cleanupInterval = null;
-    }
     this.sessions.clear();
   }
 }
