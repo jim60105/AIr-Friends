@@ -88,8 +88,8 @@ export class WorkspaceManager {
       await ensureDirectory(path);
       createdAt = new Date();
 
-      // Create empty memory files
-      await this.initializeWorkspaceFiles(path, event.isDm);
+      // Memory files are created lazily on first write
+      this.initializeWorkspaceFiles(path, event.isDm);
     } else {
       // Try to get creation time from directory stat
       try {
@@ -118,27 +118,16 @@ export class WorkspaceManager {
   }
 
   /**
-   * Initialize workspace with required files
-   * Both public and private memory files are always created since
-   * the same workspace serves both DM and non-DM interactions.
+   * Initialize workspace with required files.
+   * Memory files (public/private JSONL) are created lazily on first write,
+   * not eagerly at workspace creation time.
    */
-  private async initializeWorkspaceFiles(
-    workspacePath: string,
+  private initializeWorkspaceFiles(
+    _workspacePath: string,
     _isDm: boolean,
-  ): Promise<void> {
-    // Create public memory file
-    const publicMemoryPath = join(workspacePath, MemoryFileType.PUBLIC);
-    if (!(await pathExists(publicMemoryPath))) {
-      await Deno.writeTextFile(publicMemoryPath, "");
-    }
-
-    // Always create private memory file (workspace is per-user, may be used in DM later)
-    const privateMemoryPath = join(workspacePath, MemoryFileType.PRIVATE);
-    if (!(await pathExists(privateMemoryPath))) {
-      await Deno.writeTextFile(privateMemoryPath, "");
-    }
-
-    logger.debug("Workspace files initialized", { workspacePath });
+  ): void {
+    // Memory files are created lazily on first write (Deno.writeTextFile with append:true
+    // auto-creates the file). No eager file creation needed.
   }
 
   /**
@@ -306,11 +295,7 @@ This is your personal workspace for long-term knowledge and notes.
     if (!exists) {
       logger.info("Creating channel workspace: {key}", { key });
       await ensureDirectory(path);
-
-      const channelMemoryPath = join(path, MemoryFileType.CHANNEL);
-      if (!(await pathExists(channelMemoryPath))) {
-        await Deno.writeTextFile(channelMemoryPath, "");
-      }
+      // Channel memory file is created lazily on first write
     }
 
     return { key, platform: safePlatform, channelId: safeChannelId, path };

@@ -2646,8 +2646,9 @@ Deno.test({
 
       const workspaceStat = await Deno.stat(workspacePath);
       assertEquals(workspaceStat.isDirectory, true);
-      assertEquals(await pathExists(`${workspacePath}/memory.public.jsonl`), true);
-      assertEquals(await pathExists(`${workspacePath}/memory.private.jsonl`), true);
+      // Memory files are created lazily, not at workspace creation
+      assertEquals(await pathExists(`${workspacePath}/memory.public.jsonl`), false);
+      assertEquals(await pathExists(`${workspacePath}/memory.private.jsonl`), false);
 
       sessionRegistry.stop();
     } finally {
@@ -2705,8 +2706,9 @@ Deno.test({
 
       const workspaceStat = await Deno.stat(workspacePath);
       assertEquals(workspaceStat.isDirectory, true);
-      assertEquals(await pathExists(`${workspacePath}/memory.public.jsonl`), true);
-      assertEquals(await pathExists(`${workspacePath}/memory.private.jsonl`), true);
+      // Memory files are created lazily, not at workspace creation
+      assertEquals(await pathExists(`${workspacePath}/memory.public.jsonl`), false);
+      assertEquals(await pathExists(`${workspacePath}/memory.private.jsonl`), false);
 
       sessionRegistry.stop();
     } finally {
@@ -2815,8 +2817,9 @@ Deno.test({
 
       const workspaceStat = await Deno.stat(workspacePath);
       assertEquals(workspaceStat.isDirectory, true);
-      assertEquals(await pathExists(`${workspacePath}/memory.public.jsonl`), true);
-      assertEquals(await pathExists(`${workspacePath}/memory.private.jsonl`), true);
+      // Memory files are created lazily, not at workspace creation
+      assertEquals(await pathExists(`${workspacePath}/memory.public.jsonl`), false);
+      assertEquals(await pathExists(`${workspacePath}/memory.private.jsonl`), false);
 
       sessionRegistry.stop();
     } finally {

@@ -13,7 +13,7 @@ The system SHALL store memory events as append-only JSONL (one JSON object per l
 - `memory.public.jsonl` — public memories
 - `memory.private.jsonl` — private memories
 
-Events SHALL only be appended; existing lines SHALL NOT be modified or deleted.
+Events SHALL only be appended; existing lines SHALL NOT be modified or deleted. Memory files SHALL NOT be pre-created at workspace initialization; they SHALL be created lazily on first write.
 
 #### Scenario: Saving a new memory
 - **GIVEN** a user saves a memory with visibility `"public"`
@@ -24,6 +24,23 @@ Events SHALL only be appended; existing lines SHALL NOT be modified or deleted.
 - **GIVEN** a user saves a memory with visibility `"private"`
 - **WHEN** `addMemory()` is called
 - **THEN** the system SHALL append a JSON line to `memory.private.jsonl`
+
+#### Scenario: First memory save creates file
+- **GIVEN** a workspace with no memory files
+- **WHEN** `addMemory()` is called for the first time
+- **THEN** the appropriate memory file (public or private) is created
+- **AND** the memory entry is written as the first line
+
+#### Scenario: Read returns empty for missing file
+- **GIVEN** a workspace with no memory files
+- **WHEN** `loadAllMemories()` is called
+- **THEN** an empty array is returned
+- **AND** no error is thrown
+
+#### Scenario: Channel memory file creation
+- **GIVEN** a channel workspace with no memory file
+- **WHEN** `addChannelMemory()` is called
+- **THEN** `memory.channel.jsonl` is created with the first entry
 
 ### Requirement: Memory Event Structure
 

@@ -22,12 +22,13 @@ The system SHALL compute workspace keys using the format `{platform}/{user_id}`,
 
 ### Requirement: Workspace Directory Structure
 
-The system SHALL create workspace directories under `{repoPath}/workspaces/{workspace_key}/`. Each workspace SHALL contain a `tmp/` subdirectory. The `tmp/` directory SHALL be created or ensured on every workspace access, even if the workspace already exists.
+The system SHALL create workspace directories under `{repoPath}/workspaces/{workspace_key}/`. Each workspace SHALL contain a `tmp/` subdirectory. The `tmp/` directory SHALL be created or ensured on every workspace access, even if the workspace already exists. Memory files SHALL NOT be created during workspace initialization; they are created lazily on first write.
 
 #### Scenario: New workspace creation
 - **GIVEN** a new user triggers the bot for the first time
 - **WHEN** `getOrCreateWorkspace()` is called
 - **THEN** the system SHALL create the directory `{repoPath}/workspaces/{platform}/{userId}/` and a `tmp/` subdirectory within it
+- **AND** no memory files SHALL exist yet (memory files are created lazily on first write)
 
 #### Scenario: Existing workspace access
 - **GIVEN** a workspace already exists for a user

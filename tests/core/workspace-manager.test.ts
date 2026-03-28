@@ -66,43 +66,43 @@ Deno.test("WorkspaceManager - should create workspace directory", async () => {
     const stat = await Deno.stat(workspace.path);
     assertEquals(stat.isDirectory, true);
 
-    // Public memory file should exist
+    // Memory files should NOT exist yet (lazy creation)
     const memoryPath = `${workspace.path}/${MemoryFileType.PUBLIC}`;
-    const memoryStat = await Deno.stat(memoryPath);
-    assertEquals(memoryStat.isFile, true);
+    await assertRejects(
+      () => Deno.stat(memoryPath),
+      Deno.errors.NotFound,
+    );
   });
 });
 
-Deno.test("WorkspaceManager - should always create both memory files", async () => {
+Deno.test("WorkspaceManager - should not eagerly create memory files (lazy creation)", async () => {
   await withTestWorkspace(async (manager) => {
-    // Non-DM workspace should also have private memory file
+    // Non-DM workspace should NOT have memory files yet
     const nonDmEvent = createTestEvent({ isDm: false });
     const nonDmWorkspace = await manager.getOrCreateWorkspace(nonDmEvent);
 
-    // Both memory files should exist
-    const publicStat = await Deno.stat(
-      `${nonDmWorkspace.path}/${MemoryFileType.PUBLIC}`,
+    // Neither memory file should exist
+    await assertRejects(
+      () => Deno.stat(`${nonDmWorkspace.path}/${MemoryFileType.PUBLIC}`),
+      Deno.errors.NotFound,
     );
-    assertEquals(publicStat.isFile, true);
-
-    const privateStat = await Deno.stat(
-      `${nonDmWorkspace.path}/${MemoryFileType.PRIVATE}`,
+    await assertRejects(
+      () => Deno.stat(`${nonDmWorkspace.path}/${MemoryFileType.PRIVATE}`),
+      Deno.errors.NotFound,
     );
-    assertEquals(privateStat.isFile, true);
 
-    // DM workspace should also have both
+    // DM workspace should also NOT have memory files yet
     const dmEvent = createTestEvent({ isDm: true, userId: "dm-user" });
     const dmWorkspace = await manager.getOrCreateWorkspace(dmEvent);
 
-    const dmPublicStat = await Deno.stat(
-      `${dmWorkspace.path}/${MemoryFileType.PUBLIC}`,
+    await assertRejects(
+      () => Deno.stat(`${dmWorkspace.path}/${MemoryFileType.PUBLIC}`),
+      Deno.errors.NotFound,
     );
-    assertEquals(dmPublicStat.isFile, true);
-
-    const dmPrivateStat = await Deno.stat(
-      `${dmWorkspace.path}/${MemoryFileType.PRIVATE}`,
+    await assertRejects(
+      () => Deno.stat(`${dmWorkspace.path}/${MemoryFileType.PRIVATE}`),
+      Deno.errors.NotFound,
     );
-    assertEquals(dmPrivateStat.isFile, true);
   });
 });
 
