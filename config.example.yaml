@@ -270,6 +270,7 @@ audit:
   retentionDays: 7                # Log retention in days (default: 7); override with env AUDIT_RETENTION_DAYS
   hashContent: true               # SHA-256 hash user content (default: true); override with env AUDIT_HASH_CONTENT
   includedPhases:                 # Only record specified phases, empty = all; override with env AUDIT_INCLUDED_PHASES (comma-separated)
+    - "trigger_received"
     - "skill_call"
     - "reply_sent"
     - "session_end"

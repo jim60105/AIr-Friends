@@ -3916,3 +3916,148 @@ Deno.test("ChatbotClient - single chunk produces complete message with chunkCoun
     Deno.removeSync(tempDir, { recursive: true });
   }
 });
+
+// 8.9: flushMessageBuffer writes agent_complete_message audit entry
+Deno.test("ChatbotClient - flushMessageBuffer writes agent_complete_message audit entry", async () => {
+  const tempDir = Deno.makeTempDirSync();
+  try {
+    const auditEntries: SessionAuditEntry[] = [];
+    const auditConfig: AuditConfig = {
+      enabled: true,
+      retentionDays: 7,
+      hashContent: false,
+      includedPhases: [],
+    };
+    const auditDir = `${tempDir}/audit`;
+    Deno.mkdirSync(auditDir, { recursive: true });
+    const auditWriter = new SessionAuditWriter(
+      auditDir,
+      "discord",
+      "123",
+      "sess_flush_audit",
+      auditConfig,
+    );
+    const origWrite = auditWriter.write.bind(auditWriter);
+    auditWriter.write = async (
+      phase: AuditPhase,
+      data: SessionAuditEntry["data"],
+    ) => {
+      auditEntries.push({ ts: new Date().toISOString(), phase, data } as SessionAuditEntry);
+      await origWrite(phase, data);
+    };
+
+    const skillRegistry = createTestSkillRegistry();
+    const testLogger = new Logger("test", { level: LogLevel.FATAL });
+    const config = {
+      workingDir: tempDir,
+      platform: "discord",
+      userId: "123",
+      channelId: "456",
+      isDM: false,
+    };
+
+    const client = new ChatbotClient(skillRegistry, testLogger, config);
+    client.setAuditWriter(auditWriter);
+
+    // Send chunks
+    await client.sessionUpdate({
+      update: {
+        sessionUpdate: "agent_message_chunk",
+        content: { type: "text", text: "Hello " },
+      },
+    } as acp.SessionNotification);
+    await client.sessionUpdate({
+      update: {
+        sessionUpdate: "agent_message_chunk",
+        content: { type: "text", text: "world!" },
+      },
+    } as acp.SessionNotification);
+
+    // Trigger flush via tool_call
+    await client.sessionUpdate({
+      sessionId: "sess_flush_audit",
+      update: {
+        sessionUpdate: "tool_call",
+        toolCallId: "test-id",
+        title: "test",
+        kind: null,
+        status: "pending" as const,
+      },
+    } as unknown as acp.SessionNotification);
+
+    // Wait for async audit write
+    await new Promise((r) => setTimeout(r, 100));
+
+    const completeEntries = auditEntries.filter((e) => e.phase === "agent_complete_message");
+    assertEquals(completeEntries.length, 1);
+    assertEquals(completeEntries[0].data.chunkCount, 2);
+    assertEquals(completeEntries[0].data.messageLength, 12);
+    // hashContent=false so messageContentHash should be the raw message
+    assertEquals(completeEntries[0].data.messageContentHash, "Hello world!");
+  } finally {
+    Deno.removeSync(tempDir, { recursive: true });
+  }
+});
+
+// 8.9: flushMessageBuffer does NOT write audit when buffer is empty
+Deno.test("ChatbotClient - flushMessageBuffer no audit entry when buffer empty", async () => {
+  const tempDir = Deno.makeTempDirSync();
+  try {
+    const auditEntries: SessionAuditEntry[] = [];
+    const auditConfig: AuditConfig = {
+      enabled: true,
+      retentionDays: 7,
+      hashContent: false,
+      includedPhases: [],
+    };
+    const auditDir = `${tempDir}/audit`;
+    Deno.mkdirSync(auditDir, { recursive: true });
+    const auditWriter = new SessionAuditWriter(
+      auditDir,
+      "discord",
+      "123",
+      "sess_empty_audit",
+      auditConfig,
+    );
+    const origWrite = auditWriter.write.bind(auditWriter);
+    auditWriter.write = async (
+      phase: AuditPhase,
+      data: SessionAuditEntry["data"],
+    ) => {
+      auditEntries.push({ ts: new Date().toISOString(), phase, data } as SessionAuditEntry);
+      await origWrite(phase, data);
+    };
+
+    const skillRegistry = createTestSkillRegistry();
+    const testLogger = new Logger("test", { level: LogLevel.FATAL });
+    const config = {
+      workingDir: tempDir,
+      platform: "discord",
+      userId: "123",
+      channelId: "456",
+      isDM: false,
+    };
+
+    const client = new ChatbotClient(skillRegistry, testLogger, config);
+    client.setAuditWriter(auditWriter);
+
+    // Trigger flush without any chunks
+    await client.sessionUpdate({
+      sessionId: "sess_empty_audit",
+      update: {
+        sessionUpdate: "tool_call",
+        toolCallId: "test-id",
+        title: "test",
+        kind: null,
+        status: "pending" as const,
+      },
+    } as unknown as acp.SessionNotification);
+
+    await new Promise((r) => setTimeout(r, 100));
+
+    const completeEntries = auditEntries.filter((e) => e.phase === "agent_complete_message");
+    assertEquals(completeEntries.length, 0);
+  } finally {
+    Deno.removeSync(tempDir, { recursive: true });
+  }
+});

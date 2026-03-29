@@ -1842,3 +1842,284 @@ Deno.test("SkillAPIServer - skill API call refreshes session timeout", async () 
     await Deno.remove(tempDir, { recursive: true });
   }
 });
+
+// 8.4: edit-reply writes reply_edited audit entry
+Deno.test("SkillAPIServer - edit-reply success writes reply_edited audit entry", async () => {
+  const tempDir = await Deno.makeTempDir();
+  try {
+    const sessionRegistry = new SessionRegistry();
+    const workspaceManager = new WorkspaceManager({
+      repoPath: tempDir,
+      workspacesDir: "workspaces",
+    });
+    const memoryStore = new MemoryStore(workspaceManager, {
+      searchLimit: 10,
+      maxChars: 2000,
+    });
+    const skillRegistry = new SkillRegistry(memoryStore);
+
+    const mockWorkspace = {
+      key: "test/123",
+      components: { platform: "discord" as const, userId: "123" },
+      path: tempDir,
+      tmpPath: tempDir + "/tmp",
+      isDm: false,
+    };
+
+    const mockAdapter = {
+      sendReply: () => Promise.resolve({ success: true, messageId: "original_msg" }),
+      editMessage: () => Promise.resolve({ success: true, messageId: "edited_msg" }),
+      // deno-lint-ignore no-explicit-any
+    } as any;
+
+    const sessionId = sessionRegistry.register({
+      platform: "discord",
+      channelId: "456",
+      userId: "123",
+      isDm: false,
+      workspace: mockWorkspace,
+      platformAdapter: mockAdapter,
+      triggerEvent: {
+        platform: "discord",
+        channelId: "456",
+        userId: "123",
+        messageId: "msg_trigger",
+        isDm: false,
+        guildId: "",
+        content: "",
+        timestamp: new Date(),
+      },
+    });
+
+    // Attach audit writer
+    const { SessionAuditWriter } = await import("@core/audit-logger.ts");
+    const auditDir = `${tempDir}/audit`;
+    const auditWriter = new SessionAuditWriter(auditDir, "discord", "123", sessionId, {
+      enabled: true,
+      retentionDays: 7,
+      hashContent: false,
+      includedPhases: [],
+    });
+    sessionRegistry.setAuditWriter(sessionId, auditWriter);
+
+    const port = 3025;
+    const server = new SkillAPIServer(sessionRegistry, skillRegistry, { port, host: "127.0.0.1" });
+    server.start();
+    await waitForServer(port);
+
+    // Send initial reply
+    await fetch(`http://localhost:${port}/api/skill/send-reply`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ sessionId, parameters: { message: "Original" } }),
+    }).then((r) => r.json());
+
+    // Edit reply
+    const editResponse = await fetch(`http://localhost:${port}/api/skill/edit-reply`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        sessionId,
+        parameters: { messageId: "original_msg", message: "Edited content" },
+      }),
+    });
+    assertEquals(editResponse.status, 200);
+    await editResponse.json();
+
+    // Wait for async audit writes
+    await new Promise((r) => setTimeout(r, 200));
+
+    // Read audit file and verify reply_edited entry
+    const auditPath = `${auditDir}/discord/123/${sessionId}.jsonl`;
+    const content = await Deno.readTextFile(auditPath);
+    const entries = content.trim().split("\n").map((l: string) => JSON.parse(l));
+    const editedEntry = entries.find((e: { phase: string }) => e.phase === "reply_edited");
+    assertExists(editedEntry);
+    assertEquals(editedEntry.data.originalMessageId, "original_msg");
+    assertEquals(editedEntry.data.replyLength, 14);
+
+    await server.stop();
+    sessionRegistry.stop();
+  } finally {
+    await Deno.remove(tempDir, { recursive: true });
+  }
+});
+
+// 8.5: memory-save writes memory_operation audit entry
+Deno.test("SkillAPIServer - memory-save writes memory_operation audit entry", async () => {
+  const tempDir = await Deno.makeTempDir();
+  try {
+    const sessionRegistry = new SessionRegistry();
+    const workspaceManager = new WorkspaceManager({
+      repoPath: tempDir,
+      workspacesDir: "workspaces",
+    });
+    const memoryStore = new MemoryStore(workspaceManager, {
+      searchLimit: 10,
+      maxChars: 2000,
+    });
+    const skillRegistry = new SkillRegistry(memoryStore);
+
+    const wsDir = `${tempDir}/workspaces/discord/123`;
+    await Deno.mkdir(wsDir, { recursive: true });
+
+    const mockWorkspace = {
+      key: "discord/123",
+      components: { platform: "discord" as const, userId: "123" },
+      path: wsDir,
+      tmpPath: wsDir + "/tmp",
+      isDm: false,
+    };
+
+    const sessionId = sessionRegistry.register({
+      platform: "discord",
+      channelId: "456",
+      userId: "123",
+      isDm: false,
+      workspace: mockWorkspace,
+      // deno-lint-ignore no-explicit-any
+      platformAdapter: {} as any,
+      triggerEvent: {
+        platform: "discord",
+        channelId: "456",
+        userId: "123",
+        messageId: "msg_trigger",
+        isDm: false,
+        guildId: "",
+        content: "",
+        timestamp: new Date(),
+      },
+    });
+
+    const { SessionAuditWriter } = await import("@core/audit-logger.ts");
+    const auditDir = `${tempDir}/audit`;
+    const auditWriter = new SessionAuditWriter(auditDir, "discord", "123", sessionId, {
+      enabled: true,
+      retentionDays: 7,
+      hashContent: false,
+      includedPhases: [],
+    });
+    sessionRegistry.setAuditWriter(sessionId, auditWriter);
+
+    const port = 3026;
+    const server = new SkillAPIServer(sessionRegistry, skillRegistry, { port, host: "127.0.0.1" });
+    server.start();
+    await waitForServer(port);
+
+    const response = await fetch(`http://localhost:${port}/api/skill/memory-save`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        sessionId,
+        parameters: { content: "User likes cats", visibility: "public", tier: "working" },
+      }),
+    });
+    assertEquals(response.status, 200);
+    await response.json();
+
+    await new Promise((r) => setTimeout(r, 200));
+
+    const auditPath = `${auditDir}/discord/123/${sessionId}.jsonl`;
+    const content = await Deno.readTextFile(auditPath);
+    const entries = content.trim().split("\n").map((l: string) => JSON.parse(l));
+    const memEntry = entries.find((e: { phase: string }) => e.phase === "memory_operation");
+    assertExists(memEntry);
+    assertEquals(memEntry.data.operation, "save");
+    assertEquals(memEntry.data.visibility, "public");
+    assertEquals(memEntry.data.tier, "working");
+    assertEquals(auditWriter.getSummaryCounters().memoryOpsCount, 1);
+
+    await server.stop();
+    sessionRegistry.stop();
+  } finally {
+    await Deno.remove(tempDir, { recursive: true });
+  }
+});
+
+// 8.5: memory-search writes memory_operation audit entry
+Deno.test("SkillAPIServer - memory-search writes memory_operation audit entry", async () => {
+  const tempDir = await Deno.makeTempDir();
+  try {
+    const sessionRegistry = new SessionRegistry();
+    const workspaceManager = new WorkspaceManager({
+      repoPath: tempDir,
+      workspacesDir: "workspaces",
+    });
+    const memoryStore = new MemoryStore(workspaceManager, {
+      searchLimit: 10,
+      maxChars: 2000,
+    });
+    const skillRegistry = new SkillRegistry(memoryStore);
+
+    const wsDir = `${tempDir}/workspaces/discord/123`;
+    await Deno.mkdir(wsDir, { recursive: true });
+
+    const mockWorkspace = {
+      key: "discord/123",
+      components: { platform: "discord" as const, userId: "123" },
+      path: wsDir,
+      tmpPath: wsDir + "/tmp",
+      isDm: false,
+    };
+
+    const sessionId = sessionRegistry.register({
+      platform: "discord",
+      channelId: "456",
+      userId: "123",
+      isDm: false,
+      workspace: mockWorkspace,
+      // deno-lint-ignore no-explicit-any
+      platformAdapter: {} as any,
+      triggerEvent: {
+        platform: "discord",
+        channelId: "456",
+        userId: "123",
+        messageId: "msg_trigger",
+        isDm: false,
+        guildId: "",
+        content: "",
+        timestamp: new Date(),
+      },
+    });
+
+    const { SessionAuditWriter } = await import("@core/audit-logger.ts");
+    const auditDir = `${tempDir}/audit`;
+    const auditWriter = new SessionAuditWriter(auditDir, "discord", "123", sessionId, {
+      enabled: true,
+      retentionDays: 7,
+      hashContent: false,
+      includedPhases: [],
+    });
+    sessionRegistry.setAuditWriter(sessionId, auditWriter);
+
+    const port = 3027;
+    const server = new SkillAPIServer(sessionRegistry, skillRegistry, { port, host: "127.0.0.1" });
+    server.start();
+    await waitForServer(port);
+
+    const response = await fetch(`http://localhost:${port}/api/skill/memory-search`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        sessionId,
+        parameters: { query: "cats" },
+      }),
+    });
+    assertEquals(response.status, 200);
+    await response.json();
+
+    await new Promise((r) => setTimeout(r, 200));
+
+    const auditPath = `${auditDir}/discord/123/${sessionId}.jsonl`;
+    const content = await Deno.readTextFile(auditPath);
+    const entries = content.trim().split("\n").map((l: string) => JSON.parse(l));
+    const memEntry = entries.find((e: { phase: string }) => e.phase === "memory_operation");
+    assertExists(memEntry);
+    assertEquals(memEntry.data.operation, "search");
+
+    await server.stop();
+    sessionRegistry.stop();
+  } finally {
+    await Deno.remove(tempDir, { recursive: true });
+  }
+});

@@ -392,6 +392,7 @@ export class SkillAPIServer {
       skillResult: { success: result.success, error: result.error },
       skillDurationMs: Date.now() - skillStartTime,
     });
+    auditWriter?.incrementSkillCalls();
 
     // Rollback if send-reply failed
     if (skillName === "send-reply" && !result.success) {
@@ -442,6 +443,55 @@ export class SkillAPIServer {
         replyLength: replyContent.length,
         platform: session.platform,
       });
+      auditWriter.incrementReplies();
+    }
+
+    // Audit: reply_edited (when edit-reply succeeds)
+    if (skillName === "edit-reply" && result.success && auditWriter) {
+      const editContent = typeof (body.parameters ?? {}).message === "string"
+        ? (body.parameters as Record<string, string>).message
+        : "";
+      const originalMsgId = typeof (body.parameters ?? {}).messageId === "string"
+        ? (body.parameters as Record<string, string>).messageId
+        : "";
+      const newMsgId = result.data && typeof result.data === "object" && "messageId" in result.data
+        ? (result.data as Record<string, unknown>).messageId as string
+        : originalMsgId;
+      await auditWriter.write("reply_edited", {
+        originalMessageId: originalMsgId,
+        newMessageId: newMsgId,
+        replyContentHash: auditWriter.getConfig().hashContent
+          ? `sha256:${await sha256Hash(editContent)}`
+          : undefined,
+        replyLength: editContent.length,
+        platform: session.platform,
+      });
+    }
+
+    // Audit: memory_operation (for memory skills)
+    const memorySkillMap: Record<string, string> = {
+      "memory-save": "save",
+      "memory-search": "search",
+      "memory-patch": "patch",
+      "memory-stats": "stats",
+    };
+    if (skillName in memorySkillMap && auditWriter) {
+      const params = body.parameters as Record<string, unknown> ?? {};
+      await auditWriter.write("memory_operation", {
+        operation: memorySkillMap[skillName],
+        memoryId: typeof params.id === "string" ? params.id : (
+          result.data && typeof result.data === "object" && "id" in result.data
+            ? (result.data as Record<string, unknown>).id as string
+            : ""
+        ),
+        visibility: typeof params.visibility === "string" ? params.visibility : undefined,
+        tier: typeof params.tier === "string" ? params.tier : undefined,
+        category: typeof params.category === "string" ? params.category : undefined,
+        resultCount: result.data && typeof result.data === "object" && "results" in result.data
+          ? (result.data as { results?: unknown[] }).results?.length ?? 0
+          : 0,
+      });
+      auditWriter.incrementMemoryOps();
     }
 
     logger.info("Skill {skillName} executed via API for session {sessionId}", {

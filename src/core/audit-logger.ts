@@ -17,6 +17,12 @@ export class SessionAuditWriter {
   private config: AuditConfig;
   private sessionId: string;
 
+  // Session summary counters
+  private _repliesCount = 0;
+  private _skillCallsCount = 0;
+  private _memoryOpsCount = 0;
+  private _permissionDecisionsCount = 0;
+
   constructor(
     auditBasePath: string,
     platform: string,
@@ -32,6 +38,41 @@ export class SessionAuditWriter {
   /** Expose config for external use (e.g. skill audit) */
   getConfig(): AuditConfig {
     return this.config;
+  }
+
+  /** Increment replies counter */
+  incrementReplies(): void {
+    this._repliesCount++;
+  }
+
+  /** Increment skill calls counter */
+  incrementSkillCalls(): void {
+    this._skillCallsCount++;
+  }
+
+  /** Increment memory operations counter */
+  incrementMemoryOps(): void {
+    this._memoryOpsCount++;
+  }
+
+  /** Increment permission decisions counter */
+  incrementPermissionDecisions(): void {
+    this._permissionDecisionsCount++;
+  }
+
+  /** Get summary counters for session_end */
+  getSummaryCounters(): {
+    repliesCount: number;
+    skillCallsCount: number;
+    memoryOpsCount: number;
+    permissionDecisionsCount: number;
+  } {
+    return {
+      repliesCount: this._repliesCount,
+      skillCallsCount: this._skillCallsCount,
+      memoryOpsCount: this._memoryOpsCount,
+      permissionDecisionsCount: this._permissionDecisionsCount,
+    };
   }
 
   /**

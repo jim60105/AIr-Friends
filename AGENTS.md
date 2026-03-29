@@ -1070,7 +1070,30 @@ agent:
 
 ### 14. Session Audit Log (Feature 25)
 
-Per-session JSONL audit trail for replay and debugging. Each session writes timestamped entries tracking the full lifecycle: context assembly, agent connection, prompt, skill calls, reply, and session end.
+Per-session JSONL audit trail for replay and debugging. Each session writes timestamped entries tracking the full lifecycle from trigger receipt through context assembly, agent interaction, skill calls, replies, and session end.
+
+**Audit Phases:**
+
+| Phase                    | Description                          |
+| ------------------------ | ------------------------------------ |
+| `trigger_received`       | Incoming trigger event recorded      |
+| `session_start`          | Session registered and configured    |
+| `rate_limit_checked`     | Rate limit evaluation result         |
+| `context_assembly`       | Context assembly completed           |
+| `yolo_resolution`        | YOLO mode resolution                 |
+| `agent_connect`          | Agent subprocess connected           |
+| `prompt_sent`            | Prompt sent to agent                 |
+| `agent_message`          | Full prompt/context sent to agent    |
+| `skill_call`             | Skill API invoked                    |
+| `memory_operation`       | Memory skill operation               |
+| `agent_response`         | Agent response received              |
+| `agent_complete_message` | Agent complete buffered response     |
+| `reply_sent`             | Reply sent to platform               |
+| `reply_edited`           | Reply edited on platform             |
+| `retry_triggered`        | Missing-reply retry activated        |
+| `session_end`            | Session lifecycle completed          |
+| `permission_approved`    | Permission request approved          |
+| `permission_denied`      | Permission request denied            |
 
 **Configuration:**
 
@@ -1080,6 +1103,7 @@ audit:
   retentionDays: 7
   hashContent: true
   includedPhases:
+    - "trigger_received"
     - "skill_call"
     - "reply_sent"
     - "session_end"
@@ -1103,6 +1127,25 @@ audit:
 5. Content hashing: when `hashContent` is true, user content fields are SHA-256 hashed via `sanitizeSkillParams()`
 6. Retention cleanup runs at startup and every 24 hours, deleting files older than `retentionDays`
 7. Skill call auditing is done in the Skill API Server (`src/skill-api/server.ts`)
+
+**Phase-Specific `SessionAuditEntry.data` Fields:**
+
+- `trigger_received`: `platform`, `channelId`, `userId`, `messageId`, `isDm`, `contentLength`, `attachmentCount`
+- `session_start`: `sessionId`, `sessionType`, `workspaceKey`, `agentType`, `model`, `yolo`
+- `rate_limit_checked`: `decision`, `userId`, `platform`, `requestCount`, `maxRequests`, `cooldownRemainingMs`
+- `context_assembly`: `memoriesCount`, `recentMessagesCount`, `relatedMessagesCount`, `estimatedTokens`
+- `agent_connect`: `agentType`, `capabilities`
+- `prompt_sent`: `promptLength`, `imageCount`, `modelId`
+- `agent_message`: `promptContentHash`, `promptLength`
+- `skill_call`: `skillName`, `skillParams`, `skillResult`, `skillDurationMs`
+- `memory_operation`: `operation`, `memoryId`, `visibility`, `tier`, `category`, `resultCount`
+- `agent_response`: `stopReason`, `isRetry`
+- `agent_complete_message`: `messageContentHash`, `messageLength`, `chunkCount`
+- `reply_sent`: `replyContentHash`, `replyLength`, `platform`
+- `reply_edited`: `originalMessageId`, `newMessageId`, `replyContentHash`, `replyLength`, `platform`
+- `retry_triggered`: `retryCount`, `maxRetries`, `reason`
+- `session_end`: `success`, `replySent`, `reactionSent`, `durationMs`, `error`, `repliesCount`, `skillCallsCount`, `memoryOpsCount`, `permissionDecisionsCount`
+- `permission_approved` / `permission_denied`: `toolName`, `permissionKind`, `command`, `decision`, `reason`
 
 **Key Components:**
 

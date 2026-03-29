@@ -218,6 +218,7 @@ export class ChatbotClient implements acp.Client {
       decision: phase === "permission_approved" ? "approved" : "denied",
       reason,
     });
+    this.auditWriter.incrementPermissionDecisions();
   }
 
   /**
@@ -838,11 +839,34 @@ export class ChatbotClient implements acp.Client {
     if (this.messageBuffer.length === 0) return;
 
     const completeMessage = this.messageBuffer.join("");
+    const chunkCount = this.messageBuffer.length;
     this.logger.info("Agent complete message ({chunkCount} chunks, {length} chars): {message}", {
       message: completeMessage,
-      chunkCount: this.messageBuffer.length,
+      chunkCount,
       length: completeMessage.length,
     });
+
+    if (this.auditWriter) {
+      const writer = this.auditWriter;
+      const hashContent = writer.getConfig().hashContent;
+      const msgLen = completeMessage.length;
+      if (hashContent) {
+        sha256Hash(completeMessage).then((hash) => {
+          void writer.write("agent_complete_message", {
+            messageContentHash: `sha256:${hash}`,
+            messageLength: msgLen,
+            chunkCount,
+          });
+        });
+      } else {
+        void writer.write("agent_complete_message", {
+          messageContentHash: completeMessage,
+          messageLength: msgLen,
+          chunkCount,
+        });
+      }
+    }
+
     this.messageBuffer = [];
   }
 

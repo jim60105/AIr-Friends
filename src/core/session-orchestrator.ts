@@ -37,6 +37,7 @@ import type { ChannelWorkspaceInfo, WorkspaceInfo } from "../types/workspace.ts"
 import type { ResolvedReminder } from "../types/reminder.ts";
 import type { ReminderStore } from "./reminder-store.ts";
 import { SessionAuditWriter } from "./audit-logger.ts";
+import { sha256Hash } from "@utils/hash.ts";
 import type { CompletedSessionStore } from "../dashboard/completed-session-store.ts";
 
 const logger = createLogger("SessionOrchestrator");
@@ -318,6 +319,17 @@ export class SessionOrchestrator {
         this.sessionRegistry.setAuditWriter(shellSessionId, auditWriter);
       }
 
+      // Audit: trigger_received
+      await auditWriter?.write("trigger_received", {
+        platform: event.platform,
+        channelId: event.channelId,
+        userId: event.userId,
+        messageId: event.messageId,
+        isDm: event.isDm,
+        contentLength: event.content.length,
+        attachmentCount: event.attachments?.length ?? 0,
+      });
+
       // Pre-resolve model for template variables and later session model assignment
       const routingContext: ModelRoutingContext = {
         sessionType,
@@ -338,6 +350,25 @@ export class SessionOrchestrator {
         event.userId,
         event.channelId,
       );
+
+      // Audit: session_start
+      await auditWriter?.write("session_start", {
+        sessionId: shellSessionId ?? "",
+        sessionType,
+        workspaceKey: workspace.key,
+        agentType: getDefaultAgentType(this.config),
+        model: resolvedModel,
+        yolo: yoloDecision.enabled,
+      });
+
+      // Audit: rate_limit_checked (request was allowed to reach this point)
+      if (this.config.rateLimit?.enabled) {
+        await auditWriter?.write("rate_limit_checked", {
+          decision: "allowed",
+          userId: event.userId,
+          platform: event.platform,
+        });
+      }
 
       // Audit: yolo_resolution
       await auditWriter?.write("yolo_resolution", {
@@ -561,6 +592,16 @@ export class SessionOrchestrator {
           stopReason: response.stopReason,
         });
 
+        // Audit: agent_message
+        if (auditWriter) {
+          const hashContent = auditWriter.getConfig().hashContent;
+          await auditWriter.write("agent_message", {
+            promptContentHash: hashContent ? `sha256:${await sha256Hash(fullPrompt)}` : fullPrompt,
+            promptLength: promptLen,
+            model: resolvedModel,
+          });
+        }
+
         // Audit: agent_response
         await auditWriter?.write("agent_response", {
           stopReason: response.stopReason,
@@ -583,6 +624,13 @@ export class SessionOrchestrator {
           const retryStrategy = getRetryPromptStrategy(agentType);
 
           for (let attempt = 0; attempt < retryStrategy.maxRetries; attempt++) {
+            // Audit: retry_triggered
+            await auditWriter?.write("retry_triggered", {
+              retryCount: attempt + 1,
+              maxRetries: retryStrategy.maxRetries,
+              reason: "no_reply_sent",
+            });
+
             // Clear reply state to allow retry (reaction state is NOT cleared)
             replyHandler.clearReplyState(workspace.key, event.channelId);
 
@@ -642,6 +690,7 @@ export class SessionOrchestrator {
             replySent,
             reactionSent,
             durationMs: Date.now() - sessionStartTime,
+            ...auditWriter?.getSummaryCounters(),
           });
 
           // Generate conversation summary (fire-and-forget)
@@ -671,6 +720,7 @@ export class SessionOrchestrator {
             replySent: false,
             durationMs: Date.now() - sessionStartTime,
             error: "Agent did not generate a reply",
+            ...auditWriter?.getSummaryCounters(),
           });
           result = {
             success: false,
@@ -686,6 +736,7 @@ export class SessionOrchestrator {
             replySent: false,
             durationMs: Date.now() - sessionStartTime,
             error: "Session was cancelled",
+            ...auditWriter?.getSummaryCounters(),
           });
           result = {
             success: false,
@@ -700,6 +751,7 @@ export class SessionOrchestrator {
           replySent: false,
           durationMs: Date.now() - sessionStartTime,
           error: `Unexpected stop reason: ${response.stopReason}`,
+          ...auditWriter?.getSummaryCounters(),
         });
         result = {
           success: false,
@@ -734,6 +786,7 @@ export class SessionOrchestrator {
         success: false,
         durationMs: Date.now() - sessionStartTime,
         error: error instanceof Error ? error.message : String(error),
+        ...auditWriter?.getSummaryCounters(),
       });
       result = {
         success: false,
@@ -830,6 +883,17 @@ export class SessionOrchestrator {
         this.sessionRegistry.setAuditWriter(shellSessionId, auditWriter);
       }
 
+      // Audit: trigger_received
+      await auditWriter?.write("trigger_received", {
+        platform,
+        channelId,
+        userId: "",
+        messageId: "",
+        isDm: false,
+        contentLength: 0,
+        attachmentCount: 0,
+      });
+
       // Pre-resolve model for template variables and later session model assignment
       const routingContext: ModelRoutingContext = {
         sessionType: "spontaneous",
@@ -845,6 +909,16 @@ export class SessionOrchestrator {
 
       // Compute YOLO decision early so it's available for context assembly and prompt rendering
       const yoloDecision = this.getEffectiveYolo(platform, options.botId, channelId);
+
+      // Audit: session_start
+      await auditWriter?.write("session_start", {
+        sessionId: shellSessionId ?? "",
+        sessionType: "spontaneous",
+        workspaceKey: workspace.key,
+        agentType: getDefaultAgentType(this.config),
+        model: resolvedModel,
+        yolo: yoloDecision.enabled,
+      });
 
       // Audit: yolo_resolution
       await auditWriter?.write("yolo_resolution", {
@@ -992,6 +1066,16 @@ export class SessionOrchestrator {
           stopReason: response.stopReason,
         });
 
+        // Audit: agent_message
+        if (auditWriter) {
+          const hashContent = auditWriter.getConfig().hashContent;
+          await auditWriter.write("agent_message", {
+            promptContentHash: hashContent ? `sha256:${await sha256Hash(fullPrompt)}` : fullPrompt,
+            promptLength: fullPrompt.length,
+            model: resolvedModel,
+          });
+        }
+
         // Audit: agent_response
         await auditWriter?.write("agent_response", {
           stopReason: response.stopReason,
@@ -1006,6 +1090,13 @@ export class SessionOrchestrator {
 
           const retryStrategy = getRetryPromptStrategy(agentType);
           for (let attempt = 0; attempt < retryStrategy.maxRetries; attempt++) {
+            // Audit: retry_triggered
+            await auditWriter?.write("retry_triggered", {
+              retryCount: attempt + 1,
+              maxRetries: retryStrategy.maxRetries,
+              reason: "no_reply_sent",
+            });
+
             replyHandler.clearReplyState(workspace.key, channelId);
 
             const retryResponse = await connector.prompt(
@@ -1026,6 +1117,7 @@ export class SessionOrchestrator {
           replySent,
           durationMs: Date.now() - sessionStartTime,
           error: replySent ? undefined : "Agent did not send a reply",
+          ...auditWriter?.getSummaryCounters(),
         });
 
         result = {
@@ -1055,6 +1147,7 @@ export class SessionOrchestrator {
         success: false,
         durationMs: Date.now() - sessionStartTime,
         error: error instanceof Error ? error.message : String(error),
+        ...auditWriter?.getSummaryCounters(),
       });
       result = {
         success: false,
@@ -1151,6 +1244,17 @@ export class SessionOrchestrator {
         this.sessionRegistry.setAuditWriter(shellSessionId, auditWriter);
       }
 
+      // Audit: trigger_received
+      await auditWriter?.write("trigger_received", {
+        platform: "system",
+        channelId: "",
+        userId: "",
+        messageId: "",
+        isDm: false,
+        contentLength: 0,
+        attachmentCount: 0,
+      });
+
       // Pre-resolve model for template variables and later session model assignment
       // Fallback chain: routing rules → selfResearch.model → agent.model
       const routingContext: ModelRoutingContext = {
@@ -1162,6 +1266,16 @@ export class SessionOrchestrator {
         routingContext,
         sectionFallback,
       );
+
+      // Audit: session_start
+      await auditWriter?.write("session_start", {
+        sessionId: shellSessionId ?? "",
+        sessionType: "selfResearch",
+        workspaceKey: workspace.key,
+        agentType: getDefaultAgentType(this.config),
+        model: resolvedModel,
+        yolo: this.yolo,
+      });
 
       // 3. Build self-research prompt
       const fullPrompt = await this.buildSelfResearchPrompt(
@@ -1271,6 +1385,15 @@ export class SessionOrchestrator {
         sessionLogger.info("Self-research agent session completed with stopReason {stopReason}", {
           stopReason: response.stopReason,
         });
+        // Audit: agent_message
+        if (auditWriter) {
+          const hashContent = auditWriter.getConfig().hashContent;
+          await auditWriter.write("agent_message", {
+            promptContentHash: hashContent ? `sha256:${await sha256Hash(fullPrompt)}` : fullPrompt,
+            promptLength: fullPrompt.length,
+            model: resolvedModel,
+          });
+        }
         await auditWriter?.write("agent_response", {
           stopReason: response.stopReason,
           isRetry: false,
@@ -1284,6 +1407,7 @@ export class SessionOrchestrator {
           replySent: false,
           durationMs: Date.now() - sessionStartTime,
           error: success ? undefined : `Unexpected stop reason: ${response.stopReason}`,
+          ...auditWriter?.getSummaryCounters(),
         });
 
         result = {
@@ -1311,6 +1435,7 @@ export class SessionOrchestrator {
         success: false,
         durationMs: Date.now() - sessionStartTime,
         error: error instanceof Error ? error.message : String(error),
+        ...auditWriter?.getSummaryCounters(),
       });
       result = {
         success: false,
@@ -1409,6 +1534,17 @@ export class SessionOrchestrator {
         this.sessionRegistry.setAuditWriter(shellSessionId, auditWriter);
       }
 
+      // Audit: trigger_received
+      await auditWriter?.write("trigger_received", {
+        platform,
+        channelId: "",
+        userId,
+        messageId: "",
+        isDm: false,
+        contentLength: 0,
+        attachmentCount: 0,
+      });
+
       // Pre-resolve model for template variables and later session model assignment
       // Fallback chain: routing rules → memoryMaintenance.model → agent.model
       const routingContext: ModelRoutingContext = {
@@ -1420,6 +1556,16 @@ export class SessionOrchestrator {
         routingContext,
         sectionFallback,
       );
+
+      // Audit: session_start
+      await auditWriter?.write("session_start", {
+        sessionId: shellSessionId ?? "",
+        sessionType: "memoryMaintenance",
+        workspaceKey,
+        agentType: getDefaultAgentType(this.config),
+        model: resolvedModel,
+        yolo: this.yolo,
+      });
 
       const fullPrompt = await this.buildMemoryMaintenancePrompt(
         workspaceKey,
@@ -1523,6 +1669,15 @@ export class SessionOrchestrator {
         sessionLogger.info("Memory maintenance session completed with stopReason {stopReason}", {
           stopReason: response.stopReason,
         });
+        // Audit: agent_message
+        if (auditWriter) {
+          const hashContent = auditWriter.getConfig().hashContent;
+          await auditWriter.write("agent_message", {
+            promptContentHash: hashContent ? `sha256:${await sha256Hash(fullPrompt)}` : fullPrompt,
+            promptLength: fullPrompt.length,
+            model: resolvedModel,
+          });
+        }
         await auditWriter?.write("agent_response", {
           stopReason: response.stopReason,
           isRetry: false,
@@ -1534,6 +1689,7 @@ export class SessionOrchestrator {
           replySent: false,
           durationMs: Date.now() - sessionStartTime,
           error: success ? undefined : `Unexpected stop reason: ${response.stopReason}`,
+          ...auditWriter?.getSummaryCounters(),
         });
         result = {
           success,
@@ -1560,6 +1716,7 @@ export class SessionOrchestrator {
         success: false,
         durationMs: Date.now() - sessionStartTime,
         error: error instanceof Error ? error.message : String(error),
+        ...auditWriter?.getSummaryCounters(),
       });
       result = {
         success: false,
@@ -1657,6 +1814,17 @@ export class SessionOrchestrator {
         this.sessionRegistry.setAuditWriter(shellSessionId, auditWriter);
       }
 
+      // Audit: trigger_received
+      await auditWriter?.write("trigger_received", {
+        platform,
+        channelId: channelWorkspace.channelId,
+        userId: "",
+        messageId: "",
+        isDm: false,
+        contentLength: 0,
+        attachmentCount: 0,
+      });
+
       const routingContext: ModelRoutingContext = {
         sessionType: "memory-maintenance",
       };
@@ -1666,6 +1834,16 @@ export class SessionOrchestrator {
         routingContext,
         sectionFallback,
       );
+
+      // Audit: session_start
+      await auditWriter?.write("session_start", {
+        sessionId: shellSessionId ?? "",
+        sessionType: "channelMemoryMaintenance",
+        workspaceKey: channelKey,
+        agentType: getDefaultAgentType(this.config),
+        model: resolvedModel,
+        yolo: this.yolo,
+      });
 
       const memoriesDump = await this.serializeChannelMemories(channelWorkspace);
 
@@ -1785,6 +1963,15 @@ export class SessionOrchestrator {
           "Channel memory maintenance session completed with stopReason {stopReason}",
           { stopReason: response.stopReason },
         );
+        // Audit: agent_message
+        if (auditWriter) {
+          const hashContent = auditWriter.getConfig().hashContent;
+          await auditWriter.write("agent_message", {
+            promptContentHash: hashContent ? `sha256:${await sha256Hash(fullPrompt)}` : fullPrompt,
+            promptLength: fullPrompt.length,
+            model: resolvedModel,
+          });
+        }
         await auditWriter?.write("agent_response", {
           stopReason: response.stopReason,
           isRetry: false,
@@ -1796,6 +1983,7 @@ export class SessionOrchestrator {
           replySent: false,
           durationMs: Date.now() - sessionStartTime,
           error: success ? undefined : `Unexpected stop reason: ${response.stopReason}`,
+          ...auditWriter?.getSummaryCounters(),
         });
         result = {
           success,
@@ -1820,6 +2008,7 @@ export class SessionOrchestrator {
         success: false,
         durationMs: Date.now() - sessionStartTime,
         error: error instanceof Error ? error.message : String(error),
+        ...auditWriter?.getSummaryCounters(),
       });
       result = {
         success: false,
@@ -1937,6 +2126,17 @@ export class SessionOrchestrator {
         this.sessionRegistry.setAuditWriter(shellSessionId, auditWriter);
       }
 
+      // Audit: trigger_received
+      await auditWriter?.write("trigger_received", {
+        platform,
+        channelId: dmChannelId,
+        userId: reminder.userId,
+        messageId: "",
+        isDm: true,
+        contentLength: 0,
+        attachmentCount: 0,
+      });
+
       // Pre-resolve model for template variables and later session model assignment
       const routingContext: ModelRoutingContext = {
         sessionType: "reminder",
@@ -1952,6 +2152,25 @@ export class SessionOrchestrator {
 
       // Compute YOLO decision early so it's available for prompt rendering
       const yoloDecision = this.getEffectiveYolo(platform, reminder.userId, dmChannelId);
+
+      // Audit: session_start
+      await auditWriter?.write("session_start", {
+        sessionId: shellSessionId ?? "",
+        sessionType: "reminder",
+        workspaceKey: workspace.key,
+        agentType: getDefaultAgentType(this.config),
+        model: resolvedModel,
+        yolo: yoloDecision.enabled,
+      });
+
+      // Audit: rate_limit_checked (request was allowed to reach this point)
+      if (this.config.rateLimit?.enabled) {
+        await auditWriter?.write("rate_limit_checked", {
+          decision: "allowed",
+          userId: reminder.userId,
+          platform,
+        });
+      }
 
       // Audit: yolo_resolution
       await auditWriter?.write("yolo_resolution", {
@@ -2074,8 +2293,16 @@ export class SessionOrchestrator {
         sessionLogger.info("Agent session completed with stopReason {stopReason}", {
           stopReason: response.stopReason,
         });
+        // Audit: agent_message
+        if (auditWriter) {
+          const hashContent = auditWriter.getConfig().hashContent;
+          await auditWriter.write("agent_message", {
+            promptContentHash: hashContent ? `sha256:${await sha256Hash(fullPrompt)}` : fullPrompt,
+            promptLength: fullPrompt.length,
+            model: resolvedModel,
+          });
+        }
         await auditWriter?.write("agent_response", {
-          stopReason: response.stopReason,
           isRetry: false,
         });
 
@@ -2087,6 +2314,13 @@ export class SessionOrchestrator {
 
           const retryStrategy = getRetryPromptStrategy(agentType);
           for (let attempt = 0; attempt < retryStrategy.maxRetries; attempt++) {
+            // Audit: retry_triggered
+            await auditWriter?.write("retry_triggered", {
+              retryCount: attempt + 1,
+              maxRetries: retryStrategy.maxRetries,
+              reason: "no_reply_sent",
+            });
+
             replyHandler.clearReplyState(workspace.key, dmChannelId);
 
             const retryResponse = await connector.prompt(
@@ -2118,6 +2352,7 @@ export class SessionOrchestrator {
           replySent,
           durationMs: Date.now() - sessionStartTime,
           error: replySent ? undefined : "Agent did not send a reply",
+          ...auditWriter?.getSummaryCounters(),
         });
 
         result = {
@@ -2146,6 +2381,7 @@ export class SessionOrchestrator {
         success: false,
         durationMs: Date.now() - sessionStartTime,
         error: error instanceof Error ? error.message : String(error),
+        ...auditWriter?.getSummaryCounters(),
       });
       result = {
         success: false,
