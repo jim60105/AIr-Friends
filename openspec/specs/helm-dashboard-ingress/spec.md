@@ -1,4 +1,10 @@
-## ADDED Requirements
+# Helm Dashboard Ingress
+
+## Purpose
+
+Provides optional Kubernetes Ingress resource configuration for the web dashboard, enabling external HTTP(S) access with TLS, custom annotations, and path routing.
+
+## Requirements
 
 ### Requirement: Optional Ingress for dashboard
 The Helm chart SHALL create an Ingress resource for the dashboard only when `dashboard.ingress.enabled` is `true`.

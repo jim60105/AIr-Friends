@@ -70,6 +70,13 @@ If summary generation fails (agent error, timeout, etc.), the failure SHALL be l
 
 Memory maintenance SHALL consolidate older working-tier summaries into fewer archive-tier entries. The consolidation SHALL preserve key information while reducing the total count of working-tier summaries.
 
+#### Scenario: Summaries consolidated during maintenance
+- **GIVEN** a workspace has multiple working-tier summaries older than 7 days
+- **WHEN** memory maintenance runs
+- **THEN** the agent SHALL consolidate related summaries into archive-tier entries
+- **AND** the original summaries SHALL be disabled via `memory-patch`
+- **AND** consolidated entries SHALL include `supersedes` referencing the original IDs
+
 ### Requirement: Configurable Summary Model
 
 The system SHALL support a `conversationSummary.model` configuration to specify which model generates conversation summaries. The system SHALL switch the ACP session model before sending the summary prompt and restore the original model afterward. If `conversationSummary.model` is not configured, the system SHALL use the default `agent.model` without any model switch.
@@ -94,10 +101,3 @@ The system SHALL support a `conversationSummary.model` configuration to specify 
 - **WHEN** summary generation completes (success or failure)
 - **THEN** the system SHALL restore the original model via `setSessionModel`
 - **AND** subsequent operations on the session SHALL use the original model
-
-#### Scenario: Summaries consolidated during maintenance
-- **GIVEN** a workspace has 20 working-tier summaries older than 7 days
-- **WHEN** memory maintenance runs
-- **THEN** the agent SHALL consolidate related summaries into archive-tier entries
-- **AND** the original summaries SHALL be disabled via `memory-patch`
-- **AND** consolidated entries SHALL include `supersedes` referencing the original IDs

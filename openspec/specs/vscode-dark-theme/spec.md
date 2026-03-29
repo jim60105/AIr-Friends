@@ -1,3 +1,11 @@
+# VSCode Dark Theme
+
+## Purpose
+
+Applies the VSCode Dark+ color scheme to the web dashboard, replacing default colors with VSCode-standard surface, accent, and text colors for a consistent developer-friendly appearance.
+
+## Requirements
+
 ### Requirement: VSCode Dark+ surface colors
 The dashboard Tailwind config SHALL define surface colors matching the VSCode Dark+ theme: `surface.DEFAULT` as `#1e1e1e`, `surface.50` as `#252526`, `surface.100` as `#2d2d30`, `surface.200` as `#3c3c3c`.
 

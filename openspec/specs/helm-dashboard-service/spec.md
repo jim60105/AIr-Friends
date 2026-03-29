@@ -1,4 +1,10 @@
-## ADDED Requirements
+# Helm Dashboard Service
+
+## Purpose
+
+Provides a dedicated Kubernetes Service resource for the web dashboard, enabling internal cluster routing to the dashboard container port with configurable service type and port settings.
+
+## Requirements
 
 ### Requirement: Conditional dashboard Service creation
 The Helm chart SHALL create a dedicated Kubernetes Service for the web dashboard only when `dashboard.service.enabled` is `true` in values.
