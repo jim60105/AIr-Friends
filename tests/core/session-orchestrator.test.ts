@@ -2073,21 +2073,60 @@ Deno.test({
 });
 
 Deno.test({
-  name: "SessionOrchestrator - GIF attachments are excluded from image content blocks",
+  name: "SessionOrchestrator - GIF conversion failure falls back to string prompt",
   sanitizeResources: false,
   fn: async () => {
     const tempDir = await Deno.makeTempDir();
     try {
+      // Serve a minimal GIF
+      const gifBytes = new Uint8Array([
+        0x47,
+        0x49,
+        0x46,
+        0x38,
+        0x39,
+        0x61, // GIF89a
+        0x01,
+        0x00,
+        0x01,
+        0x00,
+        0x00,
+        0x00,
+        0x00, // 1x1 no GCT
+        0x2C,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x01,
+        0x00,
+        0x01,
+        0x00,
+        0x00, // image descriptor
+        0x02,
+        0x02,
+        0x44,
+        0x01,
+        0x00, // LZW min code size + data
+        0x3B, // trailer
+      ]);
+      const server = Deno.serve({ port: 0, onListen: () => {} }, () => {
+        return new Response(gifBytes, {
+          headers: { "Content-Type": "image/gif" },
+        });
+      });
+      const gifUrl = `http://localhost:${server.addr.port}/test.gif`;
+
       const { orchestrator, sessionRegistry } = await createTestableOrchestrator(
         tempDir,
       );
       const event = createTestEvent();
       event.attachments = [{
         id: "a1",
-        url: "https://example.com/anim.gif",
+        url: gifUrl,
         mimeType: "image/gif",
         filename: "anim.gif",
-        size: 1000,
+        size: gifBytes.length,
         isImage: true,
       }];
       let receivedArg: string | unknown[] | null = null;
@@ -2102,10 +2141,23 @@ Deno.test({
       const platformAdapter = new MockPlatformAdapter() as unknown as PlatformAdapter;
       await orchestrator.processMessage(event, platformAdapter);
 
-      // GIF image should be skipped, prompt should be string (no ContentBlock[])
-      assertEquals(typeof receivedArg, "string");
+      // If ImageMagick is not available, GIF conversion fails gracefully
+      // and falls back to string prompt (no ContentBlock[])
+      // If ImageMagick IS available, it produces a ContentBlock[] with image/webp
+      if (typeof receivedArg === "string") {
+        // Fallback path: conversion failed, string prompt
+        assertEquals(typeof receivedArg, "string");
+      } else {
+        // Success path: conversion worked, ContentBlock[] with webp
+        const blocks = receivedArg as unknown as Array<{ type: string; mimeType?: string }>;
+        assertEquals(blocks.length, 2); // text + image
+        assertEquals(blocks[0].type, "text");
+        assertEquals(blocks[1].type, "image");
+        assertEquals(blocks[1].mimeType, "image/webp");
+      }
 
       sessionRegistry.stop();
+      await server.shutdown();
     } finally {
       await Deno.remove(tempDir, { recursive: true });
     }

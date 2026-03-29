@@ -541,6 +541,7 @@ export class SessionOrchestrator {
           supportsImage,
           event,
           sessionLogger,
+          workspace.tmpPath,
         );
 
         // Audit: prompt_sent
@@ -2472,6 +2473,7 @@ export class SessionOrchestrator {
     supportsImage: boolean,
     event: NormalizedEvent,
     sessionLogger: ReturnType<typeof logger.child>,
+    tmpPath?: string,
   ): Promise<string | acp.ContentBlock[]> {
     if (!supportsImage || !event.attachments) {
       return fullPrompt;
@@ -2479,7 +2481,7 @@ export class SessionOrchestrator {
 
     const imageAttachments = event.attachments.filter(
       (att) =>
-        att.isImage && att.mimeType !== "image/gif" &&
+        att.isImage &&
         (!att.size || att.size <= MAX_IMAGE_SIZE_BYTES),
     );
 
@@ -2499,21 +2501,39 @@ export class SessionOrchestrator {
 
         if (response.ok) {
           const arrayBuffer = await response.arrayBuffer();
-          const uint8Array = new Uint8Array(arrayBuffer);
+          let finalData: Uint8Array;
+          let finalMimeType = att.mimeType;
+
+          if (att.mimeType === "image/gif" && tmpPath) {
+            // Convert GIF to WebP using ImageMagick
+            const converted = await this.convertGifToWebp(
+              new Uint8Array(arrayBuffer),
+              att.id,
+              tmpPath,
+              sessionLogger,
+            );
+            if (!converted) continue;
+            finalData = converted;
+            finalMimeType = "image/webp";
+          } else {
+            finalData = new Uint8Array(arrayBuffer);
+          }
+
           let binary = "";
           const chunkSize = 8192;
-          for (let i = 0; i < uint8Array.length; i += chunkSize) {
-            binary += String.fromCharCode(...uint8Array.subarray(i, i + chunkSize));
+          for (let i = 0; i < finalData.length; i += chunkSize) {
+            binary += String.fromCharCode(...finalData.subarray(i, i + chunkSize));
           }
           const base64 = btoa(binary);
           contentBlocks.push({
             type: "image" as const,
             data: base64,
-            mimeType: att.mimeType,
+            mimeType: finalMimeType,
           });
           sessionLogger.debug("Image attachment added to prompt", {
             filename: att.filename,
-            mimeType: att.mimeType,
+            mimeType: finalMimeType,
+            originalMimeType: att.mimeType,
             size: att.size,
           });
         }
@@ -2527,6 +2547,59 @@ export class SessionOrchestrator {
     }
 
     return contentBlocks.length > 1 ? contentBlocks : fullPrompt;
+  }
+
+  /**
+   * Convert a GIF image to static WebP using ImageMagick.
+   * Returns the WebP file data, or null if conversion fails.
+   */
+  private async convertGifToWebp(
+    gifData: Uint8Array,
+    attachmentId: string,
+    tmpPath: string,
+    sessionLogger: ReturnType<typeof logger.child>,
+  ): Promise<Uint8Array | null> {
+    const gifPath = `${tmpPath}/${attachmentId}.gif`;
+    const webpPath = `${tmpPath}/${attachmentId}.webp`;
+    try {
+      await Deno.mkdir(tmpPath, { recursive: true });
+      await Deno.writeFile(gifPath, gifData);
+
+      const command = new Deno.Command("convert", {
+        args: [`${gifPath}[0]`, webpPath],
+        stdout: "null",
+        stderr: "piped",
+      });
+      const result = await command.output();
+
+      if (!result.success) {
+        const stderr = new TextDecoder().decode(result.stderr);
+        sessionLogger.warn("ImageMagick GIF-to-WebP conversion failed", {
+          exitCode: result.code,
+          stderr,
+        });
+        return null;
+      }
+
+      const webpData = await Deno.readFile(webpPath);
+      sessionLogger.debug("GIF converted to WebP", {
+        attachmentId,
+        gifSize: gifData.length,
+        webpSize: webpData.length,
+      });
+      return webpData;
+    } catch (error) {
+      sessionLogger.warn("GIF-to-WebP conversion error", {
+        attachmentId,
+        error: String(error),
+      });
+      return null;
+    } finally {
+      // Clean up intermediate GIF file (WebP cleaned up with tmpDir)
+      try {
+        await Deno.remove(gifPath);
+      } catch { /* ignore */ }
+    }
   }
 
   /**
