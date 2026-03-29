@@ -1,6 +1,6 @@
 {
   "name": "@air-friends/core",
-  "version": "0.22.0",
+  "version": "0.23.0",
   "exports": "./src/main.ts",
   "unstable": ["net"],
   "imports": {

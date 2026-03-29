@@ -7,7 +7,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
-## [0.22.0] - 2025-05-01
+## [0.23.0] - 2026-03-29
+
+### Added
+
+- Web dashboard for monitoring and agent chat — passphrase-based authentication, session monitor, read-only workspace file browser, interactive chat with ACP agent via SSE streaming, and graceful restart endpoint
+- Dashboard security hardening (OWASP Top 10 review) — CSP headers, login rate limiting, session token expiration, HMAC-based timing-safe validation, DOMPurify for XSS prevention, workspace traversal depth/entry limits
+- Markdown rendering with raw/rendered toggle in workspace file viewer
+- Helm chart dashboard Service and Ingress templates for Kubernetes exposure
+- Tiered memory management with channel scope and automatic conversation summaries — core/working/archive tiers, decay-weighted scoring, channel-scoped memory, category-based retrieval
+- Redesigned audit logs with 8 new phases (trigger_received, session_start, rate_limit_checked, reply_edited, memory_operation, retry_triggered, agent_message, agent_complete_message) and session summary counters
+- Dashboard session history loaded from audit log JSONL files at startup
+- Alphabetical sorting with directories-first in workspace file tree
+- OpenSpec specifications generated from codebase (22 capability specs, 240 requirements, 536 scenarios)
+
+### Changed
+
+- Refactored all 7 schedulers to use abstract BaseScheduler class, eliminating ~500 lines of duplicated code
+- Extracted setupSession() and recordSessionMetrics() helpers in SessionOrchestrator
+- SESSION_ID now passed as subprocess environment variable at spawn time instead of file-based approach
+- Prompt templates refined for improved agent response workflow and tool usage guidance
+- Lazy memory file creation — memory files deferred to first write instead of eager creation at workspace init
+- Removed memory index (premature optimization) in favor of sequential file scan
+- Removed session time-based expiry from skill API — sessions now only removed via explicit remove() at session end
+- Dashboard theme changed to VSCode Dark+ colors
+- Documentation aligned with OpenSpec specs and codebase; legacy BDD feature files removed
+
+### Fixed
+
+- Workspace manager now passed to SkillContext for channel memory operations
+- Agent subprocess SESSION_ID inheritance fixed by passing through createAgentConfig()
+- Dashboard: fixed session ID truncation, Started/Ended field names, audit session ID validation (underscores), ERR_TOO_MANY_REDIRECTS on login, auth.js load order, SSE event name mismatch, workspace tree folding, file content scrollability, file path normalization, chat message field name, model dropdown population
+- Workspace file tree clipped by max-height limit resolved
+- Helm chart dashboard port condition uses toString for type-safe comparison
+
+## [0.22.0] - 2026-03-21
 
 ### Added
 
@@ -899,7 +933,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ---
 
-[Unreleased]: https://github.com/jim60105/AIr-Friends/compare/v0.22.0...HEAD
+[Unreleased]: https://github.com/jim60105/AIr-Friends/compare/v0.23.0...HEAD
+[0.23.0]: https://github.com/jim60105/AIr-Friends/compare/v0.22.0...v0.23.0
 [0.22.0]: https://github.com/jim60105/AIr-Friends/compare/v0.21.0...v0.22.0
 [0.21.0]: https://github.com/jim60105/AIr-Friends/compare/v0.20.0...v0.21.0
 [0.20.0]: https://github.com/jim60105/AIr-Friends/compare/v0.19.0...v0.20.0
