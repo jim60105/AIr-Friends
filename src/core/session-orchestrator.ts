@@ -2478,7 +2478,9 @@ export class SessionOrchestrator {
     }
 
     const imageAttachments = event.attachments.filter(
-      (att) => att.isImage && (!att.size || att.size <= MAX_IMAGE_SIZE_BYTES),
+      (att) =>
+        att.isImage && att.mimeType !== "image/gif" &&
+        (!att.size || att.size <= MAX_IMAGE_SIZE_BYTES),
     );
 
     if (imageAttachments.length === 0) {
