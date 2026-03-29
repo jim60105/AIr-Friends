@@ -4,348 +4,344 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>AIr-Friends Dashboard</title>
+    
+    <!-- Unique Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700&family=Outfit:wght@400;500;700;800&display=swap" rel="stylesheet">
+    
     <script src="https://cdn.tailwindcss.com"></script>
     <script>
       tailwind.config = {
         theme: {
           extend: {
+            fontFamily: {
+              sans: ['Manrope', 'sans-serif'],
+              display: ['Outfit', 'sans-serif'],
+            },
             colors: {
               surface: {
-                DEFAULT: "#1e1e1e",
-                50: "#252526",
-                100: "#2d2d30",
-                200: "#3c3c3c",
+                DEFAULT: "#0B0C10", // Deep dark space
+                50: "#13151A",
+                100: "#1A1D24",
+                200: "#232730",
               },
               accent: {
-                DEFAULT: "#007acc",
-                light: "#3794ff",
-                dark: "#0e639c",
-                muted: "rgba(0, 122, 204, 0.15)",
+                DEFAULT: "#8A2BE2", // Neon purple
+                light: "#B829EA", // Magenta-ish
+                dark: "#5C1A99",
+                muted: "rgba(138, 43, 226, 0.15)",
               },
+              cyan: {
+                DEFAULT: "#00F0FF",
+                muted: "rgba(0, 240, 255, 0.15)",
+              }
             },
+            boxShadow: {
+              'glow': '0 0 20px rgba(138, 43, 226, 0.3)',
+              'glow-cyan': '0 0 20px rgba(0, 240, 255, 0.3)',
+              'panel': '0 4px 30px rgba(0, 0, 0, 0.4)',
+            }
           },
         },
       };
     </script>
     <link rel="stylesheet" href="/style.css">
   </head>
-  <body class="h-full bg-surface text-[#cccccc] font-sans">
+  <body class="h-full bg-surface text-gray-300 font-sans antialiased selection:bg-accent-light selection:text-white relative">
+    
+    <!-- Ambient background glows -->
+    <div class="fixed top-[-10%] left-[-10%] w-[40%] h-[40%] bg-accent-dark/20 rounded-full blur-[120px] pointer-events-none"></div>
+    <div class="fixed bottom-[-10%] right-[-10%] w-[40%] h-[40%] bg-cyan-muted rounded-full blur-[120px] pointer-events-none"></div>
+
     <!-- Login Screen -->
-    <div id="login-screen" class="hidden min-h-screen flex items-center justify-center px-4">
-      <div
-        class="w-full max-w-sm bg-surface-100 border border-accent-muted rounded-2xl shadow-2xl p-8"
-      >
-        <h1 class="text-2xl font-bold text-center text-accent-light mb-1">AIr-Friends</h1>
-        <p class="text-sm text-gray-400 text-center mb-6">Dashboard Login</p>
-        <form id="login-form" class="space-y-4">
-          <input
-            id="login-passphrase"
-            type="password"
-            placeholder="Passphrase"
-            class="w-full px-4 py-2.5 bg-surface-200 border border-accent/30 rounded-lg text-gray-200 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-accent focus:border-transparent"
-            autocomplete="current-password"
-          >
+    <div id="login-screen" class="hidden min-h-screen flex items-center justify-center px-4 relative z-10">
+      <div class="w-full max-w-sm bg-surface-50/80 backdrop-blur-xl border border-white/5 rounded-3xl shadow-glow p-10 transform transition-all hover:scale-[1.01]">
+        <div class="mb-8 text-center">
+          <h1 class="text-4xl font-display font-bold text-transparent bg-clip-text bg-gradient-to-r from-accent-light to-cyan mb-2 tracking-tight">AIr-Friends</h1>
+          <p class="text-sm text-gray-400 font-medium tracking-wide uppercase">Command Center</p>
+        </div>
+        <form id="login-form" class="space-y-6">
+          <div class="space-y-1">
+            <input
+              id="login-passphrase"
+              type="password"
+              placeholder="Enter Passphrase..."
+              class="w-full px-5 py-3.5 bg-surface-100/50 border border-white/10 rounded-xl text-gray-100 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-accent/50 focus:border-accent/50 transition-all shadow-inner"
+              autocomplete="current-password"
+            >
+          </div>
           <button
             type="submit"
-            class="w-full py-2.5 bg-accent-dark hover:bg-accent text-white font-medium rounded-lg transition-colors"
+            class="w-full py-3.5 bg-gradient-to-r from-accent to-accent-light hover:from-accent-light hover:to-cyan text-white font-semibold rounded-xl transition-all shadow-lg hover:shadow-glow transform hover:-translate-y-0.5"
           >
-            Login
+            Authenticate
           </button>
-          <p id="login-error" class="text-red-400 text-sm text-center hidden"></p>
+          <p id="login-error" class="text-red-400 text-sm text-center font-medium hidden bg-red-400/10 py-2 rounded-lg"></p>
         </form>
       </div>
     </div>
 
     <!-- Dashboard -->
-    <div id="dashboard" class="hidden h-full flex flex-col">
-      <!-- Header -->
-      <header
-        class="bg-surface-100 border-b border-accent-muted px-4 py-3 flex items-center justify-between shrink-0"
-      >
-        <h1 class="text-lg font-bold text-accent-light">AIr-Friends</h1>
-        <div class="flex items-center gap-3">
-          <button
-            onclick="doRestart()"
-            class="text-xs text-gray-400 hover:text-yellow-400 transition-colors"
-            title="Restart"
-          >
-            ⟳ Restart
-          </button>
-          <button
-            onclick="doLogout()"
-            class="text-xs text-gray-400 hover:text-red-400 transition-colors"
-          >
-            Logout
-          </button>
-        </div>
-      </header>
-
-      <!-- Tabs -->
-      <nav
-        class="bg-surface-100 border-b border-accent-muted px-4 flex gap-1 shrink-0 overflow-x-auto"
-      >
-        <button
-          class="tab-btn px-4 py-2.5 text-sm font-medium rounded-t-lg transition-colors"
-          data-tab="sessions"
-        >
-          Sessions
-        </button>
-        <button
-          class="tab-btn px-4 py-2.5 text-sm font-medium rounded-t-lg transition-colors"
-          data-tab="stats"
-        >
-          Stats
-        </button>
-        <button
-          class="tab-btn px-4 py-2.5 text-sm font-medium rounded-t-lg transition-colors"
-          data-tab="workspace"
-        >
-          Workspace
-        </button>
-        <button
-          class="tab-btn px-4 py-2.5 text-sm font-medium rounded-t-lg transition-colors"
-          data-tab="chat"
-        >
-          Chat
-        </button>
-      </nav>
-
-      <!-- Content -->
-      <main class="flex-1 overflow-auto p-4">
-        <!-- Sessions Tab -->
-        <section id="tab-sessions" class="tab-panel hidden space-y-6">
-          <div>
-            <h2 class="text-sm font-semibold text-accent-light uppercase tracking-wider mb-3">
-              Active Sessions
-            </h2>
-            <div class="bg-surface-100 border border-accent-muted rounded-xl overflow-hidden">
-              <div class="overflow-x-auto">
-                <table class="w-full text-sm">
-                  <thead>
-                    <tr class="border-b border-accent-muted text-gray-400 text-xs uppercase">
-                      <th class="px-4 py-2.5 text-left">ID</th>
-                      <th class="px-4 py-2.5 text-left">Type</th>
-                      <th class="px-4 py-2.5 text-left">Platform</th>
-                      <th class="px-4 py-2.5 text-left">User</th>
-                      <th class="px-4 py-2.5 text-left">Channel</th>
-                      <th class="px-4 py-2.5 text-left">Started</th>
-                      <th class="px-4 py-2.5 text-left">Status</th>
-                    </tr>
-                  </thead>
-                  <tbody id="active-sessions-body" class="divide-y divide-accent-muted">
-                    <tr>
-                      <td colspan="7" class="px-4 py-6 text-center text-gray-500">
-                        No active sessions
-                      </td>
-                    </tr>
-                  </tbody>
-                </table>
-              </div>
+    <div id="dashboard" class="hidden h-full flex flex-col relative z-10 p-2 md:p-4 lg:p-6 gap-4">
+      
+      <div class="flex flex-col md:flex-row gap-4 h-full">
+        <!-- Sidebar / Navigation -->
+        <aside class="md:w-64 shrink-0 bg-surface-50/60 backdrop-blur-xl border border-white/5 rounded-3xl flex flex-col overflow-hidden shadow-panel">
+          <header class="p-6 border-b border-white/5">
+            <h1 class="text-2xl font-display font-bold text-transparent bg-clip-text bg-gradient-to-r from-accent-light to-cyan tracking-tight">AIr-Friends</h1>
+            <div class="mt-2 flex items-center gap-2">
+              <span class="w-2 h-2 rounded-full bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.8)]"></span>
+              <span class="text-xs text-gray-400 uppercase tracking-widest font-semibold">System Online</span>
             </div>
-          </div>
+          </header>
 
-          <div>
-            <h2 class="text-sm font-semibold text-accent-light uppercase tracking-wider mb-3">
-              Session History
-            </h2>
-            <div class="bg-surface-100 border border-accent-muted rounded-xl overflow-hidden">
-              <div class="overflow-x-auto">
-                <table class="w-full text-sm">
-                  <thead>
-                    <tr class="border-b border-accent-muted text-gray-400 text-xs uppercase">
-                      <th class="px-4 py-2.5 text-left">Session ID</th>
-                      <th class="px-4 py-2.5 text-left">Type</th>
-                      <th class="px-4 py-2.5 text-left">Platform</th>
-                      <th class="px-4 py-2.5 text-left">User</th>
-                      <th class="px-4 py-2.5 text-left">Started</th>
-                      <th class="px-4 py-2.5 text-left">Ended</th>
-                      <th class="px-4 py-2.5 text-left">Duration</th>
-                      <th class="px-4 py-2.5 text-left">Status</th>
-                    </tr>
-                  </thead>
-                  <tbody id="history-sessions-body" class="divide-y divide-accent-muted">
-                    <tr>
-                      <td colspan="8" class="px-4 py-6 text-center text-gray-500">
-                        No session history
-                      </td>
-                    </tr>
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          </div>
-        </section>
+          <nav class="flex-1 px-4 py-6 flex flex-col gap-2">
+            <button class="tab-btn flex items-center gap-3 px-4 py-3 text-sm font-semibold rounded-xl text-gray-400 hover:text-white hover:bg-white/5 transition-all" data-tab="sessions">
+              <svg class="w-5 h-5 opacity-70" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>
+              Sessions
+            </button>
+            <button class="tab-btn flex items-center gap-3 px-4 py-3 text-sm font-semibold rounded-xl text-gray-400 hover:text-white hover:bg-white/5 transition-all" data-tab="stats">
+              <svg class="w-5 h-5 opacity-70" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" /></svg>
+              Statistics
+            </button>
+            <button class="tab-btn flex items-center gap-3 px-4 py-3 text-sm font-semibold rounded-xl text-gray-400 hover:text-white hover:bg-white/5 transition-all" data-tab="workspace">
+              <svg class="w-5 h-5 opacity-70" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" /></svg>
+              Workspace
+            </button>
+            <button class="tab-btn flex items-center gap-3 px-4 py-3 text-sm font-semibold rounded-xl text-gray-400 hover:text-white hover:bg-white/5 transition-all" data-tab="chat">
+              <svg class="w-5 h-5 opacity-70" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z" /></svg>
+              Live Chat
+            </button>
+          </nav>
 
-        <!-- Stats Tab -->
-        <section id="tab-stats" class="tab-panel hidden">
-          <h2 class="text-sm font-semibold text-accent-light uppercase tracking-wider mb-3">
-            Statistics
-          </h2>
-          <div id="stats-grid" class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4"></div>
-        </section>
-
-        <!-- Workspace Tab -->
-        <section id="tab-workspace" class="tab-panel hidden flex flex-col h-[calc(100vh-8rem)]">
-          <div class="flex items-center justify-between mb-3">
-            <h2 class="text-sm font-semibold text-accent-light uppercase tracking-wider">
-              Agent Workspace
-            </h2>
-            <button
-              onclick="loadWorkspaceTree()"
-              class="text-xs px-3 py-1.5 bg-surface-200 hover:bg-accent-muted border border-accent-muted rounded-lg text-gray-300 transition-colors"
-            >
-              ↻ Refresh
+          <div class="p-4 border-t border-white/5 flex flex-col gap-2">
+            <button onclick="doRestart()" class="flex items-center justify-center gap-2 w-full py-2.5 bg-surface-100 hover:bg-surface-200 border border-white/5 rounded-xl text-xs font-semibold text-yellow-400/80 hover:text-yellow-400 transition-colors">
+              <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
+              Restart System
+            </button>
+            <button onclick="doLogout()" class="flex items-center justify-center gap-2 w-full py-2.5 bg-surface-100 hover:bg-red-500/10 border border-white/5 rounded-xl text-xs font-semibold text-red-400/80 hover:text-red-400 transition-colors">
+              <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" /></svg>
+              Terminate Session
             </button>
           </div>
-          <div class="flex flex-col lg:flex-row gap-4 flex-1 min-h-0 overflow-hidden">
-            <div
-              class="lg:w-72 shrink-0 bg-surface-100 border border-accent-muted rounded-xl p-3 overflow-auto"
-            >
-              <div id="workspace-tree" class="text-sm">
-                <p class="text-gray-500 text-center py-4">Loading…</p>
+        </aside>
+
+        <!-- Main Content Area -->
+        <main class="flex-1 flex flex-col min-w-0 bg-surface-50/60 backdrop-blur-xl border border-white/5 rounded-3xl shadow-panel overflow-hidden">
+          <div class="flex-1 overflow-auto p-6 md:p-8">
+            
+            <!-- Sessions Tab -->
+            <section id="tab-sessions" class="tab-panel hidden space-y-10">
+              <div>
+                <div class="flex items-center gap-3 mb-6">
+                  <div class="h-8 w-1 bg-accent rounded-full"></div>
+                  <h2 class="text-xl font-display font-bold text-white tracking-tight">Active Sessions</h2>
+                </div>
+                <div class="bg-surface-100/50 border border-white/5 rounded-2xl overflow-hidden shadow-inner">
+                  <div class="overflow-x-auto">
+                    <table class="w-full text-sm">
+                      <thead>
+                        <tr class="border-b border-white/5 text-gray-400 text-xs font-semibold uppercase tracking-wider bg-surface-200/30">
+                          <th class="px-6 py-4 text-left">ID</th>
+                          <th class="px-6 py-4 text-left">Type</th>
+                          <th class="px-6 py-4 text-left">Platform</th>
+                          <th class="px-6 py-4 text-left">User</th>
+                          <th class="px-6 py-4 text-left">Channel</th>
+                          <th class="px-6 py-4 text-left">Started</th>
+                          <th class="px-6 py-4 text-left">Status</th>
+                        </tr>
+                      </thead>
+                      <tbody id="active-sessions-body" class="divide-y divide-white/5">
+                        <tr>
+                          <td colspan="7" class="px-6 py-12 text-center text-gray-500 font-medium">No active sessions detected</td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
               </div>
-            </div>
-            <div
-              class="flex-1 flex flex-col bg-surface-100 border border-accent-muted rounded-xl overflow-hidden min-h-0"
-            >
-              <div
-                id="file-header"
-                class="hidden px-4 py-2.5 border-b border-accent-muted text-xs text-gray-400 font-mono flex items-center justify-between"
-              >
-                <span id="file-header-path"></span>
-                <button
-                  id="md-view-toggle"
-                  class="hidden px-2 py-0.5 rounded border border-accent-muted text-gray-400 hover:text-gray-200 hover:border-accent/50 transition-colors text-[11px] tracking-wide uppercase"
-                  onclick="toggleMarkdownView()"
-                >
-                  Raw
+
+              <div>
+                <div class="flex items-center gap-3 mb-6">
+                  <div class="h-8 w-1 bg-surface-200 rounded-full"></div>
+                  <h2 class="text-xl font-display font-bold text-white tracking-tight">Session History</h2>
+                </div>
+                <div class="bg-surface-100/50 border border-white/5 rounded-2xl overflow-hidden shadow-inner">
+                  <div class="overflow-x-auto">
+                    <table class="w-full text-sm">
+                      <thead>
+                        <tr class="border-b border-white/5 text-gray-400 text-xs font-semibold uppercase tracking-wider bg-surface-200/30">
+                          <th class="px-6 py-4 text-left">Session ID</th>
+                          <th class="px-6 py-4 text-left">Type</th>
+                          <th class="px-6 py-4 text-left">Platform</th>
+                          <th class="px-6 py-4 text-left">User</th>
+                          <th class="px-6 py-4 text-left">Started</th>
+                          <th class="px-6 py-4 text-left">Ended</th>
+                          <th class="px-6 py-4 text-left">Duration</th>
+                          <th class="px-6 py-4 text-left">Status</th>
+                        </tr>
+                      </thead>
+                      <tbody id="history-sessions-body" class="divide-y divide-white/5">
+                        <tr>
+                          <td colspan="8" class="px-6 py-12 text-center text-gray-500 font-medium">No historical records found</td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </div>
+            </section>
+
+            <!-- Stats Tab -->
+            <section id="tab-stats" class="tab-panel hidden h-full flex flex-col">
+              <div class="flex items-center gap-3 mb-6 shrink-0">
+                <div class="h-8 w-1 bg-cyan rounded-full"></div>
+                <h2 class="text-xl font-display font-bold text-white tracking-tight">System Telemetry</h2>
+              </div>
+              <div id="stats-grid" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6 content-start">
+                <!-- Stats cards injected here -->
+              </div>
+            </section>
+
+            <!-- Workspace Tab -->
+            <section id="tab-workspace" class="tab-panel hidden h-full flex flex-col">
+              <div class="flex items-center justify-between mb-6 shrink-0">
+                <div class="flex items-center gap-3">
+                  <div class="h-8 w-1 bg-accent-light rounded-full"></div>
+                  <h2 class="text-xl font-display font-bold text-white tracking-tight">Agent Workspace</h2>
+                </div>
+                <button onclick="loadWorkspaceTree()" class="flex items-center gap-2 px-4 py-2 bg-surface-100 hover:bg-surface-200 border border-white/10 rounded-xl text-sm font-semibold text-gray-300 transition-all hover:shadow-md">
+                  <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
+                  Sync Index
                 </button>
               </div>
-              <pre
-                id="file-content"
-                class="p-4 text-sm font-mono text-gray-300 whitespace-pre-wrap overflow-auto flex-1 min-h-0"
-              ><span class="text-gray-500">Select a file to view its contents</span></pre>
-              <div
-                id="file-content-rendered"
-                class="hidden p-6 text-gray-300 overflow-auto flex-1 min-h-0 md-rendered"
-              >
+              <div class="flex flex-col lg:flex-row gap-6 flex-1 min-h-0">
+                <!-- File Tree -->
+                <div class="lg:w-80 shrink-0 bg-surface-100/50 border border-white/5 rounded-2xl p-4 overflow-auto shadow-inner">
+                  <div id="workspace-tree" class="text-sm font-medium">
+                    <div class="flex items-center justify-center h-32">
+                      <div class="animate-pulse flex flex-col items-center gap-3 text-gray-500">
+                        <svg class="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 002-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" /></svg>
+                        <span>Scanning directory...</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                <!-- File Viewer -->
+                <div class="flex-1 flex flex-col bg-surface-100/50 border border-white/5 rounded-2xl overflow-hidden shadow-inner min-h-0">
+                  <div id="file-header" class="hidden px-5 py-3.5 border-b border-white/5 bg-surface-200/30 flex items-center justify-between shrink-0">
+                    <span id="file-header-path" class="text-xs text-cyan font-mono tracking-wide"></span>
+                    <button id="md-view-toggle" onclick="toggleMarkdownView()" class="hidden px-3 py-1.5 rounded-lg border border-white/10 bg-white/5 hover:bg-white/10 text-gray-300 transition-colors text-xs font-semibold uppercase tracking-wider">
+                      Raw
+                    </button>
+                  </div>
+                  <div class="relative flex-1 min-h-0 bg-[#0A0B10]">
+                    <pre id="file-content" class="absolute inset-0 p-6 text-[13px] leading-relaxed font-mono text-gray-300 whitespace-pre-wrap overflow-auto"><div class="flex h-full items-center justify-center text-gray-600 font-sans text-sm">Select a file from the explorer to view its contents.</div></pre>
+                    <div id="file-content-rendered" class="hidden absolute inset-0 p-8 text-gray-300 overflow-auto md-rendered bg-surface-100/30"></div>
+                  </div>
+                </div>
               </div>
-            </div>
-          </div>
-        </section>
+            </section>
 
-        <!-- Chat Tab -->
-        <section id="tab-chat" class="tab-panel hidden flex flex-col h-[calc(100vh-8rem)]">
-          <!-- Connection bar -->
-          <div
-            id="chat-connect-bar"
-            class="bg-surface-100 border border-accent-muted rounded-xl p-4 mb-4 shrink-0"
-          >
-            <div class="flex flex-wrap items-end gap-3">
-              <div>
-                <label class="block text-xs text-gray-400 mb-1">Agent</label>
-                <select
-                  id="chat-agent-type"
-                  class="bg-surface-200 border border-accent/30 rounded-lg px-3 py-2 text-sm text-gray-200 focus:outline-none focus:ring-2 focus:ring-accent"
-                >
-                  <option value="copilot">Copilot</option>
-                  <option value="gemini">Gemini</option>
-                  <option value="opencode">OpenCode</option>
-                </select>
+            <!-- Chat Tab -->
+            <section id="tab-chat" class="tab-panel hidden h-full flex flex-col">
+              <div class="flex items-center gap-3 mb-6 shrink-0">
+                <div class="h-8 w-1 bg-accent rounded-full"></div>
+                <h2 class="text-xl font-display font-bold text-white tracking-tight">Interactive Terminal</h2>
               </div>
-              <div class="flex-1 min-w-[200px]">
-                <label class="block text-xs text-gray-400 mb-1">Model</label>
-                <input
-                  id="chat-model"
-                  type="text"
-                  list="model-suggestions"
-                  placeholder="e.g. claude-sonnet-4"
-                  class="w-full bg-surface-200 border border-accent/30 rounded-lg px-3 py-2 text-sm text-gray-200 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-accent"
-                >
-                <datalist id="model-suggestions"></datalist>
+              
+              <div class="flex-1 flex flex-col gap-4 min-h-0">
+                <!-- Connection Controls -->
+                <div id="chat-connect-bar" class="bg-surface-100/50 backdrop-blur-md border border-white/5 rounded-2xl p-5 shrink-0 shadow-inner">
+                  <div class="flex flex-col md:flex-row md:items-end gap-4">
+                    <div class="flex-1">
+                      <label class="block text-xs font-semibold text-gray-400 uppercase tracking-widest mb-2">Agent Protocol</label>
+                      <div class="relative">
+                        <select id="chat-agent-type" class="w-full appearance-none bg-surface-200/50 border border-white/10 rounded-xl pl-4 pr-10 py-3 text-sm font-medium text-white focus:outline-none focus:ring-2 focus:ring-accent/50 transition-all">
+                          <option value="copilot">Copilot</option>
+                          <option value="gemini">Gemini</option>
+                          <option value="opencode">OpenCode</option>
+                        </select>
+                        <div class="absolute inset-y-0 right-0 flex items-center pr-3 pointer-events-none text-gray-400">
+                          <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path></svg>
+                        </div>
+                      </div>
+                    </div>
+                    <div class="flex-[2]">
+                      <label class="block text-xs font-semibold text-gray-400 uppercase tracking-widest mb-2">Language Model</label>
+                      <input id="chat-model" type="text" list="model-suggestions" placeholder="e.g. claude-3-opus" class="w-full bg-surface-200/50 border border-white/10 rounded-xl px-4 py-3 text-sm font-medium text-white placeholder-gray-600 focus:outline-none focus:ring-2 focus:ring-accent/50 transition-all">
+                      <datalist id="model-suggestions"></datalist>
+                    </div>
+                    <div class="flex gap-3">
+                      <button id="chat-connect-btn" onclick="chatConnect()" class="px-8 py-3 bg-gradient-to-r from-accent to-accent-light hover:from-accent-light hover:to-cyan text-white text-sm font-bold rounded-xl transition-all shadow-lg hover:shadow-glow transform hover:-translate-y-0.5">
+                        Establish Uplink
+                      </button>
+                      <button id="chat-disconnect-btn" onclick="chatDisconnect()" class="hidden px-8 py-3 bg-surface-200 border border-red-500/30 hover:bg-red-500/10 text-red-400 text-sm font-bold rounded-xl transition-all">
+                        Sever Link
+                      </button>
+                    </div>
+                  </div>
+                  <p id="chat-status" class="text-xs font-medium text-cyan mt-4 hidden flex items-center gap-2">
+                    <span class="relative flex h-2 w-2">
+                      <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-cyan opacity-75"></span>
+                      <span class="relative inline-flex rounded-full h-2 w-2 bg-cyan"></span>
+                    </span>
+                    <span class="status-text"></span>
+                  </p>
+                </div>
+
+                <!-- Chat Log -->
+                <div id="chat-messages" class="flex-1 overflow-auto bg-surface-100/30 border border-white/5 rounded-2xl p-6 space-y-6 shadow-inner relative">
+                  <div class="absolute inset-0 flex items-center justify-center pointer-events-none opacity-50">
+                    <div class="text-center">
+                      <svg class="w-16 h-16 mx-auto text-surface-200 mb-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1" d="M17 8h2a2 2 0 012 2v6a2 2 0 01-2 2h-2v4l-4-4H9a1.994 1.994 0 01-1.414-.586m0 0L11 14h4a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2v4l.586-.586z" /></svg>
+                      <p class="text-gray-600 font-medium">Awaiting connection...</p>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- Input Area -->
+                <div id="chat-input-bar" class="flex gap-3 shrink-0 relative z-10">
+                  <div class="flex-1 relative group">
+                    <textarea id="chat-input" rows="1" placeholder="Transmit message..." disabled class="w-full bg-surface-100/80 backdrop-blur-md border border-white/10 group-hover:border-white/20 rounded-2xl pl-5 pr-14 py-4 text-[15px] text-white placeholder-gray-500 resize-none focus:outline-none focus:ring-2 focus:ring-accent/50 focus:border-transparent transition-all disabled:opacity-50 overflow-hidden shadow-inner leading-relaxed"></textarea>
+                    <!-- Small visual accent in the corner of textarea -->
+                    <div class="absolute right-4 bottom-4 pointer-events-none opacity-0 transition-opacity group-focus-within:opacity-100 text-xs text-gray-500 font-medium font-mono">↵ to send</div>
+                  </div>
+                  <button id="chat-send-btn" onclick="chatSend()" disabled class="w-14 h-14 flex items-center justify-center shrink-0 bg-accent hover:bg-accent-light disabled:bg-surface-200 disabled:text-gray-500 disabled:border disabled:border-white/5 disabled:shadow-none text-white rounded-2xl transition-all shadow-glow hover:scale-105 active:scale-95 disabled:hover:scale-100">
+                    <svg class="w-5 h-5 translate-x-[-1px] translate-y-[1px]" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" /></svg>
+                  </button>
+                </div>
+
+                <div id="chat-reconnect" class="hidden shrink-0 pb-2">
+                  <button onclick="chatReset()" class="w-full py-4 bg-surface-200/50 hover:bg-surface-200 border border-white/5 border-dashed rounded-2xl text-sm font-semibold text-gray-400 hover:text-white transition-all">
+                    Initialize New Session
+                  </button>
+                </div>
               </div>
-              <button
-                id="chat-connect-btn"
-                onclick="chatConnect()"
-                class="px-5 py-2 bg-accent-dark hover:bg-accent text-white text-sm font-medium rounded-lg transition-colors"
-              >
-                Connect
-              </button>
-              <button
-                id="chat-disconnect-btn"
-                onclick="chatDisconnect()"
-                class="hidden px-5 py-2 bg-red-700 hover:bg-red-600 text-white text-sm font-medium rounded-lg transition-colors"
-              >
-                Disconnect
-              </button>
-            </div>
-            <p id="chat-status" class="text-xs text-gray-500 mt-2 hidden"></p>
-          </div>
+            </section>
 
-          <!-- Messages -->
-          <div
-            id="chat-messages"
-            class="flex-1 overflow-auto bg-surface-100 border border-accent-muted rounded-xl p-4 mb-4 space-y-3"
-          >
-            <p class="text-gray-500 text-center text-sm py-8">
-              Connect to an agent to start chatting
-            </p>
           </div>
-
-          <!-- Input -->
-          <div id="chat-input-bar" class="flex gap-2 shrink-0">
-            <textarea
-              id="chat-input"
-              rows="2"
-              placeholder="Type a message…"
-              disabled
-              class="flex-1 bg-surface-100 border border-accent-muted rounded-xl px-4 py-2.5 text-sm text-gray-200 placeholder-gray-500 resize-none focus:outline-none focus:ring-2 focus:ring-accent disabled:opacity-40"
-            ></textarea>
-            <button
-              id="chat-send-btn"
-              onclick="chatSend()"
-              disabled
-              class="px-5 bg-accent-dark hover:bg-accent disabled:bg-accent-dark disabled:opacity-40 text-white text-sm font-medium rounded-xl transition-colors"
-            >
-              Send
-            </button>
-          </div>
-
-          <!-- New connection (post-disconnect) -->
-          <div id="chat-reconnect" class="hidden mt-3 text-center">
-            <button
-              onclick="chatReset()"
-              class="px-5 py-2 bg-accent-dark hover:bg-accent text-white text-sm font-medium rounded-lg transition-colors"
-            >
-              New Connection
-            </button>
-          </div>
-        </section>
-      </main>
+        </main>
+      </div>
     </div>
 
     <!-- Restart confirmation modal -->
-    <div
-      id="restart-modal"
-      class="hidden fixed inset-0 z-50 flex items-center justify-center bg-black/60"
-    >
-      <div
-        class="bg-surface-100 border border-accent-muted rounded-2xl shadow-2xl p-6 max-w-sm w-full mx-4"
-      >
-        <h3 class="text-lg font-semibold text-yellow-400 mb-2">Restart Process?</h3>
-        <p id="restart-msg" class="text-sm text-gray-300 mb-5"></p>
-        <div class="flex justify-end gap-3">
-          <button
-            onclick="closeRestartModal()"
-            class="px-4 py-2 text-sm text-gray-400 hover:text-gray-200 transition-colors"
-          >
+    <div id="restart-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
+      <div class="bg-surface-100 border border-white/10 rounded-3xl shadow-[0_0_50px_rgba(234,179,8,0.15)] p-8 max-w-sm w-full transform transition-all scale-100 opacity-100">
+        <div class="flex items-center gap-4 mb-4">
+          <div class="w-12 h-12 rounded-full bg-yellow-500/10 flex items-center justify-center shrink-0">
+            <svg class="w-6 h-6 text-yellow-500" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>
+          </div>
+          <h3 class="text-xl font-display font-bold text-white">System Restart</h3>
+        </div>
+        <p id="restart-msg" class="text-sm text-gray-400 leading-relaxed mb-8">Are you sure you want to reboot the system? Active operations may be interrupted.</p>
+        <div class="flex gap-3">
+          <button onclick="closeRestartModal()" class="flex-1 px-5 py-3 bg-surface-200 hover:bg-surface-300 text-white font-semibold rounded-xl transition-colors">
             Cancel
           </button>
-          <button
-            onclick="confirmRestart()"
-            class="px-4 py-2 bg-yellow-600 hover:bg-yellow-500 text-white text-sm font-medium rounded-lg transition-colors"
-          >
-            Restart
+          <button onclick="confirmRestart()" class="flex-1 px-5 py-3 bg-yellow-600 hover:bg-yellow-500 text-white font-bold rounded-xl transition-colors shadow-lg shadow-yellow-600/20">
+            Confirm Reboot
           </button>
         </div>
       </div>
