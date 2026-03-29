@@ -9,5 +9,6 @@ export { ContextAssembler } from "./context-assembler.ts";
 export { MemoryStore } from "./memory-store.ts";
 export { loadConfig } from "./config-loader.ts";
 export { ReplyPolicyEvaluator } from "./reply-policy.ts";
+export { BaseScheduler } from "./base-scheduler.ts";
 
 export type { SessionResponse } from "./session-orchestrator.ts";

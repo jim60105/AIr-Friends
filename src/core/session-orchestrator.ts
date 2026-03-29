@@ -26,7 +26,12 @@ import { resolveModel } from "./model-router.ts";
 import type { ModelRoutingContext } from "./model-router.ts";
 import type { SkillRegistry } from "@skills/registry.ts";
 import type { SessionRegistry } from "../skill-api/session-registry.ts";
-import type { Config, MemoryMaintenanceConfig, SelfResearchConfig } from "../types/config.ts";
+import type {
+  Config,
+  MemoryMaintenanceConfig,
+  SelfResearchConfig,
+  SessionType,
+} from "../types/config.ts";
 import { isValidPlatform } from "../types/events.ts";
 import type { NormalizedEvent, Platform } from "../types/events.ts";
 import type { PlatformAdapter } from "@platforms/platform-adapter.ts";
@@ -280,44 +285,29 @@ export class SessionOrchestrator {
     try {
       // 1. Get or create workspace
       const workspace = await this.workspaceManager.getOrCreateWorkspace(event);
-      const agentWorkspacePath = await this.workspaceManager.getOrCreateAgentWorkspace();
+
+      // 2. Register session, create audit writer
+      const setup = await this.setupSession({
+        platform: event.platform,
+        userId: event.userId,
+        channelId: event.channelId,
+        isDm: event.isDm,
+        guildId: event.guildId || undefined,
+        workspace,
+        platformAdapter,
+        triggerEvent: event,
+        sessionLogger,
+      });
+      const agentWorkspacePath = setup.agentWorkspacePath;
+      shellSessionId = setup.shellSessionId;
+      auditWriter = setup.auditWriter;
+      sessionLogger = setup.sessionLogger;
+
       sessionLogger.debug("Workspace ready", {
         workspaceKey: workspace.key,
         workingDir: workspace.path,
         agentWorkspacePath,
       });
-
-      // 2. Register session in SessionRegistry (if skill API is enabled)
-      if (this.config.skillApi?.enabled) {
-        shellSessionId = this.sessionRegistry.register({
-          platform: event.platform,
-          channelId: event.channelId,
-          userId: event.userId,
-          guildId: event.guildId || undefined,
-          isDm: event.isDm,
-          workspace,
-          platformAdapter,
-          triggerEvent: event,
-          agentWorkspacePath,
-          workspaceManager: this.workspaceManager,
-        });
-
-        sessionLogger.info("Shell session {shellSessionId} registered", {
-          shellSessionId,
-        });
-
-        sessionLogger = sessionLogger.withContext({ shellSessionId });
-      }
-
-      // Create audit writer if enabled
-      auditWriter = shellSessionId
-        ? this.createAuditWriter(event.platform, event.userId, shellSessionId)
-        : null;
-
-      // Attach audit writer to session registry for skill-level auditing
-      if (auditWriter && shellSessionId) {
-        this.sessionRegistry.setAuditWriter(shellSessionId, auditWriter);
-      }
 
       // Audit: trigger_received
       await auditWriter?.write("trigger_received", {
@@ -795,20 +785,14 @@ export class SessionOrchestrator {
       };
       return result;
     } finally {
-      activeSessionsGauge.dec();
-      const durationSec = (Date.now() - sessionStartTime) / 1000;
-      const status = result!.success ? "success" : "failure";
-      sessionsTotal.labels(event.platform, sessionType, status).inc();
-      sessionDurationSeconds.labels(event.platform, sessionType, status).observe(durationSec);
-      this.completedSessionStore?.add({
-        auditSessionId: shellSessionId ?? `sess_noaudit_${sessionStartTime}`,
-        type: sessionType === "channelLurk" ? "channelLurk" : "message",
+      this.recordSessionMetrics({
         platform: event.platform,
+        sessionType,
         userId: event.userId,
-        startedAt: new Date(sessionStartTime).toISOString(),
-        endedAt: new Date().toISOString(),
-        status,
-        durationMs: Date.now() - sessionStartTime,
+        shellSessionId,
+        sessionStartTime,
+        success: result!.success,
+        completedSessionType: sessionType === "channelLurk" ? "channelLurk" : "message",
       });
     }
   }
@@ -854,34 +838,21 @@ export class SessionOrchestrator {
         timestamp: new Date(),
       };
       const workspace = await this.workspaceManager.getOrCreateWorkspace(botEvent);
-      const agentWorkspacePath = await this.workspaceManager.getOrCreateAgentWorkspace();
 
       // 2. Register session WITHOUT triggerEvent
-      if (this.config.skillApi?.enabled) {
-        shellSessionId = this.sessionRegistry.register({
-          platform,
-          channelId,
-          userId: options.botId,
-          isDm: false,
-          workspace,
-          platformAdapter,
-          // triggerEvent is omitted (undefined)
-          agentWorkspacePath,
-          workspaceManager: this.workspaceManager,
-        });
-
-        sessionLogger.info("Shell session {shellSessionId} registered", { shellSessionId });
-
-        sessionLogger = sessionLogger.withContext({ shellSessionId });
-      }
-
-      // Create audit writer
-      auditWriter = shellSessionId
-        ? this.createAuditWriter(platform, options.botId, shellSessionId)
-        : null;
-      if (auditWriter && shellSessionId) {
-        this.sessionRegistry.setAuditWriter(shellSessionId, auditWriter);
-      }
+      const setup = await this.setupSession({
+        platform,
+        userId: options.botId,
+        channelId,
+        isDm: false,
+        workspace,
+        platformAdapter,
+        sessionLogger,
+      });
+      const agentWorkspacePath = setup.agentWorkspacePath;
+      shellSessionId = setup.shellSessionId;
+      auditWriter = setup.auditWriter;
+      sessionLogger = setup.sessionLogger;
 
       // Audit: trigger_received
       await auditWriter?.write("trigger_received", {
@@ -1156,20 +1127,14 @@ export class SessionOrchestrator {
       };
       return result;
     } finally {
-      activeSessionsGauge.dec();
-      const durationSec = (Date.now() - sessionStartTime) / 1000;
-      const status = result!.success ? "success" : "failure";
-      sessionsTotal.labels(platform, "spontaneous", status).inc();
-      sessionDurationSeconds.labels(platform, "spontaneous", status).observe(durationSec);
-      this.completedSessionStore?.add({
-        auditSessionId: shellSessionId ?? `sess_noaudit_${sessionStartTime}`,
-        type: "spontaneous",
+      this.recordSessionMetrics({
         platform,
+        sessionType: "spontaneous",
         userId: options.botId,
-        startedAt: new Date(sessionStartTime).toISOString(),
-        endedAt: new Date().toISOString(),
-        status,
-        durationMs: Date.now() - sessionStartTime,
+        shellSessionId,
+        sessionStartTime,
+        success: result!.success,
+        completedSessionType: "spontaneous",
       });
     }
   }
@@ -1216,33 +1181,20 @@ export class SessionOrchestrator {
         timestamp: new Date(),
       };
       const workspace = await this.workspaceManager.getOrCreateWorkspace(botEvent);
-      const agentWorkspacePath = await this.workspaceManager.getOrCreateAgentWorkspace();
 
       // 2. Register session (for skill API access, mainly for memory-search)
-      if (this.config.skillApi?.enabled) {
-        shellSessionId = this.sessionRegistry.register({
-          platform: "discord", // Placeholder — see comment above on botEvent
-          channelId: "internal",
-          userId: "self-research",
-          isDm: false,
-          workspace,
-          platformAdapter: undefined as unknown as PlatformAdapter,
-          agentWorkspacePath,
-          workspaceManager: this.workspaceManager,
-        });
-
-        sessionLogger.info("Shell session {shellSessionId} registered", { shellSessionId });
-
-        sessionLogger = sessionLogger.withContext({ shellSessionId });
-      }
-
-      // Create audit writer
-      auditWriter = shellSessionId
-        ? this.createAuditWriter("discord", "self-research", shellSessionId) // Placeholder platform
-        : null;
-      if (auditWriter && shellSessionId) {
-        this.sessionRegistry.setAuditWriter(shellSessionId, auditWriter);
-      }
+      const setup = await this.setupSession({
+        platform: "discord", // Placeholder — see comment above on botEvent
+        userId: "self-research",
+        channelId: "internal",
+        isDm: false,
+        workspace,
+        sessionLogger,
+      });
+      const agentWorkspacePath = setup.agentWorkspacePath;
+      shellSessionId = setup.shellSessionId;
+      auditWriter = setup.auditWriter;
+      sessionLogger = setup.sessionLogger;
 
       // Audit: trigger_received
       await auditWriter?.write("trigger_received", {
@@ -1444,20 +1396,14 @@ export class SessionOrchestrator {
       };
       return result;
     } finally {
-      activeSessionsGauge.dec();
-      const durationSec = (Date.now() - sessionStartTime) / 1000;
-      const status = result!.success ? "success" : "failure";
-      sessionsTotal.labels("internal", "self_research", status).inc();
-      sessionDurationSeconds.labels("internal", "self_research", status).observe(durationSec);
-      this.completedSessionStore?.add({
-        auditSessionId: shellSessionId ?? `sess_noaudit_${sessionStartTime}`,
-        type: "self-research",
+      this.recordSessionMetrics({
         platform: "internal",
+        sessionType: "self_research",
         userId: "self-research",
-        startedAt: new Date(sessionStartTime).toISOString(),
-        endedAt: new Date().toISOString(),
-        status,
-        durationMs: Date.now() - sessionStartTime,
+        shellSessionId,
+        sessionStartTime,
+        success: result!.success,
+        completedSessionType: "self-research",
       });
     }
   }
@@ -1507,32 +1453,19 @@ export class SessionOrchestrator {
         timestamp: new Date(),
       };
       const workspace = await this.workspaceManager.getOrCreateWorkspace(syntheticEvent);
-      const agentWorkspacePath = await this.workspaceManager.getOrCreateAgentWorkspace();
 
-      if (this.config.skillApi?.enabled) {
-        shellSessionId = this.sessionRegistry.register({
-          platform,
-          channelId: "internal",
-          userId,
-          isDm: true,
-          workspace,
-          platformAdapter: undefined as unknown as PlatformAdapter,
-          agentWorkspacePath,
-          workspaceManager: this.workspaceManager,
-        });
-
-        sessionLogger.info("Shell session {shellSessionId} registered", { shellSessionId });
-
-        sessionLogger = sessionLogger.withContext({ shellSessionId });
-      }
-
-      // Create audit writer
-      auditWriter = shellSessionId
-        ? this.createAuditWriter(platform, userId, shellSessionId)
-        : null;
-      if (auditWriter && shellSessionId) {
-        this.sessionRegistry.setAuditWriter(shellSessionId, auditWriter);
-      }
+      const setup = await this.setupSession({
+        platform,
+        userId,
+        channelId: "internal",
+        isDm: true,
+        workspace,
+        sessionLogger,
+      });
+      const agentWorkspacePath = setup.agentWorkspacePath;
+      shellSessionId = setup.shellSessionId;
+      auditWriter = setup.auditWriter;
+      sessionLogger = setup.sessionLogger;
 
       // Audit: trigger_received
       await auditWriter?.write("trigger_received", {
@@ -1725,20 +1658,14 @@ export class SessionOrchestrator {
       };
       return result;
     } finally {
-      activeSessionsGauge.dec();
-      const durationSec = (Date.now() - sessionStartTime) / 1000;
-      const status = result!.success ? "success" : "failure";
-      sessionsTotal.labels(platform, "memory_maintenance", status).inc();
-      sessionDurationSeconds.labels(platform, "memory_maintenance", status).observe(durationSec);
-      this.completedSessionStore?.add({
-        auditSessionId: shellSessionId ?? `sess_noaudit_${sessionStartTime}`,
-        type: "memory-maintenance",
+      this.recordSessionMetrics({
         platform,
+        sessionType: "memory_maintenance",
         userId,
-        startedAt: new Date(sessionStartTime).toISOString(),
-        endedAt: new Date().toISOString(),
-        status,
-        durationMs: Date.now() - sessionStartTime,
+        shellSessionId,
+        sessionStartTime,
+        success: result!.success,
+        completedSessionType: "memory-maintenance",
       });
     }
   }
@@ -1788,31 +1715,19 @@ export class SessionOrchestrator {
         timestamp: new Date(),
       };
       const workspace = await this.workspaceManager.getOrCreateWorkspace(syntheticEvent);
-      const agentWorkspacePath = await this.workspaceManager.getOrCreateAgentWorkspace();
 
-      if (this.config.skillApi?.enabled) {
-        shellSessionId = this.sessionRegistry.register({
-          platform,
-          channelId: channelWorkspace.channelId,
-          userId: "channel-maintenance",
-          isDm: false,
-          workspace,
-          platformAdapter: undefined as unknown as PlatformAdapter,
-          agentWorkspacePath,
-          workspaceManager: this.workspaceManager,
-        });
-
-        sessionLogger.info("Shell session {shellSessionId} registered", { shellSessionId });
-        sessionLogger = sessionLogger.withContext({ shellSessionId });
-      }
-
-      // Create audit writer
-      auditWriter = shellSessionId
-        ? this.createAuditWriter(platform, "channel-maintenance", shellSessionId)
-        : null;
-      if (auditWriter && shellSessionId) {
-        this.sessionRegistry.setAuditWriter(shellSessionId, auditWriter);
-      }
+      const setup = await this.setupSession({
+        platform,
+        userId: "channel-maintenance",
+        channelId: channelWorkspace.channelId,
+        isDm: false,
+        workspace,
+        sessionLogger,
+      });
+      const agentWorkspacePath = setup.agentWorkspacePath;
+      shellSessionId = setup.shellSessionId;
+      auditWriter = setup.auditWriter;
+      sessionLogger = setup.sessionLogger;
 
       // Audit: trigger_received
       await auditWriter?.write("trigger_received", {
@@ -2017,22 +1932,14 @@ export class SessionOrchestrator {
       };
       return result;
     } finally {
-      activeSessionsGauge.dec();
-      const durationSec = (Date.now() - sessionStartTime) / 1000;
-      const status = result!.success ? "success" : "failure";
-      sessionsTotal.labels(platform, "channel_memory_maintenance", status).inc();
-      sessionDurationSeconds.labels(platform, "channel_memory_maintenance", status).observe(
-        durationSec,
-      );
-      this.completedSessionStore?.add({
-        auditSessionId: shellSessionId ?? `sess_noaudit_${sessionStartTime}`,
-        type: "memory-maintenance",
+      this.recordSessionMetrics({
         platform,
+        sessionType: "channel_memory_maintenance",
         userId: "channel-maintenance",
-        startedAt: new Date(sessionStartTime).toISOString(),
-        endedAt: new Date().toISOString(),
-        status,
-        durationMs: Date.now() - sessionStartTime,
+        shellSessionId,
+        sessionStartTime,
+        success: result!.success,
+        completedSessionType: "memory-maintenance",
       });
     }
   }
@@ -2098,33 +2005,21 @@ export class SessionOrchestrator {
         timestamp: new Date(),
       };
       const workspace = await this.workspaceManager.getOrCreateWorkspace(syntheticEvent);
-      const agentWorkspacePath = await this.workspaceManager.getOrCreateAgentWorkspace();
 
       // 3. Register shell session
-      if (this.config.skillApi?.enabled) {
-        shellSessionId = this.sessionRegistry.register({
-          platform,
-          channelId: dmChannelId,
-          userId: reminder.userId,
-          isDm: true,
-          workspace,
-          platformAdapter,
-          agentWorkspacePath,
-          workspaceManager: this.workspaceManager,
-        });
-
-        sessionLogger.info("Shell session {shellSessionId} registered", { shellSessionId });
-
-        sessionLogger = sessionLogger.withContext({ shellSessionId });
-      }
-
-      // Create audit writer
-      auditWriter = shellSessionId
-        ? this.createAuditWriter(platform, reminder.userId, shellSessionId)
-        : null;
-      if (auditWriter && shellSessionId) {
-        this.sessionRegistry.setAuditWriter(shellSessionId, auditWriter);
-      }
+      const setup = await this.setupSession({
+        platform,
+        userId: reminder.userId,
+        channelId: dmChannelId,
+        isDm: true,
+        workspace,
+        platformAdapter,
+        sessionLogger,
+      });
+      const agentWorkspacePath = setup.agentWorkspacePath;
+      shellSessionId = setup.shellSessionId;
+      auditWriter = setup.auditWriter;
+      sessionLogger = setup.sessionLogger;
 
       // Audit: trigger_received
       await auditWriter?.write("trigger_received", {
@@ -2390,20 +2285,14 @@ export class SessionOrchestrator {
       };
       return result;
     } finally {
-      activeSessionsGauge.dec();
-      const durationSec = (Date.now() - sessionStartTime) / 1000;
-      const status = result!.success ? "success" : "failure";
-      sessionsTotal.labels(platform, "reminder", status).inc();
-      sessionDurationSeconds.labels(platform, "reminder", status).observe(durationSec);
-      this.completedSessionStore?.add({
-        auditSessionId: shellSessionId ?? `sess_noaudit_${sessionStartTime}`,
-        type: "reminder",
+      this.recordSessionMetrics({
         platform,
+        sessionType: "reminder",
         userId: reminder.userId,
-        startedAt: new Date(sessionStartTime).toISOString(),
-        endedAt: new Date().toISOString(),
-        status,
-        durationMs: Date.now() - sessionStartTime,
+        shellSessionId,
+        sessionStartTime,
+        success: result!.success,
+        completedSessionType: "reminder",
       });
     }
   }
@@ -2474,6 +2363,86 @@ export class SessionOrchestrator {
    */
   protected createConnector(options: AgentConnectorOptions): AgentConnector {
     return new AgentConnector(options);
+  }
+
+  /**
+   * Common session setup: create workspace, register shell session, create audit writer.
+   * Consolidates the repeated preamble across all process* methods.
+   */
+  private async setupSession(params: {
+    platform: string;
+    userId: string;
+    channelId: string;
+    isDm: boolean;
+    workspace: WorkspaceInfo;
+    messageId?: string;
+    guildId?: string;
+    platformAdapter?: PlatformAdapter;
+    triggerEvent?: NormalizedEvent;
+    sessionLogger: ReturnType<typeof logger.child>;
+  }): Promise<{
+    agentWorkspacePath: string;
+    shellSessionId: string | null;
+    auditWriter: SessionAuditWriter | null;
+    sessionLogger: ReturnType<typeof logger.child>;
+  }> {
+    const agentWorkspacePath = await this.workspaceManager.getOrCreateAgentWorkspace();
+    let { sessionLogger } = params;
+    let shellSessionId: string | null = null;
+
+    if (this.config.skillApi?.enabled) {
+      shellSessionId = this.sessionRegistry.register({
+        platform: params.platform,
+        channelId: params.channelId,
+        userId: params.userId,
+        guildId: params.guildId,
+        isDm: params.isDm,
+        workspace: params.workspace,
+        platformAdapter: params.platformAdapter,
+        triggerEvent: params.triggerEvent,
+        agentWorkspacePath,
+        workspaceManager: this.workspaceManager,
+      });
+
+      sessionLogger.info("Shell session {shellSessionId} registered", { shellSessionId });
+      sessionLogger = sessionLogger.withContext({ shellSessionId });
+    }
+
+    const auditWriter = shellSessionId
+      ? this.createAuditWriter(params.platform, params.userId, shellSessionId)
+      : null;
+    if (auditWriter && shellSessionId) {
+      this.sessionRegistry.setAuditWriter(shellSessionId, auditWriter);
+    }
+
+    return { agentWorkspacePath, shellSessionId, auditWriter, sessionLogger };
+  }
+
+  /** Common session cleanup: decrement gauge, record metrics, store completed session. */
+  private recordSessionMetrics(params: {
+    platform: string;
+    sessionType: string;
+    userId: string;
+    shellSessionId: string | null;
+    sessionStartTime: number;
+    success: boolean;
+    completedSessionType: SessionType;
+  }): void {
+    activeSessionsGauge.dec();
+    const durationSec = (Date.now() - params.sessionStartTime) / 1000;
+    const status = params.success ? "success" : "failure";
+    sessionsTotal.labels(params.platform, params.sessionType, status).inc();
+    sessionDurationSeconds.labels(params.platform, params.sessionType, status).observe(durationSec);
+    this.completedSessionStore?.add({
+      auditSessionId: params.shellSessionId ?? `sess_noaudit_${params.sessionStartTime}`,
+      type: params.completedSessionType,
+      platform: params.platform,
+      userId: params.userId,
+      startedAt: new Date(params.sessionStartTime).toISOString(),
+      endedAt: new Date().toISOString(),
+      status,
+      durationMs: Date.now() - params.sessionStartTime,
+    });
   }
 
   /**

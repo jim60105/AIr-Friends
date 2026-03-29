@@ -6,6 +6,14 @@ Enables the agent to periodically read RSS/Atom feeds, pick a topic aligned with
 
 ## Requirements
 
+### Requirement: SelfResearchScheduler extends BaseScheduler
+
+The `SelfResearchScheduler` SHALL extend `BaseScheduler`, inheriting common lifecycle management while providing its own scheduling configuration.
+
+#### Scenario: Scheduler extends BaseScheduler
+- **WHEN** `SelfResearchScheduler` is instantiated
+- **THEN** it SHALL be an instance of `BaseScheduler` and use `getNextDelayMs()` to compute random intervals from `minIntervalMs`/`maxIntervalMs` config
+
 ### Requirement: SelfResearchScheduler with Random Interval
 
 The `SelfResearchScheduler` SHALL schedule research sessions at random intervals between `minIntervalMs` (default 43,200,000 ms / 12 hours) and `maxIntervalMs` (default 86,400,000 ms / 24 hours).

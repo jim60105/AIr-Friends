@@ -183,6 +183,14 @@ The `session_end` audit entry SHALL include summary counters: `repliesCount` (nu
 - **WHEN** a session ends without any skill calls, replies, or permission decisions
 - **THEN** the `session_end` entry SHALL contain `repliesCount: 0`, `skillCallsCount: 0`, `memoryOpsCount: 0`, `permissionDecisionsCount: 0`
 
+### Requirement: Audit writer creation integrated into shared session lifecycle
+
+The creation and attachment of `SessionAuditWriter` to session registry SHALL be handled by the shared `runAgentSession()` method rather than duplicated in each `process*` method.
+
+#### Scenario: Audit writer created by shared lifecycle
+- **WHEN** `runAgentSession()` executes and audit is enabled
+- **THEN** the audit writer SHALL be created and attached to the session registry as part of the shared lifecycle, not in individual `process*` methods
+
 ### Requirement: Fire-and-Forget Write
 
 The `write()` method SHALL be fire-and-forget. I/O errors during audit writing SHALL be logged as warnings but SHALL NOT throw exceptions or crash the session. The system SHALL catch all errors in the `write()` method and log them via `logger.warn`.

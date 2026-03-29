@@ -355,7 +355,7 @@ export class SkillAPIServer {
       workspace: session.workspace,
       channelId: session.channelId,
       userId: session.userId,
-      platformAdapter: session.platformAdapter,
+      platformAdapter: session.platformAdapter!,
       replyToMessageId: session.triggerEvent?.messageId,
       agentWorkspacePath: session.agentWorkspacePath,
       lastSentMessageId: session.lastSentMessageId,

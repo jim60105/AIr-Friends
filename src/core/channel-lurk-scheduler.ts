@@ -1,13 +1,9 @@
 // src/core/channel-lurk-scheduler.ts
 
-import { createLogger } from "@utils/logger.ts";
 import type { ChannelLurkConfig } from "../types/config.ts";
 import type { PlatformAdapter } from "@platforms/platform-adapter.ts";
 import type { PlatformMessage } from "../types/events.ts";
-import type { SchedulerStateStore } from "@core/scheduler-state-store.ts";
-import { resolveScheduleTime } from "@core/scheduler-state-store.ts";
-
-const logger = createLogger("ChannelLurkScheduler");
+import { BaseScheduler } from "@core/base-scheduler.ts";
 
 /**
  * Target information for a channel lurk trigger.
@@ -29,113 +25,51 @@ export type ChannelLurkCallback = (
  * Periodically checks whitelisted Discord channels and triggers a callback
  * when the last message meets all conditions for a lurk reply.
  */
-export class ChannelLurkScheduler {
-  private timer?: ReturnType<typeof setTimeout>;
-  private running = false;
+export class ChannelLurkScheduler extends BaseScheduler {
   private lastProcessedMessageId: Map<string, string> = new Map();
-  private stateStore: SchedulerStateStore | null = null;
 
   constructor(
     private readonly config: ChannelLurkConfig,
     private readonly adapter: PlatformAdapter,
     private readonly channels: string[],
     private readonly callback: ChannelLurkCallback,
-  ) {}
-
-  /**
-   * Set the state store for persisting schedule times.
-   */
-  setStateStore(store: SchedulerStateStore): void {
-    this.stateStore = store;
+  ) {
+    super();
   }
 
-  start(restoredState?: Record<string, string>): void {
-    if (!this.config.enabled) return;
+  protected isEnabled(): boolean {
+    return this.config.enabled;
+  }
 
-    logger.info("Channel lurk scheduler started", {
+  protected getNextDelayMs(): number {
+    return this.config.intervalMs;
+  }
+
+  protected getMaxIntervalMs(): number {
+    return this.config.intervalMs;
+  }
+
+  protected getStateKey(): string {
+    return "channelLurk";
+  }
+
+  protected override onStarted(): void {
+    this.logger.info("Channel lurk scheduler started", {
       channelCount: this.channels.length,
       intervalMs: this.config.intervalMs,
     });
-
-    const restoredNextAt = restoredState?.["channelLurk"]
-      ? new Date(restoredState["channelLurk"])
-      : undefined;
-
-    if (restoredNextAt && !isNaN(restoredNextAt.getTime())) {
-      const { delayMs, nextAt } = resolveScheduleTime(
-        restoredNextAt,
-        this.config.intervalMs,
-        this.config.intervalMs,
-        () => this.config.intervalMs,
-      );
-      this.stateStore?.save("channelLurk", nextAt);
-
-      if (delayMs === 0) {
-        this.execute().catch((error) => {
-          logger.error("Channel lurk execution failed", {
-            error: (error as Error).message,
-          });
-        });
-      } else {
-        this.timer = setTimeout(() => {
-          this.execute().catch((error) => {
-            logger.error("Channel lurk execution failed", {
-              error: (error as Error).message,
-            });
-          });
-        }, delayMs);
-      }
-    } else {
-      this.scheduleNext();
-    }
   }
 
-  stop(): void {
-    if (this.timer !== undefined) {
-      clearTimeout(this.timer);
-      this.timer = undefined;
-    }
-    logger.info("Channel lurk scheduler stopped");
-  }
-
-  private scheduleNext(): void {
-    if (!this.config.enabled) return;
-
-    // Persist the scheduled time
-    const nextTime = new Date(Date.now() + this.config.intervalMs);
-    this.stateStore?.save("channelLurk", nextTime);
-
-    this.timer = setTimeout(() => {
-      this.execute().catch((error) => {
-        logger.error("Channel lurk execution failed", {
+  protected async executeCallback(): Promise<void> {
+    for (const channelId of this.channels) {
+      try {
+        await this.checkChannel(channelId);
+      } catch (error) {
+        this.logger.error("Channel lurk check failed for {channelId}", {
+          channelId,
           error: (error as Error).message,
         });
-      });
-    }, this.config.intervalMs);
-  }
-
-  private async execute(): Promise<void> {
-    if (this.running) {
-      logger.info("Skipping channel lurk — previous execution still running");
-      this.scheduleNext();
-      return;
-    }
-
-    this.running = true;
-    try {
-      for (const channelId of this.channels) {
-        try {
-          await this.checkChannel(channelId);
-        } catch (error) {
-          logger.error("Channel lurk check failed for {channelId}", {
-            channelId,
-            error: (error as Error).message,
-          });
-        }
       }
-    } finally {
-      this.running = false;
-      this.scheduleNext();
     }
   }
 
@@ -162,7 +96,7 @@ export class ChannelLurkScheduler {
     // All conditions passed
     this.lastProcessedMessageId.set(channelId, lastMessage.messageId);
 
-    logger.info("Channel lurk triggered for {channelId} by message {messageId}", {
+    this.logger.info("Channel lurk triggered for {channelId} by message {messageId}", {
       channelId,
       messageId: lastMessage.messageId,
     });

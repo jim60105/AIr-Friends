@@ -6,6 +6,18 @@ Periodically backs up the `data/` directory to a remote Git repository, with sma
 
 ## Requirements
 
+### Requirement: GitBackupScheduler extends BaseScheduler
+
+The `GitBackupScheduler` SHALL extend `BaseScheduler`, inheriting common lifecycle management while providing its fixed-interval scheduling and immediate-first-execution behavior.
+
+#### Scenario: Scheduler extends BaseScheduler
+- **WHEN** `GitBackupScheduler` is instantiated
+- **THEN** it SHALL be an instance of `BaseScheduler` and use `getNextDelayMs()` to return the configured `intervalMs`
+
+#### Scenario: Immediate execution on first start preserved
+- **WHEN** `start()` is called without restored state
+- **THEN** the scheduler SHALL execute immediately (delay of 0) on first start, matching current behavior
+
 ### Requirement: Fixed-Interval Scheduling
 
 The `GitBackupScheduler` SHALL execute backups at a fixed interval defined by `gitBackup.intervalMs`. The scheduler SHALL execute immediately on first start (when no restored state exists), then schedule subsequent executions at the configured interval. When a backup is already running, the scheduler SHALL skip the current execution and schedule the next one.

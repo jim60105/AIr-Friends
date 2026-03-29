@@ -6,6 +6,14 @@ Enables periodic, agent-driven memory summarization and compaction per user work
 
 ## Requirements
 
+### Requirement: MemoryMaintenanceScheduler extends BaseScheduler
+
+The `MemoryMaintenanceScheduler` SHALL extend `BaseScheduler`, inheriting common lifecycle management while providing its fixed-interval scheduling configuration.
+
+#### Scenario: Scheduler extends BaseScheduler
+- **WHEN** `MemoryMaintenanceScheduler` is instantiated
+- **THEN** it SHALL be an instance of `BaseScheduler` and use `getNextDelayMs()` to return the configured `intervalMs`
+
 ### Requirement: Fixed-Interval Scheduling
 
 The `MemoryMaintenanceScheduler` SHALL trigger maintenance at a fixed interval (default 604,800,000 ms / 7 days, configurable via `memoryMaintenance.intervalMs`).

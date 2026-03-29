@@ -1,11 +1,7 @@
 // src/core/self-research-scheduler.ts
 
-import { createLogger } from "@utils/logger.ts";
+import { BaseScheduler } from "@core/base-scheduler.ts";
 import type { Config } from "../types/config.ts";
-import type { SchedulerStateStore } from "@core/scheduler-state-store.ts";
-import { resolveScheduleTime } from "@core/scheduler-state-store.ts";
-
-const logger = createLogger("SelfResearchScheduler");
 
 /**
  * Callback function invoked when a self-research session should be triggered.
@@ -14,19 +10,13 @@ export type SelfResearchCallback = () => Promise<void>;
 
 /**
  * Manages periodic self-research sessions.
- * Design pattern mirrors SpontaneousScheduler.
  */
-export class SelfResearchScheduler {
-  private timerId: number | null = null;
-  private isRunning = false;
-  private lastExecutedAt: Date | null = null;
-  private nextScheduledAt: Date | null = null;
+export class SelfResearchScheduler extends BaseScheduler {
   private callback: SelfResearchCallback | null = null;
   private readonly config: Config;
-  private started = false;
-  private stateStore: SchedulerStateStore | null = null;
 
   constructor(config: Config) {
+    super();
     this.config = config;
   }
 
@@ -38,144 +28,38 @@ export class SelfResearchScheduler {
     this.callback = callback;
   }
 
-  /**
-   * Set the state store for persisting schedule times.
-   */
-  setStateStore(store: SchedulerStateStore): void {
-    this.stateStore = store;
+  protected isEnabled(): boolean {
+    return !!this.config.selfResearch?.enabled;
   }
 
-  /**
-   * Start scheduling self-research sessions.
-   */
-  start(restoredState?: Record<string, string>): void {
-    if (this.started) {
-      logger.warn("Self-research scheduler already started");
-      return;
-    }
-    if (!this.config.selfResearch?.enabled) return;
-
-    this.started = true;
-
-    const restoredNextAt = restoredState?.["selfResearch"]
-      ? new Date(restoredState["selfResearch"])
-      : undefined;
-
-    if (restoredNextAt && !isNaN(restoredNextAt.getTime())) {
-      const { delayMs, nextAt } = resolveScheduleTime(
-        restoredNextAt,
-        this.config.selfResearch!.minIntervalMs,
-        this.config.selfResearch!.maxIntervalMs,
-        () => this.getRandomInterval(),
-      );
-      this.nextScheduledAt = nextAt;
-      this.stateStore?.save("selfResearch", nextAt);
-
-      if (delayMs === 0) {
-        this.execute();
-      } else {
-        this.timerId = setTimeout(() => this.execute(), delayMs);
-      }
-    } else {
-      this.scheduleNext();
-    }
-
-    logger.info("Self-research scheduler started", {
-      minIntervalMs: this.config.selfResearch.minIntervalMs,
-      maxIntervalMs: this.config.selfResearch.maxIntervalMs,
-      model: this.config.selfResearch.model,
-      feedCount: this.config.selfResearch.rssFeeds.length,
-    });
-  }
-
-  /**
-   * Stop the scheduler and clean up.
-   */
-  stop(): void {
-    if (this.timerId !== null) {
-      clearTimeout(this.timerId);
-      this.timerId = null;
-    }
-    this.started = false;
-    this.nextScheduledAt = null;
-    logger.info("Self-research scheduler stopped");
-  }
-
-  /**
-   * Get the current status of the scheduler.
-   */
-  getStatus(): {
-    isRunning: boolean;
-    lastExecutedAt: Date | null;
-    nextScheduledAt: Date | null;
-  } {
-    return {
-      isRunning: this.isRunning,
-      lastExecutedAt: this.lastExecutedAt,
-      nextScheduledAt: this.nextScheduledAt,
-    };
-  }
-
-  /**
-   * Calculate a random interval between min and max.
-   */
-  private getRandomInterval(): number {
+  protected getNextDelayMs(): number {
     const sr = this.config.selfResearch!;
     const range = sr.maxIntervalMs - sr.minIntervalMs;
     return sr.minIntervalMs + Math.floor(Math.random() * range);
   }
 
-  /**
-   * Schedule the next self-research session.
-   */
-  private scheduleNext(): void {
-    const interval = this.getRandomInterval();
-    const nextTime = new Date(Date.now() + interval);
-    this.nextScheduledAt = nextTime;
-
-    // Persist the scheduled time
-    this.stateStore?.save("selfResearch", nextTime);
-
-    logger.info("Next self-research session scheduled at {scheduledAt}", {
-      intervalMs: interval,
-      scheduledAt: nextTime.toISOString(),
-    });
-
-    this.timerId = setTimeout(() => {
-      this.execute();
-    }, interval);
+  protected getMaxIntervalMs(): number {
+    return this.config.selfResearch!.maxIntervalMs;
   }
 
-  /**
-   * Execute the self-research session.
-   * Catches all errors to prevent crashing the bot.
-   */
-  private async execute(): Promise<void> {
+  protected getStateKey(): string {
+    return "selfResearch";
+  }
+
+  protected async executeCallback(): Promise<void> {
     if (!this.callback) return;
+    this.logger.info("Executing self-research session");
+    await this.callback();
+    this.logger.info("Self-research session completed");
+  }
 
-    if (this.isRunning) {
-      logger.warn("Previous self-research session still running, skipping");
-      this.scheduleNext();
-      return;
-    }
-
-    this.isRunning = true;
-    this.timerId = null;
-
-    try {
-      logger.info("Executing self-research session");
-      await this.callback();
-      this.lastExecutedAt = new Date();
-      logger.info("Self-research session completed");
-    } catch (error) {
-      logger.error("Self-research session failed", {
-        error: error instanceof Error ? error.message : String(error),
-      });
-    } finally {
-      this.isRunning = false;
-      if (this.started) {
-        this.scheduleNext();
-      }
-    }
+  protected override onStarted(): void {
+    const sr = this.config.selfResearch!;
+    this.logger.info("Self-research scheduler started", {
+      minIntervalMs: sr.minIntervalMs,
+      maxIntervalMs: sr.maxIntervalMs,
+      model: sr.model,
+      feedCount: sr.rssFeeds.length,
+    });
   }
 }

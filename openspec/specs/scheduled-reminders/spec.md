@@ -145,6 +145,18 @@ The `list-reminders` handler SHALL return all active pending reminders (enabled 
 - **WHEN** `loadReminders()` is called
 - **THEN** the system SHALL return an empty array without error
 
+### Requirement: ReminderScheduler extends BaseScheduler
+
+The `ReminderScheduler` SHALL extend `BaseScheduler`, inheriting common lifecycle management while preserving its lack of state persistence.
+
+#### Scenario: Scheduler extends BaseScheduler
+- **WHEN** `ReminderScheduler` is instantiated
+- **THEN** it SHALL be an instance of `BaseScheduler` and use `getNextDelayMs()` to return the configured `checkIntervalMs`
+
+#### Scenario: No state persistence
+- **WHEN** `ReminderScheduler` starts
+- **THEN** it SHALL NOT use `SchedulerStateStore` for persistence, matching current behavior
+
 ### Requirement: Fixed-Interval Polling Scheduler
 
 `ReminderScheduler` SHALL poll at `checkIntervalMs` intervals using `setTimeout`. The scheduler SHALL prevent overlapping executions — if a previous check is still running, the current tick SHALL be skipped. Errors in the callback SHALL be caught and logged without stopping the scheduler. The scheduler SHALL schedule the next tick in the `finally` block.

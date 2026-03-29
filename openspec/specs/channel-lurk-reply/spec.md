@@ -15,6 +15,18 @@ The channel lurk feature SHALL only operate on Discord platform channels. Misske
 - **WHEN** the channel lurk scheduler runs
 - **THEN** only Discord channel entries are checked
 
+### Requirement: ChannelLurkScheduler extends BaseScheduler
+
+The `ChannelLurkScheduler` SHALL extend `BaseScheduler`, inheriting common lifecycle management while preserving its unique constructor signature (adapter, channels, callback) and channel-checking logic.
+
+#### Scenario: Scheduler extends BaseScheduler
+- **WHEN** `ChannelLurkScheduler` is instantiated with adapter, channels, and callback
+- **THEN** it SHALL be an instance of `BaseScheduler` and call `setCallback()` from the constructor
+
+#### Scenario: Channel check logic preserved
+- **WHEN** the scheduler executes
+- **THEN** it SHALL iterate configured channels, check conditions (not self, not mentioned, not reacted, not processed), and invoke the callback for matching channels
+
 ### Requirement: Fixed-Interval Scheduling
 
 The `ChannelLurkScheduler` SHALL check all configured channels at a fixed interval (default 30 minutes, configurable via `platforms.discord.channelLurk.intervalMs`).
