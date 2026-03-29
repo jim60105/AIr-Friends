@@ -110,25 +110,46 @@
       <div class="flex flex-col md:flex-row gap-4 h-full">
         <!-- Sidebar / Navigation -->
         <aside
-          class="md:w-64 shrink-0 bg-surface-50/60 backdrop-blur-xl border border-white/5 rounded-3xl flex flex-col overflow-hidden shadow-panel"
+          id="sidebar"
+          class="md:w-64 shrink-0 bg-surface-50/60 backdrop-blur-xl border border-white/5 rounded-3xl flex flex-col overflow-hidden shadow-panel transition-all duration-300"
         >
           <header class="p-6 border-b border-white/5">
-            <h1
-              class="text-2xl font-display font-bold text-transparent bg-clip-text bg-gradient-to-r from-accent-light to-cyan tracking-tight"
-            >
-              AIr-Friends
-            </h1>
-            <div class="mt-2 flex items-center gap-2">
-              <span
-                class="w-2 h-2 rounded-full bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.8)]"
-              ></span>
-              <span class="text-xs text-gray-400 uppercase tracking-widest font-semibold"
-              >System Online</span>
+            <div class="flex items-center justify-between">
+              <div class="sidebar-expanded-content">
+                <h1
+                  class="text-2xl font-display font-bold text-transparent bg-clip-text bg-gradient-to-r from-accent-light to-cyan tracking-tight"
+                >
+                  AIr-Friends
+                </h1>
+                <div class="mt-2 flex items-center gap-2">
+                  <span
+                    class="w-2 h-2 rounded-full bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.8)]"
+                  ></span>
+                  <span class="text-xs text-gray-400 uppercase tracking-widest font-semibold"
+                  >System Online</span>
+                </div>
+              </div>
+              <button
+                id="sidebar-toggle"
+                onclick="toggleSidebar()"
+                class="p-2 rounded-lg hover:bg-white/5 text-gray-400 hover:text-white transition-colors"
+                title="Toggle sidebar"
+              >
+                <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    stroke-width="2"
+                    d="M4 6h16M4 12h16M4 18h16"
+                  />
+                </svg>
+              </button>
             </div>
           </header>
 
-          <nav class="flex-1 px-4 py-6 flex flex-col gap-2">
+          <nav id="sidebar-nav" class="flex-1 px-4 py-6 flex flex-col gap-2">
             <button
+              id="sidebar-tab-sessions"
               class="tab-btn flex items-center gap-3 px-4 py-3 text-sm font-semibold rounded-xl text-gray-400 hover:text-white hover:bg-white/5 transition-all"
               data-tab="sessions"
             >
@@ -140,9 +161,10 @@
                   d="M13 10V3L4 14h7v7l9-11h-7z"
                 />
               </svg>
-              Sessions
+              <span class="sidebar-expanded-content">Sessions</span>
             </button>
             <button
+              id="sidebar-tab-stats"
               class="tab-btn flex items-center gap-3 px-4 py-3 text-sm font-semibold rounded-xl text-gray-400 hover:text-white hover:bg-white/5 transition-all"
               data-tab="stats"
             >
@@ -154,9 +176,10 @@
                   d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"
                 />
               </svg>
-              Statistics
+              <span class="sidebar-expanded-content">Statistics</span>
             </button>
             <button
+              id="sidebar-tab-workspace"
               class="tab-btn flex items-center gap-3 px-4 py-3 text-sm font-semibold rounded-xl text-gray-400 hover:text-white hover:bg-white/5 transition-all"
               data-tab="workspace"
             >
@@ -168,9 +191,10 @@
                   d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"
                 />
               </svg>
-              Workspace
+              <span class="sidebar-expanded-content">Workspace</span>
             </button>
             <button
+              id="sidebar-tab-chat"
               class="tab-btn flex items-center gap-3 px-4 py-3 text-sm font-semibold rounded-xl text-gray-400 hover:text-white hover:bg-white/5 transition-all"
               data-tab="chat"
             >
@@ -182,12 +206,13 @@
                   d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z"
                 />
               </svg>
-              Live Chat
+              <span class="sidebar-expanded-content">Live Chat</span>
             </button>
           </nav>
 
-          <div class="p-4 border-t border-white/5 flex flex-col gap-2">
+          <div id="sidebar-actions" class="p-4 border-t border-white/5 flex flex-col gap-2">
             <button
+              id="sidebar-btn-restart"
               onclick="doRestart()"
               class="flex items-center justify-center gap-2 w-full py-2.5 bg-surface-100 hover:bg-surface-200 border border-white/5 rounded-xl text-xs font-semibold text-yellow-400/80 hover:text-yellow-400 transition-colors"
             >
@@ -199,9 +224,10 @@
                   d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
                 />
               </svg>
-              Restart System
+              <span class="sidebar-expanded-content">Restart System</span>
             </button>
             <button
+              id="sidebar-btn-logout"
               onclick="doLogout()"
               class="flex items-center justify-center gap-2 w-full py-2.5 bg-surface-100 hover:bg-red-500/10 border border-white/5 rounded-xl text-xs font-semibold text-red-400/80 hover:text-red-400 transition-colors"
             >
@@ -213,13 +239,14 @@
                   d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"
                 />
               </svg>
-              Terminate Session
+              <span class="sidebar-expanded-content">Terminate Session</span>
             </button>
           </div>
         </aside>
 
         <!-- Main Content Area -->
         <main
+          id="main-content"
           class="flex-1 flex flex-col min-w-0 bg-surface-50/60 backdrop-blur-xl border border-white/5 rounded-3xl shadow-panel overflow-hidden"
         >
           <div class="flex-1 overflow-auto p-6 md:p-8">
@@ -236,7 +263,7 @@
                   class="bg-surface-100/50 border border-white/5 rounded-2xl overflow-hidden shadow-inner"
                 >
                   <div class="overflow-x-auto">
-                    <table class="w-full text-sm">
+                    <table id="active-sessions-table" class="w-full text-sm">
                       <thead>
                         <tr
                           class="border-b border-white/5 text-gray-400 text-xs font-semibold uppercase tracking-wider bg-surface-200/30"
@@ -273,7 +300,7 @@
                   class="bg-surface-100/50 border border-white/5 rounded-2xl overflow-hidden shadow-inner"
                 >
                   <div class="overflow-x-hidden">
-                    <table class="w-full text-sm table-fixed">
+                    <table id="history-sessions-table" class="w-full text-sm table-fixed">
                       <thead>
                         <tr
                           class="border-b border-white/5 text-gray-400 text-xs font-semibold uppercase tracking-wider bg-surface-200/30"
@@ -326,6 +353,7 @@
                   </h2>
                 </div>
                 <button
+                  id="workspace-sync-btn"
                   onclick="loadWorkspaceTree()"
                   class="flex items-center gap-2 px-4 py-2 bg-surface-100 hover:bg-surface-200 border border-white/10 rounded-xl text-sm font-semibold text-gray-300 transition-all hover:shadow-md"
                 >
@@ -343,9 +371,22 @@
               <div class="flex flex-col lg:flex-row gap-6 flex-1 min-h-0">
                 <!-- File Tree -->
                 <div
-                  class="lg:w-80 shrink-0 bg-surface-100/50 border border-white/5 rounded-2xl p-4 overflow-auto shadow-inner"
+                  id="workspace-tree-panel"
+                  class="lg:w-80 shrink-0 bg-surface-100/50 border border-white/5 rounded-2xl overflow-auto shadow-inner"
                 >
-                  <div id="workspace-tree" class="text-sm font-medium">
+                  <div class="flex items-center justify-between px-4 pt-4 pb-2">
+                    <span class="text-xs font-semibold text-gray-400 uppercase tracking-widest"
+                    >Files</span>
+                    <button
+                      id="workspace-tree-sort-toggle"
+                      onclick="toggleTreeSortOrder()"
+                      class="px-2 py-1 rounded-lg border border-white/10 bg-white/5 hover:bg-white/10 text-gray-400 hover:text-white transition-colors text-xs font-semibold"
+                      title="Toggle sort order"
+                    >
+                      A→Z
+                    </button>
+                  </div>
+                  <div id="workspace-tree" class="text-sm font-medium px-4 pb-4">
                     <div class="flex items-center justify-center h-32">
                       <div class="animate-pulse flex flex-col items-center gap-3 text-gray-500">
                         <svg class="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -363,6 +404,7 @@
                 </div>
                 <!-- File Viewer -->
                 <div
+                  id="workspace-file-viewer"
                   class="flex-1 flex flex-col bg-surface-100/50 border border-white/5 rounded-2xl overflow-hidden shadow-inner min-h-0"
                 >
                   <div
@@ -373,13 +415,23 @@
                       id="file-header-path"
                       class="text-xs text-cyan font-mono tracking-wide"
                     ></span>
-                    <button
-                      id="md-view-toggle"
-                      onclick="toggleMarkdownView()"
-                      class="hidden px-3 py-1.5 rounded-lg border border-white/10 bg-white/5 hover:bg-white/10 text-gray-300 transition-colors text-xs font-semibold uppercase tracking-wider"
-                    >
-                      Raw
-                    </button>
+                    <div class="flex items-center gap-2">
+                      <button
+                        id="workspace-file-expand-btn"
+                        onclick="openExpandedFileViewer()"
+                        class="hidden px-3 py-1.5 rounded-lg border border-white/10 bg-white/5 hover:bg-white/10 text-gray-300 transition-colors text-xs font-semibold uppercase tracking-wider"
+                        title="Expand view"
+                      >
+                        ⛶
+                      </button>
+                      <button
+                        id="md-view-toggle"
+                        onclick="toggleMarkdownView()"
+                        class="hidden px-3 py-1.5 rounded-lg border border-white/10 bg-white/5 hover:bg-white/10 text-gray-300 transition-colors text-xs font-semibold uppercase tracking-wider"
+                      >
+                        Raw
+                      </button>
+                    </div>
                   </div>
                   <div class="relative flex-1 min-h-0 bg-[#0A0B10]">
                     <pre
@@ -567,6 +619,48 @@
             </section>
           </div>
         </main>
+      </div>
+    </div>
+
+    <!-- Expanded file viewer modal -->
+    <div
+      id="file-viewer-modal"
+      class="hidden fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4"
+      onclick="if(event.target===this)closeExpandedFileViewer()"
+    >
+      <div
+        class="relative bg-surface-100 border border-white/10 rounded-3xl shadow-panel overflow-hidden"
+        style="width: 80vw; height: 80vh"
+      >
+        <div
+          class="flex items-center justify-between px-6 py-4 border-b border-white/5 bg-surface-200/30"
+        >
+          <span
+            id="file-viewer-modal-path"
+            class="text-xs text-cyan font-mono tracking-wide"
+          ></span>
+          <button
+            id="file-viewer-modal-close"
+            onclick="closeExpandedFileViewer()"
+            class="p-2 rounded-lg hover:bg-white/10 text-gray-400 hover:text-white transition-colors"
+            title="Close"
+          >
+            <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                stroke-width="2"
+                d="M6 18L18 6M6 6l12 12"
+              />
+            </svg>
+          </button>
+        </div>
+        <div
+          id="file-viewer-modal-content"
+          class="overflow-auto p-8 text-[13px] leading-relaxed font-mono text-gray-300 whitespace-pre-wrap"
+          style="height: calc(80vh - 60px)"
+        >
+        </div>
       </div>
     </div>
 

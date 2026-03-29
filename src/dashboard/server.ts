@@ -446,7 +446,13 @@ export class DashboardServer {
       : "/" + currentPath.substring(rootPath.length + 1);
 
     if (!stat.isDirectory) {
-      return { name, path: relativePath, type: "file", size: stat.size };
+      return {
+        name,
+        path: relativePath,
+        type: "file",
+        size: stat.size,
+        mtime: stat.mtime?.getTime() ?? null,
+      };
     }
 
     if (depth >= maxDepth) {
@@ -476,7 +482,13 @@ export class DashboardServer {
       return (a.name as string).localeCompare(b.name as string, undefined, { sensitivity: "base" });
     });
 
-    return { name, path: relativePath, type: "directory", children };
+    return {
+      name,
+      path: relativePath,
+      type: "directory",
+      children,
+      mtime: stat.mtime?.getTime() ?? null,
+    };
   }
 
   private async handleWorkspaceFile(url: URL): Promise<Response> {

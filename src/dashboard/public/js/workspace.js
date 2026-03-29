@@ -5,6 +5,9 @@ if (typeof marked !== "undefined") {
   marked.use({ renderer: { html: () => "" } });
 }
 
+let workspaceTreeData = null;
+let treeSortOrder = "alpha"; // "alpha" or "time"
+
 async function loadWorkspaceTree() {
   const container = document.getElementById("workspace-tree");
   try {
@@ -13,11 +16,76 @@ async function loadWorkspaceTree() {
       container.innerHTML = '<p class="text-red-400 text-sm">Failed to load</p>';
       return;
     }
-    const tree = await res.json();
-    container.innerHTML = renderTree(tree);
+    workspaceTreeData = await res.json();
+    renderSortedTree();
   } catch (_) {
     container.innerHTML = '<p class="text-red-400 text-sm">Connection error</p>';
   }
+}
+
+function renderSortedTree() {
+  const container = document.getElementById("workspace-tree");
+  if (!workspaceTreeData) return;
+  const sorted = sortTree(JSON.parse(JSON.stringify(workspaceTreeData)), treeSortOrder);
+  container.innerHTML = renderTree(sorted);
+}
+
+function sortTree(node, order) {
+  if (!node || !node.children) return node;
+  node.children.forEach((c) => sortTree(c, order));
+  node.children.sort((a, b) => {
+    const aIsDir = a.type === "directory" ? 0 : 1;
+    const bIsDir = b.type === "directory" ? 0 : 1;
+    if (aIsDir !== bIsDir) return aIsDir - bIsDir;
+    if (order === "time") {
+      return (b.mtime || 0) - (a.mtime || 0);
+    }
+    return (a.name || "").localeCompare(b.name || "", undefined, { sensitivity: "base" });
+  });
+  return node;
+}
+
+function toggleTreeSortOrder() {
+  const btn = document.getElementById("workspace-tree-sort-toggle");
+  if (treeSortOrder === "alpha") {
+    treeSortOrder = "time";
+    btn.textContent = "🕒";
+    btn.title = "Sorted by time (newest first)";
+  } else {
+    treeSortOrder = "alpha";
+    btn.textContent = "A→Z";
+    btn.title = "Sorted alphabetically";
+  }
+  renderSortedTree();
+}
+
+function toggleSidebar() {
+  document.getElementById("sidebar").classList.toggle("collapsed");
+}
+
+function openExpandedFileViewer() {
+  const modal = document.getElementById("file-viewer-modal");
+  const modalContent = document.getElementById("file-viewer-modal-content");
+  const modalPath = document.getElementById("file-viewer-modal-path");
+  const rendered = document.getElementById("file-content-rendered");
+  const raw = document.getElementById("file-content");
+  const path = document.getElementById("file-header-path").textContent;
+
+  modalPath.textContent = path;
+  if (!rendered.classList.contains("hidden")) {
+    modalContent.innerHTML = rendered.innerHTML;
+    modalContent.className = "overflow-auto p-8 text-gray-300 md-rendered bg-surface-100/30";
+  } else {
+    modalContent.textContent = raw.textContent;
+    modalContent.className =
+      "overflow-auto p-8 text-[13px] leading-relaxed font-mono text-gray-300 whitespace-pre-wrap";
+  }
+  modalContent.style.height = "calc(80vh - 60px)";
+  modal.classList.remove("hidden");
+}
+
+function closeExpandedFileViewer() {
+  document.getElementById("file-viewer-modal").classList.add("hidden");
 }
 
 function renderTree(node) {
@@ -46,6 +114,7 @@ async function loadFile(path) {
   const content = document.getElementById("file-content");
   const rendered = document.getElementById("file-content-rendered");
   const toggle = document.getElementById("md-view-toggle");
+  const expandBtn = document.getElementById("workspace-file-expand-btn");
   header.classList.remove("hidden");
   headerPath.textContent = path;
   content.textContent = "Loading…";
@@ -53,6 +122,7 @@ async function loadFile(path) {
   rendered.classList.add("hidden");
   content.classList.remove("hidden");
   toggle.classList.add("hidden");
+  expandBtn.classList.add("hidden");
   try {
     const res = await fetch(`/api/workspace/file?path=${encodeURIComponent(path)}`);
     if (!res.ok) {
@@ -62,6 +132,7 @@ async function loadFile(path) {
     const data = await res.json();
     const isMd = path.endsWith(".md");
     content.textContent = data.content;
+    expandBtn.classList.remove("hidden");
     if (isMd && typeof marked !== "undefined") {
       rendered.innerHTML = typeof DOMPurify !== "undefined"
         ? DOMPurify.sanitize(marked.parse(data.content))
