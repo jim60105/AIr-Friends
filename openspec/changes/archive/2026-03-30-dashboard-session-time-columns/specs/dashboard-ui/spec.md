@@ -1,10 +1,4 @@
-# Dashboard UI
-
-## Purpose
-
-Defines the requirements for the modernized dashboard interface.
-
-## Requirements
+## MODIFIED Requirements
 
 ### Requirement: Modernized Dashboard UI
 The system SHALL provide a modernized, clean, and consistent web dashboard interface following frontend design guidelines. The Session History table SHALL be constrained to its parent container width without producing a horizontal scrollbar. Table content SHALL wrap within cells when it exceeds the available column width.

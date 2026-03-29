@@ -35,7 +35,7 @@ async function pollHistory() {
     const body = document.getElementById("history-sessions-body");
     if (!sessions.length) {
       body.innerHTML =
-        '<tr><td colspan="8" class="px-4 py-6 text-center text-gray-500">No session history</td></tr>';
+        '<tr><td colspan="7" class="px-4 py-6 text-center text-gray-500">No session history</td></tr>';
       return;
     }
     body.innerHTML = sessions.map((s) =>
@@ -45,9 +45,8 @@ async function pollHistory() {
       }</td>
       <td class="px-4 py-2.5">${esc(s.type)}</td>
       <td class="px-4 py-2.5">${esc(s.platform)}</td>
-      <td class="px-4 py-2.5 font-mono text-xs">${esc(s.userId)}</td>
-      <td class="px-4 py-2.5 text-xs">${formatTime(s.startTime)}</td>
-      <td class="px-4 py-2.5 text-xs">${formatTime(s.endTime)}</td>
+      <td class="px-4 py-2.5 font-mono text-xs break-all">${esc(s.userId)}</td>
+      <td class="px-4 py-2.5 text-xs break-words">${formatTime(s.startTime)}</td>
       <td class="px-4 py-2.5 text-xs">${formatDuration(s.durationMs)}</td>
       <td class="px-4 py-2.5"><span class="inline-flex items-center gap-1.5"><span class="w-2 h-2 rounded-full ${
         s.status === "success" ? "bg-green-400" : "bg-red-400"

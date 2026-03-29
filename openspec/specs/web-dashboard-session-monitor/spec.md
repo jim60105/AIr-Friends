@@ -33,6 +33,8 @@ Defines the session monitoring APIs for active session listing, session history,
 
 `GET /api/sessions/history` SHALL return recently completed sessions (up to 100, ring buffer). Each entry SHALL include `auditSessionId` (string, primary identifier — the skill-API session ID in `sess_*` format, used for audit log file lookups), `type`, `platform`, `userId`, `startTime`, `endTime`, `status` ("success" | "failure"), and `durationMs`. Sessions SHALL be returned in descending order by `endedAt` (newest first). The response SHALL NOT include an `id` field separate from `auditSessionId`.
 
+The Session History table SHALL display the following columns: Session ID, Type, Platform, User, Time, Duration, Status. The Time column SHALL display the session start time. The Duration column SHALL display the session duration. The table SHALL use `table-fixed` layout with explicit column width distribution to prevent horizontal overflow.
+
 #### Scenario: Session history returns newest first
 
 - **WHEN** a client sends `GET /api/sessions/history`
@@ -63,6 +65,19 @@ Defines the session monitoring APIs for active session listing, session history,
 - **GIVEN** the dashboard server is running
 - **WHEN** a `GET /api/sessions/history` request is received without a valid session cookie
 - **THEN** the server SHALL return HTTP 401
+
+#### Scenario: Session History table displays Time and Duration columns
+
+- **WHEN** the Session History table is rendered with session data
+- **THEN** the Time column SHALL display the formatted start time of each session
+- **AND** the Duration column SHALL display the formatted duration of each session
+- **AND** the table SHALL NOT display separate Started and Ended columns
+
+#### Scenario: Session History table does not overflow horizontally
+
+- **WHEN** the Session History table is rendered on any screen size
+- **THEN** the table width SHALL NOT exceed its parent container width
+- **AND** no horizontal scrollbar SHALL be visible
 
 ### Requirement: Statistics Display
 
