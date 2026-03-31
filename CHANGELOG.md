@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.24.0] - 2025-07-15
+
+### Added
+
+- Collapsible sidebar with CSS transition, expanded file viewer modal, file tree sort order toggle (alphabetical/time), and unique element IDs in web dashboard
+- GIF-to-WebP image conversion for ACP agent prompts — animated GIF attachments are now converted to static WebP (first frame) via ImageMagick before sending to the agent
+
+### Changed
+
+- Consolidated session history Started/Ended/Duration into Time/Duration two-column layout with fixed table widths and proper text wrapping
+- Redesigned web dashboard UI with modern dark theme and neon accents
+- Memory saving prompt relaxed to store only key user information instead of mandatory on every reply
+- Post-session summary structure simplified by removing action items
+
+### Fixed
+
+- Animated GIF images no longer cause silent agent crashes — filtered before WebP conversion was added
+- Dashboard table overflow and colspan mismatch in session history
+- OpenSpec spec validation failures in 4 specs (conversation-summaries, helm-dashboard-ingress, helm-dashboard-service, vscode-dark-theme)
+
 ## [0.23.0] - 2026-03-29
 
 ### Added
@@ -933,7 +953,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ---
 
-[Unreleased]: https://github.com/jim60105/AIr-Friends/compare/v0.23.0...HEAD
+[Unreleased]: https://github.com/jim60105/AIr-Friends/compare/v0.24.0...HEAD
+[0.24.0]: https://github.com/jim60105/AIr-Friends/compare/v0.23.0...v0.24.0
 [0.23.0]: https://github.com/jim60105/AIr-Friends/compare/v0.22.0...v0.23.0
 [0.22.0]: https://github.com/jim60105/AIr-Friends/compare/v0.21.0...v0.22.0
 [0.21.0]: https://github.com/jim60105/AIr-Friends/compare/v0.20.0...v0.21.0
