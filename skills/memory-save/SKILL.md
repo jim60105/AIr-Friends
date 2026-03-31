@@ -1,6 +1,6 @@
 ---
 name: memory-save
-description: Save information to persistent cross-conversation memory. Call this in every conversation. Always use this skill to save any information you learn. You MUST NOT manually modify the memory files.
+description: Save information to persistent cross-conversation memory. Call this skill to save important information you learned. You MUST NOT manually modify the memory files.
 allowed-tools: Bash
 ---
 

@@ -11,7 +11,6 @@ Your task: Create a concise conversation summary and save it to memory. This is 
    - **Key topics** discussed
    - **Decisions** made or conclusions reached
    - **Emotional tone** of the conversation
-   - **Action items** or follow-ups mentioned
    - **Participant context** (who was involved, their apparent needs)
 3. Use the following Memory Save Skill with:
    - `content`: Your structured summary text
