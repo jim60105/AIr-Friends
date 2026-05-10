@@ -20,6 +20,8 @@ spec:
         app: air-friends
         {{- include "air-friends.selectorLabels" . | nindent 8 }}
     spec:
+      serviceAccountName: {{ include "air-friends.serviceAccountName" . }}
+      automountServiceAccountToken: {{ .Values.serviceAccount.automount }}
       {{- if .Values.podSecurityContext }}
       securityContext:
         {{- toYaml .Values.podSecurityContext | nindent 8 }}

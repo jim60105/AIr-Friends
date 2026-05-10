@@ -359,6 +359,19 @@ service:
   port: 80
   targetPort: 8080
 
+# ServiceAccount configuration
+# AIr-Friends does not call the Kubernetes API, so token automounting is disabled by default.
+serviceAccount:
+  # Specifies whether a service account should be created
+  create: false
+  # Automatically mount a ServiceAccount's API credentials?
+  automount: false
+  # Annotations to add to the service account (e.g. for IRSA or Workload Identity)
+  annotations: {}
+  # The name of the service account to use.
+  # If not set and create is true, a name is generated using the fullname template.
+  name: ""
+
 # Kubernetes-specific settings
 kubernetes:
   clusterDomain: cluster.local
