@@ -9,10 +9,29 @@
     },
     "openrouter": {
       "models": {
-        "deepseek/deepseek-v3.2": {}
+        "deepseek/deepseek-v4-pro": {}
       },
       "options": {
         "apiKey": "{env:OPENROUTER_API_KEY}"
+      }
+    },
+    "pioneer": {
+      "npm": "@ai-sdk/openai-compatible",
+      "name": "Pioneer AI",
+      "options": {
+        "baseURL": "https://api.pioneer.ai/v1",
+        "apiKey": "{env:PIONEER_API_KEY}"
+      },
+      "models": {
+        "claude-opus-4-8": {
+          "name": "Claude Opus 4.8"
+        },
+        "claude-sonnet-4-6": {
+          "name": "Claude Sonnet 4.6"
+        },
+        "deepseek-ai/DeepSeek-V4-Pro": {
+          "name": "DeepSeek V4 Pro"
+        }
       }
     }
   },
