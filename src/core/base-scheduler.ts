@@ -17,7 +17,7 @@ import type { Logger } from "@utils/logger.ts";
  * - `getMaxIntervalMs()`: max interval for restored state validation
  */
 export abstract class BaseScheduler {
-  protected timerId: number | null = null;
+  protected timerId: ReturnType<typeof setTimeout> | null = null;
   protected started = false;
   protected isRunning = false;
   protected lastExecutedAt: Date | null = null;

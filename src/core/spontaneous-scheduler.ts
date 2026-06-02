@@ -16,7 +16,7 @@ export type SpontaneousPostCallback = (platform: Platform) => Promise<void>;
  */
 export interface PlatformSchedulerState {
   platform: Platform;
-  timerId: number | null;
+  timerId: ReturnType<typeof setTimeout> | null;
   isRunning: boolean;
   lastExecutedAt: Date | null;
   nextScheduledAt: Date | null;

@@ -57,7 +57,7 @@ class TestScheduler extends BaseScheduler {
   get _isRunning(): boolean {
     return this.isRunning;
   }
-  get _timerId(): number | null {
+  get _timerId(): ReturnType<typeof setTimeout> | null {
     return this.timerId;
   }
 }

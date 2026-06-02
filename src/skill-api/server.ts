@@ -46,7 +46,7 @@ export class SkillAPIServer {
   private config: SkillAPIConfig;
   private requestCache: Map<string, RequestCacheEntry> = new Map();
   private readonly CACHE_TTL_MS = 1000; // 1 second cache for duplicate detection
-  private cleanupInterval?: number;
+  private cleanupInterval?: ReturnType<typeof setInterval>;
 
   constructor(
     sessionRegistry: SessionRegistry,
