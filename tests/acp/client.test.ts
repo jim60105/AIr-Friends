@@ -4061,3 +4061,81 @@ Deno.test("ChatbotClient - flushMessageBuffer no audit entry when buffer empty",
     Deno.removeSync(tempDir, { recursive: true });
   }
 });
+
+Deno.test("ChatbotClient - config_option_update refreshes via listener and updates activity", async () => {
+  const tempDir = Deno.makeTempDirSync();
+  try {
+    const skillRegistry = createTestSkillRegistry();
+    const logger = createTestLogger();
+    const config = {
+      workingDir: tempDir,
+      platform: "discord",
+      userId: "123",
+      channelId: "456",
+      isDM: false,
+    };
+    const client = new ChatbotClient(skillRegistry, logger, config);
+
+    const received: acp.SessionConfigOption[][] = [];
+    client.setConfigOptionsListener((opts) => received.push(opts));
+
+    const before = client.getLastActivityTimestamp();
+    await new Promise((r) => setTimeout(r, 5));
+
+    const configOptions = [
+      {
+        id: "thought_level",
+        category: "thought_level",
+        type: "select",
+        currentValue: "high",
+        name: "Thought Level",
+        options: [{ value: "high", name: "High" }],
+      },
+    ] as unknown as acp.SessionConfigOption[];
+
+    await client.sessionUpdate({
+      sessionId: "s",
+      update: {
+        sessionUpdate: "config_option_update",
+        configOptions,
+      },
+    } as unknown as acp.SessionNotification);
+
+    assertEquals(received.length, 1);
+    assertEquals(received[0].length, 1);
+    assertEquals(client.getLastActivityTimestamp() > before, true);
+  } finally {
+    Deno.removeSync(tempDir, { recursive: true });
+  }
+});
+
+Deno.test("ChatbotClient - non-config_option_update does not invoke listener", async () => {
+  const tempDir = Deno.makeTempDirSync();
+  try {
+    const skillRegistry = createTestSkillRegistry();
+    const logger = createTestLogger();
+    const config = {
+      workingDir: tempDir,
+      platform: "discord",
+      userId: "123",
+      channelId: "456",
+      isDM: false,
+    };
+    const client = new ChatbotClient(skillRegistry, logger, config);
+
+    let called = false;
+    client.setConfigOptionsListener(() => (called = true));
+
+    await client.sessionUpdate({
+      sessionId: "s",
+      update: {
+        sessionUpdate: "agent_message_chunk",
+        content: { type: "text", text: "hi" },
+      },
+    } as unknown as acp.SessionNotification);
+
+    assertEquals(called, false);
+  } finally {
+    Deno.removeSync(tempDir, { recursive: true });
+  }
+});

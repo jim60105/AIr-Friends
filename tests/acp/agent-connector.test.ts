@@ -343,3 +343,233 @@ Deno.test("AgentConnector - setSessionMode throws when not connected", async () 
     "Not connected to agent",
   );
 });
+
+// --- setReasoningEffort tests ---
+
+type MockConfigOption = {
+  id: string;
+  category?: string;
+  currentValue?: string;
+  options: { value: string; name: string }[];
+};
+
+function injectThoughtLevel(
+  connector: AgentConnector,
+  options: { value: string; name: string }[],
+  setConfigImpl?: (
+    params: { sessionId: string; configId: string; value: string },
+  ) => Promise<{ configOptions: MockConfigOption[] }>,
+): { calls: { sessionId: string; configId: string; value: string }[] } {
+  const opt: MockConfigOption = {
+    id: "thought_level",
+    category: "thought_level",
+    currentValue: options[0]?.value,
+    options,
+  };
+  connector["sessionConfigOptions"] = [opt] as unknown as typeof connector["sessionConfigOptions"];
+
+  const calls: { sessionId: string; configId: string; value: string }[] = [];
+  connector["connection"] = {
+    setSessionConfigOption: (
+      params: { sessionId: string; configId: string; value: string },
+    ) => {
+      calls.push(params);
+      if (setConfigImpl) return setConfigImpl(params);
+      return Promise.resolve({ configOptions: [opt] });
+    },
+  } as unknown as typeof connector["connection"];
+
+  return { calls };
+}
+
+Deno.test("setReasoningEffort - returns skipped for default/empty", async () => {
+  const connector = createMockConnectorWithCapabilities({});
+  assertEquals(await connector.setReasoningEffort("s", "default"), "skipped");
+  assertEquals(await connector.setReasoningEffort("s", ""), "skipped");
+  assertEquals(await connector.setReasoningEffort("s", "  DEFAULT "), "skipped");
+});
+
+Deno.test("setReasoningEffort - returns unsupported when no thought_level option", async () => {
+  const connector = createMockConnectorWithCapabilities({});
+  connector["connection"] = {} as unknown as typeof connector["connection"];
+  // No config options cached.
+  assertEquals(await connector.setReasoningEffort("s", "high"), "unsupported");
+});
+
+Deno.test("setReasoningEffort - applied sends value with correct configId", async () => {
+  const connector = createMockConnectorWithCapabilities({});
+  const { calls } = injectThoughtLevel(connector, [
+    { value: "low", name: "Low" },
+    { value: "high", name: "High" },
+  ]);
+
+  const outcome = await connector.setReasoningEffort("sess_1", "high");
+  assertEquals(outcome, "applied");
+  assertEquals(calls.length, 1);
+  assertEquals(calls[0].configId, "thought_level");
+  assertEquals(calls[0].value, "high");
+});
+
+Deno.test("setReasoningEffort - skipped_unavailable when known value not offered", async () => {
+  const connector = createMockConnectorWithCapabilities({});
+  const { calls } = injectThoughtLevel(connector, [
+    { value: "low", name: "Low" },
+    { value: "medium", name: "Medium" },
+  ]);
+
+  const outcome = await connector.setReasoningEffort("s", "none");
+  assertEquals(outcome, "skipped_unavailable");
+  assertEquals(calls.length, 0); // not sent
+});
+
+Deno.test("setReasoningEffort - passthrough token sent even if not in known set", async () => {
+  const connector = createMockConnectorWithCapabilities({});
+  const { calls } = injectThoughtLevel(connector, [
+    { value: "low", name: "Low" },
+  ]);
+
+  const outcome = await connector.setReasoningEffort("s", "ultra");
+  assertEquals(outcome, "applied");
+  assertEquals(calls.length, 1);
+  assertEquals(calls[0].value, "ultra");
+});
+
+Deno.test("setReasoningEffort - failed when agent rejects (error caught)", async () => {
+  const connector = createMockConnectorWithCapabilities({});
+  injectThoughtLevel(
+    connector,
+    [{ value: "high", name: "High" }],
+    () => Promise.reject(new Error("rejected")),
+  );
+
+  const outcome = await connector.setReasoningEffort("s", "high");
+  assertEquals(outcome, "failed");
+});
+
+Deno.test("setReasoningEffort - refreshes cache from set_config_option response", async () => {
+  const connector = createMockConnectorWithCapabilities({});
+  injectThoughtLevel(
+    connector,
+    [{ value: "low", name: "Low" }, { value: "high", name: "High" }],
+    () =>
+      Promise.resolve({
+        configOptions: [{
+          id: "thought_level",
+          category: "thought_level",
+          currentValue: "high",
+          options: [{ value: "high", name: "High" }],
+        }],
+      }),
+  );
+
+  await connector.setReasoningEffort("s", "high");
+  const cached = connector["sessionConfigOptions"] as unknown as MockConfigOption[];
+  assertEquals(cached[0].currentValue, "high");
+  assertEquals(cached[0].options.length, 1);
+});
+
+Deno.test("setReasoningEffort - re-discovers from grouped option values", async () => {
+  const connector = createMockConnectorWithCapabilities({});
+  // Grouped options form: options is an array of groups, each with its own options.
+  const grouped = {
+    id: "thought_level",
+    category: "thought_level",
+    options: [
+      { group: "g1", name: "G1", options: [{ value: "high", name: "High" }] },
+    ],
+  };
+  connector["sessionConfigOptions"] = [
+    grouped,
+  ] as unknown as typeof connector["sessionConfigOptions"];
+  const calls: { value: string }[] = [];
+  connector["connection"] = {
+    setSessionConfigOption: (p: { value: string }) => {
+      calls.push(p);
+      return Promise.resolve({ configOptions: [grouped] });
+    },
+  } as unknown as typeof connector["connection"];
+
+  assertEquals(await connector.setReasoningEffort("s", "high"), "applied");
+  assertEquals(calls[0].value, "high");
+});
+
+Deno.test("AgentConnector.isReasoningEffortActive - static helper", () => {
+  assertEquals(AgentConnector.isReasoningEffortActive(undefined), false);
+  assertEquals(AgentConnector.isReasoningEffortActive(""), false);
+  assertEquals(AgentConnector.isReasoningEffortActive("default"), false);
+  assertEquals(AgentConnector.isReasoningEffortActive(" DEFAULT "), false);
+  assertEquals(AgentConnector.isReasoningEffortActive("high"), true);
+});
+
+Deno.test("setReasoningEffort - matches case-insensitively and sends agent canonical casing", async () => {
+  const connector = createMockConnectorWithCapabilities({});
+  // Agent advertises mixed-case values.
+  const { calls } = injectThoughtLevel(connector, [
+    { value: "Low", name: "Low" },
+    { value: "High", name: "High" },
+  ]);
+
+  const outcome = await connector.setReasoningEffort("s", "high"); // configured lowercase
+  assertEquals(outcome, "applied");
+  assertEquals(calls.length, 1);
+  // Sends the agent's canonical "High", not the lowercase request.
+  assertEquals(calls[0].value, "High");
+});
+
+Deno.test("setReasoningEffort - applies after config_option_update adds thought_level later", async () => {
+  const connector = createMockConnectorWithCapabilities({});
+  // Initially no thought_level option cached.
+  connector["sessionConfigOptions"] = [] as unknown as typeof connector["sessionConfigOptions"];
+  const calls: { value: string }[] = [];
+  connector["connection"] = {
+    setSessionConfigOption: (p: { value: string }) => {
+      calls.push(p);
+      return Promise.resolve({ configOptions: [] });
+    },
+  } as unknown as typeof connector["connection"];
+
+  // Before update -> unsupported
+  assertEquals(await connector.setReasoningEffort("s", "high"), "unsupported");
+
+  // Simulate config_option_update arriving (via the private refresh used by the listener).
+  connector["refreshSessionConfigOptions"](
+    [
+      {
+        id: "thought_level",
+        category: "thought_level",
+        currentValue: "high",
+        options: [{ value: "high", name: "High" }],
+      },
+    ] as unknown as typeof connector["sessionConfigOptions"],
+  );
+
+  // Now it applies.
+  assertEquals(await connector.setReasoningEffort("s", "high"), "applied");
+  assertEquals(calls.length, 1);
+});
+
+Deno.test("AgentConnector - cache is single-session: refresh replaces (not appends)", () => {
+  const connector = createMockConnectorWithCapabilities({});
+  connector["refreshSessionConfigOptions"](
+    [
+      { id: "a", category: "model", currentValue: "x", options: [{ value: "x", name: "X" }] },
+    ] as unknown as typeof connector["sessionConfigOptions"],
+  );
+  connector["refreshSessionConfigOptions"](
+    [
+      {
+        id: "thought_level",
+        category: "thought_level",
+        currentValue: "high",
+        options: [{ value: "high", name: "High" }],
+      },
+    ] as unknown as typeof connector["sessionConfigOptions"],
+  );
+  const cached = connector["sessionConfigOptions"] as unknown as MockConfigOption[];
+  // Replaced, not accumulated.
+  assertEquals(cached.length, 1);
+  assertEquals(cached[0].id, "thought_level");
+  // Nullish clears.
+  connector["refreshSessionConfigOptions"](undefined);
+  assertEquals((connector["sessionConfigOptions"] as unknown as MockConfigOption[]).length, 0);
+});

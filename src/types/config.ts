@@ -102,11 +102,43 @@ export interface GitCredentialConfig {
 }
 
 /**
+ * Reasoning / thought-level effort for the ACP session.
+ *
+ * Resolved per-context through the same chain as model selection
+ * (routing rule -> section -> global). Shared by every reasoning-effort field.
+ *
+ * - `"none" | "low" | "medium" | "high"`: normalized effort levels.
+ * - `"default"`: sentinel meaning "do not configure reasoning effort"
+ *   (let the agent/model use its own default). Empty/whitespace normalizes to this.
+ * - Any other non-empty string is preserved as an agent-specific passthrough token.
+ *
+ * An *omitted* per-rule/per-section field stays `undefined` so the resolution
+ * chain can fall through to the next level; this is distinct from the value
+ * `"default"`, which terminates the chain.
+ */
+export type ReasoningEffort =
+  | "none"
+  | "low"
+  | "medium"
+  | "high"
+  | "default"
+  // Allow agent-specific passthrough tokens while preserving editor autocomplete
+  // for the known values above.
+  // deno-lint-ignore ban-types
+  | (string & {});
+
+/**
  * Agent/LLM configuration
  */
 export interface AgentConfig {
   /** Model identifier */
   model: string;
+
+  /**
+   * Global reasoning-effort default for ACP sessions (default: `"default"`).
+   * Acts as the final fallback in the reasoning-effort resolution chain.
+   */
+  reasoningEffort?: ReasoningEffort;
 
   /** Path to system prompt file */
   systemPromptPath: string;
@@ -239,6 +271,11 @@ export interface ModelRoutingRule {
   match: ModelRoutingMatch;
   /** Model identifier to use when matched */
   model: string;
+  /**
+   * Reasoning effort to use when this rule matches (optional).
+   * When omitted, resolution falls back to the section/global value.
+   */
+  reasoningEffort?: ReasoningEffort;
 }
 
 /**
@@ -461,6 +498,9 @@ export interface SelfResearchConfig {
   /** LLM model to use for self-research (separate from chat model) */
   model: string;
 
+  /** Reasoning effort for self-research sessions (optional; falls back to agent.reasoningEffort) */
+  reasoningEffort?: ReasoningEffort;
+
   /** RSS feed sources */
   rssFeeds: RssFeedSource[];
 
@@ -481,6 +521,9 @@ export interface MemoryMaintenanceConfig {
 
   /** LLM model to use for memory maintenance (separate from chat model, e.g. "gpt-5-mini") */
   model: string;
+
+  /** Reasoning effort for memory-maintenance sessions (optional; falls back to agent.reasoningEffort) */
+  reasoningEffort?: ReasoningEffort;
 
   /** Minimum enabled memory count required before maintenance runs */
   minMemoryCount: number;
@@ -584,6 +627,9 @@ export interface ConversationSummaryConfig {
 
   /** LLM model to use for summary generation (default: same as agent.model) */
   model?: string;
+
+  /** Reasoning effort for conversation-summary generation (optional; falls back to agent.reasoningEffort) */
+  reasoningEffort?: ReasoningEffort;
 }
 
 /**

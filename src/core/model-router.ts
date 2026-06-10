@@ -110,3 +110,52 @@ export function resolveModel(
   });
   return fallbackModel;
 }
+
+/**
+ * Resolve the reasoning effort to use for a given context.
+ *
+ * Mirrors {@link resolveModel}: it evaluates rules in declaration order and stops at the
+ * **first matching rule** (NOT the first rule that happens to have a `reasoningEffort`).
+ * If that first matching rule sets `reasoningEffort`, it wins; otherwise the resolver
+ * returns `fallbackEffort` and does NOT continue to later rules. This keeps a session's
+ * model and effort tied to the same matched rule while letting operators set one without
+ * the other.
+ *
+ * Evaluation order:
+ * 1. If modelRouting is disabled or undefined, return `fallbackEffort`
+ * 2. Find the first matching rule; if it sets `reasoningEffort`, return it
+ * 3. Otherwise (matched rule without effort, or no rule matched) return `fallbackEffort`
+ *
+ * @param routingConfig - Model routing configuration (may be undefined)
+ * @param context - Current session context
+ * @param fallbackEffort - Effort to use when no rule provides one (section -> global chain)
+ * @returns The resolved reasoning effort (always a concrete string when the caller passes
+ *          a concrete fallback)
+ */
+export function resolveReasoningEffort(
+  routingConfig: ModelRoutingConfig | undefined,
+  context: ModelRoutingContext,
+  fallbackEffort: string,
+): string {
+  if (!routingConfig?.enabled || !routingConfig.rules?.length) {
+    return fallbackEffort;
+  }
+
+  for (const rule of routingConfig.rules) {
+    if (matchesRule(rule.match, context)) {
+      // First matching rule wins. If it sets reasoningEffort, use it; otherwise fall back.
+      if (rule.reasoningEffort !== undefined && rule.reasoningEffort !== "") {
+        logger.info("Reasoning effort routing rule matched, resolved to {resolvedEffort}", {
+          matchedRule: rule.match,
+          resolvedEffort: rule.reasoningEffort,
+          sessionType: context.sessionType,
+        });
+        return rule.reasoningEffort;
+      }
+      // Matched rule without effort: stop here and use fallback (do not scan later rules).
+      return fallbackEffort;
+    }
+  }
+
+  return fallbackEffort;
+}

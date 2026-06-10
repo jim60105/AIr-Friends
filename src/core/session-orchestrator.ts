@@ -22,7 +22,7 @@ import { MemoryStore } from "./memory-store.ts";
 import { convertUserMCPServerConfigs } from "./config-loader.ts";
 import { createTemplateEngine, renderTemplate } from "./template-renderer.ts";
 import type { TemplateVariables } from "../types/template.ts";
-import { resolveModel } from "./model-router.ts";
+import { resolveModel, resolveReasoningEffort } from "./model-router.ts";
 import type { ModelRoutingContext } from "./model-router.ts";
 import type { SkillRegistry } from "@skills/registry.ts";
 import type { SessionRegistry } from "../skill-api/session-registry.ts";
@@ -155,6 +155,40 @@ export class SessionOrchestrator {
       return [];
     }
     return convertUserMCPServerConfigs(this.config.agent.mcpServers);
+  }
+
+  /**
+   * Resolve the effective reasoning effort for a session through the chain:
+   * routing rule -> section fallback -> global `agent.reasoningEffort`.
+   * Always returns a concrete string (global defaults to "default").
+   *
+   * @param routingContext The session routing context
+   * @param sectionEffort The section-specific reasoning effort (if any) for this session type
+   */
+  private resolveSessionReasoningEffort(
+    routingContext: ModelRoutingContext,
+    sectionEffort?: string,
+  ): string {
+    const fallback = sectionEffort ?? this.config.agent.reasoningEffort ?? "default";
+    return resolveReasoningEffort(this.config.agent.modelRouting, routingContext, fallback);
+  }
+
+  /**
+   * Apply the resolved reasoning effort to the session (best-effort, non-fatal).
+   * Must always be called with a concrete resolved value (never undefined).
+   */
+  private async applyReasoningEffort(
+    connector: AgentConnector,
+    sessionId: string,
+    resolvedEffort: string,
+    sessionLogger: ReturnType<typeof createLogger>,
+  ): Promise<void> {
+    const outcome = await connector.setReasoningEffort(sessionId, resolvedEffort);
+    sessionLogger.info("Reasoning effort outcome {outcome} for session {sessionId}", {
+      sessionId,
+      requested: resolvedEffort,
+      outcome,
+    });
   }
 
   /**
@@ -333,6 +367,8 @@ export class SessionOrchestrator {
         routingContext,
         this.config.agent.model,
       );
+      // Message / channelLurk sessions have no section reasoning effort -> global fallback only.
+      const resolvedReasoningEffort = this.resolveSessionReasoningEffort(routingContext);
 
       // Compute YOLO decision early so it's available for context assembly and prompt rendering
       const yoloDecision = this.getEffectiveYolo(
@@ -348,6 +384,7 @@ export class SessionOrchestrator {
         workspaceKey: workspace.key,
         agentType: getDefaultAgentType(this.config),
         model: resolvedModel,
+        reasoningEffort: resolvedReasoningEffort,
         yolo: yoloDecision.enabled,
       });
 
@@ -520,6 +557,13 @@ export class SessionOrchestrator {
           sessionId,
           model: resolvedModel,
         });
+        // Apply resolved reasoning effort after model setting (best-effort, non-fatal).
+        await this.applyReasoningEffort(
+          connector,
+          sessionId,
+          resolvedReasoningEffort,
+          sessionLogger,
+        );
 
         // Clear reply state before prompting
         const replyHandler = this.skillRegistry.getReplyHandler();
@@ -692,6 +736,8 @@ export class SessionOrchestrator {
               resolvedModel,
               sessionType,
               sessionLogger,
+              routingContext,
+              resolvedReasoningEffort,
             );
           }
 
@@ -879,6 +925,9 @@ export class SessionOrchestrator {
         this.config.agent.model,
       );
 
+      // Spontaneous sessions have no section reasoning effort -> global fallback only.
+      const resolvedReasoningEffort = this.resolveSessionReasoningEffort(routingContext);
+
       // Compute YOLO decision early so it's available for context assembly and prompt rendering
       const yoloDecision = this.getEffectiveYolo(platform, options.botId, channelId);
 
@@ -889,6 +938,7 @@ export class SessionOrchestrator {
         workspaceKey: workspace.key,
         agentType: getDefaultAgentType(this.config),
         model: resolvedModel,
+        reasoningEffort: resolvedReasoningEffort,
         yolo: yoloDecision.enabled,
       });
 
@@ -1011,6 +1061,12 @@ export class SessionOrchestrator {
         if (modeOverride) {
           await connector.setSessionMode(sessionId, modeOverride);
         }
+        await this.applyReasoningEffort(
+          connector,
+          sessionId,
+          resolvedReasoningEffort,
+          sessionLogger,
+        );
 
         // Clear reply state
         const replyHandler = this.skillRegistry.getReplyHandler();
@@ -1219,6 +1275,10 @@ export class SessionOrchestrator {
         routingContext,
         sectionFallback,
       );
+      const resolvedReasoningEffort = this.resolveSessionReasoningEffort(
+        routingContext,
+        selfResearchConfig.reasoningEffort,
+      );
 
       // Audit: session_start
       await auditWriter?.write("session_start", {
@@ -1227,6 +1287,7 @@ export class SessionOrchestrator {
         workspaceKey: workspace.key,
         agentType: getDefaultAgentType(this.config),
         model: resolvedModel,
+        reasoningEffort: resolvedReasoningEffort,
         yolo: this.yolo,
       });
 
@@ -1316,6 +1377,12 @@ export class SessionOrchestrator {
         if (modeOverride) {
           await connector.setSessionMode(sessionId, modeOverride);
         }
+        await this.applyReasoningEffort(
+          connector,
+          sessionId,
+          resolvedReasoningEffort,
+          sessionLogger,
+        );
 
         // Audit: prompt_sent
         await auditWriter?.write("prompt_sent", {
@@ -1490,6 +1557,10 @@ export class SessionOrchestrator {
         routingContext,
         sectionFallback,
       );
+      const resolvedReasoningEffort = this.resolveSessionReasoningEffort(
+        routingContext,
+        memoryMaintenanceConfig.reasoningEffort,
+      );
 
       // Audit: session_start
       await auditWriter?.write("session_start", {
@@ -1498,6 +1569,7 @@ export class SessionOrchestrator {
         workspaceKey,
         agentType: getDefaultAgentType(this.config),
         model: resolvedModel,
+        reasoningEffort: resolvedReasoningEffort,
         yolo: this.yolo,
       });
 
@@ -1584,6 +1656,12 @@ export class SessionOrchestrator {
         if (modeOverride) {
           await connector.setSessionMode(sessionId, modeOverride);
         }
+        await this.applyReasoningEffort(
+          connector,
+          sessionId,
+          resolvedReasoningEffort,
+          sessionLogger,
+        );
 
         await auditWriter?.write("prompt_sent", {
           promptLength: fullPrompt.length,
@@ -1750,6 +1828,10 @@ export class SessionOrchestrator {
         routingContext,
         sectionFallback,
       );
+      const resolvedReasoningEffort = this.resolveSessionReasoningEffort(
+        routingContext,
+        memoryMaintenanceConfig.reasoningEffort,
+      );
 
       // Audit: session_start
       await auditWriter?.write("session_start", {
@@ -1758,6 +1840,7 @@ export class SessionOrchestrator {
         workspaceKey: channelKey,
         agentType: getDefaultAgentType(this.config),
         model: resolvedModel,
+        reasoningEffort: resolvedReasoningEffort,
         yolo: this.yolo,
       });
 
@@ -1857,6 +1940,12 @@ export class SessionOrchestrator {
         if (modeOverride) {
           await connector.setSessionMode(sessionId, modeOverride);
         }
+        await this.applyReasoningEffort(
+          connector,
+          sessionId,
+          resolvedReasoningEffort,
+          sessionLogger,
+        );
 
         await auditWriter?.write("prompt_sent", {
           promptLength: fullPrompt.length,
@@ -2045,6 +2134,8 @@ export class SessionOrchestrator {
         routingContext,
         this.config.agent.model,
       );
+      // Reminder sessions have no section reasoning effort -> global fallback only.
+      const resolvedReasoningEffort = this.resolveSessionReasoningEffort(routingContext);
 
       // Compute YOLO decision early so it's available for prompt rendering
       const yoloDecision = this.getEffectiveYolo(platform, reminder.userId, dmChannelId);
@@ -2056,6 +2147,7 @@ export class SessionOrchestrator {
         workspaceKey: workspace.key,
         agentType: getDefaultAgentType(this.config),
         model: resolvedModel,
+        reasoningEffort: resolvedReasoningEffort,
         yolo: yoloDecision.enabled,
       });
 
@@ -2163,6 +2255,12 @@ export class SessionOrchestrator {
         if (modeOverride) {
           await connector.setSessionMode(sessionId, modeOverride);
         }
+        await this.applyReasoningEffort(
+          connector,
+          sessionId,
+          resolvedReasoningEffort,
+          sessionLogger,
+        );
 
         // Clear reply state
         const replyHandler = this.skillRegistry.getReplyHandler();
@@ -2884,6 +2982,8 @@ export class SessionOrchestrator {
     currentModel: string,
     sessionType: string,
     sessionLogger: ReturnType<typeof createLogger>,
+    routingContext: ModelRoutingContext,
+    sessionReasoningEffort: string,
   ): Promise<void> {
     // Skip if disabled
     if (this.config.conversationSummary?.enabled === false) return;
@@ -2897,6 +2997,12 @@ export class SessionOrchestrator {
 
       if (modelSwitched) {
         await connector.setSessionModel(sessionId, summaryModel);
+        // Re-resolve effort for the summary model (conversationSummary section -> global).
+        const summaryEffort = this.resolveSessionReasoningEffort(
+          routingContext,
+          this.config.conversationSummary?.reasoningEffort,
+        );
+        await this.applyReasoningEffort(connector, sessionId, summaryEffort, sessionLogger);
       }
 
       try {
@@ -2910,7 +3016,28 @@ export class SessionOrchestrator {
         sessionLogger.info("Conversation summary generated");
       } finally {
         if (modelSwitched) {
-          await connector.setSessionModel(sessionId, currentModel);
+          // Restore the original model + reasoning effort. Guard separately so a restore
+          // failure is logged distinctly (not masked as a summary-generation failure) and
+          // never throws out of the finally block.
+          try {
+            await connector.setSessionModel(sessionId, currentModel);
+            await this.applyReasoningEffort(
+              connector,
+              sessionId,
+              sessionReasoningEffort,
+              sessionLogger,
+            );
+          } catch (restoreError) {
+            sessionLogger.warn(
+              "Failed to restore model/reasoning effort after conversation summary",
+              {
+                sessionId,
+                model: currentModel,
+                reasoningEffort: sessionReasoningEffort,
+                error: restoreError instanceof Error ? restoreError.message : String(restoreError),
+              },
+            );
+          }
         }
       }
     } catch (error) {

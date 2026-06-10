@@ -1,11 +1,12 @@
 // tests/core/model-router.test.ts
 
 import { assertEquals } from "@std/assert";
-import { resolveModel } from "@core/model-router.ts";
+import { resolveModel, resolveReasoningEffort } from "@core/model-router.ts";
 import type { ModelRoutingConfig } from "../../src/types/config.ts";
 import type { ModelRoutingContext } from "@core/model-router.ts";
 
 const FALLBACK_MODEL = "default-model";
+const FALLBACK_EFFORT = "default";
 
 Deno.test("resolveModel - should return fallback when routing is undefined", () => {
   const context: ModelRoutingContext = { sessionType: "message" };
@@ -369,4 +370,89 @@ Deno.test("resolveModel - backward compat: single sessionType condition still wo
   };
   const context: ModelRoutingContext = { sessionType: "spontaneous" };
   assertEquals(resolveModel(config, context, FALLBACK_MODEL), "sp-model");
+});
+
+// --- resolveReasoningEffort tests ---
+
+Deno.test("resolveReasoningEffort - returns fallback when routing undefined", () => {
+  const context: ModelRoutingContext = { sessionType: "message" };
+  assertEquals(resolveReasoningEffort(undefined, context, FALLBACK_EFFORT), "default");
+});
+
+Deno.test("resolveReasoningEffort - returns fallback when routing disabled", () => {
+  const config: ModelRoutingConfig = {
+    enabled: false,
+    rules: [{ match: { sessionType: "message" }, model: "m", reasoningEffort: "high" }],
+  };
+  const context: ModelRoutingContext = { sessionType: "message" };
+  assertEquals(resolveReasoningEffort(config, context, FALLBACK_EFFORT), "default");
+});
+
+Deno.test("resolveReasoningEffort - matched rule with effort wins", () => {
+  const config: ModelRoutingConfig = {
+    enabled: true,
+    rules: [{ match: { sessionType: "message" }, model: "m", reasoningEffort: "high" }],
+  };
+  const context: ModelRoutingContext = { sessionType: "message" };
+  assertEquals(resolveReasoningEffort(config, context, "low"), "high");
+});
+
+Deno.test("resolveReasoningEffort - matched rule without effort falls back", () => {
+  const config: ModelRoutingConfig = {
+    enabled: true,
+    rules: [{ match: { sessionType: "message" }, model: "m" }],
+  };
+  const context: ModelRoutingContext = { sessionType: "message" };
+  assertEquals(resolveReasoningEffort(config, context, "low"), "low");
+});
+
+Deno.test("resolveReasoningEffort - no rule matches returns fallback", () => {
+  const config: ModelRoutingConfig = {
+    enabled: true,
+    rules: [{ match: { sessionType: "spontaneous" }, model: "m", reasoningEffort: "high" }],
+  };
+  const context: ModelRoutingContext = { sessionType: "message" };
+  assertEquals(resolveReasoningEffort(config, context, "medium"), "medium");
+});
+
+Deno.test("resolveReasoningEffort - first matching rule wins even if later rule has effort", () => {
+  const config: ModelRoutingConfig = {
+    enabled: true,
+    rules: [
+      { match: { sessionType: "message" }, model: "m1" }, // matches, no effort
+      { match: { sessionType: "message" }, model: "m2", reasoningEffort: "high" },
+    ],
+  };
+  const context: ModelRoutingContext = { sessionType: "message" };
+  // Stops at first matching rule (no effort) -> fallback, does NOT reach rule 2.
+  assertEquals(resolveReasoningEffort(config, context, "low"), "low");
+});
+
+Deno.test("resolveReasoningEffort - model and effort resolved from same matched rule", () => {
+  const config: ModelRoutingConfig = {
+    enabled: true,
+    rules: [{ match: { sessionType: "message" }, model: "routed-model", reasoningEffort: "high" }],
+  };
+  const context: ModelRoutingContext = { sessionType: "message" };
+  assertEquals(resolveModel(config, context, FALLBACK_MODEL), "routed-model");
+  assertEquals(resolveReasoningEffort(config, context, FALLBACK_EFFORT), "high");
+});
+
+Deno.test("resolveReasoningEffort - empty-string effort on rule treated as fallback", () => {
+  const config: ModelRoutingConfig = {
+    enabled: true,
+    rules: [{ match: { sessionType: "message" }, model: "m", reasoningEffort: "" }],
+  };
+  const context: ModelRoutingContext = { sessionType: "message" };
+  assertEquals(resolveReasoningEffort(config, context, "medium"), "medium");
+});
+
+Deno.test("resolveReasoningEffort - explicit 'default' on matched rule terminates chain", () => {
+  const config: ModelRoutingConfig = {
+    enabled: true,
+    rules: [{ match: { sessionType: "message" }, model: "m", reasoningEffort: "default" }],
+  };
+  const context: ModelRoutingContext = { sessionType: "message" };
+  // Explicit "default" is a concrete value -> returned (terminates), not fallthrough.
+  assertEquals(resolveReasoningEffort(config, context, "high"), "default");
 });

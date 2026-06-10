@@ -39,6 +39,11 @@ class MockAgentConnector {
     this.lastModelId = modelId;
     return Promise.resolve();
   }
+  reasoningEffortCalls: string[] = [];
+  setReasoningEffort(_sessionId: string, value: string): Promise<string> {
+    this.reasoningEffortCalls.push(value);
+    return Promise.resolve("applied");
+  }
   prompt(_sessionId: string, _text: string): Promise<PromptResponse> {
     const response = this.promptResponses[this.promptCallCount] ??
       { stopReason: "end_turn" } as PromptResponse;

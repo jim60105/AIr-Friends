@@ -64,6 +64,14 @@ agent:
   defaultAgentType: "${AGENT_DEFAULT_TYPE}" # Default ACP agent: "copilot", "gemini", or "opencode" (env: AGENT_DEFAULT_TYPE)
   skillsDir: "skills" # Path to skills directory (default: "skills"); use "/home/deno/.agents/skills" for container deployment; override with env AGENT_SKILLS_DIR
 
+  # Reasoning effort (ACP thought_level): controls how hard the model "thinks".
+  # Global default; resolved per session as: routing rule -> section -> this global value.
+  # Values: "none" | "low" | "medium" | "high", or "default" = do not configure
+  # (let the agent/model decide). Agent-specific tokens are passed through as-is.
+  # Best-effort: if the agent/model does not expose a thought_level option, it is a no-op.
+  # Override the global with env AGENT_REASONING_EFFORT.
+  reasoningEffort: "default"
+
   # External skills to install at startup (optional)
   # Each entry specifies a GitHub repo and skill name to install via `deno x -y skills add`
   # externalSkills:
@@ -96,15 +104,21 @@ agent:
   # When enabled, rules are evaluated in order (first-match wins).
   # All conditions in a rule's match are AND-combined; contentKeywords entries are OR-combined.
   # If no rule matches, falls back to agent.model (or selfResearch.model / memoryMaintenance.model for those session types).
+  #
+  # Each rule MAY also set `reasoningEffort` to control thinking effort per context.
+  # The FIRST matching rule wins; if that rule omits `reasoningEffort`, resolution falls back
+  # to the section value (selfResearch/memoryMaintenance/conversationSummary) then agent.reasoningEffort.
+  # A rule can set `model` and `reasoningEffort` independently (one without the other).
   modelRouting:
     enabled: false
     rules: []
     # Example rules:
-    #   # Specific account + research keywords → research model
+    #   # Specific account + research keywords → research model at high effort
     #   - match:
     #       channel: "discord/account/12345678901234567"
     #       contentKeywords: ["研究", "research"]
     #     model: "openrouter/google/gemini-2.5-pro"
+    #     reasoningEffort: "high"
     #   # Any message with research keywords → research model
     #   - match:
     #       contentKeywords: ["研究", "research", "論文", "paper"]
@@ -112,8 +126,9 @@ agent:
     #   # Specific account (any content) → premium model
     #   - match: { channel: "discord/account/12345678901234567" }
     #     model: "openrouter/deepseek/deepseek-v3.2"
+    #   # Spontaneous posts can think less to save cost (model unchanged, effort lowered)
     #   - match: { sessionType: "spontaneous" }
-    #     model: "openrouter/deepseek/deepseek-v3.2"
+    #     reasoningEffort: "low"
 
   # External MCP Servers: register MCP-compatible servers for the Agent to use.
   # The Agent connects to these servers during session creation and can call their tools.
@@ -182,6 +197,7 @@ memory:
 conversationSummary:
   enabled: true                       # Enable post-session conversation summaries (default: true); override with env CONVERSATION_SUMMARY_ENABLED
   model: ""                           # Model for summary generation (defaults to agent.model); override with env CONVERSATION_SUMMARY_MODEL
+  # reasoningEffort: "low"            # Reasoning effort for summaries (falls back to agent.reasoningEffort when omitted)
 
 # Workspace configuration
 workspace:
@@ -242,6 +258,7 @@ channels:
 selfResearch:
   enabled: false                    # Enable self-research (default: false); override with env SELF_RESEARCH_ENABLED
   model: "gpt-5-mini"              # Model for research (separate from chat); override with env SELF_RESEARCH_MODEL
+  # reasoningEffort: "high"         # Reasoning effort for research (falls back to agent.reasoningEffort when omitted)
   rssFeeds:                         # RSS feed sources; override with env SELF_RESEARCH_RSS_FEEDS (JSON string)
     - url: "https://example.com/feed.xml"
       name: "Tech News"
@@ -253,6 +270,7 @@ selfResearch:
 memoryMaintenance:
   enabled: false                    # Enable memory maintenance (default: false); override with env MEMORY_MAINTENANCE_ENABLED
   model: "gpt-5-mini"              # Model for maintenance (separate from chat); override with env MEMORY_MAINTENANCE_MODEL
+  # reasoningEffort: "low"          # Reasoning effort for maintenance (falls back to agent.reasoningEffort when omitted)
   minMemoryCount: 50                # Minimum enabled memories required to run; override with env MEMORY_MAINTENANCE_MIN_MEMORY_COUNT
   intervalMs: 604800000             # Fixed interval: 7 days (default); override with env MEMORY_MAINTENANCE_INTERVAL_MS
 

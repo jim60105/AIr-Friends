@@ -40,6 +40,65 @@ function isValidChannelId(id: string): boolean {
   );
 }
 
+/** Recognized reasoning-effort tokens (the sentinel "default" means "do not configure"). */
+export const KNOWN_REASONING_EFFORTS = ["none", "low", "medium", "high", "default"] as const;
+
+/**
+ * Normalize a single reasoning-effort value (shared by global / per-rule / per-section fields
+ * and the AGENT_REASONING_EFFORT env override).
+ *
+ * - `undefined` stays `undefined` (so the resolution chain can fall through).
+ * - Non-strings are coerced to `"default"` with a warning.
+ * - Trimmed + lowercased. Empty / whitespace-only becomes `"default"`.
+ * - Known tokens are returned as-is; unknown non-empty tokens are preserved as
+ *   passthrough with a warning.
+ *
+ * @param value The raw value (may be undefined)
+ * @param fieldLabel A label used in warning logs (e.g. "agent.reasoningEffort")
+ */
+export function normalizeReasoningEffort(
+  value: unknown,
+  fieldLabel: string,
+): string | undefined {
+  if (value === undefined || value === null) return undefined;
+
+  if (typeof value !== "string") {
+    logger.warn("{field} is not a string, treating as default", { field: fieldLabel, value });
+    return "default";
+  }
+
+  const trimmed = value.trim();
+  if (trimmed === "") return "default";
+
+  const lowered = trimmed.toLowerCase();
+  if ((KNOWN_REASONING_EFFORTS as readonly string[]).includes(lowered)) {
+    return lowered;
+  }
+
+  // Preserve agent-specific tokens as passthrough, but warn so typos are visible.
+  logger.warn("{field} has a non-standard reasoning effort value (passthrough)", {
+    field: fieldLabel,
+    value: trimmed,
+  });
+  return trimmed;
+}
+
+/**
+ * Normalize a section's `reasoningEffort` field in place.
+ * Deletes the field when omitted so the resolution chain can fall through.
+ */
+function normalizeSectionReasoningEffort(
+  section: Record<string, unknown>,
+  fieldLabel: string,
+): void {
+  const normalized = normalizeReasoningEffort(section.reasoningEffort, fieldLabel);
+  if (normalized === undefined) {
+    delete section.reasoningEffort;
+  } else {
+    section.reasoningEffort = normalized;
+  }
+}
+
 /** Load and normalize channel configs from raw input */
 function loadChannels(rawChannels: unknown[]): ChannelConfig[] {
   const channels: ChannelConfig[] = [];
@@ -392,6 +451,9 @@ function validateConfig(config: Record<string, unknown>): void {
 
   const sr = config.selfResearch as Record<string, unknown>;
 
+  // Normalize section reasoning effort (omitted stays undefined to allow fallthrough).
+  normalizeSectionReasoningEffort(sr, "selfResearch.reasoningEffort");
+
   if (sr.enabled === true) {
     // Disable if rssFeeds is empty
     if (!Array.isArray(sr.rssFeeds) || (sr.rssFeeds as unknown[]).length === 0) {
@@ -431,6 +493,8 @@ function validateConfig(config: Record<string, unknown>): void {
   }
 
   const mm = config.memoryMaintenance as Record<string, unknown>;
+
+  normalizeSectionReasoningEffort(mm, "memoryMaintenance.reasoningEffort");
 
   if ((mm.intervalMs as number) < 3600000) {
     logger.warn("memoryMaintenance.intervalMs too small, clamping to 1 hour");
@@ -523,10 +587,18 @@ function validateConfig(config: Record<string, unknown>): void {
   } else {
     const cs = config.conversationSummary as Record<string, unknown>;
     if (cs.enabled === undefined) cs.enabled = true;
+    normalizeSectionReasoningEffort(cs, "conversationSummary.reasoningEffort");
   }
 
-  // Model routing defaults and validation
   const agentConfig = config.agent as Record<string, unknown>;
+
+  // Global reasoning effort: default to "default" (do not configure) and normalize.
+  agentConfig.reasoningEffort = normalizeReasoningEffort(
+    agentConfig.reasoningEffort,
+    "agent.reasoningEffort",
+  ) ?? "default";
+
+  // Model routing defaults and validation
   if (!agentConfig.modelRouting) {
     agentConfig.modelRouting = { enabled: false, rules: [] };
   } else {
@@ -605,6 +677,18 @@ function validateConfig(config: Record<string, unknown>): void {
           } else {
             match.contentKeywords = validKeywords;
           }
+        }
+
+        // Normalize per-rule reasoning effort (passthrough preserved; never drops the rule).
+        // Omitted field stays undefined so resolution can fall through to section/global.
+        const normalizedEffort = normalizeReasoningEffort(
+          rule.reasoningEffort,
+          "modelRouting.rule.reasoningEffort",
+        );
+        if (normalizedEffort === undefined) {
+          delete rule.reasoningEffort;
+        } else {
+          rule.reasoningEffort = normalizedEffort;
         }
 
         validRules.push(rule);

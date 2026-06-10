@@ -45,6 +45,9 @@ export interface SessionAuditEntry {
     sessionId?: string;
     sessionType?: string;
     workspaceKey?: string;
+    model?: string;
+    /** Resolved (effective) reasoning effort for the session ("default" = not configured) */
+    reasoningEffort?: string;
     yolo?: boolean;
 
     // rate_limit_checked

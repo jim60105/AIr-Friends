@@ -31,6 +31,27 @@ const IDLE_TIMEOUT_MS = 5 * 60 * 1000;
 const IDLE_CHECK_INTERVAL_MS = 30 * 1000;
 
 /**
+ * Outcome of a reasoning-effort application attempt.
+ * - `applied`: the value was sent to the agent.
+ * - `unsupported`: the agent advertised no `thought_level` config option.
+ * - `skipped`: requested value was empty/`"default"` (do not configure).
+ * - `skipped_unavailable`: a known value was not among the option's advertised values.
+ * - `failed`: the agent rejected the value or another error occurred (caught, not thrown).
+ */
+export type ReasoningEffortOutcome =
+  | "applied"
+  | "unsupported"
+  | "skipped"
+  | "skipped_unavailable"
+  | "failed";
+
+/** Reasoning-effort tokens that have an agreed meaning (used for availability validation). */
+const KNOWN_REASONING_EFFORT_TOKENS = ["none", "low", "medium", "high"];
+
+/** ACP config option category that represents reasoning / thought level. */
+const THOUGHT_LEVEL_CATEGORY = "thought_level";
+
+/**
  * AgentConnector manages the lifecycle of ACP Agent connections
  * Handles spawning, connecting, and communicating with external ACP Agents
  */
@@ -40,6 +61,12 @@ export class AgentConnector {
   private client: ChatbotClient | null = null;
   private options: AgentConnectorOptions;
   private capabilities: AgentCapabilities | null = null;
+  /**
+   * Live cache of the current session's config options (single-session scoped).
+   * Captured from `newSession`, refreshed by `config_option_update` notifications and
+   * `set_config_option` responses. Used to discover the `thought_level` option.
+   */
+  private sessionConfigOptions: acp.SessionConfigOption[] = [];
   private currentIdleMonitorIntervalId: ReturnType<typeof setInterval> | null = null;
   private promptCompleted = false;
 
@@ -98,6 +125,11 @@ export class AgentConnector {
       clientConfig,
       autoApproveList,
     );
+
+    // Keep cached session config options fresh from agent-initiated updates.
+    this.client.setConfigOptionsListener((configOptions) => {
+      this.refreshSessionConfigOptions(configOptions);
+    });
 
     // Create ClientSideConnection with proper stream order
     const stream = acp.ndJsonStream(output, input);
@@ -160,6 +192,10 @@ export class AgentConnector {
       cwd: this.options.agentConfig.cwd,
       mcpServers: supportedServers.map((server) => this.convertMCPServerConfig(server)),
     });
+
+    // Capture initial config options (single-session scoped); refreshed later via
+    // config_option_update notifications and set_config_option responses.
+    this.refreshSessionConfigOptions(result.configOptions);
 
     logger.info("Session {sessionId} created with {mcpServerCount} MCP servers", {
       sessionId: result.sessionId,
@@ -325,6 +361,146 @@ export class AgentConnector {
   }
 
   /**
+   * Refresh the cached session config options from a complete list.
+   * Used by both `config_option_update` notifications and `set_config_option` responses.
+   * A nullish list clears the cache.
+   */
+  private refreshSessionConfigOptions(
+    configOptions: acp.SessionConfigOption[] | null | undefined,
+  ): void {
+    this.sessionConfigOptions = Array.isArray(configOptions) ? configOptions : [];
+  }
+
+  /**
+   * Find the currently advertised `thought_level` config option, if any.
+   */
+  private findThoughtLevelOption(): acp.SessionConfigOption | undefined {
+    return this.sessionConfigOptions.find((opt) => opt.category === THOUGHT_LEVEL_CATEGORY);
+  }
+
+  /**
+   * Collect the available value ids for a config option, flattening grouped options.
+   */
+  private collectOptionValues(option: acp.SessionConfigOption): string[] {
+    const values: string[] = [];
+    const options = (option as { options?: unknown }).options;
+    if (!Array.isArray(options)) return values;
+    for (const entry of options as Array<Record<string, unknown>>) {
+      if (typeof entry.value === "string") {
+        // Flat SessionConfigSelectOption
+        values.push(entry.value);
+      } else if (Array.isArray(entry.options)) {
+        // SessionConfigSelectGroup: collect its nested option values
+        for (const nested of entry.options as Array<Record<string, unknown>>) {
+          if (typeof nested.value === "string") values.push(nested.value);
+        }
+      }
+    }
+    return values;
+  }
+
+  /**
+   * Apply a reasoning effort (ACP `thought_level`) to the session via Session Config Options.
+   *
+   * Best-effort and non-fatal: never throws. Re-discovers the `thought_level` option from the
+   * latest cached config options at call time, so it reflects any updates that arrived after
+   * the model was set.
+   *
+   * @returns the {@link ReasoningEffortOutcome} describing what happened
+   */
+  async setReasoningEffort(
+    sessionId: string,
+    value: string,
+  ): Promise<ReasoningEffortOutcome> {
+    const logger = this.options.logger as Logger;
+
+    const trimmed = (value ?? "").trim();
+    // "default" (or empty) means: do not configure reasoning effort.
+    if (trimmed === "" || trimmed.toLowerCase() === "default") {
+      return "skipped";
+    }
+
+    if (!this.connection) {
+      logger.warn("Cannot set reasoning effort: not connected to agent", { sessionId });
+      return "failed";
+    }
+
+    const option = this.findThoughtLevelOption();
+    if (!option) {
+      logger.info(
+        "Reasoning effort not supported by agent for session {sessionId} (no thought_level option)",
+        { sessionId, requested: trimmed },
+      );
+      return "unsupported";
+    }
+
+    // For known-vocabulary values, skip rather than send an invalid value the agent would reject.
+    // Passthrough (agent-specific) tokens are sent as-is and any error is caught.
+    //
+    // Match case-insensitively against the agent's advertised values, but SEND the agent's
+    // canonical casing when a case-insensitive match exists (agents define their own value casing).
+    const availableValues = this.collectOptionValues(option);
+    const isKnownToken = KNOWN_REASONING_EFFORT_TOKENS.includes(trimmed.toLowerCase());
+    const canonicalMatch = availableValues.find(
+      (v) => v.toLowerCase() === trimmed.toLowerCase(),
+    );
+
+    if (isKnownToken && availableValues.length > 0 && canonicalMatch === undefined) {
+      logger.warn(
+        "Requested reasoning effort {requested} not offered by model; skipping",
+        {
+          sessionId,
+          requested: trimmed,
+          availableValues,
+          configId: option.id,
+        },
+      );
+      return "skipped_unavailable";
+    }
+
+    // Prefer the agent's canonical-cased value when matched; otherwise send the trimmed token.
+    const valueToSend = canonicalMatch ?? trimmed;
+
+    try {
+      const response = await this.connection.setSessionConfigOption({
+        sessionId,
+        configId: option.id,
+        value: valueToSend,
+      });
+      // The response carries the complete updated config option state.
+      this.refreshSessionConfigOptions(
+        (response as { configOptions?: acp.SessionConfigOption[] })?.configOptions,
+      );
+      logger.info(
+        "Reasoning effort {requested} applied for session {sessionId}",
+        { sessionId, requested: trimmed, sent: valueToSend, configId: option.id },
+      );
+      return "applied";
+    } catch (error) {
+      logger.warn(
+        "Failed to apply reasoning effort {requested} for session {sessionId}",
+        {
+          sessionId,
+          requested: trimmed,
+          configId: option.id,
+          error: error instanceof Error ? error.message : String(error),
+        },
+      );
+      return "failed";
+    }
+  }
+
+  /**
+   * Whether a reasoning-effort value is "active" (i.e. would attempt to configure the agent).
+   * Returns false for empty / `"default"`.
+   */
+  static isReasoningEffortActive(value: string | undefined): boolean {
+    if (value === undefined) return false;
+    const trimmed = value.trim().toLowerCase();
+    return trimmed !== "" && trimmed !== "default";
+  }
+
+  /**
    * Check if the connected Agent supports image content in prompts
    */
   supportsImageContent(): boolean {
@@ -426,6 +602,7 @@ export class AgentConnector {
     this.connection = null;
     this.client = null;
     this.capabilities = null;
+    this.sessionConfigOptions = [];
   }
 
   /**

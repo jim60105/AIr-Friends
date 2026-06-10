@@ -10,6 +10,7 @@ export const ENV_MAPPINGS = {
   MISSKEY_HOST: "platforms.misskey.host",
   MISSKEY_ENABLED: "platforms.misskey.enabled",
   AGENT_MODEL: "agent.model",
+  AGENT_REASONING_EFFORT: "agent.reasoningEffort",
   GITHUB_TOKEN: "agent.githubToken",
   COPILOT_GITHUB_TOKEN: "agent.copilotGithubToken",
   GEMINI_API_KEY: "agent.geminiApiKey",

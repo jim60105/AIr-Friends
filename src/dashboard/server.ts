@@ -599,6 +599,17 @@ export class DashboardServer {
 
       const acpSessionId = await connector.createSession();
       await connector.setSessionModel(acpSessionId, model);
+      // Dashboard / manual sessions have no routing context or section value:
+      // use the global reasoning effort as the fallback (best-effort, non-fatal).
+      const dashboardReasoningEffort = this.deps.appConfig.agent.reasoningEffort ?? "default";
+      const reasoningOutcome = await connector.setReasoningEffort(
+        acpSessionId,
+        dashboardReasoningEffort,
+      );
+      logger.info("Dashboard reasoning effort outcome {outcome}", {
+        requested: dashboardReasoningEffort,
+        outcome: reasoningOutcome,
+      });
 
       this.chatSession = {
         id: chatSessionId,

@@ -525,12 +525,53 @@ if (modeOverride) {
   await connector.setSessionMode(sessionId, modeOverride);
 }
 
-// 4. Send prompt and get response
+// 4. Apply resolved reasoning effort (best-effort; no-op if unsupported)
+await connector.setReasoningEffort(sessionId, resolvedReasoningEffort);
+
+// 5. Send prompt and get response
 const response = await connector.prompt(sessionId, assembledContext);
 
-// 5. Disconnect when done
+// 6. Disconnect when done
 await connector.disconnect();
 ```
+
+**Reasoning Effort (ACP `thought_level`)**:
+
+Reasoning effort controls how hard the model "thinks" and is applied to the ACP session via the
+Session Config Options API (`session/set_config_option` with the `thought_level` category) after
+the model is set. It is resolved **per session** through a chain parallel to model selection:
+
+1. **Per-routing-rule** `reasoningEffort` on a matching `agent.modelRouting.rules[]` entry
+2. **Per-section** `reasoningEffort` on `selfResearch` / `memoryMaintenance` / `conversationSummary`
+3. **Global** `agent.reasoningEffort` (default `"default"`)
+
+`resolveReasoningEffort()` (in `src/core/model-router.ts`) mirrors `resolveModel()`: it stops at the
+**first matching rule**; if that rule sets `reasoningEffort` it wins, otherwise resolution falls back
+to the section/global value (it does NOT continue to later rules). This lets a rule route the model
+and the effort independently while keeping them tied to the same matched rule.
+
+| Value | Meaning |
+| ----- | ------- |
+| `"none"` / `"low"` / `"medium"` / `"high"` | Normalized effort levels |
+| `"default"` (or empty/unset global) | Do not configure — let the agent/model decide |
+| any other token | Agent-specific passthrough (sent as-is, warned at load) |
+
+**Behavior**:
+
+- Best-effort and non-fatal: if the agent does not advertise a `thought_level` option, or rejects the
+  value, the session continues. Outcomes (`applied` / `unsupported` / `skipped` / `skipped_unavailable`
+  / `failed`) are logged, and the resolved effort is recorded in the `session_start` audit entry.
+- The connector caches the session's `configOptions` (from `newSession`, refreshed by
+  `config_option_update` notifications and `set_config_option` responses) and re-discovers the
+  `thought_level` option from the latest cache at apply time — important because a model change can
+  alter the available reasoning options.
+- For known-vocabulary values not offered by the model, the call is skipped with a structured warning
+  (rather than sending an invalid value); agent-specific passthrough tokens are sent as-is.
+
+**Environment Variable Override**:
+
+- `AGENT_REASONING_EFFORT` → `agent.reasoningEffort` (global default only). Per-rule values ride in
+  `MODEL_ROUTING_RULES` JSON; per-section values come from the config file.
 
 **Supported Agents**:
 

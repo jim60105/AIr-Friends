@@ -156,6 +156,12 @@ export class ChatbotClient implements acp.Client {
   private lastActivityTimestamp: number = Date.now();
   private messageBuffer: string[] = [];
 
+  /**
+   * Optional listener invoked when the Agent sends a `config_option_update`
+   * notification, so the AgentConnector can refresh its cached config options.
+   */
+  private configOptionsListener?: (configOptions: acp.SessionConfigOption[]) => void;
+
   constructor(
     skillRegistry: SkillRegistry,
     logger: Logger,
@@ -191,6 +197,17 @@ export class ChatbotClient implements acp.Client {
    */
   setAuditWriter(writer: SessionAuditWriter): void {
     this.auditWriter = writer;
+  }
+
+  /**
+   * Register a listener that receives the complete config options list whenever the
+   * Agent emits a `config_option_update` notification. Used by AgentConnector to keep
+   * its cached config options fresh (e.g. after a model change alters `thought_level`).
+   */
+  setConfigOptionsListener(
+    listener: (configOptions: acp.SessionConfigOption[]) => void,
+  ): void {
+    this.configOptionsListener = listener;
   }
 
   private updateActivity(): void {
@@ -610,6 +627,28 @@ export class ChatbotClient implements acp.Client {
           size: usageUpdate.size,
           cost: usageUpdate.cost,
         });
+        break;
+      }
+
+      case "config_option_update": {
+        this.flushMessageBuffer();
+        // Agent reports the complete updated config option state; propagate to the connector
+        // so reasoning-effort discovery uses fresh options (e.g. after a model change).
+        const configOptions = (update as unknown as {
+          configOptions?: acp.SessionConfigOption[];
+        }).configOptions;
+        if (Array.isArray(configOptions)) {
+          this.logger.debug("Config options updated ({count} options)", {
+            count: configOptions.length,
+          });
+          this.configOptionsListener?.(configOptions);
+        } else {
+          // Defensive: notification shape lacked a parseable configOptions array.
+          // Log so silent cache staleness is diagnosable instead of invisible.
+          this.logger.warn(
+            "config_option_update received without a parseable configOptions array",
+          );
+        }
         break;
       }
 

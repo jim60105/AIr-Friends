@@ -487,6 +487,13 @@ class MockAgentConnector {
     await Promise.resolve();
   }
 
+  reasoningEffortCalls: string[] = [];
+  async setReasoningEffort(_sessionId: string, value: string): Promise<string> {
+    this.reasoningEffortCalls.push(value);
+    await Promise.resolve();
+    return "applied";
+  }
+
   async prompt(_sessionId: string, _text: string): Promise<PromptResponse> {
     const response = this.promptResponses[this.promptCallCount] ??
       { stopReason: "end_turn" } as PromptResponse;
@@ -3094,6 +3101,158 @@ Deno.test({
         // deno-lint-ignore no-explicit-any
         (Deno as any).removeSync = originalRemoveSync;
       }
+
+      sessionRegistry.stop();
+    } finally {
+      await Deno.remove(tempDir, { recursive: true });
+    }
+  },
+});
+
+// --- Reasoning Effort integration tests ---
+
+Deno.test({
+  name: "SessionOrchestrator - applies routing-rule reasoning effort after model setting",
+  sanitizeResources: false,
+  sanitizeOps: false,
+  fn: async () => {
+    const tempDir = await Deno.makeTempDir();
+    try {
+      const { orchestrator, skillRegistry, sessionRegistry, config } =
+        await createTestableOrchestrator(tempDir);
+
+      config.agent.reasoningEffort = "low";
+      config.agent.modelRouting = {
+        enabled: true,
+        rules: [
+          {
+            match: { channel: "discord/account/11122233344455566" },
+            model: "premium-model",
+            reasoningEffort: "high",
+          },
+        ],
+      };
+
+      const platformAdapter = new MockPlatformAdapter() as unknown as PlatformAdapter;
+      const event = createTestEvent();
+
+      orchestrator.setConnectorSetup((connector) => {
+        connector.promptResponses = [{ stopReason: "end_turn" } as PromptResponse];
+        connector.onPrompt = (callCount) => {
+          if (callCount === 1) {
+            const replyHandler = skillRegistry.getReplyHandler();
+            const key = `discord/11122233344455566:99988877766655544`;
+            // deno-lint-ignore no-explicit-any
+            (replyHandler as any).replySentMap.set(key, true);
+          }
+        };
+      });
+
+      await orchestrator.processMessage(event, platformAdapter);
+
+      const connector = orchestrator.mockConnector!;
+      // Rule effort "high" wins over global "low".
+      assertEquals(connector.reasoningEffortCalls.includes("high"), true);
+
+      sessionRegistry.stop();
+    } finally {
+      await Deno.remove(tempDir, { recursive: true });
+    }
+  },
+});
+
+Deno.test({
+  name: "SessionOrchestrator - applies global reasoning effort when no rule matches",
+  sanitizeResources: false,
+  sanitizeOps: false,
+  fn: async () => {
+    const tempDir = await Deno.makeTempDir();
+    try {
+      const { orchestrator, skillRegistry, sessionRegistry, config } =
+        await createTestableOrchestrator(tempDir);
+
+      config.agent.reasoningEffort = "medium";
+      config.agent.modelRouting = { enabled: false, rules: [] };
+
+      const platformAdapter = new MockPlatformAdapter() as unknown as PlatformAdapter;
+      const event = createTestEvent();
+
+      orchestrator.setConnectorSetup((connector) => {
+        connector.promptResponses = [{ stopReason: "end_turn" } as PromptResponse];
+        connector.onPrompt = (callCount) => {
+          if (callCount === 1) {
+            const replyHandler = skillRegistry.getReplyHandler();
+            const key = `discord/11122233344455566:99988877766655544`;
+            // deno-lint-ignore no-explicit-any
+            (replyHandler as any).replySentMap.set(key, true);
+          }
+        };
+      });
+
+      await orchestrator.processMessage(event, platformAdapter);
+
+      const connector = orchestrator.mockConnector!;
+      assertEquals(connector.reasoningEffortCalls.length >= 1, true);
+      // Every call uses the resolved global value (never undefined/empty).
+      for (const v of connector.reasoningEffortCalls) {
+        assertEquals(typeof v === "string" && v.length > 0, true);
+      }
+      assertEquals(connector.reasoningEffortCalls[0], "medium");
+
+      sessionRegistry.stop();
+    } finally {
+      await Deno.remove(tempDir, { recursive: true });
+    }
+  },
+});
+
+Deno.test({
+  name: "SessionOrchestrator - reapplies reasoning effort across conversation-summary swap",
+  sanitizeResources: false,
+  sanitizeOps: false,
+  fn: async () => {
+    const tempDir = await Deno.makeTempDir();
+    try {
+      const { orchestrator, skillRegistry, sessionRegistry, config } =
+        await createTestableOrchestrator(tempDir);
+
+      config.agent.reasoningEffort = "high";
+      config.conversationSummary = {
+        enabled: true,
+        model: "summary-model", // different from agent.model -> triggers swap
+        reasoningEffort: "low",
+      };
+
+      const platformAdapter = new MockPlatformAdapter() as unknown as PlatformAdapter;
+      const event = createTestEvent();
+
+      orchestrator.setConnectorSetup((connector) => {
+        // 1st prompt = main turn (reply), 2nd prompt = summary generation
+        connector.promptResponses = [
+          { stopReason: "end_turn" } as PromptResponse,
+          { stopReason: "end_turn" } as PromptResponse,
+        ];
+        connector.onPrompt = (callCount) => {
+          if (callCount === 1) {
+            const replyHandler = skillRegistry.getReplyHandler();
+            const key = `discord/11122233344455566:99988877766655544`;
+            // deno-lint-ignore no-explicit-any
+            (replyHandler as any).replySentMap.set(key, true);
+          }
+        };
+      });
+
+      await orchestrator.processMessage(event, platformAdapter);
+
+      const connector = orchestrator.mockConnector!;
+      // Expect: initial "high", summary-model "low", restore "high".
+      assertEquals(connector.reasoningEffortCalls[0], "high");
+      assertEquals(connector.reasoningEffortCalls.includes("low"), true);
+      // Last call restores the original session effort.
+      assertEquals(
+        connector.reasoningEffortCalls[connector.reasoningEffortCalls.length - 1],
+        "high",
+      );
 
       sessionRegistry.stop();
     } finally {

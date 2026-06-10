@@ -45,6 +45,10 @@ env:
   # Agent configuration
   AGENT_MODEL: 'github-copilot/gpt-5-mini'
 
+  # Global reasoning effort (ACP thought_level): none|low|medium|high|default
+  # "default" = do not configure. Per-rule/per-section values go in config / MODEL_ROUTING_RULES.
+  AGENT_REASONING_EFFORT: 'default'
+
   # Default ACP agent type (copilot|gemini|opencode)
   AGENT_DEFAULT_TYPE: 'opencode'
 
