@@ -23,6 +23,9 @@
         "apiKey": "{env:PIONEER_API_KEY}"
       },
       "models": {
+        "pioneer/auto": {
+          "name": "Pioneer Auto Router"
+        },
         "claude-opus-4-8": {
           "name": "Claude Opus 4.8"
         },
