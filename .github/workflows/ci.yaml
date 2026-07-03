@@ -141,7 +141,9 @@ jobs:
       - name: Setup Deno
         uses: denoland/setup-deno@v2
         with:
-          deno-version: v2.x
+          # Pinned: Deno 2.9.x has a denort stack-overflow regression during
+          # `deno compile` for this module graph. 2.8.3 is the last known-good.
+          deno-version: v2.8.3
 
       - name: Cache Deno dependencies
         uses: actions/cache@v5
