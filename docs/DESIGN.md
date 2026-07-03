@@ -582,16 +582,16 @@ workspace:
 | `MISSKEY_HOST`             | Misskey instance host                                                      |
 | `MISSKEY_TOKEN`            | Misskey access token                                                       |
 | `AGENT_MODEL`              | LLM model identifier (e.g., "gpt-5-mini")                                  |
-| `AGENT_DEFAULT_TYPE`       | Default ACP agent type (copilot/gemini/opencode)                           |
+| `AGENT_DEFAULT_TYPE`       | ACP agent type (opencode)                                                  |
 | `REPLY_POLICY`             | Reply policy mode (`all`/`public`/`channels`) (REPLY_TO accepted as alias) |
 | `CHANNELS`                 | Channel entries (JSON array, replaces config)                              |
 | `LOG_LEVEL`                | Logging level (DEBUG/INFO/WARN/ERROR)                                      |
 | `DENO_ENV`                 | Environment name (dev/prod)                                                |
-| `GITHUB_TOKEN`             | GitHub token for Copilot                                                   |
-| `COPILOT_GITHUB_TOKEN`     | Dedicated Copilot token (falls back to GITHUB_TOKEN)                       |
-| `GEMINI_API_KEY`           | Gemini API key for Gemini CLI/OpenCode                                     |
+| `GITHUB_TOKEN`             | GitHub token for git-backup / git-credential store                        |
+| `GEMINI_API_KEY`           | API key for the OpenCode Gemini provider                                   |
 | `OPENCODE_API_KEY`         | OpenCode API key                                                           |
 | `OPENROUTER_API_KEY`       | OpenRouter API key                                                         |
+| `PIONEER_API_KEY`          | Pioneer provider API key (read directly from env, no config field)         |
 | `MODEL_ROUTING_ENABLED`    | Enable model routing (true/false, default: false)                          |
 | `MODEL_ROUTING_RULES`      | Model routing rules as JSON string                                         |
 | `AGENT_EXTERNAL_SKILLS`    | External skills to install at startup (JSON string)                        |
@@ -620,7 +620,6 @@ Environment-specific config overrides base config.
 
 **Included Binaries:**
 
-- **copilot** - GitHub Copilot CLI (latest release)
 - **opencode** - OpenCode CLI (latest release)
 - **rg** (ripgrep 15.1.0) - For memory search operations
 - **curl** - For health checks
@@ -629,10 +628,7 @@ Environment-specific config overrides base config.
 **Multi-Stage Build:**
 
 ```dockerfile
-# Stage 1: Unpack binaries (copilot, opencode, ripgrep)
-FROM base AS copilot-unpacker
-# ... download and extract copilot
-
+# Stage 1: Unpack binaries (opencode, ripgrep)
 FROM base AS opencode-unpacker
 # ... download and extract opencode
 
@@ -644,13 +640,12 @@ FROM base AS cache
 WORKDIR /app
 COPY deno.json deno.lock ./
 COPY src/ ./src/
-RUN deno cache --lock=deno.lock src/main.ts npm:@google/gemini-cli
+RUN deno cache --lock=deno.lock src/main.ts
 
 # Stage 3: Final runtime
 FROM base AS final
 WORKDIR /app
 # Copy binaries from unpack stages
-COPY --from=copilot-unpacker /copilot/copilot /usr/local/bin/copilot
 COPY --from=opencode-unpacker /opencode/opencode /usr/local/bin/opencode
 COPY --from=ripgrip-unpacker /ripgrip/.../rg /usr/local/bin/rg
 # Copy cached dependencies

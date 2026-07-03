@@ -55,14 +55,14 @@ Deno.test("applyEnvOverrides - MISSKEY_ENABLED=true sets platforms.misskey.enabl
 });
 
 Deno.test("applyEnvOverrides - AGENT_DEFAULT_TYPE sets agent.defaultAgentType", () => {
-  Deno.env.set("AGENT_DEFAULT_TYPE", "gemini");
+  Deno.env.set("AGENT_DEFAULT_TYPE", "opencode");
   try {
     const config: Record<string, unknown> = {
-      agent: { defaultAgentType: "copilot" },
+      agent: { defaultAgentType: "unset" },
     };
     applyEnvOverrides(config);
     const agent = config.agent as { defaultAgentType: string };
-    assertEquals(agent.defaultAgentType, "gemini");
+    assertEquals(agent.defaultAgentType, "opencode");
   } finally {
     Deno.env.delete("AGENT_DEFAULT_TYPE");
   }

@@ -1,19 +1,18 @@
 # Agent Permission Design
 
-This document describes AIr-Friends' multi-layer permission model for controlling what external ACP Agents (GitHub Copilot CLI, Gemini CLI, OpenCode CLI) can do during a session.
+This document describes AIr-Friends' multi-layer permission model for controlling what the external ACP Agent (OpenCode CLI) can do during a session.
 
 ## Table of Contents
 
 - [Design Principles](#design-principles)
 - [Permission Layers Overview](#permission-layers-overview)
-- [Layer 1 — Agent-Level Tool Restrictions](#layer-1--agent-level-tool-restrictions)
-- [Layer 2 — Agent-Specific Permission Configuration](#layer-2--agent-specific-permission-configuration)
+- [Layer 1 — OpenCode Agent Mode](#layer-1--opencode-agent-mode)
+- [Layer 2 — OpenCode Permission Configuration](#layer-2--opencode-permission-configuration)
 - [Layer 3 — ACP Client Permission Gate](#layer-3--acp-client-permission-gate)
 - [Layer 4 — File Access Boundary](#layer-4--file-access-boundary)
 - [Layer 5 — Sandbox Isolation](#layer-5--sandbox-isolation)
 - [YOLO Mode](#yolo-mode)
 - [Per-Session-Type Permission Behavior](#per-session-type-permission-behavior)
-- [Per-Agent-Type Differences](#per-agent-type-differences)
 - [Skill Auto-Approve List](#skill-auto-approve-list)
 - [Permission Audit Logging](#permission-audit-logging)
 - [Security Considerations](#security-considerations)
@@ -28,7 +27,7 @@ AIr-Friends is a **non-interactive** system — there is no human operator to ap
 1. **Default-deny**: Unknown tool calls and commands are rejected, not queued for approval.
 2. **Defense in depth**: Permissions are enforced at multiple independent layers. Even if one layer is misconfigured, others prevent unauthorized access.
 3. **Whitelist-only in restricted mode**: Only known skills and safe commands are auto-approved; everything else is rejected.
-4. **Minimal privilege**: Each agent type receives only the environment variables and tools it needs.
+4. **Minimal privilege**: The agent receives only the environment variables and tools it needs.
 5. **Per-channel granularity**: YOLO mode (all-approve) can be selectively enabled for trusted accounts/channels while the rest of the system runs in restricted mode.
 
 ---
@@ -37,11 +36,11 @@ AIr-Friends is a **non-interactive** system — there is no human operator to ap
 
 ```text
 ┌───────────────────────────────────────────────────────────────────┐
-│ Layer 1: Agent-Level Tool Restrictions                            │
-│ (CLI flags that limit what tools the agent CLI exposes)           │
+│ Layer 1: OpenCode Agent Mode                                      │
+│ (build vs. yolo agent selected via ACP setSessionMode)            │
 ├───────────────────────────────────────────────────────────────────┤
 │ Layer 2: OpenCode Permission Configuration (opencode.json)        │
-│ (OpenCode-specific: fine-grained allow/deny per tool & pattern)   │
+│ (fine-grained allow/deny per tool & pattern)                      │
 ├───────────────────────────────────────────────────────────────────┤
 │ Layer 3: ACP Client Permission Gate                               │
 │ (ChatbotClient.requestPermission() — whitelist-based approval)    │
@@ -58,84 +57,30 @@ When the external Agent requests any action, it must pass **all applicable layer
 
 ---
 
-## Layer 1 — Agent-Level Tool Restrictions
+## Layer 1 — OpenCode Agent Mode
 
-Before the ACP permission callback is ever invoked, the agent CLI itself can be configured to only expose certain tools.
+OpenCode's tool exposure is governed by which **agent** the session runs as. AIr-Friends defines two agents in `agent-config/opencode.json` and selects between them via the ACP `setSessionMode()` call — there is no CLI flag that restricts individual tools.
 
-### Copilot (non-YOLO)
+| Mode       | OpenCode Agent    | Permission Default        | Selected via                 |
+| ---------- | ----------------- | ------------------------- | ---------------------------- |
+| Restricted | `build` (default) | `"*": "deny"` + whitelist | Default agent (no override)  |
+| YOLO       | `yolo`            | `"*": "allow"`            | ACP `setSessionMode("yolo")` |
 
-In restricted mode, Copilot is launched with `--available-tools` flags that limit it to **only bash-related tools**, plus `--deny-tool` flags that block dangerous shell commands:
+### Restricted Mode (`build` agent)
 
-```
-copilot --available-tools write_bash --available-tools read_bash \
-        --available-tools stop_bash --available-tools bash \
-        --deny-tool 'shell(git:*)' --deny-tool 'shell(echo:*)' \
-        --deny-tool 'shell(mkdir:*)' \
-        --disable-builtin-mcps --no-ask-user --acp
-```
+In restricted mode, the session runs as the default `build` agent. All permissions are configured through `opencode.json` (see [Layer 2](#layer-2--opencode-permission-configuration)): the default `"*"` is `deny`, read-only tools are allowed, `edit` is delegated to Layer 3 via `"ask"`, and `bash` uses a specific allow-list. No tool restriction is applied at the CLI level.
 
-This means Copilot cannot use its own native `edit`, `read`, or other tools — it can only run bash commands. The `--deny-tool` flags provide Layer 1 defense-in-depth by blocking dangerous commands (git, echo, mkdir) before they reach Layer 3's ACP permission gate.
+### YOLO Mode (`yolo` agent)
 
-| `--deny-tool` Pattern | Blocks                                        | opencode.json Equivalent |
-| --------------------- | --------------------------------------------- | ------------------------ |
-| `shell(git:*)`        | All git commands                              | `"git *": "deny"`        |
-| `shell(echo:*)`       | echo (prevents file writes via redirection)   | `"echo *": "deny"`       |
-| `shell(mkdir:*)`      | mkdir (prevents arbitrary directory creation) | `"mkdir *": "deny"`      |
-
-### Copilot (YOLO)
-
-```
-copilot --yolo --disable-builtin-mcps --no-ask-user --acp
-```
-
-All tools are available. The `--yolo` flag tells Copilot to auto-approve all actions internally.
-
-### Gemini (non-YOLO)
-
-In restricted mode, Gemini uses **Policy Engine TOML rules** (`agent-config/gemini-policies/airfriends.toml`) and **settings.json** (`agent-config/gemini-settings.json`) for permission control. These files are copied to `~/.gemini/` in the container.
-
-**settings.json** configures:
-
-- `defaultApprovalMode: "default"` — all tool calls require permission check
-- `enableAutoUpdate: false` — no auto-updates in container
-- `folderTrust.enabled: false` — no trust dialogs (non-interactive)
-
-**Policy Engine rules** mirror `opencode.json`:
-
-| Rule                                         | Decision         | Priority | opencode.json Equivalent               |
-| -------------------------------------------- | ---------------- | -------- | -------------------------------------- |
-| `write_file`, `replace`                      | deny             | 200      | `"edit": "ask"` (delegated to Layer 3) |
-| `ask_user`                                   | deny (all modes) | 200      | `"question": "deny"`                   |
-| `save_memory`                                | deny             | 200      | N/A (Gemini-specific)                  |
-| `run_shell_command` (default)                | deny             | 10       | `"bash": { "*": "deny" }`              |
-| `run_shell_command` (`deno run`)             | allow            | 100      | `"deno run *skills/*": "allow"`        |
-| `run_shell_command` (`rg`, `curl`, etc.)     | allow            | 100      | `"rg *": "allow"`, etc.                |
-| `run_shell_command` (`agent-browser`)        | allow            | 100      | `"agent-browser *": "allow"`           |
-| `run_shell_command` (`git`, `echo`, `mkdir`) | deny             | 200      | `"git *": "deny"`, etc.                |
-
-Rules with `modes = ["default", "auto_edit", "plan"]` are inactive in YOLO mode. The `ask_user` rule has no `modes` field — it is always active (no human to answer).
-
-### Gemini (YOLO)
-
-```
-gemini --experimental-acp --yolo
-```
-
-The `--yolo` flag activates Gemini's built-in yolo policy (priority 999+), which overrides all custom rules with `modes` fields. The `ask_user` deny rule remains active since it has no `modes` field.
-
-### OpenCode
-
-OpenCode does not support tool restriction via CLI flags. In restricted mode, permissions are configured entirely through `opencode.json` (Layer 2). In YOLO mode, the system switches to the `yolo` agent defined in `opencode.json` via ACP `setSessionMode("yolo")`, which has `"*": "allow"` permissions.
+In YOLO mode, the system switches to the `yolo` agent via ACP `setSessionMode("yolo")`. This agent has `"*": "allow"` permissions, so every tool is available and all actions are auto-approved internally.
 
 **Reference**: `src/acp/agent-factory.ts`
 
 ---
 
-## Layer 2 — Agent-Specific Permission Configuration
+## Layer 2 — OpenCode Permission Configuration
 
-Agent-specific permission configurations provide fine-grained control at the agent level. Currently used by OpenCode (`opencode.json`) and Gemini (`settings.json` + Policy Engine TOML).
-
-OpenCode uses a JSON configuration file (`opencode.json`) for fine-grained permission control. Gemini uses `settings.json` and Policy Engine TOML files for equivalent control (see [Layer 1](#layer-1--agent-level-tool-restrictions) for details).
+OpenCode uses a JSON configuration file (`opencode.json`) for fine-grained, per-tool and per-pattern permission control. This is the primary permission layer for restricted-mode (`build` agent) sessions.
 
 > **Reference**: [OpenCode Permissions Documentation](https://opencode.ai/docs/permissions/)
 
@@ -209,8 +154,6 @@ The `write`, `patch`, and `multiedit` tools all use `permission: "edit"`, so thi
 2. **Layer 3** → `ChatbotClient.requestPermission()` checks workspace boundary (agent workspace + TMPDIR) and file extension (`allowedWriteExtensions`)
 3. **Layer 4** → `writeTextFile()` enforces path boundary and extension checks as defense-in-depth
 
-This approach is consistent with Gemini, which also relies on Layer 3 for edit/write permission enforcement.
-
 ### Bash Permission (Whitelist)
 
 Shell commands use default-deny with specific allowed patterns:
@@ -239,7 +182,6 @@ By default, OpenCode only allows file access within its working directory (the u
   "*": "deny",
   "~/.agents/skills/**": "allow",
   "/home/deno/.agents/skills/**": "allow",
-  "/home/deno/.copilot/skills/**": "allow",
   "/app/data/agent-workspace/**": "allow",
   "/app/data/workspaces/*/tmp/**": "allow"
 }
@@ -251,7 +193,7 @@ By default, OpenCode only allows file access within its working directory (the u
 
 ## Layer 3 — ACP Client Permission Gate
 
-The `ChatbotClient.requestPermission()` method is the core permission callback invoked by the ACP protocol whenever the external agent requests to perform any action. This layer applies to **all agent types**.
+The `ChatbotClient.requestPermission()` method is the core permission callback invoked by the ACP protocol whenever the OpenCode agent requests to perform any action.
 
 ### Evaluation Order
 
@@ -259,7 +201,7 @@ The method evaluates permission requests in this order:
 
 1. **YOLO check** — If `config.yolo === true`, auto-approve everything immediately.
 
-2. **Skills directory read** — Auto-approve `read` requests where paths start with `/home/deno/.copilot/skills`. This allows agents to discover SKILL.md files.
+2. **Skills directory read** — Auto-approve `read` requests where paths start with the skills directory (`~/.agents/skills` / `/home/deno/.agents/skills`). This allows the agent to discover SKILL.md files.
 
 3. **Skill command execution** — For `execute` kind requests, first reject commands containing shell injection characters (`;`, `|`, `&`, `` ` ``, `$()`, `>`, `<`, `#`, newlines), then check if **all** commands match the skill auto-approve list using safe token matching (see [Skill Auto-Approve List](#skill-auto-approve-list)).
 
@@ -305,7 +247,7 @@ The `SandboxManager` applies OS-level isolation to the agent subprocess before i
 
 When `sandbox.filterEnv` is `true` (default), the agent subprocess only receives explicitly allowed environment variables:
 
-**Base allowed (all agent types):**
+**Base allowed:**
 
 | Variable                                | Purpose                         |
 | --------------------------------------- | ------------------------------- |
@@ -316,13 +258,11 @@ When `sandbox.filterEnv` is `true` (default), the agent subprocess only receives
 | `AGENT_WORKSPACE`                       | Agent workspace path            |
 | `TMPDIR`                                | Workspace-scoped temp directory |
 
-**Agent-type-specific:**
+**OpenCode provider keys:**
 
-| Agent    | Additional variables                                                                       |
-| -------- | ------------------------------------------------------------------------------------------ |
-| Copilot  | `GITHUB_TOKEN`, `COPILOT_GITHUB_TOKEN`                                                     |
-| Gemini   | `GEMINI_API_KEY`, `GEMINI_SYSTEM_MD`                                                       |
-| OpenCode | `GEMINI_API_KEY`, `OPENROUTER_API_KEY`, `OPENCODE_API_KEY`, `GOOGLE_GENERATIVE_AI_API_KEY` |
+| Variable                                                                                                    | Purpose                            |
+| ------------------------------------------------------------------------------------------------------------ | ----------------------------------- |
+| `OPENROUTER_API_KEY`, `OPENCODE_API_KEY`, `GEMINI_API_KEY`, `GOOGLE_GENERATIVE_AI_API_KEY`, `PIONEER_API_KEY` | Provider API keys for OpenCode CLI |
 
 Additional env vars can be added via `sandbox.allowedEnvVars` config array.
 
@@ -341,10 +281,10 @@ When `sandbox.networkIsolation` is `true` (default: `false`), the agent command 
 
 YOLO mode bypasses permission restrictions at multiple layers simultaneously:
 
-| Layer                   | YOLO Behavior                                                                                                               |
-| ----------------------- | --------------------------------------------------------------------------------------------------------------------------- |
-| Layer 1 (Agent CLI)     | Copilot: `--yolo` flag, no `--available-tools` restrictions. Gemini: `--yolo` flag. OpenCode: ACP `setSessionMode("yolo")`. |
-| Layer 2 (opencode.json) | OpenCode switches to `yolo` agent via `setSessionMode` — all permissions become `allow`.                                    |
+| Layer                   | YOLO Behavior                                                                             |
+| ----------------------- | ----------------------------------------------------------------------------------------- |
+| Layer 1 (Agent Mode)    | OpenCode switches from the `build` agent to the `yolo` agent via ACP `setSessionMode("yolo")`. |
+| Layer 2 (opencode.json) | The `yolo` agent's permissions are all `allow`.                                           |
 | Layer 3 (ACP Client)    | `requestPermission()` auto-approves every request.                                                                          |
 | Layer 4 (File Boundary) | Unchanged — path boundaries still enforced.                                                                                 |
 | Layer 5 (Sandbox)       | Unchanged — env filtering and network isolation still apply.                                                                |
@@ -398,26 +338,17 @@ These sessions use synthetic identifiers (e.g., platform=`"discord"`, userId=`"s
 
 ---
 
-## Per-Agent-Type Differences
+## How OpenCode Permissions Interact with the Layers
 
-### Comparison Table
+OpenCode uses Layer 2 (`opencode.json`) for most permissions, but delegates edit/write decisions to Layer 3 via `"ask"`. This is because OpenCode's edit/write tools convert file paths to relative paths before evaluating Layer 2 patterns, making absolute path patterns unreliable (see [Path Resolution in Permission Patterns](#path-resolution-in-permission-patterns)). The `build` agent enforces the restricted-mode whitelist; the `yolo` agent (selected via ACP `setSessionMode("yolo")`) grants all permissions.
 
-| Aspect                          | Copilot                                                                                       | Gemini                             | OpenCode                     |
-| ------------------------------- | --------------------------------------------------------------------------------------------- | ---------------------------------- | ---------------------------- |
-| **Binary**                      | `copilot`                                                                                     | `gemini`                           | `opencode`                   |
-| **ACP flag**                    | `--acp`                                                                                       | `--experimental-acp`               | `acp` (subcommand)           |
-| **YOLO flag**                   | `--yolo`                                                                                      | `--yolo`                           | ACP `setSessionMode("yolo")` |
-| **Tool restriction** (non-YOLO) | `--available-tools (bash only) + --deny-tool (git, echo, mkdir)`                              | Policy Engine TOML rules           | `opencode.json` (Layer 2)    |
-| **Config-based permissions**    | Not supported                                                                                 | ✅ settings.json + policies/*.toml | ✅ `opencode.json`           |
-| **Extra CLI flags**             | `--disable-builtin-mcps`, `--no-ask-user`, `--no-color`, `--no-auto-update`, `--experimental` | —                                  | —                            |
-
-### How Each Agent's Permissions Interact with Layers
-
-**Copilot** relies primarily on Layer 1 (CLI tool restriction) and Layer 3 (ACP permission gate). In non-YOLO mode, it can only use bash tools — all bash commands are then validated by Layer 3's skill auto-approve list.
-
-**Gemini** uses Policy Engine TOML rules and settings.json for Layer 1/2 permission control. These rules mirror the OpenCode permission model. Layer 3 (ACP permission gate) acts as a secondary enforcer.
-
-**OpenCode** uses Layer 2 (`opencode.json`) for most permissions, but delegates edit/write decisions to Layer 3 via `"ask"`. This is because OpenCode's edit/write tools convert file paths to relative paths before evaluating Layer 2 patterns, making absolute path patterns unreliable (see [Path Resolution in Permission Patterns](#path-resolution-in-permission-patterns)). This approach is consistent with Gemini, which also relies on Layer 3 for edit/write enforcement.
+| Aspect                          | Value                        |
+| ------------------------------- | ---------------------------- |
+| **Binary**                      | `opencode`                   |
+| **ACP invocation**              | `acp` (subcommand)           |
+| **Restricted agent** (non-YOLO) | `build` (`opencode.json`, Layer 2) |
+| **YOLO switch**                 | ACP `setSessionMode("yolo")` |
+| **Config-based permissions**    | ✅ `opencode.json`           |
 
 **Reference**: `src/acp/agent-factory.ts`
 
@@ -527,30 +458,28 @@ Permission audit phases respect the `audit.includedPhases` configuration. When `
 
 ### What Each Layer Prevents
 
-| Threat                                  | Prevented by                                                                                                                                 |
-| --------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
-| Agent modifying source code             | Layer 1 (no edit tool for Copilot), Layer 2 (`"ask"` delegates to Layer 3 for OpenCode), Layer 3 (edit/write scoped to agent workspace only) |
-| Agent running arbitrary commands        | Layer 2 (bash whitelist for OpenCode), Layer 3 (skill auto-approve list)                                                                     |
-| Agent accessing other users' data       | Layer 4 (file access boundary — workspace isolation)                                                                                         |
-| Agent exfiltrating secrets via env vars | Layer 5 (env var filtering)                                                                                                                  |
-| Agent making unauthorized network calls | Layer 5 (optional network isolation)                                                                                                         |
-| Agent committing/pushing to git         | Layer 2 (git denied for OpenCode), Layer 3 (not in skill list)                                                                               |
-| Agent writing non-allowed file types    | Layer 2 (`"ask"` delegates to Layer 3 for OpenCode), Layer 3 (extension check), Layer 4 (writeTextFile check)                                |
-| Permission bypass undetected            | All permission decisions (approved and denied) are recorded in per-session audit logs with full context                                      |
+| Threat                                  | Prevented by                                                                                                            |
+| --------------------------------------- | --------------------------------------------------------------------------------------------------------------------- |
+| Agent modifying source code             | Layer 2 (`"edit": "ask"` delegates to Layer 3), Layer 3 (edit/write scoped to agent workspace only)                    |
+| Agent running arbitrary commands        | Layer 2 (bash whitelist), Layer 3 (skill auto-approve list)                                                            |
+| Agent accessing other users' data       | Layer 4 (file access boundary — workspace isolation)                                                                   |
+| Agent exfiltrating secrets via env vars | Layer 5 (env var filtering)                                                                                            |
+| Agent making unauthorized network calls | Layer 5 (optional network isolation)                                                                                   |
+| Agent committing/pushing to git         | Layer 2 (`"git *": "deny"`), Layer 3 (not in skill list)                                                               |
+| Agent writing non-allowed file types    | Layer 2 (`"edit": "ask"` delegates to Layer 3), Layer 3 (extension check), Layer 4 (writeTextFile check)              |
+| Permission bypass undetected            | All permission decisions (approved and denied) are recorded in per-session audit logs with full context               |
 
 ### Known Limitations
 
-1. **Gemini Policy Engine effectiveness in ACP mode**: Gemini's Policy Engine rules may or may not be enforced before the ACP `requestPermission()` callback. If the Policy Engine acts as a pre-filter, it provides genuine Layer 1/2 defense. If not, Layer 3 (ACP permission gate) remains the effective enforcer. Either way, the configuration provides defense-in-depth documentation and intent.
+1. **OpenCode's Layer 2 is only as strong as opencode.json**: If the configuration file is modified, all Layer 2 protections are bypassed. YOLO mode is controlled via ACP `setSessionMode("yolo")`, which switches to the permissive `yolo` agent defined in `opencode.json`.
 
-2. **OpenCode's Layer 2 is only as strong as opencode.json**: If the configuration file is modified, all Layer 2 protections are bypassed. YOLO mode is controlled via ACP `setSessionMode("yolo")`, which switches to the permissive `yolo` agent defined in `opencode.json`.
+2. **Layer 3 relies on shell operator detection**: Layer 3 rejects commands containing shell meta-characters (`;`, `|`, `&`, `` ` ``, `(`, `)`, `>`, `<`, `#`, newlines) and validates script paths as complete whitespace-delimited tokens and command prefixes as exact first-token matches. `$` alone is intentionally allowed for variable expansion; `$()` is caught via `(`. While this prevents known injection patterns (command chaining, piping, comment hiding), novel shell features or encoding tricks not covered by the character set could theoretically bypass the check.
 
-3. **Layer 3 relies on shell operator detection**: Layer 3 rejects commands containing shell meta-characters (`;`, `|`, `&`, `` ` ``, `(`, `)`, `>`, `<`, `#`, newlines) and validates script paths as complete whitespace-delimited tokens and command prefixes as exact first-token matches. `$` alone is intentionally allowed for variable expansion; `$()` is caught via `(`. While this prevents known injection patterns (command chaining, piping, comment hiding), novel shell features or encoding tricks not covered by the character set could theoretically bypass the check.
+3. **Self-research and memory maintenance always run in restricted mode**: There is no way to enable per-channel YOLO for these internal sessions — only the global `--yolo` flag works. This is by design (synthetic identifiers), but means trusted-channel YOLO configs don't apply to background tasks.
 
-4. **Self-research and memory maintenance always run in restricted mode**: There is no way to enable per-channel YOLO for these internal sessions — only the global `--yolo` flag works. This is by design (synthetic identifiers), but means trusted-channel YOLO configs don't apply to background tasks.
+4. **OpenCode pattern matching limitations**: OpenCode's wildcard engine only expands `~` and `$HOME` — other environment variables (`$TMPDIR`, `$AGENT_WORKSPACE`, `${HOME}`) are not supported. All `opencode.json` permission patterns must use absolute paths or `~/`-relative paths. The TMPDIR pattern uses a broader absolute path (`/app/data/workspaces/*/tmp/**`) that covers all user workspaces; per-session isolation relies on Layers 3 and 4.
 
-5. **OpenCode pattern matching limitations**: OpenCode's wildcard engine only expands `~` and `$HOME` — other environment variables (`$TMPDIR`, `$AGENT_WORKSPACE`, `${HOME}`) are not supported. All `opencode.json` permission patterns must use absolute paths or `~/`-relative paths. The TMPDIR pattern uses a broader absolute path (`/app/data/workspaces/*/tmp/**`) that covers all user workspaces; per-session isolation relies on Layers 3 and 4.
-
-6. **OpenCode edit/write relative path resolution**: OpenCode's `edit`/`write` tools convert absolute file paths to relative paths (via `path.relative(Instance.worktree, filepath)`) before evaluating permission rules. This means file-path-based patterns in the `edit` permission section are unreliable — absolute paths will never match. The recommended approach is to set `"edit": "ask"` in `opencode.json` and rely on Layer 3 (`ChatbotClient.requestPermission()`) for edit/write permission enforcement. See [OpenCode edit.ts](https://github.com/anomalyco/opencode/blob/dev/packages/opencode/src/tool/edit.ts) and [OpenCode write.ts](https://github.com/anomalyco/opencode/blob/dev/packages/opencode/src/tool/write.ts).
+5. **OpenCode edit/write relative path resolution**: OpenCode's `edit`/`write` tools convert absolute file paths to relative paths (via `path.relative(Instance.worktree, filepath)`) before evaluating permission rules. This means file-path-based patterns in the `edit` permission section are unreliable — absolute paths will never match. The recommended approach is to set `"edit": "ask"` in `opencode.json` and rely on Layer 3 (`ChatbotClient.requestPermission()`) for edit/write permission enforcement. See [OpenCode edit.ts](https://github.com/anomalyco/opencode/blob/dev/packages/opencode/src/tool/edit.ts) and [OpenCode write.ts](https://github.com/anomalyco/opencode/blob/dev/packages/opencode/src/tool/write.ts).
 
 ---
 
@@ -605,13 +534,9 @@ audit:
 | `AGENT_SANDBOX_ALLOWED_WRITE_EXTENSIONS` | `agent.sandbox.allowedWriteExtensions` | Comma-separated list |
 | `AGENT_AUTO_APPROVE_SKILLS`              | `agent.autoApproveSkills`              | Comma-separated list |
 
-### OpenCode-Specific
+### OpenCode Configuration
 
-The `agent-config/opencode.json` file configures OpenCode agent permissions. See [Layer 2](#layer-2--agent-specific-permission-configuration) for details. This file is only used when the agent type is `opencode`.
-
-### Gemini-Specific
-
-The `agent-config/gemini-settings.json` and `agent-config/gemini-policies/airfriends.toml` files configure Gemini agent permissions. These are copied to `~/.gemini/settings.json` and `~/.gemini/policies/airfriends.toml` in the container. See [Layer 1](#layer-1--agent-level-tool-restrictions) for details.
+The `agent-config/opencode.json` file configures OpenCode agent permissions, defining both the restricted `build` agent and the permissive `yolo` agent. See [Layer 2](#layer-2--opencode-permission-configuration) for details.
 
 ---
 

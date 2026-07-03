@@ -47,7 +47,7 @@ export interface ClientConfig {
  * Configuration for ACP Agent
  */
 export interface AgentConfig {
-  /** Command to execute (e.g., "copilot", "gemini") */
+  /** Command to execute (e.g., "opencode") */
   command: string;
 
   /** Arguments to pass to the command */
@@ -63,7 +63,7 @@ export interface AgentConfig {
 /**
  * Supported ACP Agent types
  */
-export type AgentType = "copilot" | "gemini" | "opencode";
+export type AgentType = "opencode";
 
 /**
  * MCP transport capabilities reported by Agent

@@ -95,7 +95,7 @@ The `TemplateVariables` interface SHALL define the following variables available
 | `userId`               | `string`                        | User's platform ID                                   |
 | `channelId`            | `string`                        | Channel/conversation ID                              |
 | `guildId`              | `string`                        | Server/guild ID (empty string if N/A)                |
-| `agentType`            | `string` (optional)             | ACP agent type (`"copilot"`, `"gemini"`, `"opencode"`) |
+| `agentType`            | `string` (optional)             | ACP agent type (`"opencode"`)                        |
 | `model`                | `string` (optional)             | Model identifier                                     |
 | `yolo`                 | `boolean` (optional)            | Whether YOLO mode is enabled                         |
 | `canWriteAgentWorkspace` | `boolean` (optional)          | Whether session allows writing to agent workspace    |

@@ -13,7 +13,7 @@ Defines the interactive chat view with ACP agent connection management, message 
 #### Scenario: Successful Connection with Specified Agent and Model
 
 - **GIVEN** the dashboard server is running and no chat session is active
-- **WHEN** a `POST /api/chat/connect` request is received with body `{"agentType": "copilot", "model": "gpt-4"}` and a valid session cookie
+- **WHEN** a `POST /api/chat/connect` request is received with body `{"agentType": "opencode", "model": "claude-opus-4.8"}` and a valid session cookie
 - **THEN** the server SHALL return HTTP 200 with a JSON body containing `chatSessionId`
 - **AND** an ACP agent connection SHALL be established with the specified agent type and model
 
@@ -32,7 +32,7 @@ Defines the interactive chat view with ACP agent connection management, message 
 #### Scenario: Returns Error for Invalid Agent Type
 
 - **GIVEN** the dashboard server is running
-- **WHEN** a `POST /api/chat/connect` request is received with body `{"agentType": "invalid", "model": "gpt-4"}` and a valid session cookie
+- **WHEN** a `POST /api/chat/connect` request is received with body `{"agentType": "invalid", "model": "claude-opus-4.8"}` and a valid session cookie
 - **THEN** the server SHALL return HTTP 400 indicating the agent type is invalid
 
 ### Requirement: Send Message

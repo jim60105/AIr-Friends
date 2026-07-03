@@ -74,7 +74,7 @@ function createTestOrchestrator(): { orchestrator: TestableOrchestrator; cleanup
       model: "test",
       systemPromptPath: "./prompts/system_reply.md",
       tokenLimit: 20000,
-      defaultAgentType: "copilot",
+      defaultAgentType: "opencode",
     },
     memory: {
       searchLimit: 10,

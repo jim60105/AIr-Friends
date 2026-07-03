@@ -57,11 +57,9 @@ This document lists all common tools pre-installed in the AIr-Friends container 
 | Package                      | Command                   | Description                                                                                                                           |
 | ---------------------------- | ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
 | `denoland/deno` (base image) | `deno`                    | Deno 2.x JavaScript/TypeScript runtime. The primary runtime for the AIr-Friends application and shell-based skills.                   |
-| `nodejs` + `npm`             | `node`, `npm`             | Node.js runtime and npm package manager. Required for installing npm-based tools (`agent-browser`, `@google/gemini-cli`, Playwright). |
+| `nodejs` + `npm`             | `node`, `npm`             | Node.js runtime and npm package manager. Required for installing npm-based tools (`agent-browser`, Playwright).                       |
 | `dumb-init`                  | `dumb-init`               | Minimal init system for containers. Used as PID 1 for proper signal forwarding and to wrap agent subprocesses.                        |
-| `copilot` (GitHub release)   | `copilot`                 | GitHub Copilot CLI. ACP-compatible agent for AI-assisted coding tasks.                                                                |
 | `opencode` (GitHub release)  | `opencode`                | OpenCode CLI. Open-source ACP-compatible coding agent supporting multiple AI providers.                                               |
-| `@google/gemini-cli` (npm)   | `gemini`                  | Google Gemini CLI. ACP-compatible agent powered by Gemini models.                                                                     |
 | `agent-browser` (npm)        | `agent-browser`           | Browser automation CLI for AI agents. Enables web interaction, form filling, screenshots, and data extraction.                        |
 | Playwright + Chromium        | `npx playwright`          | Browser automation framework. Provides headless Chromium for `agent-browser` and web testing.                                         |
 | `util-linux`                 | `unshare`, `nsenter`, ... | System utilities including `unshare` for network namespace isolation (sandbox `networkIsolation` feature).                            |

@@ -190,7 +190,7 @@ The container image SHALL use multi-stage builds with the Deno official Debian i
 
 - **GIVEN** the Containerfile is built
 - **WHEN** the build executes
-- **THEN** it SHALL use separate stages: `base` (system packages), `copilot-unpacker` (Copilot CLI binary), `opencode-unpacker` (OpenCode CLI binary), `cache` (Deno dependency cache), and `final` (runtime image)
+- **THEN** it SHALL use separate stages: `base` (system packages), `opencode-unpacker` (OpenCode CLI binary), `cache` (Deno dependency cache), and `final` (runtime image)
 
 #### Scenario: Dependency Caching
 
@@ -258,10 +258,9 @@ The container SHALL include pre-installed agent binaries and tools.
 
 - **GIVEN** the container is built
 - **WHEN** the final image is produced
-- **THEN** it SHALL contain: `copilot` (GitHub Copilot CLI), `opencode` (OpenCode CLI), `gemini` (Gemini CLI via npm), `rg` (ripgrep), and `dumb-init`
+- **THEN** it SHALL contain: `opencode` (OpenCode CLI), `rg` (ripgrep), and `dumb-init`
 - **AND** skills SHALL be copied to `/home/deno/.agents/skills/`
 - **AND** OpenCode config SHALL be at `/home/deno/.config/opencode/opencode.json`
-- **AND** Gemini settings SHALL be at `/home/deno/.gemini/settings.json`
 
 ### Requirement: OCI Labels
 

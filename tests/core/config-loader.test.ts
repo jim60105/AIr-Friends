@@ -180,7 +180,7 @@ agent:
   model: "gpt-4"
   systemPromptPath: "./prompts/system_reply.md"
   tokenLimit: 20000
-  defaultAgentType: "copilot"
+  defaultAgentType: "opencode"
 workspace:
   repoPath: "./data"
   workspacesDir: "workspaces"

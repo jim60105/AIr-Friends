@@ -121,7 +121,6 @@
           "*": "deny",
           "~/.agents/skills/**": "allow",
           "/home/deno/.agents/skills/**": "allow",
-          "/home/deno/.copilot/skills/**": "allow",
           "/app/data/agent-workspace/**": "allow",
           "/app/data/workspaces/*/tmp/**": "allow"
         }

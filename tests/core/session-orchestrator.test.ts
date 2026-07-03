@@ -84,7 +84,7 @@ function createTestConfig(tempDir: string): Config {
       model: "gpt-4",
       systemPromptPath: "./prompts/system_reply.md",
       tokenLimit: 20000,
-      defaultAgentType: "copilot",
+      defaultAgentType: "opencode",
     },
     memory: {
       searchLimit: 10,
@@ -212,7 +212,7 @@ Deno.test("SessionOrchestrator - processMessage creates workspace", async () => 
     const event = createTestEvent();
     const platformAdapter = new MockPlatformAdapter() as unknown as PlatformAdapter;
 
-    // Note: This will fail because we don't have copilot CLI installed
+    // Note: This will fail because we don't have opencode CLI installed
     // But it should at least create the workspace
     const response = await orchestrator.processMessage(event, platformAdapter);
 
@@ -394,7 +394,7 @@ Deno.test("SessionOrchestrator - processMessage handles agent failure gracefully
     const event = createTestEvent();
     const platformAdapter = new MockPlatformAdapter() as unknown as PlatformAdapter;
 
-    // This will fail because copilot CLI is not installed,
+    // This will fail because opencode CLI is not installed,
     // but should not crash and should return error response
     const response = await orchestrator.processMessage(event, platformAdapter);
 
@@ -546,9 +546,7 @@ class TestableSessionOrchestrator extends SessionOrchestrator {
  */
 async function createTestableOrchestrator(tempDir: string, options?: { skillApi?: boolean }) {
   const config = createTestConfig(tempDir);
-  config.agent.defaultAgentType = "copilot";
-  // Set GitHub token to avoid config error in createAgentConfig
-  config.agent.githubToken = "test-token";
+  config.agent.defaultAgentType = "opencode";
   if (options?.skillApi !== false) {
     config.skillApi = {
       enabled: true,
@@ -884,7 +882,7 @@ Deno.test("SessionOrchestrator - retry exhausts max retries without reply", asyn
     assertEquals(response.success, false);
     assertEquals(response.replySent, false);
     assertEquals(response.error, "Agent did not generate a reply");
-    // Initial prompt + maxRetries (1 for copilot) = 2
+    // Initial prompt + maxRetries (1 for opencode) = 2
     assertEquals(orchestrator.mockConnector!.promptCallCount, 2);
 
     sessionRegistry.stop();
@@ -1069,8 +1067,7 @@ Deno.test("SessionOrchestrator - processSpontaneousPost with skillApi disabled",
   const tempDir = await Deno.makeTempDir();
   try {
     const config = createTestConfig(tempDir);
-    config.agent.defaultAgentType = "copilot";
-    config.agent.githubToken = "test-token";
+    config.agent.defaultAgentType = "opencode";
     // Ensure skillApi is not configured (disabled)
     // deno-lint-ignore no-explicit-any
     delete (config as any).skillApi;
@@ -1314,8 +1311,7 @@ Deno.test("SessionOrchestrator - processSelfResearch handles agent connection fa
   const tempDir = await Deno.makeTempDir();
   try {
     const config = createTestConfig(tempDir);
-    config.agent.defaultAgentType = "copilot";
-    config.agent.githubToken = "test-token";
+    config.agent.defaultAgentType = "opencode";
     config.skillApi = {
       enabled: true,
       port: 3998,
@@ -1351,7 +1347,7 @@ Deno.test("SessionOrchestrator - processSelfResearch handles agent connection fa
 
     const sessionRegistry = new SessionRegistry();
 
-    // Use real orchestrator (not testable) - will fail to connect to copilot CLI
+    // Use real orchestrator (not testable) - will fail to connect to opencode CLI
     const orchestrator = new SessionOrchestrator(
       workspaceManager,
       contextAssembler,
@@ -1606,8 +1602,7 @@ Deno.test("SessionOrchestrator - processMemoryMaintenance handles agent connecti
   const tempDir = await Deno.makeTempDir();
   try {
     const config = createTestConfig(tempDir);
-    config.agent.defaultAgentType = "copilot";
-    config.agent.githubToken = "test-token";
+    config.agent.defaultAgentType = "opencode";
     config.skillApi = {
       enabled: true,
       port: 3997,
@@ -2581,47 +2576,6 @@ Deno.test({
 
       // Switch to opencode agent without YOLO
       config.agent.defaultAgentType = "opencode";
-
-      const event = createTestEvent();
-      const platformAdapter = new MockPlatformAdapter() as unknown as PlatformAdapter;
-      const replyHandler = skillRegistry.getReplyHandler();
-
-      orchestrator.setConnectorSetup((connector) => {
-        connector.promptResponses = [{ stopReason: "end_turn" } as PromptResponse];
-        connector.onPrompt = (callCount) => {
-          if (callCount === 1) {
-            const workspace = workspaceManager.getWorkspaceKeyFromEvent(event);
-            const key = `${workspace}:${event.channelId}`;
-            // deno-lint-ignore no-explicit-any
-            (replyHandler as any).replySentMap.set(key, true);
-          }
-        };
-      });
-
-      await orchestrator.processMessage(event, platformAdapter);
-
-      assertEquals(orchestrator.mockConnector!.modeSet, false);
-
-      sessionRegistry.stop();
-    } finally {
-      await Deno.remove(tempDir, { recursive: true });
-    }
-  },
-});
-
-Deno.test({
-  name: "SessionOrchestrator - setSessionMode NOT called with copilot + YOLO",
-  sanitizeResources: false,
-  sanitizeOps: false,
-  async fn() {
-    const tempDir = await Deno.makeTempDir();
-    try {
-      const { orchestrator, skillRegistry, workspaceManager, sessionRegistry } =
-        await createTestableOrchestrator(tempDir);
-
-      // copilot is the default agent type; enable YOLO
-      // deno-lint-ignore no-explicit-any
-      (orchestrator as any).yolo = true;
 
       const event = createTestEvent();
       const platformAdapter = new MockPlatformAdapter() as unknown as PlatformAdapter;

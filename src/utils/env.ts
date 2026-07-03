@@ -11,8 +11,6 @@ export const ENV_MAPPINGS = {
   MISSKEY_ENABLED: "platforms.misskey.enabled",
   AGENT_MODEL: "agent.model",
   AGENT_REASONING_EFFORT: "agent.reasoningEffort",
-  GITHUB_TOKEN: "agent.githubToken",
-  COPILOT_GITHUB_TOKEN: "agent.copilotGithubToken",
   GEMINI_API_KEY: "agent.geminiApiKey",
   OPENROUTER_API_KEY: "agent.openRouterApiKey",
   AGENT_DEFAULT_TYPE: "agent.defaultAgentType",

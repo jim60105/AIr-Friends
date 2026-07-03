@@ -116,8 +116,7 @@ function createTestConfig(tempDir: string, dryRunEnabled = true): Config {
       model: "gpt-4",
       systemPromptPath: `${tempDir}/prompts/system_reply.md`,
       tokenLimit: 20000,
-      defaultAgentType: "copilot",
-      githubToken: "test-token",
+      defaultAgentType: "opencode",
       dryRun: {
         enabled: dryRunEnabled,
         outputPath: `${tempDir}/dry-run-output/`,

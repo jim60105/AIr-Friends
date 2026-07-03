@@ -578,10 +578,11 @@ export class DashboardServer {
       return this.json({ error: "Invalid request body" }, 400);
     }
 
-    const agentType = (body.agentType ?? getDefaultAgentType(this.deps.appConfig)) as AgentType;
-    if (!["copilot", "gemini", "opencode"].includes(agentType)) {
+    const rawAgentType = body.agentType ?? getDefaultAgentType(this.deps.appConfig);
+    if (rawAgentType !== "opencode") {
       return this.json({ error: "Invalid agent type" }, 400);
     }
+    const agentType: AgentType = rawAgentType;
 
     const model = body.model ?? this.deps.appConfig.agent.model;
     const chatSessionId = crypto.randomUUID();

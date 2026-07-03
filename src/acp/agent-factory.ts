@@ -60,127 +60,6 @@ function buildBaseAgentConfig(
   sessionId?: string,
 ): AgentConfig {
   switch (type) {
-    case "copilot": {
-      const copilotToken = Deno.env.get("COPILOT_GITHUB_TOKEN") ??
-        appConfig.agent.copilotGithubToken;
-      const githubToken = Deno.env.get("GITHUB_TOKEN") ??
-        appConfig.agent.githubToken;
-
-      if (!copilotToken && !githubToken) {
-        throw new Error(
-          "GitHub token not configured for Copilot agent. " +
-            "Set COPILOT_GITHUB_TOKEN or GITHUB_TOKEN env var",
-        );
-      }
-
-      // Build full environment — SandboxManager will filter if enabled
-      const env: Record<string, string> = {};
-      if (copilotToken) env.COPILOT_GITHUB_TOKEN = copilotToken;
-      if (githubToken) env.GITHUB_TOKEN = githubToken;
-
-      // Inherit all potentially needed environment variables
-      const inheritVars = ["PATH", "HOME", "DENO_DIR", "LANG", "LC_ALL", "USER", "TMPDIR"];
-      for (const varName of inheritVars) {
-        const value = Deno.env.get(varName);
-        if (value !== undefined) {
-          env[varName] = value;
-        }
-      }
-
-      if (agentWorkspacePath) {
-        env["AGENT_WORKSPACE"] = agentWorkspacePath;
-      }
-
-      // Set TMPDIR to workspace-scoped tmp directory
-      env["TMPDIR"] = `${workingDir}/tmp`;
-
-      if (sessionId) {
-        env["SESSION_ID"] = sessionId;
-      }
-
-      const args = [
-        "--disable-builtin-mcps",
-        "--no-ask-user",
-        "--no-color",
-        "--no-auto-update",
-        "--experimental",
-        "--acp",
-      ];
-
-      if (!yolo) {
-        args.push("--available-tools");
-        args.push("write_bash");
-        args.push("--available-tools");
-        args.push("read_bash");
-        args.push("--available-tools");
-        args.push("stop_bash");
-        args.push("--available-tools");
-        args.push("bash");
-
-        // Layer 1: Deny dangerous shell commands (defense-in-depth with Layer 3)
-        args.push("--deny-tool", "shell(git:*)");
-        args.push("--deny-tool", "shell(echo:*)");
-        args.push("--deny-tool", "shell(mkdir:*)");
-      } else {
-        args.push("--yolo");
-      }
-
-      return {
-        command: "copilot",
-        args,
-        cwd: workingDir,
-        env,
-      };
-    }
-
-    case "gemini": {
-      const geminiApiKey = appConfig.agent.geminiApiKey ??
-        Deno.env.get("GEMINI_API_KEY");
-
-      if (!geminiApiKey) {
-        throw new Error(
-          "Gemini API key not configured for Gemini agent. " +
-            "Set agent.geminiApiKey in config or GEMINI_API_KEY env var",
-        );
-      }
-
-      const env: Record<string, string> = {
-        GEMINI_API_KEY: geminiApiKey,
-        GEMINI_SYSTEM_MD: "/app/prompts/system_prompt_override.md",
-      };
-
-      const inheritVars = ["PATH", "HOME", "DENO_DIR", "LANG", "LC_ALL", "USER", "TMPDIR"];
-      for (const varName of inheritVars) {
-        const value = Deno.env.get(varName);
-        if (value !== undefined) {
-          env[varName] = value;
-        }
-      }
-
-      if (agentWorkspacePath) {
-        env["AGENT_WORKSPACE"] = agentWorkspacePath;
-      }
-
-      // Set TMPDIR to workspace-scoped tmp directory
-      env["TMPDIR"] = `${workingDir}/tmp`;
-
-      if (sessionId) {
-        env["SESSION_ID"] = sessionId;
-      }
-
-      const args = ["--experimental-acp"];
-      if (yolo) {
-        args.push("--yolo");
-      }
-
-      return {
-        command: "gemini",
-        args,
-        cwd: workingDir,
-        env,
-      };
-    }
-
     case "opencode": {
       const env: Record<string, string> = {};
 
@@ -262,10 +141,10 @@ export function getSessionModeOverride(agentType: AgentType, yolo: boolean): str
 }
 
 /**
- * Get the default agent type from config, or fall back to "copilot"
+ * Get the default agent type from config, or fall back to "opencode"
  */
 export function getDefaultAgentType(appConfig: Config): AgentType {
-  return appConfig.agent.defaultAgentType ?? "copilot";
+  return appConfig.agent.defaultAgentType ?? "opencode";
 }
 
 /**
@@ -295,19 +174,7 @@ export function getRetryPromptStrategy(type: AgentType): RetryPromptStrategy {
     `System message: You have a special turn. You must communicate with the user by using send-reply or react-message before ending the session.\n\n---\n\n${sendReplyContent}\n\n---\n\n${reactMessageContent}`;
 
   switch (type) {
-    case "copilot":
-      return {
-        retryPromptMessage: defaultRetryMessage,
-        maxRetries: 1,
-      };
-
     case "opencode":
-      return {
-        retryPromptMessage: defaultRetryMessage,
-        maxRetries: 1,
-      };
-
-    case "gemini":
       return {
         retryPromptMessage: defaultRetryMessage,
         maxRetries: 1,

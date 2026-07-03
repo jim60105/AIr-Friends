@@ -36,7 +36,7 @@ Deno.test("SessionAuditWriter - appends multiple entries", async () => {
   const tmpDir = await Deno.makeTempDir();
   try {
     const writer = new SessionAuditWriter(tmpDir, "discord", "user1", "sess_test2", baseConfig);
-    await writer.write("agent_connect", { agentType: "copilot" });
+    await writer.write("agent_connect", { agentType: "opencode" });
     await writer.write("prompt_sent", { promptLength: 500 });
     await writer.write("session_end", { success: true });
 
@@ -59,7 +59,7 @@ Deno.test("SessionAuditWriter - filters by includedPhases", async () => {
   };
   try {
     const writer = new SessionAuditWriter(tmpDir, "discord", "user1", "sess_test3", config);
-    await writer.write("agent_connect", { agentType: "copilot" });
+    await writer.write("agent_connect", { agentType: "opencode" });
     await writer.write("session_end", { success: true });
 
     const content = await Deno.readTextFile(`${tmpDir}/discord/user1/sess_test3.jsonl`);
@@ -76,7 +76,7 @@ Deno.test("SessionAuditWriter - empty includedPhases records all", async () => {
   try {
     const writer = new SessionAuditWriter(tmpDir, "discord", "user1", "sess_test4", baseConfig);
     await writer.write("context_assembly", { memoriesCount: 5 });
-    await writer.write("agent_connect", { agentType: "copilot" });
+    await writer.write("agent_connect", { agentType: "opencode" });
 
     const content = await Deno.readTextFile(`${tmpDir}/discord/user1/sess_test4.jsonl`);
     const lines = content.trim().split("\n");
@@ -197,7 +197,7 @@ Deno.test("SessionAuditWriter - writes session_start entry", async () => {
       sessionId: "sess_start",
       sessionType: "normal",
       workspaceKey: "discord/user1",
-      agentType: "copilot",
+      agentType: "opencode",
       model: "gpt-4",
       yolo: false,
     });
@@ -330,7 +330,7 @@ Deno.test("SessionAuditWriter - entries written in chronological order", async (
       ["session_start", { sessionId: "sess_chrono", sessionType: "normal" }],
       ["rate_limit_checked", { decision: "allowed" }],
       ["context_assembly", { memoriesCount: 5 }],
-      ["agent_connect", { agentType: "copilot" }],
+      ["agent_connect", { agentType: "opencode" }],
       ["prompt_sent", { promptLength: 500 }],
       ["agent_message", { promptLength: 500 }],
       ["skill_call", { skillName: "memory-save" }],

@@ -26,27 +26,6 @@ RUN --mount=type=cache,id=apt-$TARGETARCH$TARGETVARIANT,sharing=locked,target=/v
     pandoc
 
 ########################################
-# GitHub Copilot unpack stage
-########################################
-FROM base AS copilot-unpacker
-
-ARG TARGETARCH
-
-WORKDIR /copilot
-
-# Map Docker TARGETARCH to Copilot CLI naming convention
-# TARGETARCH: amd64 -> x64, arm64 -> arm64
-RUN case "${TARGETARCH}" in \
-      amd64) COPILOT_ARCH="x64" ;; \
-      arm64) COPILOT_ARCH="arm64" ;; \
-      *) echo "unsupported architecture: ${TARGETARCH}" && exit 1 ;; \
-    esac && \
-    curl -fsSL "https://github.com/github/copilot-cli/releases/latest/download/copilot-linux-${COPILOT_ARCH}.tar.gz" \
-    -o /tmp/copilot.tar.gz && \
-    tar -xzf /tmp/copilot.tar.gz -C /copilot && \
-    rm -f /tmp/copilot.tar.gz
-
-########################################
 # Opencode unpack stage
 ########################################
 FROM base AS opencode-unpacker
@@ -107,9 +86,7 @@ RUN install -d -m 775 -o $UID -g 0 /app && \
     install -d -m 775 -o $UID -g 0 /home/deno/.local && \
     install -d -m 775 -o $UID -g 0 /home/deno/.local/bin && \
     install -d -m 775 -o $UID -g 0 /home/deno/.local/share/opencode && \
-    install -d -m 775 -o $UID -g 0 /home/deno/.config/opencode && \
-    install -d -m 775 -o $UID -g 0 /home/deno/.gemini && \
-    install -d -m 775 -o $UID -g 0 /home/deno/.gemini/policies
+    install -d -m 775 -o $UID -g 0 /home/deno/.config/opencode
 
 # Copy license file (OpenShift Policy)
 COPY --link --chown=$UID:0 --chmod=775 LICENSE /licenses/LICENSE
@@ -140,17 +117,10 @@ RUN --mount=type=cache,id=apt-$TARGETARCH$TARGETVARIANT,sharing=locked,target=/v
     npx playwright install-deps chromium-headless-shell
 
 # Copy Agents CLI binary
-COPY --link --chown=$UID:0 --chmod=775 --from=copilot-unpacker /copilot/copilot /usr/local/bin/copilot
 COPY --link --chown=$UID:0 --chmod=775 --from=opencode-unpacker /opencode/opencode /usr/local/bin/opencode
-RUN npm install -g @google/gemini-cli && \
-    npm cache clean --force
 
 # Copy OpenCode configuration
 COPY --link --chown=$UID:0 --chmod=775 agent-config/opencode.json /home/deno/.config/opencode/opencode.json
-
-# Copy Gemini CLI configuration
-COPY --link --chown=$UID:0 --chmod=775 agent-config/gemini-settings.json /home/deno/.gemini/settings.json
-COPY --link --chown=$UID:0 --chmod=775 agent-config/gemini-policies/ /home/deno/.gemini/policies/
 
 # Copy application files
 COPY --link --chown=$UID:0 --chmod=775 deno.json deno.lock /app/
@@ -169,7 +139,7 @@ VOLUME ["/app/data"]
 # Volume for custom prompts (optional, defaults to bundled prompts)
 VOLUME ["/app/prompts"]
 
-# Set HOME environment variable for copilot skills discovery
+# Set HOME environment variable for agent skills discovery
 ENV HOME=/home/deno
 
 ENV PATH="/home/deno/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"

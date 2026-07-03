@@ -24,7 +24,7 @@ export interface TemplateVariables {
   /** Guild/server ID (empty string if not applicable) */
   guildId: string;
 
-  /** The agent type used for this session (e.g. "copilot", "gemini", "opencode") */
+  /** The agent type used for this session (e.g. "opencode") */
   agentType?: string;
 
   /** RSS items formatted block (for self-research prompt) */
@@ -63,7 +63,7 @@ export interface TemplateVariables {
   /** Reminder scheduled timestamp (reminder delivery prompt only) */
   reminderScheduledAt?: string;
 
-  /** Model identifier (e.g., "claude-opus-4.6", "gemini-2.5-pro") */
+  /** Model identifier (e.g., "pioneer/claude-opus-4-8", "openrouter/google/gemini-2.5-pro") */
   model?: string;
 
   /** Whether YOLO mode is enabled for this session (bypasses permission restrictions) */

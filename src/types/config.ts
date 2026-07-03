@@ -146,13 +146,7 @@ export interface AgentConfig {
   /** Maximum tokens for context */
   tokenLimit: number;
 
-  /** Optional GitHub token dedicated to Copilot agent (takes priority over githubToken) */
-  copilotGithubToken?: string;
-
-  /** GitHub token for GitHub Copilot CLI (optional) */
-  githubToken?: string;
-
-  /** Gemini API key for Gemini CLI (optional) */
+  /** OpenCode Gemini provider API key (optional) */
   geminiApiKey?: string;
 
   /** OpenCode API key for OpenCode CLI (optional) */
@@ -161,8 +155,8 @@ export interface AgentConfig {
   /** OpenRouter API key for OpenRouter provider (optional) */
   openRouterApiKey?: string;
 
-  /** Default ACP agent type to use ("copilot", "gemini", or "opencode") */
-  defaultAgentType?: "copilot" | "gemini" | "opencode";
+  /** Default ACP agent type to use ("opencode") */
+  defaultAgentType?: "opencode";
 
   /** Model routing configuration (optional) */
   modelRouting?: ModelRoutingConfig;

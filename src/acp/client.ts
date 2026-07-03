@@ -265,7 +265,7 @@ export function matchesCommandPrefix(cmd: string, prefix: string): boolean {
 
 /**
  * ChatbotClient implements the ACP Client interface
- * Handles callbacks from external ACP Agents (GitHub Copilot CLI, Gemini CLI)
+ * Handles callbacks from the external OpenCode ACP Agent
  */
 export class ChatbotClient implements acp.Client {
   private skillRegistry: SkillRegistry;

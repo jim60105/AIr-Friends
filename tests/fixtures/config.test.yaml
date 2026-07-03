@@ -5,8 +5,7 @@ logging:
 
 acp:
   agent:
-    type: copilot
-    githubToken: test-github-token
+    type: opencode
 
 session:
   maxDuration: 10000

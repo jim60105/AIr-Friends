@@ -43,13 +43,13 @@ env:
   MISSKEY_ENABLED: 'false'
 
   # Agent configuration
-  AGENT_MODEL: 'github-copilot/gpt-5-mini'
+  AGENT_MODEL: 'pioneer/claude-opus-4-8'
 
   # Global reasoning effort (ACP thought_level): none|low|medium|high|default
   # "default" = do not configure. Per-rule/per-section values go in config / MODEL_ROUTING_RULES.
   AGENT_REASONING_EFFORT: 'default'
 
-  # Default ACP agent type (copilot|gemini|opencode)
+  # Default ACP agent type (opencode)
   AGENT_DEFAULT_TYPE: 'opencode'
 
   # Skills directory path (default: skills)
@@ -73,16 +73,17 @@ env:
   # Environment
   DENO_ENV: 'development'
 
-  # Agents API keys
-  # GitHub Token for Copilot
-  GITHUB_TOKEN: 'github_pat_your-token-here'
-  COPILOT_GITHUB_TOKEN: ''
-  # Gemini API Key for Gemini CLI and OpenCode Gemini provider
-  GEMINI_API_KEY: 'your-gemini-api-key'
-  # OpenCode API Key (optional - can use GitHub/Gemini providers instead)
+  # Agent provider API keys
+  # OpenCode API Key (optional)
   OPENCODE_API_KEY: 'your-opencode-api-key'
   # OpenRouter API Key (optional - for OpenRouter provider)
   OPENROUTER_API_KEY: 'your-openrouter-api-key'
+  # Gemini API Key for the OpenCode Gemini provider (optional)
+  GEMINI_API_KEY: 'your-gemini-api-key'
+  # Pioneer API Key (optional - for the Pioneer provider)
+  PIONEER_API_KEY: 'your-pioneer-api-key'
+  # GitHub Token (used by the git backup / git credential store; optional)
+  GITHUB_TOKEN: 'github_pat_your-token-here'
 
   # Reply Policy & Channel Settings (all|public|channels)
   REPLY_POLICY: 'channels'
@@ -118,7 +119,7 @@ env:
 
   # RSS Feed Research Settings
   SELF_RESEARCH_ENABLED: 'false'
-  SELF_RESEARCH_MODEL: 'github-copilot/claude-opus-4.6'
+  SELF_RESEARCH_MODEL: 'pioneer/claude-opus-4-8'
   # RSS feeds: prefer using selfResearchRssFeeds section below (native YAML).
   # Only set this if you need to override selfResearchRssFeeds with a raw JSON string.
   # SELF_RESEARCH_RSS_FEEDS: '[{"url":"https://example.com/feed.xml","name":"Tech News"}]'

@@ -8,7 +8,7 @@ This guide provides comprehensive instructions for developing and customizing AI
 - [dumb-init](https://github.com/Yelp/dumb-init) - Required for wrapping agent subprocesses with proper signal forwarding and zombie process reaping
 - Discord Bot Token (for Discord integration)
 - Misskey Access Token (for Misskey integration)
-- An ACP-compliant CLI agent (OpenCode CLI, GitHub Copilot CLI, Gemini CLI. The recommended one is OpenCode CLI)
+- [OpenCode CLI](https://opencode.ai/) - The ACP-compliant CLI agent that powers AIr-Friends
 - For OpenCode CLI: GEMINI_API_KEY, OPENCODE_API_KEY, or OPENROUTER_API_KEY for [provider access](https://opencode.ai/docs/providers/)
 
 ## Development Setup
@@ -204,9 +204,7 @@ Configuration is loaded from `config.yaml` (YAML format). See [config.example.ya
 | `MISSKEY_ENABLED`      | Enable Misskey integration (true/false)              |
 | `MISSKEY_HOST`         | Misskey instance host                                |
 | `MISSKEY_TOKEN`        | Misskey access token                                 |
-| `GITHUB_TOKEN`         | GitHub token for Copilot                             |
-| `COPILOT_GITHUB_TOKEN` | Dedicated Copilot token (falls back to GITHUB_TOKEN) |
-| `GEMINI_API_KEY`       | Gemini API key for Gemini CLI/OpenCode               |
+| `GEMINI_API_KEY`       | API key for the OpenCode Gemini provider             |
 | `OPENCODE_API_KEY`     | OpenCode API key                                     |
 | `OPENROUTER_API_KEY`   | OpenRouter API key                                   |
 
@@ -215,7 +213,7 @@ Configuration is loaded from `config.yaml` (YAML format). See [config.example.ya
 | Variable                    | Description                                                                                        |
 | --------------------------- | -------------------------------------------------------------------------------------------------- |
 | `AGENT_MODEL`               | LLM model identifier (e.g., "gpt-5-mini")                                                          |
-| `AGENT_DEFAULT_TYPE`        | Default ACP agent type (copilot/gemini/opencode)                                                   |
+| `AGENT_DEFAULT_TYPE`        | Default ACP agent type (opencode)                                                                  |
 | `AGENT_SKILLS_DIR`          | Skills directory path (default: "skills")                                                          |
 | `AGENT_EXTERNAL_SKILLS`     | External skills to install at startup (JSON string, e.g. `[{"repo":"owner/repo","skill":"name"}]`) |
 | `AGENT_AUTO_APPROVE_SKILLS` | Skill names to auto-approve in restricted mode (comma-separated)                                   |
@@ -452,7 +450,7 @@ agent:
         model: "openrouter/deepseek/deepseek-v3.2"
       # Premium model for self-research
       - match: { sessionType: "self-research" }
-        model: "github-copilot/claude-opus-4.6"
+        model: "pioneer/claude-opus-4-8"
 ```
 
 Via environment variables:
@@ -566,7 +564,14 @@ The container includes a pre-configured `opencode.json` that automatically sets 
 
 The configuration defines a **dual-agent setup**: a `build` agent (default) for restricted mode with granular permission whitelisting (`"*": "deny"` + specific allows), and a `yolo` agent for unrestricted mode (`"*": "allow"`). When YOLO mode is enabled, the system switches to the `yolo` agent via ACP `setSessionMode("yolo")`.
 
-The configuration file is located at `~/.config/opencode/opencode.json` inside the container. OpenCode will automatically use the GitHub and Gemini providers when their respective tokens are available as environment variables.
+The configuration file is located at `~/.config/opencode/opencode.json` inside the container. OpenCode automatically enables its providers when their respective keys are available as environment variables:
+
+- **Pioneer provider**: Uses `PIONEER_API_KEY`
+- **OpenRouter provider**: Uses `OPENROUTER_API_KEY`
+- **Gemini provider**: Uses `GEMINI_API_KEY`
+- **OpenCode's own hosted API**: Uses `OPENCODE_API_KEY`
+
+To override the system prompt, set the prompt path in `opencode.json` to point at `prompts/system_prompt_override.md`.
 
 You can customize OpenCode behavior by mounting your own `opencode.json` configuration file:
 
@@ -615,7 +620,7 @@ The following variables are available in all prompt templates:
 | `channelId`              | `string`  | Channel/conversation ID                                         | `"873618490202931231"`   |
 | `guildId`                | `string`  | Server/guild ID (empty string if N/A)                           | `""`                     |
 | `sessionId`              | `string`  | Current skill API session ID                                    | `"sess_abc123"`          |
-| `agentType`              | `string`  | ACP agent type (`"copilot"`, `"gemini"`, `"opencode"`)          | `"copilot"`              |
+| `agentType`              | `string`  | ACP agent type (`"opencode"`)                                   | `"opencode"`             |
 | `model`                  | `string`  | Model identifier for the current session                        | `"claude-opus-4.6"`      |
 | `yolo`                   | `boolean` | Whether YOLO mode is enabled (bypasses permission restrictions) | `true`                   |
 | `canWriteAgentWorkspace` | `boolean` | Whether this session allows writing to agent workspace          | `false`                  |

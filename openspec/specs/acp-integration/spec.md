@@ -2,11 +2,11 @@
 
 ## Purpose
 
-Defines how AIr-Friends acts as an ACP (Agent Client Protocol) Client, spawning external agent subprocesses (Copilot, Gemini, OpenCode), managing bidirectional JSON-RPC communication, handling permission requests, sandboxing agent processes, and supporting retry, idle timeout, and external MCP server registration.
+Defines how AIr-Friends acts as an ACP (Agent Client Protocol) Client, spawning the external OpenCode agent subprocess, managing bidirectional JSON-RPC communication, handling permission requests, sandboxing agent processes, and supporting retry, idle timeout, and external MCP server registration.
 ## Requirements
 ### Requirement: AgentConnector Subprocess Management
 
-The system SHALL manage external ACP agent lifecycle through the `AgentConnector` class, spawning agents as subprocesses with `dumb-init` for proper signal forwarding and communicating via stdio JSON-RPC. The subprocess SHALL be spawned with a cleared parent environment (`clearEnv: true`) so it receives ONLY the explicitly-built agent environment and inherits no parent secrets.
+The system SHALL manage the external OpenCode ACP agent lifecycle through the `AgentConnector` class, spawning the agent as a subprocess with `dumb-init` for proper signal forwarding and communicating via stdio JSON-RPC. The subprocess SHALL be spawned with a cleared parent environment (`clearEnv: true`) so it receives ONLY the explicitly-built agent environment and inherits no parent secrets.
 
 #### Scenario: Agent connection
 - **GIVEN** a valid `AgentConfig` with command, args, cwd, and env
@@ -203,27 +203,22 @@ The system SHALL build a skill auto-approve list from configuration or by scanni
 
 ### Requirement: Supported Agent Types
 
-The system SHALL support three agent types: `"copilot"`, `"gemini"`, and `"opencode"`.
-
-#### Scenario: Copilot agent configuration
-- **GIVEN** agent type `"copilot"`
-- **WHEN** `createAgentConfig()` builds the config
-- **THEN** it SHALL use command `copilot` with base flags (`--disable-builtin-mcps`, `--no-ask-user`, `--no-color`, `--no-auto-update`, `--experimental`, `--acp`), and in restricted mode add `--available-tools write_bash`, `--available-tools read_bash`, `--available-tools stop_bash`, `--available-tools bash`, and separate `--deny-tool` entries for `shell(git:*)`, `shell(echo:*)`, `shell(mkdir:*)`; or `--yolo` flag in YOLO mode, and pass `COPILOT_GITHUB_TOKEN` and `GITHUB_TOKEN` env vars
-
-#### Scenario: Gemini agent configuration
-- **GIVEN** agent type `"gemini"`
-- **WHEN** `createAgentConfig()` builds the config
-- **THEN** it SHALL use command `gemini` with `--experimental-acp` in restricted mode or `--yolo` in YOLO mode, and pass `GEMINI_API_KEY` and `GEMINI_SYSTEM_MD` env vars
+The system SHALL support a single agent type: `"opencode"`.
 
 #### Scenario: OpenCode agent configuration
 - **GIVEN** agent type `"opencode"`
 - **WHEN** `createAgentConfig()` builds the config
-- **THEN** it SHALL use command `opencode acp` with permissions defined in `opencode.json`, passing `OPENCODE_API_KEY`, `OPENROUTER_API_KEY`, `GEMINI_API_KEY`, and `GOOGLE_GENERATIVE_AI_API_KEY` env vars
+- **THEN** it SHALL use command `opencode acp` with permissions defined in `opencode.json`, passing `OPENCODE_API_KEY`, `OPENROUTER_API_KEY`, `PIONEER_API_KEY`, `GEMINI_API_KEY`, and `GOOGLE_GENERATIVE_AI_API_KEY` env vars
+
+#### Scenario: Unknown agent type
+- **GIVEN** an agent type other than `"opencode"`
+- **WHEN** `createAgentConfig()` builds the config
+- **THEN** it SHALL throw an error indicating the agent type is unknown
 
 #### Scenario: Default agent selection
 - **GIVEN** no explicit agent type configured
 - **WHEN** `getDefaultAgentType()` is called
-- **THEN** it SHALL return `"copilot"` as the default
+- **THEN** it SHALL return `"opencode"` as the default
 
 ### Requirement: Agent Common Environment
 
@@ -250,10 +245,10 @@ The system SHALL switch OpenCode to its YOLO agent via ACP `setSessionMode()` ra
 - **WHEN** `getSessionModeOverride()` is called
 - **THEN** it SHALL return `"yolo"` to switch to the yolo agent defined in `opencode.json` (which has `"*": "allow"` permissions)
 
-#### Scenario: Non-OpenCode YOLO
-- **GIVEN** agent type `"copilot"` or `"gemini"` with YOLO enabled
+#### Scenario: OpenCode restricted mode
+- **GIVEN** agent type `"opencode"` with YOLO disabled
 - **WHEN** `getSessionModeOverride()` is called
-- **THEN** it SHALL return `null` (YOLO is handled via CLI flags for these agents)
+- **THEN** it SHALL return `null` (the default restricted `build` agent is used)
 
 ---
 
@@ -272,9 +267,9 @@ The `SandboxManager` SHALL filter subprocess environment variables to a base all
 - **THEN** it SHALL pass the agent configuration environment variables without additional sandbox filtering
 
 #### Scenario: Agent-specific environment variables
-- **GIVEN** agent type `"copilot"`
+- **GIVEN** agent type `"opencode"`
 - **WHEN** environment is filtered
-- **THEN** it SHALL additionally allow `GITHUB_TOKEN` and `COPILOT_GITHUB_TOKEN`
+- **THEN** it SHALL additionally allow `GEMINI_API_KEY`, `OPENROUTER_API_KEY`, `OPENCODE_API_KEY`, `GOOGLE_GENERATIVE_AI_API_KEY`, and `PIONEER_API_KEY`
 
 ### Requirement: SandboxManager Network Isolation
 
@@ -367,10 +362,10 @@ The system SHALL retry when an ACP agent completes without calling the `send-rep
 - **WHEN** the retry threshold has not been reached
 - **THEN** it SHALL clear reply state, send a retry prompt on the same ACP session, and check for a reply again
 
-#### Scenario: Retry strategy per agent type
-- **GIVEN** any supported agent type
+#### Scenario: Retry strategy for OpenCode
+- **GIVEN** agent type `"opencode"`
 - **WHEN** `getRetryPromptStrategy()` is called
-- **THEN** it SHALL return `maxRetries: 1` for all agent types (copilot, gemini, opencode)
+- **THEN** it SHALL return `maxRetries: 1`
 
 #### Scenario: Final retry failure
 - **GIVEN** the retry also fails to produce a reply

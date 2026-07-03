@@ -27,10 +27,9 @@ const BASE_ALLOWED_ENV = [
   "TMPDIR",
 ];
 
-// Agent-type-specific authentication environment variables
+// Agent-type-specific authentication environment variables.
+// GEMINI_API_KEY / GOOGLE_GENERATIVE_AI_API_KEY are the OpenCode Gemini provider keys.
 const AGENT_TYPE_ENV: Record<string, string[]> = {
-  copilot: ["GITHUB_TOKEN", "COPILOT_GITHUB_TOKEN"],
-  gemini: ["GEMINI_API_KEY", "GEMINI_SYSTEM_MD"],
   opencode: [
     "GEMINI_API_KEY",
     "OPENROUTER_API_KEY",

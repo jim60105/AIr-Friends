@@ -91,7 +91,7 @@ export interface ContextAssemblyConfig {
   /** Path to system prompt file */
   systemPromptPath: string;
 
-  /** The agent type used for prompt rendering (e.g. "copilot", "gemini", "opencode") */
+  /** The agent type used for prompt rendering (e.g. "opencode") */
   agentType?: string;
 }
 

@@ -760,7 +760,7 @@ Deno.test({
     const res = await fetch(`${t.baseUrl}/api/chat/connect`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ agentType: "copilot" }),
+      body: JSON.stringify({ agentType: "opencode" }),
     });
     assertEquals(res.status, 401);
     await res.body?.cancel();
@@ -2096,9 +2096,9 @@ Deno.test({
     const res = await fetch(`${t.baseUrl}/api/chat/connect`, {
       method: "POST",
       headers: { "Content-Type": "application/json", Cookie: cookie },
-      body: JSON.stringify({ agentType: "copilot", model: "gpt-4" }),
+      body: JSON.stringify({ agentType: "opencode", model: "gpt-4" }),
     });
-    // Will fail because copilot binary is not available — returns 500
+    // Will fail because opencode binary is not available — returns 500
     assertEquals(res.status, 500);
     const body = await res.json();
     assertEquals(body.error, "Failed to connect to agent");
@@ -2518,7 +2518,7 @@ Deno.test({
     const res = await fetch(`${t.baseUrl}/api/chat/connect`, {
       method: "POST",
       headers: { "Content-Type": "application/json", Cookie: cookie },
-      body: JSON.stringify({ agentType: "copilot" }),
+      body: JSON.stringify({ agentType: "opencode" }),
     });
     assertEquals(res.status, 409);
     const body = await res.json();

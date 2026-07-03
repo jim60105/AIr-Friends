@@ -184,7 +184,7 @@ AIr-Friends acts as an [ACP (Agent Client Protocol)](https://agentclientprotocol
 │  AIr-Friends (ACP Client)               │
 │            ↓                            │
 │  External AI Agent                      │
-│  (Copilot/Gemini/OpenCode)              │
+│  (OpenCode)                             │
 │            ↓                            │
 │  Skills & Memory System                 │
 └─────────────────────────────────────────┘
@@ -196,7 +196,7 @@ See [Design Document](docs/DESIGN.md) for detailed architecture.
 
 The official container image includes:
 
-- Pre-installed AI agent binaries (Copilot CLI, Gemini CLI, OpenCode CLI)
+- Pre-installed AI agent binary (OpenCode CLI)
 - Auto-approval mode enabled for isolated execution
 - Health check endpoint on port 8080
 - Default prompts at `/app/prompts` (can be overridden)

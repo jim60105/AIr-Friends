@@ -88,7 +88,7 @@ function createTestConfig(
       model: "gpt-4",
       systemPromptPath: `${tempDir}/prompts/system_reply.md`,
       tokenLimit: 20000,
-      defaultAgentType: "copilot",
+      defaultAgentType: "opencode",
     },
     memory: {
       searchLimit: 10,
@@ -196,7 +196,7 @@ Deno.test("AgentCore - handles events from registered platforms", async () => {
     // Wait a bit for async processing
     await new Promise((resolve) => setTimeout(resolve, 100));
 
-    // Note: The event will fail because we don't have copilot CLI,
+    // Note: The event will fail because we don't have opencode CLI,
     // but it should send an error message
     const sentReplies = mockAdapter.sentReplies;
     assertEquals(sentReplies.length > 0, true, "Should send error message");

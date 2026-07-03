@@ -4,12 +4,12 @@ This document provides comprehensive guidance for AI agents working on the AIr-F
 
 ## Project Overview
 
-AIr-Friends is a multi-platform conversational AI bot that acts as an **ACP (Agent Client Protocol) Client**, delegating AI reasoning to external agents (GitHub Copilot CLI, Gemini CLI, OpenCode CLI) while maintaining persistent cross-conversation memory.
+AIr-Friends is a multi-platform conversational AI bot that acts as an **ACP (Agent Client Protocol) Client**, delegating AI reasoning to the external OpenCode CLI agent while maintaining persistent cross-conversation memory.
 
 **Key Concepts:**
 
 - **We are the ACP Client**: We spawn and communicate with external ACP Agents
-- **External CLI tools are the Agents**: GitHub Copilot CLI, Gemini CLI, OpenCode CLI execute AI tasks
+- **External CLI tool is the Agent**: OpenCode CLI executes AI tasks
 - **Skills are shell-based**: We provide Deno TypeScript skill scripts that Agents can execute
 - **Skill API Server**: HTTP server for skills to communicate back to the main bot
 - **Workspace isolation**: Each conversation context has its own isolated working directory
@@ -40,7 +40,7 @@ AIr-Friends is a multi-platform conversational AI bot that acts as an **ACP (Age
 │           ↓ (spawn subprocess, stdio JSON-RPC)              │
 ├─────────────────────────────────────────────────────────────┤
 │           External ACP AGENTS                               │
-│  (GitHub Copilot CLI / Gemini CLI / OpenCode CLI)           │
+│  (OpenCode CLI)                                             │
 │           ↓ (executes our shell-based skills)               │
 ├─────────────────────────────────────────────────────────────┤
 │  Shell Skills (Deno scripts in skills/ directory)           │
@@ -489,7 +489,7 @@ We use `@agentclientprotocol/sdk` for Client-side connection:
 
 **AgentConnector** (`src/acp/agent-connector.ts`):
 
-- Spawns external ACP agent as subprocess (copilot/gemini/opencode CLI)
+- Spawns external ACP agent as subprocess (opencode CLI)
 - Creates bidirectional JSON-RPC stream (stdin/stdout)
 - Manages agent lifecycle (connect, disconnect, cleanup)
 
@@ -575,21 +575,19 @@ and the effort independently while keeping them tied to the same matched rule.
 - `AGENT_REASONING_EFFORT` → `agent.reasoningEffort` (global default only). Per-rule values ride in
   `MODEL_ROUTING_RULES` JSON; per-section values come from the config file.
 
-**Supported Agents**:
+**Supported Agent**:
 
-- **GitHub Copilot CLI** (`copilot`) - Commercial agent from GitHub, requires `COPILOT_GITHUB_TOKEN` or `GITHUB_TOKEN`
-- **Gemini CLI** (`gemini`) - Google's Gemini CLI, requires `GEMINI_API_KEY`
 - **OpenCode CLI** (`opencode`) - Open source coding agent that supports multiple providers:
-  - Gemini provider (uses `GEMINI_API_KEY` env var)
+  - Pioneer provider
   - OpenRouter provider (uses `OPENROUTER_API_KEY` env var)
+  - Gemini provider (uses `GEMINI_API_KEY` env var)
   - Pre-configured in container with `agent-config/opencode.json`
 
 **Agent Selection**:
 
 - Set via `agent.defaultAgentType` in config or `AGENT_DEFAULT_TYPE` env var
-- Valid values: `"copilot"`, `"gemini"`, or `"opencode"`
-- Container includes pre-installed binaries for all three agents
-- Copilot agent accepts `COPILOT_GITHUB_TOKEN` (dedicated token) and/or `GITHUB_TOKEN`; both are passed to the subprocess separately
+- Valid value: `"opencode"`
+- Container includes the pre-installed `opencode` binary
 
 **External MCP Servers**:
 
@@ -634,7 +632,7 @@ When `agent.gitCredential.enabled` is true, bootstrap writes a `~/.git-credentia
 - Host resolution order is: `agent.gitCredential.host` → parsed from `gitBackup.remoteUrl` → `github.com`
 - The credential file lives under `$HOME`, so it is outside ACP workspace file reads and is not injected into prompt context
 - In restricted mode this configuration is effectively dormant because git shell access is still blocked by the existing defense layers
-- Copilot may still receive `GITHUB_TOKEN` for CLI auth, but credential store keeps git auth behavior consistent with Gemini and OpenCode and avoids constructing tokenized git URLs in prompts
+- The credential store keeps git auth behavior consistent for OpenCode and avoids constructing tokenized git URLs in prompts
 - Known limitation: in YOLO mode, the Agent can still read `~/.git-credentials` directly if it chooses to run `cat ~/.git-credentials`; this is an inherent YOLO trust-boundary tradeoff
 
 Environment variable overrides:
@@ -648,7 +646,7 @@ Environment variable overrides:
 
 When YOLO mode is enabled for an OpenCode session, the system switches to the `yolo` agent
 defined in `agent-config/opencode.json` via ACP `setSessionMode("yolo")`. This agent has
-`"*": "allow"` permissions, matching the unrestricted behavior of Copilot and Gemini `--yolo` flags.
+`"*": "allow"` permissions, granting the agent unrestricted access.
 
 | Mode       | OpenCode Agent    | Permission Default        |
 | ---------- | ----------------- | ------------------------- |
@@ -673,9 +671,7 @@ The retry strategy is configured per agent type via `getRetryPromptStrategy()` i
 
 | Agent    | Max Retries | Retry Supported |
 | -------- | ----------- | --------------- |
-| Copilot  | 1           | Yes             |
 | OpenCode | 1           | Yes             |
-| Gemini   | 1           | Yes             |
 
 **Idle Timeout Detection**:
 
@@ -1252,8 +1248,8 @@ You are Yuna. This is a private chat.
 | `channelId`              | `string`  | Channel/conversation ID                                          |
 | `guildId`                | `string`  | Server/guild ID (empty string if N/A)                            |
 | `sessionId`              | `string`  | Current skill API session ID                                     |
-| `agentType`              | `string`  | ACP agent type (`"copilot"` / `"gemini"` / `"opencode"`)         |
-| `model`                  | `string`  | Model identifier (e.g., `"claude-opus-4.6"`, `"gemini-2.5-pro"`) |
+| `agentType`              | `string`  | ACP agent type (`"opencode"`)                                    |
+| `model`                  | `string`  | Model identifier (e.g., `"pioneer/claude-opus-4-8"`)             |
 | `rssItems`               | `string`  | RSS items (self-research prompt only)                            |
 | `workspaceKey`           | `string`  | Workspace key (memory maintenance prompt only)                   |
 | `memoriesDump`           | `string`  | Memory JSON dump (memory maintenance only)                       |
@@ -1282,7 +1278,6 @@ You are Yuna. This is a private chat.
 **Container Binaries:**
 
 - The container includes pre-installed binaries:
-  - `copilot` - GitHub Copilot CLI (latest release)
   - `opencode` - OpenCode CLI (latest release)
   - `rg` - ripgrep 15.1.0 for memory search
   - `dumb-init` - Used as PID 1 and to wrap agent subprocesses for proper signal forwarding
@@ -1579,10 +1574,7 @@ AIr-Friends/
 │   ├── mocks/
 │   └── main.test.ts
 ├── agent-config/             # Agent CLI configuration files
-│   ├── opencode.json         # OpenCode CLI configuration
-│   ├── gemini-settings.json  # Gemini CLI settings
-│   └── gemini-policies/      # Gemini Policy Engine rules
-│       └── airfriends.toml
+│   └── opencode.json         # OpenCode CLI configuration
 ├── deno.json                 # Deno configuration
 ├── deno.lock                 # Dependency lock file
 ├── config.yaml               # Runtime configuration
