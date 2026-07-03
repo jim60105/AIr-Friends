@@ -53,13 +53,12 @@ platforms:
 
 # Agent/LLM configuration
 agent:
-  model: "pioneer/claude-opus-4-8" # Model identifier (OpenCode provider/model)
+  model: "openrouter/deepseek/deepseek-v4-pro" # Model identifier (OpenCode provider/model)
   systemPromptPath: "./prompts/system_reply.md" # Path to the system prompt file
   tokenLimit: 20000 # Max tokens for context
   geminiApiKey: "${GEMINI_API_KEY}" # Optional OpenCode Gemini provider API key (env: GEMINI_API_KEY)
   opencodeApiKey: "${OPENCODE_API_KEY}" # Optional OpenCode API key (env: OPENCODE_API_KEY)
   openRouterApiKey: "${OPENROUTER_API_KEY}" # Optional OpenRouter API key (env: OPENROUTER_API_KEY)
-  # Pioneer API key is read directly from the PIONEER_API_KEY env var (no config field; forwarded to the OpenCode subprocess)
   defaultAgentType: "${AGENT_DEFAULT_TYPE}" # Default ACP agent: "opencode" (env: AGENT_DEFAULT_TYPE)
   skillsDir: "skills" # Path to skills directory (default: "skills"); use "/home/deno/.agents/skills" for container deployment; override with env AGENT_SKILLS_DIR
 

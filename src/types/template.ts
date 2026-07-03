@@ -63,7 +63,7 @@ export interface TemplateVariables {
   /** Reminder scheduled timestamp (reminder delivery prompt only) */
   reminderScheduledAt?: string;
 
-  /** Model identifier (e.g., "pioneer/claude-opus-4-8", "openrouter/google/gemini-2.5-pro") */
+  /** Model identifier (e.g., "openrouter/deepseek/deepseek-v4-pro", "openrouter/google/gemini-2.5-pro") */
   model?: string;
 
   /** Whether YOLO mode is enabled for this session (bypasses permission restrictions) */

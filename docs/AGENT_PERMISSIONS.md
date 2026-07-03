@@ -262,7 +262,7 @@ When `sandbox.filterEnv` is `true` (default), the agent subprocess only receives
 
 | Variable                                                                                                    | Purpose                            |
 | ------------------------------------------------------------------------------------------------------------ | ----------------------------------- |
-| `OPENROUTER_API_KEY`, `OPENCODE_API_KEY`, `GEMINI_API_KEY`, `GOOGLE_GENERATIVE_AI_API_KEY`, `PIONEER_API_KEY` | Provider API keys for OpenCode CLI |
+| `OPENROUTER_API_KEY`, `OPENCODE_API_KEY`, `GEMINI_API_KEY`, `GOOGLE_GENERATIVE_AI_API_KEY` | Provider API keys for OpenCode CLI |
 
 Additional env vars can be added via `sandbox.allowedEnvVars` config array.
 

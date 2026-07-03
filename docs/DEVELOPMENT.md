@@ -450,7 +450,7 @@ agent:
         model: "openrouter/deepseek/deepseek-v3.2"
       # Premium model for self-research
       - match: { sessionType: "self-research" }
-        model: "pioneer/claude-opus-4-8"
+        model: "openrouter/anthropic/claude-opus-4.8"
 ```
 
 Via environment variables:
@@ -566,7 +566,6 @@ The configuration defines a **dual-agent setup**: a `build` agent (default) for 
 
 The configuration file is located at `~/.config/opencode/opencode.json` inside the container. OpenCode automatically enables its providers when their respective keys are available as environment variables:
 
-- **Pioneer provider**: Uses `PIONEER_API_KEY`
 - **OpenRouter provider**: Uses `OPENROUTER_API_KEY`
 - **Gemini provider**: Uses `GEMINI_API_KEY`
 - **OpenCode's own hosted API**: Uses `OPENCODE_API_KEY`

@@ -54,14 +54,12 @@ Deno.test("SandboxManager - opencode agent allows all provider API keys", () => 
     OPENROUTER_API_KEY: "or_xxx",
     OPENCODE_API_KEY: "oc_xxx",
     GOOGLE_GENERATIVE_AI_API_KEY: "gg_xxx",
-    PIONEER_API_KEY: "pi_xxx",
   };
   const opts = sandbox.buildSpawnOptions("opencode", "opencode", [], baseEnv, "/tmp");
   assertEquals(opts.env["GEMINI_API_KEY"], "gm_xxx");
   assertEquals(opts.env["OPENROUTER_API_KEY"], "or_xxx");
   assertEquals(opts.env["OPENCODE_API_KEY"], "oc_xxx");
   assertEquals(opts.env["GOOGLE_GENERATIVE_AI_API_KEY"], "gg_xxx");
-  assertEquals(opts.env["PIONEER_API_KEY"], "pi_xxx");
 });
 
 Deno.test("SandboxManager - unknown agent type only gets base env", () => {
@@ -69,12 +67,10 @@ Deno.test("SandboxManager - unknown agent type only gets base env", () => {
   const baseEnv = {
     PATH: "/usr/bin",
     OPENCODE_API_KEY: "oc_xxx",
-    PIONEER_API_KEY: "pi_xxx",
   };
   const opts = sandbox.buildSpawnOptions("unknown", "test", [], baseEnv, "/tmp");
   assertEquals(opts.env["PATH"], "/usr/bin");
   assertEquals(opts.env["OPENCODE_API_KEY"], undefined);
-  assertEquals(opts.env["PIONEER_API_KEY"], undefined);
 });
 
 Deno.test("SandboxManager - base allowed env vars are preserved", () => {

@@ -68,12 +68,6 @@ function buildBaseAgentConfig(
       if (opencodeApiKey) {
         env["OPENCODE_API_KEY"] = opencodeApiKey;
       }
-      // Pioneer provider (agent-config/opencode.json references {env:PIONEER_API_KEY}).
-      // Must be forwarded explicitly because clearEnv:true no longer inherits it (F1).
-      const pioneerApiKey = Deno.env.get("PIONEER_API_KEY");
-      if (pioneerApiKey) {
-        env["PIONEER_API_KEY"] = pioneerApiKey;
-      }
       const openRouterApiKey = appConfig.agent.openRouterApiKey ??
         Deno.env.get("OPENROUTER_API_KEY");
       if (openRouterApiKey) {

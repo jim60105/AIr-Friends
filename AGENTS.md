@@ -578,7 +578,6 @@ and the effort independently while keeping them tied to the same matched rule.
 **Supported Agent**:
 
 - **OpenCode CLI** (`opencode`) - Open source coding agent that supports multiple providers:
-  - Pioneer provider
   - OpenRouter provider (uses `OPENROUTER_API_KEY` env var)
   - Gemini provider (uses `GEMINI_API_KEY` env var)
   - Pre-configured in container with `agent-config/opencode.json`
@@ -1249,7 +1248,7 @@ You are Yuna. This is a private chat.
 | `guildId`                | `string`  | Server/guild ID (empty string if N/A)                            |
 | `sessionId`              | `string`  | Current skill API session ID                                     |
 | `agentType`              | `string`  | ACP agent type (`"opencode"`)                                    |
-| `model`                  | `string`  | Model identifier (e.g., `"pioneer/claude-opus-4-8"`)             |
+| `model`                  | `string`  | Model identifier (e.g., `"openrouter/deepseek/deepseek-v4-pro"`)   |
 | `rssItems`               | `string`  | RSS items (self-research prompt only)                            |
 | `workspaceKey`           | `string`  | Workspace key (memory maintenance prompt only)                   |
 | `memoriesDump`           | `string`  | Memory JSON dump (memory maintenance only)                       |

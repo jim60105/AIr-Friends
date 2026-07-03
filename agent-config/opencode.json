@@ -14,34 +14,6 @@
       "options": {
         "apiKey": "{env:OPENROUTER_API_KEY}"
       }
-    },
-    "pioneer": {
-      "npm": "@ai-sdk/openai-compatible",
-      "name": "Pioneer AI",
-      "options": {
-        "baseURL": "https://api.pioneer.ai/v1",
-        "apiKey": "{env:PIONEER_API_KEY}"
-      },
-      "models": {
-        "pioneer/auto": {
-          "name": "Pioneer Auto Router"
-        },
-        "claude-opus-4-8": {
-          "name": "Claude Opus 4.8"
-        },
-        "claude-opus-4-6": {
-          "name": "Claude Opus 4.6"
-        },
-        "claude-sonnet-4-6": {
-          "name": "Claude Sonnet 4.6"
-        },
-        "deepseek-ai/DeepSeek-V4-Pro": {
-          "name": "DeepSeek V4 Pro"
-        },
-        "zai-org/GLM-5.2": {
-          "name": "GLM 5.2"
-        }
-      }
     }
   },
   "autoupdate": false,

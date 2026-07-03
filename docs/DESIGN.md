@@ -591,7 +591,6 @@ workspace:
 | `GEMINI_API_KEY`           | API key for the OpenCode Gemini provider                                   |
 | `OPENCODE_API_KEY`         | OpenCode API key                                                           |
 | `OPENROUTER_API_KEY`       | OpenRouter API key                                                         |
-| `PIONEER_API_KEY`          | Pioneer provider API key (read directly from env, no config field)         |
 | `MODEL_ROUTING_ENABLED`    | Enable model routing (true/false, default: false)                          |
 | `MODEL_ROUTING_RULES`      | Model routing rules as JSON string                                         |
 | `AGENT_EXTERNAL_SKILLS`    | External skills to install at startup (JSON string)                        |

@@ -208,7 +208,7 @@ The system SHALL support a single agent type: `"opencode"`.
 #### Scenario: OpenCode agent configuration
 - **GIVEN** agent type `"opencode"`
 - **WHEN** `createAgentConfig()` builds the config
-- **THEN** it SHALL use command `opencode acp` with permissions defined in `opencode.json`, passing `OPENCODE_API_KEY`, `OPENROUTER_API_KEY`, `PIONEER_API_KEY`, `GEMINI_API_KEY`, and `GOOGLE_GENERATIVE_AI_API_KEY` env vars
+- **THEN** it SHALL use command `opencode acp` with permissions defined in `opencode.json`, passing `OPENCODE_API_KEY`, `OPENROUTER_API_KEY`, `GEMINI_API_KEY`, and `GOOGLE_GENERATIVE_AI_API_KEY` env vars
 
 #### Scenario: Unknown agent type
 - **GIVEN** an agent type other than `"opencode"`
@@ -269,7 +269,7 @@ The `SandboxManager` SHALL filter subprocess environment variables to a base all
 #### Scenario: Agent-specific environment variables
 - **GIVEN** agent type `"opencode"`
 - **WHEN** environment is filtered
-- **THEN** it SHALL additionally allow `GEMINI_API_KEY`, `OPENROUTER_API_KEY`, `OPENCODE_API_KEY`, `GOOGLE_GENERATIVE_AI_API_KEY`, and `PIONEER_API_KEY`
+- **THEN** it SHALL additionally allow `GEMINI_API_KEY`, `OPENROUTER_API_KEY`, `OPENCODE_API_KEY`, and `GOOGLE_GENERATIVE_AI_API_KEY`
 
 ### Requirement: SandboxManager Network Isolation
 
