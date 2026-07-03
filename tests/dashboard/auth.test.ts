@@ -2,6 +2,7 @@
 
 import { assertEquals, assertNotEquals } from "@std/assert";
 import {
+  canonicalizeHost,
   clearSessionCookie,
   createSessionCookie,
   generateSessionToken,
@@ -160,6 +161,40 @@ Deno.test("LoginRateLimiter - isolates per IP", () => {
   }
   assertEquals(limiter.isAllowed("1.1.1.1"), false);
   assertEquals(limiter.isAllowed("2.2.2.2"), true);
+});
+
+// --- F5: global backoff caps total attempts across rotating keys ---
+
+Deno.test("LoginRateLimiter - global backoff caps attempts across many keys", () => {
+  // Per-key limit is high, but the global cap (3) blocks all keys once exceeded,
+  // modeling an attacker rotating the source IP to dodge per-IP limits.
+  const limiter = new LoginRateLimiter(1000, 60000, 3, 60000);
+  for (let i = 0; i < 3; i++) {
+    assertEquals(limiter.isAllowed(`10.0.0.${i}`), true);
+    limiter.recordAttempt(`10.0.0.${i}`);
+  }
+  // Global cap reached: a brand-new key is now blocked.
+  assertEquals(limiter.isAllowed("10.0.0.99"), false);
+});
+
+// --- F5: canonicalizeHost ---
+
+Deno.test("canonicalizeHost - strips IPv4 port", () => {
+  assertEquals(canonicalizeHost("1.2.3.4:5678"), "1.2.3.4");
+});
+
+Deno.test("canonicalizeHost - strips brackets and port from IPv6", () => {
+  assertEquals(canonicalizeHost("[::1]:8080"), "::1");
+  assertEquals(canonicalizeHost("[fe80::1]"), "fe80::1");
+});
+
+Deno.test("canonicalizeHost - preserves bare IPv6 and lowercases", () => {
+  assertEquals(canonicalizeHost("FE80::ABCD"), "fe80::abcd");
+  assertEquals(canonicalizeHost("::1"), "::1");
+});
+
+Deno.test("canonicalizeHost - lowercases hostname and strips port", () => {
+  assertEquals(canonicalizeHost("Proxy.Example.COM:443"), "proxy.example.com");
 });
 
 // --- SessionTokenStore expiration ---

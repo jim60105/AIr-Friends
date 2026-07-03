@@ -2,9 +2,11 @@
 
 import { assertEquals } from "@std/assert";
 import {
+  ALLOWED_READ_EXTENSIONS,
   buildSkillAutoApproveList,
   ChatbotClient,
   containsShellOperators,
+  isWithinDir,
   matchesCommandPrefix,
   matchesScriptPath,
   type SkillAutoApproveList,
@@ -182,7 +184,9 @@ Deno.test("ChatbotClient - requestPermission auto-approves skills directory read
 
     const client = new ChatbotClient(skillRegistry, logger, config);
 
-    // Create a mock RequestPermissionRequest for reading skills directory
+    // Create a mock RequestPermissionRequest for reading the OpenCode-effective
+    // skills directory (~/.agents/skills). Path is anchored under $HOME.
+    const home = Deno.env.get("HOME") ?? "/home/deno";
     const request: acp.RequestPermissionRequest = {
       sessionId: "test-session",
       toolCall: {
@@ -192,7 +196,7 @@ Deno.test("ChatbotClient - requestPermission auto-approves skills directory read
         content: [],
         toolCallId: "test-id",
         locations: [
-          { path: "/home/deno/.copilot/skills/send-reply" },
+          { path: `${home}/.agents/skills/send-reply/SKILL.md` },
         ],
       },
       options: [
@@ -731,7 +735,7 @@ Deno.test("ChatbotClient - readTextFile allows agent workspace path", async () =
   }
 });
 
-Deno.test("ChatbotClient - writeTextFile allows agent workspace path", async () => {
+Deno.test("ChatbotClient - writeTextFile allows agent workspace path when authorized", async () => {
   const tempDir = Deno.makeTempDirSync();
   const agentWorkspace = Deno.makeTempDirSync();
   try {
@@ -744,6 +748,8 @@ Deno.test("ChatbotClient - writeTextFile allows agent workspace path", async () 
       userId: "123",
       channelId: "456",
       isDM: false,
+      // F3: only authorized (self-research) sessions may write the shared workspace.
+      canWriteAgentWorkspace: true,
     };
 
     const client = new ChatbotClient(skillRegistry, logger, config);
@@ -1425,6 +1431,104 @@ Deno.test("matchesCommandPrefix - rejects when prefix is substring of first toke
   assertEquals(matchesCommandPrefix("agent-browsers open", "agent-browser"), false);
 });
 
+// --- F2: entrypoint-anchored matching (command laundering rejection) ---
+
+Deno.test("F2 matchesScriptPath - rejects whitelisted script as trailing arg to cat", () => {
+  // The classic bypass: an arbitrary binary is the entrypoint, the whitelisted script
+  // path is merely a trailing argument. Must NOT be approved.
+  assertEquals(
+    matchesScriptPath(
+      "cat /home/deno/.git-credentials skills/memory-save/scripts/memory-save.ts",
+      "skills/memory-save/scripts/memory-save.ts",
+    ),
+    false,
+  );
+});
+
+Deno.test("F2 matchesScriptPath - rejects whitelisted script as trailing arg to tar", () => {
+  assertEquals(
+    matchesScriptPath(
+      "tar -czf /tmp/out.tgz /home/deno/.git-credentials skills/memory-save/scripts/memory-save.ts",
+      "skills/memory-save/scripts/memory-save.ts",
+    ),
+    false,
+  );
+});
+
+Deno.test("F2 matchesScriptPath - approves direct shebang execution (entrypoint)", () => {
+  assertEquals(
+    matchesScriptPath(
+      "${HOME}/.agents/skills/memory-save/scripts/memory-save.ts --session-id x --content y",
+      "skills/memory-save/scripts/memory-save.ts",
+    ),
+    true,
+  );
+});
+
+Deno.test("F2 matchesScriptPath - approves deno run <flags> <script> <args> (entrypoint)", () => {
+  assertEquals(
+    matchesScriptPath(
+      "deno run --allow-net --allow-env skills/memory-save/scripts/memory-save.ts --session-id x",
+      "skills/memory-save/scripts/memory-save.ts",
+    ),
+    true,
+  );
+});
+
+Deno.test("F2 matchesScriptPath - rejects arbitrary interpreter-lookalike as first token", () => {
+  // First token is not an allowed interpreter and not the script -> entrypoint is the
+  // arbitrary binary, so no match.
+  assertEquals(
+    matchesScriptPath(
+      "python skills/memory-save/scripts/memory-save.ts",
+      "skills/memory-save/scripts/memory-save.ts",
+    ),
+    false,
+  );
+});
+
+Deno.test("F2 matchesCommandPrefix - rejects out-of-workspace absolute path argument", () => {
+  assertEquals(
+    matchesCommandPrefix("agent-browser /home/deno/.git-credentials", "agent-browser"),
+    false,
+  );
+});
+
+Deno.test("F2 matchesCommandPrefix - rejects home-anchored path argument", () => {
+  assertEquals(
+    matchesCommandPrefix("agent-browser ${HOME}/.git-credentials", "agent-browser"),
+    false,
+  );
+});
+
+Deno.test("F2 matchesCommandPrefix - rejects parent-traversal path argument", () => {
+  assertEquals(
+    matchesCommandPrefix("agent-browser ../../etc/passwd", "agent-browser"),
+    false,
+  );
+});
+
+Deno.test("F2 matchesCommandPrefix - allows workspace-relative and flag arguments", () => {
+  assertEquals(
+    matchesCommandPrefix("agent-browser open https://example.com --headless", "agent-browser"),
+    true,
+  );
+});
+
+Deno.test("F2 matchesCommandPrefix - rejects quoted absolute path argument", () => {
+  assertEquals(
+    matchesCommandPrefix('agent-browser "/home/deno/.git-credentials"', "agent-browser"),
+    false,
+  );
+});
+
+Deno.test("F2 matchesCommandPrefix - rejects flag-embedded absolute path argument", () => {
+  assertEquals(
+    matchesCommandPrefix("agent-browser --file=/home/deno/.git-credentials", "agent-browser"),
+    false,
+  );
+});
+
 // --- Integration tests: attack vector rejection through requestPermission ---
 
 Deno.test("ChatbotClient - rejects && chain injection in skill command", async () => {
@@ -1983,7 +2087,9 @@ Deno.test("Permission audit - skills directory access writes approved entry", as
         content: [],
         toolCallId: "test-id",
         rawInput: {},
-        locations: [{ path: "/home/deno/.copilot/skills/memory-save/SKILL.md" }],
+        locations: [{
+          path: `${Deno.env.get("HOME") ?? "/home/deno"}/.agents/skills/memory-save/SKILL.md`,
+        }],
       },
       options: [
         { kind: "allow_once", optionId: "allow-1", name: "Allow once" },
@@ -2127,7 +2233,7 @@ Deno.test("Permission audit - includedPhases filtering works", async () => {
   }
 });
 
-Deno.test("ChatbotClient - requestPermission allows edit to agent workspace in restricted mode", async () => {
+Deno.test("ChatbotClient - requestPermission allows edit to agent workspace when authorized (restricted mode)", async () => {
   const tempDir = Deno.makeTempDirSync();
   const agentWorkspace = `${tempDir}/agent-workspace`;
   Deno.mkdirSync(agentWorkspace, { recursive: true });
@@ -2141,6 +2247,8 @@ Deno.test("ChatbotClient - requestPermission allows edit to agent workspace in r
       userId: "123",
       channelId: "456",
       isDM: false,
+      // F3: authorized self-research session.
+      canWriteAgentWorkspace: true,
     };
     const allowList: SkillAutoApproveList = {
       scriptPaths: new Set(),
@@ -2175,7 +2283,7 @@ Deno.test("ChatbotClient - requestPermission allows edit to agent workspace in r
   }
 });
 
-Deno.test("ChatbotClient - requestPermission allows write_file to agent workspace in restricted mode", async () => {
+Deno.test("ChatbotClient - requestPermission allows write_file to agent workspace when authorized (restricted mode)", async () => {
   const tempDir = Deno.makeTempDirSync();
   const agentWorkspace = `${tempDir}/agent-workspace`;
   Deno.mkdirSync(agentWorkspace, { recursive: true });
@@ -2189,6 +2297,8 @@ Deno.test("ChatbotClient - requestPermission allows write_file to agent workspac
       userId: "123",
       channelId: "456",
       isDM: false,
+      // F3: authorized self-research session.
+      canWriteAgentWorkspace: true,
     };
     const allowList: SkillAutoApproveList = {
       scriptPaths: new Set(),
@@ -2433,6 +2543,7 @@ Deno.test("ChatbotClient - requestPermission allows .md write to agent workspace
       channelId: "456",
       isDM: false,
       allowedWriteExtensions: [".md", ".txt"],
+      canWriteAgentWorkspace: true,
     };
     const allowList: SkillAutoApproveList = {
       scriptPaths: new Set(),
@@ -2482,6 +2593,7 @@ Deno.test("ChatbotClient - requestPermission allows .txt write to agent workspac
       channelId: "456",
       isDM: false,
       allowedWriteExtensions: [".md", ".txt"],
+      canWriteAgentWorkspace: true,
     };
     const allowList: SkillAutoApproveList = {
       scriptPaths: new Set(),
@@ -2531,6 +2643,7 @@ Deno.test("ChatbotClient - requestPermission rejects .js write to agent workspac
       channelId: "456",
       isDM: false,
       allowedWriteExtensions: [".md", ".txt"],
+      canWriteAgentWorkspace: true,
     };
     const allowList: SkillAutoApproveList = {
       scriptPaths: new Set(),
@@ -2612,6 +2725,7 @@ Deno.test("ChatbotClient - requestPermission rejects .py write to agent workspac
       channelId: "456",
       isDM: false,
       allowedWriteExtensions: [".md", ".txt"],
+      canWriteAgentWorkspace: true,
     };
     const allowList: SkillAutoApproveList = {
       scriptPaths: new Set(),
@@ -2661,6 +2775,7 @@ Deno.test("ChatbotClient - requestPermission rejects file without extension in a
       channelId: "456",
       isDM: false,
       allowedWriteExtensions: [".md", ".txt"],
+      canWriteAgentWorkspace: true,
     };
     const allowList: SkillAutoApproveList = {
       scriptPaths: new Set(),
@@ -2712,6 +2827,7 @@ Deno.test("ChatbotClient - requestPermission allows any extension in TMPDIR (exe
       channelId: "456",
       isDM: false,
       allowedWriteExtensions: [".md", ".txt"],
+      canWriteAgentWorkspace: true,
     };
     const allowList: SkillAutoApproveList = {
       scriptPaths: new Set(),
@@ -2762,6 +2878,7 @@ Deno.test("ChatbotClient - YOLO mode allows any extension write to agent workspa
       isDM: false,
       yolo: true,
       allowedWriteExtensions: [".md", ".txt"],
+      canWriteAgentWorkspace: true,
     };
     const client = new ChatbotClient(skillRegistry, logger, config);
 
@@ -2807,6 +2924,7 @@ Deno.test("ChatbotClient - custom allowedWriteExtensions list works for requestP
       channelId: "456",
       isDM: false,
       allowedWriteExtensions: [".json", ".yaml"],
+      canWriteAgentWorkspace: true,
     };
     const allowList: SkillAutoApproveList = {
       scriptPaths: new Set(),
@@ -2879,6 +2997,7 @@ Deno.test("ChatbotClient - empty allowedWriteExtensions allows all extensions vi
       channelId: "456",
       isDM: false,
       allowedWriteExtensions: [] as string[],
+      canWriteAgentWorkspace: true,
     };
     const allowList: SkillAutoApproveList = {
       scriptPaths: new Set(),
@@ -2928,6 +3047,7 @@ Deno.test("ChatbotClient - allowedWriteExtensions is case insensitive for reques
       channelId: "456",
       isDM: false,
       allowedWriteExtensions: [".md", ".txt"],
+      canWriteAgentWorkspace: true,
     };
     const allowList: SkillAutoApproveList = {
       scriptPaths: new Set(),
@@ -3003,6 +3123,7 @@ Deno.test("ChatbotClient - writeTextFile rejects non-allowed extension in agent 
       isDM: false,
       yolo: false,
       allowedWriteExtensions: [".md", ".txt"],
+      canWriteAgentWorkspace: true,
     };
     const client = new ChatbotClient(skillRegistry, logger, config);
 
@@ -3043,6 +3164,7 @@ Deno.test("ChatbotClient - writeTextFile allows .md in agent workspace (non-YOLO
       isDM: false,
       yolo: false,
       allowedWriteExtensions: [".md", ".txt"],
+      canWriteAgentWorkspace: true,
     };
     const client = new ChatbotClient(skillRegistry, logger, config);
 
@@ -3076,6 +3198,7 @@ Deno.test("ChatbotClient - writeTextFile YOLO mode allows any extension in agent
       isDM: false,
       yolo: true,
       allowedWriteExtensions: [".md", ".txt"],
+      canWriteAgentWorkspace: true,
     };
     const client = new ChatbotClient(skillRegistry, logger, config);
 
@@ -3111,6 +3234,7 @@ Deno.test("ChatbotClient - writeTextFile allows any extension in TMPDIR (non-YOL
       isDM: false,
       yolo: false,
       allowedWriteExtensions: [".md", ".txt"],
+      canWriteAgentWorkspace: true,
     };
     const client = new ChatbotClient(skillRegistry, logger, config);
 
@@ -3144,6 +3268,7 @@ Deno.test("ChatbotClient - writeTextFile allows any extension in working directo
       isDM: false,
       yolo: false,
       allowedWriteExtensions: [".md", ".txt"],
+      canWriteAgentWorkspace: true,
     };
     const client = new ChatbotClient(skillRegistry, logger, config);
 
@@ -3177,6 +3302,7 @@ Deno.test("ChatbotClient - requestPermission extracts path from rawInput.path wh
       channelId: "456",
       isDM: false,
       allowedWriteExtensions: [".md", ".txt"],
+      canWriteAgentWorkspace: true,
     };
     const allowList: SkillAutoApproveList = {
       scriptPaths: new Set(),
@@ -3226,6 +3352,7 @@ Deno.test("ChatbotClient - requestPermission extracts path from rawInput.filePat
       channelId: "456",
       isDM: false,
       allowedWriteExtensions: [".md", ".txt"],
+      canWriteAgentWorkspace: true,
     };
     const allowList: SkillAutoApproveList = {
       scriptPaths: new Set(),
@@ -3275,6 +3402,7 @@ Deno.test("ChatbotClient - requestPermission extracts path from rawInput.filepat
       channelId: "456",
       isDM: false,
       allowedWriteExtensions: [".md", ".txt"],
+      canWriteAgentWorkspace: true,
     };
     const allowList: SkillAutoApproveList = {
       scriptPaths: new Set(),
@@ -3324,6 +3452,7 @@ Deno.test("ChatbotClient - requestPermission extracts paths from rawInput.paths 
       channelId: "456",
       isDM: false,
       allowedWriteExtensions: [".md", ".txt"],
+      canWriteAgentWorkspace: true,
     };
     const allowList: SkillAutoApproveList = {
       scriptPaths: new Set(),
@@ -3378,6 +3507,7 @@ Deno.test("ChatbotClient - requestPermission rejects rawInput path outside works
       channelId: "456",
       isDM: false,
       allowedWriteExtensions: [".md", ".txt"],
+      canWriteAgentWorkspace: true,
     };
     const allowList: SkillAutoApproveList = {
       scriptPaths: new Set(),
@@ -3427,6 +3557,7 @@ Deno.test("ChatbotClient - requestPermission rejects rawInput path with disallow
       channelId: "456",
       isDM: false,
       allowedWriteExtensions: [".md", ".txt"],
+      canWriteAgentWorkspace: true,
     };
     const allowList: SkillAutoApproveList = {
       scriptPaths: new Set(),
@@ -3476,6 +3607,7 @@ Deno.test("ChatbotClient - requestPermission ignores non-string rawInput values"
       channelId: "456",
       isDM: false,
       allowedWriteExtensions: [".md", ".txt"],
+      canWriteAgentWorkspace: true,
     };
     const allowList: SkillAutoApproveList = {
       scriptPaths: new Set(),
@@ -3525,6 +3657,7 @@ Deno.test("ChatbotClient - requestPermission uses locations over rawInput when b
       channelId: "456",
       isDM: false,
       allowedWriteExtensions: [".md", ".txt"],
+      canWriteAgentWorkspace: true,
     };
     const allowList: SkillAutoApproveList = {
       scriptPaths: new Set(),
@@ -4138,4 +4271,296 @@ Deno.test("ChatbotClient - non-config_option_update does not invoke listener", a
   } finally {
     Deno.removeSync(tempDir, { recursive: true });
   }
+});
+
+// ============ F3: canWriteAgentWorkspace write-gating ============
+
+Deno.test("F3 requestPermission - ordinary session cannot write shared agent workspace", async () => {
+  const tempDir = Deno.makeTempDirSync();
+  const agentWorkspace = `${tempDir}/agent-workspace`;
+  Deno.mkdirSync(agentWorkspace, { recursive: true });
+  try {
+    const client = new ChatbotClient(createTestSkillRegistry(), createTestLogger(), {
+      workingDir: tempDir,
+      agentWorkspacePath: agentWorkspace,
+      platform: "discord",
+      userId: "123",
+      channelId: "456",
+      isDM: false,
+      allowedWriteExtensions: [".md", ".txt"],
+      // canWriteAgentWorkspace intentionally unset (ordinary session)
+    }, { scriptPaths: new Set(), commandPrefixes: new Set() });
+
+    const request: acp.RequestPermissionRequest = {
+      sessionId: "s",
+      toolCall: {
+        title: "write_file",
+        kind: "write" as unknown as acp.ToolCall["kind"],
+        status: "pending" as const,
+        content: [],
+        toolCallId: "t",
+        rawInput: { path: `${agentWorkspace}/notes/topic.md`, content: "x" },
+        locations: [{ path: `${agentWorkspace}/notes/topic.md` }],
+      },
+      options: [
+        { kind: "allow_once", optionId: "allow-1", name: "Allow once" },
+        { kind: "reject_once", optionId: "reject-1", name: "Reject once" },
+      ],
+    };
+
+    const response = await client.requestPermission(request);
+    if (response.outcome.outcome === "selected") {
+      assertEquals(response.outcome.optionId, "reject-1");
+    }
+  } finally {
+    Deno.removeSync(tempDir, { recursive: true });
+  }
+});
+
+Deno.test("F3 requestPermission - memory-maintenance session cannot write shared workspace", async () => {
+  // Memory-maintenance operates on per-user memory JSONL via skills; it must NOT be
+  // granted shared-workspace write access. Modeled by canWriteAgentWorkspace unset.
+  const tempDir = Deno.makeTempDirSync();
+  const agentWorkspace = `${tempDir}/agent-workspace`;
+  Deno.mkdirSync(agentWorkspace, { recursive: true });
+  try {
+    const client = new ChatbotClient(createTestSkillRegistry(), createTestLogger(), {
+      workingDir: tempDir,
+      agentWorkspacePath: agentWorkspace,
+      platform: "discord",
+      userId: "mem-maint",
+      channelId: "internal",
+      isDM: false,
+      allowedWriteExtensions: [".md", ".txt"],
+      canWriteAgentWorkspace: false,
+    }, { scriptPaths: new Set(), commandPrefixes: new Set() });
+
+    const request: acp.RequestPermissionRequest = {
+      sessionId: "s",
+      toolCall: {
+        title: "edit",
+        kind: "execute",
+        status: "pending" as const,
+        content: [],
+        toolCallId: "t",
+        rawInput: { path: `${agentWorkspace}/notes/topic.md` },
+        locations: [{ path: `${agentWorkspace}/notes/topic.md` }],
+      },
+      options: [
+        { kind: "allow_once", optionId: "allow-1", name: "Allow once" },
+        { kind: "reject_once", optionId: "reject-1", name: "Reject once" },
+      ],
+    };
+
+    const response = await client.requestPermission(request);
+    if (response.outcome.outcome === "selected") {
+      assertEquals(response.outcome.optionId, "reject-1");
+    }
+  } finally {
+    Deno.removeSync(tempDir, { recursive: true });
+  }
+});
+
+Deno.test("F3 requestPermission - TMPDIR write allowed regardless of flag", async () => {
+  const tempDir = Deno.makeTempDirSync();
+  const agentWorkspace = `${tempDir}/agent-workspace`;
+  const tmpSub = `${tempDir}/tmp`;
+  Deno.mkdirSync(agentWorkspace, { recursive: true });
+  Deno.mkdirSync(tmpSub, { recursive: true });
+  try {
+    const client = new ChatbotClient(createTestSkillRegistry(), createTestLogger(), {
+      workingDir: tempDir,
+      agentWorkspacePath: agentWorkspace,
+      platform: "discord",
+      userId: "123",
+      channelId: "456",
+      isDM: false,
+      // no canWriteAgentWorkspace -> TMPDIR still allowed
+    }, { scriptPaths: new Set(), commandPrefixes: new Set() });
+
+    const request: acp.RequestPermissionRequest = {
+      sessionId: "s",
+      toolCall: {
+        title: "edit",
+        kind: "execute",
+        status: "pending" as const,
+        content: [],
+        toolCallId: "t",
+        rawInput: { path: `${tmpSub}/scratch.txt` },
+        locations: [{ path: `${tmpSub}/scratch.txt` }],
+      },
+      options: [
+        { kind: "allow_once", optionId: "allow-1", name: "Allow once" },
+        { kind: "reject_once", optionId: "reject-1", name: "Reject once" },
+      ],
+    };
+
+    const response = await client.requestPermission(request);
+    if (response.outcome.outcome === "selected") {
+      assertEquals(response.outcome.optionId, "allow-1");
+    }
+  } finally {
+    Deno.removeSync(tempDir, { recursive: true });
+  }
+});
+
+Deno.test("F3 writeTextFile - unauthorized session rejected at direct write sink", async () => {
+  const tempDir = Deno.makeTempDirSync();
+  const agentWorkspace = `${tempDir}/agent-workspace`;
+  Deno.mkdirSync(agentWorkspace, { recursive: true });
+  try {
+    const client = new ChatbotClient(createTestSkillRegistry(), createTestLogger(), {
+      workingDir: tempDir,
+      agentWorkspacePath: agentWorkspace,
+      platform: "discord",
+      userId: "123",
+      channelId: "456",
+      isDM: false,
+      allowedWriteExtensions: [".md", ".txt"],
+      // canWriteAgentWorkspace unset -> reject
+    });
+
+    let threw = false;
+    try {
+      await client.writeTextFile({
+        path: `${agentWorkspace}/notes/topic.md`,
+        content: "poison",
+        sessionId: "s",
+      });
+    } catch {
+      threw = true;
+    }
+    assertEquals(threw, true);
+    // Confirm nothing was written.
+    let exists = true;
+    try {
+      await Deno.stat(`${agentWorkspace}/notes/topic.md`);
+    } catch {
+      exists = false;
+    }
+    assertEquals(exists, false);
+  } finally {
+    Deno.removeSync(tempDir, { recursive: true });
+  }
+});
+
+Deno.test("F3 writeTextFile - authorized self-research session write succeeds", async () => {
+  const tempDir = Deno.makeTempDirSync();
+  const agentWorkspace = `${tempDir}/agent-workspace`;
+  Deno.mkdirSync(`${agentWorkspace}/notes`, { recursive: true });
+  try {
+    const client = new ChatbotClient(createTestSkillRegistry(), createTestLogger(), {
+      workingDir: tempDir,
+      agentWorkspacePath: agentWorkspace,
+      platform: "discord",
+      userId: "self-research",
+      channelId: "internal",
+      isDM: false,
+      allowedWriteExtensions: [".md", ".txt"],
+      canWriteAgentWorkspace: true,
+    });
+
+    await client.writeTextFile({
+      path: `${agentWorkspace}/notes/topic.md`,
+      content: "research note",
+      sessionId: "s",
+    });
+    assertEquals(await Deno.readTextFile(`${agentWorkspace}/notes/topic.md`), "research note");
+  } finally {
+    Deno.removeSync(tempDir, { recursive: true });
+  }
+});
+
+// ============ F4: boundary-safe path validation + read allowlist ============
+
+Deno.test("F4 isWithinDir - rejects sibling-prefix path", () => {
+  assertEquals(isWithinDir("/data/workspaces/discord/1234", "/data/workspaces/discord/123"), false);
+});
+
+Deno.test("F4 isWithinDir - accepts genuine subpath and the base itself", () => {
+  assertEquals(
+    isWithinDir("/data/workspaces/discord/123/memory.public.jsonl", "/data/workspaces/discord/123"),
+    true,
+  );
+  assertEquals(isWithinDir("/data/workspaces/discord/123", "/data/workspaces/discord/123"), true);
+});
+
+Deno.test("F4 readTextFile - sibling-prefix workspace path rejected", async () => {
+  const root = Deno.makeTempDirSync();
+  try {
+    const base = `${root}/123`;
+    const sibling = `${root}/1234`;
+    Deno.mkdirSync(base, { recursive: true });
+    Deno.mkdirSync(sibling, { recursive: true });
+    const siblingFile = `${sibling}/memory.private.jsonl`;
+    await Deno.writeTextFile(siblingFile, "secret");
+
+    const client = new ChatbotClient(createTestSkillRegistry(), createTestLogger(), {
+      workingDir: base,
+      platform: "discord",
+      userId: "123",
+      channelId: "456",
+      isDM: false,
+    });
+
+    let threw = false;
+    try {
+      await client.readTextFile({ path: siblingFile, sessionId: "s" });
+    } catch {
+      threw = true;
+    }
+    assertEquals(threw, true);
+  } finally {
+    Deno.removeSync(root, { recursive: true });
+  }
+});
+
+Deno.test("F4 readTextFile - memory JSONL read allowed", async () => {
+  const tempDir = Deno.makeTempDirSync();
+  try {
+    const f = `${tempDir}/memory.public.jsonl`;
+    await Deno.writeTextFile(f, '{"type":"memory"}');
+    const client = new ChatbotClient(createTestSkillRegistry(), createTestLogger(), {
+      workingDir: tempDir,
+      platform: "discord",
+      userId: "123",
+      channelId: "456",
+      isDM: false,
+    });
+    const res = await client.readTextFile({ path: f, sessionId: "s" });
+    assertEquals(res.content, '{"type":"memory"}');
+  } finally {
+    Deno.removeSync(tempDir, { recursive: true });
+  }
+});
+
+Deno.test("F4 readTextFile - disallowed extension (.json) rejected", async () => {
+  const tempDir = Deno.makeTempDirSync();
+  try {
+    const f = `${tempDir}/secrets.json`;
+    await Deno.writeTextFile(f, '{"token":"abc"}');
+    const client = new ChatbotClient(createTestSkillRegistry(), createTestLogger(), {
+      workingDir: tempDir,
+      platform: "discord",
+      userId: "123",
+      channelId: "456",
+      isDM: false,
+    });
+    let threw = false;
+    try {
+      await client.readTextFile({ path: f, sessionId: "s" });
+    } catch {
+      threw = true;
+    }
+    assertEquals(threw, true);
+  } finally {
+    Deno.removeSync(tempDir, { recursive: true });
+  }
+});
+
+Deno.test("F4 ALLOWED_READ_EXTENSIONS - documents the read allowlist", () => {
+  assertEquals(ALLOWED_READ_EXTENSIONS.includes(".jsonl"), true);
+  assertEquals(ALLOWED_READ_EXTENSIONS.includes(".md"), true);
+  assertEquals(ALLOWED_READ_EXTENSIONS.includes(".txt"), true);
+  assertEquals(ALLOWED_READ_EXTENSIONS.includes(".json"), false);
 });

@@ -43,6 +43,7 @@ import type { ResolvedReminder } from "../types/reminder.ts";
 import type { ReminderStore } from "./reminder-store.ts";
 import { SessionAuditWriter } from "./audit-logger.ts";
 import { sha256Hash } from "@utils/hash.ts";
+import { safeFetch } from "@utils/ssrf.ts";
 import type { CompletedSessionStore } from "../dashboard/completed-session-store.ts";
 
 const logger = createLogger("SessionOrchestrator");
@@ -1330,6 +1331,10 @@ export class SessionOrchestrator {
         yolo: this.yolo,
         autoApproveSkills: this.config.agent.autoApproveSkills,
         allowedWriteExtensions: this.config.agent.sandbox?.allowedWriteExtensions,
+        // F3: self-research is the ONLY session type authorized to write the shared
+        // agent workspace (research notes / journal). All other session types get
+        // read-only access via the permission gate.
+        canWriteAgentWorkspace: true,
       };
 
       // 5. Build and execute ACP connector (use selfResearch model)
@@ -2563,6 +2568,17 @@ export class SessionOrchestrator {
   }
 
   /**
+   * SSRF-guarded fetch used for downloading attachment images (F6).
+   *
+   * Extracted into a protected seam so tests can exercise the download→ContentBlock
+   * pipeline against a loopback test server without disabling the production guard.
+   * Production code always uses {@link safeFetch}.
+   */
+  protected safeImageFetch(url: string, init?: RequestInit): Promise<Response> {
+    return safeFetch(url, init);
+  }
+
+  /**
    * Build prompt content with optional image ContentBlocks.
    * Only downloads images from the trigger message when Agent supports image capability.
    */
@@ -2594,7 +2610,12 @@ export class SessionOrchestrator {
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), IMAGE_FETCH_TIMEOUT_MS);
 
-        const response = await fetch(att.url, { signal: controller.signal });
+        // F6 (SSRF): validate the URL at the authoritative fetch sink and follow
+        // redirects manually with per-hop re-validation. This applies to EVERY
+        // attachment download regardless of which platform/code path set `att.url`.
+        // Validation failures throw and are caught below (non-fatal: falls back to
+        // the URL-only text description already present in the prompt).
+        const response = await this.safeImageFetch(att.url, { signal: controller.signal });
         clearTimeout(timeoutId);
 
         if (response.ok) {

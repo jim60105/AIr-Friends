@@ -291,6 +291,7 @@ Deno.test("ReplyHandler - handleEditReply succeeds after send-reply", async () =
     ),
     channelId: "ch_edit1",
     userId: "edit1",
+    lastSentMessageId: "msg_edit1",
   };
 
   // Send reply first
@@ -374,6 +375,7 @@ Deno.test("ReplyHandler - handleEditReply validates message parameter", async ()
     platformAdapter: createMockPlatformAdapter({ success: true, messageId: "msg_e4" }),
     channelId: "ch_edit4",
     userId: "edit4",
+    lastSentMessageId: "msg_e4",
   };
 
   await handler.handleSendReply({ message: "First" }, context);
@@ -408,6 +410,7 @@ Deno.test("ReplyHandler - handleEditReply handles platform failure", async () =>
     ),
     channelId: "ch_edit5",
     userId: "edit5",
+    lastSentMessageId: "msg_e5",
   };
 
   await handler.handleSendReply({ message: "First" }, context);
@@ -440,6 +443,7 @@ Deno.test("ReplyHandler - handleEditReply allows multiple edits", async () => {
     ),
     channelId: "ch_edit6",
     userId: "edit6",
+    lastSentMessageId: "msg_e6",
   };
 
   await handler.handleSendReply({ message: "First" }, context);
@@ -478,6 +482,7 @@ Deno.test("ReplyHandler - handleEditReply handles thrown exception", async () =>
     platformAdapter: throwingAdapter,
     channelId: "ch_edit7",
     userId: "edit7",
+    lastSentMessageId: "msg_e7",
   };
 
   await handler.handleSendReply({ message: "First" }, context);
@@ -512,6 +517,7 @@ Deno.test("ReplyHandler - handleEditReply handles non-Error exception", async ()
     platformAdapter: throwingAdapter,
     channelId: "ch_edit8",
     userId: "edit8",
+    lastSentMessageId: "msg_e8",
   };
 
   await handler.handleSendReply({ message: "First" }, context);
@@ -556,6 +562,7 @@ Deno.test("ReplyHandler - handleEditReply passes replyToMessageId to editMessage
     platformAdapter: adapter,
     channelId: "ch_edit9",
     userId: "edit9",
+    lastSentMessageId: "msg_e9",
     replyToMessageId: "trigger_msg_123",
   };
 
@@ -670,6 +677,7 @@ Deno.test("ReplyHandler - handleEditReply strips XML tags from message", async (
     platformAdapter: adapter,
     channelId: "ch_xml2",
     userId: "xml2",
+    lastSentMessageId: "msg_xml2",
   };
 
   // Send reply first
@@ -711,6 +719,7 @@ Deno.test("ReplyHandler - handleEditReply skips edit when content is unchanged",
     platformAdapter: adapter,
     channelId: "ch_cmp1",
     userId: "cmp1",
+    lastSentMessageId: "msg_cmp1",
   };
 
   await handler.handleSendReply({ message: "First reply" }, context);
@@ -757,6 +766,7 @@ Deno.test("ReplyHandler - handleEditReply proceeds when content is different", a
     platformAdapter: adapter,
     channelId: "ch_cmp2",
     userId: "cmp2",
+    lastSentMessageId: "msg_cmp2",
   };
 
   await handler.handleSendReply({ message: "First reply" }, context);
@@ -793,6 +803,7 @@ Deno.test("ReplyHandler - handleEditReply proceeds when fetchMessage returns nul
     platformAdapter: adapter,
     channelId: "ch_cmp3",
     userId: "cmp3",
+    lastSentMessageId: "msg_cmp3",
   };
 
   await handler.handleSendReply({ message: "First reply" }, context);
@@ -829,6 +840,7 @@ Deno.test("ReplyHandler - handleEditReply proceeds when fetchMessage throws", as
     platformAdapter: adapter,
     channelId: "ch_cmp4",
     userId: "cmp4",
+    lastSentMessageId: "msg_cmp4",
   };
 
   await handler.handleSendReply({ message: "First reply" }, context);
@@ -870,6 +882,7 @@ Deno.test("ReplyHandler - handleEditReply compares content after XML strip and u
     platformAdapter: adapter,
     channelId: "ch_cmp5",
     userId: "cmp5",
+    lastSentMessageId: "msg_cmp5",
   };
 
   await handler.handleSendReply({ message: "First reply" }, context);
@@ -908,6 +921,7 @@ Deno.test("ReplyHandler - handleEditReply success response includes nextAction",
     platformAdapter: adapter,
     channelId: "ch_cmp6",
     userId: "cmp6",
+    lastSentMessageId: "msg_cmp6",
   };
 
   await handler.handleSendReply({ message: "First reply" }, context);
@@ -923,6 +937,96 @@ Deno.test("ReplyHandler - handleEditReply success response includes nextAction",
     data.nextAction,
     "You have done your job. EXIT IMMEDIATELY or you will be terminated.",
   );
+});
+
+// ============ F7: edit-reply scoping to session's own last-sent message ============
+
+Deno.test("F7 handleEditReply - rejects foreign messageId (no edit/delete)", async () => {
+  const handler = new ReplyHandler();
+
+  const workspace: WorkspaceInfo = {
+    key: "misskey/f7a",
+    components: { platform: "misskey", userId: "f7a" },
+    path: "/tmp/workspaces/misskey/f7a",
+    tmpPath: "/tmp/workspaces/misskey/f7a/tmp",
+    isDm: false,
+  };
+
+  let editCalled = false;
+  const adapter = createMockPlatformAdapter({ success: true, messageId: "note_A" });
+  adapter.editMessage = () => {
+    editCalled = true;
+    return Promise.resolve({ success: true, messageId: "note_A" });
+  };
+
+  const context: SkillContext = {
+    workspace,
+    platformAdapter: adapter,
+    channelId: "note:note_A",
+    userId: "f7a",
+    lastSentMessageId: "note_A",
+  };
+
+  await handler.handleSendReply({ message: "Original" }, context);
+
+  // Attempt to edit a DIFFERENT (foreign) note from another conversation.
+  const result = await handler.handleEditReply(
+    { messageId: "note_FOREIGN", message: "hijack" },
+    context,
+  );
+
+  assertEquals(result.success, false);
+  assertEquals(editCalled, false);
+});
+
+Deno.test("F7 handleEditReply - two consecutive Misskey edits (new ID after delete) both succeed", async () => {
+  const handler = new ReplyHandler();
+
+  const workspace: WorkspaceInfo = {
+    key: "misskey/f7b",
+    components: { platform: "misskey", userId: "f7b" },
+    path: "/tmp/workspaces/misskey/f7b",
+    tmpPath: "/tmp/workspaces/misskey/f7b/tmp",
+    isDm: false,
+  };
+
+  // Misskey delete-and-recreate returns a NEW note id each edit.
+  let editCount = 0;
+  const adapter = createMockPlatformAdapter({ success: true, messageId: "note_1" });
+  adapter.editMessage = () => {
+    editCount++;
+    return Promise.resolve({ success: true, messageId: `note_${editCount + 1}` });
+  };
+
+  // The Skill API updates lastSentMessageId after each edit; we simulate that here.
+  const context: SkillContext = {
+    workspace,
+    platformAdapter: adapter,
+    channelId: "note:note_1",
+    userId: "f7b",
+    lastSentMessageId: "note_1",
+  };
+
+  await handler.handleSendReply({ message: "First" }, context);
+
+  // First edit: matches note_1 → succeeds, returns note_2.
+  const r1 = await handler.handleEditReply(
+    { messageId: "note_1", message: "Edit 1" },
+    context,
+  );
+  assertEquals(r1.success, true);
+  assertEquals((r1.data as Record<string, unknown>).messageId, "note_2");
+
+  // Simulate the Skill API updating the tracked last-sent id to the new note.
+  context.lastSentMessageId = "note_2";
+
+  // Second edit: must use the NEW id (note_2) to pass scoping.
+  const r2 = await handler.handleEditReply(
+    { messageId: "note_2", message: "Edit 2" },
+    context,
+  );
+  assertEquals(r2.success, true);
+  assertEquals((r2.data as Record<string, unknown>).messageId, "note_3");
 });
 
 // --- unescapeNewlines tests ---

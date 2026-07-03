@@ -194,9 +194,22 @@ env:
   AUDIT_INCLUDED_PHASES: ''
 
   # Web Dashboard
+  # NOTE: For K8s, prefer leaving DASHBOARD_HOST and DASHBOARD_BEHIND_HTTPS_PROXY
+  # empty. When dashboard.service.enabled=true the chart auto-sets DASHBOARD_HOST
+  # to "0.0.0.0" (the app defaults to 127.0.0.1, which is unreachable from the
+  # ClusterIP Service inside the pod), and when the dashboard Ingress terminates
+  # TLS it auto-sets DASHBOARD_BEHIND_HTTPS_PROXY=true (for the Secure cookie).
+  # Set values here only to explicitly override that behavior.
   DASHBOARD_ENABLED: ''
   DASHBOARD_PORT: ''
+  DASHBOARD_HOST: ''
   DASHBOARD_PASSPHRASE: ''
+  DASHBOARD_BEHIND_HTTPS_PROXY: ''
+  # Comma-separated real connection addresses whose X-Forwarded-For is trusted for
+  # login rate-limit keying. When exposed via Ingress, set this to your ingress
+  # controller / proxy pod IP(s) so per-client rate limiting keys on the real
+  # client IP instead of the shared proxy address.
+  DASHBOARD_TRUSTED_PROXIES: ''
 
 # -- Self-research RSS feeds (native YAML, easier than JSON env var).
 # When selfResearchRssFeeds is non-empty, it takes precedence over

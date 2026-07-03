@@ -640,8 +640,25 @@ export interface DashboardConfig {
   enabled: boolean;
   /** Dashboard HTTP port (default: 8090) */
   port: number;
-  /** Login passphrase (required when enabled) */
+  /**
+   * Dashboard bind host (default: "127.0.0.1"). Binding to all interfaces requires
+   * explicitly setting this to "0.0.0.0" (F8).
+   */
+  host: string;
+  /** Login passphrase (required when enabled, minimum 16 characters when enabled) */
   passphrase: string;
+  /**
+   * Whether the dashboard is served behind an HTTPS-terminating reverse proxy (F10).
+   * When true, the session cookie is issued with the `Secure` flag. This is NOT derived
+   * from the spoofable `X-Forwarded-Proto` header. Default: false.
+   */
+  behindHttpsProxy: boolean;
+  /**
+   * Real connection addresses (reverse proxies) whose `X-Forwarded-For` header is trusted
+   * for deriving the login rate-limit key (F5). When empty (default), `X-Forwarded-For`
+   * is ignored and the real socket address is always used.
+   */
+  trustedProxies: string[];
 }
 
 /**

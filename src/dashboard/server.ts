@@ -3,6 +3,7 @@
 import { createLogger } from "@utils/logger.ts";
 import { join, resolve } from "@std/path";
 import {
+  canonicalizeHost,
   clearSessionCookie,
   createSessionCookie,
   generateSessionToken,
@@ -90,8 +91,12 @@ export class DashboardServer {
   /** Start the dashboard HTTP server */
   start(): void {
     const port = this.deps.config.port;
-    this.server = Deno.serve({ port, onListen: () => {} }, (req) => this.handleRequest(req));
-    logger.info("Dashboard server started on port {port}", { port });
+    const hostname = this.deps.config.host;
+    this.server = Deno.serve(
+      { port, hostname, onListen: () => {} },
+      (req, info) => this.handleRequest(req, info),
+    );
+    logger.info("Dashboard server started on {hostname}:{port}", { hostname, port });
 
     // Asynchronously load historical sessions from audit logs (non-blocking)
     if (this.deps.auditConfig?.enabled && this.deps.auditBasePath) {
@@ -123,7 +128,7 @@ export class DashboardServer {
     }
   }
 
-  private async handleRequest(req: Request): Promise<Response> {
+  private async handleRequest(req: Request, info?: Deno.ServeHandlerInfo): Promise<Response> {
     const url = new URL(req.url);
     const path = url.pathname;
 
@@ -131,7 +136,7 @@ export class DashboardServer {
     try {
       // Public endpoints (no auth required)
       if (path === "/api/auth/login" && req.method === "POST") {
-        response = await this.handleLogin(req);
+        response = await this.handleLogin(req, info);
         return withSecurityHeaders(response);
       }
 
@@ -230,11 +235,35 @@ export class DashboardServer {
 
   // --- Auth ---
 
-  private async handleLogin(req: Request): Promise<Response> {
-    try {
-      const ip = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "unknown";
+  /**
+   * Derive the login rate-limit key from the REAL connection address (F5).
+   *
+   * `X-Forwarded-For` is honored ONLY when the real socket address is in the
+   * configured `dashboard.trustedProxies` allow-list (compared after canonicalization).
+   * Otherwise the header is ignored and the real socket address is used, so header
+   * rotation cannot bypass the per-key limit.
+   */
+  private resolveRateLimitKey(req: Request, info?: Deno.ServeHandlerInfo): string {
+    const remoteAddr = info?.remoteAddr;
+    const realHost = remoteAddr && "hostname" in remoteAddr
+      ? canonicalizeHost(remoteAddr.hostname)
+      : "unknown";
 
-      if (!this.loginRateLimiter.isAllowed(ip)) {
+    const trusted = (this.deps.config.trustedProxies ?? []).map(canonicalizeHost);
+    if (trusted.includes(realHost)) {
+      const forwarded = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim();
+      if (forwarded) {
+        return canonicalizeHost(forwarded);
+      }
+    }
+    return realHost;
+  }
+
+  private async handleLogin(req: Request, info?: Deno.ServeHandlerInfo): Promise<Response> {
+    try {
+      const key = this.resolveRateLimitKey(req, info);
+
+      if (!this.loginRateLimiter.isAllowed(key)) {
         return new Response(JSON.stringify({ error: "Too many login attempts" }), {
           status: 429,
           headers: {
@@ -248,16 +277,17 @@ export class DashboardServer {
       const { passphrase } = body as { passphrase?: string };
 
       if (!passphrase || !(await validatePassphrase(passphrase, this.deps.config.passphrase))) {
-        this.loginRateLimiter.recordAttempt(ip);
+        this.loginRateLimiter.recordAttempt(key);
         return this.json({ error: "Invalid passphrase" }, 401);
       }
 
-      this.loginRateLimiter.recordAttempt(ip);
       const token = generateSessionToken();
       tokenStore.add(token);
       logger.info("Dashboard login successful");
 
-      const secure = !!req.headers.get("x-forwarded-proto")?.includes("https");
+      // F10: Secure cookie is driven by explicit config, NOT the spoofable
+      // X-Forwarded-Proto header.
+      const secure = this.deps.config.behindHttpsProxy === true;
 
       return new Response(JSON.stringify({ success: true }), {
         status: 200,

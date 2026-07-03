@@ -3,9 +3,7 @@
 ## Purpose
 
 Defines per-user workspace isolation, session lifecycle, and cross-workspace access prevention. Each user gets a dedicated filesystem workspace keyed by platform and user ID, ensuring memory and file isolation across users.
-
 ## Requirements
-
 ### Requirement: Workspace Key Generation
 
 The system SHALL compute workspace keys using the format `{platform}/{user_id}`, where `platform` is the normalized platform name (e.g., `"discord"`, `"misskey"`) and `user_id` is the platform-specific user identifier. The workspace key SHALL be per-user, not per-channel — the same user shares one workspace across all channels and threads.
@@ -75,12 +73,27 @@ The system SHALL prevent any file operation that would access paths outside the 
 
 ### Requirement: Agent Global Workspace
 
-The system SHALL provide a global agent workspace at `{repoPath}/agent-workspace/` with `notes/` and `journal/` subdirectories. This workspace SHALL be shared across all conversations and users, and SHALL NOT contain per-user private data. The `getOrCreateAgentWorkspace()` method SHALL create the directory structure if it does not exist.
+The system SHALL provide a global agent workspace at `{repoPath}/agent-workspace/` with `notes/` and `journal/` subdirectories. This workspace SHALL be shared across all conversations and users, and SHALL NOT contain per-user private data. The `getOrCreateAgentWorkspace()` method SHALL create the directory structure if it does not exist. Because the workspace is shared, WRITE access SHALL be restricted to sessions explicitly authorized via the `canWriteAgentWorkspace` flag (self-research sessions only); ordinary user, spontaneous, channel-lurk, and memory-maintenance sessions SHALL have read-only access. Memory-maintenance operates on per-user memory files via memory skills and SHALL NOT be granted shared-workspace write access.
 
 #### Scenario: Agent workspace initialization
 - **GIVEN** the agent workspace directory does not exist
 - **WHEN** `getOrCreateAgentWorkspace()` is called
 - **THEN** the system SHALL create `{repoPath}/agent-workspace/` with `notes/` and `journal/` subdirectories
+
+#### Scenario: Ordinary session has read-only agent workspace access
+- **GIVEN** a user-triggered session where `canWriteAgentWorkspace` is not set
+- **WHEN** the agent attempts to write a file into the shared agent workspace
+- **THEN** the write SHALL be rejected
+
+#### Scenario: Memory-maintenance session has read-only agent workspace access
+- **GIVEN** a memory-maintenance session where `canWriteAgentWorkspace` is not set
+- **WHEN** the agent attempts to write a file into the shared agent workspace
+- **THEN** the write SHALL be rejected
+
+#### Scenario: Authorized session may write agent workspace
+- **GIVEN** a self-research session where `canWriteAgentWorkspace` is `true`
+- **WHEN** the agent writes a note into the shared agent workspace with an allowed extension
+- **THEN** the write SHALL succeed
 
 ### Requirement: Workspace File Operations
 
@@ -121,3 +134,4 @@ The `SessionOrchestrator` SHALL clean up the workspace `tmp/` directory after ev
 - **GIVEN** the `tmp/` directory removal fails with an error other than `NotFound`
 - **WHEN** `cleanupWorkspaceTmp()` catches the error
 - **THEN** the system SHALL log a warning with the error message and path but SHALL NOT propagate the error
+

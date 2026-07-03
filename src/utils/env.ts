@@ -140,7 +140,10 @@ export const ENV_MAPPINGS = {
   // Dashboard settings
   DASHBOARD_ENABLED: "dashboard.enabled",
   DASHBOARD_PORT: "dashboard.port",
+  DASHBOARD_HOST: "dashboard.host",
   DASHBOARD_PASSPHRASE: "dashboard.passphrase",
+  DASHBOARD_BEHIND_HTTPS_PROXY: "dashboard.behindHttpsProxy",
+  DASHBOARD_TRUSTED_PROXIES: "dashboard.trustedProxies",
 } as const;
 
 /**
@@ -209,7 +212,8 @@ export function applyEnvOverrides(config: Record<string, unknown>): void {
         envName === "AGENT_SANDBOX_ALLOWED_ENV_VARS" ||
         envName === "AGENT_SANDBOX_ALLOWED_WRITE_EXTENSIONS" ||
         envName === "AUDIT_INCLUDED_PHASES" ||
-        envName === "AGENT_AUTO_APPROVE_SKILLS"
+        envName === "AGENT_AUTO_APPROVE_SKILLS" ||
+        envName === "DASHBOARD_TRUSTED_PROXIES"
       ) {
         parsedValue = value.split(",").map((s) => s.trim()).filter((s) => s !== "");
       } // Handle REPLY_POLICY / REPLY_TO: map "whitelist" → "channels" for backward compat

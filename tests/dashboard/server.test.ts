@@ -82,11 +82,16 @@ async function createTestServer(overrides?: {
   completedSessionStore?: CompletedSessionStore;
   metricsRegistry?: Registry | null;
   appConfig?: Config;
+  dashboard?: Partial<DashboardConfig>;
 }): Promise<TestServer> {
   const dashboardConfig: DashboardConfig = {
     enabled: true,
     port: 0,
+    host: "127.0.0.1",
     passphrase: "test-passphrase",
+    behindHttpsProxy: false,
+    trustedProxies: [],
+    ...overrides?.dashboard,
   };
 
   const tempDir = await Deno.makeTempDir();
@@ -595,7 +600,10 @@ Deno.test({
   const dashboardConfig: DashboardConfig = {
     enabled: true,
     port: 0,
+    host: "127.0.0.1",
     passphrase: "test-passphrase",
+    behindHttpsProxy: false,
+    trustedProxies: [],
   };
   const tempDir = await Deno.makeTempDir();
   const wsPath = `${tempDir}/agent-workspace`;
@@ -1768,7 +1776,10 @@ Deno.test({
   const dashboardConfig: DashboardConfig = {
     enabled: true,
     port,
+    host: "127.0.0.1",
     passphrase: "test-passphrase",
+    behindHttpsProxy: false,
+    trustedProxies: [],
   };
   const server = new DashboardServer({
     config: dashboardConfig,
@@ -1823,7 +1834,10 @@ Deno.test({
   const dashboardConfig: DashboardConfig = {
     enabled: true,
     port,
+    host: "127.0.0.1",
     passphrase: "test-passphrase",
+    behindHttpsProxy: false,
+    trustedProxies: [],
   };
   const server = new DashboardServer({
     config: dashboardConfig,
@@ -1874,7 +1888,10 @@ Deno.test({
   const dashboardConfig: DashboardConfig = {
     enabled: true,
     port,
+    host: "127.0.0.1",
     passphrase: "test-passphrase",
+    behindHttpsProxy: false,
+    trustedProxies: [],
   };
   const server = new DashboardServer({
     config: dashboardConfig,
@@ -2114,10 +2131,44 @@ Deno.test({
 });
 
 Deno.test({
-  name: "DashboardServer - login with x-forwarded-proto https sets secure cookie",
+  name: "DashboardServer - F8: default host binds localhost and serves requests",
   sanitizeResources: false,
   sanitizeOps: false,
 }, async () => {
+  // createTestServer uses host "127.0.0.1" by default; a request over localhost succeeds.
+  const t = await createTestServer();
+  try {
+    const res = await fetch(`${t.baseUrl}/api/auth/status`);
+    // Unauthenticated status endpoint returns 401 (server is reachable on localhost).
+    assertEquals(res.status, 401);
+    await res.body?.cancel();
+  } finally {
+    await t.cleanup();
+  }
+});
+
+Deno.test({
+  name: "DashboardServer - F8: explicit 0.0.0.0 host is honored and serves requests",
+  sanitizeResources: false,
+  sanitizeOps: false,
+}, async () => {
+  const t = await createTestServer({ dashboard: { host: "0.0.0.0" } });
+  try {
+    // When bound to 0.0.0.0, the server is still reachable via loopback.
+    const res = await fetch(`http://127.0.0.1:${t.port}/api/auth/status`);
+    assertEquals(res.status, 401);
+    await res.body?.cancel();
+  } finally {
+    await t.cleanup();
+  }
+});
+
+Deno.test({
+  name: "DashboardServer - F10: spoofed X-Forwarded-Proto https does NOT set Secure cookie",
+  sanitizeResources: false,
+  sanitizeOps: false,
+}, async () => {
+  // behindHttpsProxy defaults to false; the Secure flag must NOT be derived from the header.
   const t = await createTestServer();
   try {
     const res = await fetch(`${t.baseUrl}/api/auth/login`, {
@@ -2130,8 +2181,93 @@ Deno.test({
     });
     assertEquals(res.status, 200);
     const setCookie = res.headers.get("Set-Cookie") ?? "";
+    assertEquals(setCookie.includes("Secure"), false);
+    await res.body?.cancel();
+  } finally {
+    await t.cleanup();
+  }
+});
+
+Deno.test({
+  name: "DashboardServer - F10: Secure cookie set when behindHttpsProxy is true",
+  sanitizeResources: false,
+  sanitizeOps: false,
+}, async () => {
+  const t = await createTestServer({ dashboard: { behindHttpsProxy: true } });
+  try {
+    const res = await fetch(`${t.baseUrl}/api/auth/login`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ passphrase: "test-passphrase" }),
+    });
+    assertEquals(res.status, 200);
+    const setCookie = res.headers.get("Set-Cookie") ?? "";
     assertEquals(setCookie.includes("Secure"), true);
     await res.body?.cancel();
+  } finally {
+    await t.cleanup();
+  }
+});
+
+Deno.test({
+  name: "DashboardServer - F5: X-Forwarded-For ignored for rate-limit key when proxy untrusted",
+  sanitizeResources: false,
+  sanitizeOps: false,
+}, async () => {
+  // With no trustedProxies, header rotation must still be counted against the real IP,
+  // so the limit is reached despite unique X-Forwarded-For values each time.
+  const t = await createTestServer();
+  try {
+    for (let i = 0; i < 6; i++) {
+      const res = await fetch(`${t.baseUrl}/api/auth/login`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Forwarded-For": `10.0.0.${i}`,
+        },
+        body: JSON.stringify({ passphrase: "wrong" }),
+      });
+      await res.body?.cancel();
+    }
+    const res = await fetch(`${t.baseUrl}/api/auth/login`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Forwarded-For": "10.0.0.99",
+      },
+      body: JSON.stringify({ passphrase: "wrong" }),
+    });
+    assertEquals(res.status, 429);
+    await res.body?.cancel();
+  } finally {
+    await t.cleanup();
+  }
+});
+
+Deno.test({
+  name: "DashboardServer - F5: trusted proxy X-Forwarded-For honored for rate-limit key",
+  sanitizeResources: false,
+  sanitizeOps: false,
+}, async () => {
+  // Trust the loopback proxy (127.0.0.1). Then distinct X-Forwarded-For values are keyed
+  // separately, so 6 attempts across 6 distinct forwarded IPs stay under the per-IP limit.
+  const t = await createTestServer({ dashboard: { trustedProxies: ["127.0.0.1", "::1"] } });
+  try {
+    let last = 0;
+    for (let i = 0; i < 6; i++) {
+      const res = await fetch(`${t.baseUrl}/api/auth/login`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Forwarded-For": `198.51.100.${i}`,
+        },
+        body: JSON.stringify({ passphrase: "wrong" }),
+      });
+      last = res.status;
+      await res.body?.cancel();
+    }
+    // Each distinct forwarded IP is its own key -> none exceeds the per-IP limit -> 401 not 429.
+    assertEquals(last, 401);
   } finally {
     await t.cleanup();
   }

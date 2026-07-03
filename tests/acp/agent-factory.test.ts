@@ -257,6 +257,32 @@ Deno.test("createAgentConfig - uses env var for OpenCode API key if config not s
   }
 });
 
+Deno.test("createAgentConfig - forwards PIONEER_API_KEY for opencode (F1 env completeness)", () => {
+  // agent-config/opencode.json references {env:PIONEER_API_KEY}; with clearEnv:true the
+  // agent no longer inherits it, so createAgentConfig must forward it explicitly.
+  const config = createTestConfig({
+    agent: {
+      model: "test",
+      systemPromptPath: "./test.md",
+      tokenLimit: 20000,
+      opencodeApiKey: undefined,
+    },
+  });
+
+  const originalKey = Deno.env.get("PIONEER_API_KEY");
+  Deno.env.set("PIONEER_API_KEY", "env-pioneer-key");
+  try {
+    const agentConfig = createAgentConfig("opencode", "/tmp/workspace", config);
+    assertEquals(agentConfig.env?.PIONEER_API_KEY, "env-pioneer-key");
+  } finally {
+    if (originalKey) {
+      Deno.env.set("PIONEER_API_KEY", originalKey);
+    } else {
+      Deno.env.delete("PIONEER_API_KEY");
+    }
+  }
+});
+
 Deno.test("createAgentConfig - throws for unknown agent type", () => {
   const config = createTestConfig();
 

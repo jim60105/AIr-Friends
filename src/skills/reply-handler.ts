@@ -199,6 +199,28 @@ export class ReplyHandler {
         };
       }
 
+      // Scope edit-reply to the session's OWN most-recently-sent message (F7).
+      // Without this, a session could pass an arbitrary bot-authored messageId and, on
+      // Misskey, delete-and-recreate a note from another conversation. `lastSentMessageId`
+      // is refreshed by the Skill API after every send-reply and edit-reply, so successive
+      // in-session edits (including Misskey's new-ID-after-delete) still pass this check.
+      if (params.messageId !== context.lastSentMessageId) {
+        logger.warn(
+          "Rejecting edit-reply for message {messageId} not matching session last-sent {lastSentMessageId}",
+          {
+            workspaceKey: context.workspace.key,
+            channelId: context.channelId,
+            messageId: params.messageId,
+            lastSentMessageId: context.lastSentMessageId,
+          },
+        );
+        return {
+          success: false,
+          error:
+            "edit-reply can only edit this session's most recently sent message. The provided messageId does not match.",
+        };
+      }
+
       if (!params.message || typeof params.message !== "string") {
         return {
           success: false,

@@ -514,6 +514,12 @@ class MockAgentConnector {
 class TestableSessionOrchestrator extends SessionOrchestrator {
   mockConnector: MockAgentConnector | null = null;
   private connectorSetup?: (connector: MockAgentConnector) => void;
+  /**
+   * When true, attachment image fetches bypass the SSRF guard and use plain fetch,
+   * allowing tests to serve images from a loopback test server. The production SSRF
+   * behavior (loopback rejection) is covered separately in tests/utils/ssrf.test.ts.
+   */
+  allowLoopbackImageFetch = false;
 
   setConnectorSetup(setup: (connector: MockAgentConnector) => void): void {
     this.connectorSetup = setup;
@@ -525,6 +531,13 @@ class TestableSessionOrchestrator extends SessionOrchestrator {
     this.mockConnector = new MockAgentConnector(options);
     this.connectorSetup?.(this.mockConnector);
     return this.mockConnector as unknown as AgentConnector;
+  }
+
+  protected override safeImageFetch(url: string, init?: RequestInit): Promise<Response> {
+    if (this.allowLoopbackImageFetch) {
+      return fetch(url, init);
+    }
+    return super.safeImageFetch(url, init);
   }
 }
 
@@ -2001,6 +2014,8 @@ Deno.test({
     const tempDir = await Deno.makeTempDir();
     try {
       const { orchestrator, sessionRegistry } = await createTestableOrchestrator(tempDir);
+      // Permit the loopback test server (SSRF loopback rejection is tested separately).
+      orchestrator.allowLoopbackImageFetch = true;
       const event = createTestEvent();
       event.attachments = [{
         id: "a1",

@@ -3,9 +3,7 @@
 ## Purpose
 
 Defines the Deno 2.x runtime environment, YAML configuration system with environment variable overrides, container deployment strategy, project structure conventions, and external skill auto-installation.
-
 ## Requirements
-
 ### Requirement: Deno Runtime with Explicit Permissions
 
 The system SHALL use Deno 2.x as the runtime environment with explicit permission flags. The system SHALL NOT use `--allow-all`.
@@ -349,7 +347,7 @@ The system SHALL support automatic installation of external agent skills at star
 
 ### Requirement: Dashboard Configuration Section
 
-The configuration system SHALL support a `dashboard` config section with `enabled` (boolean, default `false`), `port` (number, default `8090`), and `passphrase` (string, required when enabled).
+The configuration system SHALL support a `dashboard` config section with `enabled` (boolean, default `false`), `port` (number, default `8090`), `host` (string, default `127.0.0.1`), `passphrase` (string, required when enabled, minimum 16 characters), `behindHttpsProxy` (boolean, default `false`), and `trustedProxies` (string array of real connection addresses whose `X-Forwarded-For` header is trusted for rate-limit keying, default empty). Each new field SHALL have a corresponding environment variable override.
 
 #### Scenario: Dashboard Config in YAML
 
@@ -358,18 +356,40 @@ The configuration system SHALL support a `dashboard` config section with `enable
   dashboard:
     enabled: true
     port: 8090
-    passphrase: "my-secret"
+    host: "127.0.0.1"
+    passphrase: "a-sufficiently-long-secret"
+    behindHttpsProxy: false
+    trustedProxies: []
   ```
 - **WHEN** the configuration is loaded
 - **THEN** `dashboard.enabled` SHALL be `true`
 - **AND** `dashboard.port` SHALL be `8090`
-- **AND** `dashboard.passphrase` SHALL be `"my-secret"`
+- **AND** `dashboard.host` SHALL be `"127.0.0.1"`
+- **AND** `dashboard.behindHttpsProxy` SHALL be `false`
+
+#### Scenario: Host defaults to localhost
+
+- **GIVEN** `config.yaml` sets `dashboard.enabled: true` without a `host` field
+- **WHEN** the configuration is loaded
+- **THEN** `dashboard.host` SHALL default to `"127.0.0.1"`
+
+#### Scenario: Weak passphrase rejected when enabled
+
+- **GIVEN** `config.yaml` sets `dashboard.enabled: true` and `dashboard.passphrase: "short"`
+- **WHEN** the configuration is loaded
+- **THEN** loading SHALL fail with a `ConfigError` indicating the passphrase does not meet the minimum strength
+
+#### Scenario: Environment variable overrides for new dashboard fields
+
+- **GIVEN** environment variables `DASHBOARD_HOST`, `DASHBOARD_BEHIND_HTTPS_PROXY`, and `DASHBOARD_TRUSTED_PROXIES` are set
+- **WHEN** the configuration is loaded
+- **THEN** they SHALL override `dashboard.host`, `dashboard.behindHttpsProxy`, and `dashboard.trustedProxies` respectively
 
 #### Scenario: Config Example and Env Example Updated
 
 - **GIVEN** the project documentation files
-- **WHEN** `config.example.yaml` and `.env.example` are examined
-- **THEN** they SHALL include the `dashboard` section with `enabled`, `port`, and `passphrase` fields
+- **WHEN** `config.example.yaml`, `.env.example`, and `helm/values.yaml` are examined
+- **THEN** they SHALL include the `dashboard` section with `enabled`, `port`, `host`, `passphrase`, `behindHttpsProxy`, and `trustedProxies` fields
 
 ### Requirement: Dashboard Passphrase as Kubernetes Secret
 
@@ -463,3 +483,4 @@ The shared normalization SHALL trim and lowercase values, treat present-but-empt
 - **GIVEN** the `helm/values.yaml` file
 - **WHEN** the values are examined
 - **THEN** it SHALL include an `AGENT_REASONING_EFFORT` entry under the `env:` section
+

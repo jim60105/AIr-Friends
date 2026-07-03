@@ -3,12 +3,10 @@
 ## Purpose
 
 Defines the unified platform abstraction layer that normalizes events across Discord and Misskey into a common model, provides a base adapter class with required methods, manages multi-platform connections with automatic reconnection, and handles platform-specific behaviors transparently.
-
 ## Requirements
-
 ### Requirement: NormalizedEvent Model
 
-The system SHALL normalize all incoming platform events into a `NormalizedEvent` structure with fields: `platform` (Platform type), `channelId`, `userId`, `username` (optional), `messageId`, `isDm`, `guildId` (empty string if not applicable), `content`, `timestamp`, `attachments` (optional array of `Attachment`), and `raw` (optional, original platform object).
+The system SHALL normalize all incoming platform events into a `NormalizedEvent` structure with fields: `platform` (Platform type), `channelId`, `userId`, `username` (optional), `messageId`, `isDm`, `guildId` (empty string if not applicable), `content`, `timestamp`, `attachments` (optional array of `Attachment`), and `raw` (optional, original platform object). For Misskey notes, `isDm` SHALL be derived from the note visibility: notes with visibility `"specified"` SHALL be classified as direct messages (`isDm` set to `true`).
 
 #### Scenario: Discord message normalization
 - **GIVEN** a Discord message is received
@@ -28,7 +26,8 @@ The system SHALL normalize all incoming platform events into a `NormalizedEvent`
 #### Scenario: Misskey DM normalization
 - **GIVEN** a Misskey note with visibility `"specified"` is received via the mention stream
 - **WHEN** the adapter processes the note
-- **THEN** it SHALL normalize the note with `channelId` set to `"note:{noteId}"` and `isDm` set to `false`, with filtering controlled by the `allowDm` configuration
+- **THEN** it SHALL normalize the note with `channelId` set to `"dm:{userId}"` and `isDm` set to `true`, with filtering controlled by the `allowDm` configuration
+- **AND** the reply policy SHALL gate the note as a DM (e.g. in `public` mode a non-whitelisted `specified` note SHALL NOT receive a reply)
 
 ### Requirement: Platform Type Validation
 
@@ -430,3 +429,4 @@ The `EventRouter` SHALL route `NormalizedEvent` instances to registered handlers
 - **GIVEN** a `PlatformRegistry` instance
 - **WHEN** `connectToRegistry(registry)` is called
 - **THEN** the router SHALL subscribe to the registry's event stream via `registry.onEvent()` and route each incoming event
+

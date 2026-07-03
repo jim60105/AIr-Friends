@@ -28,6 +28,7 @@ import {
   buildReplyParams,
   ChatMessageLite,
   chatMessageToPlatformMessage,
+  isDirectMessage,
   isMentionToBot,
   MisskeyMessage,
   MisskeyNote,
@@ -101,9 +102,13 @@ export class MisskeyAdapter extends PlatformAdapter {
       // Subscribe to main channel for mentions and DMs
       this.mainChannel = stream.useChannel(MISSKEY_STREAMING_CHANNELS.MAIN);
 
-      // Set up event handlers
+      // Set up event handlers.
+      // F11: derive isDm from note visibility. A `specified`-visibility note is a private
+      // (direct) message and MUST be classified as a DM so the reply policy gates it as a
+      // DM (e.g. in `public` mode a non-whitelisted specified note is not answered),
+      // instead of being treated as a public mention.
       this.mainChannel.on("mention", (note: MisskeyNote) => {
-        this.handleNote(note, false);
+        this.handleNote(note, isDirectMessage(note));
       });
 
       this.mainChannel.on("newChatMessage", (message: MisskeyMessage) => {

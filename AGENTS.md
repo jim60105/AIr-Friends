@@ -247,6 +247,8 @@ In addition to per-user workspaces, the Agent has a global workspace at `{worksp
 - **Not pre-loaded**: Content is NOT included in initial context; Agent reads on-demand via `$AGENT_WORKSPACE` env var
 - **Index-guided**: `notes/_index.md` serves as a quick-reference index
 - **Privacy boundary**: User private data must NOT be stored here (use `memory-save` instead)
+- **Write-gated (read-only by default)**: The shared workspace is a cross-user store, so WRITE access is restricted to sessions explicitly authorized via the `canWriteAgentWorkspace` flag — currently **only self-research sessions**. Ordinary user, spontaneous, channel-lurk, and memory-maintenance sessions have **read-only** access; their edit/write requests to the shared workspace are rejected at the ACP permission gate (both `requestPermission` and `writeTextFile`). Per-session `$TMPDIR` writes remain allowed regardless. Memory-maintenance operates on per-user memory JSONL via memory skills, not the shared workspace.
+- **No auto-approved network egress**: `curl` / `wget` are NOT in the OpenCode restricted-mode bash allow-list; agents fetch web content via the dedicated `webfetch` / `agent-browser` skills (or run under YOLO / network isolation for research).
 
 ```
 data/agent-workspace/
@@ -983,6 +985,7 @@ Trigger/history message → Platform adapter extracts attachment metadata (URL, 
 - **Only trigger message images downloaded**: History message images are described by URL only (no download)
 - **Size limit**: Images over 20MB are not downloaded; described by URL instead
 - **Download timeout**: 10 seconds per image; failures are non-fatal
+- **SSRF protection**: Every attachment URL is validated at the download sink via `safeFetch` (`src/utils/ssrf.ts`) before each request: scheme must be http/https; the host must resolve to a public address (loopback / private / link-local / ULA / unspecified / multicast are rejected); redirects are followed manually with per-hop re-validation up to a max of 5 hops. Validation failures are non-fatal and fall back to the URL-only text description.
 - **Backward compatible**: `attachments` field is optional; no changes to existing behavior for text-only messages
 
 **Platform Attachment Sources:**
@@ -1445,7 +1448,17 @@ channels:
   - id: "discord/account/12345678901234567"
     rateLimitBypass: true
     yolo: true # Run Agent in YOLO mode for this account
+
+dashboard:
+  enabled: false
+  port: 8090
+  host: "127.0.0.1"        # Bind host; default localhost. Set "0.0.0.0" to expose on all interfaces (DASHBOARD_HOST)
+  passphrase: ""            # Required when enabled; minimum 16 characters (DASHBOARD_PASSPHRASE)
+  behindHttpsProxy: false   # Enables the Secure cookie flag; NOT derived from X-Forwarded-Proto (DASHBOARD_BEHIND_HTTPS_PROXY)
+  trustedProxies: []        # Real connection addresses whose X-Forwarded-For is trusted for login rate-limit keying (DASHBOARD_TRUSTED_PROXIES)
 ```
+
+**Dashboard security defaults:** the dashboard binds to `127.0.0.1` by default and requires an explicit `0.0.0.0` to expose on all interfaces. The login rate limit keys on the real connection address (not the spoofable `X-Forwarded-For`) unless the peer is in `trustedProxies`, with an additional global backoff. A minimum 16-character passphrase is enforced at config load when the dashboard is enabled. The session cookie's `Secure` flag is driven by `behindHttpsProxy`, never by request headers.
 
 Environment variables override config file values.
 

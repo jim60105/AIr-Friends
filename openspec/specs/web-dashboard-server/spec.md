@@ -3,18 +3,28 @@
 ## Purpose
 
 Defines the HTTP server lifecycle, static file serving, passphrase-based authentication, and CSRF protection for the web dashboard.
-
 ## Requirements
-
 ### Requirement: Dashboard HTTP Server Lifecycle
 
-The system SHALL provide a web dashboard HTTP server on a configurable port (default 8090). The server SHALL only start when `dashboard.enabled` is `true` and `dashboard.passphrase` is non-empty.
+The system SHALL provide a web dashboard HTTP server on a configurable port (default 8090) and a configurable bind host (`dashboard.host`, default `127.0.0.1`). The server SHALL only start when `dashboard.enabled` is `true` and `dashboard.passphrase` is non-empty. Binding to all interfaces (`0.0.0.0`) SHALL require the operator to explicitly set `dashboard.host` to `0.0.0.0`.
 
 #### Scenario: Server Starts on Configured Port
 
-- **GIVEN** `dashboard.enabled` is `true`, `dashboard.passphrase` is `"my-secret"`, and `dashboard.port` is `8090`
+- **GIVEN** `dashboard.enabled` is `true`, `dashboard.passphrase` is a sufficiently strong value, and `dashboard.port` is `8090`
 - **WHEN** the application starts
 - **THEN** the dashboard HTTP server SHALL listen on port `8090`
+
+#### Scenario: Server Binds Localhost by Default
+
+- **GIVEN** `dashboard.enabled` is `true` and `dashboard.host` is not configured
+- **WHEN** the dashboard server starts
+- **THEN** it SHALL bind to `127.0.0.1` (not all interfaces)
+
+#### Scenario: Server Binds All Interfaces Only When Explicitly Configured
+
+- **GIVEN** `dashboard.host` is explicitly set to `0.0.0.0`
+- **WHEN** the dashboard server starts
+- **THEN** it SHALL bind to `0.0.0.0`
 
 #### Scenario: Server Does Not Start When Disabled
 
@@ -187,3 +197,4 @@ All error responses from the dashboard server SHALL be sanitized to prevent info
 - **GIVEN** a request triggers a known validation error
 - **WHEN** the error is handled
 - **THEN** the response SHALL contain the validation message without internal details
+

@@ -112,6 +112,40 @@ Deno.test("isDirectMessage - should not detect public visibility", () => {
   assertEquals(isDirectMessage(note), false);
 });
 
+// ============ F11: specified notes classified as DM + reply-policy gating ============
+
+Deno.test("F11 - specified note normalized with isDm true via isDirectMessage", () => {
+  // Models the adapter's mention handler: isDm is derived from isDirectMessage(note).
+  const note = createMockNote({ visibility: "specified" });
+  const isDm = isDirectMessage(note);
+  const event = normalizeMisskeyNote(note, "bot123", isDm);
+  assertEquals(event.isDm, true);
+  // A DM-classified note uses the dm: channel id form.
+  assertEquals(event.channelId, "dm:user123");
+});
+
+Deno.test("F11 - public note normalized with isDm false via isDirectMessage", () => {
+  const note = createMockNote({ visibility: "public" });
+  const isDm = isDirectMessage(note);
+  const event = normalizeMisskeyNote(note, "bot123", isDm);
+  assertEquals(event.isDm, false);
+});
+
+Deno.test("F11 - reply policy in public mode denies non-whitelisted specified note", async () => {
+  const { ReplyPolicyEvaluator } = await import("@core/reply-policy.ts");
+  const note = createMockNote({ visibility: "specified" });
+  const event = normalizeMisskeyNote(note, "bot123", isDirectMessage(note));
+
+  // public mode: DMs only answered if the account/channel is whitelisted.
+  const evaluator = new ReplyPolicyEvaluator("public", []);
+  assertEquals(evaluator.shouldReply(event), false);
+
+  // A public note in public mode is still answered.
+  const publicNote = createMockNote({ visibility: "public" });
+  const publicEvent = normalizeMisskeyNote(publicNote, "bot123", isDirectMessage(publicNote));
+  assertEquals(evaluator.shouldReply(publicEvent), true);
+});
+
 Deno.test("shouldRespondToNote - should not respond to self", () => {
   const note = createMockNote({ userId: "bot123" });
   const result = shouldRespondToNote(note, "bot123", "testbot", {

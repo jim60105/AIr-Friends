@@ -84,7 +84,8 @@ aside.collapsed header {
   animation: pulse-dot 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
 }
 @keyframes pulse-dot {
-  0%, 100% {
+  0%,
+  100% {
     opacity: 1;
     transform: scale(1);
   }
@@ -146,7 +147,8 @@ aside.collapsed header {
   line-height: 1.8;
   color: #cbd5e1;
 }
-.md-rendered ul, .md-rendered ol {
+.md-rendered ul,
+.md-rendered ol {
   margin: 0.75rem 0;
   padding-left: 1.5rem;
   color: #cbd5e1;
@@ -218,7 +220,8 @@ aside.collapsed header {
   border-radius: 12px;
   overflow: hidden;
 }
-.md-rendered th, .md-rendered td {
+.md-rendered th,
+.md-rendered td {
   padding: 0.75rem 1rem;
   text-align: left;
   border-bottom: 1px solid rgba(255, 255, 255, 0.05);
@@ -261,7 +264,9 @@ aside.collapsed header {
   background: #00f0ff;
 }
 @keyframes typing-bounce {
-  0%, 60%, 100% {
+  0%,
+  60%,
+  100% {
     transform: translateY(0);
     opacity: 0.3;
   }

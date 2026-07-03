@@ -1,7 +1,7 @@
 // src/acp/client.ts
 
 import * as acp from "@agentclientprotocol/sdk";
-import { join, resolve } from "@std/path";
+import { join, resolve, SEPARATOR } from "@std/path";
 import type { SkillRegistry } from "@skills/registry.ts";
 import type { Logger } from "@utils/logger.ts";
 import type { ClientConfig } from "./types.ts";
@@ -109,6 +109,44 @@ function buildFromDirectory(skillsDir: string): SkillAutoApproveList {
 }
 
 /**
+ * Read-extension allowlist for `readTextFile` (F4). Intentionally BROADER than the
+ * write allowlist (`.md`/`.txt`): the agent legitimately reads workspace memory JSONL
+ * (`.jsonl`), markdown notes/prompts (`.md`), and plain text (`.txt`). Any other
+ * extension (e.g. a `.json` cache/token file) is denied.
+ */
+export const ALLOWED_READ_EXTENSIONS = [".jsonl", ".md", ".txt"];
+
+/**
+ * Boundary-safe containment check (F4).
+ *
+ * Returns `true` only when the resolved candidate path equals the resolved base
+ * directory OR begins with the resolved base followed by a path separator. This
+ * rejects sibling-prefix escapes such as `/data/workspaces/discord/1234` matching
+ * base `/data/workspaces/discord/123` — a real risk because Discord snowflake IDs
+ * are variable-length, so a naive `startsWith` could leak a sibling user's files.
+ */
+export function isWithinDir(path: string, base: string): boolean {
+  try {
+    const resolvedPath = resolve(path);
+    const resolvedBase = resolve(base);
+    if (resolvedPath === resolvedBase) return true;
+    return resolvedPath.startsWith(resolvedBase + SEPARATOR);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Check whether a file path's extension is in the given allowlist (case-insensitive).
+ */
+function hasAllowedExtension(filePath: string, allowed: string[]): boolean {
+  const dotIndex = filePath.lastIndexOf(".");
+  if (dotIndex === -1 || dotIndex === filePath.length - 1) return false;
+  const ext = filePath.substring(dotIndex).toLowerCase();
+  return allowed.some((e) => ext === e.toLowerCase());
+}
+
+/**
  * Check if a command string contains shell operators that could enable injection.
  * Rejects commands containing: ; | & ` ( ) > < # and newlines.
  * Note: $ is intentionally allowed for shell variable expansion ($HOME, ${VAR}).
@@ -118,26 +156,111 @@ export function containsShellOperators(cmd: string): boolean {
   return /[;|&`()><#\n]/.test(cmd);
 }
 
+/** Interpreters that may precede a skill script as the launcher (e.g. `deno run <script>`). */
+const ALLOWED_SCRIPT_INTERPRETERS = new Set(["deno"]);
+
 /**
- * Check if a command contains an allowed script path as a complete token.
- * First rejects commands with shell injection characters,
- * then verifies the path appears as a whitespace-delimited token.
+ * Determine whether a single token equals the whitelisted script path or ends with
+ * `/<allowedPath>` (so an absolute/`$HOME`-anchored path to the same script matches).
  */
-export function matchesScriptPath(cmd: string, allowedPath: string): boolean {
-  if (containsShellOperators(cmd)) return false;
-  const tokens = cmd.trim().split(/\s+/);
-  return tokens.some((token) => token === allowedPath || token.endsWith(`/${allowedPath}`));
+function tokenMatchesAllowedScript(token: string, allowedPath: string): boolean {
+  return token === allowedPath || token.endsWith(`/${allowedPath}`);
 }
 
 /**
- * Check if the first token of a command exactly matches an allowed command name.
- * First rejects commands with shell injection characters,
- * then verifies the prefix is the exact first whitespace-delimited token.
+ * Resolve the invocation ENTRYPOINT token of a command.
+ *
+ * Skills are executed either directly via their shebang
+ * (`${HOME}/.agents/skills/<name>/scripts/<name>.ts <args>`) — first token is the
+ * script — or via an interpreter (`deno run <flags> <script> <args>`) — the script
+ * is the first non-flag positional after the `run` subcommand.
+ *
+ * Returns the entrypoint token, or `undefined` if it cannot be determined.
+ */
+function resolveEntrypointToken(tokens: string[]): string | undefined {
+  if (tokens.length === 0) return undefined;
+
+  const first = tokens[0];
+  // Direct shebang execution: the script itself is the entrypoint.
+  if (!ALLOWED_SCRIPT_INTERPRETERS.has(first)) {
+    return first;
+  }
+
+  // Interpreter launch (e.g. `deno run <flags...> <script> <args>`): find the first
+  // non-flag positional token AFTER the `run` subcommand. Flags (leading `-`) and the
+  // `run` subcommand itself are skipped; the next positional is the entrypoint.
+  let sawRun = false;
+  for (let i = 1; i < tokens.length; i++) {
+    const t = tokens[i];
+    if (!sawRun) {
+      if (t === "run") sawRun = true;
+      // Skip interpreter-level flags/subcommands until we see `run`.
+      continue;
+    }
+    if (t.startsWith("-")) continue; // skip `deno run` flags (e.g. --allow-net)
+    return t; // first positional after `run` is the entrypoint script
+  }
+  return undefined;
+}
+
+/**
+ * Check whether a command's INVOCATION ENTRYPOINT is an allowed skill script.
+ *
+ * Security (F2): the whitelisted script path is only accepted when it is the actual
+ * invocation entrypoint — either the first token (direct shebang execution) or the
+ * first positional after `deno run`. A whitelisted script path appearing merely as a
+ * trailing ARGUMENT to some other command (e.g. `cat <secret> <script>`) is NOT approved,
+ * closing the "arbitrary first token launders an allowed path" bypass.
+ */
+export function matchesScriptPath(cmd: string, allowedPath: string): boolean {
+  if (containsShellOperators(cmd)) return false;
+  const tokens = cmd.trim().split(/\s+/).filter((t) => t.length > 0);
+  const entrypoint = resolveEntrypointToken(tokens);
+  if (entrypoint === undefined) return false;
+  return tokenMatchesAllowedScript(entrypoint, allowedPath);
+}
+
+/**
+ * Determine whether an argument token references a path OUTSIDE the workspace.
+ * Rejects absolute paths (`/etc/...`), home-anchored paths (`~/...`, `$HOME/...`),
+ * and parent-traversal (`../`). Workspace-relative paths and non-path flags/values
+ * are allowed. Used to keep a whitelisted command prefix from being used to read
+ * sensitive files (e.g. `agent-browser /home/deno/.git-credentials`).
+ */
+function referencesOutOfWorkspacePath(token: string): boolean {
+  // Strip surrounding quotes and common `--flag=` prefixes so a quoted or flag-embedded
+  // absolute path (e.g. `"/etc/passwd"`, `--file=/etc/passwd`) is still inspected.
+  let t = token;
+  const eq = t.indexOf("=");
+  if (eq !== -1 && t.startsWith("-")) t = t.substring(eq + 1);
+  t = t.replace(/^["']+/, "").replace(/["']+$/, "");
+
+  if (t.startsWith("/")) return true; // absolute path
+  if (t.startsWith("~")) return true; // home-anchored
+  if (t.startsWith("$HOME") || t.startsWith("${HOME}")) return true;
+  // Parent traversal anywhere in the token (e.g. `../`, `a/../../b`)
+  if (t === ".." || t.includes("../")) return true;
+  return false;
+}
+
+/**
+ * Check if the first token of a command exactly matches an allowed command name,
+ * AND that no subsequent argument references a path outside the workspace.
+ *
+ * First rejects commands with shell injection characters, then verifies the prefix
+ * is the exact first whitespace-delimited token. Security (F2): even with a matching
+ * prefix, an out-of-workspace path argument causes rejection so a whitelisted command
+ * cannot be used to reach sensitive files outside the sandbox.
  */
 export function matchesCommandPrefix(cmd: string, prefix: string): boolean {
   if (containsShellOperators(cmd)) return false;
-  const firstToken = cmd.trim().split(/\s+/)[0];
-  return firstToken === prefix;
+  const tokens = cmd.trim().split(/\s+/).filter((t) => t.length > 0);
+  if (tokens[0] !== prefix) return false;
+  // Reject if any argument references a path outside the workspace.
+  for (let i = 1; i < tokens.length; i++) {
+    if (referencesOutOfWorkspacePath(tokens[i])) return false;
+  }
+  return true;
 }
 
 /**
@@ -312,12 +435,20 @@ export class ChatbotClient implements acp.Client {
       });
     }
 
-    // Auto-approve read access to skills directory
-    // External agents need to read SKILL.md files to understand available skills
+    // Auto-approve read access to skills directories.
+    // External agents need to read SKILL.md files to understand available skills.
+    // OpenCode discovers skills from `~/.agents/skills` (external/installed skills) and the
+    // repo-local `skills/` directory. We approve reads anchored to any of these roots using
+    // boundary-safe matching so a sibling-prefix path cannot slip through.
     if (params.toolCall.kind === "read" && params.toolCall.locations) {
-      const skillsPath = "/home/deno/.copilot/skills";
+      const home = Deno.env.get("HOME") ?? "/home/deno";
+      const skillsRoots = [
+        join(home, ".agents", "skills"),
+        join(Deno.cwd(), "skills"),
+      ];
       const isReadingSkills = params.toolCall.locations.some((loc) =>
-        loc.path?.startsWith(skillsPath)
+        loc.path !== undefined &&
+        skillsRoots.some((root) => isWithinDir(loc.path!, root))
       );
 
       if (isReadingSkills) {
@@ -444,10 +575,36 @@ export class ChatbotClient implements acp.Client {
         paths.every((p) => this.isAgentWorkspacePath(p!));
 
       if (isAgentWorkspaceWrite) {
+        // Identify non-TMPDIR agent-workspace paths (i.e. shared workspace writes).
+        const sharedWorkspacePaths = paths.filter((p) => !this.isWithinTmpDir(p!));
+
+        // Write-gating (F3): shared agent-workspace writes require canWriteAgentWorkspace.
+        // Only self-research sessions are authorized to author shared notes. TMPDIR writes
+        // (per-session scratch) are exempt.
+        if (sharedWorkspacePaths.length > 0 && this.config.canWriteAgentWorkspace !== true) {
+          this.logger.warn(
+            "Rejecting edit/write to shared agent workspace: session not authorized to write (canWriteAgentWorkspace not set)",
+            { title, kind, paths: sharedWorkspacePaths },
+          );
+
+          void this.writePermissionAudit(
+            "permission_denied",
+            title,
+            kind,
+            undefined,
+            "rejected_agent_workspace_write_unauthorized",
+          );
+
+          const rejectOption = params.options.find((o) => o.kind === "reject_once") ??
+            params.options[0];
+          return Promise.resolve({
+            outcome: { outcome: "selected", optionId: rejectOption.optionId },
+          });
+        }
+
         // Check extension restrictions for non-TMPDIR agent workspace paths
         const disallowedPaths = paths.filter((p) => {
-          const resolved = resolve(p!);
-          return !this.isWithinTmpDir(resolved) && !this.hasAllowedWriteExtension(p!);
+          return !this.isWithinTmpDir(p!) && !this.hasAllowedWriteExtension(p!);
         });
 
         if (disallowedPaths.length > 0) {
@@ -672,11 +829,27 @@ export class ChatbotClient implements acp.Client {
     this.updateActivity();
     this.logger.debug("Read file requested", { path: params.path });
 
-    // Validate path is within working directory
+    // Validate path is within working directory (boundary-safe)
     if (!this.isPathAllowed(params.path)) {
       throw new acp.RequestError(
         -32600,
         "Access denied: path outside working directory",
+      );
+    }
+
+    // Read-extension allowlist (F4): only workspace memory (`.jsonl`), markdown (`.md`),
+    // and plain text (`.txt`) may be read. This blocks reads of arbitrary sensitive text
+    // files (e.g. `.json` token/cache files) that could live inside an allowed directory.
+    if (!hasAllowedExtension(params.path, ALLOWED_READ_EXTENSIONS)) {
+      this.logger.warn("Rejecting read due to disallowed file extension: {path}", {
+        path: params.path,
+        allowedExtensions: ALLOWED_READ_EXTENSIONS,
+      });
+      throw new acp.RequestError(
+        -32600,
+        `Access denied: file extension not allowed for reads (permitted: ${
+          ALLOWED_READ_EXTENSIONS.join(", ")
+        })`,
       );
     }
 
@@ -709,18 +882,28 @@ export class ChatbotClient implements acp.Client {
       );
     }
 
-    // Defense-in-depth: check extension for agent workspace writes in restricted mode
+    // Defense-in-depth: gate agent-workspace writes in restricted mode.
+    // This is a SEPARATE sink from requestPermission() (an agent may call writeTextFile
+    // directly), so the same F3 write-gating and F4 extension checks are enforced here too.
     if (!this.config.yolo) {
-      const resolvedPath = resolve(params.path);
-      const agentWorkspacePath = this.config.agentWorkspacePath
-        ? resolve(this.config.agentWorkspacePath)
-        : null;
-      const tmpDir = resolve(this.config.workingDir, "tmp");
+      const isSharedWorkspaceWrite = this.config.agentWorkspacePath
+        ? isWithinDir(params.path, this.config.agentWorkspacePath) &&
+          !this.isWithinTmpDir(params.path)
+        : false;
 
-      if (
-        agentWorkspacePath && resolvedPath.startsWith(agentWorkspacePath) &&
-        !resolvedPath.startsWith(tmpDir)
-      ) {
+      if (isSharedWorkspaceWrite) {
+        // Write-gating (F3): shared agent-workspace writes require canWriteAgentWorkspace.
+        if (this.config.canWriteAgentWorkspace !== true) {
+          this.logger.warn(
+            "Rejecting writeTextFile to shared agent workspace: session not authorized (canWriteAgentWorkspace not set)",
+            { path: params.path },
+          );
+          throw new acp.RequestError(
+            -32600,
+            "Access denied: session not authorized to write to the shared agent workspace",
+          );
+        }
+
         if (!this.hasAllowedWriteExtension(params.path)) {
           throw new acp.RequestError(
             -32600,
@@ -769,13 +952,10 @@ export class ChatbotClient implements acp.Client {
    */
   private isPathAllowed(path: string): boolean {
     try {
-      const normalizedPath = resolve(path);
-      const normalizedWorkingDir = resolve(this.config.workingDir);
-      if (normalizedPath.startsWith(normalizedWorkingDir)) return true;
+      if (isWithinDir(path, this.config.workingDir)) return true;
 
-      if (this.config.agentWorkspacePath) {
-        const normalizedAgentWorkspace = resolve(this.config.agentWorkspacePath);
-        if (normalizedPath.startsWith(normalizedAgentWorkspace)) return true;
+      if (this.config.agentWorkspacePath && isWithinDir(path, this.config.agentWorkspacePath)) {
+        return true;
       }
 
       return false;
@@ -791,16 +971,13 @@ export class ChatbotClient implements acp.Client {
    */
   private isAgentWorkspacePath(path: string): boolean {
     try {
-      const normalizedPath = resolve(path);
-
-      // Check agent workspace path
-      if (this.config.agentWorkspacePath) {
-        const normalizedAgentWorkspace = resolve(this.config.agentWorkspacePath);
-        if (normalizedPath.startsWith(normalizedAgentWorkspace)) return true;
+      // Check agent workspace path (boundary-safe)
+      if (this.config.agentWorkspacePath && isWithinDir(path, this.config.agentWorkspacePath)) {
+        return true;
       }
 
       // Check workspace TMPDIR
-      if (this.isWithinTmpDir(normalizedPath)) return true;
+      if (this.isWithinTmpDir(path)) return true;
 
       return false;
     } catch {
@@ -809,15 +986,10 @@ export class ChatbotClient implements acp.Client {
   }
 
   /**
-   * Check if a resolved path is within the workspace TMPDIR
+   * Check if a path is within the workspace TMPDIR (boundary-safe).
    */
-  private isWithinTmpDir(resolvedPath: string): boolean {
-    try {
-      const tmpDir = resolve(this.config.workingDir, "tmp");
-      return resolvedPath.startsWith(tmpDir);
-    } catch {
-      return false;
-    }
+  private isWithinTmpDir(path: string): boolean {
+    return isWithinDir(path, resolve(this.config.workingDir, "tmp"));
   }
 
   /**

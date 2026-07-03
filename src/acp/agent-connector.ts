@@ -87,10 +87,17 @@ export class AgentConnector {
     });
 
     // Spawn the Agent subprocess wrapped with dumb-init for proper signal
-    // forwarding and child process reaping (prevents memory leaks from orphaned processes)
+    // forwarding and child process reaping (prevents memory leaks from orphaned processes).
+    //
+    // Security (F1): `clearEnv: true` ensures the child receives ONLY the explicitly-built
+    // allowlisted `agentConfig.env` and inherits NO variables from the parent bot process.
+    // Without this, `Deno.Command` MERGES `env` into the inherited parent environment, which
+    // would leak every secret the bot holds (bot tokens, provider keys, git credentials) to
+    // the agent subprocess — defeating the SandboxManager env allowlist entirely.
     const command = new Deno.Command(DUMB_INIT_PATH, {
       args: ["--", agentConfig.command, ...agentConfig.args],
       cwd: agentConfig.cwd,
+      clearEnv: true,
       env: agentConfig.env,
       stdin: "piped",
       stdout: "piped",

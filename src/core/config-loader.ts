@@ -273,8 +273,14 @@ const DEFAULT_SANDBOX: SandboxConfig = {
 const DEFAULT_DASHBOARD: DashboardConfig = {
   enabled: false,
   port: 8090,
+  host: "127.0.0.1",
   passphrase: "",
+  behindHttpsProxy: false,
+  trustedProxies: [],
 };
+
+/** Minimum dashboard passphrase length enforced at load when the dashboard is enabled (F5). */
+const MIN_DASHBOARD_PASSPHRASE_LENGTH = 16;
 
 const DEFAULT_IDLE_TIMEOUT: IdleTimeoutConfig = {
   enabled: true,
@@ -579,6 +585,21 @@ function validateConfig(config: Record<string, unknown>): void {
       "dashboard.passphrase is required when dashboard is enabled",
       { field: "dashboard.passphrase" },
     );
+  }
+  // F5: enforce minimum passphrase strength when the dashboard is enabled.
+  if (
+    dash.enabled === true &&
+    String(dash.passphrase).length < MIN_DASHBOARD_PASSPHRASE_LENGTH
+  ) {
+    throw new ConfigError(
+      ErrorCode.CONFIG_INVALID,
+      `dashboard.passphrase must be at least ${MIN_DASHBOARD_PASSPHRASE_LENGTH} characters when the dashboard is enabled`,
+      { field: "dashboard.passphrase" },
+    );
+  }
+  // Normalize trustedProxies to a string array.
+  if (!Array.isArray(dash.trustedProxies)) {
+    dash.trustedProxies = [];
   }
 
   // Conversation summary defaults

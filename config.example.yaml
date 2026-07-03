@@ -324,4 +324,7 @@ skills:
 dashboard:
   enabled: false                    # Enable web dashboard (default: false); override with env DASHBOARD_ENABLED
   port: 8090                        # Dashboard HTTP port (default: 8090); override with env DASHBOARD_PORT
-  passphrase: ""                    # Login passphrase (required when enabled); override with env DASHBOARD_PASSPHRASE
+  host: "127.0.0.1"                 # Bind host (default: 127.0.0.1). Set to "0.0.0.0" to expose on all interfaces; override with env DASHBOARD_HOST
+  passphrase: ""                    # Login passphrase (required when enabled, min 16 chars); override with env DASHBOARD_PASSPHRASE
+  behindHttpsProxy: false           # Set true when served behind an HTTPS-terminating reverse proxy; enables the Secure cookie flag. NOT derived from X-Forwarded-Proto. Override with env DASHBOARD_BEHIND_HTTPS_PROXY
+  trustedProxies: []                # Real connection addresses whose X-Forwarded-For is trusted for login rate-limit keying (default: empty = ignore XFF). Override with env DASHBOARD_TRUSTED_PROXIES (comma-separated)

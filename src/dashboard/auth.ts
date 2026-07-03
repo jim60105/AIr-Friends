@@ -123,36 +123,96 @@ export function clearSessionCookie(): string {
 }
 
 /**
- * Login rate limiter using sliding window
+ * Normalize a host/address string to a canonical form for exact matching (F5).
+ *
+ * - Strips a trailing `:port` from IPv4 / hostname forms (`1.2.3.4:5678` → `1.2.3.4`).
+ * - Strips brackets and port from IPv6 forms (`[::1]:5678` → `::1`, `[fe80::1]` → `fe80::1`).
+ * - Lowercases the result (IPv6 hex / hostnames are case-insensitive).
+ * - Trims surrounding whitespace.
+ *
+ * This lets the trusted-proxy allow-list compare the real socket address against
+ * configured entries regardless of port or bracket notation differences.
+ */
+export function canonicalizeHost(host: string): string {
+  let h = host.trim();
+  if (h.length === 0) return h;
+
+  // Bracketed IPv6, optionally with port: [::1] or [::1]:8080
+  if (h.startsWith("[")) {
+    const close = h.indexOf("]");
+    if (close !== -1) {
+      return h.substring(1, close).toLowerCase();
+    }
+  }
+
+  // If there are multiple colons and no brackets, treat as bare IPv6 (no port to strip).
+  const colonCount = (h.match(/:/g) ?? []).length;
+  if (colonCount > 1) {
+    return h.toLowerCase();
+  }
+
+  // IPv4 or hostname, optionally with a single `:port` — strip the port.
+  if (colonCount === 1) {
+    h = h.substring(0, h.indexOf(":"));
+  }
+  return h.toLowerCase();
+}
+
+/**
+ * Login rate limiter using sliding window, keyed on the REAL connection address (F5).
+ *
+ * Adds a GLOBAL failed-attempt counter with backoff independent of the per-key window,
+ * so an attacker who rotates the client IP (or spoofs `X-Forwarded-For` from a trusted
+ * proxy) cannot gain unlimited total attempts.
  */
 export class LoginRateLimiter {
   private attempts: Map<string, number[]> = new Map();
+  private globalAttempts: number[] = [];
   private maxAttempts: number;
   private windowMs: number;
+  private globalMaxAttempts: number;
+  private globalWindowMs: number;
 
-  constructor(maxAttempts: number = 5, windowMs: number = 60000) {
+  constructor(
+    maxAttempts: number = 5,
+    windowMs: number = 60000,
+    globalMaxAttempts: number = 50,
+    globalWindowMs: number = 60000,
+  ) {
     this.maxAttempts = maxAttempts;
     this.windowMs = windowMs;
+    this.globalMaxAttempts = globalMaxAttempts;
+    this.globalWindowMs = globalWindowMs;
   }
 
-  /** Check if an IP is allowed to attempt login */
-  isAllowed(ip: string): boolean {
+  /** Check if a key (real connection IP) is allowed to attempt login. */
+  isAllowed(key: string): boolean {
     const now = Date.now();
-    const timestamps = this.attempts.get(ip);
+
+    // Global backoff: cap total attempts across all keys within the global window.
+    const recentGlobal = this.globalAttempts.filter((t) => now - t < this.globalWindowMs);
+    this.globalAttempts = recentGlobal;
+    if (recentGlobal.length >= this.globalMaxAttempts) {
+      return false;
+    }
+
+    const timestamps = this.attempts.get(key);
     if (!timestamps) return true;
 
     // Prune old timestamps
     const recent = timestamps.filter((t) => now - t < this.windowMs);
-    this.attempts.set(ip, recent);
+    this.attempts.set(key, recent);
 
     return recent.length < this.maxAttempts;
   }
 
-  /** Record a login attempt */
-  recordAttempt(ip: string): void {
-    const timestamps = this.attempts.get(ip) ?? [];
-    timestamps.push(Date.now());
-    this.attempts.set(ip, timestamps);
+  /** Record a failed login attempt against both the per-key and global counters. */
+  recordAttempt(key: string): void {
+    const now = Date.now();
+    const timestamps = this.attempts.get(key) ?? [];
+    timestamps.push(now);
+    this.attempts.set(key, timestamps);
+    this.globalAttempts.push(now);
   }
 }
 

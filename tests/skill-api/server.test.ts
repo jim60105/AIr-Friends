@@ -1630,14 +1630,18 @@ Deno.test("SkillAPIServer - edit-reply no crash when onTerminateRequest not set"
       }),
     }).then((r) => r.json());
 
-    // Execute 2 successful edits to bring editCount to 2
+    // Execute 2 successful edits to bring editCount to 2. The edit-reply is scoped to the
+    // session's last-sent message (F7); since editMessage here returns "edited_msg_001",
+    // the tracked lastSentMessageId is "sent_msg_001" for the first edit and
+    // "edited_msg_001" for the second.
+    const editIds = ["sent_msg_001", "edited_msg_001"];
     for (let i = 1; i <= 2; i++) {
       await fetch(`http://localhost:${port}/api/skill/edit-reply`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           sessionId,
-          parameters: { messageId: "sent_msg_001", message: `Edit ${i}` },
+          parameters: { messageId: editIds[i - 1], message: `Edit ${i}` },
         }),
       }).then((r) => r.json());
     }

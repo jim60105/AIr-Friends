@@ -79,8 +79,6 @@
           "*/skills/*/scripts/*.ts*": "allow",
           "agent-browser *": "allow",
           "rg *": "allow",
-          "curl *": "allow",
-          "wget *": "allow",
           "cat *": "allow",
           "head *": "allow",
           "tail *": "allow",

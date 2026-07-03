@@ -32,6 +32,15 @@ export interface ClientConfig {
 
   /** Allowed file extensions for agent workspace writes in restricted mode */
   allowedWriteExtensions?: string[];
+
+  /**
+   * Whether this session may WRITE to the shared agent workspace (F3).
+   * Only self-research sessions are authorized to author shared notes. When unset or
+   * `false`, edit/write requests targeting the shared agent workspace are rejected even
+   * if path/extension checks pass. Writes to the per-session TMPDIR remain allowed
+   * regardless of this flag.
+   */
+  canWriteAgentWorkspace?: boolean;
 }
 
 /**
