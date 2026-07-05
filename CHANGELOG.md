@@ -7,6 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.26.0] - 2026-07-05
+
+### Added
+
+- Per-context reasoning effort configuration (`agent.reasoningEffort`), enabling global, per-rule, and per-section control over AI reasoning effort levels via ACP Session Config Options
+- SSRF validation for attachment downloads across scheme, private/loopback/link-local ranges, and redirect hops
+- Web dashboard authentication rate limiting, trusted-proxy XFF support, and a 16-character minimum passphrase requirement
+- Helm chart automatic dashboard host binding (`0.0.0.0`) and HTTPS proxy secure cookie configuration when dashboard Service and TLS Ingress are enabled
+
+### Changed
+
+- Consolidated on OpenCode as the sole external ACP agent, removing legacy Copilot and Gemini agent integrations
+- Switched default AI models to OpenRouter (`openrouter/deepseek/deepseek-v4-pro` and `openrouter/anthropic/claude-opus-4.8`)
+
+### Removed
+
+- Pioneer AI provider integration and configuration
+
+### Security
+
+- Hardened ACP agent subprocess execution by spawning with `clearEnv: true` to prevent parent secret inheritance
+- Anchored command whitelist matching to invocation entrypoints and restricted shared agent-workspace file write access strictly to self-research sessions
+
+### Fixed
+
+- Scoped `edit-reply` skill execution strictly to the session's own last-sent message
+- Classified Misskey specified-visibility notes as direct messages in the mention handler
+- Pinned Deno version to v2.8.3 in CI Build Check job to prevent stack overflow compilation regression
+
 ## [0.25.0] - 2026-06-03
 
 ### Added
@@ -964,7 +993,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ---
 
-[Unreleased]: https://github.com/jim60105/AIr-Friends/compare/v0.25.0...HEAD
+[Unreleased]: https://github.com/jim60105/AIr-Friends/compare/v0.26.0...HEAD
+[0.26.0]: https://github.com/jim60105/AIr-Friends/compare/v0.25.0...v0.26.0
 [0.25.0]: https://github.com/jim60105/AIr-Friends/compare/v0.24.0...v0.25.0
 [0.24.0]: https://github.com/jim60105/AIr-Friends/compare/v0.23.0...v0.24.0
 [0.23.0]: https://github.com/jim60105/AIr-Friends/compare/v0.22.0...v0.23.0
