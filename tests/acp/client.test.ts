@@ -521,6 +521,193 @@ Deno.test("ChatbotClient - sessionUpdate handles usage_update", async () => {
   }
 });
 
+Deno.test("ChatbotClient - sessionUpdate logs thought chunk from content envelope", async () => {
+  const tempDir = Deno.makeTempDirSync();
+  try {
+    const debugLogs: Array<{ message: string; context: unknown }> = [];
+    const testLogger = new Logger("test", { level: LogLevel.DEBUG });
+    const originalDebug = testLogger.debug.bind(testLogger);
+    testLogger.debug = (message: string, context?: Record<string, unknown>) => {
+      debugLogs.push({ message, context });
+      originalDebug(message, context);
+    };
+
+    const skillRegistry = createTestSkillRegistry();
+    const config = {
+      workingDir: tempDir,
+      platform: "discord",
+      userId: "123",
+      channelId: "456",
+      isDM: false,
+    };
+    const client = new ChatbotClient(skillRegistry, testLogger, config);
+
+    await client.sessionUpdate({
+      update: {
+        sessionUpdate: "agent_thought_chunk",
+        content: { type: "text", text: "old format thought" },
+      },
+    } as unknown as acp.SessionNotification);
+
+    const thoughtLogs = debugLogs.filter((log) => log.message === "Agent thought: {text}");
+    assertEquals(thoughtLogs.length, 1);
+    const context = thoughtLogs[0].context as Record<string, unknown>;
+    assertEquals(context.text, "old format thought");
+  } finally {
+    Deno.removeSync(tempDir, { recursive: true });
+  }
+});
+
+Deno.test("ChatbotClient - sessionUpdate logs thought chunk from direct text", async () => {
+  const tempDir = Deno.makeTempDirSync();
+  try {
+    const debugLogs: Array<{ message: string; context: unknown }> = [];
+    const testLogger = new Logger("test", { level: LogLevel.DEBUG });
+    const originalDebug = testLogger.debug.bind(testLogger);
+    testLogger.debug = (message: string, context?: Record<string, unknown>) => {
+      debugLogs.push({ message, context });
+      originalDebug(message, context);
+    };
+
+    const skillRegistry = createTestSkillRegistry();
+    const config = {
+      workingDir: tempDir,
+      platform: "discord",
+      userId: "123",
+      channelId: "456",
+      isDM: false,
+    };
+    const client = new ChatbotClient(skillRegistry, testLogger, config);
+
+    await client.sessionUpdate({
+      update: {
+        sessionUpdate: "agent_thought_chunk",
+        text: "new format thought",
+      },
+    } as unknown as acp.SessionNotification);
+
+    const thoughtLogs = debugLogs.filter((log) => log.message === "Agent thought: {text}");
+    assertEquals(thoughtLogs.length, 1);
+    const context = thoughtLogs[0].context as Record<string, unknown>;
+    assertEquals(context.text, "new format thought");
+  } finally {
+    Deno.removeSync(tempDir, { recursive: true });
+  }
+});
+
+Deno.test("ChatbotClient - sessionUpdate logs thought chunk with empty text when missing", async () => {
+  const tempDir = Deno.makeTempDirSync();
+  try {
+    const debugLogs: Array<{ message: string; context: unknown }> = [];
+    const testLogger = new Logger("test", { level: LogLevel.DEBUG });
+    const originalDebug = testLogger.debug.bind(testLogger);
+    testLogger.debug = (message: string, context?: Record<string, unknown>) => {
+      debugLogs.push({ message, context });
+      originalDebug(message, context);
+    };
+
+    const skillRegistry = createTestSkillRegistry();
+    const config = {
+      workingDir: tempDir,
+      platform: "discord",
+      userId: "123",
+      channelId: "456",
+      isDM: false,
+    };
+    const client = new ChatbotClient(skillRegistry, testLogger, config);
+
+    await client.sessionUpdate({
+      update: {
+        sessionUpdate: "agent_thought_chunk",
+      },
+    } as unknown as acp.SessionNotification);
+
+    const thoughtLogs = debugLogs.filter((log) => log.message === "Agent thought: {text}");
+    assertEquals(thoughtLogs.length, 1);
+    const context = thoughtLogs[0].context as Record<string, unknown>;
+    assertEquals(context.text, "");
+  } finally {
+    Deno.removeSync(tempDir, { recursive: true });
+  }
+});
+
+Deno.test("ChatbotClient - sessionUpdate prefers content envelope over direct text", async () => {
+  const tempDir = Deno.makeTempDirSync();
+  try {
+    const debugLogs: Array<{ message: string; context: unknown }> = [];
+    const testLogger = new Logger("test", { level: LogLevel.DEBUG });
+    const originalDebug = testLogger.debug.bind(testLogger);
+    testLogger.debug = (message: string, context?: Record<string, unknown>) => {
+      debugLogs.push({ message, context });
+      originalDebug(message, context);
+    };
+
+    const skillRegistry = createTestSkillRegistry();
+    const config = {
+      workingDir: tempDir,
+      platform: "discord",
+      userId: "123",
+      channelId: "456",
+      isDM: false,
+    };
+    const client = new ChatbotClient(skillRegistry, testLogger, config);
+
+    await client.sessionUpdate({
+      update: {
+        sessionUpdate: "agent_thought_chunk",
+        content: { type: "text", text: "" },
+        text: "direct format thought",
+      },
+    } as unknown as acp.SessionNotification);
+
+    const thoughtLogs = debugLogs.filter((log) => log.message === "Agent thought: {text}");
+    assertEquals(thoughtLogs.length, 1);
+    const context = thoughtLogs[0].context as Record<string, unknown>;
+    assertEquals(context.text, "");
+  } finally {
+    Deno.removeSync(tempDir, { recursive: true });
+  }
+});
+
+Deno.test("ChatbotClient - sessionUpdate truncates thought text to 100 chars", async () => {
+  const tempDir = Deno.makeTempDirSync();
+  try {
+    const debugLogs: Array<{ message: string; context: unknown }> = [];
+    const testLogger = new Logger("test", { level: LogLevel.DEBUG });
+    const originalDebug = testLogger.debug.bind(testLogger);
+    testLogger.debug = (message: string, context?: Record<string, unknown>) => {
+      debugLogs.push({ message, context });
+      originalDebug(message, context);
+    };
+
+    const skillRegistry = createTestSkillRegistry();
+    const config = {
+      workingDir: tempDir,
+      platform: "discord",
+      userId: "123",
+      channelId: "456",
+      isDM: false,
+    };
+    const client = new ChatbotClient(skillRegistry, testLogger, config);
+    const longText = "a".repeat(150);
+
+    await client.sessionUpdate({
+      update: {
+        sessionUpdate: "agent_thought_chunk",
+        text: longText,
+      },
+    } as unknown as acp.SessionNotification);
+
+    const thoughtLogs = debugLogs.filter((log) => log.message === "Agent thought: {text}");
+    assertEquals(thoughtLogs.length, 1);
+    const context = thoughtLogs[0].context as Record<string, unknown>;
+    assertEquals((context.text as string).length, 100);
+    assertEquals(context.text, "a".repeat(100));
+  } finally {
+    Deno.removeSync(tempDir, { recursive: true });
+  }
+});
+
 Deno.test("ChatbotClient - sessionUpdate logs failed tool calls with details", async () => {
   const tempDir = Deno.makeTempDirSync();
   try {

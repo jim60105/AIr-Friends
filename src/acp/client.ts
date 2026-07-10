@@ -764,10 +764,18 @@ export class ChatbotClient implements acp.Client {
       case "agent_thought_chunk":
         this.flushMessageBuffer();
         // Agent's thinking process - only log
-        this.logger.debug("Agent thought", {
-          hasContent: update.content?.type === "text",
-          text: update.content?.type === "text" ? update.content.text.substring(0, 100) : "",
-        });
+        {
+          const updateAny = update as Record<string, unknown>;
+          const contentText = update.content?.type === "text" &&
+              typeof update.content.text === "string"
+            ? update.content.text
+            : undefined;
+          const directText = typeof updateAny.text === "string" ? updateAny.text : "";
+          const thoughtText = contentText ?? directText;
+          this.logger.debug("Agent thought: {text}", {
+            text: thoughtText.substring(0, 100),
+          });
+        }
         break;
 
       case "usage_update": {
