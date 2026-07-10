@@ -278,6 +278,7 @@ export class ChatbotClient implements acp.Client {
   /** Timestamp of the last activity received from the Agent */
   private lastActivityTimestamp: number = Date.now();
   private messageBuffer: string[] = [];
+  private thoughtBuffer: string[] = [];
 
   /**
    * Optional listener invoked when the Agent sends a `config_option_update`
@@ -701,6 +702,7 @@ export class ChatbotClient implements acp.Client {
 
     switch (update.sessionUpdate) {
       case "agent_message_chunk":
+        this.flushThoughtBuffer();
         // Agent is generating response - log but don't send
         if (update.content.type === "text") {
           this.logger.debug("Agent message chunk: {text}", {
@@ -712,6 +714,7 @@ export class ChatbotClient implements acp.Client {
         break;
 
       case "tool_call":
+        this.flushThoughtBuffer();
         this.flushMessageBuffer();
         this.logger.info(
           "Tool call started: {title} (id: {id}, kind: {kind})",
@@ -725,6 +728,7 @@ export class ChatbotClient implements acp.Client {
         break;
 
       case "tool_call_update": {
+        this.flushThoughtBuffer();
         this.flushMessageBuffer();
         // Log tool call updates with full context
         const logContext: Record<string, unknown> = {
@@ -755,6 +759,7 @@ export class ChatbotClient implements acp.Client {
       }
 
       case "plan":
+        this.flushThoughtBuffer();
         this.flushMessageBuffer();
         this.logger.debug("Agent plan", {
           entriesCount: update.entries?.length ?? 0,
@@ -775,10 +780,14 @@ export class ChatbotClient implements acp.Client {
           this.logger.debug("Agent thought: {text}", {
             text: thoughtText.substring(0, 100),
           });
+          if (thoughtText.length > 0) {
+            this.thoughtBuffer.push(thoughtText);
+          }
         }
         break;
 
       case "usage_update": {
+        this.flushThoughtBuffer();
         this.flushMessageBuffer();
         // Token usage information from the agent
         const usageUpdate = update as unknown as {
@@ -796,6 +805,7 @@ export class ChatbotClient implements acp.Client {
       }
 
       case "config_option_update": {
+        this.flushThoughtBuffer();
         this.flushMessageBuffer();
         // Agent reports the complete updated config option state; propagate to the connector
         // so reasoning-effort discovery uses fresh options (e.g. after a model change).
@@ -818,6 +828,7 @@ export class ChatbotClient implements acp.Client {
       }
 
       default:
+        this.flushThoughtBuffer();
         this.flushMessageBuffer();
         this.logger.debug("Session update", {
           type: (update as { sessionUpdate?: string }).sessionUpdate,
@@ -1050,53 +1061,115 @@ export class ChatbotClient implements acp.Client {
     this.replyAlreadySent = true;
   }
 
+  private flushAccumulatedBuffer(type: "message" | "thought"): void {
+    const buffer = type === "message" ? this.messageBuffer : this.thoughtBuffer;
+    if (buffer.length === 0) return;
+
+    if (type === "message") {
+      this.messageBuffer = [];
+    } else {
+      this.thoughtBuffer = [];
+    }
+
+    const completeText = buffer.join("");
+    const chunkCount = buffer.length;
+    const textLen = completeText.length;
+
+    if (type === "message") {
+      this.logger.info(
+        "Agent complete message ({chunkCount} chunks, {length} chars): {message}",
+        {
+          message: completeText,
+          chunkCount,
+          length: textLen,
+        },
+      );
+    } else {
+      this.logger.info(
+        "Agent complete thought ({chunkCount} chunks, {length} chars): {thought}",
+        {
+          thought: completeText,
+          chunkCount,
+          length: textLen,
+        },
+      );
+    }
+
+    if (this.auditWriter) {
+      const writer = this.auditWriter;
+      const hashContent = writer.getConfig().hashContent;
+      const ts = new Date().toISOString();
+      const phase = type === "message" ? "agent_complete_message" : "agent_complete_thought";
+
+      if (hashContent) {
+        sha256Hash(completeText)
+          .then((hash) => {
+            void writer.write(
+              phase,
+              type === "message"
+                ? {
+                  messageContentHash: `sha256:${hash}`,
+                  messageLength: textLen,
+                  chunkCount,
+                }
+                : {
+                  thoughtContentHash: `sha256:${hash}`,
+                  thoughtLength: textLen,
+                  chunkCount,
+                },
+              ts,
+            );
+          })
+          .catch((error) => {
+            this.logger.warn("Failed to hash complete {type} for audit entry", {
+              type,
+              error: error instanceof Error ? error.message : String(error),
+            });
+          });
+      } else {
+        void writer.write(
+          phase,
+          type === "message"
+            ? {
+              messageContentHash: completeText,
+              messageLength: textLen,
+              chunkCount,
+            }
+            : {
+              thoughtContentHash: completeText,
+              thoughtLength: textLen,
+              chunkCount,
+            },
+          ts,
+        );
+      }
+    }
+  }
+
   /**
    * Flush the accumulated agent message chunks as a single complete message log entry.
    * Called when a non-chunk session update arrives or when the prompt completes.
    */
   flushMessageBuffer(): void {
-    if (this.messageBuffer.length === 0) return;
+    this.flushAccumulatedBuffer("message");
+  }
 
-    const completeMessage = this.messageBuffer.join("");
-    const chunkCount = this.messageBuffer.length;
-    this.logger.info("Agent complete message ({chunkCount} chunks, {length} chars): {message}", {
-      message: completeMessage,
-      chunkCount,
-      length: completeMessage.length,
-    });
-
-    if (this.auditWriter) {
-      const writer = this.auditWriter;
-      const hashContent = writer.getConfig().hashContent;
-      const msgLen = completeMessage.length;
-      if (hashContent) {
-        sha256Hash(completeMessage).then((hash) => {
-          void writer.write("agent_complete_message", {
-            messageContentHash: `sha256:${hash}`,
-            messageLength: msgLen,
-            chunkCount,
-          });
-        });
-      } else {
-        void writer.write("agent_complete_message", {
-          messageContentHash: completeMessage,
-          messageLength: msgLen,
-          chunkCount,
-        });
-      }
-    }
-
-    this.messageBuffer = [];
+  /**
+   * Flush the accumulated agent thought chunks as a single complete thought log entry.
+   * Called when a non-thought-chunk session update arrives or when the prompt completes.
+   */
+  flushThoughtBuffer(): void {
+    this.flushAccumulatedBuffer("thought");
   }
 
   /**
    * Reset client state for new session
    */
   reset(): void {
+    this.flushThoughtBuffer();
     this.flushMessageBuffer();
     this.replyAlreadySent = false;
     this.lastActivityTimestamp = Date.now();
-    this.auditWriter = undefined;
   }
 
   /**

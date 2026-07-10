@@ -23,6 +23,8 @@ export class SessionAuditWriter {
   private _memoryOpsCount = 0;
   private _permissionDecisionsCount = 0;
 
+  private writeQueue: Promise<void> = Promise.resolve();
+
   constructor(
     auditBasePath: string,
     platform: string,
@@ -79,38 +81,48 @@ export class SessionAuditWriter {
    * Write an audit entry if the phase is included in config.
    * Fire-and-forget — errors are logged but never thrown.
    */
-  async write(phase: AuditPhase, data: SessionAuditEntry["data"]): Promise<void> {
+  write(
+    phase: AuditPhase,
+    data: SessionAuditEntry["data"],
+    timestamp?: string,
+  ): Promise<void> {
     // Phase filter
     if (
       this.config.includedPhases.length > 0 &&
       !this.config.includedPhases.includes(phase)
     ) {
-      return;
+      return Promise.resolve();
     }
 
-    // Update Prometheus counter
-    auditEntriesTotal.inc({ phase });
+    const ts = timestamp ?? new Date().toISOString();
 
-    const entry: SessionAuditEntry = {
-      ts: new Date().toISOString(),
-      phase,
-      data,
-    };
+    this.writeQueue = this.writeQueue
+      .then(async () => {
+        // Update Prometheus counter
+        auditEntriesTotal.inc({ phase });
 
-    try {
-      const dir = this.filePath.substring(0, this.filePath.lastIndexOf("/"));
-      await Deno.mkdir(dir, { recursive: true });
-      await Deno.writeTextFile(
-        this.filePath,
-        JSON.stringify(entry) + "\n",
-        { append: true },
-      );
-    } catch (error) {
-      logger.warn("Failed to write audit entry for session {sessionId}", {
-        sessionId: this.sessionId,
-        phase,
-        error: error instanceof Error ? error.message : String(error),
+        const entry: SessionAuditEntry = {
+          ts,
+          phase,
+          data,
+        };
+
+        const dir = this.filePath.substring(0, this.filePath.lastIndexOf("/"));
+        await Deno.mkdir(dir, { recursive: true });
+        await Deno.writeTextFile(
+          this.filePath,
+          JSON.stringify(entry) + "\n",
+          { append: true },
+        );
+      })
+      .catch((error) => {
+        logger.warn("Failed to write audit entry for session {sessionId}", {
+          sessionId: this.sessionId,
+          phase,
+          error: error instanceof Error ? error.message : String(error),
+        });
       });
-    }
+
+    return this.writeQueue;
   }
 }

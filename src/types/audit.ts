@@ -16,6 +16,7 @@ export type AuditPhase =
   | "memory_operation"
   | "agent_response"
   | "agent_complete_message"
+  | "agent_complete_thought"
   | "reply_sent"
   | "reply_edited"
   | "retry_triggered"
@@ -95,6 +96,10 @@ export interface SessionAuditEntry {
     messageContentHash?: string;
     messageLength?: number;
     chunkCount?: number;
+
+    // agent_complete_thought
+    thoughtContentHash?: string;
+    thoughtLength?: number;
 
     // reply_sent
     replyContentHash?: string;

@@ -4751,3 +4751,273 @@ Deno.test("F4 ALLOWED_READ_EXTENSIONS - documents the read allowlist", () => {
   assertEquals(ALLOWED_READ_EXTENSIONS.includes(".txt"), true);
   assertEquals(ALLOWED_READ_EXTENSIONS.includes(".json"), false);
 });
+
+Deno.test("ChatbotClient - flushThoughtBuffer logs complete thought after chunks", async () => {
+  const tempDir = Deno.makeTempDirSync();
+  try {
+    const infoLogs: Array<{ message: string; context: unknown }> = [];
+    const testLogger = new Logger("test", { level: LogLevel.DEBUG });
+    const originalInfo = testLogger.info.bind(testLogger);
+    testLogger.info = (message: string, context?: Record<string, unknown>) => {
+      infoLogs.push({ message, context });
+      originalInfo(message, context);
+    };
+
+    const skillRegistry = createTestSkillRegistry();
+    const config = {
+      workingDir: tempDir,
+      platform: "discord",
+      userId: "123",
+      channelId: "456",
+      isDM: false,
+    };
+
+    const client = new ChatbotClient(skillRegistry, testLogger, config);
+
+    await client.sessionUpdate({
+      update: {
+        sessionUpdate: "agent_thought_chunk",
+        content: { type: "text", text: "Thinking step 1... " },
+      },
+    } as acp.SessionNotification);
+
+    await client.sessionUpdate({
+      update: {
+        sessionUpdate: "agent_thought_chunk",
+        content: { type: "text", text: "Thinking step 2" },
+      },
+    } as acp.SessionNotification);
+
+    const preFlushLogs = infoLogs.filter((log) =>
+      log.message === "Agent complete thought ({chunkCount} chunks, {length} chars): {thought}"
+    );
+    assertEquals(preFlushLogs.length, 0);
+
+    await client.sessionUpdate({
+      sessionId: "test-session",
+      update: {
+        sessionUpdate: "tool_call",
+        toolCallId: "test-id",
+        title: "test",
+        kind: null,
+        status: "pending" as const,
+      },
+    } as unknown as acp.SessionNotification);
+
+    const completeLogs = infoLogs.filter((log) =>
+      log.message === "Agent complete thought ({chunkCount} chunks, {length} chars): {thought}"
+    );
+    assertEquals(completeLogs.length, 1);
+    const context = completeLogs[0].context as Record<string, unknown>;
+    assertEquals(context.thought, "Thinking step 1... Thinking step 2");
+    assertEquals(context.chunkCount, 2);
+    assertEquals(context.length, 34);
+  } finally {
+    Deno.removeSync(tempDir, { recursive: true });
+  }
+});
+
+Deno.test("ChatbotClient - flushThoughtBuffer is safe when buffer is empty", () => {
+  const tempDir = Deno.makeTempDirSync();
+  try {
+    const infoLogs: string[] = [];
+    const testLogger = new Logger("test", { level: LogLevel.DEBUG });
+    const originalInfo = testLogger.info.bind(testLogger);
+    testLogger.info = (message: string, context?: Record<string, unknown>) => {
+      infoLogs.push(message);
+      originalInfo(message, context);
+    };
+
+    const skillRegistry = createTestSkillRegistry();
+    const config = {
+      workingDir: tempDir,
+      platform: "discord",
+      userId: "123",
+      channelId: "456",
+      isDM: false,
+    };
+
+    const client = new ChatbotClient(skillRegistry, testLogger, config);
+    client.flushThoughtBuffer();
+
+    assertEquals(infoLogs.length, 0);
+  } finally {
+    Deno.removeSync(tempDir, { recursive: true });
+  }
+});
+
+Deno.test("ChatbotClient - deterministic flush ordering (flushThoughtBuffer before flushMessageBuffer)", async () => {
+  const tempDir = Deno.makeTempDirSync();
+  try {
+    const logOrder: string[] = [];
+    const testLogger = new Logger("test", { level: LogLevel.DEBUG });
+    testLogger.info = (message: string) => {
+      if (message.startsWith("Agent complete thought")) {
+        logOrder.push("thought");
+      } else if (message.startsWith("Agent complete message")) {
+        logOrder.push("message");
+      }
+    };
+
+    const skillRegistry = createTestSkillRegistry();
+    const config = {
+      workingDir: tempDir,
+      platform: "discord",
+      userId: "123",
+      channelId: "456",
+      isDM: false,
+    };
+
+    const client = new ChatbotClient(skillRegistry, testLogger, config);
+
+    await client.sessionUpdate({
+      update: {
+        sessionUpdate: "agent_thought_chunk",
+        content: { type: "text", text: "Deep thought" },
+      },
+    } as acp.SessionNotification);
+
+    client.reset();
+    assertEquals(logOrder, ["thought"]);
+  } finally {
+    Deno.removeSync(tempDir, { recursive: true });
+  }
+});
+
+Deno.test("ChatbotClient - flushThoughtBuffer writes agent_complete_thought audit entry", async () => {
+  const tempDir = Deno.makeTempDirSync();
+  try {
+    const auditEntries: SessionAuditEntry[] = [];
+    const auditConfig: AuditConfig = {
+      enabled: true,
+      retentionDays: 7,
+      hashContent: false,
+      includedPhases: [],
+    };
+    const auditDir = `${tempDir}/audit`;
+    Deno.mkdirSync(auditDir, { recursive: true });
+    const auditWriter = new SessionAuditWriter(
+      auditDir,
+      "discord",
+      "123",
+      "sess_flush_thought_audit",
+      auditConfig,
+    );
+    const origWrite = auditWriter.write.bind(auditWriter);
+    auditWriter.write = async (
+      phase: AuditPhase,
+      data: SessionAuditEntry["data"],
+    ) => {
+      auditEntries.push({ ts: new Date().toISOString(), phase, data } as SessionAuditEntry);
+      await origWrite(phase, data);
+    };
+
+    const skillRegistry = createTestSkillRegistry();
+    const testLogger = new Logger("test", { level: LogLevel.FATAL });
+    const config = {
+      workingDir: tempDir,
+      platform: "discord",
+      userId: "123",
+      channelId: "456",
+      isDM: false,
+    };
+
+    const client = new ChatbotClient(skillRegistry, testLogger, config);
+    client.setAuditWriter(auditWriter);
+
+    await client.sessionUpdate({
+      update: {
+        sessionUpdate: "agent_thought_chunk",
+        content: { type: "text", text: "Thinking " },
+      },
+    } as acp.SessionNotification);
+    await client.sessionUpdate({
+      update: {
+        sessionUpdate: "agent_thought_chunk",
+        content: { type: "text", text: "deeply" },
+      },
+    } as acp.SessionNotification);
+
+    await client.sessionUpdate({
+      sessionId: "sess_flush_thought_audit",
+      update: {
+        sessionUpdate: "tool_call",
+        toolCallId: "test-id",
+        title: "test",
+        kind: null,
+        status: "pending" as const,
+      },
+    } as unknown as acp.SessionNotification);
+
+    await new Promise((r) => setTimeout(r, 100));
+
+    const completeEntries = auditEntries.filter((e) => e.phase === "agent_complete_thought");
+    assertEquals(completeEntries.length, 1);
+    assertEquals(completeEntries[0].data.chunkCount, 2);
+    assertEquals(completeEntries[0].data.thoughtLength, 15);
+    assertEquals(completeEntries[0].data.thoughtContentHash, "Thinking deeply");
+  } finally {
+    Deno.removeSync(tempDir, { recursive: true });
+  }
+});
+
+Deno.test("ChatbotClient - flushThoughtBuffer no audit entry when buffer empty", async () => {
+  const tempDir = Deno.makeTempDirSync();
+  try {
+    const auditEntries: SessionAuditEntry[] = [];
+    const auditConfig: AuditConfig = {
+      enabled: true,
+      retentionDays: 7,
+      hashContent: false,
+      includedPhases: [],
+    };
+    const auditDir = `${tempDir}/audit`;
+    Deno.mkdirSync(auditDir, { recursive: true });
+    const auditWriter = new SessionAuditWriter(
+      auditDir,
+      "discord",
+      "123",
+      "sess_empty_thought_audit",
+      auditConfig,
+    );
+    const origWrite = auditWriter.write.bind(auditWriter);
+    auditWriter.write = async (
+      phase: AuditPhase,
+      data: SessionAuditEntry["data"],
+    ) => {
+      auditEntries.push({ ts: new Date().toISOString(), phase, data } as SessionAuditEntry);
+      await origWrite(phase, data);
+    };
+
+    const skillRegistry = createTestSkillRegistry();
+    const testLogger = new Logger("test", { level: LogLevel.FATAL });
+    const config = {
+      workingDir: tempDir,
+      platform: "discord",
+      userId: "123",
+      channelId: "456",
+      isDM: false,
+    };
+
+    const client = new ChatbotClient(skillRegistry, testLogger, config);
+    client.setAuditWriter(auditWriter);
+
+    await client.sessionUpdate({
+      sessionId: "sess_empty_thought_audit",
+      update: {
+        sessionUpdate: "tool_call",
+        toolCallId: "test-id",
+        title: "test",
+        kind: null,
+        status: "pending" as const,
+      },
+    } as unknown as acp.SessionNotification);
+
+    await new Promise((r) => setTimeout(r, 100));
+
+    const completeEntries = auditEntries.filter((e) => e.phase === "agent_complete_thought");
+    assertEquals(completeEntries.length, 0);
+  } finally {
+    Deno.removeSync(tempDir, { recursive: true });
+  }
+});

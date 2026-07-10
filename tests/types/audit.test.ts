@@ -3,8 +3,8 @@
 import { assertEquals } from "@std/assert";
 import type { AuditPhase } from "../../src/types/audit.ts";
 
-// 8.1: Verify all 18 AuditPhase literals are valid
-Deno.test("AuditPhase - all 18 phase literals are assignable", () => {
+// 8.1: Verify all 19 AuditPhase literals are valid
+Deno.test("AuditPhase - all 19 phase literals are assignable", () => {
   const phases: AuditPhase[] = [
     "trigger_received",
     "session_start",
@@ -18,6 +18,7 @@ Deno.test("AuditPhase - all 18 phase literals are assignable", () => {
     "memory_operation",
     "agent_response",
     "agent_complete_message",
+    "agent_complete_thought",
     "reply_sent",
     "reply_edited",
     "retry_triggered",
@@ -25,7 +26,7 @@ Deno.test("AuditPhase - all 18 phase literals are assignable", () => {
     "permission_approved",
     "permission_denied",
   ];
-  assertEquals(phases.length, 18);
+  assertEquals(phases.length, 19);
   // Each assignment above is a compile-time check that the literal is valid
   for (const phase of phases) {
     assertEquals(typeof phase, "string");
@@ -46,6 +47,7 @@ Deno.test("AuditPhase - phase literals are distinct", () => {
     "memory_operation",
     "agent_response",
     "agent_complete_message",
+    "agent_complete_thought",
     "reply_sent",
     "reply_edited",
     "retry_triggered",
@@ -54,5 +56,5 @@ Deno.test("AuditPhase - phase literals are distinct", () => {
     "permission_denied",
   ];
   const unique = new Set(phases);
-  assertEquals(unique.size, 18);
+  assertEquals(unique.size, 19);
 });

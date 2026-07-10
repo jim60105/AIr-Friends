@@ -39,6 +39,7 @@ The system SHALL support the following audit phases as defined in `AuditPhase`:
 | `memory_operation`     | Memory skill operation               |
 | `agent_response`       | Agent response received              |
 | `agent_complete_message` | Agent complete buffered response   |
+| `agent_complete_thought` | Agent complete buffered thought process |
 | `reply_sent`           | Reply sent to platform               |
 | `reply_edited`         | Reply edited on platform             |
 | `retry_triggered`      | Missing-reply retry activated        |
@@ -61,7 +62,7 @@ Each entry SHALL contain an ISO 8601 `ts` timestamp, the `phase` string, and a `
 #### Scenario: Complete session audit trail
 - **GIVEN** audit is enabled with all phases included
 - **WHEN** a normal message session completes successfully with one reply and two memory saves
-- **THEN** the session JSONL file SHALL contain entries in chronological order: `trigger_received`, `session_start`, `rate_limit_checked` (if rate limiting enabled), `context_assembly`, `yolo_resolution`, `agent_connect`, `prompt_sent`, `agent_message`, one or more `skill_call`/`memory_operation`/`agent_complete_message` entries, `agent_response`, `reply_sent`, `session_end`
+- **THEN** the session JSONL file SHALL contain entries in chronological order: `trigger_received`, `session_start`, `rate_limit_checked` (if rate limiting enabled), `context_assembly`, `yolo_resolution`, `agent_connect`, `prompt_sent`, `agent_message`, one or more `skill_call`/`memory_operation`/`agent_complete_thought`/`agent_complete_message` entries, `agent_response`, `reply_sent`, `session_end`
 
 ### Requirement: Trigger Received Audit Phase
 
@@ -253,6 +254,39 @@ The `cleanupAuditLogs()` function SHALL delete JSONL files whose `mtime` is olde
 - **GIVEN** a cleanup is already running
 - **WHEN** the timer fires again
 - **THEN** the execution SHALL be skipped and the next timer SHALL be scheduled
+
+### Requirement: Agent Complete Thought Audit Phase
+
+The system SHALL emit an `agent_complete_thought` audit entry whenever buffered thought chunks are flushed at the end of a thought process or session turn. The entry `data` payload SHALL contain `thoughtContentHash` (optional string, formatted as `sha256:<hex>` or plain text depending on `hashContent` configuration), `thoughtLength` (integer, total character length of complete thought), and `chunkCount` (integer, number of thought chunks aggregated).
+
+#### Scenario: Agent complete thought after multiple chunks
+- **GIVEN** audit is enabled and `agent_complete_thought` phase is included
+- **WHEN** the agent emits 3 `agent_thought_chunk` updates totaling 450 characters and then emits an `agent_message_chunk`
+- **THEN** an audit entry SHALL be written with `phase: "agent_complete_thought"` containing `thoughtLength: 450` and `chunkCount: 3`
+
+#### Scenario: Empty thought buffer flush does not emit audit entry
+- **GIVEN** `thoughtBuffer` is empty
+- **WHEN** `flushThoughtBuffer()` is called
+- **THEN** no `agent_complete_thought` audit entry SHALL be written
+
+#### Scenario: Multiple thought flushes in one session
+- **GIVEN** an agent performs multiple turns or tool calls with reasoning in a single session
+- **WHEN** `flushThoughtBuffer()` is called multiple times after non-empty thought chunks
+- **THEN** multiple distinct `agent_complete_thought` entries SHALL be recorded in the session JSONL file in chronological sequence
+
+### Requirement: Non-Blocking Audit Logging and Synchronous Timestamps
+
+The system SHALL capture event timestamps synchronously at the exact moment of buffer flushing or phase occurrence and execute all audit log formatting, hashing, and filesystem writes asynchronously without blocking the main program workflow.
+
+#### Scenario: Synchronous timestamp capture during asynchronous hashing
+- **GIVEN** `hashContent` is enabled requiring asynchronous SHA-256 calculation
+- **WHEN** `flushThoughtBuffer()` or `flushMessageBuffer()` is called at timestamp `T0`
+- **THEN** `T0` SHALL be captured synchronously and recorded as `ts` in the audit entry even if the SHA-256 calculation completes at later timestamp `T1`
+
+#### Scenario: Fire-and-forget non-blocking write
+- **GIVEN** an audit entry is being written via `SessionAuditWriter.write()`
+- **WHEN** the filesystem write operation is pending or fails
+- **THEN** the main session execution SHALL continue immediately without blocking or throwing an unhandled exception
 
 ### Requirement: Prometheus Metric
 
