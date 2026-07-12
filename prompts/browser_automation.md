@@ -1,6 +1,6 @@
 ## Browser Automation
 
-Use `agent-browser` for web automation. Run `agent-browser --help` for all commands.
+Use `agent-browser` for web automation. Run `agent-browser --help` for all commands. Note that `--args "--no-sandbox"` is needed for your environment.
 
 Core workflow:
 
