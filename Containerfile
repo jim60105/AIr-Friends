@@ -86,7 +86,9 @@ RUN install -d -m 775 -o $UID -g 0 /app && \
     install -d -m 775 -o $UID -g 0 /home/deno/.local && \
     install -d -m 775 -o $UID -g 0 /home/deno/.local/bin && \
     install -d -m 775 -o $UID -g 0 /home/deno/.local/share/opencode && \
-    install -d -m 775 -o $UID -g 0 /home/deno/.config/opencode
+    install -d -m 775 -o $UID -g 0 /home/deno/.config/opencode && \
+    install -d -m 775 -o $UID -g 0 /home/deno/.cache && \
+    install -d -m 775 -o $UID -g 0 /home/deno/.agent-browser
 
 # Copy license file (OpenShift Policy)
 COPY --link --chown=$UID:0 --chmod=775 LICENSE /licenses/LICENSE

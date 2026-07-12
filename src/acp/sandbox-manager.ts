@@ -25,6 +25,8 @@ const BASE_ALLOWED_ENV = [
   "AGENT_WORKSPACE",
   // Workspace-scoped temp directory
   "TMPDIR",
+  // Browser automation
+  "AGENT_BROWSER_EXECUTABLE_PATH",
 ];
 
 // Agent-type-specific authentication environment variables.

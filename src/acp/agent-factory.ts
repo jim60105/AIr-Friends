@@ -3,6 +3,7 @@
 import type { AgentConfig, AgentType, RetryPromptStrategy } from "./types.ts";
 import type { Config } from "../types/config.ts";
 import { SandboxManager } from "./sandbox-manager.ts";
+import { join } from "@std/path";
 
 /**
  * Create ACP Agent configuration based on agent type.
@@ -95,6 +96,15 @@ function buildBaseAgentConfig(
       // Set TMPDIR to workspace-scoped tmp directory
       env["TMPDIR"] = `${workingDir}/tmp`;
 
+      // Automatically detect and set AGENT_BROWSER_EXECUTABLE_PATH if not already set
+      let browserPath = Deno.env.get("AGENT_BROWSER_EXECUTABLE_PATH");
+      if (browserPath === undefined) {
+        browserPath = detectPlaywrightBinarySync();
+      }
+      if (browserPath !== undefined) {
+        env["AGENT_BROWSER_EXECUTABLE_PATH"] = browserPath;
+      }
+
       if (sessionId) {
         env["SESSION_ID"] = sessionId;
       }
@@ -177,4 +187,153 @@ export function getRetryPromptStrategy(type: AgentType): RetryPromptStrategy {
     default:
       throw new Error(`Unknown agent type: ${type}`);
   }
+}
+
+/**
+ * Traverses Playwright's default cache paths synchronously to find
+ * either chromium-headless-shell or standard chromium executable.
+ */
+export function detectPlaywrightBinarySync(): string | undefined {
+  const searchDirs: string[] = [];
+  const customBrowsersPath = Deno.env.get("PLAYWRIGHT_BROWSERS_PATH");
+  if (customBrowsersPath && customBrowsersPath !== "0") {
+    searchDirs.push(customBrowsersPath);
+  }
+
+  const home = Deno.env.get("HOME") || Deno.env.get("USERPROFILE");
+  if (home) {
+    if (Deno.build.os === "darwin") {
+      searchDirs.push(join(home, "Library", "Caches", "ms-playwright"));
+    } else if (Deno.build.os === "windows") {
+      searchDirs.push(join(home, "AppData", "Local", "ms-playwright"));
+    } else {
+      searchDirs.push(join(home, ".cache", "ms-playwright"));
+    }
+  }
+  const defaultPath = "/home/deno/.cache/ms-playwright";
+  if (!searchDirs.includes(defaultPath)) {
+    searchDirs.push(defaultPath);
+  }
+
+  for (const cacheDir of searchDirs) {
+    try {
+      const stat = Deno.statSync(cacheDir);
+      if (!stat.isDirectory) continue;
+
+      const found = findBinaryInDirSync(cacheDir);
+      if (found) {
+        return found;
+      }
+    } catch {
+      // Ignore errors when directory does not exist or is not readable
+    }
+  }
+  return undefined;
+}
+
+interface PlaywrightDirEntry {
+  name: string;
+  revision: number;
+  type: "headless_shell" | "chromium";
+}
+
+function findBinaryInDirSync(dirPath: string): string | undefined {
+  const isWindows = Deno.build.os === "windows";
+  const shellBinaryName = isWindows ? "chrome-headless-shell.exe" : "chrome-headless-shell";
+  const chromeBinaryName = isWindows ? "chrome.exe" : "chrome";
+
+  const headlessShellRegex = /^chromium_headless_shell-(\d+)$/;
+  const chromiumRegex = /^chromium-(\d+)$/;
+
+  const candidates: PlaywrightDirEntry[] = [];
+
+  try {
+    for (const entry of Deno.readDirSync(dirPath)) {
+      let isDir = entry.isDirectory;
+      if (!isDir && entry.isSymlink) {
+        try {
+          isDir = Deno.statSync(join(dirPath, entry.name)).isDirectory;
+        } catch {
+          isDir = false;
+        }
+      }
+      if (!isDir) continue;
+
+      let match = entry.name.match(headlessShellRegex);
+      if (match) {
+        const revision = parseInt(match[1], 10);
+        candidates.push({ name: entry.name, revision, type: "headless_shell" });
+        continue;
+      }
+
+      match = entry.name.match(chromiumRegex);
+      if (match) {
+        const revision = parseInt(match[1], 10);
+        candidates.push({ name: entry.name, revision, type: "chromium" });
+      }
+    }
+  } catch {
+    return undefined;
+  }
+
+  // Sort candidates by revision descending, tie-breaking to prioritize headless_shell
+  candidates.sort((a, b) => {
+    if (b.revision !== a.revision) {
+      return b.revision - a.revision;
+    }
+    return a.type === "headless_shell" ? -1 : 1;
+  });
+
+  for (const candidate of candidates) {
+    const subDir = join(dirPath, candidate.name);
+    const fileName = candidate.type === "headless_shell" ? shellBinaryName : chromeBinaryName;
+    const binary = findFileRecursiveSync(subDir, fileName, 0, 4);
+    if (binary) {
+      return binary;
+    }
+  }
+
+  return undefined;
+}
+
+function findFileRecursiveSync(
+  dirPath: string,
+  fileName: string,
+  currentDepth: number,
+  maxDepth: number,
+): string | undefined {
+  if (currentDepth > maxDepth) return undefined;
+
+  try {
+    const subdirs: string[] = [];
+    for (const entry of Deno.readDirSync(dirPath)) {
+      const fullPath = join(dirPath, entry.name);
+      let isFile = entry.isFile;
+      let isDir = entry.isDirectory;
+      if (entry.isSymlink) {
+        try {
+          const stat = Deno.statSync(fullPath);
+          isFile = stat.isFile;
+          isDir = stat.isDirectory;
+        } catch {
+          continue;
+        }
+      }
+
+      if (isFile && entry.name === fileName) {
+        return fullPath;
+      }
+      if (isDir) {
+        subdirs.push(fullPath);
+      }
+    }
+
+    for (const subDir of subdirs) {
+      const found = findFileRecursiveSync(subDir, fileName, currentDepth + 1, maxDepth);
+      if (found) return found;
+    }
+  } catch {
+    // Ignore
+  }
+  return undefined;
 }

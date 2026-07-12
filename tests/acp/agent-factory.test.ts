@@ -3,10 +3,12 @@
 import { assertEquals, assertExists, assertStringIncludes, assertThrows } from "@std/assert";
 import {
   createAgentConfig,
+  detectPlaywrightBinarySync,
   getDefaultAgentType,
   getRetryPromptStrategy,
   getSessionModeOverride,
 } from "@acp/agent-factory.ts";
+import { join } from "@std/path";
 import type { Config } from "../../src/types/config.ts";
 
 // Create a minimal test config
@@ -417,4 +419,250 @@ Deno.test("createAgentConfig - does not set SESSION_ID when sessionId omitted", 
   const config = createTestConfig();
   const agentConfig = createAgentConfig("opencode", "/tmp/workspace", config);
   assertEquals(agentConfig.env?.["SESSION_ID"], undefined);
+});
+
+Deno.test("detectPlaywrightBinarySync - detects chromium-headless-shell", () => {
+  const tempDir = Deno.makeTempDirSync();
+  const originalHome = Deno.env.get("HOME");
+  Deno.env.set("HOME", tempDir);
+
+  try {
+    const playwrightDir = join(
+      tempDir,
+      ".cache",
+      "ms-playwright",
+      "chromium_headless_shell-1208",
+      "chrome-headless-shell-linux64",
+    );
+    Deno.mkdirSync(playwrightDir, { recursive: true });
+    const binaryPath = join(playwrightDir, "chrome-headless-shell");
+    Deno.writeTextFileSync(binaryPath, "dummy binary content");
+
+    const detected = detectPlaywrightBinarySync();
+    assertEquals(detected, binaryPath);
+  } finally {
+    if (originalHome) {
+      Deno.env.set("HOME", originalHome);
+    } else {
+      Deno.env.delete("HOME");
+    }
+    try {
+      Deno.removeSync(tempDir, { recursive: true });
+    } catch {
+      // Ignore cleanup error
+    }
+  }
+});
+
+Deno.test("detectPlaywrightBinarySync - detects standard chromium", () => {
+  const tempDir = Deno.makeTempDirSync();
+  const originalHome = Deno.env.get("HOME");
+  Deno.env.set("HOME", tempDir);
+
+  try {
+    const playwrightDir = join(tempDir, ".cache", "ms-playwright", "chromium-1097", "chrome-linux");
+    Deno.mkdirSync(playwrightDir, { recursive: true });
+    const binaryPath = join(playwrightDir, "chrome");
+    Deno.writeTextFileSync(binaryPath, "dummy binary content");
+
+    const detected = detectPlaywrightBinarySync();
+    assertEquals(detected, binaryPath);
+  } finally {
+    if (originalHome) {
+      Deno.env.set("HOME", originalHome);
+    } else {
+      Deno.env.delete("HOME");
+    }
+    try {
+      Deno.removeSync(tempDir, { recursive: true });
+    } catch {
+      // Ignore cleanup error
+    }
+  }
+});
+
+Deno.test("createAgentConfig - sets AGENT_BROWSER_EXECUTABLE_PATH and respects env override", () => {
+  const config = createTestConfig();
+  const originalEnvVar = Deno.env.get("AGENT_BROWSER_EXECUTABLE_PATH");
+
+  // Set custom path in env
+  Deno.env.set("AGENT_BROWSER_EXECUTABLE_PATH", "/custom/path/to/chrome");
+
+  try {
+    const agentConfig = createAgentConfig("opencode", "/tmp/workspace", config);
+    assertEquals(agentConfig.env?.["AGENT_BROWSER_EXECUTABLE_PATH"], "/custom/path/to/chrome");
+  } finally {
+    if (originalEnvVar) {
+      Deno.env.set("AGENT_BROWSER_EXECUTABLE_PATH", originalEnvVar);
+    } else {
+      Deno.env.delete("AGENT_BROWSER_EXECUTABLE_PATH");
+    }
+  }
+});
+
+Deno.test("detectPlaywrightBinarySync - sorts by revision descending", () => {
+  const tempDir = Deno.makeTempDirSync();
+  const originalHome = Deno.env.get("HOME");
+  Deno.env.set("HOME", tempDir);
+
+  try {
+    // Create an older version (1100)
+    const oldPlaywrightDir = join(
+      tempDir,
+      ".cache",
+      "ms-playwright",
+      "chromium_headless_shell-1100",
+      "chrome-headless-shell-linux64",
+    );
+    Deno.mkdirSync(oldPlaywrightDir, { recursive: true });
+    const oldBinaryPath = join(oldPlaywrightDir, "chrome-headless-shell");
+    Deno.writeTextFileSync(oldBinaryPath, "old binary content");
+
+    // Create a newer version (1208)
+    const newPlaywrightDir = join(
+      tempDir,
+      ".cache",
+      "ms-playwright",
+      "chromium_headless_shell-1208",
+      "chrome-headless-shell-linux64",
+    );
+    Deno.mkdirSync(newPlaywrightDir, { recursive: true });
+    const newBinaryPath = join(newPlaywrightDir, "chrome-headless-shell");
+    Deno.writeTextFileSync(newBinaryPath, "new binary content");
+
+    const detected = detectPlaywrightBinarySync();
+    assertEquals(detected, newBinaryPath); // Must be the newer revision
+  } finally {
+    if (originalHome) {
+      Deno.env.set("HOME", originalHome);
+    } else {
+      Deno.env.delete("HOME");
+    }
+    try {
+      Deno.removeSync(tempDir, { recursive: true });
+    } catch {
+      // Ignore
+    }
+  }
+});
+
+Deno.test("detectPlaywrightBinarySync - ignores temporary download folders", () => {
+  const tempDir = Deno.makeTempDirSync();
+  const originalHome = Deno.env.get("HOME");
+  Deno.env.set("HOME", tempDir);
+
+  try {
+    // Create a temp folder (chromium_headless_shell-1208-temp)
+    const tempPlaywrightDir = join(
+      tempDir,
+      ".cache",
+      "ms-playwright",
+      "chromium_headless_shell-1208-temp",
+      "chrome-headless-shell-linux64",
+    );
+    Deno.mkdirSync(tempPlaywrightDir, { recursive: true });
+    const tempBinaryPath = join(tempPlaywrightDir, "chrome-headless-shell");
+    Deno.writeTextFileSync(tempBinaryPath, "temp binary content");
+
+    // Create a valid folder with older version (1100)
+    const validPlaywrightDir = join(
+      tempDir,
+      ".cache",
+      "ms-playwright",
+      "chromium_headless_shell-1100",
+      "chrome-headless-shell-linux64",
+    );
+    Deno.mkdirSync(validPlaywrightDir, { recursive: true });
+    const validBinaryPath = join(validPlaywrightDir, "chrome-headless-shell");
+    Deno.writeTextFileSync(validBinaryPath, "valid binary content");
+
+    const detected = detectPlaywrightBinarySync();
+    assertEquals(detected, validBinaryPath); // Must ignore the temp folder and pick the valid older folder
+  } finally {
+    if (originalHome) {
+      Deno.env.set("HOME", originalHome);
+    } else {
+      Deno.env.delete("HOME");
+    }
+    try {
+      Deno.removeSync(tempDir, { recursive: true });
+    } catch {
+      // Ignore
+    }
+  }
+});
+
+Deno.test("detectPlaywrightBinarySync - prioritizes headless_shell over chromium when revisions match", () => {
+  const tempDir = Deno.makeTempDirSync();
+  const originalHome = Deno.env.get("HOME");
+  Deno.env.set("HOME", tempDir);
+
+  try {
+    const chromiumDir = join(
+      tempDir,
+      ".cache",
+      "ms-playwright",
+      "chromium-1200",
+      "chrome-linux",
+    );
+    Deno.mkdirSync(chromiumDir, { recursive: true });
+    const chromiumBinary = join(chromiumDir, "chrome");
+    Deno.writeTextFileSync(chromiumBinary, "chromium binary content");
+
+    const shellDir = join(
+      tempDir,
+      ".cache",
+      "ms-playwright",
+      "chromium_headless_shell-1200",
+      "chrome-headless-shell-linux64",
+    );
+    Deno.mkdirSync(shellDir, { recursive: true });
+    const shellBinary = join(shellDir, "chrome-headless-shell");
+    Deno.writeTextFileSync(shellBinary, "shell binary content");
+
+    const detected = detectPlaywrightBinarySync();
+    assertEquals(detected, shellBinary);
+  } finally {
+    if (originalHome) {
+      Deno.env.set("HOME", originalHome);
+    } else {
+      Deno.env.delete("HOME");
+    }
+    try {
+      Deno.removeSync(tempDir, { recursive: true });
+    } catch {
+      // Ignore
+    }
+  }
+});
+
+Deno.test("detectPlaywrightBinarySync - checks PLAYWRIGHT_BROWSERS_PATH if set", () => {
+  const tempDir = Deno.makeTempDirSync();
+  const originalBrowsersPath = Deno.env.get("PLAYWRIGHT_BROWSERS_PATH");
+  Deno.env.set("PLAYWRIGHT_BROWSERS_PATH", tempDir);
+
+  try {
+    const shellDir = join(
+      tempDir,
+      "chromium_headless_shell-1300",
+      "chrome-headless-shell-linux64",
+    );
+    Deno.mkdirSync(shellDir, { recursive: true });
+    const shellBinary = join(shellDir, "chrome-headless-shell");
+    Deno.writeTextFileSync(shellBinary, "custom path binary content");
+
+    const detected = detectPlaywrightBinarySync();
+    assertEquals(detected, shellBinary);
+  } finally {
+    if (originalBrowsersPath) {
+      Deno.env.set("PLAYWRIGHT_BROWSERS_PATH", originalBrowsersPath);
+    } else {
+      Deno.env.delete("PLAYWRIGHT_BROWSERS_PATH");
+    }
+    try {
+      Deno.removeSync(tempDir, { recursive: true });
+    } catch {
+      // Ignore
+    }
+  }
 });
