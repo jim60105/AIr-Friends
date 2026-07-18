@@ -122,6 +122,53 @@ Deno.test("tunnelConnections - upstream close propagates EOF to the client promp
   await tunnel;
 });
 
+Deno.test("tunnelConnections - relays a large payload without dropping bytes", async () => {
+  const [client, proxyClientSide] = await tcpPair();
+  const [proxyUpstreamSide, upstreamServer] = await tcpPair();
+  const tunnel = tunnelConnections(proxyClientSide, proxyUpstreamSide);
+
+  // 4 MiB of a repeating pattern, larger than the 16 KiB tunnel buffer and the socket
+  // buffers, so writes are forced into short (partial) writes under backpressure. If the
+  // pipe ignores a short-write return value the received stream is truncated/corrupted.
+  const SIZE = 4 * 1024 * 1024;
+  const payload = new Uint8Array(SIZE);
+  for (let i = 0; i < SIZE; i++) payload[i] = i & 0xff;
+
+  const received = new Uint8Array(SIZE);
+  const drain = (async () => {
+    let off = 0;
+    while (off < SIZE) {
+      const n = await upstreamServer.read(received.subarray(off));
+      if (n === null) break;
+      off += n;
+    }
+    return off;
+  })();
+
+  await writeFullConn(client, payload);
+  client.closeWrite();
+  const total = await drain;
+
+  assertEquals(total, SIZE, "every byte must arrive");
+  for (let i = 0; i < SIZE; i++) {
+    if (received[i] !== (i & 0xff)) {
+      throw new Error(`byte ${i} corrupted: got ${received[i]}, want ${i & 0xff}`);
+    }
+  }
+
+  upstreamServer.close();
+  client.close();
+  await tunnel;
+});
+
+/** Test-local write-all (mirrors the proxy's own short-write handling). */
+async function writeFullConn(conn: Deno.Conn, data: Uint8Array): Promise<void> {
+  let off = 0;
+  while (off < data.length) {
+    off += await conn.write(data.subarray(off));
+  }
+}
+
 // --- Plain-HTTP forwarding: origin-form rewrite + forced Connection: close ---
 
 Deno.test("rewriteForwardHead - rewrites request line and forces Connection: close", () => {

@@ -102,7 +102,15 @@ async function tunnelPipe(from: Deno.Conn, to: Deno.Conn): Promise<void> {
     while (true) {
       const n = await from.read(buf);
       if (n === null) break;
-      await to.write(buf.subarray(0, n));
+      // `Deno.Conn.write` may perform a SHORT write and return fewer bytes than requested
+      // (TCP backpressure on a large transfer). Loop until every byte is flushed — dropping
+      // the remainder here silently corrupts a tunneled TLS stream ("bad record mac") and
+      // manifests as intermittent "socket connection was closed" once request bodies grow
+      // (e.g. after a skill inflates the LLM context).
+      let off = 0;
+      while (off < n) {
+        off += await to.write(buf.subarray(off, n));
+      }
     }
     await to.closeWrite();
   } catch {
@@ -139,11 +147,22 @@ export async function tunnelConnections(client: Deno.Conn, upstream: Deno.Conn):
   }
 }
 
+/** Write every byte of `data` to `conn`, looping over short writes. */
+async function writeFull(
+  conn: { write(p: Uint8Array): Promise<number> },
+  data: Uint8Array,
+): Promise<void> {
+  let off = 0;
+  while (off < data.length) {
+    off += await conn.write(data.subarray(off));
+  }
+}
+
 async function writeAll(
   conn: { write(p: Uint8Array): Promise<number> },
   text: string,
 ): Promise<void> {
-  await conn.write(encoder.encode(text));
+  await writeFull(conn, encoder.encode(text));
 }
 
 /** Read the first request line + headers block from a proxied connection. */
@@ -303,7 +322,7 @@ async function handleConnection(conn: Deno.Conn): Promise<void> {
   const originPath = (url.pathname || "/") + url.search;
   const rewrittenHead = rewriteForwardHead(head, method, originPath);
   try {
-    await upstream.write(encoder.encode(rewrittenHead));
+    await writeFull(upstream, encoder.encode(rewrittenHead));
   } catch {
     try {
       upstream.close();
