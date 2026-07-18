@@ -18,4 +18,5 @@ function switchTab(tab) {
     b.classList.toggle("hover:text-gray-200", !active);
   });
   if (tab === "workspace") loadWorkspaceTree();
+  if (tab === "channel-memory") loadChannelMemoryChannels();
 }

@@ -191,6 +191,21 @@
               <span class="sidebar-expanded-content">Workspace</span>
             </button>
             <button
+              id="sidebar-tab-channel-memory"
+              class="tab-btn flex items-center gap-3 px-4 py-3 text-sm font-semibold rounded-xl text-gray-400 hover:text-white hover:bg-white/5 transition-all"
+              data-tab="channel-memory"
+            >
+              <svg class="w-5 h-5 opacity-70" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  stroke-width="2"
+                  d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"
+                />
+              </svg>
+              <span class="sidebar-expanded-content">Channel Memory</span>
+            </button>
+            <button
               id="sidebar-tab-chat"
               class="tab-btn flex items-center gap-3 px-4 py-3 text-sm font-semibold rounded-xl text-gray-400 hover:text-white hover:bg-white/5 transition-all"
               data-tab="chat"
@@ -441,6 +456,70 @@
                     ></div>
                   </div>
                 </div>
+              </div>
+            </section>
+
+            <!-- Channel Memory Tab (F15 moderation) -->
+            <section id="tab-channel-memory" class="tab-panel hidden h-full flex flex-col">
+              <div class="flex items-center justify-between mb-6 shrink-0">
+                <div class="flex items-center gap-3">
+                  <div class="h-8 w-1 bg-accent-light rounded-full"></div>
+                  <h2 class="text-xl font-display font-bold text-white tracking-tight">
+                    Channel Memory
+                  </h2>
+                </div>
+                <div class="flex items-center gap-3">
+                  <select
+                    id="channel-memory-select"
+                    class="px-3 py-2 bg-surface-100 border border-white/10 rounded-xl text-sm text-gray-200 focus:outline-none focus:ring-2 focus:ring-accent/40"
+                    onchange="loadChannelMemories(this.value)"
+                  >
+                    <option value="">Select a channel…</option>
+                  </select>
+                  <button
+                    id="channel-memory-refresh-btn"
+                    onclick="loadChannelMemoryChannels()"
+                    class="flex items-center gap-2 px-4 py-2 bg-surface-100 hover:bg-surface-200 border border-white/10 rounded-xl text-sm font-semibold text-gray-300 transition-all hover:shadow-md"
+                  >
+                    <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                        stroke-width="2"
+                        d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+                      />
+                    </svg>
+                    Refresh
+                  </button>
+                </div>
+              </div>
+              <p class="text-sm text-gray-400 mb-4 shrink-0">
+                Channel notes are contributed by channel members and are treated as
+                <span class="text-amber-400 font-semibold">unverified</span>. Disable any entry
+                that should not be shown to the channel.
+              </p>
+              <div
+                class="flex-1 min-h-0 overflow-auto bg-surface-100/50 border border-white/5 rounded-2xl shadow-inner"
+              >
+                <table class="w-full text-sm">
+                  <thead
+                    class="sticky top-0 bg-surface-100 text-gray-400 text-xs uppercase tracking-widest">
+                    <tr>
+                      <th class="text-left font-semibold px-4 py-3">Author</th>
+                      <th class="text-left font-semibold px-4 py-3">Content</th>
+                      <th class="text-left font-semibold px-4 py-3">Tier</th>
+                      <th class="text-left font-semibold px-4 py-3">Status</th>
+                      <th class="text-right font-semibold px-4 py-3">Action</th>
+                    </tr>
+                  </thead>
+                  <tbody id="channel-memory-table">
+                    <tr>
+                      <td colspan="5" class="px-4 py-8 text-center text-gray-500">
+                        Select a channel to view its memories.
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
               </div>
             </section>
 
@@ -714,6 +793,7 @@
     <script src="/js/sessions.js"></script>
     <script src="/js/stats.js"></script>
     <script src="/js/workspace.js"></script>
+    <script src="/js/channel-memory.js"></script>
     <script src="/js/chat.js"></script>
     <script src="/js/restart.js"></script>
   </body>

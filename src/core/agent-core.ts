@@ -71,10 +71,11 @@ export class AgentCore {
     const skillRegistry = this.skillRegistry;
 
     // Initialize session registry
-    this.sessionRegistry = new SessionRegistry();
+    this.sessionRegistry = new SessionRegistry(config.skillApi?.sessionTimeoutMs);
 
     // Initialize skill API server if enabled
     if (config.skillApi?.enabled) {
+      this.sessionRegistry.startCleanupTimer();
       this.skillApiServer = new SkillAPIServer(
         this.sessionRegistry,
         skillRegistry,

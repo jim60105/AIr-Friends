@@ -140,6 +140,15 @@ export class MemoryHandler {
 
       // Channel-scoped memory
       if (scope === "channel") {
+        // Authorization gate (F15): a channel-scope write requires the session
+        // to be authorized. A valid session with enum-valid params is not
+        // sufficient; the configured channel-write policy must grant it.
+        if (context.canWriteChannelMemory !== true) {
+          return {
+            success: false,
+            error: "Not authorized to write channel memory in this session",
+          };
+        }
         if (!context.channelId) {
           return {
             success: false,
@@ -158,6 +167,9 @@ export class MemoryHandler {
           context.channelId,
         );
 
+        // F15: user-driven channel writes are attributed and non-durable — a
+        // requested `core` tier is downgraded to a decaying tier by the store,
+        // so an untrusted contribution cannot become a permanent implant.
         const entry = await this.memoryStore.addChannelMemory(
           channelWorkspace,
           params.content,
@@ -168,6 +180,7 @@ export class MemoryHandler {
             ...(decay !== undefined && { decay }),
             ...(relatedTo && { relatedTo }),
             ...(supersedes && { supersedes }),
+            ...(context.userId && { author: context.userId }),
           },
         );
 

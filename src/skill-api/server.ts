@@ -7,8 +7,33 @@ import type { SkillContext } from "@skills/types.ts";
 
 import { skillApiCallsTotal } from "@utils/metrics.ts";
 import { sanitizeSkillParams, sha256Hash } from "@utils/hash.ts";
+import { timingSafeEqual } from "@std/crypto/timing-safe-equal";
 
 const logger = createLogger("SkillAPIServer");
+
+const tokenEncoder = new TextEncoder();
+
+/**
+ * Constant-time comparison of a presented caller token against the expected
+ * session token (F13). Returns false on any length/content mismatch without
+ * an early-exit timing oracle.
+ */
+function tokensMatch(presented: string | undefined, expected: string): boolean {
+  if (!presented) return false;
+  const a = tokenEncoder.encode(presented);
+  const b = tokenEncoder.encode(expected);
+  if (a.byteLength !== b.byteLength) return false;
+  return timingSafeEqual(a, b);
+}
+
+/**
+ * Extract the bearer token from an `Authorization: Bearer <token>` header.
+ */
+function extractBearerToken(authHeader: string | null): string | undefined {
+  if (!authHeader) return undefined;
+  const match = authHeader.match(/^Bearer\s+(.+)$/i);
+  return match ? match[1].trim() : undefined;
+}
 
 /** Maximum number of send-reply calls allowed per session */
 const MAX_REPLIES_PER_SESSION = 1;
@@ -155,6 +180,24 @@ export class SkillAPIServer {
         );
       }
 
+      // Authenticate BEFORE the dedup cache (F13): a valid session ID is not
+      // sufficient — the caller must present the per-session token bound to the
+      // owning subprocess. Authentication failures are returned immediately and
+      // are NOT cached, so an unauthorized attempt holding a leaked session ID
+      // cannot poison a legitimate caller's cached result.
+      const auth = this.authenticate(
+        body.sessionId,
+        extractBearerToken(request.headers.get("authorization")),
+      );
+      if (!auth.ok) {
+        return new Response(
+          JSON.stringify(auth.response),
+          { status: auth.response.statusCode ?? 403, headers },
+        );
+      }
+      // Refresh the session's idle timer on each authenticated call.
+      this.sessionRegistry.touch(body.sessionId);
+
       // Generate cache key for deduplication
       const cacheKey = this.generateCacheKey(skillName, body.sessionId, body.parameters ?? {});
 
@@ -202,11 +245,18 @@ export class SkillAPIServer {
       // Wait for execution to complete
       const result = await executionPromise;
 
-      // Update cache with the actual result
-      this.requestCache.set(cacheKey, {
-        timestamp: Date.now(),
-        response: result,
-      });
+      // Never cache authentication/authorization failures (F13): only cache
+      // executed results. (Auth failures are already gated out above; this is a
+      // defense-in-depth guard for the executeSkillRequest safety-net 401.)
+      if (result.statusCode === 401 || result.statusCode === 403) {
+        this.requestCache.delete(cacheKey);
+      } else {
+        // Update cache with the actual result
+        this.requestCache.set(cacheKey, {
+          timestamp: Date.now(),
+          response: result,
+        });
+      }
 
       const statusCode = result.statusCode ?? (result.success ? 200 : 400);
       return new Response(
@@ -226,6 +276,37 @@ export class SkillAPIServer {
         { status: 500, headers },
       );
     }
+  }
+
+  /**
+   * Authenticate a Skill API request (F13): resolve the session by ID (which
+   * also enforces the idle TTL) and verify the presented caller token against
+   * the session's stored token in constant time. Returns a typed result so the
+   * caller can reject un-cached before the dedup/execute path.
+   */
+  private authenticate(
+    sessionId: string,
+    presentedToken: string | undefined,
+  ): { ok: true } | { ok: false; response: SkillResponse } {
+    const session = this.sessionRegistry.get(sessionId);
+    if (!session) {
+      return {
+        ok: false,
+        response: { success: false, error: "Invalid or expired session", statusCode: 401 },
+      };
+    }
+    if (!tokensMatch(presentedToken, session.callerToken)) {
+      logger.warn("Skill API request rejected: missing or invalid caller token", { sessionId });
+      return {
+        ok: false,
+        response: {
+          success: false,
+          error: "Missing or invalid caller token",
+          statusCode: 403,
+        },
+      };
+    }
+    return { ok: true };
   }
 
   /**
@@ -360,6 +441,7 @@ export class SkillAPIServer {
       agentWorkspacePath: session.agentWorkspacePath,
       lastSentMessageId: session.lastSentMessageId,
       workspaceManager: session.workspaceManager,
+      canWriteChannelMemory: session.canWriteChannelMemory,
     };
 
     // Execute skill

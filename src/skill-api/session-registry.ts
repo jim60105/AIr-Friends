@@ -15,6 +15,12 @@ const logger = createLogger("SessionRegistry");
 export interface ActiveSession {
   /** Unique session identifier */
   id: string;
+  /**
+   * Per-session caller token (F13). Provisioned into the owning agent
+   * subprocess's environment as `SKILL_API_TOKEN`; a Skill API request must
+   * present this token (not merely a valid session ID) to be authorized.
+   */
+  callerToken: string;
   /** Platform (discord/misskey) */
   platform: string;
   /** Channel ID for replies */
@@ -42,6 +48,8 @@ export interface ActiveSession {
   editCount: number;
   /** Agent's global workspace path */
   agentWorkspacePath?: string;
+  /** Last time this session was touched by an authenticated call (F13 idle TTL) */
+  lastActivityAt: Date;
   /** Audit writer for this session (null if audit disabled) */
   auditWriter?: SessionAuditWriter;
   /** Callback to request agent process termination (doom-loop protection) */
@@ -50,13 +58,31 @@ export interface ActiveSession {
   lastSentMessageId?: string;
   /** WorkspaceManager for channel workspace resolution */
   workspaceManager?: WorkspaceManager;
+  /**
+   * Whether this session may write channel-scoped memory (F15). Derived from
+   * the configured channel-write policy at registration and copied into the
+   * skill context to gate `memory-save --scope channel`.
+   */
+  canWriteChannelMemory?: boolean;
 }
 
 /**
  * Session Registry - tracks active agent sessions
  */
+/** Default idle timeout for a session before it is treated as absent (30 min). */
+export const DEFAULT_SESSION_TIMEOUT_MS = 30 * 60 * 1000;
+
 export class SessionRegistry {
   private sessions: Map<string, ActiveSession> = new Map();
+  private cleanupInterval?: ReturnType<typeof setInterval>;
+
+  /**
+   * @param timeoutMs idle timeout after which a session is treated as absent
+   *   on {@link get} and reaped by the cleanup timer. Refreshed via {@link touch}
+   *   on each authenticated call. Defaults to {@link DEFAULT_SESSION_TIMEOUT_MS},
+   *   chosen to comfortably exceed the longest legitimate agent turn.
+   */
+  constructor(private readonly timeoutMs: number = DEFAULT_SESSION_TIMEOUT_MS) {}
 
   /**
    * Generate a secure session ID
@@ -68,19 +94,45 @@ export class SessionRegistry {
   }
 
   /**
+   * Generate a high-entropy per-session caller token (F13), distinct from the
+   * session ID. 256 bits from a CSPRNG, hex-encoded.
+   */
+  private generateCallerToken(): string {
+    const bytes = new Uint8Array(32);
+    crypto.getRandomValues(bytes);
+    return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
+  }
+
+  /**
+   * Return true if a session has been idle beyond the configured timeout.
+   */
+  private isExpired(session: ActiveSession, now = Date.now()): boolean {
+    return now - session.lastActivityAt.getTime() > this.timeoutMs;
+  }
+
+  /**
    * Register a new session
    */
   register(
     session: Omit<
       ActiveSession,
-      "id" | "startedAt" | "replySent" | "replyCount" | "editCount"
+      | "id"
+      | "callerToken"
+      | "startedAt"
+      | "lastActivityAt"
+      | "replySent"
+      | "replyCount"
+      | "editCount"
     >,
   ): string {
     const id = this.generateSessionId();
+    const now = new Date();
     const activeSession: ActiveSession = {
       ...session,
       id,
-      startedAt: new Date(),
+      callerToken: this.generateCallerToken(),
+      startedAt: now,
+      lastActivityAt: now,
       replySent: false,
       replyCount: 0,
       editCount: 0,
@@ -99,10 +151,66 @@ export class SessionRegistry {
   }
 
   /**
-   * Get session by ID
+   * Get session by ID. A session idle beyond the configured `timeoutMs` is
+   * treated as absent (and evicted): it is deleted and `undefined` is returned,
+   * so a leaked session ID cannot be used indefinitely (F13).
    */
   get(sessionId: string): ActiveSession | undefined {
-    return this.sessions.get(sessionId);
+    const session = this.sessions.get(sessionId);
+    if (!session) return undefined;
+    if (this.isExpired(session)) {
+      this.sessions.delete(sessionId);
+      logger.debug("Session {sessionId} expired (idle timeout), evicted", { sessionId });
+      return undefined;
+    }
+    return session;
+  }
+
+  /**
+   * Retrieve the caller token for a session without applying idle expiry.
+   * Used at spawn time to provision the token into the agent subprocess env.
+   */
+  getCallerToken(sessionId: string): string | undefined {
+    return this.sessions.get(sessionId)?.callerToken;
+  }
+
+  /**
+   * Refresh a session's idle timer. Called on each authenticated Skill API
+   * request so an actively-used session does not expire mid-turn.
+   */
+  touch(sessionId: string): void {
+    const session = this.sessions.get(sessionId);
+    if (session) {
+      session.lastActivityAt = new Date();
+    }
+  }
+
+  /**
+   * Start the periodic cleanup timer that reaps idle-expired sessions.
+   * Must be started explicitly (e.g. by AgentCore) so that unit tests
+   * constructing a registry directly do not leak a timer; {@link stop}
+   * clears it.
+   */
+  startCleanupTimer(): void {
+    if (this.cleanupInterval !== undefined) return;
+    this.cleanupInterval = setInterval(() => this.reapExpired(), this.timeoutMs);
+  }
+
+  /**
+   * Remove all idle-expired sessions from the registry.
+   */
+  private reapExpired(): void {
+    const now = Date.now();
+    let reaped = 0;
+    for (const [id, session] of this.sessions) {
+      if (this.isExpired(session, now)) {
+        this.sessions.delete(id);
+        reaped++;
+      }
+    }
+    if (reaped > 0) {
+      logger.debug("Reaped {count} idle-expired sessions", { count: reaped });
+    }
   }
 
   /**
@@ -241,15 +349,25 @@ export class SessionRegistry {
   }
 
   /**
-   * Get all active (non-expired) sessions
+   * Get all currently-registered sessions.
+   *
+   * Note: this returns every entry still in the map, including sessions that
+   * are past their idle timeout but not yet reaped. Idle expiry is enforced
+   * lazily on {@link get} and by the cleanup timer; this accessor deliberately
+   * does not filter, so callers that use it for liveness (e.g. workspace tmp
+   * cleanup) err on the side of treating a session as still active.
    */
   getAll(): ActiveSession[] {
     return Array.from(this.sessions.values());
   }
 
   /**
-   * Check if there are any active (non-expired) sessions for the given workspace key.
+   * Check if there are any registered sessions for the given workspace key.
    * Used to determine if it's safe to clean up the workspace tmp directory.
+   *
+   * Like {@link getAll}, this counts every registered session (including ones
+   * past their idle timeout but not yet reaped) so tmp cleanup never races
+   * ahead of a still-running agent.
    */
   hasActiveSessionsForWorkspace(workspaceKey: string): boolean {
     for (const [, session] of this.sessions) {
@@ -271,6 +389,10 @@ export class SessionRegistry {
    * Stop the registry (cleanup)
    */
   stop(): void {
+    if (this.cleanupInterval !== undefined) {
+      clearInterval(this.cleanupInterval);
+      this.cleanupInterval = undefined;
+    }
     this.sessions.clear();
   }
 }

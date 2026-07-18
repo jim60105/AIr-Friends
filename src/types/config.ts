@@ -297,6 +297,16 @@ export interface MemoryConfig {
 
   /** Maximum number of working-tier entries to load at session start (default: 20) */
   workingTierLimit: number;
+
+  /**
+   * Channel-scoped memory write policy (F15). Controls whether ordinary
+   * sessions may write `scope: "channel"` memory:
+   * - `"sessions"` (default): ordinary channel sessions may write — entries are
+   *   attributed, non-durable (decaying), bounded, and moderatable.
+   * - `"curated"`: user-driven channel writes are rejected; durable channel
+   *   knowledge comes only from an operator/curated flow.
+   */
+  channelWritePolicy?: "sessions" | "curated";
 }
 
 /**
@@ -416,6 +426,13 @@ export interface SkillAPIConfig {
 
   /** Host for skill API server (should be localhost) */
   host: string;
+
+  /**
+   * Idle timeout (ms) after which a session is treated as absent and rejected
+   * with 401 (F13). Refreshed on each authenticated call. Should comfortably
+   * exceed the longest legitimate agent turn. Defaults to 30 minutes.
+   */
+  sessionTimeoutMs?: number;
 }
 
 /**

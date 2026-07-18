@@ -7,6 +7,13 @@ import { SkillRegistry } from "../../src/skills/registry.ts";
 import { MemoryStore } from "../../src/core/memory-store.ts";
 import { WorkspaceManager } from "../../src/core/workspace-manager.ts";
 
+// Build request headers, optionally with the per-session caller token (F13).
+function jsonHeaders(token?: string): Record<string, string> {
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  if (token) headers["Authorization"] = `Bearer ${token}`;
+  return headers;
+}
+
 // Helper to wait for server to be ready
 async function waitForServer(port: number, maxAttempts = 10): Promise<boolean> {
   for (let i = 0; i < maxAttempts; i++) {
@@ -74,7 +81,7 @@ Deno.test("SkillAPIServer - starts and stops", async () => {
     // Server should be running (POST to invalid skill returns 404)
     const response = await fetch(`http://localhost:${port}/api/skill/test`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: jsonHeaders(),
       body: JSON.stringify({ sessionId: "test" }),
     });
     await response.text(); // Consume the body
@@ -227,7 +234,7 @@ Deno.test("SkillAPIServer - validates session ID", async () => {
     // Test with missing sessionId
     const response1 = await fetch(`http://localhost:${port}/api/skill/send-reply`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: jsonHeaders(),
       body: JSON.stringify({}),
     });
 
@@ -239,7 +246,7 @@ Deno.test("SkillAPIServer - validates session ID", async () => {
     // Test with invalid sessionId
     const response2 = await fetch(`http://localhost:${port}/api/skill/send-reply`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: jsonHeaders(),
       body: JSON.stringify({ sessionId: "invalid-session-id" }),
     });
 
@@ -313,7 +320,7 @@ Deno.test("SkillAPIServer - validates skill name", async () => {
     // Test with unknown skill
     const response = await fetch(`http://localhost:${port}/api/skill/unknown-skill`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: jsonHeaders(sessionRegistry.getCallerToken(sessionId)),
       body: JSON.stringify({ sessionId }),
     });
 
@@ -391,7 +398,7 @@ Deno.test("SkillAPIServer - allows multiple replies within limit", async () => {
     // First reply should succeed (limit is now 1)
     const response = await fetch(`http://localhost:${port}/api/skill/send-reply`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: jsonHeaders(sessionRegistry.getCallerToken(sessionId)),
       body: JSON.stringify({
         sessionId,
         parameters: { message: "Message 1" },
@@ -470,7 +477,7 @@ Deno.test("SkillAPIServer - send-reply rejected after reaching limit", async () 
     // Send 1 successful reply (new limit is 1)
     const response1 = await fetch(`http://localhost:${port}/api/skill/send-reply`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: jsonHeaders(sessionRegistry.getCallerToken(sessionId)),
       body: JSON.stringify({
         sessionId,
         parameters: { message: "Message 1" },
@@ -481,7 +488,7 @@ Deno.test("SkillAPIServer - send-reply rejected after reaching limit", async () 
     // 2nd reply should be rejected with 429
     const response4 = await fetch(`http://localhost:${port}/api/skill/send-reply`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: jsonHeaders(sessionRegistry.getCallerToken(sessionId)),
       body: JSON.stringify({
         sessionId,
         parameters: { message: "Fourth message" },
@@ -561,7 +568,7 @@ Deno.test("SkillAPIServer - reply count not incremented on failed send-reply", a
     // Send a reply that will fail
     const response = await fetch(`http://localhost:${port}/api/skill/send-reply`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: jsonHeaders(sessionRegistry.getCallerToken(sessionId)),
       body: JSON.stringify({
         sessionId,
         parameters: { message: "Test message" },
@@ -641,7 +648,7 @@ Deno.test("SkillAPIServer - edit-reply not affected by reply limit", async () =>
     // Send 1 reply to reach the limit (new limit is 1)
     const replyResponse = await fetch(`http://localhost:${port}/api/skill/send-reply`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: jsonHeaders(sessionRegistry.getCallerToken(sessionId)),
       body: JSON.stringify({
         sessionId,
         parameters: { message: "Message 1" },
@@ -652,7 +659,7 @@ Deno.test("SkillAPIServer - edit-reply not affected by reply limit", async () =>
     // edit-reply should still work
     const editResponse = await fetch(`http://localhost:${port}/api/skill/edit-reply`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: jsonHeaders(sessionRegistry.getCallerToken(sessionId)),
       body: JSON.stringify({
         sessionId,
         parameters: { messageId: "test123", message: "Edited message" },
@@ -731,7 +738,7 @@ Deno.test("SkillAPIServer - reply count incremented even on rejection", async ()
     // First reply succeeds
     const response1 = await fetch(`http://localhost:${port}/api/skill/send-reply`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: jsonHeaders(sessionRegistry.getCallerToken(sessionId)),
       body: JSON.stringify({
         sessionId,
         parameters: { message: "Message 1" },
@@ -744,7 +751,7 @@ Deno.test("SkillAPIServer - reply count incremented even on rejection", async ()
     // Second reply rejected but count still increments
     const response2 = await fetch(`http://localhost:${port}/api/skill/send-reply`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: jsonHeaders(sessionRegistry.getCallerToken(sessionId)),
       body: JSON.stringify({
         sessionId,
         parameters: { message: "Message 2" },
@@ -757,7 +764,7 @@ Deno.test("SkillAPIServer - reply count incremented even on rejection", async ()
     // Third reply rejected, count increments again
     const response3 = await fetch(`http://localhost:${port}/api/skill/send-reply`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: jsonHeaders(sessionRegistry.getCallerToken(sessionId)),
       body: JSON.stringify({
         sessionId,
         parameters: { message: "Message 3" },
@@ -843,7 +850,7 @@ Deno.test("SkillAPIServer - doom-loop triggers agent termination on 4th attempt"
     for (let i = 1; i <= 4; i++) {
       const response = await fetch(`http://localhost:${port}/api/skill/send-reply`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: jsonHeaders(sessionRegistry.getCallerToken(sessionId)),
         body: JSON.stringify({
           sessionId,
           parameters: { message: `Message ${i}` },
@@ -929,7 +936,7 @@ Deno.test("SkillAPIServer - no crash when onTerminateRequest not set on doom-loo
     for (let i = 1; i <= 4; i++) {
       const response = await fetch(`http://localhost:${port}/api/skill/send-reply`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: jsonHeaders(sessionRegistry.getCallerToken(sessionId)),
         body: JSON.stringify({
           sessionId,
           parameters: { message: `Message ${i}` },
@@ -1021,7 +1028,7 @@ Deno.test("SkillAPIServer - send-reply success updates lastSentMessageId", async
 
     const response = await fetch(`http://localhost:${port}/api/skill/send-reply`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: jsonHeaders(sessionRegistry.getCallerToken(sessionId)),
       body: JSON.stringify({
         sessionId,
         parameters: { message: "Hello!" },
@@ -1104,7 +1111,7 @@ Deno.test("SkillAPIServer - edit-reply success updates lastSentMessageId", async
     // First send a reply
     const sendResponse = await fetch(`http://localhost:${port}/api/skill/send-reply`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: jsonHeaders(sessionRegistry.getCallerToken(sessionId)),
       body: JSON.stringify({
         sessionId,
         parameters: { message: "Original" },
@@ -1116,7 +1123,7 @@ Deno.test("SkillAPIServer - edit-reply success updates lastSentMessageId", async
     // Now edit the reply
     const editResponse = await fetch(`http://localhost:${port}/api/skill/edit-reply`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: jsonHeaders(sessionRegistry.getCallerToken(sessionId)),
       body: JSON.stringify({
         sessionId,
         parameters: { messageId: "original_msg", message: "Edited" },
@@ -1205,7 +1212,7 @@ Deno.test("SkillAPIServer - get-message skill via API", async () => {
 
     const response = await fetch(`http://localhost:${port}/api/skill/get-message`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: jsonHeaders(sessionRegistry.getCallerToken(sessionId)),
       body: JSON.stringify({
         sessionId,
         parameters: { messageId: "fetched_msg" },
@@ -1299,7 +1306,7 @@ Deno.test("SkillAPIServer - get-message uses lastSentMessageId from session", as
     // First send a reply to set lastSentMessageId
     const sendResponse = await fetch(`http://localhost:${port}/api/skill/send-reply`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: jsonHeaders(sessionRegistry.getCallerToken(sessionId)),
       body: JSON.stringify({
         sessionId,
         parameters: { message: "Hello!" },
@@ -1310,7 +1317,7 @@ Deno.test("SkillAPIServer - get-message uses lastSentMessageId from session", as
     // Now call get-message without messageId — should use lastSentMessageId
     const getResponse = await fetch(`http://localhost:${port}/api/skill/get-message`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: jsonHeaders(sessionRegistry.getCallerToken(sessionId)),
       body: JSON.stringify({
         sessionId,
         parameters: {},
@@ -1391,7 +1398,7 @@ Deno.test("SkillAPIServer - edit-reply succeeds for first 2 calls", async () => 
     // Send initial reply to get a messageId
     const sendResponse = await fetch(`http://localhost:${port}/api/skill/send-reply`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: jsonHeaders(sessionRegistry.getCallerToken(sessionId)),
       body: JSON.stringify({
         sessionId,
         parameters: { message: "Initial message" },
@@ -1402,7 +1409,7 @@ Deno.test("SkillAPIServer - edit-reply succeeds for first 2 calls", async () => 
     // First edit — should succeed (editCount: 0 → 1)
     const editResponse1 = await fetch(`http://localhost:${port}/api/skill/edit-reply`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: jsonHeaders(sessionRegistry.getCallerToken(sessionId)),
       body: JSON.stringify({
         sessionId,
         parameters: { messageId: "sent_msg_001", message: "First edit" },
@@ -1416,7 +1423,7 @@ Deno.test("SkillAPIServer - edit-reply succeeds for first 2 calls", async () => 
     // Second edit — should succeed (editCount: 1 → 2)
     const editResponse2 = await fetch(`http://localhost:${port}/api/skill/edit-reply`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: jsonHeaders(sessionRegistry.getCallerToken(sessionId)),
       body: JSON.stringify({
         sessionId,
         parameters: { messageId: "edited_msg_001", message: "Second edit" },
@@ -1502,7 +1509,7 @@ Deno.test("SkillAPIServer - edit-reply rejected on 3rd call and triggers termina
     // Send initial reply
     await fetch(`http://localhost:${port}/api/skill/send-reply`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: jsonHeaders(sessionRegistry.getCallerToken(sessionId)),
       body: JSON.stringify({
         sessionId,
         parameters: { message: "Initial message" },
@@ -1512,7 +1519,7 @@ Deno.test("SkillAPIServer - edit-reply rejected on 3rd call and triggers termina
     // Edit 1 — succeeds (editCount: 0 → 1)
     await fetch(`http://localhost:${port}/api/skill/edit-reply`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: jsonHeaders(sessionRegistry.getCallerToken(sessionId)),
       body: JSON.stringify({
         sessionId,
         parameters: { messageId: "sent_msg_001", message: "First edit" },
@@ -1522,7 +1529,7 @@ Deno.test("SkillAPIServer - edit-reply rejected on 3rd call and triggers termina
     // Edit 2 — succeeds (editCount: 1 → 2)
     await fetch(`http://localhost:${port}/api/skill/edit-reply`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: jsonHeaders(sessionRegistry.getCallerToken(sessionId)),
       body: JSON.stringify({
         sessionId,
         parameters: { messageId: "edited_msg_001", message: "Second edit" },
@@ -1534,7 +1541,7 @@ Deno.test("SkillAPIServer - edit-reply rejected on 3rd call and triggers termina
     // Edit 3 — should be rejected (editCount=2 >= 3) and trigger termination
     const editResponse3 = await fetch(`http://localhost:${port}/api/skill/edit-reply`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: jsonHeaders(sessionRegistry.getCallerToken(sessionId)),
       body: JSON.stringify({
         sessionId,
         parameters: { messageId: "edited_msg_001", message: "Third edit" },
@@ -1623,7 +1630,7 @@ Deno.test("SkillAPIServer - edit-reply no crash when onTerminateRequest not set"
     // Send initial reply
     await fetch(`http://localhost:${port}/api/skill/send-reply`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: jsonHeaders(sessionRegistry.getCallerToken(sessionId)),
       body: JSON.stringify({
         sessionId,
         parameters: { message: "Initial message" },
@@ -1638,7 +1645,7 @@ Deno.test("SkillAPIServer - edit-reply no crash when onTerminateRequest not set"
     for (let i = 1; i <= 2; i++) {
       await fetch(`http://localhost:${port}/api/skill/edit-reply`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: jsonHeaders(sessionRegistry.getCallerToken(sessionId)),
         body: JSON.stringify({
           sessionId,
           parameters: { messageId: editIds[i - 1], message: `Edit ${i}` },
@@ -1649,7 +1656,7 @@ Deno.test("SkillAPIServer - edit-reply no crash when onTerminateRequest not set"
     // 3rd edit should be rejected but not crash (no termination callback)
     const editResponse3 = await fetch(`http://localhost:${port}/api/skill/edit-reply`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: jsonHeaders(sessionRegistry.getCallerToken(sessionId)),
       body: JSON.stringify({
         sessionId,
         parameters: { messageId: "edited_msg_001", message: "Third edit" },
@@ -1734,7 +1741,7 @@ Deno.test("SkillAPIServer - edit-reply count independent from reply count", asyn
     // Send 1 reply — replyCount=1, editCount=0
     const sendResponse = await fetch(`http://localhost:${port}/api/skill/send-reply`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: jsonHeaders(sessionRegistry.getCallerToken(sessionId)),
       body: JSON.stringify({
         sessionId,
         parameters: { message: "Initial message" },
@@ -1748,7 +1755,7 @@ Deno.test("SkillAPIServer - edit-reply count independent from reply count", asyn
     // Edit reply once — editCount=1, replyCount still 1
     const editResponse = await fetch(`http://localhost:${port}/api/skill/edit-reply`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: jsonHeaders(sessionRegistry.getCallerToken(sessionId)),
       body: JSON.stringify({
         sessionId,
         parameters: { messageId: "sent_msg_001", message: "Edited" },
@@ -1826,7 +1833,7 @@ Deno.test("SkillAPIServer - skill API call refreshes session timeout", async () 
     // Make a skill API call to refresh timeout
     const response = await fetch(`http://localhost:${port}/api/skill/memory-stats`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: jsonHeaders(sessionRegistry.getCallerToken(sessionId)),
       body: JSON.stringify({ sessionId, parameters: {} }),
     });
     const result = await response.json();
@@ -1914,14 +1921,14 @@ Deno.test("SkillAPIServer - edit-reply success writes reply_edited audit entry",
     // Send initial reply
     await fetch(`http://localhost:${port}/api/skill/send-reply`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: jsonHeaders(sessionRegistry.getCallerToken(sessionId)),
       body: JSON.stringify({ sessionId, parameters: { message: "Original" } }),
     }).then((r) => r.json());
 
     // Edit reply
     const editResponse = await fetch(`http://localhost:${port}/api/skill/edit-reply`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: jsonHeaders(sessionRegistry.getCallerToken(sessionId)),
       body: JSON.stringify({
         sessionId,
         parameters: { messageId: "original_msg", message: "Edited content" },
@@ -2012,7 +2019,7 @@ Deno.test("SkillAPIServer - memory-save writes memory_operation audit entry", as
 
     const response = await fetch(`http://localhost:${port}/api/skill/memory-save`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: jsonHeaders(sessionRegistry.getCallerToken(sessionId)),
       body: JSON.stringify({
         sessionId,
         parameters: { content: "User likes cats", visibility: "public", tier: "working" },
@@ -2103,7 +2110,7 @@ Deno.test("SkillAPIServer - memory-search writes memory_operation audit entry", 
 
     const response = await fetch(`http://localhost:${port}/api/skill/memory-search`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: jsonHeaders(sessionRegistry.getCallerToken(sessionId)),
       body: JSON.stringify({
         sessionId,
         parameters: { query: "cats" },

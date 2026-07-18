@@ -38,6 +38,14 @@ const DEFAULT_TIER_DECAY: Record<MemoryTier, number> = {
   archive: 0.5,
 };
 
+/**
+ * Maximum number of durable (core-tier) channel memory entries per channel (F15).
+ * Bounds the durable/curated channel-knowledge store so it cannot grow without
+ * limit. Ordinary user-driven channel writes never reach core tier (they decay);
+ * this cap applies to the authorized/curated durable flow.
+ */
+export const MAX_CHANNEL_CORE_ENTRIES = 32;
+
 export class MemoryStore {
   private readonly workspaceManager: WorkspaceManager;
   private readonly config: MemoryStoreConfig;
@@ -289,6 +297,7 @@ export class MemoryStore {
           decay,
           relatedTo: event.relatedTo ?? [],
           supersedes: event.supersedes ?? [],
+          ...(event.author !== undefined && { author: event.author }),
         });
       } else if (event.type === "patch") {
         const patches = patchesMap.get(event.targetId) ?? [];
@@ -648,9 +657,38 @@ export class MemoryStore {
       tier?: MemoryTier;
       category?: MemoryCategory;
       decay?: number;
+      /** User ID of the contributing author (F15), for attribution on read. */
+      author?: string;
+      /**
+       * Whether this write comes from an authorized/curated durable flow (F15).
+       * Only durable writes may create a permanent, non-decaying `core` entry.
+       * Ordinary user-driven writes (the default) are never pinned to core: a
+       * requested `core` tier is downgraded to a decaying `working` tier so an
+       * untrusted contribution cannot become a permanent implant.
+       */
+      durable?: boolean;
     } = {},
   ): Promise<MemoryEntry> {
-    const tier = options.tier ?? (options.importance === "high" ? "core" : "archive");
+    let tier = options.tier ?? (options.importance === "high" ? "core" : "archive");
+
+    // F15: untrusted (non-durable) channel writes may not be pinned to permanent
+    // core. Downgrade a requested core tier to a decaying working tier.
+    if (tier === "core" && !options.durable) {
+      tier = "working";
+    }
+
+    // F15: bound the number of durable core-tier channel entries per channel.
+    if (tier === "core" && options.durable) {
+      const existingCore = await this.getChannelCoreTierMemories(channelWorkspace);
+      if (existingCore.length >= MAX_CHANNEL_CORE_ENTRIES) {
+        throw new MemoryError(
+          ErrorCode.MEMORY_WRITE_FAILED,
+          `Channel core-tier memory cap reached (${MAX_CHANNEL_CORE_ENTRIES})`,
+          { channelKey: channelWorkspace.key },
+        );
+      }
+    }
+
     const category = options.category ?? "fact";
     const decay = tier === "core" ? 1.0 : (options.decay ?? DEFAULT_TIER_DECAY[tier]);
 
@@ -668,6 +706,7 @@ export class MemoryStore {
       decay,
       ...(options.relatedTo && { relatedTo: options.relatedTo }),
       ...(options.supersedes && { supersedes: options.supersedes }),
+      ...(options.author !== undefined && { author: options.author }),
     };
 
     const filePath = this.workspaceManager.getChannelMemoryFilePath(channelWorkspace);

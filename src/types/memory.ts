@@ -79,6 +79,13 @@ export interface MemoryEntry extends BaseMemoryEvent {
 
   /** IDs of memories this entry supersedes (e.g., maintenance summary replacing old memories) */
   supersedes?: string[];
+
+  /**
+   * User ID of the author of this entry (F15). Recorded for channel-scoped
+   * memory so shared entries can be attributed to the contributing user and
+   * rendered as unverified user contributions rather than trusted fact.
+   */
+  author?: string;
 }
 
 /**
@@ -150,6 +157,9 @@ export interface ResolvedMemory {
 
   /** IDs of memories this memory supersedes (aggregated from entry + patches) */
   supersedes: string[];
+
+  /** User ID of the author (F15), for channel-scoped memory attribution */
+  author?: string;
 }
 
 /**

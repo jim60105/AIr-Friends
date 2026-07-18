@@ -286,6 +286,13 @@ export class ChatbotClient implements acp.Client {
    */
   private configOptionsListener?: (configOptions: acp.SessionConfigOption[]) => void;
 
+  /**
+   * Optional listener invoked on every observed Agent activity (F13). Used to
+   * keep the Skill API session's idle timer aligned with real agent liveness,
+   * so a long, active turn is never evicted for lack of a skill call.
+   */
+  private activityListener?: () => void;
+
   constructor(
     skillRegistry: SkillRegistry,
     logger: Logger,
@@ -334,8 +341,16 @@ export class ChatbotClient implements acp.Client {
     this.configOptionsListener = listener;
   }
 
+  /**
+   * Register a listener invoked on every observed Agent activity (F13).
+   */
+  setActivityListener(listener: () => void): void {
+    this.activityListener = listener;
+  }
+
   private updateActivity(): void {
     this.lastActivityTimestamp = Date.now();
+    this.activityListener?.();
   }
 
   /**

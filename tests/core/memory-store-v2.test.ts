@@ -389,6 +389,7 @@ Deno.test("MemoryStore v2 - addChannelMemory creates memory with scope=channel",
     const memory = await store.addChannelMemory(channelWorkspace, "Channel fact", {
       tier: "core",
       category: "fact",
+      durable: true,
     });
 
     assertEquals(memory.scope, "channel");
@@ -435,7 +436,11 @@ Deno.test("MemoryStore v2 - searchChannelMemories filters by category", async ()
 
 Deno.test("MemoryStore v2 - getChannelCoreTierMemories returns only core", async () => {
   await withTestChannelStore(async (store, channelWorkspace) => {
-    await store.addChannelMemory(channelWorkspace, "Core channel mem", { tier: "core" });
+    // Durable core entries come from the authorized/curated flow (F15).
+    await store.addChannelMemory(channelWorkspace, "Core channel mem", {
+      tier: "core",
+      durable: true,
+    });
     await store.addChannelMemory(channelWorkspace, "Archive channel mem", { tier: "archive" });
 
     const core = await store.getChannelCoreTierMemories(channelWorkspace);
@@ -477,6 +482,7 @@ Deno.test("MemoryStore v2 - getChannelMemoryStats includes byTier and byCategory
     await store.addChannelMemory(channelWorkspace, "Core fact", {
       tier: "core",
       category: "fact",
+      durable: true,
     });
     await store.addChannelMemory(channelWorkspace, "Archive pref", {
       tier: "archive",
@@ -491,5 +497,77 @@ Deno.test("MemoryStore v2 - getChannelMemoryStats includes byTier and byCategory
     assertEquals(stats.private, null);
     assertEquals(stats.channel!.total, 2);
     assertEquals(stats.summary.totalEnabled, 2);
+  });
+});
+
+// ── F15: channel memory de-trusting / non-permanence / bounds / attribution ──
+
+Deno.test("F15 - untrusted channel write requesting core is downgraded to a decaying tier", async () => {
+  await withTestChannelStore(async (store, channelWorkspace) => {
+    const memory = await store.addChannelMemory(channelWorkspace, "Injected fact", {
+      tier: "core",
+      importance: "high",
+      // no durable flag → ordinary user-driven write
+    });
+    // Not pinned to permanent core
+    assertEquals(memory.tier === "core", false);
+    assertEquals(memory.decay === 1.0, false);
+
+    const core = await store.getChannelCoreTierMemories(channelWorkspace);
+    assertEquals(core.length, 0);
+  });
+});
+
+Deno.test("F15 - durable channel write may create a core entry", async () => {
+  await withTestChannelStore(async (store, channelWorkspace) => {
+    const memory = await store.addChannelMemory(channelWorkspace, "Curated fact", {
+      tier: "core",
+      durable: true,
+    });
+    assertEquals(memory.tier, "core");
+    assertEquals(memory.decay, 1.0);
+  });
+});
+
+Deno.test("F15 - channel write records the author for attribution", async () => {
+  await withTestChannelStore(async (store, channelWorkspace) => {
+    await store.addChannelMemory(channelWorkspace, "From a user", { author: "user_42" });
+    const loaded = await store.loadChannelMemories(channelWorkspace);
+    assertEquals(loaded.length, 1);
+    assertEquals(loaded[0].author, "user_42");
+  });
+});
+
+Deno.test("F15 - a disabled channel entry is excluded from context loading", async () => {
+  await withTestChannelStore(async (store, channelWorkspace) => {
+    const mem = await store.addChannelMemory(channelWorkspace, "planted", {
+      tier: "core",
+      durable: true,
+    });
+    // Moderation path: disable via patchChannelMemory (as the dashboard does).
+    await store.patchChannelMemory(channelWorkspace, mem.id, { enabled: false });
+
+    const core = await store.getChannelCoreTierMemories(channelWorkspace);
+    assertEquals(core.find((m) => m.id === mem.id), undefined);
+  });
+});
+
+Deno.test("F15 - durable core channel entries are bounded by the cap", async () => {
+  await withTestChannelStore(async (store, channelWorkspace) => {
+    const { MAX_CHANNEL_CORE_ENTRIES } = await import("../../src/core/memory-store.ts");
+    for (let i = 0; i < MAX_CHANNEL_CORE_ENTRIES; i++) {
+      await store.addChannelMemory(channelWorkspace, `Core ${i}`, {
+        tier: "core",
+        durable: true,
+      });
+    }
+    await assertRejects(
+      () =>
+        store.addChannelMemory(channelWorkspace, "One too many", {
+          tier: "core",
+          durable: true,
+        }),
+      MemoryError,
+    );
   });
 });

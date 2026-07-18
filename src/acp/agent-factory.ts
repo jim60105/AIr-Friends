@@ -16,6 +16,7 @@ export function createAgentConfig(
   yolo = false,
   agentWorkspacePath?: string,
   sessionId?: string,
+  callerToken?: string,
 ): AgentConfig {
   // Build the base (unfiltered) config for the agent type
   const baseConfig = buildBaseAgentConfig(
@@ -25,6 +26,7 @@ export function createAgentConfig(
     yolo,
     agentWorkspacePath,
     sessionId,
+    callerToken,
   );
 
   // Apply sandbox if configured
@@ -59,6 +61,7 @@ function buildBaseAgentConfig(
   yolo: boolean,
   agentWorkspacePath?: string,
   sessionId?: string,
+  callerToken?: string,
 ): AgentConfig {
   switch (type) {
     case "opencode": {
@@ -107,6 +110,13 @@ function buildBaseAgentConfig(
 
       if (sessionId) {
         env["SESSION_ID"] = sessionId;
+      }
+
+      // Per-session Skill API caller token (F13): only the owning subprocess
+      // receives it, so possession of a session ID alone is not sufficient to
+      // authenticate against the Skill API.
+      if (callerToken) {
+        env["SKILL_API_TOKEN"] = callerToken;
       }
 
       const args = ["acp"];

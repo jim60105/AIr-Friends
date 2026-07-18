@@ -719,3 +719,62 @@ Deno.test("SessionRegistry - hasActiveSessionsForWorkspace different workspaces 
 
   registry.stop();
 });
+
+// deno-lint-ignore no-explicit-any
+const registrationBase: any = {
+  platform: "discord",
+  channelId: "456",
+  userId: "u",
+  isDm: false,
+  workspace: {
+    key: "discord/u",
+    components: { platform: "discord", userId: "u" },
+    path: "/tmp/u",
+    tmpPath: "/tmp/u/tmp",
+    isDm: false,
+  },
+  platformAdapter: {},
+};
+
+Deno.test("SessionRegistry - register mints a unique caller token distinct from the session ID (F13)", () => {
+  const registry = new SessionRegistry();
+
+  const id1 = registry.register(registrationBase);
+  const id2 = registry.register(registrationBase);
+
+  const t1 = registry.getCallerToken(id1);
+  const t2 = registry.getCallerToken(id2);
+
+  assertExists(t1);
+  assertExists(t2);
+  assertEquals(t1 === id1, false); // token is not the session ID
+  assertEquals(t1 === t2, false); // tokens are per-session
+  assertEquals(t1!.length >= 32, true); // high entropy
+
+  registry.stop();
+});
+
+Deno.test("SessionRegistry - get() treats an idle-expired session as absent (F13)", async () => {
+  const registry = new SessionRegistry(80); // 80ms idle timeout
+
+  const id = registry.register(registrationBase);
+  assertExists(registry.get(id));
+
+  await new Promise((r) => setTimeout(r, 150));
+  assertEquals(registry.get(id), undefined);
+
+  registry.stop();
+});
+
+Deno.test("SessionRegistry - touch() refreshes the idle timer (F13)", async () => {
+  const registry = new SessionRegistry(120);
+
+  const id = registry.register(registrationBase);
+  for (let i = 0; i < 3; i++) {
+    await new Promise((r) => setTimeout(r, 70));
+    registry.touch(id);
+    assertExists(registry.get(id));
+  }
+
+  registry.stop();
+});

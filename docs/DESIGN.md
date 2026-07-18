@@ -996,6 +996,24 @@ The self-research feature allows the agent to autonomously build knowledge by pe
 
 See `config.example.yaml` for the `selfResearch` section. Environment variables: `SELF_RESEARCH_ENABLED`, `SELF_RESEARCH_MODEL`, `SELF_RESEARCH_RSS_FEEDS` (JSON), `SELF_RESEARCH_MIN_INTERVAL_MS`, `SELF_RESEARCH_MAX_INTERVAL_MS`.
 
+### Untrusted-content delimiting (F16)
+
+Self-research is the only session type that both ingests external RSS content and
+is authorized to write shared agent-workspace notes, so feed text is treated as
+untrusted. `formatUntrustedRssBlock` (`src/core/session-orchestrator.ts`) wraps each
+interpolated item in distinctive `⟪UNTRUSTED_EXTERNAL_ARTICLE⟫ … ⟪END_UNTRUSTED_EXTERNAL_ARTICLE⟫`
+markers and prefixes the block with a directive not to follow any instructions
+contained within, so the model treats feed content as data rather than as prompt
+instructions. Upstream markup stripping and 300-char truncation (`rss-fetcher.ts`)
+limit an item's ability to forge the end marker. This is a proportionate mitigation
+for a LOW-severity, default-off feature — not a guarantee against prompt injection.
+
+Deferred future work (F16 D2): provenance-tag notes derived from external feed
+content and optionally require operator review before such notes become readable
+by user-facing sessions. This addresses the shared-store sink (the complement of
+run-1's F3 session-type write-gate, and related to F15's channel-memory write path)
+rather than only the source, and is left deferred given the LOW severity.
+
 ---
 
 ## Memory Maintenance

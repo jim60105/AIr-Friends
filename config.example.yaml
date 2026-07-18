@@ -190,6 +190,13 @@ memory:
   maxChars: 2000 # Max characters stored per memory (default: 2000)
   recentMessageLimit: 20 # Number of recent messages included in context (default: 20)
   workingTierLimit: 20 # Max working-tier memories before auto-demotion to archive (default: 20); override with env MEMORY_WORKING_TIER_LIMIT
+  # Channel-scoped memory write policy (F15):
+  #   "sessions" (default) — ordinary channel sessions may write channel memory
+  #     (entries are attributed, non-durable/decaying, bounded, and moderatable
+  #     via the dashboard Channel Memory tab).
+  #   "curated" — user-driven channel writes are rejected; durable channel
+  #     knowledge comes only from an operator/curated flow.
+  channelWritePolicy: sessions
 
 # Conversation summary - auto-generate summaries after each session
 conversationSummary:

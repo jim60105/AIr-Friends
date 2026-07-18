@@ -39,6 +39,12 @@ export interface SkillContext {
   lastSentMessageId?: string;
   /** Workspace manager for channel workspace resolution */
   workspaceManager?: WorkspaceManager;
+  /**
+   * Whether this session is authorized to write channel-scoped memory (F15).
+   * Gates `memory-save --scope channel`. Set per the configured channel-write
+   * policy; when not set, channel writes are rejected.
+   */
+  canWriteChannelMemory?: boolean;
 }
 
 /**

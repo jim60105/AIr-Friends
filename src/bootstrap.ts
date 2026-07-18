@@ -504,6 +504,8 @@ export async function bootstrap(
       auditBasePath,
       metricsRegistry: config.metrics?.enabled ? metricsRegistry : undefined,
       skillRegistry: agentCore.getSkillRegistry(),
+      memoryStore: agentCore.getMemoryStore(),
+      workspaceManager: agentCore.getWorkspaceManager(),
     });
     dashboardServer.start();
     logger.info("Dashboard server initialized", { port: config.dashboard.port });

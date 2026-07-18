@@ -343,6 +343,41 @@ const result = await skillRegistry.executeSkill(
 4. **Once-per-interaction**: Reply sending enforced to prevent spam
 5. **Error Handling**: All errors caught and logged without crashing
 
+### Skill API Caller Authentication (F13)
+
+A Skill API request is authenticated by **both** the session ID and a per-session
+**caller token**, bound to the subprocess that owns the session — a valid session
+ID alone is not sufficient.
+
+- At session registration (`SessionRegistry.register`) a high-entropy `callerToken`
+  (256-bit, distinct from the session ID) is minted and stored on the `ActiveSession`.
+- The token is provisioned into the owning agent subprocess's environment as
+  `SKILL_API_TOKEN` (allow-listed in `SandboxManager.BASE_ALLOWED_ENV`, set alongside
+  `SESSION_ID` in `agent-factory.ts`). `skills/lib/client.ts` reads it and sends it as
+  `Authorization: Bearer <token>`.
+- The server resolves the session by ID and verifies the presented token against the
+  stored token with a **constant-time comparison** (`timingSafeEqual`), returning HTTP
+  403 on a missing/mismatched token. Authentication runs **before** the request-dedup
+  cache, and 401/403 outcomes are never cached, so an unauthorized attempt holding a
+  leaked session ID cannot poison a legitimate caller's cached result.
+- **Idle TTL:** sessions expire after `skillApi.sessionTimeoutMs` (default 30 min) of
+  inactivity. `SessionRegistry.get()` treats an idle-expired session as absent (401);
+  each authenticated call `touch()`es the session so an actively-used session does not
+  expire mid-turn; a cleanup timer reaps idle entries.
+
+**Honest scope note:** the caller token is injected into the agent environment, so it
+shares the exact exposure of `SESSION_ID` under a `/proc/<pid>/environ` read. It does
+**not** by itself defend against an attacker who can already read the victim
+subprocess's environment directly — that vector is closed by the agent filesystem
+confinement (F12), not by this token. The token's value is against session-ID leakage
+through **other** channels (logs, dashboard, error messages) and the removal of ambient
+"any holder of the ID" bearer authority. The two changes compose.
+
+**Documented future work (D3):** move the Skill API from a shared TCP port to a
+per-session channel (a unix domain socket bound to one session) so the server derives
+the session from the connection rather than a client-supplied field, making caller
+identity OS-enforced rather than token-asserted.
+
 ## Skill Permissions
 
 Skill permissions are enforced through a whitelist mechanism managed by `SkillAutoApproveList` in `src/acp/client.ts`. In restricted (non-YOLO) mode, only whitelisted skill commands are auto-approved; all other execution requests are rejected.

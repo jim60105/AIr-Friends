@@ -50,6 +50,21 @@ function createMockSkillRegistry() {
   } as never;
 }
 
+function createMockMemoryStore() {
+  return {
+    loadChannelMemories: () => Promise.resolve([]),
+    patchChannelMemory: () => Promise.resolve({}),
+  } as never;
+}
+
+function createMockWorkspaceManager() {
+  return {
+    listChannelWorkspaces: () => Promise.resolve([]),
+    getOrCreateChannelWorkspace: (platform: string, channelId: string) =>
+      Promise.resolve({ key: `${platform}/${channelId}`, platform, channelId, path: "/tmp" }),
+  } as never;
+}
+
 function createMinimalConfig(): Config {
   return {
     platforms: {
@@ -109,6 +124,8 @@ async function createTestServer(overrides?: {
       ? undefined
       : (overrides?.metricsRegistry ?? createMockMetricsRegistry()),
     skillRegistry: createMockSkillRegistry(),
+    memoryStore: createMockMemoryStore(),
+    workspaceManager: createMockWorkspaceManager(),
   });
 
   // Use a random available port by starting with port 0
@@ -360,6 +377,8 @@ Deno.test({
 }, async () => {
   const mockSession: ActiveSession = {
     id: "sess_test1",
+    callerToken: "tok_test1",
+    lastActivityAt: new Date(),
     platform: "discord",
     channelId: "ch1",
     userId: "u1",
@@ -624,6 +643,8 @@ Deno.test({
     auditBasePath: `${tempDir}/audit`,
     metricsRegistry: createMockMetricsRegistry(),
     skillRegistry: createMockSkillRegistry(),
+    memoryStore: createMockMemoryStore(),
+    workspaceManager: createMockWorkspaceManager(),
   });
   server.start();
   try {
@@ -1791,6 +1812,8 @@ Deno.test({
     auditBasePath,
     metricsRegistry: createMockMetricsRegistry(),
     skillRegistry: createMockSkillRegistry(),
+    memoryStore: createMockMemoryStore(),
+    workspaceManager: createMockWorkspaceManager(),
   });
   server.start();
   try {
@@ -1849,6 +1872,8 @@ Deno.test({
     auditBasePath,
     metricsRegistry: createMockMetricsRegistry(),
     skillRegistry: createMockSkillRegistry(),
+    memoryStore: createMockMemoryStore(),
+    workspaceManager: createMockWorkspaceManager(),
   });
   server.start();
   try {
@@ -1902,6 +1927,8 @@ Deno.test({
     auditBasePath: `${tempDir}/audit`,
     metricsRegistry: createMockMetricsRegistry(),
     skillRegistry: createMockSkillRegistry(),
+    memoryStore: createMockMemoryStore(),
+    workspaceManager: createMockWorkspaceManager(),
   });
   server.start();
   try {
@@ -2280,6 +2307,8 @@ Deno.test({
 }, async () => {
   const mockSession: ActiveSession = {
     id: "sess_spont",
+    callerToken: "tok_spont",
+    lastActivityAt: new Date(),
     platform: "discord",
     channelId: "ch1",
     userId: "u1",
@@ -2320,6 +2349,8 @@ Deno.test({
 }, async () => {
   const mockSession: ActiveSession = {
     id: "sess_active",
+    callerToken: "tok_active",
+    lastActivityAt: new Date(),
     platform: "discord",
     channelId: "ch1",
     userId: "u1",

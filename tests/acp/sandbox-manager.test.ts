@@ -87,6 +87,7 @@ Deno.test("SandboxManager - base allowed env vars are preserved", () => {
     DENO_NO_UPDATE_CHECK: "1",
     SKILL_API_PORT: "3001",
     SESSION_ID: "sess_123",
+    SKILL_API_TOKEN: "tok_abc",
     AGENT_WORKSPACE: "/workspace",
     OPENCODE_API_KEY: "oc_xxx",
   };
@@ -96,6 +97,7 @@ Deno.test("SandboxManager - base allowed env vars are preserved", () => {
   assertEquals(opts.env["DENO_DIR"], "/deno-dir");
   assertEquals(opts.env["SKILL_API_PORT"], "3001");
   assertEquals(opts.env["SESSION_ID"], "sess_123");
+  assertEquals(opts.env["SKILL_API_TOKEN"], "tok_abc");
   assertEquals(opts.env["AGENT_WORKSPACE"], "/workspace");
 });
 

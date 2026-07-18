@@ -23,6 +23,8 @@ import type { AgentConnectorOptions, ClientConfig } from "@acp/types.ts";
 import { loadSystemPrompt } from "@core/config-loader.ts";
 import type { TemplateVariables } from "../types/template.ts";
 import type { SkillRegistry } from "@skills/registry.ts";
+import type { MemoryStore } from "@core/memory-store.ts";
+import type { WorkspaceManager } from "@core/workspace-manager.ts";
 import type { Registry } from "prom-client";
 
 const logger = createLogger("DashboardServer");
@@ -72,6 +74,8 @@ export interface DashboardServerDeps {
   auditBasePath: string;
   metricsRegistry?: Registry;
   skillRegistry: SkillRegistry;
+  memoryStore: MemoryStore;
+  workspaceManager: WorkspaceManager;
 }
 
 /**
@@ -188,6 +192,20 @@ export class DashboardServer {
       }
       if (path === "/api/workspace/file" && req.method === "GET") {
         response = await this.handleWorkspaceFile(url);
+        return withSecurityHeaders(response);
+      }
+
+      // Channel-memory moderation endpoints (F15)
+      if (path === "/api/channel-memory/channels" && req.method === "GET") {
+        response = await this.handleChannelMemoryChannels();
+        return withSecurityHeaders(response);
+      }
+      if (path === "/api/channel-memory/list" && req.method === "GET") {
+        response = await this.handleChannelMemoryList(url);
+        return withSecurityHeaders(response);
+      }
+      if (path === "/api/channel-memory/disable" && req.method === "POST") {
+        response = await this.handleChannelMemoryDisable(req);
         return withSecurityHeaders(response);
       }
 
@@ -984,6 +1002,110 @@ export class DashboardServer {
   }
 
   // --- Helpers ---
+
+  // --- Channel memory moderation (F15) ---
+
+  /** List channels that have a channel-memory store. */
+  private async handleChannelMemoryChannels(): Promise<Response> {
+    try {
+      const keys = await this.deps.workspaceManager.listChannelWorkspaces();
+      return this.json({ channels: keys });
+    } catch (error) {
+      logger.warn("Failed to list channel workspaces: {error}", {
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return this.json({ error: "Failed to list channels" }, 500);
+    }
+  }
+
+  /**
+   * List the channel memories for a channel key (`platform/channelId`).
+   * Returns id, content, author, tier, enabled, and timestamps.
+   */
+  private async handleChannelMemoryList(url: URL): Promise<Response> {
+    const key = url.searchParams.get("channel");
+    const parsed = this.parseChannelKey(key);
+    if (!parsed) {
+      return this.json({ error: "Missing or invalid channel parameter" }, 400);
+    }
+
+    try {
+      const channelWorkspace = await this.deps.workspaceManager.getOrCreateChannelWorkspace(
+        parsed.platform,
+        parsed.channelId,
+      );
+      const memories = await this.deps.memoryStore.loadChannelMemories(channelWorkspace);
+      return this.json({
+        channel: key,
+        memories: memories.map((m) => ({
+          id: m.id,
+          content: m.content,
+          author: m.author ?? null,
+          tier: m.tier,
+          category: m.category,
+          enabled: m.enabled,
+          createdAt: m.createdAt,
+          lastModifiedAt: m.lastModifiedAt,
+        })),
+      });
+    } catch (error) {
+      logger.warn("Failed to list channel memories: {error}", {
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return this.json({ error: "Failed to list channel memories" }, 500);
+    }
+  }
+
+  /** Disable (moderate away) a channel memory entry via `patchChannelMemory`. */
+  private async handleChannelMemoryDisable(req: Request): Promise<Response> {
+    let body: { channel?: string; id?: string };
+    try {
+      body = await req.json();
+    } catch {
+      return this.json({ error: "Invalid JSON body" }, 400);
+    }
+
+    const parsed = this.parseChannelKey(body.channel);
+    if (!parsed || !body.id) {
+      return this.json({ error: "Missing or invalid channel/id" }, 400);
+    }
+
+    try {
+      const channelWorkspace = await this.deps.workspaceManager.getOrCreateChannelWorkspace(
+        parsed.platform,
+        parsed.channelId,
+      );
+      await this.deps.memoryStore.patchChannelMemory(channelWorkspace, body.id, {
+        enabled: false,
+      });
+      logger.info("Channel memory {id} disabled via dashboard moderation", { id: body.id });
+      return this.json({ success: true });
+    } catch (error) {
+      logger.warn("Failed to disable channel memory: {error}", {
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return this.json({ error: "Failed to disable channel memory" }, 500);
+    }
+  }
+
+  /**
+   * Parse and validate a `platform/channelId` channel key, rejecting anything
+   * with path-traversal or extra path segments.
+   */
+  private parseChannelKey(
+    key: string | null | undefined,
+  ): { platform: string; channelId: string } | null {
+    if (!key) return null;
+    const parts = key.split("/");
+    if (parts.length !== 2) return null;
+    // Allow-list each segment (matches the on-disk sanitized workspace naming);
+    // this rejects traversal (`..`), encoded separators, and any other unexpected
+    // characters rather than blocklisting specific traversal tokens.
+    const segment = /^[A-Za-z0-9_.-]+$/;
+    if (parts[0] === ".." || parts[1] === "..") return null;
+    if (!segment.test(parts[0]) || !segment.test(parts[1])) return null;
+    return { platform: parts[0], channelId: parts[1] };
+  }
 
   private json(data: unknown, status = 200): Response {
     return new Response(JSON.stringify(data), {

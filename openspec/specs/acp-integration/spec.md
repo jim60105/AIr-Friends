@@ -273,6 +273,12 @@ All agent subprocesses SHALL receive common environment variables regardless of 
 - **WHEN** the agent subprocess spawns child processes (e.g., skill scripts)
 - **THEN** the `SESSION_ID` environment variable SHALL be set to the active session ID so that skill scripts can resolve `$SESSION_ID` in their shell environment
 
+#### Scenario: Per-session Skill API caller token provided to agent
+- **GIVEN** a session has been created and assigned a caller token
+- **WHEN** the agent subprocess is spawned
+- **THEN** the per-session Skill API caller token SHALL be set in that subprocess's environment (e.g. `SKILL_API_TOKEN`) so its skill scripts can present it as an `Authorization` header
+- **AND** the token value SHALL be unique per session and distinct from the session ID
+
 ---
 
 ### Requirement: OpenCode YOLO Mode Switching
@@ -298,7 +304,7 @@ The `SandboxManager` SHALL filter subprocess environment variables to a base all
 #### Scenario: Filtered environment
 - **GIVEN** `sandbox.filterEnv` is `true`
 - **WHEN** `buildSpawnOptions()` constructs the subprocess environment
-- **THEN** it SHALL include only base allowed vars (`PATH`, `HOME`, `USER`, `SHELL`, `TERM`, `LANG`, `LC_ALL`, `DENO_DIR`, `DENO_NO_UPDATE_CHECK`, `SKILL_API_PORT`, `SESSION_ID`, `AGENT_WORKSPACE`, `TMPDIR`) plus agent-type-specific vars plus any configured `allowedEnvVars`
+- **THEN** it SHALL include only base allowed vars (`PATH`, `HOME`, `USER`, `SHELL`, `TERM`, `LANG`, `LC_ALL`, `DENO_DIR`, `DENO_NO_UPDATE_CHECK`, `SKILL_API_PORT`, `SESSION_ID`, `SKILL_API_TOKEN`, `AGENT_WORKSPACE`, `TMPDIR`) plus agent-type-specific vars plus any configured `allowedEnvVars`
 
 #### Scenario: Unfiltered environment
 - **GIVEN** `sandbox.filterEnv` is `false`

@@ -73,11 +73,21 @@ export async function callSkillApi(
 ): Promise<{ success: boolean; data?: unknown; error?: string }> {
   const url = `${apiUrl}/api/skill/${skillName}`;
 
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+  };
+
+  // Present the per-session caller token (F13) so the Skill API can verify that
+  // this request originates from the subprocess that owns the session. Possession
+  // of a session ID alone is not sufficient.
+  const callerToken = Deno.env.get("SKILL_API_TOKEN");
+  if (callerToken) {
+    headers["Authorization"] = `Bearer ${callerToken}`;
+  }
+
   const response = await fetch(url, {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
+    headers,
     body: JSON.stringify({
       sessionId,
       parameters,

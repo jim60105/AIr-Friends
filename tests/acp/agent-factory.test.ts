@@ -421,6 +421,33 @@ Deno.test("createAgentConfig - does not set SESSION_ID when sessionId omitted", 
   assertEquals(agentConfig.env?.["SESSION_ID"], undefined);
 });
 
+Deno.test("createAgentConfig - sets SKILL_API_TOKEN in env when callerToken provided (F13)", () => {
+  const config = createTestConfig();
+  const agentConfig = createAgentConfig(
+    "opencode",
+    "/tmp/workspace",
+    config,
+    false,
+    undefined,
+    "sess_test123",
+    "tok_secret_value",
+  );
+  assertEquals(agentConfig.env?.["SKILL_API_TOKEN"], "tok_secret_value");
+});
+
+Deno.test("createAgentConfig - does not set SKILL_API_TOKEN when callerToken omitted", () => {
+  const config = createTestConfig();
+  const agentConfig = createAgentConfig(
+    "opencode",
+    "/tmp/workspace",
+    config,
+    false,
+    undefined,
+    "sess_test123",
+  );
+  assertEquals(agentConfig.env?.["SKILL_API_TOKEN"], undefined);
+});
+
 Deno.test("detectPlaywrightBinarySync - detects chromium-headless-shell", () => {
   const tempDir = Deno.makeTempDirSync();
   const originalHome = Deno.env.get("HOME");
