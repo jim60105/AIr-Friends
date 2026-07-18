@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.28.0] - 2026-07-19
+
+### Added
+
+- ACP permission gate now authoritatively mediates every filesystem-touching bash tool the agent invokes, instead of trusting the agent's own tool-level allow list
+- Agent network egress (web fetch, web search, browser automation) is now mediated through a local validating proxy that blocks loopback/private/link-local/metadata addresses and pins resolved IPs to prevent DNS rebinding
+- Optional bubblewrap-based filesystem confinement for the agent sandbox, isolating the agent's view of the filesystem to its own session workspace (opt-in; see `docs/AGENT_PERMISSIONS.md` for Kubernetes requirements)
+- Skill API calls from the agent subprocess now require a per-session bearer token, closing a gap where any local process could reach the API
+- Channel memory writes now require explicit permission, are attributed to their author, and are shown as untrusted/de-trusted content in the dashboard, with a bounded decaying retention tier replacing permanent pinning and a moderation view to disable entries
+- Content pulled from RSS feeds during self-research is now wrapped in explicit untrusted-content markers with a do-not-follow directive, preventing feed-controlled text from being mistaken for instructions
+
+### Fixed
+
+- Large tunneled request/response bodies through the egress proxy no longer get silently corrupted when a single write is split by TCP backpressure
+- The egress proxy now promptly forwards connection closure to the client instead of leaving dead tunnels in client connection pools, which previously caused hangs or "socket connection was closed unexpectedly" errors; forwarded plain-HTTP requests are now forced to `Connection: close`, also closing a validation bypass that let a keep-alive client smuggle a second unvalidated request through an established tunnel
+
 ## [0.27.0] - 2026-07-16
 
 ### Added
@@ -1008,7 +1024,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ---
 
-[Unreleased]: https://github.com/jim60105/AIr-Friends/compare/v0.27.0...HEAD
+[Unreleased]: https://github.com/jim60105/AIr-Friends/compare/v0.28.0...HEAD
+[0.28.0]: https://github.com/jim60105/AIr-Friends/compare/v0.27.0...v0.28.0
 [0.27.0]: https://github.com/jim60105/AIr-Friends/compare/v0.26.0...v0.27.0
 [0.26.0]: https://github.com/jim60105/AIr-Friends/compare/v0.25.0...v0.26.0
 [0.25.0]: https://github.com/jim60105/AIr-Friends/compare/v0.24.0...v0.25.0
