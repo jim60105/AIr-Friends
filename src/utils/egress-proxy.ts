@@ -22,13 +22,9 @@ const logger = createLogger("EgressProxy");
 
 const encoder = new TextEncoder();
 
-// Minimal structural stream types (Deno.Reader/Deno.Writer were removed). `Deno.Conn`
-// satisfies both.
+// Minimal structural read type (Deno.Reader was removed). `Deno.Conn` satisfies it.
 interface ByteReader {
   read(p: Uint8Array): Promise<number | null>;
-}
-interface ByteWriter {
-  write(p: Uint8Array): Promise<number>;
 }
 
 /** Resolve a host to its addresses (literal IPs pass through) for range validation. */
@@ -92,7 +88,15 @@ function parseAuthority(authority: string, defaultPort: number): { host: string;
   return { host, port: Number.isFinite(port) ? port : defaultPort };
 }
 
-async function pipe(from: ByteReader, to: ByteWriter): Promise<void> {
+/**
+ * Copy bytes from one side of a tunnel to the other. On EOF, PROPAGATE the half-close
+ * (`closeWrite`, i.e. forward the FIN) to the destination — without this, a client whose
+ * upstream closed an idle keep-alive connection never learns the tunnel is dead: its
+ * connection pool reuses the zombie tunnel and the next request either hangs forever or
+ * dies with "socket connection was closed" (observed with OpenCode's pooled LLM streams).
+ * On error (reset), tear down BOTH connections so the opposite pipe unblocks immediately.
+ */
+async function tunnelPipe(from: Deno.Conn, to: Deno.Conn): Promise<void> {
   const buf = new Uint8Array(16 * 1024);
   try {
     while (true) {
@@ -100,12 +104,45 @@ async function pipe(from: ByteReader, to: ByteWriter): Promise<void> {
       if (n === null) break;
       await to.write(buf.subarray(0, n));
     }
+    await to.closeWrite();
   } catch {
-    // connection closed / reset — normal for tunnels
+    try {
+      from.close();
+    } catch {
+      // already closed
+    }
+    try {
+      to.close();
+    } catch {
+      // already closed
+    }
   }
 }
 
-async function writeAll(conn: ByteWriter, text: string): Promise<void> {
+/**
+ * Bidirectionally tunnel two established connections until both directions have drained
+ * (or either side errors), then close both. Exported for direct testing of the
+ * FIN-propagation behavior (the proxy's target validation forbids loopback upstreams, so
+ * the tunnel semantics cannot be exercised through the full proxy path in tests).
+ */
+export async function tunnelConnections(client: Deno.Conn, upstream: Deno.Conn): Promise<void> {
+  await Promise.all([tunnelPipe(client, upstream), tunnelPipe(upstream, client)]);
+  try {
+    upstream.close();
+  } catch {
+    // already closed
+  }
+  try {
+    client.close();
+  } catch {
+    // already closed
+  }
+}
+
+async function writeAll(
+  conn: { write(p: Uint8Array): Promise<number> },
+  text: string,
+): Promise<void> {
   await conn.write(encoder.encode(text));
 }
 
@@ -220,13 +257,7 @@ async function handleConnection(conn: Deno.Conn): Promise<void> {
       return;
     }
     await writeAll(conn, "HTTP/1.1 200 Connection Established\r\n\r\n");
-    await Promise.all([pipe(conn, upstream), pipe(upstream, conn)]);
-    try {
-      upstream.close();
-    } catch {
-      // already closed
-    }
-    conn.close();
+    await tunnelConnections(conn, upstream);
     return;
   }
 
@@ -270,17 +301,39 @@ async function handleConnection(conn: Deno.Conn): Promise<void> {
     return;
   }
   const originPath = (url.pathname || "/") + url.search;
-  const rewrittenHead = head.replace(requestLine, `${method} ${originPath} HTTP/1.1`);
+  const rewrittenHead = rewriteForwardHead(head, method, originPath);
   try {
     await upstream.write(encoder.encode(rewrittenHead));
-    await Promise.all([pipe(conn, upstream), pipe(upstream, conn)]);
   } catch {
-    // upstream/client closed
+    try {
+      upstream.close();
+    } catch {
+      // already closed
+    }
+    conn.close();
+    return;
   }
-  try {
-    upstream.close();
-  } catch {
-    // already closed
-  }
-  conn.close();
+  await tunnelConnections(conn, upstream);
+}
+
+/**
+ * Rewrite a proxied plain-HTTP request head for forwarding to the origin: the absolute-form
+ * request line becomes origin-form, and the connection is forced to `Connection: close`
+ * (dropping any `Connection`/`Proxy-Connection` the client sent). Forcing close is
+ * load-bearing for security, not just hygiene: after this first request the proxy blindly
+ * tunnels bytes, so a keep-alive client could smuggle a SECOND request to the same upstream
+ * without validation. With close semantics the upstream ends the connection after one
+ * response and the teardown propagates to the client. Any body bytes that were read along
+ * with the head are preserved. Exported for direct unit testing.
+ */
+export function rewriteForwardHead(head: string, method: string, originPath: string): string {
+  const headerEnd = head.indexOf("\r\n\r\n");
+  const headerBlock = headerEnd === -1 ? head : head.slice(0, headerEnd);
+  const rest = headerEnd === -1 ? "\r\n\r\n" : head.slice(headerEnd);
+  const lines = headerBlock.split("\r\n");
+  const headers = lines
+    .slice(1)
+    .filter((line) => !/^(connection|proxy-connection):/i.test(line));
+  headers.push("Connection: close");
+  return [`${method} ${originPath} HTTP/1.1`, ...headers].join("\r\n") + rest;
 }

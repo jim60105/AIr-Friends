@@ -55,7 +55,11 @@ Deno.test("egress proxy - refuses plain-HTTP request to a metadata endpoint with
 
 // --- F14 #4: DNS-rebinding — the proxy pins to the validated resolved address ---
 
-import { resolveAndValidateEgress } from "@utils/egress-proxy.ts";
+import {
+  resolveAndValidateEgress,
+  rewriteForwardHead,
+  tunnelConnections,
+} from "@utils/egress-proxy.ts";
 
 Deno.test("resolveAndValidateEgress - returns a pinned address for public literals, rejects internal", async () => {
   const pub = await resolveAndValidateEgress("8.8.8.8");
@@ -66,4 +70,81 @@ Deno.test("resolveAndValidateEgress - returns a pinned address for public litera
   assertEquals(loop.address, undefined);
   const meta = await resolveAndValidateEgress("169.254.169.254");
   assertEquals(meta.allowed, false);
+});
+
+// --- Tunnel teardown: FIN propagation so client pools never reuse a dead tunnel ---
+
+/** Create a connected loopback TCP pair (client side, server side). */
+async function tcpPair(): Promise<[Deno.Conn, Deno.Conn]> {
+  const listener = Deno.listen({ hostname: "127.0.0.1", port: 0 });
+  const port = (listener.addr as Deno.NetAddr).port;
+  const [a, b] = await Promise.all([
+    Deno.connect({ hostname: "127.0.0.1", port }),
+    listener.accept(),
+  ]);
+  listener.close();
+  return [a, b];
+}
+
+Deno.test("tunnelConnections - upstream close propagates EOF to the client promptly", async () => {
+  // client <-> proxyClientSide tunneled to proxyUpstreamSide <-> upstreamServer
+  const [client, proxyClientSide] = await tcpPair();
+  const [proxyUpstreamSide, upstreamServer] = await tcpPair();
+  const tunnel = tunnelConnections(proxyClientSide, proxyUpstreamSide);
+
+  const enc = new TextEncoder();
+  const dec = new TextDecoder();
+  const buf = new Uint8Array(64);
+
+  // Bytes flow client -> upstream and upstream -> client through the tunnel.
+  await client.write(enc.encode("hello"));
+  let n = await upstreamServer.read(buf);
+  assertEquals(dec.decode(buf.subarray(0, n ?? 0)), "hello");
+  await upstreamServer.write(enc.encode("world"));
+  n = await client.read(buf);
+  assertEquals(dec.decode(buf.subarray(0, n ?? 0)), "world");
+
+  // Upstream closes (e.g. keep-alive idle timeout). The client MUST observe EOF quickly —
+  // before the fix the FIN was never forwarded and this read hung until the pool reused a
+  // dead tunnel. Guard with a timer so a regression fails instead of hanging the test.
+  upstreamServer.close();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const eof = await Promise.race([
+    client.read(buf),
+    new Promise<"timeout">((resolve) => {
+      timer = setTimeout(() => resolve("timeout"), 2000);
+    }),
+  ]);
+  clearTimeout(timer);
+  assertEquals(eof, null, "client must see EOF once upstream closed");
+
+  client.close();
+  await tunnel;
+});
+
+// --- Plain-HTTP forwarding: origin-form rewrite + forced Connection: close ---
+
+Deno.test("rewriteForwardHead - rewrites request line and forces Connection: close", () => {
+  const head = "GET http://example.com/a?b=1 HTTP/1.1\r\n" +
+    "Host: example.com\r\n" +
+    "Connection: keep-alive\r\n" +
+    "Proxy-Connection: keep-alive\r\n" +
+    "X-Foo: bar\r\n" +
+    "\r\n";
+  assertEquals(
+    rewriteForwardHead(head, "GET", "/a?b=1"),
+    "GET /a?b=1 HTTP/1.1\r\nHost: example.com\r\nX-Foo: bar\r\nConnection: close\r\n\r\n",
+  );
+});
+
+Deno.test("rewriteForwardHead - adds Connection: close when absent and preserves body bytes", () => {
+  const head = "POST http://example.com/submit HTTP/1.1\r\n" +
+    "Host: example.com\r\n" +
+    "Content-Length: 4\r\n" +
+    "\r\n" +
+    "data";
+  assertEquals(
+    rewriteForwardHead(head, "POST", "/submit"),
+    "POST /submit HTTP/1.1\r\nHost: example.com\r\nContent-Length: 4\r\nConnection: close\r\n\r\ndata",
+  );
 });
