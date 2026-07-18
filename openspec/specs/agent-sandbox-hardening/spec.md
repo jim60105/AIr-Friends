@@ -161,6 +161,8 @@ When filesystem confinement is enabled (`sandbox.filesystemConfinement`), the ag
 
 Confinement is OPT-IN (default off) because the fresh-`/proc` mount it relies on cannot be established inside a doubly-nested user namespace (e.g. rootless podman) and its viability is therefore runtime-dependent and SHALL be verified against the real deployment (`scripts/probe-sandbox-caps.sh`) before enabling; the authoritative permission gate (`requestPermission` routing, generic-command confinement, URI-scheme rejection) provides the primary protection independent of this defense-in-depth layer.
 
+On Kubernetes the mechanism's availability depends on a chain of runtime prerequisites, established empirically on Talos 1.7.2 / K8s 1.30 / containerd 1.7: (1) the node must permit unprivileged user namespaces (`user.max_user_namespaces > 0`); (2) the pod must not run under the default containerd seccomp profile, which gates `unshare`/`clone(CLONE_NEWUSER)` on `CAP_SYS_ADMIN`, so an explicit `seccompProfile` and a relaxed PodSecurity level are required; (3) the CRI's `MNT_LOCKED` masked `/proc` paths make the kernel refuse a fresh procfs mount, requiring `securityContext.procMount: Unmasked`, which since K8s 1.30 additionally requires `hostUsers: false` and therefore containerd 2.0+ (or CRI-O ≥ 1.25). Documented in `docs/AGENT_PERMISSIONS.md` and `helm/values.yaml`. Clusters that cannot satisfy the chain SHALL keep `filesystemConfinement` disabled and rely on the always-on protections.
+
 #### Scenario: Daemon environ not readable by the agent
 
 - **GIVEN** a confined agent subprocess
@@ -178,4 +180,11 @@ Confinement is OPT-IN (default off) because the fresh-`/proc` mount it relies on
 - **GIVEN** a runtime that does not support the configured confinement mechanism
 - **WHEN** the daemon starts and prepares to spawn the agent
 - **THEN** it SHALL fail startup with an actionable error rather than spawn the agent without confinement
+
+#### Scenario: Kubernetes runtime cannot satisfy the requirement chain
+
+- **GIVEN** a Kubernetes cluster whose runtime cannot satisfy the full chain (e.g. containerd 1.7, which rejects the `hostUsers: false` that `procMount: Unmasked` requires since K8s 1.30)
+- **WHEN** the operator configures the deployment
+- **THEN** the documented guidance SHALL be to keep `filesystemConfinement` disabled and rely on the always-on permission gate, environment filtering, and egress mediation
+- **AND** if it is enabled anyway, startup SHALL fail closed rather than run the agent unconfined
 

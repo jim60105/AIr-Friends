@@ -365,6 +365,31 @@ The `SandboxManager` SHALL mediate the agent subprocess's network egress so that
 - **WHEN** `buildSpawnOptions()` is called in a posture that expects mediation
 - **THEN** it SHALL fail closed with an actionable error and SHALL NOT silently fall through to unmediated open egress; unrestricted egress SHALL require the explicit opt-in
 
+### Requirement: Egress Proxy Transport Fidelity
+
+The validating egress proxy (`src/utils/egress-proxy.ts`) SHALL relay bytes between the agent and the upstream origin without altering or losing them, and SHALL propagate connection lifecycle events in both directions, so that the mediation layer does not itself become a source of corrupted streams or zombie connections. Specifically: every byte handed to a socket SHALL be flushed even when the underlying `write` performs a short write; end-of-stream on one direction SHALL be forwarded to the peer as a half-close; a transport error SHALL tear down both connections; and forwarded plain-HTTP requests SHALL be rewritten to `Connection: close` semantics.
+
+#### Scenario: Short writes are fully flushed
+- **GIVEN** a tunneled transfer large enough that the socket `write` returns fewer bytes than requested (TCP backpressure)
+- **WHEN** the proxy relays a chunk to the peer, or writes a control response / rewritten request head
+- **THEN** it SHALL loop until every byte has been written, and the payload SHALL arrive byte-exact (a dropped remainder would corrupt the tunneled TLS stream)
+
+#### Scenario: Upstream close is propagated to the client
+- **GIVEN** an established CONNECT tunnel whose upstream closes an idle keep-alive connection
+- **WHEN** the proxy observes EOF on that direction
+- **THEN** it SHALL forward the half-close to the client immediately rather than waiting for the opposite direction to drain, so the client's connection pool observes the closure instead of reusing a dead tunnel
+
+#### Scenario: Transport error tears down both directions
+- **GIVEN** an established tunnel
+- **WHEN** either direction errors (e.g. connection reset)
+- **THEN** the proxy SHALL close both connections so the opposite direction unblocks rather than hanging until the session idle timeout
+
+#### Scenario: Forwarded plain-HTTP requests are forced to close semantics
+- **GIVEN** a plain-HTTP request the client sent with `Connection: keep-alive` (or `Proxy-Connection`)
+- **WHEN** the proxy rewrites the absolute-form request line to origin-form for forwarding
+- **THEN** it SHALL drop the client's `Connection`/`Proxy-Connection` headers and emit `Connection: close`, and SHALL preserve any body bytes already read with the head
+- **AND** the upstream SHALL therefore end the connection after one response, preventing a keep-alive client from smuggling a second, unvalidated request through the raw tunnel to the same upstream
+
 ### Requirement: Sandbox Configuration
 
 Sandbox settings SHALL be configurable via `config.yaml` and environment variable overrides.
