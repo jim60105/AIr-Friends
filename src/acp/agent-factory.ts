@@ -3,6 +3,7 @@
 import type { AgentConfig, AgentType, RetryPromptStrategy } from "./types.ts";
 import type { Config } from "../types/config.ts";
 import { SandboxManager } from "./sandbox-manager.ts";
+import { getRunningEgressProxyUrl } from "@utils/egress-proxy.ts";
 import { join } from "@std/path";
 
 /**
@@ -117,6 +118,24 @@ function buildBaseAgentConfig(
       // authenticate against the Skill API.
       if (callerToken) {
         env["SKILL_API_TOKEN"] = callerToken;
+      }
+
+      // Validating egress proxy (F14): when enabled and no unrestricted opt-in, point the
+      // agent's fetch/browser clients at the local proxy (started once during bootstrap) so
+      // `webfetch`/`websearch`/`agent-browser` inherit SSRF validation. NO_PROXY keeps the
+      // loopback Skill API and OAuth-refresh loopback reachable — the proxy would otherwise
+      // reject loopback as an internal target and break skill callbacks.
+      const sandbox = appConfig.agent.sandbox;
+      if (sandbox?.egressProxy && !sandbox.unrestrictedEgress) {
+        const proxyUrl = getRunningEgressProxyUrl();
+        if (proxyUrl) {
+          env["HTTP_PROXY"] = proxyUrl;
+          env["HTTPS_PROXY"] = proxyUrl;
+          env["http_proxy"] = proxyUrl;
+          env["https_proxy"] = proxyUrl;
+          env["NO_PROXY"] = "localhost,127.0.0.1,::1";
+          env["no_proxy"] = env["NO_PROXY"];
+        }
       }
 
       const args = ["acp"];

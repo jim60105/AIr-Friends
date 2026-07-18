@@ -221,7 +221,10 @@ export interface SandboxConfig {
   /** Filter subprocess environment variables to allowed list only (default: true) */
   filterEnv: boolean;
 
-  /** Enable Linux network namespace isolation via unshare --net (default: false) */
+  /** Enable full Linux network namespace isolation via unshare (default: false).
+   * NOTE: full isolation gives the agent an empty network namespace, which also severs
+   * its loopback access to the Skill API. Prefer `egressProxy` for a mediated posture that
+   * keeps the Skill API working while blocking internal targets (F14). */
   networkIsolation: boolean;
 
   /** Additional environment variable names to allow through the filter */
@@ -229,6 +232,36 @@ export interface SandboxConfig {
 
   /** Allowed file extensions for agent workspace writes in restricted mode (default: [".md", ".txt"]) */
   allowedWriteExtensions: string[];
+
+  /**
+   * Confine the agent subprocess's filesystem view via a bubblewrap mount namespace so the
+   * daemon's `/proc/1/environ` and other users' workspaces are not readable regardless of the
+   * permission-layer configuration (F12 D4, default: FALSE — opt-in). The mechanism mounts a
+   * fresh `/proc`, which is NOT possible inside a doubly-nested user namespace (e.g. rootless
+   * podman); its viability must be verified against the real deployment runtime
+   * (`scripts/probe-sandbox-caps.sh`) before enabling. When enabled but unavailable at runtime,
+   * the system fails closed rather than spawning unconfined.
+   */
+  filesystemConfinement: boolean;
+
+  /**
+   * Mediate the agent's network egress through a local validating forward proxy that applies
+   * SSRF rules to `webfetch`/`websearch`/`agent-browser` (F14 D1, default: true). The proxy
+   * blocks loopback/private/link-local/metadata targets while allowing public destinations,
+   * so the Skill API loopback channel keeps working (it bypasses the proxy via NO_PROXY).
+   */
+  egressProxy: boolean;
+
+  /** Port for the validating egress proxy (0 = ephemeral; default: 0). */
+  egressProxyPort: number;
+
+  /**
+   * Explicit operator opt-in to UNRESTRICTED agent egress (default: false). When true, the
+   * agent reaches the network directly with no proxy mediation — only for trusted
+   * single-tenant deployments that accept the SSRF risk. When neither `egressProxy` nor this
+   * flag is set, the system fails closed rather than granting silent open egress.
+   */
+  unrestrictedEgress: boolean;
 }
 
 /**

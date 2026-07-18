@@ -28,6 +28,8 @@ import { isValidPlatform } from "./types/events.ts";
 import { DashboardServer } from "./dashboard/server.ts";
 import { CompletedSessionStore } from "./dashboard/completed-session-store.ts";
 import { metricsRegistry } from "@utils/metrics.ts";
+import { ensureEgressProxy } from "@utils/egress-proxy.ts";
+import { canConfineFilesystem, canIsolateNetwork } from "@acp/sandbox-capabilities.ts";
 
 const logger = createLogger("Bootstrap");
 
@@ -92,6 +94,41 @@ export async function bootstrap(
     format: "json",
     gelfTransport: gelfTransport ?? undefined,
   });
+
+  // Agent sandbox egress + confinement (F12/F14). Start the validating egress proxy once
+  // and verify the required namespace capabilities up front, failing closed at startup with
+  // an actionable error rather than at first agent spawn.
+  const sandbox = config.agent.sandbox;
+  if (sandbox) {
+    if (sandbox.filesystemConfinement && !canConfineFilesystem()) {
+      throw new Error(
+        "agent.sandbox.filesystemConfinement is enabled but bwrap could not establish a mount " +
+          "namespace in this runtime (unprivileged user namespaces appear disabled). Enable them / " +
+          "install bubblewrap, or set filesystemConfinement:false to accept the risk. " +
+          "Run scripts/probe-sandbox-caps.sh to diagnose.",
+      );
+    }
+    const wantsFullIsolation = !sandbox.unrestrictedEgress && !sandbox.egressProxy &&
+      sandbox.networkIsolation;
+    if (wantsFullIsolation && !canIsolateNetwork()) {
+      throw new Error(
+        "agent.sandbox.networkIsolation is enabled but a network namespace could not be " +
+          "established in this runtime. Enable unprivileged user namespaces, or use " +
+          "agent.sandbox.egressProxy instead. Run scripts/probe-sandbox-caps.sh to diagnose.",
+      );
+    }
+    if (sandbox.egressProxy && !sandbox.unrestrictedEgress) {
+      const proxy = ensureEgressProxy(sandbox.egressProxyPort ?? 0);
+      logger.info("Agent egress mediated by validating proxy on 127.0.0.1:{port}", {
+        port: proxy.port,
+      });
+    } else if (sandbox.unrestrictedEgress) {
+      logger.warn(
+        "⚠️  agent.sandbox.unrestrictedEgress is ENABLED — the agent has UNMEDIATED network " +
+          "egress. Only appropriate for trusted single-tenant deployments.",
+      );
+    }
+  }
 
   // Log configured MCP servers
   if (config.agent.mcpServers && config.agent.mcpServers.length > 0) {

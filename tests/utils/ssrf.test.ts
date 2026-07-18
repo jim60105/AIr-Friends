@@ -158,3 +158,56 @@ Deno.test("safeFetch - aborts after exceeding MAX_REDIRECT_HOPS", async () => {
 Deno.test("MAX_REDIRECT_HOPS - documented bound is 5", () => {
   assertEquals(MAX_REDIRECT_HOPS, 5);
 });
+
+// --- F14 D3: DNS-rebinding mitigation via connect-time IP pinning ---
+
+import { pinValidatedUrl } from "@utils/ssrf.ts";
+
+Deno.test("pinValidatedUrl - pins http hostname to the validated IP with Host preserved", () => {
+  const { requestUrl, hostHeader } = pinValidatedUrl("http://example.test/path?q=1", [
+    "93.184.216.34",
+  ]);
+  assertEquals(requestUrl, "http://93.184.216.34/path?q=1");
+  assertEquals(hostHeader, "example.test");
+});
+
+Deno.test("pinValidatedUrl - leaves https hostnames unchanged (TLS SNI limitation)", () => {
+  const { requestUrl, hostHeader } = pinValidatedUrl("https://example.test/x", [
+    "93.184.216.34",
+  ]);
+  assertEquals(requestUrl, "https://example.test/x");
+  assertEquals(hostHeader, undefined);
+});
+
+Deno.test("pinValidatedUrl - leaves literal-IP hosts unchanged", () => {
+  const { requestUrl } = pinValidatedUrl("http://93.184.216.34/x", ["93.184.216.34"]);
+  assertEquals(requestUrl, "http://93.184.216.34/x");
+});
+
+Deno.test("safeFetch - connects to the validated address, not a re-resolution (D3)", async () => {
+  const contacted: string[] = [];
+  // First (and only) resolution yields a public address; a second resolution WOULD yield
+  // loopback, but safeFetch must never re-resolve — it connects to the pinned address.
+  let resolveCount = 0;
+  const resolve = (_host: string): Promise<string[]> => {
+    resolveCount++;
+    return Promise.resolve(resolveCount === 1 ? ["93.184.216.34"] : ["127.0.0.1"]);
+  };
+  const fetchImpl = (url: string): Promise<Response> => {
+    contacted.push(new URL(url).hostname);
+    return Promise.resolve(new Response("ok", { status: 200 }));
+  };
+  const resp = await safeFetch("http://example.test/x", undefined, { resolve, fetchImpl });
+  assertEquals(resp.status, 200);
+  // The connection targeted the validated public IP, never the rebound loopback.
+  assertEquals(contacted, ["93.184.216.34"]);
+});
+
+Deno.test("safeFetch - rejects when the resolved address is internal", async () => {
+  const resolve = (_host: string): Promise<string[]> => Promise.resolve(["127.0.0.1"]);
+  const fetchImpl = (): Promise<Response> => Promise.resolve(new Response("ok"));
+  await assertRejects(
+    () => safeFetch("http://rebind.test/x", undefined, { resolve, fetchImpl }),
+    SsrfValidationError,
+  );
+});

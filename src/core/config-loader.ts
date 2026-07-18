@@ -262,6 +262,17 @@ const DEFAULT_SANDBOX: SandboxConfig = {
   networkIsolation: false,
   allowedEnvVars: [],
   allowedWriteExtensions: [".md", ".txt"],
+  // F12 D4: filesystem confinement is OPT-IN (default off). The mechanism (bwrap mounting a
+  // fresh /proc to hide the daemon environ) cannot be established inside a doubly-nested user
+  // namespace (e.g. rootless podman) and its viability must be verified against the real
+  // deployment runtime with scripts/probe-sandbox-caps.sh before enabling. When enabled but
+  // unavailable at runtime it fails closed. D1-D3 (the authoritative permission gate) and the
+  // F14 egress proxy remain the active default protections.
+  filesystemConfinement: false,
+  // F14 D1/D2: mediate egress through the validating proxy by default; never open by default.
+  egressProxy: true,
+  egressProxyPort: 0,
+  unrestrictedEgress: false,
 };
 
 /**

@@ -164,9 +164,13 @@ agent:
   # Sandbox settings for agent subprocess isolation
   # sandbox:
   #   filterEnv: true             # Filter subprocess environment variables (default: true); override with env AGENT_SANDBOX_FILTER_ENV
-  #   networkIsolation: false     # Linux network namespace isolation via unshare --net (default: false); override with env AGENT_SANDBOX_NETWORK_ISOLATION
+  #   networkIsolation: false     # Full Linux network namespace isolation (default: false). NOTE: full isolation gives the agent an EMPTY network namespace, which also severs its loopback access to the Skill API. Prefer egressProxy below. Override with env AGENT_SANDBOX_NETWORK_ISOLATION
   #   allowedEnvVars: []          # Additional env var names to allow through the filter; override with env AGENT_SANDBOX_ALLOWED_ENV_VARS (comma-separated)
   #   allowedWriteExtensions: [".md", ".txt"]  # Allowed file extensions for agent workspace writes in restricted mode; override with env AGENT_SANDBOX_ALLOWED_WRITE_EXTENSIONS (comma-separated)
+  #   filesystemConfinement: false # F12 D4: OPT-IN (default false). Confine the agent's filesystem view via bubblewrap so the daemon's /proc/1/environ and other users' workspaces are unreadable regardless of the permission layer. Mounts a fresh /proc, which is NOT possible inside a doubly-nested user namespace (e.g. rootless podman) — verify with scripts/probe-sandbox-caps.sh on your real runtime before enabling. FAILS CLOSED at spawn when enabled but unavailable. Override with env AGENT_SANDBOX_FILESYSTEM_CONFINEMENT
+  #   egressProxy: true           # F14: mediate agent egress (webfetch/websearch/agent-browser) through a local validating proxy that blocks loopback/private/link-local/metadata targets while allowing public destinations (default: true). Override with env AGENT_SANDBOX_EGRESS_PROXY
+  #   egressProxyPort: 0          # Port for the validating egress proxy (0 = ephemeral); override with env AGENT_SANDBOX_EGRESS_PROXY_PORT
+  #   unrestrictedEgress: false   # Explicit opt-in to UNMEDIATED agent egress for trusted single-tenant deployments that accept the SSRF risk (default: false). When neither egressProxy nor this is set, the agent fails closed rather than getting open egress. Override with env AGENT_SANDBOX_UNRESTRICTED_EGRESS
 
   # Idle timeout detection for ACP connections
   # Detects silently disconnected Agent connections and attempts recovery

@@ -227,13 +227,25 @@ export function matchesScriptPath(cmd: string, allowedPath: string): boolean {
  * are allowed. Used to keep a whitelisted command prefix from being used to read
  * sensitive files (e.g. `agent-browser /home/deno/.git-credentials`).
  */
-function referencesOutOfWorkspacePath(token: string): boolean {
+export function referencesOutOfWorkspacePath(token: string): boolean {
   // Strip surrounding quotes and common `--flag=` prefixes so a quoted or flag-embedded
   // absolute path (e.g. `"/etc/passwd"`, `--file=/etc/passwd`) is still inspected.
   let t = token;
   const eq = t.indexOf("=");
   if (eq !== -1 && t.startsWith("-")) t = t.substring(eq + 1);
   t = t.replace(/^["']+/, "").replace(/["']+$/, "");
+
+  // Reject FILESYSTEM-reaching URI schemes (e.g. `file://`, and any non-network scheme such
+  // as `ftp://`/`gopher://`/`dict://`) as out-of-workspace (F12 D3). `referencesOutOfWorkspacePath`
+  // was scheme-blind, so `agent-browser open file:///etc/passwd` slipped past the leading-`/`
+  // check. `http(s)://` is intentionally NOT rejected here: a network URL is not a filesystem
+  // path, and `agent-browser` legitimately navigates to web URLs — that egress is mediated by
+  // F14, not by this filesystem gate.
+  const schemeMatch = t.match(/^([a-zA-Z][a-zA-Z0-9+.-]*):\/\//);
+  if (schemeMatch) {
+    const scheme = schemeMatch[1].toLowerCase();
+    if (scheme !== "http" && scheme !== "https") return true;
+  }
 
   if (t.startsWith("/")) return true; // absolute path
   if (t.startsWith("~")) return true; // home-anchored
@@ -259,6 +271,128 @@ export function matchesCommandPrefix(cmd: string, prefix: string): boolean {
   // Reject if any argument references a path outside the workspace.
   for (let i = 1; i < tokens.length; i++) {
     if (referencesOutOfWorkspacePath(tokens[i])) return false;
+  }
+  return true;
+}
+
+/**
+ * Generic-command allow-list (F12 D2): the search/read and document/media/archive
+ * utilities the restricted profile exposes. Because `agent-config/opencode.json` routes
+ * these tools to `"ask"` (not `"allow"`), OpenCode forwards their execution to this ACP
+ * gate; without an explicit allow-list they would hit default-deny and break every
+ * legitimate in-workspace use. `agent-browser` is deliberately NOT here — its `file://`
+ * argument is rejected by `referencesOutOfWorkspacePath` (D3) and its network behavior is
+ * F14's concern. Interpreters and mutating system tools (`python`, `git`, `rm`, `mv`, `dd`,
+ * `chmod`, `mkdir`, ...) are NOT here and remain default-deny.
+ */
+export const GENERIC_COMMAND_ALLOWLIST: ReadonlySet<string> = new Set([
+  // Plain search/read/stat primitives whose ONLY file access is via ordinary path arguments
+  // (which the workspace-containment check below can see). Tools with their own file-reading
+  // argument DSL, an argument/response indirection file, an embedded protocol/coder, or an
+  // -exec/-delete/preprocessor code-exec facility are deliberately EXCLUDED — a lexical
+  // path check cannot bound those (e.g. ImageMagick `caption:@/proc/1/environ`, `exiftool -@`
+  // argfile, `ffmpeg -f lavfi -i movie=/etc/passwd`, `pandoc --lua-filter`, `7zz -o/etc`,
+  // archive path traversal). Those tools are only safe under the F12 D4 bwrap confinement,
+  // which contains them regardless of argv; until confinement is enabled+verified they stay
+  // default-denied at this gate.
+  "rg",
+  "cat",
+  "head",
+  "tail",
+  "ls",
+  "find",
+  "wc",
+  "file",
+  "tree",
+  "jq",
+  "pdftotext",
+  "pdfinfo",
+  "pdfimages",
+  "pdftoppm",
+]);
+
+/**
+ * Argument flags that turn an allow-listed tool into a code-execution or arbitrary-file
+ * read/write primitive whose target is NOT an ordinary path token (so the workspace check
+ * cannot see it). Presence of any of these rejects the whole command. Examples:
+ *   `find . -exec cat {} +` / `find . -delete` / `find . -fprintf /etc/x %p`  (find)
+ *   `rg --pre <cmd> pattern .`                                                  (rg preprocessor)
+ */
+const DANGEROUS_GENERIC_FLAGS: ReadonlySet<string> = new Set([
+  "-exec",
+  "-execdir",
+  "-ok",
+  "-okdir",
+  "-delete",
+  "-fprintf",
+  "-fprint",
+  "-fprint0",
+  "-fls",
+  "--pre",
+  "-@",
+  "--files-from",
+  "-T",
+  "--lua-filter",
+  "--filter",
+]);
+
+/**
+ * Determine whether a single command argument stays inside the allowed workspace dirs.
+ *
+ * The agent's cwd is the session workspace, so relative tokens (search patterns, numbers,
+ * flags, relative file names) always resolve inside it and pass harmlessly. Only tokens
+ * that can escape — URI schemes, home-anchored paths, absolute paths, and parent traversal
+ * — are resolved and containment-checked against the allowed dirs. This is an
+ * over-approximation (a non-path relative token is treated as a harmless in-workspace path),
+ * which is safe because the decision only ever GRANTS in-workspace access.
+ */
+function genericArgWithinWorkspace(
+  token: string,
+  base: string,
+  allowedDirs: string[],
+): boolean {
+  let t = token;
+  const eq = t.indexOf("=");
+  if (eq !== -1 && t.startsWith("-")) t = t.substring(eq + 1);
+  t = t.replace(/^["']+/, "").replace(/["']+$/, "");
+  if (t.length === 0) return true;
+
+  // URI schemes and home-anchored paths cannot be safely resolved into the workspace.
+  if (/^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//.test(t)) return false;
+  if (t.startsWith("~") || t.startsWith("$HOME") || t.startsWith("${HOME}")) return false;
+  // Attached-value flag carrying an out-of-workspace path (e.g. a hypothetical `-o/etc/cron.d`):
+  // a `-`-prefixed token whose glued value is an absolute path or contains parent traversal.
+  // (The `--flag=value` form is already normalized above.)
+  if (t.startsWith("-") && (/^-{1,2}[a-zA-Z][a-zA-Z0-9-]*\//.test(t) || t.includes("/../"))) {
+    return false;
+  }
+
+  // Absolute or relative (incl. `../`): resolve and require containment. `resolve()`
+  // normalizes traversal, so `a/../../etc` escaping the workspace is rejected here.
+  const resolved = t.startsWith("/") ? resolve(t) : resolve(base, t);
+  return allowedDirs.some((d) => isWithinDir(resolved, d));
+}
+
+/**
+ * Approve a generic bash command only when its first token is on {@link GENERIC_COMMAND_ALLOWLIST}
+ * AND every path-like argument — read input OR write/output target — resolves inside the
+ * session workspace/TMPDIR (F12 D2). `base` is the agent cwd used to resolve relative tokens;
+ * `allowedDirs` are the containment boundaries (session workspace, agent workspace).
+ */
+export function isApprovedGenericCommand(
+  cmd: string,
+  base: string,
+  allowedDirs: string[],
+): boolean {
+  if (containsShellOperators(cmd)) return false;
+  const tokens = cmd.trim().split(/\s+/).filter((t) => t.length > 0);
+  if (tokens.length === 0) return false;
+  if (!GENERIC_COMMAND_ALLOWLIST.has(tokens[0])) return false;
+  for (let i = 1; i < tokens.length; i++) {
+    // A code-exec / arbitrary-target flag rejects the whole command (e.g. `find -exec`,
+    // `find -delete`, `rg --pre`), independent of whether its path arguments are in-workspace.
+    if (DANGEROUS_GENERIC_FLAGS.has(tokens[i])) return false;
+    if (!genericArgWithinWorkspace(tokens[i], base, allowedDirs)) return false;
   }
   return true;
 }
@@ -537,6 +671,58 @@ export class ChatbotClient implements acp.Client {
             optionId: allowOption.optionId,
           },
         });
+      }
+
+      // Generic-command workspace confinement (F12 D2). Filesystem-touching bash tools
+      // are routed here (configured "ask", not "allow"), so this gate is the authoritative
+      // decision point for them. Approve only when every command's first token is on the
+      // allow-list AND all path arguments (inputs and outputs) resolve inside the session
+      // workspace/TMPDIR; otherwise fall through to default-deny.
+      const allowedDirs = [this.config.workingDir];
+      if (this.config.agentWorkspacePath) {
+        allowedDirs.push(this.config.agentWorkspacePath);
+      }
+      const isConfinedGenericCommand = commands.length > 0 &&
+        commands.every((cmd) => isApprovedGenericCommand(cmd, this.config.workingDir, allowedDirs));
+
+      if (isConfinedGenericCommand) {
+        this.logger.info("Auto-approving workspace-confined generic command: {command}", {
+          command: commands.join("; "),
+        });
+
+        void this.writePermissionAudit(
+          "permission_approved",
+          title,
+          kind,
+          commands.join("; "),
+          "generic_command_workspace_confined",
+        );
+
+        const allowOption = params.options.find((o) => o.kind === "allow_once") ??
+          params.options[0];
+
+        return Promise.resolve({
+          outcome: {
+            outcome: "selected",
+            optionId: allowOption.optionId,
+          },
+        });
+      }
+
+      // A filesystem-touching command that escapes the workspace: log the rejection
+      // reason before falling through to default-deny for operational visibility.
+      if (commands.length > 0) {
+        this.logger.warn(
+          "Rejecting generic command: path argument outside session workspace/TMPDIR",
+          { commands },
+        );
+        void this.writePermissionAudit(
+          "permission_denied",
+          title,
+          kind,
+          commands.join("; "),
+          "rejected_generic_command_out_of_workspace",
+        );
       }
     }
 

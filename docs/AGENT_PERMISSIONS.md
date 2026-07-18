@@ -49,11 +49,13 @@ AIr-Friends is a **non-interactive** system — there is no human operator to ap
 │ (readTextFile/writeTextFile path validation)                      │
 ├───────────────────────────────────────────────────────────────────┤
 │ Layer 5: Sandbox Isolation                                        │
-│ (Env var filtering + optional network namespace isolation)        │
+│ (Env filtering + filesystem confinement + egress mediation)       │
 └───────────────────────────────────────────────────────────────────┘
 ```
 
 When the external Agent requests any action, it must pass **all applicable layers**. A denial at any layer blocks the operation.
+
+> **Important — how Layer 2 and Layer 3 interact (F12).** Layer 2 is evaluated *first*, and an `"allow"` verdict there is **self-authorizing**: OpenCode executes the tool and returns *without* ever sending a `session/request_permission` to the ACP client, so **Layer 3 never runs for an `"allow"`ed tool**. Only a `"deny"` (blocks) or an `"ask"` (forwards to Layer 3) leaves the final decision to this repo's gate. Consequently, any filesystem-touching bash tool must be configured `"ask"`, not `"allow"` — otherwise the Layer-3 boundary is dead code for it and an attacker-controlled command such as `head /proc/1/environ` would self-authorize at Layer 2. All such tools are `"ask"` (see [Bash Permission](#bash-permission-whitelist) below).
 
 ---
 
@@ -156,22 +158,19 @@ The `write`, `patch`, and `multiedit` tools all use `permission: "edit"`, so thi
 
 ### Bash Permission (Whitelist)
 
-Shell commands use default-deny with specific allowed patterns:
+Shell commands use default-deny. Skill-invocation patterns are `"allow"` (Layer 3 matches them by entrypoint). **Every filesystem-touching utility is `"ask"`, not `"allow"`** (F12 D1), so its execution is forwarded to the Layer-3 gate rather than self-authorized at Layer 2:
 
-| Pattern                            | Purpose                                                 |
-| ---------------------------------- | ------------------------------------------------------- |
-| `deno run *skills/*/scripts/*.ts*` | Execute skill scripts via `deno run`                    |
-| `*/skills/*/scripts/*.ts*`         | Execute skill scripts directly (shebang-based)          |
-| `agent-browser *`                  | Browser automation skill (command-based)                |
-| `rg *`                             | ripgrep for memory search                               |
-| `curl *`                           | HTTP requests for web research                          |
-| `cat *`                            | Read file contents                                      |
-| `head *`, `tail *`                 | Read partial file contents                              |
-| `ls *`, `find *`                   | List and find files                                     |
-| `wc *`                             | Word/line counting                                      |
-| `git *`                            | Denied — prevents repo state mutation                   |
-| `echo *`                           | Denied — prevents arbitrary file writes via redirection |
-| `mkdir *`                          | Denied — prevents arbitrary directory creation          |
+| Pattern                                                                                              | Verdict           | Purpose / rationale                                                                                   |
+| --------------------------------------------------------------------------------------------------- | ----------------- | ---------------------------------------------------------------------------------------------------- |
+| `deno run *skills/*/scripts/*.ts*`, `*/skills/*/scripts/*.ts*`                                       | `allow`           | Skill scripts; Layer 3 verifies the invocation entrypoint                                             |
+| `rg`, `cat`, `head`, `tail`, `ls`, `find`, `wc`, `file`, `tree`, `jq`                                | `ask`             | Search/read utilities — routed to the Layer-3 generic-command gate                                    |
+| `pdftotext`, `pdfinfo`, `pdfimages`, `pandoc`, `exiftool`, `ffprobe`                                 | `ask`             | Document/metadata readers — routed to the Layer-3 gate                                                |
+| `ffmpeg`, `magick`, `convert`, `identify`, `mogrify`, `pdftoppm`, `unzip`, `zip`, `7zz`              | `ask`             | Media/archive tools that also **write** — routed to the gate (output paths confined too)              |
+| `agent-browser *`                                                                                    | `ask`             | Browser automation — `file://` args rejected by the gate (D3); network egress mediated by F14         |
+| `bc`, `zola`                                                                                         | `deny`            | Dropped — not needed by the agent (a calculator / static-site generator)                              |
+| `git`, `python`, `echo`, `mkdir`, `rm`, `mv`, `dd`, `chmod`, `strace`, `gcc`, `make`                | `deny`            | Interpreters / mutating system tools — never routed to the generic allow-list                         |
+
+**Layer-3 generic-command gate (F12 D2).** Because the utilities above are `"ask"`, they reach `requestPermission()`, which approves a command only when its first token is on an explicit read/media allow-list **and every path argument — read input *and* write output — resolves inside the session workspace or TMPDIR**. So `head notes.md` (in-workspace) is approved while `head /proc/1/environ`, `rg -a "" /proc/1/environ`, `head <other-user>/memory.private.jsonl`, and `convert in.png /home/deno/.ssh/authorized_keys` (out-of-workspace read *or* write) are rejected. URI-scheme arguments such as `file:///etc/passwd` are classified out-of-workspace (D3). See `GENERIC_COMMAND_ALLOWLIST` / `isApprovedGenericCommand` in `src/acp/client.ts`.
 
 ### External Directory Permission
 
@@ -266,14 +265,37 @@ When `sandbox.filterEnv` is `true` (default), the agent subprocess only receives
 
 Additional env vars can be added via `sandbox.allowedEnvVars` config array.
 
-### Network Isolation
+### Filesystem Confinement (F12 D4)
 
-When `sandbox.networkIsolation` is `true` (default: `false`), the agent command is wrapped with `unshare --net` to create a new network namespace. This prevents the agent from making any network connections directly.
+When `sandbox.filesystemConfinement` is `true` (**opt-in; default off**), the agent subprocess is wrapped in a `bubblewrap` mount namespace that:
 
-- **Linux only** — gracefully skips on other platforms
-- **Requires `unshare`** — gracefully skips if binary is not available
+- mounts a **fresh `/proc`**, so the daemon's `/proc/1/environ` — which inherits the daemon's `DISCORD_TOKEN` / `OPENROUTER_API_KEY` / dashboard passphrase — is **not** visible to the agent;
+- binds **only this session's own** workspace + TMPDIR (and, for self-research, the shared agent workspace) read-write; sibling users' workspaces are never bound, so they are absent from the namespace and unreadable;
+- binds the runtime (interpreters, `opencode`/`agent-browser`, caches, CA certs) read-only.
 
-**Reference**: `src/acp/sandbox-manager.ts`
+This holds **independent of the permission layers** — a permissive or misconfigured `opencode.json` cannot re-expose the daemon environ or cross-user data, removing the single-point-of-failure property of the permission gate. It is **opt-in and runtime-dependent**: the fresh-`/proc` mount cannot be established inside a *doubly-nested* user namespace (e.g. **rootless podman**, where `bwrap --proc` fails with "Can't mount proc … Permission denied" regardless of added capabilities), so it must be verified against the real deployment runtime with `scripts/probe-sandbox-caps.sh` before enabling. **When enabled but the runtime cannot establish the confinement, the daemon fails closed at startup** with an actionable error rather than running the agent unconfined. The authoritative permission gate (D1–D3 above) is the primary protection and is always on, independent of this defense-in-depth layer.
+
+### Network Egress Mediation (F14)
+
+The agent's `webfetch` / `websearch` / `agent-browser` use their own network stacks that never touch the daemon's `safeFetch` SSRF guard. The **default posture is `sandbox.egressProxy: true`**: the agent's egress is routed through a local **validating forward proxy** (`src/utils/egress-proxy.ts`) that reuses the `ssrf.ts` rule set — it allows public destinations but rejects loopback / RFC1918 / link-local / unique-local / cloud-metadata (`169.254.169.254`) / multicast targets, for both plain-HTTP and HTTPS (CONNECT) requests. The agent receives `HTTP_PROXY`/`HTTPS_PROXY` pointing at the proxy, with `NO_PROXY=localhost,127.0.0.1,::1` so its **loopback Skill API callbacks bypass the proxy** (the proxy would otherwise reject loopback as an internal target).
+
+Egress posture is never silently open:
+
+- `egressProxy: true` (default) → mediated egress; public research works, internal targets blocked.
+- `networkIsolation: true` → **full** network-namespace isolation via `unshare --user --map-root --net` (userns-first; a bare `unshare --net` fails in a non-root container). NOTE: full isolation gives the agent an empty network namespace, which also **severs its loopback Skill API access** — use only when the agent needs no skill callbacks.
+- `unrestrictedEgress: true` → explicit opt-in to raw, unmediated egress for trusted single-tenant deployments that accept the SSRF risk.
+- none of the above configured → the daemon **fails closed** rather than granting open egress.
+
+The validating proxy resolves each destination once, validates every resolved address, and connects to that **pinned** address (both CONNECT tunnels and plain-HTTP), so a DNS-rebinding second resolution cannot redirect the connection to an internal IP. The daemon-side `safeFetch` similarly pins the validated IP for plain-HTTP; HTTPS hostname pinning in `safeFetch` awaits a Deno connect-by-IP-with-SNI API (Open Question).
+
+**Residual limitations of the default (env-proxy) posture — do not over-trust it.** Routing via `HTTP_PROXY`/`HTTPS_PROXY` is a best-effort convenience layer, **not** a hard boundary:
+
+- A client that ignores the proxy env vars escapes mediation. OpenCode's `webfetch`/`websearch` and Chromium (`agent-browser`) honoring these vars is **unverified** and must be tested against the real binaries (point them at a private IP and confirm a 403).
+- `NO_PROXY=localhost,127.0.0.1,::1` (needed so the loopback Skill API keeps working without a network bridge) means the agent can still reach **other loopback services on the daemon host** (e.g. `http://127.0.0.1:6379/`) directly, bypassing the proxy — the loopback carve-out is host-wide, not limited to the Skill API port.
+
+Closing both gaps requires the authoritative network-route boundary (a namespace whose only egress is the proxy), which is deferred until the loopback Skill API is bridged into that namespace (UDS or a non-loopback bridge address). Until then, treat the default posture as blocking the trivial external-SSRF cases for proxy-honoring clients, not as a complete egress boundary. Operators who need a hard boundary today can use `networkIsolation: true` (full isolation; disables web tools and skill callbacks) for agents that need no egress.
+
+**Reference**: `src/acp/sandbox-manager.ts`, `src/acp/filesystem-confinement.ts`, `src/acp/sandbox-capabilities.ts`, `src/utils/egress-proxy.ts`
 
 ---
 

@@ -8,6 +8,22 @@ services:
       target: final
       args:
         - NODE_ENV=development
+    # Restricted baseline mirroring the OpenShift `restricted-v2` SCC (non-root UID, no
+    # privilege escalation, all capabilities dropped), so the F14 egress posture and env
+    # filtering are exercised the same way locally as in production. The default F14 egress
+    # proxy needs no namespace privilege and works here as-is.
+    #
+    # NOTE on F12 filesystem confinement (`AGENT_SANDBOX_FILESYSTEM_CONFINEMENT`): it is OFF by
+    # default and CANNOT be validated under rootless podman — rootless podman is itself a user
+    # namespace, and bwrap mounting a fresh /proc inside a second nested userns fails with
+    # "Can't mount proc … Permission denied" (adding SYS_ADMIN does not help; the constraint is
+    # userns nesting, not capabilities). Verify confinement against your real (non-nested)
+    # runtime with `scripts/probe-sandbox-caps.sh` before enabling it there.
+    user: "1000:0"
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
     environment:
       - TZ=Asia/Taipei
     env_file:

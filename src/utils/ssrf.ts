@@ -180,14 +180,74 @@ export async function validateFetchUrl(url: string): Promise<URL> {
   return parsed;
 }
 
+/**
+ * Pin a validated URL to a specific resolved address (F14 D3).
+ *
+ * Given the addresses the URL's host was validated against, return the request URL that
+ * connects to the validated address rather than letting `fetch` re-resolve the hostname (a
+ * second, attacker-controlled resolution could otherwise swap in an internal IP between
+ * validation and connection). For plain-HTTP hostnames the authority is rewritten to the
+ * pinned IP and the original `Host` is preserved. Literal-IP hosts need no pinning; HTTPS
+ * hostnames are left unchanged because Deno `fetch` cannot connect-by-IP while preserving
+ * TLS SNI/certificate validation (documented Open Question) — for those the caller still
+ * gets the all-addresses range check, just not connect-time pinning.
+ */
+export function pinValidatedUrl(
+  url: string,
+  addresses: string[],
+): { requestUrl: string; hostHeader?: string } {
+  const parsed = new URL(url);
+  const scheme = parsed.protocol.replace(/:$/, "").toLowerCase();
+  const host = normalizeHost(parsed.hostname);
+  const isLiteralIp = parseIPv4(host) !== null || host.includes(":");
+  if (scheme !== "http" || isLiteralIp || addresses.length === 0) {
+    return { requestUrl: parsed.toString() };
+  }
+  const pinned = addresses[0];
+  const pinnedUrl = new URL(parsed.toString());
+  pinnedUrl.hostname = pinned.includes(":") ? `[${pinned}]` : pinned;
+  return { requestUrl: pinnedUrl.toString(), hostHeader: parsed.host };
+}
+
+/**
+ * Validate a URL for SSRF safety and return the request to connect to (pinned per D3).
+ * Throws {@link SsrfValidationError} on scheme/host/range violations.
+ */
+async function validateAndPin(
+  url: string,
+  resolveFn: (host: string) => Promise<string[]>,
+): Promise<{ requestUrl: string; hostHeader?: string }> {
+  const parsed = new URL(url);
+  const scheme = parsed.protocol.replace(/:$/, "").toLowerCase();
+  if (scheme !== "http" && scheme !== "https") {
+    throw new SsrfValidationError(`Disallowed URL scheme: ${scheme}`);
+  }
+  const host = normalizeHost(parsed.hostname);
+  if (host.length === 0) throw new SsrfValidationError("URL has no host");
+  const addresses = await resolveFn(host);
+  if (addresses.length === 0) {
+    throw new SsrfValidationError(`DNS resolution failed or returned no records for host: ${host}`);
+  }
+  for (const addr of addresses) {
+    if (isDisallowedAddress(addr)) {
+      throw new SsrfValidationError(`URL host ${host} resolves to a disallowed address: ${addr}`);
+    }
+  }
+  return pinValidatedUrl(url, addresses);
+}
+
 /** Options for {@link safeFetch}. */
 export interface SafeFetchOptions {
   /**
    * URL validator invoked before the initial request AND before following each redirect.
-   * Defaults to {@link validateFetchUrl}. Overridable for testing the redirect/hop-limit
-   * logic against a loopback server.
+   * When provided, it REPLACES the built-in validate-and-pin path (used by tests that
+   * exercise redirect/hop-limit logic against a loopback server); no IP pinning is applied.
    */
   validate?: (url: string) => Promise<unknown>;
+  /** Resolver override for tests. Defaults to the real DNS resolver. */
+  resolve?: (host: string) => Promise<string[]>;
+  /** `fetch` override for tests. Defaults to the global `fetch`. */
+  fetchImpl?: (url: string, init?: RequestInit) => Promise<Response>;
 }
 
 /**
@@ -206,14 +266,29 @@ export async function safeFetch(
   init?: RequestInit,
   opts?: SafeFetchOptions,
 ): Promise<Response> {
-  const validate = opts?.validate ?? validateFetchUrl;
+  const resolveFn = opts?.resolve ?? resolveHostAddresses;
+  const fetchImpl = opts?.fetchImpl ?? fetch;
   let currentUrl = url;
 
   for (let hop = 0; hop <= MAX_REDIRECT_HOPS; hop++) {
-    // Validate BEFORE each request (initial + every redirect target).
-    await validate(currentUrl);
+    // Validate BEFORE each request (initial + every redirect target), then connect to the
+    // validated (pinned) address so a re-resolution cannot swap in an internal IP (D3).
+    let requestUrl = currentUrl;
+    let requestInit: RequestInit = { ...init, redirect: "manual" };
+    if (opts?.validate) {
+      // Test path: custom validator replaces validate-and-pin; no pinning applied.
+      await opts.validate(currentUrl);
+    } else {
+      const pinned = await validateAndPin(currentUrl, resolveFn);
+      requestUrl = pinned.requestUrl;
+      if (pinned.hostHeader) {
+        const headers = new Headers(init?.headers);
+        headers.set("host", pinned.hostHeader);
+        requestInit = { ...requestInit, headers };
+      }
+    }
 
-    const response = await fetch(currentUrl, { ...init, redirect: "manual" });
+    const response = await fetchImpl(requestUrl, requestInit);
 
     // Non-redirect response: return it.
     const status = response.status;

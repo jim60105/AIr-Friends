@@ -110,6 +110,10 @@ export const ENV_MAPPINGS = {
   AGENT_SANDBOX_NETWORK_ISOLATION: "agent.sandbox.networkIsolation",
   AGENT_SANDBOX_ALLOWED_ENV_VARS: "agent.sandbox.allowedEnvVars",
   AGENT_SANDBOX_ALLOWED_WRITE_EXTENSIONS: "agent.sandbox.allowedWriteExtensions",
+  AGENT_SANDBOX_FILESYSTEM_CONFINEMENT: "agent.sandbox.filesystemConfinement",
+  AGENT_SANDBOX_EGRESS_PROXY: "agent.sandbox.egressProxy",
+  AGENT_SANDBOX_EGRESS_PROXY_PORT: "agent.sandbox.egressProxyPort",
+  AGENT_SANDBOX_UNRESTRICTED_EGRESS: "agent.sandbox.unrestrictedEgress",
 
   // Agent skill auto-approve list
   AGENT_AUTO_APPROVE_SKILLS: "agent.autoApproveSkills",
