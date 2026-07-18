@@ -28,7 +28,7 @@ import { isValidPlatform } from "./types/events.ts";
 import { DashboardServer } from "./dashboard/server.ts";
 import { CompletedSessionStore } from "./dashboard/completed-session-store.ts";
 import { metricsRegistry } from "@utils/metrics.ts";
-import { ensureEgressProxy } from "@utils/egress-proxy.ts";
+import { configureEgressAllowHosts, ensureEgressProxy } from "@utils/egress-proxy.ts";
 import { canConfineFilesystem, canIsolateNetwork } from "@acp/sandbox-capabilities.ts";
 
 const logger = createLogger("Bootstrap");
@@ -118,6 +118,7 @@ export async function bootstrap(
       );
     }
     if (sandbox.egressProxy && !sandbox.unrestrictedEgress) {
+      configureEgressAllowHosts(sandbox.egressAllowHosts ?? []);
       const proxy = ensureEgressProxy(sandbox.egressProxyPort ?? 0);
       logger.info("Agent egress mediated by validating proxy on 127.0.0.1:{port}", {
         port: proxy.port,

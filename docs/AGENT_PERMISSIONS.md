@@ -303,6 +303,17 @@ The validating proxy resolves each destination once, validates every resolved ad
 
 Closing both gaps requires the authoritative network-route boundary (a namespace whose only egress is the proxy), which is deferred until the loopback Skill API is bridged into that namespace (UDS or a non-loopback bridge address). Until then, treat the default posture as blocking the trivial external-SSRF cases for proxy-honoring clients, not as a complete egress boundary. Operators who need a hard boundary today can use `networkIsolation: true` (full isolation; disables web tools and skill callbacks) for agents that need no egress.
 
+#### Operator-Trusted Egress Destinations (`egressAllowHosts`)
+
+Deployments that legitimately need the agent to reach specific internal services (e.g. a LAN Stable Diffusion WebUI, an in-cluster reverse proxy) can enumerate them in `sandbox.egressAllowHosts` (env: `AGENT_SANDBOX_EGRESS_ALLOW_HOSTS`, comma-separated) instead of abandoning mediation with `unrestrictedEgress`:
+
+- **Semantics**: each entry is a bare hostname or literal IP (no scheme, port, or path — malformed entries are warned about at startup and never match). Matching is **exact** (case-insensitive, IPv6 brackets stripped) against the requested destination host, for both CONNECT and plain-HTTP paths — one entry never widens into a range. DNS resolution and connect-time address pinning still apply to allowlisted hostnames.
+- **Non-exemptable metadata block**: resolved addresses in the cloud-metadata space (`169.254.169.254`, `fd00:ec2::254`, etc.) are rejected **regardless of the allowlist** — a compromised DNS answer for an allowlisted name can never turn the trust grant into a credential-theft path.
+- **NO_PROXY fast path**: allowlisted hosts are also appended to the agent's `NO_PROXY`/`no_proxy`, so env-honoring clients (e.g. `curl` in skill scripts) connect directly and avoid the proxy's forced single-request `Connection: close` semantics for large payloads. `NO_PROXY` matching varies by client; the proxy-side exemption remains authoritative for clients that ignore it, and both derive from the same config value.
+- **Loopback all-ports warning**: entries carry no port scoping, so a loopback entry (`127.0.0.1`, `localhost`, `::1`) exposes **every** loopback port — the dashboard, the Skill API, and any future loopback-bound service — not just the one intended. Such entries are honored but logged at error level at startup.
+
+The allowlist defaults to empty (posture identical to the above) and is sourced exclusively from operator deployment configuration — the agent and chat users cannot extend it at runtime.
+
 **Reference**: `src/acp/sandbox-manager.ts`, `src/acp/filesystem-confinement.ts`, `src/acp/sandbox-capabilities.ts`, `src/utils/egress-proxy.ts`
 
 ---

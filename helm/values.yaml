@@ -176,6 +176,13 @@ env:
   AGENT_SANDBOX_EGRESS_PROXY_PORT: '0'
   # Explicit opt-in to unmediated egress (only for trusted single-tenant deployments).
   AGENT_SANDBOX_UNRESTRICTED_EGRESS: 'false'
+  # Operator-trusted egress destinations exempt from the proxy's disallowed-range rejection
+  # (comma-separated bare hostnames or literal IPs — no scheme/port/path). Each entry is an
+  # operator-audited trust grant: prefer literal IPs or cluster-internal service names, and
+  # note a loopback entry exposes ALL loopback ports (dashboard, Skill API), not just the
+  # intended service. Cloud-metadata addresses stay blocked regardless of this list.
+  # Example: '192.168.1.10,internal-proxy'
+  AGENT_SANDBOX_EGRESS_ALLOW_HOSTS: ''
 
   # Agent Idle Timeout
   AGENT_IDLE_TIMEOUT_ENABLED: 'true'

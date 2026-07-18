@@ -448,3 +448,27 @@ Deno.test("applyEnvOverrides - AGENT_SANDBOX_ALLOWED_WRITE_EXTENSIONS parses com
     Deno.env.delete("AGENT_SANDBOX_ALLOWED_WRITE_EXTENSIONS");
   }
 });
+
+Deno.test("applyEnvOverrides - AGENT_SANDBOX_EGRESS_ALLOW_HOSTS parses comma-separated list", () => {
+  Deno.env.set("AGENT_SANDBOX_EGRESS_ALLOW_HOSTS", " 192.168.1.10 , internal-proxy ,, ");
+  try {
+    const config: Record<string, unknown> = {
+      agent: { sandbox: { egressAllowHosts: [] } },
+    };
+    applyEnvOverrides(config);
+    const agent = config.agent as { sandbox: { egressAllowHosts: string[] } };
+    assertEquals(agent.sandbox.egressAllowHosts, ["192.168.1.10", "internal-proxy"]);
+  } finally {
+    Deno.env.delete("AGENT_SANDBOX_EGRESS_ALLOW_HOSTS");
+  }
+});
+
+Deno.test("applyEnvOverrides - unset AGENT_SANDBOX_EGRESS_ALLOW_HOSTS leaves the default", () => {
+  Deno.env.delete("AGENT_SANDBOX_EGRESS_ALLOW_HOSTS");
+  const config: Record<string, unknown> = {
+    agent: { sandbox: { egressAllowHosts: [] } },
+  };
+  applyEnvOverrides(config);
+  const agent = config.agent as { sandbox: { egressAllowHosts: string[] } };
+  assertEquals(agent.sandbox.egressAllowHosts, []);
+});

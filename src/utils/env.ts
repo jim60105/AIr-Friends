@@ -114,6 +114,7 @@ export const ENV_MAPPINGS = {
   AGENT_SANDBOX_EGRESS_PROXY: "agent.sandbox.egressProxy",
   AGENT_SANDBOX_EGRESS_PROXY_PORT: "agent.sandbox.egressProxyPort",
   AGENT_SANDBOX_UNRESTRICTED_EGRESS: "agent.sandbox.unrestrictedEgress",
+  AGENT_SANDBOX_EGRESS_ALLOW_HOSTS: "agent.sandbox.egressAllowHosts",
 
   // Agent skill auto-approve list
   AGENT_AUTO_APPROVE_SKILLS: "agent.autoApproveSkills",
@@ -215,7 +216,8 @@ export function applyEnvOverrides(config: Record<string, unknown>): void {
         envName === "AGENT_SANDBOX_ALLOWED_WRITE_EXTENSIONS" ||
         envName === "AUDIT_INCLUDED_PHASES" ||
         envName === "AGENT_AUTO_APPROVE_SKILLS" ||
-        envName === "DASHBOARD_TRUSTED_PROXIES"
+        envName === "DASHBOARD_TRUSTED_PROXIES" ||
+        envName === "AGENT_SANDBOX_EGRESS_ALLOW_HOSTS"
       ) {
         parsedValue = value.split(",").map((s) => s.trim()).filter((s) => s !== "");
       } // Handle REPLY_POLICY / REPLY_TO: map "whitelist" → "channels" for backward compat

@@ -133,7 +133,14 @@ function buildBaseAgentConfig(
           env["HTTPS_PROXY"] = proxyUrl;
           env["http_proxy"] = proxyUrl;
           env["https_proxy"] = proxyUrl;
-          env["NO_PROXY"] = "localhost,127.0.0.1,::1";
+          // Operator-trusted egress hosts join NO_PROXY so env-honoring clients (e.g. curl
+          // in skill scripts) connect directly, avoiding the proxy's forced single-request
+          // Connection: close semantics for large payloads. The proxy-side allowlist
+          // exemption remains authoritative for clients that ignore NO_PROXY.
+          const allowHosts = (sandbox.egressAllowHosts ?? [])
+            .map((h) => h.trim())
+            .filter((h) => h.length > 0);
+          env["NO_PROXY"] = ["localhost", "127.0.0.1", "::1", ...allowHosts].join(",");
           env["no_proxy"] = env["NO_PROXY"];
         }
       }

@@ -19,6 +19,7 @@ const createSandboxConfig = (overrides: Partial<SandboxConfig> = {}): SandboxCon
   egressProxy: false,
   egressProxyPort: 0,
   unrestrictedEgress: true,
+  egressAllowHosts: [],
   ...overrides,
 });
 

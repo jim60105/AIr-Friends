@@ -693,3 +693,125 @@ Deno.test("detectPlaywrightBinarySync - checks PLAYWRIGHT_BROWSERS_PATH if set",
     }
   }
 });
+
+// --- Operator-trusted egress hosts join NO_PROXY (allow-trusted-egress-hosts) ---
+
+import { ensureEgressProxy, stopEgressProxy } from "@utils/egress-proxy.ts";
+import type { SandboxConfig } from "../../src/types/config.ts";
+
+const createSandbox = (overrides: Partial<SandboxConfig> = {}): SandboxConfig => ({
+  filterEnv: true,
+  networkIsolation: false,
+  allowedEnvVars: [],
+  allowedWriteExtensions: [".md", ".txt"],
+  filesystemConfinement: false,
+  egressProxy: true,
+  egressProxyPort: 0,
+  unrestrictedEgress: false,
+  egressAllowHosts: [],
+  ...overrides,
+});
+
+Deno.test("createAgentConfig - NO_PROXY includes allowlisted egress hosts", () => {
+  ensureEgressProxy(0);
+  try {
+    const config = createTestConfig({
+      agent: {
+        model: "test-model",
+        systemPromptPath: "./test.md",
+        tokenLimit: 20000,
+        sandbox: createSandbox({
+          egressAllowHosts: ["192.168.1.10", "internal-proxy"],
+        }),
+      },
+    });
+    const agentConfig = createAgentConfig("opencode", "/tmp/workspace", config);
+    assertEquals(
+      agentConfig.env?.NO_PROXY,
+      "localhost,127.0.0.1,::1,192.168.1.10,internal-proxy",
+    );
+    assertEquals(agentConfig.env?.no_proxy, agentConfig.env?.NO_PROXY);
+  } finally {
+    stopEgressProxy();
+  }
+});
+
+Deno.test("createAgentConfig - NO_PROXY unchanged with an empty allowlist", () => {
+  ensureEgressProxy(0);
+  try {
+    const config = createTestConfig({
+      agent: {
+        model: "test-model",
+        systemPromptPath: "./test.md",
+        tokenLimit: 20000,
+        sandbox: createSandbox(),
+      },
+    });
+    const agentConfig = createAgentConfig("opencode", "/tmp/workspace", config);
+    assertEquals(agentConfig.env?.NO_PROXY, "localhost,127.0.0.1,::1");
+    assertEquals(agentConfig.env?.no_proxy, "localhost,127.0.0.1,::1");
+  } finally {
+    stopEgressProxy();
+  }
+});
+
+// Verify curl (the motivating skill's HTTP client) honors no_proxy for both a bare-hostname
+// and a literal-IP entry: http_proxy points at a dead port, so the request only succeeds if
+// curl bypasses the proxy and connects to the local upstream directly.
+const curlAvailable = (() => {
+  try {
+    return new Deno.Command("curl", { args: ["--version"], stdout: "null", stderr: "null" })
+      .outputSync().success;
+  } catch {
+    return false;
+  }
+})();
+
+Deno.test({
+  name: "curl - honors no_proxy for literal-IP and bare-hostname entries",
+  ignore: !curlAvailable,
+  fn: async () => {
+    const upstream = Deno.listen({ hostname: "127.0.0.1", port: 0 });
+    const upstreamPort = (upstream.addr as Deno.NetAddr).port;
+    const serving = (async () => {
+      // Serve up to 2 sequential requests (one per curl invocation below).
+      for (let i = 0; i < 2; i++) {
+        const conn = await upstream.accept();
+        const buf = new Uint8Array(4096);
+        await conn.read(buf);
+        await conn.write(
+          new TextEncoder().encode(
+            "HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok",
+          ),
+        );
+        conn.close();
+      }
+    })();
+
+    const runCurl = async (url: string, noProxy: string) => {
+      const out = await new Deno.Command("curl", {
+        args: ["-s", "-o", "/dev/null", "-w", "%{http_code}", "--max-time", "5", url],
+        env: {
+          http_proxy: "http://127.0.0.1:9", // dead proxy: only a no_proxy bypass can succeed
+          no_proxy: noProxy,
+        },
+        stdout: "piped",
+        stderr: "null",
+      }).output();
+      return new TextDecoder().decode(out.stdout);
+    };
+
+    try {
+      const viaIp = await runCurl(
+        `http://127.0.0.1:${upstreamPort}/`,
+        "127.0.0.1,192.168.1.10",
+      );
+      assertEquals(viaIp, "200", "curl must bypass the proxy for a literal-IP no_proxy entry");
+      const viaHost = await runCurl(`http://localhost:${upstreamPort}/`, "localhost");
+      assertEquals(viaHost, "200", "curl must bypass the proxy for a bare-hostname no_proxy entry");
+    } finally {
+      upstream.close();
+      await serving.catch(() => {});
+    }
+  },
+});

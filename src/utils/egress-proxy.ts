@@ -22,6 +22,144 @@ const logger = createLogger("EgressProxy");
 
 const encoder = new TextEncoder();
 
+/**
+ * Operator-trusted egress destinations (normalized), exempt from the disallowed-range
+ * rejection. Module-level like the shared proxy itself: configured once at bootstrap via
+ * {@link configureEgressAllowHosts}, sourced exclusively from deployment config — never
+ * extendable by the agent or chat users at runtime.
+ */
+let egressAllowHosts = new Set<string>();
+
+/** Normalize a host for allowlist comparison: trim, lowercase, strip IPv6 brackets. */
+function normalizeAllowHost(host: string): string {
+  let h = host.trim().toLowerCase();
+  if (h.startsWith("[") && h.endsWith("]")) h = h.slice(1, -1);
+  return h;
+}
+
+/** True for entries that grant loopback/unspecified reachability (all-ports blast radius). */
+function isLoopbackOrUnspecifiedEntry(h: string): boolean {
+  if (h === "localhost" || h.endsWith(".localhost")) return true;
+  if (h === "0.0.0.0") return true;
+  if (/^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(h)) return true;
+  // Compare IPv6 in expanded form so uncompressed loopback/unspecified spellings
+  // (e.g. 0:0:0:0:0:0:0:1) trigger the warning too, not just ::1 / ::.
+  const expanded = expandIPv6(h);
+  if (expanded === "0000:0000:0000:0000:0000:0000:0000:0001") return true; // ::1
+  if (expanded === "0000:0000:0000:0000:0000:0000:0000:0000") return true; // ::
+  return false;
+}
+
+/**
+ * Replace the operator-trusted egress allowlist (idempotent). Entries are normalized
+ * (trim, lowercase, IPv6 brackets stripped) and matched EXACTLY against requested
+ * destination hosts. Entries carrying a scheme, path, or port can never match a bare
+ * destination host, so they are warned about and dropped. Loopback/unspecified entries are
+ * honored but logged at error level: without port scoping they expose EVERY loopback port
+ * (dashboard, Skill API, any future loopback-bound service), not just the intended one.
+ */
+export function configureEgressAllowHosts(hosts: string[]): void {
+  const next = new Set<string>();
+  for (const raw of hosts) {
+    const h = normalizeAllowHost(raw);
+    if (h === "") {
+      logger.warn("Ignoring empty egress allowlist entry");
+      continue;
+    }
+    // ":" is only legal inside IPv6 literals (which contain "::" or 2+ colons); a single
+    // colon means a host:port entry, which can never match a bare destination host.
+    const looksIPv6 = h.includes("::") || h.split(":").length > 2;
+    if (h.includes("/") || h.includes("\\") || (!looksIPv6 && h.includes(":"))) {
+      logger.warn(
+        "Ignoring egress allowlist entry {entry}: entries must be a bare hostname or IP " +
+          "(no scheme, port, or path) or they can never match a destination host",
+        { entry: raw },
+      );
+      continue;
+    }
+    // Colon-bearing entries that are not parseable IPv6 (dotted-mapped forms like
+    // ::ffff:1.2.3.4 excepted) are garbage that can never match — flag them too.
+    const isDottedMapped = h.includes(":") && /(\d{1,3}\.){3}\d{1,3}$/.test(h);
+    if (looksIPv6 && !isDottedMapped && expandIPv6(h) === null) {
+      logger.warn(
+        "Ignoring egress allowlist entry {entry}: not a valid IPv6 literal",
+        { entry: raw },
+      );
+      continue;
+    }
+    if (isLoopbackOrUnspecifiedEntry(h)) {
+      logger.error(
+        "Egress allowlist entry {entry} grants the agent access to ALL loopback ports " +
+          "(dashboard, Skill API, every loopback-bound service), not just one service. " +
+          "Honoring the operator's explicit choice.",
+        { entry: h },
+      );
+    }
+    next.add(h);
+  }
+  egressAllowHosts = next;
+  if (next.size > 0) {
+    logger.info("Egress allowlist configured: {hosts}", { hosts: [...next].join(", ") });
+  }
+}
+
+/**
+ * Cloud-metadata addresses are NON-EXEMPTABLE: an allowlisted hostname's resolution is not
+ * operator-controlled over time (that instability is why a name gets allowlisted instead of
+ * an IP), so a compromised or misconfigured DNS answer must never turn a trust grant into a
+ * credential-theft path. No legitimate allowlist use case needs these addresses.
+ */
+const METADATA_IPV4 = new Set([
+  "169.254.169.254", // AWS/GCP/Azure/OpenStack IMDS
+  "169.254.170.2", // AWS ECS task metadata
+  "100.100.100.200", // Alibaba Cloud metadata
+  "192.0.0.192", // Oracle Cloud legacy metadata
+]);
+
+/** Expand an IPv6 literal to its full 8-group lowercase form (null if not parseable). */
+function expandIPv6(addr: string): string | null {
+  const pct = addr.indexOf("%");
+  const clean = (pct === -1 ? addr : addr.slice(0, pct)).toLowerCase();
+  if (clean.includes(".")) return null; // dotted-quad embedded forms handled separately
+  const halves = clean.split("::");
+  if (halves.length > 2) return null;
+  const head = halves[0] ? halves[0].split(":") : [];
+  const tail = halves.length === 2 && halves[1] ? halves[1].split(":") : [];
+  let groups: string[];
+  if (halves.length === 2) {
+    const fill = 8 - head.length - tail.length;
+    if (fill < 0) return null;
+    groups = [...head, ...Array(fill).fill("0"), ...tail];
+  } else {
+    groups = head;
+  }
+  if (groups.length !== 8 || groups.some((g) => !/^[0-9a-f]{1,4}$/.test(g))) return null;
+  return groups.map((g) => g.padStart(4, "0")).join(":");
+}
+
+const METADATA_IPV6_EXPANDED = new Set(
+  ["fd00:ec2::254"].map((a) => expandIPv6(a) as string),
+);
+
+/** True when a resolved address is in the cloud-metadata space (never exemptable). */
+export function isMetadataAddress(addr: string): boolean {
+  const h = addr.toLowerCase();
+  // Dotted IPv4, including IPv4-mapped IPv6 suffix forms (::ffff:169.254.169.254)
+  const dotted = h.match(/(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})$/);
+  if (dotted && METADATA_IPV4.has(dotted[1])) return true;
+  // Hex-form IPv4-mapped (::ffff:a9fe:a9fe = 169.254.169.254)
+  const mappedHex = h.match(/::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/);
+  if (mappedHex) {
+    const hi = parseInt(mappedHex[1], 16);
+    const lo = parseInt(mappedHex[2], 16);
+    const v4 = `${(hi >> 8) & 0xff}.${hi & 0xff}.${(lo >> 8) & 0xff}.${lo & 0xff}`;
+    if (METADATA_IPV4.has(v4)) return true;
+  }
+  const expanded = expandIPv6(h);
+  if (expanded !== null && METADATA_IPV6_EXPANDED.has(expanded)) return true;
+  return false;
+}
+
 // Minimal structural read type (Deno.Reader was removed). `Deno.Conn` satisfies it.
 interface ByteReader {
   read(p: Uint8Array): Promise<number | null>;
@@ -52,14 +190,32 @@ async function resolveAddresses(host: string): Promise<string[]> {
  * independent resolution that an attacker's short-TTL record could answer with an internal IP.
  * Fails closed — an unresolvable host, or any resolved address in a disallowed range, yields
  * `{ allowed: false }`.
+ *
+ * Hosts on the operator-trusted allowlist ({@link configureEgressAllowHosts}) are exempt
+ * from the disallowed-range rejection — resolution and connect-time pinning still apply —
+ * but the cloud-metadata block is evaluated INDEPENDENTLY of the allowlist and can never
+ * be lifted by it.
  */
 export async function resolveAndValidateEgress(
   host: string,
 ): Promise<{ allowed: boolean; address?: string }> {
   const clean = host.startsWith("[") && host.endsWith("]") ? host.slice(1, -1) : host;
+  const allowlisted = egressAllowHosts.has(normalizeAllowHost(host));
   const addresses = await resolveAddresses(clean);
   if (addresses.length === 0) return { allowed: false };
-  if (addresses.some((addr) => isDisallowedAddress(addr))) return { allowed: false };
+  if (addresses.some((addr) => isMetadataAddress(addr))) {
+    if (allowlisted) {
+      logger.error(
+        "Allowlisted egress host {host} resolved to a cloud-metadata address; blocking " +
+          "(the allowlist exemption never extends to the metadata space)",
+        { host: clean },
+      );
+    }
+    return { allowed: false };
+  }
+  if (!allowlisted && addresses.some((addr) => isDisallowedAddress(addr))) {
+    return { allowed: false };
+  }
   return { allowed: true, address: addresses[0] };
 }
 

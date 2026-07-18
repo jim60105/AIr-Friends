@@ -262,6 +262,19 @@ export interface SandboxConfig {
    * flag is set, the system fails closed rather than granting silent open egress.
    */
   unrestrictedEgress: boolean;
+
+  /**
+   * Operator-trusted egress destinations exempt from the validating proxy's disallowed-range
+   * rejection (default: []). Each entry is a bare hostname or literal IP — no scheme, no port,
+   * no path; entries carrying any of those can never match and are warned about at startup.
+   * Matching is exact (case-insensitive, IPv6 brackets stripped) against the requested
+   * destination host, never a range grant. Allowlisted hosts are also appended to the agent's
+   * NO_PROXY so env-honoring clients connect directly. Resolved addresses in the cloud
+   * metadata space (e.g. 169.254.169.254) remain blocked regardless of this list. This is an
+   * operator-audited trust grant sourced only from deployment config; the agent and chat
+   * users cannot extend it at runtime.
+   */
+  egressAllowHosts: string[];
 }
 
 /**

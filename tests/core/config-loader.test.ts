@@ -2280,6 +2280,79 @@ workspace:
   });
 });
 
+// --- egressAllowHosts sandbox config tests ---
+
+Deno.test("loadConfig - egressAllowHosts defaults to an empty list", async () => {
+  const config = `
+platforms:
+  discord:
+    token: "test-token"
+    enabled: true
+agent:
+  model: "gpt-4"
+  systemPromptPath: "./prompts/system_reply.md"
+  tokenLimit: 20000
+workspace:
+  repoPath: "./data"
+  workspacesDir: "workspaces"
+`;
+
+  await withTestConfig(config, async (dir) => {
+    const result = await loadConfig(dir);
+    assertEquals(result.agent.sandbox?.egressAllowHosts, []);
+  });
+});
+
+Deno.test("loadConfig - egressAllowHosts from config is preserved, empty entries dropped", async () => {
+  const config = `
+platforms:
+  discord:
+    token: "test-token"
+    enabled: true
+agent:
+  model: "gpt-4"
+  systemPromptPath: "./prompts/system_reply.md"
+  tokenLimit: 20000
+  sandbox:
+    egressAllowHosts:
+      - "192.168.1.10"
+      - "internal-proxy"
+      - ""
+      - "   "
+workspace:
+  repoPath: "./data"
+  workspacesDir: "workspaces"
+`;
+
+  await withTestConfig(config, async (dir) => {
+    const result = await loadConfig(dir);
+    assertEquals(result.agent.sandbox?.egressAllowHosts, ["192.168.1.10", "internal-proxy"]);
+  });
+});
+
+Deno.test("loadConfig - non-array egressAllowHosts falls back to an empty list", async () => {
+  const config = `
+platforms:
+  discord:
+    token: "test-token"
+    enabled: true
+agent:
+  model: "gpt-4"
+  systemPromptPath: "./prompts/system_reply.md"
+  tokenLimit: 20000
+  sandbox:
+    egressAllowHosts: "not-an-array"
+workspace:
+  repoPath: "./data"
+  workspacesDir: "workspaces"
+`;
+
+  await withTestConfig(config, async (dir) => {
+    const result = await loadConfig(dir);
+    assertEquals(result.agent.sandbox?.egressAllowHosts, []);
+  });
+});
+
 Deno.test("loadConfig - default gitCredential config is applied", async () => {
   const config = `
 platforms:

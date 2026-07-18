@@ -273,6 +273,7 @@ const DEFAULT_SANDBOX: SandboxConfig = {
   egressProxy: true,
   egressProxyPort: 0,
   unrestrictedEgress: false,
+  egressAllowHosts: [],
 };
 
 /**
@@ -766,6 +767,16 @@ function validateConfig(config: Record<string, unknown>): void {
       sandbox.allowedWriteExtensions = sandbox.allowedWriteExtensions
         .filter((ext: unknown): ext is string => typeof ext === "string" && ext.startsWith("."));
     }
+  }
+
+  // Validate egressAllowHosts: must be an array of non-empty strings (fall back to [])
+  if (!Array.isArray(sandbox.egressAllowHosts)) {
+    sandbox.egressAllowHosts = [];
+  } else {
+    sandbox.egressAllowHosts = sandbox.egressAllowHosts
+      .filter((host: unknown): host is string =>
+        typeof host === "string" && host.trim().length > 0
+      );
   }
 
   // Idle timeout defaults

@@ -1,5 +1,10 @@
 import { assertEquals, assertStringIncludes } from "@std/assert";
-import { isEgressTargetAllowed, startEgressProxy } from "@utils/egress-proxy.ts";
+import {
+  configureEgressAllowHosts,
+  isEgressTargetAllowed,
+  isMetadataAddress,
+  startEgressProxy,
+} from "@utils/egress-proxy.ts";
 
 Deno.test("isEgressTargetAllowed - rejects loopback/private/link-local/metadata literals", async () => {
   assertEquals(await isEgressTargetAllowed("127.0.0.1"), false);
@@ -194,4 +199,164 @@ Deno.test("rewriteForwardHead - adds Connection: close when absent and preserves
     rewriteForwardHead(head, "POST", "/submit"),
     "POST /submit HTTP/1.1\r\nHost: example.com\r\nContent-Length: 4\r\nConnection: close\r\n\r\ndata",
   );
+});
+
+// --- Operator-trusted egress allowlist (allow-trusted-egress-hosts) ---
+
+Deno.test("egressAllowHosts - allowlisted private literal is exempt, neighbor stays rejected", async () => {
+  configureEgressAllowHosts(["192.168.1.10"]);
+  try {
+    assertEquals(await isEgressTargetAllowed("192.168.1.10"), true);
+    const pinned = await resolveAndValidateEgress("192.168.1.10");
+    assertEquals(pinned.allowed, true);
+    assertEquals(pinned.address, "192.168.1.10");
+    // Exact match, not a range grant: the neighbor address is still rejected.
+    assertEquals(await isEgressTargetAllowed("192.168.10.11"), false);
+    assertEquals(await isEgressTargetAllowed("10.0.0.1"), false);
+  } finally {
+    configureEgressAllowHosts([]);
+  }
+});
+
+Deno.test("egressAllowHosts - metadata addresses stay blocked even when allowlisted", async () => {
+  configureEgressAllowHosts(["169.254.169.254", "169.254.170.2"]);
+  try {
+    assertEquals(await isEgressTargetAllowed("169.254.169.254"), false);
+    assertEquals(await isEgressTargetAllowed("169.254.170.2"), false);
+  } finally {
+    configureEgressAllowHosts([]);
+  }
+});
+
+Deno.test("egressAllowHosts - IPv6 literal entry matches bracketed request form", async () => {
+  // Uppercase entry with brackets exercises trim/lowercase/bracket-strip normalization too.
+  configureEgressAllowHosts(["  [FD12:3456::10]  "]);
+  try {
+    assertEquals(await isEgressTargetAllowed("[fd12:3456::10]"), true);
+    assertEquals(await isEgressTargetAllowed("fd12:3456::10"), true);
+    // Different ULA address is still rejected.
+    assertEquals(await isEgressTargetAllowed("[fd12:3456::11]"), false);
+  } finally {
+    configureEgressAllowHosts([]);
+  }
+});
+
+Deno.test("egressAllowHosts - malformed entries (scheme/port/path, empty) never match", async () => {
+  configureEgressAllowHosts([
+    "http://192.168.1.10:7860",
+    "192.168.1.10:7860",
+    "192.168.1.10/api",
+    "a:b:c", // colon-bearing garbage that is not a valid IPv6 literal
+    "",
+    "   ",
+  ]);
+  try {
+    assertEquals(await isEgressTargetAllowed("192.168.1.10"), false);
+  } finally {
+    configureEgressAllowHosts([]);
+  }
+});
+
+Deno.test("egressAllowHosts - empty allowlist keeps the default-deny posture", async () => {
+  configureEgressAllowHosts([]);
+  assertEquals(await isEgressTargetAllowed("192.168.1.10"), false);
+  assertEquals(await isEgressTargetAllowed("127.0.0.1"), false);
+  assertEquals(await isEgressTargetAllowed("8.8.8.8"), true);
+});
+
+Deno.test("isMetadataAddress - covers IPv4, IPv4-mapped, and IPv6 metadata forms", () => {
+  assertEquals(isMetadataAddress("169.254.169.254"), true);
+  assertEquals(isMetadataAddress("169.254.170.2"), true);
+  assertEquals(isMetadataAddress("100.100.100.200"), true);
+  assertEquals(isMetadataAddress("::ffff:169.254.169.254"), true);
+  assertEquals(isMetadataAddress("::ffff:a9fe:a9fe"), true);
+  assertEquals(isMetadataAddress("fd00:ec2::254"), true);
+  assertEquals(isMetadataAddress("fd00:0ec2:0000:0000:0000:0000:0000:0254"), true);
+  assertEquals(isMetadataAddress("8.8.8.8"), false);
+  assertEquals(isMetadataAddress("169.254.169.253"), false);
+  assertEquals(isMetadataAddress("fd12:3456::10"), false);
+});
+
+// --- Full proxy path with an allowlisted loopback upstream (integration) ---
+
+Deno.test("egress proxy - plain-HTTP forward to an allowlisted loopback upstream succeeds", async () => {
+  // A minimal loopback HTTP upstream. Allowlisting 127.0.0.1 is the only way to exercise
+  // the full proxy path against a real listener in tests.
+  const upstream = Deno.listen({ hostname: "127.0.0.1", port: 0 });
+  const upstreamPort = (upstream.addr as Deno.NetAddr).port;
+  const serve = (async () => {
+    const conn = await upstream.accept();
+    const buf = new Uint8Array(4096);
+    await conn.read(buf);
+    await conn.write(
+      new TextEncoder().encode(
+        "HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok",
+      ),
+    );
+    conn.close();
+  })();
+
+  configureEgressAllowHosts(["127.0.0.1"]);
+  const proxy = startEgressProxy(0);
+  try {
+    const conn = await Deno.connect({ hostname: "127.0.0.1", port: proxy.port });
+    await conn.write(
+      new TextEncoder().encode(
+        `GET http://127.0.0.1:${upstreamPort}/health HTTP/1.1\r\nHost: 127.0.0.1:${upstreamPort}\r\n\r\n`,
+      ),
+    );
+    let response = "";
+    const buf = new Uint8Array(1024);
+    while (true) {
+      const n = await conn.read(buf);
+      if (n === null) break;
+      response += new TextDecoder().decode(buf.subarray(0, n));
+      if (response.includes("ok")) break;
+    }
+    assertStringIncludes(response, "200 OK");
+    assertStringIncludes(response, "ok");
+    conn.close();
+  } finally {
+    proxy.close();
+    upstream.close();
+    configureEgressAllowHosts([]);
+    await serve;
+  }
+});
+
+Deno.test("egress proxy - CONNECT to an allowlisted loopback upstream establishes a tunnel", async () => {
+  // Echo upstream: whatever arrives through the tunnel is sent back.
+  const upstream = Deno.listen({ hostname: "127.0.0.1", port: 0 });
+  const upstreamPort = (upstream.addr as Deno.NetAddr).port;
+  const serve = (async () => {
+    const conn = await upstream.accept();
+    const buf = new Uint8Array(64);
+    const n = await conn.read(buf);
+    if (n !== null) await conn.write(buf.subarray(0, n));
+    conn.close();
+  })();
+
+  configureEgressAllowHosts(["127.0.0.1"]);
+  const proxy = startEgressProxy(0);
+  try {
+    const conn = await Deno.connect({ hostname: "127.0.0.1", port: proxy.port });
+    await conn.write(
+      new TextEncoder().encode(
+        `CONNECT 127.0.0.1:${upstreamPort} HTTP/1.1\r\nHost: 127.0.0.1:${upstreamPort}\r\n\r\n`,
+      ),
+    );
+    const buf = new Uint8Array(256);
+    let n = await conn.read(buf);
+    const established = new TextDecoder().decode(buf.subarray(0, n ?? 0));
+    assertStringIncludes(established, "200 Connection Established");
+    await conn.write(new TextEncoder().encode("ping"));
+    n = await conn.read(buf);
+    assertEquals(new TextDecoder().decode(buf.subarray(0, n ?? 0)), "ping");
+    conn.close();
+  } finally {
+    proxy.close();
+    upstream.close();
+    configureEgressAllowHosts([]);
+    await serve;
+  }
 });
