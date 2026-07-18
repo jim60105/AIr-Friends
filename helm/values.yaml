@@ -166,6 +166,10 @@ env:
   # /proc/1/environ and other users' workspaces). Mounts a fresh /proc, which fails inside a
   # doubly-nested user namespace (rootless podman) — verify with scripts/probe-sandbox-caps.sh
   # against your actual SCC/node, then set 'true'. Fails closed when enabled but unavailable.
+  # On Kubernetes the full requirement chain is: node sysctl user.max_user_namespaces > 0,
+  # a non-default seccomp profile (the containerd default gates unshare on CAP_SYS_ADMIN),
+  # and an unmasked /proc (securityContext.procMount: Unmasked), which since K8s 1.30 requires
+  # hostUsers: false and therefore containerd 2.0+ / CRI-O 1.25+. See docs/AGENT_PERMISSIONS.md.
   AGENT_SANDBOX_FILESYSTEM_CONFINEMENT: 'false'
   # F14: mediate agent egress (webfetch/websearch/agent-browser) through the validating proxy.
   AGENT_SANDBOX_EGRESS_PROXY: 'true'
