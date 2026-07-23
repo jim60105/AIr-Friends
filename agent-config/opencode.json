@@ -12,7 +12,11 @@
         "deepseek/deepseek-v4-pro": {}
       },
       "options": {
-        "apiKey": "{env:OPENROUTER_API_KEY}"
+        "apiKey": "{env:OPENROUTER_API_KEY}",
+        "headers": {
+          "X-Title": "AIr-Friends",
+          "HTTP-Referer": "https://github.com/jim60105/AIr-Friends"
+        }
       }
     }
   },
