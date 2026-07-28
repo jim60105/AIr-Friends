@@ -300,6 +300,9 @@ const DEFAULT_IDLE_TIMEOUT: IdleTimeoutConfig = {
   checkIntervalMs: 30000, // 30 seconds
 };
 
+/** Default connect-time ACP handshake timeout (30 seconds), chosen by convention. */
+const DEFAULT_CONNECT_TIMEOUT_MS = 30000;
+
 /**
  * Required configuration fields that must be present
  */
@@ -787,6 +790,11 @@ function validateConfig(config: Record<string, unknown>): void {
       ...DEFAULT_IDLE_TIMEOUT,
       ...(agentConfig.idleTimeout as Record<string, unknown>),
     };
+  }
+
+  // Connect-time handshake timeout default
+  if (typeof agentConfig.connectTimeoutMs !== "number") {
+    agentConfig.connectTimeoutMs = DEFAULT_CONNECT_TIMEOUT_MS;
   }
 
   // MCP Servers validation

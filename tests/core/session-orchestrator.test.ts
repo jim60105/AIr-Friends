@@ -3229,3 +3229,40 @@ Deno.test({
     }
   },
 });
+
+// === Crash-signal cascade tests (handle-agent-process-crash) ===
+
+Deno.test("SessionOrchestrator - processMessage cleans up when connector.connect() rejects instead of hanging", async () => {
+  const tempDir = await Deno.makeTempDir();
+  try {
+    const { orchestrator, sessionRegistry } = await createTestableOrchestrator(tempDir);
+
+    orchestrator.setConnectorSetup((connector) => {
+      // Simulates AgentConnector.connect() failing fast due to a crash-signal or
+      // connect-timeout rejection (handle-agent-process-crash), instead of hanging.
+      connector.connect = () => {
+        return Promise.reject(
+          new Error(
+            "Agent process exited unexpectedly (code=1, signal=null) while awaiting a response",
+          ),
+        );
+      };
+    });
+
+    const event = createTestEvent();
+    const platformAdapter = new MockPlatformAdapter() as unknown as PlatformAdapter;
+
+    const response = await orchestrator.processMessage(event, platformAdapter);
+
+    // Fails fast (this await itself would never resolve if the old hang bug reappeared)
+    // instead of hanging, and the existing finally/catch cleanup still runs correctly.
+    assertEquals(response.success, false);
+    assertEquals(response.replySent, false);
+    assertExists(response.error);
+    assertEquals(orchestrator.mockConnector!.disconnected, true);
+
+    sessionRegistry.stop();
+  } finally {
+    await Deno.remove(tempDir, { recursive: true });
+  }
+});

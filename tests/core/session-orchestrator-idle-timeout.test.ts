@@ -215,6 +215,41 @@ Deno.test("promptWithIdleTimeoutHandling - attempts reconnect on agent process e
   }
 });
 
+Deno.test("promptWithIdleTimeoutHandling - propagates crash-signal error directly without attempting reconnect (Decision 5)", async () => {
+  const { orchestrator, cleanup } = createTestOrchestrator();
+  try {
+    const mockConnector = new MockAgentConnector();
+    let reconnectCalled = false;
+    mockConnector.reconnectAndResumeSession = (_sessionId: string) => {
+      reconnectCalled = true;
+      return Promise.resolve(false);
+    };
+    // Message shape produced by AgentConnector's crash signal (design.md Decision 5):
+    // deliberately does NOT contain "ACP connection dead" or "ACP agent process exited
+    // unexpectedly", so it bypasses the (always-futile) reconnectAndResumeSession() detour.
+    mockConnector.promptResults.push(
+      new Error(
+        "Agent process exited unexpectedly (code=1, signal=null) while awaiting a response",
+      ),
+    );
+
+    await assertRejects(
+      () =>
+        orchestrator.testPromptWithIdleTimeoutHandling(
+          mockConnector as unknown as AgentConnector,
+          "session-1",
+          "test prompt",
+        ),
+      Error,
+      "Agent process exited unexpectedly",
+    );
+
+    assertEquals(reconnectCalled, false);
+  } finally {
+    cleanup();
+  }
+});
+
 Deno.test("promptWithIdleTimeoutHandling - returns null when resumed session also fails", async () => {
   const { orchestrator, cleanup } = createTestOrchestrator();
   try {

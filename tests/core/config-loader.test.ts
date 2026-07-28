@@ -2402,3 +2402,56 @@ workspace:
     assertEquals(result.agent.gitCredential?.host, undefined);
   });
 });
+
+Deno.test("loadConfig - connectTimeoutMs defaults to 30000 when unset", async () => {
+  const config = `
+platforms:
+  discord:
+    token: "test-token"
+    enabled: true
+  misskey:
+    enabled: false
+agent:
+  model: "gpt-4"
+  systemPromptPath: "./prompts/system_reply.md"
+  tokenLimit: 20000
+workspace:
+  repoPath: "./data"
+  workspacesDir: "workspaces"
+`;
+
+  await withTestConfig(config, async (dir) => {
+    const result = await loadConfig(dir);
+    assertEquals(result.agent.connectTimeoutMs, 30000);
+  });
+});
+
+Deno.test("loadConfig - AGENT_CONNECT_TIMEOUT_MS env overrides agent.connectTimeoutMs", async () => {
+  const config = `
+platforms:
+  discord:
+    token: "test-token"
+    enabled: true
+  misskey:
+    enabled: false
+agent:
+  model: "gpt-4"
+  systemPromptPath: "./prompts/system_reply.md"
+  tokenLimit: 20000
+  connectTimeoutMs: 30000
+workspace:
+  repoPath: "./data"
+  workspacesDir: "workspaces"
+`;
+
+  Deno.env.set("AGENT_CONNECT_TIMEOUT_MS", "15000");
+
+  try {
+    await withTestConfig(config, async (dir) => {
+      const result = await loadConfig(dir);
+      assertEquals(result.agent.connectTimeoutMs, 15000);
+    });
+  } finally {
+    Deno.env.delete("AGENT_CONNECT_TIMEOUT_MS");
+  }
+});

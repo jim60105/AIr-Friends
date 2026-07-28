@@ -13,6 +13,7 @@
     "jsr:@std/path@1": "1.1.5",
     "jsr:@std/path@^1.1.5": "1.1.5",
     "jsr:@std/testing@^1.0.17": "1.0.18",
+    "jsr:@std/yaml@*": "1.1.1",
     "jsr:@std/yaml@1": "1.1.1",
     "npm:@agentclientprotocol/sdk@~0.14.1": "0.14.1_zod@4.4.3",
     "npm:discord.js@14": "14.26.4",

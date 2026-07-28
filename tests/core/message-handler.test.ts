@@ -1,6 +1,6 @@
 // tests/core/message-handler.test.ts
 
-import { assertEquals } from "@std/assert";
+import { assertEquals, assertRejects } from "@std/assert";
 import { MessageHandler } from "@core/message-handler.ts";
 import { ReplyPolicyEvaluator } from "@core/reply-policy.ts";
 import type { SessionOrchestrator, SessionResponse } from "@core/session-orchestrator.ts";
@@ -307,6 +307,34 @@ Deno.test("MessageHandler - non-whitelisted account rate limited normally", asyn
   assertEquals(r1.success, true);
   assertEquals(r2.success, false);
   assertEquals(r2.error, "Rate limited");
+
+  handler.dispose();
+});
+
+// === activeEvents release tests (handle-agent-process-crash) ===
+
+Deno.test("MessageHandler - releases activeEvents entry even when orchestrator.processMessage rejects", async () => {
+  // Simulates a crash-signal-shaped rejection propagating all the way up (rather than the
+  // { success: false } response SessionOrchestrator's own try/catch normally produces).
+  // The activeEvents dedup entry must still be released — otherwise a retried delivery of
+  // the same messageId would be dropped forever as a "duplicate" (see design.md Decision 4).
+  const orchestrator = {
+    processMessage(): Promise<SessionResponse> {
+      return Promise.reject(
+        new Error(
+          "Agent process exited unexpectedly (code=1, signal=null) while awaiting a response",
+        ),
+      );
+    },
+  } as unknown as SessionOrchestrator;
+
+  const handler = new MessageHandler(orchestrator, DEFAULT_RATE_LIMIT, DEFAULT_REPLY_POLICY);
+  const event = createTestEvent("msg_crash_1");
+
+  await assertRejects(() => handler.handleEvent(event, mockPlatformAdapter));
+
+  assertEquals(handler.isProcessing("discord", "msg_crash_1"), false);
+  assertEquals(handler.getActiveCount(), 0);
 
   handler.dispose();
 });

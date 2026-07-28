@@ -180,6 +180,10 @@ agent:
     timeoutMs: 300000              # Idle timeout in ms (default: 300000 = 5 minutes); override with env AGENT_IDLE_TIMEOUT_MS
     checkIntervalMs: 30000         # Check interval in ms (default: 30000 = 30 seconds); override with env AGENT_IDLE_TIMEOUT_CHECK_INTERVAL_MS
 
+  # Maximum time to wait for the ACP handshake (connection.initialize()) during connect().
+  # A crashed or hung agent subprocess fails connect() fast instead of hanging forever.
+  connectTimeoutMs: 30000           # Connect handshake timeout in ms (default: 30000 = 30 seconds); override with env AGENT_CONNECT_TIMEOUT_MS
+
 
 # Git credential store for agent subprocesses (effective only in YOLO mode)
 # Configures git credential.helper = store at startup so the agent can use

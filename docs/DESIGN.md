@@ -1279,6 +1279,20 @@ Environment variables: `AGENT_IDLE_TIMEOUT_ENABLED`, `AGENT_IDLE_TIMEOUT_MS`, `A
 
 ---
 
+## Connect-Time Handshake Timeout
+
+Bounds how long `connect()` may wait for the ACP handshake (`connection.initialize()`) to complete, independent of idle-timeout (which only covers `prompt()`). Also, every outbound ACP call (`initialize`, `createSession`, `setSessionModel`, `setSessionMode`, `setSessionConfigOption`, `prompt`, `cancel`) is raced against a per-subprocess crash signal that rejects immediately if the agent subprocess exits unexpectedly, instead of leaving the call pending forever — see `openspec/changes/handle-agent-process-crash/design.md` for the full rationale.
+
+| Setting                   | Default | Description                                          |
+| -------------------------- | ------- | ----------------------------------------------------- |
+| `agent.connectTimeoutMs`   | `30000` | Max time to wait for the ACP handshake during `connect()` (30s) |
+
+Environment variable: `AGENT_CONNECT_TIMEOUT_MS`.
+
+The 30s default is chosen by convention (matching the idle-timeout default), not from measured production connect-latency data. A `WARN` is logged once elapsed time passes 80% of the timeout, giving operators an early signal before a hard failure; the default should be revisited once real rollout data accumulates.
+
+---
+
 ## Git Credential Store for Agent
 
 When `agent.gitCredential.enabled` is true, bootstrap writes a `~/.git-credentials` file and configures `git config --global credential.helper store` so Agent subprocesses can use plain `git push`/`git pull` without embedding credentials in command strings. Credential source is shared with `gitBackup` config. Host resolution order: `agent.gitCredential.host` → parsed from `gitBackup.remoteUrl` → `github.com`.

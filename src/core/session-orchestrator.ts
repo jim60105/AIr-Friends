@@ -545,6 +545,7 @@ export class SessionOrchestrator {
         skillRegistry: this.skillRegistry,
         logger: sessionLogger,
         idleTimeoutConfig: this.config.agent.idleTimeout,
+        connectTimeoutMs: this.config.agent.connectTimeoutMs,
       });
 
       // Set doom-loop protection: terminate agent if reply attempts exceed threshold
@@ -1078,6 +1079,7 @@ export class SessionOrchestrator {
         skillRegistry: this.skillRegistry,
         logger: sessionLogger,
         idleTimeoutConfig: this.config.agent.idleTimeout,
+        connectTimeoutMs: this.config.agent.connectTimeoutMs,
       });
 
       // Set doom-loop protection: terminate agent if reply attempts exceed threshold
@@ -1411,6 +1413,7 @@ export class SessionOrchestrator {
         skillRegistry: this.skillRegistry,
         logger: sessionLogger,
         idleTimeoutConfig: this.config.agent.idleTimeout,
+        connectTimeoutMs: this.config.agent.connectTimeoutMs,
       });
 
       // Set doom-loop protection: terminate agent if reply attempts exceed threshold
@@ -1699,6 +1702,7 @@ export class SessionOrchestrator {
         skillRegistry: this.skillRegistry,
         logger: sessionLogger,
         idleTimeoutConfig: this.config.agent.idleTimeout,
+        connectTimeoutMs: this.config.agent.connectTimeoutMs,
       });
 
       // Set doom-loop protection: terminate agent if reply attempts exceed threshold
@@ -1995,6 +1999,7 @@ export class SessionOrchestrator {
         skillRegistry: this.skillRegistry,
         logger: sessionLogger,
         idleTimeoutConfig: this.config.agent.idleTimeout,
+        connectTimeoutMs: this.config.agent.connectTimeoutMs,
       });
 
       if (shellSessionId) {
@@ -2316,6 +2321,7 @@ export class SessionOrchestrator {
         skillRegistry: this.skillRegistry,
         logger: sessionLogger,
         idleTimeoutConfig: this.config.agent.idleTimeout,
+        connectTimeoutMs: this.config.agent.connectTimeoutMs,
       });
 
       // Set doom-loop protection: terminate agent if reply attempts exceed threshold

@@ -173,4 +173,6 @@ export interface AgentConnectorOptions {
   skillRegistry: unknown; // SkillRegistry type - using unknown to avoid circular deps
   logger: unknown; // Logger type - using unknown to avoid circular deps
   idleTimeoutConfig?: IdleTimeoutConfig;
+  /** Maximum time in milliseconds to wait for the ACP handshake during `connect()` (default: 30000) */
+  connectTimeoutMs?: number;
 }

@@ -7,7 +7,7 @@ import { Logger, LogLevel } from "@utils/logger.ts";
 import type { IdleTimeoutConfig } from "../../src/types/config.ts";
 
 /**
- * Test suite for AgentConnector process exit monitoring and promptCompleted flag.
+ * Test suite for AgentConnector process exit monitoring and intentionalShutdown flag.
  * Covers monitorProcessExit, isProcessAlive, clearIdleMonitor, and config getters.
  */
 
@@ -73,14 +73,14 @@ Deno.test("monitorProcessExit - no ERROR when process === null (already disconne
   assertEquals(errorLogs.length, 0);
 });
 
-Deno.test("monitorProcessExit - logs ERROR when process exits and promptCompleted is false", async () => {
+Deno.test("monitorProcessExit - logs ERROR when process exits and intentionalShutdown is false", async () => {
   const { logger, logs } = createCapturingLogger();
   const connector = createConnector(logger);
 
   // Create a mock process that resolves immediately (simulating unexpected exit)
   const mockStatus = Promise.resolve({ code: 1, signal: null, success: false });
   connector["process"] = { status: mockStatus } as unknown as Deno.ChildProcess;
-  connector["promptCompleted"] = false;
+  connector["intentionalShutdown"] = false;
 
   connector["monitorProcessExit"](logger);
 
@@ -91,13 +91,13 @@ Deno.test("monitorProcessExit - logs ERROR when process exits and promptComplete
   assertEquals(errorLogs[0].message, "Agent process exited unexpectedly");
 });
 
-Deno.test("monitorProcessExit - logs DEBUG (not ERROR) when promptCompleted is true", async () => {
+Deno.test("monitorProcessExit - logs DEBUG (not ERROR) when intentionalShutdown is true", async () => {
   const { logger, logs } = createCapturingLogger();
   const connector = createConnector(logger);
 
   const mockStatus = Promise.resolve({ code: 0, signal: null, success: true });
   connector["process"] = { status: mockStatus } as unknown as Deno.ChildProcess;
-  connector["promptCompleted"] = true;
+  connector["intentionalShutdown"] = true;
 
   connector["monitorProcessExit"](logger);
 
@@ -108,7 +108,7 @@ Deno.test("monitorProcessExit - logs DEBUG (not ERROR) when promptCompleted is t
 
   const debugLogs = logs.filter((l) => l.level === "debug");
   assertEquals(debugLogs.length, 1);
-  assertEquals(debugLogs[0].message, "Agent process exited after prompt completion");
+  assertEquals(debugLogs[0].message, "Agent process exited after intentional shutdown");
 });
 
 Deno.test("monitorProcessExit - catch branch silently ignores process.status errors", async () => {
@@ -260,22 +260,22 @@ Deno.test("idleTimeoutEnabled - returns true when enabled is true", () => {
   assertEquals(connector["idleTimeoutEnabled"], true);
 });
 
-// promptCompleted flag reset tests
+// intentionalShutdown flag reset tests
 
-Deno.test("promptCompleted - defaults to false", () => {
+Deno.test("intentionalShutdown - defaults to false", () => {
   const { logger } = createCapturingLogger();
   const connector = createConnector(logger);
 
-  assertEquals(connector["promptCompleted"], false);
+  assertEquals(connector["intentionalShutdown"], false);
 });
 
-Deno.test("promptCompleted - can be set and read", () => {
+Deno.test("intentionalShutdown - can be set and read", () => {
   const { logger } = createCapturingLogger();
   const connector = createConnector(logger);
 
-  connector["promptCompleted"] = true;
-  assertEquals(connector["promptCompleted"], true);
+  connector["intentionalShutdown"] = true;
+  assertEquals(connector["intentionalShutdown"], true);
 
-  connector["promptCompleted"] = false;
-  assertEquals(connector["promptCompleted"], false);
+  connector["intentionalShutdown"] = false;
+  assertEquals(connector["intentionalShutdown"], false);
 });

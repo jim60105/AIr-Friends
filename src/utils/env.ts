@@ -124,6 +124,9 @@ export const ENV_MAPPINGS = {
   AGENT_IDLE_TIMEOUT_MS: "agent.idleTimeout.timeoutMs",
   AGENT_IDLE_TIMEOUT_CHECK_INTERVAL_MS: "agent.idleTimeout.checkIntervalMs",
 
+  // Agent connect-time handshake timeout
+  AGENT_CONNECT_TIMEOUT_MS: "agent.connectTimeoutMs",
+
   // Scheduled reminders settings
   REMINDERS_ENABLED: "reminders.enabled",
   REMINDERS_MAX_PER_USER: "reminders.maxRemindersPerUser",

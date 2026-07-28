@@ -31,6 +31,16 @@ const IDLE_TIMEOUT_MS = 5 * 60 * 1000;
 const IDLE_CHECK_INTERVAL_MS = 30 * 1000;
 
 /**
+ * Default timeout in milliseconds to wait for the ACP handshake
+ * (`connection.initialize()`) to complete during `connect()` (30 seconds).
+ * Configurable via `agent.connectTimeoutMs` / `AGENT_CONNECT_TIMEOUT_MS`.
+ */
+const CONNECT_TIMEOUT_MS = 30 * 1000;
+
+/** Fraction of connectTimeoutMs elapsed before an early advance-warning WARN is logged. */
+const CONNECT_TIMEOUT_WARN_FRACTION = 0.8;
+
+/**
  * Outcome of a reasoning-effort application attempt.
  * - `applied`: the value was sent to the agent.
  * - `unsupported`: the agent advertised no `thought_level` config option.
@@ -68,7 +78,21 @@ export class AgentConnector {
    */
   private sessionConfigOptions: acp.SessionConfigOption[] = [];
   private currentIdleMonitorIntervalId: ReturnType<typeof setInterval> | null = null;
-  private promptCompleted = false;
+  /**
+   * Rejects unconditionally whenever the current subprocess exits, for any reason
+   * (crash or a deliberate `disconnect()`). Raced against every outbound ACP call via
+   * `raceAgainstCrash()` so a dead subprocess never leaves a call pending forever.
+   * Rebuilt fresh on each `connect()`; a no-op `.catch()` is attached at creation so it
+   * never surfaces as an unhandled rejection when nothing is currently racing against it.
+   */
+  private crashSignal: Promise<never> | null = null;
+  /**
+   * Set at the start of `disconnect()`, reset at the start of `connect()`.
+   * Affects ONLY the log severity chosen in `monitorProcessExit()` — it must never gate
+   * whether `crashSignal` rejects, since a doom-loop `disconnect()` call while a prompt is
+   * still in flight must still unstick that prompt.
+   */
+  private intentionalShutdown = false;
 
   constructor(options: AgentConnectorOptions) {
     this.options = options;
@@ -105,6 +129,11 @@ export class AgentConnector {
     });
 
     this.process = command.spawn();
+
+    // Reset shutdown-intent tracking and build a fresh crash signal tied to this
+    // subprocess (not any stale signal from a previously disconnected one).
+    this.intentionalShutdown = false;
+    this.crashSignal = this.buildCrashSignal();
 
     // Monitor for unexpected process exit
     this.monitorProcessExit(logger as Logger);
@@ -145,18 +174,24 @@ export class AgentConnector {
       stream,
     );
 
-    // Initialize the connection
+    // Initialize the connection.
+    // Raced against the crash signal (rejects if the subprocess exits before the
+    // handshake completes) AND a bounded timeout (rejects if the subprocess is alive
+    // but never completes the handshake — a hang the crash signal cannot catch).
     try {
-      const initResult = await this.connection.initialize({
-        protocolVersion: acp.PROTOCOL_VERSION,
-        clientCapabilities: {
-          fs: {
-            readTextFile: true,
-            writeTextFile: true,
+      const initResult = await this.raceWithConnectTimeout(
+        this.raceAgainstCrash(this.connection.initialize({
+          protocolVersion: acp.PROTOCOL_VERSION,
+          clientCapabilities: {
+            fs: {
+              readTextFile: true,
+              writeTextFile: true,
+            },
+            terminal: false,
           },
-          terminal: false,
-        },
-      });
+        })),
+        logger as Logger,
+      );
       // Store agent capabilities for transport validation
       this.capabilities = initResult.agentCapabilities ?? {};
 
@@ -182,6 +217,40 @@ export class AgentConnector {
   }
 
   /**
+   * Race `operation` (the ACP `initialize()` call, already raced against the crash
+   * signal) against `connectTimeoutMs`. Logs a WARN once elapsed time passes
+   * {@link CONNECT_TIMEOUT_WARN_FRACTION} of the timeout, and clears both timers as soon
+   * as the race settles by any arm so a fast/successful connect doesn't leave a dangling
+   * timer alive.
+   */
+  private raceWithConnectTimeout<T>(operation: Promise<T>, logger: Logger): Promise<T> {
+    const connectTimeoutMs = this.connectTimeoutMs;
+    let warnHandle: ReturnType<typeof setTimeout> | undefined;
+    let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
+
+    const timeoutSignal = new Promise<never>((_resolve, reject) => {
+      warnHandle = setTimeout(() => {
+        logger.warn(
+          "connect() approaching connectTimeoutMs without a completed ACP handshake",
+          {
+            elapsedMs: Math.round(connectTimeoutMs * CONNECT_TIMEOUT_WARN_FRACTION),
+            connectTimeoutMs,
+          },
+        );
+      }, Math.round(connectTimeoutMs * CONNECT_TIMEOUT_WARN_FRACTION));
+
+      timeoutHandle = setTimeout(() => {
+        reject(new Error(`ACP handshake did not complete within ${connectTimeoutMs}ms`));
+      }, connectTimeoutMs);
+    });
+
+    return Promise.race([operation, timeoutSignal]).finally(() => {
+      clearTimeout(warnHandle);
+      clearTimeout(timeoutHandle);
+    });
+  }
+
+  /**
    * Create a new session with the Agent
    * @param mcpServers Optional MCP servers to connect to
    */
@@ -195,10 +264,10 @@ export class AgentConnector {
     // Filter out MCP servers with unsupported transports (skip + warn)
     const supportedServers = this.filterSupportedMCPServers(mcpServers);
 
-    const result = await this.connection.newSession({
+    const result = await this.raceAgainstCrash(this.connection.newSession({
       cwd: this.options.agentConfig.cwd,
       mcpServers: supportedServers.map((server) => this.convertMCPServerConfig(server)),
-    });
+    }));
 
     // Capture initial config options (single-session scoped); refreshed later via
     // config_option_update notifications and set_config_option responses.
@@ -341,10 +410,10 @@ export class AgentConnector {
 
     const logger = this.options.logger as Logger;
 
-    await this.connection.unstable_setSessionModel({
+    await this.raceAgainstCrash(this.connection.unstable_setSessionModel({
       sessionId,
       modelId,
-    });
+    }));
 
     logger.info("Session model set to {modelId} for session {sessionId}", { sessionId, modelId });
   }
@@ -359,10 +428,10 @@ export class AgentConnector {
 
     const logger = this.options.logger as Logger;
 
-    await this.connection.setSessionMode({
+    await this.raceAgainstCrash(this.connection.setSessionMode({
       sessionId,
       modeId,
-    });
+    }));
 
     logger.info("Session mode set to {modeId} for session {sessionId}", { sessionId, modeId });
   }
@@ -469,11 +538,11 @@ export class AgentConnector {
     const valueToSend = canonicalMatch ?? trimmed;
 
     try {
-      const response = await this.connection.setSessionConfigOption({
+      const response = await this.raceAgainstCrash(this.connection.setSessionConfigOption({
         sessionId,
         configId: option.id,
         value: valueToSend,
-      });
+      }));
       // The response carries the complete updated config option state.
       this.refreshSessionConfigOptions(
         (response as { configOptions?: acp.SessionConfigOption[] })?.configOptions,
@@ -531,7 +600,6 @@ export class AgentConnector {
 
     // Reset client state for new prompt
     this.client?.reset();
-    this.promptCompleted = false;
 
     // If content is a plain string, wrap as text ContentBlock (backward compatible)
     const prompt: acp.ContentBlock[] = typeof content === "string"
@@ -539,18 +607,16 @@ export class AgentConnector {
       : content;
 
     try {
-      let result: acp.PromptResponse;
-
-      if (this.idleTimeoutEnabled) {
-        result = await Promise.race([
-          this.connection.prompt({ sessionId, prompt }),
-          this.monitorIdleTimeout(sessionId, logger),
-        ]);
-      } else {
-        result = await this.connection.prompt({ sessionId, prompt });
-      }
-
-      this.promptCompleted = true;
+      // The crash-signal race arm applies unconditionally, independent of idle-timeout
+      // configuration, so a subprocess crash mid-prompt rejects promptly even when idle
+      // timeout is disabled. Its error message is deliberately worded to NOT match
+      // promptWithIdleTimeoutHandling()'s reconnect-trigger substrings ("ACP connection
+      // dead" / "ACP agent process exited unexpectedly"), bypassing its always-futile
+      // reconnectAndResumeSession() detour for this error class (see design.md Decision 5).
+      const promptCall = this.raceAgainstCrash(this.connection.prompt({ sessionId, prompt }));
+      const result = this.idleTimeoutEnabled
+        ? await Promise.race([promptCall, this.monitorIdleTimeout(sessionId, logger)])
+        : await promptCall;
 
       logger.info("Prompt completed for session {sessionId} with stopReason {stopReason}", {
         sessionId,
@@ -578,7 +644,7 @@ export class AgentConnector {
 
     const logger = this.options.logger as Logger;
 
-    await this.connection.cancel({ sessionId });
+    await this.raceAgainstCrash(this.connection.cancel({ sessionId }));
     logger.info("Session {sessionId} cancelled", { sessionId });
   }
 
@@ -587,6 +653,12 @@ export class AgentConnector {
    * Uses best-effort cleanup with timeout (following GitHub's ACP example)
    */
   async disconnect(): Promise<void> {
+    // Mark the shutdown as intentional before anything else (including SIGTERM), so
+    // monitorProcessExit() logs at DEBUG rather than ERROR. This flag affects log
+    // severity ONLY — it must never gate whether `crashSignal` rejects (see its
+    // declaration): a doom-loop `disconnect()` call while a prompt is still in flight
+    // must still unstick that prompt.
+    this.intentionalShutdown = true;
     this.clearIdleMonitor();
 
     if (this.process) {
@@ -627,20 +699,48 @@ export class AgentConnector {
   private monitorProcessExit(logger: Logger): void {
     if (!this.process) return;
     this.process.status.then((status) => {
-      if (this.process !== null && !this.promptCompleted) {
+      if (this.process !== null && !this.intentionalShutdown) {
         logger.error("Agent process exited unexpectedly", {
           code: status.code,
           signal: status.signal,
           success: status.success,
         });
       } else if (this.process !== null) {
-        logger.debug("Agent process exited after prompt completion", {
+        logger.debug("Agent process exited after intentional shutdown", {
           code: status.code,
           signal: status.signal,
           success: status.success,
         });
       }
     }).catch(() => {/* Ignore */});
+  }
+
+  /**
+   * Build a crash signal tied to the current subprocess: rejects unconditionally
+   * whenever the process exits, for any reason (crash or intentional `disconnect()`).
+   * A no-op `.catch()` is attached at creation so this never surfaces as an unhandled
+   * rejection when nothing is currently racing against it. Does not log — the exit is
+   * logged exactly once, in `monitorProcessExit()`, to avoid duplicate log lines.
+   */
+  private buildCrashSignal(): Promise<never> {
+    const signal = this.process!.status.then((status): never => {
+      throw new Error(
+        `Agent process exited unexpectedly (code=${status.code}, signal=${status.signal}) ` +
+          "while awaiting a response",
+      );
+    });
+    signal.catch(() => {/* Prevent unhandled rejection when nothing races against this signal */});
+    return signal;
+  }
+
+  /**
+   * Race an outbound ACP call against the current crash signal, so an unexpected
+   * subprocess exit rejects the call promptly instead of leaving it pending forever.
+   * Falls back to the bare operation when no crash signal exists yet (not connected).
+   */
+  private raceAgainstCrash<T>(operation: Promise<T>): Promise<T> {
+    if (!this.crashSignal) return operation;
+    return Promise.race([operation, this.crashSignal]);
   }
 
   /**
@@ -807,5 +907,9 @@ export class AgentConnector {
 
   private get idleTimeoutEnabled(): boolean {
     return this.options.idleTimeoutConfig?.enabled !== false;
+  }
+
+  private get connectTimeoutMs(): number {
+    return this.options.connectTimeoutMs ?? CONNECT_TIMEOUT_MS;
   }
 }

@@ -238,6 +238,12 @@ Configuration is loaded from `config.yaml` (YAML format). See [config.example.ya
 | `AGENT_IDLE_TIMEOUT_MS`                | Idle timeout in ms (default: 300000 = 5 min)              |
 | `AGENT_IDLE_TIMEOUT_CHECK_INTERVAL_MS` | Check interval in ms (default: 30000 = 30s)               |
 
+**Agent Connect Timeout:**
+
+| Variable                    | Description                                                          |
+| --------------------------- | --------------------------------------------------------------------|
+| `AGENT_CONNECT_TIMEOUT_MS`  | Max time to wait for the ACP handshake during `connect()` (default: 30000 = 30s). A `WARN` is logged at 80% elapsed as an early signal before the hard timeout fires. This default is convention-based (matches the idle-timeout default), not measured from production connect latency — revisit once real data accumulates post-rollout. |
+
 **Agent Git Credential Store:**
 
 | Variable                       | Description                                                                              |

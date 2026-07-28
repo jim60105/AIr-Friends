@@ -6,7 +6,7 @@ Defines how AIr-Friends acts as an ACP (Agent Client Protocol) Client, spawning 
 ## Requirements
 ### Requirement: AgentConnector Subprocess Management
 
-The system SHALL manage the external OpenCode ACP agent lifecycle through the `AgentConnector` class, spawning the agent as a subprocess with `dumb-init` for proper signal forwarding and communicating via stdio JSON-RPC. The subprocess SHALL be spawned with a cleared parent environment (`clearEnv: true`) so it receives ONLY the explicitly-built agent environment and inherits no parent secrets.
+The system SHALL manage the external OpenCode ACP agent lifecycle through the `AgentConnector` class, spawning the agent as a subprocess with `dumb-init` for proper signal forwarding and communicating via stdio JSON-RPC. The subprocess SHALL be spawned with a cleared parent environment (`clearEnv: true`) so it receives ONLY the explicitly-built agent environment and inherits no parent secrets. Every outbound ACP call made through the connection (`initialize`, `createSession`, `setSessionModel`, `setSessionMode`, `setSessionConfigOption`, `prompt`, `cancel`) SHALL be raced against a per-subprocess crash signal so that an unexpected subprocess exit rejects any currently pending call instead of leaving it pending forever, regardless of idle-timeout configuration.
 
 #### Scenario: Agent connection
 - **GIVEN** a valid `AgentConfig` with command, args, cwd, and env
@@ -47,12 +47,42 @@ The system SHALL manage the external OpenCode ACP agent lifecycle through the `A
 #### Scenario: Graceful disconnect
 - **GIVEN** a connected agent
 - **WHEN** `disconnect()` is called
-- **THEN** it SHALL attempt graceful shutdown with a 2-second SIGTERM timeout before force-killing the subprocess, and clear any cached session `configOptions`
+- **THEN** it SHALL mark the shutdown as intentional before signaling the subprocess, attempt graceful shutdown with a 2-second SIGTERM timeout before force-killing the subprocess, and clear any cached session `configOptions`
 
 #### Scenario: Subprocess exit monitoring
 - **GIVEN** a running agent subprocess
-- **WHEN** the subprocess exits unexpectedly
-- **THEN** the system SHALL log the exit status and code asynchronously
+- **WHEN** the subprocess exits
+- **THEN** the system SHALL log the exit status and code asynchronously, distinguishing an intentional shutdown from an unexpected exit
+
+#### Scenario: Pending call rejected on unexpected exit during connect
+- **GIVEN** `connect()` is awaiting `connection.initialize()`
+- **WHEN** the agent subprocess exits unexpectedly (non-zero code or signal) before a response arrives, without `disconnect()` having been called first
+- **THEN** the pending `initialize()` call SHALL reject promptly with a descriptive error identifying the unexpected exit, instead of remaining pending indefinitely
+
+#### Scenario: Pending call rejected on unexpected exit during an active prompt
+- **GIVEN** `prompt()` is awaiting `connection.prompt()` for an active session, with or without idle-timeout enabled
+- **WHEN** the agent subprocess exits unexpectedly before a response arrives, without `disconnect()` having been called first
+- **THEN** the pending `prompt()` call SHALL reject promptly with a descriptive error identifying the unexpected exit, instead of waiting for the next idle-check interval or hanging indefinitely when idle-timeout is disabled
+
+#### Scenario: Pending call rejected on unexpected exit during other ACP calls
+- **GIVEN** any other outbound call is pending (`createSession`, `setSessionModel`, `setSessionMode`, `setSessionConfigOption`, `cancel`)
+- **WHEN** the agent subprocess exits unexpectedly before a response arrives
+- **THEN** that pending call SHALL reject promptly with a descriptive error, consistent with `initialize()` and `prompt()`
+
+#### Scenario: Disconnect-triggered exit rejects the crash signal without raising an unhandled rejection
+- **GIVEN** `disconnect()` has been called after all prior pending calls already settled, and the subprocess subsequently exits as a result
+- **WHEN** the crash signal rejects (it rejects on every exit, intentional or not)
+- **THEN** no unhandled-promise-rejection SHALL be raised, because nothing is currently racing against the signal and a permanent no-op handler was attached to it at creation time
+
+#### Scenario: Doom-loop disconnect while a prompt is in flight
+- **GIVEN** a `prompt()` call is in flight and `disconnect()` is invoked concurrently (e.g. by doom-loop termination) before the agent responds
+- **WHEN** the subprocess is killed as part of that `disconnect()`
+- **THEN** the in-flight `prompt()` call SHALL still reject promptly rather than hang, since a response for it will never arrive
+
+#### Scenario: Fresh crash signal on reconnect
+- **GIVEN** `reconnectAndResumeSession()` calls `disconnect()` followed by `connect()` on the same `AgentConnector` instance
+- **WHEN** the new subprocess is spawned
+- **THEN** subsequent calls SHALL be raced against a crash signal tied to the new subprocess, not any stale signal from the previously disconnected subprocess
 
 ### Requirement: Session Config Option Update Handling
 
@@ -481,7 +511,7 @@ The system SHALL configure git credential store for agent subprocesses when `age
 
 ### Requirement: Idle Timeout Detection
 
-The system SHALL detect silently unresponsive agent connections via periodic idle checks during prompt execution.
+The system SHALL detect silently unresponsive agent connections via periodic idle checks during prompt execution, and SHALL separately bound how long `connect()` may wait for the agent to complete its ACP handshake.
 
 #### Scenario: Activity tracking
 - **GIVEN** an active ACP session
@@ -502,6 +532,26 @@ The system SHALL detect silently unresponsive agent connections via periodic idl
 - **GIVEN** environment variables `AGENT_IDLE_TIMEOUT_ENABLED`, `AGENT_IDLE_TIMEOUT_MS`, or `AGENT_IDLE_TIMEOUT_CHECK_INTERVAL_MS`
 - **WHEN** configuration is loaded
 - **THEN** they SHALL override the corresponding `agent.idleTimeout.*` config values
+
+#### Scenario: Connect-time handshake timeout
+- **GIVEN** the agent subprocess has spawned and is alive (has not exited)
+- **WHEN** `connection.initialize()` does not complete within `connectTimeoutMs` (default: 30 seconds)
+- **THEN** `connect()` SHALL reject with a descriptive timeout error rather than waiting indefinitely for a handshake that may never complete
+
+#### Scenario: Connect timeout configuration
+- **GIVEN** the `AGENT_CONNECT_TIMEOUT_MS` environment variable
+- **WHEN** configuration is loaded
+- **THEN** it SHALL override the corresponding `agent.connectTimeoutMs` config value
+
+#### Scenario: Early warning before a connect-time timeout
+- **GIVEN** `connect()` is awaiting `connection.initialize()`
+- **WHEN** elapsed time passes 80% of `connectTimeoutMs` without the handshake completing
+- **THEN** the system SHALL log a `WARN` indicating the connection is approaching its timeout, so operators get advance signal before a hard failure and before the default is tuned against real production latency data
+
+#### Scenario: Connect timeout timer cleared on early settlement
+- **GIVEN** `connection.initialize()` completes (successfully or via crash-signal rejection) before `connectTimeoutMs` elapses
+- **WHEN** the race settles
+- **THEN** the timeout's pending timer SHALL be cleared so it does not remain scheduled for the rest of its duration after the call has already settled
 
 ---
 
