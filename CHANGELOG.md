@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.29.0] - 2026-08-03
+
+### Added
+
+- Operator-trusted egress allowlist (`agent.sandbox.egressAllowHosts`) — operators can now enumerate specific internal destinations the agent may reach through the validating egress proxy without abandoning SSRF mediation; exempted hosts keep DNS resolution and connect-time IP pinning, the cloud-metadata address space stays hard-blocked, and allowlisted hosts are also appended to the agent's `NO_PROXY` so env-honoring clients connect directly
+- OpenRouter attribution headers identifying AIr-Friends and its GitHub repository on outgoing requests
+
+### Changed
+
+- External agent skills are now installed via the npm-native `npx --yes --package=skills skills add` command instead of `deno x`, aligning with the upstream skills CLI distribution
+
+### Fixed
+
+- Pending ACP calls (initialize, createSession, setSessionModel, setSessionMode, prompt, cancel) are now rejected promptly when the agent subprocess crashes, instead of hanging indefinitely; the ACP connect handshake is also bounded by a new configurable `connectTimeoutMs` (default 30s, `AGENT_CONNECT_TIMEOUT_MS`)
+
 ## [0.28.0] - 2026-07-19
 
 ### Added
@@ -1024,7 +1039,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ---
 
-[Unreleased]: https://github.com/jim60105/AIr-Friends/compare/v0.28.0...HEAD
+[Unreleased]: https://github.com/jim60105/AIr-Friends/compare/v0.29.0...HEAD
+[0.29.0]: https://github.com/jim60105/AIr-Friends/compare/v0.28.0...v0.29.0
 [0.28.0]: https://github.com/jim60105/AIr-Friends/compare/v0.27.0...v0.28.0
 [0.27.0]: https://github.com/jim60105/AIr-Friends/compare/v0.26.0...v0.27.0
 [0.26.0]: https://github.com/jim60105/AIr-Friends/compare/v0.25.0...v0.26.0
