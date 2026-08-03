@@ -6,11 +6,56 @@ import type { ExternalSkillConfig } from "../types/config.ts";
 const logger = createLogger("SkillInstaller");
 
 /**
- * Install external skills via `deno x -y skills add` command.
+ * Build the `npx --yes --package=skills skills add` command for a single external skill.
+ * Returns a plain { cmd, args } pair so the invocation can be unit-tested without spawning.
+ */
+export function buildSkillInstallCommand(
+  skill: ExternalSkillConfig,
+): { cmd: string; args: string[] } {
+  return {
+    cmd: "npx",
+    args: [
+      "--yes",
+      "--package=skills",
+      "skills",
+      "add",
+      skill.repo,
+      "-a",
+      "universal",
+      "-s",
+      skill.skill,
+      "-g",
+      "-y",
+    ],
+  };
+}
+
+/** Minimal subprocess abstraction so tests can inject a mock without spawning npx. */
+export interface SkillInstallExecutor {
+  run(
+    cmd: string,
+    args: string[],
+  ): Promise<{ code: number; stdout: Uint8Array; stderr: Uint8Array }>;
+}
+
+const defaultExecutor: SkillInstallExecutor = {
+  async run(cmd, args) {
+    const command = new Deno.Command(cmd, {
+      args,
+      stdout: "piped",
+      stderr: "piped",
+    });
+    return await command.output();
+  },
+};
+
+/**
+ * Install external skills via `npx --yes --package=skills skills add` command.
  * Each skill is installed sequentially. Failures are logged but do not block startup.
  */
 export async function installExternalSkills(
   skills: ExternalSkillConfig[],
+  executor: SkillInstallExecutor = defaultExecutor,
 ): Promise<void> {
   if (skills.length === 0) return;
 
@@ -24,25 +69,8 @@ export async function installExternalSkills(
         repo: skill.repo,
       });
 
-      const command = new Deno.Command("deno", {
-        args: [
-          "x",
-          "-y",
-          "skills",
-          "add",
-          skill.repo,
-          "-a",
-          "universal",
-          "-s",
-          skill.skill,
-          "-g",
-          "-y",
-        ],
-        stdout: "piped",
-        stderr: "piped",
-      });
-
-      const { code, stdout, stderr } = await command.output();
+      const { cmd, args } = buildSkillInstallCommand(skill);
+      const { code, stdout, stderr } = await executor.run(cmd, args);
       const stdoutText = new TextDecoder().decode(stdout);
       const stderrText = new TextDecoder().decode(stderr);
 

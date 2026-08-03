@@ -1077,7 +1077,7 @@ gitBackup:
 
 ### 15. External Skill Auto-Installation (Feature 27)
 
-Enables automatic installation of external Agent Skills at startup via `deno x -y skills add`.
+Enables automatic installation of external Agent Skills at startup via `npx --yes --package=skills skills add`.
 
 **Configuration:**
 
@@ -1097,7 +1097,7 @@ agent:
 1. Configured in `config.yaml` under `agent.externalSkills` or via `AGENT_EXTERNAL_SKILLS` env var
 2. `installExternalSkills()` runs during `bootstrap()`, after config loading and before `AgentCore` initialization
 3. Skills are installed sequentially to avoid filesystem conflicts in `~/.agents/skills/`
-4. Each skill is installed via `deno x -y skills add <repo> -a universal -s <skill> -g -y`
+4. Each skill is installed via `npx --yes --package=skills skills add <repo> -a universal -s <skill> -g -y`
 5. Individual installation failures are logged but do **not** block application startup
 
 **Key Components:**

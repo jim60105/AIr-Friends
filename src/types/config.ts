@@ -195,7 +195,7 @@ export interface AgentConfig {
 
 /**
  * External skill configuration for automatic installation at startup.
- * Each entry specifies a GitHub repo and skill name to install via `deno x -y skills add`.
+ * Each entry specifies a GitHub repo and skill name to install via `npx --yes --package=skills skills add`.
  */
 export interface ExternalSkillConfig {
   /** GitHub repository (e.g. "jim60105/copilot-prompt") */

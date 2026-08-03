@@ -1152,7 +1152,7 @@ Environment variables: `DISCORD_CHANNEL_LURK_ENABLED`, `DISCORD_CHANNEL_LURK_INT
 
 ## External Skill Auto-Installation
 
-Enables automatic installation of external Agent Skills at startup via `deno x -y skills add`.
+Enables automatic installation of external Agent Skills at startup via `npx --yes --package=skills skills add`.
 
 **Configuration:**
 

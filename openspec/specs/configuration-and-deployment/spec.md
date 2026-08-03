@@ -316,7 +316,7 @@ The system SHALL support automatic installation of external agent skills at star
 - **GIVEN** `agent.externalSkills` contains `[{repo: "jim60105/copilot-prompt", skill: "create-blog-post"}]`
 - **WHEN** bootstrap runs
 - **THEN** `installExternalSkills` SHALL run before `AgentCore` initialization
-- **AND** each skill SHALL be installed via `deno x -y skills add <repo> -a universal -s <skill> -g -y`
+- **AND** each skill SHALL be installed via `npx --yes --package=skills skills add <repo> -a universal -s <skill> -g -y`
 
 #### Scenario: Sequential Installation
 
