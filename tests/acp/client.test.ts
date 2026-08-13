@@ -246,7 +246,7 @@ Deno.test("ChatbotClient - requestPermission auto-approves skill shell execution
         toolCallId: "test-id",
         rawInput: {
           commands: [
-            "deno run --allow-net /home/deno/.agents/skills/memory-save/scripts/memory-save.ts --session-id test --content 'test'",
+            'deno run --allow-net /home/deno/.agents/skills/memory-save/scripts/memory-save.ts --session-id test --content-file "$TMPDIR/$SESSION_ID/content.md"',
           ],
         },
       },
@@ -1645,7 +1645,7 @@ Deno.test("F2 matchesScriptPath - rejects whitelisted script as trailing arg to 
 Deno.test("F2 matchesScriptPath - approves direct shebang execution (entrypoint)", () => {
   assertEquals(
     matchesScriptPath(
-      "${HOME}/.agents/skills/memory-save/scripts/memory-save.ts --session-id x --content y",
+      '${HOME}/.agents/skills/memory-save/scripts/memory-save.ts --session-id x --content-file "$TMPDIR/$SESSION_ID/content.md"',
       "skills/memory-save/scripts/memory-save.ts",
     ),
     true,
@@ -5120,6 +5120,213 @@ Deno.test("ChatbotClient - requestPermission rejects shared/home-rooted and sibl
       assertEquals(response.outcome.outcome, "selected");
       if (response.outcome.outcome === "selected") {
         assertEquals(response.outcome.optionId, "reject-1", `must reject: ${cmd}`);
+      }
+    }
+  } finally {
+    Deno.removeSync(tempDir, { recursive: true });
+  }
+});
+
+Deno.test("ChatbotClient - edit/write with $TMPDIR/$SESSION_ID tokens approved", async () => {
+  const tempDir = Deno.makeTempDirSync();
+  try {
+    const skillRegistry = createTestSkillRegistry();
+    const logger = createTestLogger();
+    const config = {
+      workingDir: tempDir,
+      platform: "discord",
+      userId: "123",
+      channelId: "456",
+      isDM: false,
+      sessionId: "sess_own",
+    };
+    const client = new ChatbotClient(skillRegistry, logger, config);
+
+    for (
+      const tokenPath of [
+        "$TMPDIR/$SESSION_ID/reply.md",
+        "${TMPDIR}/${SESSION_ID}/reply.md",
+      ]
+    ) {
+      const request: acp.RequestPermissionRequest = {
+        sessionId: "sess_own",
+        toolCall: {
+          title: "edit",
+          kind: "execute",
+          status: "pending" as const,
+          content: [],
+          toolCallId: "test-id",
+          rawInput: { path: tokenPath },
+          locations: [{ path: tokenPath }],
+        },
+        options: [
+          { kind: "allow_once", optionId: "allow-1", name: "Allow once" },
+          { kind: "reject_once", optionId: "reject-1", name: "Reject once" },
+        ],
+      };
+
+      const response = await client.requestPermission(request);
+      assertEquals(response.outcome.outcome, "selected");
+      if (response.outcome.outcome === "selected") {
+        assertEquals(response.outcome.optionId, "allow-1", `must approve: ${tokenPath}`);
+      }
+    }
+  } finally {
+    Deno.removeSync(tempDir, { recursive: true });
+  }
+});
+
+Deno.test("ChatbotClient - edit/write with unexpanded $TMPDIR2 / $OTHER tokens rejected", async () => {
+  const tempDir = Deno.makeTempDirSync();
+  try {
+    const skillRegistry = createTestSkillRegistry();
+    const logger = createTestLogger();
+    const config = {
+      workingDir: tempDir,
+      platform: "discord",
+      userId: "123",
+      channelId: "456",
+      isDM: false,
+      sessionId: "sess_own",
+    };
+    const client = new ChatbotClient(skillRegistry, logger, config);
+
+    for (const tokenPath of ["$TMPDIR2/x", "$OTHER/x"]) {
+      const request: acp.RequestPermissionRequest = {
+        sessionId: "sess_own",
+        toolCall: {
+          title: "edit",
+          kind: "execute",
+          status: "pending" as const,
+          content: [],
+          toolCallId: "test-id",
+          rawInput: { path: tokenPath },
+          locations: [{ path: tokenPath }],
+        },
+        options: [
+          { kind: "allow_once", optionId: "allow-1", name: "Allow once" },
+          { kind: "reject_once", optionId: "reject-1", name: "Reject once" },
+        ],
+      };
+
+      const response = await client.requestPermission(request);
+      assertEquals(response.outcome.outcome, "selected");
+      if (response.outcome.outcome === "selected") {
+        assertEquals(response.outcome.optionId, "reject-1", `must reject: ${tokenPath}`);
+      }
+    }
+  } finally {
+    Deno.removeSync(tempDir, { recursive: true });
+  }
+});
+
+Deno.test("ChatbotClient - writeTextFile writes the EXPANDED $TMPDIR/$SESSION_ID path", async () => {
+  const tempDir = Deno.makeTempDirSync();
+  try {
+    const skillRegistry = createTestSkillRegistry();
+    const logger = createTestLogger();
+    const config = {
+      workingDir: tempDir,
+      platform: "discord",
+      userId: "123",
+      channelId: "456",
+      isDM: false,
+      sessionId: "sess_own",
+    };
+    const client = new ChatbotClient(skillRegistry, logger, config);
+
+    // Create the staging dir the way the workspace would (writeTextFile does not mkdir).
+    Deno.mkdirSync(join(tempDir, "tmp", "sess_own"), { recursive: true });
+
+    await client.writeTextFile({
+      path: "$TMPDIR/$SESSION_ID/reply.md",
+      content: "定價 $0.435",
+      sessionId: "sess_own",
+    });
+
+    // Content lands at the EXPANDED path, verbatim (including the $ characters).
+    const expanded = join(tempDir, "tmp", "sess_own", "reply.md");
+    assertEquals(Deno.readTextFileSync(expanded), "定價 $0.435");
+
+    // No literal `$TMPDIR` directory was created under the bot's cwd.
+    const literalDir = join(Deno.cwd(), "$TMPDIR");
+    let literalExists = true;
+    try {
+      Deno.statSync(literalDir);
+    } catch {
+      literalExists = false;
+    }
+    assertEquals(literalExists, false);
+
+    // readTextFile on the expanded path returns the verbatim content.
+    const read = await client.readTextFile({ path: expanded, sessionId: "sess_own" });
+    assertEquals(read.content, "定價 $0.435");
+  } finally {
+    Deno.removeSync(tempDir, { recursive: true });
+  }
+});
+
+Deno.test("ChatbotClient - skill command with legacy free-text flag rejected in both forms", async () => {
+  const tempDir = Deno.makeTempDirSync();
+  try {
+    const skillRegistry = createTestSkillRegistry();
+    const logger = createTestLogger();
+    const config = {
+      workingDir: tempDir,
+      platform: "discord",
+      userId: "123",
+      channelId: "456",
+      isDM: false,
+      sessionId: "sess_own",
+    };
+    const allowList: SkillAutoApproveList = {
+      scriptPaths: new Set(["skills/send-reply/scripts/send-reply.ts"]),
+      commandPrefixes: new Set(),
+    };
+    const client = new ChatbotClient(skillRegistry, logger, config, allowList);
+
+    const buildRequest = (command: string): acp.RequestPermissionRequest => ({
+      sessionId: "sess_own",
+      toolCall: {
+        title: "Execute shell command",
+        kind: "execute",
+        status: "pending" as const,
+        content: [],
+        toolCallId: "test-id",
+        rawInput: { commands: [command] },
+      },
+      options: [
+        { kind: "allow_once", optionId: "allow-1", name: "Allow once" },
+        { kind: "reject_once", optionId: "reject-1", name: "Reject once" },
+      ],
+    });
+
+    const script = "/home/deno/.agents/skills/send-reply/scripts/send-reply.ts";
+
+    for (
+      const command of [
+        `${script} --session-id "$SESSION_ID" --message "定價 $0.435"`,
+        `${script} --session-id "$SESSION_ID" --message=定價`,
+        `${script} --session-id "$SESSION_ID" --content "text"`,
+      ]
+    ) {
+      const response = await client.requestPermission(buildRequest(command));
+      assertEquals(response.outcome.outcome, "selected");
+      if (response.outcome.outcome === "selected") {
+        assertEquals(response.outcome.optionId, "reject-1", `must reject: ${command}`);
+      }
+    }
+
+    for (
+      const command of [
+        `${script} --session-id "$SESSION_ID" --message-id "msg_x"`,
+        `${script} --session-id "$SESSION_ID" --message-file "$TMPDIR/$SESSION_ID/reply.md"`,
+      ]
+    ) {
+      const response = await client.requestPermission(buildRequest(command));
+      assertEquals(response.outcome.outcome, "selected");
+      if (response.outcome.outcome === "selected") {
+        assertEquals(response.outcome.optionId, "allow-1", `must approve: ${command}`);
       }
     }
   } finally {

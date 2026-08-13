@@ -12,8 +12,10 @@ import type { NormalizedEvent, PlatformMessage } from "../../src/types/events.ts
 import type { PlatformAdapter } from "@platforms/platform-adapter.ts";
 import type { PlatformCapabilities, ReplyResult } from "../../src/types/platform.ts";
 import type { AgentConnectorOptions } from "../../src/acp/types.ts";
+import type { ClientConfig } from "../../src/acp/types.ts";
 import type { AgentConnector } from "../../src/acp/agent-connector.ts";
 import type { PromptResponse } from "npm:@agentclientprotocol/sdk@^0.14.1";
+import { join } from "@std/path";
 
 // Mock PlatformAdapter
 class MockPlatformAdapter implements Partial<PlatformAdapter> {
@@ -3260,6 +3262,56 @@ Deno.test("SessionOrchestrator - processMessage cleans up when connector.connect
     assertEquals(response.replySent, false);
     assertExists(response.error);
     assertEquals(orchestrator.mockConnector!.disconnected, true);
+
+    sessionRegistry.stop();
+  } finally {
+    await Deno.remove(tempDir, { recursive: true });
+  }
+});
+
+Deno.test("SessionOrchestrator - setupSession pre-creates session payload staging dir; ACP writeTextFile lands in it", async () => {
+  const tempDir = await Deno.makeTempDir();
+  try {
+    const { orchestrator, skillRegistry, workspaceManager, sessionRegistry } =
+      await createTestableOrchestrator(tempDir);
+
+    const event = createTestEvent();
+    const platformAdapter = new MockPlatformAdapter() as unknown as PlatformAdapter;
+    const replyHandler = skillRegistry.getReplyHandler();
+
+    // Assert mid-session (the connector is created right after setupSession, and
+    // the session-scoped staging dir is only removed at session end): the
+    // client config carries the shell session id, and setupSession has
+    // pre-created `{cwd}/tmp/{sessionId}` so the agent's `$TMPDIR/$SESSION_ID/...`
+    // payload writes have an existing parent (a missing parent would later
+    // surface as SKILL_PAYLOAD_NOT_FOUND). The dir is a real writable
+    // directory, and the token-expansion write chain itself is covered by the
+    // ChatbotClient tests (writeTextFile writes the EXPANDED path).
+    orchestrator.setConnectorSetup((connector) => {
+      const clientConfig = connector.options.clientConfig as ClientConfig;
+      if (!clientConfig.sessionId) {
+        throw new Error("captured client config missing sessionId");
+      }
+      const stagingDir = join(connector.options.agentConfig.cwd, "tmp", clientConfig.sessionId);
+      assertEquals(Deno.statSync(stagingDir).isDirectory, true);
+      const probe = join(stagingDir, "probe.md");
+      Deno.writeTextFileSync(probe, "probe");
+      assertEquals(Deno.readTextFileSync(probe), "probe");
+
+      connector.promptResponses = [{ stopReason: "end_turn" } as PromptResponse];
+      connector.onPrompt = (callCount) => {
+        // Simulate the reply being sent so the session completes successfully.
+        if (callCount === 1) {
+          const workspace = workspaceManager.getWorkspaceKeyFromEvent(event);
+          const key = `${workspace}:${event.channelId}`;
+          // deno-lint-ignore no-explicit-any
+          (replyHandler as any).replySentMap.set(key, true);
+        }
+      };
+    });
+
+    const response = await orchestrator.processMessage(event, platformAdapter);
+    assertEquals(response.success, true);
 
     sessionRegistry.stop();
   } finally {

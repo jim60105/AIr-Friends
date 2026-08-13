@@ -165,6 +165,16 @@ export function containsShellOperators(cmd: string): boolean {
 const ALLOWED_SCRIPT_INTERPRETERS = new Set(["deno"]);
 
 /**
+ * Legacy free-text skill argument flags (D5). A skill command carrying one of
+ * these in either form (`--message x` or `--message=x`) is rejected by the gate
+ * as defense-in-depth — free-text content must never reach a shell command line
+ * (bash would expand `$VAR` in it). Distinct tokens such as `--message-id`,
+ * `--message-file`, `--content-file`, `--query-file`, `--caption-file` do not
+ * match and are unaffected.
+ */
+export const LEGACY_FREE_TEXT_FLAG_PATTERN = /^--(?:message|content|query|caption)(?:=|$)/;
+
+/**
  * Determine whether a single token equals the whitelisted script path or ends with
  * `/<allowedPath>` (so an absolute/`$HOME`-anchored path to the same script matches).
  */
@@ -730,6 +740,39 @@ export class ChatbotClient implements acp.Client {
         });
 
       if (isSkillCommand) {
+        // Defense-in-depth (D5): reject skill commands that smuggle free text in a
+        // legacy `--message` / `--content` / `--query` / `--caption` flag (either
+        // `--flag value` or `--flag=value`). The script-side check uses the same
+        // token pattern, so both layers agree.
+        const hasLegacyFreeTextFlag = commands.some((cmd) =>
+          cmd.trim().split(/\s+/).some((token) => LEGACY_FREE_TEXT_FLAG_PATTERN.test(token))
+        );
+
+        if (hasLegacyFreeTextFlag) {
+          this.logger.warn(
+            "Rejecting skill command with legacy free-text flag: {command}",
+            { command: commands.join("; ") },
+          );
+
+          void this.writePermissionAudit(
+            "permission_denied",
+            title,
+            kind,
+            commands.join("; "),
+            "rejected_skill_free_text_flag",
+          );
+
+          const rejectOption = params.options.find((o) => o.kind === "reject_once") ??
+            params.options[0];
+
+          return Promise.resolve({
+            outcome: {
+              outcome: "selected",
+              optionId: rejectOption.optionId,
+            },
+          });
+        }
+
         this.logger.info("Auto-approving skill shell execution: {command}", {
           command: commands.join("; "),
         });
@@ -1156,8 +1199,13 @@ export class ChatbotClient implements acp.Client {
     this.updateActivity();
     this.logger.debug("Read file requested", { path: params.path });
 
+    // The path that passes validation IS the path that is read: canonicalize
+    // `$TMPDIR`/`$SESSION_ID` tokens first, then validate and read the
+    // expanded path (no literal `$TMPDIR` directory under the bot's cwd).
+    const resolvedPath = this.resolveSessionPath(params.path);
+
     // Validate path is within working directory (boundary-safe)
-    if (!this.isPathAllowed(params.path)) {
+    if (!this.isPathAllowed(resolvedPath)) {
       throw new acp.RequestError(
         -32600,
         "Access denied: path outside working directory",
@@ -1167,9 +1215,9 @@ export class ChatbotClient implements acp.Client {
     // Read-extension allowlist (F4): only workspace memory (`.jsonl`), markdown (`.md`),
     // and plain text (`.txt`) may be read. This blocks reads of arbitrary sensitive text
     // files (e.g. `.json` token/cache files) that could live inside an allowed directory.
-    if (!hasAllowedExtension(params.path, ALLOWED_READ_EXTENSIONS)) {
+    if (!hasAllowedExtension(resolvedPath, ALLOWED_READ_EXTENSIONS)) {
       this.logger.warn("Rejecting read due to disallowed file extension: {path}", {
-        path: params.path,
+        path: resolvedPath,
         allowedExtensions: ALLOWED_READ_EXTENSIONS,
       });
       throw new acp.RequestError(
@@ -1181,7 +1229,7 @@ export class ChatbotClient implements acp.Client {
     }
 
     try {
-      const content = await Deno.readTextFile(params.path);
+      const content = await Deno.readTextFile(resolvedPath);
       return { content };
     } catch (error) {
       throw new acp.RequestError(
@@ -1201,8 +1249,13 @@ export class ChatbotClient implements acp.Client {
     this.updateActivity();
     this.logger.debug("Write file requested", { path: params.path });
 
+    // The path that passes validation IS the path that is written: canonicalize
+    // `$TMPDIR`/`$SESSION_ID` tokens first, then validate and write the
+    // expanded path (no literal `$TMPDIR` directory under the bot's cwd).
+    const resolvedPath = this.resolveSessionPath(params.path);
+
     // Validate path is within working directory
-    if (!this.isPathAllowed(params.path)) {
+    if (!this.isPathAllowed(resolvedPath)) {
       throw new acp.RequestError(
         -32600,
         "Access denied: path outside working directory",
@@ -1214,8 +1267,8 @@ export class ChatbotClient implements acp.Client {
     // directly), so the same F3 write-gating and F4 extension checks are enforced here too.
     if (!this.config.yolo) {
       const isSharedWorkspaceWrite = this.config.agentWorkspacePath
-        ? isWithinDir(params.path, this.config.agentWorkspacePath) &&
-          !this.isWithinTmpDir(params.path)
+        ? isWithinDir(resolvedPath, this.config.agentWorkspacePath) &&
+          !this.isWithinTmpDir(resolvedPath)
         : false;
 
       if (isSharedWorkspaceWrite) {
@@ -1223,7 +1276,7 @@ export class ChatbotClient implements acp.Client {
         if (this.config.canWriteAgentWorkspace !== true) {
           this.logger.warn(
             "Rejecting writeTextFile to shared agent workspace: session not authorized (canWriteAgentWorkspace not set)",
-            { path: params.path },
+            { path: resolvedPath },
           );
           throw new acp.RequestError(
             -32600,
@@ -1231,7 +1284,7 @@ export class ChatbotClient implements acp.Client {
           );
         }
 
-        if (!this.hasAllowedWriteExtension(params.path)) {
+        if (!this.hasAllowedWriteExtension(resolvedPath)) {
           throw new acp.RequestError(
             -32600,
             `Access denied: file extension not allowed for agent workspace writes (permitted: ${
@@ -1243,7 +1296,7 @@ export class ChatbotClient implements acp.Client {
     }
 
     try {
-      await Deno.writeTextFile(params.path, params.content);
+      await Deno.writeTextFile(resolvedPath, params.content);
       return {};
     } catch (error) {
       throw new acp.RequestError(
@@ -1274,14 +1327,40 @@ export class ChatbotClient implements acp.Client {
   }
 
   /**
+   * Expand the session-bound path tokens `$TMPDIR`/`${TMPDIR}` and
+   * `$SESSION_ID`/`${SESSION_ID}` (as the agent types them into its edit/write
+   * tools) to the resolved session TMPDIR (`{workingDir}/tmp`) and the session
+   * id, then return the canonical path. An absent session id expands to an
+   * empty string. Other `$VAR`-style tokens (e.g. `$TMPDIR2`, `$OTHER`) are
+   * left verbatim and will fail containment, mirroring the home-anchored
+   * expansion used for generic command arguments. The bot never executes the
+   * expanded value — it only resolves and compares paths, so no injection is
+   * possible (a path is data).
+   */
+  private resolveSessionPath(path: string): string {
+    const tmpDir = resolve(this.config.workingDir, "tmp");
+    const sessionId = this.config.sessionId ?? "";
+    let expanded = path;
+    // ${TMPDIR} / ${SESSION_ID} exact forms first, then $TMPDIR / $SESSION_ID
+    // with a variable-name boundary so `$TMPDIR2` / `$SESSION_ID2` are NOT
+    // expanded.
+    expanded = expanded.split("${TMPDIR}").join(tmpDir);
+    expanded = expanded.split("${SESSION_ID}").join(sessionId);
+    expanded = expanded.replace(/\$TMPDIR(?![A-Za-z0-9_])/g, tmpDir);
+    expanded = expanded.replace(/\$SESSION_ID(?![A-Za-z0-9_])/g, sessionId);
+    return resolve(expanded);
+  }
+
+  /**
    * Validate that a path is within the allowed directories
    * Allows: user workspace OR agent global workspace
    */
   private isPathAllowed(path: string): boolean {
     try {
-      if (isWithinDir(path, this.config.workingDir)) return true;
+      const expanded = this.resolveSessionPath(path);
+      if (isWithinDir(expanded, this.config.workingDir)) return true;
 
-      if (this.config.agentWorkspacePath && isWithinDir(path, this.config.agentWorkspacePath)) {
+      if (this.config.agentWorkspacePath && isWithinDir(expanded, this.config.agentWorkspacePath)) {
         return true;
       }
 
@@ -1298,13 +1377,14 @@ export class ChatbotClient implements acp.Client {
    */
   private isAgentWorkspacePath(path: string): boolean {
     try {
+      const expanded = this.resolveSessionPath(path);
       // Check agent workspace path (boundary-safe)
-      if (this.config.agentWorkspacePath && isWithinDir(path, this.config.agentWorkspacePath)) {
+      if (this.config.agentWorkspacePath && isWithinDir(expanded, this.config.agentWorkspacePath)) {
         return true;
       }
 
       // Check workspace TMPDIR
-      if (this.isWithinTmpDir(path)) return true;
+      if (this.isWithinTmpDir(expanded)) return true;
 
       return false;
     } catch {
@@ -1316,7 +1396,7 @@ export class ChatbotClient implements acp.Client {
    * Check if a path is within the workspace TMPDIR (boundary-safe).
    */
   private isWithinTmpDir(path: string): boolean {
-    return isWithinDir(path, resolve(this.config.workingDir, "tmp"));
+    return isWithinDir(this.resolveSessionPath(path), resolve(this.config.workingDir, "tmp"));
   }
 
   /**

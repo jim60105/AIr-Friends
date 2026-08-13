@@ -1,7 +1,8 @@
-#!/usr/bin/env -S deno run --allow-net --allow-env
+#!/usr/bin/env -S deno run --allow-net --allow-env --allow-read --allow-write
 
 import { parse } from "jsr:@std/flags@^0.224.0";
 import { callSkillApi, exitWithError, outputResult, parseBaseArgs } from "../../lib/client.ts";
+import { PayloadError, readPayloadArg } from "../../lib/payload.ts";
 
 async function main() {
   try {
@@ -9,7 +10,6 @@ async function main() {
       string: [
         "session-id",
         "api-url",
-        "content",
         "importance",
         "related-to",
         "supersedes",
@@ -18,15 +18,19 @@ async function main() {
         "scope",
         "decay",
       ],
-      alias: { s: "session-id", a: "api-url", c: "content", i: "importance" },
+      alias: { s: "session-id", a: "api-url", i: "importance" },
     });
 
     const { sessionId, apiUrl } = parseBaseArgs(Deno.args);
 
-    const content = args.content;
-    if (!content) {
-      exitWithError("Missing required argument: --content");
-    }
+    const content = await readPayloadArg(Deno.args, "content", {
+      sessionId,
+      alias: "c",
+      fileName: "content.md",
+      example: `${Deno.env.get("HOME") ?? "~"}/.agents/skills/memory-save/scripts/memory-save.ts ` +
+        `--session-id "$SESSION_ID" --importance normal ` +
+        `--content-file "$TMPDIR/$SESSION_ID/content.md"`,
+    });
 
     const importance = args.importance ?? "normal";
 
@@ -88,7 +92,11 @@ async function main() {
       Deno.exit(1);
     }
   } catch (error) {
-    exitWithError(error instanceof Error ? error.message : String(error));
+    if (error instanceof PayloadError) {
+      exitWithError(error.message, error.code);
+    } else {
+      exitWithError(error instanceof Error ? error.message : String(error));
+    }
   }
 }
 

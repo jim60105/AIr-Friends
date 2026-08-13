@@ -1,22 +1,27 @@
-#!/usr/bin/env -S deno run --allow-net --allow-env
+#!/usr/bin/env -S deno run --allow-net --allow-env --allow-read --allow-write
 
 import { parse } from "jsr:@std/flags@^0.224.0";
 import { callSkillApi, exitWithError, outputResult, parseBaseArgs } from "../../lib/client.ts";
+import { PayloadError, readPayloadArg } from "../../lib/payload.ts";
 
 async function main() {
   try {
     const args = parse(Deno.args, {
-      string: ["session-id", "api-url", "query", "category", "scope"],
-      alias: { s: "session-id", a: "api-url", q: "query" },
+      string: ["session-id", "api-url", "category", "scope"],
+      alias: { s: "session-id", a: "api-url" },
       default: { limit: 10 },
     });
 
     const { sessionId, apiUrl } = parseBaseArgs(Deno.args);
 
-    const query = args.query;
-    if (!query) {
-      exitWithError("Missing required argument: --query");
-    }
+    const query = await readPayloadArg(Deno.args, "query", {
+      sessionId,
+      alias: "q",
+      fileName: "query.md",
+      example:
+        `${Deno.env.get("HOME") ?? "~"}/.agents/skills/memory-search/scripts/memory-search.ts ` +
+        `--session-id "$SESSION_ID" --limit 10 --query-file "$TMPDIR/$SESSION_ID/query.md"`,
+    });
 
     const limit = Number(args.limit) || 10;
 
@@ -48,7 +53,11 @@ async function main() {
       Deno.exit(1);
     }
   } catch (error) {
-    exitWithError(error instanceof Error ? error.message : String(error));
+    if (error instanceof PayloadError) {
+      exitWithError(error.message, error.code);
+    } else {
+      exitWithError(error instanceof Error ? error.message : String(error));
+    }
   }
 }
 

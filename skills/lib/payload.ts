@@ -1,0 +1,242 @@
+// Shared payload-file helpers for skill scripts.
+//
+// Free-text content (reply text, memory content, search queries, captions) MUST
+// never appear on a shell command line: bash expands `$VAR` in double-quoted
+// arguments before the script runs, corrupting content and leaking subprocess
+// environment variables into external channels. Instead, the agent stages the
+// text in a payload file under the session-scoped TMPDIR via the ACP filesystem
+// interface (edit/write tool), and the script reads it back verbatim.
+
+import { resolve, SEPARATOR } from "jsr:@std/path@^1.0.0";
+
+/**
+ * Error raised by the payload helpers on a contract failure.
+ * Carries a stable machine-readable `code` plus a human (LLM-audience) guidance
+ * message that states what went wrong, why it matters, and the correct pattern
+ * with a copy-pasteable example invocation.
+ */
+export class PayloadError extends Error {
+  code: string;
+
+  constructor(code: string, message: string) {
+    super(message);
+    this.name = "PayloadError";
+    this.code = code;
+  }
+}
+
+/**
+ * Legacy free-text CLI argument flags. Any token matching this pattern is
+ * rejected: exact `--message` / `--content` / `--query` / `--caption` (with a
+ * following whitespace-separated value) or the attached `--flag=value` form.
+ * Distinct tokens such as `--message-id`, `--message-file`, `--content-file`,
+ * `--query-file`, `--caption-file` do not match and are unaffected.
+ */
+export const LEGACY_FREE_TEXT_FLAG_PATTERN = /^--(?:message|content|query|caption)(?:=|$)/;
+
+/**
+ * Boundary-safe containment check: true when `path` equals `base` or starts with
+ * `base` followed by a path separator. Rejects sibling-prefix escapes such as
+ * `{base}-2` and `{base}2`.
+ */
+export function isWithinDir(path: string, base: string): boolean {
+  const resolvedPath = resolve(path);
+  const resolvedBase = resolve(base);
+  if (resolvedPath === resolvedBase) return true;
+  return resolvedPath.startsWith(resolvedBase + SEPARATOR);
+}
+
+/**
+ * Resolve the session staging base directory: `{cwd}/tmp/{sessionId}`.
+ * Sessions without an id (defensive; internal sessions) fall back to
+ * `{cwd}/tmp`.
+ */
+export function resolvePayloadBase(cwd: string, sessionId: string): string {
+  return sessionId ? resolve(cwd, "tmp", sessionId) : resolve(cwd, "tmp");
+}
+
+/**
+ * Resolve a payload path against the script's working directory (the session
+ * workspace) and require it to be inside the session staging directory.
+ *
+ * - The resolved path must be inside the session staging base (boundary-safe,
+ *   so `{base}-2`/`{base}2` siblings are rejected).
+ * - When the file exists, its REAL path (`Deno.realPath`) is re-checked for
+ *   containment so a symlink escaping the staging directory (e.g. pointing at
+ *   `/etc/passwd` or into another session's directory) is rejected.
+ *
+ * Throws {@link PayloadError} with `SKILL_PAYLOAD_OUT_OF_BOUNDS` or
+ * `SKILL_PAYLOAD_NOT_FOUND`; otherwise returns the resolved real path.
+ */
+export function resolvePayloadPath(
+  payloadPath: string,
+  cwd: string,
+  sessionId: string,
+  options: { flagName: string; example: string; fileName: string },
+): string {
+  const base = resolvePayloadBase(cwd, sessionId);
+  const resolved = resolve(cwd, payloadPath);
+
+  if (!isWithinDir(resolved, base)) {
+    throw new PayloadError(
+      "SKILL_PAYLOAD_OUT_OF_BOUNDS",
+      outOfBoundsMessage(payloadPath, base, options),
+    );
+  }
+
+  let realPath: string;
+  try {
+    realPath = Deno.realPathSync(resolved);
+  } catch {
+    throw new PayloadError("SKILL_PAYLOAD_NOT_FOUND", notFoundMessage(payloadPath, options));
+  }
+
+  if (!isWithinDir(realPath, base)) {
+    throw new PayloadError(
+      "SKILL_PAYLOAD_OUT_OF_BOUNDS",
+      outOfBoundsMessage(payloadPath, base, options),
+    );
+  }
+
+  return realPath;
+}
+
+/**
+ * Read the value of a payload-file argument from raw CLI arguments.
+ *
+ * - Any token matching {@link LEGACY_FREE_TEXT_FLAG_PATTERN} raises
+ *   `SKILL_LEGACY_FLAG` (both `--flag value` and `--flag=value` forms).
+ * - The payload value comes from `--<flagName>-file` (or `--<flagName>-file=…`
+ *   or the configured short alias).
+ * - The value is resolved via {@link resolvePayloadPath}, read verbatim as
+ *   UTF-8, and the payload file is best-effort deleted after the successful
+ *   read.
+ * - A REQUIRED payload with no flag raises `SKILL_MISSING_PAYLOAD`; an
+ *   OPTIONAL payload that is omitted returns `undefined`.
+ *
+ * Returns the file content (which may be an empty string).
+ */
+export async function readPayloadArg(
+  args: string[],
+  flagName: string,
+  options: {
+    sessionId: string;
+    example: string;
+    fileName: string;
+    alias?: string;
+    required?: boolean;
+    cwd?: string;
+  },
+): Promise<string | undefined> {
+  const fileFlag = `--${flagName}-file`;
+  const required = options.required ?? true;
+  const cwd = options.cwd ?? Deno.cwd();
+
+  let value: string | undefined;
+
+  for (let i = 0; i < args.length; i++) {
+    const token = args[i];
+    if (LEGACY_FREE_TEXT_FLAG_PATTERN.test(token)) {
+      throw new PayloadError("SKILL_LEGACY_FLAG", legacyFlagMessage(flagName, options));
+    }
+    if (token === fileFlag) {
+      value = args[i + 1];
+    } else if (token.startsWith(`${fileFlag}=`)) {
+      value = token.substring(fileFlag.length + 1);
+    } else if (options.alias && token === `-${options.alias}`) {
+      value = args[i + 1];
+    } else if (options.alias && token.startsWith(`-${options.alias}=`)) {
+      value = token.substring(options.alias.length + 2);
+    }
+  }
+
+  if (value === undefined) {
+    if (!required) return undefined;
+    throw new PayloadError("SKILL_MISSING_PAYLOAD", missingPayloadMessage(flagName, options));
+  }
+
+  const path = resolvePayloadPath(value, cwd, options.sessionId, {
+    flagName,
+    example: options.example,
+    fileName: options.fileName,
+  });
+
+  let content: string;
+  try {
+    content = await Deno.readTextFile(path);
+  } catch {
+    throw new PayloadError(
+      "SKILL_PAYLOAD_NOT_FOUND",
+      notFoundMessage(value, {
+        flagName,
+        example: options.example,
+        fileName: options.fileName,
+      }),
+    );
+  }
+
+  // Best-effort: the payload is consumed; remove it so it cannot be re-sent or
+  // confuse a later session. Failures are ignored (read-only filesystem, etc.).
+  try {
+    await Deno.remove(path);
+  } catch {
+    // Ignore deletion failures.
+  }
+
+  return content;
+}
+
+function twoStepGuidance(flagName: string, options: { fileName: string; example: string }): string {
+  return (
+    `1. Write the text to $TMPDIR/$SESSION_ID/${options.fileName} using your edit/write tool. ` +
+    `2. Invoke the script with --${flagName}-file pointing at that file. ` +
+    `Example: ${options.example}`
+  );
+}
+
+function legacyFlagMessage(
+  flagName: string,
+  options: { fileName: string; example: string },
+): string {
+  return (
+    `The --${flagName} argument is no longer supported: free-text content passed on the command line ` +
+    `is expanded by the shell before the script runs, so a $ in your text (e.g. $0, $HOME, $API_KEY) ` +
+    `is either corrupted or leaks subprocess environment variables into the message. You must NOT put ` +
+    `message content on the command line. Instead, ${twoStepGuidance(flagName, options)}`
+  );
+}
+
+function missingPayloadMessage(
+  flagName: string,
+  options: { fileName: string; example: string },
+): string {
+  return (
+    `Missing required argument: --${flagName}-file. The ${flagName} content must be passed via a ` +
+    `payload file, never on the command line. ${twoStepGuidance(flagName, options)}`
+  );
+}
+
+function outOfBoundsMessage(
+  value: string,
+  base: string,
+  options: { flagName: string; fileName: string; example: string },
+): string {
+  return (
+    `The payload file "${value}" is outside the session staging directory ` +
+    `"${base}" (resolved as $TMPDIR/$SESSION_ID). The script only reads payload files from its own ` +
+    `session's staging directory — this prevents sending the content of arbitrary files (workspace ` +
+    `memory, notes, ~/.git-credentials, another session's directory, or a symlink escaping the ` +
+    `staging directory). ${twoStepGuidance(options.flagName, options)}`
+  );
+}
+
+function notFoundMessage(
+  value: string,
+  options: { flagName: string; fileName: string; example: string },
+): string {
+  return (
+    `The payload file "${value}" does not exist or cannot be read. The script reads content from a ` +
+    `file staged in $TMPDIR/$SESSION_ID/, so the file must be written FIRST with your edit/write ` +
+    `tool before invoking the script. ${twoStepGuidance(options.flagName, options)}`
+  );
+}

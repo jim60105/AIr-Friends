@@ -10,16 +10,30 @@ Save important information that should persist across conversations.
 
 ## Usage
 
-```bash
-${HOME}/.agents/skills/memory-save/scripts/memory-save.ts \
-  --session-id "$SESSION_ID" \
-  --content "User prefers formal communication" \
-  --importance high
-```
+**Two-step flow — the memory content MUST NOT appear on the command line.**
+
+1. Write the memory content to a payload file under the session staging directory using your **edit/write tool**:
+
+   ```
+   $TMPDIR/$SESSION_ID/content.md
+   ```
+
+   The `$TMPDIR` / `$SESSION_ID` tokens in that path are expanded by the ACP path boundary, so the write is approved and the text bytes are preserved **verbatim** (no shell expansion).
+
+2. Invoke the script with the payload file path:
+
+   ```bash
+   ${HOME}/.agents/skills/memory-save/scripts/memory-save.ts \
+     --session-id "$SESSION_ID" \
+     --content-file "$TMPDIR/$SESSION_ID/content.md" \
+     --importance high
+   ```
+
+**WARNING**: Never put memory content on the command line. The legacy `--content "..."` / `--content=...` flag is REMOVED: the shell expands `$VAR` in it, which corrupts stored memory and can leak environment variables.
 
 ## Parameters
 
-- `--content`: (Required) The memory content to save. Log what you learned and what you feel. You don't need to stick only to objective descriptions. Write in a relaxed way, using YOUR character's perspective and subjective descriptions.
+- `--content-file`: (Required) Path of the payload file containing the memory content. Log what you learned and what you feel. You don't need to stick only to objective descriptions. Write in a relaxed way, using YOUR character's perspective and subjective descriptions.
 - `--importance`: `normal` (default) or `high`. High importance memories are for user preferences, critical facts, or information that should be prioritized in recall. Normal importance is for general information that is not important or will be out of date soon.
 - `--tier`: (Optional) `core`, `working`, or `archive` (default: `archive`). Core memories are persistent identity facts (never decay). Working memories are active context. Archive memories are long-term storage subject to decay.
 - `--category`: (Optional) `fact`, `preference`, `episode`, `summary`, or `relationship` (default: `fact`). Classifies the type of information being stored.
@@ -27,6 +41,10 @@ ${HOME}/.agents/skills/memory-save/scripts/memory-save.ts \
 - `--decay`: (Optional) 0.0–1.0 importance-weighted temporal relevance. Defaults are based on tier: core=1.0 (no decay), working=0.8, archive=0.5. Lower values indicate less current relevance.
 - `--related-to`: (Optional) Comma-separated IDs of semantically related memories
 - `--supersedes`: (Optional) Comma-separated IDs of memories this new memory replaces
+
+## Error Codes
+
+If the script fails, read the JSON error on stderr. It contains the fix. Common codes: `SKILL_LEGACY_FLAG` (you used the removed `--content` flag — stage the text in `$TMPDIR/$SESSION_ID/content.md` and use `--content-file`), `SKILL_MISSING_PAYLOAD` (no `--content-file` given), `SKILL_PAYLOAD_OUT_OF_BOUNDS` (payload path outside `$TMPDIR/$SESSION_ID/`), `SKILL_PAYLOAD_NOT_FOUND` (payload file not written yet — write it first with the edit/write tool).
 
 ## Notes
 

@@ -220,7 +220,22 @@ export function getRetryPromptStrategy(type: AgentType): RetryPromptStrategy {
   }
 
   const defaultRetryMessage =
-    `System message: You have a special turn. You must communicate with the user by using send-reply or react-message before ending the session.\n\n---\n\n${sendReplyContent}\n\n---\n\n${reactMessageContent}`;
+    `System message: Your previous turn ended without sending a reply or reaction to the user. ` +
+    `You must communicate with the user by using send-reply or react-message before ending this session.\n\n` +
+    `If you tried send-reply and it failed, the most likely causes are:\n` +
+    `- You used the removed legacy flag --message with the text on the command line (it was rejected). ` +
+    `Message content MUST NOT appear on a command line — the shell expands $ in it, corrupting the text and ` +
+    `leaking environment variables.\n` +
+    `- The payload file was never written. You must write the message text to a file FIRST using your ` +
+    `edit/write tool (e.g. $TMPDIR/$SESSION_ID/reply.md), then pass that path.\n` +
+    `- The payload was staged outside $TMPDIR/$SESSION_ID/ (e.g. a workspace file) and was rejected — the ` +
+    `script only reads its own session's staging directory.\n` +
+    `- A previous send-reply call errored — read that error's output; it contains the exact fix.\n\n` +
+    `Correct pattern (two steps):\n` +
+    `1. Write the reply text to $TMPDIR/$SESSION_ID/reply.md with your edit/write tool.\n` +
+    `2. Invoke: \${HOME}/.agents/skills/send-reply/scripts/send-reply.ts --session-id "$SESSION_ID" ` +
+    `--message-file "$TMPDIR/$SESSION_ID/reply.md"\n\n` +
+    `---\n\n${sendReplyContent}\n\n---\n\n${reactMessageContent}`;
 
   switch (type) {
     case "opencode":

@@ -1,0 +1,39 @@
+## Why
+
+Skill scripts are invoked by the external ACP agent (OpenCode) through the Bash tool. Free-text content embedded in double-quoted CLI arguments is subject to shell parameter expansion before the script ever runs: `$0` becomes `/usr/bin/bash` and any `$VAR` expands to the subprocess environment's value. This is both a correctness bug and a confidentiality hole — agent output containing `$` gets mangled, and an agent that types `$OPENROUTER_API_KEY` (or any other env var, accidentally or deliberately) would have it expanded and posted verbatim to any channel the bot can reach, including public ones. Observed in production: a Discord reply rendered pricing as `/usr/bin/bash.435` (`$0.435`).
+
+Because `agent-config/opencode.json` grants skill-invocation bash patterns `"allow"`, these commands never reach the ACP permission gate, so the fix cannot live in the gate alone — the message payload must be removed from the command line entirely.
+
+## What Changes
+
+- **BREAKING** — Remove free-text CLI arguments from skill scripts: `send-reply --message`, `edit-reply --message`, `set-reminder --message`, `send-file --caption`, `memory-save --content`, `memory-search --query`, `fetch-context --query`. Each is replaced by a payload-file flag (`--message-file`, `--caption-file`, `--content-file`, `--query-file`) whose content is read by the script. The legacy flags are rejected with a clear error in both forms (`--flag value` and `--flag=value`), never silently accepted.
+- **Payload staging via ACP filesystem, session-scoped**: the agent writes the payload text to `$TMPDIR/$SESSION_ID/...` (its own session-scoped staging directory) using its edit/write capability, then passes that path to the script. The ACP path boundary (`isPathAllowed` / `isAgentWorkspacePath` / TMPDIR checks) gains `$TMPDIR`/`${TMPDIR}`/`$SESSION_ID`/`${SESSION_ID}` token expansion, and the canonical expanded path — not the raw string — is the path `readTextFile`/`writeTextFile` actually read/write.
+- **Payload-file containment in the scripts**: a shared helper (`skills/lib`) resolves the payload path against the script's cwd (the session workspace) and requires it to resolve inside the session staging directory `{workspace}/tmp/{sessionId}` (boundary-safe), with a `Deno.realPath` re-check so symlink escapes are rejected. This closes the exfiltration vector a naive `--message-file` would open (`--message-file memory.private.jsonl` / `~/.git-credentials` / another session's directory must fail). Scripts gain `--allow-read` and `--allow-write` in their shebang (canonical invocation is direct shebang execution; `--allow-write` enables best-effort deletion of the consumed payload file).
+- **Gate defense-in-depth**: the restricted-mode skill-command auto-approval path rejects any command containing a legacy free-text flag in either form (`--message`, `--message=value`, `--content`, `--query`, `--caption` — so `--message-id`/`--message-file` are unaffected), so even a skill command that reaches the gate cannot smuggle free text through the shell.
+- **SKILL.md + embedded prompt updates**: SKILL.md usage docs for all seven skills (write payload to `$TMPDIR/$SESSION_ID/...` first, then invoke with the payload-file flag; never put message content on the command line), plus `prompts/system_summary.md`, which embeds the old `memory-save --content "..."` contract and runs by default for conversation summaries.
+- **Instructive error messages (指導性錯誤資訊)**: because the payload-file flow adds a step, every contract failure teaches the correct pattern instead of a bare error. The shared payload helper raises typed errors with stable codes (`SKILL_LEGACY_FLAG`, `SKILL_MISSING_PAYLOAD`, `SKILL_PAYLOAD_OUT_OF_BOUNDS`, `SKILL_PAYLOAD_NOT_FOUND`) whose `error` field states what was wrong, why it matters (security), and the exact correct two-step invocation with a copy-pasteable example. This covers both failure moments: a rejected script call mid-turn (the agent sees the guidance in the tool output and self-corrects) and a turn that ends without a reply (the missing-reply retry prompt is rewritten to explain the likely causes — e.g. legacy `--message` rejected, payload never written, payload staged outside `$TMPDIR/$SESSION_ID/` — and gives the correct example before embedding the SKILL.md content).
+- **Discord startup slash-command wording** (secondary, cosmetic): log messages in `cleanupSlashCommands` change from "deleted/removed" to "aligned" (`"Successfully aligned all global slash commands"`, `"Successfully aligned all guild commands"`, matching in-progress/error messages); method renamed to `alignSlashCommands`. No behavior change.
+
+## Capabilities
+
+### New Capabilities
+
+- (none)
+
+### Modified Capabilities
+
+- `skills-and-reply`: "Shell-Based Skill Execution" changes — skill scripts SHALL NOT accept free-text content as CLI arguments (either `--flag value` or `--flag=value` form); free-text arguments are passed via payload files staged in the session-scoped TMPDIR. "Retry on Missing Reply" changes — the retry prompt SHALL be instructive (likely causes + correct example + embedded SKILL.md). New requirement "Payload-File Argument Passing" — payload-file flags, session-scoped `{workspace}/tmp/{sessionId}` containment (boundary-safe + symlink-aware via `realPath`), and legacy-flag rejection. New requirement "Instructive Skill Error Messages" — typed error codes (`SKILL_LEGACY_FLAG` / `SKILL_MISSING_PAYLOAD` / `SKILL_PAYLOAD_OUT_OF_BOUNDS` / `SKILL_PAYLOAD_NOT_FOUND`) with guidance that states what was wrong, why, and the correct example invocation.
+- `acp-integration`: "Permission Handling — Restricted Mode" changes — edit/write path checks expand `$TMPDIR` / `${TMPDIR}` / `$SESSION_ID` / `${SESSION_ID}` tokens; `readTextFile`/`writeTextFile` operate on the canonical expanded path; skill-command auto-approval rejects commands containing legacy free-text skill argument flags in either form.
+
+## Impact
+
+- `skills/lib/client.ts` (or a new `skills/lib/payload.ts`) — shared payload-file resolution + session-scoped containment helper; typed errors with `code` + guidance; `exitWithError` extended with a `code` field.
+- Skill scripts: `send-reply`, `edit-reply`, `set-reminder`, `send-file`, `memory-save`, `memory-search`, `fetch-context` (argument parsing; per-skill example invocation in the guidance; shebangs gain `--allow-read`; best-effort payload deletion after read).
+- `src/acp/agent-factory.ts` — instructive missing-reply retry prompt (`defaultRetryMessage` in `getRetryPromptStrategy`).
+- `SKILL.md` usage docs for the same seven skills (incl. error-code reference).
+- `prompts/system_summary.md` — embedded `memory-save --content` usage block migrated to the payload-file flow (runs by default; also affected by the same `$` corruption).
+- `src/acp/client.ts` — `$TMPDIR`/`$SESSION_ID` token expansion in path checks; `readTextFile`/`writeTextFile` operate on the canonical expanded path; legacy-flag rejection (both `--flag` and `--flag=value` forms) in the skill-command approval branch.
+- `src/platforms/discord/discord-adapter.ts` — `cleanupSlashCommands` → `alignSlashCommands` reworded logs (issue 2).
+- Tests: unit tests for the payload helper (incl. error-code + guidance assertions); subprocess tests executing the scripts directly against a mock `--api-url` (verbatim `$`/newline content, legacy-flag rejection incl. `--flag=value` with `SKILL_LEGACY_FLAG` guidance, out-of-bounds payloads with `SKILL_PAYLOAD_OUT_OF_BOUNDS`); retry-prompt content test; new `requestPermission`-level cases for token expansion, expanded-path I/O, and legacy-flag rejection; no handler/API changes (Skill API already receives content as JSON parameters).
+- Docs: `AGENTS.md`, `docs/SKILLS_IMPLEMENTATION.md` updated for the new invocation contract.
+- No configuration surface changes; no backward compatibility or migration needed (early-stage project, zero users).

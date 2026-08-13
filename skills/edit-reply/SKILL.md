@@ -23,12 +23,38 @@ Edit the previously sent reply message. Use this when you need to correct errors
 
 ## Usage
 
-```bash
-${HOME}/.agents/skills/edit-reply/scripts/edit-reply.ts \
-  --session-id "$SESSION_ID" \
-  --message-id "<messageId from send-reply>" \
-  --message "Corrected reply content"
-```
+**Two-step flow — the new message text MUST NOT appear on the command line.**
+
+1. Write the corrected text to a payload file under the session staging directory using your **edit/write tool**:
+
+   ```
+   $TMPDIR/$SESSION_ID/reply.md
+   ```
+
+   The `$TMPDIR` / `$SESSION_ID` tokens in that path are expanded by the ACP path boundary, so the write is approved and the text bytes are preserved **verbatim** (no shell expansion).
+
+2. Invoke the script with the payload file path:
+
+   ```bash
+   ${HOME}/.agents/skills/edit-reply/scripts/edit-reply.ts \
+     --session-id "$SESSION_ID" \
+     --message-id "<messageId from send-reply>" \
+     --message-file "$TMPDIR/$SESSION_ID/reply.md"
+   ```
+
+**WARNING**: Never put message content on the command line. The legacy `--message "..."` / `--message=...` flags are REMOVED: the shell expands `$VAR` in them (e.g. `$0` → `/usr/bin/bash`, `$HOME`, `$API_KEY`), which corrupts your message and can leak environment variables to the user.
+
+## Parameters
+
+| Parameter        | Required | Description                                                                             |
+| ---------------- | -------- | --------------------------------------------------------------------------------------- |
+| `--session-id`   | Yes      | Current session ID (from `$SESSION_ID` environment)                                     |
+| `--message-id`   | Yes      | The ID of the message to edit (obtained from send-reply result)                         |
+| `--message-file` | Yes      | Path of the payload file containing the new text (must be under `$TMPDIR/$SESSION_ID/`) |
+
+## Error Codes
+
+If the script fails, read the JSON error on stderr. It contains the fix. Common codes: `SKILL_LEGACY_FLAG` (you used the removed `--message` flag — stage the text in `$TMPDIR/$SESSION_ID/reply.md` and use `--message-file`), `SKILL_MISSING_PAYLOAD` (no `--message-file` given), `SKILL_PAYLOAD_OUT_OF_BOUNDS` (payload path outside `$TMPDIR/$SESSION_ID/`), `SKILL_PAYLOAD_NOT_FOUND` (payload file not written yet — write it first with the edit/write tool).
 
 ## Important Notes
 

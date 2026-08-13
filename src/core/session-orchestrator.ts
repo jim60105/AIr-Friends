@@ -1391,6 +1391,7 @@ export class SessionOrchestrator {
         channelId: "internal",
         isDM: false,
         yolo: this.yolo,
+        sessionId: shellSessionId ?? undefined,
         autoApproveSkills: this.config.agent.autoApproveSkills,
         allowedWriteExtensions: this.config.agent.sandbox?.allowedWriteExtensions,
         // F3: self-research is the ONLY session type authorized to write the shared
@@ -1983,6 +1984,7 @@ export class SessionOrchestrator {
         channelId: channelWorkspace.channelId,
         isDM: false,
         yolo: this.yolo,
+        sessionId: shellSessionId ?? undefined,
         autoApproveSkills: this.config.agent.autoApproveSkills,
         allowedWriteExtensions: this.config.agent.sandbox?.allowedWriteExtensions,
       };
@@ -2616,6 +2618,13 @@ export class SessionOrchestrator {
 
       sessionLogger.info("Shell session {shellSessionId} registered", { shellSessionId });
       sessionLogger = sessionLogger.withContext({ shellSessionId });
+
+      // Pre-create the session-scoped payload staging directory
+      // `{workspace}/tmp/{sessionId}` so the agent's `$TMPDIR/$SESSION_ID/...`
+      // payload writes (via its edit/write tool or `writeTextFile`) have an
+      // existing parent — neither write sink creates parent directories, and a
+      // missing directory would otherwise surface later as SKILL_PAYLOAD_NOT_FOUND.
+      await Deno.mkdir(join(params.workspace.tmpPath, shellSessionId), { recursive: true });
     }
 
     const auditWriter = shellSessionId

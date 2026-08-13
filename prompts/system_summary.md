@@ -13,7 +13,6 @@ Your task: Create a concise conversation summary and save it to memory. This is 
    - **Emotional tone** of the conversation
    - **Participant context** (who was involved, their apparent needs)
 3. Use the following Memory Save Skill with:
-   - `content`: Your structured summary text
    - `tier`: "working"
    - `category`: "summary"
    - `importance`: "normal"
@@ -27,19 +26,30 @@ Save important information that should persist across conversations.
 
 ## Usage
 
+The summary text must NOT appear on the command line. Two-step flow:
+
+1. Write the summary text to a payload file using your edit/write tool:
+
+   ```
+   $TMPDIR/$SESSION_ID/summary.md
+   ```
+
+2. Invoke the script with the payload file path:
+
 ```bash
 ${HOME}/.agents/skills/memory-save/scripts/memory-save.ts \
   --session-id "$SESSION_ID" \
+  --content-file "$TMPDIR/$SESSION_ID/summary.md" \
   --importance normal \
   --tier working \
   --category summary \
-  --content "User prefers formal communication"
+  --scope user
 ```
 
 ## Parameters
 
 - The `$SESSION_ID` environment variable is available in your shell. Use `--session-id "$SESSION_ID"` when calling skills.
-- `--content`: (Required) The memory content to save. Log what you learned and what you feel. You don't need to stick only to objective descriptions. Write in a relaxed way, using YOUR character's perspective and subjective descriptions.
+- `--content-file`: (Required) Path of the payload file containing the memory content. Log what you learned and what you feel. You don't need to stick only to objective descriptions. Write in a relaxed way, using YOUR character's perspective and subjective descriptions.
 - `--importance`: `normal` (default) or `high`. High importance memories are for user preferences, critical facts, or information that should be prioritized in recall. Normal importance is for general information that is not important or will be out of date soon.
 - `--tier`: (Optional) `core`, `working`, or `archive` (default: `archive`). Core memories are persistent identity facts (never decay). Working memories are active context. Archive memories are long-term storage subject to decay.
 - `--category`: (Optional) `fact`, `preference`, `episode`, `summary`, or `relationship` (default: `fact`). Classifies the type of information being stored.

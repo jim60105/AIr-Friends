@@ -368,7 +368,7 @@ Deno.test("getRetryPromptStrategy - retryPromptMessage starts with system messag
   assertStringIncludes(strategy.retryPromptMessage, "System message:");
   assertStringIncludes(
     strategy.retryPromptMessage,
-    "You must communicate with the user by using send-reply or react-message before ending the session.",
+    "You must communicate with the user by using send-reply or react-message before ending this session.",
   );
 });
 
@@ -836,4 +836,26 @@ Deno.test({
       await serving.catch(() => {});
     }
   },
+});
+
+Deno.test("getRetryPromptStrategy - retry prompt is instructive (causes + payload-file example + SKILL.md)", () => {
+  const strategy = getRetryPromptStrategy("opencode");
+  const msg = strategy.retryPromptMessage;
+
+  // States the turn ended without a reply/reaction.
+  assertStringIncludes(msg, "ended without sending a reply or reaction");
+
+  // Likely causes under the payload-file contract.
+  assertStringIncludes(msg, "legacy flag --message");
+  assertStringIncludes(msg, "payload file was never written");
+  assertStringIncludes(msg, "$TMPDIR/$SESSION_ID/");
+  assertStringIncludes(msg, "read that error's output");
+
+  // Correct two-step example invocation with the payload-file flag.
+  assertStringIncludes(msg, 'send-reply.ts --session-id "$SESSION_ID"');
+  assertStringIncludes(msg, '--message-file "$TMPDIR/$SESSION_ID/reply.md"');
+
+  // Embedded SKILL.md content.
+  assertStringIncludes(msg, "# Send Reply Skill");
+  assertStringIncludes(msg, "# React Message Skill");
 });

@@ -59,7 +59,7 @@ Located in `skills/{name}/SKILL.md`, these files follow the [Agent Skills Standa
 
 - **Purpose**: Save important information to persistent memory
 - **Parameters**:
-  - `content` (required): Memory content to save
+  - `content-file` (required): Path of the payload file containing the memory content (staged in `$TMPDIR/$SESSION_ID/`)
   - `visibility`: "public" or "private" (default: "public")
   - `importance`: "high" or "normal" (default: "normal")
 - **Key Features**:
@@ -71,7 +71,7 @@ Located in `skills/{name}/SKILL.md`, these files follow the [Agent Skills Standa
 
 - **Purpose**: Search through saved memories
 - **Parameters**:
-  - `query` (required): Search keywords
+  - `query-file` (required): Path of the payload file containing the search keywords (staged in `$TMPDIR/$SESSION_ID/`)
   - `limit`: Maximum results (default: 10)
 - **Returns**: Array of matching memories
 
@@ -79,7 +79,7 @@ Located in `skills/{name}/SKILL.md`, these files follow the [Agent Skills Standa
 
 - **Purpose**: Send final reply to user
 - **Parameters**:
-  - `message` (required): Final message to send
+  - `message-file` (required): Path of the payload file containing the final message (staged in `$TMPDIR/$SESSION_ID/`)
 - **Critical Rule**: Can only be called ONCE per interaction. After sending, use `edit-reply` to modify.
 - **Reply Threading**: When triggered from a note (Misskey) or message, the reply is threaded to the original note/message using `replyToMessageId` from the SkillContext. For new conversations without a triggering message, a new note/message is created instead.
 - **Content Processing**: Reply content is processed through `stripXmlTags()` (removes XML-like tags agents may emit) and `unescapeNewlines()` (converts literal `\n` sequences to actual newlines).
@@ -90,7 +90,7 @@ Located in `skills/{name}/SKILL.md`, these files follow the [Agent Skills Standa
 - **Purpose**: Fetch additional context from platform
 - **Parameters**:
   - `type` (required): "recent_messages", "search_messages", or "user_info"
-  - `query`: Search query (for search_messages)
+  - `query-file`: Path of the payload file containing the search query (for search_messages; staged in `$TMPDIR/$SESSION_ID/`)
   - `limit`: Maximum items (default: 20)
 - **Use Cases**: Get more history, search conversations, get user info
 
@@ -118,7 +118,7 @@ Located in `skills/{name}/SKILL.md`, these files follow the [Agent Skills Standa
 - **Purpose**: Set a one-time reminder to be delivered via DM at a future time
 - **Parameters**:
   - `scheduledAt` (required): ISO 8601 UTC timestamp for when the reminder should fire
-  - `message` (required): The reminder message content
+  - `message-file` (required): Path of the payload file containing the reminder text (staged in `$TMPDIR/$SESSION_ID/`)
 - **Constraints**: DM-only, one per session, minimum 1 minute in the future, max 20 active per user
 - **Returns**: `reminderId` and `scheduledAt` on success
 
@@ -141,7 +141,7 @@ Located in `skills/{name}/SKILL.md`, these files follow the [Agent Skills Standa
 - **Purpose**: Edit the last reply message sent via send-reply
 - **Parameters**:
   - `messageId` (required): The ID of the message to edit (obtained from send-reply result)
-  - `message` (required): The new message content to replace the original
+  - `message-file` (required): Path of the payload file containing the new message content (staged in `$TMPDIR/$SESSION_ID/`)
 - **Key Features**:
   - Can be called multiple times within a session (up to 2 edits before termination)
   - Only edits messages sent by the bot in the current session
@@ -173,7 +173,7 @@ Located in `skills/{name}/SKILL.md`, these files follow the [Agent Skills Standa
 - **Purpose**: Send a file from the workspace to the user on the platform
 - **Parameters**:
   - `file-path` (required): File path relative to the workspace root
-  - `caption`: Optional text message to accompany the file
+  - `caption-file`: Path of the payload file containing the optional caption text (staged in `$TMPDIR/$SESSION_ID/`)
 - **Key Features**:
   - Workspace boundary enforced (no path traversal)
   - Size limit (default 25 MB) and optional extension whitelist
@@ -185,6 +185,18 @@ Located in `skills/{name}/SKILL.md`, these files follow the [Agent Skills Standa
 - **Parameters**:
   - `messageId`: The ID of the message to fetch. If omitted, returns the last message sent in the session.
 - **Returns**: Message content, userId, username, timestamp, and isBot flag
+
+## Payload-File Argument Contract
+
+Skill scripts NEVER accept free-text content as CLI argument values. Free-text arguments (`--message`, `--content`, `--query`, `--caption`) were removed because skill scripts are executed via the Bash tool: the shell expands `$VAR` in double-quoted arguments before the script runs, corrupting content (`$0.435` became `/usr/bin/bash.435` in production) and leaking subprocess environment variables (e.g. `$OPENROUTER_API_KEY`) into external channels. Since `agent-config/opencode.json` grants skill-invocation bash patterns `"allow"`, the script itself is the authoritative enforcement point.
+
+The contract:
+
+1. The agent writes the free text to a payload file under the session staging directory using its edit/write tool — the literal `$TMPDIR/$SESSION_ID/...` path is expanded by the ACP path boundary (`src/acp/client.ts`), so the write is approved and bytes are preserved verbatim.
+2. The agent invokes the script with the payload-file flag: `--message-file` (send-reply/edit-reply/set-reminder), `--content-file` (memory-save), `--query-file` (memory-search/fetch-context), `--caption-file` (send-file).
+3. The shared helper (`skills/lib/payload.ts`) resolves the payload path against the script's cwd (the session workspace) and requires it to be inside `{workspace}/tmp/{sessionId}` (boundary-safe, symlink-aware via `Deno.realPath`), so a payload file can never exfiltrate arbitrary workspace/home files. The payload file is deleted after a successful read.
+
+Legacy flags are rejected in both forms (`--flag value` and `--flag=value`) with a typed error (`SKILL_LEGACY_FLAG` / `SKILL_MISSING_PAYLOAD` / `SKILL_PAYLOAD_OUT_OF_BOUNDS` / `SKILL_PAYLOAD_NOT_FOUND`) whose `error` field teaches the correct two-step pattern with a concrete example invocation. The ACP gate additionally rejects skill commands carrying a legacy free-text flag as defense-in-depth.
 
 ## Skill Handlers Implementation
 

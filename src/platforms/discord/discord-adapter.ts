@@ -91,8 +91,8 @@ export class DiscordAdapter extends PlatformAdapter {
         guilds: this.client.guilds.cache.size,
       });
 
-      // Cleanup all slash commands
-      await this.cleanupSlashCommands();
+      // Align all slash commands (the registered set is aligned to an empty manifest)
+      await this.alignSlashCommands();
     });
 
     this.client.on("messageCreate", async (message) => {
@@ -118,42 +118,42 @@ export class DiscordAdapter extends PlatformAdapter {
   }
 
   /**
-   * Cleanup all slash commands (global and guild-based)
+   * Align all slash commands (global and guild-based) to the empty manifest.
    */
-  private async cleanupSlashCommands(): Promise<void> {
+  private async alignSlashCommands(): Promise<void> {
     if (!this.botId) {
-      logger.warn("Cannot cleanup commands: bot ID not set");
+      logger.warn("Cannot align commands: bot ID not set");
       return;
     }
 
     const rest = new REST().setToken(this.config.token);
 
     try {
-      // Delete all global commands
-      logger.info("Deleting all global slash commands");
+      // Align all global commands
+      logger.info("Aligning all global slash commands");
       await rest.put(Routes.applicationCommands(this.botId), { body: [] });
-      logger.info("Successfully deleted all global slash commands");
+      logger.info("Successfully aligned all global slash commands");
     } catch (error) {
-      logger.error("Failed to delete global commands", {
+      logger.error("Failed to align global commands", {
         error: error instanceof Error ? error.message : String(error),
       });
     }
 
-    // Delete guild-based commands for all guilds
+    // Align guild-based commands for all guilds
     const guilds = this.client.guilds.cache;
     for (const [guildId, guild] of guilds) {
       try {
-        logger.info("Deleting slash commands for guild", {
+        logger.info("Aligning slash commands for guild", {
           guildId,
           guildName: guild.name,
         });
         await rest.put(Routes.applicationGuildCommands(this.botId, guildId), { body: [] });
-        logger.info("Successfully deleted all guild commands", {
+        logger.info("Successfully aligned all guild commands", {
           guildId,
           guildName: guild.name,
         });
       } catch (error) {
-        logger.error("Failed to delete guild commands", {
+        logger.error("Failed to align guild commands", {
           guildId,
           guildName: guild.name,
           error: error instanceof Error ? error.message : String(error),

@@ -397,6 +397,7 @@ conversationSummary:
 - Scripts call back to main bot via HTTP API (Skill API Server on localhost:3001)
 - Session-based authentication ensures security
 - The `SESSION_ID` environment variable is set for the agent subprocess with the active session ID
+- **Payload-file argument contract**: free-text content (reply text, memory content, search queries, captions, reminder text) MUST NEVER appear on a skill command line — the shell expands `$VAR` in it, corrupting content and leaking subprocess env vars into external channels. The agent writes the text to `$TMPDIR/$SESSION_ID/{name}.md` with its edit/write tool, then passes the path via the payload-file flag (`--message-file`, `--content-file`, `--query-file`, `--caption-file`). The shared helper `skills/lib/payload.ts` enforces session-scoped containment (`{workspace}/tmp/{sessionId}`, symlink-aware) and raises instructive typed errors (`SKILL_LEGACY_FLAG`, `SKILL_MISSING_PAYLOAD`, `SKILL_PAYLOAD_OUT_OF_BOUNDS`, `SKILL_PAYLOAD_NOT_FOUND`) that teach the correct pattern.
 
 **Available Skills**:
 

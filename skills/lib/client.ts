@@ -105,9 +105,18 @@ export function outputResult(result: unknown): void {
 }
 
 /**
- * Output error and exit with non-zero code
+ * Output error and exit with non-zero code.
+ * An optional stable error `code` (e.g. a `SKILL_*` contract code from the
+ * payload helper) is included in the emitted JSON for machine readability.
  */
-export function exitWithError(message: string): never {
-  console.error(JSON.stringify({ success: false, error: message }));
+export function exitWithError(message: string, code?: string): never {
+  const payload: { success: boolean; error: string; code?: string } = {
+    success: false,
+    error: message,
+  };
+  if (code) {
+    payload.code = code;
+  }
+  console.error(JSON.stringify(payload));
   Deno.exit(1);
 }

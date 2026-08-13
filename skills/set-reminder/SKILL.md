@@ -17,20 +17,38 @@ Set a one-time reminder that will be delivered to the user via **direct message 
 
 ## Usage
 
-```bash
-${HOME}/.agents/skills/set-reminder/scripts/set-reminder.ts \
-  --session-id "$SESSION_ID" \
-  --scheduled-at "2025-01-15T10:00:00Z" \
-  --message "Team meeting in 30 minutes"
-```
+**Two-step flow — the reminder text MUST NOT appear on the command line.**
+
+1. Write the reminder text to a payload file under the session staging directory using your **edit/write tool**:
+
+   ```
+   $TMPDIR/$SESSION_ID/reminder.md
+   ```
+
+   The `$TMPDIR` / `$SESSION_ID` tokens in that path are expanded by the ACP path boundary, so the write is approved and the text bytes are preserved **verbatim** (no shell expansion).
+
+2. Invoke the script with the payload file path:
+
+   ```bash
+   ${HOME}/.agents/skills/set-reminder/scripts/set-reminder.ts \
+     --session-id "$SESSION_ID" \
+     --scheduled-at "2025-01-15T10:00:00Z" \
+     --message-file "$TMPDIR/$SESSION_ID/reminder.md"
+   ```
+
+**WARNING**: Never put message content on the command line. The legacy `--message "..."` / `--message=...` flags are REMOVED: the shell expands `$VAR` in them, which corrupts the stored reminder text.
 
 ## Parameters
 
-| Parameter        | Required | Description                                              |
-| ---------------- | -------- | -------------------------------------------------------- |
-| `--session-id`   | Yes      | Current session ID                                       |
-| `--scheduled-at` | Yes      | ISO 8601 UTC timestamp for when the reminder should fire |
-| `--message`      | Yes      | The reminder message content                             |
+| Parameter        | Required | Description                                                                                  |
+| ---------------- | -------- | -------------------------------------------------------------------------------------------- |
+| `--session-id`   | Yes      | Current session ID                                                                           |
+| `--scheduled-at` | Yes      | ISO 8601 UTC timestamp for when the reminder should fire                                     |
+| `--message-file` | Yes      | Path of the payload file containing the reminder text (must be under `$TMPDIR/$SESSION_ID/`) |
+
+## Error Codes
+
+If the script fails, read the JSON error on stderr. It contains the fix. Common codes: `SKILL_LEGACY_FLAG` (you used the removed `--message` flag — stage the text in `$TMPDIR/$SESSION_ID/reminder.md` and use `--message-file`), `SKILL_MISSING_PAYLOAD` (no `--message-file` given), `SKILL_PAYLOAD_OUT_OF_BOUNDS` (payload path outside `$TMPDIR/$SESSION_ID/`), `SKILL_PAYLOAD_NOT_FOUND` (payload file not written yet — write it first with the edit/write tool).
 
 ## Rules
 
