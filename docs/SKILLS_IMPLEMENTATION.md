@@ -170,13 +170,17 @@ Located in `skills/{name}/SKILL.md`, these files follow the [Agent Skills Standa
 
 ### 13. send-file
 
-- **Purpose**: Send a file from the workspace to the user on the platform
+- **Purpose**: Send one or more files from the workspace to the user on the platform in a single invocation
 - **Parameters**:
-  - `file-path` (required): File path relative to the workspace root
+  - `file-paths` (required, repeatable): File paths relative to the workspace root; one occurrence per file, at least one required. The removed singular `--file-path` flag is rejected with `SKILL_SINGLE_FILE_FLAG`
   - `caption-file`: Path of the payload file containing the optional caption text (staged in `$TMPDIR/$SESSION_ID/`)
 - **Key Features**:
-  - Workspace boundary enforced (no path traversal)
-  - Size limit (default 25 MB) and optional extension whitelist
+  - Workspace boundary enforced (no path traversal) per file; preflight validation is all-or-nothing (one invalid path rejects the whole call with nothing sent)
+  - Per-file size limit (default 25 MB), batch limits `maxFilesPerInvocation` (default 10) and `maxTotalSizeMb` (default 50) enforced **before reading file bytes**
+  - Optional extension whitelist
+  - Caption goes through the same `stripXmlTags` → `unescapeNewlines` content pipeline as `send-reply`
+  - Delivery: Discord = one message with all attachments; Misskey note = one note with all `fileIds`; Misskey chat = one message per file (caption on the first), with partial-delivery reporting and best-effort Drive cleanup of unreferenced uploads on mid-batch failure
+  - Limited to **1 successful call per session** (`MAX_FILE_SENDS_PER_SESSION = 1`) with doom-loop termination at 4 attempts; does NOT consume the reply quota and does NOT set `replySent`/`lastSentMessageId` — a successful send marks `fileSent` and counts as a session response (suppresses the missing-response retry)
   - Can be disabled by administrator via config
 
 ### 14. get-message
@@ -196,7 +200,7 @@ The contract:
 2. The agent invokes the script with the payload-file flag: `--message-file` (send-reply/edit-reply/set-reminder), `--content-file` (memory-save), `--query-file` (memory-search/fetch-context), `--caption-file` (send-file).
 3. The shared helper (`skills/lib/payload.ts`) resolves the payload path against the script's cwd (the session workspace) and requires it to be inside `{workspace}/tmp/{sessionId}` (boundary-safe, symlink-aware via `Deno.realPath`), so a payload file can never exfiltrate arbitrary workspace/home files. The payload file is deleted after a successful read.
 
-Legacy flags are rejected in both forms (`--flag value` and `--flag=value`) with a typed error (`SKILL_LEGACY_FLAG` / `SKILL_MISSING_PAYLOAD` / `SKILL_PAYLOAD_OUT_OF_BOUNDS` / `SKILL_PAYLOAD_NOT_FOUND`) whose `error` field teaches the correct two-step pattern with a concrete example invocation. The ACP gate additionally rejects skill commands carrying a legacy free-text flag as defense-in-depth.
+Legacy flags are rejected in both forms (`--flag value` and `--flag=value`) with a typed error (`SKILL_LEGACY_FLAG` / `SKILL_MISSING_PAYLOAD` / `SKILL_PAYLOAD_OUT_OF_BOUNDS` / `SKILL_PAYLOAD_NOT_FOUND` / `SKILL_SINGLE_FILE_FLAG` for the removed singular `--file-path`) whose `error` field teaches the correct two-step pattern with a concrete example invocation. The ACP gate additionally rejects skill commands carrying a legacy free-text flag as defense-in-depth.
 
 ## Skill Handlers Implementation
 
@@ -273,9 +277,12 @@ Handles reminder CRUD operations (conditionally registered when reminders are en
 
 Handles file sending from workspace (conditionally registered when send-file is enabled):
 
-- `handleSendFile`: Reads file from workspace and sends via platform adapter
-- Path security validation (no traversal, workspace boundary enforced)
-- File size limit and extension whitelist checks
+- `handleSendFile`: Validates all paths, reads files, and sends via platform adapter (multi-file)
+- Path security validation (no traversal, workspace boundary enforced) per file
+- Per-file size limit, batch count/aggregate-size limits (preflight before any byte is read), and extension whitelist checks
+- Caption content pipeline (`stripXmlTags` → `unescapeNewlines`)
+- `fileSent` response-state map with `hasFileSent` / `clearFileState` (a successful send — including partial Misskey chat delivery — marks the session as responded)
+- Result contract: `messageIds`, `messageId`, `filesCount`, `nextAction`; partial failures carry the delivered IDs alongside the error
 
 ### Skill Registry (src/skills/registry.ts)
 
@@ -287,6 +294,7 @@ Central registry for all skills:
 - `getReplyHandler`: Access to reply handler for state management
 - `getReactionHandler`: Access to reaction handler for state management
 - `getReminderHandler`: Access to reminder handler for session state management
+- `getFileHandler`: Access to file handler for response state management (null when send-file is disabled)
 
 ## Testing
 

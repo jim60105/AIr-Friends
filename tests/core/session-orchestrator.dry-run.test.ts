@@ -148,14 +148,19 @@ function createTestEvent(): NormalizedEvent {
   };
 }
 
-async function createOrchestrator(tempDir: string, dryRunEnabled = true) {
+async function createOrchestrator(tempDir: string, dryRunEnabled = true, sendFileEnabled = false) {
   const config = createTestConfig(tempDir, dryRunEnabled);
   const workspaceManager = new WorkspaceManager({
     repoPath: tempDir,
     workspacesDir: "workspaces",
   });
   const memoryStore = new MemoryStore(workspaceManager, { searchLimit: 10, maxChars: 2000 });
-  const skillRegistry = new SkillRegistry(memoryStore);
+  const skillRegistry = new SkillRegistry(
+    memoryStore,
+    undefined,
+    undefined,
+    sendFileEnabled ? { enabled: true, allowedExtensions: [] } : undefined,
+  );
 
   await Deno.mkdir(`${tempDir}/prompts`, { recursive: true });
   await Deno.writeTextFile(
@@ -313,7 +318,35 @@ Deno.test("Dry run enabled — no reply when mockReply is empty", async () => {
 
     assertEquals(response.success, true);
     assertEquals(response.replySent, false);
+    assertEquals(response.fileSent, false);
     assertEquals(mockAdapter.sentReplies.length, 0);
+
+    sessionRegistry.stop();
+  } finally {
+    await Deno.remove(tempDir, { recursive: true });
+  }
+});
+
+Deno.test("Dry run enabled — produces no file-send response state even with send-file skill enabled", async () => {
+  const tempDir = await Deno.makeTempDir();
+  try {
+    const { orchestrator, sessionRegistry, config } = await createOrchestrator(
+      tempDir,
+      true,
+      true,
+    );
+    config.agent.dryRun!.mockReply = "";
+
+    const event = createTestEvent();
+    const mockAdapter = new MockPlatformAdapter();
+    const platformAdapter = mockAdapter as unknown as PlatformAdapter;
+
+    const response = await orchestrator.processMessage(event, platformAdapter);
+
+    // Dry run never executes the agent, so no file-send state can be produced
+    assertEquals(response.success, true);
+    assertEquals(response.replySent, false);
+    assertEquals(response.fileSent, false);
 
     sessionRegistry.stop();
   } finally {

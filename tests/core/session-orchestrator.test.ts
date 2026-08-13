@@ -893,6 +893,200 @@ Deno.test("SessionOrchestrator - retry exhausts max retries without reply", asyn
   }
 });
 
+// --- Send-file response accounting tests ---
+
+/** Simulate the agent delivering a file: mark the active session's fileSent. */
+function markFileSentForWorkspace(
+  sessionRegistry: SessionRegistry,
+  workspaceKey: string,
+): void {
+  const session = sessionRegistry.getAll().find((s) => s.workspace.key === workspaceKey);
+  if (!session) throw new Error(`No active session for workspace ${workspaceKey}`);
+  sessionRegistry.markFileSent(session.id);
+}
+
+Deno.test("SessionOrchestrator - no retry when send-file was called (fileSent true)", async () => {
+  const tempDir = await Deno.makeTempDir();
+  try {
+    const { orchestrator, workspaceManager, sessionRegistry } = await createTestableOrchestrator(
+      tempDir,
+    );
+
+    const event = createTestEvent();
+    const platformAdapter = new MockPlatformAdapter() as unknown as PlatformAdapter;
+
+    orchestrator.setConnectorSetup((connector) => {
+      connector.promptResponses = [
+        { stopReason: "end_turn" } as PromptResponse,
+      ];
+      connector.onPrompt = (callCount) => {
+        // Simulate the agent delivering a file on the first prompt
+        if (callCount === 1) {
+          const workspace = workspaceManager.getWorkspaceKeyFromEvent(event);
+          markFileSentForWorkspace(sessionRegistry, workspace);
+        }
+      };
+    });
+
+    const response = await orchestrator.processMessage(event, platformAdapter);
+
+    assertEquals(response.success, true);
+    assertEquals(response.replySent, false);
+    assertEquals(response.fileSent, true);
+    // Prompt called only once — file send suppresses the retry
+    assertEquals(orchestrator.mockConnector!.promptCallCount, 1);
+
+    sessionRegistry.stop();
+  } finally {
+    await Deno.remove(tempDir, { recursive: true });
+  }
+});
+
+Deno.test("SessionOrchestrator - retry still fires when no reply/reaction/file occurred", async () => {
+  const tempDir = await Deno.makeTempDir();
+  try {
+    const { orchestrator, sessionRegistry } = await createTestableOrchestrator(tempDir);
+
+    const event = createTestEvent();
+    const platformAdapter = new MockPlatformAdapter() as unknown as PlatformAdapter;
+
+    orchestrator.setConnectorSetup((connector) => {
+      // Both prompts end_turn with no response at all
+      connector.promptResponses = [
+        { stopReason: "end_turn" } as PromptResponse,
+        { stopReason: "end_turn" } as PromptResponse,
+      ];
+    });
+
+    const response = await orchestrator.processMessage(event, platformAdapter);
+
+    assertEquals(response.success, false);
+    assertEquals(response.replySent, false);
+    assertEquals(response.fileSent, false);
+    assertEquals(response.error, "Agent did not generate a reply");
+    // Initial prompt + retry (maxRetries 1) = 2
+    assertEquals(orchestrator.mockConnector!.promptCallCount, 2);
+
+    sessionRegistry.stop();
+  } finally {
+    await Deno.remove(tempDir, { recursive: true });
+  }
+});
+
+Deno.test("SessionOrchestrator - file-send state is per-session (fresh each session)", async () => {
+  const tempDir = await Deno.makeTempDir();
+  try {
+    const { orchestrator, workspaceManager, sessionRegistry } = await createTestableOrchestrator(
+      tempDir,
+    );
+
+    const event = createTestEvent();
+    const platformAdapter = new MockPlatformAdapter() as unknown as PlatformAdapter;
+
+    orchestrator.setConnectorSetup((connector) => {
+      connector.promptResponses = [
+        { stopReason: "end_turn" } as PromptResponse,
+      ];
+      connector.onPrompt = (callCount) => {
+        if (callCount === 1) {
+          const workspace = workspaceManager.getWorkspaceKeyFromEvent(event);
+          markFileSentForWorkspace(sessionRegistry, workspace);
+        }
+      };
+    });
+
+    const response1 = await orchestrator.processMessage(event, platformAdapter);
+    assertEquals(response1.success, true);
+    assertEquals(response1.fileSent, true);
+
+    // Second session on the same channel: fileSent state is per-session (a new
+    // session starts fresh), so a turn with no response triggers the retry.
+    orchestrator.setConnectorSetup((connector) => {
+      connector.promptResponses = [
+        { stopReason: "end_turn" } as PromptResponse,
+        { stopReason: "end_turn" } as PromptResponse,
+      ];
+    });
+
+    const response2 = await orchestrator.processMessage(event, platformAdapter);
+    assertEquals(response2.success, false);
+    assertEquals(response2.fileSent, false);
+    assertEquals(orchestrator.mockConnector!.promptCallCount, 2);
+
+    sessionRegistry.stop();
+  } finally {
+    await Deno.remove(tempDir, { recursive: true });
+  }
+});
+
+Deno.test("SessionOrchestrator - partial file delivery (fileSent marked) suppresses the retry", async () => {
+  const tempDir = await Deno.makeTempDir();
+  try {
+    const { orchestrator, workspaceManager, sessionRegistry } = await createTestableOrchestrator(
+      tempDir,
+    );
+
+    const event = createTestEvent();
+    const platformAdapter = new MockPlatformAdapter() as unknown as PlatformAdapter;
+
+    orchestrator.setConnectorSetup((connector) => {
+      connector.promptResponses = [
+        { stopReason: "end_turn" } as PromptResponse,
+      ];
+      connector.onPrompt = (callCount) => {
+        if (callCount === 1) {
+          const workspace = workspaceManager.getWorkspaceKeyFromEvent(event);
+          // Partial delivery (1 of 2) still marks the session's fileSent state
+          markFileSentForWorkspace(sessionRegistry, workspace);
+        }
+      };
+    });
+
+    const response = await orchestrator.processMessage(event, platformAdapter);
+
+    assertEquals(response.success, true);
+    assertEquals(response.fileSent, true);
+    assertEquals(orchestrator.mockConnector!.promptCallCount, 1);
+
+    sessionRegistry.stop();
+  } finally {
+    await Deno.remove(tempDir, { recursive: true });
+  }
+});
+
+Deno.test("SessionOrchestrator - spontaneous flow reports fileSent false", async () => {
+  const tempDir = await Deno.makeTempDir();
+  try {
+    const { orchestrator, sessionRegistry } = await createTestableOrchestrator(tempDir);
+
+    const platformAdapter = new MockPlatformAdapter() as unknown as PlatformAdapter;
+
+    orchestrator.setConnectorSetup((connector) => {
+      connector.promptResponses = [
+        { stopReason: "end_turn" } as PromptResponse,
+      ];
+    });
+
+    const response = await orchestrator.processSpontaneousPost(
+      "discord",
+      "mock-channel",
+      platformAdapter,
+      {
+        botId: "bot-123",
+        fetchRecentMessages: false,
+      },
+    );
+
+    // Spontaneous sessions do not track file sends — fileSent is explicitly false
+    assertEquals(response.fileSent, false);
+    assertEquals(response.replySent, false);
+
+    sessionRegistry.stop();
+  } finally {
+    await Deno.remove(tempDir, { recursive: true });
+  }
+});
+
 // --- Spontaneous post tests ---
 
 Deno.test("SessionOrchestrator - processSpontaneousPost sends reply successfully", async () => {

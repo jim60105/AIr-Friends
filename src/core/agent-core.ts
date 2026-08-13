@@ -182,7 +182,8 @@ export class AgentCore {
     const response = await this.messageHandler.handleEvent(event, platform);
 
     // If processing failed and no reply was sent, dispatch error message
-    if (!response.success && !response.replySent) {
+    // (also skipped when a file was delivered — the user already received output)
+    if (!response.success && !response.replySent && !response.fileSent) {
       await this.replyDispatcher.dispatchErrorIfNeeded(
         platform,
         event.channelId,

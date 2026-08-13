@@ -720,8 +720,7 @@ export class MemoryHandler {
       const fileContent = new TextEncoder().encode(output);
       const sendResult = await context.platformAdapter.sendFile(
         dmChannelId,
-        fileContent,
-        fileName,
+        [{ content: fileContent, fileName }],
       );
 
       if (!sendResult.success) {

@@ -158,21 +158,43 @@ Deno.test("scripts - memory-save delivers staged content verbatim", async () => 
   }
 });
 
-Deno.test("scripts - send-file optional caption omitted then provided via payload", async () => {
+Deno.test("scripts - send-file multi-file flag reaches API as array, caption optional", async () => {
   const ws = setupWorkspace();
   const api = startMockApi();
   try {
-    // Without caption: no caption param sent.
+    // Without caption: no caption param sent; repeatable --file-paths is an array.
     const noCaption = await runScript(
       "skills/send-file/scripts/send-file.ts",
-      ["--session-id", "sess_own", "--api-url", api.url, "--file-path", "output/chart.png"],
+      [
+        "--session-id",
+        "sess_own",
+        "--api-url",
+        api.url,
+        "--file-paths",
+        "output/chart.png",
+        "--file-paths",
+        "output/data.json",
+      ],
       ws,
     );
     assertEquals(noCaption.code, 0, noCaption.stderr);
     assertEquals(api.requests[0].skillName, "send-file");
+    assertEquals(api.requests[0].parameters.filePaths, [
+      "output/chart.png",
+      "output/data.json",
+    ]);
     assertEquals("caption" in api.requests[0].parameters, false);
 
-    // With caption via payload file.
+    // Short alias -f collects multiple files too.
+    const aliasRun = await runScript(
+      "skills/send-file/scripts/send-file.ts",
+      ["--session-id", "sess_own", "--api-url", api.url, "-f", "a.png", "-f", "b.png"],
+      ws,
+    );
+    assertEquals(aliasRun.code, 0, aliasRun.stderr);
+    assertEquals(api.requests[1].parameters.filePaths, ["a.png", "b.png"]);
+
+    // With caption via payload file alongside multi-file.
     const captionPayload = join(ws, "tmp", "sess_own", "caption.md");
     Deno.writeTextFileSync(captionPayload, "chart $0.435 caption");
     const withCaption = await runScript(
@@ -182,15 +204,126 @@ Deno.test("scripts - send-file optional caption omitted then provided via payloa
         "sess_own",
         "--api-url",
         api.url,
-        "--file-path",
+        "--file-paths",
         "x.png",
+        "--file-paths",
+        "y.png",
         "--caption-file",
         captionPayload,
       ],
       ws,
     );
     assertEquals(withCaption.code, 0, withCaption.stderr);
-    assertEquals(api.requests[1].parameters.caption, "chart $0.435 caption");
+    assertEquals(api.requests[2].parameters.filePaths, ["x.png", "y.png"]);
+    assertEquals(api.requests[2].parameters.caption, "chart $0.435 caption");
+  } finally {
+    await api.close();
+    Deno.removeSync(ws, { recursive: true });
+  }
+});
+
+Deno.test("scripts - send-file missing --file-paths rejected, API never hit", async () => {
+  const ws = setupWorkspace();
+  const api = startMockApi();
+  try {
+    const result = await runScript(
+      "skills/send-file/scripts/send-file.ts",
+      ["--session-id", "sess_own", "--api-url", api.url],
+      ws,
+    );
+    assertEquals(result.code !== 0, true);
+    const err = parseStderrJson(result.stderr);
+    assertStringIncludes(String(err.error ?? ""), "--file-paths");
+    assertEquals(api.requests.length, 0);
+  } finally {
+    await api.close();
+    Deno.removeSync(ws, { recursive: true });
+  }
+});
+
+Deno.test("scripts - singular --file-path rejected with SKILL_SINGLE_FILE_FLAG in both forms, API never hit", async () => {
+  const ws = setupWorkspace();
+  const api = startMockApi();
+  try {
+    for (
+      const legacyArgs of [
+        ["--file-path", "report.pdf"],
+        ["--file-path=report.pdf"],
+      ]
+    ) {
+      const result = await runScript(
+        "skills/send-file/scripts/send-file.ts",
+        ["--session-id", "sess_own", "--api-url", api.url, ...legacyArgs],
+        ws,
+      );
+
+      assertEquals(result.code !== 0, true);
+      const err = parseStderrJson(result.stderr);
+      assertEquals(err.code, "SKILL_SINGLE_FILE_FLAG");
+      const message = String(err.error ?? "");
+      assertStringIncludes(message, "repeatable");
+      assertStringIncludes(message, "--file-paths");
+      assertStringIncludes(message, '--file-paths "exports/report.pdf"');
+    }
+    assertEquals(api.requests.length, 0);
+  } finally {
+    await api.close();
+    Deno.removeSync(ws, { recursive: true });
+  }
+});
+
+Deno.test("scripts - mixed singular and plural file flags rejected, API never hit", async () => {
+  const ws = setupWorkspace();
+  const api = startMockApi();
+  try {
+    const result = await runScript(
+      "skills/send-file/scripts/send-file.ts",
+      [
+        "--session-id",
+        "sess_own",
+        "--api-url",
+        api.url,
+        "--file-path",
+        "a.png",
+        "--file-paths",
+        "b.png",
+      ],
+      ws,
+    );
+    assertEquals(result.code !== 0, true);
+    const err = parseStderrJson(result.stderr);
+    assertEquals(err.code, "SKILL_SINGLE_FILE_FLAG");
+    assertEquals(api.requests.length, 0);
+  } finally {
+    await api.close();
+    Deno.removeSync(ws, { recursive: true });
+  }
+});
+
+Deno.test("scripts - send-file out-of-bounds caption payload still rejected", async () => {
+  const ws = setupWorkspace();
+  const api = startMockApi();
+  try {
+    Deno.writeTextFileSync(join(ws, "memory.private.jsonl"), "{}");
+
+    const result = await runScript(
+      "skills/send-file/scripts/send-file.ts",
+      [
+        "--session-id",
+        "sess_own",
+        "--api-url",
+        api.url,
+        "--file-paths",
+        "a.png",
+        "--caption-file",
+        join(ws, "memory.private.jsonl"),
+      ],
+      ws,
+    );
+    assertEquals(result.code !== 0, true);
+    const err = parseStderrJson(result.stderr);
+    assertEquals(err.code, "SKILL_PAYLOAD_OUT_OF_BOUNDS");
+    assertEquals(api.requests.length, 0);
   } finally {
     await api.close();
     Deno.removeSync(ws, { recursive: true });

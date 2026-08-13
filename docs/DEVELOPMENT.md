@@ -344,6 +344,8 @@ Configuration is loaded from `config.yaml` (YAML format). See [config.example.ya
 | `SKILL_SEND_FILE_ENABLED`            | Enable send-file skill (true/false, default: false) |
 | `SKILL_SEND_FILE_MAX_SIZE_MB`        | File size limit in MB (0 = platform default)        |
 | `SKILL_SEND_FILE_ALLOWED_EXTENSIONS` | Allowed file extensions whitelist (comma-separated) |
+| `SKILL_SEND_FILE_MAX_FILES_PER_INVOCATION` | Max files per send-file invocation (default: 10) |
+| `SKILL_SEND_FILE_MAX_TOTAL_SIZE_MB`  | Max aggregate size per invocation in MB (default: 50) |
 
 **Metrics & Health:**
 

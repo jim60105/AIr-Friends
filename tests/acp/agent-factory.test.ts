@@ -353,6 +353,7 @@ Deno.test("getRetryPromptStrategy - returns strategy for opencode", () => {
   assertEquals(strategy.maxRetries, 1);
   assertStringIncludes(strategy.retryPromptMessage, "send-reply");
   assertStringIncludes(strategy.retryPromptMessage, "react-message");
+  assertStringIncludes(strategy.retryPromptMessage, "send-file");
 });
 
 Deno.test("getRetryPromptStrategy - throws for unknown agent type", () => {
@@ -368,7 +369,12 @@ Deno.test("getRetryPromptStrategy - retryPromptMessage starts with system messag
   assertStringIncludes(strategy.retryPromptMessage, "System message:");
   assertStringIncludes(
     strategy.retryPromptMessage,
-    "You must communicate with the user by using send-reply or react-message before ending this session.",
+    "You must communicate with the user by using send-reply, react-message, or send-file",
+  );
+  // send-file carries the "only when a suitable file already exists" qualifier
+  assertStringIncludes(
+    strategy.retryPromptMessage,
+    "only when a suitable file already exists in the workspace",
   );
 });
 
@@ -394,6 +400,13 @@ Deno.test("getRetryPromptStrategy - retryPromptMessage includes react-message SK
   // Content loaded from skills/react-message/SKILL.md
   assertStringIncludes(strategy.retryPromptMessage, "# React Message Skill");
   assertStringIncludes(strategy.retryPromptMessage, "Use appropriate emoji");
+});
+
+Deno.test("getRetryPromptStrategy - retryPromptMessage includes send-file SKILL.md content", () => {
+  const strategy = getRetryPromptStrategy("opencode");
+  // Content loaded from skills/send-file/SKILL.md
+  assertStringIncludes(strategy.retryPromptMessage, "# Send File Skill");
+  assertStringIncludes(strategy.retryPromptMessage, "--file-paths");
 });
 
 // ============ Agent Workspace Env Var Tests ============
@@ -842,14 +855,17 @@ Deno.test("getRetryPromptStrategy - retry prompt is instructive (causes + payloa
   const strategy = getRetryPromptStrategy("opencode");
   const msg = strategy.retryPromptMessage;
 
-  // States the turn ended without a reply/reaction.
-  assertStringIncludes(msg, "ended without sending a reply or reaction");
+  // States the turn ended without a reply/reaction/file.
+  assertStringIncludes(msg, "ended without sending a reply, reaction, or file");
 
   // Likely causes under the payload-file contract.
-  assertStringIncludes(msg, "legacy flag --message");
+  assertStringIncludes(msg, "removed legacy flag");
+  assertStringIncludes(msg, "--message for send-reply");
   assertStringIncludes(msg, "payload file was never written");
   assertStringIncludes(msg, "$TMPDIR/$SESSION_ID/");
   assertStringIncludes(msg, "read that error's output");
+  // send-file causes: removed singular flag and caption legacy flag
+  assertStringIncludes(msg, "--file-path");
 
   // Correct two-step example invocation with the payload-file flag.
   assertStringIncludes(msg, 'send-reply.ts --session-id "$SESSION_ID"');
@@ -858,4 +874,5 @@ Deno.test("getRetryPromptStrategy - retry prompt is instructive (causes + payloa
   // Embedded SKILL.md content.
   assertStringIncludes(msg, "# Send Reply Skill");
   assertStringIncludes(msg, "# React Message Skill");
+  assertStringIncludes(msg, "# Send File Skill");
 });

@@ -333,6 +333,8 @@ skills:
     maxFileSizeMb: 25           # File size limit in MB, 0 = use platform default; override with env SKILL_SEND_FILE_MAX_SIZE_MB
     allowedExtensions: []       # Allowed file extension whitelist, empty = no restriction; override with env SKILL_SEND_FILE_ALLOWED_EXTENSIONS
                                 # Example: [".png", ".jpg", ".gif", ".pdf", ".txt", ".md"]
+    maxFilesPerInvocation: 10   # Max files per send-file invocation (default: 10, Discord attachment cap); override with env SKILL_SEND_FILE_MAX_FILES_PER_INVOCATION
+    maxTotalSizeMb: 50          # Max aggregate file size per invocation in MB (default: 50); override with env SKILL_SEND_FILE_MAX_TOTAL_SIZE_MB
 
 # ─── Web Dashboard ─────────────────────────────────────
 dashboard:

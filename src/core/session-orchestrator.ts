@@ -101,6 +101,8 @@ export interface SessionResponse {
   success: boolean;
   replySent: boolean;
   reactionSent?: boolean;
+  /** Whether at least one file was delivered via send-file (message flows only) */
+  fileSent?: boolean;
   error?: string;
 }
 
@@ -303,6 +305,7 @@ export class SessionOrchestrator {
     return {
       success: true,
       replySent,
+      fileSent: false,
     };
   }
 
@@ -348,6 +351,7 @@ export class SessionOrchestrator {
       return {
         success: true,
         replySent: false,
+        fileSent: false,
       };
     }
 
@@ -670,6 +674,7 @@ export class SessionOrchestrator {
           return {
             success: false,
             replySent: false,
+            fileSent: false,
             error: "Session lost due to idle timeout and reconnection failure",
           };
         }
@@ -695,17 +700,20 @@ export class SessionOrchestrator {
           isRetry: false,
         });
 
-        // Check if reply or reaction was sent
+        // Check if reply, reaction, or file was sent. File-send response state
+        // is per-session in the registry (marked by the Skill API server when
+        // at least one file was delivered); a missing session yields false.
         let replySent = replyHandler.hasReplySent(workspace.key, event.channelId);
         let reactionSent = reactionHandler.hasReactionSent(workspace.key, event.channelId);
+        let fileSent = shellSessionId ? this.sessionRegistry.hasFileSent(shellSessionId) : false;
 
-        // Agent has responded if it sent a reply OR a reaction
-        let hasResponded = replySent || reactionSent;
+        // Agent has responded if it sent a reply, a reaction, OR a file
+        let hasResponded = replySent || reactionSent || fileSent;
 
-        // If agent completed without any response (no reply AND no reaction), retry
+        // If agent completed without any response, retry
         if (!hasResponded && response.stopReason === "end_turn") {
           sessionLogger.warn(
-            "Agent completed without sending reply or reaction, retrying with special prompt",
+            "Agent completed without sending reply, reaction, or file, retrying with special prompt",
           );
 
           const retryStrategy = getRetryPromptStrategy(agentType);
@@ -739,10 +747,11 @@ export class SessionOrchestrator {
               stopReason: retryResponse.stopReason,
             });
 
-            // Check if reply or reaction was sent after retry
+            // Check if reply, reaction, or file was sent after retry
             replySent = replyHandler.hasReplySent(workspace.key, event.channelId);
             reactionSent = reactionHandler.hasReactionSent(workspace.key, event.channelId);
-            hasResponded = replySent || reactionSent;
+            fileSent = shellSessionId ? this.sessionRegistry.hasFileSent(shellSessionId) : false;
+            hasResponded = replySent || reactionSent || fileSent;
 
             if (hasResponded) {
               sessionLogger.info("Response sent after retry", {
@@ -750,6 +759,7 @@ export class SessionOrchestrator {
                 attempt: attempt + 1,
                 replySent,
                 reactionSent,
+                fileSent,
               });
               break;
             }
@@ -767,7 +777,8 @@ export class SessionOrchestrator {
           // Re-evaluate after retry
           replySent = replyHandler.hasReplySent(workspace.key, event.channelId);
           reactionSent = reactionHandler.hasReactionSent(workspace.key, event.channelId);
-          hasResponded = replySent || reactionSent;
+          fileSent = shellSessionId ? this.sessionRegistry.hasFileSent(shellSessionId) : false;
+          hasResponded = replySent || reactionSent || fileSent;
         }
 
         if (hasResponded) {
@@ -776,6 +787,7 @@ export class SessionOrchestrator {
             success: true,
             replySent,
             reactionSent,
+            fileSent,
             durationMs: Date.now() - sessionStartTime,
             ...auditWriter?.getSummaryCounters(),
           });
@@ -797,16 +809,18 @@ export class SessionOrchestrator {
             success: true,
             replySent,
             reactionSent,
+            fileSent,
           };
           return result;
         }
 
-        // Agent completed but didn't send reply or reaction even after retry
+        // Agent completed but didn't send reply, reaction, or file even after retry
         if (response.stopReason === "end_turn") {
-          sessionLogger.warn("Agent completed without sending reply after retry");
+          sessionLogger.warn("Agent completed without sending a response after retry");
           await auditWriter?.write("session_end", {
             success: false,
             replySent: false,
+            fileSent: false,
             durationMs: Date.now() - sessionStartTime,
             error: "Agent did not generate a reply",
             ...auditWriter?.getSummaryCounters(),
@@ -814,6 +828,7 @@ export class SessionOrchestrator {
           result = {
             success: false,
             replySent: false,
+            fileSent: false,
             error: "Agent did not generate a reply",
           };
           return result;
@@ -823,6 +838,7 @@ export class SessionOrchestrator {
           await auditWriter?.write("session_end", {
             success: false,
             replySent: false,
+            fileSent: false,
             durationMs: Date.now() - sessionStartTime,
             error: "Session was cancelled",
             ...auditWriter?.getSummaryCounters(),
@@ -830,6 +846,7 @@ export class SessionOrchestrator {
           result = {
             success: false,
             replySent: false,
+            fileSent: false,
             error: "Session was cancelled",
           };
           return result;
@@ -838,6 +855,7 @@ export class SessionOrchestrator {
         await auditWriter?.write("session_end", {
           success: false,
           replySent: false,
+          fileSent: false,
           durationMs: Date.now() - sessionStartTime,
           error: `Unexpected stop reason: ${response.stopReason}`,
           ...auditWriter?.getSummaryCounters(),
@@ -845,6 +863,7 @@ export class SessionOrchestrator {
         result = {
           success: false,
           replySent: false,
+          fileSent: false,
           error: `Unexpected stop reason: ${response.stopReason}`,
         };
         return result;
@@ -873,6 +892,7 @@ export class SessionOrchestrator {
       // Audit: session_end (exception) — auditWriter may be null if error occurs before creation
       await auditWriter?.write("session_end", {
         success: false,
+        fileSent: false,
         durationMs: Date.now() - sessionStartTime,
         error: error instanceof Error ? error.message : String(error),
         ...auditWriter?.getSummaryCounters(),
@@ -880,6 +900,7 @@ export class SessionOrchestrator {
       result = {
         success: false,
         replySent: false,
+        fileSent: false,
         error: error instanceof Error ? error.message : "Unknown error",
       };
       return result;
@@ -1150,7 +1171,12 @@ export class SessionOrchestrator {
 
         if (response === null) {
           sessionLogger.warn("Spontaneous session ended without response after reconnect");
-          return { success: false, replySent: false, error: "Session lost due to idle timeout" };
+          return {
+            success: false,
+            replySent: false,
+            fileSent: false,
+            error: "Session lost due to idle timeout",
+          };
         }
 
         sessionLogger.info("Agent session completed with stopReason {stopReason}", {
@@ -1206,6 +1232,7 @@ export class SessionOrchestrator {
         await auditWriter?.write("session_end", {
           success: replySent,
           replySent,
+          fileSent: false,
           durationMs: Date.now() - sessionStartTime,
           error: replySent ? undefined : "Agent did not send a reply",
           ...auditWriter?.getSummaryCounters(),
@@ -1214,6 +1241,7 @@ export class SessionOrchestrator {
         result = {
           success: replySent,
           replySent,
+          fileSent: false,
           error: replySent ? undefined : "Agent did not send a reply",
         };
         return result;
@@ -1236,6 +1264,7 @@ export class SessionOrchestrator {
       });
       await auditWriter?.write("session_end", {
         success: false,
+        fileSent: false,
         durationMs: Date.now() - sessionStartTime,
         error: error instanceof Error ? error.message : String(error),
         ...auditWriter?.getSummaryCounters(),
@@ -1243,6 +1272,7 @@ export class SessionOrchestrator {
       result = {
         success: false,
         replySent: false,
+        fileSent: false,
         error: error instanceof Error ? error.message : "Unknown error",
       };
       return result;
@@ -1477,7 +1507,12 @@ export class SessionOrchestrator {
 
         if (response === null) {
           sessionLogger.warn("Self-research session ended without response after reconnect");
-          return { success: false, replySent: false, error: "Session lost due to idle timeout" };
+          return {
+            success: false,
+            replySent: false,
+            fileSent: false,
+            error: "Session lost due to idle timeout",
+          };
         }
 
         sessionLogger.info("Self-research agent session completed with stopReason {stopReason}", {
@@ -1503,6 +1538,7 @@ export class SessionOrchestrator {
         await auditWriter?.write("session_end", {
           success,
           replySent: false,
+          fileSent: false,
           durationMs: Date.now() - sessionStartTime,
           error: success ? undefined : `Unexpected stop reason: ${response.stopReason}`,
           ...auditWriter?.getSummaryCounters(),
@@ -1511,6 +1547,7 @@ export class SessionOrchestrator {
         result = {
           success,
           replySent: false,
+          fileSent: false,
           error: success ? undefined : `Unexpected stop reason: ${response.stopReason}`,
         };
         return result;
@@ -1531,6 +1568,7 @@ export class SessionOrchestrator {
       });
       await auditWriter?.write("session_end", {
         success: false,
+        fileSent: false,
         durationMs: Date.now() - sessionStartTime,
         error: error instanceof Error ? error.message : String(error),
         ...auditWriter?.getSummaryCounters(),
@@ -1538,6 +1576,7 @@ export class SessionOrchestrator {
       result = {
         success: false,
         replySent: false,
+        fileSent: false,
         error: error instanceof Error ? error.message : "Unknown error",
       };
       return result;
@@ -1570,6 +1609,7 @@ export class SessionOrchestrator {
       return {
         success: false,
         replySent: false,
+        fileSent: false,
         error: `Invalid workspace key: ${workspaceKey}`,
       };
     }
@@ -1764,7 +1804,12 @@ export class SessionOrchestrator {
 
         if (response === null) {
           sessionLogger.warn("Memory maintenance session ended without response after reconnect");
-          return { success: false, replySent: false, error: "Session lost due to idle timeout" };
+          return {
+            success: false,
+            replySent: false,
+            fileSent: false,
+            error: "Session lost due to idle timeout",
+          };
         }
 
         sessionLogger.info("Memory maintenance session completed with stopReason {stopReason}", {
@@ -1788,6 +1833,7 @@ export class SessionOrchestrator {
         await auditWriter?.write("session_end", {
           success,
           replySent: false,
+          fileSent: false,
           durationMs: Date.now() - sessionStartTime,
           error: success ? undefined : `Unexpected stop reason: ${response.stopReason}`,
           ...auditWriter?.getSummaryCounters(),
@@ -1795,6 +1841,7 @@ export class SessionOrchestrator {
         result = {
           success,
           replySent: false,
+          fileSent: false,
           error: success ? undefined : `Unexpected stop reason: ${response.stopReason}`,
         };
         return result;
@@ -1815,6 +1862,7 @@ export class SessionOrchestrator {
       });
       await auditWriter?.write("session_end", {
         success: false,
+        fileSent: false,
         durationMs: Date.now() - sessionStartTime,
         error: error instanceof Error ? error.message : String(error),
         ...auditWriter?.getSummaryCounters(),
@@ -1822,6 +1870,7 @@ export class SessionOrchestrator {
       result = {
         success: false,
         replySent: false,
+        fileSent: false,
         error: error instanceof Error ? error.message : "Unknown error",
       };
       return result;
@@ -1855,6 +1904,7 @@ export class SessionOrchestrator {
       return {
         success: false,
         replySent: false,
+        fileSent: false,
         error: `Invalid platform in channel key: ${channelKey}`,
       };
     }
@@ -2061,7 +2111,12 @@ export class SessionOrchestrator {
           sessionLogger.warn(
             "Channel memory maintenance session ended without response after reconnect",
           );
-          return { success: false, replySent: false, error: "Session lost due to idle timeout" };
+          return {
+            success: false,
+            replySent: false,
+            fileSent: false,
+            error: "Session lost due to idle timeout",
+          };
         }
 
         sessionLogger.info(
@@ -2086,6 +2141,7 @@ export class SessionOrchestrator {
         await auditWriter?.write("session_end", {
           success,
           replySent: false,
+          fileSent: false,
           durationMs: Date.now() - sessionStartTime,
           error: success ? undefined : `Unexpected stop reason: ${response.stopReason}`,
           ...auditWriter?.getSummaryCounters(),
@@ -2093,6 +2149,7 @@ export class SessionOrchestrator {
         result = {
           success,
           replySent: false,
+          fileSent: false,
           error: success ? undefined : `Unexpected stop reason: ${response.stopReason}`,
         };
         return result;
@@ -2111,6 +2168,7 @@ export class SessionOrchestrator {
       });
       await auditWriter?.write("session_end", {
         success: false,
+        fileSent: false,
         durationMs: Date.now() - sessionStartTime,
         error: error instanceof Error ? error.message : String(error),
         ...auditWriter?.getSummaryCounters(),
@@ -2118,6 +2176,7 @@ export class SessionOrchestrator {
       result = {
         success: false,
         replySent: false,
+        fileSent: false,
         error: error instanceof Error ? error.message : "Unknown error",
       };
       return result;
@@ -2178,6 +2237,7 @@ export class SessionOrchestrator {
         result = {
           success: false,
           replySent: false,
+          fileSent: false,
           error: "Cannot resolve DM channel — reminder disabled",
         };
         return result;
@@ -2392,7 +2452,12 @@ export class SessionOrchestrator {
 
         if (response === null) {
           sessionLogger.warn("Reminder session ended without response after reconnect");
-          return { success: false, replySent: false, error: "Session lost due to idle timeout" };
+          return {
+            success: false,
+            replySent: false,
+            fileSent: false,
+            error: "Session lost due to idle timeout",
+          };
         }
 
         sessionLogger.info("Agent session completed with stopReason {stopReason}", {
@@ -2455,6 +2520,7 @@ export class SessionOrchestrator {
         await auditWriter?.write("session_end", {
           success: replySent,
           replySent,
+          fileSent: false,
           durationMs: Date.now() - sessionStartTime,
           error: replySent ? undefined : "Agent did not send a reply",
           ...auditWriter?.getSummaryCounters(),
@@ -2463,6 +2529,7 @@ export class SessionOrchestrator {
         result = {
           success: replySent,
           replySent,
+          fileSent: false,
           error: replySent ? undefined : "Agent did not send a reply",
         };
         return result;
@@ -2484,6 +2551,7 @@ export class SessionOrchestrator {
       });
       await auditWriter?.write("session_end", {
         success: false,
+        fileSent: false,
         durationMs: Date.now() - sessionStartTime,
         error: error instanceof Error ? error.message : String(error),
         ...auditWriter?.getSummaryCounters(),
@@ -2491,6 +2559,7 @@ export class SessionOrchestrator {
       result = {
         success: false,
         replySent: false,
+        fileSent: false,
         error: error instanceof Error ? error.message : "Unknown error",
       };
       return result;

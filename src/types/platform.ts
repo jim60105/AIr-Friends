@@ -107,6 +107,16 @@ export interface PlatformEmoji {
 }
 
 /**
+ * A single file to send via the send-file skill
+ */
+export interface SendFilePayload {
+  /** File content bytes */
+  content: Uint8Array;
+  /** File name for the attachment */
+  fileName: string;
+}
+
+/**
  * Options for sending a file to a channel
  */
 export interface SendFileOptions {
@@ -121,7 +131,10 @@ export interface SendFileOptions {
  */
 export interface SendFileResult {
   success: boolean;
+  /** Last delivered message ID (backward-compatible field for logs/result consumers) */
   messageId?: string;
+  /** All delivered message IDs, in send order (multi-file/partial delivery) */
+  messageIds?: string[];
   error?: string;
 }
 

@@ -7,15 +7,35 @@ import { PayloadError, readPayloadArg } from "../../lib/payload.ts";
 async function main() {
   try {
     const args = parse(Deno.args, {
-      string: ["session-id", "api-url", "file-path"],
-      alias: { s: "session-id", a: "api-url", f: "file-path" },
+      string: ["session-id", "api-url", "file-paths"],
+      collect: ["file-paths"],
+      alias: { s: "session-id", a: "api-url", f: "file-paths" },
     });
 
     const { sessionId, apiUrl } = parseBaseArgs(Deno.args);
 
-    const filePath = args["file-path"];
-    if (!filePath) {
-      exitWithError("Missing required argument: --file-path");
+    // Reject the removed singular --file-path flag (both forms) BEFORE any API
+    // call with an instructive error teaching the repeatable --file-paths form.
+    for (const token of Deno.args) {
+      if (token === "--file-path" || token.startsWith("--file-path=")) {
+        exitWithError(
+          `The --file-path flag is no longer supported: it was replaced by the repeatable ` +
+          `--file-paths flag, because the skill now supports sending multiple files in one ` +
+          `invocation. Use --file-paths once per file, for example:\n` +
+          `${Deno.env.get("HOME") ?? "~"}/.agents/skills/send-file/scripts/send-file.ts ` +
+          `--session-id "$SESSION_ID" --file-paths "exports/report.pdf" ` +
+          `--file-paths "exports/chart.png"`,
+          "SKILL_SINGLE_FILE_FLAG",
+        );
+      }
+    }
+
+    const filePaths = args["file-paths"];
+    if (!Array.isArray(filePaths) || filePaths.length === 0) {
+      exitWithError(
+        "Missing required argument: --file-paths (repeatable, one occurrence per file, " +
+        "at least one required). Example: --file-paths \"a.png\" --file-paths \"b.png\"",
+      );
     }
 
     const caption = await readPayloadArg(Deno.args, "caption", {
@@ -24,12 +44,13 @@ async function main() {
       required: false,
       fileName: "caption.md",
       example: `${Deno.env.get("HOME") ?? "~"}/.agents/skills/send-file/scripts/send-file.ts ` +
-        `--session-id "$SESSION_ID" --file-path "exports/report.pdf" ` +
+        `--session-id "$SESSION_ID" --file-paths "exports/report.pdf" ` +
+        `--file-paths "exports/chart.png" ` +
         `--caption-file "$TMPDIR/$SESSION_ID/caption.md"`,
     });
 
     const result = await callSkillApi(apiUrl, "send-file", sessionId, {
-      filePath,
+      filePaths,
       caption: caption ?? undefined,
     });
 

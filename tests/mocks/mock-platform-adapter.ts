@@ -10,6 +10,7 @@ import {
   type ReactionResult,
   type ReplyOptions,
   type ReplyResult,
+  type SendFilePayload,
   type SendFileResult,
 } from "../../src/types/platform.ts";
 
@@ -73,10 +74,13 @@ export class MockPlatformAdapter extends PlatformAdapter {
 
   async sendFile(
     _channelId: string,
-    _fileContent: Uint8Array,
-    _fileName: string,
+    _files: SendFilePayload[],
   ): Promise<SendFileResult> {
-    return await Promise.resolve({ success: true, messageId: "file-msg-1" });
+    return await Promise.resolve({
+      success: true,
+      messageId: "file-msg-1",
+      messageIds: ["file-msg-1"],
+    });
   }
 
   async getDmChannelId(userId: string): Promise<string | null> {

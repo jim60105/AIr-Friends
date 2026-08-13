@@ -15,6 +15,7 @@ import {
   type ReplyOptions,
   type ReplyResult,
   type SendFileOptions,
+  type SendFilePayload,
   type SendFileResult,
 } from "../../types/platform.ts";
 import { ErrorCode, PlatformError } from "../../types/errors.ts";
@@ -884,40 +885,73 @@ export class MisskeyAdapter extends PlatformAdapter {
   }
 
   /**
-   * Send a file to a channel.
-   * For chat channels, uploads to Drive then sends via chat message.
-   * For note channels, uploads to Drive then creates a note with file attachment.
+   * Send files to a channel.
+   * Uploads ALL files to Drive before creating any message (an upload failure
+   * aborts before anything is sent, cleaning up already-uploaded files). For
+   * note channels, one note is created with all fileIds (a note-creation
+   * failure cleans up all uploads). For chat channels (API accepts one fileId
+   * per message), one message is sent per file with the caption on the first
+   * message only; delivery is not atomic — on a mid-batch failure the delivered
+   * message IDs are returned alongside the error and the not-yet-referenced
+   * Drive uploads are best-effort deleted.
    */
   async sendFile(
     channelId: string,
-    fileContent: Uint8Array,
-    fileName: string,
+    files: SendFilePayload[],
     options?: SendFileOptions,
   ): Promise<SendFileResult> {
+    const uploadedIds: string[] = [];
     try {
-      // Step 1: Upload file to Misskey Drive
-      const driveFile = await this.client.uploadFile(fileContent, fileName);
+      // Step 1: Upload all files to Misskey Drive before any message is created
+      const driveFiles: Array<{ id: string; url: string }> = [];
+      try {
+        for (const file of files) {
+          const driveFile = await this.client.uploadFile(file.content, file.fileName);
+          driveFiles.push(driveFile);
+          uploadedIds.push(driveFile.id);
+        }
+      } catch (error) {
+        // A later upload failed — nothing was sent yet; clean up the files
+        // already uploaded so they do not remain orphaned in Drive.
+        await this.bestEffortDeleteDriveFiles(uploadedIds);
+        throw error;
+      }
 
       // Step 2: Send via appropriate channel type
       if (channelId.startsWith("chat:")) {
-        return await this.sendChatMessage(
-          channelId,
-          options?.comment ?? null,
-          driveFile.id,
-        );
+        return await this.sendChatFiles(channelId, driveFiles, options);
       }
 
-      // Note with file attachment
-      return await this.createNote(options?.comment ?? null, {
+      // Note with all file attachments
+      const result = await this.createNote(options?.comment ?? null, {
         replyToMessageId: options?.replyToMessageId,
-        fileIds: [driveFile.id],
+        fileIds: driveFiles.map((f) => f.id),
       });
+      if (!result.success) {
+        // The note was never created — none of the uploads are referenced.
+        await this.bestEffortDeleteDriveFiles(uploadedIds);
+        return { ...result, messageIds: [] };
+      }
+
+      logger.debug("File note sent", {
+        noteId: result.messageId,
+        fileCount: files.length,
+      });
+
+      return {
+        ...result,
+        messageIds: result.messageId ? [result.messageId] : [],
+      };
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
 
-      logger.error("Failed to send file", {
+      // Safety net: any failure after upload (e.g. a notes/create API error)
+      // leaves the uploads unreferenced — clean them up best-effort.
+      await this.bestEffortDeleteDriveFiles(uploadedIds);
+
+      logger.error("Failed to send files", {
         channelId,
-        fileName,
+        fileNames: files.map((f) => f.fileName).join(", "),
         error: errorMessage,
       });
 
@@ -926,6 +960,107 @@ export class MisskeyAdapter extends PlatformAdapter {
         error: errorMessage,
       };
     }
+  }
+
+  /**
+   * Best-effort deletion of Drive files (used to clean up unreferenced uploads
+   * after a failed send). Failures are logged, never thrown.
+   */
+  private async bestEffortDeleteDriveFiles(fileIds: string[]): Promise<void> {
+    for (const fileId of fileIds) {
+      try {
+        await this.client.request("drive/files/delete", { fileId });
+        logger.debug("Deleted unreferenced Drive file", { fileId });
+      } catch (deleteError) {
+        logger.warn("Failed to delete unreferenced Drive file", {
+          fileId,
+          error: deleteError instanceof Error ? deleteError.message : String(deleteError),
+        });
+      }
+    }
+  }
+
+  /**
+   * Send one chat message per Drive file, caption on the first message only.
+   * On a mid-batch failure: stop, best-effort delete the not-yet-referenced
+   * Drive uploads, and return a partial-failure result carrying the delivered
+   * message IDs.
+   */
+  private async sendChatFiles(
+    channelId: string,
+    driveFiles: Array<{ id: string; url: string }>,
+    options?: SendFileOptions,
+  ): Promise<SendFileResult> {
+    const userId = channelId.slice(5); // Remove "chat:" prefix
+    const messageIds: string[] = [];
+    let lastError: string | undefined;
+
+    for (let i = 0; i < driveFiles.length; i++) {
+      try {
+        const params: Record<string, unknown> = {
+          toUserId: userId,
+          // Caption only on the first message of the batch
+          text: i === 0 ? (options?.comment ?? null) : null,
+          fileId: driveFiles[i].id,
+        };
+
+        const result = await this.client.request<ChatMessageLite>(
+          "chat/messages/create-to-user",
+          params,
+        );
+        messageIds.push(result.id);
+
+        logger.debug("Chat file message sent", {
+          messageId: result.id,
+          toUserId: userId,
+          fileIndex: i + 1,
+          fileCount: driveFiles.length,
+        });
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        lastError = errorMessage;
+        logger.error("Failed to send chat file message, stopping batch", {
+          userId,
+          fileIndex: i + 1,
+          deliveredCount: messageIds.length,
+          error: errorMessage,
+        });
+        break;
+      }
+    }
+
+    if (messageIds.length === driveFiles.length) {
+      return {
+        success: true,
+        messageId: messageIds[messageIds.length - 1],
+        messageIds,
+      };
+    }
+
+    // Partial failure: best-effort delete the Drive uploads that were NOT
+    // referenced by a delivered message (files[0..messageIds.length-1] were).
+    const unreferenced = driveFiles.slice(messageIds.length);
+    for (const file of unreferenced) {
+      try {
+        await this.client.request("drive/files/delete", { fileId: file.id });
+        logger.debug("Deleted unreferenced Drive file after partial chat send", {
+          fileId: file.id,
+          userId,
+        });
+      } catch (deleteError) {
+        logger.warn("Failed to delete unreferenced Drive file", {
+          fileId: file.id,
+          error: deleteError instanceof Error ? deleteError.message : String(deleteError),
+        });
+      }
+    }
+
+    return {
+      success: false,
+      error: lastError ?? "Failed to send chat files",
+      messageId: messageIds[messageIds.length - 1],
+      messageIds,
+    };
   }
 
   /**

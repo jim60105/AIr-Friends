@@ -60,6 +60,7 @@ export class MessageHandler {
       return {
         success: false,
         replySent: false,
+        fileSent: false,
         error: "Event already being processed",
       };
     }
@@ -84,7 +85,7 @@ export class MessageHandler {
           userId: event.userId,
           channelId: event.channelId,
         });
-        return { success: false, replySent: false, error: "Rate limited" };
+        return { success: false, replySent: false, fileSent: false, error: "Rate limited" };
       }
 
       logger.info("Handling event {messageId} from user {userId} on {platform}", {

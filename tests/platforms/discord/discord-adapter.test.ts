@@ -437,10 +437,44 @@ Deno.test({
     mockDiscordClient(adapter, mockChannel);
 
     const fileContent = new TextEncoder().encode("test content");
-    const result = await adapter.sendFile("ch123", fileContent, "test.md");
+    const result = await adapter.sendFile(
+      "ch123",
+      [{ content: fileContent, fileName: "test.md" }],
+    );
     assertEquals(result.success, true);
     assertEquals(result.messageId, "sent_msg_123");
+    assertEquals(result.messageIds, ["sent_msg_123"]);
     assertEquals(sentFiles.length, 1);
+  },
+});
+
+Deno.test({
+  name: "DiscordAdapter.sendFile - sends multiple files in one message",
+  sanitizeOps: false,
+  sanitizeResources: false,
+  fn: async () => {
+    const adapter = createMockDiscordAdapter();
+    let sentFiles: any[] = [];
+    const mockChannel = {
+      type: 0,
+      send: (opts: any) => {
+        sentFiles = opts.files;
+        return Promise.resolve({ id: "sent_msg_multi" });
+      },
+    };
+    mockDiscordClient(adapter, mockChannel);
+
+    const result = await adapter.sendFile("ch123", [
+      { content: new TextEncoder().encode("a"), fileName: "a.png" },
+      { content: new TextEncoder().encode("b"), fileName: "b.png" },
+    ]);
+    assertEquals(result.success, true);
+    assertEquals(result.messageId, "sent_msg_multi");
+    assertEquals(result.messageIds, ["sent_msg_multi"]);
+    // All files in a single message (2 attachments, 1 message)
+    assertEquals(sentFiles.length, 2);
+    assertEquals((sentFiles[0] as any).name, "a.png");
+    assertEquals((sentFiles[1] as any).name, "b.png");
   },
 });
 
@@ -453,7 +487,10 @@ Deno.test({
     mockDiscordClient(adapter, null);
 
     const fileContent = new TextEncoder().encode("test content");
-    const result = await adapter.sendFile("ch123", fileContent, "test.md");
+    const result = await adapter.sendFile(
+      "ch123",
+      [{ content: fileContent, fileName: "test.md" }],
+    );
     assertEquals(result.success, false);
     assertEquals(result.error, "Channel not found or not text-based");
   },
@@ -476,9 +513,13 @@ Deno.test({
     mockDiscordClient(adapter, mockChannel);
 
     const fileContent = new TextEncoder().encode("test content");
-    const result = await adapter.sendFile("ch123", fileContent, "test.md", {
-      comment: "Here is the file",
-    });
+    const result = await adapter.sendFile(
+      "ch123",
+      [{ content: fileContent, fileName: "test.md" }],
+      {
+        comment: "Here is the file",
+      },
+    );
     assertEquals(result.success, true);
     assertEquals(capturedContent, "Here is the file");
   },
@@ -501,9 +542,13 @@ Deno.test({
     mockDiscordClient(adapter, mockChannel);
 
     const fileContent = new TextEncoder().encode("test content");
-    const result = await adapter.sendFile("ch123", fileContent, "test.md", {
-      replyToMessageId: "original_msg_id",
-    });
+    const result = await adapter.sendFile(
+      "ch123",
+      [{ content: fileContent, fileName: "test.md" }],
+      {
+        replyToMessageId: "original_msg_id",
+      },
+    );
     assertEquals(result.success, true);
     assertEquals(capturedReply.messageReference, "original_msg_id");
   },
@@ -524,7 +569,10 @@ Deno.test({
     mockDiscordClient(adapter, mockChannel);
 
     const fileContent = new TextEncoder().encode("test content");
-    const result = await adapter.sendFile("ch123", fileContent, "test.md");
+    const result = await adapter.sendFile(
+      "ch123",
+      [{ content: fileContent, fileName: "test.md" }],
+    );
     assertEquals(result.success, false);
     assertEquals(result.error, "Permission denied");
   },

@@ -19,6 +19,7 @@ export type AuditPhase =
   | "agent_complete_thought"
   | "reply_sent"
   | "reply_edited"
+  | "file_sent"
   | "retry_triggered"
   | "session_end"
   | "permission_approved"
@@ -106,6 +107,12 @@ export interface SessionAuditEntry {
     replyLength?: number;
     platform?: string;
 
+    // file_sent
+    filesCount?: number;
+    captionHash?: string;
+    fileNamesHash?: string;
+    fileNames?: string;
+
     // reply_edited
     originalMessageId?: string;
     newMessageId?: string;
@@ -118,6 +125,7 @@ export interface SessionAuditEntry {
     success?: boolean;
     replySent?: boolean;
     reactionSent?: boolean;
+    fileSent?: boolean;
     durationMs?: number;
     error?: string;
     repliesCount?: number;

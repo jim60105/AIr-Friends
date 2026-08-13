@@ -775,6 +775,16 @@ export interface SendFileSkillConfig {
   maxFileSizeMb?: number;
   /** Allowed file extensions whitelist (e.g. [".png", ".jpg"]), empty = no restriction */
   allowedExtensions?: string[];
+  /**
+   * Maximum number of files per send-file invocation (default: 10).
+   * Matches Discord's per-message attachment cap.
+   */
+  maxFilesPerInvocation?: number;
+  /**
+   * Maximum aggregate size of all files in one invocation in MB (default: 50).
+   * Checked before any file bytes are read.
+   */
+  maxTotalSizeMb?: number;
 }
 
 /**

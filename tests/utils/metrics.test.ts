@@ -2,6 +2,7 @@
 
 import { assertStringIncludes } from "@std/assert";
 import {
+  filesSentTotal,
   messagesReceivedTotal,
   metricsRegistry,
   sessionDurationSeconds,
@@ -18,6 +19,7 @@ Deno.test("metrics registry - exports all registered metrics", async () => {
   assertStringIncludes(output, "airfriends_memory_operations_total");
   assertStringIncludes(output, "airfriends_skill_api_calls_total");
   assertStringIncludes(output, "airfriends_rate_limit_rejections_total");
+  assertStringIncludes(output, "airfriends_files_sent_total");
 });
 
 Deno.test("metrics - counter increments correctly", async () => {
@@ -36,4 +38,10 @@ Deno.test("metrics - messages received counter", async () => {
   messagesReceivedTotal.labels("discord").inc();
   const output = await metricsRegistry.metrics();
   assertStringIncludes(output, "airfriends_messages_received_total{");
+});
+
+Deno.test("metrics - files sent counter increments per delivered file", async () => {
+  filesSentTotal.labels("misskey").inc(3);
+  const output = await metricsRegistry.metrics();
+  assertStringIncludes(output, 'airfriends_files_sent_total{platform="misskey",app="air-friends"} 3');
 });

@@ -101,6 +101,8 @@ export const ENV_MAPPINGS = {
   SKILL_SEND_FILE_ENABLED: "skills.sendFile.enabled",
   SKILL_SEND_FILE_MAX_SIZE_MB: "skills.sendFile.maxFileSizeMb",
   SKILL_SEND_FILE_ALLOWED_EXTENSIONS: "skills.sendFile.allowedExtensions",
+  SKILL_SEND_FILE_MAX_FILES_PER_INVOCATION: "skills.sendFile.maxFilesPerInvocation",
+  SKILL_SEND_FILE_MAX_TOTAL_SIZE_MB: "skills.sendFile.maxTotalSizeMb",
 
   // External skills installation
   AGENT_EXTERNAL_SKILLS: "agent.externalSkills",

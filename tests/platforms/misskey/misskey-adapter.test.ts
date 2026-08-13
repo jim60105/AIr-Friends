@@ -1325,70 +1325,86 @@ Deno.test("MisskeyAdapter.editMessage - handles non-Error object in chat error",
 
 // ============ sendFile Tests ============
 
-Deno.test("MisskeyAdapter.sendFile - sends file via chat message", async () => {
+Deno.test("MisskeyAdapter.sendFile - sends files via chat message (one per file, caption on first)", async () => {
   const adapter = createMockMisskeyAdapter();
-  const calls: string[] = [];
+  const calls: Array<{ endpoint: string; params: Record<string, unknown> }> = [];
 
   // Mock client with both request and uploadFile
   // deno-lint-ignore no-explicit-any
   (adapter as any).client = {
     // deno-lint-ignore no-explicit-any
-    request: (endpoint: string, _params: any) => {
-      calls.push(endpoint);
+    request: (endpoint: string, params: any) => {
+      calls.push({ endpoint, params });
       if (endpoint === "chat/messages/create-to-user") {
-        return Promise.resolve({ id: "chat_msg_123" });
+        return Promise.resolve({ id: `chat_msg_${calls.length}` });
       }
       return Promise.resolve({});
     },
     uploadFile: (_content: Uint8Array, _fileName: string) => {
-      calls.push("drive/files/create");
-      return Promise.resolve({ id: "file_id_456", url: "https://example.com/file" });
+      calls.push({ endpoint: "drive/files/create", params: { fileName: _fileName } });
+      return Promise.resolve({ id: `file_id_${calls.length}`, url: "https://example.com/file" });
     },
   };
 
-  const fileContent = new TextEncoder().encode("test file content");
-  const result = await adapter.sendFile("chat:user1", fileContent, "test.md");
+  const files = [
+    { content: new TextEncoder().encode("one"), fileName: "one.png" },
+    { content: new TextEncoder().encode("two"), fileName: "two.png" },
+  ];
+  const result = await adapter.sendFile("chat:user1", files, { comment: "Here they are" });
 
   assertEquals(result.success, true);
-  assertEquals(result.messageId, "chat_msg_123");
-  assertEquals(calls, ["drive/files/create", "chat/messages/create-to-user"]);
+  assertEquals(result.messageId, "chat_msg_4");
+  assertEquals(result.messageIds, ["chat_msg_3", "chat_msg_4"]);
+  // 2 uploads then 2 chat messages, caption text only on the first chat message
+  const uploads = calls.filter((c) => c.endpoint === "drive/files/create");
+  assertEquals(uploads.length, 2);
+  const chatCalls = calls.filter((c) => c.endpoint === "chat/messages/create-to-user");
+  assertEquals(chatCalls.length, 2);
+  assertEquals(chatCalls[0].params.text, "Here they are");
+  assertEquals(chatCalls[1].params.text, null);
+  // One message per file, in order (upload 1 → message 1, upload 2 → message 2)
+  assertEquals(chatCalls[0].params.fileId, "file_id_1");
+  assertEquals(chatCalls[1].params.fileId, "file_id_2");
 });
 
-Deno.test("MisskeyAdapter.sendFile - sends file via note for non-chat channels", async () => {
+Deno.test("MisskeyAdapter.sendFile - sends files via note for non-chat channels (all fileIds in one note)", async () => {
   const adapter = createMockMisskeyAdapter();
-  const calls: string[] = [];
+  const calls: Array<{ endpoint: string; params: Record<string, unknown> }> = [];
 
   // deno-lint-ignore no-explicit-any
   (adapter as any).client = {
     // deno-lint-ignore no-explicit-any
-    request: (endpoint: string, _params: any) => {
-      calls.push(endpoint);
+    request: (endpoint: string, params: any) => {
+      calls.push({ endpoint, params });
       if (endpoint === "notes/create") {
         return Promise.resolve({ createdNote: { id: "note_123" } });
       }
       return Promise.resolve({});
     },
     uploadFile: (_content: Uint8Array, _fileName: string) => {
-      calls.push("drive/files/create");
-      return Promise.resolve({ id: "file_id_789", url: "https://example.com/file" });
+      calls.push({ endpoint: "drive/files/create", params: { fileName: _fileName } });
+      return Promise.resolve({ id: `file_id_${calls.length}`, url: "https://example.com/file" });
     },
   };
 
-  const fileContent = new TextEncoder().encode("test content");
-  const result = await adapter.sendFile(
-    "note:abc123",
-    fileContent,
-    "export.json",
-    { comment: "Here is your file" },
-  );
+  const files = [
+    { content: new TextEncoder().encode("one"), fileName: "one.png" },
+    { content: new TextEncoder().encode("two"), fileName: "two.png" },
+  ];
+  const result = await adapter.sendFile("note:abc123", files, {
+    comment: "Here is your file",
+  });
 
   assertEquals(result.success, true);
   assertEquals(result.messageId, "note_123");
-  assertEquals(calls.includes("drive/files/create"), true);
-  assertEquals(calls.includes("notes/create"), true);
+  assertEquals(result.messageIds, ["note_123"]);
+  const createNote = calls.find((c) => c.endpoint === "notes/create");
+  // Both file IDs attached to the single note
+  assertEquals((createNote!.params.fileIds as string[]).length, 2);
+  assertEquals(calls.filter((c) => c.endpoint === "drive/files/create").length, 2);
 });
 
-Deno.test("MisskeyAdapter.sendFile - sends file via note with reply threading", async () => {
+Deno.test("MisskeyAdapter.sendFile - sends files via note with reply threading", async () => {
   const adapter = createMockMisskeyAdapter();
   const calls: string[] = [];
 
@@ -1417,8 +1433,7 @@ Deno.test("MisskeyAdapter.sendFile - sends file via note with reply threading", 
   const fileContent = new TextEncoder().encode("test content");
   const result = await adapter.sendFile(
     "note:abc123",
-    fileContent,
-    "export.md",
+    [{ content: fileContent, fileName: "export.md" }],
     { replyToMessageId: "original_note" },
   );
 
@@ -1428,21 +1443,34 @@ Deno.test("MisskeyAdapter.sendFile - sends file via note with reply threading", 
   assertEquals(calls.includes("notes/create"), true);
 });
 
-Deno.test("MisskeyAdapter.sendFile - handles upload failure", async () => {
+Deno.test("MisskeyAdapter.sendFile - handles upload failure before any message is sent", async () => {
   const adapter = createMockMisskeyAdapter();
+  const chatCalls: string[] = [];
 
   // deno-lint-ignore no-explicit-any
   (adapter as any).client = {
+    request: (endpoint: string) => {
+      if (endpoint === "chat/messages/create-to-user") {
+        chatCalls.push(endpoint);
+        return Promise.resolve({ id: "msg" });
+      }
+      return Promise.resolve({});
+    },
     uploadFile: () => {
       throw new Error("Drive upload failed (500): Internal Server Error");
     },
   };
 
-  const fileContent = new TextEncoder().encode("test content");
-  const result = await adapter.sendFile("chat:user1", fileContent, "test.md");
+  const files = [
+    { content: new TextEncoder().encode("one"), fileName: "one.png" },
+    { content: new TextEncoder().encode("two"), fileName: "two.png" },
+  ];
+  const result = await adapter.sendFile("chat:user1", files);
 
   assertEquals(result.success, false);
   assertEquals(result.error, "Drive upload failed (500): Internal Server Error");
+  // Nothing sent — upload failure aborts before any chat message
+  assertEquals(chatCalls.length, 0);
 });
 
 Deno.test("MisskeyAdapter.sendFile - handles non-Error object in error", async () => {
@@ -1456,9 +1484,60 @@ Deno.test("MisskeyAdapter.sendFile - handles non-Error object in error", async (
   };
 
   const fileContent = new TextEncoder().encode("test content");
-  const result = await adapter.sendFile("chat:user1", fileContent, "test.md");
+  const result = await adapter.sendFile(
+    "chat:user1",
+    [{ content: fileContent, fileName: "test.md" }],
+  );
 
   assertEquals(result.success, false);
+});
+
+Deno.test("MisskeyAdapter.sendFile - mid-batch chat failure reports partial delivery and cleans up unreferenced uploads", async () => {
+  const adapter = createMockMisskeyAdapter();
+  const endpoints: string[] = [];
+  const deleteCalls: string[] = [];
+  let uploadCounter = 0;
+
+  // deno-lint-ignore no-explicit-any
+  (adapter as any).client = {
+    // deno-lint-ignore no-explicit-any
+    request: (endpoint: string, params: any) => {
+      endpoints.push(endpoint);
+      if (endpoint === "chat/messages/create-to-user") {
+        // First message succeeds, second fails
+        if (params.fileId === "drive_1") {
+          return Promise.resolve({ id: "chat_msg_1" });
+        }
+        throw new Error("Rate limited (429)");
+      }
+      if (endpoint === "drive/files/delete") {
+        deleteCalls.push(params.fileId);
+        return Promise.resolve({});
+      }
+      return Promise.resolve({});
+    },
+    uploadFile: () => {
+      uploadCounter += 1;
+      return Promise.resolve({ id: `drive_${uploadCounter}`, url: "https://example.com/f" });
+    },
+  };
+
+  const files = [
+    { content: new TextEncoder().encode("one"), fileName: "one.png" },
+    { content: new TextEncoder().encode("two"), fileName: "two.png" },
+    { content: new TextEncoder().encode("three"), fileName: "three.png" },
+  ];
+  const result = await adapter.sendFile("chat:user1", files);
+
+  assertEquals(result.success, false);
+  assertEquals(result.error, "Rate limited (429)");
+  // 1 of 3 delivered
+  assertEquals(result.messageIds, ["chat_msg_1"]);
+  assertEquals(result.messageId, "chat_msg_1");
+  // Best-effort deletion of the 2 unreferenced uploads (files 2 and 3)
+  assertEquals(deleteCalls.length, 2);
+  assertEquals(deleteCalls.includes("drive_2"), true);
+  assertEquals(deleteCalls.includes("drive_3"), true);
 });
 
 // ============ getDmChannelId Tests ============

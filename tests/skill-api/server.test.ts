@@ -1,6 +1,6 @@
 // tests/skill-api/server.test.ts
 
-import { assertEquals, assertExists } from "@std/assert";
+import { assertEquals, assertExists, assertStringIncludes } from "@std/assert";
 import { SkillAPIServer } from "../../src/skill-api/server.ts";
 import { SessionRegistry } from "../../src/skill-api/session-registry.ts";
 import { SkillRegistry } from "../../src/skills/registry.ts";
@@ -2130,6 +2130,495 @@ Deno.test("SkillAPIServer - memory-search writes memory_operation audit entry", 
 
     await server.stop();
     sessionRegistry.stop();
+  } finally {
+    await Deno.remove(tempDir, { recursive: true });
+  }
+});
+
+// ============ Send-file quota, doom-loop, and audit tests ============
+
+function createSendFileRig(
+  tempDir: string,
+  options?: { hashContent?: boolean; adapter?: unknown },
+) {
+  const sessionRegistry = new SessionRegistry();
+  const workspaceManager = new WorkspaceManager({
+    repoPath: tempDir,
+    workspacesDir: "workspaces",
+  });
+  const memoryStore = new MemoryStore(workspaceManager, {
+    searchLimit: 10,
+    maxChars: 2000,
+  });
+  const skillRegistry = new SkillRegistry(
+    memoryStore,
+    undefined,
+    undefined,
+    { enabled: true, allowedExtensions: [] },
+  );
+
+  const mockWorkspace = {
+    key: "discord/123",
+    components: { platform: "discord" as const, userId: "123" },
+    path: tempDir,
+    tmpPath: tempDir + "/tmp",
+    isDm: false,
+  };
+
+  const mockAdapter = options?.adapter ?? {
+    sendFile: () =>
+      Promise.resolve({
+        success: true,
+        messageId: "file_msg_1",
+        messageIds: ["file_msg_1"],
+      }),
+    // deno-lint-ignore no-explicit-any
+  } as any;
+
+  const sessionId = sessionRegistry.register({
+    platform: "discord",
+    channelId: "456",
+    userId: "123",
+    isDm: false,
+    workspace: mockWorkspace,
+    platformAdapter: mockAdapter,
+    triggerEvent: {
+      platform: "discord",
+      channelId: "456",
+      userId: "123",
+      messageId: "msg_trigger",
+      isDm: false,
+      guildId: "",
+      content: "",
+      timestamp: new Date(),
+    },
+  });
+
+  return { sessionRegistry, skillRegistry, sessionId, mockWorkspace };
+}
+
+Deno.test("SkillAPIServer - send-file rejected after one successful call", async () => {
+  const tempDir = await Deno.makeTempDir();
+  try {
+    const rig = createSendFileRig(tempDir);
+    await Deno.writeTextFile(`${rig.mockWorkspace.path}/a.txt`, "aaa");
+
+    const port = 3101;
+    const server = new SkillAPIServer(rig.sessionRegistry, rig.skillRegistry, {
+      port,
+      host: "127.0.0.1",
+    });
+    server.start();
+    await waitForServer(port);
+
+    const callSendFile = (filePaths: string[]) =>
+      fetch(`http://localhost:${port}/api/skill/send-file`, {
+        method: "POST",
+        headers: jsonHeaders(rig.sessionRegistry.getCallerToken(rig.sessionId)),
+        body: JSON.stringify({ sessionId: rig.sessionId, parameters: { filePaths } }),
+      });
+
+    const response1 = await callSendFile(["a.txt"]);
+    const body1 = await response1.json();
+    assertEquals(response1.status, 200, JSON.stringify(body1));
+    assertEquals(body1.success, true);
+
+    // Second send-file (different parameters to bypass the dedup cache) must be
+    // rejected with 429
+    const response2 = await callSendFile(["b.txt"]);
+    assertEquals(response2.status, 429);
+    const body2 = await response2.json();
+    assertEquals(body2.success, false);
+    assertEquals(body2.error?.includes("File send limit reached"), true);
+
+    await server.stop();
+    rig.sessionRegistry.stop();
+  } finally {
+    await Deno.remove(tempDir, { recursive: true });
+  }
+});
+
+Deno.test("SkillAPIServer - send-file quota not consumed on total failure (rollback)", async () => {
+  const tempDir = await Deno.makeTempDir();
+  try {
+    const rig = createSendFileRig(tempDir, {
+      adapter: {
+        sendFile: () => Promise.resolve({ success: false, error: "Platform error" }),
+        // deno-lint-ignore no-explicit-any
+      } as any,
+    });
+    await Deno.writeTextFile(`${rig.mockWorkspace.path}/a.txt`, "aaa");
+
+    const port = 3102;
+    const server = new SkillAPIServer(rig.sessionRegistry, rig.skillRegistry, {
+      port,
+      host: "127.0.0.1",
+    });
+    server.start();
+    await waitForServer(port);
+
+    const callSendFile = (filePath: string) =>
+      fetch(`http://localhost:${port}/api/skill/send-file`, {
+        method: "POST",
+        headers: jsonHeaders(rig.sessionRegistry.getCallerToken(rig.sessionId)),
+        body: JSON.stringify({
+          sessionId: rig.sessionId,
+          parameters: { filePaths: [filePath] },
+        }),
+      });
+
+    // First attempt fails entirely → slot rolled back
+    const response1 = await callSendFile("a.txt");
+    assertEquals(response1.status, 400);
+    await response1.json();
+
+    // Second attempt (different parameters to bypass the dedup cache) still
+    // allowed — the failed attempt did not consume the quota
+    const response2 = await callSendFile("b.txt");
+    assertEquals(response2.status, 400);
+    await response2.json();
+
+    assertEquals(rig.sessionRegistry.getFileSendCount(rig.sessionId), 0);
+
+    await server.stop();
+    rig.sessionRegistry.stop();
+  } finally {
+    await Deno.remove(tempDir, { recursive: true });
+  }
+});
+
+Deno.test("SkillAPIServer - send-file doom-loop terminates agent after 4 attempts", async () => {
+  const tempDir = await Deno.makeTempDir();
+  try {
+    const rig = createSendFileRig(tempDir);
+    await Deno.writeTextFile(`${rig.mockWorkspace.path}/a.txt`, "aaa");
+
+    let terminated = false;
+    rig.sessionRegistry.setTerminateCallback(rig.sessionId, () => {
+      terminated = true;
+      return Promise.resolve();
+    });
+
+    const port = 3103;
+    const server = new SkillAPIServer(rig.sessionRegistry, rig.skillRegistry, {
+      port,
+      host: "127.0.0.1",
+    });
+    server.start();
+    await waitForServer(port);
+
+    const callSendFile = (filePath: string) =>
+      fetch(`http://localhost:${port}/api/skill/send-file`, {
+        method: "POST",
+        headers: jsonHeaders(rig.sessionRegistry.getCallerToken(rig.sessionId)),
+        body: JSON.stringify({
+          sessionId: rig.sessionId,
+          parameters: { filePaths: [filePath] },
+        }),
+      });
+
+    // Attempt 1: succeeds (count 1). Attempts 2-4 (distinct params to bypass the
+    // dedup cache): rejected; the 4th triggers doom-loop.
+    const r1 = await callSendFile("a.txt");
+    assertEquals(r1.status, 200);
+    await r1.json();
+    const attempts = ["b.txt", "c.txt", "d.txt"];
+    for (const filePath of attempts) {
+      const r = await callSendFile(filePath);
+      assertEquals(r.status, 429);
+      await r.json();
+    }
+    assertEquals(rig.sessionRegistry.getFileSendCount(rig.sessionId), 4);
+
+    // Termination is scheduled after the response is sent
+    await new Promise((r) => setTimeout(r, 300));
+    assertEquals(terminated, true);
+
+    await server.stop();
+    rig.sessionRegistry.stop();
+  } finally {
+    await Deno.remove(tempDir, { recursive: true });
+  }
+});
+
+Deno.test("SkillAPIServer - send-file writes file_sent audit entry (hashContent true)", async () => {
+  const tempDir = await Deno.makeTempDir();
+  try {
+    const rig = createSendFileRig(tempDir);
+    await Deno.writeTextFile(`${rig.mockWorkspace.path}/a.png`, "aaa");
+    await Deno.writeTextFile(`${rig.mockWorkspace.path}/b.png`, "bbb");
+
+    const { SessionAuditWriter } = await import("@core/audit-logger.ts");
+    const auditDir = `${tempDir}/audit`;
+    const auditWriter = new SessionAuditWriter(auditDir, "discord", "123", rig.sessionId, {
+      enabled: true,
+      retentionDays: 7,
+      hashContent: true,
+      includedPhases: [],
+    });
+    rig.sessionRegistry.setAuditWriter(rig.sessionId, auditWriter);
+
+    const port = 3104;
+    const server = new SkillAPIServer(rig.sessionRegistry, rig.skillRegistry, {
+      port,
+      host: "127.0.0.1",
+    });
+    server.start();
+    await waitForServer(port);
+
+    const response = await fetch(`http://localhost:${port}/api/skill/send-file`, {
+      method: "POST",
+      headers: jsonHeaders(rig.sessionRegistry.getCallerToken(rig.sessionId)),
+      body: JSON.stringify({
+        sessionId: rig.sessionId,
+        parameters: { filePaths: ["a.png", "b.png"], caption: "here you go" },
+      }),
+    });
+    const body = await response.json();
+    assertEquals(response.status, 200, JSON.stringify(body));
+    assertEquals(body.success, true);
+
+    await new Promise((r) => setTimeout(r, 200));
+
+    const auditPath = `${auditDir}/discord/123/${rig.sessionId}.jsonl`;
+    const content = await Deno.readTextFile(auditPath);
+    const entries = content.trim().split("\n").map((l: string) => JSON.parse(l));
+    const sentEntry = entries.find((e: { phase: string }) => e.phase === "file_sent");
+    assertExists(sentEntry);
+    assertEquals(sentEntry.data.filesCount, 2);
+    assertEquals(sentEntry.data.platform, "discord");
+    assertStringIncludes(sentEntry.data.captionHash as string, "sha256:");
+    assertStringIncludes(sentEntry.data.fileNamesHash as string, "sha256:");
+    // File content itself is never hashed/recorded
+    assertEquals("fileContent" in sentEntry.data, false);
+
+    await server.stop();
+    rig.sessionRegistry.stop();
+  } finally {
+    await Deno.remove(tempDir, { recursive: true });
+  }
+});
+
+Deno.test("SkillAPIServer - file_sent audit entry without caption and without hashing", async () => {
+  const tempDir = await Deno.makeTempDir();
+  try {
+    const rig = createSendFileRig(tempDir);
+    await Deno.writeTextFile(`${rig.mockWorkspace.path}/a.png`, "aaa");
+
+    const { SessionAuditWriter } = await import("@core/audit-logger.ts");
+    const auditDir = `${tempDir}/audit`;
+    const auditWriter = new SessionAuditWriter(auditDir, "discord", "123", rig.sessionId, {
+      enabled: true,
+      retentionDays: 7,
+      hashContent: false,
+      includedPhases: [],
+    });
+    rig.sessionRegistry.setAuditWriter(rig.sessionId, auditWriter);
+
+    const port = 3105;
+    const server = new SkillAPIServer(rig.sessionRegistry, rig.skillRegistry, {
+      port,
+      host: "127.0.0.1",
+    });
+    server.start();
+    await waitForServer(port);
+
+    const response = await fetch(`http://localhost:${port}/api/skill/send-file`, {
+      method: "POST",
+      headers: jsonHeaders(rig.sessionRegistry.getCallerToken(rig.sessionId)),
+      body: JSON.stringify({
+        sessionId: rig.sessionId,
+        parameters: { filePaths: ["a.png"] },
+      }),
+    });
+    const body = await response.json();
+    assertEquals(response.status, 200, JSON.stringify(body));
+    assertEquals(body.success, true);
+
+    await new Promise((r) => setTimeout(r, 200));
+
+    const auditPath = `${auditDir}/discord/123/${rig.sessionId}.jsonl`;
+    const content = await Deno.readTextFile(auditPath);
+    const entries = content.trim().split("\n").map((l: string) => JSON.parse(l));
+    const sentEntry = entries.find((e: { phase: string }) => e.phase === "file_sent");
+    assertExists(sentEntry);
+    assertEquals(sentEntry.data.filesCount, 1);
+    // No caption → no captionHash field; no hashing → plain file names
+    assertEquals("captionHash" in sentEntry.data, false);
+    assertEquals(sentEntry.data.fileNames, "a.png");
+
+    await server.stop();
+    rig.sessionRegistry.stop();
+  } finally {
+    await Deno.remove(tempDir, { recursive: true });
+  }
+});
+
+Deno.test("SkillAPIServer - send-file rejected for triggerless sessions (no triggerEvent)", async () => {
+  const tempDir = await Deno.makeTempDir();
+  try {
+    const sessionRegistry = new SessionRegistry();
+    const workspaceManager = new WorkspaceManager({
+      repoPath: tempDir,
+      workspacesDir: "workspaces",
+    });
+    const memoryStore = new MemoryStore(workspaceManager, {
+      searchLimit: 10,
+      maxChars: 2000,
+    });
+    const skillRegistry = new SkillRegistry(
+      memoryStore,
+      undefined,
+      undefined,
+      { enabled: true, allowedExtensions: [] },
+    );
+
+    // Session registered WITHOUT a trigger event (spontaneous-like)
+    const sessionId = sessionRegistry.register({
+      platform: "discord",
+      channelId: "456",
+      userId: "123",
+      isDm: false,
+      workspace: {
+        key: "discord/123",
+        components: { platform: "discord" as const, userId: "123" },
+        path: tempDir,
+        tmpPath: tempDir + "/tmp",
+        isDm: false,
+      },
+      platformAdapter: {
+        sendFile: () =>
+          Promise.resolve({
+            success: true,
+            messageId: "m",
+            messageIds: ["m"],
+          }),
+        // deno-lint-ignore no-explicit-any
+      } as any,
+    });
+
+    const port = 3106;
+    const server = new SkillAPIServer(sessionRegistry, skillRegistry, {
+      port,
+      host: "127.0.0.1",
+    });
+    server.start();
+    await waitForServer(port);
+
+    const response = await fetch(`http://localhost:${port}/api/skill/send-file`, {
+      method: "POST",
+      headers: jsonHeaders(sessionRegistry.getCallerToken(sessionId)),
+      body: JSON.stringify({
+        sessionId,
+        parameters: { filePaths: ["a.txt"] },
+      }),
+    });
+
+    assertEquals(response.status, 403);
+    const body = await response.json();
+    assertEquals(body.success, false);
+    assertStringIncludes(body.error as string, "user-triggered");
+    // Nothing was marked or counted
+    assertEquals(sessionRegistry.hasFileSent(sessionId), false);
+    assertEquals(sessionRegistry.getFileSendCount(sessionId), 0);
+
+    await server.stop();
+    sessionRegistry.stop();
+  } finally {
+    await Deno.remove(tempDir, { recursive: true });
+  }
+});
+
+Deno.test("SkillAPIServer - partial delivery marks fileSent and keeps the quota slot", async () => {
+  const tempDir = await Deno.makeTempDir();
+  try {
+    const rig = createSendFileRig(tempDir, {
+      adapter: {
+        sendFile: () =>
+          Promise.resolve({
+            success: false,
+            messageId: "chat_1",
+            messageIds: ["chat_1"],
+            error: "Mid-batch failure",
+          }),
+        // deno-lint-ignore no-explicit-any
+      } as any,
+    });
+    await Deno.writeTextFile(`${rig.mockWorkspace.path}/a.txt`, "aaa");
+
+    const port = 3107;
+    const server = new SkillAPIServer(rig.sessionRegistry, rig.skillRegistry, {
+      port,
+      host: "127.0.0.1",
+    });
+    server.start();
+    await waitForServer(port);
+
+    const response = await fetch(`http://localhost:${port}/api/skill/send-file`, {
+      method: "POST",
+      headers: jsonHeaders(rig.sessionRegistry.getCallerToken(rig.sessionId)),
+      body: JSON.stringify({ sessionId: rig.sessionId, parameters: { filePaths: ["a.txt"] } }),
+    });
+    assertEquals(response.status, 400);
+    const body = await response.json();
+    assertEquals(body.success, false);
+    assertEquals(body.error, "Mid-batch failure");
+
+    // 1 of 2 delivered → session counts as responded, quota slot kept
+    assertEquals(rig.sessionRegistry.hasFileSent(rig.sessionId), true);
+    assertEquals(rig.sessionRegistry.getFileSendCount(rig.sessionId), 1);
+
+    await server.stop();
+    rig.sessionRegistry.stop();
+  } finally {
+    await Deno.remove(tempDir, { recursive: true });
+  }
+});
+
+Deno.test("SkillAPIServer - identical repeated send-file calls still reach the doom-loop gate (no result caching)", async () => {
+  const tempDir = await Deno.makeTempDir();
+  try {
+    const rig = createSendFileRig(tempDir);
+    await Deno.writeTextFile(`${rig.mockWorkspace.path}/a.txt`, "aaa");
+
+    let terminated = false;
+    rig.sessionRegistry.setTerminateCallback(rig.sessionId, () => {
+      terminated = true;
+      return Promise.resolve();
+    });
+
+    const port = 3108;
+    const server = new SkillAPIServer(rig.sessionRegistry, rig.skillRegistry, {
+      port,
+      host: "127.0.0.1",
+    });
+    server.start();
+    await waitForServer(port);
+
+    // All calls use IDENTICAL parameters — the 1s dedup cache must NOT swallow
+    // them, otherwise the quota gate and doom-loop detection would be starved.
+    const callSendFile = () =>
+      fetch(`http://localhost:${port}/api/skill/send-file`, {
+        method: "POST",
+        headers: jsonHeaders(rig.sessionRegistry.getCallerToken(rig.sessionId)),
+        body: JSON.stringify({ sessionId: rig.sessionId, parameters: { filePaths: ["a.txt"] } }),
+      });
+
+    const r1 = await callSendFile();
+    assertEquals(r1.status, 200);
+    await r1.json();
+    for (let i = 0; i < 3; i++) {
+      const r = await callSendFile();
+      assertEquals(r.status, 429);
+      await r.json();
+    }
+    assertEquals(rig.sessionRegistry.getFileSendCount(rig.sessionId), 4);
+
+    await new Promise((r) => setTimeout(r, 300));
+    assertEquals(terminated, true);
+
+    await server.stop();
+    rig.sessionRegistry.stop();
   } finally {
     await Deno.remove(tempDir, { recursive: true });
   }

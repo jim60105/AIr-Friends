@@ -1,106 +1,4 @@
-# Skills and Reply
-
-## Purpose
-
-Defines the shell-based skill execution architecture, Skill API HTTP server, session authentication, available skills, reply rules, retry mechanism, edit-reply behavior, and content processing (XML stripping, newline unescaping).
-## Requirements
-### Requirement: Shell-Based Skill Execution
-
-Skills SHALL be implemented as Deno TypeScript scripts located in `skills/{skill-name}/scripts/` directories. Each skill SHALL have a `SKILL.md` file describing its usage for the agent. External ACP Agents SHALL execute these scripts with a `--session-id` parameter. Scripts SHALL use the shared client library at `skills/lib/client.ts` to communicate back to the main bot via HTTP. Skill scripts SHALL NOT accept free-text content (reply text, memory content, search queries, captions, reminder text) as CLI argument values in any form: any free-text argument SHALL be passed via a payload-file flag (e.g. `--message-file`, `--content-file`, `--query-file`, `--caption-file`) whose content is read from a file staged in the session-scoped TMPDIR, so that no user-facing content ever appears on a shell command line. The legacy free-text flags (`--message`, `--content`, `--query`, `--caption`) SHALL be rejected with a clear error in both invocation forms (`--flag value` and `--flag=value`); a script invoked with a legacy flag SHALL exit non-zero and SHALL NOT call the Skill API. Scripts SHALL be executed directly (shebang `#!/usr/bin/env -S deno run --allow-net --allow-env --allow-read --allow-write`); the `--allow-read` permission is required for reading the staged payload file, and `--allow-write` enables the script's best-effort deletion of the consumed payload file (the only write the scripts perform — a containment-verified remove of the staging file).
-
-#### Scenario: Agent executes a skill script
-- **GIVEN** an ACP Agent decides to use the `memory-save` skill
-- **WHEN** the agent executes the script
-- **THEN** the script SHALL receive `--session-id` as a parameter
-- **AND** the script SHALL call the Skill API HTTP endpoint to perform the operation
-
-#### Scenario: Skill receives session ID from environment variable
-- **GIVEN** a skill script is executed by the agent
-- **WHEN** the agent builds the bash command
-- **THEN** the agent SHALL use `--session-id "$SESSION_ID"` where `$SESSION_ID` is resolved from the environment variable set in the agent subprocess
-- **AND** the agent SHALL NOT need to know the actual session ID value
-
-#### Scenario: Legacy free-text flag rejected
-- **GIVEN** a skill script that sends or stores user-facing content (e.g. `send-reply`)
-- **WHEN** the script is invoked with a legacy free-text flag such as `--message "定價 $0.435"` or `--message=定價 $0.435`
-- **THEN** the script SHALL exit with a non-zero status and an error instructing the use of the payload-file flag (e.g. `--message-file`)
-- **AND** the script SHALL NOT call the Skill API
-
-### Requirement: Skill API HTTP Server
-
-The system SHALL run an HTTP server (configurable host/port, typically `localhost:3001`) that exposes skill endpoints at `POST /api/skill/{skill-name}`. The server SHALL only accept POST requests (returning appropriate errors for other methods). OPTIONS requests SHALL return 204 for CORS preflight. The server SHALL implement a 1-second TTL request cache for deduplication of concurrent duplicate requests.
-
-#### Scenario: Valid skill API call
-- **GIVEN** an active session with ID `sess_abc_123`
-- **WHEN** a POST request is sent to `/api/skill/memory-save` with `{ "sessionId": "sess_abc_123", "parameters": { ... } }`
-- **THEN** the server SHALL authenticate the session, execute the skill handler, and return the result
-
-#### Scenario: Invalid session rejected
-- **GIVEN** an expired or non-existent session ID
-- **WHEN** a skill API request is made with that session ID
-- **THEN** the server SHALL return HTTP 401
-
-### Requirement: Session-Based Authentication
-
-The system SHALL authenticate all skill API requests via BOTH a session ID and a per-session caller token bound to the subprocess that owns the session; a valid session ID alone SHALL NOT be sufficient. Session IDs SHALL follow the format `sess_{timestamp}_{UUID}` with 64+ bits of entropy. At session registration the system SHALL mint a high-entropy caller token distinct from the session ID, store it on the session, and provision it into the owning agent subprocess's environment. Each skill API request SHALL present the token (e.g. as an `Authorization: Bearer <token>` header); the server SHALL resolve the session by ID and then verify the presented token against the session's stored token using a constant-time comparison, rejecting a mismatched or absent token with HTTP 403. Sessions SHALL expire based on a configurable idle `timeoutMs`: the session registry SHALL treat a session idle beyond `timeoutMs` as absent on `get()`, run periodic cleanup, and refresh the session's `lastActivityAt` via `touch()` on each authenticated call.
-
-Note: the caller token is provisioned into the owning subprocess's environment, so it does not by itself defend against an attacker who can read that subprocess's environment directly (that vector is addressed by agent filesystem confinement); its purpose is to ensure that knowledge of a session ID obtained through any other channel does not grant the ability to act as that session.
-
-#### Scenario: Valid session ID without caller token rejected
-- **GIVEN** an active session `sess_abc_123`
-- **WHEN** a skill API request presents `sessionId: "sess_abc_123"` but no caller token, or a token that does not match the session's stored token
-- **THEN** the server SHALL return HTTP 403 and SHALL NOT execute the skill
-
-#### Scenario: Valid session ID with matching caller token accepted
-- **GIVEN** an active session `sess_abc_123` whose owning subprocess holds the session's caller token
-- **WHEN** a skill API request presents `sessionId: "sess_abc_123"` and the matching token via the `Authorization` header
-- **THEN** the server SHALL authenticate the request and execute the skill handler
-
-#### Scenario: Constant-time token comparison
-- **GIVEN** a presented caller token
-- **WHEN** the server verifies it against the session's stored token
-- **THEN** the comparison SHALL be constant-time to avoid a timing oracle
-
-#### Scenario: Session expiration
-- **GIVEN** a session that has been inactive beyond `timeoutMs`
-- **WHEN** a skill API request is made with that session ID
-- **THEN** the session registry SHALL treat the session as absent and the server SHALL return 401
-
-#### Scenario: Activity refreshes idle timeout
-- **GIVEN** an active session receiving authenticated calls within `timeoutMs`
-- **WHEN** each authenticated call is processed
-- **THEN** the session's `lastActivityAt` SHALL be refreshed via `touch()` so an actively used session does not expire mid-turn
-
-### Requirement: Available Skills
-
-The system SHALL register the following skills via `SkillRegistry`:
-
-| Skill             | Handler              | Description                     |
-| ----------------- | -------------------- | ------------------------------- |
-| `memory-save`     | MemoryHandler        | Save a new memory               |
-| `memory-search`   | MemoryHandler        | Search existing memories        |
-| `memory-patch`    | MemoryHandler        | Update memory attributes        |
-| `memory-stats`    | MemoryHandler        | Get memory statistics           |
-| `memory-export`   | MemoryHandler        | Export memories as file          |
-| `send-reply`      | ReplyHandler         | Send a reply message            |
-| `edit-reply`      | ReplyHandler         | Edit a previously sent reply    |
-| `get-message`     | ReplyHandler         | Get a message by ID             |
-| `fetch-context`   | ContextHandler       | Fetch additional platform data  |
-| `react-message`   | ReactionHandler      | Add emoji reaction to a message |
-
-The following skills SHALL be registered conditionally based on configuration:
-
-| Skill              | Condition                         |
-| ------------------ | --------------------------------- |
-| `set-reminder`     | `remindersConfig?.enabled && reminderStore` |
-| `cancel-reminder`  | Same as above                     |
-| `list-reminders`   | Same as above                     |
-| `send-file`        | `sendFileConfig?.enabled`         |
-
-#### Scenario: Conditional skill not registered
-- **GIVEN** reminders are not enabled in configuration
-- **WHEN** the skill registry initializes
-- **THEN** `set-reminder`, `cancel-reminder`, and `list-reminders` SHALL NOT be registered
+## MODIFIED Requirements
 
 ### Requirement: Reply Rules
 
@@ -182,7 +80,7 @@ The system SHALL automatically retry when an ACP Agent completes a prompt turn (
 
 ### Requirement: Instructive Skill Error Messages
 
-Skill script contract failures SHALL produce structured, instructive errors that teach the correct usage, so the agent can self-correct mid-turn. The shared payload helper SHALL raise typed errors carrying a stable `code` and a guidance message; the scripts SHALL emit them as JSON on stderr (extending the existing `exitWithError` contract with a `code` field) and SHALL NOT call the Skill API. The guidance message SHALL state (a) what was wrong, (b) why it matters, and (c) the exact correct pattern with a copy-pasteable example invocation specific to the failing skill. The error codes SHALL be: `SKILL_LEGACY_FLAG` (legacy free-text flag used, in either `--flag value` or `--flag=value` form — guidance SHALL state the flag was removed for security, forbid message content on the command line, and show the two-step payload-file flow), `SKILL_MISSING_PAYLOAD` (required payload flag absent — guidance SHALL name the required flag and show the two-step flow), `SKILL_PAYLOAD_OUT_OF_BOUNDS` (path resolves outside the session staging directory, including symlink escapes — guidance SHALL explain the payload must live under `$TMPDIR/$SESSION_ID/...` and why, and show the correct form), and `SKILL_PAYLOAD_NOT_FOUND` (file absent or unreadable — guidance SHALL instruct writing the file first with the edit/write tool, then invoking the script), and `SKILL_SINGLE_FILE_FLAG` (the `send-file` script invoked with the removed singular `--file-path` flag in either form — guidance SHALL state that the flag was replaced by the repeatable `--file-paths` flag, explain that the skill supports multiple files per invocation, and show a copy-pasteable example with two or more `--file-paths` arguments). The `error` field SHALL be self-contained prose containing the fix and a full example command.
+Skill script contract failures SHALL produce structured, instructive errors that teach the correct usage, so the agent can self-correct mid-turn. The shared payload helper SHALL raise typed errors carrying a stable `code` and a guidance message; the scripts SHALL emit them as JSON on stderr (extending the existing `exitWithError` contract with a `code` field) and SHALL NOT call the Skill API. The guidance message SHALL state (a) what was wrong, (b) why it matters, and (c) the exact correct pattern with a copy-pasteable example invocation specific to the failing skill. The error codes SHALL be: `SKILL_LEGACY_FLAG` (legacy free-text flag used, in either `--flag value` or `--flag=value` form — guidance SHALL state the flag was removed for security, forbid message content on the command line, and show the two-step payload-file flow), `SKILL_MISSING_PAYLOAD` (required payload flag absent — guidance SHALL name the required flag and show the two-step flow), `SKILL_PAYLOAD_OUT_OF_BOUNDS` (path resolves outside the session staging directory, including symlink escapes — guidance SHALL explain the payload must live under `$TMPDIR/$SESSION_ID/...` and why, and show the correct form), `SKILL_PAYLOAD_NOT_FOUND` (file absent or unreadable — guidance SHALL instruct writing the file first with the edit/write tool, then invoking the script), and `SKILL_SINGLE_FILE_FLAG` (the `send-file` script invoked with the removed singular `--file-path` flag in either form — guidance SHALL state that the flag was replaced by the repeatable `--file-paths` flag, explain that the skill supports multiple files per invocation, and show a copy-pasteable example with two or more `--file-paths` arguments). The `error` field SHALL be self-contained prose containing the fix and a full example command.
 
 #### Scenario: Legacy flag error teaches the payload-file flow
 - **GIVEN** an agent invokes `send-reply` with `--message "定價 $0.435"` or `--message=定價`
@@ -211,88 +109,6 @@ Skill script contract failures SHALL produce structured, instructive errors that
 - **THEN** the error SHALL have code `SKILL_SINGLE_FILE_FLAG`, SHALL state that `--file-path` was replaced by the repeatable `--file-paths` flag, and SHALL include a copy-pasteable example passing two or more files
 - **AND** the script SHALL NOT call the Skill API
 
-### Requirement: Payload-File Argument Passing
-
-Skill scripts that carry free-text content SHALL accept that content exclusively through a payload-file flag whose value is the path of a file staged in the session-scoped TMPDIR. The mapping SHALL be: `send-reply`/`edit-reply`/`set-reminder` use `--message-file`, `send-file` uses `--caption-file`, `memory-save` uses `--content-file`, `memory-search`/`fetch-context` use `--query-file`. A REQUIRED free-text argument SHALL have exactly one payload-file flag; an OPTIONAL free-text argument (e.g. `send-file` caption, `fetch-context` query) MAY omit its payload-file flag, and when present SHALL accept exactly one. The payload file SHALL be written by the agent through the ACP filesystem interface (edit/write tool or `writeTextFile`) using the `$TMPDIR/$SESSION_ID`-anchored path, so its bytes are preserved verbatim with no shell interpretation. The system SHALL pre-create the session staging directory `{workspace}/tmp/{sessionId}` at session setup (when the shell session is registered), because neither the agent's edit/write tool nor `writeTextFile` creates parent directories; the directory is removed with the rest of `{workspace}/tmp` when the last session for the workspace ends. The script SHALL resolve the payload path against its working directory (the session workspace, which is the agent subprocess cwd) and SHALL require the resolved path to be inside the session staging directory `{workspace}/tmp/{sessionId}` (the session id from the script's own `--session-id` argument; sessions without an id fall back to `{workspace}/tmp`), using boundary-safe matching (equal-or-separator-prefixed) so prefix-sibling directories (`{base}-2`, `{base}2`) are rejected. When the payload file exists, the script SHALL resolve its real path (`Deno.realPath`) and SHALL re-check the real path for containment, so a symlink that escapes the staging directory (e.g. pointing at `/etc/passwd` or into another session's directory) SHALL be rejected. When the payload flag is missing, the referenced file is absent or unreadable, the path is outside the staging directory, or the real path escapes it, the script SHALL exit non-zero with a structured error and SHALL NOT call the Skill API. On success the script SHALL pass the file content to the Skill API as the corresponding JSON parameter (server-side behavior unchanged), and SHALL best-effort delete the payload file afterwards. The script SHALL reject any legacy free-text flag in either invocation form before doing anything else.
-
-#### Scenario: Valid session-scoped payload accepted
-- **GIVEN** a session with id `sess_own` whose workspace TMPDIR is `{workspace}/tmp`, and a payload file staged at `{workspace}/tmp/sess_own/reply.md`
-- **WHEN** `send-reply` is invoked with `--session-id "sess_own"` and `--message-file "$TMPDIR/$SESSION_ID/reply.md"`
-- **THEN** the script SHALL resolve the path into its own staging directory `{workspace}/tmp/sess_own`, read the file content verbatim (including any `$` characters, newlines, and empty strings), and call the Skill API with that content as the `message` parameter
-
-#### Scenario: Workspace-root file cannot be used as payload
-- **GIVEN** an agent workspace whose staging directory is `{workspace}/tmp/sess_own` and whose root contains `memory.private.jsonl`
-- **WHEN** a script is invoked with `--message-file memory.private.jsonl` or `--message-file {workspace}/memory.private.jsonl`
-- **THEN** the script SHALL reject the payload because the resolved path is outside the session staging directory
-- **AND** the script SHALL exit non-zero without calling the Skill API
-
-#### Scenario: Home-anchored or absolute payload rejected
-- **GIVEN** an agent with runtime home directory `$HOME`
-- **WHEN** a script is invoked with `--message-file ~/.git-credentials`, `--message-file $HOME/.env`, or `--message-file /etc/passwd`
-- **THEN** the script SHALL reject the payload because the resolved path is outside the session staging directory
-- **AND** the script SHALL exit non-zero without calling the Skill API
-
-#### Scenario: Another session's staging directory rejected
-- **GIVEN** a session with id `sess_own` and a sibling session `sess_other` sharing the workspace TMPDIR `{workspace}/tmp`
-- **WHEN** a script invoked with `--session-id "sess_own"` receives `--message-file {workspace}/tmp/sess_other/reply.md`
-- **THEN** the script SHALL reject the payload because it resolves outside `{workspace}/tmp/sess_own`
-
-#### Scenario: Boundary-safe staging containment
-- **GIVEN** a session with id `sess_own` and sibling directories `{workspace}/tmp/sess_own-2` and `{workspace}/tmp/sess_own2`
-- **WHEN** a script is invoked with `--message-file {workspace}/tmp/sess_own-2/reply.md` or `--message-file {workspace}/tmp/sess_own2/reply.md`
-- **THEN** the script SHALL reject the payload because the resolved path is not inside `{workspace}/tmp/sess_own`
-
-#### Scenario: Symlink escape rejected
-- **GIVEN** a session staging directory `{workspace}/tmp/sess_own` containing a symlink `leak.md` pointing at `/etc/passwd` (or at a path outside the staging directory)
-- **WHEN** a script is invoked with `--message-file {workspace}/tmp/sess_own/leak.md`
-- **THEN** the script SHALL resolve the real path, reject the payload because the real path escapes the staging directory, and SHALL NOT call the Skill API
-
-#### Scenario: Missing payload file rejected
-- **GIVEN** no payload file exists at the given path
-- **WHEN** a script is invoked with `--message-file {workspace}/tmp/sess_own/nonexistent.md`
-- **THEN** the script SHALL exit non-zero with a structured error and SHALL NOT call the Skill API
-
-#### Scenario: Missing required payload flag rejected
-- **GIVEN** a script invocation that provides neither the legacy flag nor the payload-file flag
-- **WHEN** the script parses its arguments
-- **THEN** the script SHALL exit non-zero with an error naming the required payload-file flag
-
-#### Scenario: Optional payload omitted
-- **GIVEN** a `send-file` invocation without a caption or a `fetch-context` invocation of type `recent_messages` without a query
-- **WHEN** the script parses its arguments
-- **THEN** the script SHALL proceed without a payload file, passing no caption/query parameter to the Skill API
-
-### Requirement: Edit-Reply Platform Behavior
-
-`edit-reply` SHALL only operate on the current session's own most-recently-sent message: the handler SHALL reject the request when `params.messageId` does not equal `context.lastSentMessageId`. Subject to that scoping, `edit-reply` SHALL behave differently depending on the platform:
-
-- **Discord**: SHALL use native `platformAdapter.editMessage()` to edit the message in-place.
-- **Misskey Notes** (`note:` channel prefix): SHALL use a delete-and-recreate strategy — delete the old note via `notes/delete`, then create a new note via `notes/create` with the original trigger note's `replyId` to preserve threading. The returned `messageId` will differ from the original. Visibility and `visibleUserIds` SHALL be preserved.
-- **Misskey Chat** (`chat:` channel prefix): SHALL use a delete-and-recreate strategy via `chat/messages/delete` followed by `chat/messages/create-to-user`.
-
-If the delete step fails, the system SHALL abort without creating a new message and SHALL return an error.
-
-#### Scenario: Edit-reply on foreign message rejected
-- **GIVEN** a session whose `context.lastSentMessageId` is `msg-A`
-- **WHEN** `edit-reply` is called with `messageId` equal to `msg-B` (a message from another conversation)
-- **THEN** the handler SHALL reject the request with an error and SHALL NOT delete or edit any message
-
-#### Scenario: Discord edit-reply
-- **GIVEN** a reply was sent in a Discord channel and it is the session's last-sent message
-- **WHEN** `edit-reply` is called with the matching `messageId`
-- **THEN** the system SHALL call `platformAdapter.editMessage()` to edit in-place
-
-#### Scenario: Misskey note edit-reply
-- **GIVEN** a reply was sent as a Misskey note and it is the session's last-sent message
-- **WHEN** `edit-reply` is called with the matching `messageId`
-- **THEN** the system SHALL delete the old note and create a new note with the original `replyId`
-- **AND** if the delete fails, the system SHALL NOT create a new note
-
-#### Scenario: Successive Misskey edits in one session
-- **GIVEN** a Misskey note reply was edited once, producing a new note ID (delete-and-recreate)
-- **WHEN** `edit-reply` is called again in the same session with the new note ID
-- **THEN** the session's tracked `lastSentMessageId` SHALL have been updated to that new ID after the first edit, so the second edit's scoping check SHALL pass and the edit SHALL proceed
-
 ### Requirement: XML Tag Stripping
 
 The system SHALL strip XML-like tags from reply content before sending to platforms using the regex `/<\/?[a-zA-Z][a-zA-Z0-9_]*>/g`. Inner text between tags SHALL be preserved. This SHALL apply to `send-reply`, `edit-reply`, and the `send-file` caption.
@@ -320,20 +136,6 @@ The system SHALL convert literal `\n` sequences (2 characters: backslash + n) to
 - **GIVEN** a `send-file` caption contains the literal string `Line1\nLine2`
 - **WHEN** the caption is processed before sending
 - **THEN** the sent caption SHALL contain an actual newline between `Line1` and `Line2`
-
-### Requirement: Reaction Handling
-
-The `react-message` skill SHALL add an emoji reaction to the trigger message. It SHALL require a non-empty `emoji` parameter and a valid `context.replyToMessageId` (the trigger message). The system SHALL track reactions per workspace:channel combination via `reactionSentMap` to prevent duplicate reactions.
-
-#### Scenario: Reaction added to trigger message
-- **GIVEN** a session triggered by a message
-- **WHEN** `react-message` is called with `emoji = "👍"`
-- **THEN** the system SHALL call `platformAdapter.addReaction()` on the trigger message
-
-#### Scenario: No trigger message for reaction
-- **GIVEN** a session without a `replyToMessageId` (e.g., spontaneous post)
-- **WHEN** `react-message` is called
-- **THEN** the handler SHALL return an error indicating no trigger message exists
 
 ### Requirement: Send-File Workspace Boundary
 
@@ -372,6 +174,8 @@ The `send-file` skill SHALL accept multiple file paths per invocation via the `f
 - **WHEN** a `send-file` request with two files totaling 6 MB is processed
 - **THEN** the invocation SHALL be rejected
 - **AND** no file SHALL be read or sent
+
+## ADDED Requirements
 
 ### Requirement: Send-File Multi-File Sending
 
@@ -443,4 +247,3 @@ The system SHALL track successful `send-file` calls as session responses, mirror
 - **GIVEN** a session that ends with `success: false` but `fileSent: true`
 - **WHEN** the reply dispatcher evaluates the response
 - **THEN** no error message SHALL be dispatched to the platform
-

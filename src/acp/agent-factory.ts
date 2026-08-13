@@ -219,23 +219,32 @@ export function getRetryPromptStrategy(type: AgentType): RetryPromptStrategy {
       "# React Message Skill\n\nUse react-message to add an emoji reaction to the trigger message.";
   }
 
+  let sendFileContent: string;
+  try {
+    sendFileContent = Deno.readTextFileSync(`${skillsDir}/send-file/SKILL.md`);
+  } catch {
+    sendFileContent = "# Send File Skill\n\nUse send-file to send a file from the workspace.";
+  }
+
   const defaultRetryMessage =
-    `System message: Your previous turn ended without sending a reply or reaction to the user. ` +
-    `You must communicate with the user by using send-reply or react-message before ending this session.\n\n` +
-    `If you tried send-reply and it failed, the most likely causes are:\n` +
-    `- You used the removed legacy flag --message with the text on the command line (it was rejected). ` +
-    `Message content MUST NOT appear on a command line — the shell expands $ in it, corrupting the text and ` +
-    `leaking environment variables.\n` +
-    `- The payload file was never written. You must write the message text to a file FIRST using your ` +
-    `edit/write tool (e.g. $TMPDIR/$SESSION_ID/reply.md), then pass that path.\n` +
+    `System message: Your previous turn ended without sending a reply, reaction, or file to the user. ` +
+    `You must communicate with the user by using send-reply, react-message, or send-file (only when a ` +
+    `suitable file already exists in the workspace) before ending this session.\n\n` +
+    `If you tried send-reply or send-file and it failed, the most likely causes are:\n` +
+    `- You used a removed legacy flag with the text on the command line (--message for send-reply, ` +
+    `--caption for send-file, --file-path for a single send-file file) — it was rejected. ` +
+    `Message content MUST NOT appear on a command line — the shell expands $ in it, corrupting the text ` +
+    `and leaking environment variables.\n` +
+    `- The payload file was never written. You must write the message/caption text to a file FIRST using ` +
+    `your edit/write tool (e.g. $TMPDIR/$SESSION_ID/reply.md), then pass that path.\n` +
     `- The payload was staged outside $TMPDIR/$SESSION_ID/ (e.g. a workspace file) and was rejected — the ` +
     `script only reads its own session's staging directory.\n` +
-    `- A previous send-reply call errored — read that error's output; it contains the exact fix.\n\n` +
+    `- A previous send-reply/send-file call errored — read that error's output; it contains the exact fix.\n\n` +
     `Correct pattern (two steps):\n` +
     `1. Write the reply text to $TMPDIR/$SESSION_ID/reply.md with your edit/write tool.\n` +
     `2. Invoke: \${HOME}/.agents/skills/send-reply/scripts/send-reply.ts --session-id "$SESSION_ID" ` +
     `--message-file "$TMPDIR/$SESSION_ID/reply.md"\n\n` +
-    `---\n\n${sendReplyContent}\n\n---\n\n${reactMessageContent}`;
+    `---\n\n${sendReplyContent}\n\n---\n\n${reactMessageContent}\n\n---\n\n${sendFileContent}`;
 
   switch (type) {
     case "opencode":

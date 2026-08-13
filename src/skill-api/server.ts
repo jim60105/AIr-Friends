@@ -40,6 +40,10 @@ const MAX_REPLIES_PER_SESSION = 1;
 const MAX_REPLY_ATTEMPTS_BEFORE_TERMINATE = 4;
 const MAX_EDIT_CALLS_BEFORE_TERMINATE = 3;
 
+/** Maximum number of successful send-file calls allowed per session (a multi-file batch = 1) */
+const MAX_FILE_SENDS_PER_SESSION = 1;
+const MAX_FILE_SEND_ATTEMPTS_BEFORE_TERMINATE = 4;
+
 export interface SkillAPIConfig {
   port: number;
   host: string; // Should be "localhost" or "127.0.0.1"
@@ -248,7 +252,16 @@ export class SkillAPIServer {
       // Never cache authentication/authorization failures (F13): only cache
       // executed results. (Auth failures are already gated out above; this is a
       // defense-in-depth guard for the executeSkillRequest safety-net 401.)
-      if (result.statusCode === 401 || result.statusCode === 403) {
+      // send-file results are ALSO never cached: the skill is quota-gated
+      // (1 successful call per session with doom-loop termination), so serving
+      // a cached success or rejection would let the agent bypass the quota gate
+      // and starve doom-loop detection. Concurrent in-flight duplicates still
+      // deduplicate via the pending-promise path above.
+      if (
+        result.statusCode === 401 ||
+        result.statusCode === 403 ||
+        skillName === "send-file"
+      ) {
         this.requestCache.delete(cacheKey);
       } else {
         // Update cache with the actual result
@@ -431,6 +444,76 @@ export class SkillAPIServer {
       }
     }
 
+    // Send-file quota and doom-loop protection (independent of the reply counters)
+    if (skillName === "send-file") {
+      // send-file delivers externally visible output; it is only meaningful in
+      // user-triggered message/channelLurk sessions. Triggerless sessions
+      // (spontaneous, self-research, memory-maintenance, reminders) only track
+      // replies — an untracked file send would cause duplicate output or repeat
+      // delivery, so it is rejected here.
+      if (!session.triggerEvent) {
+        return {
+          success: false,
+          error: "send-file is only available in user-triggered message sessions. " +
+            "This session type cannot send files.",
+          statusCode: 403,
+        };
+      }
+
+      const currentCount = this.sessionRegistry.getFileSendCount(body.sessionId);
+      if (currentCount >= MAX_FILE_SENDS_PER_SESSION) {
+        // Still increment count even when rejecting (doom-loop tracking)
+        this.sessionRegistry.incrementFileSendCount(body.sessionId);
+        const newCount = currentCount + 1;
+
+        logger.warn(
+          "File send limit reached for session {sessionId} ({fileSendCount}/{maxFileSends})",
+          {
+            sessionId: body.sessionId,
+            fileSendCount: newCount,
+            maxFileSends: MAX_FILE_SENDS_PER_SESSION,
+          },
+        );
+
+        // Check doom-loop threshold
+        if (newCount >= MAX_FILE_SEND_ATTEMPTS_BEFORE_TERMINATE) {
+          logger.error(
+            "Doom-loop detected: send-file attempts {fileSendCount} reached threshold {threshold}, terminating agent",
+            {
+              sessionId: body.sessionId,
+              fileSendCount: newCount,
+              threshold: MAX_FILE_SEND_ATTEMPTS_BEFORE_TERMINATE,
+            },
+          );
+
+          // Schedule termination after response is sent
+          const session = this.sessionRegistry.get(body.sessionId);
+          if (session?.onTerminateRequest) {
+            setTimeout(() => {
+              session.onTerminateRequest!().catch((err: unknown) => {
+                logger.error("Failed to terminate agent process", {
+                  error: err instanceof Error ? err.message : String(err),
+                });
+              });
+            }, 100);
+          }
+        }
+
+        return {
+          success: false,
+          error:
+            `File send limit reached (${MAX_FILE_SENDS_PER_SESSION}/${MAX_FILE_SENDS_PER_SESSION}). ` +
+            "Only one file send is allowed per session and there is no edit-file skill, " +
+            "so further send-file calls cannot succeed.",
+          statusCode: 429,
+        };
+      }
+
+      // Reserve the per-session slot BEFORE execution; rolled back when nothing
+      // is delivered so a failed attempt does not consume the quota.
+      this.sessionRegistry.incrementFileSendCount(body.sessionId);
+    }
+
     // Build skill context
     const skillContext: SkillContext = {
       workspace: session.workspace,
@@ -511,6 +594,47 @@ export class SkillAPIServer {
     // Increment edit count on successful edit-reply
     if (skillName === "edit-reply" && result.success) {
       this.sessionRegistry.incrementEditCount(body.sessionId);
+    }
+
+    // Send-file: roll back the reserved slot when nothing was delivered; when at
+    // least one file was delivered, keep the reservation, mark the session's
+    // fileSent response state, and write the file_sent audit entry (partial
+    // delivery included).
+    if (skillName === "send-file") {
+      const deliveredCount = result.data && typeof result.data === "object"
+        ? (result.data as Record<string, unknown>).filesCount
+        : undefined;
+      const filesDelivered = typeof deliveredCount === "number" && deliveredCount > 0;
+
+      if (!filesDelivered) {
+        this.sessionRegistry.decrementFileSendCount(body.sessionId);
+        logger.warn("Send-file failed with no delivery, file-send slot rolled back", {
+          sessionId: body.sessionId,
+          error: result.error,
+        });
+      } else {
+        this.sessionRegistry.markFileSent(body.sessionId);
+        if (auditWriter) {
+          const hashContent = auditWriter.getConfig().hashContent;
+          const params = (body.parameters ?? {}) as Record<string, unknown>;
+          const caption = typeof params.caption === "string" ? params.caption : "";
+          const fileNames = Array.isArray(params.filePaths)
+            ? (params.filePaths as string[])
+              .map((p) => p.split("/").pop() ?? p)
+              .join(",")
+            : "";
+          await auditWriter.write("file_sent", {
+            filesCount: deliveredCount,
+            ...(hashContent
+              ? {
+                captionHash: `sha256:${await sha256Hash(caption)}`,
+                fileNamesHash: `sha256:${await sha256Hash(fileNames)}`,
+              }
+              : { fileNames }),
+            platform: session.platform,
+          });
+        }
+      }
     }
 
     // Audit: reply_sent (when send-reply succeeds)

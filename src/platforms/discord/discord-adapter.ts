@@ -26,6 +26,7 @@ import {
   type ReplyOptions,
   type ReplyResult,
   type SendFileOptions,
+  type SendFilePayload,
   type SendFileResult,
 } from "../../types/platform.ts";
 import { ErrorCode, PlatformError } from "../../types/errors.ts";
@@ -566,12 +567,12 @@ export class DiscordAdapter extends PlatformAdapter {
   }
 
   /**
-   * Send a file to a channel
+   * Send files to a channel.
+   * All files are sent in a single message with all attachments.
    */
   async sendFile(
     channelId: string,
-    fileContent: Uint8Array,
-    fileName: string,
+    files: SendFilePayload[],
     options?: SendFileOptions,
   ): Promise<SendFileResult> {
     try {
@@ -584,16 +585,18 @@ export class DiscordAdapter extends PlatformAdapter {
         };
       }
 
-      const attachment = new AttachmentBuilder(Buffer.from(fileContent), {
-        name: fileName,
-      });
+      const attachments = files.map((file) =>
+        new AttachmentBuilder(Buffer.from(file.content), {
+          name: file.fileName,
+        })
+      );
 
       const messageOptions: {
         files: AttachmentBuilder[];
         content?: string;
         reply?: { messageReference: string };
       } = {
-        files: [attachment],
+        files: attachments,
       };
 
       if (options?.comment) {
@@ -608,22 +611,24 @@ export class DiscordAdapter extends PlatformAdapter {
 
       const sentMessage = await channel.send(messageOptions);
 
-      logger.debug("File sent", {
+      logger.debug("Files sent", {
         channelId,
         messageId: sentMessage.id,
-        fileName,
+        fileCount: files.length,
+        fileNames: files.map((f) => f.fileName).join(", "),
       });
 
       return {
         success: true,
         messageId: sentMessage.id,
+        messageIds: [sentMessage.id],
       };
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
 
-      logger.error("Failed to send file", {
+      logger.error("Failed to send files", {
         channelId,
-        fileName,
+        fileNames: files.map((f) => f.fileName).join(", "),
         error: errorMessage,
       });
 

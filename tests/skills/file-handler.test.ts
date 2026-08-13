@@ -6,12 +6,22 @@ import { SkillError } from "../../src/types/errors.ts";
 import type { SkillContext } from "@skills/types.ts";
 import type { WorkspaceInfo } from "../../src/types/workspace.ts";
 import type { PlatformAdapter } from "@platforms/platform-adapter.ts";
+import type { SendFilePayload } from "../../src/types/platform.ts";
+
+interface CapturedSendFile {
+  channelId: string;
+  files: SendFilePayload[];
+  options?: Record<string, unknown>;
+}
 
 const createMockPlatformAdapter = (
-  sendFileResult: { success: boolean; messageId?: string; error?: string } = {
-    success: true,
-    messageId: "file_msg_123",
-  },
+  sendFileResult: {
+    success: boolean;
+    messageId?: string;
+    messageIds?: string[];
+    error?: string;
+  } = { success: true, messageId: "file_msg_123", messageIds: ["file_msg_123"] },
+  capture?: CapturedSendFile[],
 ): PlatformAdapter => {
   return {
     platform: "discord",
@@ -33,26 +43,34 @@ const createMockPlatformAdapter = (
     disconnect: async () => {},
     sendReply: () => Promise.resolve({ success: true }),
     editMessage: () => Promise.resolve({ success: true, messageId: "msg_123" }),
-    sendFile: () => Promise.resolve(sendFileResult),
+    sendFile: (
+      channelId: string,
+      files: SendFilePayload[],
+      options?: Record<string, unknown>,
+    ) => {
+      capture?.push({ channelId, files, options });
+      return Promise.resolve(sendFileResult);
+    },
     fetchRecentMessages: () => Promise.resolve([]),
     getUsername: (userId: string) => Promise.resolve(`user_${userId}`),
     isSelf: () => false,
   } as unknown as PlatformAdapter;
 };
 
-const createWorkspace = (): WorkspaceInfo => ({
+const createWorkspace = (path = "/tmp/test-workspace"): WorkspaceInfo => ({
   key: "discord/123",
   components: { platform: "discord", userId: "123" },
-  path: "/tmp/test-workspace",
-  tmpPath: "/tmp/test-workspace/tmp",
+  path,
+  tmpPath: `${path}/tmp`,
   isDm: true,
 });
 
 const createContext = (
   adapter?: PlatformAdapter,
   agentWorkspacePath?: string,
+  workspace?: WorkspaceInfo,
 ): SkillContext => ({
-  workspace: createWorkspace(),
+  workspace: workspace ?? createWorkspace(),
   platformAdapter: adapter ?? createMockPlatformAdapter(),
   channelId: "456",
   userId: "123",
@@ -60,31 +78,46 @@ const createContext = (
   agentWorkspacePath,
 });
 
+const makeTempWorkspace = async (): Promise<{
+  dir: string;
+  workspace: WorkspaceInfo;
+}> => {
+  const dir = await Deno.makeTempDir();
+  return { dir, workspace: createWorkspace(dir) };
+};
+
 Deno.test("FileHandler - returns error when skill is disabled", async () => {
   const handler = new FileHandler({ enabled: false });
-  const result = await handler.handleSendFile({ filePath: "test.png" }, createContext());
+  const result = await handler.handleSendFile({ filePaths: ["test.png"] }, createContext());
   assertEquals(result.success, false);
   assertEquals(result.error, "send-file skill is disabled");
 });
 
-Deno.test("FileHandler - returns error when filePath is missing", async () => {
+Deno.test("FileHandler - returns error when filePaths is missing", async () => {
   const handler = new FileHandler({ enabled: true });
   const result = await handler.handleSendFile({}, createContext());
   assertEquals(result.success, false);
-  assertEquals(result.error, "Missing or invalid parameter: filePath");
+  assertEquals(result.error?.includes("filePaths"), true);
 });
 
-Deno.test("FileHandler - returns error when filePath is empty string", async () => {
+Deno.test("FileHandler - returns error when filePaths is empty array", async () => {
   const handler = new FileHandler({ enabled: true });
-  const result = await handler.handleSendFile({ filePath: "  " }, createContext());
+  const result = await handler.handleSendFile({ filePaths: [] }, createContext());
   assertEquals(result.success, false);
-  assertEquals(result.error, "Missing or invalid parameter: filePath");
+  assertEquals(result.error?.includes("filePaths"), true);
+});
+
+Deno.test("FileHandler - returns error when filePaths contains an empty string", async () => {
+  const handler = new FileHandler({ enabled: true });
+  const result = await handler.handleSendFile({ filePaths: ["ok.png", "  "] }, createContext());
+  assertEquals(result.success, false);
+  assertEquals(result.error?.includes("non-empty string"), true);
 });
 
 Deno.test("FileHandler - throws SkillError on path traversal", async () => {
   const handler = new FileHandler({ enabled: true });
   await assertRejects(
-    () => handler.handleSendFile({ filePath: "../../../etc/passwd" }, createContext()),
+    () => handler.handleSendFile({ filePaths: ["../../../etc/passwd"] }, createContext()),
     SkillError,
     "Path traversal not allowed",
   );
@@ -93,7 +126,7 @@ Deno.test("FileHandler - throws SkillError on path traversal", async () => {
 Deno.test("FileHandler - throws SkillError when path is outside workspace", async () => {
   const handler = new FileHandler({ enabled: true });
   await assertRejects(
-    () => handler.handleSendFile({ filePath: "/etc/passwd" }, createContext()),
+    () => handler.handleSendFile({ filePaths: ["/etc/passwd"] }, createContext()),
     SkillError,
     "File path must be within workspace or agent-workspace boundary",
   );
@@ -124,7 +157,7 @@ Deno.test("FileHandler - allows path within agent-workspace", async () => {
   };
 
   const handler = new FileHandler({ enabled: true });
-  const result = await handler.handleSendFile({ filePath: "notes/test.md" }, context);
+  const result = await handler.handleSendFile({ filePaths: ["notes/test.md"] }, context);
   assertEquals(result.success, true);
 
   await Deno.remove(tmpDir, { recursive: true });
@@ -132,186 +165,283 @@ Deno.test("FileHandler - allows path within agent-workspace", async () => {
 
 Deno.test("FileHandler - returns error when file exceeds size limit", async () => {
   // Create a temp file larger than limit
-  const tmpDir = await Deno.makeTempDir();
-  const filePath = `${tmpDir}/big.bin`;
-  // Write 2MB file, set limit to 1MB
-  await Deno.writeFile(filePath, new Uint8Array(2 * 1024 * 1024));
+  const { dir, workspace } = await makeTempWorkspace();
+  await Deno.writeFile(`${dir}/big.bin`, new Uint8Array(2 * 1024 * 1024));
 
-  const workspace: WorkspaceInfo = {
-    key: "discord/123",
-    components: { platform: "discord", userId: "123" },
-    path: tmpDir,
-    tmpPath: tmpDir + "/tmp",
-    isDm: true,
-  };
-
-  const context: SkillContext = {
-    workspace,
-    platformAdapter: createMockPlatformAdapter(),
-    channelId: "456",
-    userId: "123",
-  };
-
+  const context = createContext(undefined, undefined, workspace);
   const handler = new FileHandler({ enabled: true, maxFileSizeMb: 1 });
-  const result = await handler.handleSendFile({ filePath: "big.bin" }, context);
+  const result = await handler.handleSendFile({ filePaths: ["big.bin"] }, context);
   assertEquals(result.success, false);
   assertEquals(result.error?.includes("exceeds limit"), true);
 
-  await Deno.remove(tmpDir, { recursive: true });
+  await Deno.remove(dir, { recursive: true });
 });
 
 Deno.test("FileHandler - returns error when extension not in whitelist", async () => {
-  const tmpDir = await Deno.makeTempDir();
-  await Deno.writeTextFile(`${tmpDir}/secret.jsonl`, "data");
+  const { dir, workspace } = await makeTempWorkspace();
+  await Deno.writeTextFile(`${dir}/secret.jsonl`, "data");
 
-  const workspace: WorkspaceInfo = {
-    key: "discord/123",
-    components: { platform: "discord", userId: "123" },
-    path: tmpDir,
-    tmpPath: tmpDir + "/tmp",
-    isDm: true,
-  };
-
-  const context: SkillContext = {
-    workspace,
-    platformAdapter: createMockPlatformAdapter(),
-    channelId: "456",
-    userId: "123",
-  };
-
+  const context = createContext(undefined, undefined, workspace);
   const handler = new FileHandler({
     enabled: true,
     allowedExtensions: [".png", ".jpg"],
   });
-  const result = await handler.handleSendFile({ filePath: "secret.jsonl" }, context);
+  const result = await handler.handleSendFile({ filePaths: ["secret.jsonl"] }, context);
   assertEquals(result.success, false);
   assertEquals(result.error?.includes("not allowed"), true);
 
-  await Deno.remove(tmpDir, { recursive: true });
+  await Deno.remove(dir, { recursive: true });
 });
 
 Deno.test("FileHandler - allows any extension when whitelist is empty", async () => {
-  const tmpDir = await Deno.makeTempDir();
-  await Deno.writeTextFile(`${tmpDir}/report.pdf`, "pdf content");
+  const { dir, workspace } = await makeTempWorkspace();
+  await Deno.writeTextFile(`${dir}/report.pdf`, "pdf content");
 
-  const workspace: WorkspaceInfo = {
-    key: "discord/123",
-    components: { platform: "discord", userId: "123" },
-    path: tmpDir,
-    tmpPath: tmpDir + "/tmp",
-    isDm: true,
-  };
-
-  const context: SkillContext = {
-    workspace,
-    platformAdapter: createMockPlatformAdapter(),
-    channelId: "456",
-    userId: "123",
-  };
-
+  const context = createContext(undefined, undefined, workspace);
   const handler = new FileHandler({ enabled: true, allowedExtensions: [] });
-  const result = await handler.handleSendFile({ filePath: "report.pdf" }, context);
+  const result = await handler.handleSendFile({ filePaths: ["report.pdf"] }, context);
   assertEquals(result.success, true);
 
-  await Deno.remove(tmpDir, { recursive: true });
+  await Deno.remove(dir, { recursive: true });
 });
 
-Deno.test("FileHandler - successful file send returns messageId", async () => {
-  const tmpDir = await Deno.makeTempDir();
-  await Deno.writeTextFile(`${tmpDir}/hello.txt`, "hello world");
+Deno.test("FileHandler - multi-file success captures files array passed to adapter", async () => {
+  const { dir, workspace } = await makeTempWorkspace();
+  await Deno.writeTextFile(`${dir}/a.png`, "aaa");
+  await Deno.writeTextFile(`${dir}/b.png`, "bbb");
 
-  const workspace: WorkspaceInfo = {
-    key: "discord/123",
-    components: { platform: "discord", userId: "123" },
-    path: tmpDir,
-    tmpPath: tmpDir + "/tmp",
-    isDm: true,
-  };
-
-  const context: SkillContext = {
+  const capture: CapturedSendFile[] = [];
+  const context = createContext(
+    createMockPlatformAdapter(
+      { success: true, messageId: "msg_2", messageIds: ["msg_2"] },
+      capture,
+    ),
+    undefined,
     workspace,
-    platformAdapter: createMockPlatformAdapter({ success: true, messageId: "file_msg_456" }),
-    channelId: "456",
-    userId: "123",
-  };
+  );
 
   const handler = new FileHandler({ enabled: true });
-  const result = await handler.handleSendFile({ filePath: "hello.txt" }, context);
+  const result = await handler.handleSendFile({ filePaths: ["a.png", "b.png"] }, context);
+
   assertEquals(result.success, true);
-  assertEquals((result.data as { messageId: string }).messageId, "file_msg_456");
+  assertEquals(capture.length, 1);
+  assertEquals(capture[0].files.length, 2);
+  assertEquals(capture[0].files[0].fileName, "a.png");
+  assertEquals(capture[0].files[1].fileName, "b.png");
+  assertEquals(new TextDecoder().decode(capture[0].files[0].content), "aaa");
+  assertEquals(new TextDecoder().decode(capture[0].files[1].content), "bbb");
+  assertEquals(capture[0].options?.replyToMessageId, "orig_msg_789");
 
-  await Deno.remove(tmpDir, { recursive: true });
+  const data = result.data as { messageIds: string[]; messageId: string; filesCount: number };
+  assertEquals(data.messageIds, ["msg_2"]);
+  assertEquals(data.messageId, "msg_2");
+  assertEquals(data.filesCount, 2);
+  assertEquals(
+    (result.data as { nextAction: string }).nextAction,
+    "You have done your job. EXIT IMMEDIATELY",
+  );
+
+  await Deno.remove(dir, { recursive: true });
 });
 
-Deno.test("FileHandler - returns error when platform sendFile fails", async () => {
-  const tmpDir = await Deno.makeTempDir();
-  await Deno.writeTextFile(`${tmpDir}/test.txt`, "content");
+Deno.test("FileHandler - preflight all-or-nothing: one invalid path rejects the whole call with no send", async () => {
+  const { dir, workspace } = await makeTempWorkspace();
+  await Deno.writeTextFile(`${dir}/ok.png`, "ok");
 
-  const workspace: WorkspaceInfo = {
-    key: "discord/123",
-    components: { platform: "discord", userId: "123" },
-    path: tmpDir,
-    tmpPath: tmpDir + "/tmp",
-    isDm: true,
-  };
-
-  const context: SkillContext = {
+  const capture: CapturedSendFile[] = [];
+  const context = createContext(
+    createMockPlatformAdapter({ success: true, messageId: "m", messageIds: ["m"] }, capture),
+    undefined,
     workspace,
-    platformAdapter: createMockPlatformAdapter({ success: false, error: "Upload failed" }),
-    channelId: "456",
-    userId: "123",
-  };
+  );
 
   const handler = new FileHandler({ enabled: true });
-  const result = await handler.handleSendFile({ filePath: "test.txt" }, context);
+  await assertRejects(
+    () => handler.handleSendFile({ filePaths: ["ok.png", "../../etc/passwd"] }, context),
+    SkillError,
+    "Path traversal not allowed",
+  );
+
+  // No platform call happened at all
+  assertEquals(capture.length, 0);
+
+  await Deno.remove(dir, { recursive: true });
+});
+
+Deno.test("FileHandler - batch exceeding file-count limit rejected before any read", async () => {
+  const { dir, workspace } = await makeTempWorkspace();
+  await Deno.writeTextFile(`${dir}/1.png`, "1");
+  await Deno.writeTextFile(`${dir}/2.png`, "2");
+  await Deno.writeTextFile(`${dir}/3.png`, "3");
+
+  const capture: CapturedSendFile[] = [];
+  const context = createContext(
+    createMockPlatformAdapter({ success: true, messageId: "m", messageIds: ["m"] }, capture),
+    undefined,
+    workspace,
+  );
+
+  const handler = new FileHandler({ enabled: true, maxFilesPerInvocation: 2 });
+  const result = await handler.handleSendFile(
+    { filePaths: ["1.png", "2.png", "3.png"] },
+    context,
+  );
   assertEquals(result.success, false);
-  assertEquals(result.error, "Upload failed");
+  assertEquals(result.error?.includes("Too many files"), true);
+  assertEquals(capture.length, 0);
 
-  await Deno.remove(tmpDir, { recursive: true });
+  await Deno.remove(dir, { recursive: true });
 });
 
-Deno.test("FileHandler - caption is passed to sendFile options", async () => {
-  const tmpDir = await Deno.makeTempDir();
-  await Deno.writeTextFile(`${tmpDir}/img.png`, "fake image");
+Deno.test("FileHandler - batch exceeding aggregate size limit rejected before any read", async () => {
+  const { dir, workspace } = await makeTempWorkspace();
+  await Deno.writeFile(`${dir}/1.bin`, new Uint8Array(3 * 1024 * 1024));
+  await Deno.writeFile(`${dir}/2.bin`, new Uint8Array(3 * 1024 * 1024));
 
-  let capturedOptions: Record<string, unknown> | undefined;
-  const adapter = {
-    ...createMockPlatformAdapter(),
-    sendFile: (
-      _channelId: string,
-      _content: Uint8Array,
-      _fileName: string,
-      options?: Record<string, unknown>,
-    ) => {
-      capturedOptions = options;
-      return Promise.resolve({ success: true, messageId: "msg_cap" });
-    },
-  } as unknown as PlatformAdapter;
-
-  const workspace: WorkspaceInfo = {
-    key: "discord/123",
-    components: { platform: "discord", userId: "123" },
-    path: tmpDir,
-    tmpPath: tmpDir + "/tmp",
-    isDm: true,
-  };
-
-  const context: SkillContext = {
+  const capture: CapturedSendFile[] = [];
+  const context = createContext(
+    createMockPlatformAdapter({ success: true, messageId: "m", messageIds: ["m"] }, capture),
+    undefined,
     workspace,
-    platformAdapter: adapter,
-    channelId: "456",
-    userId: "123",
-    replyToMessageId: "orig_123",
-  };
+  );
+
+  const handler = new FileHandler({ enabled: true, maxTotalSizeMb: 5 });
+  const result = await handler.handleSendFile({ filePaths: ["1.bin", "2.bin"] }, context);
+  assertEquals(result.success, false);
+  assertEquals(result.error?.includes("batch limit"), true);
+  assertEquals(capture.length, 0);
+
+  await Deno.remove(dir, { recursive: true });
+});
+
+Deno.test("FileHandler - caption pipeline strips XML tags and unescapes newlines", async () => {
+  const { dir, workspace } = await makeTempWorkspace();
+  await Deno.writeTextFile(`${dir}/img.png`, "fake image");
+
+  const capture: CapturedSendFile[] = [];
+  const context = createContext(
+    createMockPlatformAdapter({ success: true, messageId: "m", messageIds: ["m"] }, capture),
+    undefined,
+    workspace,
+  );
 
   const handler = new FileHandler({ enabled: true });
   const result = await handler.handleSendFile(
-    { filePath: "img.png", caption: "Here's the image" },
+    { filePaths: ["img.png"], caption: "<e>done</e>\nLine1\\nLine2" },
     context,
   );
   assertEquals(result.success, true);
-  assertEquals(capturedOptions?.comment, "Here's the image");
-  assertEquals(capturedOptions?.replyToMessageId, "orig_123");
+  assertEquals(capture[0].options?.comment, "done\nLine1\nLine2");
 
-  await Deno.remove(tmpDir, { recursive: true });
+  await Deno.remove(dir, { recursive: true });
+});
+
+Deno.test("FileHandler - rejects symlink escaping the workspace boundary", async () => {
+  const { dir, workspace } = await makeTempWorkspace();
+  // Symlink inside the workspace pointing outside it
+  const outside = await Deno.makeTempDir();
+  await Deno.writeTextFile(`${outside}/secret.pdf`, "outside secret");
+  await Deno.symlink(`${outside}/secret.pdf`, `${dir}/leak.pdf`);
+
+  const context = createContext(undefined, undefined, workspace);
+  const handler = new FileHandler({ enabled: true });
+  await assertRejects(
+    () => handler.handleSendFile({ filePaths: ["leak.pdf"] }, context),
+    SkillError,
+    "File path must be within workspace or agent-workspace boundary",
+  );
+
+  await Deno.remove(dir, { recursive: true });
+  await Deno.remove(outside, { recursive: true });
+});
+
+Deno.test("FileHandler - allows real path within workspace (no symlink escape)", async () => {
+  const { dir, workspace } = await makeTempWorkspace();
+  await Deno.writeTextFile(`${dir}/ok.txt`, "ok");
+
+  const capture: CapturedSendFile[] = [];
+  const context = createContext(
+    createMockPlatformAdapter({ success: true, messageId: "m", messageIds: ["m"] }, capture),
+    undefined,
+    workspace,
+  );
+
+  const handler = new FileHandler({ enabled: true });
+  const result = await handler.handleSendFile({ filePaths: ["ok.txt"] }, context);
+  assertEquals(result.success, true);
+  assertEquals(capture.length, 1);
+
+  await Deno.remove(dir, { recursive: true });
+});
+
+Deno.test("FileHandler - returns error when platform sendFile fails with no delivery", async () => {
+  const { dir, workspace } = await makeTempWorkspace();
+  await Deno.writeTextFile(`${dir}/test.txt`, "content");
+
+  const capture: CapturedSendFile[] = [];
+  const context = createContext(
+    createMockPlatformAdapter({ success: false, error: "Upload failed" }, capture),
+    undefined,
+    workspace,
+  );
+
+  const handler = new FileHandler({ enabled: true });
+  const result = await handler.handleSendFile({ filePaths: ["test.txt"] }, context);
+  assertEquals(result.success, false);
+  assertEquals(result.error, "Upload failed");
+  // No delivery → no data
+  assertEquals(result.data, undefined);
+
+  await Deno.remove(dir, { recursive: true });
+});
+
+Deno.test("FileHandler - partial delivery (1 of 2) reports delivered IDs and filesCount", async () => {
+  const { dir, workspace } = await makeTempWorkspace();
+  await Deno.writeTextFile(`${dir}/a.png`, "a");
+  await Deno.writeTextFile(`${dir}/b.png`, "b");
+
+  const capture: CapturedSendFile[] = [];
+  const context = createContext(
+    createMockPlatformAdapter({
+      success: false,
+      messageId: "chat_1",
+      messageIds: ["chat_1"],
+      error: "Mid-batch failure",
+    }, capture),
+    undefined,
+    workspace,
+  );
+
+  const handler = new FileHandler({ enabled: true });
+  const result = await handler.handleSendFile({ filePaths: ["a.png", "b.png"] }, context);
+  assertEquals(result.success, false);
+  assertEquals(result.error, "Mid-batch failure");
+  const data = result.data as { messageIds: string[]; filesCount: number };
+  assertEquals(data.messageIds, ["chat_1"]);
+  assertEquals(data.filesCount, 1);
+
+  await Deno.remove(dir, { recursive: true });
+});
+
+Deno.test("FileHandler - metrics incremented once per delivered file", async () => {
+  const { dir, workspace } = await makeTempWorkspace();
+  await Deno.writeTextFile(`${dir}/a.png`, "a");
+  await Deno.writeTextFile(`${dir}/b.png`, "b");
+
+  const capture: CapturedSendFile[] = [];
+  const context = createContext(
+    createMockPlatformAdapter(
+      { success: true, messageId: "m", messageIds: ["m"] },
+      capture,
+    ),
+    undefined,
+    workspace,
+  );
+
+  const handler = new FileHandler({ enabled: true });
+  const result = await handler.handleSendFile({ filePaths: ["a.png", "b.png"] }, context);
+  assertEquals(result.success, true);
+  assertEquals((result.data as { filesCount: number }).filesCount, 2);
+
+  await Deno.remove(dir, { recursive: true });
 });

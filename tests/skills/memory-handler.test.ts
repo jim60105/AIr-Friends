@@ -1268,8 +1268,8 @@ Deno.test("MemoryHandler - handleMemoryExport returns empty file when no memorie
   const mockAdapter = {
     ...createMockPlatformAdapter(),
     getDmChannelId: (_userId: string) => Promise.resolve("dm_123"),
-    sendFile: (_channelId: string, _content: Uint8Array, fileName: string) => {
-      sentFileName = fileName;
+    sendFile: (_channelId: string, files: Array<{ fileName: string }>) => {
+      sentFileName = files[0].fileName;
       return Promise.resolve({ success: true, messageId: "file_msg_123" });
     },
   } as unknown as PlatformAdapter;
@@ -1328,9 +1328,9 @@ Deno.test("MemoryHandler - handleMemoryExport sends file via DM in markdown form
   const mockAdapter = {
     ...createMockPlatformAdapter(),
     getDmChannelId: (userId: string) => Promise.resolve(`dm_${userId}`),
-    sendFile: (channelId: string, _content: Uint8Array, fileName: string) => {
+    sendFile: (channelId: string, files: Array<{ fileName: string }>) => {
       sentChannelId = channelId;
-      sentFileName = fileName;
+      sentFileName = files[0].fileName;
       return Promise.resolve({ success: true, messageId: "file_msg_123" });
     },
   } as unknown as PlatformAdapter;
@@ -1382,8 +1382,8 @@ Deno.test("MemoryHandler - handleMemoryExport sends file via DM in json format",
   const mockAdapter = {
     ...createMockPlatformAdapter(),
     getDmChannelId: (_userId: string) => Promise.resolve("dm_123"),
-    sendFile: (_channelId: string, _content: Uint8Array, fileName: string) => {
-      sentFileName = fileName;
+    sendFile: (_channelId: string, files: Array<{ fileName: string }>) => {
+      sentFileName = files[0].fileName;
       return Promise.resolve({ success: true, messageId: "file_msg_456" });
     },
   } as unknown as PlatformAdapter;
@@ -1444,7 +1444,8 @@ Deno.test("MemoryHandler - handleMemoryExport always includes both public and pr
   const mockAdapter = {
     ...createMockPlatformAdapter(),
     getDmChannelId: (_userId: string) => Promise.resolve("dm_123"),
-    sendFile: (_channelId: string, content: Uint8Array, _fileName: string) => {
+    sendFile: (_channelId: string, files: Array<{ content: Uint8Array }>) => {
+      const content = files[0].content;
       sentFileContent = content;
       return Promise.resolve({ success: true, messageId: "file_msg_789" });
     },
@@ -1509,7 +1510,7 @@ Deno.test("MemoryHandler - handleMemoryExport filters by importance", async () =
   const mockAdapter = {
     ...createMockPlatformAdapter(),
     getDmChannelId: (_userId: string) => Promise.resolve("dm_123"),
-    sendFile: (_channelId: string, _content: Uint8Array, _fileName: string) => {
+    sendFile: () => {
       return Promise.resolve({ success: true, messageId: "file_msg_123" });
     },
   } as unknown as PlatformAdapter;
@@ -1571,7 +1572,7 @@ Deno.test("MemoryHandler - handleMemoryExport filters enabled_only", async () =>
   const mockAdapter = {
     ...createMockPlatformAdapter(),
     getDmChannelId: (_userId: string) => Promise.resolve("dm_123"),
-    sendFile: (_channelId: string, _content: Uint8Array, _fileName: string) => {
+    sendFile: () => {
       return Promise.resolve({ success: true, messageId: "file_msg_123" });
     },
   } as unknown as PlatformAdapter;
@@ -1634,7 +1635,7 @@ Deno.test("MemoryHandler - handleMemoryExport includes disabled when enabled_onl
   const mockAdapter = {
     ...createMockPlatformAdapter(),
     getDmChannelId: (_userId: string) => Promise.resolve("dm_123"),
-    sendFile: (_channelId: string, _content: Uint8Array, _fileName: string) => {
+    sendFile: () => {
       return Promise.resolve({ success: true, messageId: "file_msg_123" });
     },
   } as unknown as PlatformAdapter;
@@ -1863,7 +1864,8 @@ Deno.test("MemoryHandler - handleMemoryExport json format contains correct field
   const mockAdapter = {
     ...createMockPlatformAdapter(),
     getDmChannelId: (_userId: string) => Promise.resolve("dm_123"),
-    sendFile: (_channelId: string, content: Uint8Array, _fileName: string) => {
+    sendFile: (_channelId: string, files: Array<{ content: Uint8Array }>) => {
+      const content = files[0].content;
       sentFileContent = content;
       return Promise.resolve({ success: true, messageId: "file_msg_123" });
     },
@@ -1938,7 +1940,8 @@ Deno.test("MemoryHandler - handleMemoryExport markdown shows lastModifiedAt when
   const mockAdapter = {
     ...createMockPlatformAdapter(),
     getDmChannelId: (_userId: string) => Promise.resolve("dm_123"),
-    sendFile: (_channelId: string, content: Uint8Array, _fileName: string) => {
+    sendFile: (_channelId: string, files: Array<{ content: Uint8Array }>) => {
+      const content = files[0].content;
       sentFileContent = content;
       return Promise.resolve({ success: true, messageId: "file_msg_123" });
     },
@@ -2054,8 +2057,8 @@ Deno.test("MemoryHandler - handleMemoryExport defaults to markdown and all impor
   const mockAdapter = {
     ...createMockPlatformAdapter(),
     getDmChannelId: (_userId: string) => Promise.resolve("dm_123"),
-    sendFile: (_channelId: string, _content: Uint8Array, fileName: string) => {
-      sentFileName = fileName;
+    sendFile: (_channelId: string, files: Array<{ fileName: string }>) => {
+      sentFileName = files[0].fileName;
       return Promise.resolve({ success: true, messageId: "file_msg_123" });
     },
   } as unknown as PlatformAdapter;

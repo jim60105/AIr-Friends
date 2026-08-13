@@ -14,6 +14,7 @@ import {
   type ReplyOptions,
   type ReplyResult,
   type SendFileOptions,
+  type SendFilePayload,
   type SendFileResult,
 } from "../types/platform.ts";
 import type { MessageFetcher } from "../types/context.ts";
@@ -235,17 +236,15 @@ export abstract class PlatformAdapter implements MessageFetcher {
   ): Promise<ReplyResult>;
 
   /**
-   * Send a file to a channel
+   * Send files to a channel
    *
    * @param channelId - Target channel ID
-   * @param fileContent - File content as Uint8Array
-   * @param fileName - File name (e.g., "memory-export.md")
+   * @param files - Array of file payloads ({ content, fileName })
    * @param options - Optional: reply threading, comment text
    */
   abstract sendFile(
     channelId: string,
-    fileContent: Uint8Array,
-    fileName: string,
+    files: SendFilePayload[],
     options?: SendFileOptions,
   ): Promise<SendFileResult>;
 

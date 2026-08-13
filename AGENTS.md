@@ -397,7 +397,7 @@ conversationSummary:
 - Scripts call back to main bot via HTTP API (Skill API Server on localhost:3001)
 - Session-based authentication ensures security
 - The `SESSION_ID` environment variable is set for the agent subprocess with the active session ID
-- **Payload-file argument contract**: free-text content (reply text, memory content, search queries, captions, reminder text) MUST NEVER appear on a skill command line — the shell expands `$VAR` in it, corrupting content and leaking subprocess env vars into external channels. The agent writes the text to `$TMPDIR/$SESSION_ID/{name}.md` with its edit/write tool, then passes the path via the payload-file flag (`--message-file`, `--content-file`, `--query-file`, `--caption-file`). The shared helper `skills/lib/payload.ts` enforces session-scoped containment (`{workspace}/tmp/{sessionId}`, symlink-aware) and raises instructive typed errors (`SKILL_LEGACY_FLAG`, `SKILL_MISSING_PAYLOAD`, `SKILL_PAYLOAD_OUT_OF_BOUNDS`, `SKILL_PAYLOAD_NOT_FOUND`) that teach the correct pattern.
+- **Payload-file argument contract**: free-text content (reply text, memory content, search queries, captions, reminder text) MUST NEVER appear on a skill command line — the shell expands `$VAR` in it, corrupting content and leaking subprocess env vars into external channels. The agent writes the text to `$TMPDIR/$SESSION_ID/{name}.md` with its edit/write tool, then passes the path via the payload-file flag (`--message-file`, `--content-file`, `--query-file`, `--caption-file`). The shared helper `skills/lib/payload.ts` enforces session-scoped containment (`{workspace}/tmp/{sessionId}`, symlink-aware) and raises instructive typed errors (`SKILL_LEGACY_FLAG`, `SKILL_MISSING_PAYLOAD`, `SKILL_PAYLOAD_OUT_OF_BOUNDS`, `SKILL_PAYLOAD_NOT_FOUND`, `SKILL_SINGLE_FILE_FLAG`) that teach the correct pattern.
 
 **Available Skills**:
 
@@ -410,12 +410,18 @@ conversationSummary:
 | `fetch-context` | Get additional platform data | POST /api/skill/fetch-context |
 | `send-reply`    | Send final reply (max 1)     | POST /api/skill/send-reply    |
 | `edit-reply`    | Edit last sent reply         | POST /api/skill/edit-reply    |
+| `send-file`     | Send 1+ workspace files (max 1 call/session) | POST /api/skill/send-file |
 
 **Reply Rule**:
 
-- Only `send-reply` skill sends content externally
+- Only `send-reply` and `send-file` skills send content externally (`react-message` sends a reaction)
 - Multiple replies are allowed per session — each call sends a separate message
-- At least **one reply (or reaction) per session** is required; if absent, retry mechanism triggers
+- At least **one reply, one reaction, or one file send per session** is required; if none occurred, the retry mechanism triggers
+- `send-file` is limited to **1 successful call per session** (`MAX_FILE_SENDS_PER_SESSION = 1`; a multi-file batch counts as one call) with doom-loop protection at 4 attempts — it does NOT consume the reply quota, does NOT set `replySent`, and does NOT update `lastSentMessageId` (file messages are not `edit-reply`-able)
+- `send-file` accepts a repeatable `--file-paths` flag (one occurrence per file, at least one required); the removed singular `--file-path` is rejected with `SKILL_SINGLE_FILE_FLAG`; captions follow the payload-file flow (`--caption-file`) and go through the same `stripXmlTags` → `unescapeNewlines` content pipeline as replies
+- Delivery: Discord = one message with all attachments; Misskey note = one note with all `fileIds`; Misskey chat = one message per file (caption on the first), with partial-delivery reporting and best-effort Drive cleanup of unreferenced uploads on mid-batch failure — a successful file send marks `fileSent` and suppresses the missing-response retry
+- Batch limits: `skills.sendFile.maxFilesPerInvocation` (default 10) and `skills.sendFile.maxTotalSizeMb` (default 50) are enforced **before reading file bytes**; preflight validation is all-or-nothing (one invalid path rejects the whole call with nothing sent)
+- A file-only turn does NOT trigger conversation summary generation (the summary gate stays `replySent`)
 - All other outputs (tool calls, reasoning) stay internal
 - **Reply Threading**: When triggered from a message/note, replies are threaded to the original message using `replyToMessageId` from SkillContext
 
@@ -665,11 +671,11 @@ ACP `setSessionMode("yolo")`.
 
 **Retry on Missing Reply**:
 
-When an ACP Agent completes a prompt turn (`stopReason === "end_turn"`) without calling the `send-reply` skill, the system automatically retries:
+When an ACP Agent completes a prompt turn (`stopReason === "end_turn"`) without calling the `send-reply` skill, the `react-message` skill, or the `send-file` skill (a file send counts as a response — `hasResponded = replySent || reactionSent || fileSent`), the system automatically retries:
 
 1. Clears the reply state to allow a new reply
-2. Sends a second prompt on the **same ACP session** with a system message requesting the agent to send a reply
-3. If the retry also fails to produce a reply, the system returns a failure response
+2. Sends a second prompt on the **same ACP session** with a system message requesting the agent to send a reply (the retry prompt names all three communication tools and embeds the `send-file` SKILL.md alongside the others)
+3. If the retry also fails to produce a reply, reaction, or file send, the system returns a failure response
 
 This retry mechanism uses `connector.prompt()` on the existing session — no CLI-level resume or `loadSession()`/`resumeSession()` is needed.
 

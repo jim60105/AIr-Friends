@@ -10,6 +10,7 @@ import {
   type PlatformEmoji,
   type ReactionResult,
   type ReplyResult,
+  type SendFilePayload,
   type SendFileResult,
 } from "../../src/types/platform.ts";
 
@@ -61,10 +62,13 @@ class MockAdapter extends PlatformAdapter {
 
   sendFile(
     _channelId: string,
-    _fileContent: Uint8Array,
-    _fileName: string,
+    _files: SendFilePayload[],
   ): Promise<SendFileResult> {
-    return Promise.resolve({ success: true, messageId: "file-msg-1" });
+    return Promise.resolve({
+      success: true,
+      messageId: "file-msg-1",
+      messageIds: ["file-msg-1"],
+    });
   }
 
   getDmChannelId(userId: string): Promise<string | null> {

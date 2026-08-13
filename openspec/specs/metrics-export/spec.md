@@ -68,6 +68,8 @@ The system SHALL expose the following metrics with the specified types and label
 | `airfriends_reminders_cancelled_total` | Counter | `platform` |
 | `airfriends_idle_timeout_total` | Counter | `platform`, `outcome` |
 
+The `airfriends_files_sent_total` counter SHALL be incremented once per individual file delivered (a multi-file `send-file` invocation increments it by the number of delivered files), not once per invocation.
+
 #### Scenario: Session counter increments on success
 
 - **GIVEN** `metrics.enabled` is `true`
@@ -86,6 +88,12 @@ The system SHALL expose the following metrics with the specified types and label
 - **WHEN** the gauge is queried
 - **THEN** `airfriends_active_sessions` SHALL show `2`
 - **AND** when both sessions complete, it SHALL show `0`
+
+#### Scenario: Files sent counter increments per file
+
+- **GIVEN** `metrics.enabled` is `true`
+- **WHEN** a `send-file` invocation delivers 3 files to a Misskey channel
+- **THEN** `airfriends_files_sent_total{platform="misskey"}` SHALL be incremented by 3
 
 ### Requirement: Histogram Buckets
 

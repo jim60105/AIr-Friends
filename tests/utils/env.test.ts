@@ -82,6 +82,34 @@ Deno.test("applyEnvOverrides - empty env var does not override", () => {
   }
 });
 
+Deno.test("applyEnvOverrides - SKILL_SEND_FILE_MAX_FILES_PER_INVOCATION sets skills.sendFile.maxFilesPerInvocation as number", () => {
+  Deno.env.set("SKILL_SEND_FILE_MAX_FILES_PER_INVOCATION", "5");
+  try {
+    const config: Record<string, unknown> = {
+      skills: { sendFile: { enabled: true } },
+    };
+    applyEnvOverrides(config);
+    const sendFile = config.skills as { sendFile: { maxFilesPerInvocation: number } };
+    assertEquals(sendFile.sendFile.maxFilesPerInvocation, 5);
+  } finally {
+    Deno.env.delete("SKILL_SEND_FILE_MAX_FILES_PER_INVOCATION");
+  }
+});
+
+Deno.test("applyEnvOverrides - SKILL_SEND_FILE_MAX_TOTAL_SIZE_MB sets skills.sendFile.maxTotalSizeMb as number", () => {
+  Deno.env.set("SKILL_SEND_FILE_MAX_TOTAL_SIZE_MB", "100");
+  try {
+    const config: Record<string, unknown> = {
+      skills: { sendFile: { enabled: true } },
+    };
+    applyEnvOverrides(config);
+    const sendFile = config.skills as { sendFile: { maxTotalSizeMb: number } };
+    assertEquals(sendFile.sendFile.maxTotalSizeMb, 100);
+  } finally {
+    Deno.env.delete("SKILL_SEND_FILE_MAX_TOTAL_SIZE_MB");
+  }
+});
+
 Deno.test("applyEnvOverrides - REPLY_TO sets accessControl.replyTo", () => {
   Deno.env.set("REPLY_TO", "public");
   try {

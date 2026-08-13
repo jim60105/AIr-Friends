@@ -403,8 +403,10 @@ Deno.test({
     },
     startedAt: new Date(),
     replySent: false,
+    fileSent: false,
     replyCount: 0,
     editCount: 0,
+    fileSendCount: 0,
   };
   const registry = createMockSessionRegistry([mockSession]);
   const t = await createTestServer({ sessionRegistry: registry });
@@ -2324,8 +2326,10 @@ Deno.test({
     triggerEvent: undefined, // No trigger = spontaneous
     startedAt: new Date(),
     replySent: false,
+    fileSent: false,
     replyCount: 0,
     editCount: 0,
+    fileSendCount: 0,
   };
   const registry = createMockSessionRegistry([mockSession]);
   const t = await createTestServer({ sessionRegistry: registry });
@@ -2375,8 +2379,10 @@ Deno.test({
     },
     startedAt: new Date(),
     replySent: false,
+    fileSent: false,
     replyCount: 0,
     editCount: 0,
+    fileSendCount: 0,
   };
   const registry = createMockSessionRegistry([mockSession]);
   const t = await createTestServer({ sessionRegistry: registry });

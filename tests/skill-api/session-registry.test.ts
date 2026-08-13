@@ -260,6 +260,90 @@ Deno.test("SessionRegistry - getReplyCount returns 0 for unknown session", () =>
   registry.stop();
 });
 
+Deno.test("SessionRegistry - tracks file sent status per session", () => {
+  const registry = new SessionRegistry();
+
+  const mockWorkspace = {
+    key: "test/123",
+    components: { platform: "discord" as const, userId: "123" },
+    path: "/tmp/test",
+    tmpPath: "/tmp/test/tmp",
+    isDm: false,
+  };
+
+  const sessionId = registry.register({
+    platform: "discord",
+    channelId: "456",
+    userId: "123",
+    isDm: false,
+    workspace: mockWorkspace,
+    // deno-lint-ignore no-explicit-any
+    platformAdapter: {} as any,
+    // deno-lint-ignore no-explicit-any
+    triggerEvent: {} as any,
+  });
+
+  // Defaults to false
+  assertEquals(registry.hasFileSent(sessionId), false);
+
+  // Mark after delivery
+  assertEquals(registry.markFileSent(sessionId), true);
+  assertEquals(registry.hasFileSent(sessionId), true);
+
+  // Unknown session handling
+  assertEquals(registry.hasFileSent("nonexistent"), false);
+  assertEquals(registry.markFileSent("nonexistent"), false);
+
+  registry.stop();
+});
+
+Deno.test("SessionRegistry - fileSendCount increments, rolls back, and defaults", () => {
+  const registry = new SessionRegistry();
+
+  const mockWorkspace = {
+    key: "test/123",
+    components: { platform: "discord" as const, userId: "123" },
+    path: "/tmp/test",
+    tmpPath: "/tmp/test/tmp",
+    isDm: false,
+  };
+
+  const sessionId = registry.register({
+    platform: "discord",
+    channelId: "456",
+    userId: "123",
+    isDm: false,
+    workspace: mockWorkspace,
+    // deno-lint-ignore no-explicit-any
+    platformAdapter: {} as any,
+    // deno-lint-ignore no-explicit-any
+    triggerEvent: {} as any,
+  });
+
+  // Starts at 0 (not counted by reply counters)
+  assertEquals(registry.getFileSendCount(sessionId), 0);
+  assertEquals(registry.getReplyCount(sessionId), 0);
+
+  // Reserve before execution
+  assertEquals(registry.incrementFileSendCount(sessionId), 1);
+  assertEquals(registry.getFileSendCount(sessionId), 1);
+
+  // Rollback on zero delivery
+  registry.decrementFileSendCount(sessionId);
+  assertEquals(registry.getFileSendCount(sessionId), 0);
+
+  // Rollback never goes below zero
+  registry.decrementFileSendCount(sessionId);
+  assertEquals(registry.getFileSendCount(sessionId), 0);
+
+  // Unknown session handling
+  assertEquals(registry.incrementFileSendCount("nonexistent"), -1);
+  assertEquals(registry.getFileSendCount("nonexistent"), 0);
+  registry.decrementFileSendCount("nonexistent");
+
+  registry.stop();
+});
+
 Deno.test("SessionRegistry - register session without triggerEvent", () => {
   const registry = new SessionRegistry();
 

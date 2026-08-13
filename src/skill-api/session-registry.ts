@@ -42,10 +42,14 @@ export interface ActiveSession {
 
   /** Whether reply has been sent */
   replySent: boolean;
+  /** Whether at least one file was delivered via send-file (session-scoped response state) */
+  fileSent: boolean;
   /** Number of replies sent in this session */
   replyCount: number;
   /** Number of edit-reply calls in this session */
   editCount: number;
+  /** Number of successful send-file calls in this session (multi-file batch = 1) */
+  fileSendCount: number;
   /** Agent's global workspace path */
   agentWorkspacePath?: string;
   /** Last time this session was touched by an authenticated call (F13 idle TTL) */
@@ -121,8 +125,10 @@ export class SessionRegistry {
       | "startedAt"
       | "lastActivityAt"
       | "replySent"
+      | "fileSent"
       | "replyCount"
       | "editCount"
+      | "fileSendCount"
     >,
   ): string {
     const id = this.generateSessionId();
@@ -134,8 +140,10 @@ export class SessionRegistry {
       startedAt: now,
       lastActivityAt: now,
       replySent: false,
+      fileSent: false,
       replyCount: 0,
       editCount: 0,
+      fileSendCount: 0,
     };
 
     this.sessions.set(id, activeSession);
@@ -245,6 +253,29 @@ export class SessionRegistry {
   }
 
   /**
+   * Mark that at least one file was delivered in this session (session-scoped
+   * response state, read by the orchestrator's missing-response check).
+   * Returns true if the session exists.
+   */
+  markFileSent(sessionId: string): boolean {
+    const session = this.sessions.get(sessionId);
+    if (!session) return false;
+
+    session.fileSent = true;
+    logger.debug("File send marked as sent for session {sessionId}", { sessionId });
+    return true;
+  }
+
+  /**
+   * Check if at least one file was delivered in this session.
+   * Returns false if session not found.
+   */
+  hasFileSent(sessionId: string): boolean {
+    const session = this.sessions.get(sessionId);
+    return session?.fileSent ?? false;
+  }
+
+  /**
    * Increment the reply count for a session.
    * Returns the new count, or -1 if session not found.
    */
@@ -292,6 +323,48 @@ export class SessionRegistry {
   getEditCount(sessionId: string): number {
     const session = this.sessions.get(sessionId);
     return session?.editCount ?? 0;
+  }
+
+  /**
+   * Increment the send-file count for a session.
+   * Used to reserve the per-session slot BEFORE execution (doom-loop-safe
+   * against concurrent calls); rolled back via {@link decrementFileSendCount}
+   * when nothing was delivered.
+   * Returns the new count, or -1 if session not found.
+   */
+  incrementFileSendCount(sessionId: string): number {
+    const session = this.sessions.get(sessionId);
+    if (!session) return -1;
+
+    session.fileSendCount += 1;
+    logger.debug("File send count incremented to {fileSendCount} for session {sessionId}", {
+      sessionId,
+      fileSendCount: session.fileSendCount,
+    });
+    return session.fileSendCount;
+  }
+
+  /**
+   * Get the current send-file count for a session.
+   * Returns 0 if session not found.
+   */
+  getFileSendCount(sessionId: string): number {
+    const session = this.sessions.get(sessionId);
+    return session?.fileSendCount ?? 0;
+  }
+
+  /**
+   * Decrement the send-file count (rollback when nothing was delivered).
+   */
+  decrementFileSendCount(sessionId: string): void {
+    const session = this.sessions.get(sessionId);
+    if (session && session.fileSendCount > 0) {
+      session.fileSendCount -= 1;
+      logger.debug("File send count rolled back to {fileSendCount} for session {sessionId}", {
+        sessionId,
+        fileSendCount: session.fileSendCount,
+      });
+    }
   }
 
   /**
