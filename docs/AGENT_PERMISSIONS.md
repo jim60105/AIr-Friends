@@ -172,6 +172,16 @@ Shell commands use default-deny. Skill-invocation patterns are `"allow"` (Layer 
 
 **Layer-3 generic-command gate (F12 D2).** Because the utilities above are `"ask"`, they reach `requestPermission()`, which approves a command only when its first token is on an explicit read/media allow-list **and every path argument — read input *and* write output — resolves inside the session workspace or TMPDIR**. So `head notes.md` (in-workspace) is approved while `head /proc/1/environ`, `rg -a "" /proc/1/environ`, `head <other-user>/memory.private.jsonl`, and `convert in.png /home/deno/.ssh/authorized_keys` (out-of-workspace read *or* write) are rejected. URI-scheme arguments such as `file:///etc/passwd` are classified out-of-workspace (D3). See `GENERIC_COMMAND_ALLOWLIST` / `isApprovedGenericCommand` in `src/acp/client.ts`.
 
+**fd-to-fd redirection tolerance (F12 D1).** A whitespace-delimited argument token that is **exactly** `N>&M` with the source descriptor `M` restricted to a standard stream (`1` or `2`; e.g. `2>&1`, `1>&2`, `3>&1`) is tolerated by the generic gate **and** the skill-whitelist matchers (`matchesScriptPath` / `matchesCommandPrefix`): it duplicates an already-open standard output/error capture pipe and references no path on disk, so it is removed from the shell-operator check and skipped in the path-argument scan. Coding models habitually append `2>&1`, so `ls -la {WS}/tmp/ 2>&1` is approved instead of being misrejected as an out-of-workspace escape. The tolerance is intentionally maximally narrow and provably cannot grant filesystem access:
+
+- File-referencing redirects remain denied: `2>/dev/null`, `2>/tmp/x`, `> file`, `>&word` with a non-numeric `word`, and digit-prefixed filenames a shell opens for writing (`2>&1/tmp/x`, `2>&1x`) are NOT exact `N>&[12]` tokens and still trip the operator check.
+- Non-standard source descriptors remain denied: `1>&3`, `2>&3`, `9>&99` could reference a harness-inherited descriptor the gate cannot see.
+- Glued operator forms remain denied: `ls x 2>&1 && cat /etc/passwd`, `ls x 2>&1; rm -rf /` — only an UNQUOTED, exact, whitespace-delimited `N>&[12]` token is dropped before the operator check.
+- Newline-separated second commands remain denied: only space/tab count as a token separator, so `ls x 2>&1\nrm victim` keeps its `\n` (a shell command separator, not a token boundary) and is rejected — the second command is never reinterpreted as in-workspace path arguments.
+- Path containment is unchanged: `ls /etc/passwd 2>&1` is still rejected because the path argument resolves outside the allowed directories.
+
+The real command still executes with the redirection (OpenCode runs the original) — this only relaxes the permission decision for tokens that duplicate an already-open standard stream. When a generic command IS rejected, the WARN and the `permission_denied` audit reason now report the ACTUAL cause — `shell_operator` / `first_token_not_allowed` / `dangerous_flag` / `path_outside_boundary` — instead of always claiming a path escape. The path-outside case keeps the historical audit code `rejected_generic_command_out_of_workspace`; the new causes use `rejected_generic_command_shell_operator`, `rejected_generic_command_first_token_not_allowed`, and `rejected_generic_command_dangerous_flag`. For a multi-command permission request, the FIRST failing command, its index, and its reason are recorded.
+
 **Session-scoped OpenCode data directory (F12).** The agent subprocess is spawned with `XDG_DATA_HOME` set to `{workspace}/tmp/opencode-data/{sessionId}` (per-session subdir; the workspace-level root for internal system sessions — derived via `sessionXdgDataHome()`), so OpenCode's data dir — including the hard-coded truncated **tool-output** directory (`{xdgData}/opencode/tool-output`) that holds oversized tool results — lands inside the session workspace instead of the shared `~/.local/share/opencode/`. Three properties follow:
 
 - **Session-local tool-output boundary**: the gate resolves the session's tool-output dir from the same path the subprocess env uses (never from the parent process's `XDG_DATA_HOME`) and includes it in the generic-command containment boundary only while it resolves inside the session workspace/TMPDIR (deduplicated against existing allowed dirs). A non-session-local resolution fails closed — the shared home-rooted tool-output dir is **never** within bounds, so `cat ~/.local/share/opencode/tool-output/tool_x` stays denied.
@@ -449,6 +459,8 @@ Commands containing any of these characters are immediately rejected, regardless
 
 > **Note**: `$` alone is intentionally **not** rejected. It is needed for shell variable expansion (e.g., `$HOME`, `${VAR}`). Command substitution `$()` is still caught because `(` is in the rejected character set.
 
+> **Note (F12 D1)**: an **exact, unquoted, whitespace-delimited** fd-to-fd redirection token `N>&M` with the source descriptor `M` in `{1, 2}` (e.g. `2>&1`, `1>&2`, `3>&1`) is stripped from the operator check and the path-argument scan, so a skill invocation suffixed with `2>&1` is approved. Any other redirect form — file redirects (`2>/dev/null`, `> file`), glued/embedded operators (`2>&1&&cat`, `2>&1;curl`), digit-prefixed filenames (`2>&1/tmp/x`, `2>&1x`), quoted/escaped tokens, and non-standard source descriptors (`1>&3`, `9>&99`) — still matches a rejected character and is denied. See `FD_REDIRECT_TOKEN_PATTERN` / `commandWithoutFdRedirects` in `src/acp/client.ts`.
+
 Additionally, path matching uses strict token validation:
 
 - **Script paths** must appear as a complete whitespace-delimited token (not embedded in a substring)
@@ -483,14 +495,18 @@ Each permission audit entry includes:
 
 ### Decision Reasons
 
-| Reason                    | Decision | Description                                      |
-| ------------------------- | -------- | ------------------------------------------------ |
-| `yolo_mode`               | approved | YOLO mode auto-approved the request              |
-| `skills_directory_access` | approved | Read access to the skills directory              |
-| `skill_whitelist`         | approved | Command matched the skill auto-approve list      |
-| `registered_skill`        | approved | Tool matched a registered skill name             |
-| `rejected_edit_write`     | denied   | Edit/write operation rejected in restricted mode |
-| `rejected_unknown`        | denied   | Unknown tool rejected by default-deny policy     |
+| Reason                                            | Decision | Description                                                              |
+| ------------------------------------------------- | -------- | ------------------------------------------------------------------------ |
+| `yolo_mode`                                       | approved | YOLO mode auto-approved the request                                       |
+| `skills_directory_access`                         | approved | Read access to the skills directory                                       |
+| `skill_whitelist`                                 | approved | Command matched the skill auto-approve list                               |
+| `registered_skill`                                | approved | Tool matched a registered skill name                                      |
+| `rejected_edit_write`                             | denied   | Edit/write operation rejected in restricted mode                          |
+| `rejected_unknown`                                | denied   | Unknown tool rejected by default-deny policy                              |
+| `rejected_generic_command_out_of_workspace`       | denied   | Generic command path argument resolved outside the allowed dirs           |
+| `rejected_generic_command_shell_operator`         | denied   | Generic command contained a non-tolerated shell operator / file redirect  |
+| `rejected_generic_command_first_token_not_allowed` | denied  | Generic command first token was not on the allow-list                     |
+| `rejected_generic_command_dangerous_flag`         | denied   | Generic command used a code-exec / arbitrary-target flag (e.g. `find -exec`) |
 
 ### Content Hashing
 
@@ -521,7 +537,7 @@ Permission audit phases respect the `audit.includedPhases` configuration. When `
 
 1. **OpenCode's Layer 2 is only as strong as opencode.json**: If the configuration file is modified, all Layer 2 protections are bypassed. YOLO mode is controlled via ACP `setSessionMode("yolo")`, which switches to the permissive `yolo` agent defined in `opencode.json`.
 
-2. **Layer 3 relies on shell operator detection**: Layer 3 rejects commands containing shell meta-characters (`;`, `|`, `&`, `` ` ``, `(`, `)`, `>`, `<`, `#`, newlines) and validates script paths as complete whitespace-delimited tokens and command prefixes as exact first-token matches. `$` alone is intentionally allowed for variable expansion; `$()` is caught via `(`. While this prevents known injection patterns (command chaining, piping, comment hiding), novel shell features or encoding tricks not covered by the character set could theoretically bypass the check.
+2. **Layer 3 relies on shell operator detection**: Layer 3 rejects commands containing shell meta-characters (`;`, `|`, `&`, `` ` ``, `(`, `)`, `>`, `<`, `#`, newlines) and validates script paths as complete whitespace-delimited tokens and command prefixes as exact first-token matches. `$` alone is intentionally allowed for variable expansion; `$()` is caught via `(`. A single narrow carve-out exists: an exact, unquoted, whitespace-delimited `N>&[12]` fd-to-fd redirection token (e.g. `2>&1`) is stripped before the operator check (see [Shell Injection Protection](#shell-injection-protection)). While this prevents known injection patterns (command chaining, piping, comment hiding), novel shell features or encoding tricks not covered by the character set could theoretically bypass the check.
 
 3. **Self-research and memory maintenance always run in restricted mode**: There is no way to enable per-channel YOLO for these internal sessions — only the global `--yolo` flag works. This is by design (synthetic identifiers), but means trusted-channel YOLO configs don't apply to background tasks.
 

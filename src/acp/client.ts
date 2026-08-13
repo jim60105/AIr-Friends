@@ -161,6 +161,40 @@ export function containsShellOperators(cmd: string): boolean {
   return /[;|&`()><#\n]/.test(cmd);
 }
 
+/**
+ * Whole-token fd-to-fd redirection tolerated by the permission gates (F12 D1).
+ *
+ * A whitespace-delimited token that is EXACTLY `N>&M`, where `N` is one-or-more
+ * decimal digits and `M` (the SOURCE descriptor) is a standard stream `1` or `2`
+ * (e.g. `2>&1`, `1>&2`, `3>&1`), duplicates an already-open standard stdout/stderr
+ * capture pipe and references no path on disk. Restricting the source descriptor to
+ * the always-connected standard streams keeps the tolerance provably non-escaping:
+ * an unchecked `1>&3`-style redirect could write into a harness-inherited high
+ * descriptor the gate cannot see, so non-standard sources stay rejected.
+ */
+export const FD_REDIRECT_TOKEN_PATTERN = /^\d+>&[12]$/;
+
+/**
+ * Remove tolerated fd-to-fd redirection tokens from a command for the shell-operator
+ * check and path-argument scan. Splits on shell TOKEN separators (space/tab only —
+ * NOT newline, which is a shell command separator and must survive for the operator
+ * check), drops tokens matching {@link FD_REDIRECT_TOKEN_PATTERN} in full, and rejoins
+ * with single spaces.
+ *
+ * Only an UNQUOTED, exact, whitespace-delimited token with a standard-stream source
+ * is dropped. Glued forms (`2>&1&&cat`, `2>&1;cat`), digit-prefixed filenames a shell
+ * opens for writing (`2>&1/tmp/x`, `2>&1x`), file redirects (`2>/dev/null`),
+ * non-standard source descriptors (`1>&3`, `9>&99`), and newline-separated second
+ * commands (`2>&1\nrm victim`) all survive the filter, so their residual operator/path
+ * is still detected. The real command still executes with the redirection (OpenCode
+ * runs the original) — this only relaxes the permission decision.
+ */
+export function commandWithoutFdRedirects(cmd: string): string {
+  return cmd.trim().split(/[ \t]+/)
+    .filter((t) => t.length > 0 && !FD_REDIRECT_TOKEN_PATTERN.test(t))
+    .join(" ");
+}
+
 /** Interpreters that may precede a skill script as the launcher (e.g. `deno run <script>`). */
 const ALLOWED_SCRIPT_INTERPRETERS = new Set(["deno"]);
 
@@ -228,9 +262,15 @@ function resolveEntrypointToken(tokens: string[]): string | undefined {
  * closing the "arbitrary first token launders an allowed path" bypass.
  */
 export function matchesScriptPath(cmd: string, allowedPath: string): boolean {
-  if (containsShellOperators(cmd)) return false;
+  if (containsShellOperators(commandWithoutFdRedirects(cmd))) return false;
   const tokens = cmd.trim().split(/\s+/).filter((t) => t.length > 0);
-  const entrypoint = resolveEntrypointToken(tokens);
+  // A tolerated fd-to-fd redirect token must NOT affect entrypoint resolution (it is
+  // not a real argument), so it is skipped when locating the entrypoint. The first-token
+  // allow-list check below still operates on the ORIGINAL token, so a redirect can never
+  // masquerade as the entrypoint.
+  const entrypoint = resolveEntrypointToken(
+    tokens.filter((t) => !FD_REDIRECT_TOKEN_PATTERN.test(t)),
+  );
   if (entrypoint === undefined) return false;
   return tokenMatchesAllowedScript(entrypoint, allowedPath);
 }
@@ -280,7 +320,7 @@ export function referencesOutOfWorkspacePath(token: string): boolean {
  * cannot be used to reach sensitive files outside the sandbox.
  */
 export function matchesCommandPrefix(cmd: string, prefix: string): boolean {
-  if (containsShellOperators(cmd)) return false;
+  if (containsShellOperators(commandWithoutFdRedirects(cmd))) return false;
   const tokens = cmd.trim().split(/\s+/).filter((t) => t.length > 0);
   if (tokens[0] !== prefix) return false;
   // Reject if any argument references a path outside the workspace.
@@ -456,6 +496,17 @@ function genericArgWithinWorkspace(
 }
 
 /**
+ * Reasons a generic command can be rejected by the generic-command gate (F12 D2).
+ * `isApprovedGenericCommand` returns whether the decision is `null`; `requestPermission`
+ * uses the first failing command's reason for cause-specific logging and auditing.
+ */
+export type GenericCommandRejection =
+  | "shell_operator"
+  | "first_token_not_allowed"
+  | "dangerous_flag"
+  | "path_outside_boundary";
+
+/**
  * Approve a generic bash command only when its first token is on {@link GENERIC_COMMAND_ALLOWLIST}
  * AND every path-like argument — read input OR write/output target — resolves inside the
  * session workspace/TMPDIR (F12 D2). `base` is the agent cwd used to resolve relative tokens;
@@ -472,19 +523,48 @@ export function isApprovedGenericCommand(
   xdgDataHome: string = sessionXdgDataHome(base),
   dataRoot: string = opencodeDataRoot(base),
 ): boolean {
-  if (containsShellOperators(cmd)) return false;
+  return genericCommandRejectionReason(cmd, base, allowedDirs, home, xdgDataHome, dataRoot) ===
+    null;
+}
+
+/**
+ * Single source of truth for the generic-command gate decision AND its reason, so the
+ * decision and the rejection cause can never drift. Returns `null` when the command is
+ * approved, or the FIRST reason it fails:
+ *
+ * - `"shell_operator"` — the command contains a shell operator other than a tolerated
+ *   fd-to-fd redirection token (or a glued/digit-prefixed form that survived the filter)
+ * - `"first_token_not_allowed"` — empty command or first token not on the allow-list
+ * - `"dangerous_flag"` — a code-exec / arbitrary-target flag (e.g. `find -exec`) present
+ * - `"path_outside_boundary"` — a path argument resolves outside the allowed directories
+ *
+ * A tolerated `N>&[12]` token is removed before the shell-operator check and skipped in the
+ * per-token path-argument loop; the first-token allow-list check operates on the ORIGINAL
+ * tokens so a redirect can never masquerade as the entrypoint.
+ */
+export function genericCommandRejectionReason(
+  cmd: string,
+  base: string,
+  allowedDirs: string[],
+  home: string = Deno.env.get("HOME") ?? "/home/deno",
+  xdgDataHome: string = sessionXdgDataHome(base),
+  dataRoot: string = opencodeDataRoot(base),
+): GenericCommandRejection | null {
+  if (containsShellOperators(commandWithoutFdRedirects(cmd))) return "shell_operator";
   const tokens = cmd.trim().split(/\s+/).filter((t) => t.length > 0);
-  if (tokens.length === 0) return false;
-  if (!GENERIC_COMMAND_ALLOWLIST.has(tokens[0])) return false;
+  if (tokens.length === 0) return "first_token_not_allowed";
+  if (!GENERIC_COMMAND_ALLOWLIST.has(tokens[0])) return "first_token_not_allowed";
   for (let i = 1; i < tokens.length; i++) {
+    // A tolerated fd-to-fd redirect token is not a path argument (F12 D1).
+    if (FD_REDIRECT_TOKEN_PATTERN.test(tokens[i])) continue;
     // A code-exec / arbitrary-target flag rejects the whole command (e.g. `find -exec`,
     // `find -delete`, `rg --pre`), independent of whether its path arguments are in-workspace.
-    if (DANGEROUS_GENERIC_FLAGS.has(tokens[i])) return false;
+    if (DANGEROUS_GENERIC_FLAGS.has(tokens[i])) return "dangerous_flag";
     if (!genericArgWithinWorkspace(tokens[i], base, allowedDirs, home, xdgDataHome, dataRoot)) {
-      return false;
+      return "path_outside_boundary";
     }
   }
-  return true;
+  return null;
 }
 
 /**
@@ -823,17 +903,20 @@ export class ChatbotClient implements acp.Client {
       ) {
         allowedDirs.push(toolOutputDir);
       }
-      const isConfinedGenericCommand = commands.length > 0 &&
-        commands.every((cmd) =>
-          isApprovedGenericCommand(
-            cmd,
-            this.config.workingDir,
-            allowedDirs,
-            Deno.env.get("HOME") ?? "/home/deno",
-            sessionDataHome,
-            opencodeDataRoot(this.config.workingDir),
-          )
-        );
+      const home = Deno.env.get("HOME") ?? "/home/deno";
+      const dataRoot = opencodeDataRoot(this.config.workingDir);
+      const genericReasons = commands.map((cmd) =>
+        genericCommandRejectionReason(
+          cmd,
+          this.config.workingDir,
+          allowedDirs,
+          home,
+          sessionDataHome,
+          dataRoot,
+        )
+      );
+      const firstRejectedIndex = genericReasons.findIndex((reason) => reason !== null);
+      const isConfinedGenericCommand = commands.length > 0 && firstRejectedIndex === -1;
 
       if (isConfinedGenericCommand) {
         this.logger.info("Auto-approving workspace-confined generic command: {command}", {
@@ -859,20 +942,57 @@ export class ChatbotClient implements acp.Client {
         });
       }
 
-      // A filesystem-touching command that escapes the workspace: log the rejection
-      // reason before falling through to default-deny for operational visibility.
+      // A filesystem-touching command that fails the generic gate: report the ACTUAL
+      // rejection cause (shell operator / first token not allow-listed / dangerous flag /
+      // path outside allowed dirs) for the FIRST failing command, replacing the previous
+      // hard-coded "path argument outside session workspace/TMPDIR" message which misled
+      // diagnosis for every rejection kind.
       if (commands.length > 0) {
+        const reason = genericReasons[firstRejectedIndex] ?? "path_outside_boundary";
+        const failingCommand = commands[firstRejectedIndex];
+
         this.logger.warn(
-          "Rejecting generic command: path argument outside session workspace/TMPDIR",
-          { commands },
+          "Rejecting generic command: {reason} (command {index} of {total}: {command})",
+          {
+            reason,
+            index: firstRejectedIndex,
+            total: commands.length,
+            command: failingCommand,
+          },
         );
+
+        // Single source of truth for the audit reason. The path case keeps the historical
+        // `rejected_generic_command_out_of_workspace` code so existing monitoring queries
+        // stay valid; the new causes get distinct codes. A string template like
+        // `rejected_generic_command_{reason}` is NOT used because it would rename the
+        // preserved path code.
+        const auditReason = reason === "path_outside_boundary"
+          ? "rejected_generic_command_out_of_workspace"
+          : reason === "shell_operator"
+          ? "rejected_generic_command_shell_operator"
+          : reason === "first_token_not_allowed"
+          ? "rejected_generic_command_first_token_not_allowed"
+          : "rejected_generic_command_dangerous_flag";
+
         void this.writePermissionAudit(
           "permission_denied",
           title,
           kind,
           commands.join("; "),
-          "rejected_generic_command_out_of_workspace",
+          auditReason,
         );
+
+        // Return reject immediately: falling through to default-deny would write a second,
+        // contradictory `rejected_unknown` audit entry that misclassifies the cause.
+        const rejectOption = params.options.find((o) => o.kind === "reject_once") ??
+          params.options[0];
+
+        return Promise.resolve({
+          outcome: {
+            outcome: "selected",
+            optionId: rejectOption.optionId,
+          },
+        });
       }
     }
 

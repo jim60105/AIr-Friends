@@ -5,7 +5,9 @@ import {
   ALLOWED_READ_EXTENSIONS,
   buildSkillAutoApproveList,
   ChatbotClient,
+  commandWithoutFdRedirects,
   containsShellOperators,
+  genericCommandRejectionReason,
   isWithinDir,
   matchesCommandPrefix,
   matchesScriptPath,
@@ -1716,6 +1718,134 @@ Deno.test("F2 matchesCommandPrefix - rejects flag-embedded absolute path argumen
   );
 });
 
+// --- F12 D1: fd-to-fd redirect tolerance in the skill-whitelist matchers ---
+
+Deno.test("F12 D1 matchesScriptPath - trailing 2>&1 tolerated, entrypoint still the script", () => {
+  assertEquals(
+    matchesScriptPath(
+      "deno run skills/memory-save/scripts/memory-save.ts --content-file $TMPDIR/$SESSION_ID/x.md 2>&1",
+      "skills/memory-save/scripts/memory-save.ts",
+    ),
+    true,
+  );
+});
+
+Deno.test("F12 D1 matchesScriptPath - tolerated 2>&1 before the script does not break entrypoint resolution", () => {
+  // The tolerated redirect token must NOT affect entrypoint resolution: the script is
+  // still the first positional after `run` even when the redirect precedes it.
+  assertEquals(
+    matchesScriptPath(
+      "deno run 2>&1 skills/memory-save/scripts/memory-save.ts --session-id x",
+      "skills/memory-save/scripts/memory-save.ts",
+    ),
+    true,
+  );
+});
+
+Deno.test("F12 D1 matchesScriptPath - newline-separated second command still rejected", () => {
+  // commandWithoutFdRedirects must NOT swallow the newline command separator: the
+  // filtered command still contains `\n`, so the operator check rejects it.
+  assertEquals(
+    matchesScriptPath(
+      "deno run skills/memory-save/scripts/memory-save.ts 2>&1\nrm -rf /",
+      "skills/memory-save/scripts/memory-save.ts",
+    ),
+    false,
+  );
+});
+
+Deno.test("F12 D1 matchesScriptPath - glued fd-redirect operators still rejected", () => {
+  assertEquals(
+    matchesScriptPath(
+      "deno run skills/memory-save/scripts/memory-save.ts 2>&1&&rm -rf /",
+      "skills/memory-save/scripts/memory-save.ts",
+    ),
+    false,
+  );
+  assertEquals(
+    matchesScriptPath(
+      "deno run skills/memory-save/scripts/memory-save.ts 2>&1; curl evil",
+      "skills/memory-save/scripts/memory-save.ts",
+    ),
+    false,
+  );
+});
+
+Deno.test("F12 D1 matchesCommandPrefix - trailing 2>&1 tolerated", () => {
+  assertEquals(
+    matchesCommandPrefix("agent-browser open https://example.com 2>&1", "agent-browser"),
+    true,
+  );
+});
+
+Deno.test("F12 D1 matchesCommandPrefix - glued/other redirect forms rejected", () => {
+  assertEquals(matchesCommandPrefix("agent-browser 2>&1; curl evil", "agent-browser"), false);
+  assertEquals(matchesCommandPrefix("agent-browser 2>&1x", "agent-browser"), false);
+  assertEquals(matchesCommandPrefix("agent-browser 2>&1/tmp/x", "agent-browser"), false);
+  assertEquals(
+    matchesCommandPrefix("agent-browser 2>&1&&cat /etc/passwd", "agent-browser"),
+    false,
+  );
+});
+
+// --- F12 D1: commandWithoutFdRedirects unit tests ---
+
+Deno.test("F12 D1 commandWithoutFdRedirects - drops exact standard-stream fd-redirect tokens", () => {
+  assertEquals(commandWithoutFdRedirects("ls x 2>&1"), "ls x");
+  assertEquals(commandWithoutFdRedirects("ls x 1>&2"), "ls x");
+  assertEquals(commandWithoutFdRedirects("ls x 3>&1"), "ls x");
+});
+
+Deno.test("F12 D1 commandWithoutFdRedirects - keeps non-exact / non-standard redirect tokens", () => {
+  // Glued forms, digit-prefixed filenames, file redirects, quoted/escaped forms, and
+  // non-standard source descriptors all survive the filter (their operator is preserved).
+  assertEquals(commandWithoutFdRedirects("ls 2>&1/tmp/x"), "ls 2>&1/tmp/x");
+  assertEquals(commandWithoutFdRedirects("ls 2>&1x"), "ls 2>&1x");
+  assertEquals(commandWithoutFdRedirects("ls 2>&1&&cat"), "ls 2>&1&&cat");
+  assertEquals(commandWithoutFdRedirects("ls 2>/dev/null"), "ls 2>/dev/null");
+  assertEquals(commandWithoutFdRedirects("ls 1>&3"), "ls 1>&3");
+  assertEquals(commandWithoutFdRedirects("ls 9>&99"), "ls 9>&99");
+  // Quoted/escaped tokens are not exact unquoted tokens, so they are kept.
+  assertEquals(commandWithoutFdRedirects(`ls '2>&1'`), `ls '2>&1'`);
+  assertEquals(commandWithoutFdRedirects(`ls "2>&1"`), `ls "2>&1"`);
+  assertEquals(commandWithoutFdRedirects(`ls 2\\>&1`), `ls 2\\>&1`);
+});
+
+// --- F12 D1: genericCommandRejectionReason unit tests ---
+
+Deno.test("F12 D1 genericCommandRejectionReason - distinct causes", () => {
+  const base = "/tmp/ws";
+  const dirs = [base];
+  const home = "/home/deno";
+  const dataRoot = `${base}/tmp/opencode-data`;
+  const xdg = `${dataRoot}/sess`;
+  // Approved.
+  assertEquals(
+    genericCommandRejectionReason(`cat ${base}/x.md 2>&1`, base, dirs, home, xdg, dataRoot),
+    null,
+  );
+  // Shell operator.
+  assertEquals(
+    genericCommandRejectionReason(`cat ${base}/x.md 2>/dev/null`, base, dirs, home, xdg, dataRoot),
+    "shell_operator",
+  );
+  // First token not allowed.
+  assertEquals(
+    genericCommandRejectionReason(`python ${base}/x.py`, base, dirs, home, xdg, dataRoot),
+    "first_token_not_allowed",
+  );
+  // Dangerous flag.
+  assertEquals(
+    genericCommandRejectionReason(`find ${base} -delete`, base, dirs, home, xdg, dataRoot),
+    "dangerous_flag",
+  );
+  // Path outside boundary.
+  assertEquals(
+    genericCommandRejectionReason(`cat /etc/passwd 2>&1`, base, dirs, home, xdg, dataRoot),
+    "path_outside_boundary",
+  );
+});
+
 // --- Integration tests: attack vector rejection through requestPermission ---
 
 Deno.test("ChatbotClient - rejects && chain injection in skill command", async () => {
@@ -2352,6 +2482,166 @@ Deno.test("Permission audit - registered skill writes approved entry", async () 
     assertEquals(entries[0].data.decision, "approved");
     assertEquals(entries[0].data.reason, "registered_skill");
     assertEquals(entries[0].data.toolName, "memory-save");
+  } finally {
+    Deno.removeSync(tempDir, { recursive: true });
+  }
+});
+
+Deno.test("Permission audit - rejected generic command writes out_of_workspace reason and approved 2>&1 granted", async () => {
+  const tempDir = Deno.makeTempDirSync();
+  try {
+    const skillRegistry = createTestSkillRegistry();
+    const logger = createTestLogger();
+    const config = {
+      workingDir: tempDir,
+      platform: "discord",
+      userId: "123",
+      channelId: "456",
+      isDM: false,
+      sessionId: "sess_generic",
+    };
+
+    const client = new ChatbotClient(skillRegistry, logger, config);
+    const auditConfig = createTestAuditConfig();
+    const writer = new SessionAuditWriter(tempDir, "discord", "123", "sess_generic", auditConfig);
+    client.setAuditWriter(writer);
+
+    // Out-of-workspace path with a tolerated fd-redirect: still rejected, and the audit
+    // reason keeps the preserved `rejected_generic_command_out_of_workspace` code.
+    const rejectedRequest: acp.RequestPermissionRequest = {
+      sessionId: "sess_generic",
+      toolCall: {
+        title: "Execute shell command",
+        kind: "execute",
+        status: "pending" as const,
+        content: [],
+        toolCallId: "reject-id",
+        rawInput: { commands: ["ls /etc/passwd 2>&1"] },
+      },
+      options: [
+        { kind: "allow_once", optionId: "allow-1", name: "Allow once" },
+        { kind: "reject_once", optionId: "reject-1", name: "Reject once" },
+      ],
+    };
+    const rejected = await client.requestPermission(rejectedRequest);
+    assertEquals(rejected.outcome.outcome, "selected");
+    if (rejected.outcome.outcome === "selected") {
+      assertEquals(rejected.outcome.optionId, "reject-1");
+    }
+
+    // In-workspace command with a tolerated fd-redirect: granted.
+    const approvedRequest: acp.RequestPermissionRequest = {
+      sessionId: "sess_generic",
+      toolCall: {
+        title: "Execute shell command",
+        kind: "execute",
+        status: "pending" as const,
+        content: [],
+        toolCallId: "approve-id",
+        rawInput: { commands: [`ls ${tempDir}/ 2>&1`] },
+      },
+      options: [
+        { kind: "allow_once", optionId: "allow-1", name: "Allow once" },
+        { kind: "reject_once", optionId: "reject-1", name: "Reject once" },
+      ],
+    };
+    const approved = await client.requestPermission(approvedRequest);
+    assertEquals(approved.outcome.outcome, "selected");
+    if (approved.outcome.outcome === "selected") {
+      assertEquals(approved.outcome.optionId, "allow-1");
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, 100));
+
+    const filePath = join(tempDir, "discord", "123", "sess_generic.jsonl");
+    const entries = await readAuditEntries(filePath);
+    // Exactly ONE denied entry: the cause-specific generic rejection must return
+    // immediately instead of falling through to a contradictory `rejected_unknown`.
+    const deniedEntries = entries.filter((e) => e.phase === "permission_denied");
+    assertEquals(deniedEntries.length, 1);
+    const denied = deniedEntries[0];
+    assertEquals(denied?.data?.reason, "rejected_generic_command_out_of_workspace");
+    assertEquals(denied?.data?.command, "ls /etc/passwd 2>&1");
+    const granted = entries.find((e) => e.phase === "permission_approved");
+    assertEquals(granted?.data?.reason, "generic_command_workspace_confined");
+  } finally {
+    Deno.removeSync(tempDir, { recursive: true });
+  }
+});
+
+Deno.test("Permission audit - multi-command request records the FIRST failing command", async () => {
+  const tempDir = Deno.makeTempDirSync();
+  try {
+    // Capture WARN logs to assert the recorded first-failing command + index.
+    const warnLogs: Array<{ message: string; context: unknown }> = [];
+    const testLogger = new Logger("test", { level: LogLevel.DEBUG });
+    const originalWarn = testLogger.warn.bind(testLogger);
+    testLogger.warn = (message: string, context?: Record<string, unknown>) => {
+      warnLogs.push({ message, context });
+      originalWarn(message, context);
+    };
+
+    const skillRegistry = createTestSkillRegistry();
+    const config = {
+      workingDir: tempDir,
+      platform: "discord",
+      userId: "123",
+      channelId: "456",
+      isDM: false,
+      sessionId: "sess_multi",
+    };
+    const client = new ChatbotClient(skillRegistry, testLogger, config);
+    const auditConfig = createTestAuditConfig();
+    const writer = new SessionAuditWriter(tempDir, "discord", "123", "sess_multi", auditConfig);
+    client.setAuditWriter(writer);
+
+    // First command is fine; SECOND fails on an out-of-workspace path.
+    const request: acp.RequestPermissionRequest = {
+      sessionId: "sess_multi",
+      toolCall: {
+        title: "Execute shell command",
+        kind: "execute",
+        status: "pending" as const,
+        content: [],
+        toolCallId: "test-id",
+        rawInput: {
+          commands: [`cat ${tempDir}/notes.md 2>&1`, "ls /etc/passwd 2>&1"],
+        },
+      },
+      options: [
+        { kind: "allow_once", optionId: "allow-1", name: "Allow once" },
+        { kind: "reject_once", optionId: "reject-1", name: "Reject once" },
+      ],
+    };
+
+    const response = await client.requestPermission(request);
+    assertEquals(response.outcome.outcome, "selected");
+    if (response.outcome.outcome === "selected") {
+      assertEquals(response.outcome.optionId, "reject-1");
+    }
+
+    // The WARN names the FIRST failing command, its index, and the path-outside reason.
+    const genericWarns = warnLogs.filter((log) =>
+      log.message === "Rejecting generic command: {reason} (command {index} of {total}: {command})"
+    );
+    assertEquals(genericWarns.length, 1);
+    const context = genericWarns[0].context as Record<string, unknown>;
+    assertEquals(context.reason, "path_outside_boundary");
+    assertEquals(context.index, 1);
+    assertEquals(context.total, 2);
+    assertEquals(context.command, "ls /etc/passwd 2>&1");
+
+    await new Promise((resolve) => setTimeout(resolve, 100));
+
+    const filePath = join(tempDir, "discord", "123", "sess_multi.jsonl");
+    const entries = await readAuditEntries(filePath);
+    // Exactly ONE denied entry (no contradictory fall-through `rejected_unknown`).
+    const deniedEntries = entries.filter((e) => e.phase === "permission_denied");
+    assertEquals(deniedEntries.length, 1);
+    const denied = deniedEntries[0];
+    assertEquals(denied?.data?.reason, "rejected_generic_command_out_of_workspace");
+    // Audit records the full command set for context; the WARN carries the specific index.
+    assertEquals(denied?.data?.command, `cat ${tempDir}/notes.md 2>&1; ls /etc/passwd 2>&1`);
   } finally {
     Deno.removeSync(tempDir, { recursive: true });
   }
