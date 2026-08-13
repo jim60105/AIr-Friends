@@ -58,8 +58,27 @@ export interface ActiveSession {
   auditWriter?: SessionAuditWriter;
   /** Callback to request agent process termination (doom-loop protection) */
   onTerminateRequest?: () => Promise<void>;
-  /** Last message ID sent by the bot in this session */
+  /**
+   * Last message ID sent via `send-reply` or `edit-reply` ONLY (including
+   * Misskey's delete-and-recreate new ID). Consumed by `edit-reply` scoping
+   * and the `get-message` fallback. A message delivered by `send-file` is
+   * NEVER recorded here — see `lastFileMessageId`.
+   */
   lastSentMessageId?: string;
+  /**
+   * Last message ID delivered by `send-file`, recorded ONLY when at least one
+   * file was delivered (on Misskey chat partial delivery this is the last
+   * *delivered* message ID). Consumed as the reply threading anchor and by
+   * the `get-message` fallback. NEVER written by `send-reply`/`edit-reply`.
+   */
+  lastFileMessageId?: string;
+  /**
+   * The message ID the last text reply was created as a reply to (the reply
+   * anchor in effect when `send-reply` succeeded). Recorded ONLY on a
+   * successful `send-reply`; never changed by `edit-reply`, which consumes
+   * it to preserve the edited reply's original thread parent.
+   */
+  lastReplyAnchorMessageId?: string;
   /** WorkspaceManager for channel workspace resolution */
   workspaceManager?: WorkspaceManager;
   /**
@@ -397,7 +416,7 @@ export class SessionRegistry {
   }
 
   /**
-   * Set the last message ID sent by the bot in a session.
+   * Set the last message ID sent by the bot via send-reply/edit-reply in a session.
    */
   setLastSentMessageId(sessionId: string, messageId: string): void {
     const session = this.sessions.get(sessionId);
@@ -407,10 +426,46 @@ export class SessionRegistry {
   }
 
   /**
-   * Get the last message ID sent by the bot in a session.
+   * Get the last message ID sent by the bot via send-reply/edit-reply in a session.
    */
   getLastSentMessageId(sessionId: string): string | undefined {
     return this.sessions.get(sessionId)?.lastSentMessageId;
+  }
+
+  /**
+   * Set the last `send-file`-delivered message ID for a session (the reply
+   * threading anchor for subsequent replies).
+   */
+  setLastFileMessageId(sessionId: string, messageId: string): void {
+    const session = this.sessions.get(sessionId);
+    if (session) {
+      session.lastFileMessageId = messageId;
+    }
+  }
+
+  /**
+   * Get the last `send-file`-delivered message ID for a session.
+   */
+  getLastFileMessageId(sessionId: string): string | undefined {
+    return this.sessions.get(sessionId)?.lastFileMessageId;
+  }
+
+  /**
+   * Set the reply anchor recorded when the last text reply was created (set
+   * only on `send-reply` success; never changed by `edit-reply`).
+   */
+  setLastReplyAnchorMessageId(sessionId: string, messageId: string): void {
+    const session = this.sessions.get(sessionId);
+    if (session) {
+      session.lastReplyAnchorMessageId = messageId;
+    }
+  }
+
+  /**
+   * Get the reply anchor recorded when the last text reply was created.
+   */
+  getLastReplyAnchorMessageId(sessionId: string): string | undefined {
+    return this.sessions.get(sessionId)?.lastReplyAnchorMessageId;
   }
 
   /**

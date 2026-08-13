@@ -17,6 +17,11 @@ Send one or more files from your workspace to the current conversation channel i
 5. **One send per session**: Only ONE successful `send-file` call is allowed per session (a multi-file batch counts as one call). Further calls are rejected with HTTP 429, and repeated attempts terminate the agent. If you need to send more, include everything in the single invocation.
 6. **This skill may be disabled**: The administrator may disable this skill. If you receive a "disabled" error, inform the user that file sending is not available.
 7. **Timeout**: The script won't run for more than 30 seconds. If it hangs, do stop_bash.
+8. **Threading**: The file message is sent as a reply to the user's trigger message. A subsequent `send-reply` in the same session will be threaded to this file message (keeping the conversation in one thread), not to the trigger.
+
+## Result
+
+On success the script returns `messageId` (the delivered message ID), `messageIds` (all delivered IDs, in send order), `filesCount`, and `nextAction`. On partial delivery (Misskey chat) it returns the delivered IDs alongside the error.
 
 ## Usage
 

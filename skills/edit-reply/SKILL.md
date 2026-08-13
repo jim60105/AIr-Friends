@@ -61,6 +61,8 @@ If the script fails, read the JSON error on stderr. It contains the fix. Common 
 - You can call this multiple times to make additional edits
 - Only the most recent content will be visible on the platform
 - The `messageId` must be from a previous `send-reply` call in the same session
+- **Only `send-reply` messages are editable** — messages delivered by `send-file` are NEVER editable, and passing a file-message ID to this skill will be rejected. There is no edit-file skill.
+- Editing keeps the reply's original thread position: a reply sent before a file send stays threaded to the trigger message, and one sent after stays threaded to the file message. Editing never rewrites the conversation's thread topology.
 
 ## Platform-Specific Behavior
 

@@ -35,7 +35,8 @@ export interface SessionAuditEntry {
   phase: AuditPhase;
   /** Phase-specific payload */
   data: {
-    // trigger_received
+    // trigger_received (messageId also used by file_sent: the last delivered
+    // message ID / reply anchor)
     channelId?: string;
     userId?: string;
     messageId?: string;
@@ -109,6 +110,8 @@ export interface SessionAuditEntry {
 
     // file_sent
     filesCount?: number;
+    /** All delivered message IDs in send order */
+    messageIds?: string[];
     captionHash?: string;
     fileNamesHash?: string;
     fileNames?: string;

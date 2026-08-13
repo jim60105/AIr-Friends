@@ -268,12 +268,16 @@ export class ReplyHandler {
         // fetchMessage failure should not block editing — proceed with the edit
       }
 
-      // Edit message via platform adapter
+      // Edit message via platform adapter. Threading anchor: the reply's OWN
+      // recorded anchor (`lastReplyAnchorMessageId` — the message it was
+      // created as a reply to), falling back to the current resolved anchor.
+      // This preserves the edited reply's original thread parent on Misskey's
+      // delete-and-recreate: editing never rewrites thread topology.
       const result = await context.platformAdapter.editMessage(
         context.channelId,
         params.messageId,
         formattedMessage,
-        context.replyToMessageId,
+        context.lastReplyAnchorMessageId ?? context.replyToMessageId,
       );
 
       if (!result.success) {
@@ -329,8 +333,11 @@ export class ReplyHandler {
     try {
       const params = parameters as unknown as GetMessageParams;
 
-      // Use provided messageId or fall back to last sent message
-      const messageId = params.messageId || context.lastSentMessageId;
+      // Use provided messageId or fall back to the session's last-sent text
+      // reply, then to the last send-file-delivered message (so the agent can
+      // re-inspect the file message it just sent without copying the ID).
+      const messageId = params.messageId || context.lastSentMessageId ||
+        context.lastFileMessageId;
 
       if (!messageId) {
         return {

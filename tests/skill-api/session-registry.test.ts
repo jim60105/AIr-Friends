@@ -501,6 +501,133 @@ Deno.test("SessionRegistry - setLastSentMessageId ignores unknown session", () =
   registry.stop();
 });
 
+Deno.test("SessionRegistry - setLastFileMessageId and getLastFileMessageId", () => {
+  const registry = new SessionRegistry();
+
+  const mockWorkspace = {
+    key: "test/123",
+    components: { platform: "discord" as const, userId: "123" },
+    path: "/tmp/test",
+    tmpPath: "/tmp/test/tmp",
+    isDm: false,
+  };
+
+  const sessionId = registry.register({
+    platform: "discord",
+    channelId: "456",
+    userId: "123",
+    isDm: false,
+    workspace: mockWorkspace,
+    // deno-lint-ignore no-explicit-any
+    platformAdapter: {} as any,
+    // deno-lint-ignore no-explicit-any
+    triggerEvent: {} as any,
+  });
+
+  assertEquals(registry.getLastFileMessageId(sessionId), undefined);
+
+  registry.setLastFileMessageId(sessionId, "file_msg_1");
+  assertEquals(registry.getLastFileMessageId(sessionId), "file_msg_1");
+
+  // Overwrite with a new ID
+  registry.setLastFileMessageId(sessionId, "file_msg_2");
+  assertEquals(registry.getLastFileMessageId(sessionId), "file_msg_2");
+
+  // setLastFileMessageId must not touch lastSentMessageId
+  assertEquals(registry.getLastSentMessageId(sessionId), undefined);
+
+  registry.stop();
+});
+
+Deno.test("SessionRegistry - setLastFileMessageId ignores unknown session", () => {
+  const registry = new SessionRegistry();
+
+  // Should not throw
+  registry.setLastFileMessageId("nonexistent", "file_msg_xyz");
+  assertEquals(registry.getLastFileMessageId("nonexistent"), undefined);
+
+  registry.stop();
+});
+
+Deno.test("SessionRegistry - setLastReplyAnchorMessageId and getLastReplyAnchorMessageId", () => {
+  const registry = new SessionRegistry();
+
+  const mockWorkspace = {
+    key: "test/123",
+    components: { platform: "discord" as const, userId: "123" },
+    path: "/tmp/test",
+    tmpPath: "/tmp/test/tmp",
+    isDm: false,
+  };
+
+  const sessionId = registry.register({
+    platform: "discord",
+    channelId: "456",
+    userId: "123",
+    isDm: false,
+    workspace: mockWorkspace,
+    // deno-lint-ignore no-explicit-any
+    platformAdapter: {} as any,
+    // deno-lint-ignore no-explicit-any
+    triggerEvent: {} as any,
+  });
+
+  assertEquals(registry.getLastReplyAnchorMessageId(sessionId), undefined);
+
+  registry.setLastReplyAnchorMessageId(sessionId, "anchor_1");
+  assertEquals(registry.getLastReplyAnchorMessageId(sessionId), "anchor_1");
+
+  // Overwrite with a new ID
+  registry.setLastReplyAnchorMessageId(sessionId, "anchor_2");
+  assertEquals(registry.getLastReplyAnchorMessageId(sessionId), "anchor_2");
+
+  registry.stop();
+});
+
+Deno.test("SessionRegistry - message ID roles are stored per session (isolation)", () => {
+  const registry = new SessionRegistry();
+
+  const mockWorkspace = {
+    key: "test/123",
+    components: { platform: "discord" as const, userId: "123" },
+    path: "/tmp/test",
+    tmpPath: "/tmp/test/tmp",
+    isDm: false,
+  };
+
+  const sessionA = registry.register({
+    platform: "discord",
+    channelId: "456",
+    userId: "123",
+    isDm: false,
+    workspace: mockWorkspace,
+    // deno-lint-ignore no-explicit-any
+    platformAdapter: {} as any,
+    // deno-lint-ignore no-explicit-any
+    triggerEvent: {} as any,
+  });
+  const sessionB = registry.register({
+    platform: "discord",
+    channelId: "456",
+    userId: "123",
+    isDm: false,
+    workspace: mockWorkspace,
+    // deno-lint-ignore no-explicit-any
+    platformAdapter: {} as any,
+    // deno-lint-ignore no-explicit-any
+    triggerEvent: {} as any,
+  });
+
+  registry.setLastFileMessageId(sessionA, "file_a");
+  registry.setLastReplyAnchorMessageId(sessionA, "anchor_a");
+
+  // Session B is untouched
+  assertEquals(registry.getLastFileMessageId(sessionB), undefined);
+  assertEquals(registry.getLastReplyAnchorMessageId(sessionB), undefined);
+
+  registry.stop();
+});
+
 Deno.test("SessionRegistry - setTerminateCallback overwrites previous callback", async () => {
   const registry = new SessionRegistry();
 

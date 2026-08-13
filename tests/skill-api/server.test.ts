@@ -2387,6 +2387,9 @@ Deno.test("SkillAPIServer - send-file writes file_sent audit entry (hashContent 
     assertExists(sentEntry);
     assertEquals(sentEntry.data.filesCount, 2);
     assertEquals(sentEntry.data.platform, "discord");
+    // Delivered message IDs are recorded verbatim (not user content)
+    assertEquals(sentEntry.data.messageId, "file_msg_1");
+    assertEquals(sentEntry.data.messageIds, ["file_msg_1"]);
     assertStringIncludes(sentEntry.data.captionHash as string, "sha256:");
     assertStringIncludes(sentEntry.data.fileNamesHash as string, "sha256:");
     // File content itself is never hashed/recorded
@@ -2619,6 +2622,626 @@ Deno.test("SkillAPIServer - identical repeated send-file calls still reach the d
 
     await server.stop();
     rig.sessionRegistry.stop();
+  } finally {
+    await Deno.remove(tempDir, { recursive: true });
+  }
+});
+
+// ============ Reply threading anchor tests (file-message-reply-threading) ============
+
+Deno.test("SkillAPIServer - send-file success stores lastFileMessageId (not lastSentMessageId)", async () => {
+  const tempDir = await Deno.makeTempDir();
+  try {
+    const rig = createSendFileRig(tempDir);
+    await Deno.writeTextFile(`${rig.mockWorkspace.path}/a.txt`, "aaa");
+
+    const port = 3201;
+    const server = new SkillAPIServer(rig.sessionRegistry, rig.skillRegistry, {
+      port,
+      host: "127.0.0.1",
+    });
+    server.start();
+    await waitForServer(port);
+
+    const response = await fetch(`http://localhost:${port}/api/skill/send-file`, {
+      method: "POST",
+      headers: jsonHeaders(rig.sessionRegistry.getCallerToken(rig.sessionId)),
+      body: JSON.stringify({ sessionId: rig.sessionId, parameters: { filePaths: ["a.txt"] } }),
+    });
+    const body = await response.json();
+    assertEquals(response.status, 200, JSON.stringify(body));
+    assertEquals(body.success, true);
+
+    // The delivered ID lands in lastFileMessageId ONLY — the edit scope
+    // (lastSentMessageId) must stay untouched so file messages are not
+    // editable.
+    assertEquals(rig.sessionRegistry.getLastFileMessageId(rig.sessionId), "file_msg_1");
+    assertEquals(rig.sessionRegistry.getLastSentMessageId(rig.sessionId), undefined);
+
+    await server.stop();
+    rig.sessionRegistry.stop();
+  } finally {
+    await Deno.remove(tempDir, { recursive: true });
+  }
+});
+
+Deno.test("SkillAPIServer - send-file total failure records no message ID", async () => {
+  const tempDir = await Deno.makeTempDir();
+  try {
+    const rig = createSendFileRig(tempDir, {
+      adapter: {
+        sendFile: () => Promise.resolve({ success: false, error: "Platform error" }),
+        // deno-lint-ignore no-explicit-any
+      } as any,
+    });
+    await Deno.writeTextFile(`${rig.mockWorkspace.path}/a.txt`, "aaa");
+
+    const port = 3202;
+    const server = new SkillAPIServer(rig.sessionRegistry, rig.skillRegistry, {
+      port,
+      host: "127.0.0.1",
+    });
+    server.start();
+    await waitForServer(port);
+
+    const response = await fetch(`http://localhost:${port}/api/skill/send-file`, {
+      method: "POST",
+      headers: jsonHeaders(rig.sessionRegistry.getCallerToken(rig.sessionId)),
+      body: JSON.stringify({ sessionId: rig.sessionId, parameters: { filePaths: ["a.txt"] } }),
+    });
+    assertEquals(response.status, 400);
+    await response.json();
+
+    assertEquals(rig.sessionRegistry.getLastFileMessageId(rig.sessionId), undefined);
+
+    await server.stop();
+    rig.sessionRegistry.stop();
+  } finally {
+    await Deno.remove(tempDir, { recursive: true });
+  }
+});
+
+Deno.test("SkillAPIServer - send-file delivery without a usable message ID records no anchor", async () => {
+  const tempDir = await Deno.makeTempDir();
+  try {
+    const rig = createSendFileRig(tempDir, {
+      adapter: {
+        sendFile: () => Promise.resolve({ success: true }),
+        // deno-lint-ignore no-explicit-any
+      } as any,
+    });
+    await Deno.writeTextFile(`${rig.mockWorkspace.path}/a.txt`, "aaa");
+
+    const port = 3203;
+    const server = new SkillAPIServer(rig.sessionRegistry, rig.skillRegistry, {
+      port,
+      host: "127.0.0.1",
+    });
+    server.start();
+    await waitForServer(port);
+
+    const response = await fetch(`http://localhost:${port}/api/skill/send-file`, {
+      method: "POST",
+      headers: jsonHeaders(rig.sessionRegistry.getCallerToken(rig.sessionId)),
+      body: JSON.stringify({ sessionId: rig.sessionId, parameters: { filePaths: ["a.txt"] } }),
+    });
+    const body = await response.json();
+    assertEquals(response.status, 200, JSON.stringify(body));
+    assertEquals(body.success, true);
+
+    // Files were delivered (fileSent marked) but no usable ID exists — the
+    // anchor stays on the trigger, never a bogus ID.
+    assertEquals(rig.sessionRegistry.hasFileSent(rig.sessionId), true);
+    assertEquals(rig.sessionRegistry.getLastFileMessageId(rig.sessionId), undefined);
+
+    await server.stop();
+    rig.sessionRegistry.stop();
+  } finally {
+    await Deno.remove(tempDir, { recursive: true });
+  }
+});
+
+Deno.test("SkillAPIServer - send-reply success records the per-reply anchor", async () => {
+  const tempDir = await Deno.makeTempDir();
+  try {
+    const sessionRegistry = new SessionRegistry();
+    const workspaceManager = new WorkspaceManager({
+      repoPath: tempDir,
+      workspacesDir: "workspaces",
+    });
+    const memoryStore = new MemoryStore(workspaceManager, {
+      searchLimit: 10,
+      maxChars: 2000,
+    });
+    const skillRegistry = new SkillRegistry(memoryStore);
+
+    const sessionId = sessionRegistry.register({
+      platform: "discord",
+      channelId: "456",
+      userId: "123",
+      isDm: false,
+      workspace: {
+        key: "discord/123",
+        components: { platform: "discord" as const, userId: "123" },
+        path: tempDir,
+        tmpPath: tempDir + "/tmp",
+        isDm: false,
+      },
+      platformAdapter: {
+        sendReply: () => Promise.resolve({ success: true, messageId: "reply_1" }),
+        // deno-lint-ignore no-explicit-any
+      } as any,
+      triggerEvent: {
+        platform: "discord",
+        channelId: "456",
+        userId: "123",
+        messageId: "msg_trigger",
+        isDm: false,
+        guildId: "",
+        content: "",
+        timestamp: new Date(),
+      },
+    });
+
+    const port = 3204;
+    const server = new SkillAPIServer(sessionRegistry, skillRegistry, {
+      port,
+      host: "127.0.0.1",
+    });
+    server.start();
+    await waitForServer(port);
+
+    const response = await fetch(`http://localhost:${port}/api/skill/send-reply`, {
+      method: "POST",
+      headers: jsonHeaders(sessionRegistry.getCallerToken(sessionId)),
+      body: JSON.stringify({ sessionId, parameters: { message: "Hello!" } }),
+    });
+    assertEquals(response.status, 200);
+    await response.json();
+
+    // The reply was created as a reply to the trigger (no file sent yet)
+    assertEquals(sessionRegistry.getLastReplyAnchorMessageId(sessionId), "msg_trigger");
+
+    await server.stop();
+    sessionRegistry.stop();
+  } finally {
+    await Deno.remove(tempDir, { recursive: true });
+  }
+});
+
+Deno.test("SkillAPIServer - send-reply after send-file threads to the file message", async () => {
+  const tempDir = await Deno.makeTempDir();
+  try {
+    const sessionRegistry = new SessionRegistry();
+    const workspaceManager = new WorkspaceManager({
+      repoPath: tempDir,
+      workspacesDir: "workspaces",
+    });
+    const memoryStore = new MemoryStore(workspaceManager, {
+      searchLimit: 10,
+      maxChars: 2000,
+    });
+    const skillRegistry = new SkillRegistry(
+      memoryStore,
+      undefined,
+      undefined,
+      { enabled: true, allowedExtensions: [] },
+    );
+
+    let capturedReplyAnchor: string | undefined;
+    let capturedEditAnchor: string | undefined;
+    const sessionId = sessionRegistry.register({
+      platform: "discord",
+      channelId: "456",
+      userId: "123",
+      isDm: false,
+      workspace: {
+        key: "discord/123",
+        components: { platform: "discord" as const, userId: "123" },
+        path: tempDir,
+        tmpPath: tempDir + "/tmp",
+        isDm: false,
+      },
+      platformAdapter: {
+        sendFile: () =>
+          Promise.resolve({
+            success: true,
+            messageId: "file_msg_1",
+            messageIds: ["file_msg_1"],
+          }),
+        sendReply: (
+          _channelId: string,
+          _content: string,
+          options?: { replyToMessageId?: string },
+        ) => {
+          capturedReplyAnchor = options?.replyToMessageId;
+          return Promise.resolve({ success: true, messageId: "reply_1" });
+        },
+        fetchMessage: () => Promise.resolve(null),
+        editMessage: (
+          _channelId: string,
+          _messageId: string,
+          _newContent: string,
+          replyToMessageId?: string,
+        ) => {
+          capturedEditAnchor = replyToMessageId;
+          return Promise.resolve({ success: true, messageId: "reply_1_edited" });
+        },
+        // deno-lint-ignore no-explicit-any
+      } as any,
+      triggerEvent: {
+        platform: "discord",
+        channelId: "456",
+        userId: "123",
+        messageId: "msg_trigger",
+        isDm: false,
+        guildId: "",
+        content: "",
+        timestamp: new Date(),
+      },
+    });
+    await Deno.writeTextFile(`${tempDir}/a.txt`, "aaa");
+
+    const port = 3205;
+    const server = new SkillAPIServer(sessionRegistry, skillRegistry, {
+      port,
+      host: "127.0.0.1",
+    });
+    server.start();
+    await waitForServer(port);
+
+    // 1. Send files
+    const fileResponse = await fetch(`http://localhost:${port}/api/skill/send-file`, {
+      method: "POST",
+      headers: jsonHeaders(sessionRegistry.getCallerToken(sessionId)),
+      body: JSON.stringify({ sessionId, parameters: { filePaths: ["a.txt"] } }),
+    });
+    assertEquals(fileResponse.status, 200);
+    await fileResponse.json();
+
+    // 2. Send a reply — the skill context resolves replyToMessageId to the
+    //    file message, NOT the trigger
+    const replyResponse = await fetch(`http://localhost:${port}/api/skill/send-reply`, {
+      method: "POST",
+      headers: jsonHeaders(sessionRegistry.getCallerToken(sessionId)),
+      body: JSON.stringify({ sessionId, parameters: { message: "Here are the files" } }),
+    });
+    assertEquals(replyResponse.status, 200);
+    await replyResponse.json();
+
+    assertEquals(capturedReplyAnchor, "file_msg_1");
+    // The per-reply anchor recorded is the anchor that call used
+    assertEquals(sessionRegistry.getLastReplyAnchorMessageId(sessionId), "file_msg_1");
+    // Edit scope stays on the text reply
+    assertEquals(sessionRegistry.getLastSentMessageId(sessionId), "reply_1");
+    assertEquals(sessionRegistry.getLastFileMessageId(sessionId), "file_msg_1");
+
+    // 3. Edit the reply — the recreated message keeps the reply's OWN anchor
+    //    (the file message), so Misskey delete-and-recreate never re-threads
+    //    the reply to a different parent
+    const editResponse = await fetch(`http://localhost:${port}/api/skill/edit-reply`, {
+      method: "POST",
+      headers: jsonHeaders(sessionRegistry.getCallerToken(sessionId)),
+      body: JSON.stringify({ sessionId, parameters: { messageId: "reply_1", message: "Edited" } }),
+    });
+    assertEquals(editResponse.status, 200);
+    await editResponse.json();
+
+    assertEquals(capturedEditAnchor, "file_msg_1");
+
+    await server.stop();
+    sessionRegistry.stop();
+  } finally {
+    await Deno.remove(tempDir, { recursive: true });
+  }
+});
+
+Deno.test("SkillAPIServer - react-message after a file send targets the trigger message", async () => {
+  const tempDir = await Deno.makeTempDir();
+  try {
+    const sessionRegistry = new SessionRegistry();
+    const workspaceManager = new WorkspaceManager({
+      repoPath: tempDir,
+      workspacesDir: "workspaces",
+    });
+    const memoryStore = new MemoryStore(workspaceManager, {
+      searchLimit: 10,
+      maxChars: 2000,
+    });
+    const skillRegistry = new SkillRegistry(
+      memoryStore,
+      undefined,
+      undefined,
+      { enabled: true, allowedExtensions: [] },
+    );
+
+    let reactedMessageId: string | undefined;
+    const sessionId = sessionRegistry.register({
+      platform: "discord",
+      channelId: "456",
+      userId: "123",
+      isDm: false,
+      workspace: {
+        key: "discord/123",
+        components: { platform: "discord" as const, userId: "123" },
+        path: tempDir,
+        tmpPath: tempDir + "/tmp",
+        isDm: false,
+      },
+      platformAdapter: {
+        sendFile: () =>
+          Promise.resolve({
+            success: true,
+            messageId: "file_msg_1",
+            messageIds: ["file_msg_1"],
+          }),
+        addReaction: (_channelId: string, messageId: string) => {
+          reactedMessageId = messageId;
+          return Promise.resolve({ success: true });
+        },
+        // deno-lint-ignore no-explicit-any
+      } as any,
+      triggerEvent: {
+        platform: "discord",
+        channelId: "456",
+        userId: "123",
+        messageId: "msg_trigger",
+        isDm: false,
+        guildId: "",
+        content: "",
+        timestamp: new Date(),
+      },
+    });
+    await Deno.writeTextFile(`${tempDir}/a.txt`, "aaa");
+
+    const port = 3206;
+    const server = new SkillAPIServer(sessionRegistry, skillRegistry, {
+      port,
+      host: "127.0.0.1",
+    });
+    server.start();
+    await waitForServer(port);
+
+    const fileResponse = await fetch(`http://localhost:${port}/api/skill/send-file`, {
+      method: "POST",
+      headers: jsonHeaders(sessionRegistry.getCallerToken(sessionId)),
+      body: JSON.stringify({ sessionId, parameters: { filePaths: ["a.txt"] } }),
+    });
+    assertEquals(fileResponse.status, 200);
+    await fileResponse.json();
+
+    const reactResponse = await fetch(`http://localhost:${port}/api/skill/react-message`, {
+      method: "POST",
+      headers: jsonHeaders(sessionRegistry.getCallerToken(sessionId)),
+      body: JSON.stringify({ sessionId, parameters: { emoji: "👍" } }),
+    });
+    assertEquals(reactResponse.status, 200);
+    await reactResponse.json();
+
+    // triggerMessageId in the skill context keeps reactions on the user's
+    // message, never the bot's file message
+    assertEquals(reactedMessageId, "msg_trigger");
+
+    await server.stop();
+    sessionRegistry.stop();
+  } finally {
+    await Deno.remove(tempDir, { recursive: true });
+  }
+});
+
+Deno.test("SkillAPIServer - ordering: reply → file → edit keeps the edited reply on the trigger anchor", async () => {
+  const tempDir = await Deno.makeTempDir();
+  try {
+    const sessionRegistry = new SessionRegistry();
+    const workspaceManager = new WorkspaceManager({
+      repoPath: tempDir,
+      workspacesDir: "workspaces",
+    });
+    const memoryStore = new MemoryStore(workspaceManager, {
+      searchLimit: 10,
+      maxChars: 2000,
+    });
+    const skillRegistry = new SkillRegistry(
+      memoryStore,
+      undefined,
+      undefined,
+      { enabled: true, allowedExtensions: [] },
+    );
+
+    let editAnchor: string | undefined;
+    const sessionId = sessionRegistry.register({
+      platform: "discord",
+      channelId: "456",
+      userId: "123",
+      isDm: false,
+      workspace: {
+        key: "discord/123",
+        components: { platform: "discord" as const, userId: "123" },
+        path: tempDir,
+        tmpPath: tempDir + "/tmp",
+        isDm: false,
+      },
+      platformAdapter: {
+        sendReply: () => Promise.resolve({ success: true, messageId: "reply_1" }),
+        sendFile: () =>
+          Promise.resolve({
+            success: true,
+            messageId: "file_msg_1",
+            messageIds: ["file_msg_1"],
+          }),
+        fetchMessage: () => Promise.resolve(null),
+        editMessage: (
+          _channelId: string,
+          _messageId: string,
+          _newContent: string,
+          replyToMessageId?: string,
+        ) => {
+          editAnchor = replyToMessageId;
+          return Promise.resolve({ success: true, messageId: "reply_1_edited" });
+        },
+        // deno-lint-ignore no-explicit-any
+      } as any,
+      triggerEvent: {
+        platform: "discord",
+        channelId: "456",
+        userId: "123",
+        messageId: "msg_trigger",
+        isDm: false,
+        guildId: "",
+        content: "",
+        timestamp: new Date(),
+      },
+    });
+    await Deno.writeTextFile(`${tempDir}/a.txt`, "aaa");
+
+    const port = 3207;
+    const server = new SkillAPIServer(sessionRegistry, skillRegistry, {
+      port,
+      host: "127.0.0.1",
+    });
+    server.start();
+    await waitForServer(port);
+
+    // 1. Reply first (threads to the trigger)
+    const replyResponse = await fetch(`http://localhost:${port}/api/skill/send-reply`, {
+      method: "POST",
+      headers: jsonHeaders(sessionRegistry.getCallerToken(sessionId)),
+      body: JSON.stringify({ sessionId, parameters: { message: "First" } }),
+    });
+    assertEquals(replyResponse.status, 200);
+    await replyResponse.json();
+    assertEquals(sessionRegistry.getLastReplyAnchorMessageId(sessionId), "msg_trigger");
+
+    // 2. Send files afterwards (the current anchor becomes the file message)
+    const fileResponse = await fetch(`http://localhost:${port}/api/skill/send-file`, {
+      method: "POST",
+      headers: jsonHeaders(sessionRegistry.getCallerToken(sessionId)),
+      body: JSON.stringify({ sessionId, parameters: { filePaths: ["a.txt"] } }),
+    });
+    assertEquals(fileResponse.status, 200);
+    await fileResponse.json();
+
+    // 3. Edit the earlier reply — Misskey delete-and-recreate must keep the
+    //    reply's ORIGINAL thread parent (the trigger), not the file message
+    const editResponse = await fetch(`http://localhost:${port}/api/skill/edit-reply`, {
+      method: "POST",
+      headers: jsonHeaders(sessionRegistry.getCallerToken(sessionId)),
+      body: JSON.stringify({ sessionId, parameters: { messageId: "reply_1", message: "Edited" } }),
+    });
+    assertEquals(editResponse.status, 200);
+    await editResponse.json();
+
+    assertEquals(editAnchor, "msg_trigger");
+
+    await server.stop();
+    sessionRegistry.stop();
+  } finally {
+    await Deno.remove(tempDir, { recursive: true });
+  }
+});
+
+Deno.test("SkillAPIServer - Misskey chat partial delivery records the last delivered ID and threads to it", async () => {
+  const tempDir = await Deno.makeTempDir();
+  try {
+    const sessionRegistry = new SessionRegistry();
+    const workspaceManager = new WorkspaceManager({
+      repoPath: tempDir,
+      workspacesDir: "workspaces",
+    });
+    const memoryStore = new MemoryStore(workspaceManager, {
+      searchLimit: 10,
+      maxChars: 2000,
+    });
+    const skillRegistry = new SkillRegistry(
+      memoryStore,
+      undefined,
+      undefined,
+      { enabled: true, allowedExtensions: [] },
+    );
+
+    let capturedReplyAnchor: string | undefined;
+    const sessionId = sessionRegistry.register({
+      platform: "misskey",
+      channelId: "chat:456",
+      userId: "123",
+      isDm: true,
+      workspace: {
+        key: "misskey/123",
+        components: { platform: "misskey" as const, userId: "123" },
+        path: tempDir,
+        tmpPath: tempDir + "/tmp",
+        isDm: true,
+      },
+      platformAdapter: {
+        sendFile: () =>
+          Promise.resolve({
+            success: false,
+            messageIds: ["file-1", "file-2"],
+            error: "Mid-batch failure (2 of 3 delivered)",
+          }),
+        sendReply: (
+          _channelId: string,
+          _content: string,
+          options?: { replyToMessageId?: string },
+        ) => {
+          capturedReplyAnchor = options?.replyToMessageId;
+          return Promise.resolve({ success: true, messageId: "reply_1" });
+        },
+        // deno-lint-ignore no-explicit-any
+      } as any,
+      triggerEvent: {
+        platform: "misskey",
+        channelId: "chat:456",
+        userId: "123",
+        messageId: "msg_trigger",
+        isDm: true,
+        guildId: "",
+        content: "",
+        timestamp: new Date(),
+      },
+    });
+    await Deno.writeTextFile(`${tempDir}/a.txt`, "aaa");
+    await Deno.writeTextFile(`${tempDir}/b.txt`, "bbb");
+    await Deno.writeTextFile(`${tempDir}/c.txt`, "ccc");
+
+    const port = 3208;
+    const server = new SkillAPIServer(sessionRegistry, skillRegistry, {
+      port,
+      host: "127.0.0.1",
+    });
+    server.start();
+    await waitForServer(port);
+
+    // 1. Partial delivery (2 of 3 files)
+    const fileResponse = await fetch(`http://localhost:${port}/api/skill/send-file`, {
+      method: "POST",
+      headers: jsonHeaders(sessionRegistry.getCallerToken(sessionId)),
+      body: JSON.stringify({
+        sessionId,
+        parameters: { filePaths: ["a.txt", "b.txt", "c.txt"] },
+      }),
+    });
+    assertEquals(fileResponse.status, 400);
+    const fileBody = await fileResponse.json();
+    assertEquals(fileBody.success, false);
+
+    // Session responded; anchor = the last DELIVERED message
+    assertEquals(sessionRegistry.hasFileSent(sessionId), true);
+    assertEquals(sessionRegistry.getLastFileMessageId(sessionId), "file-2");
+
+    // 2. A subsequent send-reply threads to the last delivered chat message
+    const replyResponse = await fetch(`http://localhost:${port}/api/skill/send-reply`, {
+      method: "POST",
+      headers: jsonHeaders(sessionRegistry.getCallerToken(sessionId)),
+      body: JSON.stringify({ sessionId, parameters: { message: "Partial delivery" } }),
+    });
+    assertEquals(replyResponse.status, 200);
+    await replyResponse.json();
+
+    assertEquals(capturedReplyAnchor, "file-2");
+
+    await server.stop();
+    sessionRegistry.stop();
   } finally {
     await Deno.remove(tempDir, { recursive: true });
   }

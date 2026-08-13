@@ -576,6 +576,54 @@ Deno.test("ReplyHandler - handleEditReply passes replyToMessageId to editMessage
   assertEquals(capturedReplyToMessageId, "trigger_msg_123");
 });
 
+Deno.test("ReplyHandler - handleEditReply passes lastReplyAnchorMessageId to editMessage", async () => {
+  const handler = new ReplyHandler();
+
+  const workspace: WorkspaceInfo = {
+    key: "discord/edit10",
+    components: { platform: "discord", userId: "edit10" },
+    path: "/tmp/workspaces/discord/edit10",
+    tmpPath: "/tmp/workspaces/discord/edit10/tmp",
+    isDm: true,
+  };
+
+  let capturedAnchor: string | undefined;
+  const adapter = createMockPlatformAdapter(
+    { success: true, messageId: "msg_e10" },
+    { success: true, messageId: "msg_e10" },
+  );
+  adapter.editMessage = (
+    _channelId: string,
+    _messageId: string,
+    _newContent: string,
+    replyToMessageId?: string,
+  ) => {
+    capturedAnchor = replyToMessageId;
+    return Promise.resolve({ success: true, messageId: "msg_e10" });
+  };
+
+  const context: SkillContext = {
+    workspace,
+    platformAdapter: adapter,
+    channelId: "ch_edit10",
+    userId: "edit10",
+    lastSentMessageId: "msg_e10",
+    // The reply was created as a reply to the trigger; a later file send
+    // changed the current anchor — the edit must use the recorded anchor.
+    replyToMessageId: "file_msg_after",
+    lastReplyAnchorMessageId: "trigger_msg_original",
+  };
+
+  await handler.handleSendReply({ message: "First" }, context);
+
+  await handler.handleEditReply(
+    { messageId: "msg_e10", message: "Edited" },
+    context,
+  );
+
+  assertEquals(capturedAnchor, "trigger_msg_original");
+});
+
 // ============ stripXmlTags tests ============
 
 Deno.test("stripXmlTags - strips simple XML tags", () => {
@@ -1291,4 +1339,88 @@ Deno.test("ReplyHandler - handleGetMessage prefers explicit messageId over lastS
   await handler.handleGetMessage({ messageId: "explicit_id" }, context);
 
   assertEquals(capturedMessageId, "explicit_id");
+});
+
+Deno.test("ReplyHandler - handleGetMessage falls back to lastFileMessageId", async () => {
+  const handler = new ReplyHandler();
+
+  const workspace: WorkspaceInfo = {
+    key: "discord/gm8",
+    components: { platform: "discord", userId: "gm8" },
+    path: "/tmp/workspaces/discord/gm8",
+    tmpPath: "/tmp/workspaces/discord/gm8/tmp",
+    isDm: true,
+  };
+
+  let capturedMessageId = "";
+  const adapter = createMockPlatformAdapter();
+  (adapter as unknown as { fetchMessage: PlatformAdapter["fetchMessage"] }).fetchMessage = (
+    _channelId: string,
+    messageId: string,
+  ) => {
+    capturedMessageId = messageId;
+    return Promise.resolve({
+      messageId,
+      userId: "bot_user",
+      username: "Bot",
+      content: "File message",
+      timestamp: new Date(),
+      isBot: true,
+    });
+  };
+
+  const context: SkillContext = {
+    workspace,
+    platformAdapter: adapter,
+    channelId: "ch_gm8",
+    userId: "gm8",
+    // No text reply sent yet — only a file message
+    lastFileMessageId: "file_msg_42",
+  };
+
+  const result = await handler.handleGetMessage({}, context);
+
+  assertEquals(result.success, true);
+  assertEquals(capturedMessageId, "file_msg_42");
+});
+
+Deno.test("ReplyHandler - handleGetMessage prefers explicit messageId over lastFileMessageId", async () => {
+  const handler = new ReplyHandler();
+
+  const workspace: WorkspaceInfo = {
+    key: "discord/gm9",
+    components: { platform: "discord", userId: "gm9" },
+    path: "/tmp/workspaces/discord/gm9",
+    tmpPath: "/tmp/workspaces/discord/gm9/tmp",
+    isDm: true,
+  };
+
+  let capturedMessageId = "";
+  const adapter = createMockPlatformAdapter();
+  (adapter as unknown as { fetchMessage: PlatformAdapter["fetchMessage"] }).fetchMessage = (
+    _channelId: string,
+    messageId: string,
+  ) => {
+    capturedMessageId = messageId;
+    return Promise.resolve({
+      messageId,
+      userId: "user1",
+      username: "User",
+      content: "Content",
+      timestamp: new Date(),
+      isBot: false,
+    });
+  };
+
+  const context: SkillContext = {
+    workspace,
+    platformAdapter: adapter,
+    channelId: "ch_gm9",
+    userId: "gm9",
+    lastFileMessageId: "fallback_file_msg",
+  };
+
+  await handler.handleGetMessage({ messageId: "explicit_file_id" }, context);
+
+  assertEquals(capturedMessageId, "explicit_file_id");
 });

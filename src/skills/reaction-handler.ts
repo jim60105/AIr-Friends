@@ -63,8 +63,9 @@ export class ReactionHandler {
         };
       }
 
-      // Need a message to react to
-      if (!context.replyToMessageId) {
+      // Need a message to react to — the original trigger message, never a
+      // message the bot itself sent (e.g. a file message).
+      if (!context.triggerMessageId) {
         return {
           success: false,
           error: "No trigger message to react to",
@@ -74,7 +75,7 @@ export class ReactionHandler {
       // Add reaction via platform adapter
       const result = await context.platformAdapter.addReaction(
         context.channelId,
-        context.replyToMessageId,
+        context.triggerMessageId,
         params.emoji,
       );
 
@@ -98,14 +99,14 @@ export class ReactionHandler {
         workspaceKey: context.workspace.key,
         channelId: context.channelId,
         emoji: params.emoji,
-        messageId: context.replyToMessageId,
+        messageId: context.triggerMessageId,
       });
 
       return {
         success: true,
         data: {
           emoji: params.emoji,
-          messageId: context.replyToMessageId,
+          messageId: context.triggerMessageId,
           timestamp: new Date().toISOString(),
           nextAction: "Reaction success. Never call react-message skill second time.",
         },

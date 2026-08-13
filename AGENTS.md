@@ -417,13 +417,13 @@ conversationSummary:
 - Only `send-reply` and `send-file` skills send content externally (`react-message` sends a reaction)
 - Multiple replies are allowed per session — each call sends a separate message
 - At least **one reply, one reaction, or one file send per session** is required; if none occurred, the retry mechanism triggers
-- `send-file` is limited to **1 successful call per session** (`MAX_FILE_SENDS_PER_SESSION = 1`; a multi-file batch counts as one call) with doom-loop protection at 4 attempts — it does NOT consume the reply quota, does NOT set `replySent`, and does NOT update `lastSentMessageId` (file messages are not `edit-reply`-able)
+- `send-file` is limited to **1 successful call per session** (`MAX_FILE_SENDS_PER_SESSION = 1`; a multi-file batch counts as one call) with doom-loop protection at 4 attempts — it does NOT consume the reply quota, does NOT set `replySent`, and does NOT update `lastSentMessageId` (file messages are not `edit-reply`-able); on delivery it records the last delivered message ID in `lastFileMessageId` (never `lastSentMessageId`), and the session's reply anchor resolves to `lastFileMessageId ?? triggerMessageId` — a subsequent `send-reply` threads to the file message, while a per-reply anchor (`lastReplyAnchorMessageId`, recorded on `send-reply` success) keeps `edit-reply` on the edited reply's original thread parent
 - `send-file` accepts a repeatable `--file-paths` flag (one occurrence per file, at least one required); the removed singular `--file-path` is rejected with `SKILL_SINGLE_FILE_FLAG`; captions follow the payload-file flow (`--caption-file`) and go through the same `stripXmlTags` → `unescapeNewlines` content pipeline as replies
 - Delivery: Discord = one message with all attachments; Misskey note = one note with all `fileIds`; Misskey chat = one message per file (caption on the first), with partial-delivery reporting and best-effort Drive cleanup of unreferenced uploads on mid-batch failure — a successful file send marks `fileSent` and suppresses the missing-response retry
 - Batch limits: `skills.sendFile.maxFilesPerInvocation` (default 10) and `skills.sendFile.maxTotalSizeMb` (default 50) are enforced **before reading file bytes**; preflight validation is all-or-nothing (one invalid path rejects the whole call with nothing sent)
 - A file-only turn does NOT trigger conversation summary generation (the summary gate stays `replySent`)
 - All other outputs (tool calls, reasoning) stay internal
-- **Reply Threading**: When triggered from a message/note, replies are threaded to the original message using `replyToMessageId` from SkillContext
+- **Reply Threading**: When triggered from a message/note, replies are threaded to the resolved reply anchor (`lastFileMessageId ?? triggerMessageId`) from SkillContext — the original trigger message until `send-file` delivers files, the file message afterwards. `react-message` always targets the original trigger (`triggerMessageId`), never the bot's own messages; `edit-reply` preserves the edited reply's original thread parent via `lastReplyAnchorMessageId`
 
 **Edit Reply**:
 
@@ -480,7 +480,7 @@ Platform adapters must implement:
 - **DM Channel ID**: DMs use `dm:{userId}` as channel ID
 - **Chat Channel ID**: Private chat messages use `chat:{userId}` as channel ID, supporting Misskey's chat feature for 1-on-1 messaging
 - **Bot Filtering**: `shouldRespondToNote()` and `shouldRespondToChatMessage()` check `user.isBot` / `fromUser?.isBot` to ignore messages from bot accounts, preventing multi-instance infinite loops. Bot messages in recent history are correctly marked as `[Bot]` via `isBot` in `noteToPlatformMessage()` and `chatMessageToPlatformMessage()`.
-- **Note Edit Strategy**: Misskey API has no `notes/update` endpoint. `editMessage()` uses a delete-and-recreate strategy (`notes/delete` → `notes/create`). The new note's `replyId` points to the original trigger note (not the deleted old reply) to preserve conversation threading. The returned `messageId` will be different from the original.
+- **Note Edit Strategy**: Misskey API has no `notes/update` endpoint. `editMessage()` uses a delete-and-recreate strategy (`notes/delete` → `notes/create`). The new note's `replyId` points to the edited reply's recorded thread parent (`lastReplyAnchorMessageId` — the message it was created as a reply to: the file message when the reply followed a file send, otherwise the trigger note), never the current anchor, so an edit never rewrites thread topology. The returned `messageId` will be different from the original.
 
 **Misskey Channel Types**:
 

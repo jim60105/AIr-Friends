@@ -43,5 +43,8 @@ Deno.test("metrics - messages received counter", async () => {
 Deno.test("metrics - files sent counter increments per delivered file", async () => {
   filesSentTotal.labels("misskey").inc(3);
   const output = await metricsRegistry.metrics();
-  assertStringIncludes(output, 'airfriends_files_sent_total{platform="misskey",app="air-friends"} 3');
+  assertStringIncludes(
+    output,
+    'airfriends_files_sent_total{platform="misskey",app="air-friends"} 3',
+  );
 });

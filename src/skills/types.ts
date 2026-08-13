@@ -31,12 +31,36 @@ export interface SkillContext {
   platformAdapter: PlatformAdapter;
   channelId: string;
   userId: string;
-  /** Original message ID that triggered this session (for reply threading) */
+  /**
+   * Resolved reply anchor: `lastFileMessageId ?? triggerMessageId`. This is
+   * the message the bot's outgoing messages (send-reply/send-file) thread to,
+   * NOT necessarily the original trigger — use `triggerMessageId` when the
+   * trigger identity is needed (e.g. react-message).
+   */
   replyToMessageId?: string;
+  /**
+   * Original message ID that triggered this session (empty for triggerless
+   * sessions). The fallback reply anchor and the target of `react-message`.
+   */
+  triggerMessageId?: string;
   /** Agent's global workspace path for searching notes */
   agentWorkspacePath?: string;
-  /** Last message ID sent by the bot in this session */
+  /**
+   * Last message ID sent via `send-reply`/`edit-reply` ONLY (never
+   * `send-file`); consumed by `edit-reply` scoping and `get-message` fallback.
+   */
   lastSentMessageId?: string;
+  /**
+   * Last message ID delivered by `send-file` (set only when at least one file
+   * was delivered); the reply threading anchor for subsequent replies.
+   */
+  lastFileMessageId?: string;
+  /**
+   * The message ID the last text reply was created as a reply to; recorded on
+   * `send-reply` success only and consumed by `edit-reply` to preserve the
+   * edited reply's original thread parent.
+   */
+  lastReplyAnchorMessageId?: string;
   /** Workspace manager for channel workspace resolution */
   workspaceManager?: WorkspaceManager;
   /**

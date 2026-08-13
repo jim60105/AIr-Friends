@@ -16,6 +16,7 @@ Send your final response to the user. This is the gateway to external communicat
 4. **No second attempt**: If you fail to send the reply or if the script encounters an error, you won't get a second chance to send another reply. That means you failed your job. Make sure your message is final and well-crafted before executing this skill.
 5. **Think before you send**: Take a moment to review your message for clarity, tone, and content. Once you hit send, there's no going back.
 6. **Exit directly after sending the reply**: After executing this `send-reply` skill, you must exit immediately. Do not summarize, continue processing, or attempt to send another message. Your job is done.
+7. **Threading**: The reply is threaded to the message the file tool (`send-file`) most recently delivered, when one exists in this session; otherwise it is threaded to the user's trigger message.
 
 ## Usage
 

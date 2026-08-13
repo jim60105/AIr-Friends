@@ -180,14 +180,14 @@ Located in `skills/{name}/SKILL.md`, these files follow the [Agent Skills Standa
   - Optional extension whitelist
   - Caption goes through the same `stripXmlTags` → `unescapeNewlines` content pipeline as `send-reply`
   - Delivery: Discord = one message with all attachments; Misskey note = one note with all `fileIds`; Misskey chat = one message per file (caption on the first), with partial-delivery reporting and best-effort Drive cleanup of unreferenced uploads on mid-batch failure
-  - Limited to **1 successful call per session** (`MAX_FILE_SENDS_PER_SESSION = 1`) with doom-loop termination at 4 attempts; does NOT consume the reply quota and does NOT set `replySent`/`lastSentMessageId` — a successful send marks `fileSent` and counts as a session response (suppresses the missing-response retry)
+  - Limited to **1 successful call per session** (`MAX_FILE_SENDS_PER_SESSION = 1`) with doom-loop termination at 4 attempts; does NOT consume the reply quota and does NOT set `replySent`/`lastSentMessageId` — a successful send marks `fileSent`, counts as a session response (suppresses the missing-response retry), and records its last delivered message ID in `lastFileMessageId` (never `lastSentMessageId`; on Misskey chat partial delivery the last *delivered* ID). The session's reply anchor then resolves to `lastFileMessageId ?? triggerMessageId`: a subsequent `send-reply` threads to the file message. A per-reply anchor `lastReplyAnchorMessageId` (recorded on `send-reply` success) keeps `edit-reply` on the edited reply's original thread parent
   - Can be disabled by administrator via config
 
 ### 14. get-message
 
 - **Purpose**: Get the content of a sent message by its ID
 - **Parameters**:
-  - `messageId`: The ID of the message to fetch. If omitted, returns the last message sent in the session.
+  - `messageId`: The ID of the message to fetch. If omitted, falls back to the session's last `send-reply`/`edit-reply` message, then to the last `send-file`-delivered message.
 - **Returns**: Message content, userId, username, timestamp, and isBot flag
 
 ## Payload-File Argument Contract
@@ -213,7 +213,11 @@ Legacy flags are rejected in both forms (`--flag value` and `--flag=value`) with
   - `platformAdapter`: Platform interface for sending messages
   - `channelId`: Target channel ID
   - `userId`: User who triggered the interaction
-  - `replyToMessageId`: Optional original message ID for reply threading
+  - `replyToMessageId`: Optional resolved reply anchor — `lastFileMessageId ?? triggerMessageId` — for reply threading
+  - `triggerMessageId`: Original message ID that triggered the session (target of `react-message`)
+  - `lastSentMessageId`: Last message ID sent via `send-reply`/`edit-reply` ONLY (edit-reply scoping, get-message fallback)
+  - `lastFileMessageId`: Last message ID delivered by `send-file` (reply anchor, get-message fallback)
+  - `lastReplyAnchorMessageId`: Reply anchor recorded when the last text reply was created (edit-reply thread-parent preservation)
 - Parameter types for each skill
 
 ### Memory Handler (src/skills/memory-handler.ts)
@@ -262,7 +266,7 @@ Manages emoji reactions on trigger messages:
 - `handleReactMessage`: Adds emoji reaction via platform adapter
 - Session tracking to prevent duplicate reactions
 - `clearReactionState`: Clears state for new interactions
-- Requires `replyToMessageId` (a trigger message to react to)
+- Requires `triggerMessageId` (the original trigger message — never a bot-sent message such as a file message)
 
 ### Reminder Handler (src/skills/reminder-handler.ts)
 

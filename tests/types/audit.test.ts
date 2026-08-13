@@ -60,3 +60,26 @@ Deno.test("AuditPhase - phase literals are distinct", () => {
   const unique = new Set(phases);
   assertEquals(unique.size, 20);
 });
+
+// file_sent data accepts the delivered message IDs (verbatim, not user content)
+Deno.test("Audit - file_sent entry data accepts messageId/messageIds", () => {
+  const entry: {
+    phase: AuditPhase;
+    data: {
+      filesCount?: number;
+      messageId?: string;
+      messageIds?: string[];
+    };
+  } = {
+    phase: "file_sent",
+    data: {
+      filesCount: 2,
+      messageId: "file-2",
+      messageIds: ["file-1", "file-2"],
+    },
+  };
+  assertEquals(entry.phase, "file_sent");
+  assertEquals(entry.data.filesCount, 2);
+  assertEquals(entry.data.messageId, "file-2");
+  assertEquals(entry.data.messageIds, ["file-1", "file-2"]);
+});

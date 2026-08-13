@@ -62,6 +62,7 @@ Deno.test("ReactionHandler - handleReactMessage succeeds with valid emoji", asyn
     channelId: "456",
     userId: "123",
     replyToMessageId: "msg_trigger",
+    triggerMessageId: "msg_trigger",
   };
 
   const result = await handler.handleReactMessage({ emoji: "👍" }, context);
@@ -80,6 +81,7 @@ Deno.test("ReactionHandler - handleReactMessage fails with missing emoji", async
     channelId: "456",
     userId: "123",
     replyToMessageId: "msg_trigger",
+    triggerMessageId: "msg_trigger",
   };
 
   const result = await handler.handleReactMessage({}, context);
@@ -98,6 +100,7 @@ Deno.test("ReactionHandler - handleReactMessage fails with empty emoji", async (
     channelId: "456",
     userId: "123",
     replyToMessageId: "msg_trigger",
+    triggerMessageId: "msg_trigger",
   };
 
   const result = await handler.handleReactMessage({ emoji: "   " }, context);
@@ -137,6 +140,7 @@ Deno.test("ReactionHandler - handleReactMessage fails when platform returns erro
     channelId: "456",
     userId: "123",
     replyToMessageId: "msg_trigger",
+    triggerMessageId: "msg_trigger",
   };
 
   const result = await handler.handleReactMessage({ emoji: "👍" }, context);
@@ -155,6 +159,7 @@ Deno.test("ReactionHandler - hasReactionSent tracks state correctly", async () =
     channelId: "456",
     userId: "123",
     replyToMessageId: "msg_trigger",
+    triggerMessageId: "msg_trigger",
   };
 
   // Initially false
@@ -175,6 +180,7 @@ Deno.test("ReactionHandler - clearReactionState resets tracking", async () => {
     channelId: "456",
     userId: "123",
     replyToMessageId: "msg_trigger",
+    triggerMessageId: "msg_trigger",
   };
 
   // Send reaction
@@ -184,4 +190,53 @@ Deno.test("ReactionHandler - clearReactionState resets tracking", async () => {
   // Clear state
   handler.clearReactionState(workspace.key, "456");
   assertEquals(handler.hasReactionSent(workspace.key, "456"), false);
+});
+
+Deno.test("ReactionHandler - reaction targets triggerMessageId even after a file send", async () => {
+  const handler = new ReactionHandler();
+  const workspace = createTestWorkspace();
+
+  let reactedMessageId: string | undefined;
+  const adapter = createMockPlatformAdapter({ success: true });
+  adapter.addReaction = (_channelId: string, messageId: string) => {
+    reactedMessageId = messageId;
+    return Promise.resolve({ success: true });
+  };
+
+  const context: SkillContext = {
+    workspace,
+    platformAdapter: adapter,
+    channelId: "456",
+    userId: "123",
+    // The bot sent a file message, so the resolved reply anchor is the file
+    // message — but a reaction must target the user's trigger message.
+    replyToMessageId: "file_msg_1",
+    triggerMessageId: "trigger_msg_1",
+  };
+
+  const result = await handler.handleReactMessage({ emoji: "👍" }, context);
+
+  assertEquals(result.success, true);
+  assertEquals(reactedMessageId, "trigger_msg_1");
+});
+
+Deno.test("ReactionHandler - fails without triggerMessageId even when a file anchor exists", async () => {
+  const handler = new ReactionHandler();
+  const workspace = createTestWorkspace();
+
+  const context: SkillContext = {
+    workspace,
+    platformAdapter: createMockPlatformAdapter({ success: true }),
+    channelId: "456",
+    userId: "123",
+    // Defensive: a file anchor without a trigger cannot exist in practice
+    // (send-file is rejected in triggerless sessions), but the handler must
+    // not react to a bot-sent message.
+    replyToMessageId: "file_msg_1",
+  };
+
+  const result = await handler.handleReactMessage({ emoji: "👍" }, context);
+
+  assertEquals(result.success, false);
+  assertEquals(result.error, "No trigger message to react to");
 });

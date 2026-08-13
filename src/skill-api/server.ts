@@ -514,15 +514,21 @@ export class SkillAPIServer {
       this.sessionRegistry.incrementFileSendCount(body.sessionId);
     }
 
-    // Build skill context
+    // Build skill context. The reply anchor is resolved once per call and
+    // captured in a local so it can be recorded as the per-reply anchor
+    // (`lastReplyAnchorMessageId`) when a send-reply succeeds.
+    const replyAnchor = session.lastFileMessageId ?? session.triggerEvent?.messageId;
     const skillContext: SkillContext = {
       workspace: session.workspace,
       channelId: session.channelId,
       userId: session.userId,
       platformAdapter: session.platformAdapter!,
-      replyToMessageId: session.triggerEvent?.messageId,
+      replyToMessageId: replyAnchor,
+      triggerMessageId: session.triggerEvent?.messageId,
       agentWorkspacePath: session.agentWorkspacePath,
       lastSentMessageId: session.lastSentMessageId,
+      lastFileMessageId: session.lastFileMessageId,
+      lastReplyAnchorMessageId: session.lastReplyAnchorMessageId,
       workspaceManager: session.workspaceManager,
       canWriteChannelMemory: session.canWriteChannelMemory,
     };
@@ -578,6 +584,13 @@ export class SkillAPIServer {
           (result.data as Record<string, unknown>).messageId as string,
         );
       }
+      // Record the per-reply anchor: the message this reply was created as a
+      // reply to (the replyAnchor resolved when the context was built).
+      // `edit-reply` consumes this to preserve the reply's original thread
+      // parent; it is NOT updated by edit-reply itself.
+      if (replyAnchor) {
+        this.sessionRegistry.setLastReplyAnchorMessageId(body.sessionId, replyAnchor);
+      }
     }
 
     // Track last sent message ID after successful edit-reply
@@ -598,13 +611,28 @@ export class SkillAPIServer {
 
     // Send-file: roll back the reserved slot when nothing was delivered; when at
     // least one file was delivered, keep the reservation, mark the session's
-    // fileSent response state, and write the file_sent audit entry (partial
-    // delivery included).
+    // fileSent response state, record the delivered message ID as the reply
+    // anchor, and write the file_sent audit entry (partial delivery included).
     if (skillName === "send-file") {
-      const deliveredCount = result.data && typeof result.data === "object"
-        ? (result.data as Record<string, unknown>).filesCount
+      const resultData = result.data && typeof result.data === "object"
+        ? result.data as Record<string, unknown>
         : undefined;
+      const deliveredCount = resultData?.filesCount;
       const filesDelivered = typeof deliveredCount === "number" && deliveredCount > 0;
+
+      // Resolve the last delivered message ID: `messageId`, else the last
+      // non-empty entry of `messageIds` (defensive — the result types mark it
+      // optional; on Misskey chat partial delivery this is the most recent
+      // delivered chat message, the correct anchor for a follow-up reply).
+      const deliveredMessageIds = Array.isArray(resultData?.messageIds)
+        ? (resultData.messageIds as unknown[]).filter(
+          (id): id is string => typeof id === "string" && id.length > 0,
+        )
+        : [];
+      const deliveredMessageId = typeof resultData?.messageId === "string" &&
+          resultData.messageId.length > 0
+        ? resultData.messageId
+        : deliveredMessageIds[deliveredMessageIds.length - 1];
 
       if (!filesDelivered) {
         this.sessionRegistry.decrementFileSendCount(body.sessionId);
@@ -614,6 +642,16 @@ export class SkillAPIServer {
         });
       } else {
         this.sessionRegistry.markFileSent(body.sessionId);
+        if (deliveredMessageId) {
+          this.sessionRegistry.setLastFileMessageId(body.sessionId, deliveredMessageId);
+        } else {
+          // Defensive: delivery reported without a usable message ID. Never
+          // record a bogus anchor — the reply anchor stays on the trigger.
+          logger.warn(
+            "Send-file delivered files but no usable message ID; no file reply anchor recorded",
+            { sessionId: body.sessionId },
+          );
+        }
         if (auditWriter) {
           const hashContent = auditWriter.getConfig().hashContent;
           const params = (body.parameters ?? {}) as Record<string, unknown>;
@@ -625,6 +663,10 @@ export class SkillAPIServer {
             : "";
           await auditWriter.write("file_sent", {
             filesCount: deliveredCount,
+            // Message IDs are platform message identifiers, not user content —
+            // recorded verbatim regardless of hashContent.
+            ...(deliveredMessageId ? { messageId: deliveredMessageId } : {}),
+            messageIds: deliveredMessageIds,
             ...(hashContent
               ? {
                 captionHash: `sha256:${await sha256Hash(caption)}`,
