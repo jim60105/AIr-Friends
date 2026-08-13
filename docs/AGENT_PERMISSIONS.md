@@ -172,6 +172,12 @@ Shell commands use default-deny. Skill-invocation patterns are `"allow"` (Layer 
 
 **Layer-3 generic-command gate (F12 D2).** Because the utilities above are `"ask"`, they reach `requestPermission()`, which approves a command only when its first token is on an explicit read/media allow-list **and every path argument — read input *and* write output — resolves inside the session workspace or TMPDIR**. So `head notes.md` (in-workspace) is approved while `head /proc/1/environ`, `rg -a "" /proc/1/environ`, `head <other-user>/memory.private.jsonl`, and `convert in.png /home/deno/.ssh/authorized_keys` (out-of-workspace read *or* write) are rejected. URI-scheme arguments such as `file:///etc/passwd` are classified out-of-workspace (D3). See `GENERIC_COMMAND_ALLOWLIST` / `isApprovedGenericCommand` in `src/acp/client.ts`.
 
+**Session-scoped OpenCode data directory (F12).** The agent subprocess is spawned with `XDG_DATA_HOME` set to `{workspace}/tmp/opencode-data/{sessionId}` (per-session subdir; the workspace-level root for internal system sessions — derived via `sessionXdgDataHome()`), so OpenCode's data dir — including the hard-coded truncated **tool-output** directory (`{xdgData}/opencode/tool-output`) that holds oversized tool results — lands inside the session workspace instead of the shared `~/.local/share/opencode/`. Three properties follow:
+
+- **Session-local tool-output boundary**: the gate resolves the session's tool-output dir from the same path the subprocess env uses (never from the parent process's `XDG_DATA_HOME`) and includes it in the generic-command containment boundary only while it resolves inside the session workspace/TMPDIR (deduplicated against existing allowed dirs). A non-session-local resolution fails closed — the shared home-rooted tool-output dir is **never** within bounds, so `cat ~/.local/share/opencode/tool-output/tool_x` stays denied.
+- **Cross-session exclusion**: a path that resolves inside the session's OpenCode data area (`{workspace}/tmp/opencode-data`) but outside the session's own data home is rejected — sibling/previous sessions' truncated tool outputs (and the data-area root listing that would enumerate them) are never readable, even though they lexically resolve inside the workspace.
+- **Home-anchored token expansion**: argument tokens are expanded *after* quote stripping and `--flag=value` splitting — leading `~`/`~/`, and `$HOME`/`${HOME}`/`$XDG_DATA_HOME`/`${XDG_DATA_HOME}` anywhere in the token — then containment-checked. `$XDG_DATA_HOME/opencode/tool-output/tool_x` therefore resolves inside the session boundary and is approved, while `~/.ssh/id_rsa`, `$HOME/.git-credentials`, `-o$HOME/...` (attached option values become attached absolute paths and are rejected), attached short-option traversal (`-f../sibling/file`, `-o../x`), and unexpandable forms like `~otheruser/...` all remain denied.
+
 ### External Directory Permission
 
 By default, OpenCode only allows file access within its working directory (the user's workspace). The `external_directory` permission grants access to additional paths:
@@ -256,6 +262,7 @@ When `sandbox.filterEnv` is `true` (default), the agent subprocess only receives
 | `SKILL_API_PORT`, `SESSION_ID`          | Skill API communication         |
 | `AGENT_WORKSPACE`                       | Agent workspace path            |
 | `TMPDIR`                                | Workspace-scoped temp directory |
+| `XDG_DATA_HOME`                         | Session-scoped OpenCode data dir (`{workspace}/tmp/opencode-data`) |
 
 **OpenCode provider keys:**
 
@@ -271,7 +278,7 @@ When `sandbox.filesystemConfinement` is `true` (**opt-in; default off**), the ag
 
 - mounts a **fresh `/proc`**, so the daemon's `/proc/1/environ` — which inherits the daemon's `DISCORD_TOKEN` / `OPENROUTER_API_KEY` / dashboard passphrase — is **not** visible to the agent;
 - binds **only this session's own** workspace + TMPDIR (and, for self-research, the shared agent workspace) read-write; sibling users' workspaces are never bound, so they are absent from the namespace and unreadable;
-- binds the runtime (interpreters, `opencode`/`agent-browser`, caches, CA certs) read-only.
+- binds the runtime (interpreters, `opencode`/`agent-browser`, caches, CA certs) read-only. The shared home-rooted OpenCode data dir (`~/.local/share/opencode`) is **not bound at all** — the agent's data dir lives under its session-scoped `XDG_DATA_HOME` (inside the workspace), so the shared dir is never written or visible to the confined process.
 
 This holds **independent of the permission layers** — a permissive or misconfigured `opencode.json` cannot re-expose the daemon environ or cross-user data, removing the single-point-of-failure property of the permission gate. It is **opt-in and runtime-dependent**: the fresh-`/proc` mount cannot be established inside a *doubly-nested* user namespace (e.g. **rootless podman**, where `bwrap --proc` fails with "Can't mount proc … Permission denied" regardless of added capabilities), so it must be verified against the real deployment runtime with `scripts/probe-sandbox-caps.sh` before enabling. **When enabled but the runtime cannot establish the confinement, the daemon fails closed at startup** with an actionable error rather than running the agent unconfined. The authoritative permission gate (D1–D3 above) is the primary protection and is always on, independent of this defense-in-depth layer.
 

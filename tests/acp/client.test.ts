@@ -5021,3 +5021,108 @@ Deno.test("ChatbotClient - flushThoughtBuffer no audit entry when buffer empty",
     Deno.removeSync(tempDir, { recursive: true });
   }
 });
+
+Deno.test("ChatbotClient - requestPermission approves session tool-output read via generic gate", async () => {
+  const tempDir = Deno.makeTempDirSync();
+  try {
+    const skillRegistry = createTestSkillRegistry();
+    const logger = createTestLogger();
+    const config = {
+      workingDir: tempDir,
+      platform: "discord",
+      userId: "123",
+      channelId: "456",
+      isDM: false,
+      sessionId: "sess_own",
+    };
+
+    const client = new ChatbotClient(skillRegistry, logger, config);
+
+    // The session's own tool-output dir (under {workspace}/tmp/opencode-data/{sessionId})
+    // must be within the generic-command boundary, so the observed self-research failure
+    // shape (reading OpenCode's truncated tool output) is approved.
+    const toolFile =
+      `${tempDir}/tmp/opencode-data/sess_own/opencode/tool-output/tool_ff80f6564001UdX4UoUmlKdpjY`;
+    const request: acp.RequestPermissionRequest = {
+      sessionId: "test-session",
+      toolCall: {
+        title: "Execute shell command",
+        kind: "execute",
+        status: "pending" as const,
+        content: [],
+        toolCallId: "test-id",
+        rawInput: {
+          commands: [`jq -r '.message.items[0].abstract' ${toolFile}`],
+        },
+      },
+      options: [
+        { kind: "allow_once", optionId: "allow-1", name: "Allow once" },
+        { kind: "reject_once", optionId: "reject-1", name: "Reject once" },
+      ],
+    };
+
+    const response = await client.requestPermission(request);
+    assertEquals(response.outcome.outcome, "selected");
+    if (response.outcome.outcome === "selected") {
+      assertEquals(response.outcome.optionId, "allow-1");
+    }
+  } finally {
+    Deno.removeSync(tempDir, { recursive: true });
+  }
+});
+
+Deno.test("ChatbotClient - requestPermission rejects shared/home-rooted and sibling-session tool-output reads", async () => {
+  const tempDir = Deno.makeTempDirSync();
+  try {
+    const skillRegistry = createTestSkillRegistry();
+    const logger = createTestLogger();
+    const config = {
+      workingDir: tempDir,
+      platform: "discord",
+      userId: "123",
+      channelId: "456",
+      isDM: false,
+      sessionId: "sess_own",
+    };
+
+    const client = new ChatbotClient(skillRegistry, logger, config);
+
+    // Non-session-local tool-output dirs are never within bounds — the gate fails closed:
+    // the shared home-rooted one, a sibling user's workspace, and a concurrent session's
+    // data dir (same user, different session id) are all rejected.
+    for (
+      const cmd of [
+        "cat /home/deno/.local/share/opencode/tool-output/tool_x",
+        "cat $HOME/.local/share/opencode/tool-output/tool_x",
+        `cat ${tempDir}/../456/tmp/opencode-data/sess_x/opencode/tool-output/tool_x`,
+        `cat ${tempDir}/tmp/opencode-data/sess_other/opencode/tool-output/tool_x`,
+        `ls ${tempDir}/tmp/opencode-data`,
+        "cat -o$HOME/.ssh/x",
+      ]
+    ) {
+      const request: acp.RequestPermissionRequest = {
+        sessionId: "test-session",
+        toolCall: {
+          title: "Execute shell command",
+          kind: "execute",
+          status: "pending" as const,
+          content: [],
+          toolCallId: "test-id",
+          rawInput: { commands: [cmd] },
+        },
+        options: [
+          { kind: "allow_once", optionId: "allow-1", name: "Allow once" },
+          { kind: "reject_once", optionId: "reject-1", name: "Reject once" },
+        ],
+      };
+
+      const response = await client.requestPermission(request);
+      assertEquals(response.outcome.outcome, "selected");
+      if (response.outcome.outcome === "selected") {
+        assertEquals(response.outcome.optionId, "reject-1", `must reject: ${cmd}`);
+      }
+    }
+  } finally {
+    Deno.removeSync(tempDir, { recursive: true });
+  }
+});

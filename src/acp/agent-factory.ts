@@ -4,6 +4,7 @@ import type { AgentConfig, AgentType, RetryPromptStrategy } from "./types.ts";
 import type { Config } from "../types/config.ts";
 import { SandboxManager } from "./sandbox-manager.ts";
 import { getRunningEgressProxyUrl } from "@utils/egress-proxy.ts";
+import { sessionXdgDataHome } from "@utils/opencode-paths.ts";
 import { join } from "@std/path";
 
 /**
@@ -99,6 +100,14 @@ function buildBaseAgentConfig(
 
       // Set TMPDIR to workspace-scoped tmp directory
       env["TMPDIR"] = `${workingDir}/tmp`;
+
+      // Per-session XDG data home (F12): OpenCode's data dir (truncated tool outputs,
+      // logs, storage) is scoped to a per-session directory under the session TMPDIR
+      // instead of the shared `$HOME/.local/share/opencode/`. Truncated tool outputs
+      // therefore land inside the session workspace — inside the permission gate's
+      // containment boundary — never in the cross-session shared data directory, and
+      // never in another concurrent session's data dir.
+      env["XDG_DATA_HOME"] = sessionXdgDataHome(workingDir, sessionId);
 
       // Automatically detect and set AGENT_BROWSER_EXECUTABLE_PATH if not already set
       let browserPath = Deno.env.get("AGENT_BROWSER_EXECUTABLE_PATH");

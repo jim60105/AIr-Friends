@@ -506,6 +506,7 @@ We use `@agentclientprotocol/sdk` for Client-side connection:
 
 - **Restricted mode**: Auto-approves registered skills, skills directory access, and skill auto-approve list matched commands (script paths + command prefixes). The auto-approve list can be configured via `agent.autoApproveSkills` in config or `AGENT_AUTO_APPROVE_SKILLS` env var (comma-separated). When not configured, falls back to scanning the built-in `skills/` directory. Explicitly rejects `edit`/`write` tools with logging.
 - **Edit/Write Path Extraction**: When `locations` is empty in an edit/write permission request, the system attempts to extract file paths from `rawInput` (checking fields: `path`, `file_path`, `filePath`, `filepath`, `file`, `filename`, `paths`, `files`). Extracted paths go through the standard workspace boundary and extension checks. If paths cannot be extracted from either `locations` or `rawInput`, the request is rejected (conservative approach to maintain security boundaries).
+- **Generic-command gate (F12 D2)**: allow-listed read/media tools (`rg`, `cat`, `head`, `tail`, `ls`, `find`, `wc`, `file`, `tree`, `jq`, `pdftotext`, `pdfinfo`, `pdfimages`, `pdftoppm`) are approved only when every path argument — input and output — resolves inside the session workspace/TMPDIR, the agent workspace, or the session's OpenCode tool-output dir. The tool-output boundary is session-local: OpenCode runs with `XDG_DATA_HOME={workspace}/tmp/opencode-data/{sessionId}`, so truncated tool outputs land inside the session workspace; the shared home-rooted `~/.local/share/opencode/tool-output` is **never** within bounds (fail closed), and paths inside the data area that belong to sibling/previous sessions (or the enumerating root listing) are rejected. Home-anchored tokens (`~`, `~/`, `$HOME`, `${HOME}`, `$XDG_DATA_HOME`, `${XDG_DATA_HOME}`, including attached option values like `-o$HOME/...`) are expanded and containment-checked; unexpandable forms (`~otheruser/...`) are rejected, as are attached short-option traversal values (`-f../sibling/file`, `-o../x`).
 - **YOLO mode** (global `--yolo` flag or per-channel `yolo: true`): Auto-approves ALL permission requests
   - Useful for trusted/isolated environments
   - Bypasses all permission validation
@@ -605,6 +606,11 @@ Agent subprocesses run with configurable sandbox isolation via `SandboxManager`:
 | `agent.sandbox.networkIsolation`       | `false`           | Wrap command with `unshare --net` for network namespace isolation (Linux only) |
 | `agent.sandbox.allowedEnvVars`         | `[]`              | Additional env var names to pass through the filter                            |
 | `agent.sandbox.allowedWriteExtensions` | `[".md", ".txt"]` | Allowed file extensions for agent workspace writes in restricted mode          |
+
+The base env allowlist includes `XDG_DATA_HOME`; agent-factory sets it per session to
+`{workspace}/tmp/opencode-data/{sessionId}` (session id when present, else the workspace
+root) so OpenCode's data dir (truncated tool outputs, logs) stays inside the session
+workspace instead of the shared `~/.local/share/opencode/`.
 
 Environment variable overrides:
 

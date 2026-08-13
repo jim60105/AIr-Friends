@@ -9,6 +9,14 @@ export interface ClientConfig {
   /** Working directory for the session */
   workingDir: string;
 
+  /**
+   * Skill API session id of this ACP session, when one exists (skill-backed sessions).
+   * Used to scope the agent's `XDG_DATA_HOME` (and the permission gate's tool-output
+   * boundary) to THIS session, so concurrent sessions of the same user never share
+   * OpenCode's data directory / truncated tool outputs.
+   */
+  sessionId?: string;
+
   /** Agent global workspace path */
   agentWorkspacePath?: string;
 

@@ -35,6 +35,19 @@ Deno.test("buildBwrapConfinement - binds only this session's dirs writable", () 
   assertEquals(joined.includes("--bind /app/data/workspaces /app/data/workspaces "), false);
 });
 
+Deno.test("buildBwrapConfinement - shared OpenCode data dir is NOT bound writable (session-scoped XDG_DATA_HOME)", () => {
+  const { args } = buildBwrapConfinement(
+    { sessionWorkspace: "/ws", tmpDir: "/ws/tmp", shareNet: true },
+    "opencode",
+    [],
+  );
+  // The shared home-rooted data dir must not be bound at all: the agent's data dir lives
+  // under its session-scoped XDG_DATA_HOME (inside the workspace), so binding it would only
+  // expose stale home-rooted state (e.g. a pre-built auth.json) to the confined process.
+  const joined = args.join(" ");
+  assertEquals(joined.includes("/home/deno/.local/share/opencode"), false);
+});
+
 Deno.test("buildBwrapConfinement - shareNet controls network namespace", () => {
   const shared = buildBwrapConfinement(
     { sessionWorkspace: "/ws", tmpDir: "/ws/tmp", shareNet: true },

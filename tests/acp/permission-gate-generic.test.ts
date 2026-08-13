@@ -10,8 +10,18 @@ import {
 const WS = "/app/data/workspaces/discord/123";
 const DIRS = [WS];
 
+// Runtime values used for home-anchored token expansion. The session-scoped XDG data
+// home matches what agent-factory sets for a session with this workingDir, so the gate
+// expands `$XDG_DATA_HOME` references to the same directory the subprocess uses.
+// DATA_ROOT is the shared opencode data area root; XDG_DATA_HOME is THIS session's own
+// data home under it (other sessions' dirs under DATA_ROOT must stay unreadable).
+const HOME = "/home/deno";
+const DATA_ROOT = `${WS}/tmp/opencode-data`;
+const XDG_DATA_HOME = `${DATA_ROOT}/sess_own`;
+const TOOL_OUTPUT = `${XDG_DATA_HOME}/opencode/tool-output`;
+
 function approve(cmd: string): boolean {
-  return isApprovedGenericCommand(cmd, WS, DIRS);
+  return isApprovedGenericCommand(cmd, WS, DIRS, HOME, XDG_DATA_HOME, DATA_ROOT);
 }
 
 Deno.test("F12 D2 - in-workspace generic commands are approved", () => {
@@ -109,7 +119,82 @@ Deno.test("F12 D2 - shell operators cause rejection before the allow-list applie
 Deno.test("F12 D2 - home-anchored and URI-scheme arguments are rejected", () => {
   assertEquals(approve("cat ~/.ssh/id_rsa"), false);
   assertEquals(approve("cat $HOME/.git-credentials"), false);
+  assertEquals(approve("cat '${HOME}/.ssh/known_hosts'"), false);
   assertEquals(approve("jq . file:///etc/passwd"), false);
+});
+
+Deno.test("F12 D2 - session tool-output file read approved via absolute path", () => {
+  // The observed self-research failure shape: reading OpenCode's truncated tool output.
+  assertEquals(
+    approve(
+      `jq -r '.message.items[0].abstract, "---", .message.items[0].title[0]' ` +
+        `${TOOL_OUTPUT}/tool_ff80f6564001UdX4UoUmlKdpjY`,
+    ),
+    true,
+  );
+  assertEquals(approve(`cat ${TOOL_OUTPUT}/tool_x`), true);
+  assertEquals(approve(`head ${TOOL_OUTPUT}/tool_x`), true);
+});
+
+Deno.test("F12 D2 - session tool-output file read approved via XDG_DATA_HOME reference", () => {
+  // $XDG_DATA_HOME / ${XDG_DATA_HOME} expand to the session's own data home, which resolves
+  // inside the session workspace.
+  assertEquals(approve("cat $XDG_DATA_HOME/opencode/tool-output/tool_x"), true);
+  assertEquals(approve("cat ${XDG_DATA_HOME}/opencode/tool-output/tool_x"), true);
+});
+
+Deno.test("F12 D2 - sibling/previous sessions' opencode data dirs are never readable", () => {
+  // Another session's tool-output (same user, concurrent or stale) resolves inside the
+  // workspace lexically but must be rejected by the per-session data-area boundary.
+  assertEquals(
+    approve(`cat ${DATA_ROOT}/sess_other/opencode/tool-output/tool_x`),
+    false,
+  );
+  assertEquals(
+    approve(`cat ${DATA_ROOT}/sess_other/opencode/tool-output/../tool-output/tool_x`),
+    false,
+  );
+  // Listing the shared data-area root (which would enumerate other sessions) is rejected.
+  assertEquals(approve(`ls ${DATA_ROOT}`), false);
+  // The session's OWN data home stays readable.
+  assertEquals(approve(`ls ${XDG_DATA_HOME}`), true);
+  assertEquals(approve(`cat ${XDG_DATA_HOME}/opencode/tool-output/tool_x`), true);
+});
+
+Deno.test("F12 D2 - attached short-option traversal is rejected", () => {
+  // A glued option value starting with `..`/`/` resolves against the cwd and escapes the
+  // workspace (e.g. `jq -f../<sibling>/program.jq` reads a sibling user's file), and a
+  // value containing `/../` traverses back out — both must be rejected.
+  assertEquals(approve("jq -f../other-user/program.jq data.json"), false);
+  assertEquals(approve("pdftoppm in.pdf -o../x"), false);
+  assertEquals(approve("cat -o../etc/passwd"), false);
+  assertEquals(approve("rg -f/../etc/passwd ."), false);
+  // Safe attached values (bare flags, in-workspace attached file names) still pass.
+  assertEquals(approve("jq -fprogram.jq data.json"), true);
+  assertEquals(approve("head -n5 notes.md"), true);
+});
+
+Deno.test("F12 D2 - shared home-rooted tool-output directory is never within bounds", () => {
+  // The pre-fix shared location must stay denied in every spelling.
+  assertEquals(approve("cat ~/.local/share/opencode/tool-output/tool_x"), false);
+  assertEquals(approve("cat $HOME/.local/share/opencode/tool-output/tool_x"), false);
+  assertEquals(approve("cat ${HOME}/.local/share/opencode/tool-output/tool_x"), false);
+  assertEquals(approve("cat /home/deno/.local/share/opencode/tool-output/tool_x"), false);
+});
+
+Deno.test("F12 D2 - home-anchored sensitive paths still rejected after expansion", () => {
+  // Expansion then containment: home resolves outside every allowed dir, and parent
+  // traversal normalizes out of the workspace.
+  assertEquals(approve("cat $HOME/../etc/passwd"), false);
+  assertEquals(approve("cat ~/../../etc/passwd"), false);
+  assertEquals(approve("cat ~/.ssh/id_rsa"), false);
+  assertEquals(approve("cat $HOME/.git-credentials"), false);
+  // Attached option values expand into attached absolute paths and are rejected.
+  assertEquals(approve("cat -o$HOME/.ssh/x"), false);
+  assertEquals(approve("cat --file=$HOME/.git-credentials"), false);
+  // Unexpandable home-anchored forms are rejected outright.
+  assertEquals(approve("cat ~otheruser/notes.md"), false);
+  assertEquals(approve("cat ~notexpanded/file"), false);
 });
 
 Deno.test("F12 D3 - referencesOutOfWorkspacePath rejects filesystem URI schemes, allows network URLs", () => {

@@ -29,6 +29,9 @@ const BASE_ALLOWED_ENV = [
   "AGENT_WORKSPACE",
   // Workspace-scoped temp directory
   "TMPDIR",
+  // Per-session XDG data home (F12): OpenCode's data dir is scoped under the session
+  // TMPDIR so truncated tool outputs stay inside the session workspace.
+  "XDG_DATA_HOME",
   // Browser automation
   "AGENT_BROWSER_EXECUTABLE_PATH",
   // Validating egress proxy (F14): the agent's fetch/browser clients are pointed at the proxy

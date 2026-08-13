@@ -527,6 +527,7 @@ export class SessionOrchestrator {
         yolo: yoloDecision.enabled,
         autoApproveSkills: this.config.agent.autoApproveSkills,
         allowedWriteExtensions: this.config.agent.sandbox?.allowedWriteExtensions,
+        sessionId: shellSessionId ?? undefined,
       };
 
       // 5. Build ACP connector
@@ -1061,6 +1062,7 @@ export class SessionOrchestrator {
         yolo: yoloDecision.enabled,
         autoApproveSkills: this.config.agent.autoApproveSkills,
         allowedWriteExtensions: this.config.agent.sandbox?.allowedWriteExtensions,
+        sessionId: shellSessionId ?? undefined,
       };
 
       // 6. Build and execute ACP connector
@@ -1685,6 +1687,7 @@ export class SessionOrchestrator {
         yolo: this.yolo,
         autoApproveSkills: this.config.agent.autoApproveSkills,
         allowedWriteExtensions: this.config.agent.sandbox?.allowedWriteExtensions,
+        sessionId: shellSessionId ?? undefined,
       };
 
       const agentType = getDefaultAgentType(this.config);
@@ -2303,6 +2306,7 @@ export class SessionOrchestrator {
         yolo: yoloDecision.enabled,
         autoApproveSkills: this.config.agent.autoApproveSkills,
         allowedWriteExtensions: this.config.agent.sandbox?.allowedWriteExtensions,
+        sessionId: shellSessionId ?? undefined,
       };
 
       // 6. Build and execute ACP connector

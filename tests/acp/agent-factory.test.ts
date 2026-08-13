@@ -75,6 +75,28 @@ Deno.test("createAgentConfig - sets TMPDIR to workspace-scoped tmp directory", (
   assertEquals(agentConfig.env?.TMPDIR, "/tmp/workspace/tmp");
 });
 
+Deno.test("createAgentConfig - sets session-scoped XDG_DATA_HOME under the workspace TMPDIR", () => {
+  const config = createTestConfig();
+  const agentConfig = createAgentConfig("opencode", "/tmp/workspace", config);
+  // OpenCode's data dir (tool-output, logs) must be scoped to the session workspace so
+  // truncated tool outputs stay inside the containment boundary, never in the shared home.
+  assertEquals(agentConfig.env?.XDG_DATA_HOME, "/tmp/workspace/tmp/opencode-data");
+});
+
+Deno.test("createAgentConfig - XDG_DATA_HOME is per-session when a session id exists", () => {
+  const config = createTestConfig();
+  const agentConfig = createAgentConfig(
+    "opencode",
+    "/tmp/workspace",
+    config,
+    false,
+    undefined,
+    "sess_abc",
+  );
+  // Concurrent sessions of the same user must not share the OpenCode data dir.
+  assertEquals(agentConfig.env?.XDG_DATA_HOME, "/tmp/workspace/tmp/opencode-data/sess_abc");
+});
+
 Deno.test("createAgentConfig - creates opencode without API key (uses providers)", () => {
   const config = createTestConfig({
     agent: {

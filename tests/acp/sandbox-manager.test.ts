@@ -48,6 +48,16 @@ Deno.test("SandboxManager - filterEnv: true filters out non-allowed env vars", (
   assertEquals(opts.env["RANDOM_VAR"], undefined);
 });
 
+Deno.test("SandboxManager - session-scoped XDG_DATA_HOME passes through the filter (F12)", () => {
+  const sandbox = new SandboxManager(createSandboxConfig());
+  const baseEnv = {
+    PATH: "/usr/bin",
+    XDG_DATA_HOME: "/ws/tmp/opencode-data",
+  };
+  const opts = sandbox.buildSpawnOptions("opencode", "opencode", [], baseEnv, "/ws");
+  assertEquals(opts.env["XDG_DATA_HOME"], "/ws/tmp/opencode-data");
+});
+
 Deno.test("SandboxManager - filterEnv: false passes all env vars through", () => {
   const sandbox = new SandboxManager(createSandboxConfig({ filterEnv: false }));
   const baseEnv = { PATH: "/usr/bin", SECRET: "value" };

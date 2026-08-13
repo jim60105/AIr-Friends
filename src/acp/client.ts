@@ -8,6 +8,11 @@ import type { ClientConfig } from "./types.ts";
 import type { SkillContext } from "@skills/types.ts";
 import type { SessionAuditWriter } from "@core/audit-logger.ts";
 import { sha256Hash } from "@utils/hash.ts";
+import {
+  opencodeDataRoot,
+  opencodeToolOutputDir,
+  sessionXdgDataHome,
+} from "@utils/opencode-paths.ts";
 
 /**
  * Auto-approved skill lists for restricted (non-YOLO) mode.
@@ -337,6 +342,43 @@ const DANGEROUS_GENERIC_FLAGS: ReadonlySet<string> = new Set([
 ]);
 
 /**
+ * Expand home-anchored references in a command argument token (F12):
+ * - leading `~` / `~/...` expand against `home`
+ * - `$HOME`, `${HOME}`, `$XDG_DATA_HOME`, `${XDG_DATA_HOME}` anywhere in the token
+ *   expand against `home` / `xdgDataHome`
+ *
+ * Returns the expanded token, or `undefined` when the token is home-anchored in an
+ * unexpandable form (`~otheruser/...`, `~notexpanded`). Expansion is applied AFTER
+ * quote stripping and `--flag=value` splitting — including inside attached option
+ * values — so `-o$HOME/...` becomes an attached absolute path and is subject to the
+ * attached-absolute-path rejection below, closing the attached-option escape hole.
+ */
+function expandHomeReferences(
+  token: string,
+  home: string,
+  xdgDataHome: string,
+): string | undefined {
+  if (token === "~" || token.startsWith("~/")) {
+    return home + token.substring(1);
+  }
+  if (token.startsWith("~")) return undefined;
+
+  const references: Array<[string, string]> = [
+    ["${HOME}", home],
+    ["$HOME", home],
+    ["${XDG_DATA_HOME}", xdgDataHome],
+    ["$XDG_DATA_HOME", xdgDataHome],
+  ];
+  let expanded = token;
+  for (const [ref, value] of references) {
+    if (expanded.includes(ref)) {
+      expanded = expanded.split(ref).join(value);
+    }
+  }
+  return expanded;
+}
+
+/**
  * Determine whether a single command argument stays inside the allowed workspace dirs.
  *
  * The agent's cwd is the session workspace, so relative tokens (search patterns, numbers,
@@ -345,11 +387,19 @@ const DANGEROUS_GENERIC_FLAGS: ReadonlySet<string> = new Set([
  * — are resolved and containment-checked against the allowed dirs. This is an
  * over-approximation (a non-path relative token is treated as a harmless in-workspace path),
  * which is safe because the decision only ever GRANTS in-workspace access.
+ *
+ * `dataRoot` is the session's OpenCode data area root (`{workspace}/tmp/opencode-data`) and
+ * `xdgDataHome` is THIS session's own data home under it. Any path that resolves inside the
+ * data area but outside the session's own data home is another session's data (or the shared
+ * root listing) and is rejected — cross-session isolation for truncated tool outputs.
  */
 function genericArgWithinWorkspace(
   token: string,
   base: string,
   allowedDirs: string[],
+  home: string,
+  xdgDataHome: string,
+  dataRoot: string,
 ): boolean {
   let t = token;
   const eq = t.indexOf("=");
@@ -357,32 +407,60 @@ function genericArgWithinWorkspace(
   t = t.replace(/^["']+/, "").replace(/["']+$/, "");
   if (t.length === 0) return true;
 
-  // URI schemes and home-anchored paths cannot be safely resolved into the workspace.
+  // URI schemes cannot be safely resolved into the workspace.
   if (/^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//.test(t)) return false;
-  if (t.startsWith("~") || t.startsWith("$HOME") || t.startsWith("${HOME}")) return false;
-  // Attached-value flag carrying an out-of-workspace path (e.g. a hypothetical `-o/etc/cron.d`):
-  // a `-`-prefixed token whose glued value is an absolute path or contains parent traversal.
-  // (The `--flag=value` form is already normalized above.)
-  if (t.startsWith("-") && (/^-{1,2}[a-zA-Z][a-zA-Z0-9-]*\//.test(t) || t.includes("/../"))) {
+
+  // Home-anchored tokens are expanded against the runtime values and then run through
+  // the same checks as literal paths; unexpandable home forms are rejected outright.
+  const expanded = expandHomeReferences(t, home, xdgDataHome);
+  if (expanded === undefined) return false;
+  t = expanded;
+
+  // Attached-value option: a `-`-prefixed token whose glued value is absolute or
+  // traversal-anchored (e.g. `-o/etc/cron.d`, `-f../sibling/file`, `-o../x`, `-oout/../x`).
+  // A value starting with `..` resolves against the cwd and escapes the workspace; a value
+  // starting with `/` is absolute; `/../` traverses back out. Bare flags (`-r`) and safe
+  // attached values (`-n5`, `-fprogram.jq`) pass. (The `--flag=value` form is already
+  // normalized above.)
+  if (
+    t.startsWith("-") &&
+    (/^-{1,2}[a-zA-Z][a-zA-Z0-9-]*\//.test(t) ||
+      /^-{1,2}[a-zA-Z][a-zA-Z0-9-]*\.\./.test(t) ||
+      t.includes("/../"))
+  ) {
     return false;
   }
 
   // Absolute or relative (incl. `../`): resolve and require containment. `resolve()`
   // normalizes traversal, so `a/../../etc` escaping the workspace is rejected here.
   const resolved = t.startsWith("/") ? resolve(t) : resolve(base, t);
-  return allowedDirs.some((d) => isWithinDir(resolved, d));
+  if (!allowedDirs.some((d) => isWithinDir(resolved, d))) return false;
+
+  // Cross-session isolation (F12): inside the OpenCode data area, only this session's
+  // own data home is readable. Sibling/previous sessions' data dirs are rejected even
+  // though they lexically resolve inside the workspace.
+  if (isWithinDir(resolved, dataRoot) && !isWithinDir(resolved, xdgDataHome)) {
+    return false;
+  }
+  return true;
 }
 
 /**
  * Approve a generic bash command only when its first token is on {@link GENERIC_COMMAND_ALLOWLIST}
  * AND every path-like argument — read input OR write/output target — resolves inside the
  * session workspace/TMPDIR (F12 D2). `base` is the agent cwd used to resolve relative tokens;
- * `allowedDirs` are the containment boundaries (session workspace, agent workspace).
+ * `allowedDirs` are the containment boundaries (session workspace, agent workspace, session
+ * tool-output dir). `home` / `xdgDataHome` / `dataRoot` are the runtime values used to expand
+ * home-anchored tokens and enforce the per-session data-area boundary (defaults: the process
+ * home and the session-scoped XDG data home derived from `base`).
  */
 export function isApprovedGenericCommand(
   cmd: string,
   base: string,
   allowedDirs: string[],
+  home: string = Deno.env.get("HOME") ?? "/home/deno",
+  xdgDataHome: string = sessionXdgDataHome(base),
+  dataRoot: string = opencodeDataRoot(base),
 ): boolean {
   if (containsShellOperators(cmd)) return false;
   const tokens = cmd.trim().split(/\s+/).filter((t) => t.length > 0);
@@ -392,7 +470,9 @@ export function isApprovedGenericCommand(
     // A code-exec / arbitrary-target flag rejects the whole command (e.g. `find -exec`,
     // `find -delete`, `rg --pre`), independent of whether its path arguments are in-workspace.
     if (DANGEROUS_GENERIC_FLAGS.has(tokens[i])) return false;
-    if (!genericArgWithinWorkspace(tokens[i], base, allowedDirs)) return false;
+    if (!genericArgWithinWorkspace(tokens[i], base, allowedDirs, home, xdgDataHome, dataRoot)) {
+      return false;
+    }
   }
   return true;
 }
@@ -682,8 +762,35 @@ export class ChatbotClient implements acp.Client {
       if (this.config.agentWorkspacePath) {
         allowedDirs.push(this.config.agentWorkspacePath);
       }
+      // Session-local OpenCode tool-output boundary (F12): the agent subprocess is spawned
+      // with a per-session `XDG_DATA_HOME` under the session TMPDIR, so truncated tool
+      // outputs land under the session workspace. The resolved tool-output dir belongs to
+      // the generic-command boundary only while it is session-local; it is appended
+      // explicitly (deduped against existing allowed dirs) so the boundary stays
+      // self-documenting, and any resolution outside the session workspace/TMPDIR (a
+      // future change to the path helpers) fails closed — the shared home-rooted
+      // tool-output dir is never within bounds. Cross-session reads inside the data area
+      // are additionally rejected in `genericArgWithinWorkspace`.
+      const sessionDataHome = sessionXdgDataHome(this.config.workingDir, this.config.sessionId);
+      const toolOutputDir = opencodeToolOutputDir(sessionDataHome);
+      const toolOutputCovered = allowedDirs.some((d) => isWithinDir(toolOutputDir, d));
+      if (
+        !toolOutputCovered &&
+        (this.isWithinTmpDir(toolOutputDir) || isWithinDir(toolOutputDir, this.config.workingDir))
+      ) {
+        allowedDirs.push(toolOutputDir);
+      }
       const isConfinedGenericCommand = commands.length > 0 &&
-        commands.every((cmd) => isApprovedGenericCommand(cmd, this.config.workingDir, allowedDirs));
+        commands.every((cmd) =>
+          isApprovedGenericCommand(
+            cmd,
+            this.config.workingDir,
+            allowedDirs,
+            Deno.env.get("HOME") ?? "/home/deno",
+            sessionDataHome,
+            opencodeDataRoot(this.config.workingDir),
+          )
+        );
 
       if (isConfinedGenericCommand) {
         this.logger.info("Auto-approving workspace-confined generic command: {command}", {

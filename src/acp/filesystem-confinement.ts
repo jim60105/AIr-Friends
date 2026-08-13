@@ -50,14 +50,14 @@ export const DEFAULT_CONFINEMENT_READONLY_PATHS: readonly string[] = [
 ];
 
 /**
- * Runtime paths the agent needs to WRITE at runtime beyond the session workspace: opencode
- * session/auth state and the browser cache/profile. These are the agent's OWN home dirs (no
- * daemon secrets live in files here — the daemon's secrets are in its process environ, which
- * the fresh `/proc` already hides).
+ * Runtime paths the agent needs to WRITE at runtime beyond the session workspace: the
+ * browser cache/profile. The shared OpenCode data dir (`~/.local/share/opencode`) is NOT
+ * bound — the agent runs with a session-scoped `XDG_DATA_HOME` under the workspace TMPDIR,
+ * so its data dir (tool-output, auth, storage, logs) lives inside the session workspace
+ * and the shared home-rooted dir is never written or visible to the confined process.
  */
 export const DEFAULT_CONFINEMENT_WRITABLE_RUNTIME_PATHS: readonly string[] = [
   "/home/deno/.cache",
-  "/home/deno/.local/share/opencode",
   "/home/deno/.agent-browser",
 ];
 
