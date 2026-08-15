@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.30.0] - 2026-08-15
+
+### Added
+
+- Multi-file delivery support in `send-file` skill via repeatable `--file-paths` arguments with configurable batch bounds (`skills.sendFile.maxFilesPerInvocation`, `skills.sendFile.maxTotalSizeMb`) and cross-platform multi-attachment delivery (Discord attachments, Misskey note `fileIds`, Misskey chat messages with automatic Drive cleanup on failure)
+- Session response tracking for file sends (`fileSent`), recognizing file delivery as a valid final turn response and preventing spurious missing-reply retries
+- Reply threading to file messages when `send-file` precedes `send-reply` in a session, resolving the reply anchor to `lastFileMessageId ?? triggerMessageId` while strictly separating file and text message IDs to protect files from `edit-reply`
+- ACP permission gate support for OpenCode `kind="edit"` requests with path classification, and per-session permission rejection tracking to supply actionable diagnostic feedback in retry prompts
+- Tolerance for standard file descriptor redirects (`2>&1`, `1>&2`, `3>&1`) in the generic-command permission gate, allowing stderr-to-stdout merging without triggering shell operator or boundary violations
+- Session-scoped OpenCode tool output directory (`{workspace}/tmp/opencode-data/{sessionId}` via `XDG_DATA_HOME`), isolating truncated tool outputs to session workspaces and enabling secure access through the permission gate
+- OpenCode CLI v1.17.13 pinning in container builds with per-architecture SHA-256 integrity verification and non-fatal startup version checks
+
+### Changed
+
+- Migrated skill free-text arguments (`--message`, `--content`, `--query`, `--caption`) to payload-file flags (`--message-file`, `--content-file`, `--query-file`, `--caption-file`) staged in `$TMPDIR/$SESSION_ID`, eliminating shell variable expansion (`$VAR`) and environment variable leaks
+- Removed obsolete `openCodeAuth` persistent volume claim from Helm chart and Docker Compose as AI provider keys are environment-based
+
+### Fixed
+
+- Fixed bash shell expansion corrupting free-text skill arguments ($0.xx expanded to script paths) and leaking subprocess environment variables into external channels
+- Fixed parallel test execution races in CI caused by global `PATH` mutations and fixed port allocations in dashboard test suites
+- Fixed Misskey thread parent loss during `edit-reply` re-creation by preserving per-reply parent anchors (`lastReplyAnchorMessageId`)
+
 ## [0.29.0] - 2026-08-03
 
 ### Added
@@ -1039,7 +1062,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ---
 
-[Unreleased]: https://github.com/jim60105/AIr-Friends/compare/v0.29.0...HEAD
+[Unreleased]: https://github.com/jim60105/AIr-Friends/compare/v0.30.0...HEAD
+[0.30.0]: https://github.com/jim60105/AIr-Friends/compare/v0.29.0...v0.30.0
 [0.29.0]: https://github.com/jim60105/AIr-Friends/compare/v0.28.0...v0.29.0
 [0.28.0]: https://github.com/jim60105/AIr-Friends/compare/v0.27.0...v0.28.0
 [0.27.0]: https://github.com/jim60105/AIr-Friends/compare/v0.26.0...v0.27.0
