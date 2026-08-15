@@ -128,16 +128,11 @@ async function createTestServer(overrides?: {
     workspaceManager: createMockWorkspaceManager(),
   });
 
-  // Use a random available port by starting with port 0
-  // DashboardServer uses the config port, so we need to find a free port
-  const listener = Deno.listen({ port: 0 });
-  const port = (listener.addr as Deno.NetAddr).port;
-  listener.close();
-
-  // Update config to use found port
-  (dashboardConfig as { port: number }).port = port;
-
+  // Let the OS assign a free port (port 0). This avoids the probe-and-reuse
+  // race (listen on 0, close, then rebind) which causes AddrInUse under
+  // --parallel execution.
   server.start();
+  const port = server.getPort();
   // Wait for server to be ready
   for (let i = 0; i < 20; i++) {
     try {
@@ -631,11 +626,6 @@ Deno.test({
   await Deno.mkdir(wsPath, { recursive: true });
   await Deno.writeTextFile(`${wsPath}/test.md`, "# Hello");
 
-  const listener = Deno.listen({ port: 0 });
-  const port = (listener.addr as Deno.NetAddr).port;
-  listener.close();
-  dashboardConfig.port = port;
-
   const server = new DashboardServer({
     config: dashboardConfig,
     appConfig: createMinimalConfig(),
@@ -649,6 +639,7 @@ Deno.test({
     workspaceManager: createMockWorkspaceManager(),
   });
   server.start();
+  const port = server.getPort();
   try {
     // Wait for server
     for (let i = 0; i < 20; i++) {
@@ -1792,13 +1783,9 @@ Deno.test({
   const entry = { phase: "session_end", ts: "2024-01-01T00:00:00Z" };
   await Deno.writeTextFile(`${auditDir}/sess_test123.jsonl`, JSON.stringify(entry) + "\n");
 
-  const listener = Deno.listen({ port: 0 });
-  const port = (listener.addr as Deno.NetAddr).port;
-  listener.close();
-
   const dashboardConfig: DashboardConfig = {
     enabled: true,
-    port,
+    port: 0,
     host: "127.0.0.1",
     passphrase: "test-passphrase",
     behindHttpsProxy: false,
@@ -1818,6 +1805,7 @@ Deno.test({
     workspaceManager: createMockWorkspaceManager(),
   });
   server.start();
+  const port = server.getPort();
   try {
     for (let i = 0; i < 20; i++) {
       try {
@@ -1852,13 +1840,9 @@ Deno.test({
   const auditBasePath = `${tempDir}/audit`;
   await Deno.mkdir(auditBasePath, { recursive: true });
 
-  const listener = Deno.listen({ port: 0 });
-  const port = (listener.addr as Deno.NetAddr).port;
-  listener.close();
-
   const dashboardConfig: DashboardConfig = {
     enabled: true,
-    port,
+    port: 0,
     host: "127.0.0.1",
     passphrase: "test-passphrase",
     behindHttpsProxy: false,
@@ -1878,6 +1862,7 @@ Deno.test({
     workspaceManager: createMockWorkspaceManager(),
   });
   server.start();
+  const port = server.getPort();
   try {
     for (let i = 0; i < 20; i++) {
       try {
@@ -1908,13 +1893,9 @@ Deno.test({
   const tempDir = await Deno.makeTempDir();
   const nonexistentPath = `${tempDir}/does-not-exist`;
 
-  const listener = Deno.listen({ port: 0 });
-  const port = (listener.addr as Deno.NetAddr).port;
-  listener.close();
-
   const dashboardConfig: DashboardConfig = {
     enabled: true,
-    port,
+    port: 0,
     host: "127.0.0.1",
     passphrase: "test-passphrase",
     behindHttpsProxy: false,
@@ -1933,6 +1914,7 @@ Deno.test({
     workspaceManager: createMockWorkspaceManager(),
   });
   server.start();
+  const port = server.getPort();
   try {
     for (let i = 0; i < 20; i++) {
       try {

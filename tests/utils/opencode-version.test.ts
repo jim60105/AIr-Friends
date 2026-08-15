@@ -146,20 +146,9 @@ Deno.test("getMinimumOpenCodeVersion - honors env override", () => {
 });
 
 Deno.test("detectOpenCodeVersion - returns null when binary missing (non-fatal)", async () => {
-  // Override PATH to a directory that cannot contain opencode, so the spawn fails
-  // regardless of the host environment. The function must return null, not throw.
-  const originalPath = Deno.env.get("PATH");
-  try {
-    const fakeBin = Deno.makeTempDirSync();
-    Deno.env.set("PATH", fakeBin);
-    const detected = await detectOpenCodeVersion(1000);
-    assertEquals(detected, null);
-    Deno.removeSync(fakeBin, { recursive: true });
-  } finally {
-    if (originalPath !== undefined) {
-      Deno.env.set("PATH", originalPath);
-    } else {
-      Deno.env.delete("PATH");
-    }
-  }
+  // Spawn a binary name that cannot exist. NEVER override the global PATH here:
+  // tests run with `--parallel` and Deno.env is process-global, so mutating PATH
+  // would break sibling test files (e.g. git-backup-service spawning `git`).
+  const detected = await detectOpenCodeVersion(1000, "definitely-not-a-real-binary-xyz");
+  assertEquals(detected, null);
 });

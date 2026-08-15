@@ -87,6 +87,8 @@ export class DashboardServer {
   private deps: DashboardServerDeps;
   private chatSession: ChatSession | null = null;
   private loginRateLimiter = new LoginRateLimiter();
+  /** Actual bound port once the server is listening (set from onListen). */
+  private actualPort: number | null = null;
 
   constructor(deps: DashboardServerDeps) {
     this.deps = deps;
@@ -97,10 +99,19 @@ export class DashboardServer {
     const port = this.deps.config.port;
     const hostname = this.deps.config.host;
     this.server = Deno.serve(
-      { port, hostname, onListen: () => {} },
+      {
+        port,
+        hostname,
+        onListen: (addr) => {
+          this.actualPort = addr.port;
+        },
+      },
       (req, info) => this.handleRequest(req, info),
     );
-    logger.info("Dashboard server started on {hostname}:{port}", { hostname, port });
+    logger.info("Dashboard server started on {hostname}:{port}", {
+      hostname,
+      port: this.actualPort ?? port,
+    });
 
     // Asynchronously load historical sessions from audit logs (non-blocking)
     if (this.deps.auditConfig?.enabled && this.deps.auditBasePath) {
@@ -128,8 +139,18 @@ export class DashboardServer {
     if (this.server) {
       await this.server.shutdown();
       this.server = null;
+      this.actualPort = null;
       logger.info("Dashboard server stopped");
     }
+  }
+
+  /**
+   * Actual bound port. When `config.port` is 0 (OS-assigned, used by tests),
+   * this returns the port allocated by the OS once the server is listening;
+   * otherwise the configured port.
+   */
+  getPort(): number {
+    return this.actualPort ?? this.deps.config.port;
   }
 
   private async handleRequest(req: Request, info?: Deno.ServeHandlerInfo): Promise<Response> {

@@ -80,11 +80,14 @@ export function isAtLeastVersion(detected: string, minimum: string): boolean {
  */
 export async function detectOpenCodeVersion(
   timeoutMs: number = OPENCODE_VERSION_CHECK_TIMEOUT_MS,
+  /** Binary name to spawn; injectable for tests so a missing-binary scenario can be
+   * simulated without mutating the global PATH (which would race parallel tests). */
+  commandName: string = "opencode",
 ): Promise<string | null> {
   let command: Deno.Command;
   let process: Deno.ChildProcess;
   try {
-    command = new Deno.Command("opencode", {
+    command = new Deno.Command(commandName, {
       args: ["--version"],
       stdout: "piped",
       stderr: "piped",
