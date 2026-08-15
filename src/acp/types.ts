@@ -173,6 +173,28 @@ export interface RetryPromptStrategy {
 }
 
 /**
+ * A permission denial recorded by ChatbotClient for retry-prompt feedback.
+ * Collected on EVERY denial path (requestPermission + writeTextFile) so the
+ * missing-reply retry prompt can tell the Agent WHY its actions were blocked.
+ */
+export interface PermissionRejection {
+  /** Tool name as reported by the agent (e.g. "write", "bash", "send-reply") */
+  toolName: string;
+
+  /** ACP tool kind of the request (e.g. "edit", "execute") */
+  kind: string;
+
+  /** The rejected command or path (truncated at record time) */
+  commandOrPath?: string;
+
+  /** Machine-readable rejection reason (e.g. "rejected_edit_write") */
+  reason: string;
+
+  /** ISO 8601 timestamp of the rejection */
+  ts: string;
+}
+
+/**
  * Options for AgentConnector
  */
 export interface AgentConnectorOptions {

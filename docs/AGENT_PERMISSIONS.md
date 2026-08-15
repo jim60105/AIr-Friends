@@ -222,7 +222,7 @@ The method evaluates permission requests in this order:
 
 4. **Registered skill check** — Extract skill name from `rawInput.skill` or `toolCall.title` and check against the `SkillRegistry`.
 
-5. **Edit/write scoping** — For `edit`, `edit_file`, and `write` kind requests, check if **all** target paths (from `locations[]`) are within `config.agentWorkspacePath` or workspace TMPDIR. For agent workspace paths (not TMPDIR), additionally verify that file extensions match `allowedWriteExtensions` (default: `[".md", ".txt"]`). If all checks pass, auto-approve. Otherwise, reject with warning logs. Requests with no location paths are rejected as a safe default.
+5. **Edit/write scoping** — Requests are recognized as edit/write by the ACP tool `kind` (`"edit"` — what OpenCode v1.17.13+ sends for its `write`/`edit`/`apply_patch`/`patch` tools, with `title` = the target file path) or by legacy title values (`"edit"`, `"edit_file"`, `"write"`, `"write_file"`). When `locations[]` is empty, paths are extracted from `rawInput` fields (`path`, `file_path`, `filePath`, `filepath`, `file`, `filename`, `paths`, `files` — covering both the `{filePath, content}` write shape and the `{filepath, diff}` edit shape). For recognized requests, check if **all** target paths are within `config.agentWorkspacePath` or workspace TMPDIR. For agent workspace paths (not TMPDIR), additionally verify that file extensions match `allowedWriteExtensions` (default: `[".md", ".txt"]`). If all checks pass, auto-approve. Otherwise, reject with warning logs. Requests with no resolvable paths are rejected as a safe default (fail closed). Requests matching neither the `kind` nor legacy titles fall through to unknown-tool rejection.
 
 6. **Default rejection** — All unrecognized tool calls are rejected with `reject_once`.
 
@@ -597,6 +597,22 @@ audit:
 | `AGENT_SANDBOX_ALLOWED_ENV_VARS`         | `agent.sandbox.allowedEnvVars`         | Comma-separated list |
 | `AGENT_SANDBOX_ALLOWED_WRITE_EXTENSIONS` | `agent.sandbox.allowedWriteExtensions` | Comma-separated list |
 | `AGENT_AUTO_APPROVE_SKILLS`              | `agent.autoApproveSkills`              | Comma-separated list |
+| `AGENT_OPENCODE_MIN_VERSION`             | — (observability only)                 | Minimum OpenCode version for the bootstrap check (default `1.17.13`) |
+
+### Permission Rejection Feedback (Retry Prompt)
+
+Every permission denial in `requestPermission()` and `writeTextFile()` is recorded in a bounded per-session ring buffer (max 10 entries; `commandOrPath` truncated to 200 chars). When an agent turn ends without a reply, reaction, or file send and the missing-reply retry fires, the retry prompt carries the recorded rejections as a `Recent permission rejections in this session:` section (bounded, truncated, framed as diagnostic data) so the Agent can self-correct.
+
+- The buffer is **NOT** cleared by `reset()` — `reset()` runs at the start of every prompt (including the retry), so clearing there would wipe the data the retry prompt needs.
+- It is cleared exactly once per logical session in `AgentConnector.createSession()`.
+- The retry flow snapshots the records before the retry `connector.prompt()` call.
+
+### OpenCode Version Compatibility
+
+The ACP permission request shape changed in OpenCode v1.17.13 (PR #34079 "enrich permission prompts"): edit/write requests now carry `kind: "edit"` with `title` = the target file path (the ACP `ToolKind` vocabulary has no `"write"` kind). The permission gate accepts both the new shape and legacy title shapes.
+
+- **Container pin**: `Containerfile` downloads a pinned `OPENCODE_VERSION` (default `1.17.13`) with per-arch SHA-256 checksum verification instead of `releases/latest`, so ACP contract changes cannot silently degrade the harness.
+- **Bootstrap check**: `verifyOpenCodeVersion()` (`src/utils/opencode-version.ts`) runs at bootstrap, spawns `opencode --version` (5s timeout, no network, never starts an ACP session) and logs a structured, greppable marker: `OpenCode version check: OK|BELOW_MINIMUM|UNKNOWN`. Below-minimum or undeterminable versions only WARN — startup never blocks. This is an observability measure, NOT a functional gate.
 
 ### OpenCode Configuration
 

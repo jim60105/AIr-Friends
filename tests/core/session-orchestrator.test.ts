@@ -1,6 +1,6 @@
 // tests/core/session-orchestrator.test.ts
 
-import { assertEquals, assertExists } from "@std/assert";
+import { assertEquals, assertExists, assertStringIncludes } from "@std/assert";
 import { SessionOrchestrator } from "@core/session-orchestrator.ts";
 import { WorkspaceManager } from "@core/workspace-manager.ts";
 import { ContextAssembler } from "@core/context-assembler.ts";
@@ -13,6 +13,7 @@ import type { PlatformAdapter } from "@platforms/platform-adapter.ts";
 import type { PlatformCapabilities, ReplyResult } from "../../src/types/platform.ts";
 import type { AgentConnectorOptions } from "../../src/acp/types.ts";
 import type { ClientConfig } from "../../src/acp/types.ts";
+import type { PermissionRejection } from "../../src/acp/types.ts";
 import type { AgentConnector } from "../../src/acp/agent-connector.ts";
 import type { PromptResponse } from "npm:@agentclientprotocol/sdk@^0.14.1";
 import { join } from "@std/path";
@@ -496,12 +497,41 @@ class MockAgentConnector {
     return "applied";
   }
 
-  async prompt(_sessionId: string, _text: string): Promise<PromptResponse> {
+  async prompt(_sessionId: string, text: string): Promise<PromptResponse> {
+    this.lastPromptText = text;
     const response = this.promptResponses[this.promptCallCount] ??
       { stopReason: "end_turn" } as PromptResponse;
     this.promptCallCount++;
     this.onPrompt?.(this.promptCallCount);
     return await Promise.resolve(response);
+  }
+
+  /** Text of the most recent prompt call (used to assert retry-prompt content) */
+  lastPromptText = "";
+
+  /**
+   * Simulated client access for the retry-prompt rejection snapshot. Returns a
+   * fake client whose rejection records are injected by the test, or null when
+   * none were configured (mirroring a connector without a client). The fake also
+   * provides the no-op listener/writer hooks the orchestrator calls on the real
+   * client, so the session flow behaves identically.
+   */
+  fakeClient: { rejections: PermissionRejection[]; cleared: boolean } | null = null;
+
+  getClient(): {
+    getRecentPermissionRejections(): PermissionRejection[];
+    setActivityListener(_listener: () => void): void;
+    setAuditWriter(_writer: unknown): void;
+    getLastActivityTimestamp(): number;
+  } | null {
+    return this.fakeClient
+      ? {
+        getRecentPermissionRejections: () => [...this.fakeClient!.rejections],
+        setActivityListener: () => {},
+        setAuditWriter: () => {},
+        getLastActivityTimestamp: () => Date.now(),
+      }
+      : null;
   }
 
   async disconnect(): Promise<void> {
@@ -679,6 +709,63 @@ Deno.test("SessionOrchestrator - retry sends reply on first retry attempt", asyn
 
     assertEquals(response.success, true);
     assertEquals(response.replySent, true);
+
+    sessionRegistry.stop();
+  } finally {
+    await Deno.remove(tempDir, { recursive: true });
+  }
+});
+
+Deno.test("SessionOrchestrator - retry prompt includes recorded permission rejections (surviving the prompt() boundary)", async () => {
+  const tempDir = await Deno.makeTempDir();
+  try {
+    const { orchestrator, skillRegistry, workspaceManager, sessionRegistry } =
+      await createTestableOrchestrator(tempDir);
+
+    const event = createTestEvent();
+    const platformAdapter = new MockPlatformAdapter() as unknown as PlatformAdapter;
+    const replyHandler = skillRegistry.getReplyHandler();
+
+    orchestrator.setConnectorSetup((connector) => {
+      // The first turn ends without a reply -> retry fires. The client's rejection
+      // records (injected here) must survive across prompt()'s reset() boundary.
+      connector.fakeClient = {
+        rejections: [{
+          toolName: "write",
+          kind: "edit",
+          commandOrPath: "$TMPDIR/$SESSION_ID/reply.md",
+          reason: "rejected_edit_write",
+          ts: "2026-08-14T00:00:00.000Z",
+        }],
+        cleared: false,
+      };
+      connector.promptResponses = [
+        { stopReason: "end_turn" } as PromptResponse,
+        { stopReason: "end_turn" } as PromptResponse,
+      ];
+      connector.onPrompt = (callCount) => {
+        // On the retry prompt (2nd call), simulate reply was sent.
+        if (callCount === 2) {
+          const workspace = workspaceManager.getWorkspaceKeyFromEvent(event);
+          const key = `${workspace}:${event.channelId}`;
+          // deno-lint-ignore no-explicit-any
+          (replyHandler as any).replySentMap.set(key, true);
+        }
+      };
+    });
+
+    const response = await orchestrator.processMessage(event, platformAdapter);
+
+    assertEquals(response.success, true);
+    assertEquals(orchestrator.mockConnector!.promptCallCount, 2);
+    // The retry prompt (2nd call) carries the recorded rejection with the reason,
+    // so the Agent can self-correct instead of guessing why the write was blocked.
+    const retryPrompt = orchestrator.mockConnector!.lastPromptText;
+    assertStringIncludes(retryPrompt, "Recent permission rejections in this session");
+    assertStringIncludes(
+      retryPrompt,
+      "write $TMPDIR/$SESSION_ID/reply.md (kind: edit) rejected: rejected_edit_write",
+    );
 
     sessionRegistry.stop();
   } finally {

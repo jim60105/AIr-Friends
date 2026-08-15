@@ -32,17 +32,27 @@ FROM base AS opencode-unpacker
 
 ARG TARGETARCH
 
+# Pinned OpenCode version and per-arch SHA-256 checksums (Design Decision 4).
+# The ACP permission request shape changed in v1.17.13; tracking `releases/latest`
+# silently broke the permission gate when OpenCode upgraded. Bump deliberately and
+# re-verify the request shape + checksums. Verify with:
+#   curl -fsSL https://github.com/anomalyco/opencode/releases/download/v${OPENCODE_VERSION}/opencode-linux-${OC_ARCH}.tar.gz | sha256sum
+ARG OPENCODE_VERSION=1.17.13
+ARG OPENCODE_SHA256_X64=157afa289d1a8d9372de0ce19ac726119b937a1f6b201808d46f06e4e59bb348
+ARG OPENCODE_SHA256_ARM64=bbaccdd374aaab66cd97c7f8ad1c080aa393610fa5f80ee8dfc007f9500afaf9
+
 WORKDIR /opencode
 
 # Map Docker TARGETARCH to OpenCode CLI naming convention
 # TARGETARCH: amd64 -> x64, arm64 -> arm64
 RUN case "${TARGETARCH}" in \
-      amd64) OC_ARCH="x64" ;; \
-      arm64) OC_ARCH="arm64" ;; \
+      amd64) OC_ARCH="x64"; OC_SHA256="${OPENCODE_SHA256_X64}" ;; \
+      arm64) OC_ARCH="arm64"; OC_SHA256="${OPENCODE_SHA256_ARM64}" ;; \
       *) echo "unsupported architecture: ${TARGETARCH}" && exit 1 ;; \
     esac && \
-    curl -fsSL "https://github.com/anomalyco/opencode/releases/latest/download/opencode-linux-${OC_ARCH}.tar.gz" \
+    curl -fsSL "https://github.com/anomalyco/opencode/releases/download/v${OPENCODE_VERSION}/opencode-linux-${OC_ARCH}.tar.gz" \
     -o /tmp/opencode.tar.gz && \
+    echo "${OC_SHA256}  /tmp/opencode.tar.gz" | sha256sum -c - && \
     tar -xzf /tmp/opencode.tar.gz -C /opencode && \
     rm -f /tmp/opencode.tar.gz
 

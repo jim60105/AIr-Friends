@@ -261,6 +261,12 @@ export class AgentConnector {
 
     const logger = this.options.logger as Logger;
 
+    // Start a fresh rejection record per logical session (Design Decision 2).
+    // Cleared HERE, NOT in `reset()`: `reset()` runs at the start of every prompt
+    // (including the retry prompt) and must not wipe the records the retry prompt
+    // needs. createSession() is the one place that marks a new logical session.
+    this.client?.clearPermissionRejections();
+
     // Filter out MCP servers with unsupported transports (skip + warn)
     const supportedServers = this.filterSupportedMCPServers(mcpServers);
 

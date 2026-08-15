@@ -2,6 +2,7 @@
 
 import { loadConfig } from "@core/config-loader.ts";
 import type { Config } from "./types/config.ts";
+import { verifyOpenCodeVersion } from "@utils/opencode-version.ts";
 import { AgentCore } from "@core/agent-core.ts";
 import { SpontaneousScheduler } from "@core/spontaneous-scheduler.ts";
 import { ChannelLurkScheduler } from "@core/channel-lurk-scheduler.ts";
@@ -94,6 +95,10 @@ export async function bootstrap(
     format: "json",
     gelfTransport: gelfTransport ?? undefined,
   });
+
+  // Verify the installed OpenCode CLI version (non-fatal, observable). The container
+  // pin (Containerfile OPENCODE_VERSION) is the prevention; this surfaces drift early.
+  await verifyOpenCodeVersion();
 
   // Agent sandbox egress + confinement (F12/F14). Start the validating egress proxy once
   // and verify the required namespace capabilities up front, failing closed at startup with

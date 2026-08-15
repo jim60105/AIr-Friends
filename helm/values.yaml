@@ -52,6 +52,12 @@ env:
   # Default ACP agent type (opencode)
   AGENT_DEFAULT_TYPE: 'opencode'
 
+  # Bootstrap OpenCode version-check minimum (observability only, never blocks startup).
+  # WARNs (marker BELOW_MINIMUM/UNKNOWN) when the installed opencode CLI is below this.
+  # Default 1.17.13. Not a functional gate — the container pins the version via
+  # Containerfile OPENCODE_VERSION + per-arch SHA-256 checksums.
+  # AGENT_OPENCODE_MIN_VERSION: '1.17.13'
+
   # Skills directory path (default: skills)
   AGENT_SKILLS_DIR: '/home/deno/.agents/skills'
 

@@ -2,6 +2,7 @@
 
 import { assertEquals, assertRejects } from "@std/assert";
 import { AgentConnector } from "@acp/agent-connector.ts";
+import { ChatbotClient } from "@acp/client.ts";
 import type {
   AgentCapabilities,
   HTTPMCPServerConfig,
@@ -572,4 +573,91 @@ Deno.test("AgentConnector - cache is single-session: refresh replaces (not appen
   // Nullish clears.
   connector["refreshSessionConfigOptions"](undefined);
   assertEquals((connector["sessionConfigOptions"] as unknown as MockConfigOption[]).length, 0);
+});
+
+// --- Permission-rejection buffer lifecycle (Design Decision 2/3) ---
+// createSession() clears the records; prompt() (whose reset() runs at its start)
+// must NOT clear them, so the retry prompt can still read them.
+
+Deno.test("AgentConnector - createSession clears rejection records, prompt() does NOT", async () => {
+  const connector = createMockConnectorWithCapabilities({});
+  const tempDir = Deno.makeTempDirSync();
+  try {
+    // Real ChatbotClient so the buffer semantics are the production ones.
+    const client = new ChatbotClient(
+      // deno-lint-ignore no-explicit-any
+      { hasSkill: () => false } as any,
+      // deno-lint-ignore no-explicit-any
+      { debug: () => {}, info: () => {}, warn: () => {}, error: () => {} } as any,
+      // deno-lint-ignore no-explicit-any
+      { workingDir: tempDir, platform: "test", userId: "u", channelId: "c", isDM: false } as any,
+      // deno-lint-ignore no-explicit-any
+      { scriptPaths: new Set(), commandPrefixes: new Set() } as any,
+    );
+    connector["client"] = client;
+
+    // Record two rejections via real denial paths (unknown tool call).
+    for (let i = 0; i < 2; i++) {
+      await client.requestPermission({
+        sessionId: "s",
+        toolCall: {
+          title: `unknown_${i}`,
+          kind: "other",
+          status: "pending",
+          content: [],
+          toolCallId: `t${i}`,
+          rawInput: {},
+          locations: [],
+        },
+        options: [
+          { kind: "allow_once", optionId: "a", name: "A" },
+          { kind: "reject_once", optionId: "r", name: "R" },
+        ],
+      });
+    }
+    assertEquals(client.getRecentPermissionRejections().length, 2);
+
+    // createSession() (new logical session) clears the buffer.
+    connector["connection"] = {
+      newSession: () =>
+        Promise.resolve({
+          sessionId: "sess_1",
+          protocolVersion: 1,
+          agentCapabilities: {},
+          authMethods: [],
+        }),
+      setSessionConfigOption: () => Promise.resolve({ configOptions: [] }),
+    } as unknown as typeof connector["connection"];
+    await connector.createSession([]);
+    assertEquals(client.getRecentPermissionRejections().length, 0, "createSession clears");
+
+    // Record again, then prompt() — its reset() must NOT clear the records.
+    await client.requestPermission({
+      sessionId: "s",
+      toolCall: {
+        title: "unknown_2",
+        kind: "other",
+        status: "pending",
+        content: [],
+        toolCallId: "t2",
+        rawInput: {},
+        locations: [],
+      },
+      options: [
+        { kind: "allow_once", optionId: "a", name: "A" },
+        { kind: "reject_once", optionId: "r", name: "R" },
+      ],
+    });
+    connector["connection"] = {
+      prompt: () => Promise.resolve({ stopReason: "end_turn" }),
+    } as unknown as typeof connector["connection"];
+    await connector.prompt("sess_1", "retry prompt");
+    assertEquals(
+      client.getRecentPermissionRejections().length,
+      1,
+      "prompt() reset() must NOT clear rejection records",
+    );
+  } finally {
+    Deno.removeSync(tempDir, { recursive: true });
+  }
 });

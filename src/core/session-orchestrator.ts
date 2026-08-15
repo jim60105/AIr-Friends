@@ -35,7 +35,12 @@ import type {
 import { isValidPlatform } from "../types/events.ts";
 import type { NormalizedEvent, Platform } from "../types/events.ts";
 import type { PlatformAdapter } from "@platforms/platform-adapter.ts";
-import type { AgentConnectorOptions, ClientConfig, MCPServerConfig } from "@acp/types.ts";
+import type {
+  AgentConnectorOptions,
+  AgentType,
+  ClientConfig,
+  MCPServerConfig,
+} from "@acp/types.ts";
 import { dirname, join } from "@std/path";
 import type { RssItem } from "@utils/rss-fetcher.ts";
 import type { ChannelWorkspaceInfo, WorkspaceInfo } from "../types/workspace.ts";
@@ -232,6 +237,28 @@ export class SessionOrchestrator {
       requested: resolvedEffort,
       outcome,
     });
+  }
+
+  /**
+   * Send the missing-reply retry prompt on the SAME ACP session, enriched with the
+   * session's recent permission-rejection reasons (Design Decision 3).
+   *
+   * The rejection records are snapshotted BEFORE `connector.prompt()` is called —
+   * `prompt()` runs `client.reset()` at its start, and `reset()` must NOT clear the
+   * buffer (the records must survive across the retry boundary). The rejection
+   * section is bounded/truncated by `formatPermissionRejections()`; when none were
+   * recorded the message is byte-identical to the plain retry prompt.
+   */
+  private async sendRetryPrompt(
+    connector: AgentConnector,
+    sessionId: string,
+    agentType: AgentType,
+    sessionLogger: ReturnType<typeof createLogger>,
+  ): Promise<acp.PromptResponse> {
+    const rejections = connector.getClient()?.getRecentPermissionRejections() ?? [];
+    const retryStrategy = getRetryPromptStrategy(agentType, rejections);
+    sessionLogger.info("Sending retry prompt for session {sessionId}", { sessionId });
+    return await connector.prompt(sessionId, retryStrategy.retryPromptMessage);
   }
 
   /**
@@ -729,16 +756,13 @@ export class SessionOrchestrator {
             // Clear reply state to allow retry (reaction state is NOT cleared)
             replyHandler.clearReplyState(workspace.key, event.channelId);
 
-            sessionLogger.info("Sending retry prompt", {
+            // Send retry prompt on the same session (snapshots permission
+            // rejections BEFORE prompt() — see sendRetryPrompt)
+            const retryResponse = await this.sendRetryPrompt(
+              connector,
               sessionId,
-              attempt: attempt + 1,
-              maxRetries: retryStrategy.maxRetries,
-            });
-
-            // Send retry prompt on the same session
-            const retryResponse = await connector.prompt(
-              sessionId,
-              retryStrategy.retryPromptMessage,
+              agentType,
+              sessionLogger,
             );
 
             sessionLogger.info("Retry prompt completed", {
@@ -1216,9 +1240,11 @@ export class SessionOrchestrator {
 
             replyHandler.clearReplyState(workspace.key, channelId);
 
-            const retryResponse = await connector.prompt(
+            const retryResponse = await this.sendRetryPrompt(
+              connector,
               sessionId,
-              retryStrategy.retryPromptMessage,
+              agentType,
+              sessionLogger,
             );
 
             replySent = replyHandler.hasReplySent(workspace.key, channelId);
@@ -2493,9 +2519,11 @@ export class SessionOrchestrator {
 
             replyHandler.clearReplyState(workspace.key, dmChannelId);
 
-            const retryResponse = await connector.prompt(
+            const retryResponse = await this.sendRetryPrompt(
+              connector,
               sessionId,
-              retryStrategy.retryPromptMessage,
+              agentType,
+              sessionLogger,
             );
 
             replySent = replyHandler.hasReplySent(workspace.key, dmChannelId);

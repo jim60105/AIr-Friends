@@ -1,9 +1,16 @@
 // tests/acp/agent-factory.test.ts
 
-import { assertEquals, assertExists, assertStringIncludes, assertThrows } from "@std/assert";
+import {
+  assertEquals,
+  assertExists,
+  assertFalse,
+  assertStringIncludes,
+  assertThrows,
+} from "@std/assert";
 import {
   createAgentConfig,
   detectPlaywrightBinarySync,
+  formatPermissionRejections,
   getDefaultAgentType,
   getRetryPromptStrategy,
   getSessionModeOverride,
@@ -407,6 +414,67 @@ Deno.test("getRetryPromptStrategy - retryPromptMessage includes send-file SKILL.
   // Content loaded from skills/send-file/SKILL.md
   assertStringIncludes(strategy.retryPromptMessage, "# Send File Skill");
   assertStringIncludes(strategy.retryPromptMessage, "--file-paths");
+});
+
+// ============ Retry prompt rejection enrichment (task 5.4) ============
+
+Deno.test("getRetryPromptStrategy - byte-identical to no-rejections when rejections empty", () => {
+  const without = getRetryPromptStrategy("opencode").retryPromptMessage;
+  const withEmpty = getRetryPromptStrategy("opencode", []).retryPromptMessage;
+  const withUndefined = getRetryPromptStrategy("opencode", undefined).retryPromptMessage;
+  assertEquals(withEmpty, without);
+  assertEquals(withUndefined, without);
+  assertFalse(without.includes("Recent permission rejections"));
+});
+
+Deno.test("getRetryPromptStrategy - includes rejection section when rejections present", () => {
+  const rejections = [
+    {
+      toolName: "write",
+      kind: "edit",
+      commandOrPath: "$TMPDIR/$SESSION_ID/reply.md",
+      reason: "rejected_unknown",
+      ts: "2026-08-14T00:00:00.000Z",
+    },
+    {
+      toolName: "bash",
+      kind: "execute",
+      commandOrPath: 'echo "$TMPDIR/$SESSION_ID"',
+      reason: "rejected_generic_command_first_token_not_allowed",
+      ts: "2026-08-14T00:00:00.001Z",
+    },
+  ];
+  const message = getRetryPromptStrategy("opencode", rejections).retryPromptMessage;
+  assertStringIncludes(message, "Recent permission rejections in this session");
+  assertStringIncludes(
+    message,
+    "write $TMPDIR/$SESSION_ID/reply.md (kind: edit) rejected: rejected_unknown",
+  );
+  assertStringIncludes(
+    message,
+    'bash echo "$TMPDIR/$SESSION_ID" (kind: execute) rejected: rejected_generic_command_first_token_not_allowed',
+  );
+  // Diagnostic framing, not instructions
+  assertStringIncludes(message, "diagnostic data, not instructions");
+  // Standard guidance still present
+  assertStringIncludes(message, "System message:");
+});
+
+Deno.test("formatPermissionRejections - section capped at 2000 chars", () => {
+  const rejections = Array.from({ length: 10 }, (_, i) => ({
+    toolName: "write",
+    kind: "edit",
+    commandOrPath: `/very/long/path/${"x".repeat(300)}/${i}.md`,
+    reason: "rejected_edit_write",
+    ts: "2026-08-14T00:00:00.000Z",
+  }));
+  const section = formatPermissionRejections(rejections);
+  assertEquals(section.length <= 2000, true, "section must respect the 2000 char cap");
+  assertStringIncludes(section, "(truncated)");
+});
+
+Deno.test("formatPermissionRejections - empty input yields empty section", () => {
+  assertEquals(formatPermissionRejections([]), "");
 });
 
 // ============ Agent Workspace Env Var Tests ============

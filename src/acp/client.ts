@@ -4,7 +4,7 @@ import * as acp from "@agentclientprotocol/sdk";
 import { join, resolve, SEPARATOR } from "@std/path";
 import type { SkillRegistry } from "@skills/registry.ts";
 import type { Logger } from "@utils/logger.ts";
-import type { ClientConfig } from "./types.ts";
+import type { ClientConfig, PermissionRejection } from "./types.ts";
 import type { SkillContext } from "@skills/types.ts";
 import type { SessionAuditWriter } from "@core/audit-logger.ts";
 import { sha256Hash } from "@utils/hash.ts";
@@ -568,6 +568,60 @@ export function genericCommandRejectionReason(
 }
 
 /**
+ * Classify a permission request as a scoped edit/write request.
+ *
+ * OpenCode v1.17.13+ (PR #34079 "enrich permission prompts") sends `kind: "edit"`
+ * with `title` set to the target FILE PATH for its `write`/`edit`/`apply_patch`/
+ * `patch` tools (`toToolKind()` maps all of them to `"edit"`). Older OpenCode
+ * versions and other ACP agents used the permission name as `title`
+ * (`"edit"`, `"edit_file"`, `"write"`, `"write_file"`). The ACP SDK `ToolKind`
+ * vocabulary (`read | edit | delete | move | search | execute | think | fetch |
+ * switch_mode | other`) contains no `"write"` kind, so `kind === "write"` cannot
+ * occur; the legacy `title: "write"` check below covers pre-rename agents.
+ */
+export function isEditWriteRequest(title: string, kind: string): boolean {
+  return kind === "edit" ||
+    title === "edit" ||
+    title === "edit_file" ||
+    title === "write" ||
+    title === "write_file";
+}
+
+/**
+ * Maximum number of permission-rejection records kept for retry-prompt feedback.
+ */
+export const MAX_PERMISSION_REJECTIONS = 10;
+
+/**
+ * Maximum length of a single rejection field (`toolName`, `kind`, `commandOrPath`)
+ * INCLUDING any truncation marker. Fields are sanitized at record time so
+ * oversized or agent-influenced content cannot inflate the retry prompt.
+ */
+export const MAX_PERMISSION_REJECTION_FIELD_LENGTH = 200;
+
+/**
+ * Strip control characters and bound an agent-derived rejection field so the
+ * retry-prompt diagnostic section cannot be re-injected with user-influenced
+ * formatting (e.g. newlines or prompt-structure characters) or oversized content.
+ * Applies to `toolName`, `kind`, and `commandOrPath` at record time.
+ */
+const CONTROL_CHARS_PATTERN = new RegExp(
+  `[\\u0000-\\u001f\\u007f]`,
+  "g",
+);
+
+export function sanitizeRejectionField(
+  value: string | undefined,
+): string | undefined {
+  if (value === undefined) return undefined;
+  const withoutControlChars = value.replace(CONTROL_CHARS_PATTERN, "");
+  if (withoutControlChars.length <= MAX_PERMISSION_REJECTION_FIELD_LENGTH) {
+    return withoutControlChars;
+  }
+  return `${withoutControlChars.slice(0, MAX_PERMISSION_REJECTION_FIELD_LENGTH - 1)}…`;
+}
+
+/**
  * ChatbotClient implements the ACP Client interface
  * Handles callbacks from the external OpenCode ACP Agent
  */
@@ -583,6 +637,15 @@ export class ChatbotClient implements acp.Client {
   private lastActivityTimestamp: number = Date.now();
   private messageBuffer: string[] = [];
   private thoughtBuffer: string[] = [];
+
+  /**
+   * Bounded per-session record of permission denials, consumed by the missing-reply
+   * retry prompt (Design Decision 2). NOT cleared in `reset()` — `reset()` runs at
+   * the start of every prompt including the retry, so clearing there would wipe the
+   * data the retry prompt needs. Cleared exactly once per logical session via
+   * `clearPermissionRejections()` from `AgentConnector.createSession()`.
+   */
+  private recentPermissionRejections: PermissionRejection[] = [];
 
   /**
    * Optional listener invoked when the Agent sends a `config_option_update`
@@ -679,6 +742,56 @@ export class ChatbotClient implements acp.Client {
       reason,
     });
     this.auditWriter.incrementPermissionDecisions();
+  }
+
+  /**
+   * Record a permission denial for retry-prompt feedback (Design Decision 2).
+   * Called on EVERY denial path in `requestPermission()` and `writeTextFile()`
+   * so the retry prompt's rejection section never misses a real cause.
+   *
+   * All agent-derived string fields (`toolName`, `kind`, `commandOrPath`) are
+   * sanitized at record time: control characters are stripped and each field is
+   * bounded to MAX_PERMISSION_REJECTION_FIELD_LENGTH characters, so the retry
+   * prompt's diagnostic section cannot be re-injected with agent/user-influenced
+   * formatting or oversized content. `reason` is our own constant (never
+   * sanitized). Synchronous and side-effect free beyond the buffer — never throws.
+   */
+  private recordPermissionRejection(
+    toolName: string,
+    kind: string,
+    commandOrPath: string | undefined,
+    reason: string,
+  ): void {
+    // toolName/kind are required fields (never undefined at call sites), so the
+    // sanitizer's undefined case only applies to commandOrPath.
+    this.recentPermissionRejections.push({
+      toolName: sanitizeRejectionField(toolName) ?? "",
+      kind: sanitizeRejectionField(kind) ?? "",
+      commandOrPath: sanitizeRejectionField(commandOrPath),
+      reason,
+      ts: new Date().toISOString(),
+    });
+    if (this.recentPermissionRejections.length > MAX_PERMISSION_REJECTIONS) {
+      this.recentPermissionRejections.shift();
+    }
+  }
+
+  /**
+   * Snapshot the session's recent permission rejections (for the retry prompt).
+   * Returns a shallow copy so callers cannot mutate the buffer.
+   */
+  getRecentPermissionRejections(): PermissionRejection[] {
+    return [...this.recentPermissionRejections];
+  }
+
+  /**
+   * Clear the rejection buffer. Called once per logical session when a new ACP
+   * session is created (`AgentConnector.createSession()`). MUST NOT be called from
+   * `reset()` — `reset()` runs at the start of every prompt, including the retry,
+   * and clearing there would wipe the records the retry prompt needs.
+   */
+  clearPermissionRejections(): void {
+    this.recentPermissionRejections = [];
   }
 
   /**
@@ -842,6 +955,13 @@ export class ChatbotClient implements acp.Client {
             "rejected_skill_free_text_flag",
           );
 
+          this.recordPermissionRejection(
+            title,
+            kind,
+            commands.join("; "),
+            "rejected_skill_free_text_flag",
+          );
+
           const rejectOption = params.options.find((o) => o.kind === "reject_once") ??
             params.options[0];
 
@@ -982,6 +1102,8 @@ export class ChatbotClient implements acp.Client {
           auditReason,
         );
 
+        this.recordPermissionRejection(title, kind, failingCommand, auditReason);
+
         // Return reject immediately: falling through to default-deny would write a second,
         // contradictory `rejected_unknown` audit entry that misclassifies the cause.
         const rejectOption = params.options.find((o) => o.kind === "reject_once") ??
@@ -1027,8 +1149,13 @@ export class ChatbotClient implements acp.Client {
       });
     }
 
-    // Scoped edit/write: allow if ALL paths are within agent workspace or TMPDIR
-    if (title === "edit" || title === "edit_file" || kind === "write" as string) {
+    // Scoped edit/write: allow if ALL paths are within agent workspace or TMPDIR.
+    // Classify by the ACP tool `kind` (OpenCode v1.17.13+ sends `kind: "edit"` with
+    // `title` = file path for its write/edit/apply_patch/patch tools) with a legacy
+    // title fallback for older OpenCode versions and other ACP agents. The ACP SDK
+    // ToolKind vocabulary has no `"write"` kind, so `kind === "write"` alone could
+    // never match a real request (legacy `title: "write"` is still accepted below).
+    if (isEditWriteRequest(title, kind)) {
       let paths = locations.map((l) => l.path).filter(Boolean) as string[];
 
       // When locations are empty, try extracting paths from rawInput
@@ -1067,6 +1194,13 @@ export class ChatbotClient implements acp.Client {
             "rejected_agent_workspace_write_unauthorized",
           );
 
+          this.recordPermissionRejection(
+            title,
+            kind,
+            sharedWorkspacePaths.join(", "),
+            "rejected_agent_workspace_write_unauthorized",
+          );
+
           const rejectOption = params.options.find((o) => o.kind === "reject_once") ??
             params.options[0];
           return Promise.resolve({
@@ -1097,6 +1231,25 @@ export class ChatbotClient implements acp.Client {
             undefined,
             "rejected_write_extension",
           );
+
+          this.recordPermissionRejection(
+            title,
+            kind,
+            disallowedPaths.join(", "),
+            "rejected_write_extension",
+          );
+
+          // Return reject immediately: falling through would record a second,
+          // contradictory `rejected_edit_write` entry (audit + rejection buffer).
+          const rejectOption = params.options.find((o) => o.kind === "reject_once") ??
+            params.options[0];
+
+          return Promise.resolve({
+            outcome: {
+              outcome: "selected",
+              optionId: rejectOption.optionId,
+            },
+          });
         } else {
           this.logger.info(
             "Auto-approving edit/write to agent workspace: {title}",
@@ -1136,6 +1289,8 @@ export class ChatbotClient implements acp.Client {
         undefined,
         "rejected_edit_write",
       );
+
+      this.recordPermissionRejection(title, kind, paths.join(", "), "rejected_edit_write");
     } else {
       // For unknown tool calls, reject
       this.logger.warn("Rejecting unknown tool call", {
@@ -1150,6 +1305,8 @@ export class ChatbotClient implements acp.Client {
         undefined,
         "rejected_unknown",
       );
+
+      this.recordPermissionRejection(title, kind, undefined, "rejected_unknown");
     }
 
     const rejectOption = params.options.find((o) => o.kind === "reject_once") ??
@@ -1376,6 +1533,12 @@ export class ChatbotClient implements acp.Client {
 
     // Validate path is within working directory
     if (!this.isPathAllowed(resolvedPath)) {
+      this.recordPermissionRejection(
+        "writeTextFile",
+        "write",
+        resolvedPath,
+        "rejected_write_path_outside_workspace",
+      );
       throw new acp.RequestError(
         -32600,
         "Access denied: path outside working directory",
@@ -1398,6 +1561,12 @@ export class ChatbotClient implements acp.Client {
             "Rejecting writeTextFile to shared agent workspace: session not authorized (canWriteAgentWorkspace not set)",
             { path: resolvedPath },
           );
+          this.recordPermissionRejection(
+            "writeTextFile",
+            "write",
+            resolvedPath,
+            "rejected_agent_workspace_write_unauthorized",
+          );
           throw new acp.RequestError(
             -32600,
             "Access denied: session not authorized to write to the shared agent workspace",
@@ -1405,6 +1574,12 @@ export class ChatbotClient implements acp.Client {
         }
 
         if (!this.hasAllowedWriteExtension(resolvedPath)) {
+          this.recordPermissionRejection(
+            "writeTextFile",
+            "write",
+            resolvedPath,
+            "rejected_write_extension",
+          );
           throw new acp.RequestError(
             -32600,
             `Access denied: file extension not allowed for agent workspace writes (permitted: ${

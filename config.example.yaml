@@ -70,6 +70,14 @@ agent:
   # Override the global with env AGENT_REASONING_EFFORT.
   reasoningEffort: "default"
 
+  # Bootstrap OpenCode version check (observability only, never blocks startup):
+  # the system warns when the installed opencode CLI reports a version below the
+  # known-good minimum (default 1.17.13, the first release with the enriched ACP
+  # permission request shape). Override the minimum with env AGENT_OPENCODE_MIN_VERSION.
+  # This only affects the bootstrap WARN marker (OK/BELOW_MINIMUM/UNKNOWN) — it is
+  # NOT a functional gate. The container image pins the version via
+  # Containerfile OPENCODE_VERSION + per-arch SHA-256 checksums.
+
   # External skills to install at startup (optional)
   # Each entry specifies a GitHub repo and skill name to install via `npx --yes --package=skills skills add`
   # externalSkills:

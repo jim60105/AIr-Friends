@@ -11,6 +11,8 @@ import {
   isWithinDir,
   matchesCommandPrefix,
   matchesScriptPath,
+  MAX_PERMISSION_REJECTION_FIELD_LENGTH,
+  sanitizeRejectionField,
   type SkillAutoApproveList,
 } from "@acp/client.ts";
 import * as acp from "@agentclientprotocol/sdk";
@@ -1204,8 +1206,9 @@ Deno.test("ChatbotClient - requestPermission rejects edit tool in restricted mod
     const request: acp.RequestPermissionRequest = {
       sessionId: "test-session",
       toolCall: {
+        // Legacy title shape (kind "edit" with title "edit")
         title: "edit",
-        kind: "execute",
+        kind: "edit",
         status: "pending" as const,
         content: [],
         toolCallId: "test-id",
@@ -1247,7 +1250,7 @@ Deno.test("ChatbotClient - requestPermission approves edit tool in YOLO mode", a
       sessionId: "test-session",
       toolCall: {
         title: "edit",
-        kind: "execute",
+        kind: "edit",
         status: "pending" as const,
         content: [],
         toolCallId: "test-id",
@@ -2737,7 +2740,7 @@ Deno.test("ChatbotClient - requestPermission allows edit to agent workspace when
       sessionId: "test-session",
       toolCall: {
         title: "edit",
-        kind: "execute",
+        kind: "edit",
         status: "pending" as const,
         content: [],
         toolCallId: "test-id",
@@ -2786,12 +2789,13 @@ Deno.test("ChatbotClient - requestPermission allows write_file to agent workspac
     const request: acp.RequestPermissionRequest = {
       sessionId: "test-session",
       toolCall: {
-        title: "write_file",
-        kind: "write" as unknown as typeof request.toolCall.kind,
+        // Real OpenCode v1.17.13+ shape: kind "edit", title = file path
+        title: `${agentWorkspace}/notes/topic.md`,
+        kind: "edit",
         status: "pending" as const,
         content: [],
         toolCallId: "test-id",
-        rawInput: { path: `${agentWorkspace}/notes/topic.md`, content: "Research notes" },
+        rawInput: { filePath: `${agentWorkspace}/notes/topic.md`, content: "Research notes" },
         locations: [{ path: `${agentWorkspace}/notes/topic.md` }],
       },
       options: [
@@ -2834,8 +2838,9 @@ Deno.test("ChatbotClient - requestPermission rejects edit outside agent workspac
     const request: acp.RequestPermissionRequest = {
       sessionId: "test-session",
       toolCall: {
+        // Legacy title shape (kind "edit" with title "edit")
         title: "edit",
-        kind: "execute",
+        kind: "edit",
         status: "pending" as const,
         content: [],
         toolCallId: "test-id",
@@ -2881,12 +2886,13 @@ Deno.test("ChatbotClient - requestPermission allows edit to workspace TMPDIR in 
     const request: acp.RequestPermissionRequest = {
       sessionId: "test-session",
       toolCall: {
-        title: "edit_file",
-        kind: "execute",
+        // Real OpenCode v1.17.13+ edit shape: kind "edit", title = file path
+        title: `${tmpSubDir}/temp-file.md`,
+        kind: "edit",
         status: "pending" as const,
         content: [],
         toolCallId: "test-id",
-        rawInput: { path: `${tmpSubDir}/temp-file.md` },
+        rawInput: { filepath: `${tmpSubDir}/temp-file.md`, diff: "patch" },
         locations: [{ path: `${tmpSubDir}/temp-file.md` }],
       },
       options: [
@@ -2930,7 +2936,7 @@ Deno.test("ChatbotClient - requestPermission rejects edit with no locations in r
       sessionId: "test-session",
       toolCall: {
         title: "edit",
-        kind: "execute",
+        kind: "edit",
         status: "pending" as const,
         content: [],
         toolCallId: "test-id",
@@ -2977,7 +2983,7 @@ Deno.test("ChatbotClient - requestPermission rejects edit with mixed paths (some
       sessionId: "test-session",
       toolCall: {
         title: "edit",
-        kind: "execute",
+        kind: "edit",
         status: "pending" as const,
         content: [],
         toolCallId: "test-id",
@@ -3032,7 +3038,7 @@ Deno.test("ChatbotClient - requestPermission allows .md write to agent workspace
       sessionId: "test-session",
       toolCall: {
         title: "edit",
-        kind: "execute",
+        kind: "edit",
         status: "pending" as const,
         content: [],
         toolCallId: "test-id",
@@ -3082,7 +3088,7 @@ Deno.test("ChatbotClient - requestPermission allows .txt write to agent workspac
       sessionId: "test-session",
       toolCall: {
         title: "edit",
-        kind: "execute",
+        kind: "edit",
         status: "pending" as const,
         content: [],
         toolCallId: "test-id",
@@ -3159,7 +3165,7 @@ Deno.test("ChatbotClient - requestPermission rejects .js write to agent workspac
       sessionId: "test-session",
       toolCall: {
         title: "edit",
-        kind: "execute",
+        kind: "edit",
         status: "pending" as const,
         content: [],
         toolCallId: "test-id",
@@ -3214,7 +3220,7 @@ Deno.test("ChatbotClient - requestPermission rejects .py write to agent workspac
       sessionId: "test-session",
       toolCall: {
         title: "edit",
-        kind: "execute",
+        kind: "edit",
         status: "pending" as const,
         content: [],
         toolCallId: "test-id",
@@ -3264,7 +3270,7 @@ Deno.test("ChatbotClient - requestPermission rejects file without extension in a
       sessionId: "test-session",
       toolCall: {
         title: "edit",
-        kind: "execute",
+        kind: "edit",
         status: "pending" as const,
         content: [],
         toolCallId: "test-id",
@@ -3316,7 +3322,7 @@ Deno.test("ChatbotClient - requestPermission allows any extension in TMPDIR (exe
       sessionId: "test-session",
       toolCall: {
         title: "edit",
-        kind: "execute",
+        kind: "edit",
         status: "pending" as const,
         content: [],
         toolCallId: "test-id",
@@ -3363,7 +3369,7 @@ Deno.test("ChatbotClient - YOLO mode allows any extension write to agent workspa
       sessionId: "test-session",
       toolCall: {
         title: "edit",
-        kind: "execute",
+        kind: "edit",
         status: "pending" as const,
         content: [],
         toolCallId: "test-id",
@@ -3414,7 +3420,7 @@ Deno.test("ChatbotClient - custom allowedWriteExtensions list works for requestP
       sessionId: "test-session",
       toolCall: {
         title: "edit",
-        kind: "execute",
+        kind: "edit",
         status: "pending" as const,
         content: [],
         toolCallId: "test-id-1",
@@ -3437,7 +3443,7 @@ Deno.test("ChatbotClient - custom allowedWriteExtensions list works for requestP
       sessionId: "test-session",
       toolCall: {
         title: "edit",
-        kind: "execute",
+        kind: "edit",
         status: "pending" as const,
         content: [],
         toolCallId: "test-id-2",
@@ -3486,7 +3492,7 @@ Deno.test("ChatbotClient - empty allowedWriteExtensions allows all extensions vi
       sessionId: "test-session",
       toolCall: {
         title: "edit",
-        kind: "execute",
+        kind: "edit",
         status: "pending" as const,
         content: [],
         toolCallId: "test-id",
@@ -3537,7 +3543,7 @@ Deno.test("ChatbotClient - allowedWriteExtensions is case insensitive for reques
       sessionId: "test-session",
       toolCall: {
         title: "edit",
-        kind: "execute",
+        kind: "edit",
         status: "pending" as const,
         content: [],
         toolCallId: "test-id-1",
@@ -3560,7 +3566,7 @@ Deno.test("ChatbotClient - allowedWriteExtensions is case insensitive for reques
       sessionId: "test-session",
       toolCall: {
         title: "edit",
-        kind: "execute",
+        kind: "edit",
         status: "pending" as const,
         content: [],
         toolCallId: "test-id-2",
@@ -4771,12 +4777,13 @@ Deno.test("F3 requestPermission - ordinary session cannot write shared agent wor
     const request: acp.RequestPermissionRequest = {
       sessionId: "s",
       toolCall: {
-        title: "write_file",
-        kind: "write" as unknown as acp.ToolCall["kind"],
+        // Real OpenCode v1.17.13+ write shape: kind "edit", title = file path
+        title: `${agentWorkspace}/notes/topic.md`,
+        kind: "edit",
         status: "pending" as const,
         content: [],
         toolCallId: "t",
-        rawInput: { path: `${agentWorkspace}/notes/topic.md`, content: "x" },
+        rawInput: { filePath: `${agentWorkspace}/notes/topic.md`, content: "x" },
         locations: [{ path: `${agentWorkspace}/notes/topic.md` }],
       },
       options: [
@@ -4816,7 +4823,7 @@ Deno.test("F3 requestPermission - memory-maintenance session cannot write shared
       sessionId: "s",
       toolCall: {
         title: "edit",
-        kind: "execute",
+        kind: "edit",
         status: "pending" as const,
         content: [],
         toolCallId: "t",
@@ -4859,7 +4866,7 @@ Deno.test("F3 requestPermission - TMPDIR write allowed regardless of flag", asyn
       sessionId: "s",
       toolCall: {
         title: "edit",
-        kind: "execute",
+        kind: "edit",
         status: "pending" as const,
         content: [],
         toolCallId: "t",
@@ -5441,12 +5448,13 @@ Deno.test("ChatbotClient - edit/write with $TMPDIR/$SESSION_ID tokens approved",
       const request: acp.RequestPermissionRequest = {
         sessionId: "sess_own",
         toolCall: {
-          title: "edit",
-          kind: "execute",
+          // Real OpenCode v1.17.13+ shape: kind "edit", title = file path
+          title: tokenPath,
+          kind: "edit",
           status: "pending" as const,
           content: [],
           toolCallId: "test-id",
-          rawInput: { path: tokenPath },
+          rawInput: { filePath: tokenPath, content: "payload" },
           locations: [{ path: tokenPath }],
         },
         options: [
@@ -5485,12 +5493,13 @@ Deno.test("ChatbotClient - edit/write with unexpanded $TMPDIR2 / $OTHER tokens r
       const request: acp.RequestPermissionRequest = {
         sessionId: "sess_own",
         toolCall: {
-          title: "edit",
-          kind: "execute",
+          // Real OpenCode v1.17.13+ shape: kind "edit", title = file path
+          title: tokenPath,
+          kind: "edit",
           status: "pending" as const,
           content: [],
           toolCallId: "test-id",
-          rawInput: { path: tokenPath },
+          rawInput: { filePath: tokenPath, content: "payload" },
           locations: [{ path: tokenPath }],
         },
         options: [
@@ -5618,6 +5627,606 @@ Deno.test("ChatbotClient - skill command with legacy free-text flag rejected in 
       if (response.outcome.outcome === "selected") {
         assertEquals(response.outcome.optionId, "allow-1", `must approve: ${command}`);
       }
+    }
+  } finally {
+    Deno.removeSync(tempDir, { recursive: true });
+  }
+});
+
+// ============ Real OpenCode v1.17.13+ request shapes (regression, task 5.2) ============
+
+function buildEditRequest(
+  overrides: Partial<acp.RequestPermissionRequest["toolCall"]>,
+): acp.RequestPermissionRequest {
+  return {
+    sessionId: "test-session",
+    toolCall: {
+      title: "/some/path.md",
+      kind: "edit",
+      status: "pending" as const,
+      content: [],
+      toolCallId: "test-id",
+      rawInput: { filePath: "/some/path.md", content: "x" },
+      locations: [],
+      ...overrides,
+    },
+    options: [
+      { kind: "allow_once", optionId: "allow-1", name: "Allow once" },
+      { kind: "reject_once", optionId: "reject-1", name: "Reject once" },
+    ],
+  };
+}
+
+Deno.test("ChatbotClient - real write shape (kind edit, title=path, rawInput filePath/content) writing $TMPDIR/$SESSION_ID/reply.md auto-approved in restricted mode", async () => {
+  const tempDir = Deno.makeTempDirSync();
+  try {
+    const client = new ChatbotClient(createTestSkillRegistry(), createTestLogger(), {
+      workingDir: tempDir,
+      platform: "discord",
+      userId: "123",
+      channelId: "456",
+      isDM: false,
+      sessionId: "sess_own",
+    }, { scriptPaths: new Set(), commandPrefixes: new Set() });
+
+    const tokenPath = "$TMPDIR/$SESSION_ID/reply.md";
+    const request = buildEditRequest({
+      title: tokenPath,
+      rawInput: { filePath: tokenPath, content: "reply text" },
+      locations: [{ path: tokenPath }],
+    });
+
+    const response = await client.requestPermission(request);
+    assertEquals(response.outcome.outcome, "selected");
+    if (response.outcome.outcome === "selected") {
+      assertEquals(response.outcome.optionId, "allow-1");
+    }
+  } finally {
+    Deno.removeSync(tempDir, { recursive: true });
+  }
+});
+
+Deno.test("ChatbotClient - real edit shape (kind edit, title=path, rawInput filepath/diff) for in-workspace path approved", async () => {
+  const tempDir = Deno.makeTempDirSync();
+  try {
+    const client = new ChatbotClient(createTestSkillRegistry(), createTestLogger(), {
+      workingDir: tempDir,
+      platform: "discord",
+      userId: "123",
+      channelId: "456",
+      isDM: false,
+    }, { scriptPaths: new Set(), commandPrefixes: new Set() });
+
+    const inWorkspace = `${tempDir}/tmp/scratch.md`;
+    const request = buildEditRequest({
+      title: inWorkspace,
+      rawInput: { filepath: inWorkspace, diff: "--- a/file.md\n+++ b/file.md" },
+      locations: [{ path: inWorkspace }],
+    });
+
+    const response = await client.requestPermission(request);
+    assertEquals(response.outcome.outcome, "selected");
+    if (response.outcome.outcome === "selected") {
+      assertEquals(response.outcome.optionId, "allow-1");
+    }
+  } finally {
+    Deno.removeSync(tempDir, { recursive: true });
+  }
+});
+
+Deno.test("ChatbotClient - real edit shape with out-of-workspace path rejected", async () => {
+  const tempDir = Deno.makeTempDirSync();
+  try {
+    const client = new ChatbotClient(createTestSkillRegistry(), createTestLogger(), {
+      workingDir: tempDir,
+      platform: "discord",
+      userId: "123",
+      channelId: "456",
+      isDM: false,
+    }, { scriptPaths: new Set(), commandPrefixes: new Set() });
+
+    const request = buildEditRequest({
+      title: "/etc/passwd",
+      rawInput: { filepath: "/etc/passwd", diff: "x" },
+      locations: [{ path: "/etc/passwd" }],
+    });
+
+    const response = await client.requestPermission(request);
+    assertEquals(response.outcome.outcome, "selected");
+    if (response.outcome.outcome === "selected") {
+      assertEquals(response.outcome.optionId, "reject-1");
+    }
+  } finally {
+    Deno.removeSync(tempDir, { recursive: true });
+  }
+});
+
+Deno.test("ChatbotClient - real edit shape with empty locations AND unparseable rawInput rejected (fail-closed)", async () => {
+  const tempDir = Deno.makeTempDirSync();
+  try {
+    const client = new ChatbotClient(createTestSkillRegistry(), createTestLogger(), {
+      workingDir: tempDir,
+      platform: "discord",
+      userId: "123",
+      channelId: "456",
+      isDM: false,
+    }, { scriptPaths: new Set(), commandPrefixes: new Set() });
+
+    const request = buildEditRequest({
+      rawInput: { notAPathField: "x" },
+      locations: [],
+    });
+
+    const response = await client.requestPermission(request);
+    assertEquals(response.outcome.outcome, "selected");
+    if (response.outcome.outcome === "selected") {
+      assertEquals(response.outcome.optionId, "reject-1", "must reject unresolvable-path edit");
+    }
+  } finally {
+    Deno.removeSync(tempDir, { recursive: true });
+  }
+});
+
+// ============ Permission rejection tracking (task 5.3) ============
+
+Deno.test("ChatbotClient - rejection recorded on unknown-tool denial path", async () => {
+  const tempDir = Deno.makeTempDirSync();
+  try {
+    const client = new ChatbotClient(createTestSkillRegistry(), createTestLogger(), {
+      workingDir: tempDir,
+      platform: "discord",
+      userId: "123",
+      channelId: "456",
+      isDM: false,
+    }, { scriptPaths: new Set(), commandPrefixes: new Set() });
+
+    const request: acp.RequestPermissionRequest = {
+      sessionId: "test-session",
+      toolCall: {
+        title: "unknown_tool",
+        kind: "other",
+        status: "pending" as const,
+        content: [],
+        toolCallId: "test-id",
+        rawInput: {},
+        locations: [],
+      },
+      options: [
+        { kind: "allow_once", optionId: "allow-1", name: "Allow once" },
+        { kind: "reject_once", optionId: "reject-1", name: "Reject once" },
+      ],
+    };
+
+    await client.requestPermission(request);
+    const rejections = client.getRecentPermissionRejections();
+    assertEquals(rejections.length, 1);
+    assertEquals(rejections[0].toolName, "unknown_tool");
+    assertEquals(rejections[0].kind, "other");
+    assertEquals(rejections[0].reason, "rejected_unknown");
+    assertEquals(typeof rejections[0].ts, "string");
+  } finally {
+    Deno.removeSync(tempDir, { recursive: true });
+  }
+});
+
+Deno.test("ChatbotClient - rejection recorded on edit/write denial with paths", async () => {
+  const tempDir = Deno.makeTempDirSync();
+  try {
+    const client = new ChatbotClient(createTestSkillRegistry(), createTestLogger(), {
+      workingDir: tempDir,
+      platform: "discord",
+      userId: "123",
+      channelId: "456",
+      isDM: false,
+    }, { scriptPaths: new Set(), commandPrefixes: new Set() });
+
+    const request = buildEditRequest({
+      title: "/etc/passwd",
+      rawInput: { filepath: "/etc/passwd", diff: "x" },
+      locations: [{ path: "/etc/passwd" }],
+    });
+
+    await client.requestPermission(request);
+    const rejections = client.getRecentPermissionRejections();
+    assertEquals(rejections.length, 1);
+    assertEquals(rejections[0].reason, "rejected_edit_write");
+    assertEquals(rejections[0].commandOrPath, "/etc/passwd");
+  } finally {
+    Deno.removeSync(tempDir, { recursive: true });
+  }
+});
+
+Deno.test("ChatbotClient - rejection recorded on generic-command denial with failing command", async () => {
+  const tempDir = Deno.makeTempDirSync();
+  try {
+    const client = new ChatbotClient(createTestSkillRegistry(), createTestLogger(), {
+      workingDir: tempDir,
+      platform: "discord",
+      userId: "123",
+      channelId: "456",
+      isDM: false,
+    }, { scriptPaths: new Set(), commandPrefixes: new Set() });
+
+    const request: acp.RequestPermissionRequest = {
+      sessionId: "test-session",
+      toolCall: {
+        title: "bash",
+        kind: "execute",
+        status: "pending" as const,
+        content: [],
+        toolCallId: "test-id",
+        rawInput: { commands: ['echo "$TMPDIR/$SESSION_ID"'] },
+      },
+      options: [
+        { kind: "allow_once", optionId: "allow-1", name: "Allow once" },
+        { kind: "reject_once", optionId: "reject-1", name: "Reject once" },
+      ],
+    };
+
+    await client.requestPermission(request);
+    const rejections = client.getRecentPermissionRejections();
+    assertEquals(rejections.length, 1);
+    assertEquals(rejections[0].reason, "rejected_generic_command_first_token_not_allowed");
+    assertEquals(rejections[0].commandOrPath, 'echo "$TMPDIR/$SESSION_ID"');
+  } finally {
+    Deno.removeSync(tempDir, { recursive: true });
+  }
+});
+
+Deno.test("ChatbotClient - rejection recorded on skill free-text flag denial", async () => {
+  const tempDir = Deno.makeTempDirSync();
+  try {
+    const client = new ChatbotClient(createTestSkillRegistry(), createTestLogger(), {
+      workingDir: tempDir,
+      platform: "discord",
+      userId: "123",
+      channelId: "456",
+      isDM: false,
+      sessionId: "sess_own",
+    }, {
+      scriptPaths: new Set(["skills/send-reply/scripts/send-reply.ts"]),
+      commandPrefixes: new Set(),
+    });
+
+    const request: acp.RequestPermissionRequest = {
+      sessionId: "sess_own",
+      toolCall: {
+        title: "Execute shell command",
+        kind: "execute",
+        status: "pending" as const,
+        content: [],
+        toolCallId: "test-id",
+        rawInput: {
+          commands: [
+            '/home/deno/.agents/skills/send-reply/scripts/send-reply.ts --session-id x --message "text"',
+          ],
+        },
+      },
+      options: [
+        { kind: "allow_once", optionId: "allow-1", name: "Allow once" },
+        { kind: "reject_once", optionId: "reject-1", name: "Reject once" },
+      ],
+    };
+
+    await client.requestPermission(request);
+    const rejections = client.getRecentPermissionRejections();
+    assertEquals(rejections.length, 1);
+    assertEquals(rejections[0].reason, "rejected_skill_free_text_flag");
+  } finally {
+    Deno.removeSync(tempDir, { recursive: true });
+  }
+});
+
+Deno.test("ChatbotClient - rejection recorded on writeTextFile denial", async () => {
+  const tempDir = Deno.makeTempDirSync();
+  try {
+    const client = new ChatbotClient(createTestSkillRegistry(), createTestLogger(), {
+      workingDir: tempDir,
+      platform: "discord",
+      userId: "123",
+      channelId: "456",
+      isDM: false,
+    });
+
+    let threw = false;
+    try {
+      await client.writeTextFile({ path: "/etc/passwd", content: "x", sessionId: "s" });
+    } catch {
+      threw = true;
+    }
+    assertEquals(threw, true);
+
+    const rejections = client.getRecentPermissionRejections();
+    assertEquals(rejections.length, 1);
+    assertEquals(rejections[0].toolName, "writeTextFile");
+    assertEquals(rejections[0].reason, "rejected_write_path_outside_workspace");
+    assertEquals(rejections[0].commandOrPath, "/etc/passwd");
+  } finally {
+    Deno.removeSync(tempDir, { recursive: true });
+  }
+});
+
+Deno.test("ChatbotClient - rejection recorded on unauthorized shared-workspace write denial", async () => {
+  const tempDir = Deno.makeTempDirSync();
+  try {
+    const agentWorkspace = `${tempDir}/agent-workspace`;
+    const client = new ChatbotClient(createTestSkillRegistry(), createTestLogger(), {
+      workingDir: tempDir,
+      platform: "discord",
+      userId: "123",
+      channelId: "456",
+      isDM: false,
+      agentWorkspacePath: agentWorkspace,
+      // canWriteAgentWorkspace NOT set — shared workspace writes are unauthorized.
+    }, { scriptPaths: new Set(), commandPrefixes: new Set() });
+
+    const request = buildEditRequest({
+      title: `${agentWorkspace}/notes/topic.md`,
+      rawInput: { filePath: `${agentWorkspace}/notes/topic.md`, content: "x" },
+      locations: [{ path: `${agentWorkspace}/notes/topic.md` }],
+    });
+
+    await client.requestPermission(request);
+    const rejections = client.getRecentPermissionRejections();
+    assertEquals(rejections.length, 1);
+    assertEquals(rejections[0].reason, "rejected_agent_workspace_write_unauthorized");
+    assertEquals(rejections[0].commandOrPath, `${agentWorkspace}/notes/topic.md`);
+  } finally {
+    Deno.removeSync(tempDir, { recursive: true });
+  }
+});
+
+Deno.test("ChatbotClient - rejection recorded on disallowed-extension write denial", async () => {
+  const tempDir = Deno.makeTempDirSync();
+  try {
+    const agentWorkspace = `${tempDir}/agent-workspace`;
+    const client = new ChatbotClient(createTestSkillRegistry(), createTestLogger(), {
+      workingDir: tempDir,
+      platform: "discord",
+      userId: "123",
+      channelId: "456",
+      isDM: false,
+      agentWorkspacePath: agentWorkspace,
+      canWriteAgentWorkspace: true,
+      allowedWriteExtensions: [".md", ".txt"],
+    }, { scriptPaths: new Set(), commandPrefixes: new Set() });
+
+    const request = buildEditRequest({
+      title: `${agentWorkspace}/notes/cache.json`,
+      rawInput: { filePath: `${agentWorkspace}/notes/cache.json`, content: "x" },
+      locations: [{ path: `${agentWorkspace}/notes/cache.json` }],
+    });
+
+    await client.requestPermission(request);
+    const rejections = client.getRecentPermissionRejections();
+    // Exactly ONE entry: the extension branch returns reject immediately, never
+    // recording a duplicate generic `rejected_edit_write` entry.
+    assertEquals(rejections.length, 1);
+    assertEquals(rejections[0].reason, "rejected_write_extension");
+    assertEquals(rejections[0].commandOrPath, `${agentWorkspace}/notes/cache.json`);
+  } finally {
+    Deno.removeSync(tempDir, { recursive: true });
+  }
+});
+
+Deno.test("ChatbotClient - rejection buffer is bounded at 10 entries", async () => {
+  const tempDir = Deno.makeTempDirSync();
+  try {
+    const client = new ChatbotClient(createTestSkillRegistry(), createTestLogger(), {
+      workingDir: tempDir,
+      platform: "discord",
+      userId: "123",
+      channelId: "456",
+      isDM: false,
+    }, { scriptPaths: new Set(), commandPrefixes: new Set() });
+
+    for (let i = 0; i < 15; i++) {
+      const request: acp.RequestPermissionRequest = {
+        sessionId: "test-session",
+        toolCall: {
+          title: `unknown_tool_${i}`,
+          kind: "other",
+          status: "pending" as const,
+          content: [],
+          toolCallId: `id-${i}`,
+          rawInput: {},
+          locations: [],
+        },
+        options: [
+          { kind: "allow_once", optionId: "allow-1", name: "Allow once" },
+          { kind: "reject_once", optionId: "reject-1", name: "Reject once" },
+        ],
+      };
+      await client.requestPermission(request);
+    }
+
+    const rejections = client.getRecentPermissionRejections();
+    assertEquals(rejections.length, 10);
+    // Oldest entries dropped (only the last 10 survive)
+    assertEquals(rejections[0].toolName, "unknown_tool_5");
+    assertEquals(rejections[9].toolName, "unknown_tool_14");
+  } finally {
+    Deno.removeSync(tempDir, { recursive: true });
+  }
+});
+
+Deno.test("ChatbotClient - rejection fields sanitized and bounded at 200 chars (incl. marker)", async () => {
+  const tempDir = Deno.makeTempDirSync();
+  try {
+    const client = new ChatbotClient(createTestSkillRegistry(), createTestLogger(), {
+      workingDir: tempDir,
+      platform: "discord",
+      userId: "123",
+      channelId: "456",
+      isDM: false,
+    }, { scriptPaths: new Set(), commandPrefixes: new Set() });
+
+    // Agent-influenced title with control characters and an oversized path.
+    const longPath = `/etc/${"a".repeat(500)}.md`;
+    const maliciousTitle = `evil\ninjected\rprompt ${longPath}`;
+    const request = buildEditRequest({
+      title: maliciousTitle,
+      rawInput: { filepath: longPath, diff: "x" },
+      locations: [{ path: longPath }],
+    });
+
+    await client.requestPermission(request);
+    const rejections = client.getRecentPermissionRejections();
+    assertEquals(rejections.length, 1);
+    // All fields sanitized: control characters stripped, length <= 200 incl. marker.
+    for (const field of [rejections[0].toolName, rejections[0].commandOrPath]) {
+      assertEquals(field!.length <= 200, true, "field must not exceed 200 chars");
+      assertEquals(field!.includes("\n"), false, "no newline injection");
+      assertEquals(field!.includes("\r"), false, "no CR injection");
+      assertEquals(field!.includes("\u0000"), false, "no NUL injection");
+    }
+    assertEquals(rejections[0].commandOrPath!.endsWith("…"), true);
+  } finally {
+    Deno.removeSync(tempDir, { recursive: true });
+  }
+});
+
+Deno.test("ChatbotClient - sanitizeRejectionField strips control chars and bounds length", () => {
+  // Short strings pass through with control chars stripped.
+  assertEquals(sanitizeRejectionField("write\nreply.md"), "writereply.md");
+  assertEquals(sanitizeRejectionField(undefined), undefined);
+  assertEquals(sanitizeRejectionField(""), "");
+  // Long strings are truncated to MAX_PERMISSION_REJECTION_FIELD_LENGTH incl. marker.
+  const long = "x".repeat(300);
+  const result = sanitizeRejectionField(long);
+  assertEquals(result!.length, MAX_PERMISSION_REJECTION_FIELD_LENGTH);
+  assertEquals(result!.endsWith("…"), true);
+});
+
+Deno.test("ChatbotClient - reset() does NOT clear rejection records, clearPermissionRejections() does", async () => {
+  const tempDir = Deno.makeTempDirSync();
+  try {
+    const client = new ChatbotClient(createTestSkillRegistry(), createTestLogger(), {
+      workingDir: tempDir,
+      platform: "discord",
+      userId: "123",
+      channelId: "456",
+      isDM: false,
+    }, { scriptPaths: new Set(), commandPrefixes: new Set() });
+
+    const request: acp.RequestPermissionRequest = {
+      sessionId: "test-session",
+      toolCall: {
+        title: "unknown_tool",
+        kind: "other",
+        status: "pending" as const,
+        content: [],
+        toolCallId: "test-id",
+        rawInput: {},
+        locations: [],
+      },
+      options: [
+        { kind: "allow_once", optionId: "allow-1", name: "Allow once" },
+        { kind: "reject_once", optionId: "reject-1", name: "Reject once" },
+      ],
+    };
+    await client.requestPermission(request);
+    assertEquals(client.getRecentPermissionRejections().length, 1);
+
+    // reset() runs at the start of every prompt (including the retry) — MUST NOT wipe.
+    client.reset();
+    assertEquals(client.getRecentPermissionRejections().length, 1, "reset() must not clear");
+
+    // Explicit per-session clear DOES wipe.
+    client.clearPermissionRejections();
+    assertEquals(client.getRecentPermissionRejections().length, 0);
+  } finally {
+    Deno.removeSync(tempDir, { recursive: true });
+  }
+});
+
+Deno.test("ChatbotClient - real edit shape with mixed valid/invalid multi-path rejected", async () => {
+  const tempDir = Deno.makeTempDirSync();
+  try {
+    const client = new ChatbotClient(createTestSkillRegistry(), createTestLogger(), {
+      workingDir: tempDir,
+      platform: "discord",
+      userId: "123",
+      channelId: "456",
+      isDM: false,
+    }, { scriptPaths: new Set(), commandPrefixes: new Set() });
+
+    const inWorkspace = `${tempDir}/ok.md`;
+    const request = buildEditRequest({
+      rawInput: { files: [inWorkspace, "/etc/evil"] },
+      locations: [],
+    });
+
+    const response = await client.requestPermission(request);
+    assertEquals(response.outcome.outcome, "selected");
+    if (response.outcome.outcome === "selected") {
+      assertEquals(response.outcome.optionId, "reject-1", "must reject mixed-path request");
+    }
+  } finally {
+    Deno.removeSync(tempDir, { recursive: true });
+  }
+});
+
+Deno.test("ChatbotClient - unknown-tool rejection preserved for non-edit kinds (kind other)", async () => {
+  const tempDir = Deno.makeTempDirSync();
+  try {
+    const client = new ChatbotClient(createTestSkillRegistry(), createTestLogger(), {
+      workingDir: tempDir,
+      platform: "discord",
+      userId: "123",
+      channelId: "456",
+      isDM: false,
+    }, { scriptPaths: new Set(), commandPrefixes: new Set() });
+
+    const request: acp.RequestPermissionRequest = {
+      sessionId: "test-session",
+      toolCall: {
+        title: "some_unknown_tool",
+        kind: "other",
+        status: "pending" as const,
+        content: [],
+        toolCallId: "test-id",
+        rawInput: {},
+        locations: [],
+      },
+      options: [
+        { kind: "allow_once", optionId: "allow-1", name: "Allow once" },
+        { kind: "reject_once", optionId: "reject-1", name: "Reject once" },
+      ],
+    };
+
+    const response = await client.requestPermission(request);
+    assertEquals(response.outcome.outcome, "selected");
+    if (response.outcome.outcome === "selected") {
+      assertEquals(response.outcome.optionId, "reject-1");
+    }
+  } finally {
+    Deno.removeSync(tempDir, { recursive: true });
+  }
+});
+
+Deno.test("ChatbotClient - legacy write title shape (title write, kind edit) still recognized", async () => {
+  const tempDir = Deno.makeTempDirSync();
+  try {
+    const client = new ChatbotClient(createTestSkillRegistry(), createTestLogger(), {
+      workingDir: tempDir,
+      platform: "discord",
+      userId: "123",
+      channelId: "456",
+      isDM: false,
+    }, { scriptPaths: new Set(), commandPrefixes: new Set() });
+
+    const inWorkspace = `${tempDir}/tmp/legacy.md`;
+    const request = buildEditRequest({
+      title: "write",
+      rawInput: { path: inWorkspace, content: "x" },
+      locations: [{ path: inWorkspace }],
+    });
+
+    const response = await client.requestPermission(request);
+    assertEquals(response.outcome.outcome, "selected");
+    if (response.outcome.outcome === "selected") {
+      assertEquals(response.outcome.optionId, "allow-1");
     }
   } finally {
     Deno.removeSync(tempDir, { recursive: true });
