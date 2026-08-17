@@ -1,10 +1,11 @@
 // tests/utils/metrics.test.ts
 
-import { assertStringIncludes } from "@std/assert";
+import { assertEquals, assertStringIncludes } from "@std/assert";
 import {
   filesSentTotal,
   messagesReceivedTotal,
   metricsRegistry,
+  selfResearchNoNoteTotal,
   sessionDurationSeconds,
   sessionsTotal,
 } from "../../src/utils/metrics.ts";
@@ -47,4 +48,14 @@ Deno.test("metrics - files sent counter increments per delivered file", async ()
     output,
     'airfriends_files_sent_total{platform="misskey",app="air-friends"} 3',
   );
+});
+
+Deno.test("metrics - self-research no-note counter registered and increments exactly once", async () => {
+  selfResearchNoNoteTotal.reset();
+  const before = (await selfResearchNoNoteTotal.get()).values[0].value;
+  selfResearchNoNoteTotal.inc();
+  const after = (await selfResearchNoNoteTotal.get()).values[0].value;
+  assertEquals(after, before + 1);
+  const output = await metricsRegistry.metrics();
+  assertStringIncludes(output, "airfriends_self_research_no_note_total");
 });

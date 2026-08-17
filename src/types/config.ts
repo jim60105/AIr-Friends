@@ -572,6 +572,16 @@ export interface SelfResearchConfig {
 
   /** Maximum interval between research sessions in milliseconds (default: 86400000 = 24 hours) */
   maxIntervalMs: number;
+
+  /**
+   * Verify that a research session actually produced a note before counting it as
+   * successful (default: true). When true, a session that ends with `end_turn` but
+   * wrote nothing under `$AGENT_WORKSPACE/notes/` or `journal/` gets ONE corrective
+   * retry on the same ACP session; if the retry also produces nothing the session is
+   * recorded as a failure. When false, the legacy behavior applies (any `end_turn`
+   * counts as success, no snapshot, no retry, no no-note metric).
+   */
+  verifyCompletion: boolean;
 }
 
 /**

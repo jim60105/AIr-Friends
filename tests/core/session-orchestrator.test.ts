@@ -2,6 +2,7 @@
 
 import { assertEquals, assertExists, assertStringIncludes } from "@std/assert";
 import { SessionOrchestrator } from "@core/session-orchestrator.ts";
+import { selfResearchNoNoteTotal } from "@utils/metrics.ts";
 import { WorkspaceManager } from "@core/workspace-manager.ts";
 import { ContextAssembler } from "@core/context-assembler.ts";
 import { MemoryStore } from "@core/memory-store.ts";
@@ -16,7 +17,7 @@ import type { ClientConfig } from "../../src/acp/types.ts";
 import type { PermissionRejection } from "../../src/acp/types.ts";
 import type { AgentConnector } from "../../src/acp/agent-connector.ts";
 import type { PromptResponse } from "npm:@agentclientprotocol/sdk@^0.14.1";
-import { join } from "@std/path";
+import { dirname, join } from "@std/path";
 
 // Mock PlatformAdapter
 class MockPlatformAdapter implements Partial<PlatformAdapter> {
@@ -1523,12 +1524,20 @@ Deno.test("SessionOrchestrator - processSelfResearch creates workspace and runs 
       rssFeeds: [{ url: "https://example.com/feed.xml" }],
       minIntervalMs: 43200000,
       maxIntervalMs: 86400000,
+      verifyCompletion: true,
     };
 
     orchestrator.setConnectorSetup((connector) => {
       connector.promptResponses = [
         { stopReason: "end_turn" } as PromptResponse,
       ];
+      connector.onPrompt = (callCount) => {
+        if (callCount === 1) {
+          // The agent produces its research note during the turn, so completion
+          // verification counts the session as successful.
+          writeResearchNote(tempDir, "notes/topic.md", "# Note");
+        }
+      };
     });
 
     const response = await orchestrator.processSelfResearch(rssItems, selfResearchConfig);
@@ -1578,6 +1587,7 @@ Deno.test("SessionOrchestrator - processSelfResearch returns error on cancelled 
       rssFeeds: [],
       minIntervalMs: 43200000,
       maxIntervalMs: 86400000,
+      verifyCompletion: true,
     });
 
     assertEquals(response.success, false);
@@ -1648,6 +1658,7 @@ Deno.test("SessionOrchestrator - processSelfResearch handles agent connection fa
         rssFeeds: [],
         minIntervalMs: 43200000,
         maxIntervalMs: 86400000,
+        verifyCompletion: true,
       },
     );
 
@@ -1697,6 +1708,13 @@ Deno.test("SessionOrchestrator - processSelfResearch formats RSS items in prompt
         capturedPrompt = text;
         return originalPrompt(sid, text);
       };
+      connector.onPrompt = (callCount) => {
+        if (callCount === 1) {
+          // Produce a note so completion verification succeeds and no retry prompt
+          // overwrites the captured initial prompt.
+          writeResearchNote(tempDir, "notes/prompt-test.md", "# Note");
+        }
+      };
     });
 
     await orchestrator.processSelfResearch(rssItems, {
@@ -1705,6 +1723,7 @@ Deno.test("SessionOrchestrator - processSelfResearch formats RSS items in prompt
       rssFeeds: [],
       minIntervalMs: 43200000,
       maxIntervalMs: 86400000,
+      verifyCompletion: true,
     });
 
     // Verify prompt contains RSS items
@@ -1736,6 +1755,11 @@ Deno.test("SessionOrchestrator - processSelfResearch without skillApi", async ()
       connector.promptResponses = [
         { stopReason: "end_turn" } as PromptResponse,
       ];
+      connector.onPrompt = (callCount) => {
+        if (callCount === 1) {
+          writeResearchNote(tempDir, "notes/no-skillapi.md", "# Note");
+        }
+      };
     });
 
     const response = await orchestrator.processSelfResearch(
@@ -1746,11 +1770,325 @@ Deno.test("SessionOrchestrator - processSelfResearch without skillApi", async ()
         rssFeeds: [],
         minIntervalMs: 43200000,
         maxIntervalMs: 86400000,
+        verifyCompletion: true,
       },
     );
 
     assertEquals(response.success, true);
     assertEquals(response.replySent, false);
+
+    sessionRegistry.stop();
+  } finally {
+    await Deno.remove(tempDir, { recursive: true });
+  }
+});
+
+// --- Self-research completion verification (F16) tests ---
+
+// Agent workspace root for a testable orchestrator rooted at tempDir.
+function agentWorkspacePathFor(tempDir: string): string {
+  return join(tempDir, "agent-workspace");
+}
+
+// Write a research note (new file) into the agent workspace, as the simulated
+// agent does with its edit/write tool during the prompt turn.
+function writeResearchNote(tempDir: string, relPath: string, content: string): void {
+  const path = join(agentWorkspacePathFor(tempDir), relPath);
+  Deno.mkdirSync(dirname(path), { recursive: true });
+  Deno.writeTextFileSync(path, content);
+}
+
+const SR_CONFIG = {
+  enabled: true,
+  model: "gpt-5-mini",
+  rssFeeds: [{ url: "https://example.com/feed.xml" }],
+  minIntervalMs: 43200000,
+  maxIntervalMs: 86400000,
+  verifyCompletion: true,
+};
+
+function srRssItems() {
+  return [
+    {
+      title: "Test Article",
+      url: "https://example.com/article1",
+      description: "A test article description",
+      sourceName: "Test Feed",
+    },
+  ];
+}
+
+Deno.test("Self-research verification - note written in normal flow reports success without retry", async () => {
+  const tempDir = await Deno.makeTempDir();
+  try {
+    const { orchestrator, sessionRegistry } = await createTestableOrchestrator(tempDir);
+    await Deno.writeTextFile(
+      `${tempDir}/prompts/system_self_research.md`,
+      "Research instructions\n{{ rssItems }}",
+    );
+
+    orchestrator.setConnectorSetup((connector) => {
+      connector.promptResponses = [{ stopReason: "end_turn" } as PromptResponse];
+      connector.onPrompt = (callCount) => {
+        if (callCount === 1) {
+          // The agent produces its note during the first turn.
+          writeResearchNote(tempDir, "notes/operatiology.md", "# Notes");
+          writeResearchNote(tempDir, "notes/_index.md", "- operatiology");
+        }
+      };
+    });
+
+    const response = await orchestrator.processSelfResearch(srRssItems(), SR_CONFIG);
+
+    assertEquals(response.success, true);
+    assertEquals(response.error, undefined);
+    assertEquals(orchestrator.mockConnector!.promptCallCount, 1);
+
+    sessionRegistry.stop();
+  } finally {
+    await Deno.remove(tempDir, { recursive: true });
+  }
+});
+
+Deno.test("Self-research verification - no note triggers one corrective retry that succeeds", async () => {
+  const tempDir = await Deno.makeTempDir();
+  try {
+    const { orchestrator, sessionRegistry } = await createTestableOrchestrator(tempDir);
+    await Deno.writeTextFile(
+      `${tempDir}/prompts/system_self_research.md`,
+      "Research instructions\n{{ rssItems }}",
+    );
+
+    orchestrator.setConnectorSetup((connector) => {
+      // Simulate permission rejections recorded in the session (e.g. the observed
+      // `|| echo` / `;` chain denials).
+      connector.fakeClient = {
+        rejections: [
+          {
+            toolName: "Execute shell command",
+            kind: "execute",
+            commandOrPath: 'cat x 2>/dev/null || echo "NO INDEX"',
+            reason: "rejected_generic_command_shell_operator",
+            ts: new Date().toISOString(),
+          },
+        ],
+        cleared: false,
+      };
+      connector.promptResponses = [
+        { stopReason: "end_turn" } as PromptResponse,
+        { stopReason: "end_turn" } as PromptResponse,
+      ];
+      connector.onPrompt = (callCount) => {
+        if (callCount === 2) {
+          // The retry turn produces the note.
+          writeResearchNote(tempDir, "notes/topic.md", "# Retry note");
+        }
+      };
+    });
+
+    const response = await orchestrator.processSelfResearch(srRssItems(), SR_CONFIG);
+
+    assertEquals(response.success, true);
+    assertEquals(response.error, undefined);
+    assertEquals(orchestrator.mockConnector!.promptCallCount, 2);
+    // The retry prompt carries the note requirement, sandbox rules, and the
+    // bounded rejection diagnostics.
+    assertStringIncludes(orchestrator.mockConnector!.lastPromptText, "$AGENT_WORKSPACE/notes/");
+    assertStringIncludes(
+      orchestrator.mockConnector!.lastPromptText,
+      "Recent permission rejections",
+    );
+    assertStringIncludes(orchestrator.mockConnector!.lastPromptText, "`echo`");
+    assertStringIncludes(orchestrator.mockConnector!.lastPromptText, "2>/dev/null");
+
+    sessionRegistry.stop();
+  } finally {
+    await Deno.remove(tempDir, { recursive: true });
+  }
+});
+
+Deno.test("Self-research verification - no note after retry records failure, counter, and audit lifecycle", async () => {
+  const tempDir = await Deno.makeTempDir();
+  try {
+    const { orchestrator, sessionRegistry, config } = await createTestableOrchestrator(tempDir);
+    config.audit = {
+      enabled: true,
+      retentionDays: 7,
+      hashContent: false,
+      includedPhases: [],
+    };
+    await Deno.writeTextFile(
+      `${tempDir}/prompts/system_self_research.md`,
+      "Research instructions\n{{ rssItems }}",
+    );
+
+    orchestrator.setConnectorSetup((connector) => {
+      connector.promptResponses = [
+        { stopReason: "end_turn" } as PromptResponse,
+        { stopReason: "end_turn" } as PromptResponse,
+      ];
+    });
+
+    selfResearchNoNoteTotal.reset();
+    const response = await orchestrator.processSelfResearch(srRssItems(), SR_CONFIG);
+
+    assertEquals(response.success, false);
+    assertEquals(response.error, "no_research_note");
+    assertEquals(orchestrator.mockConnector!.promptCallCount, 2);
+    assertEquals((await selfResearchNoNoteTotal.get()).values[0].value, 1);
+
+    // Audit lifecycle: exactly ONE session_end, written after the final outcome;
+    // first turn agent_response with isRetry:false, retry turn prompt_sent +
+    // agent_response with isRetry:true, and retry_triggered with the no_note reason.
+    const auditFiles: string[] = [];
+    for await (const entry of Deno.readDir(join(tempDir, "audit", "discord", "self-research"))) {
+      auditFiles.push(join(tempDir, "audit", "discord", "self-research", entry.name));
+    }
+    assertEquals(auditFiles.length, 1);
+    const entries = (await Deno.readTextFile(auditFiles[0])).trim().split("\n")
+      .map((line) => JSON.parse(line) as { phase: string; data: Record<string, unknown> });
+    const sessionEnds = entries.filter((e) => e.phase === "session_end");
+    assertEquals(sessionEnds.length, 1);
+    assertEquals(sessionEnds[0].data.success, false);
+    assertEquals(sessionEnds[0].data.error, "no_research_note");
+    const retryTriggered = entries.filter((e) => e.phase === "retry_triggered");
+    assertEquals(retryTriggered.length, 1);
+    assertEquals(retryTriggered[0].data.reason, "no_research_note");
+    assertEquals(retryTriggered[0].data.retryCount, 1);
+    assertEquals(retryTriggered[0].data.maxRetries, 1);
+    const agentResponses = entries.filter((e) => e.phase === "agent_response");
+    assertEquals(agentResponses.length, 2);
+    assertEquals(agentResponses[0].data.isRetry, false);
+    assertEquals(agentResponses[1].data.isRetry, true);
+    const promptSent = entries.filter((e) => e.phase === "prompt_sent");
+    assertEquals(promptSent.length, 2); // initial prompt + retry prompt
+
+    sessionRegistry.stop();
+  } finally {
+    await Deno.remove(tempDir, { recursive: true });
+  }
+});
+
+Deno.test("Self-research verification - same-size same-millisecond overwrite detected via content hash", async () => {
+  const tempDir = await Deno.makeTempDir();
+  try {
+    const { orchestrator, sessionRegistry } = await createTestableOrchestrator(tempDir);
+    await Deno.writeTextFile(
+      `${tempDir}/prompts/system_self_research.md`,
+      "Research instructions\n{{ rssItems }}",
+    );
+
+    // A pre-existing note with the SAME size as the overwrite the agent performs.
+    writeResearchNote(tempDir, "notes/existing.md", "aaaa");
+
+    orchestrator.setConnectorSetup((connector) => {
+      connector.promptResponses = [{ stopReason: "end_turn" } as PromptResponse];
+      connector.onPrompt = (callCount) => {
+        if (callCount === 1) {
+          const path = join(agentWorkspacePathFor(tempDir), "notes", "existing.md");
+          // Same byte length, different content; mtime pinned to "now" (>= session start).
+          Deno.writeTextFileSync(path, "zzzz");
+          Deno.utimeSync(path, new Date(), new Date());
+        }
+      };
+    });
+
+    const response = await orchestrator.processSelfResearch(srRssItems(), SR_CONFIG);
+    assertEquals(response.success, true);
+    assertEquals(orchestrator.mockConnector!.promptCallCount, 1);
+
+    sessionRegistry.stop();
+  } finally {
+    await Deno.remove(tempDir, { recursive: true });
+  }
+});
+
+Deno.test("Self-research verification - pre-session file modification does not count (mtime bound)", async () => {
+  const tempDir = await Deno.makeTempDir();
+  try {
+    const { orchestrator, sessionRegistry } = await createTestableOrchestrator(tempDir);
+    await Deno.writeTextFile(
+      `${tempDir}/prompts/system_self_research.md`,
+      "Research instructions\n{{ rssItems }}",
+    );
+
+    const beforeSession = Date.now() - 10_000;
+    writeResearchNote(tempDir, "notes/pre.md", "original");
+
+    orchestrator.setConnectorSetup((connector) => {
+      connector.promptResponses = [{ stopReason: "end_turn" } as PromptResponse];
+      connector.onPrompt = (callCount) => {
+        if (callCount === 1) {
+          // Content changed during the session, but the modification time is pinned
+          // BEFORE the session start → not this session's output.
+          const path = join(agentWorkspacePathFor(tempDir), "notes", "pre.md");
+          Deno.writeTextFileSync(path, "changed!!!");
+          Deno.utimeSync(path, new Date(beforeSession), new Date(beforeSession));
+        }
+      };
+    });
+
+    const response = await orchestrator.processSelfResearch(srRssItems(), SR_CONFIG);
+    assertEquals(response.success, false);
+    assertEquals(response.error, "no_research_note");
+    assertEquals(orchestrator.mockConnector!.promptCallCount, 2); // retried once, still failed
+
+    sessionRegistry.stop();
+  } finally {
+    await Deno.remove(tempDir, { recursive: true });
+  }
+});
+
+Deno.test("Self-research verification - I/O error during snapshot treats session as produced, no retry", async () => {
+  const tempDir = await Deno.makeTempDir();
+  try {
+    const { orchestrator, sessionRegistry } = await createTestableOrchestrator(tempDir);
+    await Deno.writeTextFile(
+      `${tempDir}/prompts/system_self_research.md`,
+      "Research instructions\n{{ rssItems }}",
+    );
+
+    orchestrator.setConnectorSetup((connector) => {
+      // Replace the notes directory with a plain FILE so the recursive snapshot
+      // hits a non-directory I/O error (verification uncertainty → fail-safe).
+      const notesPath = join(agentWorkspacePathFor(tempDir), "notes");
+      Deno.removeSync(notesPath, { recursive: true });
+      Deno.writeTextFileSync(notesPath, "not a directory");
+      connector.promptResponses = [{ stopReason: "end_turn" } as PromptResponse];
+    });
+
+    const response = await orchestrator.processSelfResearch(srRssItems(), SR_CONFIG);
+    assertEquals(response.success, true);
+    assertEquals(orchestrator.mockConnector!.promptCallCount, 1); // never retried
+
+    sessionRegistry.stop();
+  } finally {
+    await Deno.remove(tempDir, { recursive: true });
+  }
+});
+
+Deno.test("Self-research verification - verifyCompletion false keeps legacy end_turn-equals-success behavior", async () => {
+  const tempDir = await Deno.makeTempDir();
+  try {
+    const { orchestrator, sessionRegistry } = await createTestableOrchestrator(tempDir);
+    await Deno.writeTextFile(
+      `${tempDir}/prompts/system_self_research.md`,
+      "Research instructions\n{{ rssItems }}",
+    );
+
+    orchestrator.setConnectorSetup((connector) => {
+      connector.promptResponses = [{ stopReason: "end_turn" } as PromptResponse];
+    });
+
+    selfResearchNoNoteTotal.reset();
+    const response = await orchestrator.processSelfResearch(srRssItems(), {
+      ...SR_CONFIG,
+      verifyCompletion: false,
+    });
+
+    assertEquals(response.success, true);
+    assertEquals(orchestrator.mockConnector!.promptCallCount, 1);
+    assertEquals((await selfResearchNoNoteTotal.get()).values[0].value, 0); // no metric without verification
 
     sessionRegistry.stop();
   } finally {

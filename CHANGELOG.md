@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- Multi-command `;`/`&&`/`||` bash chaining through the restricted-mode ACP permission gate: a chain is approved only when every segment independently passes the exact single-command gate (skill whitelist or generic-command confinement), with quote-aware splitting (`splitCommandSegments`), redirect-only-segment rejection as operator artifacts, and first-failing-segment cause reporting
+- Shell-expansion token tightening in the permission gate: only harness-set variables (`$HOME`, `$XDG_DATA_HOME`, `$TMPDIR`, `$AGENT_WORKSPACE`, `$SESSION_ID`) are expandable/recognized; other unquoted `$VAR` references, unquoted brace-expansion tokens, token-start double-quoted non-harness references (`"$X/etc/passwd"`), and backslash-escaped newlines (line continuations) are rejected, closing pre-existing path-escape holes (`cat $IFS/etc/passwd`, `cat {safe,/etc/passwd}`, `cat "$X/etc/passwd"`, `cat \<newline>/etc/passwd`)
+- Self-research completion verification (`selfResearch.verifyCompletion`, default `true`, env `SELF_RESEARCH_VERIFY_COMPLETION`): a self-research session that ends without producing a note under `$AGENT_WORKSPACE/notes/` or `journal/` now gets ONE corrective retry prompt (with permission-rejection diagnostics and sandbox-rule guidance) and is recorded as a failure with the new `airfriends_self_research_no_note_total` metric if it still produces nothing
+- `$AGENT_WORKSPACE` path-token support in the ACP read/write path resolution, so env-var workspace paths work with the Read tool and edit/write tool in any deployment
+
+### Changed
+
+- `prompts/agent_permissions.md` and `prompts/browser_automation.md` now document the real command allow-list (removed the false `curl` claim), the multi-command chaining rule, the always-rejected operators, the OpenCode-denied commands (`echo`/`curl`/`git`/...), and the webfetch 403/429 → `agent-browser` fallback; `skills/self-research/SKILL.md` uses the deployment-independent `$AGENT_WORKSPACE` path and the Read tool instead of `cat`-with-fallbacks
+- **BREAKING (semantics)**: a self-research session that produces no research note is no longer reported as successful — it is retried once and recorded as a failure if still empty. Operators who mount custom `prompts/agent_permissions.md` / `prompts/browser_automation.md` overrides must re-mount them to receive the corrected guidance
+
 ## [0.30.0] - 2026-08-15
 
 ### Added

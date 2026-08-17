@@ -994,6 +994,7 @@ workspace:
     assertEquals(result.selfResearch?.rssFeeds, []);
     assertEquals(result.selfResearch?.minIntervalMs, 43200000);
     assertEquals(result.selfResearch?.maxIntervalMs, 86400000);
+    assertEquals(result.selfResearch?.verifyCompletion, true);
   });
 });
 

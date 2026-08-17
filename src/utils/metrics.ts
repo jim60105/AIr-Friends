@@ -137,3 +137,11 @@ export const idleTimeoutTotal = new client.Counter({
   labelNames: ["platform", "outcome"] as const,
   registers: [metricsRegistry],
 });
+
+/** Self-research sessions that ended without producing a research note */
+export const selfResearchNoNoteTotal = new client.Counter({
+  name: "airfriends_self_research_no_note_total",
+  help:
+    "Total self-research sessions that ended without producing a research note (verification enabled)",
+  registers: [metricsRegistry],
+});

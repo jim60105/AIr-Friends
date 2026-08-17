@@ -129,6 +129,9 @@ env:
   # SELF_RESEARCH_RSS_FEEDS: '[{"url":"https://example.com/feed.xml","name":"Tech News"}]'
   SELF_RESEARCH_MIN_INTERVAL_MS: '43200000'
   SELF_RESEARCH_MAX_INTERVAL_MS: '86400000'
+  # Verify a self-research session produced a note before counting it as successful
+  # (with one corrective retry otherwise). 'true'/'false' (default: true).
+  SELF_RESEARCH_VERIFY_COMPLETION: 'true'
 
   # Rate Limiting
   RATE_LIMIT_ENABLED: 'false'

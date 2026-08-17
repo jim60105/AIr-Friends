@@ -1,6 +1,6 @@
 ---
 name: self-research
-description: Conduct a self-directed research session where you pick a topic from provided reference materials or your own curiosity, research it thoroughly using web search and browser tools, and write personal study notes to your agent workspace. Use in your personal research time, are given articles or topics to explore, or want to add new knowledge notes to your personal workspace at /app/data/agent-workspace/. **IMPORTANT - NEVER DELEGATE THIS SKILL TO SUBAGENTS OR ASSIGN IT AS A TASK.**
+description: Conduct a self-directed research session where you pick a topic from provided reference materials or your own curiosity, research it thoroughly using web search and browser tools, and write personal study notes to your agent workspace. Use in your personal research time, are given articles or topics to explore, or want to add new knowledge notes to your personal workspace at $AGENT_WORKSPACE/. **IMPORTANT - NEVER DELEGATE THIS SKILL TO SUBAGENTS OR ASSIGN IT AS A TASK.**
 compatibility: MUST BE PROCESSED BY THE AGENT ITSELF, DO NOT DELEGATED TO SUBAGENTS
 ---
 
@@ -10,7 +10,7 @@ This skill guides you through a complete personal research session: picking a to
 
 ## Agent Workspace
 
-Your personal workspace is at `/app/data/agent-workspace/` (always use this absolute path).
+Your personal workspace is at `$AGENT_WORKSPACE/` (use this environment-variable path — it is deployment-independent; do NOT hard-code `/app/data`).
 
 **Structure:**
 
@@ -29,9 +29,7 @@ Your personal workspace is at `/app/data/agent-workspace/` (always use this abso
 
 ### 1. Check your existing notes
 
-```bash
-cat /app/data/agent-workspace/notes/_index.md
-```
+Use your Read tool on `$AGENT_WORKSPACE/notes/_index.md`. If the file does not exist, Read simply fails — that is fine, you just have no notes yet.
 
 Review what you have already written about. Pick something **NEW** and different from what is already there.
 
@@ -41,11 +39,11 @@ From the reference materials in your current context (RSS items, articles, or an
 
 ### 3. Deep research
 
-Use `web_search` and `agent-browser` tools to research your chosen topic thoroughly. Gather multiple authoritative sources. Dig deep, you are curious and want to really understand this.
+Use `web_search` and `agent-browser` tools to research your chosen topic thoroughly. Gather multiple authoritative sources. Dig deep, you are curious and want to really understand this. If `webfetch` returns 403/429, switch to `agent-browser`.
 
 ### 4. Write YOUR note
 
-Create a new file at `/app/data/agent-workspace/notes/{topic-slug}.md`. This is YOUR personal notebook, write it in YOUR voice, with YOUR perspective:
+Create a new file at `$AGENT_WORKSPACE/notes/{topic-slug}.md` using your edit/write tool (never shell redirection). This is YOUR personal notebook, write it in YOUR voice, with YOUR perspective:
 
 - A clear title that reflects your take on the topic
 - Key concepts explained as YOU understand them
@@ -57,7 +55,7 @@ This note should read like your character's personal study notes, not a generic 
 
 ### 5. Update the index
 
-Add an entry for your new note in `/app/data/agent-workspace/notes/_index.md`.
+Add an entry for your new note in `$AGENT_WORKSPACE/notes/_index.md` (edit/write tool).
 
 ### 6. Self-review
 
@@ -66,6 +64,10 @@ After writing, review your entire note and verify:
 - Every factual claim is supported by the references you found, remove or correct anything you cannot verify
 - **NO personal information about any user** is included, remove if found
 - Your opinions and analysis are clearly distinguished from factual statements
+
+## Sandbox Command Rules
+
+In restricted mode, a bash call may chain commands with `;`, `&&`, or `||` ONLY when every command is individually allowed; the whole call is rejected otherwise. Pipes `|`, backgrounding `&`, `2>/dev/null`, `> file`, and newline separators are always rejected. Commands OpenCode denies before the permission gate (`echo`, `curl`, `git`, `python`, `mkdir`, ...) must never be attempted — use the Read tool and your edit/write tool instead.
 
 ## Important Rules
 

@@ -4,7 +4,11 @@
 
 You are operating in **restricted mode**. Only read-only operations are permitted.
 
-**Allowed bash commands:** `rg`, `curl`, `cat`, `head`, `tail`, `ls`, `find`, `wc`
+**Allowed bash commands:** `rg`, `cat`, `head`, `tail`, `ls`, `find`, `wc`, `file`, `tree`, `jq`, `pdftotext`, `pdfinfo`, `pdfimages`, `pdftoppm`
+
+**Multi-command rule:** A single bash call may chain commands with `;`, `&&`, or `||` ONLY when every command in the chain is individually allowed. The whole call is rejected otherwise. Pipes `|`, backgrounding `&`, `2>/dev/null`, `> file`, and newline separators are **always** rejected.
+
+**Commands denied by OpenCode before the permission gate (never attempt them):** `echo`, `curl`, `git`, `python`, `pip`, `mkdir`, `rm`, `mv`, `dd`, `chmod`, `make`, `gcc`, `strace`. In particular `cat x || echo "NO INDEX"` is impossible — instead use the Read tool on the path directly; a missing file simply fails to read.
 
 **Browser automation:** The `agent-browser` command is available for web interaction.
 

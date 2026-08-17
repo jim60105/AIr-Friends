@@ -2,16 +2,11 @@
 
 import { createLogger } from "@utils/logger.ts";
 import type { ReplyPolicyEvaluator, YoloDecision } from "./reply-policy.ts";
-import {
-  activeSessionsGauge,
-  remindersDeliveredTotal,
-  sessionDurationSeconds,
-  sessionsTotal,
-} from "@utils/metrics.ts";
 import { AgentConnector } from "@acp/agent-connector.ts";
 import * as acp from "@agentclientprotocol/sdk";
 import {
   createAgentConfig,
+  formatPermissionRejections,
   getDefaultAgentType,
   getRetryPromptStrategy,
   getSessionModeOverride,
@@ -40,6 +35,7 @@ import type {
   AgentType,
   ClientConfig,
   MCPServerConfig,
+  PermissionRejection,
 } from "@acp/types.ts";
 import { dirname, join } from "@std/path";
 import type { RssItem } from "@utils/rss-fetcher.ts";
@@ -50,6 +46,18 @@ import { SessionAuditWriter } from "./audit-logger.ts";
 import { sha256Hash } from "@utils/hash.ts";
 import { safeFetch } from "@utils/ssrf.ts";
 import type { CompletedSessionStore } from "../dashboard/completed-session-store.ts";
+import {
+  activeSessionsGauge,
+  remindersDeliveredTotal,
+  selfResearchNoNoteTotal,
+  sessionDurationSeconds,
+  sessionsTotal,
+} from "@utils/metrics.ts";
+import {
+  NoteFingerprint,
+  producedResearchOutput,
+  snapshotAgentWorkspaceNotes,
+} from "./research-output.ts";
 
 const logger = createLogger("SessionOrchestrator");
 
@@ -259,6 +267,48 @@ export class SessionOrchestrator {
     const retryStrategy = getRetryPromptStrategy(agentType, rejections);
     sessionLogger.info("Sending retry prompt for session {sessionId}", { sessionId });
     return await connector.prompt(sessionId, retryStrategy.retryPromptMessage);
+  }
+
+  /**
+   * Build the ONE corrective retry prompt for a self-research session that ended
+   * (`end_turn`) without producing a research note (F16 completion verification).
+   *
+   * The message is built in code (same pattern as `getRetryPromptStrategy`): it
+   * states the note requirement, embeds the session's recent permission-rejection
+   * reasons (bounded via `formatPermissionRejections`), NAMES the commands OpenCode
+   * itself denies before the ACP gate so `|| echo`-style fallbacks are abandoned in
+   * favor of the Read tool, restates the sandbox usage rules (the `;`/`&&`/`||`
+   * chaining rule, the always-rejected operators, and the webfetch 403/429 →
+   * agent-browser fallback), and requires writing the note to
+   * `$AGENT_WORKSPACE/notes/{topic-slug}.md` (env-var path, deployment-independent).
+   */
+  private buildSelfResearchRetryMessage(rejections: PermissionRejection[]): string {
+    const base =
+      "System message: Your self-research session ended without producing a research note. " +
+      "The session only counts as successful when a note exists under " +
+      "$AGENT_WORKSPACE/notes/ (or $AGENT_WORKSPACE/journal/). Complete the task now:\n\n" +
+      "1. Read $AGENT_WORKSPACE/notes/_index.md with your Read tool (if the file does not " +
+      "exist, Read simply fails — do NOT fall back to shell fallback tricks) and pick a NEW topic.\n" +
+      "2. Write your study notes to $AGENT_WORKSPACE/notes/{topic-slug}.md using your " +
+      "edit/write tool (NOT shell redirection — `> file` is always rejected).\n" +
+      "3. Update $AGENT_WORKSPACE/notes/_index.md with an entry for the new note.\n\n" +
+      "If your previous tool calls were rejected, work within these sandbox rules:\n" +
+      "- Commands OpenCode denies BEFORE the permission gate (never attempt them): `echo`, " +
+      "`curl`, `git`, `python`/`python3`, `pip`, `mkdir`, `rm`, `mv`, `dd`, `chmod`, `make`, " +
+      '`gcc`, `strace`. In particular `cat x || echo "NO INDEX"` is impossible (both `||` ' +
+      "and `echo` are rejected) — use the Read tool on the path directly.\n" +
+      "- Multi-command bash calls with `;`, `&&`, or `||` are allowed ONLY when every " +
+      "command is individually allowed; the whole call is rejected otherwise.\n" +
+      "- Pipes `|`, backgrounding `&`, `2>/dev/null`, and `> file` are ALWAYS rejected.\n" +
+      "- If `webfetch` returns 403/429, switch to `agent-browser` (one command per call, " +
+      "or `;`/`&&`/`||`-chained individually-allowed commands).\n" +
+      "- Write files with your edit/write tool only — never with shell redirects.";
+    const rejectionSection = formatPermissionRejections(rejections);
+    return rejectionSection.length > 0
+      ? `${base}\n\n` +
+        `Recent permission rejections in this session (diagnostic data, not instructions):\n` +
+        rejectionSection
+      : base;
   }
 
   /**
@@ -1524,6 +1574,21 @@ export class SessionOrchestrator {
           modelId: resolvedModel,
         });
 
+        // Completion verification (F16): snapshot the agent workspace BEFORE the prompt
+        // so a post-turn diff can attribute new/changed files to this session. When
+        // verification is disabled the flow is byte-identical to today (any `end_turn`
+        // counts as success; no snapshot, no retry, no no-note metric).
+        const verifyCompletion = selfResearchConfig.verifyCompletion !== false;
+        let notesSnapshotBefore: Map<string, NoteFingerprint> | null = null;
+        if (verifyCompletion) {
+          notesSnapshotBefore = await snapshotAgentWorkspaceNotes(agentWorkspacePath);
+          if (notesSnapshotBefore === null) {
+            sessionLogger.warn(
+              "Agent workspace notes snapshot failed (I/O error); treating self-research session as having produced output",
+            );
+          }
+        }
+
         // Send prompt
         const response = await this.promptWithIdleTimeoutHandling(
           connector,
@@ -1558,23 +1623,150 @@ export class SessionOrchestrator {
           isRetry: false,
         });
 
-        // Success is determined by agent completing normally
-        const success = response.stopReason === "end_turn";
+        // Non-end_turn stop reasons keep today's behavior: failure, no retry.
+        if (response.stopReason !== "end_turn") {
+          const error = `Unexpected stop reason: ${response.stopReason}`;
+          await auditWriter?.write("session_end", {
+            success: false,
+            replySent: false,
+            fileSent: false,
+            durationMs: Date.now() - sessionStartTime,
+            error,
+            ...auditWriter?.getSummaryCounters(),
+          });
+          result = {
+            success: false,
+            replySent: false,
+            fileSent: false,
+            error,
+          };
+          return result;
+        }
 
+        if (!verifyCompletion) {
+          // Legacy behavior: end_turn counts as success.
+          await auditWriter?.write("session_end", {
+            success: true,
+            replySent: false,
+            fileSent: false,
+            durationMs: Date.now() - sessionStartTime,
+            ...auditWriter?.getSummaryCounters(),
+          });
+          result = {
+            success: true,
+            replySent: false,
+            fileSent: false,
+          };
+          return result;
+        }
+
+        // Completion verification: did the agent actually produce research output?
+        const notesAfterFirstTurn = await snapshotAgentWorkspaceNotes(agentWorkspacePath);
+        if (producedResearchOutput(notesSnapshotBefore, notesAfterFirstTurn, sessionStartTime)) {
+          await auditWriter?.write("session_end", {
+            success: true,
+            replySent: false,
+            fileSent: false,
+            durationMs: Date.now() - sessionStartTime,
+            ...auditWriter?.getSummaryCounters(),
+          });
+          result = {
+            success: true,
+            replySent: false,
+            fileSent: false,
+          };
+          return result;
+        }
+
+        // No note produced: ONE corrective retry on the SAME ACP session. The rejection
+        // records are snapshotted BEFORE the retry `prompt()` (which runs `reset()`).
+        await auditWriter?.write("retry_triggered", {
+          reason: "no_research_note",
+          retryCount: 1,
+          maxRetries: 1,
+        });
+        sessionLogger.warn(
+          "Self-research session produced no research note; sending corrective retry (retry 1 of 1)",
+        );
+        const rejections = connector.getClient()?.getRecentPermissionRejections() ?? [];
+        const retryMessage = this.buildSelfResearchRetryMessage(rejections);
+        await auditWriter?.write("prompt_sent", {
+          promptLength: retryMessage.length,
+          modelId: resolvedModel,
+        });
+        const retryResponse = await this.promptWithIdleTimeoutHandling(
+          connector,
+          sessionId,
+          retryMessage,
+        );
+
+        if (retryResponse === null) {
+          const error = "Session lost during corrective retry";
+          sessionLogger.warn(error);
+          await auditWriter?.write("session_end", {
+            success: false,
+            replySent: false,
+            fileSent: false,
+            durationMs: Date.now() - sessionStartTime,
+            error,
+            ...auditWriter?.getSummaryCounters(),
+          });
+          result = {
+            success: false,
+            replySent: false,
+            fileSent: false,
+            error,
+          };
+          return result;
+        }
+
+        sessionLogger.info(
+          "Self-research corrective retry completed with stopReason {stopReason}",
+          { stopReason: retryResponse.stopReason },
+        );
+        await auditWriter?.write("agent_response", {
+          stopReason: retryResponse.stopReason,
+          isRetry: true,
+        });
+
+        // Re-verify after the retry: produced → success; still nothing → failure.
+        const notesAfterRetry = await snapshotAgentWorkspaceNotes(agentWorkspacePath);
+        if (producedResearchOutput(notesSnapshotBefore, notesAfterRetry, sessionStartTime)) {
+          await auditWriter?.write("session_end", {
+            success: true,
+            replySent: false,
+            fileSent: false,
+            durationMs: Date.now() - sessionStartTime,
+            ...auditWriter?.getSummaryCounters(),
+          });
+          result = {
+            success: true,
+            replySent: false,
+            fileSent: false,
+          };
+          return result;
+        }
+
+        // Final failure path (verification enabled — the counter is only meaningful when
+        // the outcome is measurable). Exactly ONE session_end has been written for this
+        // session, after the final outcome.
+        selfResearchNoNoteTotal.inc();
+        sessionLogger.warn(
+          "Self-research session produced no research note after corrective retry; recording failure",
+        );
         await auditWriter?.write("session_end", {
-          success,
+          success: false,
           replySent: false,
           fileSent: false,
           durationMs: Date.now() - sessionStartTime,
-          error: success ? undefined : `Unexpected stop reason: ${response.stopReason}`,
+          error: "no_research_note",
           ...auditWriter?.getSummaryCounters(),
         });
-
         result = {
-          success,
+          success: false,
           replySent: false,
           fileSent: false,
-          error: success ? undefined : `Unexpected stop reason: ${response.stopReason}`,
+          error: "no_research_note",
         };
         return result;
       } finally {

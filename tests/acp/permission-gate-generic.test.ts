@@ -4,7 +4,9 @@ import {
   GENERIC_COMMAND_ALLOWLIST,
   genericCommandRejectionReason,
   isApprovedGenericCommand,
+  multiCommandRejectionReason,
   referencesOutOfWorkspacePath,
+  splitCommandSegments,
 } from "@acp/client.ts";
 
 // Session workspace used across cases. The agent's cwd is this directory, so relative
@@ -22,8 +24,30 @@ const DATA_ROOT = `${WS}/tmp/opencode-data`;
 const XDG_DATA_HOME = `${DATA_ROOT}/sess_own`;
 const TOOL_OUTPUT = `${XDG_DATA_HOME}/opencode/tool-output`;
 
+// Runtime values for the harness-set variable expansions (F12 D5): mirror what
+// agent-factory sets in the agent subprocess environment.
+const AGENT_WORKSPACE = "/app/data/agent-workspace";
+const RUNTIME_ENV = {
+  tmpDir: `${WS}/tmp`,
+  agentWorkspace: AGENT_WORKSPACE,
+  sessionId: "sess_own",
+};
+const DIRS_WITH_AGENT = [WS, AGENT_WORKSPACE];
+
 function approve(cmd: string): boolean {
   return isApprovedGenericCommand(cmd, WS, DIRS, HOME, XDG_DATA_HOME, DATA_ROOT);
+}
+
+function approveWithRuntime(cmd: string, dirs: string[] = DIRS_WITH_AGENT): boolean {
+  return isApprovedGenericCommand(
+    cmd,
+    WS,
+    dirs,
+    HOME,
+    XDG_DATA_HOME,
+    DATA_ROOT,
+    RUNTIME_ENV,
+  );
 }
 
 Deno.test("F12 D2 - in-workspace generic commands are approved", () => {
@@ -360,4 +384,208 @@ Deno.test("F12 D2 - allow-list excludes dangerous tools and DSL/indirection tool
   for (const good of ["rg", "cat", "head", "tail", "ls", "find", "wc", "jq", "pdftotext"]) {
     assertEquals(GENERIC_COMMAND_ALLOWLIST.has(good), true, `${good} must be allow-listed`);
   }
+});
+
+// --- F12 D2 chaining rule: splitCommandSegments ---
+
+Deno.test("F12 D2 splitCommandSegments - plain chains split on ;, &&, || outside quotes", () => {
+  assertEquals(splitCommandSegments("cat a; ls b"), ["cat a", "ls b"]);
+  assertEquals(splitCommandSegments("cat a && ls b && wc c"), ["cat a", "ls b", "wc c"]);
+  assertEquals(splitCommandSegments("cat a || ls b"), ["cat a", "ls b"]);
+  assertEquals(splitCommandSegments("cat a&&ls b||wc c"), ["cat a", "ls b", "wc c"]);
+  // No separator → byte-identical single segment.
+  assertEquals(splitCommandSegments("cat a 2>&1"), ["cat a 2>&1"]);
+  assertEquals(splitCommandSegments("cat a"), ["cat a"]);
+  // Single `&` / `|` are NOT splitting boundaries; they survive in the segment.
+  assertEquals(splitCommandSegments("cat a &"), ["cat a &"]);
+  assertEquals(splitCommandSegments("cat a | rg b"), ["cat a | rg b"]);
+});
+
+Deno.test("F12 D2 splitCommandSegments - quoted separators are not splitting boundaries", () => {
+  assertEquals(splitCommandSegments('agent-browser fill @e2 "some; text"'), [
+    'agent-browser fill @e2 "some; text"',
+  ]);
+  assertEquals(splitCommandSegments("rg 'a;b && c' f"), ["rg 'a;b && c' f"]);
+  assertEquals(splitCommandSegments('echo "x && y"; cat f'), ['echo "x && y"', "cat f"]);
+  // Escaped quote inside double quotes keeps the separator inside the quotes.
+  assertEquals(splitCommandSegments('cat "a\\"; b"'), ['cat "a\\"; b"']);
+  assertEquals(splitCommandSegments("cat 'it''s; fine'"), ["cat 'it''s; fine'"]);
+});
+
+Deno.test("F12 D2 splitCommandSegments - empty segments are dropped, unbalanced quotes disable splitting", () => {
+  // `; ;` empty segments, leading/trailing separators.
+  assertEquals(splitCommandSegments("cat a; ; ls b"), ["cat a", "ls b"]);
+  assertEquals(splitCommandSegments("; cat a;"), ["cat a"]);
+  assertEquals(splitCommandSegments("cat a;"), ["cat a"]);
+  // Unbalanced quotes → no split; the whole command is one segment.
+  assertEquals(splitCommandSegments("cat a; cat 'unbalanced"), ["cat a; cat 'unbalanced"]);
+  assertEquals(splitCommandSegments('cat a && echo "x'), ['cat a && echo "x']);
+});
+
+Deno.test("F12 D2 splitCommandSegments - glued redirect-only segment shapes", () => {
+  // `2>&1&&cat x` splits into a redirect-only segment and a real command.
+  assertEquals(splitCommandSegments("2>&1&&cat x"), ["2>&1", "cat x"]);
+  assertEquals(splitCommandSegments("2>&1; cat x"), ["2>&1", "cat x"]);
+  // The trailing `2>&1` belongs to the first segment when glued to `;`.
+  assertEquals(splitCommandSegments("cat x 2>&1; ls y"), ["cat x 2>&1", "ls y"]);
+});
+
+// --- F12 D2 chaining rule: multiCommandRejectionReason ---
+
+Deno.test("F12 D2 multiCommandRejectionReason - all-approved chains return null", () => {
+  assertEquals(
+    multiCommandRejectionReason(
+      `cat ${WS}/notes.md 2>&1; ls ${WS}/tmp/`,
+      WS,
+      DIRS,
+      HOME,
+      XDG_DATA_HOME,
+      DATA_ROOT,
+    ),
+    null,
+  );
+  assertEquals(
+    multiCommandRejectionReason(
+      `cat ${WS}/notes.md && head ${WS}/tmp/scratch.txt`,
+      WS,
+      DIRS,
+      HOME,
+      XDG_DATA_HOME,
+      DATA_ROOT,
+    ),
+    null,
+  );
+  // Single-segment commands behave byte-identically to today.
+  assertEquals(
+    multiCommandRejectionReason(
+      `cat ${WS}/notes.md 2>&1`,
+      WS,
+      DIRS,
+      HOME,
+      XDG_DATA_HOME,
+      DATA_ROOT,
+    ),
+    genericCommandRejectionReason(
+      `cat ${WS}/notes.md 2>&1`,
+      WS,
+      DIRS,
+      HOME,
+      XDG_DATA_HOME,
+      DATA_ROOT,
+    ),
+  );
+});
+
+Deno.test("F12 D2 multiCommandRejectionReason - first failing segment's cause is reported", () => {
+  const reason = (cmd: string) =>
+    multiCommandRejectionReason(cmd, WS, DIRS, HOME, XDG_DATA_HOME, DATA_ROOT);
+  // Path outside boundary.
+  assertEquals(reason(`cat ${WS}/x.md 2>&1; cat /etc/passwd`), "path_outside_boundary");
+  // First token not allowed (echo).
+  assertEquals(reason(`cat ${WS}/x.md 2>&1; echo y`), "first_token_not_allowed");
+  // File-referencing redirect in the first segment.
+  assertEquals(reason(`cat ${WS}/x.md 2>/dev/null || echo y`), "shell_operator");
+  // Pipe is not a splitting boundary → shell_operator on the whole command.
+  assertEquals(reason(`cat ${WS}/x.md | rg y`), "shell_operator");
+  // Redirect-only segment is an operator artifact → shell_operator.
+  assertEquals(reason(`2>&1&&cat /etc/passwd`), "shell_operator");
+  assertEquals(reason(`2>&1; cat ${WS}/x.md`), "shell_operator");
+  // Newline separator is not a splitting boundary → shell_operator.
+  assertEquals(reason(`cat ${WS}/x.md 2>&1\nrm victim`), "shell_operator");
+});
+
+// --- F12 D5: shell-expansion token tightening ---
+
+Deno.test("F12 D5 - unquoted unknown $VAR references are rejected", () => {
+  assertEquals(approve("cat $IFS/etc/passwd"), false);
+  assertEquals(approve("cat ${OTHER}/etc/shadow"), false);
+  assertEquals(approve("cat $VAR/../etc/passwd"), false);
+  assertEquals(approve("cat --file=$OTHER/x"), false);
+});
+
+Deno.test("F12 D5 - unquoted brace-expansion tokens are rejected", () => {
+  assertEquals(approve("cat {safe,/etc/passwd}"), false);
+  assertEquals(approve("cat {/etc/passwd}"), false);
+  // Quoted braces stay allowed.
+  assertEquals(approve(`rg '{a,b}' ${WS}/notes.md`), true);
+  assertEquals(approve(`jq '{a:1}' ${WS}/data.json`), true);
+});
+
+Deno.test("F12 D5 - harness-set variables are expanded and containment-checked", () => {
+  // $TMPDIR resolves inside the session workspace.
+  assertEquals(approveWithRuntime("cat $TMPDIR/scratch.txt"), true);
+  assertEquals(approveWithRuntime("cat ${TMPDIR}/scratch.txt"), true);
+  // $AGENT_WORKSPACE resolves inside the agent workspace boundary.
+  assertEquals(approveWithRuntime("cat $AGENT_WORKSPACE/notes/_index.md"), true);
+  assertEquals(approveWithRuntime("cat ${AGENT_WORKSPACE}/notes/_index.md"), true);
+  // $SESSION_ID resolves inside the session workspace.
+  assertEquals(approveWithRuntime("cat $SESSION_ID/x.md"), true);
+  // $XDG_DATA_HOME expansion unchanged (existing behavior).
+  assertEquals(approveWithRuntime("cat $XDG_DATA_HOME/opencode/tool-output/tool_x"), true);
+  // A known variable WITHOUT a runtime value fails closed.
+  assertEquals(
+    isApprovedGenericCommand(
+      "cat $AGENT_WORKSPACE/notes/_index.md",
+      WS,
+      DIRS_WITH_AGENT,
+      HOME,
+      XDG_DATA_HOME,
+      DATA_ROOT,
+    ),
+    false,
+  );
+});
+
+Deno.test("F12 D5 - quoted dollar references stay allowed", () => {
+  assertEquals(approve(`rg 'cost is $5' ${WS}/notes.md`), true);
+  assertEquals(approve(`rg "price $X" ${WS}/notes.md`), true);
+  // Escaped dollar is literal.
+  assertEquals(approve(`rg \\$IFS ${WS}/notes.md`), true);
+  // Embedded double-quoted references are safe (literal prefix keeps the result
+  // relative) — only token-start references are rejected.
+  assertEquals(approve(`cat "a$X/b" ${WS}/notes.md`), true);
+  assertEquals(approve(`rg "x$@y" ${WS}/notes.md`), true);
+});
+
+Deno.test("F12 D5 - double-quoted unknown reference at token start is rejected", () => {
+  // An unset `$X` expands to empty, making `"$X/etc/passwd"` → `/etc/passwd`
+  // (absolute) at runtime; a set variable can carry an absolute value directly.
+  assertEquals(approve(`cat "$X/etc/passwd"`), false);
+  assertEquals(approve(`cat "$X"`), false);
+  assertEquals(approve(`cat "$_"`), false);
+  assertEquals(approve(`cat "$@"`), false);
+  assertEquals(approve(`cat "\${UNKNOWN}/etc/shadow"`), false);
+  assertEquals(approve(`cat --file="$X/etc/passwd"`), false);
+  // Known harness variables in double quotes stay allowed (expanded + containment).
+  assertEquals(approveWithRuntime(`cat "$TMPDIR/scratch.txt"`), true);
+  assertEquals(approveWithRuntime(`cat "$AGENT_WORKSPACE/notes/_index.md"`), true);
+  // ... and are still containment-checked after expansion.
+  assertEquals(approve(`cat "$HOME/.git-credentials"`), false);
+});
+
+Deno.test("F12 D2 - backslash-escaped newline (line continuation) is rejected", () => {
+  // `cat \<newline>/etc/passwd` is a line continuation: bash removes the
+  // backslash-newline and executes `cat /etc/passwd`. The escaped newline must
+  // survive every escape/quote handling and reject the command.
+  assertEquals(approve("cat \\\n/etc/passwd"), false);
+  assertEquals(approve("cat \\\n$HOME/.git-credentials"), false);
+  assertEquals(approve('cat "\\\n/etc/passwd"'), false);
+  assertEquals(approve("cat 'a\\\nb' " + WS + "/notes.md"), false);
+  // Plain (non-escaped) newline separators remain rejected.
+  assertEquals(approve(`cat ${WS}/notes.md\nrm victim`), false);
+});
+
+Deno.test("F12 D5 - referencesOutOfWorkspacePath recognizes harness vars, rejects unknown unquoted refs", () => {
+  // Known harness-set variables are recognized WITHOUT expansion.
+  assertEquals(referencesOutOfWorkspacePath("$TMPDIR/$SESSION_ID/x.md"), false);
+  assertEquals(referencesOutOfWorkspacePath("$AGENT_WORKSPACE/notes/_index.md"), false);
+  assertEquals(referencesOutOfWorkspacePath("${TMPDIR}/x"), false);
+  // Unknown unquoted references are out-of-workspace.
+  assertEquals(referencesOutOfWorkspacePath("$IFS/etc/passwd"), true);
+  assertEquals(referencesOutOfWorkspacePath("${OTHER}/x"), true);
+  // Quoted references stay allowed.
+  assertEquals(referencesOutOfWorkspacePath("'$IFS/etc'"), false);
+  assertEquals(referencesOutOfWorkspacePath('"price $X"'), false);
+  // Unquoted brace tokens are out-of-workspace.
+  assertEquals(referencesOutOfWorkspacePath("{safe,/etc/passwd}"), true);
 });

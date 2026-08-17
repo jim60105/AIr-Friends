@@ -287,6 +287,7 @@ selfResearch:
     - url: "https://example.org/rss"
   minIntervalMs: 43200000          # Minimum interval: 12 hours (default); override with env SELF_RESEARCH_MIN_INTERVAL_MS
   maxIntervalMs: 86400000          # Maximum interval: 24 hours (default); override with env SELF_RESEARCH_MAX_INTERVAL_MS
+  verifyCompletion: true           # Verify a session actually produced a note before counting it as success, and retry once otherwise (default: true); override with env SELF_RESEARCH_VERIFY_COMPLETION
 
 # Memory maintenance: agent periodically summarizes and compacts old memories
 memoryMaintenance:

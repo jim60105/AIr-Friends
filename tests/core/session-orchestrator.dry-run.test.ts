@@ -424,6 +424,7 @@ Deno.test("Dry run — works for self-research session type", async () => {
       rssFeeds: [],
       minIntervalMs: 43200000,
       maxIntervalMs: 86400000,
+      verifyCompletion: true,
     });
 
     assertEquals(response.success, true);

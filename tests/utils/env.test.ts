@@ -285,6 +285,34 @@ Deno.test("applyEnvOverrides - SELF_RESEARCH_MIN_INTERVAL_MS sets number", () =>
   }
 });
 
+Deno.test("applyEnvOverrides - SELF_RESEARCH_VERIFY_COMPLETION sets boolean", () => {
+  Deno.env.set("SELF_RESEARCH_VERIFY_COMPLETION", "false");
+  try {
+    const config: Record<string, unknown> = {
+      selfResearch: { verifyCompletion: true },
+    };
+    applyEnvOverrides(config);
+    const sr = config.selfResearch as { verifyCompletion: boolean };
+    assertEquals(sr.verifyCompletion, false);
+  } finally {
+    Deno.env.delete("SELF_RESEARCH_VERIFY_COMPLETION");
+  }
+});
+
+Deno.test("applyEnvOverrides - SELF_RESEARCH_VERIFY_COMPLETION invalid value falls back to default", () => {
+  Deno.env.set("SELF_RESEARCH_VERIFY_COMPLETION", "banana");
+  try {
+    const config: Record<string, unknown> = {
+      selfResearch: { verifyCompletion: true },
+    };
+    applyEnvOverrides(config);
+    const sr = config.selfResearch as { verifyCompletion: boolean };
+    assertEquals(sr.verifyCompletion, true);
+  } finally {
+    Deno.env.delete("SELF_RESEARCH_VERIFY_COMPLETION");
+  }
+});
+
 Deno.test("applyEnvOverrides - MEMORY_MAINTENANCE_ENABLED sets memoryMaintenance.enabled", () => {
   Deno.env.set("MEMORY_MAINTENANCE_ENABLED", "true");
   try {

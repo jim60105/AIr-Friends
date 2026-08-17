@@ -1,11 +1,13 @@
 // src/utils/hash.ts
 
 /**
- * SHA-256 hash a string, returning hex digest.
+ * SHA-256 hash a string or raw bytes, returning hex digest.
  * Uses Deno's built-in Web Crypto API.
  */
-export async function sha256Hash(content: string): Promise<string> {
-  const data = new TextEncoder().encode(content);
+export async function sha256Hash(content: string | Uint8Array): Promise<string> {
+  const data = typeof content === "string"
+    ? new TextEncoder().encode(content)
+    : new Uint8Array(content); // copy so the underlying buffer is a plain ArrayBuffer
   const hashBuffer = await crypto.subtle.digest("SHA-256", data);
   const hashArray = Array.from(new Uint8Array(hashBuffer));
   return hashArray.map((b) => b.toString(16).padStart(2, "0")).join("");

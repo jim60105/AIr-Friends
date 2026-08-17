@@ -55,6 +55,7 @@ export const ENV_MAPPINGS = {
   SELF_RESEARCH_RSS_FEEDS: "selfResearch.rssFeeds",
   SELF_RESEARCH_MIN_INTERVAL_MS: "selfResearch.minIntervalMs",
   SELF_RESEARCH_MAX_INTERVAL_MS: "selfResearch.maxIntervalMs",
+  SELF_RESEARCH_VERIFY_COMPLETION: "selfResearch.verifyCompletion",
 
   // Memory maintenance settings
   MEMORY_MAINTENANCE_ENABLED: "memoryMaintenance.enabled",
@@ -214,7 +215,13 @@ export function applyEnvOverrides(config: Record<string, unknown>): void {
       else if (value === "false") parsedValue = false;
       else if (/^\d+$/.test(value)) parsedValue = parseInt(value, 10);
       else if (/^\d+\.\d+$/.test(value)) parsedValue = parseFloat(value);
-      // Handle comma-separated arrays
+      // Handle strict boolean-only overrides: any other value is ignored with a warning.
+      else if (envName === "SELF_RESEARCH_VERIFY_COMPLETION") {
+        console.warn(
+          `Invalid ${envName} value "${value}" (expected "true" or "false"); ignoring override`,
+        );
+        continue;
+      } // Handle comma-separated arrays
       else if (
         envName === "SKILL_SEND_FILE_ALLOWED_EXTENSIONS" ||
         envName === "AGENT_SANDBOX_ALLOWED_ENV_VARS" ||

@@ -14,6 +14,7 @@ import {
   MAX_PERMISSION_REJECTION_FIELD_LENGTH,
   sanitizeRejectionField,
   type SkillAutoApproveList,
+  splitCommandSegments,
 } from "@acp/client.ts";
 import * as acp from "@agentclientprotocol/sdk";
 import { Logger, LogLevel } from "@utils/logger.ts";
@@ -1991,6 +1992,443 @@ Deno.test("ChatbotClient - rejects semicolon injection in command prefix", async
   } finally {
     Deno.removeSync(tempDir, { recursive: true });
   }
+});
+
+// --- F12 D2 chaining rule: requestPermission-level tests ---
+
+Deno.test("ChatbotClient - approves the observed agent-browser ; chain failure shape", async () => {
+  const tempDir = Deno.makeTempDirSync();
+  try {
+    const skillRegistry = createTestSkillRegistry();
+    const logger = createTestLogger();
+    const config = {
+      workingDir: tempDir,
+      platform: "discord",
+      userId: "123",
+      channelId: "456",
+      isDM: false,
+      sessionId: "sess_chain",
+    };
+    const allowList: SkillAutoApproveList = {
+      scriptPaths: new Set(),
+      commandPrefixes: new Set(["agent-browser"]),
+    };
+    const client = new ChatbotClient(skillRegistry, logger, config, allowList);
+
+    const request: acp.RequestPermissionRequest = {
+      sessionId: "sess_chain",
+      toolCall: {
+        title: "Execute shell command",
+        kind: "execute",
+        status: "pending" as const,
+        content: [],
+        toolCallId: "test-id",
+        rawInput: {
+          commands: [
+            'agent-browser --args "--no-sandbox" open "https://example.com" 2>&1; ' +
+            'agent-browser --args "--no-sandbox" get text 2>&1',
+          ],
+        },
+      },
+      options: [
+        { kind: "allow_once", optionId: "allow-1", name: "Allow once" },
+        { kind: "reject_once", optionId: "reject-1", name: "Reject once" },
+      ],
+    };
+
+    const response = await client.requestPermission(request);
+    assertEquals(response.outcome.outcome, "selected");
+    if (response.outcome.outcome === "selected") {
+      assertEquals(response.outcome.optionId, "allow-1");
+    }
+  } finally {
+    Deno.removeSync(tempDir, { recursive: true });
+  }
+});
+
+Deno.test("ChatbotClient - approves an all-generic in-workspace chain", async () => {
+  const tempDir = Deno.makeTempDirSync();
+  try {
+    const skillRegistry = createTestSkillRegistry();
+    const logger = createTestLogger();
+    const config = {
+      workingDir: tempDir,
+      platform: "discord",
+      userId: "123",
+      channelId: "456",
+      isDM: false,
+      sessionId: "sess_chain2",
+    };
+    const client = new ChatbotClient(skillRegistry, logger, config);
+
+    const request: acp.RequestPermissionRequest = {
+      sessionId: "sess_chain2",
+      toolCall: {
+        title: "Execute shell command",
+        kind: "execute",
+        status: "pending" as const,
+        content: [],
+        toolCallId: "test-id",
+        rawInput: {
+          commands: [`cat ${tempDir}/notes.md 2>&1; ls ${tempDir}/`],
+        },
+      },
+      options: [
+        { kind: "allow_once", optionId: "allow-1", name: "Allow once" },
+        { kind: "reject_once", optionId: "reject-1", name: "Reject once" },
+      ],
+    };
+
+    const response = await client.requestPermission(request);
+    assertEquals(response.outcome.outcome, "selected");
+    if (response.outcome.outcome === "selected") {
+      assertEquals(response.outcome.optionId, "allow-1");
+    }
+  } finally {
+    Deno.removeSync(tempDir, { recursive: true });
+  }
+});
+
+Deno.test("ChatbotClient - rejects chains with a failing segment, one audit entry with the right cause", async () => {
+  const tempDir = Deno.makeTempDirSync();
+  try {
+    const skillRegistry = createTestSkillRegistry();
+    const logger = createTestLogger();
+    const config = {
+      workingDir: tempDir,
+      platform: "discord",
+      userId: "123",
+      channelId: "456",
+      isDM: false,
+      sessionId: "sess_chain_rej",
+    };
+    const allowList: SkillAutoApproveList = {
+      scriptPaths: new Set(),
+      commandPrefixes: new Set(["agent-browser"]),
+    };
+    const client = new ChatbotClient(skillRegistry, logger, config, allowList);
+    const auditConfig = createTestAuditConfig();
+    const writer = new SessionAuditWriter(
+      tempDir,
+      "discord",
+      "123",
+      "sess_chain_rej",
+      auditConfig,
+    );
+    client.setAuditWriter(writer);
+
+    // (a) `|| echo` fallback → echo segment fails with first_token_not_allowed.
+    const fallbackRequest: acp.RequestPermissionRequest = {
+      sessionId: "sess_chain_rej",
+      toolCall: {
+        title: "Execute shell command",
+        kind: "execute",
+        status: "pending" as const,
+        content: [],
+        toolCallId: "rej-a",
+        rawInput: {
+          commands: ["agent-browser open https://example.com || echo fallback"],
+        },
+      },
+      options: [
+        { kind: "allow_once", optionId: "allow-1", name: "Allow once" },
+        { kind: "reject_once", optionId: "reject-1", name: "Reject once" },
+      ],
+    };
+    const fallback = await client.requestPermission(fallbackRequest);
+    assertEquals(fallback.outcome.outcome, "selected");
+    if (fallback.outcome.outcome === "selected") {
+      assertEquals(fallback.outcome.optionId, "reject-1");
+    }
+
+    // (b) `&&` chain with an out-of-workspace second segment → path_outside_boundary.
+    const pathRequest: acp.RequestPermissionRequest = {
+      sessionId: "sess_chain_rej",
+      toolCall: {
+        title: "Execute shell command",
+        kind: "execute",
+        status: "pending" as const,
+        content: [],
+        toolCallId: "rej-b",
+        rawInput: {
+          commands: [`ls ${tempDir}/ 2>&1 && cat /etc/passwd`],
+        },
+      },
+      options: [
+        { kind: "allow_once", optionId: "allow-1", name: "Allow once" },
+        { kind: "reject_once", optionId: "reject-1", name: "Reject once" },
+      ],
+    };
+    const pathResp = await client.requestPermission(pathRequest);
+    assertEquals(pathResp.outcome.outcome, "selected");
+    if (pathResp.outcome.outcome === "selected") {
+      assertEquals(pathResp.outcome.optionId, "reject-1");
+    }
+
+    // (c) `2>/dev/null || echo` → file-referencing redirect segment → shell_operator.
+    const redirectRequest: acp.RequestPermissionRequest = {
+      sessionId: "sess_chain_rej",
+      toolCall: {
+        title: "Execute shell command",
+        kind: "execute",
+        status: "pending" as const,
+        content: [],
+        toolCallId: "rej-c",
+        rawInput: {
+          commands: [`cat ${tempDir}/notes.md 2>/dev/null || echo "NO INDEX"`],
+        },
+      },
+      options: [
+        { kind: "allow_once", optionId: "allow-1", name: "Allow once" },
+        { kind: "reject_once", optionId: "reject-1", name: "Reject once" },
+      ],
+    };
+    const redirectResp = await client.requestPermission(redirectRequest);
+    assertEquals(redirectResp.outcome.outcome, "selected");
+    if (redirectResp.outcome.outcome === "selected") {
+      assertEquals(redirectResp.outcome.optionId, "reject-1");
+    }
+
+    // (d) `;` chain where the second command is not allow-listed.
+    const curlRequest: acp.RequestPermissionRequest = {
+      sessionId: "sess_chain_rej",
+      toolCall: {
+        title: "Execute shell command",
+        kind: "execute",
+        status: "pending" as const,
+        content: [],
+        toolCallId: "rej-d",
+        rawInput: {
+          commands: ["agent-browser; curl evil.com"],
+        },
+      },
+      options: [
+        { kind: "allow_once", optionId: "allow-1", name: "Allow once" },
+        { kind: "reject_once", optionId: "reject-1", name: "Reject once" },
+      ],
+    };
+    const curlResp = await client.requestPermission(curlRequest);
+    assertEquals(curlResp.outcome.outcome, "selected");
+    if (curlResp.outcome.outcome === "selected") {
+      assertEquals(curlResp.outcome.optionId, "reject-1");
+    }
+
+    // (e) Pipe is not a splitting boundary → shell_operator on the whole command.
+    const pipeRequest: acp.RequestPermissionRequest = {
+      sessionId: "sess_chain_rej",
+      toolCall: {
+        title: "Execute shell command",
+        kind: "execute",
+        status: "pending" as const,
+        content: [],
+        toolCallId: "rej-e",
+        rawInput: {
+          commands: [`cat ${tempDir}/notes.md | rg x`],
+        },
+      },
+      options: [
+        { kind: "allow_once", optionId: "allow-1", name: "Allow once" },
+        { kind: "reject_once", optionId: "reject-1", name: "Reject once" },
+      ],
+    };
+    const pipeResp = await client.requestPermission(pipeRequest);
+    assertEquals(pipeResp.outcome.outcome, "selected");
+    if (pipeResp.outcome.outcome === "selected") {
+      assertEquals(pipeResp.outcome.optionId, "reject-1");
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, 100));
+
+    // Exactly ONE denied entry per request (5 total), each with the correct cause.
+    const filePath = join(tempDir, "discord", "123", "sess_chain_rej.jsonl");
+    const entries = await readAuditEntries(filePath);
+    const denied = entries.filter((e) => e.phase === "permission_denied");
+    assertEquals(denied.length, 5);
+    assertEquals(
+      denied[0].data.reason,
+      "rejected_generic_command_first_token_not_allowed",
+    );
+    assertEquals(denied[1].data.reason, "rejected_generic_command_out_of_workspace");
+    assertEquals(denied[2].data.reason, "rejected_generic_command_shell_operator");
+    assertEquals(denied[3].data.reason, "rejected_generic_command_first_token_not_allowed");
+    assertEquals(denied[4].data.reason, "rejected_generic_command_shell_operator");
+  } finally {
+    Deno.removeSync(tempDir, { recursive: true });
+  }
+});
+
+Deno.test("F12 D5 - skill payload invocation with $TMPDIR/$SESSION_ID still approved through requestPermission", async () => {
+  const tempDir = Deno.makeTempDirSync();
+  try {
+    const skillRegistry = createTestSkillRegistry();
+    const logger = createTestLogger();
+    const config = {
+      workingDir: tempDir,
+      platform: "discord",
+      userId: "123",
+      channelId: "456",
+      isDM: false,
+      sessionId: "sess_own",
+    };
+    const allowList: SkillAutoApproveList = {
+      scriptPaths: new Set(["skills/memory-save/scripts/memory-save.ts"]),
+      commandPrefixes: new Set(),
+    };
+    const client = new ChatbotClient(skillRegistry, logger, config, allowList);
+
+    const request: acp.RequestPermissionRequest = {
+      sessionId: "sess_own",
+      toolCall: {
+        title: "Execute shell command",
+        kind: "execute",
+        status: "pending" as const,
+        content: [],
+        toolCallId: "test-id",
+        rawInput: {
+          commands: [
+            "deno run skills/memory-save/scripts/memory-save.ts " +
+            "--content-file $TMPDIR/$SESSION_ID/x.md --session-id $SESSION_ID",
+          ],
+        },
+      },
+      options: [
+        { kind: "allow_once", optionId: "allow-1", name: "Allow once" },
+        { kind: "reject_once", optionId: "reject-1", name: "Reject once" },
+      ],
+    };
+
+    const response = await client.requestPermission(request);
+    assertEquals(response.outcome.outcome, "selected");
+    if (response.outcome.outcome === "selected") {
+      assertEquals(response.outcome.optionId, "allow-1");
+    }
+  } finally {
+    Deno.removeSync(tempDir, { recursive: true });
+  }
+});
+
+Deno.test("F12 D5 - unquoted unknown $VAR in a skill command is rejected", async () => {
+  const tempDir = Deno.makeTempDirSync();
+  try {
+    const skillRegistry = createTestSkillRegistry();
+    const logger = createTestLogger();
+    const config = {
+      workingDir: tempDir,
+      platform: "discord",
+      userId: "123",
+      channelId: "456",
+      isDM: false,
+      sessionId: "sess_own",
+    };
+    const allowList: SkillAutoApproveList = {
+      scriptPaths: new Set(),
+      commandPrefixes: new Set(["agent-browser"]),
+    };
+    const client = new ChatbotClient(skillRegistry, logger, config, allowList);
+
+    const request: acp.RequestPermissionRequest = {
+      sessionId: "sess_own",
+      toolCall: {
+        title: "Execute shell command",
+        kind: "execute",
+        status: "pending" as const,
+        content: [],
+        toolCallId: "test-id",
+        rawInput: {
+          commands: ["agent-browser open $IFS/etc/passwd"],
+        },
+      },
+      options: [
+        { kind: "allow_once", optionId: "allow-1", name: "Allow once" },
+        { kind: "reject_once", optionId: "reject-1", name: "Reject once" },
+      ],
+    };
+
+    const response = await client.requestPermission(request);
+    assertEquals(response.outcome.outcome, "selected");
+    if (response.outcome.outcome === "selected") {
+      assertEquals(response.outcome.optionId, "reject-1");
+    }
+  } finally {
+    Deno.removeSync(tempDir, { recursive: true });
+  }
+});
+
+Deno.test("F12 D5/D2 - line-continuation and token-start double-quoted escapes rejected at requestPermission level", async () => {
+  const tempDir = Deno.makeTempDirSync();
+  try {
+    const skillRegistry = createTestSkillRegistry();
+    const logger = createTestLogger();
+    const config = {
+      workingDir: tempDir,
+      platform: "discord",
+      userId: "123",
+      channelId: "456",
+      isDM: false,
+      sessionId: "sess_own",
+    };
+    const client = new ChatbotClient(skillRegistry, logger, config);
+
+    // Each of these must be rejected: backslash-escaped newline (line
+    // continuation → `cat /etc/passwd`), and double-quoted unknown `$VAR`
+    // at token start (unset → empty expansion → absolute path).
+    const evilCommands = [
+      "cat \\\n/etc/passwd",
+      "cat \\\n$HOME/.git-credentials",
+      'cat "$X/etc/passwd"',
+      'cat "$X"',
+      'cat "$_"',
+      'cat --file="$X/etc/passwd"',
+    ];
+
+    for (const evil of evilCommands) {
+      const request: acp.RequestPermissionRequest = {
+        sessionId: "sess_own",
+        toolCall: {
+          title: "Execute shell command",
+          kind: "execute",
+          status: "pending" as const,
+          content: [],
+          toolCallId: "test-id",
+          rawInput: { commands: [evil] },
+        },
+        options: [
+          { kind: "allow_once", optionId: "allow-1", name: "Allow once" },
+          { kind: "reject_once", optionId: "reject-1", name: "Reject once" },
+        ],
+      };
+
+      const response = await client.requestPermission(request);
+      assertEquals(response.outcome.outcome, "selected");
+      if (response.outcome.outcome === "selected") {
+        assertEquals(response.outcome.optionId, "reject-1", `must reject: ${JSON.stringify(evil)}`);
+      }
+    }
+  } finally {
+    Deno.removeSync(tempDir, { recursive: true });
+  }
+});
+
+// --- splitCommandSegments unit tests ---
+
+Deno.test("splitCommandSegments - quote-aware splitting details", () => {
+  // Plain chains.
+  assertEquals(splitCommandSegments("cat a; ls b"), ["cat a", "ls b"]);
+  assertEquals(splitCommandSegments("cat a && ls b"), ["cat a", "ls b"]);
+  assertEquals(splitCommandSegments("cat a || ls b"), ["cat a", "ls b"]);
+  // Quoted separators inside "..." and '...' are not boundaries.
+  assertEquals(splitCommandSegments('cat "a;b" && ls'), ['cat "a;b"', "ls"]);
+  assertEquals(splitCommandSegments("cat 'a&&b' || ls"), ["cat 'a&&b'", "ls"]);
+  // Escaped \" inside double quotes keeps the quote from closing.
+  assertEquals(splitCommandSegments('cat "a\\"; b"'), ['cat "a\\"; b"']);
+  // Empty segments are dropped.
+  assertEquals(splitCommandSegments("cat a; ; ls b"), ["cat a", "ls b"]);
+  assertEquals(splitCommandSegments("cat a;"), ["cat a"]);
+  // Unbalanced quotes → no split.
+  assertEquals(splitCommandSegments("cat a; cat 'unbalanced"), ["cat a; cat 'unbalanced"]);
+  // Glued redirect-only segment shapes.
+  assertEquals(splitCommandSegments("2>&1&&cat x"), ["2>&1", "cat x"]);
+  assertEquals(splitCommandSegments("2>&1; cat x"), ["2>&1", "cat x"]);
 });
 
 Deno.test("ChatbotClient - config-driven auto-approve list approves configured external skill", async () => {
@@ -5514,6 +5952,88 @@ Deno.test("ChatbotClient - edit/write with unexpanded $TMPDIR2 / $OTHER tokens r
         assertEquals(response.outcome.optionId, "reject-1", `must reject: ${tokenPath}`);
       }
     }
+  } finally {
+    Deno.removeSync(tempDir, { recursive: true });
+  }
+});
+
+Deno.test("ChatbotClient - edit/write with $AGENT_WORKSPACE tokens approved for authorized session", async () => {
+  const tempDir = Deno.makeTempDirSync();
+  try {
+    const agentWorkspace = join(tempDir, "agent-workspace");
+    Deno.mkdirSync(join(agentWorkspace, "notes"), { recursive: true });
+    const skillRegistry = createTestSkillRegistry();
+    const logger = createTestLogger();
+    const config = {
+      workingDir: tempDir,
+      agentWorkspacePath: agentWorkspace,
+      platform: "discord",
+      userId: "123",
+      channelId: "456",
+      isDM: false,
+      sessionId: "sess_own",
+      canWriteAgentWorkspace: true,
+    };
+    const client = new ChatbotClient(skillRegistry, logger, config);
+
+    for (
+      const tokenPath of [
+        "$AGENT_WORKSPACE/notes/research.md",
+        "${AGENT_WORKSPACE}/notes/_index.md",
+      ]
+    ) {
+      const request: acp.RequestPermissionRequest = {
+        sessionId: "sess_own",
+        toolCall: {
+          title: tokenPath,
+          kind: "edit",
+          status: "pending" as const,
+          content: [],
+          toolCallId: "test-id",
+          rawInput: { filePath: tokenPath, content: "# note" },
+          locations: [{ path: tokenPath }],
+        },
+        options: [
+          { kind: "allow_once", optionId: "allow-1", name: "Allow once" },
+          { kind: "reject_once", optionId: "reject-1", name: "Reject once" },
+        ],
+      };
+
+      const response = await client.requestPermission(request);
+      assertEquals(response.outcome.outcome, "selected");
+      if (response.outcome.outcome === "selected") {
+        assertEquals(response.outcome.optionId, "allow-1", `must approve: ${tokenPath}`);
+      }
+    }
+  } finally {
+    Deno.removeSync(tempDir, { recursive: true });
+  }
+});
+
+Deno.test("ChatbotClient - readTextFile accepts $AGENT_WORKSPACE env-var paths", async () => {
+  const tempDir = Deno.makeTempDirSync();
+  try {
+    const agentWorkspace = join(tempDir, "agent-workspace");
+    Deno.mkdirSync(join(agentWorkspace, "notes"), { recursive: true });
+    Deno.writeTextFileSync(join(agentWorkspace, "notes", "_index.md"), "# Index");
+    const skillRegistry = createTestSkillRegistry();
+    const logger = createTestLogger();
+    const config = {
+      workingDir: tempDir,
+      agentWorkspacePath: agentWorkspace,
+      platform: "discord",
+      userId: "123",
+      channelId: "456",
+      isDM: false,
+      sessionId: "sess_own",
+    };
+    const client = new ChatbotClient(skillRegistry, logger, config);
+
+    const result = await client.readTextFile({
+      sessionId: "sess_own",
+      path: "$AGENT_WORKSPACE/notes/_index.md",
+    });
+    assertEquals(result.content, "# Index");
   } finally {
     Deno.removeSync(tempDir, { recursive: true });
   }

@@ -49,6 +49,7 @@ function createConfig(overrides?: {
       rssFeeds: [{ url: "https://example.com/feed.xml", name: "Test" }],
       minIntervalMs: overrides?.minIntervalMs ?? 50,
       maxIntervalMs: overrides?.maxIntervalMs ?? 60,
+      verifyCompletion: true,
     },
   };
 }

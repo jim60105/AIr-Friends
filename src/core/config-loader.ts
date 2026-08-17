@@ -194,6 +194,7 @@ const DEFAULT_SELF_RESEARCH = {
   rssFeeds: [],
   minIntervalMs: 43200000, // 12 hours
   maxIntervalMs: 86400000, // 24 hours
+  verifyCompletion: true,
 };
 
 /**
