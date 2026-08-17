@@ -64,7 +64,7 @@ agent:
 
   # Reasoning effort (ACP thought_level): controls how hard the model "thinks".
   # Global default; resolved per session as: routing rule -> section -> this global value.
-  # Values: "none" | "low" | "medium" | "high", or "default" = do not configure
+  # Values: "none" | "low" | "medium" | "high" | "xhigh" | "max", or "default" = do not configure
   # (let the agent/model decide). Agent-specific tokens are passed through as-is.
   # Best-effort: if the agent/model does not expose a thought_level option, it is a no-op.
   # Override the global with env AGENT_REASONING_EFFORT.

@@ -107,7 +107,7 @@ export interface GitCredentialConfig {
  * Resolved per-context through the same chain as model selection
  * (routing rule -> section -> global). Shared by every reasoning-effort field.
  *
- * - `"none" | "low" | "medium" | "high"`: normalized effort levels.
+ * - `"none" | "low" | "medium" | "high" | "xhigh" | "max"`: normalized effort levels.
  * - `"default"`: sentinel meaning "do not configure reasoning effort"
  *   (let the agent/model use its own default). Empty/whitespace normalizes to this.
  * - Any other non-empty string is preserved as an agent-specific passthrough token.
@@ -121,6 +121,8 @@ export type ReasoningEffort =
   | "low"
   | "medium"
   | "high"
+  | "xhigh"
+  | "max"
   | "default"
   // Allow agent-specific passthrough tokens while preserving editor autocomplete
   // for the known values above.

@@ -45,7 +45,7 @@ env:
   # Agent configuration
   AGENT_MODEL: 'openrouter/deepseek/deepseek-v4-pro'
 
-  # Global reasoning effort (ACP thought_level): none|low|medium|high|default
+  # Global reasoning effort (ACP thought_level): none|low|medium|high|xhigh|max|default
   # "default" = do not configure. Per-rule/per-section values go in config / MODEL_ROUTING_RULES.
   AGENT_REASONING_EFFORT: 'default'
 

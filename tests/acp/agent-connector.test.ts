@@ -435,6 +435,92 @@ Deno.test("setReasoningEffort - passthrough token sent even if not in known set"
   assertEquals(calls[0].value, "ultra");
 });
 
+Deno.test("setReasoningEffort - extended levels applied with agent canonical casing when offered", async () => {
+  const connector = createMockConnectorWithCapabilities({});
+  // Agent advertises distinct-cased extended levels.
+  const { calls } = injectThoughtLevel(connector, [
+    { value: "medium", name: "Medium" },
+    { value: "XHigh", name: "X-High" },
+    { value: "MAX", name: "Max" },
+  ]);
+
+  // Configured lowercase, agent advertises "XHigh" -> sent as-is canonical "XHigh".
+  const outXHigh = await connector.setReasoningEffort("s", "xhigh");
+  assertEquals(outXHigh, "applied");
+  assertEquals(calls.length, 1);
+  assertEquals(calls[0].value, "XHigh");
+
+  // Configured lowercase, agent advertises "MAX" -> sent as-is canonical "MAX".
+  const outMax = await connector.setReasoningEffort("s", "max");
+  assertEquals(outMax, "applied");
+  assertEquals(calls.length, 2);
+  assertEquals(calls[1].value, "MAX");
+});
+
+Deno.test("setReasoningEffort - extended levels skipped_unavailable when not offered", async () => {
+  const connector = createMockConnectorWithCapabilities({});
+  // Non-empty advertised list that excludes the extended levels.
+  const { calls } = injectThoughtLevel(connector, [
+    { value: "low", name: "Low" },
+    { value: "medium", name: "Medium" },
+    { value: "high", name: "High" },
+  ]);
+
+  const outXHigh = await connector.setReasoningEffort("s", "xhigh");
+  assertEquals(outXHigh, "skipped_unavailable");
+  assertEquals(calls.length, 0); // not sent
+
+  const outMax = await connector.setReasoningEffort("s", "max");
+  assertEquals(outMax, "skipped_unavailable");
+  assertEquals(calls.length, 0); // still not sent
+});
+
+Deno.test("setReasoningEffort - extended levels sent as-is when advertised list is empty (open-ended)", async () => {
+  const connector = createMockConnectorWithCapabilities({});
+  // Empty enumerated list means the option is open-ended (existing behavior for all known tokens).
+  const { calls } = injectThoughtLevel(connector, []);
+
+  const outXHigh = await connector.setReasoningEffort("s", "xhigh");
+  assertEquals(outXHigh, "applied");
+  assertEquals(calls.length, 1);
+  assertEquals(calls[0].value, "xhigh");
+});
+
+Deno.test("setReasoningEffort - skipped_unavailable warning includes model and agent type", async () => {
+  const warns: Record<string, unknown>[] = [];
+  const connector = new AgentConnector({
+    agentConfig: { command: "mock-agent", args: [], cwd: "/tmp" },
+    clientConfig: {
+      workingDir: "/tmp/workspace",
+      platform: "test",
+      userId: "user1",
+      channelId: "channel1",
+      isDM: false,
+    },
+    skillRegistry: null,
+    agentType: "opencode",
+    logger: {
+      debug: () => {},
+      info: () => {},
+      warn: (_msg: string, ctx?: Record<string, unknown>) => warns.push(ctx ?? {}),
+      error: () => {},
+    },
+  });
+  const { calls } = injectThoughtLevel(connector, [
+    { value: "low", name: "Low" },
+    { value: "high", name: "High" },
+  ]);
+  connector["currentModelId"] = "openrouter/model/xhigh-capable";
+
+  const outcome = await connector.setReasoningEffort("s", "max");
+  assertEquals(outcome, "skipped_unavailable");
+  assertEquals(calls.length, 0);
+  assertEquals(warns.length, 1);
+  assertEquals(warns[0].requested, "max");
+  assertEquals(warns[0].model, "openrouter/model/xhigh-capable");
+  assertEquals(warns[0].agentType, "opencode");
+});
+
 Deno.test("setReasoningEffort - failed when agent rejects (error caught)", async () => {
   const connector = createMockConnectorWithCapabilities({});
   injectThoughtLevel(

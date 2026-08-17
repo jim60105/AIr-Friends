@@ -563,7 +563,7 @@ and the effort independently while keeping them tied to the same matched rule.
 
 | Value | Meaning |
 | ----- | ------- |
-| `"none"` / `"low"` / `"medium"` / `"high"` | Normalized effort levels |
+| `"none"` / `"low"` / `"medium"` / `"high"` / `"xhigh"` / `"max"` | Normalized effort levels |
 | `"default"` (or empty/unset global) | Do not configure — let the agent/model decide |
 | any other token | Agent-specific passthrough (sent as-is, warned at load) |
 

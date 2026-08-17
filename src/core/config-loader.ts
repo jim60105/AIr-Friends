@@ -41,7 +41,15 @@ function isValidChannelId(id: string): boolean {
 }
 
 /** Recognized reasoning-effort tokens (the sentinel "default" means "do not configure"). */
-export const KNOWN_REASONING_EFFORTS = ["none", "low", "medium", "high", "default"] as const;
+export const KNOWN_REASONING_EFFORTS = [
+  "none",
+  "low",
+  "medium",
+  "high",
+  "xhigh",
+  "max",
+  "default",
+] as const;
 
 /**
  * Normalize a single reasoning-effort value (shared by global / per-rule / per-section fields

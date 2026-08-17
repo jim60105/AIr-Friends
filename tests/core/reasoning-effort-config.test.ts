@@ -1,7 +1,12 @@
 // tests/core/reasoning-effort-config.test.ts
 
 import { assertEquals } from "@std/assert";
-import { loadConfig, normalizeReasoningEffort } from "@core/config-loader.ts";
+import {
+  KNOWN_REASONING_EFFORTS,
+  loadConfig,
+  normalizeReasoningEffort,
+} from "@core/config-loader.ts";
+import { KNOWN_REASONING_EFFORT_TOKENS } from "@acp/agent-connector.ts";
 
 // --- normalizeReasoningEffort (pure function) ---
 
@@ -23,14 +28,31 @@ Deno.test("normalizeReasoningEffort - empty/whitespace becomes default", () => {
 });
 
 Deno.test("normalizeReasoningEffort - all known values accepted", () => {
-  for (const v of ["none", "low", "medium", "high", "default"]) {
+  for (const v of ["none", "low", "medium", "high", "xhigh", "max", "default"]) {
     assertEquals(normalizeReasoningEffort(v, "f"), v);
     assertEquals(normalizeReasoningEffort(v.toUpperCase(), "f"), v);
   }
 });
 
+Deno.test("normalizeReasoningEffort - extended levels accepted without warning", () => {
+  // No warning is emitted; values normalize to lowercase. (Warnings would surface
+  // as unhandled log calls only in integration tests; pure-function equality is the gate here.)
+  assertEquals(normalizeReasoningEffort("xhigh", "f"), "xhigh");
+  assertEquals(normalizeReasoningEffort(" XHigh ", "f"), "xhigh");
+  assertEquals(normalizeReasoningEffort("max", "f"), "max");
+  assertEquals(normalizeReasoningEffort("  MAX  ", "f"), "max");
+});
+
 Deno.test("normalizeReasoningEffort - unknown token passthrough preserves trimmed", () => {
   assertEquals(normalizeReasoningEffort("  Ultra  ", "f"), "Ultra");
+});
+
+Deno.test("known reasoning-effort lists stay consistent (no drift)", () => {
+  // KNOWN_REASONING_EFFORT_TOKENS (application gate) must equal
+  // KNOWN_REASONING_EFFORTS (config normalization) minus the "default" sentinel,
+  // which short-circuits earlier in setReasoningEffort().
+  const expected = KNOWN_REASONING_EFFORTS.filter((v) => v !== "default");
+  assertEquals([...KNOWN_REASONING_EFFORT_TOKENS].sort(), [...expected].sort());
 });
 
 Deno.test("normalizeReasoningEffort - non-string coerced to default", () => {
@@ -140,6 +162,38 @@ conversationSummary:
   );
 });
 
+Deno.test("loadConfig - extended levels normalized at global, section, and rule levels", async () => {
+  await withTestConfig(
+    configWithAgentExtra(`  reasoningEffort: "  XHigh  "
+  modelRouting:
+    enabled: true
+    rules:
+      - match: { sessionType: "message" }
+        model: "m1"
+        reasoningEffort: "MAX"`) + `
+selfResearch:
+  enabled: false
+  model: "gpt-4"
+  reasoningEffort: "max"
+memoryMaintenance:
+  enabled: false
+  model: "gpt-4"
+  reasoningEffort: "xhigh"`,
+    async (dir) => {
+      const config = await loadConfig(dir);
+      // Global: mixed-case "XHigh" normalizes to lowercase (passthrough would keep "XHigh").
+      assertEquals(config.agent.reasoningEffort, "xhigh");
+      // Section fields.
+      assertEquals(config.selfResearch?.reasoningEffort, "max");
+      assertEquals(config.memoryMaintenance?.reasoningEffort, "xhigh");
+      // Per-rule "MAX" normalizes to lowercase.
+      const rules = config.agent.modelRouting?.rules ?? [];
+      assertEquals(rules.length, 1);
+      assertEquals(rules[0].reasoningEffort, "max");
+    },
+  );
+});
+
 Deno.test("loadConfig - per-rule reasoningEffort normalized and rule kept", async () => {
   await withTestConfig(
     configWithAgentExtra(`  modelRouting:
@@ -192,6 +246,30 @@ Deno.test("loadConfig - per-rule reasoningEffort survives MODEL_ROUTING_RULES JS
       const rules = config.agent.modelRouting?.rules ?? [];
       assertEquals(rules.length, 1);
       assertEquals(rules[0].reasoningEffort, "ultra");
+    } finally {
+      Deno.env.delete("MODEL_ROUTING_ENABLED");
+      Deno.env.delete("MODEL_ROUTING_RULES");
+    }
+  });
+});
+
+Deno.test("loadConfig - extended levels survive MODEL_ROUTING_RULES JSON normalized lowercase", async () => {
+  await withTestConfig(baseConfig, async (dir) => {
+    Deno.env.set("MODEL_ROUTING_ENABLED", "true");
+    Deno.env.set(
+      "MODEL_ROUTING_RULES",
+      JSON.stringify([
+        { match: { sessionType: "message" }, model: "m1", reasoningEffort: "XHigh" },
+        { match: { sessionType: "spontaneous" }, model: "m2", reasoningEffort: "MAX" },
+      ]),
+    );
+    try {
+      const config = await loadConfig(dir);
+      const rules = config.agent.modelRouting?.rules ?? [];
+      assertEquals(rules.length, 2);
+      // Normalized to lowercase (a passthrough would preserve "XHigh"/"MAX").
+      assertEquals(rules[0].reasoningEffort, "xhigh");
+      assertEquals(rules[1].reasoningEffort, "max");
     } finally {
       Deno.env.delete("MODEL_ROUTING_ENABLED");
       Deno.env.delete("MODEL_ROUTING_RULES");

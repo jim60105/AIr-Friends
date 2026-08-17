@@ -55,8 +55,11 @@ export type ReasoningEffortOutcome =
   | "skipped_unavailable"
   | "failed";
 
-/** Reasoning-effort tokens that have an agreed meaning (used for availability validation). */
-const KNOWN_REASONING_EFFORT_TOKENS = ["none", "low", "medium", "high"];
+/**
+ * Reasoning-effort tokens that have an agreed meaning (used for availability validation).
+ * Exported so tests can pin consistency with `KNOWN_REASONING_EFFORTS` in the config loader.
+ */
+export const KNOWN_REASONING_EFFORT_TOKENS = ["none", "low", "medium", "high", "xhigh", "max"];
 
 /** ACP config option category that represents reasoning / thought level. */
 const THOUGHT_LEVEL_CATEGORY = "thought_level";
@@ -77,6 +80,8 @@ export class AgentConnector {
    * `set_config_option` responses. Used to discover the `thought_level` option.
    */
   private sessionConfigOptions: acp.SessionConfigOption[] = [];
+  /** Model ID of the current session (set by `setSessionModel`); included in warning context */
+  private currentModelId: string | undefined;
   private currentIdleMonitorIntervalId: ReturnType<typeof setInterval> | null = null;
   /**
    * Rejects unconditionally whenever the current subprocess exits, for any reason
@@ -421,6 +426,7 @@ export class AgentConnector {
       modelId,
     }));
 
+    this.currentModelId = modelId;
     logger.info("Session model set to {modelId} for session {sessionId}", { sessionId, modelId });
   }
 
@@ -535,6 +541,8 @@ export class AgentConnector {
           requested: trimmed,
           availableValues,
           configId: option.id,
+          model: this.currentModelId,
+          agentType: this.options.agentType,
         },
       );
       return "skipped_unavailable";

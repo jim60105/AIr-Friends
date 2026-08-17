@@ -661,6 +661,7 @@ export class DashboardServer {
         clientConfig,
         skillRegistry: this.deps.skillRegistry,
         logger: logger,
+        agentType,
         idleTimeoutConfig: this.deps.appConfig.agent.idleTimeout,
       };
 

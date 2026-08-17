@@ -428,6 +428,26 @@ Deno.test("resolveReasoningEffort - first matching rule wins even if later rule 
   assertEquals(resolveReasoningEffort(config, context, "low"), "low");
 });
 
+Deno.test("resolveReasoningEffort - extended rule value overrides section value", () => {
+  const config: ModelRoutingConfig = {
+    enabled: true,
+    rules: [{ match: { sessionType: "self-research" }, model: "m", reasoningEffort: "max" }],
+  };
+  const context: ModelRoutingContext = { sessionType: "self-research" };
+  assertEquals(resolveReasoningEffort(config, context, "xhigh"), "max");
+});
+
+Deno.test("resolveReasoningEffort - extended section value resolves when no rule contributes", () => {
+  const context: ModelRoutingContext = { sessionType: "self-research" };
+  // No routing (or no matching rule) -> section value "xhigh" resolves as-is.
+  assertEquals(resolveReasoningEffort(undefined, context, "xhigh"), "xhigh");
+});
+
+Deno.test("resolveReasoningEffort - extended global value resolves when nothing else contributes", () => {
+  const context: ModelRoutingContext = { sessionType: "message" };
+  assertEquals(resolveReasoningEffort(undefined, context, "max"), "max");
+});
+
 Deno.test("resolveReasoningEffort - model and effort resolved from same matched rule", () => {
   const config: ModelRoutingConfig = {
     enabled: true,

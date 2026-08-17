@@ -439,7 +439,7 @@ The configuration system SHALL support reasoning-effort fields at three levels, 
 - the **per-rule** `reasoningEffort` on each `agent.modelRouting.rules[]` entry (optional, unset when omitted);
 - the **per-section** `reasoningEffort` on `selfResearch`, `memoryMaintenance`, and `conversationSummary` (optional, unset when omitted).
 
-The shared normalization SHALL trim and lowercase values, treat present-but-empty as `"default"`, accept the recognized values (`"none"`, `"low"`, `"medium"`, `"high"`, `"default"`), and otherwise preserve the token as passthrough with a warning. Omitted optional per-rule and per-section fields SHALL remain unset (not coerced to `"default"`).
+The shared normalization SHALL trim and lowercase values, treat present-but-empty as `"default"`, accept the recognized values (`"none"`, `"low"`, `"medium"`, `"high"`, `"xhigh"`, `"max"`, `"default"`), and otherwise preserve the token as passthrough with a warning. Omitted optional per-rule and per-section fields SHALL remain unset (not coerced to `"default"`).
 
 #### Scenario: Global default applied when missing
 
@@ -452,6 +452,12 @@ The shared normalization SHALL trim and lowercase values, treat present-but-empt
 - **GIVEN** `agent.reasoningEffort`, a routing rule's `reasoningEffort`, and `selfResearch.reasoningEffort` are each `"  Medium  "`
 - **WHEN** configuration is loaded
 - **THEN** each SHALL be normalized to `"medium"`
+
+#### Scenario: Extended levels accepted without warning
+
+- **GIVEN** a reasoning-effort field at any level is set to `"xhigh"` or `"MAX"` (or any casing)
+- **WHEN** configuration is loaded and normalized
+- **THEN** the value SHALL be normalized to lowercase (`"xhigh"` / `"max"`) and SHALL NOT produce the non-standard passthrough warning
 
 #### Scenario: Omitted per-rule/per-section field stays unset
 

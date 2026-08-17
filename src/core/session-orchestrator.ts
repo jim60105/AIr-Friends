@@ -626,6 +626,7 @@ export class SessionOrchestrator {
         clientConfig,
         skillRegistry: this.skillRegistry,
         logger: sessionLogger,
+        agentType,
         idleTimeoutConfig: this.config.agent.idleTimeout,
         connectTimeoutMs: this.config.agent.connectTimeoutMs,
       });
@@ -1175,6 +1176,7 @@ export class SessionOrchestrator {
         clientConfig,
         skillRegistry: this.skillRegistry,
         logger: sessionLogger,
+        agentType,
         idleTimeoutConfig: this.config.agent.idleTimeout,
         connectTimeoutMs: this.config.agent.connectTimeoutMs,
       });
@@ -1521,6 +1523,7 @@ export class SessionOrchestrator {
         clientConfig,
         skillRegistry: this.skillRegistry,
         logger: sessionLogger,
+        agentType,
         idleTimeoutConfig: this.config.agent.idleTimeout,
         connectTimeoutMs: this.config.agent.connectTimeoutMs,
       });
@@ -1963,6 +1966,7 @@ export class SessionOrchestrator {
         clientConfig,
         skillRegistry: this.skillRegistry,
         logger: sessionLogger,
+        agentType,
         idleTimeoutConfig: this.config.agent.idleTimeout,
         connectTimeoutMs: this.config.agent.connectTimeoutMs,
       });
@@ -2271,6 +2275,7 @@ export class SessionOrchestrator {
         clientConfig,
         skillRegistry: this.skillRegistry,
         logger: sessionLogger,
+        agentType,
         idleTimeoutConfig: this.config.agent.idleTimeout,
         connectTimeoutMs: this.config.agent.connectTimeoutMs,
       });
@@ -2604,6 +2609,7 @@ export class SessionOrchestrator {
         clientConfig,
         skillRegistry: this.skillRegistry,
         logger: sessionLogger,
+        agentType,
         idleTimeoutConfig: this.config.agent.idleTimeout,
         connectTimeoutMs: this.config.agent.connectTimeoutMs,
       });
