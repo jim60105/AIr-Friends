@@ -115,6 +115,9 @@ data/
 # Deno cache (optional, usually not committed)
 .deno/
 
+# Snyk cache
+.dccache
+
 # Serverless directories
 .serverless/
 
