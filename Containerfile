@@ -37,9 +37,9 @@ ARG TARGETARCH
 # silently broke the permission gate when OpenCode upgraded. Bump deliberately and
 # re-verify the request shape + checksums. Verify with:
 #   curl -fsSL https://github.com/anomalyco/opencode/releases/download/v${OPENCODE_VERSION}/opencode-linux-${OC_ARCH}.tar.gz | sha256sum
-ARG OPENCODE_VERSION=1.17.13
-ARG OPENCODE_SHA256_X64=157afa289d1a8d9372de0ce19ac726119b937a1f6b201808d46f06e4e59bb348
-ARG OPENCODE_SHA256_ARM64=bbaccdd374aaab66cd97c7f8ad1c080aa393610fa5f80ee8dfc007f9500afaf9
+ARG OPENCODE_VERSION=1.18.21
+ARG OPENCODE_SHA256_X64=d910c3ed7613bb5791a328904615d41cc25b7d3a6b470e3199ab0426a995b38a
+ARG OPENCODE_SHA256_ARM64=d30d2cba74617f4e7b96e25563c9572ffe453f9eae70fc0df16286813537ee72
 
 WORKDIR /opencode
 
