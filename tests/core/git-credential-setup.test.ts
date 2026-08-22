@@ -170,7 +170,7 @@ Deno.test("git-credential-setup - setupGitCredentials writes credential file, ch
       { enabled: true },
       createBackupConfig({
         authUser: "oauth2",
-        authPassword: "ghp_test123",
+        authPassword: "pw1",
         remoteUrl: "https://github.com/example/repo.git",
       }),
       {
@@ -183,7 +183,7 @@ Deno.test("git-credential-setup - setupGitCredentials writes credential file, ch
 
     const credentialPath = `${home}/.git-credentials`;
     const content = await Deno.readTextFile(credentialPath);
-    assertEquals(content, "https://oauth2:ghp_test123@github.com\n");
+    assertEquals(content, "https://oauth2:pw1@github.com\n");
 
     const stat = await Deno.stat(credentialPath);
     assertEquals((stat.mode ?? 0) & 0o777, 0o600);
@@ -209,7 +209,7 @@ Deno.test("git-credential-setup - setupGitCredentials gracefully handles missing
   try {
     const result = await runSetupInSubprocess(
       { enabled: true },
-      createBackupConfig({ authPassword: "ghp_test123" }),
+      createBackupConfig({ authPassword: "pw1" }),
       {
         HOME: home,
         PATH: emptyPath,
@@ -222,7 +222,7 @@ Deno.test("git-credential-setup - setupGitCredentials gracefully handles missing
     const content = await Deno.readTextFile(`${home}/.git-credentials`);
     assertEquals(
       content,
-      "https://airfriends-backup%40noreply.github.com:ghp_test123@github.com\n",
+      "https://airfriends-backup%40noreply.github.com:pw1@github.com\n",
     );
   } finally {
     await Deno.remove(home, { recursive: true });

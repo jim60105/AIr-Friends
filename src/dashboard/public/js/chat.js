@@ -7,10 +7,37 @@
     if (res.ok) {
       const models = await res.json();
       const datalist = document.getElementById("model-suggestions");
-      datalist.innerHTML = models.map((m) => `<option value="${esc(m)}"></option>`).join("");
+      const optionsHtml = models.map((m) => `<option value="${esc(m)}"></option>`).join("");
+      if (typeof DOMPurify !== "undefined") {
+        datalist.innerHTML = DOMPurify.sanitize(optionsHtml);
+      } else {
+        datalist.textContent = "";
+        for (const m of models) {
+          const opt = document.createElement("option");
+          opt.value = m;
+          datalist.appendChild(opt);
+        }
+      }
     }
   } catch (_) { /* ignore */ }
 })();
+
+// Validate that the SSE source and the streamed message both come from the
+// expected (same) origin before processing, so a foreign-origin stream or
+// cross-origin postMessage can't inject content into the chat view.
+function sseOriginOk(e) {
+  if (!chatEventSource) return false;
+  try {
+    // Prefer the event's own origin (MessageEvent.origin) when present.
+    if (typeof e?.origin === "string" && e.origin !== "") {
+      return e.origin === location.origin;
+    }
+    const srcOrigin = new URL(chatEventSource.url).origin;
+    return srcOrigin === location.origin;
+  } catch (_) {
+    return false;
+  }
+}
 
 async function chatConnect() {
   const agentType = document.getElementById("chat-agent-type").value;
@@ -57,6 +84,7 @@ async function chatConnect() {
 
     chatEventSource.addEventListener("message", (e) => {
       removeTypingIndicator();
+      if (!sseOriginOk(e)) return;
       const data = JSON.parse(e.data);
       if (!currentAgentMsg) {
         currentAgentMsg = appendMessage("agent", "");
@@ -68,6 +96,7 @@ async function chatConnect() {
 
     chatEventSource.addEventListener("think", (e) => {
       removeTypingIndicator();
+      if (!sseOriginOk(e)) return;
       const data = JSON.parse(e.data);
       if (!currentAgentMsg) {
         currentAgentMsg = appendMessage("agent", "");
@@ -217,10 +246,15 @@ function appendThinkBlock(el, text) {
   const details = document.createElement("details");
   details.className =
     "think-block my-2 bg-surface/50 border border-accent-muted rounded-lg overflow-hidden";
-  details.innerHTML =
+  const thinkHtml =
     `<summary class="px-3 py-1.5 text-xs text-accent cursor-pointer hover:bg-surface-200/30 select-none">💭 Thinking…</summary><div class="think-content px-3 py-2 text-xs text-gray-400 whitespace-pre-wrap border-t border-accent-muted">${
       esc(text)
     }</div>`;
+  if (typeof DOMPurify !== "undefined") {
+    details.innerHTML = DOMPurify.sanitize(thinkHtml);
+  } else {
+    details.textContent = thinkHtml;
+  }
   content.appendChild(details);
   el.parentElement.scrollTop = el.parentElement.scrollHeight;
 }

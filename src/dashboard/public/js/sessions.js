@@ -13,17 +13,22 @@ async function pollActiveSessions() {
         '<tr><td colspan="7" class="px-4 py-6 text-center text-gray-500">No active sessions</td></tr>';
       return;
     }
-    body.innerHTML = sessions.map((s) =>
+    const activeHtml = sessions.map((s) =>
       `<tr class="hover:bg-surface-200/50">
       <td class="px-4 py-2.5 font-mono text-xs text-accent-light break-all">${esc(s.id)}</td>
       <td class="px-4 py-2.5">${esc(s.type || "—")}</td>
       <td class="px-4 py-2.5">${esc(s.platform)}</td>
       <td class="px-4 py-2.5 font-mono text-xs">${esc(s.userId)}</td>
       <td class="px-4 py-2.5 font-mono text-xs">${esc(s.channelId)}</td>
-      <td class="px-4 py-2.5 text-xs">${timeAgo(s.startTime)}</td>
+      <td class="px-4 py-2.5 text-xs">${esc(timeAgo(s.startTime))}</td>
       <td class="px-4 py-2.5"><span class="inline-flex items-center gap-1.5"><span class="w-2 h-2 rounded-full bg-green-400 status-dot-active"></span>Active</span></td>
     </tr>`
     ).join("");
+    if (typeof DOMPurify !== "undefined") {
+      body.innerHTML = DOMPurify.sanitize(activeHtml);
+    } else {
+      body.textContent = activeHtml;
+    }
   } catch (_) {}
 }
 
@@ -38,7 +43,7 @@ async function pollHistory() {
         '<tr><td colspan="7" class="px-4 py-6 text-center text-gray-500">No session history</td></tr>';
       return;
     }
-    body.innerHTML = sessions.map((s) =>
+    const historyHtml = sessions.map((s) =>
       `<tr class="hover:bg-surface-200/50 cursor-pointer" data-audit-id="${esc(s.auditSessionId)}">
       <td class="px-4 py-2.5 font-mono text-xs text-accent-light break-all">${
         esc(s.auditSessionId)
@@ -46,13 +51,18 @@ async function pollHistory() {
       <td class="px-4 py-2.5">${esc(s.type)}</td>
       <td class="px-4 py-2.5">${esc(s.platform)}</td>
       <td class="px-4 py-2.5 font-mono text-xs break-all">${esc(s.userId)}</td>
-      <td class="px-4 py-2.5 text-xs break-words">${formatTime(s.startTime)}</td>
-      <td class="px-4 py-2.5 text-xs">${formatDuration(s.durationMs)}</td>
+      <td class="px-4 py-2.5 text-xs break-words">${esc(formatTime(s.startTime))}</td>
+      <td class="px-4 py-2.5 text-xs">${esc(formatDuration(s.durationMs))}</td>
       <td class="px-4 py-2.5"><span class="inline-flex items-center gap-1.5"><span class="w-2 h-2 rounded-full ${
         s.status === "success" ? "bg-green-400" : "bg-red-400"
       }"></span>${esc(s.status)}</span></td>
     </tr>`
     ).join("");
+    if (typeof DOMPurify !== "undefined") {
+      body.innerHTML = DOMPurify.sanitize(historyHtml);
+    } else {
+      body.textContent = historyHtml;
+    }
     // Re-expand previously expanded audit rows
     for (const sessionId of expandedAuditSessions) {
       const rows = body.querySelectorAll("tr[data-audit-id]");
@@ -98,13 +108,13 @@ async function toggleAudit(row, sessionId) {
       tr.querySelector("td").innerHTML = '<p class="text-xs text-gray-500">No audit entries</p>';
       return;
     }
-    tr.querySelector("td").innerHTML =
+    const auditHtml =
       `<div class="max-h-96 overflow-auto bg-surface-200 rounded-lg p-3 space-y-1 text-xs font-mono">
       ${
         entries.map((e) =>
           `<details class="audit-entry">
             <summary class="flex gap-3 cursor-pointer hover:bg-surface/50 rounded px-1 py-0.5 select-none">
-              <span class="text-gray-500 shrink-0">${formatTime(e.ts)}</span>
+              <span class="text-gray-500 shrink-0">${esc(formatTime(e.ts))}</span>
               <span class="text-accent-light">${esc(e.phase)}</span>
               <span class="text-gray-500 truncate">${
             esc(Object.keys(e.data || {}).join(", "))
@@ -117,6 +127,11 @@ async function toggleAudit(row, sessionId) {
         ).join("")
       }
     </div>`;
+    if (typeof DOMPurify !== "undefined") {
+      tr.querySelector("td").innerHTML = DOMPurify.sanitize(auditHtml);
+    } else {
+      tr.querySelector("td").textContent = auditHtml;
+    }
   } catch (_) {
     tr.querySelector("td").innerHTML = '<p class="text-xs text-red-400">Failed to load audit</p>';
   }

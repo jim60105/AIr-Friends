@@ -15,6 +15,7 @@ import {
   normalizeMisskeyNote,
   noteToPlatformMessage,
   removeBotMention,
+  sanitizeMentionUsername,
   shouldRespondToChatMessage,
   shouldRespondToNote,
 } from "@platforms/misskey/misskey-utils.ts";
@@ -100,6 +101,44 @@ Deno.test("removeBotMention - should remove mention from text", () => {
 Deno.test("removeBotMention - should remove mention with instance", () => {
   const result = removeBotMention("@testbot@example.com Hello!", "testbot");
   assertEquals(result, "Hello!");
+});
+
+// ============ ReDoS / regex-escaping regression ============
+
+Deno.test("sanitizeMentionUsername - escapes regex metacharacters", () => {
+  assertEquals(sanitizeMentionUsername("a+b*c?"), "a\\+b\\*c\\?");
+  assertEquals(sanitizeMentionUsername("plain"), "plain");
+});
+
+Deno.test("sanitizeMentionUsername - returns null for empty username", () => {
+  assertEquals(sanitizeMentionUsername(""), null);
+  assertEquals(sanitizeMentionUsername(null), null);
+  assertEquals(sanitizeMentionUsername(undefined), null);
+});
+
+Deno.test("isMentionToBot - malicious metacharacter username does not crash or false-match", () => {
+  // The username contains regex metacharacters (+, *, ?) that must be escaped.
+  // It ends in a word char (d) so the trailing \b boundary is satisfied.
+  const note = createMockNote({ text: "Hello @a+b*c?d there" });
+  assertEquals(isMentionToBot(note, "a+b*c?d"), true);
+  // A pathological repetition username still terminates quickly (no ReDoS hang).
+  const pathological = createMockNote({ text: "hi @aaaaaaaaaaaaaaaaaaaaa there" });
+  assertEquals(isMentionToBot(pathological, "aaaaaaaaaaaaaaaaaaaaa"), true);
+});
+
+Deno.test("isMentionToBot - username containing a dot still detects mention (escaping preserves functionality)", () => {
+  const note = createMockNote({ text: "Hello @my.bot there" });
+  assertEquals(isMentionToBot(note, "my.bot"), true);
+  assertEquals(isMentionToBot(createMockNote({ text: "hi" }), "my.bot"), false);
+});
+
+Deno.test("removeBotMention - empty username returns text unchanged", () => {
+  assertEquals(removeBotMention("Hello @testbot!", ""), "Hello @testbot!");
+});
+
+Deno.test("isMentionToBot - empty username returns false", () => {
+  const note = createMockNote({ text: "Hello @testbot!" });
+  assertEquals(isMentionToBot(note, ""), false);
 });
 
 Deno.test("isDirectMessage - should detect specified visibility", () => {

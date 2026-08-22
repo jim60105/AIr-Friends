@@ -351,7 +351,7 @@ Deno.test("SessionRegistry - register session without triggerEvent", () => {
     key: "discord/bot-123",
     components: {
       platform: "discord" as const,
-      userId: "bot-123",
+      userId: "b1",
     },
     path: "/tmp/test",
     tmpPath: "/tmp/test/tmp",
@@ -361,7 +361,7 @@ Deno.test("SessionRegistry - register session without triggerEvent", () => {
   const sessionId = registry.register({
     platform: "discord",
     channelId: "456",
-    userId: "bot-123",
+    userId: "b1",
     isDm: false,
     workspace: mockWorkspace,
     // deno-lint-ignore no-explicit-any
@@ -372,7 +372,7 @@ Deno.test("SessionRegistry - register session without triggerEvent", () => {
   const session = registry.get(sessionId);
   assertEquals(session?.triggerEvent, undefined);
   assertEquals(session?.platform, "discord");
-  assertEquals(session?.userId, "bot-123");
+  assertEquals(session?.userId, "b1");
 
   registry.stop();
 });
@@ -780,8 +780,8 @@ Deno.test("SessionRegistry - hasActiveSessionsForWorkspace returns true when act
   const registry = new SessionRegistry();
 
   const mockWorkspace = {
-    key: "discord/user1",
-    components: { platform: "discord" as const, userId: "user1" },
+    key: "discord/u1",
+    components: { platform: "discord" as const, userId: "u1" },
     path: "/tmp/test",
     tmpPath: "/tmp/test/tmp",
     isDm: false,
@@ -790,7 +790,7 @@ Deno.test("SessionRegistry - hasActiveSessionsForWorkspace returns true when act
   const id1 = registry.register({
     platform: "discord",
     channelId: "456",
-    userId: "user1",
+    userId: "u1",
     isDm: false,
     workspace: mockWorkspace,
     // deno-lint-ignore no-explicit-any
@@ -802,7 +802,7 @@ Deno.test("SessionRegistry - hasActiveSessionsForWorkspace returns true when act
   registry.register({
     platform: "discord",
     channelId: "789",
-    userId: "user1",
+    userId: "u1",
     isDm: false,
     workspace: mockWorkspace,
     // deno-lint-ignore no-explicit-any
@@ -813,7 +813,7 @@ Deno.test("SessionRegistry - hasActiveSessionsForWorkspace returns true when act
 
   registry.remove(id1);
 
-  assertEquals(registry.hasActiveSessionsForWorkspace("discord/user1"), true);
+  assertEquals(registry.hasActiveSessionsForWorkspace("discord/u1"), true);
 
   registry.stop();
 });
@@ -822,8 +822,8 @@ Deno.test("SessionRegistry - hasActiveSessionsForWorkspace returns false when no
   const registry = new SessionRegistry();
 
   const mockWorkspace = {
-    key: "discord/user1",
-    components: { platform: "discord" as const, userId: "user1" },
+    key: "discord/u1",
+    components: { platform: "discord" as const, userId: "u1" },
     path: "/tmp/test",
     tmpPath: "/tmp/test/tmp",
     isDm: false,
@@ -832,7 +832,7 @@ Deno.test("SessionRegistry - hasActiveSessionsForWorkspace returns false when no
   const sessionId = registry.register({
     platform: "discord",
     channelId: "456",
-    userId: "user1",
+    userId: "u1",
     isDm: false,
     workspace: mockWorkspace,
     // deno-lint-ignore no-explicit-any
@@ -843,7 +843,7 @@ Deno.test("SessionRegistry - hasActiveSessionsForWorkspace returns false when no
 
   registry.remove(sessionId);
 
-  assertEquals(registry.hasActiveSessionsForWorkspace("discord/user1"), false);
+  assertEquals(registry.hasActiveSessionsForWorkspace("discord/u1"), false);
 
   registry.stop();
 });
@@ -852,8 +852,8 @@ Deno.test("SessionRegistry - hasActiveSessionsForWorkspace returns false after r
   const registry = new SessionRegistry();
 
   const mockWorkspace = {
-    key: "discord/user1",
-    components: { platform: "discord" as const, userId: "user1" },
+    key: "discord/u1",
+    components: { platform: "discord" as const, userId: "u1" },
     path: "/tmp/test",
     tmpPath: "/tmp/test/tmp",
     isDm: false,
@@ -862,7 +862,7 @@ Deno.test("SessionRegistry - hasActiveSessionsForWorkspace returns false after r
   const sessionId = registry.register({
     platform: "discord",
     channelId: "456",
-    userId: "user1",
+    userId: "u1",
     isDm: false,
     workspace: mockWorkspace,
     // deno-lint-ignore no-explicit-any
@@ -871,11 +871,11 @@ Deno.test("SessionRegistry - hasActiveSessionsForWorkspace returns false after r
     triggerEvent: {} as any,
   });
 
-  assertEquals(registry.hasActiveSessionsForWorkspace("discord/user1"), true);
+  assertEquals(registry.hasActiveSessionsForWorkspace("discord/u1"), true);
 
   registry.remove(sessionId);
 
-  assertEquals(registry.hasActiveSessionsForWorkspace("discord/user1"), false);
+  assertEquals(registry.hasActiveSessionsForWorkspace("discord/u1"), false);
 
   registry.stop();
 });
@@ -884,16 +884,16 @@ Deno.test("SessionRegistry - hasActiveSessionsForWorkspace different workspaces 
   const registry = new SessionRegistry();
 
   const workspaceA = {
-    key: "discord/userA",
-    components: { platform: "discord" as const, userId: "userA" },
+    key: "discord/ua",
+    components: { platform: "discord" as const, userId: "ua" },
     path: "/tmp/testA",
     tmpPath: "/tmp/testA/tmp",
     isDm: false,
   };
 
   const workspaceB = {
-    key: "discord/userB",
-    components: { platform: "discord" as const, userId: "userB" },
+    key: "discord/ub",
+    components: { platform: "discord" as const, userId: "ub" },
     path: "/tmp/testB",
     tmpPath: "/tmp/testB/tmp",
     isDm: false,
@@ -902,7 +902,7 @@ Deno.test("SessionRegistry - hasActiveSessionsForWorkspace different workspaces 
   const idA = registry.register({
     platform: "discord",
     channelId: "456",
-    userId: "userA",
+    userId: "ua",
     isDm: false,
     workspace: workspaceA,
     // deno-lint-ignore no-explicit-any
@@ -914,7 +914,7 @@ Deno.test("SessionRegistry - hasActiveSessionsForWorkspace different workspaces 
   registry.register({
     platform: "discord",
     channelId: "789",
-    userId: "userB",
+    userId: "ub",
     isDm: false,
     workspace: workspaceB,
     // deno-lint-ignore no-explicit-any
@@ -925,8 +925,8 @@ Deno.test("SessionRegistry - hasActiveSessionsForWorkspace different workspaces 
 
   registry.remove(idA);
 
-  assertEquals(registry.hasActiveSessionsForWorkspace("discord/userA"), false);
-  assertEquals(registry.hasActiveSessionsForWorkspace("discord/userB"), true);
+  assertEquals(registry.hasActiveSessionsForWorkspace("discord/ua"), false);
+  assertEquals(registry.hasActiveSessionsForWorkspace("discord/ub"), true);
 
   registry.stop();
 });

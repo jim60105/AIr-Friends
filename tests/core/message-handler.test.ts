@@ -50,7 +50,7 @@ function createTestEvent(messageId: string): NormalizedEvent {
   return {
     platform: "discord",
     channelId: "99988877766655544",
-    userId: "11122233344455566",
+    userId: "u1",
     messageId,
     isDm: false,
     guildId: "88877766655544433",
@@ -248,7 +248,7 @@ Deno.test("MessageHandler - whitelisted account bypasses rate limit", async () =
     cooldownMs: 600000,
   };
   const channels = [{
-    id: "discord/account/11122233344455566",
+    id: "discord/account/u1",
     enabled: true,
     rateLimitBypass: true,
   }];

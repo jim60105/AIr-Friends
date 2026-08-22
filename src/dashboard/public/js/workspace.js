@@ -27,7 +27,12 @@ function renderSortedTree() {
   const container = document.getElementById("workspace-tree");
   if (!workspaceTreeData) return;
   const sorted = sortTree(JSON.parse(JSON.stringify(workspaceTreeData)), treeSortOrder);
-  container.innerHTML = renderTree(sorted);
+  const treeHtml = renderTree(sorted);
+  if (typeof DOMPurify !== "undefined") {
+    container.innerHTML = DOMPurify.sanitize(treeHtml);
+  } else {
+    container.textContent = treeHtml;
+  }
 }
 
 function sortTree(node, order) {
@@ -94,7 +99,7 @@ function renderTree(node) {
   if (node.type === "directory") {
     const children = (node.children || []).map(renderTree).join("");
     return `<div class="tree-folder">
-      <div class="flex items-center gap-1.5 py-1 px-1 hover:bg-surface-200/50 rounded cursor-pointer" onclick="this.parentElement.classList.toggle('collapsed'); this.querySelector('.arrow').classList.toggle('-rotate-90')">
+      <div class="tree-folder-header flex items-center gap-1.5 py-1 px-1 hover:bg-surface-200/50 rounded cursor-pointer">
         <span class="arrow text-xs text-gray-500 transition-transform">▾</span>
         <span>📁</span><span class="text-gray-300">${esc(node.name)}</span>
       </div>
@@ -134,9 +139,12 @@ async function loadFile(path) {
     content.textContent = data.content;
     expandBtn.classList.remove("hidden");
     if (isMd && typeof marked !== "undefined") {
-      rendered.innerHTML = typeof DOMPurify !== "undefined"
-        ? DOMPurify.sanitize(marked.parse(data.content))
-        : marked.parse(data.content);
+      const mdHtml = marked.parse(data.content);
+      if (typeof DOMPurify !== "undefined") {
+        rendered.innerHTML = DOMPurify.sanitize(mdHtml);
+      } else {
+        rendered.textContent = data.content;
+      }
       content.classList.add("hidden");
       rendered.classList.remove("hidden");
       toggle.classList.remove("hidden");
@@ -165,10 +173,19 @@ function toggleMarkdownView() {
   }
 }
 
-// Delegated click handler for workspace file items
+// Delegated click handler for workspace tree: opens files and toggles
+// folder collapse. DOMPurify strips inline onclick handlers, so folder
+// collapse is handled here via the .tree-folder-header marker.
 document.getElementById("workspace-tree").addEventListener("click", (e) => {
   const fileItem = e.target.closest("[data-file-path]");
   if (fileItem) {
     loadFile(fileItem.dataset.filePath);
+    return;
+  }
+  const folderHeader = e.target.closest(".tree-folder-header");
+  if (folderHeader) {
+    const folder = folderHeader.parentElement;
+    folder.classList.toggle("collapsed");
+    folderHeader.querySelector(".arrow")?.classList.toggle("-rotate-90");
   }
 });

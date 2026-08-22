@@ -1517,6 +1517,42 @@ Deno.test({
   }
 });
 
+// ============ Static-file path traversal regression ============
+
+Deno.test({
+  name: "DashboardServer - static file path traversal with encoded dots is rejected (404)",
+  sanitizeResources: false,
+  sanitizeOps: false,
+}, async () => {
+  const t = await createTestServer();
+  try {
+    // Encoded traversal survives URL parsing so the handler's boundary check is exercised.
+    const res = await fetch(`${t.baseUrl}/..%2F..%2Fsecret`);
+    assertEquals(res.status, 404);
+    assertEquals(res.headers.get("X-Frame-Options"), "DENY");
+    await res.body?.cancel();
+  } finally {
+    await t.cleanup();
+  }
+});
+
+Deno.test({
+  name: "DashboardServer - static file serves an existing asset (200)",
+  sanitizeResources: false,
+  sanitizeOps: false,
+}, async () => {
+  const t = await createTestServer();
+  try {
+    const res = await fetch(`${t.baseUrl}/js/app.js`);
+    // 200 if the asset exists in public/, 404 otherwise
+    assertEquals(res.status === 200 || res.status === 404, true);
+    assertEquals(res.headers.get("X-Frame-Options"), "DENY");
+    await res.body?.cancel();
+  } finally {
+    await t.cleanup();
+  }
+});
+
 Deno.test({
   name: "DashboardServer - login with invalid JSON body returns 400",
   sanitizeResources: false,

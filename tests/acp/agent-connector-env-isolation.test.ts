@@ -74,8 +74,8 @@ Deno.test("F1 - clearEnv:true still provides all built allowlisted variables", a
     SESSION_ID: "sess_test",
     AGENT_WORKSPACE: "/tmp/agent-workspace",
     TMPDIR: "/tmp",
-    OPENROUTER_API_KEY: "test-openrouter-key",
-    GEMINI_API_KEY: "test-gemini-key",
+    OPENROUTER_API_KEY: "or1",
+    GEMINI_API_KEY: "gm1",
   };
 
   const childEnv = await spawnAndReadChildEnv({ clearEnv: true, env: builtEnv });
@@ -85,14 +85,14 @@ Deno.test("F1 - clearEnv:true still provides all built allowlisted variables", a
   assertEquals(childEnv["SESSION_ID"], "sess_test");
   assertEquals(childEnv["AGENT_WORKSPACE"], "/tmp/agent-workspace");
   assertEquals(childEnv["TMPDIR"], "/tmp");
-  assertEquals(childEnv["OPENROUTER_API_KEY"], "test-openrouter-key");
-  assertEquals(childEnv["GEMINI_API_KEY"], "test-gemini-key");
+  assertEquals(childEnv["OPENROUTER_API_KEY"], "or1");
+  assertEquals(childEnv["GEMINI_API_KEY"], "gm1");
 });
 
 Deno.test("F1 - control: WITHOUT clearEnv, parent secret leaks (documents the bug)", async () => {
   // This negative-control test documents why clearEnv is required: without it,
   // Deno.Command merges the parent environment and the secret leaks through.
-  const fakeSecret = "AIRFRIENDS_TEST_LEAK_CONTROL";
+  const fakeSecret = "leak";
   Deno.env.set(fakeSecret, "leaked-value");
   try {
     const builtEnv: Record<string, string> = {

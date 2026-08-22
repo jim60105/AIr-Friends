@@ -36,8 +36,8 @@ const createTestConfig = (overrides: Partial<Config> = {}): Config => {
       model: "test-model",
       systemPromptPath: "./test.md",
       tokenLimit: 20000,
-      opencodeApiKey: "test-opencode-key",
-      geminiApiKey: "test-gemini-key",
+      opencodeApiKey: "oc1",
+      geminiApiKey: "gm1",
       ...overrides.agent,
     },
     memory: {
@@ -65,7 +65,7 @@ Deno.test("createAgentConfig - creates opencode config correctly", () => {
       model: "test-model",
       systemPromptPath: "./test.md",
       tokenLimit: 20000,
-      opencodeApiKey: "test-opencode-key",
+      opencodeApiKey: "oc1",
     },
   });
   const agentConfig = createAgentConfig("opencode", "/tmp/workspace", config);
@@ -73,7 +73,7 @@ Deno.test("createAgentConfig - creates opencode config correctly", () => {
   assertEquals(agentConfig.command, "opencode");
   assertEquals(agentConfig.args, ["acp"]);
   assertEquals(agentConfig.cwd, "/tmp/workspace");
-  assertEquals(agentConfig.env?.OPENCODE_API_KEY, "test-opencode-key");
+  assertEquals(agentConfig.env?.OPENCODE_API_KEY, "oc1");
 });
 
 Deno.test("createAgentConfig - sets TMPDIR to workspace-scoped tmp directory", () => {
@@ -165,7 +165,7 @@ Deno.test("createAgentConfig - sets OPENROUTER_API_KEY from config", () => {
       model: "test",
       systemPromptPath: "./test.md",
       tokenLimit: 20000,
-      openRouterApiKey: "config-openrouter-key",
+      openRouterApiKey: "or1",
     },
   });
 
@@ -174,7 +174,7 @@ Deno.test("createAgentConfig - sets OPENROUTER_API_KEY from config", () => {
 
   try {
     const agentConfig = createAgentConfig("opencode", "/tmp/workspace", config);
-    assertEquals(agentConfig.env?.OPENROUTER_API_KEY, "config-openrouter-key");
+    assertEquals(agentConfig.env?.OPENROUTER_API_KEY, "or1");
   } finally {
     if (originalKey) {
       Deno.env.set("OPENROUTER_API_KEY", originalKey);
@@ -213,7 +213,7 @@ Deno.test("createAgentConfig - sets GEMINI_API_KEY and GOOGLE_GENERATIVE_AI_API_
       model: "test",
       systemPromptPath: "./test.md",
       tokenLimit: 20000,
-      geminiApiKey: "config-gemini-key",
+      geminiApiKey: "gm2",
     },
   });
 
@@ -222,8 +222,8 @@ Deno.test("createAgentConfig - sets GEMINI_API_KEY and GOOGLE_GENERATIVE_AI_API_
 
   try {
     const agentConfig = createAgentConfig("opencode", "/tmp/workspace", config);
-    assertEquals(agentConfig.env?.GEMINI_API_KEY, "config-gemini-key");
-    assertEquals(agentConfig.env?.GOOGLE_GENERATIVE_AI_API_KEY, "config-gemini-key");
+    assertEquals(agentConfig.env?.GEMINI_API_KEY, "gm2");
+    assertEquals(agentConfig.env?.GOOGLE_GENERATIVE_AI_API_KEY, "gm2");
   } finally {
     if (originalKey) {
       Deno.env.set("GEMINI_API_KEY", originalKey);
@@ -290,7 +290,7 @@ Deno.test("createAgentConfig - inherits critical environment variables for openc
       model: "test-model",
       systemPromptPath: "./test.md",
       tokenLimit: 20000,
-      opencodeApiKey: "test-opencode-key",
+      opencodeApiKey: "oc1",
     },
   });
 
@@ -307,7 +307,7 @@ Deno.test("createAgentConfig - inherits critical environment variables for openc
     assertEquals(agentConfig.env?.PATH, "/usr/local/bin:/usr/bin");
     assertEquals(agentConfig.env?.HOME, "/home/testuser");
     // Should also have OPENCODE_API_KEY
-    assertEquals(agentConfig.env?.OPENCODE_API_KEY, "test-opencode-key");
+    assertEquals(agentConfig.env?.OPENCODE_API_KEY, "oc1");
   } finally {
     // Restore original env vars
     if (originalPath) {
@@ -325,7 +325,7 @@ Deno.test("createAgentConfig - does not add OPENCODE_YOLO env var when yolo is t
       model: "test-model",
       systemPromptPath: "./test.md",
       tokenLimit: 20000,
-      opencodeApiKey: "test-opencode-key",
+      opencodeApiKey: "oc1",
     },
   });
   const agentConfig = createAgentConfig("opencode", "/tmp/workspace", config, true);
@@ -343,7 +343,7 @@ Deno.test("createAgentConfig - does not add OPENCODE_YOLO env var when yolo is f
       model: "test-model",
       systemPromptPath: "./test.md",
       tokenLimit: 20000,
-      opencodeApiKey: "test-opencode-key",
+      opencodeApiKey: "oc1",
     },
   });
   const agentConfig = createAgentConfig("opencode", "/tmp/workspace", config, false);

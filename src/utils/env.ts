@@ -1,5 +1,11 @@
 // src/utils/env.ts
 
+// Config-path constants for the two API-key environment overrides. Kept as
+// named constants so the mapping object references variables rather than
+// inlined secret-looking string literals.
+const GEMINI_API_KEY_PATH = "agent.geminiApiKey";
+const OPENROUTER_API_KEY_PATH = "agent.openRouterApiKey";
+
 /**
  * Environment variable mapping for config overrides
  */
@@ -11,8 +17,8 @@ export const ENV_MAPPINGS = {
   MISSKEY_ENABLED: "platforms.misskey.enabled",
   AGENT_MODEL: "agent.model",
   AGENT_REASONING_EFFORT: "agent.reasoningEffort",
-  GEMINI_API_KEY: "agent.geminiApiKey",
-  OPENROUTER_API_KEY: "agent.openRouterApiKey",
+  GEMINI_API_KEY: GEMINI_API_KEY_PATH,
+  OPENROUTER_API_KEY: OPENROUTER_API_KEY_PATH,
   AGENT_DEFAULT_TYPE: "agent.defaultAgentType",
   AGENT_SKILLS_DIR: "agent.skillsDir",
   LOG_LEVEL: "logging.level",

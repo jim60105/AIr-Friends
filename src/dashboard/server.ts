@@ -1,7 +1,7 @@
 // src/dashboard/server.ts
 
 import { createLogger } from "@utils/logger.ts";
-import { join, resolve } from "@std/path";
+import { join, normalize, relative, resolve } from "@std/path";
 import {
   canonicalizeHost,
   clearSessionCookie,
@@ -28,6 +28,16 @@ import type { WorkspaceManager } from "@core/workspace-manager.ts";
 import type { Registry } from "prom-client";
 
 const logger = createLogger("DashboardServer");
+
+/**
+ * Platform-aware containment check. `target` is inside `base` when the relative
+ * path from `base` to `target` does not start with `..`. This uses `relative()`
+ * so it works with both `/` (POSIX) and `\` (Windows) separators.
+ */
+function isWithinDir(base: string, target: string): boolean {
+  const rel = relative(base, target);
+  return !rel.startsWith("..");
+}
 
 /** Add security headers to a response */
 function withSecurityHeaders(response: Response): Response {
@@ -155,7 +165,21 @@ export class DashboardServer {
 
   private async handleRequest(req: Request, info?: Deno.ServeHandlerInfo): Promise<Response> {
     const url = new URL(req.url);
-    const path = url.pathname;
+    // Sanitize the request-URL path before it is used as a file path: decode
+    // percent-encoding, reject any `..` segment (Path Traversal protection), and
+    // drop empty / `.` segments.
+    let path: string;
+    try {
+      const decoded = decodeURIComponent(url.pathname);
+      const segments = decoded.split("/");
+      if (segments.includes("..")) {
+        return withSecurityHeaders(new Response("Not Found", { status: 404 }));
+      }
+      const cleanSegments = segments.filter((s) => s !== "" && s !== ".");
+      path = "/" + cleanSegments.join("/");
+    } catch {
+      return withSecurityHeaders(new Response("Bad Request", { status: 400 }));
+    }
 
     let response: Response;
     try {
@@ -992,18 +1016,39 @@ export class DashboardServer {
   // --- Static Files ---
 
   private async serveStaticFile(path: string): Promise<Response> {
-    // Default to index.html
+    // `path` arrives already sanitized (decoded, no `..`/`.` segments).
+    // Default to index.html for the root or the login page.
     const filePath = path === "/" || path === "/login" ? "/index.html" : path;
+    const rel = filePath.substring(1);
 
-    const staticDir = join(new URL(".", import.meta.url).pathname, "public");
-    const fullPath = resolve(staticDir, filePath.substring(1));
+    // Reject traversal: if any segment is `..`, the path would escape the
+    // static directory.
+    if (rel.split("/").includes("..")) {
+      return new Response("Not Found", { status: 404 });
+    }
 
-    // Prevent path traversal
-    if (!fullPath.startsWith(resolve(staticDir))) {
+    const staticDir = resolve(join(new URL(".", import.meta.url).pathname, "public"));
+    // Normalize the relative path (a recognized path sanitizer), then build the
+    // final path via path.join from the base directory, and require a platform-aware
+    // containment check so that sibling prefixes (e.g. `public-evil`) don't pass.
+    const normalizedRel = normalize(rel);
+    if (normalizedRel.startsWith("..")) {
+      return new Response("Not Found", { status: 404 });
+    }
+    const fullPath = join(staticDir, normalizedRel);
+    if (!isWithinDir(staticDir, fullPath)) {
       return new Response("Not Found", { status: 404 });
     }
 
     try {
+      // Resolve symlinks: verify the real (resolved) path still lives inside
+      // the real static dir, so a symlink inside `public/` pointing outside
+      // cannot leak a file from elsewhere on disk.
+      const realStaticDir = await Deno.realPath(staticDir);
+      const realFull = await Deno.realPath(fullPath);
+      if (!isWithinDir(realStaticDir, realFull)) {
+        return new Response("Not Found", { status: 404 });
+      }
       const content = await Deno.readFile(fullPath);
       const contentType = this.getContentType(filePath);
       return new Response(content, {

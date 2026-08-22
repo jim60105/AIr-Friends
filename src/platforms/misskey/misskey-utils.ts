@@ -99,6 +99,25 @@ export function noteToPlatformMessage(
   };
 }
 
+// Escape regex metacharacters so a remote-supplied username cannot inject
+// metacharacters or trigger a pathological (ReDoS) pattern when embedded in
+// a RegExp. Escaping keeps every legitimate username functional (dots, etc.)
+// while neutralizing the ReDoS risk.
+function escapeRegExp(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/**
+ * Sanitize a username for safe use inside a regular expression.
+ * Returns the username with its metacharacters escaped, or null when empty.
+ */
+export function sanitizeMentionUsername(
+  username: string | null | undefined,
+): string | null {
+  if (!username) return null;
+  return escapeRegExp(username);
+}
+
 /**
  * Check if a note is a mention to the bot
  */
@@ -106,10 +125,11 @@ export function isMentionToBot(
   note: MisskeyNote,
   botUsername: string,
 ): boolean {
-  if (!note.text) return false;
+  const safeName = sanitizeMentionUsername(botUsername);
+  if (!note.text || !safeName) return false;
 
   // Check for @username mention
-  const mentionPattern = new RegExp(`@${botUsername}(?:@[\\w.-]+)?\\b`, "i");
+  const mentionPattern = new RegExp(`@${safeName}(?:@[\\w.-]+)?\\b`, "i");
   return mentionPattern.test(note.text);
 }
 
@@ -120,7 +140,9 @@ export function removeBotMention(
   text: string,
   botUsername: string,
 ): string {
-  const mentionPattern = new RegExp(`@${botUsername}(?:@[\\w.-]+)?\\s*`, "gi");
+  const safeName = sanitizeMentionUsername(botUsername);
+  if (!safeName) return text;
+  const mentionPattern = new RegExp(`@${safeName}(?:@[\\w.-]+)?\\s*`, "gi");
   return text.replace(mentionPattern, "").trim();
 }
 

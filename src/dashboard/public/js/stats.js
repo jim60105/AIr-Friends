@@ -38,12 +38,17 @@ async function pollStats() {
         icon: "🔧",
       },
     ];
-    grid.innerHTML = cards.map((c) =>
+    const cardsHtml = cards.map((c) =>
       `<div class="bg-surface-100 border border-accent-muted rounded-xl p-5">
-      <div class="text-2xl mb-2">${c.icon}</div>
-      <div class="text-2xl font-bold text-gray-100">${c.value}</div>
-      <div class="text-xs text-gray-400 mt-1">${c.label}</div>
+      <div class="text-2xl mb-2">${esc(c.icon)}</div>
+      <div class="text-2xl font-bold text-gray-100">${esc(c.value)}</div>
+      <div class="text-xs text-gray-400 mt-1">${esc(c.label)}</div>
     </div>`
     ).join("");
+    if (typeof DOMPurify !== "undefined") {
+      grid.innerHTML = DOMPurify.sanitize(cardsHtml);
+    } else {
+      grid.textContent = cardsHtml;
+    }
   } catch (_) {}
 }

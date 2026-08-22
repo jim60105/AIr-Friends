@@ -114,7 +114,7 @@ function createTestEvent(): NormalizedEvent {
   return {
     platform: "discord",
     channelId: "99988877766655544",
-    userId: "11122233344455566",
+    userId: "u1",
     messageId: "test_msg",
     isDm: false,
     guildId: "88877766655544433",
@@ -2115,7 +2115,7 @@ Deno.test("SessionOrchestrator - processMemoryMaintenance returns success on end
     });
 
     const response = await orchestrator.processMemoryMaintenance(
-      "discord/11122233344455566",
+      "discord/u1",
       {
         enabled: true,
         model: "gpt-5-mini",
@@ -2151,7 +2151,7 @@ Deno.test("SessionOrchestrator - processMemoryMaintenance returns failure on can
     });
 
     const response = await orchestrator.processMemoryMaintenance(
-      "discord/11122233344455566",
+      "discord/u1",
       {
         enabled: true,
         model: "gpt-5-mini",
@@ -2269,7 +2269,7 @@ Deno.test("SessionOrchestrator - processMemoryMaintenance handles agent connecti
     );
 
     const response = await orchestrator.processMemoryMaintenance(
-      "discord/11122233344455566",
+      "discord/u1",
       {
         enabled: true,
         model: "gpt-5-mini",
@@ -2818,7 +2818,7 @@ Deno.test({
       config.agent.modelRouting = {
         enabled: true,
         rules: [
-          { match: { channel: "discord/account/11122233344455566" }, model: "premium-model" },
+          { match: { channel: "discord/account/u1" }, model: "premium-model" },
         ],
       };
 
@@ -2832,7 +2832,7 @@ Deno.test({
         connector.onPrompt = (callCount) => {
           if (callCount === 1) {
             const replyHandler = skillRegistry.getReplyHandler();
-            const key = `discord/11122233344455566:99988877766655544`;
+            const key = `discord/u1:99988877766655544`;
             // deno-lint-ignore no-explicit-any
             (replyHandler as any).replySentMap.set(key, true);
           }
@@ -2865,7 +2865,7 @@ Deno.test({
       config.agent.modelRouting = {
         enabled: false,
         rules: [
-          { match: { channel: "discord/account/11122233344455566" }, model: "premium-model" },
+          { match: { channel: "discord/account/u1" }, model: "premium-model" },
         ],
       };
 
@@ -2879,7 +2879,7 @@ Deno.test({
         connector.onPrompt = (callCount) => {
           if (callCount === 1) {
             const replyHandler = skillRegistry.getReplyHandler();
-            const key = `discord/11122233344455566:99988877766655544`;
+            const key = `discord/u1:99988877766655544`;
             // deno-lint-ignore no-explicit-any
             (replyHandler as any).replySentMap.set(key, true);
           }
@@ -3525,15 +3525,15 @@ Deno.test({
       const { orchestrator, sessionRegistry } = await createTestableOrchestrator(tempDir);
 
       // Create a workspace-like structure with a tmp directory
-      const workspacePath = `${tempDir}/workspaces/discord/testuser`;
+      const workspacePath = `${tempDir}/workspaces/discord/u1`;
       const tmpPath = `${workspacePath}/tmp`;
       await Deno.mkdir(tmpPath, { recursive: true });
       // Put a file in tmp to verify it gets cleaned up
       await Deno.writeTextFile(`${tmpPath}/test-file.txt`, "temporary data");
 
       const workspace = {
-        key: "discord/testuser",
-        components: { platform: "discord" as const, userId: "testuser" },
+        key: "discord/u1",
+        components: { platform: "discord" as const, userId: "u1" },
         path: workspacePath,
         tmpPath,
         isDm: false,
@@ -3574,14 +3574,14 @@ Deno.test({
       const { orchestrator, sessionRegistry } = await createTestableOrchestrator(tempDir);
 
       // Create a workspace-like structure with a tmp directory
-      const workspacePath = `${tempDir}/workspaces/discord/testuser`;
+      const workspacePath = `${tempDir}/workspaces/discord/u1`;
       const tmpPath = `${workspacePath}/tmp`;
       await Deno.mkdir(tmpPath, { recursive: true });
       await Deno.writeTextFile(`${tmpPath}/test-file.txt`, "temporary data");
 
       const workspace = {
-        key: "discord/testuser",
-        components: { platform: "discord" as const, userId: "testuser" },
+        key: "discord/u1",
+        components: { platform: "discord" as const, userId: "u1" },
         path: workspacePath,
         tmpPath,
         isDm: false,
@@ -3592,7 +3592,7 @@ Deno.test({
         workspace,
         channelId: "some-channel",
         platform: "discord",
-        userId: "testuser",
+        userId: "u1",
         isDm: false,
         platformAdapter: new MockPlatformAdapter() as unknown as PlatformAdapter,
       });
@@ -3716,7 +3716,7 @@ Deno.test({
         enabled: true,
         rules: [
           {
-            match: { channel: "discord/account/11122233344455566" },
+            match: { channel: "discord/account/u1" },
             model: "premium-model",
             reasoningEffort: "high",
           },
@@ -3731,7 +3731,7 @@ Deno.test({
         connector.onPrompt = (callCount) => {
           if (callCount === 1) {
             const replyHandler = skillRegistry.getReplyHandler();
-            const key = `discord/11122233344455566:99988877766655544`;
+            const key = `discord/u1:99988877766655544`;
             // deno-lint-ignore no-explicit-any
             (replyHandler as any).replySentMap.set(key, true);
           }
@@ -3772,7 +3772,7 @@ Deno.test({
         connector.onPrompt = (callCount) => {
           if (callCount === 1) {
             const replyHandler = skillRegistry.getReplyHandler();
-            const key = `discord/11122233344455566:99988877766655544`;
+            const key = `discord/u1:99988877766655544`;
             // deno-lint-ignore no-explicit-any
             (replyHandler as any).replySentMap.set(key, true);
           }
@@ -3825,7 +3825,7 @@ Deno.test({
         connector.onPrompt = (callCount) => {
           if (callCount === 1) {
             const replyHandler = skillRegistry.getReplyHandler();
-            const key = `discord/11122233344455566:99988877766655544`;
+            const key = `discord/u1:99988877766655544`;
             // deno-lint-ignore no-explicit-any
             (replyHandler as any).replySentMap.set(key, true);
           }
