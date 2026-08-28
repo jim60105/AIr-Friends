@@ -2,7 +2,9 @@
 
 import { assertEquals, assertExists, assertStringIncludes } from "@std/assert";
 import { SessionOrchestrator } from "@core/session-orchestrator.ts";
-import { selfResearchNoNoteTotal } from "@utils/metrics.ts";
+import { activeSessionsGauge, selfResearchNoNoteTotal, sessionsTotal } from "@utils/metrics.ts";
+import type { AgentProcessPool } from "@core/agent-process-pool.ts";
+import type { CompletedSessionStore } from "../../src/dashboard/completed-session-store.ts";
 import { WorkspaceManager } from "@core/workspace-manager.ts";
 import { ContextAssembler } from "@core/context-assembler.ts";
 import { MemoryStore } from "@core/memory-store.ts";
@@ -539,6 +541,32 @@ class MockAgentConnector {
     this.disconnected = true;
     await Promise.resolve();
   }
+
+  // --- Shared-process (pooled) runner stubs ---
+
+  sessionGateContexts: unknown[] = [];
+  setSessionGateContext(_sessionId: string, ctx: unknown): void {
+    this.sessionGateContexts.push(ctx);
+  }
+
+  cancelCalls: string[] = [];
+  async cancel(sessionId: string): Promise<void> {
+    this.cancelCalls.push(sessionId);
+    await Promise.resolve();
+  }
+
+  getProcessPid(): number | undefined {
+    return undefined;
+  }
+
+  reconnectResult = false;
+  reconnectAndResumeSession(
+    _sessionId: string,
+    _sessionCwd: string,
+    _mcpServers: unknown[],
+  ): Promise<boolean> {
+    return Promise.resolve(this.reconnectResult);
+  }
 }
 
 /**
@@ -577,7 +605,14 @@ class TestableSessionOrchestrator extends SessionOrchestrator {
 /**
  * Helper to create a testable orchestrator with all dependencies
  */
-async function createTestableOrchestrator(tempDir: string, options?: { skillApi?: boolean }) {
+async function createTestableOrchestrator(
+  tempDir: string,
+  options?: {
+    skillApi?: boolean;
+    /** Stub shared-process pool injected via the 10th constructor arg (default: null = per-spawn). */
+    processPool?: AgentProcessPool | null;
+  },
+) {
   const config = createTestConfig(tempDir);
   config.agent.defaultAgentType = "opencode";
   if (options?.skillApi !== false) {
@@ -673,6 +708,10 @@ Use this session ID when calling skills that require --session-id parameter.
     config,
     sessionRegistry,
     memoryStore,
+    false,
+    undefined,
+    "",
+    options?.processPool ?? null,
   );
 
   return { orchestrator, skillRegistry, workspaceManager, sessionRegistry, config };
@@ -3936,4 +3975,447 @@ Deno.test("SessionOrchestrator - setupSession pre-creates session payload stagin
   } finally {
     await Deno.remove(tempDir, { recursive: true });
   }
+});
+
+// === Pooled (shared-process) session result regression tests (fix-pool-mode-session-result-crash) ===
+
+/**
+ * Stub shared-process pool: `run()` synchronously invokes the runner with a fake
+ * connector and resolves a configurable run result (default: no deadline cancellation).
+ */
+function createStubProcessPool(
+  connector: MockAgentConnector,
+  resultOverride?: { acpSessionId: string | null; cancelledByDeadline: boolean },
+): AgentProcessPool {
+  return {
+    run: async (
+      options: unknown,
+      runner: (c: unknown, o: unknown) => Promise<string | undefined>,
+    ) => {
+      await runner(connector, options);
+      return resultOverride ?? { acpSessionId: "ses_fake", cancelledByDeadline: false };
+    },
+  } as unknown as AgentProcessPool;
+}
+
+Deno.test({
+  name:
+    "SessionOrchestrator - pooled processMessage resolves on no-reply (pooled session result regression)",
+  async fn() {
+    const tempDir = await Deno.makeTempDir();
+    try {
+      const fakeConnector = new MockAgentConnector({} as unknown as AgentConnectorOptions);
+      const { orchestrator, sessionRegistry, config } = await createTestableOrchestrator(
+        tempDir,
+        { processPool: createStubProcessPool(fakeConnector) },
+      );
+      config.agent.idleTimeout = { enabled: false, timeoutMs: 300000, checkIntervalMs: 30000 };
+
+      const event = createTestEvent();
+      const platformAdapter = new MockPlatformAdapter() as unknown as PlatformAdapter;
+
+      // Pre-fix this awaited call THROWS "Cannot read properties of undefined
+      // (reading 'success')" from the metrics finally; post-fix it resolves.
+      const response = await orchestrator.processMessage(event, platformAdapter);
+
+      assertEquals(response.success, false);
+      assertEquals(response.error, "Agent did not generate a reply");
+
+      sessionRegistry.stop();
+    } finally {
+      await Deno.remove(tempDir, { recursive: true });
+    }
+  },
+});
+
+Deno.test({
+  name: "SessionOrchestrator - pooled processMessage resolves on queue-deadline cancellation",
+  async fn() {
+    const tempDir = await Deno.makeTempDir();
+    try {
+      const fakeConnector = new MockAgentConnector({} as unknown as AgentConnectorOptions);
+      const { orchestrator, sessionRegistry, config } = await createTestableOrchestrator(
+        tempDir,
+        {
+          processPool: createStubProcessPool(fakeConnector, {
+            acpSessionId: null,
+            cancelledByDeadline: true,
+          }),
+        },
+      );
+      config.agent.idleTimeout = { enabled: false, timeoutMs: 300000, checkIntervalMs: 30000 };
+
+      const event = createTestEvent();
+      const platformAdapter = new MockPlatformAdapter() as unknown as PlatformAdapter;
+
+      const response = await orchestrator.processMessage(event, platformAdapter);
+
+      assertEquals(response.success, false);
+      assertEquals(response.error, "Cancelled by queue deadline");
+
+      sessionRegistry.stop();
+    } finally {
+      await Deno.remove(tempDir, { recursive: true });
+    }
+  },
+});
+
+Deno.test({
+  name: "SessionOrchestrator - pooled channelLurk resolves on stale-lurk skip",
+  async fn() {
+    const tempDir = await Deno.makeTempDir();
+    try {
+      const fakeConnector = new MockAgentConnector({} as unknown as AgentConnectorOptions);
+      const { orchestrator, sessionRegistry, config } = await createTestableOrchestrator(
+        tempDir,
+        { processPool: createStubProcessPool(fakeConnector) },
+      );
+      config.agent.idleTimeout = { enabled: false, timeoutMs: 300000, checkIntervalMs: 30000 };
+
+      const event = createTestEvent();
+      // The mock adapter's fetchRecentMessages resolves [] -> isLurkTriggerStale
+      // returns true -> the runner sets lurkSkipped without an ACP session.
+      const platformAdapter = new MockPlatformAdapter() as unknown as PlatformAdapter;
+
+      const response = await orchestrator.processChannelLurkMessage(event, platformAdapter);
+
+      assertEquals(response.success, true);
+      assertEquals(response.replySent, false);
+
+      sessionRegistry.stop();
+    } finally {
+      await Deno.remove(tempDir, { recursive: true });
+    }
+  },
+});
+
+Deno.test({
+  name:
+    "SessionOrchestrator - pooled processMessage resolves with success:true and records success metrics",
+  async fn() {
+    const tempDir = await Deno.makeTempDir();
+    try {
+      const fakeConnector = new MockAgentConnector({} as unknown as AgentConnectorOptions);
+      const { orchestrator, skillRegistry, workspaceManager, sessionRegistry, config } =
+        await createTestableOrchestrator(
+          tempDir,
+          { processPool: createStubProcessPool(fakeConnector) },
+        );
+      config.agent.idleTimeout = { enabled: false, timeoutMs: 300000, checkIntervalMs: 30000 };
+
+      const event = createTestEvent();
+      const platformAdapter = new MockPlatformAdapter() as unknown as PlatformAdapter;
+      const replyHandler = skillRegistry.getReplyHandler();
+
+      // Simulate the agent replying during the pooled runner turn so the
+      // post-lease state resolves success:true (metrics must record success:true).
+      fakeConnector.onPrompt = (callCount) => {
+        if (callCount === 1) {
+          const workspace = workspaceManager.getWorkspaceKeyFromEvent(event);
+          const key = `${workspace}:${event.channelId}`;
+          // deno-lint-ignore no-explicit-any
+          (replyHandler as any).replySentMap.set(key, true);
+        }
+      };
+
+      const readSuccessCounter = async (): Promise<number> => {
+        const values = (await sessionsTotal.get()).values;
+        const match = values.find(
+          (v) =>
+            v.labels?.platform === "discord" &&
+            v.labels?.type === "message" &&
+            v.labels?.status === "success",
+        );
+        return match?.value ?? 0;
+      };
+      const before = await readSuccessCounter();
+
+      const response = await orchestrator.processMessage(event, platformAdapter);
+
+      assertEquals(response.success, true);
+      assertEquals(response.replySent, true);
+      // Session metrics MUST have been recorded with success:true (this was the
+      // regression: metrics were silently NEVER recorded for pooled sessions).
+      assertEquals(await readSuccessCounter(), before + 1);
+
+      sessionRegistry.stop();
+    } finally {
+      await Deno.remove(tempDir, { recursive: true });
+    }
+  },
+});
+
+Deno.test({
+  name: "SessionOrchestrator - pooled processSpontaneousPost resolves (helper-return regression)",
+  async fn() {
+    const tempDir = await Deno.makeTempDir();
+    try {
+      const fakeConnector = new MockAgentConnector({} as unknown as AgentConnectorOptions);
+      const { orchestrator, sessionRegistry, config } = await createTestableOrchestrator(
+        tempDir,
+        { processPool: createStubProcessPool(fakeConnector) },
+      );
+      config.agent.idleTimeout = { enabled: false, timeoutMs: 300000, checkIntervalMs: 30000 };
+
+      const platformAdapter = new MockPlatformAdapter() as unknown as PlatformAdapter;
+
+      const response = await orchestrator.processSpontaneousPost(
+        "discord",
+        "99988877766655544",
+        platformAdapter,
+        { botId: "bot_id", fetchRecentMessages: false },
+      );
+
+      assertEquals(response.success, false);
+      assertEquals(response.error, "Agent did not generate a reply");
+
+      sessionRegistry.stop();
+    } finally {
+      await Deno.remove(tempDir, { recursive: true });
+    }
+  },
+});
+
+Deno.test({
+  name: "SessionOrchestrator - pooled processSelfResearch resolves (helper-return regression)",
+  async fn() {
+    const tempDir = await Deno.makeTempDir();
+    try {
+      const fakeConnector = new MockAgentConnector({} as unknown as AgentConnectorOptions);
+      const { orchestrator, sessionRegistry, config } = await createTestableOrchestrator(
+        tempDir,
+        { processPool: createStubProcessPool(fakeConnector) },
+      );
+      config.agent.idleTimeout = { enabled: false, timeoutMs: 300000, checkIntervalMs: 30000 };
+
+      await Deno.writeTextFile(
+        `${tempDir}/prompts/system_self_research.md`,
+        "# Research\n\n{{ rssItems }}",
+      );
+
+      const response = await orchestrator.processSelfResearch(
+        [{ title: "Test", url: "https://example.com", description: "Desc", sourceName: "Feed" }],
+        {
+          enabled: true,
+          model: "gpt-5-mini",
+          rssFeeds: [],
+          minIntervalMs: 43200000,
+          maxIntervalMs: 86400000,
+          verifyCompletion: true,
+        },
+      );
+
+      assertEquals(response.success, false);
+      assertEquals(response.error, "Agent did not generate a reply");
+
+      sessionRegistry.stop();
+    } finally {
+      await Deno.remove(tempDir, { recursive: true });
+    }
+  },
+});
+
+Deno.test({
+  name: "SessionOrchestrator - pooled processMemoryMaintenance resolves (helper-return regression)",
+  async fn() {
+    const tempDir = await Deno.makeTempDir();
+    try {
+      const fakeConnector = new MockAgentConnector({} as unknown as AgentConnectorOptions);
+      const { orchestrator, sessionRegistry, config } = await createTestableOrchestrator(
+        tempDir,
+        { processPool: createStubProcessPool(fakeConnector) },
+      );
+      config.agent.idleTimeout = { enabled: false, timeoutMs: 300000, checkIntervalMs: 30000 };
+
+      await Deno.writeTextFile(
+        `${tempDir}/prompts/system_memory_maintenance.md`,
+        "Maintenance for {{ workspaceKey }}\n{{ memoriesDump }}",
+      );
+
+      const response = await orchestrator.processMemoryMaintenance(
+        "discord/u1",
+        {
+          enabled: true,
+          model: "gpt-5-mini",
+          minMemoryCount: 50,
+          intervalMs: 604800000,
+        },
+      );
+
+      assertEquals(response.success, false);
+      assertEquals(response.error, "Agent did not generate a reply");
+
+      sessionRegistry.stop();
+    } finally {
+      await Deno.remove(tempDir, { recursive: true });
+    }
+  },
+});
+
+Deno.test({
+  name:
+    "SessionOrchestrator - per-spawn processMessage idle-timeout-lost resolves (response===null regression)",
+  async fn() {
+    const tempDir = await Deno.makeTempDir();
+    try {
+      const { orchestrator, sessionRegistry } = await createTestableOrchestrator(tempDir);
+
+      orchestrator.setConnectorSetup((connector) => {
+        // First prompt dies on idle-timeout; reconnect "succeeds"; the re-issued
+        // prompt also dies -> promptWithIdleTimeoutHandling returns null, running
+        // the per-spawn `response === null` early-return branch inside the try.
+        connector.reconnectResult = true;
+        connector.prompt = () => {
+          throw new Error("ACP connection dead");
+        };
+      });
+
+      const event = createTestEvent();
+      const platformAdapter = new MockPlatformAdapter() as unknown as PlatformAdapter;
+
+      const response = await orchestrator.processMessage(event, platformAdapter);
+
+      assertEquals(response.success, false);
+      assertEquals(
+        response.error,
+        "Session lost due to idle timeout and reconnection failure",
+      );
+
+      sessionRegistry.stop();
+    } finally {
+      await Deno.remove(tempDir, { recursive: true });
+    }
+  },
+});
+
+Deno.test({
+  name:
+    "SessionOrchestrator - per-spawn processSpontaneousPost idle-timeout-lost resolves (response===null regression)",
+  async fn() {
+    const tempDir = await Deno.makeTempDir();
+    try {
+      const { orchestrator, sessionRegistry } = await createTestableOrchestrator(tempDir);
+
+      orchestrator.setConnectorSetup((connector) => {
+        connector.reconnectResult = true;
+        connector.prompt = () => {
+          throw new Error("ACP connection dead");
+        };
+      });
+
+      const platformAdapter = new MockPlatformAdapter() as unknown as PlatformAdapter;
+
+      const response = await orchestrator.processSpontaneousPost(
+        "discord",
+        "99988877766655544",
+        platformAdapter,
+        { botId: "bot_id", fetchRecentMessages: false },
+      );
+
+      assertEquals(response.success, false);
+      assertEquals(response.error, "Session lost due to idle timeout");
+
+      sessionRegistry.stop();
+    } finally {
+      await Deno.remove(tempDir, { recursive: true });
+    }
+  },
+});
+
+Deno.test({
+  name:
+    "SessionOrchestrator - metrics-recording failure cannot replace the pooled response (gauge still decremented)",
+  async fn() {
+    const tempDir = await Deno.makeTempDir();
+    try {
+      const fakeConnector = new MockAgentConnector({} as unknown as AgentConnectorOptions);
+      const { orchestrator, sessionRegistry, config } = await createTestableOrchestrator(
+        tempDir,
+        { processPool: createStubProcessPool(fakeConnector) },
+      );
+      config.agent.idleTimeout = { enabled: false, timeoutMs: 300000, checkIntervalMs: 30000 };
+
+      // The metrics step's completed-session store throws AFTER dec() would have
+      // run — the store.add() failure must be swallowed and the gauge still
+      // decremented (dec is now decoupled from the metrics bookkeeping).
+      let storeAddFailed = false;
+      orchestrator.setCompletedSessionStore({
+        add: () => {
+          storeAddFailed = true;
+          throw new Error("store boom");
+        },
+      } as unknown as CompletedSessionStore);
+
+      const gaugeBefore = (await activeSessionsGauge.get()).values[0]?.value ?? 0;
+
+      const event = createTestEvent();
+      const platformAdapter = new MockPlatformAdapter() as unknown as PlatformAdapter;
+
+      const response = await orchestrator.processMessage(event, platformAdapter);
+
+      assertEquals(storeAddFailed, true);
+      // The originally computed response must be returned untouched even though
+      // the metrics bookkeeping threw (the finally swallows, never replaces).
+      assertEquals(response, {
+        success: false,
+        replySent: false,
+        fileSent: false,
+        error: "Agent did not generate a reply",
+      });
+      const gaugeAfter = (await activeSessionsGauge.get()).values[0]?.value ?? 0;
+      assertEquals(gaugeAfter, gaugeBefore, "gauge must be decremented despite metrics failure");
+
+      sessionRegistry.stop();
+    } finally {
+      await Deno.remove(tempDir, { recursive: true });
+    }
+  },
+});
+
+Deno.test({
+  name: "SessionOrchestrator - gauge dec() failure is logged but the response is still returned",
+  async fn() {
+    const tempDir = await Deno.makeTempDir();
+    try {
+      const { orchestrator, sessionRegistry } = await createTestableOrchestrator(tempDir);
+
+      orchestrator.setConnectorSetup((connector) => {
+        connector.promptResponses = [{ stopReason: "end_turn" } as PromptResponse];
+      });
+
+      // Inject a dec() that throws: the finally's first try must swallow it,
+      // then record metrics, and still return the computed response.
+      // deno-lint-ignore no-explicit-any
+      const originalDec = (activeSessionsGauge as any).dec;
+      const gaugeBefore = (await activeSessionsGauge.get()).values[0]?.value ?? 0;
+      try {
+        // deno-lint-ignore no-explicit-any
+        (activeSessionsGauge as any).dec = () => {
+          throw new Error("dec boom");
+        };
+
+        const event = createTestEvent();
+        const platformAdapter = new MockPlatformAdapter() as unknown as PlatformAdapter;
+
+        const response = await orchestrator.processMessage(event, platformAdapter);
+
+        // Even with dec() failing, the finally must not throw in place of the
+        // already-computed response.
+        assertEquals(response.success, false);
+        assertEquals(response.error, "Agent did not generate a reply");
+      } finally {
+        // deno-lint-ignore no-explicit-any
+        (activeSessionsGauge as any).dec = originalDec;
+        // The session's inc() ran but dec() failed during this test; rebalance
+        // the shared gauge so later tests in this file see a clean baseline.
+        if (((await activeSessionsGauge.get()).values[0]?.value ?? 0) > gaugeBefore) {
+          activeSessionsGauge.dec();
+        }
+      }
+
+      sessionRegistry.stop();
+    } finally {
+      await Deno.remove(tempDir, { recursive: true });
+    }
+  },
 });

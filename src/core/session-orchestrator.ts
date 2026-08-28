@@ -850,12 +850,13 @@ export class SessionOrchestrator {
             error: "Cancelled by queue deadline",
             ...auditWriter?.getSummaryCounters(),
           });
-          return {
+          result = {
             success: false,
             replySent: false,
             fileSent: false,
             error: "Cancelled by queue deadline",
           };
+          return result;
         }
 
         if (lurkSkipped) {
@@ -868,7 +869,8 @@ export class SessionOrchestrator {
             error: "Lurk trigger re-validation failed — cycle skipped",
             ...auditWriter?.getSummaryCounters(),
           });
-          return { success: true, replySent: false, fileSent: false };
+          result = { success: true, replySent: false, fileSent: false };
+          return result;
         }
 
         // Post-lease: final response state (the runner already cleared state before
@@ -888,7 +890,8 @@ export class SessionOrchestrator {
             durationMs: Date.now() - sessionStartTime,
             ...auditWriter?.getSummaryCounters(),
           });
-          return { success: true, replySent, reactionSent, fileSent };
+          result = { success: true, replySent, reactionSent, fileSent };
+          return result;
         }
 
         await auditWriter?.write("session_end", {
@@ -899,12 +902,13 @@ export class SessionOrchestrator {
           error: "Agent did not generate a reply",
           ...auditWriter?.getSummaryCounters(),
         });
-        return {
+        result = {
           success: false,
           replySent: false,
           fileSent: false,
           error: "Agent did not generate a reply",
         };
+        return result;
       }
       // === PER-SPAWN MODE (default) ===
       // Per-spawn mode: issue the session's Skill API JWT file (the process pool
@@ -1049,12 +1053,13 @@ export class SessionOrchestrator {
             "Session {sessionId} ended without agent response after reconnect",
             { sessionId },
           );
-          return {
+          result = {
             success: false,
             replySent: false,
             fileSent: false,
             error: "Session lost due to idle timeout and reconnection failure",
           };
+          return result;
         }
 
         sessionLogger.info("Agent session {sessionId} completed with stopReason {stopReason}", {
@@ -1283,15 +1288,32 @@ export class SessionOrchestrator {
       };
       return result;
     } finally {
-      this.recordSessionMetrics({
-        platform: event.platform,
-        sessionType,
-        userId: event.userId,
-        shellSessionId,
-        sessionStartTime,
-        success: result!.success,
-        completedSessionType: sessionType === "channelLurk" ? "channelLurk" : "message",
-      });
+      try {
+        activeSessionsGauge.dec();
+      } catch (error) {
+        sessionLogger.error("Failed to decrement active sessions gauge", {
+          platform: event.platform,
+          sessionType,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+      try {
+        this.recordSessionMetrics({
+          platform: event.platform,
+          sessionType,
+          userId: event.userId,
+          shellSessionId,
+          sessionStartTime,
+          success: result!.success,
+          completedSessionType: sessionType === "channelLurk" ? "channelLurk" : "message",
+        });
+      } catch (error) {
+        sessionLogger.error("Failed to record session metrics", {
+          platform: event.platform,
+          sessionType,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
     }
   }
 
@@ -1472,7 +1494,7 @@ export class SessionOrchestrator {
         // Shared-process mode: run on the target channel's pool key under the
         // global execution lease.
         const poolKey = `${platform}:${channelId}`;
-        return await this.runSharedPoolSession({
+        result = await this.runSharedPoolSession({
           poolKey,
           sessionType: "spontaneous",
           shellSessionId,
@@ -1509,6 +1531,7 @@ export class SessionOrchestrator {
           routingContext,
           sessionStartTime,
         });
+        return result;
       }
 
       // Per-spawn mode: issue the session's Skill API JWT file (the process pool
@@ -1601,12 +1624,13 @@ export class SessionOrchestrator {
 
         if (response === null) {
           sessionLogger.warn("Spontaneous session ended without response after reconnect");
-          return {
+          result = {
             success: false,
             replySent: false,
             fileSent: false,
             error: "Session lost due to idle timeout",
           };
+          return result;
         }
 
         sessionLogger.info("Agent session completed with stopReason {stopReason}", {
@@ -1710,15 +1734,32 @@ export class SessionOrchestrator {
       };
       return result;
     } finally {
-      this.recordSessionMetrics({
-        platform,
-        sessionType: "spontaneous",
-        userId: options.botId,
-        shellSessionId,
-        sessionStartTime,
-        success: result!.success,
-        completedSessionType: "spontaneous",
-      });
+      try {
+        activeSessionsGauge.dec();
+      } catch (error) {
+        sessionLogger.error("Failed to decrement active sessions gauge", {
+          platform,
+          sessionType: "spontaneous",
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+      try {
+        this.recordSessionMetrics({
+          platform,
+          sessionType: "spontaneous",
+          userId: options.botId,
+          shellSessionId,
+          sessionStartTime,
+          success: result!.success,
+          completedSessionType: "spontaneous",
+        });
+      } catch (error) {
+        sessionLogger.error("Failed to record session metrics", {
+          platform,
+          sessionType: "spontaneous",
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
     }
   }
 
@@ -1871,7 +1912,7 @@ export class SessionOrchestrator {
         // process (pool key is stable across research runs) and run in the
         // maintenance queue lane.
         const poolKey = `self-research:self-research`;
-        return await this.runSharedPoolSession({
+        result = await this.runSharedPoolSession({
           poolKey,
           sessionType: "self_research",
           shellSessionId,
@@ -1908,6 +1949,7 @@ export class SessionOrchestrator {
           routingContext,
           sessionStartTime,
         });
+        return result;
       }
 
       // Per-spawn mode: issue the session's Skill API JWT file (the process pool
@@ -2007,12 +2049,13 @@ export class SessionOrchestrator {
 
         if (response === null) {
           sessionLogger.warn("Self-research session ended without response after reconnect");
-          return {
+          result = {
             success: false,
             replySent: false,
             fileSent: false,
             error: "Session lost due to idle timeout",
           };
+          return result;
         }
 
         sessionLogger.info("Self-research agent session completed with stopReason {stopReason}", {
@@ -2212,15 +2255,32 @@ export class SessionOrchestrator {
       };
       return result;
     } finally {
-      this.recordSessionMetrics({
-        platform: "internal",
-        sessionType: "self_research",
-        userId: "self-research",
-        shellSessionId,
-        sessionStartTime,
-        success: result!.success,
-        completedSessionType: "self-research",
-      });
+      try {
+        activeSessionsGauge.dec();
+      } catch (error) {
+        sessionLogger.error("Failed to decrement active sessions gauge", {
+          platform: "internal",
+          sessionType: "self_research",
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+      try {
+        this.recordSessionMetrics({
+          platform: "internal",
+          sessionType: "self_research",
+          userId: "self-research",
+          shellSessionId,
+          sessionStartTime,
+          success: result!.success,
+          completedSessionType: "self-research",
+        });
+      } catch (error) {
+        sessionLogger.error("Failed to record session metrics", {
+          platform: "internal",
+          sessionType: "self_research",
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
     }
   }
 
@@ -2368,7 +2428,7 @@ export class SessionOrchestrator {
         // Shared-process mode: one long-lived process per workspace's
         // memory-maintenance pool key, served from the maintenance queue lane.
         const poolKey = `memory-maintenance:${workspaceKey}`;
-        return await this.runSharedPoolSession({
+        result = await this.runSharedPoolSession({
           poolKey,
           sessionType: "memory_maintenance",
           shellSessionId,
@@ -2405,6 +2465,7 @@ export class SessionOrchestrator {
           routingContext,
           sessionStartTime,
         });
+        return result;
       }
 
       // Per-spawn mode: issue the session's Skill API JWT file (the process pool
@@ -2486,12 +2547,13 @@ export class SessionOrchestrator {
 
         if (response === null) {
           sessionLogger.warn("Memory maintenance session ended without response after reconnect");
-          return {
+          result = {
             success: false,
             replySent: false,
             fileSent: false,
             error: "Session lost due to idle timeout",
           };
+          return result;
         }
 
         sessionLogger.info("Memory maintenance session completed with stopReason {stopReason}", {
@@ -2558,15 +2620,32 @@ export class SessionOrchestrator {
       };
       return result;
     } finally {
-      this.recordSessionMetrics({
-        platform,
-        sessionType: "memory_maintenance",
-        userId,
-        shellSessionId,
-        sessionStartTime,
-        success: result!.success,
-        completedSessionType: "memory-maintenance",
-      });
+      try {
+        activeSessionsGauge.dec();
+      } catch (error) {
+        sessionLogger.error("Failed to decrement active sessions gauge", {
+          platform,
+          sessionType: "memory_maintenance",
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+      try {
+        this.recordSessionMetrics({
+          platform,
+          sessionType: "memory_maintenance",
+          userId,
+          shellSessionId,
+          sessionStartTime,
+          success: result!.success,
+          completedSessionType: "memory-maintenance",
+        });
+      } catch (error) {
+        sessionLogger.error("Failed to record session metrics", {
+          platform,
+          sessionType: "memory_maintenance",
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
     }
   }
 
@@ -2801,12 +2880,13 @@ export class SessionOrchestrator {
           sessionLogger.warn(
             "Channel memory maintenance session ended without response after reconnect",
           );
-          return {
+          result = {
             success: false,
             replySent: false,
             fileSent: false,
             error: "Session lost due to idle timeout",
           };
+          return result;
         }
 
         sessionLogger.info(
@@ -2872,15 +2952,32 @@ export class SessionOrchestrator {
       };
       return result;
     } finally {
-      this.recordSessionMetrics({
-        platform,
-        sessionType: "channel_memory_maintenance",
-        userId: "channel-maintenance",
-        shellSessionId,
-        sessionStartTime,
-        success: result!.success,
-        completedSessionType: "memory-maintenance",
-      });
+      try {
+        activeSessionsGauge.dec();
+      } catch (error) {
+        sessionLogger.error("Failed to decrement active sessions gauge", {
+          platform,
+          sessionType: "channel_memory_maintenance",
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+      try {
+        this.recordSessionMetrics({
+          platform,
+          sessionType: "channel_memory_maintenance",
+          userId: "channel-maintenance",
+          shellSessionId,
+          sessionStartTime,
+          success: result!.success,
+          completedSessionType: "memory-maintenance",
+        });
+      } catch (error) {
+        sessionLogger.error("Failed to record session metrics", {
+          platform,
+          sessionType: "channel_memory_maintenance",
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
     }
   }
   async processReminder(
@@ -3150,12 +3247,13 @@ export class SessionOrchestrator {
 
         if (response === null) {
           sessionLogger.warn("Reminder session ended without response after reconnect");
-          return {
+          result = {
             success: false,
             replySent: false,
             fileSent: false,
             error: "Session lost due to idle timeout",
           };
+          return result;
         }
 
         sessionLogger.info("Agent session completed with stopReason {stopReason}", {
@@ -3265,15 +3363,32 @@ export class SessionOrchestrator {
       };
       return result;
     } finally {
-      this.recordSessionMetrics({
-        platform,
-        sessionType: "reminder",
-        userId: reminder.userId,
-        shellSessionId,
-        sessionStartTime,
-        success: result!.success,
-        completedSessionType: "reminder",
-      });
+      try {
+        activeSessionsGauge.dec();
+      } catch (error) {
+        sessionLogger.error("Failed to decrement active sessions gauge", {
+          platform,
+          sessionType: "reminder",
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+      try {
+        this.recordSessionMetrics({
+          platform,
+          sessionType: "reminder",
+          userId: reminder.userId,
+          shellSessionId,
+          sessionStartTime,
+          success: result!.success,
+          completedSessionType: "reminder",
+        });
+      } catch (error) {
+        sessionLogger.error("Failed to record session metrics", {
+          platform,
+          sessionType: "reminder",
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
     }
   }
 
@@ -3828,7 +3943,11 @@ export class SessionOrchestrator {
     return { agentWorkspacePath, shellSessionId, auditWriter, sessionLogger };
   }
 
-  /** Common session cleanup: decrement gauge, record metrics, store completed session. */
+  /** Common session cleanup: record session metrics and store completed session.
+   *  NOTE: activeSessionsGauge.dec() deliberately does NOT live here — each
+   *  session finally decrements the gauge in its own try/catch BEFORE calling
+   *  this method, so a metrics failure can neither leak the gauge nor replace
+   *  a computed SessionResponse. */
   private recordSessionMetrics(params: {
     platform: string;
     sessionType: string;
@@ -3838,7 +3957,6 @@ export class SessionOrchestrator {
     success: boolean;
     completedSessionType: SessionType;
   }): void {
-    activeSessionsGauge.dec();
     const durationSec = (Date.now() - params.sessionStartTime) / 1000;
     const status = params.success ? "success" : "failure";
     sessionsTotal.labels(params.platform, params.sessionType, status).inc();
