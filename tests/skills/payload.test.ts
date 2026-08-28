@@ -8,7 +8,6 @@ import {
   LEGACY_FREE_TEXT_FLAG_PATTERN,
   PayloadError,
   readPayloadArg,
-  resolvePayloadBase,
   resolvePayloadPath,
 } from "../../skills/lib/payload.ts";
 
@@ -72,9 +71,60 @@ const RESOLVE_OPTS = {
   fileName: "reply.md",
 };
 
-Deno.test("resolvePayloadBase - session-scoped and fallback", () => {
-  assertEquals(resolvePayloadBase("/ws", "sess_1"), resolve("/ws/tmp/sess_1"));
-  assertEquals(resolvePayloadBase("/ws", ""), resolve("/ws/tmp"));
+// resolvePayloadBase reads process env (TMPDIR/SKILL_JWT_DIR). These env vars
+// are process-global and shared with test files running in parallel workers
+// (e.g. lib-client.test.ts), so all env-sensitive cases run in an isolated
+// subprocess instead of mutating the global env.
+Deno.test("resolvePayloadBase - fallback, pointer staging, and TMPDIR-ignored (subprocess)", async () => {
+  const jwtDir = Deno.makeTempDirSync();
+  const payloadUrl = new URL("../../skills/lib/payload.ts", import.meta.url).href;
+  const script = `
+import { resolvePayloadBase } from ${JSON.stringify(payloadUrl)};
+const jwtDir = Deno.env.get("SKILL_JWT_DIR");
+const results = [];
+// 1. Pointer names this session: staging root from the pointer is used.
+Deno.writeTextFileSync(jwtDir + "/active.json", JSON.stringify({ sessionId: "sess_1", staging: "/ws/discord/123/tmp" }));
+results.push(resolvePayloadBase("/agent-cwd", "sess_1"));
+// 2. Pointer names ANOTHER session (stale/foreign): fall back to {cwd}/tmp.
+Deno.writeTextFileSync(jwtDir + "/active.json", JSON.stringify({ sessionId: "sess_other", staging: "/ws/discord/999/tmp" }));
+results.push(resolvePayloadBase("/agent-cwd", "sess_1"));
+// 3. No staging field: fall back too.
+Deno.writeTextFileSync(jwtDir + "/active.json", JSON.stringify({ sessionId: "sess_1" }));
+results.push(resolvePayloadBase("/agent-cwd", "sess_1"));
+// 4. No pointer file at all: fall back.
+Deno.removeSync(jwtDir + "/active.json");
+results.push(resolvePayloadBase("/ws", "sess_1"));
+results.push(resolvePayloadBase("/ws", ""));
+console.log(JSON.stringify(results));
+`;
+  const scriptPath = `${jwtDir}/probe.ts`;
+  await Deno.writeTextFile(scriptPath, script);
+
+  const baseEnv = Deno.env.toObject();
+  const env: Record<string, string> = {
+    TMPDIR: "/data/channel-tmp/discord:discord/456", // must be IGNORED
+    SKILL_JWT_DIR: jwtDir,
+  };
+  for (const k of ["PATH", "HOME", "DENO_DIR", "XDG_CACHE_HOME", "DENO_INSTALL_ROOT"]) {
+    if (baseEnv[k] !== undefined) env[k] = baseEnv[k];
+  }
+
+  const output = await new Deno.Command(Deno.execPath(), {
+    args: ["run", "--no-check", "--allow-read", "--allow-write", "--allow-env", scriptPath],
+    env,
+    clearEnv: true,
+  }).output();
+  const stdout = new TextDecoder().decode(output.stdout);
+  assertEquals(output.code, 0, `child failed: ${stdout}${new TextDecoder().decode(output.stderr)}`);
+  const results = JSON.parse(stdout.trim().split("\n").at(-1)!) as string[];
+
+  assertEquals(results[0], resolve("/ws/discord/123/tmp/sess_1"));
+  assertEquals(results[1], resolve("/agent-cwd/tmp/sess_1"));
+  assertEquals(results[2], resolve("/agent-cwd/tmp/sess_1"));
+  assertEquals(results[3], resolve("/ws/tmp/sess_1"));
+  assertEquals(results[4], resolve("/ws/tmp"));
+
+  await Deno.remove(jwtDir, { recursive: true });
 });
 
 Deno.test("isWithinDir - boundary-safe sibling prefixes rejected", () => {

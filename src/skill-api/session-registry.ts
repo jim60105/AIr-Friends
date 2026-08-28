@@ -50,6 +50,8 @@ export interface ActiveSession {
   editCount: number;
   /** Number of successful send-file calls in this session (multi-file batch = 1) */
   fileSendCount: number;
+  /** Number of successful memory-save calls in this session (crash-recovery ops note) */
+  memorySaveCount?: number;
   /** Agent's global workspace path */
   agentWorkspacePath?: string;
   /** Last time this session was touched by an authenticated call (F13 idle TTL) */
@@ -58,6 +60,19 @@ export interface ActiveSession {
   auditWriter?: SessionAuditWriter;
   /** Callback to request agent process termination (doom-loop protection) */
   onTerminateRequest?: () => Promise<void>;
+  /**
+   * Recovery fence (crash recovery): while true, side-effect skill calls
+   * (reply/file/reaction/memory mutations) for this session are rejected, so
+   * orphaned tool children of a dead agent process cannot land duplicate
+   * effects after the recovery decision has been made.
+   */
+  recoveryFenced?: boolean;
+  /**
+   * Side-effect skill calls currently executing (past the auth/fence gate,
+   * handler running or platform delivery in flight). Crash recovery waits for
+   * this to reach 0 before deciding whether the session has already responded.
+   */
+  inflightSideEffects?: number;
   /**
    * Last message ID sent via `send-reply` or `edit-reply` ONLY (including
    * Misskey's delete-and-recreate new ID). Consumed by `edit-reply` scoping
@@ -148,6 +163,7 @@ export class SessionRegistry {
       | "replyCount"
       | "editCount"
       | "fileSendCount"
+      | "memorySaveCount"
     >,
   ): string {
     const id = this.generateSessionId();
@@ -163,6 +179,7 @@ export class SessionRegistry {
       replyCount: 0,
       editCount: 0,
       fileSendCount: 0,
+      memorySaveCount: 0,
     };
 
     this.sessions.set(id, activeSession);
@@ -402,6 +419,14 @@ export class SessionRegistry {
     if (session) {
       session.auditWriter = writer;
     }
+  }
+
+  /**
+   * Retrieve the audit writer attached to a session (undefined when audit is
+   * disabled or the session is unknown/expired).
+   */
+  getAuditWriter(sessionId: string): SessionAuditWriter | undefined {
+    return this.sessions.get(sessionId)?.auditWriter;
   }
 
   /**

@@ -7,24 +7,9 @@ import type { SkillContext } from "@skills/types.ts";
 
 import { skillApiCallsTotal } from "@utils/metrics.ts";
 import { sanitizeSkillParams, sha256Hash } from "@utils/hash.ts";
-import { timingSafeEqual } from "@std/crypto/timing-safe-equal";
+import { verifySkillJwt } from "@utils/skill-jwt.ts";
 
 const logger = createLogger("SkillAPIServer");
-
-const tokenEncoder = new TextEncoder();
-
-/**
- * Constant-time comparison of a presented caller token against the expected
- * session token (F13). Returns false on any length/content mismatch without
- * an early-exit timing oracle.
- */
-function tokensMatch(presented: string | undefined, expected: string): boolean {
-  if (!presented) return false;
-  const a = tokenEncoder.encode(presented);
-  const b = tokenEncoder.encode(expected);
-  if (a.byteLength !== b.byteLength) return false;
-  return timingSafeEqual(a, b);
-}
 
 /**
  * Extract the bearer token from an `Authorization: Bearer <token>` header.
@@ -43,6 +28,23 @@ const MAX_EDIT_CALLS_BEFORE_TERMINATE = 3;
 /** Maximum number of successful send-file calls allowed per session (a multi-file batch = 1) */
 const MAX_FILE_SENDS_PER_SESSION = 1;
 const MAX_FILE_SEND_ATTEMPTS_BEFORE_TERMINATE = 4;
+
+/**
+ * Skills whose execution mutates external state (platform messages, memory
+ * store, reminders). These are rejected while a session is recovery-fenced.
+ * Read-only skills (memory-search, memory-stats, fetch-context, get-message,
+ * memory-export) are deliberately excluded.
+ */
+const SIDE_EFFECT_SKILLS = new Set([
+  "send-reply",
+  "edit-reply",
+  "send-file",
+  "react-message",
+  "memory-save",
+  "memory-patch",
+  "set-reminder",
+  "cancel-reminder",
+]);
 
 export interface SkillAPIConfig {
   port: number;
@@ -73,6 +75,11 @@ export class SkillAPIServer {
   private sessionRegistry: SessionRegistry;
   private skillRegistry: SkillRegistry;
   private config: SkillAPIConfig;
+  /**
+   * Deployment-level HMAC secret (256-bit). The bot process is the only holder
+   * of this key: it both issues per-session JWTs and verifies them.
+   */
+  private skillApiSecret: string;
   private requestCache: Map<string, RequestCacheEntry> = new Map();
   private readonly CACHE_TTL_MS = 1000; // 1 second cache for duplicate detection
   private cleanupInterval?: ReturnType<typeof setInterval>;
@@ -81,10 +88,12 @@ export class SkillAPIServer {
     sessionRegistry: SessionRegistry,
     skillRegistry: SkillRegistry,
     config: SkillAPIConfig,
+    skillApiSecret: string = "",
   ) {
     this.sessionRegistry = sessionRegistry;
     this.skillRegistry = skillRegistry;
     this.config = config;
+    this.skillApiSecret = skillApiSecret;
   }
 
   /**
@@ -184,12 +193,12 @@ export class SkillAPIServer {
         );
       }
 
-      // Authenticate BEFORE the dedup cache (F13): a valid session ID is not
-      // sufficient — the caller must present the per-session token bound to the
-      // owning subprocess. Authentication failures are returned immediately and
-      // are NOT cached, so an unauthorized attempt holding a leaked session ID
-      // cannot poison a legitimate caller's cached result.
-      const auth = this.authenticate(
+      // Authenticate BEFORE the dedup cache: a valid session ID is not
+      // sufficient — the caller must present the owning session's signed JWT.
+      // Authentication failures are returned immediately and are NOT cached, so
+      // an unauthorized attempt holding a leaked session ID cannot poison a
+      // legitimate caller's cached result.
+      const auth = await this.authenticate(
         body.sessionId,
         extractBearerToken(request.headers.get("authorization")),
       );
@@ -201,6 +210,26 @@ export class SkillAPIServer {
       }
       // Refresh the session's idle timer on each authenticated call.
       this.sessionRegistry.touch(body.sessionId);
+
+      // Recovery fence (crash recovery): while a session's recovery decision is
+      // being made, side-effect skill calls from orphaned tool children of the
+      // dead agent process are rejected so no duplicate effects can land.
+      if (
+        SIDE_EFFECT_SKILLS.has(skillName) &&
+        this.sessionRegistry.get(body.sessionId)?.recoveryFenced === true
+      ) {
+        logger.warn("Skill call rejected: session is recovery-fenced", {
+          skillName,
+          sessionId: body.sessionId,
+        });
+        return new Response(
+          JSON.stringify({
+            success: false,
+            error: "Session is in crash recovery; side-effect skill calls are temporarily blocked",
+          }),
+          { status: 409, headers },
+        );
+      }
 
       // Generate cache key for deduplication
       const cacheKey = this.generateCacheKey(skillName, body.sessionId, body.parameters ?? {});
@@ -237,45 +266,68 @@ export class SkillAPIServer {
       }
 
       // Create a promise for this request (for concurrent duplicate detection)
-      const executionPromise = this.executeSkillRequest(skillName, body, headers);
+      // Side-effect executions are counted on the session so crash recovery can
+      // wait for in-flight effects to settle before making its decision.
+      const countedSideEffect = SIDE_EFFECT_SKILLS.has(skillName);
+      if (countedSideEffect) {
+        const counted = this.sessionRegistry.get(body.sessionId);
+        if (counted) counted.inflightSideEffects = (counted.inflightSideEffects ?? 0) + 1;
+      }
+      try {
+        const executionPromise = this.executeSkillRequest(skillName, body, headers);
 
-      // Store the pending promise in cache
-      this.requestCache.set(cacheKey, {
-        timestamp: Date.now(),
-        response: { success: false }, // Placeholder, will be updated
-        promise: executionPromise,
-      });
-
-      // Wait for execution to complete
-      const result = await executionPromise;
-
-      // Never cache authentication/authorization failures (F13): only cache
-      // executed results. (Auth failures are already gated out above; this is a
-      // defense-in-depth guard for the executeSkillRequest safety-net 401.)
-      // send-file results are ALSO never cached: the skill is quota-gated
-      // (1 successful call per session with doom-loop termination), so serving
-      // a cached success or rejection would let the agent bypass the quota gate
-      // and starve doom-loop detection. Concurrent in-flight duplicates still
-      // deduplicate via the pending-promise path above.
-      if (
-        result.statusCode === 401 ||
-        result.statusCode === 403 ||
-        skillName === "send-file"
-      ) {
-        this.requestCache.delete(cacheKey);
-      } else {
-        // Update cache with the actual result
+        // Store the pending promise in cache
         this.requestCache.set(cacheKey, {
           timestamp: Date.now(),
-          response: result,
+          response: { success: false }, // Placeholder, will be updated
+          promise: executionPromise,
         });
-      }
 
-      const statusCode = result.statusCode ?? (result.success ? 200 : 400);
-      return new Response(
-        JSON.stringify(result),
-        { status: statusCode, headers },
-      );
+        // Wait for execution to complete
+        const result = await executionPromise;
+
+        // Never cache authentication/authorization failures (F13): only cache
+        // executed results. (Auth failures are already gated out above; this is a
+        // defense-in-depth guard for the executeSkillRequest safety-net 401.)
+        // send-file results are ALSO never cached: the skill is quota-gated
+        // (1 successful call per session with doom-loop termination), so serving
+        // a cached success or rejection would let the agent bypass the quota gate
+        // and starve doom-loop detection. Concurrent in-flight duplicates still
+        // deduplicate via the pending-promise path above.
+        if (
+          result.statusCode === 401 ||
+          result.statusCode === 403 ||
+          skillName === "send-file"
+        ) {
+          this.requestCache.delete(cacheKey);
+        } else {
+          // Update cache with the actual result
+          this.requestCache.set(cacheKey, {
+            timestamp: Date.now(),
+            response: result,
+          });
+        }
+
+        // Track successful memory-save calls for the crash-recovery ops note
+        // (lives in the bot process; audit-writer counters need audit.enabled).
+        if (skillName === "memory-save" && result.success) {
+          const counted = this.sessionRegistry.get(body.sessionId);
+          if (counted) counted.memorySaveCount = (counted.memorySaveCount ?? 0) + 1;
+        }
+
+        const statusCode = result.statusCode ?? (result.success ? 200 : 400);
+        return new Response(
+          JSON.stringify(result),
+          { status: statusCode, headers },
+        );
+      } finally {
+        if (countedSideEffect) {
+          const counted = this.sessionRegistry.get(body.sessionId);
+          if (counted) {
+            counted.inflightSideEffects = Math.max(0, (counted.inflightSideEffects ?? 1) - 1);
+          }
+        }
+      }
     } catch (error) {
       logger.error("Skill API error", {
         error: error instanceof Error ? error.message : String(error),
@@ -292,15 +344,17 @@ export class SkillAPIServer {
   }
 
   /**
-   * Authenticate a Skill API request (F13): resolve the session by ID (which
-   * also enforces the idle TTL) and verify the presented caller token against
-   * the session's stored token in constant time. Returns a typed result so the
-   * caller can reject un-cached before the dedup/execute path.
+   * Authenticate a Skill API request: resolve the session by ID (which also
+   * enforces the idle TTL), then verify the presented per-session JWT with
+   * four server-side checks (HMAC signature, `sub == sessionId`,
+   * `channel == session.channelId`, `jti == session.callerToken` + `exp`).
+   * Returns a typed result so the caller can reject un-cached before the
+   * dedup/execute path.
    */
-  private authenticate(
+  private async authenticate(
     sessionId: string,
     presentedToken: string | undefined,
-  ): { ok: true } | { ok: false; response: SkillResponse } {
+  ): Promise<{ ok: true } | { ok: false; response: SkillResponse }> {
     const session = this.sessionRegistry.get(sessionId);
     if (!session) {
       return {
@@ -308,18 +362,30 @@ export class SkillAPIServer {
         response: { success: false, error: "Invalid or expired session", statusCode: 401 },
       };
     }
-    if (!tokensMatch(presentedToken, session.callerToken)) {
-      logger.warn("Skill API request rejected: missing or invalid caller token", { sessionId });
+    if (!presentedToken) {
+      logger.warn("Skill API request rejected: missing Authorization token", { sessionId });
       return {
         ok: false,
-        response: {
-          success: false,
-          error: "Missing or invalid caller token",
-          statusCode: 403,
-        },
+        response: { success: false, error: "Missing Authorization header", statusCode: 403 },
       };
     }
-    return { ok: true };
+    const result = await verifySkillJwt(presentedToken, this.skillApiSecret, {
+      sessionId,
+      channelId: session.channelId,
+      callerToken: session.callerToken,
+    });
+    if (result.valid) {
+      return { ok: true };
+    }
+    const statusCode = result.reason === "expired" ? 401 : 403;
+    logger.warn(
+      "Skill API request rejected: JWT verification failed ({reason})",
+      { sessionId, reason: result.reason, detail: result.detail },
+    );
+    return {
+      ok: false,
+      response: { success: false, error: `JWT verification failed: ${result.reason}`, statusCode },
+    };
   }
 
   /**

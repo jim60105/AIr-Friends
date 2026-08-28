@@ -2,7 +2,7 @@
 
 import * as acp from "@agentclientprotocol/sdk";
 import { join } from "@std/path";
-import { buildSkillAutoApproveList, ChatbotClient } from "./client.ts";
+import { buildSkillAutoApproveList, ChatbotClient, type SessionGateContext } from "./client.ts";
 import type { AgentCapabilities, AgentConnectorOptions, MCPServerConfig } from "./types.ts";
 import type { SkillRegistry } from "@skills/registry.ts";
 import type { Logger } from "@utils/logger.ts";
@@ -75,13 +75,22 @@ export class AgentConnector {
   private options: AgentConnectorOptions;
   private capabilities: AgentCapabilities | null = null;
   /**
-   * Live cache of the current session's config options (single-session scoped).
-   * Captured from `newSession`, refreshed by `config_option_update` notifications and
-   * `set_config_option` responses. Used to discover the `thought_level` option.
+   * Per-ACP-session config-options cache (shared-process mode).
+   * In shared mode one connector serves many ACP sessions on the same stdio
+   * connection, so the mutable state (config options, current model ID, idle
+   * monitor) is indexed by ACP session ID — a later session's setup calls cannot
+   * clobber the in-flight session's state.
    */
-  private sessionConfigOptions: acp.SessionConfigOption[] = [];
-  /** Model ID of the current session (set by `setSessionModel`); included in warning context */
-  private currentModelId: string | undefined;
+  private sessionConfigOptions: Map<string, acp.SessionConfigOption[]> = new Map();
+  /** Per-ACP-session model ID (set by `setSessionModel`); included in warning context */
+  private sessionModelIds: Map<string, string> = new Map();
+  /**
+   * Per-ACP-session gate contexts (shared-process mode). Cached here so a
+   * reconnect (which builds a fresh ChatbotClient) can replay them onto the
+   * new client — session-scoped cwd, owning skill session id, and permission
+   * flags must survive crash recovery.
+   */
+  private sessionGateContexts: Map<string, SessionGateContext> = new Map();
   private currentIdleMonitorIntervalId: ReturnType<typeof setInterval> | null = null;
   /**
    * Rejects unconditionally whenever the current subprocess exits, for any reason
@@ -168,9 +177,16 @@ export class AgentConnector {
     );
 
     // Keep cached session config options fresh from agent-initiated updates.
-    this.client.setConfigOptionsListener((configOptions) => {
-      this.refreshSessionConfigOptions(configOptions);
+    // The config_option_update notification carries the ACP session id, so the
+    // cache is kept per-ACP-session (shared-process mode).
+    this.client.setConfigOptionsListener((sessionId, configOptions) => {
+      this.refreshSessionConfigOptions(sessionId, configOptions);
     });
+
+    // Replay cached per-session gate contexts onto the fresh client (reconnect).
+    for (const [sid, ctx] of this.sessionGateContexts) {
+      this.client.setSessionContext(sid, ctx);
+    }
 
     // Create ClientSideConnection with proper stream order
     const stream = acp.ndJsonStream(output, input);
@@ -256,10 +272,12 @@ export class AgentConnector {
   }
 
   /**
-   * Create a new session with the Agent
+   * Create a new ACP session on this connection.
    * @param mcpServers Optional MCP servers to connect to
+   * @param cwd Optional per-session working directory override (shared-process mode:
+   *   each user's session carries their own workspace as the session cwd).
    */
-  async createSession(mcpServers: MCPServerConfig[] = []): Promise<string> {
+  async createSession(mcpServers: MCPServerConfig[] = [], cwd?: string): Promise<string> {
     if (!this.connection) {
       throw new Error("Not connected to agent");
     }
@@ -274,15 +292,20 @@ export class AgentConnector {
 
     // Filter out MCP servers with unsupported transports (skip + warn)
     const supportedServers = this.filterSupportedMCPServers(mcpServers);
+    const sessionCwd = cwd ?? this.options.agentConfig.cwd;
 
     const result = await this.raceAgainstCrash(this.connection.newSession({
-      cwd: this.options.agentConfig.cwd,
+      cwd: sessionCwd,
       mcpServers: supportedServers.map((server) => this.convertMCPServerConfig(server)),
     }));
 
-    // Capture initial config options (single-session scoped); refreshed later via
+    // Shared-process mode: register the per-session working directory with the client
+    // so the permission gate confines this session to the session's own workspace.
+    this.setSessionGateContext(result.sessionId, { cwd: sessionCwd });
+
+    // Capture initial config options (session-scoped); refreshed later via
     // config_option_update notifications and set_config_option responses.
-    this.refreshSessionConfigOptions(result.configOptions);
+    this.refreshSessionConfigOptions(result.sessionId, result.configOptions);
 
     logger.info("Session {sessionId} created with {mcpServerCount} MCP servers", {
       sessionId: result.sessionId,
@@ -426,7 +449,7 @@ export class AgentConnector {
       modelId,
     }));
 
-    this.currentModelId = modelId;
+    this.sessionModelIds.set(sessionId, modelId);
     logger.info("Session model set to {modelId} for session {sessionId}", { sessionId, modelId });
   }
 
@@ -449,21 +472,24 @@ export class AgentConnector {
   }
 
   /**
-   * Refresh the cached session config options from a complete list.
+   * Refresh the cached session config options (session-scoped) from a complete list.
    * Used by both `config_option_update` notifications and `set_config_option` responses.
-   * A nullish list clears the cache.
+   * A nullish list clears the cache for that session.
    */
   private refreshSessionConfigOptions(
+    sessionId: string,
     configOptions: acp.SessionConfigOption[] | null | undefined,
   ): void {
-    this.sessionConfigOptions = Array.isArray(configOptions) ? configOptions : [];
+    this.sessionConfigOptions.set(sessionId, Array.isArray(configOptions) ? configOptions : []);
   }
 
   /**
-   * Find the currently advertised `thought_level` config option, if any.
+   * Find the currently advertised `thought_level` config option for a session, if any.
    */
-  private findThoughtLevelOption(): acp.SessionConfigOption | undefined {
-    return this.sessionConfigOptions.find((opt) => opt.category === THOUGHT_LEVEL_CATEGORY);
+  private findThoughtLevelOption(sessionId: string): acp.SessionConfigOption | undefined {
+    return this.sessionConfigOptions.get(sessionId)?.find((opt) =>
+      opt.category === THOUGHT_LEVEL_CATEGORY
+    );
   }
 
   /**
@@ -513,7 +539,7 @@ export class AgentConnector {
       return "failed";
     }
 
-    const option = this.findThoughtLevelOption();
+    const option = this.findThoughtLevelOption(sessionId);
     if (!option) {
       logger.info(
         "Reasoning effort not supported by agent for session {sessionId} (no thought_level option)",
@@ -541,7 +567,7 @@ export class AgentConnector {
           requested: trimmed,
           availableValues,
           configId: option.id,
-          model: this.currentModelId,
+          model: this.sessionModelIds.get(sessionId),
           agentType: this.options.agentType,
         },
       );
@@ -559,6 +585,7 @@ export class AgentConnector {
       }));
       // The response carries the complete updated config option state.
       this.refreshSessionConfigOptions(
+        sessionId,
         (response as { configOptions?: acp.SessionConfigOption[] })?.configOptions,
       );
       logger.info(
@@ -623,10 +650,11 @@ export class AgentConnector {
     try {
       // The crash-signal race arm applies unconditionally, independent of idle-timeout
       // configuration, so a subprocess crash mid-prompt rejects promptly even when idle
-      // timeout is disabled. Its error message is deliberately worded to NOT match
-      // promptWithIdleTimeoutHandling()'s reconnect-trigger substrings ("ACP connection
-      // dead" / "ACP agent process exited unexpectedly"), bypassing its always-futile
-      // reconnectAndResumeSession() detour for this error class (see design.md Decision 5).
+      // timeout is disabled. In shared-process mode the orchestrator matches this
+      // error class too and runs controlled recovery (restart + session/load +
+      // respond-gated re-issue — shared-acp-process-pool spec); in per-spawn mode
+      // the reconnect detour is futile (fresh process, per-session data dirs), so
+      // the message stays distinct from the idle-timeout triggers for that mode.
       const promptCall = this.raceAgainstCrash(this.connection.prompt({ sessionId, prompt }));
       const result = this.idleTimeoutEnabled
         ? await Promise.race([promptCall, this.monitorIdleTimeout(sessionId, logger)])
@@ -674,19 +702,39 @@ export class AgentConnector {
     // must still unstick that prompt.
     this.intentionalShutdown = true;
     this.clearIdleMonitor();
+    const logger = this.options.logger as Logger;
 
     if (this.process) {
       try {
         this.process.kill("SIGTERM");
 
-        // Best-effort cleanup with timeout (following GitHub's example)
-        await Promise.race([
-          this.process.status,
-          new Promise<void>((resolve) => setTimeout(() => resolve(), DISCONNECT_TIMEOUT_MS)),
-        ]);
+        // Best-effort cleanup with timeout (following GitHub's example).
+        // The timer handle is cleared once the race settles so a fast exit does
+        // not leave a dangling timer behind. On timeout, escalate to SIGKILL
+        // (spec: 2-second SIGTERM timeout before force-killing the subprocess).
+        let disconnectTimer: ReturnType<typeof setTimeout> | undefined;
+        let exited = false;
+        const statusRace = Promise.race([
+          this.process.status.then(() => {
+            exited = true;
+          }),
+          new Promise<void>((resolve) => {
+            disconnectTimer = setTimeout(() => resolve(), DISCONNECT_TIMEOUT_MS);
+          }),
+        ]).finally(() => clearTimeout(disconnectTimer));
+        await statusRace;
+        if (!exited) {
+          logger.warn("Agent process did not exit within SIGTERM timeout, sending SIGKILL", {
+            timeoutMs: DISCONNECT_TIMEOUT_MS,
+          });
+          try {
+            this.process.kill("SIGKILL");
+          } catch {
+            // Best effort — the process may have exited between the race and here.
+          }
+        }
       } catch (error) {
         // Ignore kill errors - best effort cleanup
-        const logger = this.options.logger as Logger;
         logger.warn("Error killing agent process", {
           error: error instanceof Error ? error.message : String(error),
         });
@@ -696,7 +744,21 @@ export class AgentConnector {
     this.connection = null;
     this.client = null;
     this.capabilities = null;
-    this.sessionConfigOptions = [];
+    this.sessionConfigOptions = new Map();
+    this.sessionModelIds = new Map();
+  }
+
+  /**
+   * Register the session's gate context (cwd + owning skill session id +
+   * per-session permission flags) on the client and cache it for replay after
+   * a reconnect. Shared-process mode: every session MUST call this — one
+   * ChatbotClient serves all sessions of the pooled process.
+   */
+  setSessionGateContext(acpSessionId: string, ctx: SessionGateContext): void {
+    const existing = this.sessionGateContexts.get(acpSessionId);
+    const merged: SessionGateContext = { ...existing, ...ctx };
+    this.sessionGateContexts.set(acpSessionId, merged);
+    this.client?.setSessionContext(acpSessionId, merged);
   }
 
   /**
@@ -797,6 +859,15 @@ export class AgentConnector {
   }
 
   /**
+   * Get the agent subprocess PID (undefined when not connected).
+   * Used by the process pool to wait for / kill the agent's child process tree
+   * before clearing the current-session pointer file.
+   */
+  getProcessPid(): number | undefined {
+    return this.process?.pid;
+  }
+
+  /**
    * Monitor for idle timeout. Only rejects (never resolves normally).
    * Used with Promise.race() against the actual prompt call.
    */
@@ -879,16 +950,27 @@ export class AgentConnector {
   }
 
   /**
-   * Attempt to reconnect and resume an existing session.
-   * Returns true if reconnection succeeded and session was loaded.
-   * Returns false if session resumption is not supported.
+   * Attempt to reconnect and resume an existing session (shared-process mode).
+   * Restarts the pool key's process, resumes the in-flight session via ACP
+   * `session/load` (history replayed to the client), and applies controlled
+   * recovery: the prompt is re-issued ONLY if no response has been recorded
+   * for the session (the caller decides via `hasResponded`).
+   *
+   * @param sessionId the ACP session to resume
+   * @param cwd the session's working directory (required by `session/load`)
+   * @param mcpServers the session's MCP servers (required by `session/load`)
+   * @returns true if reconnection succeeded and the session was loaded.
    */
-  async reconnectAndResumeSession(sessionId: string): Promise<boolean> {
+  async reconnectAndResumeSession(
+    sessionId: string,
+    cwd: string,
+    mcpServers: MCPServerConfig[] = [],
+  ): Promise<boolean> {
     const logger = this.options.logger as Logger;
 
     logger.info("Attempting to reconnect and resume session {sessionId}", { sessionId });
 
-    // Disconnect old connection
+    // Disconnect old connection (kills the dead/dying process)
     await this.disconnect();
 
     // Spawn new process and initialize
@@ -904,11 +986,23 @@ export class AgentConnector {
       return false;
     }
 
-    // TODO: Call connection.loadSession() when ACP SDK supports it.
-    // For now, since SDK v0.14.1 doesn't have this method,
-    // this path is unreachable (supportsLoadSession() returns false for all current agents).
-    await this.disconnect();
-    return false;
+    // Resume the session: `session/load` replays history into the client.
+    // The OpenCode channel-scoped data root (XDG_DATA_HOME under the pool key)
+    // persists the session state, so the load survives the process restart.
+    if (!this.connection) {
+      logger.warn("Reconnect failed: no live connection after respawn", { sessionId });
+      await this.disconnect();
+      return false;
+    }
+    const supportedServers = this.filterSupportedMCPServers(mcpServers);
+    await this.raceAgainstCrash(this.connection.loadSession({
+      sessionId,
+      cwd,
+      mcpServers: supportedServers.map((server) => this.convertMCPServerConfig(server)),
+    }));
+    this.setSessionGateContext(sessionId, { cwd });
+    logger.info("Session {sessionId} resumed via session/load", { sessionId });
+    return true;
   }
 
   private get idleTimeoutMs(): number {

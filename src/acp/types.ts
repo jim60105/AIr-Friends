@@ -35,6 +35,13 @@ export interface ClientConfig {
   /** YOLO mode: auto-approve all permission requests */
   yolo?: boolean;
 
+  /**
+   * Process-level shell TMPDIR of the agent subprocess (shared-process mode:
+   * channel-scoped `{dataRoot}/channel-tmp/{poolKey}`). The permission gate's
+   * `$TMPDIR` expansion mirrors the real subprocess environment.
+   */
+  processTmpDir?: string;
+
   /** Skill names to auto-approve in restricted (non-YOLO) mode */
   autoApproveSkills?: string[];
 
@@ -49,6 +56,16 @@ export interface ClientConfig {
    * regardless of this flag.
    */
   canWriteAgentWorkspace?: boolean;
+
+  /**
+   * Process-level `XDG_DATA_HOME` of the agent subprocess (set by agent-factory).
+   * In shared-process mode this is the pool-key-scoped data root
+   * (`{dataRoot}/opencode-data/{poolKey}`); the permission gate uses it for the
+   * tool-output boundary so truncated tool outputs stay inside the channel-scoped
+   * data root, outside any user's workspace. When unset (per-spawn mode) the gate
+   * falls back to the per-session workspace-scoped data home.
+   */
+  xdgDataHome?: string;
 }
 
 /**

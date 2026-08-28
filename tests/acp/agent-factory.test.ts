@@ -524,7 +524,7 @@ Deno.test("createAgentConfig - does not set SESSION_ID when sessionId omitted", 
   assertEquals(agentConfig.env?.["SESSION_ID"], undefined);
 });
 
-Deno.test("createAgentConfig - sets SKILL_API_TOKEN in env when callerToken provided (F13)", () => {
+Deno.test("createAgentConfig - sets SKILL_JWT_DIR in env (JWT skill auth)", () => {
   const config = createTestConfig();
   const agentConfig = createAgentConfig(
     "opencode",
@@ -533,13 +533,20 @@ Deno.test("createAgentConfig - sets SKILL_API_TOKEN in env when callerToken prov
     false,
     undefined,
     "sess_test123",
-    "tok_secret_value",
   );
-  assertEquals(agentConfig.env?.["SKILL_API_TOKEN"], "tok_secret_value");
+  // Default JWT dir (config.agent.sharedProcess?.jwtDir ?? "data/skill-jwt")
+  assertEquals(agentConfig.env?.["SKILL_JWT_DIR"], "data/skill-jwt");
+  // The deployment secret is NOT in the agent env (bot process holds it alone).
+  assertEquals(agentConfig.env?.["SKILL_API_SECRET"], undefined);
+  assertEquals(agentConfig.env?.["SKILL_API_TOKEN"], undefined);
 });
 
-Deno.test("createAgentConfig - does not set SKILL_API_TOKEN when callerToken omitted", () => {
+Deno.test("createAgentConfig - shared-process mode (poolKey) scopes data roots under the bot data root", () => {
   const config = createTestConfig();
+  config.agent.sharedProcess = {
+    enabled: true,
+    jwtDir: "data/skill-jwt",
+  };
   const agentConfig = createAgentConfig(
     "opencode",
     "/tmp/workspace",
@@ -547,8 +554,12 @@ Deno.test("createAgentConfig - does not set SKILL_API_TOKEN when callerToken omi
     false,
     undefined,
     "sess_test123",
+    "discord:123",
   );
-  assertEquals(agentConfig.env?.["SKILL_API_TOKEN"], undefined);
+  const dataRoot = config.workspace.repoPath;
+  assertEquals(agentConfig.env?.["XDG_DATA_HOME"], join(dataRoot, "opencode-data", "discord:123"));
+  assertEquals(agentConfig.env?.["TMPDIR"], join(dataRoot, "channel-tmp", "discord:123"));
+  assertEquals(agentConfig.cwd, join(dataRoot, "channel-cwd", "discord:123"));
 });
 
 Deno.test("detectPlaywrightBinarySync - detects chromium-headless-shell", () => {

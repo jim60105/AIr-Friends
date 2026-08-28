@@ -200,6 +200,15 @@ env:
   AGENT_IDLE_TIMEOUT_MS: '300000'
   AGENT_IDLE_TIMEOUT_CHECK_INTERVAL_MS: '30000'
 
+  # Shared ACP Process Pool (per-pool-key long-lived opencode acp + global execution lease)
+  AGENT_SHARED_PROCESS_ENABLED: 'false'
+  # AGENT_SHARED_PROCESS_RECLAIM_IDLE_MS: '1800000'
+  # AGENT_SHARED_PROCESS_JWT_DIR: 'data/skill-jwt'
+  # AGENT_SHARED_PROCESS_SECRET_PATH: 'data/skill-secret'
+  # AGENT_SHARED_PROCESS_QUEUE_DEADLINE_MS: '600000'
+  # Skill API deployment secret override (256-bit, 32+ bytes)
+  # AGENT_SKILL_API_SECRET: ''
+
   ## Git Credential Store (for agent subprocess, YOLO mode only)
   # AGENT_GIT_CREDENTIAL_ENABLED: 'false'
   # AGENT_GIT_CREDENTIAL_HOST: 'github.com'

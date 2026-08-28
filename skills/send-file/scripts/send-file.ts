@@ -20,11 +20,11 @@ async function main() {
       if (token === "--file-path" || token.startsWith("--file-path=")) {
         exitWithError(
           `The --file-path flag is no longer supported: it was replaced by the repeatable ` +
-          `--file-paths flag, because the skill now supports sending multiple files in one ` +
-          `invocation. Use --file-paths once per file, for example:\n` +
-          `${Deno.env.get("HOME") ?? "~"}/.agents/skills/send-file/scripts/send-file.ts ` +
-          `--session-id "$SESSION_ID" --file-paths "exports/report.pdf" ` +
-          `--file-paths "exports/chart.png"`,
+            `--file-paths flag, because the skill now supports sending multiple files in one ` +
+            `invocation. Use --file-paths once per file, for example:\n` +
+            `${Deno.env.get("HOME") ?? "~"}/.agents/skills/send-file/scripts/send-file.ts ` +
+            `--session-id "$SESSION_ID" --file-paths "exports/report.pdf" ` +
+            `--file-paths "exports/chart.png"`,
           "SKILL_SINGLE_FILE_FLAG",
         );
       }
@@ -34,7 +34,7 @@ async function main() {
     if (!Array.isArray(filePaths) || filePaths.length === 0) {
       exitWithError(
         "Missing required argument: --file-paths (repeatable, one occurrence per file, " +
-        "at least one required). Example: --file-paths \"a.png\" --file-paths \"b.png\"",
+          'at least one required). Example: --file-paths "a.png" --file-paths "b.png"',
       );
     }
 

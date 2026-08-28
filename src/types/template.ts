@@ -71,4 +71,21 @@ export interface TemplateVariables {
 
   /** Whether this session allows writing to agent workspace (regardless of YOLO mode) */
   canWriteAgentWorkspace?: boolean;
+
+  /**
+   * The session's own workspace tmp directory (payload staging area).
+   * Carried to the agent in shared-process mode, where the process-level
+   * `TMPDIR` env var is the channel-scoped data root (outside the user's
+   * workspace) — the prompt variable tells the agent where to stage payload
+   * files for this session.
+   */
+  tmpDir?: string;
+
+  /**
+   * The skill-API session id for this run ("sess_..."). Rendered into prompts so
+   * the agent passes the CURRENT session to skills (`--session-id ...`) even in
+   * shared-process mode where the process-level `$SESSION_ID` env var is frozen
+   * to the first session of the pooled process.
+   */
+  sessionId?: string;
 }

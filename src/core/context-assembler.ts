@@ -54,10 +54,11 @@ export class ContextAssembler {
    */
   async renderFullPrompt(
     event: NormalizedEvent,
-    _sessionId: string | undefined,
+    sessionId: string | undefined,
     userContextMessage: string,
     model?: string,
     yolo?: boolean,
+    workspace?: WorkspaceInfo,
   ): Promise<string> {
     const templateVars: TemplateVariables = {
       isDm: event.isDm,
@@ -69,6 +70,13 @@ export class ContextAssembler {
       model,
       yolo,
       userContextMessage,
+      // Session payload staging dir: the per-session subdir the payload helper
+      // enforces containment against (`{workspace}/tmp/{sessionId}`). In
+      // shared-process mode the process-level TMPDIR is a channel-scoped dir
+      // that is NEVER a staging area.
+      tmpDir: workspace && sessionId ? `${workspace.tmpPath}/${sessionId}` : workspace?.tmpPath,
+      // Current skill-API session id (shared mode: NOT the frozen $SESSION_ID).
+      sessionId,
     };
 
     return await this.getSystemPrompt(templateVars);

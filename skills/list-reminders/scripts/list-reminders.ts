@@ -1,4 +1,4 @@
-#!/usr/bin/env -S deno run --allow-net --allow-env
+#!/usr/bin/env -S deno run --allow-net --allow-env --allow-read
 
 import { callSkillApi, exitWithError, outputResult, parseBaseArgs } from "../../lib/client.ts";
 

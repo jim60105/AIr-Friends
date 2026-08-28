@@ -31,7 +31,7 @@ The summary text must NOT appear on the command line. Two-step flow:
 1. Write the summary text to a payload file using your edit/write tool:
 
    ```
-   $TMPDIR/$SESSION_ID/summary.md
+   {{ tmpDir || "$TMPDIR/$SESSION_ID" }}/summary.md
    ```
 
 2. Invoke the script with the payload file path:
@@ -39,7 +39,7 @@ The summary text must NOT appear on the command line. Two-step flow:
 ```bash
 ${HOME}/.agents/skills/memory-save/scripts/memory-save.ts \
   --session-id "$SESSION_ID" \
-  --content-file "$TMPDIR/$SESSION_ID/summary.md" \
+  --content-file "{{ tmpDir || "$TMPDIR/$SESSION_ID" }}/summary.md" \
   --importance normal \
   --tier working \
   --category summary \
@@ -48,7 +48,16 @@ ${HOME}/.agents/skills/memory-save/scripts/memory-save.ts \
 
 ## Parameters
 
-- The `$SESSION_ID` environment variable is available in your shell. Use `--session-id "$SESSION_ID"` when calling skills.
+- Use `--session-id {{ sessionId || "$SESSION_ID" }}` when calling skills (in per-spawn deployments the `$SESSION_ID` environment variable names this session).
+
+{{ if tmpDir -}}
+
+Your payload staging directory for this session is `{{ tmpDir }}`. Write skill payload
+files (reply text, memory content, search queries, captions) under this directory as
+`{name}.md` (e.g. `reply.md`), then pass the file path via the skill's payload-file
+flag (e.g. `--message-file`, `--content-file`). The process-level `$TMPDIR` env var is
+NOT your staging area — the per-session directory above is.
+{{- /if }}
 - `--content-file`: (Required) Path of the payload file containing the memory content. Log what you learned and what you feel. You don't need to stick only to objective descriptions. Write in a relaxed way, using YOUR character's perspective and subjective descriptions.
 - `--importance`: `normal` (default) or `high`. High importance memories are for user preferences, critical facts, or information that should be prioritized in recall. Normal importance is for general information that is not important or will be out of date soon.
 - `--tier`: (Optional) `core`, `working`, or `archive` (default: `archive`). Core memories are persistent identity facts (never decay). Working memories are active context. Archive memories are long-term storage subject to decay.

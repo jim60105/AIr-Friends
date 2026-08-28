@@ -12,6 +12,7 @@ import { ReplyPolicyEvaluator } from "./reply-policy.ts";
 import { SkillRegistry } from "@skills/registry.ts";
 import { SessionRegistry } from "../skill-api/session-registry.ts";
 import { SkillAPIServer } from "../skill-api/server.ts";
+import { AgentProcessPool } from "./agent-process-pool.ts";
 import type { Config } from "../types/config.ts";
 import type { NormalizedEvent } from "../types/events.ts";
 import type { PlatformAdapter } from "@platforms/platform-adapter.ts";
@@ -36,10 +37,20 @@ export class AgentCore {
   private memoryStore: MemoryStore;
   private reminderStore: ReminderStore | null = null;
   private skillRegistry: SkillRegistry;
+  /**
+   * Deployment-level HMAC secret for per-session Skill API JWTs.
+   * Held ONLY by the bot process (JWT issuer + Skill API verifier).
+   */
+  private skillApiSecret: string | undefined;
+  /**
+   * Shared ACP process pool (shared-process mode). Null in per-spawn mode.
+   */
+  private processPool: AgentProcessPool | null = null;
 
-  constructor(config: Config, yolo = false) {
+  constructor(config: Config, yolo = false, skillApiSecret?: string) {
     this.config = config;
     this.yolo = yolo;
+    this.skillApiSecret = skillApiSecret;
 
     logger.info("Initializing Agent Core", { yolo });
 
@@ -83,6 +94,7 @@ export class AgentCore {
           port: config.skillApi.port,
           host: config.skillApi.host,
         },
+        this.skillApiSecret ?? "",
       );
       this.skillApiServer.start();
       logger.info("Skill API server enabled on port {port}", {
@@ -103,6 +115,15 @@ export class AgentCore {
     // Initialize reply policy (needed by orchestrator and message handler)
     this.replyPolicy = new ReplyPolicyEvaluator(config.replyPolicy, config.channels);
 
+    // Initialize shared ACP process pool when shared-process mode is enabled.
+    if (config.agent.sharedProcess?.enabled) {
+      this.processPool = new AgentProcessPool(
+        config,
+        this.sessionRegistry,
+        this.skillApiSecret ?? "",
+      );
+    }
+
     // Initialize orchestrator
     this.orchestrator = new SessionOrchestrator(
       this.workspaceManager,
@@ -113,6 +134,8 @@ export class AgentCore {
       this.memoryStore,
       this.yolo,
       this.replyPolicy,
+      this.skillApiSecret,
+      this.processPool,
     );
 
     // Initialize message handler and reply dispatcher
@@ -258,10 +281,17 @@ export class AgentCore {
   }
 
   /**
-   * Get the session registry
+   * Get the session registry.
    */
   getSessionRegistry(): SessionRegistry {
     return this.sessionRegistry;
+  }
+
+  /**
+   * Get the shared ACP process pool (null in per-spawn mode).
+   */
+  getProcessPool(): AgentProcessPool | null {
+    return this.processPool;
   }
 
   /**
@@ -269,6 +299,9 @@ export class AgentCore {
    */
   async shutdown(): Promise<void> {
     logger.info("Shutting down Agent Core");
+
+    // Stop the shared process pool (reclaims idle agent processes).
+    this.processPool?.stop();
 
     // Stop skill API server
     if (this.skillApiServer) {

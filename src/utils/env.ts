@@ -136,6 +136,13 @@ export const ENV_MAPPINGS = {
   // Agent connect-time handshake timeout
   AGENT_CONNECT_TIMEOUT_MS: "agent.connectTimeoutMs",
 
+  // Shared ACP process pool settings
+  AGENT_SHARED_PROCESS_ENABLED: "agent.sharedProcess.enabled",
+  AGENT_SHARED_PROCESS_RECLAIM_IDLE_MS: "agent.sharedProcess.reclaimIdleMs",
+  AGENT_SHARED_PROCESS_JWT_DIR: "agent.sharedProcess.jwtDir",
+  AGENT_SHARED_PROCESS_SECRET_PATH: "agent.sharedProcess.secretPath",
+  AGENT_SHARED_PROCESS_QUEUE_DEADLINE_MS: "agent.sharedProcess.queueDeadlineMs",
+
   // Scheduled reminders settings
   REMINDERS_ENABLED: "reminders.enabled",
   REMINDERS_MAX_PER_USER: "reminders.maxRemindersPerUser",

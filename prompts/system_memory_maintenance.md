@@ -59,4 +59,13 @@ Memories have a `tier` field: `core`, `working`, or `archive`. They also have `c
 
 ### Session Information
 
-The `$SESSION_ID` environment variable is available in your shell. Use `--session-id "$SESSION_ID"` when calling skills.
+Use `--session-id {{ sessionId || "$SESSION_ID" }}` when calling skills (in per-spawn deployments the `$SESSION_ID` environment variable names this session).
+
+{{ if tmpDir -}}
+
+Your payload staging directory for this session is `{{ tmpDir }}`. Write skill payload
+files (reply text, memory content, search queries, captions) under this directory as
+`{name}.md` (e.g. `reply.md`), then pass the file path via the skill's payload-file
+flag (e.g. `--message-file`, `--content-file`). The process-level `$TMPDIR` env var is
+NOT your staging area — the per-session directory above is.
+{{- /if }}

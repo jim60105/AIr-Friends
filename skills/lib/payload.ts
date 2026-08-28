@@ -47,11 +47,43 @@ export function isWithinDir(path: string, base: string): boolean {
 }
 
 /**
- * Resolve the session staging base directory: `{cwd}/tmp/{sessionId}`.
- * Sessions without an id (defensive; internal sessions) fall back to
- * `{cwd}/tmp`.
+ * Resolve the session staging base directory.
+ *
+ * The staging area is the session's own workspace tmp dir (`{workspace}/tmp/
+ * {sessionId}`), which is what the prompt renders as `{{ tmpDir }}` and what
+ * the ACP path boundary expands `$TMPDIR` to for the agent's edit/write tools.
+ * Resolution order:
+ *  1. Shared-process mode (`SKILL_SHARED_PROCESS=1`): the current-session
+ *    pointer (`{SKILL_JWT_DIR}/active.json`) is authoritative — it carries the
+ *    owning session's staging root written by the process pool at lease
+ *    acquisition, plus the CURRENT session id (the process `$SESSION_ID` and
+ *    hence the CLI `--session-id` may be a stale spawn-time value there).
+ *  2. Per-spawn mode / pointer unavailable: `{cwd}/tmp/{sessionId}`, where the
+ *    script's cwd is the session workspace and `sessionId` is the CLI arg.
+ *    The pointer is honored only when it names this exact session, so a stale
+ *    pointer left by a crashed pool run cannot hijack the staging boundary.
+ *
+ * The process-level `TMPDIR` is deliberately NOT consulted: in shared-process
+ * mode it is channel-scoped (`{dataRoot}/channel-tmp/{poolKey}`) and is never a
+ * staging area (cross-user payloads must stay inside the owner's workspace).
  */
 export function resolvePayloadBase(cwd: string, sessionId: string): string {
+  const jwtDir = Deno.env.get("SKILL_JWT_DIR");
+  if (jwtDir) {
+    try {
+      const raw = Deno.readTextFileSync(`${jwtDir}/active.json`);
+      const parsed = JSON.parse(raw) as { sessionId?: string; staging?: string };
+      const shared = Deno.env.get("SKILL_SHARED_PROCESS") === "1";
+      if (
+        parsed.sessionId && parsed.staging &&
+        (shared || parsed.sessionId === sessionId)
+      ) {
+        return resolve(parsed.staging, parsed.sessionId);
+      }
+    } catch {
+      // Pointer missing/unreadable: fall through to the cwd-based base.
+    }
+  }
   return sessionId ? resolve(cwd, "tmp", sessionId) : resolve(cwd, "tmp");
 }
 
@@ -188,7 +220,8 @@ export async function readPayloadArg(
 
 function twoStepGuidance(flagName: string, options: { fileName: string; example: string }): string {
   return (
-    `1. Write the text to $TMPDIR/$SESSION_ID/${options.fileName} using your edit/write tool. ` +
+    `1. Write the text to the session staging directory shown in your system prompt ` +
+    `(\`$TMPDIR/$SESSION_ID/${options.fileName}\` in per-session mode) using your edit/write tool. ` +
     `2. Invoke the script with --${flagName}-file pointing at that file. ` +
     `Example: ${options.example}`
   );
@@ -223,7 +256,8 @@ function outOfBoundsMessage(
 ): string {
   return (
     `The payload file "${value}" is outside the session staging directory ` +
-    `"${base}" (resolved as $TMPDIR/$SESSION_ID). The script only reads payload files from its own ` +
+    `"${base}" (\`$TMPDIR/$SESSION_ID\` in per-session mode; in shared-process mode the staging ` +
+    `directory shown in your system prompt). The script only reads payload files from its own ` +
     `session's staging directory — this prevents sending the content of arbitrary files (workspace ` +
     `memory, notes, ~/.git-credentials, another session's directory, or a symlink escaping the ` +
     `staging directory). ${twoStepGuidance(options.flagName, options)}`

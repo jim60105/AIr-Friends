@@ -3,6 +3,8 @@
 import { createLogger } from "@utils/logger.ts";
 import type { ReplyPolicyEvaluator, YoloDecision } from "./reply-policy.ts";
 import { AgentConnector } from "@acp/agent-connector.ts";
+import { AgentProcessPool } from "./agent-process-pool.ts";
+import type { PoolRunOptions } from "./agent-process-pool.ts";
 import * as acp from "@agentclientprotocol/sdk";
 import {
   createAgentConfig,
@@ -17,6 +19,7 @@ import { MemoryStore } from "./memory-store.ts";
 import { convertUserMCPServerConfigs } from "./config-loader.ts";
 import { createTemplateEngine, renderTemplate } from "./template-renderer.ts";
 import type { TemplateVariables } from "../types/template.ts";
+import { deleteSessionJwtFile, issueSessionJwtFile } from "@utils/skill-jwt.ts";
 import { resolveModel, resolveReasoningEffort } from "./model-router.ts";
 import type { ModelRoutingContext } from "./model-router.ts";
 import type { SkillRegistry } from "@skills/registry.ts";
@@ -133,6 +136,16 @@ export class SessionOrchestrator {
   private yolo: boolean;
   private replyPolicy?: ReplyPolicyEvaluator;
   private completedSessionStore?: CompletedSessionStore;
+  /**
+   * Deployment-level HMAC secret for issuing per-session Skill API JWTs.
+   * Held ONLY by the bot process; the agent subprocess never sees the raw key.
+   */
+  private skillApiSecret: string;
+  /**
+   * Shared ACP process pool (shared-process mode). Null in per-spawn mode, where
+   * every session spawns a fresh agent subprocess.
+   */
+  private processPool: AgentProcessPool | null;
 
   constructor(
     workspaceManager: WorkspaceManager,
@@ -143,6 +156,8 @@ export class SessionOrchestrator {
     memoryStore: MemoryStore,
     yolo = false,
     replyPolicy?: ReplyPolicyEvaluator,
+    skillApiSecret = "",
+    processPool: AgentProcessPool | null = null,
   ) {
     this.workspaceManager = workspaceManager;
     this.contextAssembler = contextAssembler;
@@ -152,6 +167,8 @@ export class SessionOrchestrator {
     this.config = config;
     this.yolo = yolo;
     this.replyPolicy = replyPolicy;
+    this.skillApiSecret = skillApiSecret;
+    this.processPool = processPool;
   }
 
   /**
@@ -563,6 +580,7 @@ export class SessionOrchestrator {
         formattedContext.userMessage,
         resolvedModel,
         yoloDecision.enabled,
+        workspace,
       );
 
       sessionLogger.debug("Prompt built", {
@@ -613,6 +631,285 @@ export class SessionOrchestrator {
 
       // 5. Build ACP connector
       const agentType = getDefaultAgentType(this.config);
+
+      if (this.processPool) {
+        // === SHARED-PROCESS MODE ===
+        // Run this session on the pool-key long-lived agent process under the
+        // global execution lease (single-bot-persona serialization): the pool
+        // lazy-spawns or reuses the process, issues the per-session JWT +
+        // active-pointer while the lease is held, runs the runner, then releases.
+        const poolKey = `${event.platform}:${event.channelId}`;
+        const agentConfig = createAgentConfig(
+          agentType,
+          workspace.path,
+          this.config,
+          yoloDecision.enabled,
+          agentWorkspacePath,
+          shellSessionId ?? undefined,
+          poolKey,
+        );
+        // Shared-process mode: the pool-key data root drives the permission
+        // gate's tool-output boundary (channel-scoped, outside any user workspace).
+        clientConfig.xdgDataHome = agentConfig.env?.["XDG_DATA_HOME"];
+        clientConfig.processTmpDir = agentConfig.env?.["TMPDIR"];
+
+        // Typing indicator spans queue wait + in-flight execution.
+        let typingInterval: ReturnType<typeof setInterval> | undefined;
+        if (platformAdapter.supportsTypingIndicator()) {
+          platformAdapter.sendTyping(event.channelId);
+          typingInterval = setInterval(() => {
+            platformAdapter.sendTyping(event.channelId);
+          }, 10_000);
+        }
+
+        // Stale-trigger re-validation flag (channel-lurk sessions only).
+        let lurkSkipped = false;
+
+        const poolResult = await this.processPool.run(
+          {
+            poolKey,
+            sessionType,
+            shellSessionId,
+            priority: "interactive",
+            connectorOptions: {
+              agentConfig,
+              clientConfig,
+              skillRegistry: this.skillRegistry,
+              logger: sessionLogger,
+              agentType,
+              idleTimeoutConfig: this.config.agent.idleTimeout,
+              connectTimeoutMs: this.config.agent.connectTimeoutMs,
+            },
+            sessionCwd: workspace.path,
+          },
+          async (connector: AgentConnector, options: PoolRunOptions) => {
+            // ACP session lifecycle on the shared connection (one process serves
+            // many sessions; per-session params come from newSession/setSession*).
+            const sl = sessionLogger;
+
+            // Spec: a channel-lurk trigger queued for a long time behind other
+            // sessions is re-validated at LEASE acquisition; the cycle is skipped
+            // when the trigger no longer holds (newer message, bot mention/reaction).
+            if (sessionType === "channelLurk") {
+              const stale = await this.isLurkTriggerStale(event, platformAdapter);
+              if (stale) {
+                sl.info(
+                  "Lurk trigger for {channelId} no longer valid at lease acquisition — skipping",
+                  {
+                    channelId: event.channelId,
+                  },
+                );
+                lurkSkipped = true;
+                return undefined;
+              }
+            }
+            const acpSessionId = await connector.createSession(
+              this.getMCPServers(),
+              options.sessionCwd,
+            );
+            const sl2 = sl.withContext({ sessionId: acpSessionId });
+            await connector.setSessionModel(acpSessionId, resolvedModel);
+            const modeOverride = getSessionModeOverride(agentType, yoloDecision.enabled);
+            if (modeOverride) {
+              await connector.setSessionMode(acpSessionId, modeOverride);
+            }
+            // Per-session gate context (shared mode): one ChatbotClient serves
+            // every session of the pooled process — cwd, owning skill session id,
+            // and permission flags MUST be applied per session, not frozen to the
+            // first session's client config.
+            connector.setSessionGateContext(acpSessionId, {
+              cwd: options.sessionCwd,
+              shellSessionId: options.shellSessionId ?? undefined,
+              yolo: yoloDecision.enabled,
+              canWriteAgentWorkspace: false,
+              allowedWriteExtensions: this.config.agent.sandbox?.allowedWriteExtensions,
+            });
+            await this.applyReasoningEffort(connector, acpSessionId, resolvedReasoningEffort, sl2);
+
+            // Doom-loop protection: in shared mode termination sends `session/cancel`
+            // (the process keeps serving other sessions).
+            if (options.shellSessionId) {
+              const sid = options.shellSessionId;
+              this.sessionRegistry.setTerminateCallback(sid, async () => {
+                sl2.warn("Agent session termination requested by skill API (doom-loop detected)");
+                await connector.cancel(acpSessionId);
+              });
+            }
+
+            // Clear reply/reaction/reminder state before prompting
+            const replyHandler = this.skillRegistry.getReplyHandler();
+            const reactionHandler = this.skillRegistry.getReactionHandler();
+            const reminderHandler = this.skillRegistry.getReminderHandler();
+            replyHandler.clearReplyState(workspace.key, event.channelId);
+            reactionHandler.clearReactionState(workspace.key, event.channelId);
+            if (reminderHandler) {
+              reminderHandler.clearSessionState(workspace.key, event.channelId);
+            }
+
+            const promptContent = await this.buildPromptContent(
+              fullPrompt,
+              connector.supportsImageContent(),
+              event,
+              sl2,
+              workspace.tmpPath,
+            );
+
+            // Audit: prompt_sent
+            const promptLen = typeof promptContent === "string"
+              ? promptContent.length
+              : promptContent.filter((b) => b.type === "text").reduce(
+                (sum, b) => sum + ("text" in b ? (b as { text: string }).text.length : 0),
+                0,
+              );
+            await auditWriter?.write("prompt_sent", {
+              promptLength: promptLen,
+              imageCount: typeof promptContent === "string"
+                ? 0
+                : promptContent.filter((b) => b.type === "image").length,
+              modelId: resolvedModel,
+            });
+
+            const response = await this.promptWithIdleTimeoutHandling(
+              connector,
+              acpSessionId,
+              promptContent,
+              workspace.path,
+              this.getMCPServers(),
+              shellSessionId,
+            );
+            if (response === null) {
+              sl2.warn("Session {sessionId} ended without agent response after reconnect", {
+                sessionId: acpSessionId,
+              });
+              return acpSessionId;
+            }
+            sl2.info("Agent session {sessionId} completed with stopReason {stopReason}", {
+              sessionId: acpSessionId,
+              stopReason: response.stopReason,
+            });
+
+            // Retry on missing response (reply / reaction / file).
+            let replySent = replyHandler.hasReplySent(workspace.key, event.channelId);
+            let reactionSent = reactionHandler.hasReactionSent(workspace.key, event.channelId);
+            let fileSent = options.shellSessionId
+              ? this.sessionRegistry.hasFileSent(options.shellSessionId)
+              : false;
+            let hasResponded = replySent || reactionSent || fileSent;
+            if (!hasResponded && response.stopReason === "end_turn") {
+              const retryStrategy = getRetryPromptStrategy(agentType);
+              for (let attempt = 0; attempt < retryStrategy.maxRetries; attempt++) {
+                replyHandler.clearReplyState(workspace.key, event.channelId);
+                const retryResponse = await this.sendRetryPrompt(
+                  connector,
+                  acpSessionId,
+                  agentType,
+                  sl2,
+                );
+                sl2.info("Retry prompt completed", {
+                  sessionId: acpSessionId,
+                  attempt: attempt + 1,
+                  stopReason: retryResponse.stopReason,
+                });
+                replySent = replyHandler.hasReplySent(workspace.key, event.channelId);
+                reactionSent = reactionHandler.hasReactionSent(workspace.key, event.channelId);
+                fileSent = options.shellSessionId
+                  ? this.sessionRegistry.hasFileSent(options.shellSessionId)
+                  : false;
+                hasResponded = replySent || reactionSent || fileSent;
+                if (hasResponded || retryResponse.stopReason !== "end_turn") break;
+              }
+            }
+
+            // Conversation summary only when a reply was actually sent (file-only
+            // turns skip the summary — the summary gate stays on replySent).
+            if (replyHandler.hasReplySent(workspace.key, event.channelId)) {
+              await this.generateConversationSummary(
+                connector,
+                acpSessionId,
+                resolvedModel,
+                sessionType,
+                sl2,
+                routingContext,
+                resolvedReasoningEffort,
+                workspace,
+                options.shellSessionId,
+              );
+            }
+            return acpSessionId;
+          },
+        );
+
+        if (typingInterval) clearInterval(typingInterval);
+
+        if (poolResult.cancelledByDeadline) {
+          await auditWriter?.write("session_end", {
+            success: false,
+            replySent: false,
+            fileSent: false,
+            durationMs: Date.now() - sessionStartTime,
+            error: "Cancelled by queue deadline",
+            ...auditWriter?.getSummaryCounters(),
+          });
+          return {
+            success: false,
+            replySent: false,
+            fileSent: false,
+            error: "Cancelled by queue deadline",
+          };
+        }
+
+        if (lurkSkipped) {
+          // Stale lurk trigger skipped at lease acquisition: a normal no-op cycle.
+          await auditWriter?.write("session_end", {
+            success: true,
+            replySent: false,
+            fileSent: false,
+            durationMs: Date.now() - sessionStartTime,
+            error: "Lurk trigger re-validation failed — cycle skipped",
+            ...auditWriter?.getSummaryCounters(),
+          });
+          return { success: true, replySent: false, fileSent: false };
+        }
+
+        // Post-lease: final response state (the runner already cleared state before
+        // prompting, so these reflect only what the agent sent this turn).
+        const replyHandler = this.skillRegistry.getReplyHandler();
+        const reactionHandler = this.skillRegistry.getReactionHandler();
+        const replySent = replyHandler.hasReplySent(workspace.key, event.channelId);
+        const reactionSent = reactionHandler.hasReactionSent(workspace.key, event.channelId);
+        const fileSent = shellSessionId ? this.sessionRegistry.hasFileSent(shellSessionId) : false;
+
+        if (replySent || reactionSent || fileSent) {
+          await auditWriter?.write("session_end", {
+            success: true,
+            replySent,
+            reactionSent,
+            fileSent,
+            durationMs: Date.now() - sessionStartTime,
+            ...auditWriter?.getSummaryCounters(),
+          });
+          return { success: true, replySent, reactionSent, fileSent };
+        }
+
+        await auditWriter?.write("session_end", {
+          success: false,
+          replySent: false,
+          fileSent: false,
+          durationMs: Date.now() - sessionStartTime,
+          error: "Agent did not generate a reply",
+          ...auditWriter?.getSummaryCounters(),
+        });
+        return {
+          success: false,
+          replySent: false,
+          fileSent: false,
+          error: "Agent did not generate a reply",
+        };
+      }
+      // === PER-SPAWN MODE (default) ===
+      // Per-spawn mode: issue the session's Skill API JWT file (the process pool
+      // does this in shared mode). Skill scripts present it as Bearer auth.
+      await this.issuePerSpawnJwt(clientConfig.sessionId);
       const connector = this.createConnector({
         agentConfig: createAgentConfig(
           agentType,
@@ -621,7 +918,7 @@ export class SessionOrchestrator {
           yoloDecision.enabled,
           agentWorkspacePath,
           shellSessionId ?? undefined,
-          shellSessionId ? this.sessionRegistry.getCallerToken(shellSessionId) : undefined,
+          undefined, // poolKey: per-spawn mode; the process pool passes the pool key in shared mode
         ),
         clientConfig,
         skillRegistry: this.skillRegistry,
@@ -742,6 +1039,9 @@ export class SessionOrchestrator {
           connector,
           sessionId,
           promptContent,
+          workspace.path,
+          this.getMCPServers(),
+          shellSessionId,
         );
 
         if (response === null) {
@@ -877,6 +1177,8 @@ export class SessionOrchestrator {
               sessionLogger,
               routingContext,
               resolvedReasoningEffort,
+              workspace,
+              shellSessionId,
             );
           }
 
@@ -954,6 +1256,7 @@ export class SessionOrchestrator {
         // Clean up shell session if it exists
         if (shellSessionId) {
           this.sessionRegistry.remove(shellSessionId);
+          await this.cleanupPerSpawnJwt(shellSessionId);
           sessionLogger.debug("Shell session {shellSessionId} cleaned up", { shellSessionId });
 
           // Clean up tmp directory if no other sessions are using this workspace
@@ -1118,6 +1421,7 @@ export class SessionOrchestrator {
         shellSessionId,
         resolvedModel,
         yoloDecision.enabled,
+        shellSessionId ? `${workspace.tmpPath}/${shellSessionId}` : workspace.tmpPath,
       );
 
       sessionLogger.debug("Spontaneous prompt built", {
@@ -1163,6 +1467,53 @@ export class SessionOrchestrator {
 
       // 6. Build and execute ACP connector
       const agentType = getDefaultAgentType(this.config);
+
+      if (this.processPool) {
+        // Shared-process mode: run on the target channel's pool key under the
+        // global execution lease.
+        const poolKey = `${platform}:${channelId}`;
+        return await this.runSharedPoolSession({
+          poolKey,
+          sessionType: "spontaneous",
+          shellSessionId,
+          priority: "interactive",
+          connectorOptions: {
+            agentConfig: createAgentConfig(
+              agentType,
+              workspace.path,
+              this.config,
+              yoloDecision.enabled,
+              agentWorkspacePath,
+              shellSessionId ?? undefined,
+              poolKey,
+            ),
+            clientConfig,
+            skillRegistry: this.skillRegistry,
+            logger: sessionLogger,
+            agentType,
+            idleTimeoutConfig: this.config.agent.idleTimeout,
+            connectTimeoutMs: this.config.agent.connectTimeoutMs,
+          },
+          sessionCwd: workspace.path,
+          workspace,
+          channelId,
+          buildPromptContent: async () => {
+            await Promise.resolve();
+            return fullPrompt;
+          },
+          resolvedModel,
+          resolvedReasoningEffort,
+          yoloEnabled: yoloDecision.enabled,
+          sessionLogger,
+          auditWriter,
+          routingContext,
+          sessionStartTime,
+        });
+      }
+
+      // Per-spawn mode: issue the session's Skill API JWT file (the process pool
+      // does this in shared mode). Skill scripts present it as Bearer auth.
+      await this.issuePerSpawnJwt(clientConfig.sessionId);
       const connector = this.createConnector({
         agentConfig: createAgentConfig(
           agentType,
@@ -1171,7 +1522,7 @@ export class SessionOrchestrator {
           yoloDecision.enabled,
           agentWorkspacePath,
           shellSessionId ?? undefined,
-          shellSessionId ? this.sessionRegistry.getCallerToken(shellSessionId) : undefined,
+          undefined, // poolKey: per-spawn mode; the process pool passes the pool key in shared mode
         ),
         clientConfig,
         skillRegistry: this.skillRegistry,
@@ -1243,6 +1594,9 @@ export class SessionOrchestrator {
           connector,
           sessionId,
           fullPrompt,
+          workspace.path,
+          this.getMCPServers(),
+          shellSessionId,
         );
 
         if (response === null) {
@@ -1329,6 +1683,7 @@ export class SessionOrchestrator {
 
         if (shellSessionId) {
           this.sessionRegistry.remove(shellSessionId);
+          await this.cleanupPerSpawnJwt(shellSessionId);
 
           // Clean up tmp directory if no other sessions are using this workspace
           this.cleanupWorkspaceTmp(workspace, sessionLogger);
@@ -1510,6 +1865,54 @@ export class SessionOrchestrator {
 
       // 5. Build and execute ACP connector (use selfResearch model)
       const agentType = getDefaultAgentType(this.config);
+
+      if (this.processPool) {
+        // Shared-process mode: self-research sessions share one long-lived
+        // process (pool key is stable across research runs) and run in the
+        // maintenance queue lane.
+        const poolKey = `self-research:self-research`;
+        return await this.runSharedPoolSession({
+          poolKey,
+          sessionType: "self_research",
+          shellSessionId,
+          priority: "maintenance",
+          connectorOptions: {
+            agentConfig: createAgentConfig(
+              agentType,
+              workspace.path,
+              this.config,
+              this.yolo,
+              agentWorkspacePath,
+              shellSessionId ?? undefined,
+              poolKey,
+            ),
+            clientConfig,
+            skillRegistry: this.skillRegistry,
+            logger: sessionLogger,
+            agentType,
+            idleTimeoutConfig: this.config.agent.idleTimeout,
+            connectTimeoutMs: this.config.agent.connectTimeoutMs,
+          },
+          sessionCwd: workspace.path,
+          workspace,
+          channelId: "internal",
+          buildPromptContent: async () => {
+            await Promise.resolve();
+            return fullPrompt;
+          },
+          resolvedModel,
+          resolvedReasoningEffort,
+          yoloEnabled: this.yolo,
+          sessionLogger,
+          auditWriter,
+          routingContext,
+          sessionStartTime,
+        });
+      }
+
+      // Per-spawn mode: issue the session's Skill API JWT file (the process pool
+      // does this in shared mode). Skill scripts present it as Bearer auth.
+      await this.issuePerSpawnJwt(clientConfig.sessionId);
       const connector = this.createConnector({
         agentConfig: createAgentConfig(
           agentType,
@@ -1518,7 +1921,7 @@ export class SessionOrchestrator {
           this.yolo,
           agentWorkspacePath,
           shellSessionId ?? undefined,
-          shellSessionId ? this.sessionRegistry.getCallerToken(shellSessionId) : undefined,
+          undefined, // poolKey: per-spawn mode; the process pool passes the pool key in shared mode
         ),
         clientConfig,
         skillRegistry: this.skillRegistry,
@@ -1597,6 +2000,9 @@ export class SessionOrchestrator {
           connector,
           sessionId,
           fullPrompt,
+          workspace.path,
+          this.getMCPServers(),
+          shellSessionId,
         );
 
         if (response === null) {
@@ -1701,6 +2107,9 @@ export class SessionOrchestrator {
           connector,
           sessionId,
           retryMessage,
+          workspace.path,
+          this.getMCPServers(),
+          shellSessionId,
         );
 
         if (retryResponse === null) {
@@ -1778,6 +2187,7 @@ export class SessionOrchestrator {
 
         if (shellSessionId) {
           this.sessionRegistry.remove(shellSessionId);
+          await this.cleanupPerSpawnJwt(shellSessionId);
 
           // Clean up tmp directory if no other sessions are using this workspace
           this.cleanupWorkspaceTmp(workspace, sessionLogger);
@@ -1953,6 +2363,53 @@ export class SessionOrchestrator {
       };
 
       const agentType = getDefaultAgentType(this.config);
+
+      if (this.processPool) {
+        // Shared-process mode: one long-lived process per workspace's
+        // memory-maintenance pool key, served from the maintenance queue lane.
+        const poolKey = `memory-maintenance:${workspaceKey}`;
+        return await this.runSharedPoolSession({
+          poolKey,
+          sessionType: "memory_maintenance",
+          shellSessionId,
+          priority: "maintenance",
+          connectorOptions: {
+            agentConfig: createAgentConfig(
+              agentType,
+              workspace.path,
+              this.config,
+              this.yolo,
+              agentWorkspacePath,
+              shellSessionId ?? undefined,
+              poolKey,
+            ),
+            clientConfig,
+            skillRegistry: this.skillRegistry,
+            logger: sessionLogger,
+            agentType,
+            idleTimeoutConfig: this.config.agent.idleTimeout,
+            connectTimeoutMs: this.config.agent.connectTimeoutMs,
+          },
+          sessionCwd: workspace.path,
+          workspace,
+          channelId: "internal",
+          buildPromptContent: async () => {
+            await Promise.resolve();
+            return fullPrompt;
+          },
+          resolvedModel,
+          resolvedReasoningEffort,
+          yoloEnabled: this.yolo,
+          sessionLogger,
+          auditWriter,
+          routingContext,
+          sessionStartTime,
+        });
+      }
+
+      // Per-spawn mode: issue the session's Skill API JWT file (the process pool
+      // does this in shared mode). Skill scripts present it as Bearer auth.
+      await this.issuePerSpawnJwt(clientConfig.sessionId);
       const connector = this.createConnector({
         agentConfig: createAgentConfig(
           agentType,
@@ -1961,7 +2418,7 @@ export class SessionOrchestrator {
           this.yolo,
           agentWorkspacePath,
           shellSessionId ?? undefined,
-          shellSessionId ? this.sessionRegistry.getCallerToken(shellSessionId) : undefined,
+          undefined, // poolKey: per-spawn mode; the process pool passes the pool key in shared mode
         ),
         clientConfig,
         skillRegistry: this.skillRegistry,
@@ -2022,6 +2479,9 @@ export class SessionOrchestrator {
           connector,
           sessionId,
           fullPrompt,
+          workspace.path,
+          this.getMCPServers(),
+          shellSessionId,
         );
 
         if (response === null) {
@@ -2073,6 +2533,7 @@ export class SessionOrchestrator {
 
         if (shellSessionId) {
           this.sessionRegistry.remove(shellSessionId);
+          await this.cleanupPerSpawnJwt(shellSessionId);
 
           // Clean up tmp directory if no other sessions are using this workspace
           this.cleanupWorkspaceTmp(workspace, sessionLogger);
@@ -2262,6 +2723,9 @@ export class SessionOrchestrator {
       };
 
       const agentType = getDefaultAgentType(this.config);
+      // Per-spawn mode: issue the session's Skill API JWT file (the process pool
+      // does this in shared mode). Skill scripts present it as Bearer auth.
+      await this.issuePerSpawnJwt(clientConfig.sessionId);
       const connector = this.createConnector({
         agentConfig: createAgentConfig(
           agentType,
@@ -2270,7 +2734,7 @@ export class SessionOrchestrator {
           this.yolo,
           agentWorkspacePath,
           shellSessionId ?? undefined,
-          shellSessionId ? this.sessionRegistry.getCallerToken(shellSessionId) : undefined,
+          undefined, // poolKey: per-spawn mode; the process pool passes the pool key in shared mode
         ),
         clientConfig,
         skillRegistry: this.skillRegistry,
@@ -2328,6 +2792,9 @@ export class SessionOrchestrator {
           connector,
           sessionId,
           fullPrompt,
+          workspace.path,
+          this.getMCPServers(),
+          shellSessionId,
         );
 
         if (response === null) {
@@ -2382,6 +2849,7 @@ export class SessionOrchestrator {
 
         if (shellSessionId) {
           this.sessionRegistry.remove(shellSessionId);
+          await this.cleanupPerSpawnJwt(shellSessionId);
           this.cleanupWorkspaceTmp(workspace, sessionLogger);
         }
       }
@@ -2596,6 +3064,9 @@ export class SessionOrchestrator {
 
       // 6. Build and execute ACP connector
       const agentType = getDefaultAgentType(this.config);
+      // Per-spawn mode: issue the session's Skill API JWT file (the process pool
+      // does this in shared mode). Skill scripts present it as Bearer auth.
+      await this.issuePerSpawnJwt(clientConfig.sessionId);
       const connector = this.createConnector({
         agentConfig: createAgentConfig(
           agentType,
@@ -2604,7 +3075,7 @@ export class SessionOrchestrator {
           yoloDecision.enabled,
           agentWorkspacePath,
           shellSessionId ?? undefined,
-          shellSessionId ? this.sessionRegistry.getCallerToken(shellSessionId) : undefined,
+          undefined, // poolKey: per-spawn mode; the process pool passes the pool key in shared mode
         ),
         clientConfig,
         skillRegistry: this.skillRegistry,
@@ -2672,6 +3143,9 @@ export class SessionOrchestrator {
           connector,
           sessionId,
           fullPrompt,
+          workspace.path,
+          this.getMCPServers(),
+          shellSessionId,
         );
 
         if (response === null) {
@@ -2765,6 +3239,7 @@ export class SessionOrchestrator {
 
         if (shellSessionId) {
           this.sessionRegistry.remove(shellSessionId);
+          await this.cleanupPerSpawnJwt(shellSessionId);
 
           // Clean up tmp directory if no other sessions are using this workspace
           this.cleanupWorkspaceTmp(workspace, sessionLogger);
@@ -2803,6 +3278,260 @@ export class SessionOrchestrator {
   }
 
   /**
+   * Run a session on the shared ACP process pool (shared-process mode).
+   * The pool serializes all agent sessions under the global execution lease
+   * (single-bot-persona semantics). The runner performs the ACP session
+   * lifecycle on the pool-key's long-lived process and handles the
+   * controlled-recovery semantics of `promptWithIdleTimeoutHandling`.
+   */
+  private async runSharedPoolSession(params: {
+    poolKey: string;
+    sessionType: string;
+    shellSessionId: string | null;
+    priority: "interactive" | "maintenance";
+    connectorOptions: AgentConnectorOptions;
+    sessionCwd: string;
+    workspace: WorkspaceInfo;
+    channelId: string;
+    buildPromptContent: (supportsImage: boolean) => Promise<acp.ContentBlock[] | string>;
+    resolvedModel: string;
+    resolvedReasoningEffort: string;
+    yoloEnabled: boolean;
+    sessionLogger: ReturnType<typeof logger.child>;
+    auditWriter: SessionAuditWriter | null;
+    routingContext: ModelRoutingContext;
+    sessionStartTime: number;
+  }): Promise<SessionResponse> {
+    const {
+      poolKey,
+      sessionType,
+      shellSessionId,
+      priority,
+      connectorOptions,
+      sessionCwd,
+      workspace,
+      channelId,
+      buildPromptContent,
+      resolvedModel,
+      resolvedReasoningEffort,
+      yoloEnabled,
+      sessionLogger,
+      auditWriter,
+      routingContext,
+      sessionStartTime,
+    } = params;
+    const agentType = getDefaultAgentType(this.config);
+    if (!this.processPool) {
+      throw new Error("runSharedPoolSession called without a process pool (per-spawn mode)");
+    }
+    // Shared-process mode: the pool-key data root (set by agent-factory into the
+    // process env) drives the permission gate's tool-output boundary.
+    if (connectorOptions.clientConfig) {
+      connectorOptions.clientConfig.xdgDataHome = connectorOptions.agentConfig?.env
+        ?.["XDG_DATA_HOME"];
+      connectorOptions.clientConfig.processTmpDir = connectorOptions.agentConfig?.env?.["TMPDIR"];
+    }
+
+    const poolResult = await this.processPool.run(
+      { poolKey, sessionType, shellSessionId, priority, connectorOptions, sessionCwd },
+      async (connector: AgentConnector) => {
+        // ACP session lifecycle on the shared connection: per-session params
+        // come from newSession (cwd) + setSession* (model/mode/config).
+        const acpSessionId = await connector.createSession(this.getMCPServers(), sessionCwd);
+        const sl = sessionLogger.withContext({ sessionId: acpSessionId });
+        await connector.setSessionModel(acpSessionId, resolvedModel);
+        const modeOverride = getSessionModeOverride(agentType, yoloEnabled);
+        if (modeOverride) {
+          await connector.setSessionMode(acpSessionId, modeOverride);
+        }
+        // Per-session gate context (shared mode) — see runSessionWithPool comment.
+        connector.setSessionGateContext(acpSessionId, {
+          cwd: sessionCwd,
+          shellSessionId: shellSessionId ?? undefined,
+          yolo: yoloEnabled,
+          canWriteAgentWorkspace: connectorOptions.clientConfig?.canWriteAgentWorkspace,
+          allowedWriteExtensions: this.config.agent.sandbox?.allowedWriteExtensions,
+        });
+        await this.applyReasoningEffort(connector, acpSessionId, resolvedReasoningEffort, sl);
+
+        // Doom-loop protection: in shared mode termination sends `session/cancel`
+        // (the process keeps serving other sessions).
+        if (shellSessionId) {
+          const sid = shellSessionId;
+          this.sessionRegistry.setTerminateCallback(sid, async () => {
+            sl.warn("Agent session termination requested by skill API (doom-loop detected)");
+            await connector.cancel(acpSessionId);
+          });
+        }
+
+        const promptContent = await buildPromptContent(connector.supportsImageContent());
+        const promptLen = typeof promptContent === "string"
+          ? promptContent.length
+          : promptContent.filter((b) => b.type === "text").reduce(
+            (sum, b) => sum + ("text" in b ? (b as { text: string }).text.length : 0),
+            0,
+          );
+        await auditWriter?.write("prompt_sent", {
+          promptLength: promptLen,
+          modelId: resolvedModel,
+        });
+
+        const response = await this.promptWithIdleTimeoutHandling(
+          connector,
+          acpSessionId,
+          promptContent,
+          sessionCwd,
+          this.getMCPServers(),
+          shellSessionId,
+        );
+        if (response === null) {
+          sl.warn("Session {sessionId} ended without agent response after reconnect", {
+            sessionId: acpSessionId,
+          });
+          return acpSessionId;
+        }
+        sl.info("Agent session {sessionId} completed with stopReason {stopReason}", {
+          sessionId: acpSessionId,
+          stopReason: response.stopReason,
+        });
+
+        const replyHandler = this.skillRegistry.getReplyHandler();
+        const reactionHandler = this.skillRegistry.getReactionHandler();
+        let replySent = replyHandler.hasReplySent(workspace.key, channelId);
+        let reactionSent = reactionHandler.hasReactionSent(workspace.key, channelId);
+        let fileSent = shellSessionId ? this.sessionRegistry.hasFileSent(shellSessionId) : false;
+        let hasResponded = replySent || reactionSent || fileSent;
+
+        if (!hasResponded && response.stopReason === "end_turn") {
+          const retryStrategy = getRetryPromptStrategy(agentType);
+          for (let attempt = 0; attempt < retryStrategy.maxRetries; attempt++) {
+            await auditWriter?.write("retry_triggered", {
+              retryCount: attempt + 1,
+              maxRetries: retryStrategy.maxRetries,
+              reason: "no_reply_sent",
+            });
+            replyHandler.clearReplyState(workspace.key, channelId);
+            const retryResponse = await this.sendRetryPrompt(
+              connector,
+              acpSessionId,
+              agentType,
+              sl,
+            );
+            sl.info("Retry prompt completed", {
+              sessionId: acpSessionId,
+              attempt: attempt + 1,
+              stopReason: retryResponse.stopReason,
+            });
+            replySent = replyHandler.hasReplySent(workspace.key, channelId);
+            reactionSent = reactionHandler.hasReactionSent(workspace.key, channelId);
+            fileSent = shellSessionId ? this.sessionRegistry.hasFileSent(shellSessionId) : false;
+            hasResponded = replySent || reactionSent || fileSent;
+            if (hasResponded || retryResponse.stopReason !== "end_turn") break;
+          }
+        }
+
+        // Conversation summary only when a reply was actually sent (file-only
+        // turns skip the summary — the summary gate stays on replySent).
+        if (replySent) {
+          await this.generateConversationSummary(
+            connector,
+            acpSessionId,
+            resolvedModel,
+            sessionType,
+            sl,
+            routingContext,
+            resolvedReasoningEffort,
+            workspace,
+            shellSessionId,
+          );
+        }
+        return acpSessionId;
+      },
+    );
+
+    if (poolResult.cancelledByDeadline) {
+      await auditWriter?.write("session_end", {
+        success: false,
+        replySent: false,
+        fileSent: false,
+        durationMs: Date.now() - sessionStartTime,
+        error: "Cancelled by queue deadline",
+        ...auditWriter?.getSummaryCounters(),
+      });
+      return {
+        success: false,
+        replySent: false,
+        fileSent: false,
+        error: "Cancelled by queue deadline",
+      };
+    }
+
+    // Post-lease: final response state.
+    const replyHandler = this.skillRegistry.getReplyHandler();
+    const reactionHandler = this.skillRegistry.getReactionHandler();
+    const replySent = replyHandler.hasReplySent(workspace.key, channelId);
+    const reactionSent = reactionHandler.hasReactionSent(workspace.key, channelId);
+    const fileSent = shellSessionId ? this.sessionRegistry.hasFileSent(shellSessionId) : false;
+
+    if (replySent || reactionSent || fileSent) {
+      await auditWriter?.write("session_end", {
+        success: true,
+        replySent,
+        reactionSent,
+        fileSent,
+        durationMs: Date.now() - sessionStartTime,
+        ...auditWriter?.getSummaryCounters(),
+      });
+      return { success: true, replySent, reactionSent, fileSent };
+    }
+
+    await auditWriter?.write("session_end", {
+      success: false,
+      replySent: false,
+      fileSent: false,
+      durationMs: Date.now() - sessionStartTime,
+      error: "Agent did not generate a reply",
+      ...auditWriter?.getSummaryCounters(),
+    });
+    return {
+      success: false,
+      replySent: false,
+      fileSent: false,
+      error: "Agent did not generate a reply",
+    };
+  }
+
+  /**
+   * Re-validate the channel-lurk trigger conditions at lease acquisition: the
+   * trigger message must still be the LAST message in the channel, must not be
+   * from the bot itself, must not mention the bot, and must not have received
+   * a bot reaction since the scheduler picked it. True = trigger is stale.
+   */
+  private async isLurkTriggerStale(
+    event: NormalizedEvent,
+    platformAdapter: PlatformAdapter,
+  ): Promise<boolean> {
+    try {
+      const messages = await platformAdapter.fetchRecentMessages(event.channelId, 1);
+      if (messages.length === 0) return true;
+      const last = messages[0];
+      if (last.messageId !== event.messageId) return true;
+      if (platformAdapter.isSelf(last.userId)) return true;
+      if (await platformAdapter.hasBotMention(event.channelId, last.messageId)) return true;
+      if (await platformAdapter.hasBotReaction(event.channelId, last.messageId)) return true;
+      return false;
+    } catch (error) {
+      // Fail closed: if re-validation itself fails, treat the trigger as stale
+      // (a lurk reply is optional; a wrong one is not).
+      logger.warn("Lurk re-validation failed for {channelId}, skipping", {
+        channelId: event.channelId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return true;
+    }
+  }
+
+  /**
    * Execute a prompt with idle timeout handling and session resumption.
    *
    * On idle timeout:
@@ -2814,13 +3543,24 @@ export class SessionOrchestrator {
     connector: AgentConnector,
     sessionId: string,
     content: string | acp.ContentBlock[],
+    sessionCwd: string,
+    mcpServers: MCPServerConfig[],
+    shellSessionId: string | null,
   ): Promise<acp.PromptResponse | null> {
     try {
       return await connector.prompt(sessionId, content);
     } catch (error) {
+      // Recovery triggers: idle-timeout liveness failures ("ACP connection
+      // dead" / "ACP agent process exited unexpectedly") always qualify. In
+      // shared-process mode a mid-prompt process death (the connector's crash
+      // signal "Agent process exited unexpectedly") MUST also enter controlled
+      // recovery — restart + session/load + respond-gated re-issue (spec). In
+      // per-spawn mode the crash signal keeps the legacy fail-fast semantics.
+      const sharedMode = this.config.agent.sharedProcess?.enabled === true;
       const isIdleTimeout = error instanceof Error &&
         (error.message.includes("ACP connection dead") ||
-          error.message.includes("ACP agent process exited unexpectedly"));
+          error.message.includes("ACP agent process exited unexpectedly") ||
+          (sharedMode && error.message.includes("Agent process exited unexpectedly")));
 
       if (!isIdleTimeout) {
         throw error;
@@ -2831,7 +3571,7 @@ export class SessionOrchestrator {
         { sessionId },
       );
 
-      const resumed = await connector.reconnectAndResumeSession(sessionId);
+      const resumed = await connector.reconnectAndResumeSession(sessionId, sessionCwd, mcpServers);
 
       if (!resumed) {
         logger.error(
@@ -2843,14 +3583,64 @@ export class SessionOrchestrator {
         );
       }
 
-      // Session resumed — wait for agent to complete or confirm idle
-      logger.info(
-        "Session {sessionId} resumed. Waiting for agent to complete or confirm idle...",
-        { sessionId },
-      );
+      // Controlled recovery (shared-process mode): re-issue the prompt ONLY if no
+      // response (reply, reaction, or file send) has been recorded for the session.
+      // Recovery fence: `recoveryFenced` is set SYNCHRONOUSLY before reading the
+      // responded state, so a side-effect call from an orphaned tool child of the
+      // dead process is either already visible in this read or blocked by the
+      // fence — it cannot land after the read undetected.
+      const session = shellSessionId ? this.sessionRegistry.get(shellSessionId) : undefined;
+      if (session) session.recoveryFenced = true;
+      // A side-effect call that passed the fence gate before the fence was set
+      // may still be delivering; wait (bounded) for in-flight effects to settle
+      // so their success OR rollback is visible in the responded read below.
+      const settled = session ? await this.waitForInflightSideEffects(session, sessionId) : true;
+      const reactionHandler = this.skillRegistry.getReactionHandler();
+      const responded = session
+        ? session.replySent || session.fileSent ||
+          reactionHandler.hasReactionSent(session.workspace.key, session.channelId)
+        : false;
 
+      // A response was already sent: complete the session WITHOUT any prompt.
+      // (An empty-content prompt would be a fresh agent turn and could produce
+      // duplicate replies / memory events — forbidden by the spec.)
+      if (responded) {
+        logger.info(
+          "Session {sessionId} resumed; a response was already sent — completing without re-prompting",
+          { sessionId, shellSessionId },
+        );
+        return { stopReason: "end_turn" };
+      }
+
+      // Fail closed: if side-effect calls never settled, a re-issued prompt
+      // could run concurrently with a still-landing effect. Keep the fence
+      // raised and abandon the session instead of risking duplicates.
+      if (!settled) {
+        logger.error(
+          "Session {sessionId} recovery aborted: side-effect calls still in flight after settle wait — not re-prompting",
+          { sessionId, shellSessionId },
+        );
+        return null;
+      }
+
+      // Re-issue the prompt with a short note of the session's already-executed
+      // skill operations so the resumed agent avoids re-doing side effects.
+      const note = this.buildExecutedOpsNote(shellSessionId, session);
+      logger.info(
+        "Session {sessionId} resumed; re-issuing prompt (no response sent yet)",
+        { sessionId, shellSessionId },
+      );
+      const finalContent: string | acp.ContentBlock[] = typeof content === "string"
+        ? `${note}\n${content}`
+        : [
+          { type: "text" as const, text: note },
+          ...content,
+        ];
+
+      // Lift the fence: the re-issued turn's own skill calls must be allowed.
+      if (session) session.recoveryFenced = false;
       try {
-        return await connector.prompt(sessionId, []);
+        return await connector.prompt(sessionId, finalContent);
       } catch (_resumeError) {
         logger.error(
           "Resumed session {sessionId} also timed out. Giving up.",
@@ -2863,9 +3653,115 @@ export class SessionOrchestrator {
   }
 
   /**
+   * Wait (bounded) for a session's in-flight side-effect skill calls to settle.
+   * The Skill API server increments `inflightSideEffects` when a side-effect
+   * execution starts and decrements it once the effect has landed or rolled
+   * back, so 0 means the session's replied/file state is final. Returns false
+   * if the wait timed out with effects still in flight (unsafe to re-prompt).
+   */
+  private async waitForInflightSideEffects(
+    session: { inflightSideEffects?: number },
+    sessionId: string,
+    timeoutMs = 10_000,
+  ): Promise<boolean> {
+    const deadline = Date.now() + timeoutMs;
+    while ((session.inflightSideEffects ?? 0) > 0 && Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, 50));
+    }
+    if ((session.inflightSideEffects ?? 0) > 0) {
+      logger.warn(
+        "Session {sessionId} still has {count} in-flight side effect(s) after settle wait timed out",
+        { sessionId, count: session.inflightSideEffects },
+      );
+      return false;
+    }
+    return true;
+  }
+
+  /**
+   * Build a short diagnostic note listing the session's already-executed skill
+   * operations (memory-save calls, reply attempts, file sends) so a resumed agent
+   * knows what has already happened and avoids re-doing side effects.
+   */
+  private buildExecutedOpsNote(
+    shellSessionId: string | null,
+    session:
+      | {
+        replyCount: number;
+        fileSendCount: number;
+        memorySaveCount?: number;
+        workspace: { key: string };
+      }
+      | undefined,
+  ): string {
+    if (!shellSessionId || !session) return "";
+    const parts: string[] = [];
+    if (session.replyCount > 0) {
+      parts.push(`send-reply attempts: ${session.replyCount}`);
+    }
+    if (session.fileSendCount > 0) {
+      parts.push(`send-file deliveries: ${session.fileSendCount}`);
+    }
+    // Registry counter works without audit.enabled; audit-writer counters are
+    // the fallback for sessions that predate the registry counter.
+    let memoryOps = session.memorySaveCount ?? 0;
+    if (memoryOps === 0) {
+      const auditWriter = this.sessionRegistry.getAuditWriter(shellSessionId);
+      memoryOps = auditWriter?.getSummaryCounters().memoryOpsCount ?? 0;
+    }
+    if (memoryOps > 0) {
+      parts.push(`memory-save operations: ${memoryOps}`);
+    }
+    if (parts.length === 0) return "";
+    return `[Recovery note — operations already executed in this session, do NOT repeat them: ${
+      parts.join("; ")
+    }]`;
+  }
+
+  /**
    * Create an AgentConnector instance.
    * Protected to allow test subclasses to inject mocks.
    */
+  /** Directory holding the per-session Skill API JWT files (shared config). */
+  private get skillJwtDir(): string {
+    return this.config.agent.sharedProcess?.jwtDir ?? "data/skill-jwt";
+  }
+
+  /**
+   * Per-spawn mode: issue the session's Skill API JWT file so skill scripts can
+   * present it as Bearer auth (the process pool does this at lease acquisition
+   * in shared mode). No-op in shared mode or without a registered session.
+   */
+  private async issuePerSpawnJwt(shellSessionId?: string): Promise<void> {
+    if (this.processPool || !shellSessionId || !this.skillApiSecret) return;
+    try {
+      await issueSessionJwtFile({
+        jwtDir: this.skillJwtDir,
+        secret: this.skillApiSecret,
+        registry: this.sessionRegistry,
+        sessionId: shellSessionId,
+      });
+    } catch (error) {
+      logger.warn("Failed to issue per-spawn JWT for session {sessionId}: {error}", {
+        sessionId: shellSessionId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  /** Per-spawn mode: delete the session's JWT file at session end. */
+  private async cleanupPerSpawnJwt(shellSessionId?: string): Promise<void> {
+    if (this.processPool || !shellSessionId || !this.skillApiSecret) return;
+    try {
+      await deleteSessionJwtFile(this.skillJwtDir, shellSessionId);
+    } catch (error) {
+      logger.warn("Failed to delete per-spawn JWT for session {sessionId}: {error}", {
+        sessionId: shellSessionId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
   protected createConnector(options: AgentConnectorOptions): AgentConnector {
     return new AgentConnector(options);
   }
@@ -3016,17 +3912,15 @@ export class SessionOrchestrator {
     const contentBlocks: acp.ContentBlock[] = [{ type: "text" as const, text: fullPrompt }];
 
     for (const att of imageAttachments) {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), IMAGE_FETCH_TIMEOUT_MS);
       try {
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), IMAGE_FETCH_TIMEOUT_MS);
-
         // F6 (SSRF): validate the URL at the authoritative fetch sink and follow
         // redirects manually with per-hop re-validation. This applies to EVERY
         // attachment download regardless of which platform/code path set `att.url`.
         // Validation failures throw and are caught below (non-fatal: falls back to
         // the URL-only text description already present in the prompt).
         const response = await this.safeImageFetch(att.url, { signal: controller.signal });
-        clearTimeout(timeoutId);
 
         if (response.ok) {
           const arrayBuffer = await response.arrayBuffer();
@@ -3072,6 +3966,8 @@ export class SessionOrchestrator {
           error: String(error),
         });
         // Failure is non-fatal — text description with URL is already in context
+      } finally {
+        clearTimeout(timeoutId);
       }
     }
 
@@ -3136,9 +4032,10 @@ export class SessionOrchestrator {
    */
   private async buildSpontaneousPromptFromTemplate(
     context: import("../types/context.ts").AssembledSpontaneousContext,
-    _sessionId: string | null,
+    sessionId: string | null,
     model?: string,
     yolo?: boolean,
+    tmpDir?: string,
   ): Promise<string> {
     const promptDir = dirname(this.config.agent.systemPromptPath);
     const instructionsPath = join(promptDir, "system_spontaneous.md");
@@ -3172,6 +4069,8 @@ export class SessionOrchestrator {
       importantMemories: importantMemoriesText,
       recentMessages: recentMessagesText,
       availableEmojis: availableEmojisText,
+      sessionId: sessionId ?? undefined,
+      tmpDir,
     };
 
     return await renderTemplate(
@@ -3186,7 +4085,7 @@ export class SessionOrchestrator {
    */
   private async buildSelfResearchPrompt(
     rssItems: RssItem[],
-    _sessionId: string | null,
+    sessionId: string | null,
     model?: string,
     yolo?: boolean,
   ): Promise<string> {
@@ -3208,6 +4107,7 @@ export class SessionOrchestrator {
       yolo,
       canWriteAgentWorkspace: true,
       rssItems: rssBlock,
+      sessionId: sessionId ?? undefined,
     };
 
     return await renderTemplate(
@@ -3222,7 +4122,7 @@ export class SessionOrchestrator {
    */
   private async buildMemoryMaintenancePrompt(
     workspaceKey: string,
-    _sessionId: string | null,
+    sessionId: string | null,
     workspace: WorkspaceInfo,
     model?: string,
     yolo?: boolean,
@@ -3247,6 +4147,8 @@ export class SessionOrchestrator {
       workspaceKey,
       memoriesDump,
       minMemoryCount,
+      sessionId: sessionId ?? undefined,
+      tmpDir: sessionId ? `${workspace.tmpPath}/${sessionId}` : workspace.tmpPath,
     };
 
     return await renderTemplate(
@@ -3411,6 +4313,8 @@ export class SessionOrchestrator {
     sessionLogger: ReturnType<typeof createLogger>,
     routingContext: ModelRoutingContext,
     sessionReasoningEffort: string,
+    workspace: WorkspaceInfo,
+    shellSessionId: string | null,
   ): Promise<void> {
     // Skip if disabled
     if (this.config.conversationSummary?.enabled === false) return;
@@ -3436,7 +4340,10 @@ export class SessionOrchestrator {
         const promptDir = dirname(this.config.agent.systemPromptPath);
         const summaryPromptPath = join(promptDir, "system_summary.md");
         const env = createTemplateEngine(promptDir);
-        const summaryPrompt = await renderTemplate(env, summaryPromptPath, {});
+        const summaryPrompt = await renderTemplate(env, summaryPromptPath, {
+          sessionId: shellSessionId ?? undefined,
+          tmpDir: shellSessionId ? `${workspace.tmpPath}/${shellSessionId}` : workspace.tmpPath,
+        });
 
         sessionLogger.info("Generating conversation summary");
         await connector.prompt(sessionId, summaryPrompt);

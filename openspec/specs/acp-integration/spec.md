@@ -6,7 +6,7 @@ Defines how AIr-Friends acts as an ACP (Agent Client Protocol) Client, spawning 
 ## Requirements
 ### Requirement: AgentConnector Subprocess Management
 
-The system SHALL manage the external OpenCode ACP agent lifecycle through the `AgentConnector` class, spawning the agent as a subprocess with `dumb-init` for proper signal forwarding and communicating via stdio JSON-RPC. The subprocess SHALL be spawned with a cleared parent environment (`clearEnv: true`) so it receives ONLY the explicitly-built agent environment and inherits no parent secrets. Every outbound ACP call made through the connection (`initialize`, `createSession`, `setSessionModel`, `setSessionMode`, `setSessionConfigOption`, `prompt`, `cancel`) SHALL be raced against a per-subprocess crash signal so that an unexpected subprocess exit rejects any currently pending call instead of leaving it pending forever, regardless of idle-timeout configuration.
+The system SHALL manage the external OpenCode ACP agent lifecycle through the `AgentConnector` class. In per-session mode it SHALL spawn the agent as a subprocess with `dumb-init` for proper signal forwarding and communicate via stdio JSON-RPC. In shared-process mode the connector SHALL connect once per channel and create multiple ACP sessions over the same stdio connection. The subprocess SHALL be spawned with a cleared parent environment (`clearEnv: true`) so it receives ONLY the explicitly-built agent environment and inherits no parent secrets. Every outbound ACP call made through the connection (`initialize`, `createSession`, `setSessionModel`, `setSessionMode`, `setSessionConfigOption`, `prompt`, `cancel`) SHALL be raced against a per-subprocess crash signal so that an unexpected subprocess exit rejects any currently pending call instead of leaving it pending forever, regardless of idle-timeout configuration. When a shared process dies while a prompt is in flight, the system SHALL restart the channel process and resume the in-flight session via the ACP `loadSession` method (session history is persisted in the channel-scoped OpenCode data directory and replayed on load), applying controlled recovery: the prompt is re-issued ONLY if no response (reply, reaction, or file send) has been recorded for the session; if a response was already sent, the session completes without re-prompting. When the prompt IS re-issued, the recovery/retry prompt SHALL enumerate the session's already-executed skill operations (memory-save calls, reply attempts, file sends) so the resumed agent knows what has already happened and avoids re-doing side effects.
 
 #### Scenario: Agent connection
 - **GIVEN** a valid `AgentConfig` with command, args, cwd, and env
@@ -83,6 +83,18 @@ The system SHALL manage the external OpenCode ACP agent lifecycle through the `A
 - **GIVEN** `reconnectAndResumeSession()` calls `disconnect()` followed by `connect()` on the same `AgentConnector` instance
 - **WHEN** the new subprocess is spawned
 - **THEN** subsequent calls SHALL be raced against a crash signal tied to the new subprocess, not any stale signal from the previously disconnected subprocess
+
+#### Scenario: Shared process connection
+- **GIVEN** the shared process pool is enabled and a channel already has a live `opencode acp` process
+- **WHEN** a new session for that channel starts
+- **THEN** the connector SHALL reuse the live process and create a new ACP session on the existing stdio connection without spawning a new subprocess
+
+#### Scenario: In-flight session resumed after process restart
+- **GIVEN** a shared channel process dies while a session's prompt is in flight and no response has been sent yet
+- **WHEN** the system restarts that channel's process
+- **THEN** it SHALL resume the existing session via ACP `session/load` (history replayed) and re-issue the prompt on the resumed session
+- **AND** the re-issued recovery prompt SHALL enumerate the session's already-executed skill operations (memory-save calls, reply attempts, file sends) so the agent avoids re-doing side effects
+- **AND** if a response had already been sent, the session SHALL complete without re-prompting, so no duplicate reply or memory event is produced
 
 ### Requirement: Session Config Option Update Handling
 
@@ -745,3 +757,18 @@ SHALL include the extracted text in the log message template so it appears in th
   nor `update.text` containing valid text
 - **THEN** the system SHALL log at DEBUG level with `"Agent thought: {text}"` where `text` is an
   empty string
+
+### Requirement: Session-Scoped Connector State
+
+In shared-process mode, `AgentConnector`'s mutable connection-level state (cached `configOptions`, current model ID, idle monitor) SHALL be indexed by ACP session ID, so that a later session's setup calls (`createSession`, `setSessionModel`, `setSessionMode`, `setSessionConfigOption`) cannot clobber the in-flight session's state. The global execution lease SHALL cover the session's ENTIRE agent lifecycle — `newSession`, model/mode/config-option calls, prompt/retry, `session/cancel`, recovery, and cleanup — so that at most one session touches the shared connection at a time.
+
+#### Scenario: Later session's config calls don't clobber in-flight session state
+- **GIVEN** session A's prompt is in flight on a shared connection and session B is queued
+- **WHEN** session B acquires the lease and calls `createSession` / `setSessionModel` / `setSessionConfigOption`
+- **THEN** those calls SHALL update only session B's session-scoped state entries; session A's cached `configOptions` and model ID SHALL remain intact
+
+#### Scenario: Lease covers full agent lifecycle
+- **GIVEN** a shared connection with one in-flight session
+- **WHEN** the in-flight session completes, is cancelled, or requires recovery
+- **THEN** the lease SHALL be released only after cleanup (session removal from the pool's active set), and the queued session SHALL acquire it next
+

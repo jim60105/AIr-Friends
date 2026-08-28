@@ -1,4 +1,4 @@
-#!/usr/bin/env -S deno run --allow-net --allow-env
+#!/usr/bin/env -S deno run --allow-net --allow-env --allow-read
 // This file is used by all skill scripts to interact with the Skill API
 
 import { parse } from "jsr:@std/flags@^0.224.0";
@@ -63,6 +63,104 @@ export function parseBaseArgs(args: string[]): { sessionId: string; apiUrl: stri
 }
 
 /**
+ * True when the calling agent process runs in shared-process mode (pool-managed
+ * long-lived process). The process pool's factory sets this marker alongside
+ * `SKILL_JWT_DIR`; per-spawn deployments never carry it.
+ */
+function isSharedProcessMode(): boolean {
+  return Deno.env.get("SKILL_SHARED_PROCESS") === "1";
+}
+
+/**
+ * Snapshot cache of the owning session id + JWT, taken ONCE per script
+ * invocation (spec: a later session's pointer/JWT must not affect an
+ * in-flight backgrounded script).
+ */
+let owningSessionSnapshot: { jwtDir: string; sessionId: string; jwt?: string } | undefined;
+
+/**
+ * Resolve the owning shell session ID:
+ * - Shared-process mode: read the `active.json` pointer (written by the pool
+ *   while the session holds the execution lease). The process `$SESSION_ID`
+ *   is frozen at spawn time in this mode and must NOT be trusted.
+ * - Per-spawn mode: the `$SESSION_ID` env var is authoritative (a stale
+ *   pointer file from a crashed run must never hijack the identity).
+ * The result is snapshotted once per script invocation, so a later session
+ * overwriting the pointer mid-script cannot change this script's identity.
+ */
+export function resolveOwningSessionId(): string {
+  const jwtDir = Deno.env.get("SKILL_JWT_DIR");
+  // Snapshot is keyed by the JWT dir so distinct script invocations (each with
+  // its own SKILL_JWT_DIR) never observe a previous invocation's identity.
+  if (jwtDir && owningSessionSnapshot?.jwtDir === jwtDir) {
+    return owningSessionSnapshot.sessionId;
+  }
+  const shared = isSharedProcessMode();
+  const readPointer = (): string | undefined => {
+    if (!jwtDir) return undefined;
+    try {
+      const raw = Deno.readTextFileSync(`${jwtDir}/active.json`);
+      const parsed = JSON.parse(raw) as { sessionId?: string };
+      return parsed.sessionId || undefined;
+    } catch {
+      return undefined;
+    }
+  };
+  let resolved: string | undefined;
+  if (shared) {
+    resolved = readPointer() ?? Deno.env.get("SESSION_ID") ?? undefined;
+  } else {
+    resolved = Deno.env.get("SESSION_ID") ?? readPointer();
+  }
+  if (!resolved) {
+    throw new Error(
+      "Cannot resolve owning session: neither the active.json pointer nor $SESSION_ID is available",
+    );
+  }
+  if (jwtDir) {
+    owningSessionSnapshot = { jwtDir, sessionId: resolved };
+  }
+  return resolved;
+}
+
+/**
+ * Read the owning session's JWT from `{SKILL_JWT_DIR}/{sessionId}.jwt`
+ * (issued by the bot process at lease acquisition; deleted at session end).
+ * Snapshotted once per script invocation alongside the session id.
+ */
+export function readSkillJwt(sessionId: string): string {
+  const jwtDir = Deno.env.get("SKILL_JWT_DIR");
+  if (!jwtDir) {
+    throw new Error("SKILL_JWT_DIR env var is not set");
+  }
+  if (
+    owningSessionSnapshot?.jwtDir === jwtDir &&
+    owningSessionSnapshot.sessionId === sessionId &&
+    owningSessionSnapshot.jwt
+  ) {
+    return owningSessionSnapshot.jwt;
+  }
+  const path = `${jwtDir}/${sessionId}.jwt`;
+  let jwt: string;
+  try {
+    jwt = Deno.readTextFileSync(path).trim();
+  } catch (cause) {
+    throw new Error(
+      `SKILL_JWT_UNREADABLE: no JWT file at ${path} — the owning session's lease may have ended: ${
+        cause instanceof Error ? cause.message : String(cause)
+      }`,
+      { cause },
+    );
+  }
+  if (!owningSessionSnapshot || owningSessionSnapshot.jwtDir !== jwtDir) {
+    owningSessionSnapshot = { jwtDir, sessionId, jwt };
+  } else if (owningSessionSnapshot.sessionId === sessionId) {
+    owningSessionSnapshot.jwt = jwt;
+  }
+  return jwt;
+}
+
+/**
  * Call the Skill API
  */
 export async function callSkillApi(
@@ -77,19 +175,29 @@ export async function callSkillApi(
     "Content-Type": "application/json",
   };
 
-  // Present the per-session caller token (F13) so the Skill API can verify that
-  // this request originates from the subprocess that owns the session. Possession
-  // of a session ID alone is not sufficient.
-  const callerToken = Deno.env.get("SKILL_API_TOKEN");
-  if (callerToken) {
-    headers["Authorization"] = `Bearer ${callerToken}`;
+  // Present the per-session JWT (JWT skill auth). The bot process is the sole
+  // HMAC-key holder (issuer + verifier); the agent process only receives the
+  // short-lived per-session JWT file — never the deployment secret.
+  // The request body's sessionId MUST equal the JWT `sub` (the pointer-resolved
+  // owning session): under shared-process mode the `--session-id` CLI value the
+  // agent passes can be the stale spawn-time `$SESSION_ID`, while the pool-issued
+  // JWT belongs to the CURRENT session. The library substitutes the resolved
+  // owner so the agent command line never needs extra params.
+  let effectiveSessionId = sessionId;
+  const jwtDir = Deno.env.get("SKILL_JWT_DIR");
+  if (jwtDir) {
+    // Snapshot the owning session + JWT (first call wins; later calls reuse it).
+    const owningSessionId = resolveOwningSessionId();
+    const jwt = readSkillJwt(owningSessionId);
+    headers["Authorization"] = `Bearer ${jwt}`;
+    effectiveSessionId = owningSessionId;
   }
 
   const response = await fetch(url, {
     method: "POST",
     headers,
     body: JSON.stringify({
-      sessionId,
+      sessionId: effectiveSessionId,
       parameters,
     }),
   });

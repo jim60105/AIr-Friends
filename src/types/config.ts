@@ -88,6 +88,34 @@ export interface DryRunConfig {
 }
 
 /**
+ * Shared ACP process pool configuration.
+ *
+ * When enabled, long-lived `opencode acp` subprocesses are pooled per
+ * pool key and reused across that key's sessions, with a global
+ * execution-lease serialization (single-bot-persona semantics).
+ */
+export interface SharedProcessConfig {
+  /** Enable the shared process pool (default: false) */
+  enabled: boolean;
+
+  /** Idle time in ms after which an unleased pool process is reclaimed (default: 1800000 = 30 min) */
+  reclaimIdleMs?: number;
+
+  /** Directory under which per-session JWT files live (default: "data/skill-jwt") */
+  jwtDir?: string;
+
+  /** Path to the persisted deployment skill secret (default: "data/skill-secret") */
+  secretPath?: string;
+
+  /**
+   * Maximum time in ms a queued session may wait before it is cancelled
+   * (default: 600000 = 10 min). Prevents a queued session from being
+   * reaped by the registry idle reaper while still holding a pool lease.
+   */
+  queueDeadlineMs?: number;
+}
+
+/**
  * Git credential store configuration for agent subprocesses.
  */
 export interface GitCredentialConfig {
@@ -193,6 +221,13 @@ export interface AgentConfig {
   /** Skill names to auto-approve in restricted (non-YOLO) mode.
    *  When empty or undefined, falls back to scanning the built-in skills directory. */
   autoApproveSkills?: string[];
+
+  /**
+   * Shared `opencode acp` process pool (optional). When `enabled`, one long-lived
+   * agent process is spawned lazily per pool key and reused for that key's sessions;
+   * agent sessions are globally serialized behind a single execution lease.
+   */
+  sharedProcess?: SharedProcessConfig;
 }
 
 /**

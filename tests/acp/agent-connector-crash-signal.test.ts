@@ -230,13 +230,15 @@ Deno.test("setReasoningEffort - crash-signal rejection during setSessionConfigOp
   const { logger } = createCapturingLogger();
   const connector = createConnector(logger);
   const { resolveExit } = setupCrashSignal(connector);
-  connector["sessionConfigOptions"] = [
-    {
-      id: "thought_level",
-      category: "thought_level",
-      options: [{ value: "high", name: "High" }],
-    },
-  ] as unknown as typeof connector["sessionConfigOptions"];
+  connector["sessionConfigOptions"] = new Map([
+    ["sess", [
+      {
+        id: "thought_level",
+        category: "thought_level",
+        options: [{ value: "high", name: "High" }],
+      },
+    ]],
+  ]) as unknown as typeof connector["sessionConfigOptions"];
   connector["connection"] = {
     setSessionConfigOption: () => new Promise(() => {}),
   } as unknown as typeof connector["connection"];

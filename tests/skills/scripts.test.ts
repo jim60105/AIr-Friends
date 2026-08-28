@@ -54,7 +54,15 @@ async function runScript(
   cwd: string,
 ): Promise<RunResult> {
   const scriptPath = join(REPO_ROOT, scriptRelPath);
-  const output = await new Deno.Command(scriptPath, { args, cwd }).output();
+  // Pin the staging base (TMPDIR) to this test's own {cwd}/tmp so concurrent
+  // tests that mutate the process-global TMPDIR cannot affect payload
+  // resolution here (matches the per-session-mode TMPDIR the agent sets).
+  // SKILL_JWT_DIR must be absent: with it set, a leaked pointer from another
+  // concurrent test file would hijack the JWT presentation path in client.ts.
+  const env = Deno.env.toObject();
+  env["TMPDIR"] = join(cwd, "tmp");
+  delete env["SKILL_JWT_DIR"];
+  const output = await new Deno.Command(scriptPath, { args, cwd, env }).output();
   return {
     code: output.code,
     stdout: new TextDecoder().decode(output.stdout),

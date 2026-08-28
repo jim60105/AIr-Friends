@@ -5,6 +5,7 @@ import { SkillAPIServer } from "../../src/skill-api/server.ts";
 import { SessionRegistry } from "../../src/skill-api/session-registry.ts";
 import { SkillRegistry } from "../../src/skills/registry.ts";
 import { MemoryStore } from "../../src/core/memory-store.ts";
+import { createSkillJwt } from "../../src/utils/skill-jwt.ts";
 import { WorkspaceManager } from "../../src/core/workspace-manager.ts";
 
 // Build request headers, optionally with the per-session caller token (F13).
@@ -12,6 +13,22 @@ function jsonHeaders(token?: string): Record<string, string> {
   const headers: Record<string, string> = { "Content-Type": "application/json" };
   if (token) headers["Authorization"] = `Bearer ${token}`;
   return headers;
+}
+
+// --- JWT skill auth helpers (per-session HS256 JWT presentation) ---
+const TEST_SKILL_SECRET = "0123456789abcdef0123456789abcdef01"; // 36 bytes (>= 32)
+
+async function makeSessionJwt(
+  sessionRegistry: SessionRegistry,
+  sessionId: string,
+): Promise<string> {
+  const session = sessionRegistry.get(sessionId)!;
+  const callerToken = sessionRegistry.getCallerToken(sessionId) ?? "";
+  return await createSkillJwt(TEST_SKILL_SECRET, {
+    sub: sessionId,
+    channel: session.channelId,
+    jti: callerToken,
+  });
 }
 
 // Helper to wait for server to be ready
@@ -42,10 +59,15 @@ Deno.test("SkillAPIServer - constructs successfully", async () => {
     });
     const skillRegistry = new SkillRegistry(memoryStore);
 
-    const server = new SkillAPIServer(sessionRegistry, skillRegistry, {
-      port: 3002,
-      host: "127.0.0.1",
-    });
+    const server = new SkillAPIServer(
+      sessionRegistry,
+      skillRegistry,
+      {
+        port: 3002,
+        host: "127.0.0.1",
+      },
+      TEST_SKILL_SECRET,
+    );
 
     assertExists(server);
 
@@ -70,10 +92,15 @@ Deno.test("SkillAPIServer - starts and stops", async () => {
     const skillRegistry = new SkillRegistry(memoryStore);
 
     const port = 3003;
-    const server = new SkillAPIServer(sessionRegistry, skillRegistry, {
-      port,
-      host: "127.0.0.1",
-    });
+    const server = new SkillAPIServer(
+      sessionRegistry,
+      skillRegistry,
+      {
+        port,
+        host: "127.0.0.1",
+      },
+      TEST_SKILL_SECRET,
+    );
 
     server.start();
     await waitForServer(port);
@@ -109,10 +136,15 @@ Deno.test("SkillAPIServer - handles OPTIONS preflight", async () => {
     const skillRegistry = new SkillRegistry(memoryStore);
 
     const port = 3004;
-    const server = new SkillAPIServer(sessionRegistry, skillRegistry, {
-      port,
-      host: "127.0.0.1",
-    });
+    const server = new SkillAPIServer(
+      sessionRegistry,
+      skillRegistry,
+      {
+        port,
+        host: "127.0.0.1",
+      },
+      TEST_SKILL_SECRET,
+    );
 
     server.start();
     await waitForServer(port);
@@ -145,10 +177,15 @@ Deno.test("SkillAPIServer - rejects non-POST methods", async () => {
     const skillRegistry = new SkillRegistry(memoryStore);
 
     const port = 3005;
-    const server = new SkillAPIServer(sessionRegistry, skillRegistry, {
-      port,
-      host: "127.0.0.1",
-    });
+    const server = new SkillAPIServer(
+      sessionRegistry,
+      skillRegistry,
+      {
+        port,
+        host: "127.0.0.1",
+      },
+      TEST_SKILL_SECRET,
+    );
 
     server.start();
     await waitForServer(port);
@@ -184,10 +221,15 @@ Deno.test("SkillAPIServer - returns 404 for invalid routes", async () => {
     const skillRegistry = new SkillRegistry(memoryStore);
 
     const port = 3006;
-    const server = new SkillAPIServer(sessionRegistry, skillRegistry, {
-      port,
-      host: "127.0.0.1",
-    });
+    const server = new SkillAPIServer(
+      sessionRegistry,
+      skillRegistry,
+      {
+        port,
+        host: "127.0.0.1",
+      },
+      TEST_SKILL_SECRET,
+    );
 
     server.start();
     await waitForServer(port);
@@ -223,10 +265,15 @@ Deno.test("SkillAPIServer - validates session ID", async () => {
     const skillRegistry = new SkillRegistry(memoryStore);
 
     const port = 3007;
-    const server = new SkillAPIServer(sessionRegistry, skillRegistry, {
-      port,
-      host: "127.0.0.1",
-    });
+    const server = new SkillAPIServer(
+      sessionRegistry,
+      skillRegistry,
+      {
+        port,
+        host: "127.0.0.1",
+      },
+      TEST_SKILL_SECRET,
+    );
 
     server.start();
     await waitForServer(port);
@@ -309,10 +356,15 @@ Deno.test("SkillAPIServer - validates skill name", async () => {
     });
 
     const port = 3008;
-    const server = new SkillAPIServer(sessionRegistry, skillRegistry, {
-      port,
-      host: "127.0.0.1",
-    });
+    const server = new SkillAPIServer(
+      sessionRegistry,
+      skillRegistry,
+      {
+        port,
+        host: "127.0.0.1",
+      },
+      TEST_SKILL_SECRET,
+    );
 
     server.start();
     await waitForServer(port);
@@ -320,7 +372,7 @@ Deno.test("SkillAPIServer - validates skill name", async () => {
     // Test with unknown skill
     const response = await fetch(`http://localhost:${port}/api/skill/unknown-skill`, {
       method: "POST",
-      headers: jsonHeaders(sessionRegistry.getCallerToken(sessionId)),
+      headers: jsonHeaders(await makeSessionJwt(sessionRegistry, sessionId)),
       body: JSON.stringify({ sessionId }),
     });
 
@@ -387,10 +439,15 @@ Deno.test("SkillAPIServer - allows multiple replies within limit", async () => {
     });
 
     const port = 3009;
-    const server = new SkillAPIServer(sessionRegistry, skillRegistry, {
-      port,
-      host: "127.0.0.1",
-    });
+    const server = new SkillAPIServer(
+      sessionRegistry,
+      skillRegistry,
+      {
+        port,
+        host: "127.0.0.1",
+      },
+      TEST_SKILL_SECRET,
+    );
 
     server.start();
     await waitForServer(port);
@@ -398,7 +455,7 @@ Deno.test("SkillAPIServer - allows multiple replies within limit", async () => {
     // First reply should succeed (limit is now 1)
     const response = await fetch(`http://localhost:${port}/api/skill/send-reply`, {
       method: "POST",
-      headers: jsonHeaders(sessionRegistry.getCallerToken(sessionId)),
+      headers: jsonHeaders(await makeSessionJwt(sessionRegistry, sessionId)),
       body: JSON.stringify({
         sessionId,
         parameters: { message: "Message 1" },
@@ -466,10 +523,15 @@ Deno.test("SkillAPIServer - send-reply rejected after reaching limit", async () 
     });
 
     const port = 3010;
-    const server = new SkillAPIServer(sessionRegistry, skillRegistry, {
-      port,
-      host: "127.0.0.1",
-    });
+    const server = new SkillAPIServer(
+      sessionRegistry,
+      skillRegistry,
+      {
+        port,
+        host: "127.0.0.1",
+      },
+      TEST_SKILL_SECRET,
+    );
 
     server.start();
     await waitForServer(port);
@@ -477,7 +539,7 @@ Deno.test("SkillAPIServer - send-reply rejected after reaching limit", async () 
     // Send 1 successful reply (new limit is 1)
     const response1 = await fetch(`http://localhost:${port}/api/skill/send-reply`, {
       method: "POST",
-      headers: jsonHeaders(sessionRegistry.getCallerToken(sessionId)),
+      headers: jsonHeaders(await makeSessionJwt(sessionRegistry, sessionId)),
       body: JSON.stringify({
         sessionId,
         parameters: { message: "Message 1" },
@@ -488,7 +550,7 @@ Deno.test("SkillAPIServer - send-reply rejected after reaching limit", async () 
     // 2nd reply should be rejected with 429
     const response4 = await fetch(`http://localhost:${port}/api/skill/send-reply`, {
       method: "POST",
-      headers: jsonHeaders(sessionRegistry.getCallerToken(sessionId)),
+      headers: jsonHeaders(await makeSessionJwt(sessionRegistry, sessionId)),
       body: JSON.stringify({
         sessionId,
         parameters: { message: "Fourth message" },
@@ -557,10 +619,15 @@ Deno.test("SkillAPIServer - reply count not incremented on failed send-reply", a
     });
 
     const port = 3011;
-    const server = new SkillAPIServer(sessionRegistry, skillRegistry, {
-      port,
-      host: "127.0.0.1",
-    });
+    const server = new SkillAPIServer(
+      sessionRegistry,
+      skillRegistry,
+      {
+        port,
+        host: "127.0.0.1",
+      },
+      TEST_SKILL_SECRET,
+    );
 
     server.start();
     await waitForServer(port);
@@ -568,7 +635,7 @@ Deno.test("SkillAPIServer - reply count not incremented on failed send-reply", a
     // Send a reply that will fail
     const response = await fetch(`http://localhost:${port}/api/skill/send-reply`, {
       method: "POST",
-      headers: jsonHeaders(sessionRegistry.getCallerToken(sessionId)),
+      headers: jsonHeaders(await makeSessionJwt(sessionRegistry, sessionId)),
       body: JSON.stringify({
         sessionId,
         parameters: { message: "Test message" },
@@ -637,10 +704,15 @@ Deno.test("SkillAPIServer - edit-reply not affected by reply limit", async () =>
     });
 
     const port = 3012;
-    const server = new SkillAPIServer(sessionRegistry, skillRegistry, {
-      port,
-      host: "127.0.0.1",
-    });
+    const server = new SkillAPIServer(
+      sessionRegistry,
+      skillRegistry,
+      {
+        port,
+        host: "127.0.0.1",
+      },
+      TEST_SKILL_SECRET,
+    );
 
     server.start();
     await waitForServer(port);
@@ -648,7 +720,7 @@ Deno.test("SkillAPIServer - edit-reply not affected by reply limit", async () =>
     // Send 1 reply to reach the limit (new limit is 1)
     const replyResponse = await fetch(`http://localhost:${port}/api/skill/send-reply`, {
       method: "POST",
-      headers: jsonHeaders(sessionRegistry.getCallerToken(sessionId)),
+      headers: jsonHeaders(await makeSessionJwt(sessionRegistry, sessionId)),
       body: JSON.stringify({
         sessionId,
         parameters: { message: "Message 1" },
@@ -659,7 +731,7 @@ Deno.test("SkillAPIServer - edit-reply not affected by reply limit", async () =>
     // edit-reply should still work
     const editResponse = await fetch(`http://localhost:${port}/api/skill/edit-reply`, {
       method: "POST",
-      headers: jsonHeaders(sessionRegistry.getCallerToken(sessionId)),
+      headers: jsonHeaders(await makeSessionJwt(sessionRegistry, sessionId)),
       body: JSON.stringify({
         sessionId,
         parameters: { messageId: "test123", message: "Edited message" },
@@ -727,10 +799,15 @@ Deno.test("SkillAPIServer - reply count incremented even on rejection", async ()
     });
 
     const port = 3013;
-    const server = new SkillAPIServer(sessionRegistry, skillRegistry, {
-      port,
-      host: "127.0.0.1",
-    });
+    const server = new SkillAPIServer(
+      sessionRegistry,
+      skillRegistry,
+      {
+        port,
+        host: "127.0.0.1",
+      },
+      TEST_SKILL_SECRET,
+    );
 
     server.start();
     await waitForServer(port);
@@ -738,7 +815,7 @@ Deno.test("SkillAPIServer - reply count incremented even on rejection", async ()
     // First reply succeeds
     const response1 = await fetch(`http://localhost:${port}/api/skill/send-reply`, {
       method: "POST",
-      headers: jsonHeaders(sessionRegistry.getCallerToken(sessionId)),
+      headers: jsonHeaders(await makeSessionJwt(sessionRegistry, sessionId)),
       body: JSON.stringify({
         sessionId,
         parameters: { message: "Message 1" },
@@ -751,7 +828,7 @@ Deno.test("SkillAPIServer - reply count incremented even on rejection", async ()
     // Second reply rejected but count still increments
     const response2 = await fetch(`http://localhost:${port}/api/skill/send-reply`, {
       method: "POST",
-      headers: jsonHeaders(sessionRegistry.getCallerToken(sessionId)),
+      headers: jsonHeaders(await makeSessionJwt(sessionRegistry, sessionId)),
       body: JSON.stringify({
         sessionId,
         parameters: { message: "Message 2" },
@@ -764,7 +841,7 @@ Deno.test("SkillAPIServer - reply count incremented even on rejection", async ()
     // Third reply rejected, count increments again
     const response3 = await fetch(`http://localhost:${port}/api/skill/send-reply`, {
       method: "POST",
-      headers: jsonHeaders(sessionRegistry.getCallerToken(sessionId)),
+      headers: jsonHeaders(await makeSessionJwt(sessionRegistry, sessionId)),
       body: JSON.stringify({
         sessionId,
         parameters: { message: "Message 3" },
@@ -838,10 +915,15 @@ Deno.test("SkillAPIServer - doom-loop triggers agent termination on 4th attempt"
     });
 
     const port = 3014;
-    const server = new SkillAPIServer(sessionRegistry, skillRegistry, {
-      port,
-      host: "127.0.0.1",
-    });
+    const server = new SkillAPIServer(
+      sessionRegistry,
+      skillRegistry,
+      {
+        port,
+        host: "127.0.0.1",
+      },
+      TEST_SKILL_SECRET,
+    );
 
     server.start();
     await waitForServer(port);
@@ -850,7 +932,7 @@ Deno.test("SkillAPIServer - doom-loop triggers agent termination on 4th attempt"
     for (let i = 1; i <= 4; i++) {
       const response = await fetch(`http://localhost:${port}/api/skill/send-reply`, {
         method: "POST",
-        headers: jsonHeaders(sessionRegistry.getCallerToken(sessionId)),
+        headers: jsonHeaders(await makeSessionJwt(sessionRegistry, sessionId)),
         body: JSON.stringify({
           sessionId,
           parameters: { message: `Message ${i}` },
@@ -924,10 +1006,15 @@ Deno.test("SkillAPIServer - no crash when onTerminateRequest not set on doom-loo
     // Do NOT set onTerminateRequest callback
 
     const port = 3015;
-    const server = new SkillAPIServer(sessionRegistry, skillRegistry, {
-      port,
-      host: "127.0.0.1",
-    });
+    const server = new SkillAPIServer(
+      sessionRegistry,
+      skillRegistry,
+      {
+        port,
+        host: "127.0.0.1",
+      },
+      TEST_SKILL_SECRET,
+    );
 
     server.start();
     await waitForServer(port);
@@ -936,7 +1023,7 @@ Deno.test("SkillAPIServer - no crash when onTerminateRequest not set on doom-loo
     for (let i = 1; i <= 4; i++) {
       const response = await fetch(`http://localhost:${port}/api/skill/send-reply`, {
         method: "POST",
-        headers: jsonHeaders(sessionRegistry.getCallerToken(sessionId)),
+        headers: jsonHeaders(await makeSessionJwt(sessionRegistry, sessionId)),
         body: JSON.stringify({
           sessionId,
           parameters: { message: `Message ${i}` },
@@ -1018,17 +1105,22 @@ Deno.test("SkillAPIServer - send-reply success updates lastSentMessageId", async
     assertEquals(sessionRegistry.getLastSentMessageId(sessionId), undefined);
 
     const port = 3016;
-    const server = new SkillAPIServer(sessionRegistry, skillRegistry, {
-      port,
-      host: "127.0.0.1",
-    });
+    const server = new SkillAPIServer(
+      sessionRegistry,
+      skillRegistry,
+      {
+        port,
+        host: "127.0.0.1",
+      },
+      TEST_SKILL_SECRET,
+    );
 
     server.start();
     await waitForServer(port);
 
     const response = await fetch(`http://localhost:${port}/api/skill/send-reply`, {
       method: "POST",
-      headers: jsonHeaders(sessionRegistry.getCallerToken(sessionId)),
+      headers: jsonHeaders(await makeSessionJwt(sessionRegistry, sessionId)),
       body: JSON.stringify({
         sessionId,
         parameters: { message: "Hello!" },
@@ -1100,10 +1192,15 @@ Deno.test("SkillAPIServer - edit-reply success updates lastSentMessageId", async
     });
 
     const port = 3017;
-    const server = new SkillAPIServer(sessionRegistry, skillRegistry, {
-      port,
-      host: "127.0.0.1",
-    });
+    const server = new SkillAPIServer(
+      sessionRegistry,
+      skillRegistry,
+      {
+        port,
+        host: "127.0.0.1",
+      },
+      TEST_SKILL_SECRET,
+    );
 
     server.start();
     await waitForServer(port);
@@ -1111,7 +1208,7 @@ Deno.test("SkillAPIServer - edit-reply success updates lastSentMessageId", async
     // First send a reply
     const sendResponse = await fetch(`http://localhost:${port}/api/skill/send-reply`, {
       method: "POST",
-      headers: jsonHeaders(sessionRegistry.getCallerToken(sessionId)),
+      headers: jsonHeaders(await makeSessionJwt(sessionRegistry, sessionId)),
       body: JSON.stringify({
         sessionId,
         parameters: { message: "Original" },
@@ -1123,7 +1220,7 @@ Deno.test("SkillAPIServer - edit-reply success updates lastSentMessageId", async
     // Now edit the reply
     const editResponse = await fetch(`http://localhost:${port}/api/skill/edit-reply`, {
       method: "POST",
-      headers: jsonHeaders(sessionRegistry.getCallerToken(sessionId)),
+      headers: jsonHeaders(await makeSessionJwt(sessionRegistry, sessionId)),
       body: JSON.stringify({
         sessionId,
         parameters: { messageId: "original_msg", message: "Edited" },
@@ -1202,17 +1299,22 @@ Deno.test("SkillAPIServer - get-message skill via API", async () => {
     });
 
     const port = 3018;
-    const server = new SkillAPIServer(sessionRegistry, skillRegistry, {
-      port,
-      host: "127.0.0.1",
-    });
+    const server = new SkillAPIServer(
+      sessionRegistry,
+      skillRegistry,
+      {
+        port,
+        host: "127.0.0.1",
+      },
+      TEST_SKILL_SECRET,
+    );
 
     server.start();
     await waitForServer(port);
 
     const response = await fetch(`http://localhost:${port}/api/skill/get-message`, {
       method: "POST",
-      headers: jsonHeaders(sessionRegistry.getCallerToken(sessionId)),
+      headers: jsonHeaders(await makeSessionJwt(sessionRegistry, sessionId)),
       body: JSON.stringify({
         sessionId,
         parameters: { messageId: "fetched_msg" },
@@ -1295,10 +1397,15 @@ Deno.test("SkillAPIServer - get-message uses lastSentMessageId from session", as
     });
 
     const port = 3019;
-    const server = new SkillAPIServer(sessionRegistry, skillRegistry, {
-      port,
-      host: "127.0.0.1",
-    });
+    const server = new SkillAPIServer(
+      sessionRegistry,
+      skillRegistry,
+      {
+        port,
+        host: "127.0.0.1",
+      },
+      TEST_SKILL_SECRET,
+    );
 
     server.start();
     await waitForServer(port);
@@ -1306,7 +1413,7 @@ Deno.test("SkillAPIServer - get-message uses lastSentMessageId from session", as
     // First send a reply to set lastSentMessageId
     const sendResponse = await fetch(`http://localhost:${port}/api/skill/send-reply`, {
       method: "POST",
-      headers: jsonHeaders(sessionRegistry.getCallerToken(sessionId)),
+      headers: jsonHeaders(await makeSessionJwt(sessionRegistry, sessionId)),
       body: JSON.stringify({
         sessionId,
         parameters: { message: "Hello!" },
@@ -1317,7 +1424,7 @@ Deno.test("SkillAPIServer - get-message uses lastSentMessageId from session", as
     // Now call get-message without messageId — should use lastSentMessageId
     const getResponse = await fetch(`http://localhost:${port}/api/skill/get-message`, {
       method: "POST",
-      headers: jsonHeaders(sessionRegistry.getCallerToken(sessionId)),
+      headers: jsonHeaders(await makeSessionJwt(sessionRegistry, sessionId)),
       body: JSON.stringify({
         sessionId,
         parameters: {},
@@ -1387,10 +1494,15 @@ Deno.test("SkillAPIServer - edit-reply succeeds for first 2 calls", async () => 
     });
 
     const port = 3020;
-    const server = new SkillAPIServer(sessionRegistry, skillRegistry, {
-      port,
-      host: "127.0.0.1",
-    });
+    const server = new SkillAPIServer(
+      sessionRegistry,
+      skillRegistry,
+      {
+        port,
+        host: "127.0.0.1",
+      },
+      TEST_SKILL_SECRET,
+    );
 
     server.start();
     await waitForServer(port);
@@ -1398,7 +1510,7 @@ Deno.test("SkillAPIServer - edit-reply succeeds for first 2 calls", async () => 
     // Send initial reply to get a messageId
     const sendResponse = await fetch(`http://localhost:${port}/api/skill/send-reply`, {
       method: "POST",
-      headers: jsonHeaders(sessionRegistry.getCallerToken(sessionId)),
+      headers: jsonHeaders(await makeSessionJwt(sessionRegistry, sessionId)),
       body: JSON.stringify({
         sessionId,
         parameters: { message: "Initial message" },
@@ -1409,7 +1521,7 @@ Deno.test("SkillAPIServer - edit-reply succeeds for first 2 calls", async () => 
     // First edit — should succeed (editCount: 0 → 1)
     const editResponse1 = await fetch(`http://localhost:${port}/api/skill/edit-reply`, {
       method: "POST",
-      headers: jsonHeaders(sessionRegistry.getCallerToken(sessionId)),
+      headers: jsonHeaders(await makeSessionJwt(sessionRegistry, sessionId)),
       body: JSON.stringify({
         sessionId,
         parameters: { messageId: "sent_msg_001", message: "First edit" },
@@ -1423,7 +1535,7 @@ Deno.test("SkillAPIServer - edit-reply succeeds for first 2 calls", async () => 
     // Second edit — should succeed (editCount: 1 → 2)
     const editResponse2 = await fetch(`http://localhost:${port}/api/skill/edit-reply`, {
       method: "POST",
-      headers: jsonHeaders(sessionRegistry.getCallerToken(sessionId)),
+      headers: jsonHeaders(await makeSessionJwt(sessionRegistry, sessionId)),
       body: JSON.stringify({
         sessionId,
         parameters: { messageId: "edited_msg_001", message: "Second edit" },
@@ -1498,10 +1610,15 @@ Deno.test("SkillAPIServer - edit-reply rejected on 3rd call and triggers termina
     });
 
     const port = 3021;
-    const server = new SkillAPIServer(sessionRegistry, skillRegistry, {
-      port,
-      host: "127.0.0.1",
-    });
+    const server = new SkillAPIServer(
+      sessionRegistry,
+      skillRegistry,
+      {
+        port,
+        host: "127.0.0.1",
+      },
+      TEST_SKILL_SECRET,
+    );
 
     server.start();
     await waitForServer(port);
@@ -1509,7 +1626,7 @@ Deno.test("SkillAPIServer - edit-reply rejected on 3rd call and triggers termina
     // Send initial reply
     await fetch(`http://localhost:${port}/api/skill/send-reply`, {
       method: "POST",
-      headers: jsonHeaders(sessionRegistry.getCallerToken(sessionId)),
+      headers: jsonHeaders(await makeSessionJwt(sessionRegistry, sessionId)),
       body: JSON.stringify({
         sessionId,
         parameters: { message: "Initial message" },
@@ -1519,7 +1636,7 @@ Deno.test("SkillAPIServer - edit-reply rejected on 3rd call and triggers termina
     // Edit 1 — succeeds (editCount: 0 → 1)
     await fetch(`http://localhost:${port}/api/skill/edit-reply`, {
       method: "POST",
-      headers: jsonHeaders(sessionRegistry.getCallerToken(sessionId)),
+      headers: jsonHeaders(await makeSessionJwt(sessionRegistry, sessionId)),
       body: JSON.stringify({
         sessionId,
         parameters: { messageId: "sent_msg_001", message: "First edit" },
@@ -1529,7 +1646,7 @@ Deno.test("SkillAPIServer - edit-reply rejected on 3rd call and triggers termina
     // Edit 2 — succeeds (editCount: 1 → 2)
     await fetch(`http://localhost:${port}/api/skill/edit-reply`, {
       method: "POST",
-      headers: jsonHeaders(sessionRegistry.getCallerToken(sessionId)),
+      headers: jsonHeaders(await makeSessionJwt(sessionRegistry, sessionId)),
       body: JSON.stringify({
         sessionId,
         parameters: { messageId: "edited_msg_001", message: "Second edit" },
@@ -1541,7 +1658,7 @@ Deno.test("SkillAPIServer - edit-reply rejected on 3rd call and triggers termina
     // Edit 3 — should be rejected (editCount=2 >= 3) and trigger termination
     const editResponse3 = await fetch(`http://localhost:${port}/api/skill/edit-reply`, {
       method: "POST",
-      headers: jsonHeaders(sessionRegistry.getCallerToken(sessionId)),
+      headers: jsonHeaders(await makeSessionJwt(sessionRegistry, sessionId)),
       body: JSON.stringify({
         sessionId,
         parameters: { messageId: "edited_msg_001", message: "Third edit" },
@@ -1619,10 +1736,15 @@ Deno.test("SkillAPIServer - edit-reply no crash when onTerminateRequest not set"
     // Do NOT set onTerminateRequest
 
     const port = 3022;
-    const server = new SkillAPIServer(sessionRegistry, skillRegistry, {
-      port,
-      host: "127.0.0.1",
-    });
+    const server = new SkillAPIServer(
+      sessionRegistry,
+      skillRegistry,
+      {
+        port,
+        host: "127.0.0.1",
+      },
+      TEST_SKILL_SECRET,
+    );
 
     server.start();
     await waitForServer(port);
@@ -1630,7 +1752,7 @@ Deno.test("SkillAPIServer - edit-reply no crash when onTerminateRequest not set"
     // Send initial reply
     await fetch(`http://localhost:${port}/api/skill/send-reply`, {
       method: "POST",
-      headers: jsonHeaders(sessionRegistry.getCallerToken(sessionId)),
+      headers: jsonHeaders(await makeSessionJwt(sessionRegistry, sessionId)),
       body: JSON.stringify({
         sessionId,
         parameters: { message: "Initial message" },
@@ -1645,7 +1767,7 @@ Deno.test("SkillAPIServer - edit-reply no crash when onTerminateRequest not set"
     for (let i = 1; i <= 2; i++) {
       await fetch(`http://localhost:${port}/api/skill/edit-reply`, {
         method: "POST",
-        headers: jsonHeaders(sessionRegistry.getCallerToken(sessionId)),
+        headers: jsonHeaders(await makeSessionJwt(sessionRegistry, sessionId)),
         body: JSON.stringify({
           sessionId,
           parameters: { messageId: editIds[i - 1], message: `Edit ${i}` },
@@ -1656,7 +1778,7 @@ Deno.test("SkillAPIServer - edit-reply no crash when onTerminateRequest not set"
     // 3rd edit should be rejected but not crash (no termination callback)
     const editResponse3 = await fetch(`http://localhost:${port}/api/skill/edit-reply`, {
       method: "POST",
-      headers: jsonHeaders(sessionRegistry.getCallerToken(sessionId)),
+      headers: jsonHeaders(await makeSessionJwt(sessionRegistry, sessionId)),
       body: JSON.stringify({
         sessionId,
         parameters: { messageId: "edited_msg_001", message: "Third edit" },
@@ -1730,10 +1852,15 @@ Deno.test("SkillAPIServer - edit-reply count independent from reply count", asyn
     });
 
     const port = 3023;
-    const server = new SkillAPIServer(sessionRegistry, skillRegistry, {
-      port,
-      host: "127.0.0.1",
-    });
+    const server = new SkillAPIServer(
+      sessionRegistry,
+      skillRegistry,
+      {
+        port,
+        host: "127.0.0.1",
+      },
+      TEST_SKILL_SECRET,
+    );
 
     server.start();
     await waitForServer(port);
@@ -1741,7 +1868,7 @@ Deno.test("SkillAPIServer - edit-reply count independent from reply count", asyn
     // Send 1 reply — replyCount=1, editCount=0
     const sendResponse = await fetch(`http://localhost:${port}/api/skill/send-reply`, {
       method: "POST",
-      headers: jsonHeaders(sessionRegistry.getCallerToken(sessionId)),
+      headers: jsonHeaders(await makeSessionJwt(sessionRegistry, sessionId)),
       body: JSON.stringify({
         sessionId,
         parameters: { message: "Initial message" },
@@ -1755,7 +1882,7 @@ Deno.test("SkillAPIServer - edit-reply count independent from reply count", asyn
     // Edit reply once — editCount=1, replyCount still 1
     const editResponse = await fetch(`http://localhost:${port}/api/skill/edit-reply`, {
       method: "POST",
-      headers: jsonHeaders(sessionRegistry.getCallerToken(sessionId)),
+      headers: jsonHeaders(await makeSessionJwt(sessionRegistry, sessionId)),
       body: JSON.stringify({
         sessionId,
         parameters: { messageId: "sent_msg_001", message: "Edited" },
@@ -1791,10 +1918,15 @@ Deno.test("SkillAPIServer - skill API call refreshes session timeout", async () 
     const skillRegistry = new SkillRegistry(memoryStore);
 
     const port = 3024;
-    const server = new SkillAPIServer(sessionRegistry, skillRegistry, {
-      port,
-      host: "127.0.0.1",
-    });
+    const server = new SkillAPIServer(
+      sessionRegistry,
+      skillRegistry,
+      {
+        port,
+        host: "127.0.0.1",
+      },
+      TEST_SKILL_SECRET,
+    );
 
     server.start();
     await waitForServer(port);
@@ -1833,7 +1965,7 @@ Deno.test("SkillAPIServer - skill API call refreshes session timeout", async () 
     // Make a skill API call to refresh timeout
     const response = await fetch(`http://localhost:${port}/api/skill/memory-stats`, {
       method: "POST",
-      headers: jsonHeaders(sessionRegistry.getCallerToken(sessionId)),
+      headers: jsonHeaders(await makeSessionJwt(sessionRegistry, sessionId)),
       body: JSON.stringify({ sessionId, parameters: {} }),
     });
     const result = await response.json();
@@ -1914,21 +2046,29 @@ Deno.test("SkillAPIServer - edit-reply success writes reply_edited audit entry",
     sessionRegistry.setAuditWriter(sessionId, auditWriter);
 
     const port = 3025;
-    const server = new SkillAPIServer(sessionRegistry, skillRegistry, { port, host: "127.0.0.1" });
+    const server = new SkillAPIServer(
+      sessionRegistry,
+      skillRegistry,
+      {
+        port,
+        host: "127.0.0.1",
+      },
+      TEST_SKILL_SECRET,
+    );
     server.start();
     await waitForServer(port);
 
     // Send initial reply
     await fetch(`http://localhost:${port}/api/skill/send-reply`, {
       method: "POST",
-      headers: jsonHeaders(sessionRegistry.getCallerToken(sessionId)),
+      headers: jsonHeaders(await makeSessionJwt(sessionRegistry, sessionId)),
       body: JSON.stringify({ sessionId, parameters: { message: "Original" } }),
     }).then((r) => r.json());
 
     // Edit reply
     const editResponse = await fetch(`http://localhost:${port}/api/skill/edit-reply`, {
       method: "POST",
-      headers: jsonHeaders(sessionRegistry.getCallerToken(sessionId)),
+      headers: jsonHeaders(await makeSessionJwt(sessionRegistry, sessionId)),
       body: JSON.stringify({
         sessionId,
         parameters: { messageId: "original_msg", message: "Edited content" },
@@ -2013,13 +2153,21 @@ Deno.test("SkillAPIServer - memory-save writes memory_operation audit entry", as
     sessionRegistry.setAuditWriter(sessionId, auditWriter);
 
     const port = 3026;
-    const server = new SkillAPIServer(sessionRegistry, skillRegistry, { port, host: "127.0.0.1" });
+    const server = new SkillAPIServer(
+      sessionRegistry,
+      skillRegistry,
+      {
+        port,
+        host: "127.0.0.1",
+      },
+      TEST_SKILL_SECRET,
+    );
     server.start();
     await waitForServer(port);
 
     const response = await fetch(`http://localhost:${port}/api/skill/memory-save`, {
       method: "POST",
-      headers: jsonHeaders(sessionRegistry.getCallerToken(sessionId)),
+      headers: jsonHeaders(await makeSessionJwt(sessionRegistry, sessionId)),
       body: JSON.stringify({
         sessionId,
         parameters: { content: "User likes cats", visibility: "public", tier: "working" },
@@ -2104,13 +2252,21 @@ Deno.test("SkillAPIServer - memory-search writes memory_operation audit entry", 
     sessionRegistry.setAuditWriter(sessionId, auditWriter);
 
     const port = 3027;
-    const server = new SkillAPIServer(sessionRegistry, skillRegistry, { port, host: "127.0.0.1" });
+    const server = new SkillAPIServer(
+      sessionRegistry,
+      skillRegistry,
+      {
+        port,
+        host: "127.0.0.1",
+      },
+      TEST_SKILL_SECRET,
+    );
     server.start();
     await waitForServer(port);
 
     const response = await fetch(`http://localhost:${port}/api/skill/memory-search`, {
       method: "POST",
-      headers: jsonHeaders(sessionRegistry.getCallerToken(sessionId)),
+      headers: jsonHeaders(await makeSessionJwt(sessionRegistry, sessionId)),
       body: JSON.stringify({
         sessionId,
         parameters: { query: "cats" },
@@ -2207,14 +2363,14 @@ Deno.test("SkillAPIServer - send-file rejected after one successful call", async
     const server = new SkillAPIServer(rig.sessionRegistry, rig.skillRegistry, {
       port,
       host: "127.0.0.1",
-    });
+    }, TEST_SKILL_SECRET);
     server.start();
     await waitForServer(port);
 
-    const callSendFile = (filePaths: string[]) =>
+    const callSendFile = async (filePaths: string[]) =>
       fetch(`http://localhost:${port}/api/skill/send-file`, {
         method: "POST",
-        headers: jsonHeaders(rig.sessionRegistry.getCallerToken(rig.sessionId)),
+        headers: jsonHeaders(await makeSessionJwt(rig.sessionRegistry, rig.sessionId)),
         body: JSON.stringify({ sessionId: rig.sessionId, parameters: { filePaths } }),
       });
 
@@ -2253,14 +2409,14 @@ Deno.test("SkillAPIServer - send-file quota not consumed on total failure (rollb
     const server = new SkillAPIServer(rig.sessionRegistry, rig.skillRegistry, {
       port,
       host: "127.0.0.1",
-    });
+    }, TEST_SKILL_SECRET);
     server.start();
     await waitForServer(port);
 
-    const callSendFile = (filePath: string) =>
+    const callSendFile = async (filePath: string) =>
       fetch(`http://localhost:${port}/api/skill/send-file`, {
         method: "POST",
-        headers: jsonHeaders(rig.sessionRegistry.getCallerToken(rig.sessionId)),
+        headers: jsonHeaders(await makeSessionJwt(rig.sessionRegistry, rig.sessionId)),
         body: JSON.stringify({
           sessionId: rig.sessionId,
           parameters: { filePaths: [filePath] },
@@ -2303,14 +2459,14 @@ Deno.test("SkillAPIServer - send-file doom-loop terminates agent after 4 attempt
     const server = new SkillAPIServer(rig.sessionRegistry, rig.skillRegistry, {
       port,
       host: "127.0.0.1",
-    });
+    }, TEST_SKILL_SECRET);
     server.start();
     await waitForServer(port);
 
-    const callSendFile = (filePath: string) =>
+    const callSendFile = async (filePath: string) =>
       fetch(`http://localhost:${port}/api/skill/send-file`, {
         method: "POST",
-        headers: jsonHeaders(rig.sessionRegistry.getCallerToken(rig.sessionId)),
+        headers: jsonHeaders(await makeSessionJwt(rig.sessionRegistry, rig.sessionId)),
         body: JSON.stringify({
           sessionId: rig.sessionId,
           parameters: { filePaths: [filePath] },
@@ -2362,13 +2518,13 @@ Deno.test("SkillAPIServer - send-file writes file_sent audit entry (hashContent 
     const server = new SkillAPIServer(rig.sessionRegistry, rig.skillRegistry, {
       port,
       host: "127.0.0.1",
-    });
+    }, TEST_SKILL_SECRET);
     server.start();
     await waitForServer(port);
 
     const response = await fetch(`http://localhost:${port}/api/skill/send-file`, {
       method: "POST",
-      headers: jsonHeaders(rig.sessionRegistry.getCallerToken(rig.sessionId)),
+      headers: jsonHeaders(await makeSessionJwt(rig.sessionRegistry, rig.sessionId)),
       body: JSON.stringify({
         sessionId: rig.sessionId,
         parameters: { filePaths: ["a.png", "b.png"], caption: "here you go" },
@@ -2422,13 +2578,13 @@ Deno.test("SkillAPIServer - file_sent audit entry without caption and without ha
     const server = new SkillAPIServer(rig.sessionRegistry, rig.skillRegistry, {
       port,
       host: "127.0.0.1",
-    });
+    }, TEST_SKILL_SECRET);
     server.start();
     await waitForServer(port);
 
     const response = await fetch(`http://localhost:${port}/api/skill/send-file`, {
       method: "POST",
-      headers: jsonHeaders(rig.sessionRegistry.getCallerToken(rig.sessionId)),
+      headers: jsonHeaders(await makeSessionJwt(rig.sessionRegistry, rig.sessionId)),
       body: JSON.stringify({
         sessionId: rig.sessionId,
         parameters: { filePaths: ["a.png"] },
@@ -2501,16 +2657,21 @@ Deno.test("SkillAPIServer - send-file rejected for triggerless sessions (no trig
     });
 
     const port = 3106;
-    const server = new SkillAPIServer(sessionRegistry, skillRegistry, {
-      port,
-      host: "127.0.0.1",
-    });
+    const server = new SkillAPIServer(
+      sessionRegistry,
+      skillRegistry,
+      {
+        port,
+        host: "127.0.0.1",
+      },
+      TEST_SKILL_SECRET,
+    );
     server.start();
     await waitForServer(port);
 
     const response = await fetch(`http://localhost:${port}/api/skill/send-file`, {
       method: "POST",
-      headers: jsonHeaders(sessionRegistry.getCallerToken(sessionId)),
+      headers: jsonHeaders(await makeSessionJwt(sessionRegistry, sessionId)),
       body: JSON.stringify({
         sessionId,
         parameters: { filePaths: ["a.txt"] },
@@ -2553,13 +2714,13 @@ Deno.test("SkillAPIServer - partial delivery marks fileSent and keeps the quota 
     const server = new SkillAPIServer(rig.sessionRegistry, rig.skillRegistry, {
       port,
       host: "127.0.0.1",
-    });
+    }, TEST_SKILL_SECRET);
     server.start();
     await waitForServer(port);
 
     const response = await fetch(`http://localhost:${port}/api/skill/send-file`, {
       method: "POST",
-      headers: jsonHeaders(rig.sessionRegistry.getCallerToken(rig.sessionId)),
+      headers: jsonHeaders(await makeSessionJwt(rig.sessionRegistry, rig.sessionId)),
       body: JSON.stringify({ sessionId: rig.sessionId, parameters: { filePaths: ["a.txt"] } }),
     });
     assertEquals(response.status, 400);
@@ -2594,16 +2755,16 @@ Deno.test("SkillAPIServer - identical repeated send-file calls still reach the d
     const server = new SkillAPIServer(rig.sessionRegistry, rig.skillRegistry, {
       port,
       host: "127.0.0.1",
-    });
+    }, TEST_SKILL_SECRET);
     server.start();
     await waitForServer(port);
 
     // All calls use IDENTICAL parameters — the 1s dedup cache must NOT swallow
     // them, otherwise the quota gate and doom-loop detection would be starved.
-    const callSendFile = () =>
+    const callSendFile = async () =>
       fetch(`http://localhost:${port}/api/skill/send-file`, {
         method: "POST",
-        headers: jsonHeaders(rig.sessionRegistry.getCallerToken(rig.sessionId)),
+        headers: jsonHeaders(await makeSessionJwt(rig.sessionRegistry, rig.sessionId)),
         body: JSON.stringify({ sessionId: rig.sessionId, parameters: { filePaths: ["a.txt"] } }),
       });
 
@@ -2639,13 +2800,13 @@ Deno.test("SkillAPIServer - send-file success stores lastFileMessageId (not last
     const server = new SkillAPIServer(rig.sessionRegistry, rig.skillRegistry, {
       port,
       host: "127.0.0.1",
-    });
+    }, TEST_SKILL_SECRET);
     server.start();
     await waitForServer(port);
 
     const response = await fetch(`http://localhost:${port}/api/skill/send-file`, {
       method: "POST",
-      headers: jsonHeaders(rig.sessionRegistry.getCallerToken(rig.sessionId)),
+      headers: jsonHeaders(await makeSessionJwt(rig.sessionRegistry, rig.sessionId)),
       body: JSON.stringify({ sessionId: rig.sessionId, parameters: { filePaths: ["a.txt"] } }),
     });
     const body = await response.json();
@@ -2680,13 +2841,13 @@ Deno.test("SkillAPIServer - send-file total failure records no message ID", asyn
     const server = new SkillAPIServer(rig.sessionRegistry, rig.skillRegistry, {
       port,
       host: "127.0.0.1",
-    });
+    }, TEST_SKILL_SECRET);
     server.start();
     await waitForServer(port);
 
     const response = await fetch(`http://localhost:${port}/api/skill/send-file`, {
       method: "POST",
-      headers: jsonHeaders(rig.sessionRegistry.getCallerToken(rig.sessionId)),
+      headers: jsonHeaders(await makeSessionJwt(rig.sessionRegistry, rig.sessionId)),
       body: JSON.stringify({ sessionId: rig.sessionId, parameters: { filePaths: ["a.txt"] } }),
     });
     assertEquals(response.status, 400);
@@ -2716,13 +2877,13 @@ Deno.test("SkillAPIServer - send-file delivery without a usable message ID recor
     const server = new SkillAPIServer(rig.sessionRegistry, rig.skillRegistry, {
       port,
       host: "127.0.0.1",
-    });
+    }, TEST_SKILL_SECRET);
     server.start();
     await waitForServer(port);
 
     const response = await fetch(`http://localhost:${port}/api/skill/send-file`, {
       method: "POST",
-      headers: jsonHeaders(rig.sessionRegistry.getCallerToken(rig.sessionId)),
+      headers: jsonHeaders(await makeSessionJwt(rig.sessionRegistry, rig.sessionId)),
       body: JSON.stringify({ sessionId: rig.sessionId, parameters: { filePaths: ["a.txt"] } }),
     });
     const body = await response.json();
@@ -2784,16 +2945,21 @@ Deno.test("SkillAPIServer - send-reply success records the per-reply anchor", as
     });
 
     const port = 3204;
-    const server = new SkillAPIServer(sessionRegistry, skillRegistry, {
-      port,
-      host: "127.0.0.1",
-    });
+    const server = new SkillAPIServer(
+      sessionRegistry,
+      skillRegistry,
+      {
+        port,
+        host: "127.0.0.1",
+      },
+      TEST_SKILL_SECRET,
+    );
     server.start();
     await waitForServer(port);
 
     const response = await fetch(`http://localhost:${port}/api/skill/send-reply`, {
       method: "POST",
-      headers: jsonHeaders(sessionRegistry.getCallerToken(sessionId)),
+      headers: jsonHeaders(await makeSessionJwt(sessionRegistry, sessionId)),
       body: JSON.stringify({ sessionId, parameters: { message: "Hello!" } }),
     });
     assertEquals(response.status, 200);
@@ -2883,17 +3049,22 @@ Deno.test("SkillAPIServer - send-reply after send-file threads to the file messa
     await Deno.writeTextFile(`${tempDir}/a.txt`, "aaa");
 
     const port = 3205;
-    const server = new SkillAPIServer(sessionRegistry, skillRegistry, {
-      port,
-      host: "127.0.0.1",
-    });
+    const server = new SkillAPIServer(
+      sessionRegistry,
+      skillRegistry,
+      {
+        port,
+        host: "127.0.0.1",
+      },
+      TEST_SKILL_SECRET,
+    );
     server.start();
     await waitForServer(port);
 
     // 1. Send files
     const fileResponse = await fetch(`http://localhost:${port}/api/skill/send-file`, {
       method: "POST",
-      headers: jsonHeaders(sessionRegistry.getCallerToken(sessionId)),
+      headers: jsonHeaders(await makeSessionJwt(sessionRegistry, sessionId)),
       body: JSON.stringify({ sessionId, parameters: { filePaths: ["a.txt"] } }),
     });
     assertEquals(fileResponse.status, 200);
@@ -2903,7 +3074,7 @@ Deno.test("SkillAPIServer - send-reply after send-file threads to the file messa
     //    file message, NOT the trigger
     const replyResponse = await fetch(`http://localhost:${port}/api/skill/send-reply`, {
       method: "POST",
-      headers: jsonHeaders(sessionRegistry.getCallerToken(sessionId)),
+      headers: jsonHeaders(await makeSessionJwt(sessionRegistry, sessionId)),
       body: JSON.stringify({ sessionId, parameters: { message: "Here are the files" } }),
     });
     assertEquals(replyResponse.status, 200);
@@ -2921,7 +3092,7 @@ Deno.test("SkillAPIServer - send-reply after send-file threads to the file messa
     //    the reply to a different parent
     const editResponse = await fetch(`http://localhost:${port}/api/skill/edit-reply`, {
       method: "POST",
-      headers: jsonHeaders(sessionRegistry.getCallerToken(sessionId)),
+      headers: jsonHeaders(await makeSessionJwt(sessionRegistry, sessionId)),
       body: JSON.stringify({ sessionId, parameters: { messageId: "reply_1", message: "Edited" } }),
     });
     assertEquals(editResponse.status, 200);
@@ -2995,16 +3166,21 @@ Deno.test("SkillAPIServer - react-message after a file send targets the trigger 
     await Deno.writeTextFile(`${tempDir}/a.txt`, "aaa");
 
     const port = 3206;
-    const server = new SkillAPIServer(sessionRegistry, skillRegistry, {
-      port,
-      host: "127.0.0.1",
-    });
+    const server = new SkillAPIServer(
+      sessionRegistry,
+      skillRegistry,
+      {
+        port,
+        host: "127.0.0.1",
+      },
+      TEST_SKILL_SECRET,
+    );
     server.start();
     await waitForServer(port);
 
     const fileResponse = await fetch(`http://localhost:${port}/api/skill/send-file`, {
       method: "POST",
-      headers: jsonHeaders(sessionRegistry.getCallerToken(sessionId)),
+      headers: jsonHeaders(await makeSessionJwt(sessionRegistry, sessionId)),
       body: JSON.stringify({ sessionId, parameters: { filePaths: ["a.txt"] } }),
     });
     assertEquals(fileResponse.status, 200);
@@ -3012,7 +3188,7 @@ Deno.test("SkillAPIServer - react-message after a file send targets the trigger 
 
     const reactResponse = await fetch(`http://localhost:${port}/api/skill/react-message`, {
       method: "POST",
-      headers: jsonHeaders(sessionRegistry.getCallerToken(sessionId)),
+      headers: jsonHeaders(await makeSessionJwt(sessionRegistry, sessionId)),
       body: JSON.stringify({ sessionId, parameters: { emoji: "👍" } }),
     });
     assertEquals(reactResponse.status, 200);
@@ -3095,17 +3271,22 @@ Deno.test("SkillAPIServer - ordering: reply → file → edit keeps the edited r
     await Deno.writeTextFile(`${tempDir}/a.txt`, "aaa");
 
     const port = 3207;
-    const server = new SkillAPIServer(sessionRegistry, skillRegistry, {
-      port,
-      host: "127.0.0.1",
-    });
+    const server = new SkillAPIServer(
+      sessionRegistry,
+      skillRegistry,
+      {
+        port,
+        host: "127.0.0.1",
+      },
+      TEST_SKILL_SECRET,
+    );
     server.start();
     await waitForServer(port);
 
     // 1. Reply first (threads to the trigger)
     const replyResponse = await fetch(`http://localhost:${port}/api/skill/send-reply`, {
       method: "POST",
-      headers: jsonHeaders(sessionRegistry.getCallerToken(sessionId)),
+      headers: jsonHeaders(await makeSessionJwt(sessionRegistry, sessionId)),
       body: JSON.stringify({ sessionId, parameters: { message: "First" } }),
     });
     assertEquals(replyResponse.status, 200);
@@ -3115,7 +3296,7 @@ Deno.test("SkillAPIServer - ordering: reply → file → edit keeps the edited r
     // 2. Send files afterwards (the current anchor becomes the file message)
     const fileResponse = await fetch(`http://localhost:${port}/api/skill/send-file`, {
       method: "POST",
-      headers: jsonHeaders(sessionRegistry.getCallerToken(sessionId)),
+      headers: jsonHeaders(await makeSessionJwt(sessionRegistry, sessionId)),
       body: JSON.stringify({ sessionId, parameters: { filePaths: ["a.txt"] } }),
     });
     assertEquals(fileResponse.status, 200);
@@ -3125,7 +3306,7 @@ Deno.test("SkillAPIServer - ordering: reply → file → edit keeps the edited r
     //    reply's ORIGINAL thread parent (the trigger), not the file message
     const editResponse = await fetch(`http://localhost:${port}/api/skill/edit-reply`, {
       method: "POST",
-      headers: jsonHeaders(sessionRegistry.getCallerToken(sessionId)),
+      headers: jsonHeaders(await makeSessionJwt(sessionRegistry, sessionId)),
       body: JSON.stringify({ sessionId, parameters: { messageId: "reply_1", message: "Edited" } }),
     });
     assertEquals(editResponse.status, 200);
@@ -3205,17 +3386,22 @@ Deno.test("SkillAPIServer - Misskey chat partial delivery records the last deliv
     await Deno.writeTextFile(`${tempDir}/c.txt`, "ccc");
 
     const port = 3208;
-    const server = new SkillAPIServer(sessionRegistry, skillRegistry, {
-      port,
-      host: "127.0.0.1",
-    });
+    const server = new SkillAPIServer(
+      sessionRegistry,
+      skillRegistry,
+      {
+        port,
+        host: "127.0.0.1",
+      },
+      TEST_SKILL_SECRET,
+    );
     server.start();
     await waitForServer(port);
 
     // 1. Partial delivery (2 of 3 files)
     const fileResponse = await fetch(`http://localhost:${port}/api/skill/send-file`, {
       method: "POST",
-      headers: jsonHeaders(sessionRegistry.getCallerToken(sessionId)),
+      headers: jsonHeaders(await makeSessionJwt(sessionRegistry, sessionId)),
       body: JSON.stringify({
         sessionId,
         parameters: { filePaths: ["a.txt", "b.txt", "c.txt"] },
@@ -3232,7 +3418,7 @@ Deno.test("SkillAPIServer - Misskey chat partial delivery records the last deliv
     // 2. A subsequent send-reply threads to the last delivered chat message
     const replyResponse = await fetch(`http://localhost:${port}/api/skill/send-reply`, {
       method: "POST",
-      headers: jsonHeaders(sessionRegistry.getCallerToken(sessionId)),
+      headers: jsonHeaders(await makeSessionJwt(sessionRegistry, sessionId)),
       body: JSON.stringify({ sessionId, parameters: { message: "Partial delivery" } }),
     });
     assertEquals(replyResponse.status, 200);

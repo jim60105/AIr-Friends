@@ -192,6 +192,16 @@ agent:
   # A crashed or hung agent subprocess fails connect() fast instead of hanging forever.
   connectTimeoutMs: 30000           # Connect handshake timeout in ms (default: 30000 = 30 seconds); override with env AGENT_CONNECT_TIMEOUT_MS
 
+  # Shared ACP process pool: run one long-lived `opencode acp` subprocess per pool key
+  # and reuse it across that key's sessions; agent sessions are globally serialized
+  # behind a single execution lease (single-bot-persona semantics). When disabled,
+  # every session spawns its own subprocess (the legacy per-spawn behavior).
+  # sharedProcess:
+  #   enabled: false                 # Enable the shared process pool (default: false); override with env AGENT_SHARED_PROCESS_ENABLED
+  #   reclaimIdleMs: 1800000        # Reclaim an unleased pool process after this idle time (default: 30 min); override with env AGENT_SHARED_PROCESS_RECLAIM_IDLE_MS
+  #   jwtDir: "data/skill-jwt"      # Directory for per-session Skill API JWT files; override with env AGENT_SHARED_PROCESS_JWT_DIR
+  #   secretPath: "data/skill-secret" # Persisted 256-bit deployment Skill API secret (bot-process only); override with env AGENT_SHARED_PROCESS_SECRET_PATH
+  #   queueDeadlineMs: 600000       # Cancel a queued session after this wait (default: 10 min); override with env AGENT_SHARED_PROCESS_QUEUE_DEADLINE_MS
 
 # Git credential store for agent subprocesses (effective only in YOLO mode)
 # Configures git credential.helper = store at startup so the agent can use

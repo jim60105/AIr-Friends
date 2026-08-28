@@ -18,7 +18,7 @@ export function createAgentConfig(
   yolo = false,
   agentWorkspacePath?: string,
   sessionId?: string,
-  callerToken?: string,
+  poolKey?: string,
 ): AgentConfig {
   // Build the base (unfiltered) config for the agent type
   const baseConfig = buildBaseAgentConfig(
@@ -28,7 +28,7 @@ export function createAgentConfig(
     yolo,
     agentWorkspacePath,
     sessionId,
-    callerToken,
+    poolKey,
   );
 
   // Apply sandbox if configured
@@ -63,7 +63,7 @@ function buildBaseAgentConfig(
   yolo: boolean,
   agentWorkspacePath?: string,
   sessionId?: string,
-  callerToken?: string,
+  poolKey?: string,
 ): AgentConfig {
   switch (type) {
     case "opencode": {
@@ -98,16 +98,36 @@ function buildBaseAgentConfig(
         env["AGENT_WORKSPACE"] = agentWorkspacePath;
       }
 
-      // Set TMPDIR to workspace-scoped tmp directory
-      env["TMPDIR"] = `${workingDir}/tmp`;
+      // Skill-JWT directory (JWT skill auth): the agent process receives the
+      // per-session JWT file location (`{jwtDir}/{sessionId}.jwt`). The deployment
+      // secret (SKILL_API_SECRET) is NOT passed to the agent process — the bot process
+      // alone holds the HMAC key, as both JWT issuer and Skill API verifier.
+      env["SKILL_JWT_DIR"] = appConfig.agent.sharedProcess?.jwtDir ?? "data/skill-jwt";
 
-      // Per-session XDG data home (F12): OpenCode's data dir (truncated tool outputs,
-      // logs, storage) is scoped to a per-session directory under the session TMPDIR
-      // instead of the shared `$HOME/.local/share/opencode/`. Truncated tool outputs
-      // therefore land inside the session workspace — inside the permission gate's
-      // containment boundary — never in the cross-session shared data directory, and
-      // never in another concurrent session's data dir.
-      env["XDG_DATA_HOME"] = sessionXdgDataHome(workingDir, sessionId);
+      let cwdOverride: string | undefined;
+      if (poolKey) {
+        // Shared-process mode: channel/pool-key-scoped data roots under the bot data
+        // root, deliberately OUTSIDE any user's per-user workspace, so one user's
+        // agent cannot read another user's OpenCode database or tool outputs.
+        const dataRoot = appConfig.workspace.repoPath;
+        env["TMPDIR"] = join(dataRoot, "channel-tmp", poolKey);
+        env["XDG_DATA_HOME"] = join(dataRoot, "opencode-data", poolKey);
+        // Shared-process marker: skill libraries resolve the owning session from
+        // the pool's current-session pointer (the frozen $SESSION_ID is stale
+        // after the first session on a pooled process).
+        env["SKILL_SHARED_PROCESS"] = "1";
+        // Neutral process-level working directory; the per-session ACP `newSession.cwd`
+        // carries each user's own workspace.
+        cwdOverride = join(dataRoot, "channel-cwd", poolKey);
+      } else {
+        // Set TMPDIR to workspace-scoped tmp directory
+        env["TMPDIR"] = `${workingDir}/tmp`;
+
+        // Per-session XDG data home (F12): OpenCode's data dir (truncated tool outputs,
+        // logs, storage) is scoped to a per-session directory under the session TMPDIR
+        // instead of the shared `$HOME/.local/share/opencode/`.
+        env["XDG_DATA_HOME"] = sessionXdgDataHome(workingDir, sessionId);
+      }
 
       // Automatically detect and set AGENT_BROWSER_EXECUTABLE_PATH if not already set
       let browserPath = Deno.env.get("AGENT_BROWSER_EXECUTABLE_PATH");
@@ -120,13 +140,6 @@ function buildBaseAgentConfig(
 
       if (sessionId) {
         env["SESSION_ID"] = sessionId;
-      }
-
-      // Per-session Skill API caller token (F13): only the owning subprocess
-      // receives it, so possession of a session ID alone is not sufficient to
-      // authenticate against the Skill API.
-      if (callerToken) {
-        env["SKILL_API_TOKEN"] = callerToken;
       }
 
       // Validating egress proxy (F14): when enabled and no unrestricted opt-in, point the
@@ -168,7 +181,7 @@ function buildBaseAgentConfig(
       return {
         command: "opencode",
         args,
-        cwd: workingDir,
+        cwd: cwdOverride ?? workingDir,
         env,
       };
     }

@@ -5131,7 +5131,7 @@ Deno.test("ChatbotClient - config_option_update refreshes via listener and updat
     const client = new ChatbotClient(skillRegistry, logger, config);
 
     const received: acp.SessionConfigOption[][] = [];
-    client.setConfigOptionsListener((opts) => received.push(opts));
+    client.setConfigOptionsListener((_sessionId, opts) => received.push(opts));
 
     const before = client.getLastActivityTimestamp();
     await new Promise((r) => setTimeout(r, 5));

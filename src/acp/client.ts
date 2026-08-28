@@ -1,7 +1,7 @@
 // src/acp/client.ts
 
 import * as acp from "@agentclientprotocol/sdk";
-import { join, resolve, SEPARATOR } from "@std/path";
+import { dirname, join, resolve, SEPARATOR } from "@std/path";
 import type { SkillRegistry } from "@skills/registry.ts";
 import type { Logger } from "@utils/logger.ts";
 import type { ClientConfig, PermissionRejection } from "./types.ts";
@@ -1135,6 +1135,23 @@ export function sanitizeRejectionField(
  * ChatbotClient implements the ACP Client interface
  * Handles callbacks from the external OpenCode ACP Agent
  */
+/**
+ * Per-ACP-session gate context (shared-process mode). All fields except `cwd`
+ * override the process-frozen client config for THIS session only.
+ */
+export interface SessionGateContext {
+  /** The session's own workspace (ACP `newSession.cwd`). */
+  cwd: string;
+  /** Owning skill-API session id (for `$SESSION_ID` expansion; per-session). */
+  shellSessionId?: string;
+  /** This session's resolved YOLO decision (auto-approve). */
+  yolo?: boolean;
+  /** This session's agent-workspace write authorization. */
+  canWriteAgentWorkspace?: boolean;
+  /** This session's allowed write extensions (restricted-mode edit/write gate). */
+  allowedWriteExtensions?: string[];
+}
+
 export class ChatbotClient implements acp.Client {
   private skillRegistry: SkillRegistry;
   private logger: Logger;
@@ -1160,8 +1177,14 @@ export class ChatbotClient implements acp.Client {
   /**
    * Optional listener invoked when the Agent sends a `config_option_update`
    * notification, so the AgentConnector can refresh its cached config options.
+   * The `config_option_update` notification carries the ACP `sessionId`, so the
+   * callback receives it and routes the refresh to the correct session-scoped cache
+   * (shared-process mode: one connector serves many ACP sessions on one connection).
    */
-  private configOptionsListener?: (configOptions: acp.SessionConfigOption[]) => void;
+  private configOptionsListener?: (
+    sessionId: string,
+    configOptions: acp.SessionConfigOption[],
+  ) => void;
 
   /**
    * Optional listener invoked on every observed Agent activity (F13). Used to
@@ -1169,6 +1192,16 @@ export class ChatbotClient implements acp.Client {
    * so a long, active turn is never evicted for lack of a skill call.
    */
   private activityListener?: () => void;
+
+  /**
+   * Per-ACP-session gate contexts (shared-process mode).
+   * In shared mode one ChatbotClient serves many ACP sessions on one connection;
+   * each session's `newSession.cwd` (the user's workspace), owning skill session
+   * id, and per-session permission flags are registered here so the permission
+   * gate and the ACP fs handlers confine each session to its own workspace and
+   * flags instead of the process-frozen client config.
+   */
+  private sessionContexts: Map<string, SessionGateContext> = new Map();
 
   constructor(
     skillRegistry: SkillRegistry,
@@ -1208,12 +1241,61 @@ export class ChatbotClient implements acp.Client {
   }
 
   /**
+   * Register a session-scoped working directory for the permission gate (shared-process
+   * mode). The gate uses this per-session cwd instead of the process-level workingDir,
+   * so multi-user channels confine each session to its own workspace.
+   */
+  setSessionCwd(sessionId: string, cwd: string): void {
+    const ctx = this.sessionContexts.get(sessionId) ?? { cwd };
+    ctx.cwd = cwd;
+    this.sessionContexts.set(sessionId, ctx);
+  }
+
+  /**
+   * Register/merge the full per-session gate context (shared-process mode):
+   * cwd + owning skill session id + per-session permission flags. Without this
+   * a pooled process would apply the FIRST session's flags (yolo, write gating)
+   * to every later session on the same connection.
+   */
+  setSessionContext(sessionId: string, ctx: SessionGateContext): void {
+    const existing = this.sessionContexts.get(sessionId);
+    this.sessionContexts.set(sessionId, { ...existing, ...ctx, cwd: ctx.cwd ?? existing!.cwd });
+  }
+
+  private gateCtx(acpSessionId?: string): SessionGateContext | undefined {
+    return acpSessionId ? this.sessionContexts.get(acpSessionId) : undefined;
+  }
+
+  /** Session-scoped working directory (shared mode) or the process-level fallback. */
+  private gateWorkingDir(acpSessionId?: string): string {
+    return this.gateCtx(acpSessionId)?.cwd ?? this.config.workingDir;
+  }
+
+  /** Owning skill session id for `$SESSION_ID` expansion (per-session in shared mode). */
+  private gateSessionId(acpSessionId?: string): string {
+    return this.gateCtx(acpSessionId)?.shellSessionId ?? this.config.sessionId ?? "";
+  }
+
+  private gateYolo(acpSessionId?: string): boolean {
+    return this.gateCtx(acpSessionId)?.yolo ?? this.config.yolo ?? false;
+  }
+
+  private gateCanWriteAgentWorkspace(acpSessionId?: string): boolean | undefined {
+    return this.gateCtx(acpSessionId)?.canWriteAgentWorkspace ??
+      this.config.canWriteAgentWorkspace;
+  }
+
+  private gateAllowedWriteExtensions(acpSessionId?: string): string[] | undefined {
+    return this.gateCtx(acpSessionId)?.allowedWriteExtensions ?? this.config.allowedWriteExtensions;
+  }
+
+  /**
    * Register a listener that receives the complete config options list whenever the
    * Agent emits a `config_option_update` notification. Used by AgentConnector to keep
    * its cached config options fresh (e.g. after a model change alters `thought_level`).
    */
   setConfigOptionsListener(
-    listener: (configOptions: acp.SessionConfigOption[]) => void,
+    listener: (sessionId: string, configOptions: acp.SessionConfigOption[]) => void,
   ): void {
     this.configOptionsListener = listener;
   }
@@ -1316,7 +1398,7 @@ export class ChatbotClient implements acp.Client {
     this.logger.debug("Permission requested", {
       toolCall: params.toolCall,
       kind: params.toolCall.kind,
-      yolo: this.config.yolo,
+      yolo: this.gateYolo(params.sessionId),
     });
 
     // Extract and log key permission details at INFO level for operational visibility
@@ -1356,8 +1438,8 @@ export class ChatbotClient implements acp.Client {
       );
     }
 
-    // YOLO mode: auto-approve everything
-    if (this.config.yolo) {
+    // YOLO mode: auto-approve everything (per-session decision in shared mode)
+    if (this.gateYolo(params.sessionId)) {
       this.logger.info("YOLO mode: auto-approving permission for {title}", {
         kind: params.toolCall.kind,
         title: params.toolCall.title,
@@ -1475,37 +1557,62 @@ export class ChatbotClient implements acp.Client {
       // (`genericCommandRejectionReason`). This is capability-neutral — each segment
       // could already run as its own gated tool call — it only removes the forced
       // single-command round trips that cause coding models to batch and surrender.
-      const allowedDirs = [this.config.workingDir];
+      // Shared-process mode: use the session-scoped working directory registered by
+      // `setSessionCwd` (each user's workspace as the ACP `newSession.cwd`). Falls
+      // back to the process-level workingDir (per-spawn mode or unregistered session).
+      const sessionCwd = this.gateWorkingDir(params.sessionId);
+      const allowedDirs = [sessionCwd];
       if (this.config.agentWorkspacePath) {
         allowedDirs.push(this.config.agentWorkspacePath);
       }
-      // Session-local OpenCode tool-output boundary (F12): the agent subprocess is spawned
-      // with a per-session `XDG_DATA_HOME` under the session TMPDIR, so truncated tool
-      // outputs land under the session workspace. The resolved tool-output dir belongs to
-      // the generic-command boundary only while it is session-local; it is appended
-      // explicitly (deduped against existing allowed dirs) so the boundary stays
-      // self-documenting, and any resolution outside the session workspace/TMPDIR (a
-      // future change to the path helpers) fails closed — the shared home-rooted
-      // tool-output dir is never within bounds. Cross-session reads inside the data area
-      // are additionally rejected in `genericArgWithinWorkspace`.
-      const sessionDataHome = sessionXdgDataHome(this.config.workingDir, this.config.sessionId);
+      // Shared-process mode: the process-level TMPDIR (channel-scoped shell temp)
+      // is a legit in-bounds target for the session's own shell commands.
+      if (this.config.processTmpDir) {
+        allowedDirs.push(this.config.processTmpDir);
+      }
+      // Session-local OpenCode tool-output boundary (F12): in per-spawn mode the agent
+      // subprocess is spawned with a per-session `XDG_DATA_HOME` under the session TMPDIR,
+      // so truncated tool outputs land under the session workspace. In shared-process mode
+      // the process-level `XDG_DATA_HOME` is the pool-key-scoped data root
+      // (`{dataRoot}/opencode-data/{poolKey}`) carried in `config.xdgDataHome`, so the
+      // tool-output boundary becomes the channel-scoped root (outside any user workspace).
+      // The resolved tool-output dir is appended explicitly (deduped against existing
+      // allowed dirs) so the boundary stays self-documenting; any resolution outside the
+      // session workspace/TMPDIR (or pool-key data root in shared mode) fails closed.
+      const sessionDataHome = this.config.xdgDataHome ??
+        sessionXdgDataHome(sessionCwd, this.gateSessionId(params.sessionId) || undefined);
       const toolOutputDir = opencodeToolOutputDir(sessionDataHome);
+      const inSharedDataRoot = !!this.config.xdgDataHome &&
+        isWithinDir(toolOutputDir, this.config.xdgDataHome);
       const toolOutputCovered = allowedDirs.some((d) => isWithinDir(toolOutputDir, d));
       if (
         !toolOutputCovered &&
-        (this.isWithinTmpDir(toolOutputDir) || isWithinDir(toolOutputDir, this.config.workingDir))
+        (inSharedDataRoot ||
+          this.isWithinTmpDir(toolOutputDir) ||
+          isWithinDir(toolOutputDir, sessionCwd))
       ) {
         allowedDirs.push(toolOutputDir);
       }
       const home = Deno.env.get("HOME") ?? "/home/deno";
-      const dataRoot = opencodeDataRoot(this.config.workingDir);
+      // Cross-session data area: in shared-process mode this is the shared
+      // `{dataRoot}/opencode-data` area (parent of the pool-key dir); in per-spawn
+      // mode it is the session workspace's `{workingDir}/tmp/opencode-data` root.
+      const dataRoot = this.config.xdgDataHome
+        ? dirname(this.config.xdgDataHome)
+        : opencodeDataRoot(this.config.workingDir);
       // Runtime values for the harness-set variable expansions (F12 D5). These mirror
       // the subprocess environment agent-factory sets, so a `$TMPDIR`/`$AGENT_WORKSPACE`/
       // `$SESSION_ID` reference expands to the same path the shell will use.
+      // `$TMPDIR` mirrors the REAL subprocess env: in shared-process mode that is
+      // the channel-scoped `processTmpDir` set by agent-factory (payload staging
+      // is a per-session dir given explicitly via the prompt `tmpDir` variable,
+      // never the process TMPDIR); in per-spawn mode it is the session's tmp dir.
+      // `$SESSION_ID` is per-session in shared mode (gate context), not the
+      // spawn-frozen config value.
       const runtimeEnv: KnownEnvRuntime = {
-        tmpDir: resolve(this.config.workingDir, "tmp"),
+        tmpDir: this.config.processTmpDir ?? resolve(sessionCwd, "tmp"),
         agentWorkspace: this.config.agentWorkspacePath ?? undefined,
-        sessionId: this.config.sessionId ?? undefined,
+        sessionId: this.gateSessionId(params.sessionId) || undefined,
       };
 
       // Flatten every command into its segments in order; evaluate each segment.
@@ -1538,7 +1645,7 @@ export class ChatbotClient implements acp.Client {
         // Generic-command gate.
         const reason = genericCommandRejectionReason(
           segment,
-          this.config.workingDir,
+          sessionCwd,
           allowedDirs,
           home,
           sessionDataHome,
@@ -1690,16 +1797,21 @@ export class ChatbotClient implements acp.Client {
       }
 
       const isAgentWorkspaceWrite = paths.length > 0 &&
-        paths.every((p) => this.isAgentWorkspacePath(p!));
+        paths.every((p) => this.isAgentWorkspacePath(p!, params.sessionId));
 
       if (isAgentWorkspaceWrite) {
         // Identify non-TMPDIR agent-workspace paths (i.e. shared workspace writes).
-        const sharedWorkspacePaths = paths.filter((p) => !this.isWithinTmpDir(p!));
+        const sharedWorkspacePaths = paths.filter((p) =>
+          !this.isWithinTmpDir(p!, params.sessionId)
+        );
 
         // Write-gating (F3): shared agent-workspace writes require canWriteAgentWorkspace.
         // Only self-research sessions are authorized to author shared notes. TMPDIR writes
         // (per-session scratch) are exempt.
-        if (sharedWorkspacePaths.length > 0 && this.config.canWriteAgentWorkspace !== true) {
+        if (
+          sharedWorkspacePaths.length > 0 &&
+          this.gateCanWriteAgentWorkspace(params.sessionId) !== true
+        ) {
           this.logger.warn(
             "Rejecting edit/write to shared agent workspace: session not authorized to write (canWriteAgentWorkspace not set)",
             { title, kind, paths: sharedWorkspacePaths },
@@ -1729,7 +1841,8 @@ export class ChatbotClient implements acp.Client {
 
         // Check extension restrictions for non-TMPDIR agent workspace paths
         const disallowedPaths = paths.filter((p) => {
-          return !this.isWithinTmpDir(p!) && !this.hasAllowedWriteExtension(p!);
+          return !this.isWithinTmpDir(p!, params.sessionId) &&
+            !this.hasAllowedWriteExtension(p!, params.sessionId);
         });
 
         if (disallowedPaths.length > 0) {
@@ -1739,7 +1852,7 @@ export class ChatbotClient implements acp.Client {
               title,
               kind,
               paths: disallowedPaths,
-              allowedExtensions: this.config.allowedWriteExtensions,
+              allowedExtensions: this.gateAllowedWriteExtensions(params.sessionId),
             },
           );
 
@@ -1956,14 +2069,16 @@ export class ChatbotClient implements acp.Client {
         this.flushMessageBuffer();
         // Agent reports the complete updated config option state; propagate to the connector
         // so reasoning-effort discovery uses fresh options (e.g. after a model change).
-        const configOptions = (update as unknown as {
+        const notification = update as unknown as {
+          sessionId?: string;
           configOptions?: acp.SessionConfigOption[];
-        }).configOptions;
+        };
+        const configOptions = notification.configOptions;
         if (Array.isArray(configOptions)) {
           this.logger.debug("Config options updated ({count} options)", {
             count: configOptions.length,
           });
-          this.configOptionsListener?.(configOptions);
+          this.configOptionsListener?.(notification.sessionId ?? "", configOptions);
         } else {
           // Defensive: notification shape lacked a parseable configOptions array.
           // Log so silent cache staleness is diagnosable instead of invisible.
@@ -1998,10 +2113,10 @@ export class ChatbotClient implements acp.Client {
     // The path that passes validation IS the path that is read: canonicalize
     // `$TMPDIR`/`$SESSION_ID` tokens first, then validate and read the
     // expanded path (no literal `$TMPDIR` directory under the bot's cwd).
-    const resolvedPath = this.resolveSessionPath(params.path);
+    const resolvedPath = this.resolveSessionPath(params.path, params.sessionId);
 
     // Validate path is within working directory (boundary-safe)
-    if (!this.isPathAllowed(resolvedPath)) {
+    if (!this.isPathAllowed(resolvedPath, params.sessionId)) {
       throw new acp.RequestError(
         -32600,
         "Access denied: path outside working directory",
@@ -2048,10 +2163,10 @@ export class ChatbotClient implements acp.Client {
     // The path that passes validation IS the path that is written: canonicalize
     // `$TMPDIR`/`$SESSION_ID` tokens first, then validate and write the
     // expanded path (no literal `$TMPDIR` directory under the bot's cwd).
-    const resolvedPath = this.resolveSessionPath(params.path);
+    const resolvedPath = this.resolveSessionPath(params.path, params.sessionId);
 
     // Validate path is within working directory
-    if (!this.isPathAllowed(resolvedPath)) {
+    if (!this.isPathAllowed(resolvedPath, params.sessionId)) {
       this.recordPermissionRejection(
         "writeTextFile",
         "write",
@@ -2067,15 +2182,15 @@ export class ChatbotClient implements acp.Client {
     // Defense-in-depth: gate agent-workspace writes in restricted mode.
     // This is a SEPARATE sink from requestPermission() (an agent may call writeTextFile
     // directly), so the same F3 write-gating and F4 extension checks are enforced here too.
-    if (!this.config.yolo) {
+    if (!this.gateYolo(params.sessionId)) {
       const isSharedWorkspaceWrite = this.config.agentWorkspacePath
         ? isWithinDir(resolvedPath, this.config.agentWorkspacePath) &&
-          !this.isWithinTmpDir(resolvedPath)
+          !this.isWithinTmpDir(resolvedPath, params.sessionId)
         : false;
 
       if (isSharedWorkspaceWrite) {
         // Write-gating (F3): shared agent-workspace writes require canWriteAgentWorkspace.
-        if (this.config.canWriteAgentWorkspace !== true) {
+        if (this.gateCanWriteAgentWorkspace(params.sessionId) !== true) {
           this.logger.warn(
             "Rejecting writeTextFile to shared agent workspace: session not authorized (canWriteAgentWorkspace not set)",
             { path: resolvedPath },
@@ -2092,7 +2207,7 @@ export class ChatbotClient implements acp.Client {
           );
         }
 
-        if (!this.hasAllowedWriteExtension(resolvedPath)) {
+        if (!this.hasAllowedWriteExtension(resolvedPath, params.sessionId)) {
           this.recordPermissionRejection(
             "writeTextFile",
             "write",
@@ -2102,7 +2217,7 @@ export class ChatbotClient implements acp.Client {
           throw new acp.RequestError(
             -32600,
             `Access denied: file extension not allowed for agent workspace writes (permitted: ${
-              this.config.allowedWriteExtensions?.join(", ")
+              this.gateAllowedWriteExtensions(params.sessionId)?.join(", ")
             })`,
           );
         }
@@ -2151,9 +2266,9 @@ export class ChatbotClient implements acp.Client {
    * the expanded value — it only resolves and compares paths, so no injection is
    * possible (a path is data).
    */
-  private resolveSessionPath(path: string): string {
-    const tmpDir = resolve(this.config.workingDir, "tmp");
-    const sessionId = this.config.sessionId ?? "";
+  private resolveSessionPath(path: string, acpSessionId?: string): string {
+    const tmpDir = resolve(this.gateWorkingDir(acpSessionId), "tmp");
+    const sessionId = this.gateSessionId(acpSessionId);
     const agentWorkspace = this.config.agentWorkspacePath ?? "";
     let expanded = path;
     // ${...} exact forms first, then $NAME with a variable-name boundary so
@@ -2171,10 +2286,10 @@ export class ChatbotClient implements acp.Client {
    * Validate that a path is within the allowed directories
    * Allows: user workspace OR agent global workspace
    */
-  private isPathAllowed(path: string): boolean {
+  private isPathAllowed(path: string, acpSessionId?: string): boolean {
     try {
-      const expanded = this.resolveSessionPath(path);
-      if (isWithinDir(expanded, this.config.workingDir)) return true;
+      const expanded = this.resolveSessionPath(path, acpSessionId);
+      if (isWithinDir(expanded, this.gateWorkingDir(acpSessionId))) return true;
 
       if (this.config.agentWorkspacePath && isWithinDir(expanded, this.config.agentWorkspacePath)) {
         return true;
@@ -2191,16 +2306,16 @@ export class ChatbotClient implements acp.Client {
    * Used to scope edit/write permissions for self-research.
    * Equivalent to agent-config/opencode.json: "edit": { "data/agent-workspace/**": "allow", "$TMPDIR/**": "allow" }
    */
-  private isAgentWorkspacePath(path: string): boolean {
+  private isAgentWorkspacePath(path: string, acpSessionId?: string): boolean {
     try {
-      const expanded = this.resolveSessionPath(path);
+      const expanded = this.resolveSessionPath(path, acpSessionId);
       // Check agent workspace path (boundary-safe)
       if (this.config.agentWorkspacePath && isWithinDir(expanded, this.config.agentWorkspacePath)) {
         return true;
       }
 
       // Check workspace TMPDIR
-      if (this.isWithinTmpDir(expanded)) return true;
+      if (this.isWithinTmpDir(expanded, acpSessionId)) return true;
 
       return false;
     } catch {
@@ -2211,8 +2326,11 @@ export class ChatbotClient implements acp.Client {
   /**
    * Check if a path is within the workspace TMPDIR (boundary-safe).
    */
-  private isWithinTmpDir(path: string): boolean {
-    return isWithinDir(this.resolveSessionPath(path), resolve(this.config.workingDir, "tmp"));
+  private isWithinTmpDir(path: string, acpSessionId?: string): boolean {
+    return isWithinDir(
+      this.resolveSessionPath(path, acpSessionId),
+      resolve(this.gateWorkingDir(acpSessionId), "tmp"),
+    );
   }
 
   /**
@@ -2249,8 +2367,8 @@ export class ChatbotClient implements acp.Client {
    * Check if a file path has an allowed write extension for agent workspace writes.
    * Returns true if no restrictions are configured or if the extension is in the allowed list.
    */
-  private hasAllowedWriteExtension(filePath: string): boolean {
-    const extensions = this.config.allowedWriteExtensions;
+  private hasAllowedWriteExtension(filePath: string, acpSessionId?: string): boolean {
+    const extensions = this.gateAllowedWriteExtensions(acpSessionId);
     if (!extensions || extensions.length === 0) return true;
     const dotIndex = filePath.lastIndexOf(".");
     if (dotIndex === -1 || dotIndex === filePath.length - 1) return false;

@@ -23,8 +23,13 @@ const BASE_ALLOWED_ENV = [
   // Skill API communication
   "SKILL_API_PORT",
   "SESSION_ID",
-  // Per-session Skill API caller token (F13)
-  "SKILL_API_TOKEN",
+  // Per-session Skill API JWT file directory (JWT skill auth). The deployment
+  // SKILL_API_SECRET is deliberately NOT allowlisted into the agent env — the bot
+  // process is the only holder of the HMAC key.
+  "SKILL_JWT_DIR",
+  // Shared-process mode marker: skill libraries must prefer the pool's
+  // current-session pointer over the spawn-frozen $SESSION_ID.
+  "SKILL_SHARED_PROCESS",
   // Agent workspace
   "AGENT_WORKSPACE",
   // Workspace-scoped temp directory

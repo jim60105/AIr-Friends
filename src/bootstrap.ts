@@ -2,6 +2,7 @@
 
 import { loadConfig } from "@core/config-loader.ts";
 import type { Config } from "./types/config.ts";
+import { ConfigError, ErrorCode } from "./types/errors.ts";
 import { verifyOpenCodeVersion } from "@utils/opencode-version.ts";
 import { AgentCore } from "@core/agent-core.ts";
 import { SpontaneousScheduler } from "@core/spontaneous-scheduler.ts";
@@ -31,6 +32,7 @@ import { CompletedSessionStore } from "./dashboard/completed-session-store.ts";
 import { metricsRegistry } from "@utils/metrics.ts";
 import { configureEgressAllowHosts, ensureEgressProxy } from "@utils/egress-proxy.ts";
 import { canConfineFilesystem, canIsolateNetwork } from "@acp/sandbox-capabilities.ts";
+import { ensureSkillJwtDir, resolveSkillApiSecret } from "@utils/skill-secret.ts";
 
 const logger = createLogger("Bootstrap");
 
@@ -176,9 +178,40 @@ export async function bootstrap(
     await setupGitCredentials(config.agent.gitCredential, config.gitBackup);
   }
 
+  // Resolve the deployment Skill API secret (256-bit CSPRNG) and ensure the
+  // per-session JWT directory exists. The secret is held ONLY by the bot process
+  // (JWT issuer + Skill API verifier); the agent subprocess receives only the
+  // per-session JWT file via SKILL_JWT_DIR, never the raw HMAC key.
+  const sharedProcessConfig = config.agent.sharedProcess;
+  const secretPath = sharedProcessConfig?.secretPath ?? "data/skill-secret";
+  const jwtDir = sharedProcessConfig?.jwtDir ?? "data/skill-jwt";
+  let skillApiSecret = "";
+  const secretResult = await resolveSkillApiSecret(secretPath);
+  if (secretResult.ok) {
+    skillApiSecret = secretResult.secret;
+    await ensureSkillJwtDir(jwtDir);
+    logger.info(
+      "Skill API secret resolved ({source}); JWT directory ready at {jwtDir}",
+      { source: secretResult.source, jwtDir },
+    );
+  } else {
+    // Fail closed: the Skill API / process pool authenticate skill calls with
+    // JWTs signed by this secret. Starting with an empty/short secret would
+    // mean a known empty HMAC key — startup must be blocked instead.
+    const jwtAuthActive = config.skillApi?.enabled || config.agent.sharedProcess?.enabled;
+    if (jwtAuthActive) {
+      throw new ConfigError(
+        ErrorCode.CONFIG_INVALID,
+        `Skill API secret resolution failed and JWT skill auth is active: ${secretResult.error}`,
+        { source: "skillApiSecret" },
+      );
+    }
+    logger.warn("Skill API secret resolution failed: {error}", { error: secretResult.error });
+  }
+
   // Initialize agent core (this initializes all necessary components)
   logger.info("Initializing agent core");
-  const agentCore = new AgentCore(config, yolo);
+  const agentCore = new AgentCore(config, yolo, skillApiSecret);
 
   // Initialize platform registry
   logger.info("Initializing platform registry");

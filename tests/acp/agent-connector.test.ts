@@ -1,6 +1,7 @@
 // tests/acp/agent-connector.test.ts
 
 import { assertEquals, assertRejects } from "@std/assert";
+import * as acp from "@agentclientprotocol/sdk";
 import { AgentConnector } from "@acp/agent-connector.ts";
 import { ChatbotClient } from "@acp/client.ts";
 import type {
@@ -367,7 +368,11 @@ function injectThoughtLevel(
     currentValue: options[0]?.value,
     options,
   };
-  connector["sessionConfigOptions"] = [opt] as unknown as typeof connector["sessionConfigOptions"];
+  // Session-scoped cache: seed the entries the tests use ("s" and "sess_1").
+  connector["sessionConfigOptions"] = new Map([
+    ["s", [opt]],
+    ["sess_1", [opt]],
+  ]) as unknown as typeof connector["sessionConfigOptions"];
 
   const calls: { sessionId: string; configId: string; value: string }[] = [];
   connector["connection"] = {
@@ -510,7 +515,7 @@ Deno.test("setReasoningEffort - skipped_unavailable warning includes model and a
     { value: "low", name: "Low" },
     { value: "high", name: "High" },
   ]);
-  connector["currentModelId"] = "openrouter/model/xhigh-capable";
+  (connector["sessionModelIds"] as Map<string, string>).set("s", "openrouter/model/xhigh-capable");
 
   const outcome = await connector.setReasoningEffort("s", "max");
   assertEquals(outcome, "skipped_unavailable");
@@ -550,7 +555,8 @@ Deno.test("setReasoningEffort - refreshes cache from set_config_option response"
   );
 
   await connector.setReasoningEffort("s", "high");
-  const cached = connector["sessionConfigOptions"] as unknown as MockConfigOption[];
+  const cached = (connector["sessionConfigOptions"] as unknown as Map<string, MockConfigOption[]>)
+    .get("s")!;
   assertEquals(cached[0].currentValue, "high");
   assertEquals(cached[0].options.length, 1);
 });
@@ -565,9 +571,9 @@ Deno.test("setReasoningEffort - re-discovers from grouped option values", async 
       { group: "g1", name: "G1", options: [{ value: "high", name: "High" }] },
     ],
   };
-  connector["sessionConfigOptions"] = [
+  connector["sessionConfigOptions"] = new Map([["s", [
     grouped,
-  ] as unknown as typeof connector["sessionConfigOptions"];
+  ]]]) as unknown as typeof connector["sessionConfigOptions"];
   const calls: { value: string }[] = [];
   connector["connection"] = {
     setSessionConfigOption: (p: { value: string }) => {
@@ -606,7 +612,8 @@ Deno.test("setReasoningEffort - matches case-insensitively and sends agent canon
 Deno.test("setReasoningEffort - applies after config_option_update adds thought_level later", async () => {
   const connector = createMockConnectorWithCapabilities({});
   // Initially no thought_level option cached.
-  connector["sessionConfigOptions"] = [] as unknown as typeof connector["sessionConfigOptions"];
+  connector["sessionConfigOptions"] =
+    new Map() as unknown as typeof connector["sessionConfigOptions"];
   const calls: { value: string }[] = [];
   connector["connection"] = {
     setSessionConfigOption: (p: { value: string }) => {
@@ -619,16 +626,14 @@ Deno.test("setReasoningEffort - applies after config_option_update adds thought_
   assertEquals(await connector.setReasoningEffort("s", "high"), "unsupported");
 
   // Simulate config_option_update arriving (via the private refresh used by the listener).
-  connector["refreshSessionConfigOptions"](
-    [
-      {
-        id: "thought_level",
-        category: "thought_level",
-        currentValue: "high",
-        options: [{ value: "high", name: "High" }],
-      },
-    ] as unknown as typeof connector["sessionConfigOptions"],
-  );
+  connector["refreshSessionConfigOptions"]("s", [
+    {
+      id: "thought_level",
+      category: "thought_level",
+      currentValue: "high",
+      options: [{ value: "high", name: "High" }],
+    },
+  ] as unknown as acp.SessionConfigOption[]);
 
   // Now it applies.
   assertEquals(await connector.setReasoningEffort("s", "high"), "applied");
@@ -637,28 +642,25 @@ Deno.test("setReasoningEffort - applies after config_option_update adds thought_
 
 Deno.test("AgentConnector - cache is single-session: refresh replaces (not appends)", () => {
   const connector = createMockConnectorWithCapabilities({});
-  connector["refreshSessionConfigOptions"](
-    [
-      { id: "a", category: "model", currentValue: "x", options: [{ value: "x", name: "X" }] },
-    ] as unknown as typeof connector["sessionConfigOptions"],
-  );
-  connector["refreshSessionConfigOptions"](
-    [
-      {
-        id: "thought_level",
-        category: "thought_level",
-        currentValue: "high",
-        options: [{ value: "high", name: "High" }],
-      },
-    ] as unknown as typeof connector["sessionConfigOptions"],
-  );
-  const cached = connector["sessionConfigOptions"] as unknown as MockConfigOption[];
+  connector["refreshSessionConfigOptions"]("s", [
+    { id: "a", category: "model", currentValue: "x", options: [{ value: "x", name: "X" }] },
+  ] as unknown as acp.SessionConfigOption[]);
+  connector["refreshSessionConfigOptions"]("s", [
+    {
+      id: "thought_level",
+      category: "thought_level",
+      currentValue: "high",
+      options: [{ value: "high", name: "High" }],
+    },
+  ] as unknown as acp.SessionConfigOption[]);
+  const cache = connector["sessionConfigOptions"] as unknown as Map<string, MockConfigOption[]>;
   // Replaced, not accumulated.
+  const cached = cache.get("s")!;
   assertEquals(cached.length, 1);
   assertEquals(cached[0].id, "thought_level");
   // Nullish clears.
-  connector["refreshSessionConfigOptions"](undefined);
-  assertEquals((connector["sessionConfigOptions"] as unknown as MockConfigOption[]).length, 0);
+  connector["refreshSessionConfigOptions"]("s", undefined);
+  assertEquals(cache.get("s")!.length, 0);
 });
 
 // --- Permission-rejection buffer lifecycle (Design Decision 2/3) ---
