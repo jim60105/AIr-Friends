@@ -2,7 +2,14 @@
 // Unit tests for per-session Skill API JWT (HS256) creation and verification.
 
 import { assert, assertEquals, assertNotEquals } from "@std/assert";
-import { createSkillJwt, parseJwtExp, verifySkillJwt } from "../../src/utils/skill-jwt.ts";
+import { isAbsolute, resolve } from "@std/path";
+import {
+  createSkillJwt,
+  DEFAULT_SKILL_JWT_DIR,
+  parseJwtExp,
+  resolveSkillJwtDir,
+  verifySkillJwt,
+} from "../../src/utils/skill-jwt.ts";
 
 const SECRET = "test-deployment-secret-0123456789abcdef0123456789abcdef";
 const EXPECTED = {
@@ -206,4 +213,28 @@ Deno.test("verifySkillJwt - rejects a correctly-signed token without a finite ex
   if (!result.valid) {
     assertEquals(result.reason, "malformed");
   }
+});
+
+Deno.test("resolveSkillJwtDir - resolves the default to an absolute path", () => {
+  const dir = resolveSkillJwtDir();
+  assertEquals(dir, resolve(DEFAULT_SKILL_JWT_DIR));
+  assertEquals(isAbsolute(dir), true);
+});
+
+Deno.test("resolveSkillJwtDir - resolves a relative config value against the process cwd", () => {
+  const dir = resolveSkillJwtDir("data/skill-jwt");
+  assertEquals(dir, resolve("data/skill-jwt"));
+  assertEquals(isAbsolute(dir), true);
+});
+
+Deno.test("resolveSkillJwtDir - keeps an absolute config value unchanged", () => {
+  assertEquals(resolveSkillJwtDir("/tmp/absolute-jwt-dir"), "/tmp/absolute-jwt-dir");
+});
+
+Deno.test("resolveSkillJwtDir - blank values fall back to the default, never the bot cwd", () => {
+  const expected = resolve(DEFAULT_SKILL_JWT_DIR);
+  assertEquals(resolveSkillJwtDir(""), expected);
+  assertEquals(resolveSkillJwtDir("   "), expected);
+  // The bot process cwd must NOT be used as the JWT directory.
+  assertNotEquals(resolveSkillJwtDir(""), Deno.cwd());
 });

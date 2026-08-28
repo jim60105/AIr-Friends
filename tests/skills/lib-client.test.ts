@@ -33,6 +33,7 @@ Deno.test("resolveOwningSessionId - uses the active.json pointer in shared mode"
   await withEnv("SKILL_SHARED_PROCESS", "1", async () => {
     await withEnv("SKILL_JWT_DIR", jwtDir, async () => {
       await withEnv("SESSION_ID", "sess_stale_env", async () => {
+        await Promise.resolve();
         assertEquals(resolveOwningSessionId(), "sess_pointer");
       });
     });
@@ -48,6 +49,7 @@ Deno.test("resolveOwningSessionId - $SESSION_ID wins over a stale pointer in per
   );
   await withEnv("SKILL_JWT_DIR", jwtDir, async () => {
     await withEnv("SESSION_ID", "sess_env_owner", async () => {
+      await Promise.resolve();
       assertEquals(resolveOwningSessionId(), "sess_env_owner");
     });
   });
@@ -89,6 +91,67 @@ Deno.test("readSkillJwt - reads the per-session JWT file", async () => {
     assertEquals(readSkillJwt("sess_ab12"), jwt);
   });
   await Deno.remove(jwtDir, { recursive: true });
+});
+
+// Pooled skill scripts run with the tool cwd chosen by OpenCode (the session
+// workspace), NOT the bot process cwd. With an absolute SKILL_JWT_DIR the
+// pointer + JWT lookups must succeed on the first attempt from ANY cwd. Runs in
+// a subprocess so its cwd truly differs from the JWT directory's parent.
+Deno.test("SKILL_JWT_DIR is cwd-independent (pointer + JWT from a foreign working directory)", async () => {
+  const jwtDir = Deno.makeTempDirSync();
+  const foreignCwd = Deno.makeTempDirSync();
+  try {
+    const sessionId = "sess_cwd_indep";
+    const jwt = await createSkillJwt(TEST_SKILL_SECRET, {
+      sub: sessionId,
+      channel: "discord/123",
+      jti: "tok1",
+    });
+    await Deno.writeTextFile(`${jwtDir}/active.json`, JSON.stringify({ sessionId }));
+    await Deno.writeTextFile(`${jwtDir}/${sessionId}.jwt`, jwt + "\n");
+
+    const clientUrl = new URL("../../skills/lib/client.ts", import.meta.url).href;
+    const script = `
+import { resolveOwningSessionId, readSkillJwt } from ${JSON.stringify(clientUrl)};
+const owned = resolveOwningSessionId();
+const jwt = readSkillJwt(owned);
+console.log(JSON.stringify({ owned, jwt }));
+`;
+    const scriptPath = `${jwtDir}/probe.ts`;
+    await Deno.writeTextFile(scriptPath, script);
+
+    const baseEnv = Deno.env.toObject();
+    const env: Record<string, string> = {
+      SKILL_SHARED_PROCESS: "1",
+      SKILL_JWT_DIR: jwtDir,
+      SESSION_ID: "sess_stale_env", // must be ignored: the pointer is authoritative
+    };
+    for (const k of ["PATH", "HOME", "DENO_DIR", "XDG_CACHE_HOME", "DENO_INSTALL_ROOT"]) {
+      if (baseEnv[k] !== undefined) env[k] = baseEnv[k];
+    }
+
+    const output = await new Deno.Command(Deno.execPath(), {
+      args: ["run", "--no-check", "--allow-read", "--allow-env", scriptPath],
+      cwd: foreignCwd,
+      env,
+      clearEnv: true,
+    }).output();
+    const stdout = new TextDecoder().decode(output.stdout);
+    assertEquals(
+      output.code,
+      0,
+      `child failed: ${stdout}${new TextDecoder().decode(output.stderr)}`,
+    );
+    const result = JSON.parse(stdout.trim().split("\n").at(-1)!) as {
+      owned: string;
+      jwt: string;
+    };
+    assertEquals(result.owned, sessionId);
+    assertEquals(result.jwt, jwt);
+  } finally {
+    await Deno.remove(jwtDir, { recursive: true });
+    await Deno.remove(foreignCwd, { recursive: true });
+  }
 });
 
 Deno.test("callSkillApi - presents the per-session JWT end-to-end", async () => {

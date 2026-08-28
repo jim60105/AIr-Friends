@@ -12,8 +12,26 @@ import {
   isValidSkillSecret,
   MIN_SKILL_SECRET_BYTES,
 } from "@utils/skill-secret.ts";
+import { resolve } from "@std/path";
 
 const JWT_HEADER = { alg: "HS256" };
+
+/** Default Skill-JWT directory, relative to the bot process cwd (config default). */
+export const DEFAULT_SKILL_JWT_DIR = "data/skill-jwt";
+
+/**
+ * Absolute skill-JWT directory — the single source of truth for every issuing,
+ * cleanup, and agent-env site. A configured relative value keeps its documented
+ * meaning (relative to the bot process working directory) and is lexically
+ * resolved ONCE here, so JWT and pointer files resolve identically from any
+ * skill-script working directory. A blank (empty/whitespace) value falls back
+ * to the default — never to the bot process cwd itself, which would silently
+ * scatter JWT/pointer files into the application root.
+ */
+export function resolveSkillJwtDir(jwtDir?: string): string {
+  const dir = jwtDir?.trim();
+  return resolve(dir ? dir : DEFAULT_SKILL_JWT_DIR);
+}
 
 /** JWT lifetime, aligned to the 30-minute session idle TTL. */
 export const SKILL_JWT_TTL_SEC = 30 * 60;

@@ -5,7 +5,8 @@ import type { Config } from "../types/config.ts";
 import { SandboxManager } from "./sandbox-manager.ts";
 import { getRunningEgressProxyUrl } from "@utils/egress-proxy.ts";
 import { sessionXdgDataHome } from "@utils/opencode-paths.ts";
-import { join } from "@std/path";
+import { resolveSkillJwtDir } from "@utils/skill-jwt.ts";
+import { join, resolve } from "@std/path";
 
 /**
  * Create ACP Agent configuration based on agent type.
@@ -102,23 +103,25 @@ function buildBaseAgentConfig(
       // per-session JWT file location (`{jwtDir}/{sessionId}.jwt`). The deployment
       // secret (SKILL_API_SECRET) is NOT passed to the agent process — the bot process
       // alone holds the HMAC key, as both JWT issuer and Skill API verifier.
-      env["SKILL_JWT_DIR"] = appConfig.agent.sharedProcess?.jwtDir ?? "data/skill-jwt";
+      env["SKILL_JWT_DIR"] = resolveSkillJwtDir(appConfig.agent.sharedProcess?.jwtDir);
 
       let cwdOverride: string | undefined;
       if (poolKey) {
         // Shared-process mode: channel/pool-key-scoped data roots under the bot data
         // root, deliberately OUTSIDE any user's per-user workspace, so one user's
         // agent cannot read another user's OpenCode database or tool outputs.
+        // Resolved to absolute paths against the bot process cwd, so skill scripts
+        // resolve them identically from ANY tool working directory.
         const dataRoot = appConfig.workspace.repoPath;
-        env["TMPDIR"] = join(dataRoot, "channel-tmp", poolKey);
-        env["XDG_DATA_HOME"] = join(dataRoot, "opencode-data", poolKey);
+        env["TMPDIR"] = resolve(join(dataRoot, "channel-tmp", poolKey));
+        env["XDG_DATA_HOME"] = resolve(join(dataRoot, "opencode-data", poolKey));
         // Shared-process marker: skill libraries resolve the owning session from
         // the pool's current-session pointer (the frozen $SESSION_ID is stale
         // after the first session on a pooled process).
         env["SKILL_SHARED_PROCESS"] = "1";
         // Neutral process-level working directory; the per-session ACP `newSession.cwd`
         // carries each user's own workspace.
-        cwdOverride = join(dataRoot, "channel-cwd", poolKey);
+        cwdOverride = resolve(join(dataRoot, "channel-cwd", poolKey));
       } else {
         // Set TMPDIR to workspace-scoped tmp directory
         env["TMPDIR"] = `${workingDir}/tmp`;

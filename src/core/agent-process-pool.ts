@@ -16,11 +16,16 @@
 import { createLogger } from "@utils/logger.ts";
 import { AgentConnector } from "@acp/agent-connector.ts";
 import type { AgentConnectorOptions } from "@acp/types.ts";
-import { deleteSessionJwtFile, issueSessionJwtFile, SKILL_JWT_TTL_SEC } from "@utils/skill-jwt.ts";
+import {
+  deleteSessionJwtFile,
+  issueSessionJwtFile,
+  resolveSkillJwtDir,
+  SKILL_JWT_TTL_SEC,
+} from "@utils/skill-jwt.ts";
 import { atomicWritePrivate } from "@utils/skill-secret.ts";
 import type { Config } from "../types/config.ts";
 import type { SessionRegistry } from "../skill-api/session-registry.ts";
-import { join } from "@std/path";
+import { join, resolve } from "@std/path";
 
 const logger = createLogger("AgentProcessPool");
 
@@ -119,7 +124,7 @@ export class AgentProcessPool {
     this.connectorFactory = connectorFactory ?? ((options) => new AgentConnector(options));
     this.jwtRenewalIntervalMs = jwtRenewalIntervalMs;
     const sp = config.agent.sharedProcess;
-    this.jwtDir = sp?.jwtDir ?? "data/skill-jwt";
+    this.jwtDir = resolveSkillJwtDir(sp?.jwtDir);
     this.reclaimIdleMs = sp?.reclaimIdleMs ?? DEFAULT_RECLAIM_IDLE_MS;
     this.queueDeadlineMs = sp?.queueDeadlineMs ?? DEFAULT_QUEUE_DEADLINE_MS;
     this.queueSweeper = setInterval(() => {
@@ -420,7 +425,10 @@ export class AgentProcessPool {
     const dataRoot = this.config.workspace?.repoPath;
     if (!dataRoot) return;
     for (const sub of ["channel-cwd", "channel-tmp", "opencode-data"]) {
-      await Deno.mkdir(join(dataRoot, sub, poolKey), { recursive: true });
+      // Resolve lexically so the created directory string is byte-identical to
+      // the absolute paths exported into the agent process env (proposal:
+      // reader and writer always agree, independent of the process cwd).
+      await Deno.mkdir(resolve(join(dataRoot, sub, poolKey)), { recursive: true });
     }
   }
 

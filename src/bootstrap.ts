@@ -33,6 +33,7 @@ import { metricsRegistry } from "@utils/metrics.ts";
 import { configureEgressAllowHosts, ensureEgressProxy } from "@utils/egress-proxy.ts";
 import { canConfineFilesystem, canIsolateNetwork } from "@acp/sandbox-capabilities.ts";
 import { ensureSkillJwtDir, resolveSkillApiSecret } from "@utils/skill-secret.ts";
+import { resolveSkillJwtDir } from "@utils/skill-jwt.ts";
 
 const logger = createLogger("Bootstrap");
 
@@ -184,7 +185,7 @@ export async function bootstrap(
   // per-session JWT file via SKILL_JWT_DIR, never the raw HMAC key.
   const sharedProcessConfig = config.agent.sharedProcess;
   const secretPath = sharedProcessConfig?.secretPath ?? "data/skill-secret";
-  const jwtDir = sharedProcessConfig?.jwtDir ?? "data/skill-jwt";
+  const jwtDir = resolveSkillJwtDir(sharedProcessConfig?.jwtDir);
   let skillApiSecret = "";
   const secretResult = await resolveSkillApiSecret(secretPath);
   if (secretResult.ok) {

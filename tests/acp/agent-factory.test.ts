@@ -15,7 +15,8 @@ import {
   getRetryPromptStrategy,
   getSessionModeOverride,
 } from "@acp/agent-factory.ts";
-import { join } from "@std/path";
+import { isAbsolute, join, resolve } from "@std/path";
+import { DEFAULT_SKILL_JWT_DIR } from "../../src/utils/skill-jwt.ts";
 import type { Config } from "../../src/types/config.ts";
 
 // Create a minimal test config
@@ -534,8 +535,11 @@ Deno.test("createAgentConfig - sets SKILL_JWT_DIR in env (JWT skill auth)", () =
     undefined,
     "sess_test123",
   );
-  // Default JWT dir (config.agent.sharedProcess?.jwtDir ?? "data/skill-jwt")
-  assertEquals(agentConfig.env?.["SKILL_JWT_DIR"], "data/skill-jwt");
+  // Default JWT dir resolves to an absolute path against the process cwd
+  // (config.agent.sharedProcess?.jwtDir unset -> DEFAULT_SKILL_JWT_DIR).
+  const expectedJwtDir = resolve(DEFAULT_SKILL_JWT_DIR);
+  assertEquals(agentConfig.env?.["SKILL_JWT_DIR"], expectedJwtDir);
+  assertEquals(isAbsolute(expectedJwtDir), true);
   // The deployment secret is NOT in the agent env (bot process holds it alone).
   assertEquals(agentConfig.env?.["SKILL_API_SECRET"], undefined);
   assertEquals(agentConfig.env?.["SKILL_API_TOKEN"], undefined);
@@ -557,9 +561,46 @@ Deno.test("createAgentConfig - shared-process mode (poolKey) scopes data roots u
     "discord:123",
   );
   const dataRoot = config.workspace.repoPath;
-  assertEquals(agentConfig.env?.["XDG_DATA_HOME"], join(dataRoot, "opencode-data", "discord:123"));
-  assertEquals(agentConfig.env?.["TMPDIR"], join(dataRoot, "channel-tmp", "discord:123"));
-  assertEquals(agentConfig.cwd, join(dataRoot, "channel-cwd", "discord:123"));
+  assertEquals(
+    agentConfig.env?.["XDG_DATA_HOME"],
+    resolve(join(dataRoot, "opencode-data", "discord:123")),
+  );
+  assertEquals(agentConfig.env?.["TMPDIR"], resolve(join(dataRoot, "channel-tmp", "discord:123")));
+  assertEquals(agentConfig.cwd, resolve(join(dataRoot, "channel-cwd", "discord:123")));
+  assertEquals(isAbsolute(agentConfig.env?.["XDG_DATA_HOME"] ?? ""), true);
+  assertEquals(isAbsolute(agentConfig.env?.["TMPDIR"] ?? ""), true);
+});
+
+Deno.test("createAgentConfig - relative config values export absolute pool paths", () => {
+  const config = createTestConfig();
+  config.workspace.repoPath = "./data"; // relative, resolved against the process cwd
+  config.agent.sharedProcess = {
+    enabled: true,
+    jwtDir: "data/skill-jwt",
+  };
+  const agentConfig = createAgentConfig(
+    "opencode",
+    "/tmp/workspace",
+    config,
+    false,
+    undefined,
+    "sess_test123",
+    "discord:123",
+  );
+  assertEquals(isAbsolute(agentConfig.env?.["TMPDIR"] ?? ""), true);
+  assertEquals(isAbsolute(agentConfig.env?.["XDG_DATA_HOME"] ?? ""), true);
+  assertEquals(isAbsolute(agentConfig.env?.["SKILL_JWT_DIR"] ?? ""), true);
+  assertEquals(isAbsolute(agentConfig.cwd ?? ""), true);
+  assertEquals(
+    agentConfig.env?.["TMPDIR"],
+    resolve(join("./data", "channel-tmp", "discord:123")),
+  );
+  assertEquals(
+    agentConfig.env?.["XDG_DATA_HOME"],
+    resolve(join("./data", "opencode-data", "discord:123")),
+  );
+  assertEquals(agentConfig.env?.["SKILL_JWT_DIR"], resolve("data/skill-jwt"));
+  assertEquals(agentConfig.cwd, resolve(join("./data", "channel-cwd", "discord:123")));
 });
 
 Deno.test("detectPlaywrightBinarySync - detects chromium-headless-shell", () => {

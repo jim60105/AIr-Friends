@@ -19,7 +19,7 @@ import { MemoryStore } from "./memory-store.ts";
 import { convertUserMCPServerConfigs } from "./config-loader.ts";
 import { createTemplateEngine, renderTemplate } from "./template-renderer.ts";
 import type { TemplateVariables } from "../types/template.ts";
-import { deleteSessionJwtFile, issueSessionJwtFile } from "@utils/skill-jwt.ts";
+import { deleteSessionJwtFile, issueSessionJwtFile, resolveSkillJwtDir } from "@utils/skill-jwt.ts";
 import { resolveModel, resolveReasoningEffort } from "./model-router.ts";
 import type { ModelRoutingContext } from "./model-router.ts";
 import type { SkillRegistry } from "@skills/registry.ts";
@@ -3724,7 +3724,7 @@ export class SessionOrchestrator {
    */
   /** Directory holding the per-session Skill API JWT files (shared config). */
   private get skillJwtDir(): string {
-    return this.config.agent.sharedProcess?.jwtDir ?? "data/skill-jwt";
+    return resolveSkillJwtDir(this.config.agent.sharedProcess?.jwtDir);
   }
 
   /**

@@ -11,6 +11,7 @@ import type { AgentConnector } from "../../src/acp/agent-connector.ts";
 import type { Config } from "../../src/types/config.ts";
 import type { WorkspaceInfo } from "../../src/types/workspace.ts";
 import type { NormalizedEvent } from "../../src/types/events.ts";
+import { resolve } from "@std/path";
 
 /** Minimal stub standing in for AgentConnector (no real `opencode` subprocess). */
 class StubConnector {
@@ -457,6 +458,68 @@ Deno.test("pool - issues per-session JWT and writes the active pointer while the
 
   await stopPool(pool);
   await Deno.remove(jwtDir, { recursive: true });
+});
+
+Deno.test("pool - relative jwtDir config writes JWT + pointer at the resolved absolute path", async () => {
+  // Writer agreement (fix-pooled-skill-env-absolute-paths): a RELATIVE config
+  // value must land at the same absolute location skill scripts read via
+  // `$SKILL_JWT_DIR`. Uses the gitignored data/ root; cleaned up in `finally`.
+  const config = makeConfig();
+  const jwtDirRel = `data/af-pool-test-jwt-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  config.agent.sharedProcess = {
+    enabled: true,
+    jwtDir: jwtDirRel,
+    queueDeadlineMs: 600000,
+  };
+  const resolvedJwtDir = resolve(jwtDirRel);
+  const registry = new SessionRegistry(1000);
+  const pool = new AgentProcessPool(
+    config,
+    registry,
+    "test-secret-0123456789abcdef0123456789",
+    () => new StubConnector() as unknown as AgentConnector,
+  );
+  try {
+    const sid = registerSession(registry, { channelId: "discord/789" });
+    // The pool deletes the JWT file and clears the pointer at lease release, so
+    // snapshots must be taken INSIDE the runner. The out-param object keeps the
+    // declared property types readable after the closure returns.
+    const leaseState: {
+      snapshot: { jwtOk: boolean; pointerSessionId: string | undefined } | null;
+    } = { snapshot: null };
+    await pool.run(
+      {
+        poolKey: "discord:discord/789",
+        sessionType: "message",
+        shellSessionId: sid,
+        priority: "interactive",
+        connectorOptions: makeConnectorOptions(),
+        sessionCwd: "/tmp/test/workspaces/discord/789",
+      },
+      async () => {
+        // While the lease is held, the pool must have written the files at the
+        // RESOLVED (absolute) location, not the raw relative config string.
+        let jwtOk = false;
+        try {
+          const content = await Deno.readTextFile(`${resolvedJwtDir}/${sid}.jwt`);
+          jwtOk = content.trim().length > 0;
+        } catch {
+          jwtOk = false;
+        }
+        const pointerRaw = await Deno.readTextFile(`${resolvedJwtDir}/active.json`);
+        leaseState.snapshot = {
+          jwtOk,
+          pointerSessionId: (JSON.parse(pointerRaw) as { sessionId?: string }).sessionId,
+        };
+        return "acp-rel";
+      },
+    );
+    assertEquals(leaseState.snapshot?.jwtOk, true);
+    assertEquals(leaseState.snapshot?.pointerSessionId, sid);
+  } finally {
+    await stopPool(pool);
+    await Deno.remove(resolvedJwtDir, { recursive: true }).catch(() => {});
+  }
 });
 
 Deno.test("pool - JWT renewals during the lease never resurrect the JWT file after release", async () => {
