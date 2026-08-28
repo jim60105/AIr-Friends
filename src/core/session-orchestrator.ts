@@ -12,6 +12,7 @@ import {
   getDefaultAgentType,
   getRetryPromptStrategy,
   getSessionModeOverride,
+  type RetryPromptContext,
 } from "@acp/agent-factory.ts";
 import { ContextAssembler } from "./context-assembler.ts";
 import { WorkspaceManager } from "./workspace-manager.ts";
@@ -279,9 +280,10 @@ export class SessionOrchestrator {
     sessionId: string,
     agentType: AgentType,
     sessionLogger: ReturnType<typeof createLogger>,
+    retryCtx?: RetryPromptContext,
   ): Promise<acp.PromptResponse> {
     const rejections = connector.getClient()?.getRecentPermissionRejections() ?? [];
-    const retryStrategy = getRetryPromptStrategy(agentType, rejections);
+    const retryStrategy = getRetryPromptStrategy(agentType, rejections, retryCtx);
     sessionLogger.info("Sending retry prompt for session {sessionId}", { sessionId });
     return await connector.prompt(sessionId, retryStrategy.retryPromptMessage);
   }
@@ -796,7 +798,17 @@ export class SessionOrchestrator {
               : false;
             let hasResponded = replySent || reactionSent || fileSent;
             if (!hasResponded && response.stopReason === "end_turn") {
-              const retryStrategy = getRetryPromptStrategy(agentType);
+              // Shared-process retry guidance: name the literal session id and
+              // the rendered staging dir (`$TMPDIR/$SESSION_ID` shell tokens
+              // are stale/absent on a pooled process).
+              const retryCtx: RetryPromptContext = {
+                sharedProcess: true,
+                sessionId: options.shellSessionId ?? undefined,
+                stagingDir: options.shellSessionId
+                  ? `${workspace.tmpPath}/${options.shellSessionId}`
+                  : workspace.tmpPath,
+              };
+              const retryStrategy = getRetryPromptStrategy(agentType, undefined, retryCtx);
               for (let attempt = 0; attempt < retryStrategy.maxRetries; attempt++) {
                 replyHandler.clearReplyState(workspace.key, event.channelId);
                 const retryResponse = await this.sendRetryPrompt(
@@ -804,6 +816,7 @@ export class SessionOrchestrator {
                   acpSessionId,
                   agentType,
                   sl2,
+                  retryCtx,
                 );
                 sl2.info("Retry prompt completed", {
                   sessionId: acpSessionId,
@@ -1099,7 +1112,13 @@ export class SessionOrchestrator {
             "Agent completed without sending reply, reaction, or file, retrying with special prompt",
           );
 
-          const retryStrategy = getRetryPromptStrategy(agentType);
+          const retryStrategy = getRetryPromptStrategy(agentType, undefined, {
+            sharedProcess: !!this.processPool,
+            sessionId: shellSessionId ?? undefined,
+            stagingDir: shellSessionId
+              ? `${workspace.tmpPath}/${shellSessionId}`
+              : workspace.tmpPath,
+          });
 
           for (let attempt = 0; attempt < retryStrategy.maxRetries; attempt++) {
             // Audit: retry_triggered
@@ -1119,6 +1138,13 @@ export class SessionOrchestrator {
               sessionId,
               agentType,
               sessionLogger,
+              {
+                sharedProcess: !!this.processPool,
+                sessionId: shellSessionId ?? undefined,
+                stagingDir: shellSessionId
+                  ? `${workspace.tmpPath}/${shellSessionId}`
+                  : workspace.tmpPath,
+              },
             );
 
             sessionLogger.info("Retry prompt completed", {
@@ -1659,7 +1685,13 @@ export class SessionOrchestrator {
         if (!replySent && response.stopReason === "end_turn") {
           sessionLogger.warn("Agent completed without reply, retrying");
 
-          const retryStrategy = getRetryPromptStrategy(agentType);
+          const retryStrategy = getRetryPromptStrategy(agentType, undefined, {
+            sharedProcess: !!this.processPool,
+            sessionId: shellSessionId ?? undefined,
+            stagingDir: shellSessionId
+              ? `${workspace.tmpPath}/${shellSessionId}`
+              : workspace.tmpPath,
+          });
           for (let attempt = 0; attempt < retryStrategy.maxRetries; attempt++) {
             // Audit: retry_triggered
             await auditWriter?.write("retry_triggered", {
@@ -1675,6 +1707,13 @@ export class SessionOrchestrator {
               sessionId,
               agentType,
               sessionLogger,
+              {
+                sharedProcess: !!this.processPool,
+                sessionId: shellSessionId ?? undefined,
+                stagingDir: shellSessionId
+                  ? `${workspace.tmpPath}/${shellSessionId}`
+                  : workspace.tmpPath,
+              },
             );
 
             replySent = replyHandler.hasReplySent(workspace.key, channelId);
@@ -3278,7 +3317,13 @@ export class SessionOrchestrator {
         if (!replySent && response.stopReason === "end_turn") {
           sessionLogger.warn("Agent completed without reply, retrying");
 
-          const retryStrategy = getRetryPromptStrategy(agentType);
+          const retryStrategy = getRetryPromptStrategy(agentType, undefined, {
+            sharedProcess: !!this.processPool,
+            sessionId: shellSessionId ?? undefined,
+            stagingDir: shellSessionId
+              ? `${workspace.tmpPath}/${shellSessionId}`
+              : workspace.tmpPath,
+          });
           for (let attempt = 0; attempt < retryStrategy.maxRetries; attempt++) {
             // Audit: retry_triggered
             await auditWriter?.write("retry_triggered", {
@@ -3294,6 +3339,13 @@ export class SessionOrchestrator {
               sessionId,
               agentType,
               sessionLogger,
+              {
+                sharedProcess: !!this.processPool,
+                sessionId: shellSessionId ?? undefined,
+                stagingDir: shellSessionId
+                  ? `${workspace.tmpPath}/${shellSessionId}`
+                  : workspace.tmpPath,
+              },
             );
 
             replySent = replyHandler.hasReplySent(workspace.key, dmChannelId);
@@ -3518,7 +3570,15 @@ export class SessionOrchestrator {
         let hasResponded = replySent || reactionSent || fileSent;
 
         if (!hasResponded && response.stopReason === "end_turn") {
-          const retryStrategy = getRetryPromptStrategy(agentType);
+          // Shared-process retry guidance: literal session id + staging dir.
+          const retryCtx: RetryPromptContext = {
+            sharedProcess: true,
+            sessionId: shellSessionId ?? undefined,
+            stagingDir: shellSessionId
+              ? `${workspace.tmpPath}/${shellSessionId}`
+              : workspace.tmpPath,
+          };
+          const retryStrategy = getRetryPromptStrategy(agentType, undefined, retryCtx);
           for (let attempt = 0; attempt < retryStrategy.maxRetries; attempt++) {
             await auditWriter?.write("retry_triggered", {
               retryCount: attempt + 1,
@@ -3531,6 +3591,7 @@ export class SessionOrchestrator {
               acpSessionId,
               agentType,
               sl,
+              retryCtx,
             );
             sl.info("Retry prompt completed", {
               sessionId: acpSessionId,

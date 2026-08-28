@@ -52,6 +52,8 @@ async function runScript(
   scriptRelPath: string,
   args: string[],
   cwd: string,
+  envOverrides: Record<string, string> = {},
+  runViaDeno = false,
 ): Promise<RunResult> {
   const scriptPath = join(REPO_ROOT, scriptRelPath);
   // Pin the staging base (TMPDIR) to this test's own {cwd}/tmp so concurrent
@@ -62,7 +64,27 @@ async function runScript(
   const env = Deno.env.toObject();
   env["TMPDIR"] = join(cwd, "tmp");
   delete env["SKILL_JWT_DIR"];
-  const output = await new Deno.Command(scriptPath, { args, cwd, env }).output();
+  for (const [k, v] of Object.entries(envOverrides)) {
+    env[k] = v;
+  }
+  // Some skill scripts lack the executable bit in git (the container fixes it
+  // via `--chmod=775` on COPY); run those via `deno run` with the same
+  // permission set their shebang requests.
+  const output = runViaDeno
+    ? await new Deno.Command(Deno.execPath(), {
+      args: [
+        "run",
+        "--allow-net",
+        "--allow-env",
+        "--allow-read",
+        "--allow-write",
+        scriptPath,
+        ...args,
+      ],
+      cwd,
+      env,
+    }).output()
+    : await new Deno.Command(scriptPath, { args, cwd, env }).output();
   return {
     code: output.code,
     stdout: new TextDecoder().decode(output.stdout),
@@ -140,6 +162,72 @@ Deno.test("scripts - send-reply delivers empty payload verbatim", async () => {
     assertEquals(api.requests[0].parameters.message, "");
   } finally {
     await api.close();
+    Deno.removeSync(ws, { recursive: true });
+  }
+});
+
+Deno.test("scripts - shared mode: identity-only skill (react-message) fails with structured SKILL_SESSION_UNRESOLVED on malformed pointer", async () => {
+  const ws = setupWorkspace();
+  const api = startMockApi();
+  const jwtDir = Deno.makeTempDirSync();
+  try {
+    // Malformed pointer: sessionId is a number — must fail the schema check
+    // instead of resolving a wrong identity or throwing an obscure TypeError.
+    await Deno.writeTextFile(join(jwtDir, "active.json"), JSON.stringify({ sessionId: 42 }));
+
+    const result = await runScript(
+      "skills/react-message/scripts/react-message.ts",
+      ["--session-id", "sess_A", "--api-url", api.url, "--emoji", "👍"],
+      ws,
+      { SKILL_SHARED_PROCESS: "1", SKILL_JWT_DIR: jwtDir },
+      true, // react-message.ts is not executable in git; run via deno run
+    );
+
+    assertEquals(result.code !== 0, true);
+    const err = parseStderrJson(result.stderr);
+    // The structured `code` field carries the stable token (typed error).
+    assertEquals(err.code, "SKILL_SESSION_UNRESOLVED");
+    assertStringIncludes(String(err.error ?? ""), `${jwtDir}/active.json`);
+    assertEquals(api.requests.length, 0);
+  } finally {
+    await api.close();
+    await Deno.remove(jwtDir, { recursive: true });
+    Deno.removeSync(ws, { recursive: true });
+  }
+});
+
+Deno.test("scripts - shared mode: API body sessionId is the pointer owner, not the --session-id arg", async () => {
+  const ws = setupWorkspace();
+  const api = startMockApi();
+  const jwtDir = Deno.makeTempDirSync();
+  try {
+    // Pool state: the current-session pointer names sess_B (its own staging
+    // root), while the agent's CLI argument says sess_A (e.g. a stale value).
+    await Deno.writeTextFile(
+      join(jwtDir, "active.json"),
+      JSON.stringify({ sessionId: "sess_B", staging: join(ws, "tmp") }),
+    );
+    await Deno.writeTextFile(join(jwtDir, "sess_B.jwt"), "test-jwt\n");
+    Deno.mkdirSync(join(ws, "tmp", "sess_B"), { recursive: true });
+    const payload = join(ws, "tmp", "sess_B", "reply.md");
+    Deno.writeTextFileSync(payload, "shared-mode reply");
+
+    const result = await runScript(
+      SEND_REPLY,
+      ["--session-id", "sess_A", "--api-url", api.url, "--message-file", payload],
+      ws,
+      { SKILL_SHARED_PROCESS: "1", SKILL_JWT_DIR: jwtDir },
+    );
+
+    assertEquals(result.code, 0, result.stderr);
+    assertEquals(api.requests.length, 1);
+    // The JWT `sub` check requires the request body sessionId to equal the
+    // pointer-resolved owning session — never the stale CLI argument.
+    assertEquals(api.requests[0].sessionId, "sess_B");
+    assertEquals(api.requests[0].parameters.message, "shared-mode reply");
+  } finally {
+    await api.close();
+    await Deno.remove(jwtDir, { recursive: true });
     Deno.removeSync(ws, { recursive: true });
   }
 });

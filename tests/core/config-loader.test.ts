@@ -4,6 +4,7 @@ import { assertEquals, assertRejects } from "@std/assert";
 import { loadConfig, loadSystemPrompt } from "@core/config-loader.ts";
 import { ConfigError } from "../../src/types/errors.ts";
 import type { TemplateVariables } from "../../src/types/template.ts";
+import { join } from "@std/path";
 
 const defaultVars: TemplateVariables = {
   isDm: false,
@@ -392,6 +393,33 @@ Deno.test("loadSystemPrompt - should handle prompt with no placeholders", async 
       assertEquals(result, "A plain prompt with no placeholders.");
     },
   );
+});
+
+// The conversation-summary prompt's Usage example must render the session id
+// (and staging dir) when available — a pooled run cannot rely on $SESSION_ID.
+// Renders the REAL prompts/system_summary.md so the example stays copy-pasteable.
+Deno.test("loadSystemPrompt - system_summary Usage example renders the literal session id + tmpDir", async () => {
+  const promptPath = join(import.meta.dirname ?? ".", "..", "..", "prompts", "system_summary.md");
+  const withSession = await loadSystemPrompt(promptPath, {
+    ...defaultVars,
+    sessionId: "sess_sum",
+    tmpDir: "/data/workspaces/discord/u1/tmp/sess_sum",
+  });
+  assertEquals(
+    withSession.includes("--session-id sess_sum"),
+    true,
+    "example should carry the rendered session id",
+  );
+  assertEquals(
+    withSession.includes('--content-file "/data/workspaces/discord/u1/tmp/sess_sum/summary.md"'),
+    true,
+    "example should carry the rendered staging directory",
+  );
+  assertEquals(withSession.includes('"$SESSION_ID"'), false);
+
+  // Without a session id the example falls back to the per-spawn token form.
+  const noSession = await loadSystemPrompt(promptPath, defaultVars);
+  assertEquals(noSession.includes("--session-id $SESSION_ID"), true);
 });
 
 // --- accessControl configuration tests ---

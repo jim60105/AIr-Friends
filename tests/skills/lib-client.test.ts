@@ -56,6 +56,58 @@ Deno.test("resolveOwningSessionId - $SESSION_ID wins over a stale pointer in per
   await Deno.remove(jwtDir, { recursive: true });
 });
 
+Deno.test("resolveOwningSessionId - shared mode without a pointer fails SKILL_SESSION_UNRESOLVED (no env fallback)", async () => {
+  const jwtDir = Deno.makeTempDirSync();
+  try {
+    await withEnv("SKILL_SHARED_PROCESS", "1", async () => {
+      await withEnv("SKILL_JWT_DIR", jwtDir, async () => {
+        // A stale frozen env value must NOT be honored in shared mode: the
+        // pointer is the sole identity source and its absence fails loud.
+        await withEnv("SESSION_ID", "sess_stale_env", async () => {
+          await Promise.resolve();
+          assertThrows(
+            () => resolveOwningSessionId(),
+            Error,
+            "SKILL_SESSION_UNRESOLVED",
+          );
+          assertThrows(
+            () => resolveOwningSessionId(),
+            Error,
+            `${jwtDir}/active.json`,
+          );
+        });
+      });
+    });
+  } finally {
+    await Deno.remove(jwtDir, { recursive: true });
+  }
+});
+
+Deno.test("resolveOwningSessionId - shared mode with a malformed pointer (non-string sessionId) fails loud", async () => {
+  const jwtDir = Deno.makeTempDirSync();
+  try {
+    await Deno.writeTextFile(`${jwtDir}/active.json`, JSON.stringify({ sessionId: 42 }));
+    await withEnv("SKILL_SHARED_PROCESS", "1", async () => {
+      await withEnv("SKILL_JWT_DIR", jwtDir, async () => {
+        await Promise.resolve();
+        // A truthy-but-wrong-typed session id must not pass the schema check.
+        const err = assertThrows(
+          () => resolveOwningSessionId(),
+          Error,
+          "SKILL_SESSION_UNRESOLVED",
+        );
+        // The typed error carries the stable code for structured exit output.
+        assertEquals(
+          (err as { code?: string }).code,
+          "SKILL_SESSION_UNRESOLVED",
+        );
+      });
+    });
+  } finally {
+    await Deno.remove(jwtDir, { recursive: true });
+  }
+});
+
 Deno.test("resolveOwningSessionId - falls back to $SESSION_ID in per-spawn mode", async () => {
   await withEnv("SKILL_JWT_DIR", undefined, async () => {
     await withEnv("SESSION_ID", "sess_env", async () => {

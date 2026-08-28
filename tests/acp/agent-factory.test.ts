@@ -525,6 +525,29 @@ Deno.test("createAgentConfig - does not set SESSION_ID when sessionId omitted", 
   assertEquals(agentConfig.env?.["SESSION_ID"], undefined);
 });
 
+Deno.test("createAgentConfig - omits SESSION_ID in shared-process mode (poolKey set)", () => {
+  const config = createTestConfig();
+  config.agent.sharedProcess = {
+    enabled: true,
+    jwtDir: "data/skill-jwt",
+  };
+  const agentConfig = createAgentConfig(
+    "opencode",
+    "/tmp/workspace",
+    config,
+    false,
+    undefined,
+    "sess_test123",
+    "discord:123",
+  );
+  // A spawn-time frozen SESSION_ID on a pooled process would name the FIRST
+  // session and misattribute every later one — the current-session pointer
+  // ({SKILL_JWT_DIR}/active.json) is the sole identity source in this mode.
+  assertEquals(agentConfig.env?.["SESSION_ID"], undefined);
+  // The shared-process marker is exported instead of the session identity.
+  assertEquals(agentConfig.env?.["SKILL_SHARED_PROCESS"], "1");
+});
+
 Deno.test("createAgentConfig - sets SKILL_JWT_DIR in env (JWT skill auth)", () => {
   const config = createTestConfig();
   const agentConfig = createAgentConfig(
@@ -995,4 +1018,48 @@ Deno.test("getRetryPromptStrategy - retry prompt is instructive (causes + payloa
   assertStringIncludes(msg, "# Send Reply Skill");
   assertStringIncludes(msg, "# React Message Skill");
   assertStringIncludes(msg, "# Send File Skill");
+});
+
+// ============ Shared-process retry prompt (authoritative-session-id-in-shared-mode) ============
+
+Deno.test("getRetryPromptStrategy - shared-process ctx names literal session id + staging dir, no shell tokens", () => {
+  const stagingDir = "/data/workspaces/discord/123/tmp/sess_abc";
+  const strategy = getRetryPromptStrategy("opencode", undefined, {
+    sharedProcess: true,
+    sessionId: "sess_abc",
+    stagingDir,
+  });
+  const msg = strategy.retryPromptMessage;
+
+  // The shared-mode variant MUST name the literal ids/paths (the permission
+  // gate expands $TMPDIR/$SESSION_ID from its own per-session context, but
+  // bash interpolation on a pooled process sees stale/absent values).
+  assertStringIncludes(msg, `Write the reply text to ${stagingDir}/reply.md`);
+  assertStringIncludes(msg, `--session-id "sess_abc"`);
+  assertStringIncludes(msg, `--message-file "${stagingDir}/reply.md"`);
+  // The guidance section (before the embedded SKILL.md docs, which keep the
+  // per-spawn token examples) must not reference the shell tokens at all.
+  const guidance = msg.split("\n---\n")[0];
+  assertFalse(guidance.includes("$SESSION_ID"));
+  assertFalse(guidance.includes("$TMPDIR"));
+  // The note explains that the env var is absent on a shared process.
+  assertStringIncludes(msg, "SESSION_ID environment variable is not set");
+});
+
+Deno.test("getRetryPromptStrategy - per-spawn retry template stays byte-identical", () => {
+  const without = getRetryPromptStrategy("opencode").retryPromptMessage;
+  // A ctx with sharedProcess=false (or no ctx at all) keeps the per-spawn
+  // $TMPDIR/$SESSION_ID template verbatim.
+  const withCtx = getRetryPromptStrategy("opencode", undefined, {
+    sharedProcess: false,
+    sessionId: "sess_abc",
+    stagingDir: "/tmp/ignored",
+  }).retryPromptMessage;
+  const withEmptyCtx = getRetryPromptStrategy("opencode", undefined, {
+    sharedProcess: true,
+  }).retryPromptMessage;
+  assertEquals(withCtx, without);
+  // Shared mode without concrete values degrades to the token template
+  // (matches the rendered `{{ sessionId || "$SESSION_ID" }}` fallback).
+  assertEquals(withEmptyCtx, without);
 });

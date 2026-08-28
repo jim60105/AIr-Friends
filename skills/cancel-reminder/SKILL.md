@@ -22,10 +22,10 @@ ${HOME}/.agents/skills/cancel-reminder/scripts/cancel-reminder.ts \
 
 ## Parameters
 
-| Parameter       | Required | Description                                                   |
-| --------------- | -------- | ------------------------------------------------------------- |
-| `--session-id`  | Yes      | Current session ID                                            |
-| `--reminder-id` | Yes      | The ID of the reminder to cancel (returned by `set-reminder`) |
+| Parameter       | Required | Description                                                                                                                                                                                                                                      |
+| --------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `--session-id`  | Yes      | Use the session id rendered in your system prompt. `$SESSION_ID` works only in per-spawn deployments; in shared-process mode it is not set and the skill library resolves the owning session automatically — a mismatched value is never honored |
+| `--reminder-id` | Yes      | The ID of the reminder to cancel (returned by `set-reminder`)                                                                                                                                                                                    |
 
 ## Example Response
 

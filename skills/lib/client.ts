@@ -79,10 +79,52 @@ function isSharedProcessMode(): boolean {
 let owningSessionSnapshot: { jwtDir: string; sessionId: string; jwt?: string } | undefined;
 
 /**
+ * Stable machine-readable code for an unresolvable owning-session identity.
+ * Raised in shared-process mode when the current-session pointer is missing,
+ * unreadable, or malformed (and reused by the payload staging resolver so both
+ * fail with the same code — one shared constant).
+ */
+export const SKILL_SESSION_UNRESOLVED = "SKILL_SESSION_UNRESOLVED";
+
+/**
+ * Instructive shared-mode failure text naming the expected absolute pointer
+ * path and the "live turn" remedy. Shared by `resolveOwningSessionId()`
+ * (SkillSessionUnresolvedError, prefix embedded) and `resolvePayloadBase()`
+ * (PayloadError carrying the same code) so both fail with a consistent,
+ * teachable message.
+ */
+export function unresolvedSessionPointerMessage(jwtDir: string | undefined): string {
+  const pointerPath = jwtDir ? `${jwtDir}/active.json` : "the SKILL_JWT_DIR pointer location";
+  return (
+    `${SKILL_SESSION_UNRESOLVED}: no current-session pointer at ${pointerPath} — the session's ` +
+    `execution lease may have ended, or this script ran outside an active agent turn. Skills ` +
+    `must be invoked during a live turn; the owning session is resolved automatically — do not ` +
+    `set SESSION_ID manually.`
+  );
+}
+
+/**
+ * Typed error for an unresolvable owning-session identity, carrying the stable
+ * `SKILL_SESSION_UNRESOLVED` code in a machine-readable `code` field so scripts
+ * surface it via `exitWithError(message, code)` uniformly with PayloadError.
+ */
+export class SkillSessionUnresolvedError extends Error {
+  readonly code = SKILL_SESSION_UNRESOLVED;
+
+  constructor(jwtDir: string | undefined) {
+    super(unresolvedSessionPointerMessage(jwtDir));
+    this.name = "SkillSessionUnresolvedError";
+  }
+}
+
+/**
  * Resolve the owning shell session ID:
  * - Shared-process mode: read the `active.json` pointer (written by the pool
- *   while the session holds the execution lease). The process `$SESSION_ID`
- *   is frozen at spawn time in this mode and must NOT be trusted.
+ *   while the session holds the execution lease). The pointer is the SOLE
+ *   identity source here — the process `$SESSION_ID` is frozen at spawn time
+ *   in this mode and must NOT be trusted, so a missing/unreadable/malformed
+ *   pointer fails loud with `SKILL_SESSION_UNRESOLVED` instead of
+ *   misattributing.
  * - Per-spawn mode: the `$SESSION_ID` env var is authoritative (a stale
  *   pointer file from a crashed run must never hijack the identity).
  * The result is snapshotted once per script invocation, so a later session
@@ -100,19 +142,27 @@ export function resolveOwningSessionId(): string {
     if (!jwtDir) return undefined;
     try {
       const raw = Deno.readTextFileSync(`${jwtDir}/active.json`);
-      const parsed = JSON.parse(raw) as { sessionId?: string };
-      return parsed.sessionId || undefined;
+      const parsed = JSON.parse(raw) as { sessionId?: unknown };
+      // Strict schema: a non-empty string session id, anything else is treated
+      // as an unreadable/malformed pointer.
+      return typeof parsed.sessionId === "string" && parsed.sessionId.length > 0
+        ? parsed.sessionId
+        : undefined;
     } catch {
       return undefined;
     }
   };
   let resolved: string | undefined;
   if (shared) {
-    resolved = readPointer() ?? Deno.env.get("SESSION_ID") ?? undefined;
+    // Pointer only — no environment fallback in shared mode.
+    resolved = readPointer();
   } else {
     resolved = Deno.env.get("SESSION_ID") ?? readPointer();
   }
   if (!resolved) {
+    if (shared) {
+      throw new SkillSessionUnresolvedError(jwtDir);
+    }
     throw new Error(
       "Cannot resolve owning session: neither the active.json pointer nor $SESSION_ID is available",
     );

@@ -127,6 +127,110 @@ console.log(JSON.stringify(results));
   await Deno.remove(jwtDir, { recursive: true });
 });
 
+// Shared-process mode (SKILL_SHARED_PROCESS=1): the staging base comes ONLY
+// from the current-session pointer; no CLI-argument fallback exists, and a
+// missing/unreadable/malformed pointer fails with SKILL_SESSION_UNRESOLVED
+// BEFORE any payload file is read or deleted. Runs in a subprocess so the env
+// marker cannot leak into parallel test files.
+Deno.test("resolvePayloadBase - shared mode: pointer-only base, unresolved pointer fails before touching files (subprocess)", async () => {
+  const jwtDir = Deno.makeTempDirSync();
+  const ws = Deno.makeTempDirSync();
+  const payloadUrl = new URL("../../skills/lib/payload.ts", import.meta.url).href;
+  const script = `
+import { readPayloadArg, resolvePayloadBase } from ${JSON.stringify(payloadUrl)};
+const jwtDir = Deno.env.get("SKILL_JWT_DIR");
+const ws = Deno.args[0];
+const results = [];
+// (a) Valid pointer {sessionId:"sess_B", staging: ws/tmp} + CLI arg sess_A:
+//     the base is the POINTER's session, never the CLI argument's.
+Deno.writeTextFileSync(jwtDir + "/active.json", JSON.stringify({ sessionId: "sess_B", staging: ws + "/tmp" }));
+results.push(resolvePayloadBase(ws, "sess_A"));
+// (b) No pointer at all: shared mode MUST fail SKILL_SESSION_UNRESOLVED.
+Deno.removeSync(jwtDir + "/active.json");
+try {
+  resolvePayloadBase(ws, "sess_A");
+  results.push("NO_ERROR");
+} catch (err) {
+  results.push(JSON.stringify({ code: err.code, message: err.message }));
+}
+// (b2) readPayloadArg in shared mode with no pointer: fails with the same
+//      code BEFORE reading or deleting the referenced payload file.
+const staged = ws + "/tmp/sess_other/reply.md";
+Deno.mkdirSync(ws + "/tmp/sess_other", { recursive: true });
+Deno.writeTextFileSync(staged, "sibling session payload");
+try {
+  await readPayloadArg(
+    ["--message-file", staged],
+    "message",
+    { sessionId: "sess_A", example: "x", fileName: "reply.md", cwd: ws },
+  );
+  results.push("NO_ERROR");
+} catch (err) {
+  results.push(JSON.stringify({ code: err.code }));
+}
+let exists = true;
+try { Deno.statSync(staged); } catch { exists = false; }
+results.push("exists=" + exists);
+// (c) Malformed pointers in shared mode: non-string fields and relative
+//     staging all fail with the SAME stable code (strict schema validation).
+for (const pointer of [
+  { sessionId: 42, staging: ws + "/tmp" },
+  { sessionId: "sess_B", staging: {} },
+  { sessionId: "sess_B", staging: "relative/tmp" },
+  { sessionId: "" , staging: ws + "/tmp" },
+]) {
+  Deno.writeTextFileSync(jwtDir + "/active.json", JSON.stringify(pointer));
+  try {
+    resolvePayloadBase(ws, "sess_A");
+    results.push("NO_ERROR");
+  } catch (err) {
+    results.push(JSON.stringify({ code: err.code }));
+  }
+}
+console.log(JSON.stringify(results));
+`;
+  const scriptPath = `${jwtDir}/probe.ts`;
+  await Deno.writeTextFile(scriptPath, script);
+
+  const baseEnv = Deno.env.toObject();
+  const env: Record<string, string> = {
+    SKILL_SHARED_PROCESS: "1",
+    SKILL_JWT_DIR: jwtDir,
+  };
+  for (const k of ["PATH", "HOME", "DENO_DIR", "XDG_CACHE_HOME", "DENO_INSTALL_ROOT"]) {
+    if (baseEnv[k] !== undefined) env[k] = baseEnv[k];
+  }
+
+  const output = await new Deno.Command(Deno.execPath(), {
+    args: ["run", "--no-check", "--allow-read", "--allow-write", "--allow-env", scriptPath, ws],
+    env,
+    clearEnv: true,
+  }).output();
+  const stdout = new TextDecoder().decode(output.stdout);
+  assertEquals(output.code, 0, `child failed: ${stdout}${new TextDecoder().decode(output.stderr)}`);
+  const results = JSON.parse(stdout.trim().split("\n").at(-1)!) as string[];
+
+  // (a) pointer's session wins over the CLI argument.
+  assertEquals(results[0], resolve(join(ws, "tmp", "sess_B")));
+  // (b) unresolved pointer fails with the stable code + pointer path guidance.
+  const err = JSON.parse(results[1]) as { code: string; message: string };
+  assertEquals(err.code, "SKILL_SESSION_UNRESOLVED");
+  assertEquals(err.message.includes(`${jwtDir}/active.json`), true);
+  assertEquals(err.message.includes("SKILL_SESSION_UNRESOLVED"), true);
+  // (b2) same code from readPayloadArg, and the payload file was NOT read or
+  // deleted (no read-and-delete side effect before the identity is resolved).
+  assertEquals(JSON.parse(results[2]).code, "SKILL_SESSION_UNRESOLVED");
+  assertEquals(results[3], "exists=true");
+  // (c) every malformed pointer variant fails with the same stable code.
+  for (let i = 4; i < results.length; i++) {
+    const r = JSON.parse(results[i]) as { code: string };
+    assertEquals(r.code, "SKILL_SESSION_UNRESOLVED", `malformed pointer case ${i - 4}`);
+  }
+
+  await Deno.remove(jwtDir, { recursive: true });
+  await Deno.remove(ws, { recursive: true });
+});
+
 Deno.test("isWithinDir - boundary-safe sibling prefixes rejected", () => {
   assertEquals(isWithinDir("/ws/tmp/sess_own/x", "/ws/tmp/sess_own"), true);
   assertEquals(isWithinDir("/ws/tmp/sess_own", "/ws/tmp/sess_own"), true);

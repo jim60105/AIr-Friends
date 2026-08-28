@@ -25,6 +25,8 @@ ${HOME}/.agents/skills/memory-export/scripts/memory-export.ts \
   --format markdown
 ```
 
+**`--session-id`**: Use the session id rendered in your system prompt. `$SESSION_ID` works only in per-spawn deployments; in shared-process mode it is not set and the skill library resolves the owning session automatically — a mismatched value is never honored.
+
 ## Parameters
 
 - `--format`: Output format. `markdown` (default) or `json`

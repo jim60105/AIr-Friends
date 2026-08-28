@@ -21,9 +21,9 @@ ${HOME}/.agents/skills/list-reminders/scripts/list-reminders.ts \
 
 ## Parameters
 
-| Parameter      | Required | Description        |
-| -------------- | -------- | ------------------ |
-| `--session-id` | Yes      | Current session ID |
+| Parameter      | Required | Description                                                                                                                                                                                                                                      |
+| -------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `--session-id` | Yes      | Use the session id rendered in your system prompt. `$SESSION_ID` works only in per-spawn deployments; in shared-process mode it is not set and the skill library resolves the owning session automatically — a mismatched value is never honored |
 
 ## Example Response
 

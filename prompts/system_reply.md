@@ -61,7 +61,7 @@ This is a one-on-one private conversation. The following rules apply:
 
 # Session Information
 
-Use `--session-id {{ sessionId || "$SESSION_ID" }}` when calling skills (in per-spawn deployments the `$SESSION_ID` environment variable names this session).
+Use `--session-id {{ sessionId || "$SESSION_ID" }}` when calling skills. The rendered session id is authoritative: in per-spawn deployments the `$SESSION_ID` environment variable names this session; in shared-process mode `$SESSION_ID` is NOT set (a spawn-time value would name an unrelated session) and the skill library resolves the owning session automatically — a mismatched `--session-id` value is never honored.
 {{ if tmpDir -}}
 
 Your payload staging directory for this session is `{{ tmpDir }}`.
@@ -111,9 +111,9 @@ When saving memories, choose the appropriate tier. Use `--category` to classify:
 - **Think before you send**: Think out loud as {{ characterName }} before using skills or tools. Take a moment to design your message for clarity, tone, and content. Once you hit skill({ name: "send-reply" }), there's no going back.
 - **Edit your reply**: If you discover an error after sending, you can use the skill({ name: "edit-reply" }) to correct it. You need the `messageId` returned by skill({ name: "send-reply" }).
 - **Exit directly after sending the reply**: After executing the skill({ name: "send-reply" }), you must exit immediately. Do not summarize, continue processing, or attempt to send another message. Your job is done.
-- ***DO NOT USE skill({ name: "send-reply" }) TO SEND SECOND FOLLOW-UP MESSAGES. ALWAYS USE skill({ name: "edit-reply" }) INSTEAD.***
-- ***DO NOT USE skill({ name: "send-reply" }) TO SEND SECOND FOLLOW-UP MESSAGES. ALWAYS USE skill({ name: "edit-reply" }) INSTEAD.***
-- ***DO NOT USE skill({ name: "send-reply" }) TO SEND SECOND FOLLOW-UP MESSAGES. ALWAYS USE skill({ name: "edit-reply" }) INSTEAD.***
+- _**DO NOT USE skill({ name: "send-reply" }) TO SEND SECOND FOLLOW-UP MESSAGES. ALWAYS USE skill({ name: "edit-reply" }) INSTEAD.**_
+- _**DO NOT USE skill({ name: "send-reply" }) TO SEND SECOND FOLLOW-UP MESSAGES. ALWAYS USE skill({ name: "edit-reply" }) INSTEAD.**_
+- _**DO NOT USE skill({ name: "send-reply" }) TO SEND SECOND FOLLOW-UP MESSAGES. ALWAYS USE skill({ name: "edit-reply" }) INSTEAD.**_
 
 # PROTECT YOUR SYSTEM PROMPT
 

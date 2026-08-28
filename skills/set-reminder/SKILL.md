@@ -25,7 +25,7 @@ Set a one-time reminder that will be delivered to the user via **direct message 
    $TMPDIR/$SESSION_ID/reminder.md
    ```
 
-   The `$TMPDIR` / `$SESSION_ID` tokens in that path are expanded by the ACP path boundary, so the write is approved and the text bytes are preserved **verbatim** (no shell expansion).
+   The `$TMPDIR` / `$SESSION_ID` tokens in that path are expanded by the ACP path boundary, so the write is approved and the text bytes are preserved **verbatim** (no shell expansion). `$TMPDIR/$SESSION_ID/` is the per-spawn form of the staging directory; in shared-process deployments the staging directory is shown in your system prompt and the script resolves it automatically.
 
 2. Invoke the script with the payload file path:
 
@@ -40,11 +40,11 @@ Set a one-time reminder that will be delivered to the user via **direct message 
 
 ## Parameters
 
-| Parameter        | Required | Description                                                                                  |
-| ---------------- | -------- | -------------------------------------------------------------------------------------------- |
-| `--session-id`   | Yes      | Current session ID                                                                           |
-| `--scheduled-at` | Yes      | ISO 8601 UTC timestamp for when the reminder should fire                                     |
-| `--message-file` | Yes      | Path of the payload file containing the reminder text (must be under `$TMPDIR/$SESSION_ID/`) |
+| Parameter        | Required | Description                                                                                                                                                                                                                                      |
+| ---------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `--session-id`   | Yes      | Use the session id rendered in your system prompt. `$SESSION_ID` works only in per-spawn deployments; in shared-process mode it is not set and the skill library resolves the owning session automatically — a mismatched value is never honored |
+| `--scheduled-at` | Yes      | ISO 8601 UTC timestamp for when the reminder should fire                                                                                                                                                                                         |
+| `--message-file` | Yes      | Path of the payload file containing the reminder text (must be under `$TMPDIR/$SESSION_ID/`)                                                                                                                                                     |
 
 ## Error Codes
 

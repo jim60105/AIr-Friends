@@ -7,7 +7,8 @@
 // text in a payload file under the session-scoped TMPDIR via the ACP filesystem
 // interface (edit/write tool), and the script reads it back verbatim.
 
-import { resolve, SEPARATOR } from "jsr:@std/path@^1.0.0";
+import { isAbsolute, resolve, SEPARATOR } from "jsr:@std/path@^1.0.0";
+import { SKILL_SESSION_UNRESOLVED, unresolvedSessionPointerMessage } from "./client.ts";
 
 /**
  * Error raised by the payload helpers on a contract failure.
@@ -54,35 +55,68 @@ export function isWithinDir(path: string, base: string): boolean {
  * the ACP path boundary expands `$TMPDIR` to for the agent's edit/write tools.
  * Resolution order:
  *  1. Shared-process mode (`SKILL_SHARED_PROCESS=1`): the current-session
- *    pointer (`{SKILL_JWT_DIR}/active.json`) is authoritative — it carries the
- *    owning session's staging root written by the process pool at lease
+ *    pointer (`{SKILL_JWT_DIR}/active.json`) is the ONLY source — it carries
+ *    the owning session's staging root written by the process pool at lease
  *    acquisition, plus the CURRENT session id (the process `$SESSION_ID` and
- *    hence the CLI `--session-id` may be a stale spawn-time value there).
+ *    hence the CLI `--session-id` may be a stale spawn-time value there). A
+ *    missing, unreadable, or malformed pointer throws `SKILL_SESSION_UNRESOLVED`
+ *    BEFORE any payload file is read or deleted — there is NO CLI-argument
+ *    fallback, because a backgrounded/late-running pooled script could name a
+ *    sibling session's id (same workspace) and read plus delete that session's
+ *    staged content; the later JWT check gates the API call, not the file I/O.
  *  2. Per-spawn mode / pointer unavailable: `{cwd}/tmp/{sessionId}`, where the
- *    script's cwd is the session workspace and `sessionId` is the CLI arg.
- *    The pointer is honored only when it names this exact session, so a stale
- *    pointer left by a crashed pool run cannot hijack the staging boundary.
+ *    script's cwd is the session workspace and `sessionId` is the CLI arg
+ *    (`$SESSION_ID` is authoritative there). The pointer is honored only when
+ *    it names this exact session, so a stale pointer left by a crashed pool
+ *    run cannot hijack the staging boundary.
  *
  * The process-level `TMPDIR` is deliberately NOT consulted: in shared-process
  * mode it is channel-scoped (`{dataRoot}/channel-tmp/{poolKey}`) and is never a
  * staging area (cross-user payloads must stay inside the owner's workspace).
  */
+/**
+ * Strict pointer schema: `sessionId` and `staging` must be non-empty strings
+ * (numbers/objects/null are malformed), and in shared-process mode `staging`
+ * must be an absolute path — the pool writes absolute staging roots, so a
+ * relative value means the pointer is corrupt and must fail loud instead of
+ * resolving against some script cwd.
+ */
+function isPointerShape(
+  parsed: unknown,
+  requireAbsoluteStaging: boolean,
+): parsed is { sessionId: string; staging: string } {
+  if (typeof parsed !== "object" || parsed === null) return false;
+  const o = parsed as Record<string, unknown>;
+  if (typeof o.sessionId !== "string" || o.sessionId.length === 0) return false;
+  if (typeof o.staging !== "string" || o.staging.length === 0) return false;
+  return !requireAbsoluteStaging || isAbsolute(o.staging);
+}
+
 export function resolvePayloadBase(cwd: string, sessionId: string): string {
   const jwtDir = Deno.env.get("SKILL_JWT_DIR");
+  const shared = Deno.env.get("SKILL_SHARED_PROCESS") === "1";
   if (jwtDir) {
+    let parsed: unknown;
     try {
       const raw = Deno.readTextFileSync(`${jwtDir}/active.json`);
-      const parsed = JSON.parse(raw) as { sessionId?: string; staging?: string };
-      const shared = Deno.env.get("SKILL_SHARED_PROCESS") === "1";
-      if (
-        parsed.sessionId && parsed.staging &&
-        (shared || parsed.sessionId === sessionId)
-      ) {
-        return resolve(parsed.staging, parsed.sessionId);
-      }
+      parsed = JSON.parse(raw);
     } catch {
-      // Pointer missing/unreadable: fall through to the cwd-based base.
+      parsed = undefined;
     }
+    if (isPointerShape(parsed, shared) && (shared || parsed.sessionId === sessionId)) {
+      return resolve(parsed.staging, parsed.sessionId);
+    }
+    if (shared) {
+      // Shared mode demands a VALID pointer (readable, non-empty string fields,
+      // absolute staging): anything else is a hard failure before any payload
+      // file is touched.
+      throw new PayloadError(SKILL_SESSION_UNRESOLVED, unresolvedSessionPointerMessage(jwtDir));
+    }
+  } else if (shared) {
+    throw new PayloadError(
+      SKILL_SESSION_UNRESOLVED,
+      unresolvedSessionPointerMessage(jwtDir),
+    );
   }
   return sessionId ? resolve(cwd, "tmp", sessionId) : resolve(cwd, "tmp");
 }

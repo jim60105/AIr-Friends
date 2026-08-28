@@ -28,7 +28,7 @@ Send your final response to the user. This is the gateway to external communicat
    $TMPDIR/$SESSION_ID/reply.md
    ```
 
-   The `$TMPDIR` / `$SESSION_ID` tokens in that path are expanded by the ACP path boundary, so the write is approved and the text bytes are preserved **verbatim** (no shell expansion).
+   The `$TMPDIR` / `$SESSION_ID` tokens in that path are expanded by the ACP path boundary, so the write is approved and the text bytes are preserved **verbatim** (no shell expansion). `$TMPDIR/$SESSION_ID/` is the per-spawn form of the staging directory; in shared-process deployments the staging directory is shown in your system prompt and the script resolves it automatically.
 
 2. Invoke the script with the payload file path:
 
@@ -42,10 +42,10 @@ Send your final response to the user. This is the gateway to external communicat
 
 ## Parameters
 
-| Parameter        | Required | Description                                                                               |
-| ---------------- | -------- | ----------------------------------------------------------------------------------------- |
-| `--session-id`   | Yes      | Current session ID (from `$SESSION_ID` environment)                                       |
-| `--message-file` | Yes      | Path of the payload file containing the reply text (must be under `$TMPDIR/$SESSION_ID/`) |
+| Parameter        | Required | Description                                                                                                                                                                                                                                      |
+| ---------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `--session-id`   | Yes      | Use the session id rendered in your system prompt. `$SESSION_ID` works only in per-spawn deployments; in shared-process mode it is not set and the skill library resolves the owning session automatically — a mismatched value is never honored |
+| `--message-file` | Yes      | Path of the payload file containing the reply text (must be under `$TMPDIR/$SESSION_ID/`)                                                                                                                                                        |
 
 ## Error Codes
 

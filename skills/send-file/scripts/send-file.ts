@@ -1,7 +1,13 @@
 #!/usr/bin/env -S deno run --allow-net --allow-env --allow-read --allow-write
 
 import { parse } from "jsr:@std/flags@^0.224.0";
-import { callSkillApi, exitWithError, outputResult, parseBaseArgs } from "../../lib/client.ts";
+import {
+  callSkillApi,
+  exitWithError,
+  outputResult,
+  parseBaseArgs,
+  SkillSessionUnresolvedError,
+} from "../../lib/client.ts";
 import { PayloadError, readPayloadArg } from "../../lib/payload.ts";
 
 async function main() {
@@ -63,7 +69,10 @@ async function main() {
     if (error instanceof PayloadError) {
       exitWithError(error.message, error.code);
     } else {
-      exitWithError(error instanceof Error ? error.message : String(error));
+      exitWithError(
+        error instanceof Error ? error.message : String(error),
+        error instanceof SkillSessionUnresolvedError ? error.code : undefined,
+      );
     }
   }
 }

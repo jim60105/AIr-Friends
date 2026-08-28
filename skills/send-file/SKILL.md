@@ -35,7 +35,7 @@ The caption is OPTIONAL. When present, it MUST NOT appear on the command line â€
    $TMPDIR/$SESSION_ID/caption.md
    ```
 
-   The `$TMPDIR` / `$SESSION_ID` tokens in that path are expanded by the ACP path boundary, so the write is approved and the text bytes are preserved **verbatim** (no shell expansion).
+   The `$TMPDIR` / `$SESSION_ID` tokens in that path are expanded by the ACP path boundary, so the write is approved and the text bytes are preserved **verbatim** (no shell expansion). `$TMPDIR/$SESSION_ID/` is the per-spawn form of the staging directory; in shared-process deployments the staging directory is shown in your system prompt and the script resolves it automatically.
 
 2. Invoke the script with the payload file path:
 
@@ -51,12 +51,12 @@ The caption is OPTIONAL. When present, it MUST NOT appear on the command line â€
 
 ### Parameters
 
-| Parameter        | Required | Description                                                                                 |
-| ---------------- | -------- | ------------------------------------------------------------------------------------------- |
-| `--session-id`   | Yes      | Session ID from `$SESSION_ID` environment variable                                          |
-| `--file-paths`   | Yes      | Repeatable file path (relative to the workspace root); one occurrence per file, at least 1  |
-| `-f`             | No       | Short alias for `--file-paths`                                                              |
-| `--caption-file` | No       | Path of the payload file containing the caption text (must be under `$TMPDIR/$SESSION_ID/`) |
+| Parameter        | Required | Description                                                                                                                                                                                                                                      |
+| ---------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `--session-id`   | Yes      | Use the session id rendered in your system prompt. `$SESSION_ID` works only in per-spawn deployments; in shared-process mode it is not set and the skill library resolves the owning session automatically â€” a mismatched value is never honored |
+| `--file-paths`   | Yes      | Repeatable file path (relative to the workspace root); one occurrence per file, at least 1                                                                                                                                                       |
+| `-f`             | No       | Short alias for `--file-paths`                                                                                                                                                                                                                   |
+| `--caption-file` | No       | Path of the payload file containing the caption text (must be under `$TMPDIR/$SESSION_ID/`)                                                                                                                                                      |
 
 ### Example
 

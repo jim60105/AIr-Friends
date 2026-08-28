@@ -86,7 +86,7 @@ After you post, write in today's journal entry about the topic you chose and how
 
 ## Session Information
 
-Use `--session-id {{ sessionId || "$SESSION_ID" }}` when calling skills (in per-spawn deployments the `$SESSION_ID` environment variable names this session).
+Use `--session-id {{ sessionId || "$SESSION_ID" }}` when calling skills. The rendered session id is authoritative: in per-spawn deployments the `$SESSION_ID` environment variable names this session; in shared-process mode `$SESSION_ID` is NOT set (a spawn-time value would name an unrelated session) and the skill library resolves the owning session automatically — a mismatched `--session-id` value is never honored.
 
 {{ if tmpDir -}}
 

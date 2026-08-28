@@ -25,6 +25,8 @@ ${HOME}/.agents/skills/react-message/scripts/react-message.ts \
   --emoji "👍"
 ```
 
+**`--session-id`**: Use the session id rendered in your system prompt. `$SESSION_ID` works only in per-spawn deployments; in shared-process mode it is not set and the skill library resolves the owning session automatically — a mismatched value is never honored.
+
 ### Examples
 
 React with a Unicode emoji:

@@ -49,6 +49,8 @@ ${HOME}/.agents/skills/memory-patch/scripts/memory-patch.ts \
   --decay 0.9
 ```
 
+**`--session-id`**: Use the session id rendered in your system prompt. `$SESSION_ID` works only in per-spawn deployments; in shared-process mode it is not set and the skill library resolves the owning session automatically — a mismatched value is never honored.
+
 ## Capabilities
 
 - Enable/disable memories (use --enabled or --disabled flag)

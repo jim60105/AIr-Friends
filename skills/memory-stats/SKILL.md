@@ -15,6 +15,8 @@ ${HOME}/.agents/skills/memory-stats/scripts/memory-stats.ts \
   --session-id "$SESSION_ID"
 ```
 
+**`--session-id`**: Use the session id rendered in your system prompt. `$SESSION_ID` works only in per-spawn deployments; in shared-process mode it is not set and the skill library resolves the owning session automatically — a mismatched value is never honored.
+
 ## Response Format
 
 Stats include:

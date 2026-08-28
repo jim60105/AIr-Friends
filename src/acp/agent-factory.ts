@@ -141,7 +141,13 @@ function buildBaseAgentConfig(
         env["AGENT_BROWSER_EXECUTABLE_PATH"] = browserPath;
       }
 
-      if (sessionId) {
+      // Per-spawn mode only: `$SESSION_ID` is authoritative when the subprocess
+      // serves exactly this session. In shared-process (pool) mode the value
+      // would freeze the FIRST session's id for the process lifetime — every
+      // later session's shell would see a stale id — so it is omitted entirely;
+      // the current-session pointer (`{SKILL_JWT_DIR}/active.json`) is the sole
+      // identity source there and skill libraries resolve it automatically.
+      if (sessionId && !poolKey) {
         env["SESSION_ID"] = sessionId;
       }
 
@@ -242,6 +248,64 @@ export function formatPermissionRejections(
 }
 
 /**
+ * Retry-prompt context. Lets the shared-process variant of the retry template
+ * name literal session ids and the absolute staging directory (the rendered
+ * `{{ tmpDir }}`) instead of the `$TMPDIR/$SESSION_ID` shell tokens — those are
+ * stale or absent on a pooled process, where the ACP permission gate expands
+ * the tokens from ITS OWN per-session context but bash can no longer.
+ */
+export interface RetryPromptContext {
+  /** True when the agent runs on a shared (pooled) agent process. */
+  sharedProcess: boolean;
+  /** The shell session id rendered in the system prompt (`--session-id <id>`). */
+  sessionId?: string;
+  /** The session's payload staging directory (`{workspace}/tmp/{sessionId}`). */
+  stagingDir?: string;
+}
+
+/**
+ * Build the standard missing-reply retry guidance. `stagingDir`/`sessionId`
+ * are substituted verbatim when provided (shared-process mode); otherwise the
+ * `$TMPDIR`/`$SESSION_ID` shell tokens are used (per-spawn mode, where the
+ * permission gate expands them against the per-session context).
+ */
+function buildDefaultRetryMessage(
+  stagingDir: string | undefined,
+  sessionId: string | undefined,
+  sendReplyContent: string,
+  reactMessageContent: string,
+  sendFileContent: string,
+): string {
+  const stagingToken = stagingDir ?? "$TMPDIR/$SESSION_ID";
+  const sessionToken = sessionId ?? "$SESSION_ID";
+  return (
+    `System message: Your previous turn ended without sending a reply, reaction, or file to the user. ` +
+    `You must communicate with the user by using send-reply, react-message, or send-file (only when a ` +
+    `suitable file already exists in the workspace) before ending this session.\n\n` +
+    `If you tried send-reply or send-file and it failed, the most likely causes are:\n` +
+    `- You used a removed legacy flag with the text on the command line (--message for send-reply, ` +
+    `--caption for send-file, --file-path for a single send-file file) — it was rejected. ` +
+    `Message content MUST NOT appear on a command line — the shell expands $ in it, corrupting the text ` +
+    `and leaking environment variables.\n` +
+    `- The payload file was never written. You must write the message/caption text to a file FIRST using ` +
+    `your edit/write tool (e.g. ${stagingToken}/reply.md), then pass that path.\n` +
+    `- The payload was staged outside ${stagingToken}/ (e.g. a workspace file) and was rejected — the ` +
+    `script only reads its own session's staging directory.\n` +
+    `- A previous send-reply/send-file call errored — read that error's output; it contains the exact fix.\n\n` +
+    `Correct pattern (two steps):\n` +
+    `1. Write the reply text to ${stagingToken}/reply.md with your edit/write tool.\n` +
+    `2. Invoke: \${HOME}/.agents/skills/send-reply/scripts/send-reply.ts --session-id "${sessionToken}" ` +
+    `--message-file "${stagingToken}/reply.md"\n\n` +
+    (stagingDir
+      ? `Note: the SESSION_ID environment variable is not set on this shared agent process; the ` +
+        `skill library resolves the owning session automatically, and the session id above is the ` +
+        `authoritative one rendered in your system prompt.\n\n`
+      : "") +
+    `---\n\n${sendReplyContent}\n\n---\n\n${reactMessageContent}\n\n---\n\n${sendFileContent}`
+  );
+}
+
+/**
  * Get the retry prompt strategy for a specific agent type.
  * Used when an agent completes a prompt turn without sending a reply.
  * Each agent type may need different retry prompt messages or behaviors.
@@ -249,6 +313,7 @@ export function formatPermissionRejections(
 export function getRetryPromptStrategy(
   type: AgentType,
   rejections?: PermissionRejection[],
+  ctx?: RetryPromptContext,
 ): RetryPromptStrategy {
   const skillsDir = `${import.meta.dirname}/../../skills`;
 
@@ -274,25 +339,17 @@ export function getRetryPromptStrategy(
     sendFileContent = "# Send File Skill\n\nUse send-file to send a file from the workspace.";
   }
 
-  const defaultRetryMessage =
-    `System message: Your previous turn ended without sending a reply, reaction, or file to the user. ` +
-    `You must communicate with the user by using send-reply, react-message, or send-file (only when a ` +
-    `suitable file already exists in the workspace) before ending this session.\n\n` +
-    `If you tried send-reply or send-file and it failed, the most likely causes are:\n` +
-    `- You used a removed legacy flag with the text on the command line (--message for send-reply, ` +
-    `--caption for send-file, --file-path for a single send-file file) — it was rejected. ` +
-    `Message content MUST NOT appear on a command line — the shell expands $ in it, corrupting the text ` +
-    `and leaking environment variables.\n` +
-    `- The payload file was never written. You must write the message/caption text to a file FIRST using ` +
-    `your edit/write tool (e.g. $TMPDIR/$SESSION_ID/reply.md), then pass that path.\n` +
-    `- The payload was staged outside $TMPDIR/$SESSION_ID/ (e.g. a workspace file) and was rejected — the ` +
-    `script only reads its own session's staging directory.\n` +
-    `- A previous send-reply/send-file call errored — read that error's output; it contains the exact fix.\n\n` +
-    `Correct pattern (two steps):\n` +
-    `1. Write the reply text to $TMPDIR/$SESSION_ID/reply.md with your edit/write tool.\n` +
-    `2. Invoke: \${HOME}/.agents/skills/send-reply/scripts/send-reply.ts --session-id "$SESSION_ID" ` +
-    `--message-file "$TMPDIR/$SESSION_ID/reply.md"\n\n` +
-    `---\n\n${sendReplyContent}\n\n---\n\n${reactMessageContent}\n\n---\n\n${sendFileContent}`;
+  // Shared-process variant: name the literal session id + staging directory.
+  // The `$TMPDIR/$SESSION_ID` tokens are process-frozen in pool mode (or the
+  // env var is absent entirely), so the agent must write to the rendered path.
+  const sharedCtx = ctx && ctx.sharedProcess ? ctx : undefined;
+  const defaultRetryMessage = buildDefaultRetryMessage(
+    sharedCtx?.stagingDir,
+    sharedCtx?.sessionId,
+    sendReplyContent,
+    reactMessageContent,
+    sendFileContent,
+  );
 
   switch (type) {
     case "opencode": {
