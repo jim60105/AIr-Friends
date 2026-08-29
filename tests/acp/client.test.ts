@@ -544,6 +544,7 @@ Deno.test("ChatbotClient - sessionUpdate logs thought chunk from content envelop
       userId: "123",
       channelId: "456",
       isDM: false,
+      logAgentStreamChunks: true,
     };
     const client = new ChatbotClient(skillRegistry, testLogger, config);
 
@@ -581,6 +582,7 @@ Deno.test("ChatbotClient - sessionUpdate logs thought chunk from direct text", a
       userId: "123",
       channelId: "456",
       isDM: false,
+      logAgentStreamChunks: true,
     };
     const client = new ChatbotClient(skillRegistry, testLogger, config);
 
@@ -618,6 +620,7 @@ Deno.test("ChatbotClient - sessionUpdate logs thought chunk with empty text when
       userId: "123",
       channelId: "456",
       isDM: false,
+      logAgentStreamChunks: true,
     };
     const client = new ChatbotClient(skillRegistry, testLogger, config);
 
@@ -654,6 +657,7 @@ Deno.test("ChatbotClient - sessionUpdate prefers content envelope over direct te
       userId: "123",
       channelId: "456",
       isDM: false,
+      logAgentStreamChunks: true,
     };
     const client = new ChatbotClient(skillRegistry, testLogger, config);
 
@@ -692,6 +696,7 @@ Deno.test("ChatbotClient - sessionUpdate truncates thought text to 100 chars", a
       userId: "123",
       channelId: "456",
       isDM: false,
+      logAgentStreamChunks: true,
     };
     const client = new ChatbotClient(skillRegistry, testLogger, config);
     const longText = "a".repeat(150);
@@ -708,6 +713,105 @@ Deno.test("ChatbotClient - sessionUpdate truncates thought text to 100 chars", a
     const context = thoughtLogs[0].context as Record<string, unknown>;
     assertEquals((context.text as string).length, 100);
     assertEquals(context.text, "a".repeat(100));
+  } finally {
+    Deno.removeSync(tempDir, { recursive: true });
+  }
+});
+
+Deno.test("ChatbotClient - default config suppresses per-chunk debug but still flushes complete thought", async () => {
+  const tempDir = Deno.makeTempDirSync();
+  try {
+    const debugLogs: Array<{ message: string; context: unknown }> = [];
+    const infoLogs: Array<{ message: string; context: unknown }> = [];
+    const testLogger = new Logger("test", { level: LogLevel.DEBUG });
+    const originalDebug = testLogger.debug.bind(testLogger);
+    testLogger.debug = (message: string, context?: Record<string, unknown>) => {
+      debugLogs.push({ message, context });
+      originalDebug(message, context);
+    };
+    const originalInfo = testLogger.info.bind(testLogger);
+    testLogger.info = (message: string, context?: Record<string, unknown>) => {
+      infoLogs.push({ message, context });
+      originalInfo(message, context);
+    };
+
+    const skillRegistry = createTestSkillRegistry();
+    // No logAgentStreamChunks → default false
+    const config = {
+      workingDir: tempDir,
+      platform: "discord",
+      userId: "123",
+      channelId: "456",
+      isDM: false,
+    };
+    const client = new ChatbotClient(skillRegistry, testLogger, config);
+
+    // Chunks accumulate in the buffer despite the suppressed per-chunk logs
+    await client.sessionUpdate({
+      update: {
+        sessionUpdate: "agent_thought_chunk",
+        content: { type: "text", text: "Thinking step 1... " },
+      },
+    } as acp.SessionNotification);
+
+    await client.sessionUpdate({
+      update: {
+        sessionUpdate: "agent_thought_chunk",
+        content: { type: "text", text: "Thinking step 2" },
+      },
+    } as acp.SessionNotification);
+
+    // No per-chunk DEBUG entries emitted
+    const thoughtLogs = debugLogs.filter((log) => log.message === "Agent thought: {text}");
+    assertEquals(thoughtLogs.length, 0);
+
+    // Message chunks are equally gated: buffer accumulates, no per-chunk DEBUG
+    await client.sessionUpdate({
+      update: {
+        sessionUpdate: "agent_message_chunk",
+        content: { type: "text", text: "Hello " },
+      },
+    } as acp.SessionNotification);
+
+    await client.sessionUpdate({
+      update: {
+        sessionUpdate: "agent_message_chunk",
+        content: { type: "text", text: "world" },
+      },
+    } as acp.SessionNotification);
+
+    const messageChunkLogs = debugLogs.filter((log) =>
+      log.message === "Agent message chunk: {text}"
+    );
+    assertEquals(messageChunkLogs.length, 0);
+
+    // The INFO complete-thought summary still flushes with the full buffer
+    await client.sessionUpdate({
+      sessionId: "test-session",
+      update: {
+        sessionUpdate: "tool_call",
+        toolCallId: "test-id",
+        title: "test",
+        kind: null,
+        status: "pending" as const,
+      },
+    } as unknown as acp.SessionNotification);
+
+    const completeLogs = infoLogs.filter((log) =>
+      log.message === "Agent complete thought ({chunkCount} chunks, {length} chars): {thought}"
+    );
+    assertEquals(completeLogs.length, 1);
+    const context = completeLogs[0].context as Record<string, unknown>;
+    assertEquals(context.thought, "Thinking step 1... Thinking step 2");
+    assertEquals(context.chunkCount, 2);
+
+    const completeMessageLogs = infoLogs.filter((log) =>
+      log.message === "Agent complete message ({chunkCount} chunks, {length} chars): {message}"
+    );
+    assertEquals(completeMessageLogs.length, 1);
+    const messageContext = completeMessageLogs[0].context as Record<string, unknown>;
+    assertEquals(messageContext.message, "Hello world");
+    assertEquals(messageContext.chunkCount, 2);
   } finally {
     Deno.removeSync(tempDir, { recursive: true });
   }

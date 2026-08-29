@@ -1401,6 +1401,19 @@ When `logging.gelf.enabled` is `true` and `logging.gelf.endpoint` is set, all lo
 
 GELF 輸出中，`messageTemplate` 會作為 `_messageTemplate` 自訂欄位傳送。
 
+### Agent Stream Chunk Logging
+
+Per-chunk `Agent thought: {text}` / `Agent message chunk: {text}` DEBUG lines from the ACP
+agent stream are suppressed by default (`logging.agentStreamChunks: false`, env override
+`LOGGING_AGENT_STREAM_CHUNKS`) to avoid drowning the log platform — the stream can emit one
+log line per token. Buffering is unaffected: chunks still accumulate in
+`thoughtBuffer`/`messageBuffer` and flush as the INFO `Agent complete thought` /
+`Agent complete message` summaries. Enable the flag only when debugging the live stream.
+
+| Environment Variable            | Config Path                  | Type                 |
+| ------------------------------- | ---------------------------- | -------------------- |
+| `LOGGING_AGENT_STREAM_CHUNKS`   | `logging.agentStreamChunks`  | `"true"` / `"false"` |
+
 ## Testing
 
 - Unit tests: `{module}.test.ts`

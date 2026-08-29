@@ -60,6 +60,8 @@ export interface SkillResponse {
   success: boolean;
   data?: unknown;
   error?: string;
+  /** Error code passthrough from SkillResult (carried verbatim in the response body) */
+  code?: string;
   statusCode?: number; // Optional HTTP status code override
 }
 

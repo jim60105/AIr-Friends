@@ -157,6 +157,7 @@ const DEFAULT_CONFIG: Partial<Config> = {
   },
   logging: {
     level: "INFO",
+    agentStreamChunks: false,
     gelf: {
       enabled: false,
       endpoint: "",

@@ -15,10 +15,16 @@ Fix inside the stat-failure path (ENOENT only — a legit existing nested path n
 // ("discord/123/") derived from context.workspace.components — not a loose
 // substring of the raw string.
 const wasRelative = !isAbsolute(filePath);
-const relFromRoot = fullPath.slice(context.workspace.path.length + 1);
+const relFromRoot = fullPath.slice(resolve(context.workspace.path).length + 1);
+const keyToken = `${context.workspace.key}/`;
 const keyRe = new RegExp(`(^|/)${escapeRegExp(context.workspace.key)}/`);
-if (wasRelative && keyRe.test(relFromRoot)) {
-  const candidate = relFromRoot.slice(relFromRoot.indexOf(`${context.workspace.key}/`) + context.workspace.key.length + 1);
+// exec() (not indexOf()) so the candidate derives from the boundary-VALID
+// occurrence — a raw indexOf could select an earlier occurrence embedded in
+// another segment (e.g. "baddiscord/123/.../discord/123/out.png").
+const match = keyRe.exec(relFromRoot);
+if (wasRelative && match) {
+  const keyStart = match.index + (match[1] ?? "").length;
+  const candidate = relFromRoot.slice(keyStart + keyToken.length);
   const candidateExists = await fileExists(resolve(context.workspace.path, candidate));
   // guidance: always states the double-join; names `--file-paths "<candidate>"`
   // as the intended file ONLY when candidateExists === true, otherwise asks
@@ -41,7 +47,7 @@ private async runGit(args: string[], expectedExitCodes: number[] = [0]): Promise
   ...
   if (code !== 0) {
     if (expectedExitCodes.includes(code)) {
-      logger.debug("Git command exited {code}: {args}", ...);
+      logger.debug("Git command expected exit {exitCode}: {args}", { exitCode: code, args });
     } else {
       logger.error("Git command failed", ...);  // unchanged, keep credential redaction
     }

@@ -827,3 +827,103 @@ Deno.test("getAuthenticatedUrl - falls back to GITHUB_TOKEN env when authPasswor
     }
   }
 });
+
+// ============ Expected exit codes (no false ERROR alarms) ============
+
+/** Capture console.error output (the logger writes ERROR entries there). */
+function captureConsoleErrors(): { errors: string[]; restore: () => void } {
+  const errors: string[] = [];
+  const originalError = console.error;
+  console.error = (...args: unknown[]) => {
+    errors.push(args.map((a) => String(a)).join(" "));
+  };
+  return {
+    errors,
+    restore: () => {
+      console.error = originalError;
+    },
+  };
+}
+
+Deno.test("GitBackupService - staged-changes probe (exit 1) does not log an error", async () => {
+  await withTempGitEnv(async (dataDir, bareDir) => {
+    const service = new GitBackupService(
+      createConfig({ remoteUrl: bareDir }),
+      dataDir,
+    );
+    await service.initialize();
+
+    // Create a change so `git diff --cached --quiet` exits 1 (the NORMAL backup path)
+    await Deno.writeTextFile(`${dataDir}/test.txt`, "hello");
+
+    const { errors, restore } = captureConsoleErrors();
+    try {
+      const result = await service.performBackup();
+      assertEquals(result, true);
+    } finally {
+      restore();
+    }
+    assertEquals(
+      errors.filter((e) => e.includes("Git command failed")).length,
+      0,
+      `Expected no error entries, got: ${errors.join(" | ")}`,
+    );
+  });
+});
+
+Deno.test("GitBackupService - empty-remote init (rev-parse HEAD exit 128) does not log an error", async () => {
+  await withTempGitEnv(async (dataDir, bareDir) => {
+    const service = new GitBackupService(
+      createConfig({ remoteUrl: bareDir }),
+      dataDir,
+    );
+    const { errors, restore } = captureConsoleErrors();
+    try {
+      await service.initialize();
+    } finally {
+      restore();
+    }
+
+    // Verify the initial commit was really created (probe path was exercised)
+    const logProc = new Deno.Command("git", {
+      args: ["log", "--oneline"],
+      cwd: dataDir,
+      stdout: "piped",
+      stderr: "piped",
+    });
+    const { stdout } = await logProc.output();
+    assertEquals(new TextDecoder().decode(stdout).includes("initial:"), true);
+
+    assertEquals(
+      errors.filter((e) => e.includes("Git command failed")).length,
+      0,
+      `Expected no error entries, got: ${errors.join(" | ")}`,
+    );
+  }, { createInitialCommit: false });
+});
+
+Deno.test("GitBackupService - unexpected git failure still logs an error", async () => {
+  await withTempGitEnv(async (dataDir, _bareDir) => {
+    const service = new GitBackupService(
+      createConfig({ remoteUrl: "/nonexistent/repo.git" }),
+      dataDir,
+    );
+    await service.initialize();
+
+    await Deno.writeTextFile(`${dataDir}/test.txt`, "hello");
+
+    const { errors, restore } = captureConsoleErrors();
+    try {
+      const result = await service.performBackup();
+      assertEquals(result, false);
+    } finally {
+      restore();
+    }
+    // The push failure is NOT an expected exit code → ERROR log must be present
+    assertEquals(
+      errors.some((e) => e.includes("Git command failed")),
+      true,
+      `Expected an error entry, got: ${errors.join(" | ")}`,
+    );
+  });
+});

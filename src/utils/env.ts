@@ -55,6 +55,9 @@ export const ENV_MAPPINGS = {
   GELF_PROTOCOL: "logging.gelf.protocol",
   GELF_COMPRESS: "logging.gelf.compress",
 
+  // Per-chunk agent stream debug logging
+  LOGGING_AGENT_STREAM_CHUNKS: "logging.agentStreamChunks",
+
   // Self-research settings
   SELF_RESEARCH_ENABLED: "selfResearch.enabled",
   SELF_RESEARCH_MODEL: "selfResearch.model",

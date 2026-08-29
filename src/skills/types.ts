@@ -21,6 +21,12 @@ export interface SkillResult {
   success: boolean;
   data?: unknown;
   error?: string;
+  /**
+   * Optional machine-readable error code (e.g. "SKILL_FILE_PATH_WORKSPACE_PREFIXED").
+   * Passed through the Skill API response so shell skills can present typed
+   * instructive errors to the agent.
+   */
+  code?: string;
 }
 
 /**

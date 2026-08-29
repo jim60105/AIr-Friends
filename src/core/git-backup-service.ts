@@ -79,7 +79,7 @@ export class GitBackupService {
         "rev-parse",
         "--verify",
         `refs/remotes/origin/${candidate}`,
-      ]);
+      ], [128]);
       if (result.success) {
         this.defaultBranch = candidate;
         return;
@@ -121,7 +121,7 @@ export class GitBackupService {
         "rev-parse",
         "--verify",
         `refs/remotes/origin/${this.defaultBranch}`,
-      ]);
+      ], [128]);
       if (hasRemoteBranch.success) {
         await this.runGit(["checkout", "-B", this.defaultBranch, `origin/${this.defaultBranch}`]);
       } else {
@@ -130,12 +130,12 @@ export class GitBackupService {
     }
 
     // Handle empty remote: clone succeeds but no commits exist (no HEAD)
-    const hasHead = await this.runGit(["rev-parse", "--verify", "HEAD"]);
+    const hasHead = await this.runGit(["rev-parse", "--verify", "HEAD"], [128]);
     if (!hasHead.success) {
       logger.info("Remote repository is empty, creating initial commit");
       await this.deregisterSubmodules();
       await this.runGit(["add", "-A"]);
-      const diff = await this.runGit(["diff", "--cached", "--quiet"]);
+      const diff = await this.runGit(["diff", "--cached", "--quiet"], [1]);
       if (!diff.success) {
         const timestamp = new Date().toISOString();
         await this.runGit(["commit", "-m", `initial: ${timestamp}`]);
@@ -147,7 +147,7 @@ export class GitBackupService {
     // Remote had commits: commit .gitignore changes if any, and push
     await this.deregisterSubmodules();
     await this.runGit(["add", "-A"]);
-    const diff = await this.runGit(["diff", "--cached", "--quiet"]);
+    const diff = await this.runGit(["diff", "--cached", "--quiet"], [1]);
     if (!diff.success) {
       const timestamp = new Date().toISOString();
       await this.runGit(["commit", "-m", `backup: ${timestamp}`]);
@@ -173,7 +173,7 @@ export class GitBackupService {
     // Commit all existing files
     await this.deregisterSubmodules();
     await this.runGit(["add", "-A"]);
-    const diff = await this.runGit(["diff", "--cached", "--quiet"]);
+    const diff = await this.runGit(["diff", "--cached", "--quiet"], [1]);
     if (!diff.success) {
       const timestamp = new Date().toISOString();
       await this.runGit(["commit", "-m", `initial: ${timestamp}`]);
@@ -195,7 +195,7 @@ export class GitBackupService {
     // Ensure we are on default branch
     const branch = await this.runGit(["branch", "--show-current"]);
     if (branch.success && branch.output.trim() !== this.defaultBranch) {
-      const hasCommits = await this.runGit(["rev-parse", "--verify", "HEAD"]);
+      const hasCommits = await this.runGit(["rev-parse", "--verify", "HEAD"], [128]);
       if (hasCommits.success) {
         await this.runGit(["branch", "-M", this.defaultBranch]);
       }
@@ -204,7 +204,7 @@ export class GitBackupService {
     // Commit any uncommitted changes
     await this.deregisterSubmodules();
     await this.runGit(["add", "-A"]);
-    const diff = await this.runGit(["diff", "--cached", "--quiet"]);
+    const diff = await this.runGit(["diff", "--cached", "--quiet"], [1]);
     if (!diff.success) {
       const timestamp = new Date().toISOString();
       await this.runGit(["commit", "-m", `backup: ${timestamp}`]);
@@ -220,7 +220,7 @@ export class GitBackupService {
     const authUrl = this.getAuthenticatedUrl();
 
     // Check if we have any commits to push
-    const hasCommits = await this.runGit(["rev-parse", "--verify", "HEAD"]);
+    const hasCommits = await this.runGit(["rev-parse", "--verify", "HEAD"], [128]);
     if (!hasCommits.success) {
       logger.info("No commits to push");
       return;
@@ -304,7 +304,7 @@ export class GitBackupService {
     }
 
     // Check for staged changes (git diff --cached --quiet exits with 1 if there are staged changes)
-    const diff = await this.runGit(["diff", "--cached", "--quiet"]);
+    const diff = await this.runGit(["diff", "--cached", "--quiet"], [1]);
     if (diff.success) {
       logger.info("No changes to backup");
       return true;
@@ -377,9 +377,17 @@ export class GitBackupService {
     }
   }
 
-  /** Execute a git command in the data directory. */
+  /**
+   * Execute a git command in the data directory.
+   *
+   * `expectedExitCodes` declares non-zero exit codes that are a legitimate
+   * state-probe result for this invocation (e.g. `diff --cached --quiet` exits
+   * 1 when staged changes exist). Those are logged at DEBUG instead of ERROR so
+   * the normal "needs backup" signal does not raise false alarms.
+   */
   private async runGit(
     args: string[],
+    expectedExitCodes: number[] = [0],
   ): Promise<{ success: boolean; output: string; errorOutput: string }> {
     const command = new Deno.Command("git", {
       args,
@@ -401,12 +409,17 @@ export class GitBackupService {
     const errorOutput = new TextDecoder().decode(stderr);
 
     if (code !== 0) {
-      logger.error("Git command failed", {
+      const context = {
         args: args.map((a) => a.includes("@") ? "[REDACTED_URL]" : a),
         exitCode: code,
         stderr: errorOutput.replace(/\/\/[^:]+:[^@]+@/g, "//***:***@"),
         stdout: output.replace(/\/\/[^:]+:[^@]+@/g, "//***:***@"),
-      });
+      };
+      if (expectedExitCodes.includes(code)) {
+        logger.debug("Git command expected exit {exitCode}: {args}", context);
+      } else {
+        logger.error("Git command failed", context);
+      }
     }
 
     return { success: code === 0, output, errorOutput };
@@ -466,7 +479,7 @@ Thumbs.db
 
   /** Configure the git remote origin. */
   private async configureRemote(): Promise<void> {
-    const remoteResult = await this.runGit(["remote", "get-url", "origin"]);
+    const remoteResult = await this.runGit(["remote", "get-url", "origin"], [2]);
     if (!remoteResult.success) {
       await this.runGit(["remote", "add", "origin", this.config.remoteUrl]);
     } else if (remoteResult.output.trim() !== this.config.remoteUrl) {

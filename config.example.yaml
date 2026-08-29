@@ -5,6 +5,10 @@
 # Logging configuration
 logging:
   level: "INFO" # Valid: DEBUG, INFO, WARN, ERROR, FATAL (default: INFO)
+  # Log per-chunk agent stream DEBUG entries (Agent thought:/Agent message chunk:).
+  # When false (default), per-chunk logs are suppressed but the INFO complete-thought /
+  # complete-message summaries still flush. Override with env LOGGING_AGENT_STREAM_CHUNKS.
+  agentStreamChunks: false
   # GELF (Graylog Extended Log Format) output configuration
   # When enabled, log messages are also sent to a GELF-compatible log server via HTTP
   gelf:

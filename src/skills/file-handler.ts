@@ -1,6 +1,6 @@
 // src/skills/file-handler.ts
 
-import { resolve } from "jsr:@std/path@^1/resolve";
+import { isAbsolute, resolve } from "@std/path";
 import { createLogger } from "@utils/logger.ts";
 import { ErrorCode, SkillError } from "../types/errors.ts";
 import { filesSentTotal } from "@utils/metrics.ts";
@@ -10,6 +10,13 @@ import type { SendFileSkillConfig } from "../types/config.ts";
 import { stripXmlTags, unescapeNewlines } from "./reply-handler.ts";
 
 const logger = createLogger("FileHandler");
+
+/**
+ * Escape a string for literal use inside a RegExp.
+ */
+function escapeRegExp(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
 
 export class FileHandler {
   constructor(private readonly config: SendFileSkillConfig) {}
@@ -77,6 +84,16 @@ export class FileHandler {
       try {
         size = (await Deno.stat(fullPath)).size;
       } catch (error) {
+        if (error instanceof Deno.errors.NotFound) {
+          const guidance = await this.workspacePrefixGuidance(
+            filePath,
+            fullPath,
+            context,
+          );
+          if (guidance) {
+            return { success: false, code: "SKILL_FILE_PATH_WORKSPACE_PREFIXED", error: guidance };
+          }
+        }
         const msg = error instanceof Error ? error.message : String(error);
         logger.error("Failed to stat file {filePath}", { filePath: fullPath, error: msg });
         return { success: false, error: `Failed to read file: ${msg}` };
@@ -184,10 +201,60 @@ export class FileHandler {
         messageIds: result.messageIds,
         messageId: result.messageId ?? result.messageIds?.[result.messageIds.length - 1],
         filesCount: deliveredCount,
-        nextAction: "You have done your job. EXIT IMMEDIATELY",
+        nextAction:
+          "If your text reply is still pending, send it now with send-reply — then EXIT IMMEDIATELY.",
       },
     };
   };
+
+  /**
+   * Self-referential workspace-prefix detection: the agent passed a
+   * workspace-prefixed path (e.g. "data/workspaces/discord/123/out.png") from
+   * inside that same workspace — the classic double-join after reading
+   * absolute paths from logs. Triggered ONLY when: the input was RELATIVE,
+   * the resolved path is inside the workspace boundary, stat failed with
+   * ENOENT, and the workspace-relative resolution contains a segment-boundary
+   * match of the workspace key ("discord/123/") — never a loose substring.
+   *
+   * Returns a self-contained guidance error, or null when the signature does
+   * not match (the caller then falls back to the plain stat-failure error).
+   */
+  private async workspacePrefixGuidance(
+    filePath: string,
+    fullPath: string,
+    context: SkillContext,
+  ): Promise<string | null> {
+    const wasRelative = !isAbsolute(filePath);
+    if (!wasRelative) return null;
+
+    const rootPrefix = resolve(context.workspace.path) + "/";
+    if (!fullPath.startsWith(rootPrefix)) return null;
+
+    const relFromRoot = fullPath.slice(rootPrefix.length);
+    const keyToken = `${context.workspace.key}/`;
+    const keyRe = new RegExp(`(^|/)${escapeRegExp(context.workspace.key)}/`);
+    // Use exec() so the candidate is derived from the boundary-valid occurrence
+    // itself — a raw indexOf() could select an earlier occurrence embedded inside
+    // another segment (e.g. "baddiscord/123/.../discord/123/out.png").
+    const match = keyRe.exec(relFromRoot);
+    if (!match) return null;
+
+    const keyStart = match.index + (match[1] ?? "").length;
+    const candidate = relFromRoot.slice(keyStart + keyToken.length);
+
+    const candidateExists = await pathExists(resolve(context.workspace.path, candidate));
+    const didYouMean = candidateExists
+      ? ` Did you mean --file-paths "${candidate}"?`
+      : " Re-check the file path relative to the workspace root.";
+
+    return (
+      `--file-paths "${filePath}" resolves to ${fullPath} — it already contains the workspace ` +
+      `path and was joined to the workspace root again. File paths must be RELATIVE to the ` +
+      `workspace root (${context.workspace.path}), which is your working directory.` +
+      didYouMean +
+      " Absolute paths inside the workspace are also accepted."
+    );
+  }
 
   /**
    * Check that the REAL path of a file (after symlink resolution) is inside the
@@ -250,5 +317,17 @@ export class FileHandler {
         "File path must be within workspace or agent-workspace boundary",
       );
     }
+  }
+}
+
+/**
+ * Check whether a file exists (true on any successful stat, false on failure).
+ */
+async function pathExists(p: string): Promise<boolean> {
+  try {
+    await Deno.stat(p);
+    return true;
+  } catch {
+    return false;
   }
 }

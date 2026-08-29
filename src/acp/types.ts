@@ -58,6 +58,15 @@ export interface ClientConfig {
   canWriteAgentWorkspace?: boolean;
 
   /**
+   * Whether per-chunk agent stream DEBUG logs (`Agent thought:` /
+   * `Agent message chunk:`) are emitted (mirrors `logging.agentStreamChunks`).
+   * When unset or false, chunks are still buffered and flushed as the INFO
+   * complete-thought/complete-message summaries — only the per-chunk noise is
+   * suppressed.
+   */
+  logAgentStreamChunks?: boolean;
+
+  /**
    * Process-level `XDG_DATA_HOME` of the agent subprocess (set by agent-factory).
    * In shared-process mode this is the pool-key-scoped data root
    * (`{dataRoot}/opencode-data/{poolKey}`); the permission gate uses it for the

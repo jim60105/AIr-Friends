@@ -444,6 +444,14 @@ export interface LoggingConfig {
   /** Log level (DEBUG, INFO, WARN, ERROR, FATAL) */
   level: keyof typeof LogLevel;
 
+  /**
+   * Log per-chunk `Agent thought:` / `Agent message chunk:` DEBUG entries from
+   * the ACP agent stream (default: false). When disabled, chunks are still
+   * buffered and flushed as the INFO complete-thought/complete-message
+   * summaries — only the per-chunk noise is suppressed.
+   */
+  agentStreamChunks?: boolean;
+
   /** GELF output configuration (optional) */
   gelf?: GelfConfig;
 }

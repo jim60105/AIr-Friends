@@ -15,39 +15,39 @@
 
     <script src="https://cdn.tailwindcss.com"></script>
     <script>
-      tailwind.config = {
-        theme: {
-          extend: {
-            fontFamily: {
-              sans: ["Manrope", "sans-serif"],
-              display: ["Outfit", "sans-serif"],
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ["Manrope", "sans-serif"],
+            display: ["Outfit", "sans-serif"],
+          },
+          colors: {
+            surface: {
+              DEFAULT: "#0B0C10", // Deep dark space
+              50: "#13151A",
+              100: "#1A1D24",
+              200: "#232730",
             },
-            colors: {
-              surface: {
-                DEFAULT: "#0B0C10", // Deep dark space
-                50: "#13151A",
-                100: "#1A1D24",
-                200: "#232730",
-              },
-              accent: {
-                DEFAULT: "#8A2BE2", // Neon purple
-                light: "#B829EA", // Magenta-ish
-                dark: "#5C1A99",
-                muted: "rgba(138, 43, 226, 0.15)",
-              },
-              cyan: {
-                DEFAULT: "#00F0FF",
-                muted: "rgba(0, 240, 255, 0.15)",
-              },
+            accent: {
+              DEFAULT: "#8A2BE2", // Neon purple
+              light: "#B829EA", // Magenta-ish
+              dark: "#5C1A99",
+              muted: "rgba(138, 43, 226, 0.15)",
             },
-            boxShadow: {
-              "glow": "0 0 20px rgba(138, 43, 226, 0.3)",
-              "glow-cyan": "0 0 20px rgba(0, 240, 255, 0.3)",
-              "panel": "0 4px 30px rgba(0, 0, 0, 0.4)",
+            cyan: {
+              DEFAULT: "#00F0FF",
+              muted: "rgba(0, 240, 255, 0.15)",
             },
           },
+          boxShadow: {
+            "glow": "0 0 20px rgba(138, 43, 226, 0.3)",
+            "glow-cyan": "0 0 20px rgba(0, 240, 255, 0.3)",
+            "panel": "0 4px 30px rgba(0, 0, 0, 0.4)",
+          },
         },
-      };
+      },
+    };
     </script>
     <link rel="stylesheet" href="/style.css">
   </head>
@@ -57,12 +57,10 @@
     <!-- Ambient background glows -->
     <div
       class="fixed top-[-10%] left-[-10%] w-[40%] h-[40%] bg-accent-dark/20 rounded-full blur-[120px] pointer-events-none"
-    >
-    </div>
+    ></div>
     <div
       class="fixed bottom-[-10%] right-[-10%] w-[40%] h-[40%] bg-cyan-muted rounded-full blur-[120px] pointer-events-none"
-    >
-    </div>
+    ></div>
 
     <!-- Login Screen -->
     <div
@@ -99,8 +97,7 @@
           <p
             id="login-error"
             class="text-red-400 text-sm text-center font-medium hidden bg-red-400/10 py-2 rounded-lg"
-          >
-          </p>
+          ></p>
         </form>
       </div>
     </div>
@@ -456,8 +453,7 @@
                     <div
                       id="file-content-rendered"
                       class="hidden absolute inset-0 p-8 text-gray-300 overflow-auto md-rendered bg-surface-100/30"
-                    >
-                    </div>
+                    ></div>
                   </div>
                 </div>
               </div>
@@ -569,8 +565,7 @@
                               stroke-linejoin="round"
                               stroke-width="2"
                               d="M19 9l-7 7-7-7"
-                            >
-                            </path>
+                            ></path>
                           </svg>
                         </div>
                       </div>
@@ -737,8 +732,7 @@
           id="file-viewer-modal-content"
           class="overflow-auto p-8 text-[13px] leading-relaxed font-mono text-gray-300 whitespace-pre-wrap"
           style="height: calc(80vh - 60px)"
-        >
-        </div>
+        ></div>
       </div>
     </div>
 

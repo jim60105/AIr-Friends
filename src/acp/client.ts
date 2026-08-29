@@ -1965,9 +1965,11 @@ export class ChatbotClient implements acp.Client {
         this.flushThoughtBuffer();
         // Agent is generating response - log but don't send
         if (update.content.type === "text") {
-          this.logger.debug("Agent message chunk: {text}", {
-            text: update.content.text.substring(0, 100),
-          });
+          if (this.config.logAgentStreamChunks) {
+            this.logger.debug("Agent message chunk: {text}", {
+              text: update.content.text.substring(0, 100),
+            });
+          }
           // Accumulate text chunks for complete message logging
           this.messageBuffer.push(update.content.text);
         }
@@ -2037,9 +2039,11 @@ export class ChatbotClient implements acp.Client {
             : undefined;
           const directText = typeof updateAny.text === "string" ? updateAny.text : "";
           const thoughtText = contentText ?? directText;
-          this.logger.debug("Agent thought: {text}", {
-            text: thoughtText.substring(0, 100),
-          });
+          if (this.config.logAgentStreamChunks) {
+            this.logger.debug("Agent thought: {text}", {
+              text: thoughtText.substring(0, 100),
+            });
+          }
           if (thoughtText.length > 0) {
             this.thoughtBuffer.push(thoughtText);
           }

@@ -672,6 +672,7 @@ export class DashboardServer {
         yolo: false,
         autoApproveSkills: this.deps.appConfig.agent.autoApproveSkills,
         allowedWriteExtensions: this.deps.appConfig.agent.sandbox?.allowedWriteExtensions,
+        logAgentStreamChunks: this.deps.appConfig.logging?.agentStreamChunks ?? false,
       };
 
       const connectorOptions: AgentConnectorOptions = {

@@ -121,6 +121,10 @@ env:
   GELF_PROTOCOL: 'http'
   GELF_COMPRESS: 'true'
 
+  # Per-chunk agent stream debug logging (Agent thought:/Agent message chunk: DEBUG lines).
+  # 'true'/'false' (default: false).
+  LOGGING_AGENT_STREAM_CHUNKS: 'false'
+
   # RSS Feed Research Settings
   SELF_RESEARCH_ENABLED: 'false'
   SELF_RESEARCH_MODEL: 'openrouter/anthropic/claude-opus-4.8'

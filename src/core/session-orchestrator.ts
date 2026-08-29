@@ -628,6 +628,7 @@ export class SessionOrchestrator {
         yolo: yoloDecision.enabled,
         autoApproveSkills: this.config.agent.autoApproveSkills,
         allowedWriteExtensions: this.config.agent.sandbox?.allowedWriteExtensions,
+        logAgentStreamChunks: this.config.logging?.agentStreamChunks ?? false,
         sessionId: shellSessionId ?? undefined,
       };
 
@@ -1510,6 +1511,7 @@ export class SessionOrchestrator {
         yolo: yoloDecision.enabled,
         autoApproveSkills: this.config.agent.autoApproveSkills,
         allowedWriteExtensions: this.config.agent.sandbox?.allowedWriteExtensions,
+        logAgentStreamChunks: this.config.logging?.agentStreamChunks ?? false,
         sessionId: shellSessionId ?? undefined,
       };
 
@@ -1937,6 +1939,7 @@ export class SessionOrchestrator {
         sessionId: shellSessionId ?? undefined,
         autoApproveSkills: this.config.agent.autoApproveSkills,
         allowedWriteExtensions: this.config.agent.sandbox?.allowedWriteExtensions,
+        logAgentStreamChunks: this.config.logging?.agentStreamChunks ?? false,
         // F3: self-research is the ONLY session type authorized to write the shared
         // agent workspace (research notes / journal). All other session types get
         // read-only access via the permission gate.
@@ -2458,6 +2461,7 @@ export class SessionOrchestrator {
         yolo: this.yolo,
         autoApproveSkills: this.config.agent.autoApproveSkills,
         allowedWriteExtensions: this.config.agent.sandbox?.allowedWriteExtensions,
+        logAgentStreamChunks: this.config.logging?.agentStreamChunks ?? false,
         sessionId: shellSessionId ?? undefined,
       };
 
@@ -2838,6 +2842,7 @@ export class SessionOrchestrator {
         sessionId: shellSessionId ?? undefined,
         autoApproveSkills: this.config.agent.autoApproveSkills,
         allowedWriteExtensions: this.config.agent.sandbox?.allowedWriteExtensions,
+        logAgentStreamChunks: this.config.logging?.agentStreamChunks ?? false,
       };
 
       const agentType = getDefaultAgentType(this.config);
@@ -3195,6 +3200,7 @@ export class SessionOrchestrator {
         yolo: yoloDecision.enabled,
         autoApproveSkills: this.config.agent.autoApproveSkills,
         allowedWriteExtensions: this.config.agent.sandbox?.allowedWriteExtensions,
+        logAgentStreamChunks: this.config.logging?.agentStreamChunks ?? false,
         sessionId: shellSessionId ?? undefined,
       };
 

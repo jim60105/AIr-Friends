@@ -238,7 +238,7 @@ Deno.test("FileHandler - multi-file success captures files array passed to adapt
   assertEquals(data.filesCount, 2);
   assertEquals(
     (result.data as { nextAction: string }).nextAction,
-    "You have done your job. EXIT IMMEDIATELY",
+    "If your text reply is still pending, send it now with send-reply — then EXIT IMMEDIATELY.",
   );
 
   await Deno.remove(dir, { recursive: true });
@@ -442,6 +442,140 @@ Deno.test("FileHandler - metrics incremented once per delivered file", async () 
   const result = await handler.handleSendFile({ filePaths: ["a.png", "b.png"] }, context);
   assertEquals(result.success, true);
   assertEquals((result.data as { filesCount: number }).filesCount, 2);
+
+  await Deno.remove(dir, { recursive: true });
+});
+
+Deno.test("FileHandler - workspace-prefixed missing path with existing candidate gets corrected example", async () => {
+  const { dir, workspace } = await makeTempWorkspace();
+  // The de-prefixed candidate EXISTS at the workspace root
+  await Deno.writeTextFile(`${dir}/out.png`, "candidate");
+
+  const context = createContext(undefined, undefined, workspace);
+  const handler = new FileHandler({ enabled: true });
+  // The classic double-join: "discord/123/out.png" (workspace key segments)
+  const result = await handler.handleSendFile(
+    { filePaths: ["discord/123/out.png"] },
+    context,
+  );
+
+  assertEquals(result.success, false);
+  assertEquals(result.code, "SKILL_FILE_PATH_WORKSPACE_PREFIXED");
+  const error = result.error ?? "";
+  assertEquals(error.includes("resolves to"), true);
+  assertEquals(error.includes("joined to the workspace root again"), true);
+  assertEquals(error.includes('--file-paths "out.png"'), true);
+  assertEquals(error.includes(`(${dir})`), true);
+
+  await Deno.remove(dir, { recursive: true });
+});
+
+Deno.test("FileHandler - candidate is extracted from the boundary-valid key occurrence", async () => {
+  const { dir, workspace } = await makeTempWorkspace();
+  // The candidate "out.png" exists at the root; the earlier "discord/123/"
+  // occurrence is embedded inside the "xxxdiscord" segment (NOT boundary-valid)
+  await Deno.writeTextFile(`${dir}/out.png`, "candidate");
+
+  const context = createContext(undefined, undefined, workspace);
+  const handler = new FileHandler({ enabled: true });
+  const result = await handler.handleSendFile(
+    { filePaths: ["xxxdiscord/123/x/discord/123/out.png"] },
+    context,
+  );
+
+  assertEquals(result.success, false);
+  assertEquals(result.code, "SKILL_FILE_PATH_WORKSPACE_PREFIXED");
+  const error = result.error ?? "";
+  // The corrected form must come from the boundary-valid occurrence
+  assertEquals(error.includes('--file-paths "out.png"'), true);
+  assertEquals(error.includes('--file-paths "x/discord/123/out.png"'), false);
+
+  await Deno.remove(dir, { recursive: true });
+});
+
+Deno.test("FileHandler - workspace-prefixed missing path with missing candidate does not guess", async () => {
+  const { dir, workspace } = await makeTempWorkspace();
+  // No candidate file exists anywhere
+  const context = createContext(undefined, undefined, workspace);
+  const handler = new FileHandler({ enabled: true });
+  const result = await handler.handleSendFile(
+    { filePaths: ["discord/123/gone.png"] },
+    context,
+  );
+
+  assertEquals(result.success, false);
+  assertEquals(result.code, "SKILL_FILE_PATH_WORKSPACE_PREFIXED");
+  const error = result.error ?? "";
+  assertEquals(error.includes("joined to the workspace root again"), true);
+  // guidance must not claim a specific intended filename
+  assertEquals(error.includes("Did you mean"), false);
+  // the only --file-paths mention echoes the ORIGINAL argument, never a candidate
+  assertEquals(error.includes('--file-paths "gone.png"'), false);
+
+  await Deno.remove(dir, { recursive: true });
+});
+
+Deno.test("FileHandler - plain missing file keeps the original error without code", async () => {
+  const { dir, workspace } = await makeTempWorkspace();
+  const context = createContext(undefined, undefined, workspace);
+  const handler = new FileHandler({ enabled: true });
+  const result = await handler.handleSendFile({ filePaths: ["nope.png"] }, context);
+
+  assertEquals(result.success, false);
+  assertEquals(result.code, undefined);
+  assertEquals(result.error?.startsWith("Failed to read file"), true);
+
+  await Deno.remove(dir, { recursive: true });
+});
+
+Deno.test("FileHandler - absolute path inside workspace still delivers", async () => {
+  const { dir, workspace } = await makeTempWorkspace();
+  await Deno.writeTextFile(`${dir}/abs.png`, "abs content");
+
+  const capture: CapturedSendFile[] = [];
+  const context = createContext(
+    createMockPlatformAdapter({ success: true, messageId: "m", messageIds: ["m"] }, capture),
+    undefined,
+    workspace,
+  );
+
+  const handler = new FileHandler({ enabled: true });
+  const result = await handler.handleSendFile(
+    { filePaths: [`${dir}/abs.png`] },
+    context,
+  );
+
+  assertEquals(result.success, true);
+  assertEquals(capture.length, 1);
+  assertEquals(capture[0].files[0].fileName, "abs.png");
+
+  await Deno.remove(dir, { recursive: true });
+});
+
+Deno.test("FileHandler - existing legit relative path containing workspace-key segments still delivers", async () => {
+  const { dir, workspace } = await makeTempWorkspace();
+  // A legitimate nested path that happens to contain the "discord/123/" segments
+  await Deno.mkdir(`${dir}/discord/123/exports`, { recursive: true });
+  await Deno.writeTextFile(`${dir}/discord/123/exports/report.pdf`, "report");
+
+  const capture: CapturedSendFile[] = [];
+  const context = createContext(
+    createMockPlatformAdapter({ success: true, messageId: "m", messageIds: ["m"] }, capture),
+    undefined,
+    workspace,
+  );
+
+  const handler = new FileHandler({ enabled: true });
+  const result = await handler.handleSendFile(
+    { filePaths: ["discord/123/exports/report.pdf"] },
+    context,
+  );
+
+  // Stat succeeds so the heuristic is never reached
+  assertEquals(result.success, true);
+  assertEquals(result.code, undefined);
+  assertEquals(capture.length, 1);
+  assertEquals(capture[0].files[0].fileName, "report.pdf");
 
   await Deno.remove(dir, { recursive: true });
 });

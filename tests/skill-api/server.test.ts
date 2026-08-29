@@ -2826,6 +2826,45 @@ Deno.test("SkillAPIServer - send-file success stores lastFileMessageId (not last
   }
 });
 
+Deno.test("SkillAPIServer - send-file workspace-prefixed path returns typed guidance code", async () => {
+  const tempDir = await Deno.makeTempDir();
+  try {
+    const rig = createSendFileRig(tempDir);
+    // The de-prefixed candidate EXISTS at the workspace root
+    await Deno.writeTextFile(`${rig.mockWorkspace.path}/out.png`, "candidate");
+
+    const port = 3201;
+    const server = new SkillAPIServer(rig.sessionRegistry, rig.skillRegistry, {
+      port,
+      host: "127.0.0.1",
+    }, TEST_SKILL_SECRET);
+    server.start();
+    await waitForServer(port);
+
+    // The classic double-join: "discord/123/out.png" (workspace key segments)
+    const response = await fetch(`http://localhost:${port}/api/skill/send-file`, {
+      method: "POST",
+      headers: jsonHeaders(await makeSessionJwt(rig.sessionRegistry, rig.sessionId)),
+      body: JSON.stringify({
+        sessionId: rig.sessionId,
+        parameters: { filePaths: ["discord/123/out.png"] },
+      }),
+    });
+    assertEquals(response.status, 400);
+    const body = await response.json();
+    // The typed code must reach the shell-skill client unchanged
+    assertEquals(body.success, false);
+    assertEquals(body.code, "SKILL_FILE_PATH_WORKSPACE_PREFIXED");
+    assertEquals((body.error as string).includes('--file-paths "out.png"'), true);
+    assertEquals((body.error as string).includes("joined to the workspace root again"), true);
+
+    await server.stop();
+    rig.sessionRegistry.stop();
+  } finally {
+    await Deno.remove(tempDir, { recursive: true });
+  }
+});
+
 Deno.test("SkillAPIServer - send-file total failure records no message ID", async () => {
   const tempDir = await Deno.makeTempDir();
   try {
