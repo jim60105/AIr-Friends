@@ -106,7 +106,6 @@ export class GitBackupService {
     // Set user config after clone
     await this.runGit(["config", "user.name", this.config.authorName]);
     await this.runGit(["config", "user.email", this.config.authorEmail]);
-    await this.ensureGitignore();
     await this.configureRemote(); // Ensure remote uses plain URL (not auth URL)
 
     // Detect the remote's default branch (prefer master over main)
@@ -144,7 +143,7 @@ export class GitBackupService {
       return;
     }
 
-    // Remote had commits: commit .gitignore changes if any, and push
+    // Remote had commits: commit uncommitted changes if any, and push
     await this.deregisterSubmodules();
     await this.runGit(["add", "-A"]);
     const diff = await this.runGit(["diff", "--cached", "--quiet"], [1]);
@@ -167,7 +166,6 @@ export class GitBackupService {
 
     await this.runGit(["config", "user.name", this.config.authorName]);
     await this.runGit(["config", "user.email", this.config.authorEmail]);
-    await this.ensureGitignore();
     await this.configureRemote();
 
     // Commit all existing files
@@ -189,7 +187,6 @@ export class GitBackupService {
 
     await this.runGit(["config", "user.name", this.config.authorName]);
     await this.runGit(["config", "user.email", this.config.authorEmail]);
-    await this.ensureGitignore();
     await this.configureRemote();
 
     // Ensure we are on default branch
@@ -436,44 +433,6 @@ export class GitBackupService {
       await Deno.remove(gitmodulesPath);
     } catch {
       // .gitmodules doesn't exist — this is the normal case
-    }
-  }
-
-  /** Ensure .gitignore exists with required exclusions. */
-  private async ensureGitignore(): Promise<void> {
-    const gitignorePath = `${this.dataDir}/.gitignore`;
-    const content = `# Scheduler state (runtime-only, frequently updated)
-scheduler-state.json
-
-# Ignore nested git repositories (agent-created repos in workspaces)
-**/.git
-
-# Workspace temporary directories
-**/tmp/**
-
-# OS generated files
-.DS_Store
-Thumbs.db
-`;
-    try {
-      await Deno.writeTextFile(gitignorePath, content);
-
-      // Remove scheduler-state.json from index if previously tracked
-      const rmResult = await this.runGit([
-        "rm",
-        "--cached",
-        "--ignore-unmatch",
-        "scheduler-state.json",
-      ]);
-      if (!rmResult.success) {
-        logger.warn("Failed to remove scheduler-state.json from Git index", {
-          error: rmResult.output,
-        });
-      }
-    } catch (error) {
-      logger.error("Failed to write .gitignore", {
-        error: error instanceof Error ? error.message : String(error),
-      });
     }
   }
 

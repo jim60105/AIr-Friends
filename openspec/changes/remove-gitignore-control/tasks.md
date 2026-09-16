@@ -1,7 +1,7 @@
 ## 1. Remove code-owned .gitignore
 
-- [ ] 1.1 Delete `ensureGitignore()` (`src/core/git-backup-service.ts:442-478`) — including its bundled `git rm --cached --ignore-unmatch scheduler-state.json` side effect — and verify `grep -n "ensureGitignore" src/core/git-backup-service.ts` returns nothing
-- [ ] 1.2 Remove the three `await this.ensureGitignore();` call sites — `initFromClone` (~109), `initFromExisting` (~170), `initFromGitRepo` (~192) — plus the stale `// Remote had commits: commit .gitignore changes if any, and push` comment in `initFromClone` (~147); verify `deno check src/main.ts` passes with no unused-symbol errors
+- [x] 1.1 Delete `ensureGitignore()` (`src/core/git-backup-service.ts:442-478`) — including its bundled `git rm --cached --ignore-unmatch scheduler-state.json` side effect — and verify `grep -n "ensureGitignore" src/core/git-backup-service.ts` returns nothing
+- [x] 1.2 Remove the three `await this.ensureGitignore();` call sites — `initFromClone` (~109), `initFromExisting` (~170), `initFromGitRepo` (~192) — plus the stale `// Remote had commits: commit .gitignore changes if any, and push` comment in `initFromClone` (~147); verify `deno check src/main.ts` passes with no unused-symbol errors
 
 ## 2. Tests follow the contract
 
