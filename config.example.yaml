@@ -331,6 +331,8 @@ audit:
     - "session_end"
 
 # Git backup - backs up the entire data/ directory to a remote Git repository
+# Note: The data directory's .gitignore is operator-maintained; the service never writes or modifies it.
+# See docs/DESIGN.md (Git Backup section) for the recommended baseline .gitignore.
 gitBackup:
   enabled: false                  # Enable Git backup (default: false); override with env GIT_BACKUP_ENABLED
   remoteUrl: ""                   # Remote Git repository URL (HTTPS); override with env GIT_BACKUP_REMOTE_URL

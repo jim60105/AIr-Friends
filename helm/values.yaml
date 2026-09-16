@@ -148,6 +148,7 @@ env:
   METRICS_PATH: '/metrics'
 
   # Git Backup - backs up data/ directory to a remote Git repository
+  # Note: data/ .gitignore is operator-maintained; see docs/DESIGN.md for recommended baseline
   GIT_BACKUP_ENABLED: 'false'
   GIT_BACKUP_REMOTE_URL: 'https://github.com/your-username/your-backup-repo.git'
   GIT_BACKUP_INTERVAL_MS: '3600000'

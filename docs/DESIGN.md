@@ -1244,6 +1244,51 @@ gitBackup:
 
 Initialization is intelligent: handles empty directories (clone), non-Git directories (init + push), and existing repos (commit + push). Push conflicts trigger automatic rebase retry with `backup-{datetime}` fallback branch. A final backup runs during graceful shutdown.
 
+### Operator-Owned `.gitignore`
+
+The backup service does not create, overwrite, or modify `.gitignore` in the data directory. The data repository's `.gitignore` belongs entirely to the operator, preventing automatic clobbering of custom ignore rules.
+
+Operators should maintain a `.gitignore` at the root of the data repository covering runtime artifacts. The recommended baseline is:
+
+```gitignore
+# Scheduler state (runtime-only, frequently updated)
+scheduler-state.json
+
+# Ignore nested git repositories (agent-created repos in workspaces)
+**/.git
+
+# Workspace temporary directories
+**/tmp/**
+
+# OS generated files
+.DS_Store
+Thumbs.db
+
+# Bot runtime artifacts
+channel-tmp/
+opencode-data/
+channel-cwd/
+skill-jwt/
+skill-secret
+
+# Media and binary formats
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.webp
+*.mp4
+*.pdf
+*.docx
+*.xlsx
+*.pptx
+*.html
+```
+
+> **Note on `**/.git`**: The `**/.git` rule is advisory for agent-created nested repositories. `deregisterSubmodules()` only unregisters *registered* submodules, so an agent-created nested repo appears as a gitlink entry unless its directory is explicitly ignored (Git never tracks `.git` contents — only noisy commits occur without this rule, matching pre-change behavior).
+>
+> **Migration Note**: If `scheduler-state.json` (or any other baseline path) is already tracked in an existing repository, run `git rm --cached scheduler-state.json` once to untrack it; adding an entry to `.gitignore` does not untrack already-tracked files.
+
 Environment variables: `GIT_BACKUP_ENABLED`, `GIT_BACKUP_REMOTE_URL`, `GIT_BACKUP_INTERVAL_MS`, `GIT_BACKUP_AUTHOR_NAME`, `GIT_BACKUP_AUTHOR_EMAIL`, `GIT_BACKUP_AUTH_USER`, `GIT_BACKUP_AUTH_PASSWORD`.
 
 **Key Components:** `src/core/git-backup-service.ts`, `src/core/git-backup-scheduler.ts`.

@@ -12,13 +12,13 @@
 
 ## 3. Operator documentation
 
-- [ ] 3.1 Add an operator-owned `.gitignore` paragraph and the recommended baseline fenced block to the Git Backup section of `docs/DESIGN.md`: `scheduler-state.json`, `**/.git`, `**/tmp/**`, `.DS_Store`, `Thumbs.db`, `channel-tmp/`, `opencode-data/`, `channel-cwd/`, `skill-jwt/`, `skill-secret`, and media/binary globs (`*.png`, `*.jpg`, `*.jpeg`, `*.gif`, `*.webp`, `*.mp4`, `*.pdf`, `*.docx`, `*.xlsx`, `*.pptx`, `*.html`). Annotate that `**/.git` is advisory for unregistered nested repos — `deregisterSubmodules()` only unregisters registered submodules, so an agent-created nested repo appears as a gitlink entry unless its directory is ignored (no content is ever tracked; noisy commits only, matching pre-change behavior). Verify the section states the service never writes `.gitignore`
-- [ ] 3.2 Add the operator note (own your `.gitignore`; baseline lives in `docs/DESIGN.md`) beside the Git Backup env table in `docs/DEVELOPMENT.md`
-- [ ] 3.3 Add a comment to the `gitBackup:` block in the root `config.example.yaml` stating the data dir `.gitignore` is operator-maintained and linking the DESIGN.md baseline
-- [ ] 3.4 Add the equivalent one-line comment to the `GIT_BACKUP_*` block in `helm/values.yaml`
-- [ ] 3.5 Add a one-line note to `AGENTS.md` Feature 21 (Git Backup): the data dir `.gitignore` is operator-maintained; the service never writes it
+- [x] 3.1 Add an operator-owned `.gitignore` paragraph and the recommended baseline fenced block to the Git Backup section of `docs/DESIGN.md`: `scheduler-state.json`, `**/.git`, `**/tmp/**`, `.DS_Store`, `Thumbs.db`, `channel-tmp/`, `opencode-data/`, `channel-cwd/`, `skill-jwt/`, `skill-secret`, and media/binary globs (`*.png`, `*.jpg`, `*.jpeg`, `*.gif`, `*.webp`, `*.mp4`, `*.pdf`, `*.docx`, `*.xlsx`, `*.pptx`, `*.html`). Annotate that `**/.git` is advisory for unregistered nested repos — `deregisterSubmodules()` only unregisters registered submodules, so an agent-created nested repo appears as a gitlink entry unless its directory is ignored (no content is ever tracked; noisy commits only, matching pre-change behavior). Verify the section states the service never writes `.gitignore`
+- [x] 3.2 Add the operator note (own your `.gitignore`; baseline lives in `docs/DESIGN.md`) beside the Git Backup env table in `docs/DEVELOPMENT.md`
+- [x] 3.3 Add a comment to the `gitBackup:` block in the root `config.example.yaml` stating the data dir `.gitignore` is operator-maintained and linking the DESIGN.md baseline
+- [x] 3.4 Add the equivalent one-line comment to the `GIT_BACKUP_*` block in `helm/values.yaml`
+- [x] 3.5 Add a one-line note to `AGENTS.md` Feature 21 (Git Backup): the data dir `.gitignore` is operator-maintained; the service never writes it
 
 ## 4. Verification
 
-- [ ] 4.1 Run project gates once at the end: `deno fmt src/ tests/`, `deno lint src/ tests/`, `deno check src/main.ts`, `deno test` — all green
-- [ ] 4.2 Add a CHANGELOG.md entry under Unreleased (Removed: code-managed data-dir `.gitignore`; operator-owned going forward, see docs baseline) and verify the diff touches only the intended files
+- [x] 4.1 Run project gates once at the end: `deno fmt src/ tests/`, `deno lint src/ tests/`, `deno check src/main.ts`, `deno test` — all green
+- [x] 4.2 Add a CHANGELOG.md entry under Unreleased (Removed: code-managed data-dir `.gitignore`; operator-owned going forward, see docs baseline) and verify the diff touches only the intended files

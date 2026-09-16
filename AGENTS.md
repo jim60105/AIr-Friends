@@ -1090,6 +1090,7 @@ gitBackup:
 5. Authentication uses configurable credentials (`GIT_BACKUP_AUTH_USER` / `GIT_BACKUP_AUTH_PASSWORD`), falling back to `GITHUB_TOKEN` for backward compatibility
 6. A final backup is performed during graceful shutdown
 7. Push conflicts during periodic backup trigger an automatic `pull --rebase` and one retry
+8. The data directory `.gitignore` is operator-maintained; the service never creates, overwrites, or modifies `.gitignore`
 
 **Key Components:**
 
