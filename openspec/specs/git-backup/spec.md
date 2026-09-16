@@ -41,14 +41,13 @@ The `GitBackupScheduler` SHALL execute backups at a fixed interval defined by `g
 
 ### Requirement: Smart Initialization
 
-`GitBackupService.initialize()` SHALL detect the directory state and apply the appropriate initialization strategy. The directory SHALL be resolved to an absolute path. Before any git operations, the service SHALL mark the directory as `safe.directory` via `git config --global` and clean stale `.git/index.lock` files.
+`GitBackupService.initialize()` SHALL detect the directory state and apply the appropriate initialization strategy. The directory SHALL be resolved to an absolute path. Before any git operations, the service SHALL mark the directory as `safe.directory` via `git config --global` and clean stale `.git/index.lock` files. Initialization SHALL NOT create, overwrite, or modify `.gitignore` in the data directory.
 
 #### Scenario: Empty directory (Case A — clone)
 - **GIVEN** the data directory is empty
 - **WHEN** `initialize()` is called
 - **THEN** the service SHALL clone the remote repository into the directory
 - **AND** configure `user.name` and `user.email`
-- **AND** ensure `.gitignore` exists
 - **AND** detect the remote default branch (preferring `master` over `main`)
 - **AND** if clone fails, fall back to Case B (init from existing)
 
@@ -56,14 +55,14 @@ The `GitBackupScheduler` SHALL execute backups at a fixed interval defined by `g
 - **GIVEN** the data directory contains files but no `.git` directory
 - **WHEN** `initialize()` is called
 - **THEN** the service SHALL run `git init -b master`
-- **AND** configure `user.name`, `user.email`, `.gitignore`, and remote origin
+- **AND** configure `user.name`, `user.email`, and remote origin
 - **AND** commit all existing files with message `initial: {timestamp}`
 - **AND** push with fallback conflict resolution
 
 #### Scenario: Existing Git repository (Case C — sync)
 - **GIVEN** the data directory contains a `.git` directory
 - **WHEN** `initialize()` is called
-- **THEN** the service SHALL configure author, `.gitignore`, and remote
+- **THEN** the service SHALL configure author and remote
 - **AND** ensure the current branch matches the default branch (renaming if needed)
 - **AND** commit any uncommitted changes with message `backup: {timestamp}`
 - **AND** push with fallback conflict resolution
@@ -142,15 +141,6 @@ A final backup SHALL be performed during the application's graceful shutdown seq
 - **WHEN** the shutdown handler runs
 - **THEN** `performBackup()` SHALL be called to commit and push any remaining changes
 
-### Requirement: Gitignore Management
-
-The service SHALL ensure a `.gitignore` file exists in the data directory containing exclusions for: `scheduler-state.json`, `**/.git`, `**/tmp/**`, `.DS_Store`, and `Thumbs.db`. After writing `.gitignore`, the service SHALL remove `scheduler-state.json` from the git index if previously tracked.
-
-#### Scenario: Gitignore creation
-- **GIVEN** the data directory has no `.gitignore`
-- **WHEN** initialization runs
-- **THEN** a `.gitignore` SHALL be created with the standard exclusion rules
-
 ### Requirement: Submodule Deregistration
 
 Before staging files, the service SHALL deregister all submodules via `git submodule deinit --all --force` and remove `.gitmodules` if it exists. This prevents nested `.git` directories (from agent-created repos in workspaces) from being tracked as submodules.
@@ -193,3 +183,19 @@ The following environment variables SHALL override their corresponding configura
 - **GIVEN** `GIT_BACKUP_ENABLED=true` and `GIT_BACKUP_INTERVAL_MS=1800000`
 - **WHEN** the configuration is loaded
 - **THEN** git backup SHALL be enabled with interval 1,800,000 ms
+
+### Requirement: Data directory .gitignore is operator-owned
+
+The service SHALL NOT create, overwrite, or modify the `.gitignore` file in the data directory during initialization or backup, and SHALL NOT manipulate the git index to untrack files on the assumption of generated ignore rules. Whatever `.gitignore` the operator provides (via clone or manual creation) SHALL remain byte-identical across any number of backup cycles.
+
+#### Scenario: Operator .gitignore survives initialization and backup
+- **GIVEN** the data directory contains an operator-authored `.gitignore` with custom rules
+- **WHEN** `initialize()` and any number of `performBackup()` runs complete
+- **THEN** the `.gitignore` file content SHALL be unchanged
+- **AND** no commit SHALL be created solely to rewrite `.gitignore`
+
+#### Scenario: No .gitignore present
+- **GIVEN** the data directory has no `.gitignore`
+- **WHEN** initialization runs
+- **THEN** the service SHALL NOT create one
+- **AND** backup SHALL proceed normally
