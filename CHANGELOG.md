@@ -19,6 +19,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - `prompts/agent_permissions.md` and `prompts/browser_automation.md` now document the real command allow-list (removed the false `curl` claim), the multi-command chaining rule, the always-rejected operators, the OpenCode-denied commands (`echo`/`curl`/`git`/...), and the webfetch 403/429 → `agent-browser` fallback; `skills/self-research/SKILL.md` uses the deployment-independent `$AGENT_WORKSPACE` path and the Read tool instead of `cat`-with-fallbacks
 - **BREAKING (semantics)**: a self-research session that produces no research note is no longer reported as successful — it is retried once and recorded as a failure if still empty. Operators who mount custom `prompts/agent_permissions.md` / `prompts/browser_automation.md` overrides must re-mount them to receive the corrected guidance
 
+### Removed
+
+- **BREAKING (semantics)**: Removed code-managed data-directory `.gitignore` generation (`GitBackupService.ensureGitignore()`) and bundled `scheduler-state.json` index untracking. The data repository's `.gitignore` is now entirely operator-owned. Operators upgrading should ensure their data repository carries the recommended baseline `.gitignore` (documented in `docs/DESIGN.md`) and run `git rm --cached scheduler-state.json` once if the file was previously tracked
+
 ## [0.30.0] - 2026-08-15
 
 ### Added

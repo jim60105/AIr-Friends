@@ -337,6 +337,8 @@ Configuration is loaded from `config.yaml` (YAML format). See [config.example.ya
 | `GIT_BACKUP_AUTH_USER`     | Git backup HTTPS auth username (default: authorEmail)        |
 | `GIT_BACKUP_AUTH_PASSWORD` | Git backup HTTPS auth password/token (default: GITHUB_TOKEN) |
 
+> **Operator Note**: The backup service does not create or manage `.gitignore` in the data directory. Operators own and maintain `{dataDir}/.gitignore` to prevent runtime artifacts from being tracked. See the recommended baseline in `docs/DESIGN.md` (Git Backup section).
+
 **Send File Skill:**
 
 | Variable                             | Description                                         |
