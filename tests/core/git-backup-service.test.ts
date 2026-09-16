@@ -83,7 +83,7 @@ async function withTempGitEnv(
   }
 }
 
-Deno.test("GitBackupService - initialize creates .git and .gitignore", async () => {
+Deno.test("GitBackupService - initialize creates .git and no .gitignore", async () => {
   await withTempGitEnv(async (dataDir, bareDir) => {
     const service = new GitBackupService(
       createConfig({ remoteUrl: bareDir }),
@@ -94,8 +94,14 @@ Deno.test("GitBackupService - initialize creates .git and .gitignore", async () 
     const gitStat = await Deno.stat(`${dataDir}/.git`);
     assertEquals(gitStat.isDirectory, true);
 
-    const gitignore = await Deno.readTextFile(`${dataDir}/.gitignore`);
-    assertEquals(gitignore.includes("scheduler-state.json"), true);
+    let gitignoreExists = false;
+    try {
+      await Deno.stat(`${dataDir}/.gitignore`);
+      gitignoreExists = true;
+    } catch {
+      gitignoreExists = false;
+    }
+    assertEquals(gitignoreExists, false);
   });
 });
 
@@ -407,20 +413,19 @@ Deno.test("GitBackupService - initialize falls back to init when clone fails", a
     const gitStat = await Deno.stat(`${dataDir}/.git`);
     assertEquals(gitStat.isDirectory, true);
 
-    // Should have an initial commit with .gitignore
-    const logProc = new Deno.Command("git", {
-      args: ["log", "--oneline"],
+    // Fallback initialized an empty repo — no files to commit, so no initial commit
+    const revProc = new Deno.Command("git", {
+      args: ["rev-parse", "--verify", "HEAD"],
       cwd: dataDir,
       stdout: "piped",
       stderr: "piped",
     });
-    const { stdout } = await logProc.output();
-    const log = new TextDecoder().decode(stdout);
-    assertEquals(log.includes("initial:"), true);
+    const { code } = await revProc.output();
+    assertEquals(code, 128);
   });
 });
 
-Deno.test("GitBackupService - initialize clones empty remote and creates initial commit", async () => {
+Deno.test("GitBackupService - initialize clones empty remote with nothing to commit", async () => {
   // Use createInitialCommit: false to simulate an empty remote repo
   await withTempGitEnv(async (dataDir, bareDir) => {
     const service = new GitBackupService(
@@ -433,27 +438,15 @@ Deno.test("GitBackupService - initialize clones empty remote and creates initial
     const gitStat = await Deno.stat(`${dataDir}/.git`);
     assertEquals(gitStat.isDirectory, true);
 
-    // Should have created an initial commit
-    const logProc = new Deno.Command("git", {
-      args: ["log", "--oneline"],
+    // Empty remote and empty data dir — no commit created
+    const revProc = new Deno.Command("git", {
+      args: ["rev-parse", "--verify", "HEAD"],
       cwd: dataDir,
       stdout: "piped",
       stderr: "piped",
     });
-    const { stdout } = await logProc.output();
-    const log = new TextDecoder().decode(stdout);
-    assertEquals(log.includes("initial:"), true);
-
-    // Verify it was pushed to the bare repo
-    const bareLogProc = new Deno.Command("git", {
-      args: ["log", "--oneline", "master"],
-      cwd: bareDir,
-      stdout: "piped",
-      stderr: "piped",
-    });
-    const { stdout: bareStdout } = await bareLogProc.output();
-    const bareLog = new TextDecoder().decode(bareStdout);
-    assertEquals(bareLog.includes("initial:"), true);
+    const { code } = await revProc.output();
+    assertEquals(code, 128);
   }, { createInitialCommit: false });
 });
 
@@ -684,21 +677,6 @@ Deno.test("GitBackupService - performBackup handles submodule modified content c
   });
 });
 
-Deno.test("GitBackupService - ensureGitignore includes **/.git rule", async () => {
-  await withTempGitEnv(async (dataDir, bareDir) => {
-    const service = new GitBackupService(
-      createConfig({ remoteUrl: bareDir }),
-      dataDir,
-    );
-    await service.initialize();
-
-    const gitignore = await Deno.readTextFile(`${dataDir}/.gitignore`);
-    assertEquals(gitignore.includes("**/.git"), true);
-    assertStringIncludes(gitignore, "scheduler-state.json");
-    assertStringIncludes(gitignore, "**/tmp/**");
-  });
-});
-
 Deno.test("GitBackupService - performBackup skips commit when only submodule changes exist", async () => {
   await withTempGitEnv(async (dataDir, bareDir) => {
     const service = new GitBackupService(
@@ -884,15 +862,15 @@ Deno.test("GitBackupService - empty-remote init (rev-parse HEAD exit 128) does n
       restore();
     }
 
-    // Verify the initial commit was really created (probe path was exercised)
-    const logProc = new Deno.Command("git", {
-      args: ["log", "--oneline"],
+    // Verify no commit was created (empty remote + empty data dir)
+    const revProc = new Deno.Command("git", {
+      args: ["rev-parse", "--verify", "HEAD"],
       cwd: dataDir,
       stdout: "piped",
       stderr: "piped",
     });
-    const { stdout } = await logProc.output();
-    assertEquals(new TextDecoder().decode(stdout).includes("initial:"), true);
+    const { code } = await revProc.output();
+    assertEquals(code, 128);
 
     assertEquals(
       errors.filter((e) => e.includes("Git command failed")).length,
@@ -925,5 +903,46 @@ Deno.test("GitBackupService - unexpected git failure still logs an error", async
       true,
       `Expected an error entry, got: ${errors.join(" | ")}`,
     );
+  });
+});
+
+Deno.test("GitBackupService - leaves operator .gitignore untouched - Case B (init from existing)", async () => {
+  await withTempGitEnv(async (dataDir, bareDir) => {
+    const customGitignore = "# Operator rules\n*.png\n*.jpg\nchannel-tmp/\n";
+    await Deno.writeTextFile(`${dataDir}/.gitignore`, customGitignore);
+    await Deno.writeTextFile(`${dataDir}/note.txt`, "hello");
+
+    const service = new GitBackupService(
+      createConfig({ remoteUrl: bareDir }),
+      dataDir,
+    );
+    await service.initialize();
+    await service.performBackup();
+
+    const content = await Deno.readTextFile(`${dataDir}/.gitignore`);
+    assertEquals(content, customGitignore);
+  });
+});
+
+Deno.test("GitBackupService - leaves operator .gitignore untouched - Case C (sync existing git repo)", async () => {
+  await withTempGitEnv(async (dataDir, bareDir) => {
+    const service1 = new GitBackupService(
+      createConfig({ remoteUrl: bareDir }),
+      dataDir,
+    );
+    await service1.initialize();
+
+    const customGitignore = "# Custom operator rules\n*.log\ncustom-cache/\n";
+    await Deno.writeTextFile(`${dataDir}/.gitignore`, customGitignore);
+
+    const service2 = new GitBackupService(
+      createConfig({ remoteUrl: bareDir }),
+      dataDir,
+    );
+    await service2.initialize();
+    await service2.performBackup();
+
+    const content = await Deno.readTextFile(`${dataDir}/.gitignore`);
+    assertEquals(content, customGitignore);
   });
 });

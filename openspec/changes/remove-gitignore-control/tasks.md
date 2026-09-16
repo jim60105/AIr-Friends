@@ -5,10 +5,10 @@
 
 ## 2. Tests follow the contract
 
-- [ ] 2.1 Delete `Deno.test("GitBackupService - ensureGitignore includes **/.git rule", ...)` (~line 687) in `tests/core/git-backup-service.test.ts`; keep the `assertStringIncludes` import — it is still used by the `getAuthenticatedUrl` tests (~777, ~790, ~821)
-- [ ] 2.2 Retitle `Deno.test("GitBackupService - initialize creates .git and .gitignore", ...)` (~86) to `... creates .git and no .gitignore`; delete its `.gitignore` read/assertion (~97-98) and assert instead that `{dataDir}/.gitignore` does NOT exist after `initialize()` (covers the ADDED "No .gitignore present" scenario); verify the test passes
-- [ ] 2.3 Fix the stale `// Should have an initial commit with .gitignore` comment (~410) in the clone-fallback test; verify `deno test tests/core/git-backup-service.test.ts` passes
-- [ ] 2.4 Add regression tests "GitBackupService - leaves operator .gitignore untouched": (a) Case B — write an operator `.gitignore` (custom rule, e.g. `*.png`) into the temp data dir before `initialize()`, run a `performBackup()` afterwards, assert byte-identity; (b) Case C — initialize, then write a custom `.gitignore`, then re-initialize with a fresh service instance (pattern of the existing test ~495-536), assert byte-identity. Verify both fail if any `.gitignore` write is reintroduced and pass on the fixed code
+- [x] 2.1 Delete `Deno.test("GitBackupService - ensureGitignore includes **/.git rule", ...)` (~line 687) in `tests/core/git-backup-service.test.ts`; keep the `assertStringIncludes` import — it is still used by the `getAuthenticatedUrl` tests (~777, ~790, ~821)
+- [x] 2.2 Retitle `Deno.test("GitBackupService - initialize creates .git and .gitignore", ...)` (~86) to `... creates .git and no .gitignore`; delete its `.gitignore` read/assertion (~97-98) and assert instead that `{dataDir}/.gitignore` does NOT exist after `initialize()` (covers the ADDED "No .gitignore present" scenario); verify the test passes
+- [x] 2.3 Fix the stale `// Should have an initial commit with .gitignore` comment (~410) in the clone-fallback test; verify `deno test tests/core/git-backup-service.test.ts` passes
+- [x] 2.4 Add regression tests "GitBackupService - leaves operator .gitignore untouched": (a) Case B — write an operator `.gitignore` (custom rule, e.g. `*.png`) into the temp data dir before `initialize()`, run a `performBackup()` afterwards, assert byte-identity; (b) Case C — initialize, then write a custom `.gitignore`, then re-initialize with a fresh service instance (pattern of the existing test ~495-536), assert byte-identity. Verify both fail if any `.gitignore` write is reintroduced and pass on the fixed code
 
 ## 3. Operator documentation
 
