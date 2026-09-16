@@ -1255,6 +1255,7 @@ Operators should maintain a `.gitignore` at the root of the data repository cove
 scheduler-state.json
 
 # Ignore nested git repositories (agent-created repos in workspaces)
+# Advisory: nested repo dirs themselves need explicit ignore rules to avoid gitlink entries (see note below)
 **/.git
 
 # Workspace temporary directories
