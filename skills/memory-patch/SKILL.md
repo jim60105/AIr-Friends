@@ -1,6 +1,6 @@
 ---
 name: memory-patch
-description: Modify memory metadata (visibility, importance) or disable memories. Use when you need to update the status of existing memories. You MUST use this skill to modify memory metadata, you MUST NOT manually modify the memory files.
+description: Modify memory metadata (visibility, importance) or disable memories in user or channel scope. Use when you need to update the status of existing memories. You MUST use this skill to modify memory metadata, you MUST NOT manually modify the memory files.
 allowed-tools: Bash
 ---
 
