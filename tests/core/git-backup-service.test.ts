@@ -293,18 +293,10 @@ Deno.test("GitBackupService - initialize sets safe.directory config", async () =
 
 Deno.test("GitBackupService - converts relative path to absolute for safe.directory", async () => {
   const tempDir = await Deno.makeTempDir();
-  const relativeDataDir = "./data";
   const actualDataDir = `${tempDir}/data`;
-
-  await Deno.mkdir(actualDataDir, { recursive: true });
-
-  // Save current directory
-  const originalCwd = Deno.cwd();
+  const gitConfigPath = `${tempDir}/gitconfig`;
 
   try {
-    // Change to temp directory
-    Deno.chdir(tempDir);
-
     // Create bare repo
     const bareDir = `${tempDir}/bare.git`;
     await new Deno.Command("git", {
@@ -313,18 +305,41 @@ Deno.test("GitBackupService - converts relative path to absolute for safe.direct
       stderr: "piped",
     }).output();
 
-    // Create service with relative path
-    const service = new GitBackupService(
-      createConfig({ remoteUrl: bareDir }),
-      relativeDataDir,
+    // The contract needs "./data" resolved against a foreign cwd. Do it in a
+    // CHILD process: Deno.chdir() here would mutate the cwd of the whole
+    // (single-process, --parallel) test run and race other files' relative
+    // path resolution (CI run 35964700812: 13 ENOENT prompt-render failures).
+    // GIT_CONFIG_GLOBAL keeps the safe.directory write/read hermetic.
+    const helperPath = new URL("git-backup-relative-cwd.ts", import.meta.url).pathname;
+    const child = new Deno.Command(Deno.execPath(), {
+      args: [
+        "run",
+        "--allow-run",
+        "--allow-read",
+        "--allow-write",
+        "--allow-env",
+        "--no-lock",
+        helperPath,
+        bareDir,
+      ],
+      cwd: tempDir,
+      env: { GIT_CONFIG_GLOBAL: gitConfigPath },
+      stdout: "piped",
+      stderr: "piped",
+    });
+    const childResult = await child.output();
+    assertEquals(
+      childResult.success,
+      true,
+      `helper failed: ${new TextDecoder().decode(childResult.stderr)}`,
     );
-    await service.initialize();
 
     // Check if safe.directory is set with absolute path
     const proc = new Deno.Command("git", {
       args: ["config", "--global", "--get-all", "safe.directory"],
       stdout: "piped",
       stderr: "piped",
+      env: { GIT_CONFIG_GLOBAL: gitConfigPath },
     });
     const { stdout, success } = await proc.output();
     const safeDirs = new TextDecoder().decode(stdout).trim().split("\n");
@@ -337,13 +352,11 @@ Deno.test("GitBackupService - converts relative path to absolute for safe.direct
       `Expected ${actualDataDir} to be in safe.directory list`,
     );
     assertEquals(
-      safeDirs.includes(relativeDataDir),
+      safeDirs.includes("./data"),
       false,
       "Relative path should not be in safe.directory list",
     );
   } finally {
-    // Restore original directory
-    Deno.chdir(originalCwd);
     await Deno.remove(tempDir, { recursive: true });
   }
 });
