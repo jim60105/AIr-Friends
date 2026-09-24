@@ -247,8 +247,16 @@ Deno.test("pool - serializes sessions from different pool keys (global execution
 Deno.test("pool - interactive sessions take queue priority over maintenance (starvation guard)", async () => {
   const registry = new SessionRegistry(1000);
   const order: string[] = [];
+  // This test asserts ORDERING only; deadline cancellation has its own test
+  // ("queue deadline cancels still-queued sessions"). The shared 100ms
+  // deadline is tight enough that CI timer starvation under --parallel load
+  // can age out both queued jobs before the blocker releases the lease
+  // (observed in CI run 35964700442: order == []). A wide margin keeps the
+  // ordering assertion meaningful and makes cancellation impossible here.
+  const config = makeConfig();
+  config.agent.sharedProcess = { ...config.agent.sharedProcess!, queueDeadlineMs: 2000 };
   const pool = new AgentProcessPool(
-    makeConfig(),
+    config,
     registry,
     "test-secret-0123456789abcdef0123456789",
     () => new StubConnector() as unknown as AgentConnector,
@@ -272,9 +280,12 @@ Deno.test("pool - interactive sessions take queue priority over maintenance (sta
       sessionCwd: "/tmp/test/workspaces/discord/7",
     },
     async () => {
-      // Shorter than the 100ms queue deadline so the sweeper does not cancel
-      // the queued sessions before they are served.
-      await new Promise((r) => setTimeout(r, 50));
+      // The two follow-up pool.run() calls enqueue their sessions SYNCHRONOUSLY
+      // in the test's current task, strictly before this runner is reached
+      // (executeInFlight invokes the runner only in a later microtask, after
+      // JWT/pointer I/O). One microtask yield therefore holds the lease until
+      // both sessions are queued — no wall-clock timer needed.
+      await Promise.resolve();
       return "acp-blocker";
     },
   );
