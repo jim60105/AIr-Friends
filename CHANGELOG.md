@@ -7,15 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.31.0] - 2026-09-24
+
 ### Added
 
+- Shared OpenCode ACP process pool: one long-lived pooled `opencode acp` process per agent key with execution-lease serialization, deadline cancellation, crash fence with controlled recovery (session reload plus replay of gate context), orphan-drain kill loop, and SIGKILL escalation on disconnect — sessions no longer pay per-message process spawn cost
+- Per-session HS256 JWT authentication for Skill API calls in both shared-pool and per-spawn modes, replacing the raw per-session caller token; concurrent sessions on one pooled process stay isolated through per-session gate context (workspace, YOLO flag, write extensions, temp directories)
+- `--scope user|channel` flag for the `memory-patch` skill: channel-scope memories can now be patched (routed through the channel-memory write gate), with a retry hint in the user-scope not-found error and `--decay 0` now accepted
 - Multi-command `;`/`&&`/`||` bash chaining through the restricted-mode ACP permission gate: a chain is approved only when every segment independently passes the exact single-command gate (skill whitelist or generic-command confinement), with quote-aware splitting (`splitCommandSegments`), redirect-only-segment rejection as operator artifacts, and first-failing-segment cause reporting
 - Shell-expansion token tightening in the permission gate: only harness-set variables (`$HOME`, `$XDG_DATA_HOME`, `$TMPDIR`, `$AGENT_WORKSPACE`, `$SESSION_ID`) are expandable/recognized; other unquoted `$VAR` references, unquoted brace-expansion tokens, token-start double-quoted non-harness references (`"$X/etc/passwd"`), and backslash-escaped newlines (line continuations) are rejected, closing pre-existing path-escape holes (`cat $IFS/etc/passwd`, `cat {safe,/etc/passwd}`, `cat "$X/etc/passwd"`, `cat \<newline>/etc/passwd`)
 - Self-research completion verification (`selfResearch.verifyCompletion`, default `true`, env `SELF_RESEARCH_VERIFY_COMPLETION`): a self-research session that ends without producing a note under `$AGENT_WORKSPACE/notes/` or `journal/` now gets ONE corrective retry prompt (with permission-rejection diagnostics and sandbox-rule guidance) and is recorded as a failure with the new `airfriends_self_research_no_note_total` metric if it still produces nothing
 - `$AGENT_WORKSPACE` path-token support in the ACP read/write path resolution, so env-var workspace paths work with the Read tool and edit/write tool in any deployment
+- `xhigh` and `max` reasoning-effort levels in the normalized `thought_level` vocabulary, loaded silently as standard levels and gated on model-offered values; `skipped_unavailable` warnings now name the session model and agent type
+- Typed `SKILL_FILE_PATH_WORKSPACE_PREFIXED` error from `send-file` when a workspace-prefixed (double-joined) file path is detected, with a corrected `--file-paths` example in the Skill API response
+- Per-chunk agent thought/message DEBUG log lines are now gated behind `logging.agentStreamChunks` (default `false`, env `LOGGING_AGENT_STREAM_CHUNKS`) so high-volume token streams no longer drown the log platform; buffering and INFO summaries are unchanged
 
 ### Changed
 
+- Pinned OpenCode CLI in container builds bumped from v1.17.13 to v1.18.21 with recomputed per-architecture SHA-256 checksums
+- Git backup state probes (`diff --cached --quiet`, `rev-parse --verify HEAD`, `remote get-url`) now log at DEBUG instead of ERROR for their expected non-zero exits, with credential redaction preserved
+- System prompt clarifies exit order: complete all side effects before the final `send-reply`, then exit immediately
 - `prompts/agent_permissions.md` and `prompts/browser_automation.md` now document the real command allow-list (removed the false `curl` claim), the multi-command chaining rule, the always-rejected operators, the OpenCode-denied commands (`echo`/`curl`/`git`/...), and the webfetch 403/429 → `agent-browser` fallback; `skills/self-research/SKILL.md` uses the deployment-independent `$AGENT_WORKSPACE` path and the Read tool instead of `cat`-with-fallbacks
 - **BREAKING (semantics)**: a self-research session that produces no research note is no longer reported as successful — it is retried once and recorded as a failure if still empty. Operators who mount custom `prompts/agent_permissions.md` / `prompts/browser_automation.md` overrides must re-mount them to receive the corrected guidance
 
@@ -23,6 +34,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 - **BREAKING (semantics)**: Removed code-managed data-directory `.gitignore` generation (`GitBackupService.ensureGitignore()`) and bundled `scheduler-state.json` index untracking. The data repository's `.gitignore` is now entirely operator-owned. Operators upgrading should ensure their data repository carries the recommended baseline `.gitignore` (documented in `docs/DESIGN.md`) and run `git rm --cached scheduler-state.json` once if the file was previously tracked
 - **BREAKING (semantics)**: Removed legacy Discord `commandPrefix` (`!`) guild message trigger from `shouldRespondToMessage()`. Guild channels now respond only to direct bot @mentions; DM behavior (`allowDm`) is unchanged. The `commandPrefix` option has been removed from `DiscordAdapterConfig` and `config.example.yaml`; operators should delete the key from their `config.yaml` as it is no longer read or supported
+
+### Fixed
+
+- Fixed pooled-mode sessions crashing with `Cannot read properties of undefined (reading 'success')` at completion: every guarded return path now assigns the session response before returning, and metrics/gauge bookkeeping can no longer throw in place of a computed result or leak the active-sessions gauge
+- Fixed pooled agent processes receiving relative `SKILL_JWT_DIR`, `TMPDIR`, `XDG_DATA_HOME`, and cwd values that only resolved against the bot process cwd, breaking Skill API auth, payload staging, and external skills; all pooled paths are now normalized to absolute form
+- Fixed shared-mode session identity: `SESSION_ID` is no longer exported on pooled processes (a spawn-time frozen value misattributed later sessions); the current-session pointer is the sole identity source, and unresolvable sessions fail fast with the stable `SKILL_SESSION_UNRESOLVED` code before any payload file is read or deleted
+- Fixed retry and summary prompts on shared processes rendering the literal session id and staging directory instead of the absent `$SESSION_ID` token
+
+### Security
+
+- Fixed ReDoS in the Misskey bot-mention regex by escaping the configured username
+- Fixed dashboard static-file path traversal: request URLs are decoded and `..` segments rejected, the final path is built with a containment check, and symlink targets are boundary-checked
+- Fixed DOM XSS in the dashboard by wrapping `innerHTML` sinks with DOMPurify sanitization plus a safe fallback, and validating SSE/postMessage origins
+- Extracted environment API-key configuration paths to named constants and replaced secret-looking literals in tests
 
 ## [0.30.0] - 2026-08-15
 
@@ -1079,7 +1104,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ---
 
-[Unreleased]: https://github.com/jim60105/AIr-Friends/compare/v0.30.0...HEAD
+[Unreleased]: https://github.com/jim60105/AIr-Friends/compare/v0.31.0...HEAD
+[0.31.0]: https://github.com/jim60105/AIr-Friends/compare/v0.30.0...v0.31.0
 [0.30.0]: https://github.com/jim60105/AIr-Friends/compare/v0.29.0...v0.30.0
 [0.29.0]: https://github.com/jim60105/AIr-Friends/compare/v0.28.0...v0.29.0
 [0.28.0]: https://github.com/jim60105/AIr-Friends/compare/v0.27.0...v0.28.0
