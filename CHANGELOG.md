@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.31.1] - 2026-09-24
+
+### Fixed
+
+- Fixed CI test-suite flakiness: the git-backup relative-path test no longer mutates the process-wide working directory (it now runs its foreign-cwd scenario in an isolated child process with a hermetic git config), ending the race that failed 13 orchestrator tests with prompt-template ENOENT errors in CI; the shared-process pool starvation-guard test now asserts session ordering without relying on wall-clock timing margins
+
 ## [0.31.0] - 2026-09-24
 
 ### Added
@@ -1104,7 +1110,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ---
 
-[Unreleased]: https://github.com/jim60105/AIr-Friends/compare/v0.31.0...HEAD
+[Unreleased]: https://github.com/jim60105/AIr-Friends/compare/v0.31.1...HEAD
+[0.31.1]: https://github.com/jim60105/AIr-Friends/compare/v0.31.0...v0.31.1
 [0.31.0]: https://github.com/jim60105/AIr-Friends/compare/v0.30.0...v0.31.0
 [0.30.0]: https://github.com/jim60105/AIr-Friends/compare/v0.29.0...v0.30.0
 [0.29.0]: https://github.com/jim60105/AIr-Friends/compare/v0.28.0...v0.29.0
