@@ -22,6 +22,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ### Removed
 
 - **BREAKING (semantics)**: Removed code-managed data-directory `.gitignore` generation (`GitBackupService.ensureGitignore()`) and bundled `scheduler-state.json` index untracking. The data repository's `.gitignore` is now entirely operator-owned. Operators upgrading should ensure their data repository carries the recommended baseline `.gitignore` (documented in `docs/DESIGN.md`) and run `git rm --cached scheduler-state.json` once if the file was previously tracked
+- **BREAKING (semantics)**: Removed legacy Discord `commandPrefix` (`!`) guild message trigger from `shouldRespondToMessage()`. Guild channels now respond only to direct bot @mentions; DM behavior (`allowDm`) is unchanged. The `commandPrefix` option has been removed from `DiscordAdapterConfig` and `config.example.yaml`; operators should delete the key from their `config.yaml` as it is no longer read or supported
 
 ## [0.30.0] - 2026-08-15
 

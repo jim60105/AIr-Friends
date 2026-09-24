@@ -3,7 +3,9 @@
 ## Purpose
 
 Defines the unified platform abstraction layer that normalizes events across Discord and Misskey into a common model, provides a base adapter class with required methods, manages multi-platform connections with automatic reconnection, and handles platform-specific behaviors transparently.
+
 ## Requirements
+
 ### Requirement: NormalizedEvent Model
 
 The system SHALL normalize all incoming platform events into a `NormalizedEvent` structure with fields: `platform` (Platform type), `channelId`, `userId`, `username` (optional), `messageId`, `isDm`, `guildId` (empty string if not applicable), `content`, `timestamp`, `attachments` (optional array of `Attachment`), and `raw` (optional, original platform object). For Misskey notes, `isDm` SHALL be derived from the note visibility: notes with visibility `"specified"` SHALL be classified as direct messages (`isDm` set to `true`).
@@ -170,7 +172,14 @@ The Discord adapter SHALL handle message events with filtering, normalization, a
 #### Scenario: Message filtering
 - **GIVEN** a Discord message event
 - **WHEN** `shouldRespondToMessage()` evaluates the message
-- **THEN** it SHALL reject messages from bots, messages from self, and SHALL check DM allowance (`allowDm`), mention requirement (`respondToMention`), and command prefix matching
+- **THEN** it SHALL reject messages from bots and messages from self
+- **AND** in DM channels it SHALL respond only when DM allowance (`allowDm`) is enabled
+- **AND** in guild channels it SHALL respond only when `respondToMention` is enabled and the message mentions the bot; no command-prefix trigger SHALL exist
+
+#### Scenario: Prefix-prefixed guild message does not trigger
+- **GIVEN** a guild (non-DM) Discord message whose content starts with a former command prefix such as `"!"` and which does NOT mention the bot, evaluated even if a caller still supplies a legacy `commandPrefix` option
+- **WHEN** `shouldRespondToMessage()` evaluates the message
+- **THEN** it SHALL return `false`
 
 #### Scenario: Bot mention removal
 - **GIVEN** a message that mentions the bot
@@ -429,4 +438,3 @@ The `EventRouter` SHALL route `NormalizedEvent` instances to registered handlers
 - **GIVEN** a `PlatformRegistry` instance
 - **WHEN** `connectToRegistry(registry)` is called
 - **THEN** the router SHALL subscribe to the registry's event stream via `registry.onEvent()` and route each incoming event
-

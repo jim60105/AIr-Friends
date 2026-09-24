@@ -142,7 +142,6 @@ export function shouldRespondToMessage(
   config: {
     allowDm: boolean;
     respondToMention: boolean;
-    commandPrefix?: string;
   },
 ): boolean {
   // Never respond to bots
@@ -162,11 +161,6 @@ export function shouldRespondToMessage(
 
   // Check mention
   if (config.respondToMention && isBotMentioned(message, botId)) {
-    return true;
-  }
-
-  // Check prefix
-  if (config.commandPrefix && message.content.startsWith(config.commandPrefix)) {
     return true;
   }
 

@@ -26,7 +26,6 @@ platforms:
     guildIds: [] # List of guild IDs to operate in (empty = all)
     allowDm: true # Respond to direct messages (default: true)
     respondToMention: true # Respond when mentioned (default: true)
-    commandPrefix: "!" # Optional command prefix (set empty to disable)
     # Spontaneous posting: agent posts messages on its own schedule
     spontaneousPost:
       enabled: false # Enable spontaneous posting (default: false)
