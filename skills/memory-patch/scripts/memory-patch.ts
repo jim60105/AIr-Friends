@@ -23,6 +23,7 @@ async function main() {
         "tier",
         "category",
         "decay",
+        "scope",
       ],
       boolean: ["enabled", "disabled"],
       alias: { s: "session-id", a: "api-url", m: "memory-id" },
@@ -74,7 +75,14 @@ async function main() {
       params.category = args.category;
     }
 
-    if (args.decay) {
+    if (args.scope) {
+      if (!["user", "channel"].includes(args.scope)) {
+        exitWithError("Invalid scope. Must be 'user' or 'channel'");
+      }
+      params.scope = args.scope;
+    }
+
+    if (args.decay !== undefined && args.decay !== "") {
       const decay = Number(args.decay);
       if (isNaN(decay) || decay < 0 || decay > 1) {
         exitWithError("Invalid decay. Must be a number between 0.0 and 1.0");

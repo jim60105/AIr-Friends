@@ -1,6 +1,6 @@
 ---
 name: memory-patch
-description: Modify memory metadata (visibility, importance) or disable memories. Use when you need to update the status of existing memories. You MUST use this skill to modify memory metadata, you MUST NOT manually modify the memory files.
+description: Modify memory metadata (visibility, importance) or disable memories in user or channel scope. Use when you need to update the status of existing memories. You MUST use this skill to modify memory metadata, you MUST NOT manually modify the memory files.
 allowed-tools: Bash
 ---
 
@@ -47,9 +47,18 @@ ${HOME}/.agents/skills/memory-patch/scripts/memory-patch.ts \
   --session-id "$SESSION_ID" \
   --memory-id "mem_abc123" \
   --decay 0.9
+
+# Adjust decay on a channel-scoped memory (requires channel write authorization)
+${HOME}/.agents/skills/memory-patch/scripts/memory-patch.ts \
+  --session-id "$SESSION_ID" \
+  --memory-id "mem_channel_123" \
+  --scope channel \
+  --decay 0.4
 ```
 
 **`--session-id`**: Use the session id rendered in your system prompt. `$SESSION_ID` works only in per-spawn deployments; in shared-process mode it is not set and the skill library resolves the owning session automatically — a mismatched value is never honored.
+
+**`--scope`**: (Optional) `user` (default) or `channel`. Set to `channel` to patch a channel-scoped memory (as labeled in `memory-search` results). Patching channel memories requires a session authorized for channel writes.
 
 ## Capabilities
 
@@ -59,6 +68,7 @@ ${HOME}/.agents/skills/memory-patch/scripts/memory-patch.ts \
 - Change memory tier (--tier: `core`, `working`, or `archive`)
 - Change memory category (--category: `fact`, `preference`, `episode`, `summary`, or `relationship`)
 - Adjust decay value (--decay: 0.0–1.0; ignored for core tier which always has decay=1.0)
+- Patch channel-scoped memories (--scope channel; requires a session authorized for channel writes)
 - Link related memories (--related-to, comma-separated IDs)
 - Mark supersession lineage (--supersedes, comma-separated IDs)
 
@@ -66,6 +76,11 @@ ${HOME}/.agents/skills/memory-patch/scripts/memory-patch.ts \
 
 - **Cannot modify content** - content is immutable
 - **Cannot delete** - can only disable
+- **Cannot patch visibility on channel memories** - channel memories have no visibility field and are always public (use --scope user to patch visibility on user memories)
+
+## Error Guidance
+
+- **"Memory not found: <id>"**: If attempting to patch a memory returned from `memory-search` that has `scope: "channel"`, the default user-scope lookup will fail. Retry the patch with `--scope channel`.
 
 ## Critical Rules
 

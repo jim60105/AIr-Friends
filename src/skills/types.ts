@@ -129,6 +129,11 @@ export interface MemoryPatchParams {
   tier?: string;
   category?: string;
   decay?: number;
+  /**
+   * Scope to patch: "user" (default) or "channel".
+   * Channel-scope patching requires the F15 canWriteChannelMemory capability.
+   */
+  scope?: string;
 }
 
 /**

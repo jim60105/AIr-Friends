@@ -519,6 +519,48 @@ Deno.test("MemoryHandler - handleMemoryPatch validates missing memory_id", async
   await Deno.remove(tempDir, { recursive: true });
 });
 
+Deno.test("MemoryHandler - handleMemoryPatch validates invalid scope", async () => {
+  const tempDir = await Deno.makeTempDir();
+  const workspaceManager = new WorkspaceManager({
+    repoPath: tempDir,
+    workspacesDir: "workspaces",
+  });
+  const memoryStore = new MemoryStore(workspaceManager, {
+    searchLimit: 10,
+    maxChars: 2000,
+  });
+  const handler = new MemoryHandler(memoryStore);
+
+  const workspace: WorkspaceInfo = {
+    key: "discord/123",
+    components: {
+      platform: "discord",
+      userId: "123",
+    },
+    path: `${tempDir}/workspaces/discord/123`,
+    tmpPath: `${tempDir}/workspaces/discord/123/tmp`,
+    isDm: true,
+  };
+
+  const context: SkillContext = {
+    workspace,
+    platformAdapter: createMockPlatformAdapter(),
+    channelId: "456",
+    userId: "123",
+  };
+
+  const result = await handler.handleMemoryPatch(
+    { memory_id: "test_id", scope: "guild", enabled: true },
+    context,
+  );
+
+  assertEquals(result.success, false);
+  assertEquals(result.error, "Invalid 'scope' parameter. Must be 'user' or 'channel'");
+
+  // Cleanup
+  await Deno.remove(tempDir, { recursive: true });
+});
+
 Deno.test("MemoryHandler - handleMemoryPatch validates invalid enabled", async () => {
   const tempDir = await Deno.makeTempDir();
   const workspaceManager = new WorkspaceManager({
