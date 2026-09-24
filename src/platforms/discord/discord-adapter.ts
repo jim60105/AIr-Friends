@@ -177,7 +177,6 @@ export class DiscordAdapter extends PlatformAdapter {
       !shouldRespondToMessage(message, this.botId, {
         allowDm: this.config.allowDm,
         respondToMention: this.config.respondToMention,
-        commandPrefix: this.config.commandPrefix,
       })
     ) {
       return;

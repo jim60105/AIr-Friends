@@ -24,9 +24,6 @@ export interface DiscordAdapterConfig {
   /** Whether to respond when mentioned */
   respondToMention?: boolean;
 
-  /** Prefix for command triggering (optional) */
-  commandPrefix?: string;
-
   /** Typing indicator configuration */
   typingIndicator?: {
     enabled: boolean;

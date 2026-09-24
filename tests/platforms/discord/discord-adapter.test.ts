@@ -134,19 +134,24 @@ Deno.test("shouldRespondToMessage - should respond to mention", () => {
   assertEquals(result, true);
 });
 
-Deno.test("shouldRespondToMessage - should respond to prefix", () => {
-  const message = createMockMessage({
-    content: "!help me",
-  });
+Deno.test(
+  "shouldRespondToMessage - should not respond to prefix-prefixed guild message even with a legacy commandPrefix config",
+  () => {
+    const message = createMockMessage({
+      content: "!help me",
+    });
 
-  const result = shouldRespondToMessage(
-    message as Message,
-    "bot123",
-    { allowDm: true, respondToMention: true, commandPrefix: "!" },
-  );
+    const result = shouldRespondToMessage(
+      message as Message,
+      "bot123",
+      { allowDm: true, respondToMention: true, commandPrefix: "!" } as unknown as Parameters<
+        typeof shouldRespondToMessage
+      >[2],
+    );
 
-  assertEquals(result, true);
-});
+    assertEquals(result, false);
+  },
+);
 
 Deno.test("removeBotMention - should remove mention from content", () => {
   const content = "<@bot123> Hello there";
