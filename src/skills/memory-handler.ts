@@ -15,6 +15,7 @@ import type {
 import type {
   MemoryCategory,
   MemoryImportance,
+  MemoryPatch,
   MemoryScope,
   MemoryTier,
   MemoryVisibility,
@@ -493,6 +494,15 @@ export class MemoryHandler {
         };
       }
 
+      // Validate scope
+      const scope = (params.scope ?? "user") as MemoryScope;
+      if (scope !== "user" && scope !== "channel") {
+        return {
+          success: false,
+          error: "Invalid 'scope' parameter. Must be 'user' or 'channel'",
+        };
+      }
+
       // Build patch object
       const patch: {
         enabled?: boolean;
@@ -608,11 +618,82 @@ export class MemoryHandler {
         };
       }
 
-      const patchEntry = await this.memoryStore.patchMemory(
-        context.workspace,
-        params.memory_id,
-        patch,
-      );
+      // Channel-scoped memory
+      if (scope === "channel") {
+        if (patch.visibility !== undefined) {
+          return {
+            success: false,
+            error:
+              "'visibility' cannot be patched on channel-scoped memories (channel memories are always public; use scope 'user' to patch visibility)",
+          };
+        }
+        if (context.canWriteChannelMemory !== true) {
+          return {
+            success: false,
+            error: "Not authorized to write channel memory in this session",
+          };
+        }
+        if (!context.channelId) {
+          return {
+            success: false,
+            error: "Cannot patch channel memory: no channelId in context",
+          };
+        }
+        if (!context.workspaceManager) {
+          return {
+            success: false,
+            error: "Cannot patch channel memory: workspaceManager not available",
+          };
+        }
+
+        const channelWorkspace = await context.workspaceManager.getOrCreateChannelWorkspace(
+          context.workspace.components.platform,
+          context.channelId,
+        );
+
+        const patchEntry = await this.memoryStore.patchChannelMemory(
+          channelWorkspace,
+          params.memory_id,
+          patch,
+        );
+
+        logger.info("Channel memory {memoryId} patched via skill", {
+          channelKey: channelWorkspace.key,
+          memoryId: params.memory_id,
+          patch,
+        });
+        memoryOperationsTotal.labels("patch", "public").inc();
+
+        return {
+          success: true,
+          data: {
+            patchId: patchEntry.id,
+            targetId: patchEntry.targetId,
+            timestamp: patchEntry.ts,
+            changes: patch,
+            scope: "channel",
+          },
+        };
+      }
+
+      // User-scoped memory (default)
+      let patchEntry: MemoryPatch;
+      try {
+        patchEntry = await this.memoryStore.patchMemory(
+          context.workspace,
+          params.memory_id,
+          patch,
+        );
+      } catch (error) {
+        if (error instanceof Error && error.message.startsWith("Memory not found:")) {
+          return {
+            success: false,
+            error:
+              `${error.message}. If it is a channel-scoped memory (see the 'scope' field of memory-search results), retry with --scope channel`,
+          };
+        }
+        throw error;
+      }
 
       logger.info("Memory {memoryId} patched via skill", {
         workspaceKey: context.workspace.key,
