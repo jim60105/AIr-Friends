@@ -39,10 +39,7 @@ const createTestSkillRegistry = (): SkillRegistry => {
     repoPath: tempDir,
     workspacesDir: "workspaces",
   });
-  const memoryStore = new MemoryStore(workspaceManager, {
-    searchLimit: 10,
-    maxChars: 2000,
-  });
+  const memoryStore = new MemoryStore(workspaceManager, {});
   return new SkillRegistry(memoryStore);
 };
 

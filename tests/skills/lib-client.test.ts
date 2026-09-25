@@ -214,10 +214,7 @@ Deno.test("callSkillApi - presents the per-session JWT end-to-end", async () => 
       repoPath: tempDir,
       workspacesDir: "workspaces",
     });
-    const memoryStore = new MemoryStore(workspaceManager, {
-      searchLimit: 10,
-      maxChars: 2000,
-    });
+    const memoryStore = new MemoryStore(workspaceManager, {});
     const skillRegistry = new SkillRegistry(memoryStore);
 
     // Register a session; capture its caller token for the JWT `jti`.

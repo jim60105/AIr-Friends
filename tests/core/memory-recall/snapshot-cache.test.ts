@@ -69,7 +69,7 @@ async function withCache(fn: (context: CacheContext) => Promise<void>): Promise<
   const tempDir = await Deno.makeTempDir();
   try {
     const manager = new WorkspaceManager({ repoPath: tempDir, workspacesDir: "workspaces" });
-    const store = new MemoryStore(manager, { searchLimit: 10, maxChars: 2000 });
+    const store = new MemoryStore(manager, {});
     const workspace: WorkspaceInfo = await manager.getOrCreateWorkspace({
       platform: "discord" as Platform,
       channelId: "channel123",

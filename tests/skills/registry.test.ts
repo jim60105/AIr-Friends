@@ -41,10 +41,7 @@ Deno.test("SkillRegistry - registers all skills", () => {
     repoPath: tempDir,
     workspacesDir: "workspaces",
   });
-  const memoryStore = new MemoryStore(workspaceManager, {
-    searchLimit: 10,
-    maxChars: 2000,
-  });
+  const memoryStore = new MemoryStore(workspaceManager, {});
   const registry = new SkillRegistry(memoryStore);
 
   const skills = registry.getAvailableSkills();
@@ -66,10 +63,7 @@ Deno.test("SkillRegistry - hasSkill checks skill existence", () => {
     repoPath: tempDir,
     workspacesDir: "workspaces",
   });
-  const memoryStore = new MemoryStore(workspaceManager, {
-    searchLimit: 10,
-    maxChars: 2000,
-  });
+  const memoryStore = new MemoryStore(workspaceManager, {});
   const registry = new SkillRegistry(memoryStore);
 
   assertEquals(registry.hasSkill("memory-save"), true);
@@ -85,10 +79,7 @@ Deno.test("SkillRegistry - executeSkill executes known skill", async () => {
     repoPath: tempDir,
     workspacesDir: "workspaces",
   });
-  const memoryStore = new MemoryStore(workspaceManager, {
-    searchLimit: 10,
-    maxChars: 2000,
-  });
+  const memoryStore = new MemoryStore(workspaceManager, {});
   const registry = new SkillRegistry(memoryStore);
 
   const workspace: WorkspaceInfo = {
@@ -135,10 +126,7 @@ Deno.test("SkillRegistry - executeSkill returns error for unknown skill", async 
     repoPath: tempDir,
     workspacesDir: "workspaces",
   });
-  const memoryStore = new MemoryStore(workspaceManager, {
-    searchLimit: 10,
-    maxChars: 2000,
-  });
+  const memoryStore = new MemoryStore(workspaceManager, {});
   const registry = new SkillRegistry(memoryStore);
 
   const workspace: WorkspaceInfo = {
@@ -174,10 +162,7 @@ Deno.test("SkillRegistry - getReplyHandler returns reply handler", () => {
     repoPath: tempDir,
     workspacesDir: "workspaces",
   });
-  const memoryStore = new MemoryStore(workspaceManager, {
-    searchLimit: 10,
-    maxChars: 2000,
-  });
+  const memoryStore = new MemoryStore(workspaceManager, {});
   const registry = new SkillRegistry(memoryStore);
 
   const replyHandler = registry.getReplyHandler();
@@ -193,10 +178,7 @@ Deno.test("SkillRegistry - getReactionHandler returns handler", () => {
     repoPath: tempDir,
     workspacesDir: "workspaces",
   });
-  const memoryStore = new MemoryStore(workspaceManager, {
-    searchLimit: 10,
-    maxChars: 2000,
-  });
+  const memoryStore = new MemoryStore(workspaceManager, {});
   const registry = new SkillRegistry(memoryStore);
 
   const reactionHandler = registry.getReactionHandler();
@@ -212,10 +194,7 @@ Deno.test("SkillRegistry - executeSkill handles handler exceptions", async () =>
     repoPath: tempDir,
     workspacesDir: "workspaces",
   });
-  const memoryStore = new MemoryStore(workspaceManager, {
-    searchLimit: 10,
-    maxChars: 2000,
-  });
+  const memoryStore = new MemoryStore(workspaceManager, {});
   const registry = new SkillRegistry(memoryStore);
 
   const workspace: WorkspaceInfo = {

@@ -30,7 +30,7 @@ async function setup(timeoutMs?: number): Promise<TestRig> {
 
   const sessionRegistry = new SessionRegistry(timeoutMs);
   const workspaceManager = new WorkspaceManager({ repoPath: tempDir, workspacesDir: "workspaces" });
-  const memoryStore = new MemoryStore(workspaceManager, { searchLimit: 10, maxChars: 2000 });
+  const memoryStore = new MemoryStore(workspaceManager, {});
   const skillRegistry = new SkillRegistry(memoryStore);
 
   const port = nextPort++;

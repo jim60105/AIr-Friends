@@ -53,8 +53,6 @@ function makeConfig(): Config {
       },
     },
     memory: {
-      searchLimit: 10,
-      maxChars: 2000,
       recentMessageLimit: 20,
       workingTierLimit: 20,
     },

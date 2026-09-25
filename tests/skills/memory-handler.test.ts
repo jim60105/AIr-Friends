@@ -42,10 +42,7 @@ Deno.test("MemoryHandler - handleMemorySave saves memory in DM as private", asyn
     repoPath: tempDir,
     workspacesDir: "workspaces",
   });
-  const memoryStore = new MemoryStore(workspaceManager, {
-    searchLimit: 10,
-    maxChars: 2000,
-  });
+  const memoryStore = new MemoryStore(workspaceManager, {});
   const handler = new MemoryHandler(memoryStore);
 
   const workspace: WorkspaceInfo = {
@@ -94,10 +91,7 @@ Deno.test("MemoryHandler - handleMemorySave saves memory in guild as public", as
     repoPath: tempDir,
     workspacesDir: "workspaces",
   });
-  const memoryStore = new MemoryStore(workspaceManager, {
-    searchLimit: 10,
-    maxChars: 2000,
-  });
+  const memoryStore = new MemoryStore(workspaceManager, {});
   const handler = new MemoryHandler(memoryStore);
 
   const workspace: WorkspaceInfo = {
@@ -146,10 +140,7 @@ Deno.test("MemoryHandler - handleMemorySave validates parameters", async () => {
     repoPath: tempDir,
     workspacesDir: "workspaces",
   });
-  const memoryStore = new MemoryStore(workspaceManager, {
-    searchLimit: 10,
-    maxChars: 2000,
-  });
+  const memoryStore = new MemoryStore(workspaceManager, {});
   const handler = new MemoryHandler(memoryStore);
 
   const workspace: WorkspaceInfo = {
@@ -185,10 +176,7 @@ Deno.test("MemoryHandler - handleMemorySearch searches memories in DM context", 
     repoPath: tempDir,
     workspacesDir: "workspaces",
   });
-  const memoryStore = new MemoryStore(workspaceManager, {
-    searchLimit: 10,
-    maxChars: 2000,
-  });
+  const memoryStore = new MemoryStore(workspaceManager, {});
   const handler = new MemoryHandler(memoryStore);
 
   const workspace: WorkspaceInfo = {
@@ -262,7 +250,7 @@ async function withSearchHandler(
   const tempDir = await Deno.makeTempDir();
   try {
     const manager = new WorkspaceManager({ repoPath: tempDir, workspacesDir: "workspaces" });
-    const store = new MemoryStore(manager, { searchLimit: 10, maxChars: 2000 });
+    const store = new MemoryStore(manager, {});
     const handler = new MemoryHandler(store);
     const workspace: WorkspaceInfo = {
       key: "discord/123",
@@ -524,10 +512,7 @@ Deno.test("MemoryHandler - handleMemoryPatch patches memory", async () => {
     repoPath: tempDir,
     workspacesDir: "workspaces",
   });
-  const memoryStore = new MemoryStore(workspaceManager, {
-    searchLimit: 10,
-    maxChars: 2000,
-  });
+  const memoryStore = new MemoryStore(workspaceManager, {});
   const handler = new MemoryHandler(memoryStore);
 
   const workspace: WorkspaceInfo = {
@@ -586,10 +571,7 @@ Deno.test("MemoryHandler - handleMemorySave ignores agent-provided visibility in
     repoPath: tempDir,
     workspacesDir: "workspaces",
   });
-  const memoryStore = new MemoryStore(workspaceManager, {
-    searchLimit: 10,
-    maxChars: 2000,
-  });
+  const memoryStore = new MemoryStore(workspaceManager, {});
   const handler = new MemoryHandler(memoryStore);
 
   const workspace: WorkspaceInfo = {
@@ -634,10 +616,7 @@ Deno.test("MemoryHandler - handleMemorySave validates invalid importance", async
     repoPath: tempDir,
     workspacesDir: "workspaces",
   });
-  const memoryStore = new MemoryStore(workspaceManager, {
-    searchLimit: 10,
-    maxChars: 2000,
-  });
+  const memoryStore = new MemoryStore(workspaceManager, {});
   const handler = new MemoryHandler(memoryStore);
 
   const workspace: WorkspaceInfo = {
@@ -676,10 +655,7 @@ Deno.test("MemoryHandler - handleMemorySave ignores agent-provided visibility in
     repoPath: tempDir,
     workspacesDir: "workspaces",
   });
-  const memoryStore = new MemoryStore(workspaceManager, {
-    searchLimit: 10,
-    maxChars: 2000,
-  });
+  const memoryStore = new MemoryStore(workspaceManager, {});
   const handler = new MemoryHandler(memoryStore);
 
   const workspace: WorkspaceInfo = {
@@ -724,10 +700,7 @@ Deno.test("MemoryHandler - handleMemorySearch validates invalid limit", async ()
     repoPath: tempDir,
     workspacesDir: "workspaces",
   });
-  const memoryStore = new MemoryStore(workspaceManager, {
-    searchLimit: 10,
-    maxChars: 2000,
-  });
+  const memoryStore = new MemoryStore(workspaceManager, {});
   const handler = new MemoryHandler(memoryStore);
 
   const workspace: WorkspaceInfo = {
@@ -766,10 +739,7 @@ Deno.test("MemoryHandler - handleMemoryPatch validates missing memory_id", async
     repoPath: tempDir,
     workspacesDir: "workspaces",
   });
-  const memoryStore = new MemoryStore(workspaceManager, {
-    searchLimit: 10,
-    maxChars: 2000,
-  });
+  const memoryStore = new MemoryStore(workspaceManager, {});
   const handler = new MemoryHandler(memoryStore);
 
   const workspace: WorkspaceInfo = {
@@ -805,10 +775,7 @@ Deno.test("MemoryHandler - handleMemoryPatch validates invalid scope", async () 
     repoPath: tempDir,
     workspacesDir: "workspaces",
   });
-  const memoryStore = new MemoryStore(workspaceManager, {
-    searchLimit: 10,
-    maxChars: 2000,
-  });
+  const memoryStore = new MemoryStore(workspaceManager, {});
   const handler = new MemoryHandler(memoryStore);
 
   const workspace: WorkspaceInfo = {
@@ -847,10 +814,7 @@ Deno.test("MemoryHandler - handleMemoryPatch validates invalid enabled", async (
     repoPath: tempDir,
     workspacesDir: "workspaces",
   });
-  const memoryStore = new MemoryStore(workspaceManager, {
-    searchLimit: 10,
-    maxChars: 2000,
-  });
+  const memoryStore = new MemoryStore(workspaceManager, {});
   const handler = new MemoryHandler(memoryStore);
 
   const workspace: WorkspaceInfo = {
@@ -889,10 +853,7 @@ Deno.test("MemoryHandler - handleMemoryPatch validates invalid visibility", asyn
     repoPath: tempDir,
     workspacesDir: "workspaces",
   });
-  const memoryStore = new MemoryStore(workspaceManager, {
-    searchLimit: 10,
-    maxChars: 2000,
-  });
+  const memoryStore = new MemoryStore(workspaceManager, {});
   const handler = new MemoryHandler(memoryStore);
 
   const workspace: WorkspaceInfo = {
@@ -931,10 +892,7 @@ Deno.test("MemoryHandler - handleMemoryPatch validates invalid importance", asyn
     repoPath: tempDir,
     workspacesDir: "workspaces",
   });
-  const memoryStore = new MemoryStore(workspaceManager, {
-    searchLimit: 10,
-    maxChars: 2000,
-  });
+  const memoryStore = new MemoryStore(workspaceManager, {});
   const handler = new MemoryHandler(memoryStore);
 
   const workspace: WorkspaceInfo = {
@@ -973,10 +931,7 @@ Deno.test("MemoryHandler - handleMemoryPatch requires at least one field", async
     repoPath: tempDir,
     workspacesDir: "workspaces",
   });
-  const memoryStore = new MemoryStore(workspaceManager, {
-    searchLimit: 10,
-    maxChars: 2000,
-  });
+  const memoryStore = new MemoryStore(workspaceManager, {});
   const handler = new MemoryHandler(memoryStore);
 
   const workspace: WorkspaceInfo = {
@@ -1020,10 +975,7 @@ Deno.test("MemoryHandler - handleMemoryPatch accepts relatedTo parameter", async
     repoPath: tempDir,
     workspacesDir: "workspaces",
   });
-  const memoryStore = new MemoryStore(workspaceManager, {
-    searchLimit: 10,
-    maxChars: 2000,
-  });
+  const memoryStore = new MemoryStore(workspaceManager, {});
   const handler = new MemoryHandler(memoryStore);
 
   const workspace: WorkspaceInfo = {
@@ -1067,10 +1019,7 @@ Deno.test("MemoryHandler - handleMemoryPatch rejects invalid relatedTo", async (
     repoPath: tempDir,
     workspacesDir: "workspaces",
   });
-  const memoryStore = new MemoryStore(workspaceManager, {
-    searchLimit: 10,
-    maxChars: 2000,
-  });
+  const memoryStore = new MemoryStore(workspaceManager, {});
   const handler = new MemoryHandler(memoryStore);
 
   const workspace: WorkspaceInfo = {
@@ -1105,10 +1054,7 @@ Deno.test("MemoryHandler - handleMemoryPatch accepts supersedes parameter", asyn
     repoPath: tempDir,
     workspacesDir: "workspaces",
   });
-  const memoryStore = new MemoryStore(workspaceManager, {
-    searchLimit: 10,
-    maxChars: 2000,
-  });
+  const memoryStore = new MemoryStore(workspaceManager, {});
   const handler = new MemoryHandler(memoryStore);
 
   const workspace: WorkspaceInfo = {
@@ -1152,10 +1098,7 @@ Deno.test("MemoryHandler - handleMemorySave accepts relatedTo and supersedes", a
     repoPath: tempDir,
     workspacesDir: "workspaces",
   });
-  const memoryStore = new MemoryStore(workspaceManager, {
-    searchLimit: 10,
-    maxChars: 2000,
-  });
+  const memoryStore = new MemoryStore(workspaceManager, {});
   const handler = new MemoryHandler(memoryStore);
 
   const workspace: WorkspaceInfo = {
@@ -1205,10 +1148,7 @@ Deno.test("MemoryHandler - handleMemorySave rejects invalid relatedTo", async ()
     repoPath: tempDir,
     workspacesDir: "workspaces",
   });
-  const memoryStore = new MemoryStore(workspaceManager, {
-    searchLimit: 10,
-    maxChars: 2000,
-  });
+  const memoryStore = new MemoryStore(workspaceManager, {});
   const handler = new MemoryHandler(memoryStore);
 
   const workspace: WorkspaceInfo = {
@@ -1246,10 +1186,7 @@ Deno.test("MemoryHandler - handleMemorySave rejects invalid supersedes", async (
     repoPath: tempDir,
     workspacesDir: "workspaces",
   });
-  const memoryStore = new MemoryStore(workspaceManager, {
-    searchLimit: 10,
-    maxChars: 2000,
-  });
+  const memoryStore = new MemoryStore(workspaceManager, {});
   const handler = new MemoryHandler(memoryStore);
 
   const workspace: WorkspaceInfo = {
@@ -1287,10 +1224,7 @@ Deno.test("MemoryHandler - handleMemoryPatch rejects invalid supersedes", async 
     repoPath: tempDir,
     workspacesDir: "workspaces",
   });
-  const memoryStore = new MemoryStore(workspaceManager, {
-    searchLimit: 10,
-    maxChars: 2000,
-  });
+  const memoryStore = new MemoryStore(workspaceManager, {});
   const handler = new MemoryHandler(memoryStore);
 
   const workspace: WorkspaceInfo = {
@@ -1324,10 +1258,7 @@ Deno.test("MemoryHandler - handleMemorySave without relatedTo/supersedes omits t
     repoPath: tempDir,
     workspacesDir: "workspaces",
   });
-  const memoryStore = new MemoryStore(workspaceManager, {
-    searchLimit: 10,
-    maxChars: 2000,
-  });
+  const memoryStore = new MemoryStore(workspaceManager, {});
   const handler = new MemoryHandler(memoryStore);
 
   const workspace: WorkspaceInfo = {
@@ -1413,10 +1344,7 @@ Deno.test("MemoryHandler - handleMemorySearch returns empty agentNotes when no w
     repoPath: tempDir,
     workspacesDir: "workspaces",
   });
-  const memoryStore = new MemoryStore(workspaceManager, {
-    searchLimit: 10,
-    maxChars: 2000,
-  });
+  const memoryStore = new MemoryStore(workspaceManager, {});
   const handler = new MemoryHandler(memoryStore);
 
   const workspace: WorkspaceInfo = {
@@ -1458,10 +1386,7 @@ Deno.test("MemoryHandler - memory-stats - returns statistics", async () => {
     repoPath: tempDir,
     workspacesDir: "workspaces",
   });
-  const memoryStore = new MemoryStore(workspaceManager, {
-    searchLimit: 10,
-    maxChars: 2000,
-  });
+  const memoryStore = new MemoryStore(workspaceManager, {});
   const handler = new MemoryHandler(memoryStore);
 
   const workspace: WorkspaceInfo = {
@@ -1509,10 +1434,7 @@ Deno.test("MemoryHandler - memory-stats - respects DM privacy", async () => {
     repoPath: tempDir,
     workspacesDir: "workspaces",
   });
-  const memoryStore = new MemoryStore(workspaceManager, {
-    searchLimit: 10,
-    maxChars: 2000,
-  });
+  const memoryStore = new MemoryStore(workspaceManager, {});
   const handler = new MemoryHandler(memoryStore);
 
   const workspace: WorkspaceInfo = {
@@ -1554,10 +1476,7 @@ Deno.test("MemoryHandler - handleMemoryExport returns empty file when no memorie
     repoPath: tempDir,
     workspacesDir: "workspaces",
   });
-  const memoryStore = new MemoryStore(workspaceManager, {
-    searchLimit: 10,
-    maxChars: 2000,
-  });
+  const memoryStore = new MemoryStore(workspaceManager, {});
   const handler = new MemoryHandler(memoryStore);
 
   const workspace: WorkspaceInfo = {
@@ -1607,10 +1526,7 @@ Deno.test("MemoryHandler - handleMemoryExport sends file via DM in markdown form
     repoPath: tempDir,
     workspacesDir: "workspaces",
   });
-  const memoryStore = new MemoryStore(workspaceManager, {
-    searchLimit: 10,
-    maxChars: 2000,
-  });
+  const memoryStore = new MemoryStore(workspaceManager, {});
   const handler = new MemoryHandler(memoryStore);
 
   const workspace: WorkspaceInfo = {
@@ -1668,10 +1584,7 @@ Deno.test("MemoryHandler - handleMemoryExport sends file via DM in json format",
     repoPath: tempDir,
     workspacesDir: "workspaces",
   });
-  const memoryStore = new MemoryStore(workspaceManager, {
-    searchLimit: 10,
-    maxChars: 2000,
-  });
+  const memoryStore = new MemoryStore(workspaceManager, {});
   const handler = new MemoryHandler(memoryStore);
 
   const workspace: WorkspaceInfo = {
@@ -1720,10 +1633,7 @@ Deno.test("MemoryHandler - handleMemoryExport always includes both public and pr
     repoPath: tempDir,
     workspacesDir: "workspaces",
   });
-  const memoryStore = new MemoryStore(workspaceManager, {
-    searchLimit: 10,
-    maxChars: 2000,
-  });
+  const memoryStore = new MemoryStore(workspaceManager, {});
   const handler = new MemoryHandler(memoryStore);
 
   const workspace: WorkspaceInfo = {
@@ -1788,10 +1698,7 @@ Deno.test("MemoryHandler - handleMemoryExport filters by importance", async () =
     repoPath: tempDir,
     workspacesDir: "workspaces",
   });
-  const memoryStore = new MemoryStore(workspaceManager, {
-    searchLimit: 10,
-    maxChars: 2000,
-  });
+  const memoryStore = new MemoryStore(workspaceManager, {});
   const handler = new MemoryHandler(memoryStore);
 
   const workspace: WorkspaceInfo = {
@@ -1847,10 +1754,7 @@ Deno.test("MemoryHandler - handleMemoryExport filters enabled_only", async () =>
     repoPath: tempDir,
     workspacesDir: "workspaces",
   });
-  const memoryStore = new MemoryStore(workspaceManager, {
-    searchLimit: 10,
-    maxChars: 2000,
-  });
+  const memoryStore = new MemoryStore(workspaceManager, {});
   const handler = new MemoryHandler(memoryStore);
 
   const workspace: WorkspaceInfo = {
@@ -1910,10 +1814,7 @@ Deno.test("MemoryHandler - handleMemoryExport includes disabled when enabled_onl
     repoPath: tempDir,
     workspacesDir: "workspaces",
   });
-  const memoryStore = new MemoryStore(workspaceManager, {
-    searchLimit: 10,
-    maxChars: 2000,
-  });
+  const memoryStore = new MemoryStore(workspaceManager, {});
   const handler = new MemoryHandler(memoryStore);
 
   const workspace: WorkspaceInfo = {
@@ -1973,10 +1874,7 @@ Deno.test("MemoryHandler - handleMemoryExport validates format parameter", async
     repoPath: tempDir,
     workspacesDir: "workspaces",
   });
-  const memoryStore = new MemoryStore(workspaceManager, {
-    searchLimit: 10,
-    maxChars: 2000,
-  });
+  const memoryStore = new MemoryStore(workspaceManager, {});
   const handler = new MemoryHandler(memoryStore);
 
   const workspace: WorkspaceInfo = {
@@ -2011,10 +1909,7 @@ Deno.test("MemoryHandler - handleMemoryExport validates importance parameter", a
     repoPath: tempDir,
     workspacesDir: "workspaces",
   });
-  const memoryStore = new MemoryStore(workspaceManager, {
-    searchLimit: 10,
-    maxChars: 2000,
-  });
+  const memoryStore = new MemoryStore(workspaceManager, {});
   const handler = new MemoryHandler(memoryStore);
 
   const workspace: WorkspaceInfo = {
@@ -2049,10 +1944,7 @@ Deno.test("MemoryHandler - handleMemoryExport returns error when getDmChannelId 
     repoPath: tempDir,
     workspacesDir: "workspaces",
   });
-  const memoryStore = new MemoryStore(workspaceManager, {
-    searchLimit: 10,
-    maxChars: 2000,
-  });
+  const memoryStore = new MemoryStore(workspaceManager, {});
   const handler = new MemoryHandler(memoryStore);
 
   const workspace: WorkspaceInfo = {
@@ -2097,10 +1989,7 @@ Deno.test("MemoryHandler - handleMemoryExport returns error when sendFile fails"
     repoPath: tempDir,
     workspacesDir: "workspaces",
   });
-  const memoryStore = new MemoryStore(workspaceManager, {
-    searchLimit: 10,
-    maxChars: 2000,
-  });
+  const memoryStore = new MemoryStore(workspaceManager, {});
   const handler = new MemoryHandler(memoryStore);
 
   const workspace: WorkspaceInfo = {
@@ -2145,10 +2034,7 @@ Deno.test("MemoryHandler - handleMemoryExport json format contains correct field
     repoPath: tempDir,
     workspacesDir: "workspaces",
   });
-  const memoryStore = new MemoryStore(workspaceManager, {
-    searchLimit: 10,
-    maxChars: 2000,
-  });
+  const memoryStore = new MemoryStore(workspaceManager, {});
   const handler = new MemoryHandler(memoryStore);
 
   const workspace: WorkspaceInfo = {
@@ -2215,10 +2101,7 @@ Deno.test("MemoryHandler - handleMemoryExport markdown shows lastModifiedAt when
     repoPath: tempDir,
     workspacesDir: "workspaces",
   });
-  const memoryStore = new MemoryStore(workspaceManager, {
-    searchLimit: 10,
-    maxChars: 2000,
-  });
+  const memoryStore = new MemoryStore(workspaceManager, {});
   const handler = new MemoryHandler(memoryStore);
 
   const workspace: WorkspaceInfo = {
@@ -2283,10 +2166,7 @@ Deno.test("MemoryHandler - handleMemoryExport handles unexpected error gracefull
     repoPath: tempDir,
     workspacesDir: "workspaces",
   });
-  const memoryStore = new MemoryStore(workspaceManager, {
-    searchLimit: 10,
-    maxChars: 2000,
-  });
+  const memoryStore = new MemoryStore(workspaceManager, {});
   const handler = new MemoryHandler(memoryStore);
 
   const workspace: WorkspaceInfo = {
@@ -2334,10 +2214,7 @@ Deno.test("MemoryHandler - handleMemoryExport defaults to markdown and all impor
     repoPath: tempDir,
     workspacesDir: "workspaces",
   });
-  const memoryStore = new MemoryStore(workspaceManager, {
-    searchLimit: 10,
-    maxChars: 2000,
-  });
+  const memoryStore = new MemoryStore(workspaceManager, {});
   const handler = new MemoryHandler(memoryStore);
 
   const workspace: WorkspaceInfo = {

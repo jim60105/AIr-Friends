@@ -30,8 +30,6 @@ async function withTestMemoryStore(
       workspacesDir: "workspaces",
     });
     const store = new MemoryStore(manager, {
-      searchLimit: 10,
-      maxChars: 2000,
       workingTierLimit: 5,
     });
     const event = createTestEvent();

@@ -22,7 +22,7 @@ async function withHandler(
   const tempDir = await Deno.makeTempDir();
   try {
     const manager = new WorkspaceManager({ repoPath: tempDir, workspacesDir: "workspaces" });
-    const store = new MemoryStore(manager, { searchLimit: 10, maxChars: 2000 });
+    const store = new MemoryStore(manager, {});
     const handler = new MemoryHandler(store);
 
     const workspace: WorkspaceInfo = {

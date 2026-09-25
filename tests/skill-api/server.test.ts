@@ -53,10 +53,7 @@ Deno.test("SkillAPIServer - constructs successfully", async () => {
       repoPath: tempDir,
       workspacesDir: "workspaces",
     });
-    const memoryStore = new MemoryStore(workspaceManager, {
-      searchLimit: 10,
-      maxChars: 2000,
-    });
+    const memoryStore = new MemoryStore(workspaceManager, {});
     const skillRegistry = new SkillRegistry(memoryStore);
 
     const server = new SkillAPIServer(
@@ -85,10 +82,7 @@ Deno.test("SkillAPIServer - starts and stops", async () => {
       repoPath: tempDir,
       workspacesDir: "workspaces",
     });
-    const memoryStore = new MemoryStore(workspaceManager, {
-      searchLimit: 10,
-      maxChars: 2000,
-    });
+    const memoryStore = new MemoryStore(workspaceManager, {});
     const skillRegistry = new SkillRegistry(memoryStore);
 
     const port = 3003;
@@ -129,10 +123,7 @@ Deno.test("SkillAPIServer - handles OPTIONS preflight", async () => {
       repoPath: tempDir,
       workspacesDir: "workspaces",
     });
-    const memoryStore = new MemoryStore(workspaceManager, {
-      searchLimit: 10,
-      maxChars: 2000,
-    });
+    const memoryStore = new MemoryStore(workspaceManager, {});
     const skillRegistry = new SkillRegistry(memoryStore);
 
     const port = 3004;
@@ -170,10 +161,7 @@ Deno.test("SkillAPIServer - rejects non-POST methods", async () => {
       repoPath: tempDir,
       workspacesDir: "workspaces",
     });
-    const memoryStore = new MemoryStore(workspaceManager, {
-      searchLimit: 10,
-      maxChars: 2000,
-    });
+    const memoryStore = new MemoryStore(workspaceManager, {});
     const skillRegistry = new SkillRegistry(memoryStore);
 
     const port = 3005;
@@ -214,10 +202,7 @@ Deno.test("SkillAPIServer - returns 404 for invalid routes", async () => {
       repoPath: tempDir,
       workspacesDir: "workspaces",
     });
-    const memoryStore = new MemoryStore(workspaceManager, {
-      searchLimit: 10,
-      maxChars: 2000,
-    });
+    const memoryStore = new MemoryStore(workspaceManager, {});
     const skillRegistry = new SkillRegistry(memoryStore);
 
     const port = 3006;
@@ -258,10 +243,7 @@ Deno.test("SkillAPIServer - validates session ID", async () => {
       repoPath: tempDir,
       workspacesDir: "workspaces",
     });
-    const memoryStore = new MemoryStore(workspaceManager, {
-      searchLimit: 10,
-      maxChars: 2000,
-    });
+    const memoryStore = new MemoryStore(workspaceManager, {});
     const skillRegistry = new SkillRegistry(memoryStore);
 
     const port = 3007;
@@ -317,10 +299,7 @@ Deno.test("SkillAPIServer - validates skill name", async () => {
       repoPath: tempDir,
       workspacesDir: "workspaces",
     });
-    const memoryStore = new MemoryStore(workspaceManager, {
-      searchLimit: 10,
-      maxChars: 2000,
-    });
+    const memoryStore = new MemoryStore(workspaceManager, {});
     const skillRegistry = new SkillRegistry(memoryStore);
 
     // Create a valid session
@@ -396,10 +375,7 @@ Deno.test("SkillAPIServer - allows multiple replies within limit", async () => {
       repoPath: tempDir,
       workspacesDir: "workspaces",
     });
-    const memoryStore = new MemoryStore(workspaceManager, {
-      searchLimit: 10,
-      maxChars: 2000,
-    });
+    const memoryStore = new MemoryStore(workspaceManager, {});
     const skillRegistry = new SkillRegistry(memoryStore);
 
     // Create workspace
@@ -481,10 +457,7 @@ Deno.test("SkillAPIServer - send-reply rejected after reaching limit", async () 
       repoPath: tempDir,
       workspacesDir: "workspaces",
     });
-    const memoryStore = new MemoryStore(workspaceManager, {
-      searchLimit: 10,
-      maxChars: 2000,
-    });
+    const memoryStore = new MemoryStore(workspaceManager, {});
     const skillRegistry = new SkillRegistry(memoryStore);
 
     const mockWorkspace = {
@@ -577,10 +550,7 @@ Deno.test("SkillAPIServer - reply count not incremented on failed send-reply", a
       repoPath: tempDir,
       workspacesDir: "workspaces",
     });
-    const memoryStore = new MemoryStore(workspaceManager, {
-      searchLimit: 10,
-      maxChars: 2000,
-    });
+    const memoryStore = new MemoryStore(workspaceManager, {});
     const skillRegistry = new SkillRegistry(memoryStore);
 
     const mockWorkspace = {
@@ -661,10 +631,7 @@ Deno.test("SkillAPIServer - edit-reply not affected by reply limit", async () =>
       repoPath: tempDir,
       workspacesDir: "workspaces",
     });
-    const memoryStore = new MemoryStore(workspaceManager, {
-      searchLimit: 10,
-      maxChars: 2000,
-    });
+    const memoryStore = new MemoryStore(workspaceManager, {});
     const skillRegistry = new SkillRegistry(memoryStore);
 
     const mockWorkspace = {
@@ -757,10 +724,7 @@ Deno.test("SkillAPIServer - reply count incremented even on rejection", async ()
       repoPath: tempDir,
       workspacesDir: "workspaces",
     });
-    const memoryStore = new MemoryStore(workspaceManager, {
-      searchLimit: 10,
-      maxChars: 2000,
-    });
+    const memoryStore = new MemoryStore(workspaceManager, {});
     const skillRegistry = new SkillRegistry(memoryStore);
 
     const mockWorkspace = {
@@ -866,10 +830,7 @@ Deno.test("SkillAPIServer - doom-loop triggers agent termination on 4th attempt"
       repoPath: tempDir,
       workspacesDir: "workspaces",
     });
-    const memoryStore = new MemoryStore(workspaceManager, {
-      searchLimit: 10,
-      maxChars: 2000,
-    });
+    const memoryStore = new MemoryStore(workspaceManager, {});
     const skillRegistry = new SkillRegistry(memoryStore);
 
     const mockWorkspace = {
@@ -962,10 +923,7 @@ Deno.test("SkillAPIServer - no crash when onTerminateRequest not set on doom-loo
       repoPath: tempDir,
       workspacesDir: "workspaces",
     });
-    const memoryStore = new MemoryStore(workspaceManager, {
-      searchLimit: 10,
-      maxChars: 2000,
-    });
+    const memoryStore = new MemoryStore(workspaceManager, {});
     const skillRegistry = new SkillRegistry(memoryStore);
 
     const mockWorkspace = {
@@ -1060,10 +1018,7 @@ Deno.test("SkillAPIServer - send-reply success updates lastSentMessageId", async
       repoPath: tempDir,
       workspacesDir: "workspaces",
     });
-    const memoryStore = new MemoryStore(workspaceManager, {
-      searchLimit: 10,
-      maxChars: 2000,
-    });
+    const memoryStore = new MemoryStore(workspaceManager, {});
     const skillRegistry = new SkillRegistry(memoryStore);
 
     const mockWorkspace = {
@@ -1149,10 +1104,7 @@ Deno.test("SkillAPIServer - edit-reply success updates lastSentMessageId", async
       repoPath: tempDir,
       workspacesDir: "workspaces",
     });
-    const memoryStore = new MemoryStore(workspaceManager, {
-      searchLimit: 10,
-      maxChars: 2000,
-    });
+    const memoryStore = new MemoryStore(workspaceManager, {});
     const skillRegistry = new SkillRegistry(memoryStore);
 
     const mockWorkspace = {
@@ -1249,10 +1201,7 @@ Deno.test("SkillAPIServer - get-message skill via API", async () => {
       repoPath: tempDir,
       workspacesDir: "workspaces",
     });
-    const memoryStore = new MemoryStore(workspaceManager, {
-      searchLimit: 10,
-      maxChars: 2000,
-    });
+    const memoryStore = new MemoryStore(workspaceManager, {});
     const skillRegistry = new SkillRegistry(memoryStore);
 
     const mockWorkspace = {
@@ -1343,10 +1292,7 @@ Deno.test("SkillAPIServer - get-message uses lastSentMessageId from session", as
       repoPath: tempDir,
       workspacesDir: "workspaces",
     });
-    const memoryStore = new MemoryStore(workspaceManager, {
-      searchLimit: 10,
-      maxChars: 2000,
-    });
+    const memoryStore = new MemoryStore(workspaceManager, {});
     const skillRegistry = new SkillRegistry(memoryStore);
 
     const mockWorkspace = {
@@ -1451,10 +1397,7 @@ Deno.test("SkillAPIServer - edit-reply succeeds for first 2 calls", async () => 
       repoPath: tempDir,
       workspacesDir: "workspaces",
     });
-    const memoryStore = new MemoryStore(workspaceManager, {
-      searchLimit: 10,
-      maxChars: 2000,
-    });
+    const memoryStore = new MemoryStore(workspaceManager, {});
     const skillRegistry = new SkillRegistry(memoryStore);
 
     const mockWorkspace = {
@@ -1561,10 +1504,7 @@ Deno.test("SkillAPIServer - edit-reply rejected on 3rd call and triggers termina
       repoPath: tempDir,
       workspacesDir: "workspaces",
     });
-    const memoryStore = new MemoryStore(workspaceManager, {
-      searchLimit: 10,
-      maxChars: 2000,
-    });
+    const memoryStore = new MemoryStore(workspaceManager, {});
     const skillRegistry = new SkillRegistry(memoryStore);
 
     const mockWorkspace = {
@@ -1691,10 +1631,7 @@ Deno.test("SkillAPIServer - edit-reply no crash when onTerminateRequest not set"
       repoPath: tempDir,
       workspacesDir: "workspaces",
     });
-    const memoryStore = new MemoryStore(workspaceManager, {
-      searchLimit: 10,
-      maxChars: 2000,
-    });
+    const memoryStore = new MemoryStore(workspaceManager, {});
     const skillRegistry = new SkillRegistry(memoryStore);
 
     const mockWorkspace = {
@@ -1809,10 +1746,7 @@ Deno.test("SkillAPIServer - edit-reply count independent from reply count", asyn
       repoPath: tempDir,
       workspacesDir: "workspaces",
     });
-    const memoryStore = new MemoryStore(workspaceManager, {
-      searchLimit: 10,
-      maxChars: 2000,
-    });
+    const memoryStore = new MemoryStore(workspaceManager, {});
     const skillRegistry = new SkillRegistry(memoryStore);
 
     const mockWorkspace = {
@@ -1911,10 +1845,7 @@ Deno.test("SkillAPIServer - skill API call refreshes session timeout", async () 
       repoPath: tempDir,
       workspacesDir: "workspaces",
     });
-    const memoryStore = new MemoryStore(workspaceManager, {
-      searchLimit: 10,
-      maxChars: 2000,
-    });
+    const memoryStore = new MemoryStore(workspaceManager, {});
     const skillRegistry = new SkillRegistry(memoryStore);
 
     const port = 3024;
@@ -1995,10 +1926,7 @@ Deno.test("SkillAPIServer - edit-reply success writes reply_edited audit entry",
       repoPath: tempDir,
       workspacesDir: "workspaces",
     });
-    const memoryStore = new MemoryStore(workspaceManager, {
-      searchLimit: 10,
-      maxChars: 2000,
-    });
+    const memoryStore = new MemoryStore(workspaceManager, {});
     const skillRegistry = new SkillRegistry(memoryStore);
 
     const mockWorkspace = {
@@ -2105,10 +2033,7 @@ Deno.test("SkillAPIServer - memory-save writes memory_operation audit entry", as
       repoPath: tempDir,
       workspacesDir: "workspaces",
     });
-    const memoryStore = new MemoryStore(workspaceManager, {
-      searchLimit: 10,
-      maxChars: 2000,
-    });
+    const memoryStore = new MemoryStore(workspaceManager, {});
     const skillRegistry = new SkillRegistry(memoryStore);
 
     const wsDir = `${tempDir}/workspaces/discord/123`;
@@ -2204,10 +2129,7 @@ Deno.test("SkillAPIServer - memory-search writes memory_operation audit entry", 
       repoPath: tempDir,
       workspacesDir: "workspaces",
     });
-    const memoryStore = new MemoryStore(workspaceManager, {
-      searchLimit: 10,
-      maxChars: 2000,
-    });
+    const memoryStore = new MemoryStore(workspaceManager, {});
     const skillRegistry = new SkillRegistry(memoryStore);
 
     const wsDir = `${tempDir}/workspaces/discord/123`;
@@ -2302,10 +2224,7 @@ function createSendFileRig(
     repoPath: tempDir,
     workspacesDir: "workspaces",
   });
-  const memoryStore = new MemoryStore(workspaceManager, {
-    searchLimit: 10,
-    maxChars: 2000,
-  });
+  const memoryStore = new MemoryStore(workspaceManager, {});
   const skillRegistry = new SkillRegistry(
     memoryStore,
     undefined,
@@ -2621,10 +2540,7 @@ Deno.test("SkillAPIServer - send-file rejected for triggerless sessions (no trig
       repoPath: tempDir,
       workspacesDir: "workspaces",
     });
-    const memoryStore = new MemoryStore(workspaceManager, {
-      searchLimit: 10,
-      maxChars: 2000,
-    });
+    const memoryStore = new MemoryStore(workspaceManager, {});
     const skillRegistry = new SkillRegistry(
       memoryStore,
       undefined,
@@ -2949,10 +2865,7 @@ Deno.test("SkillAPIServer - send-reply success records the per-reply anchor", as
       repoPath: tempDir,
       workspacesDir: "workspaces",
     });
-    const memoryStore = new MemoryStore(workspaceManager, {
-      searchLimit: 10,
-      maxChars: 2000,
-    });
+    const memoryStore = new MemoryStore(workspaceManager, {});
     const skillRegistry = new SkillRegistry(memoryStore);
 
     const sessionId = sessionRegistry.register({
@@ -3022,10 +2935,7 @@ Deno.test("SkillAPIServer - send-reply after send-file threads to the file messa
       repoPath: tempDir,
       workspacesDir: "workspaces",
     });
-    const memoryStore = new MemoryStore(workspaceManager, {
-      searchLimit: 10,
-      maxChars: 2000,
-    });
+    const memoryStore = new MemoryStore(workspaceManager, {});
     const skillRegistry = new SkillRegistry(
       memoryStore,
       undefined,
@@ -3154,10 +3064,7 @@ Deno.test("SkillAPIServer - react-message after a file send targets the trigger 
       repoPath: tempDir,
       workspacesDir: "workspaces",
     });
-    const memoryStore = new MemoryStore(workspaceManager, {
-      searchLimit: 10,
-      maxChars: 2000,
-    });
+    const memoryStore = new MemoryStore(workspaceManager, {});
     const skillRegistry = new SkillRegistry(
       memoryStore,
       undefined,
@@ -3252,10 +3159,7 @@ Deno.test("SkillAPIServer - ordering: reply → file → edit keeps the edited r
       repoPath: tempDir,
       workspacesDir: "workspaces",
     });
-    const memoryStore = new MemoryStore(workspaceManager, {
-      searchLimit: 10,
-      maxChars: 2000,
-    });
+    const memoryStore = new MemoryStore(workspaceManager, {});
     const skillRegistry = new SkillRegistry(
       memoryStore,
       undefined,
@@ -3368,10 +3272,7 @@ Deno.test("SkillAPIServer - Misskey chat partial delivery records the last deliv
       repoPath: tempDir,
       workspacesDir: "workspaces",
     });
-    const memoryStore = new MemoryStore(workspaceManager, {
-      searchLimit: 10,
-      maxChars: 2000,
-    });
+    const memoryStore = new MemoryStore(workspaceManager, {});
     const skillRegistry = new SkillRegistry(
       memoryStore,
       undefined,

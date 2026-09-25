@@ -32,10 +32,7 @@ async function withTestMemoryStore(
       repoPath: tempDir,
       workspacesDir: "workspaces",
     });
-    const store = new MemoryStore(manager, {
-      searchLimit: 10,
-      maxChars: 2000,
-    });
+    const store = new MemoryStore(manager, {});
     const event = createTestEvent({ isDm });
     const workspace = await manager.getOrCreateWorkspace(event);
 
