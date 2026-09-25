@@ -2520,8 +2520,8 @@ Deno.test("Config - applies memory.recall defaults", async () => {
     assertEquals(result.memory.recall?.workingMaxTokens, 384);
     assertEquals(result.memory.recall?.minRecallScore, 6.75);
     assertEquals(result.memory.recall?.secondRecallScore, 6.5);
-    assertEquals(result.memory.recall?.noteMinRecallScore, 3);
-    assertEquals(result.memory.recall?.secondNoteRecallScore, 3);
+    assertEquals(result.memory.recall?.noteMinRecallScore, 11.5);
+    assertEquals(result.memory.recall?.secondNoteRecallScore, 9.25);
     assertEquals(result.memory.recall?.secondResultRatio, 0.65);
     assertEquals(result.memory.recall?.deepRecallMaxTokens, 1024);
     assertEquals(result.memory.recall?.deepMinRecallScore, 0);
@@ -2543,8 +2543,8 @@ Deno.test("Config - memory.recall keeps every default a partial override does no
     assertEquals(result.memory.recall?.coreMaxTokens, 512);
     assertEquals(result.memory.recall?.workingMaxItems, 4);
     assertEquals(result.memory.recall?.workingMaxTokens, 384);
-    assertEquals(result.memory.recall?.noteMinRecallScore, 3);
-    assertEquals(result.memory.recall?.secondNoteRecallScore, 3);
+    assertEquals(result.memory.recall?.noteMinRecallScore, 11.5);
+    assertEquals(result.memory.recall?.secondNoteRecallScore, 9.25);
     assertEquals(result.memory.recall?.secondResultRatio, 0.65);
     assertEquals(result.memory.recall?.deepRecallMaxTokens, 1024);
   });

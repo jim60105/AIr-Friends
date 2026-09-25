@@ -4,19 +4,28 @@
  * Offline calibration benchmark for Fast Recall (Memory Recall v2 design, §12).
  *
  * The script materializes the committed fixture (`tests/fixtures/memory-recall/`)
- * into a temporary workspace tree, runs Fast Recall over every labeled query
- * with a fixed clock, and grid-searches `minRecallScore` and `secondRecallScore`
- * under a false-positive cap of 5%. It reports Recall@1, Recall@2, the
- * false-positive rate, the average injected tokens and the p95 search latency,
- * and with `--write` it records the calibrated thresholds and the metrics in
+ * into a temporary workspace tree — the memory files and the agent workspace
+ * notes — runs Fast Recall over every labeled query with a fixed clock, and
+ * grid-searches `minRecallScore`/`secondRecallScore` and, independently,
+ * `noteMinRecallScore`/`secondNoteRecallScore` under a false-positive cap of 5%.
+ * It reports Recall@1, Recall@2, the false-positive rate, the average injected
+ * tokens and the p95 search latency, for memories and notes separately, and with
+ * `--write` it records the calibrated thresholds and the metrics in
  * `metrics.json` for the regression test.
  *
  * Two-stage search, as the requirement states it: `minRecallScore` is the grid
  * value that maximizes Recall@1 subject to the cap (evaluated with the second
  * selection disabled, so the metric isolates the first selection), and
  * `secondRecallScore` is the grid value that maximizes Recall@2 under the same
- * cap with `minRecallScore` fixed. Ties break on the lower false-positive rate,
+ * cap with `minRecallScore` fixed. The note thresholds follow the same two
+ * stages over the note selection. Ties break on the lower false-positive rate,
  * then on the higher threshold.
+ *
+ * The memory metrics and the memory thresholds are computed over the memory
+ * queries alone (`!isNoteQuery`), so extending the fixture with note queries
+ * cannot move the committed memory gate. The note metrics are computed over
+ * every query, because a note pointer injected into a memory turn is still a
+ * note false positive.
  *
  * Grid search cost is bounded by capturing each query's ranked candidates once
  * with a permissive retriever and replaying the threshold rules purely, instead
@@ -31,15 +40,23 @@
  *     scripts/memory-recall-benchmark.ts [--write] [--quiet]
  */
 
+import { dirname } from "@std/path";
 import { parse as parseYaml } from "@std/yaml";
-import { estimateMemorySectionTokens } from "@core/memory-recall/fast-recall.ts";
+import {
+  estimateMemorySectionTokens,
+  estimateNoteSectionTokens,
+} from "@core/memory-recall/fast-recall.ts";
 import { DEFAULT_RECALL_CONFIG } from "@core/memory-recall/recall-config.ts";
 import { MemoryRetriever } from "@core/memory-recall/retriever.ts";
-import type { MemoryRecallRequest, MemoryRecallResult } from "@core/memory-recall/retriever.ts";
+import type {
+  MemoryRecallRequest,
+  MemoryRecallResult,
+  RecallResponse,
+} from "@core/memory-recall/retriever.ts";
 import { MemoryStore } from "@core/memory-store.ts";
 import { WorkspaceManager } from "@core/workspace-manager.ts";
 import type { Platform } from "../src/types/events.ts";
-import type { MemoryLogEvent } from "../src/types/memory.ts";
+import type { MemoryLogEvent, NoteRecallResult } from "../src/types/memory.ts";
 import type { ChannelWorkspaceInfo, WorkspaceInfo } from "../src/types/workspace.ts";
 
 /** Fixed clock of the fixture, so recency bonuses are stable (design §12). */
@@ -51,6 +68,17 @@ const FIXTURE_DIR = new URL("../tests/fixtures/memory-recall/", import.meta.url)
 export const CORPUS_URL = new URL("corpus.jsonl", FIXTURE_DIR);
 export const QUERIES_URL = new URL("queries.yaml", FIXTURE_DIR);
 export const METRICS_URL = new URL("metrics.json", FIXTURE_DIR);
+/** The committed agent workspace notes, materialized into the fixture tree. */
+export const NOTES_URL = new URL("notes/", FIXTURE_DIR);
+
+/**
+ * Agent workspace root the fixture's note metrics are measured at, which is the
+ * path the design documents. The fixture's real root is a temporary directory
+ * whose length varies by a character or two, and a note pointer renders its
+ * absolute path, so measuring at the temporary root would move
+ * `averageInjectedTokens` between runs and between machines.
+ */
+export const FIXTURE_AGENT_WORKSPACE = "/app/data/agent-workspace";
 
 /** Memory false-positive cap of the calibration (design §12). */
 export const FALSE_POSITIVE_CAP = 0.05;
@@ -66,11 +94,20 @@ export const THRESHOLD_GRID_STEP = 0.25;
 /** Second-to-first score ratio the engine applies; not searched by this change. */
 export const SECOND_RESULT_RATIO = DEFAULT_RECALL_CONFIG.secondResultRatio;
 
-/** The two thresholds this benchmark calibrates. */
+/** The two memory thresholds this benchmark calibrates. */
 export interface Thresholds {
   minRecallScore: number;
   secondRecallScore: number;
 }
+
+/** The two note thresholds this benchmark calibrates. */
+export interface NoteThresholds {
+  noteMinRecallScore: number;
+  secondNoteRecallScore: number;
+}
+
+/** All four thresholds, as the retriever configuration holds them. */
+export interface RecallThresholds extends Thresholds, NoteThresholds {}
 
 /** Inclusive grid, `0.5` to `12.0` in steps of `0.25` (47 values). */
 export const THRESHOLD_GRID: readonly number[] = buildGrid();
@@ -105,6 +142,15 @@ export interface QuerySpec {
   previous?: string;
   excludeIds?: string[];
   expected: string[];
+  /** Note paths this query may select without a false positive, `notes/x.md`. */
+  expectedNotes: string[];
+}
+
+/** One committed agent workspace note. */
+export interface NoteFixture {
+  /** Workspace-relative path, e.g. `notes/cooking.md`. */
+  path: string;
+  content: string;
 }
 
 /** The workspace tree the fixture is materialized into. */
@@ -113,6 +159,8 @@ export interface FixtureWorkspaces {
   dmWorkspace: WorkspaceInfo;
   guildWorkspace: WorkspaceInfo;
   channelWorkspace: ChannelWorkspaceInfo;
+  /** Root of the materialized agent workspace, holding the fixture notes. */
+  agentWorkspacePath: string;
 }
 
 /** A materialized fixture plus its temporary root, for cleanup. */
@@ -127,7 +175,13 @@ export interface RankedMemory {
   score: number;
 }
 
-/** A query's ranked candidates (at most two) and its rendered token costs. */
+/** One selected note and its score, as the capture pass saw them. */
+export interface RankedNote {
+  path: string;
+  score: number;
+}
+
+/** A query's ranked candidates (at most two each) and its rendered token costs. */
 export interface CapturedQuery {
   query: QuerySpec;
   ranked: readonly RankedMemory[];
@@ -135,6 +189,11 @@ export interface CapturedQuery {
   tokensTop: number;
   /** Rendered tokens of the first two candidates. */
   tokensBoth: number;
+  rankedNotes: readonly RankedNote[];
+  /** Rendered tokens of the first note entry plus the note heading. */
+  noteTokensTop: number;
+  /** Rendered tokens of the first two note entries plus the note heading. */
+  noteTokensBoth: number;
 }
 
 /** The selection of one query under one threshold pair. */
@@ -148,6 +207,10 @@ export interface QueryOutcome {
   query: QuerySpec;
   selected: string[];
   tokens: number;
+  /** Selected note paths, in ranking order. */
+  selectedNotes: string[];
+  /** Rendered tokens of the selected note entries plus their heading. */
+  noteTokens: number;
   latencyMs: number;
 }
 
@@ -158,6 +221,9 @@ export interface Metrics {
   falsePositiveRate: number;
   averageInjectedTokens: number;
 }
+
+/** The four recorded note metrics of the regression gate. */
+export type NoteMetrics = Metrics;
 
 /** One grid value and the metrics it produced. */
 export interface GridRow {
@@ -177,6 +243,13 @@ export interface Calibration {
   stage1Feasible: GridRow[];
   /** Feasible `secondRecallScore` rows, best first. */
   stage2Feasible: GridRow[];
+  /** The note search, the same two stages over the note thresholds. */
+  noteFeasible: boolean;
+  noteThresholds?: NoteThresholds;
+  noteStage1: GridRow[];
+  noteStage2: GridRow[];
+  noteStage1Feasible: GridRow[];
+  noteStage2Feasible: GridRow[];
 }
 
 /** The complete result of one benchmark run. */
@@ -184,9 +257,11 @@ export interface BenchmarkResult {
   calibration: Calibration;
   corpus: readonly CorpusEntry[];
   queries: readonly QuerySpec[];
+  notes: readonly NoteFixture[];
   captured: readonly CapturedQuery[];
   outcomes: readonly QueryOutcome[];
   metrics?: Metrics;
+  noteMetrics?: NoteMetrics;
   p95LatencyMs?: number;
 }
 
@@ -363,7 +438,16 @@ export function parseQuery(record: unknown, index: number): QuerySpec {
   const fields = record as Record<string, unknown>;
   rejectUnknownKeys(
     fields,
-    ["id", "case", "context", "current", "previous", "excludeIds", "expected"],
+    [
+      "id",
+      "case",
+      "context",
+      "current",
+      "previous",
+      "excludeIds",
+      "expected",
+      "expectedNotes",
+    ],
     where,
   );
   const context = requireOptionalEnum(fields.context, "context", ["dm", "guild"], where);
@@ -378,6 +462,7 @@ export function parseQuery(record: unknown, index: number): QuerySpec {
       : requireString(fields.previous, "previous", where),
     excludeIds: requireOptionalStringArray(fields.excludeIds, "excludeIds", where),
     expected: requireOptionalStringArray(fields.expected, "expected", where) ?? [],
+    expectedNotes: requireOptionalStringArray(fields.expectedNotes, "expectedNotes", where) ?? [],
   };
 }
 
@@ -390,17 +475,47 @@ export function parseQueries(text: string): QuerySpec[] {
   return parsed.map((record, index) => parseQuery(record, index));
 }
 
-/** Loads and validates both fixture files. */
-export async function loadFixture(): Promise<{ corpus: CorpusEntry[]; queries: QuerySpec[] }> {
-  const [corpusText, queriesText] = await Promise.all([
-    Deno.readTextFile(CORPUS_URL),
-    Deno.readTextFile(QUERIES_URL),
-  ]);
-  return { corpus: parseCorpus(corpusText), queries: parseQueries(queriesText) };
+/** Reads the committed agent workspace notes, in name order. */
+export async function loadNotes(): Promise<NoteFixture[]> {
+  const names: string[] = [];
+  for await (const entry of Deno.readDir(NOTES_URL)) {
+    if (entry.isFile && entry.name.endsWith(".md")) names.push(entry.name);
+  }
+  names.sort();
+  if (names.length === 0) fail("notes/", "holds no Markdown note");
+
+  const notes: NoteFixture[] = [];
+  for (const name of names) {
+    notes.push({
+      path: `notes/${name}`,
+      content: await Deno.readTextFile(new URL(name, NOTES_URL)),
+    });
+  }
+  return notes;
 }
 
-/** Writes the corpus into a temporary workspace tree, one file per source tag. */
-export async function materializeFixture(corpus: readonly CorpusEntry[]): Promise<Fixture> {
+/** Loads and validates every fixture file. */
+export async function loadFixture(): Promise<{
+  corpus: CorpusEntry[];
+  queries: QuerySpec[];
+  notes: NoteFixture[];
+}> {
+  const [corpusText, queriesText, notes] = await Promise.all([
+    Deno.readTextFile(CORPUS_URL),
+    Deno.readTextFile(QUERIES_URL),
+    loadNotes(),
+  ]);
+  return { corpus: parseCorpus(corpusText), queries: parseQueries(queriesText), notes };
+}
+
+/**
+ * Writes the corpus into a temporary workspace tree, one file per source tag,
+ * and the notes into the agent workspace of the same tree.
+ */
+export async function materializeFixture(
+  corpus: readonly CorpusEntry[],
+  notes: readonly NoteFixture[],
+): Promise<Fixture> {
   const root = await Deno.makeTempDir({ prefix: "memory-recall-benchmark-" });
   const manager = new WorkspaceManager({ repoPath: root, workspacesDir: "workspaces" });
   const store = new MemoryStore(manager, { searchLimit: 10, maxChars: 2000 });
@@ -438,18 +553,34 @@ export async function materializeFixture(corpus: readonly CorpusEntry[]): Promis
     await Deno.writeTextFile(paths[source], lines[source].join("\n") + "\n");
   }
 
+  // Fixed file set and fixed write order here too, so the note walk of the
+  // snapshot cache sees the same tree in every run.
+  const agentWorkspacePath = `${root}/agent-workspace`;
+  for (const note of notes) {
+    const path = `${agentWorkspacePath}/${note.path}`;
+    await Deno.mkdir(dirname(path), { recursive: true });
+    await Deno.writeTextFile(path, note.content);
+  }
+
   return {
     root,
-    workspaces: { store, dmWorkspace, guildWorkspace, channelWorkspace },
+    workspaces: {
+      store,
+      dmWorkspace,
+      guildWorkspace,
+      channelWorkspace,
+      agentWorkspacePath,
+    },
   };
 }
 
 /** Materializes the fixture, runs `fn`, then removes the temporary tree. */
 export async function withFixture<T>(
   corpus: readonly CorpusEntry[],
+  notes: readonly NoteFixture[],
   fn: (fixture: Fixture) => Promise<T>,
 ): Promise<T> {
-  const fixture = await materializeFixture(corpus);
+  const fixture = await materializeFixture(corpus, notes);
   try {
     return await fn(fixture);
   } finally {
@@ -462,12 +593,14 @@ export interface RetrieverOptions {
   secondResultRatio?: number;
   /** 1 admits only the first candidate, which is how the engine disables the second. */
   fastRecallMaxResults?: number;
+  /** The note equivalent of `fastRecallMaxResults`. */
+  fastRecallNoteMaxResults?: number;
 }
 
 /** A retriever over the fixture with the given thresholds and the fixed clock. */
 export function createRetriever(
   store: MemoryStore,
-  thresholds: Thresholds,
+  thresholds: RecallThresholds,
   options: RetrieverOptions = {},
 ): MemoryRetriever {
   return new MemoryRetriever(
@@ -478,6 +611,8 @@ export function createRetriever(
       secondResultRatio: options.secondResultRatio ?? SECOND_RESULT_RATIO,
       fastRecallMaxResults: options.fastRecallMaxResults ??
         DEFAULT_RECALL_CONFIG.fastRecallMaxResults,
+      fastRecallNoteMaxResults: options.fastRecallNoteMaxResults ??
+        DEFAULT_RECALL_CONFIG.fastRecallNoteMaxResults,
     },
     { now: () => FIXED_CLOCK },
   );
@@ -492,6 +627,7 @@ export function toRequest(
     mode: "fast",
     query: query.current,
     workspace: query.context === "dm" ? workspaces.dmWorkspace : workspaces.guildWorkspace,
+    agentWorkspacePath: workspaces.agentWorkspacePath,
   };
   if (query.previous !== undefined) request.previousUserMessage = query.previous;
   if (query.context === "guild") request.channelWorkspace = workspaces.channelWorkspace;
@@ -499,13 +635,51 @@ export function toRequest(
   return request;
 }
 
+/** Note queries carry a `note-` case tag; the memory metrics skip them. */
+export function isNoteQuery(query: QuerySpec): boolean {
+  return query.case.startsWith("note-");
+}
+
+/**
+ * Fixture key of a materialized note: its path inside the agent workspace, the
+ * form `expectedNotes` uses. The engine reports absolute paths, which embed the
+ * temporary root, so every comparison normalizes through here.
+ */
+export function noteFixturePath(agentWorkspacePath: string, path: string): string {
+  const prefix = `${agentWorkspacePath}/`;
+  return path.startsWith(prefix) ? path.slice(prefix.length) : path;
+}
+
+/**
+ * Rendered tokens of the given note pointers, measured at the canonical
+ * workspace root rather than the fixture's temporary one, so the recorded note
+ * metric is the same on every run and every machine.
+ */
+function noteSectionTokens(
+  notes: readonly NoteRecallResult[],
+  agentWorkspacePath: string,
+): number {
+  if (notes.length === 0) return 0;
+  return estimateNoteSectionTokens(notes.map((note) => ({
+    ...note,
+    path: `${FIXTURE_AGENT_WORKSPACE}/${noteFixturePath(agentWorkspacePath, note.path)}`,
+  })));
+}
+
+/** The outcomes of the memory queries: the population the memory metrics use. */
+export function memoryOutcomes(outcomes: readonly QueryOutcome[]): QueryOutcome[] {
+  return outcomes.filter((outcome) => !isNoteQuery(outcome.query));
+}
+
 /**
  * Captures each query's ranked candidates with a permissive retriever: no
- * threshold and a zero ratio, so the first two candidates that fit the budget
- * come back whatever their score. The threshold and ratio rules are then
- * replayed over this capture offline. That replay is exact because the engine
- * applies both after ranking and after the `relatedTo` boost, and the fixture's
- * memories always fit the Fast Recall budget.
+ * threshold and a zero ratio, for memories and for notes, so the first two
+ * candidates of each kind that fit their budget come back whatever their score.
+ * The threshold and ratio rules are then replayed over this capture offline.
+ * That replay is exact because the engine applies both after ranking and after
+ * the `relatedTo` boost, and the fixture's memories and notes always fit their
+ * Fast Recall budgets; `assertModelMatches` fails the run when that stops being
+ * true.
  */
 export async function captureRanked(
   queries: readonly QuerySpec[],
@@ -514,24 +688,37 @@ export async function captureRanked(
   const retriever = createRetriever(workspaces.store, {
     minRecallScore: 0,
     secondRecallScore: 0,
+    noteMinRecallScore: 0,
+    secondNoteRecallScore: 0,
   }, { secondResultRatio: 0 });
   const captured: CapturedQuery[] = [];
   for (const query of queries) {
     const response = await retriever.search(toRequest(query, workspaces));
-    captured.push(toCaptured(query, response.memories));
+    captured.push(toCaptured(query, response, workspaces.agentWorkspacePath));
   }
   return captured;
 }
 
-function toCaptured(query: QuerySpec, memories: readonly MemoryRecallResult[]): CapturedQuery {
-  const contents = memories.map((item) => item.memory);
+function toCaptured(
+  query: QuerySpec,
+  response: RecallResponse,
+  agentWorkspacePath: string,
+): CapturedQuery {
+  const contents = response.memories.map((item) => item.memory);
   const tokensTop = contents.length === 0 ? 0 : estimateMemorySectionTokens(contents.slice(0, 1));
   const tokensBoth = contents.length === 0 ? 0 : estimateMemorySectionTokens(contents.slice(0, 2));
+  const notes = response.notes;
   return {
     query,
-    ranked: memories.map((item) => ({ id: item.memory.id, score: item.score })),
+    ranked: response.memories.map((item) => ({ id: item.memory.id, score: item.score })),
     tokensTop,
     tokensBoth,
+    rankedNotes: notes.map((note) => ({
+      path: noteFixturePath(agentWorkspacePath, note.path),
+      score: note.score,
+    })),
+    noteTokensTop: noteSectionTokens(notes.slice(0, 1), agentWorkspacePath),
+    noteTokensBoth: noteSectionTokens(notes.slice(0, 2), agentWorkspacePath),
   };
 }
 
@@ -560,13 +747,48 @@ export function selectFromCapture(
   return { ids: [top.id], tokens: captured.tokensTop };
 }
 
+/**
+ * Replays the Fast Recall note selection rule over a capture, the note twin of
+ * `selectFromCapture`: the first note is selected when it clears
+ * `noteMinRecallScore`, the second only when it clears `secondNoteRecallScore`
+ * and reaches `secondResultRatio` times the first score.
+ */
+export function selectNotesFromCapture(
+  captured: CapturedQuery,
+  thresholds: NoteThresholds,
+  secondEnabled: boolean,
+): Selection {
+  const [top, second] = captured.rankedNotes;
+  if (top === undefined || top.score < thresholds.noteMinRecallScore) {
+    return { ids: [], tokens: 0 };
+  }
+  if (
+    secondEnabled &&
+    second !== undefined &&
+    second.score >= thresholds.secondNoteRecallScore &&
+    second.score >= SECOND_RESULT_RATIO * top.score
+  ) {
+    return { ids: [top.path, second.path], tokens: captured.noteTokensBoth };
+  }
+  return { ids: [top.path], tokens: captured.noteTokensTop };
+}
+
 function offlineOutcome(
   captured: CapturedQuery,
-  thresholds: Thresholds,
-  secondEnabled: boolean,
+  thresholds: RecallThresholds,
+  memorySecondEnabled: boolean,
+  noteSecondEnabled: boolean,
 ): QueryOutcome {
-  const selection = selectFromCapture(captured, thresholds, secondEnabled);
-  return { query: captured.query, selected: selection.ids, tokens: selection.tokens, latencyMs: 0 };
+  const memory = selectFromCapture(captured, thresholds, memorySecondEnabled);
+  const notes = selectNotesFromCapture(captured, thresholds, noteSecondEnabled);
+  return {
+    query: captured.query,
+    selected: memory.ids,
+    tokens: memory.tokens,
+    selectedNotes: notes.ids,
+    noteTokens: notes.tokens,
+    latencyMs: 0,
+  };
 }
 
 /** Metrics over a set of outcomes (design §12). */
@@ -593,10 +815,47 @@ export function computeMetrics(outcomes: readonly QueryOutcome[]): Metrics {
   };
 }
 
+/**
+ * The note metrics (design §12): the same four, over the note selection. The
+ * population is every outcome, because a note injected on a memory query is a
+ * note false positive; the positives are the queries with an expected note.
+ */
+export function computeNoteMetrics(outcomes: readonly QueryOutcome[]): NoteMetrics {
+  const positives = outcomes.filter((outcome) => outcome.query.expectedNotes.length > 0);
+  const recallAt = (k: number): number => {
+    if (positives.length === 0) return 0;
+    const hits =
+      positives.filter((outcome) =>
+        outcome.selectedNotes.slice(0, k).some((path) => outcome.query.expectedNotes.includes(path))
+      ).length;
+    return hits / positives.length;
+  };
+  const falsePositives =
+    outcomes.filter((outcome) =>
+      outcome.selectedNotes.some((path) => !outcome.query.expectedNotes.includes(path))
+    ).length;
+  const tokens = outcomes.reduce((sum, outcome) => sum + outcome.noteTokens, 0);
+  return {
+    recallAt1: recallAt(1),
+    recallAt2: recallAt(2),
+    falsePositiveRate: falsePositives / outcomes.length,
+    averageInjectedTokens: tokens / outcomes.length,
+  };
+}
+
 /** Query ids of the false positives an outcome set contains. */
 export function falsePositiveQueryIds(outcomes: readonly QueryOutcome[]): string[] {
   return outcomes
     .filter((outcome) => outcome.selected.some((id) => !outcome.query.expected.includes(id)))
+    .map((outcome) => outcome.query.id);
+}
+
+/** Query ids where Fast Recall selected an unexpected note. */
+export function noteFalsePositiveQueryIds(outcomes: readonly QueryOutcome[]): string[] {
+  return outcomes
+    .filter((outcome) =>
+      outcome.selectedNotes.some((path) => !outcome.query.expectedNotes.includes(path))
+    )
     .map((outcome) => outcome.query.id);
 }
 
@@ -606,6 +865,16 @@ export function missedQueryIds(outcomes: readonly QueryOutcome[], k: number): st
     .filter((outcome) =>
       outcome.query.expected.length > 0 &&
       !outcome.selected.slice(0, k).some((id) => outcome.query.expected.includes(id))
+    )
+    .map((outcome) => outcome.query.id);
+}
+
+/** Query ids whose expected note is missing from the first `k` selections. */
+export function noteMissedQueryIds(outcomes: readonly QueryOutcome[], k: number): string[] {
+  return outcomes
+    .filter((outcome) =>
+      outcome.query.expectedNotes.length > 0 &&
+      !outcome.selectedNotes.slice(0, k).some((path) => outcome.query.expectedNotes.includes(path))
     )
     .map((outcome) => outcome.query.id);
 }
@@ -625,20 +894,31 @@ function rankRows(
 }
 
 /**
- * Grid-searches both thresholds. Returns `feasible: false` with the best
- * achievable rows when no grid value meets the cap, so the caller reports
+ * Grid-searches the two memory thresholds. Returns `feasible: false` with the
+ * best achievable rows when no grid value meets the cap, so the caller reports
  * instead of weakening the gate (design §12).
  */
-export function calibrate(captured: readonly CapturedQuery[]): Calibration {
+function calibrateMemory(
+  captured: readonly CapturedQuery[],
+): Pick<
+  Calibration,
+  "feasible" | "thresholds" | "stage1" | "stage2" | "stage1Feasible" | "stage2Feasible"
+> {
   const stage1 = THRESHOLD_GRID.map((value) => ({
     value,
-    metrics: computeMetrics(captured.map((item) =>
+    metrics: computeMetrics(memoryOutcomes(captured.map((item) =>
       offlineOutcome(
         item,
-        { minRecallScore: value, secondRecallScore: Number.POSITIVE_INFINITY },
+        {
+          minRecallScore: value,
+          secondRecallScore: Number.POSITIVE_INFINITY,
+          noteMinRecallScore: Number.POSITIVE_INFINITY,
+          secondNoteRecallScore: Number.POSITIVE_INFINITY,
+        },
+        false,
         false,
       )
-    )),
+    ))),
   }));
   const stage1Feasible = rankRows(stage1, (metrics) => metrics.recallAt1);
   if (stage1Feasible.length === 0) {
@@ -649,9 +929,19 @@ export function calibrate(captured: readonly CapturedQuery[]): Calibration {
   const stage2 = THRESHOLD_GRID.map((value) => ({
     value,
     metrics: computeMetrics(
-      captured.map((item) =>
-        offlineOutcome(item, { minRecallScore, secondRecallScore: value }, true)
-      ),
+      memoryOutcomes(captured.map((item) =>
+        offlineOutcome(
+          item,
+          {
+            minRecallScore,
+            secondRecallScore: value,
+            noteMinRecallScore: Number.POSITIVE_INFINITY,
+            secondNoteRecallScore: Number.POSITIVE_INFINITY,
+          },
+          true,
+          false,
+        )
+      )),
     ),
   }));
   const stage2Feasible = rankRows(stage2, (metrics) => metrics.recallAt2);
@@ -669,6 +959,110 @@ export function calibrate(captured: readonly CapturedQuery[]): Calibration {
   };
 }
 
+/**
+ * Grid-searches the two note thresholds with the same two stages and the same
+ * cap, over every query. The memory thresholds are held out of the way, so the
+ * rows measure the note selection alone.
+ */
+function calibrateNotes(
+  captured: readonly CapturedQuery[],
+): Pick<
+  Calibration,
+  | "noteFeasible"
+  | "noteThresholds"
+  | "noteStage1"
+  | "noteStage2"
+  | "noteStage1Feasible"
+  | "noteStage2Feasible"
+> {
+  const memoryOutOfTheWay: Thresholds = {
+    minRecallScore: Number.POSITIVE_INFINITY,
+    secondRecallScore: Number.POSITIVE_INFINITY,
+  };
+  const noteStage1 = THRESHOLD_GRID.map((value) => ({
+    value,
+    metrics: computeNoteMetrics(captured.map((item) =>
+      offlineOutcome(
+        item,
+        {
+          ...memoryOutOfTheWay,
+          noteMinRecallScore: value,
+          secondNoteRecallScore: Number.POSITIVE_INFINITY,
+        },
+        false,
+        false,
+      )
+    )),
+  }));
+  const noteStage1Feasible = rankRows(noteStage1, (metrics) => metrics.recallAt1);
+  if (noteStage1Feasible.length === 0) {
+    return {
+      noteFeasible: false,
+      noteStage1,
+      noteStage2: [],
+      noteStage1Feasible,
+      noteStage2Feasible: [],
+    };
+  }
+
+  const noteMinRecallScore = noteStage1Feasible[0].value;
+  const noteStage2 = THRESHOLD_GRID.map((value) => ({
+    value,
+    metrics: computeNoteMetrics(captured.map((item) =>
+      offlineOutcome(
+        item,
+        { ...memoryOutOfTheWay, noteMinRecallScore, secondNoteRecallScore: value },
+        false,
+        true,
+      )
+    )),
+  }));
+  const noteStage2Feasible = rankRows(noteStage2, (metrics) => metrics.recallAt2);
+  if (noteStage2Feasible.length === 0) {
+    return {
+      noteFeasible: false,
+      noteStage1,
+      noteStage2,
+      noteStage1Feasible,
+      noteStage2Feasible,
+    };
+  }
+
+  return {
+    noteFeasible: true,
+    noteThresholds: {
+      noteMinRecallScore,
+      secondNoteRecallScore: noteStage2Feasible[0].value,
+    },
+    noteStage1,
+    noteStage2,
+    noteStage1Feasible,
+    noteStage2Feasible,
+  };
+}
+
+/**
+ * Grid-searches all four thresholds. The memory and the note searches are
+ * independent, so an infeasible one never hides the other's evidence.
+ */
+export function calibrate(captured: readonly CapturedQuery[]): Calibration {
+  const memory = calibrateMemory(captured);
+  const notes = calibrateNotes(captured);
+  return {
+    feasible: memory.feasible,
+    ...(memory.thresholds === undefined ? {} : { thresholds: memory.thresholds }),
+    stage1: memory.stage1,
+    stage2: memory.stage2,
+    stage1Feasible: memory.stage1Feasible,
+    stage2Feasible: memory.stage2Feasible,
+    noteFeasible: notes.noteFeasible,
+    ...(notes.noteThresholds === undefined ? {} : { noteThresholds: notes.noteThresholds }),
+    noteStage1: notes.noteStage1,
+    noteStage2: notes.noteStage2,
+    noteStage1Feasible: notes.noteStage1Feasible,
+    noteStage2Feasible: notes.noteStage2Feasible,
+  };
+}
 /** Nearest-rank p95 of the measured latencies. */
 export function percentile95(values: readonly number[]): number {
   if (values.length === 0) return 0;
@@ -684,10 +1078,11 @@ export function percentile95(values: readonly number[]): number {
  */
 export async function runPassOnFixture(
   corpus: readonly CorpusEntry[],
+  notes: readonly NoteFixture[],
   queries: readonly QuerySpec[],
-  thresholds: Thresholds,
+  thresholds: RecallThresholds,
 ): Promise<{ outcomes: QueryOutcome[]; p95LatencyMs: number }> {
-  return await withFixture(corpus, async (fixture) => {
+  return await withFixture(corpus, notes, async (fixture) => {
     await runPass(queries, fixture.workspaces, thresholds);
     const outcomes = await runPass(queries, fixture.workspaces, thresholds);
     return { outcomes, p95LatencyMs: percentile95(outcomes.map((item) => item.latencyMs)) };
@@ -698,7 +1093,7 @@ export async function runPassOnFixture(
 export async function runPass(
   queries: readonly QuerySpec[],
   workspaces: FixtureWorkspaces,
-  thresholds: Thresholds,
+  thresholds: RecallThresholds,
   options: RetrieverOptions = {},
 ): Promise<QueryOutcome[]> {
   const retriever = createRetriever(workspaces.store, thresholds, options);
@@ -712,6 +1107,10 @@ export async function runPass(
       query,
       selected: response.memories.map((item) => item.memory.id),
       tokens: contents.length === 0 ? 0 : estimateMemorySectionTokens(contents),
+      selectedNotes: response.notes.map((note) =>
+        noteFixturePath(workspaces.agentWorkspacePath, note.path)
+      ),
+      noteTokens: noteSectionTokens(response.notes, workspaces.agentWorkspacePath),
       latencyMs,
     });
   }
@@ -720,24 +1119,36 @@ export async function runPass(
 
 /**
  * Fails when the offline threshold model and the real retriever disagree for
- * any query. Called with the calibrated pair and with deliberately wrong probe
- * pairs, so the model the grid search trusts is validated away from a single
- * convenient point.
+ * any query, for the memory selection and the note selection. Called with the
+ * calibrated thresholds and with deliberately wrong probe pairs, so the model
+ * the grid search trusts is validated away from a single convenient point.
  */
 export function assertModelMatches(
   captured: readonly CapturedQuery[],
   outcomes: readonly QueryOutcome[],
-  thresholds: Thresholds,
-  secondEnabled: boolean,
+  thresholds: RecallThresholds,
+  memorySecondEnabled: boolean,
+  noteSecondEnabled: boolean,
 ): void {
   for (let index = 0; index < captured.length; index++) {
-    const expected = selectFromCapture(captured[index], thresholds, secondEnabled).ids;
+    const expected = selectFromCapture(captured[index], thresholds, memorySecondEnabled).ids;
     const actual = outcomes[index].selected;
     if (expected.join(",") !== actual.join(",")) {
       throw new FixtureError(
-        `threshold model mismatch for ${captured[index].query.id} at ` +
+        `memory threshold model mismatch for ${captured[index].query.id} at ` +
           `min=${thresholds.minRecallScore} second=${thresholds.secondRecallScore}: ` +
           `model [${expected.join(", ")}] vs engine [${actual.join(", ")}]`,
+      );
+    }
+
+    const expectedNotes = selectNotesFromCapture(captured[index], thresholds, noteSecondEnabled)
+      .ids;
+    const actualNotes = outcomes[index].selectedNotes;
+    if (expectedNotes.join(",") !== actualNotes.join(",")) {
+      throw new FixtureError(
+        `note threshold model mismatch for ${captured[index].query.id} at ` +
+          `min=${thresholds.noteMinRecallScore} second=${thresholds.secondNoteRecallScore}: ` +
+          `model [${expectedNotes.join(", ")}] vs engine [${actualNotes.join(", ")}]`,
       );
     }
   }
@@ -784,59 +1195,147 @@ function boundaryPairs(captured: readonly CapturedQuery[]): Thresholds[] {
   ];
 }
 
+/** Threshold pairs the note model is checked against, including wrong ones. */
+function noteProbePairs(calibrated: NoteThresholds): NoteThresholds[] {
+  const probes: NoteThresholds[] = [
+    calibrated,
+    { noteMinRecallScore: THRESHOLD_GRID_START, secondNoteRecallScore: THRESHOLD_GRID_START },
+    { noteMinRecallScore: THRESHOLD_GRID_END, secondNoteRecallScore: THRESHOLD_GRID_END },
+    {
+      noteMinRecallScore: Math.max(calibrated.noteMinRecallScore - 1, THRESHOLD_GRID_START),
+      secondNoteRecallScore: Math.min(calibrated.secondNoteRecallScore + 1, THRESHOLD_GRID_END),
+    },
+    {
+      noteMinRecallScore: Math.min(calibrated.noteMinRecallScore + 1, THRESHOLD_GRID_END),
+      secondNoteRecallScore: Math.max(calibrated.secondNoteRecallScore - 1, THRESHOLD_GRID_START),
+    },
+  ];
+  const seen = new Set<string>();
+  return probes.filter((pair) => {
+    const key = `${pair.noteMinRecallScore}/${pair.secondNoteRecallScore}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+/**
+ * The note twin of `boundaryPairs`: score equality with `noteMinRecallScore`
+ * and with `secondNoteRecallScore`, taken from the first captured query with a
+ * second note.
+ */
+function noteBoundaryPairs(captured: readonly CapturedQuery[]): NoteThresholds[] {
+  const item = captured.find((entry) => entry.rankedNotes.length > 1);
+  if (item === undefined) return [];
+  const [top, second] = item.rankedNotes;
+  return [
+    { noteMinRecallScore: top.score, secondNoteRecallScore: second.score },
+    { noteMinRecallScore: top.score, secondNoteRecallScore: second.score + 0.01 },
+  ];
+}
+
 /** Runs the whole benchmark: capture, calibrate, measure, verify. */
 export async function runBenchmark(): Promise<BenchmarkResult> {
-  const { corpus, queries } = await loadFixture();
-  return await withFixture(corpus, async (fixture) => {
+  const { corpus, queries, notes } = await loadFixture();
+  return await withFixture(corpus, notes, async (fixture) => {
     const captured = await captureRanked(queries, fixture.workspaces);
     const calibration = calibrate(captured);
-    if (!calibration.feasible || calibration.thresholds === undefined) {
-      return { calibration, corpus, queries, captured, outcomes: [] };
+    if (
+      !calibration.feasible || calibration.thresholds === undefined ||
+      !calibration.noteFeasible || calibration.noteThresholds === undefined
+    ) {
+      return { calibration, corpus, queries, notes, captured, outcomes: [] };
     }
-    const thresholds = calibration.thresholds;
+    const thresholds: RecallThresholds = {
+      ...calibration.thresholds,
+      ...calibration.noteThresholds,
+    };
 
     // One warm-up pass over every query so the snapshot cache, the segmenter
     // and the file stats are hot before latency is measured (design §12).
     await runPass(queries, fixture.workspaces, thresholds);
     const outcomes = await runPass(queries, fixture.workspaces, thresholds);
-    assertModelMatches(captured, outcomes, thresholds, true);
+    assertModelMatches(captured, outcomes, thresholds, true, true);
 
     // The calibration also trusts the model with the second selection disabled,
     // so that geometry is checked against an engine that can only return one
-    // candidate, together with the equality boundaries of the comparisons the
-    // model re-implements.
-    const topOnly: Thresholds = {
-      minRecallScore: thresholds.minRecallScore,
-      secondRecallScore: thresholds.secondRecallScore,
-    };
+    // candidate of each kind, together with the equality boundaries of the
+    // comparisons the model re-implements.
     assertModelMatches(
       captured,
-      await runPass(queries, fixture.workspaces, topOnly, { fastRecallMaxResults: 1 }),
-      topOnly,
+      await runPass(queries, fixture.workspaces, thresholds, { fastRecallMaxResults: 1 }),
+      thresholds,
+      false,
+      true,
+    );
+    assertModelMatches(
+      captured,
+      await runPass(queries, fixture.workspaces, thresholds, { fastRecallNoteMaxResults: 1 }),
+      thresholds,
+      true,
       false,
     );
     for (const probe of boundaryPairs(captured)) {
-      assertModelMatches(captured, await runPass(queries, fixture.workspaces, probe), probe, true);
+      assertModelMatches(
+        captured,
+        await runPass(queries, fixture.workspaces, { ...thresholds, ...probe }),
+        { ...thresholds, ...probe },
+        true,
+        true,
+      );
+    }
+    for (const probe of noteBoundaryPairs(captured)) {
+      assertModelMatches(
+        captured,
+        await runPass(queries, fixture.workspaces, { ...thresholds, ...probe }),
+        { ...thresholds, ...probe },
+        true,
+        true,
+      );
     }
 
-    for (const probe of probePairs(thresholds)) {
+    for (const probe of probePairs(calibration.thresholds)) {
       if (
-        probe.minRecallScore === thresholds.minRecallScore &&
-        probe.secondRecallScore === thresholds.secondRecallScore
+        probe.minRecallScore === calibration.thresholds.minRecallScore &&
+        probe.secondRecallScore === calibration.thresholds.secondRecallScore
       ) {
         continue;
       }
-      const probeOutcomes = await runPass(queries, fixture.workspaces, probe);
-      assertModelMatches(captured, probeOutcomes, probe, true);
+      const pair: RecallThresholds = { ...thresholds, ...probe };
+      assertModelMatches(
+        captured,
+        await runPass(queries, fixture.workspaces, pair),
+        pair,
+        true,
+        true,
+      );
+    }
+    for (const probe of noteProbePairs(calibration.noteThresholds)) {
+      if (
+        probe.noteMinRecallScore === calibration.noteThresholds.noteMinRecallScore &&
+        probe.secondNoteRecallScore === calibration.noteThresholds.secondNoteRecallScore
+      ) {
+        continue;
+      }
+      const pair: RecallThresholds = { ...thresholds, ...probe };
+      assertModelMatches(
+        captured,
+        await runPass(queries, fixture.workspaces, pair),
+        pair,
+        true,
+        true,
+      );
     }
 
     return {
       calibration,
       corpus,
       queries,
+      notes,
       captured,
       outcomes,
-      metrics: computeMetrics(outcomes),
+      metrics: computeMetrics(memoryOutcomes(outcomes)),
+      noteMetrics: computeNoteMetrics(outcomes),
       p95LatencyMs: percentile95(outcomes.map((outcome) => outcome.latencyMs)),
     };
   });
@@ -844,12 +1343,21 @@ export async function runBenchmark(): Promise<BenchmarkResult> {
 
 /** The `metrics.json` payload, in a fixed key order. */
 export function toMetricsFile(result: BenchmarkResult): Record<string, unknown> {
-  if (result.metrics === undefined || result.calibration.thresholds === undefined) {
+  if (
+    result.metrics === undefined || result.calibration.thresholds === undefined ||
+    result.noteMetrics === undefined || result.calibration.noteThresholds === undefined
+  ) {
     throw new FixtureError("cannot record metrics for an infeasible calibration");
   }
   const thresholds = result.calibration.thresholds;
+  const noteThresholds = result.calibration.noteThresholds;
   const metrics = result.metrics;
-  const positives = result.queries.filter((query) => query.expected.length > 0).length;
+  const noteMetrics = result.noteMetrics;
+  // The memory metrics cover the memory queries alone, so adding note queries
+  // to the fixture can never move the committed memory gate.
+  const memoryQueries = result.queries.filter((query) => !isNoteQuery(query));
+  const positives = memoryQueries.filter((query) => query.expected.length > 0).length;
+  const notePositives = result.queries.filter((query) => query.expectedNotes.length > 0).length;
   return {
     clock: FIXED_CLOCK.toISOString(),
     grid: {
@@ -859,16 +1367,28 @@ export function toMetricsFile(result: BenchmarkResult): Record<string, unknown> 
     },
     falsePositiveCap: FALSE_POSITIVE_CAP,
     secondResultRatio: SECOND_RESULT_RATIO,
-    queryCount: result.queries.length,
+    queryCount: memoryQueries.length,
     positiveQueryCount: positives,
-    negativeQueryCount: result.queries.length - positives,
+    negativeQueryCount: memoryQueries.length - positives,
     minRecallScore: thresholds.minRecallScore,
     secondRecallScore: thresholds.secondRecallScore,
     recallAt1: metrics.recallAt1,
     recallAt2: metrics.recallAt2,
     falsePositiveRate: metrics.falsePositiveRate,
-    falsePositiveQueryCount: falsePositiveQueryIds(result.outcomes).length,
+    falsePositiveQueryCount: falsePositiveQueryIds(memoryOutcomes(result.outcomes)).length,
     averageInjectedTokens: metrics.averageInjectedTokens,
+    notes: {
+      noteCount: result.notes.length,
+      noteQueryCount: result.queries.length,
+      notePositiveQueryCount: notePositives,
+      noteMinRecallScore: noteThresholds.noteMinRecallScore,
+      secondNoteRecallScore: noteThresholds.secondNoteRecallScore,
+      recallAt1: noteMetrics.recallAt1,
+      recallAt2: noteMetrics.recallAt2,
+      falsePositiveRate: noteMetrics.falsePositiveRate,
+      falsePositiveQueryCount: noteFalsePositiveQueryIds(result.outcomes).length,
+      averageInjectedTokens: noteMetrics.averageInjectedTokens,
+    },
   };
 }
 
@@ -878,27 +1398,27 @@ export async function writeMetrics(result: BenchmarkResult): Promise<void> {
   await Deno.writeTextFile(METRICS_URL, `${JSON.stringify(payload, null, 2)}\n`);
 }
 
-function report(result: BenchmarkResult): void {
-  const positives = result.queries.filter((query) => query.expected.length > 0).length;
-  const maxFalsePositives = Math.floor(FALSE_POSITIVE_CAP * result.queries.length);
-  console.log(
-    `Memory Recall Fast-mode calibration — clock ${FIXED_CLOCK.toISOString()}`,
-  );
-  console.log(
-    `fixture: ${result.corpus.filter((entry) => entry.event.type === "memory").length} memories ` +
-      `(${result.corpus.length} events), ${result.queries.length} queries ` +
-      `(${positives} positive, ${result.queries.length - positives} negative), ` +
-      `false-positive cap ${FALSE_POSITIVE_CAP * 100}% ` +
-      `(at most ${maxFalsePositives} false-positive queries)`,
-  );
-  console.log(
-    `grid: ${THRESHOLD_GRID_START}..${THRESHOLD_GRID_END} step ${THRESHOLD_GRID_STEP} ` +
-      `(${THRESHOLD_GRID.length} values), secondResultRatio ${SECOND_RESULT_RATIO}`,
-  );
+/** The two constraint-analysis counters of one threshold search stage. */
+function constraintCounts(
+  rows: readonly GridRow[],
+  feasible: readonly GridRow[],
+  objective: (metrics: Metrics) => number,
+): { rejectedByCap: number; rejectedByObjective: number } {
+  return {
+    rejectedByCap: rows.filter((row) => row.metrics.falsePositiveRate > FALSE_POSITIVE_CAP).length,
+    rejectedByObjective: rows.filter((row) =>
+      row.metrics.falsePositiveRate <= FALSE_POSITIVE_CAP &&
+      objective(row.metrics) < objective(feasible[0].metrics)
+    ).length,
+  };
+}
 
+function reportMemoryCalibration(result: BenchmarkResult): void {
   const { calibration } = result;
+  const outcomes = memoryOutcomes(result.outcomes);
+  console.log("");
+  console.log("memory thresholds (memory queries only)");
   if (!calibration.feasible || calibration.thresholds === undefined) {
-    console.log("");
     console.log("NO FEASIBLE CALIBRATION: no grid value meets the false-positive cap.");
     if (calibration.stage1Feasible.length > 0) {
       const best = calibration.stage1Feasible[0];
@@ -939,7 +1459,6 @@ function report(result: BenchmarkResult): void {
   }
 
   const thresholds = calibration.thresholds;
-  console.log("");
   console.log(
     `calibrated: minRecallScore=${thresholds.minRecallScore} ` +
       `secondRecallScore=${thresholds.secondRecallScore}`,
@@ -958,41 +1477,161 @@ function report(result: BenchmarkResult): void {
         `(ceiling ${LATENCY_CEILING_MS} ms)`,
     );
   }
-
-  const falsePositives = falsePositiveQueryIds(result.outcomes);
+  const falsePositives = falsePositiveQueryIds(outcomes);
   console.log(
     `false-positive queries: ${falsePositives.length === 0 ? "none" : falsePositives.join(", ")}`,
   );
-  const missed = missedQueryIds(result.outcomes, 1);
+  const missed = missedQueryIds(outcomes, 1);
   console.log(`Recall@1 misses: ${missed.length === 0 ? "none" : missed.join(", ")}`);
 
-  const rejectedByCap =
-    calibration.stage1.filter((row) => row.metrics.falsePositiveRate > FALSE_POSITIVE_CAP).length;
-  const rejectedByRecall =
-    calibration.stage1.filter((row) =>
-      row.metrics.falsePositiveRate <= FALSE_POSITIVE_CAP &&
-      row.metrics.recallAt1 < calibration.stage1Feasible[0].metrics.recallAt1
-    ).length;
-  console.log(
-    `constraint analysis: minRecallScore — ${rejectedByCap}/${THRESHOLD_GRID.length} grid values ` +
-      `rejected by the cap, ${rejectedByRecall} rejected by Recall@1`,
+  const stage1 = constraintCounts(
+    calibration.stage1,
+    calibration.stage1Feasible,
+    (metrics) => metrics.recallAt1,
   );
-  const stage2Cap =
-    calibration.stage2.filter((row) => row.metrics.falsePositiveRate > FALSE_POSITIVE_CAP).length;
-  const stage2Recall =
-    calibration.stage2.filter((row) =>
-      row.metrics.falsePositiveRate <= FALSE_POSITIVE_CAP &&
-      row.metrics.recallAt2 < calibration.stage2Feasible[0].metrics.recallAt2
-    ).length;
   console.log(
-    `constraint analysis: secondRecallScore — ${stage2Cap}/${THRESHOLD_GRID.length} grid values ` +
-      `rejected by the cap, ${stage2Recall} rejected by Recall@2`,
+    `constraint analysis: minRecallScore — ${stage1.rejectedByCap}/${THRESHOLD_GRID.length} ` +
+      `grid values rejected by the cap, ${stage1.rejectedByObjective} rejected by Recall@1`,
   );
+  const stage2 = constraintCounts(
+    calibration.stage2,
+    calibration.stage2Feasible,
+    (metrics) => metrics.recallAt2,
+  );
+  console.log(
+    `constraint analysis: secondRecallScore — ${stage2.rejectedByCap}/${THRESHOLD_GRID.length} ` +
+      `grid values rejected by the cap, ${stage2.rejectedByObjective} rejected by Recall@2`,
+  );
+}
 
+function reportNoteCalibration(result: BenchmarkResult): void {
+  const { calibration } = result;
+  console.log("");
+  console.log("note thresholds (every query)");
+  if (!calibration.noteFeasible || calibration.noteThresholds === undefined) {
+    console.log("NO FEASIBLE NOTE CALIBRATION: no grid value meets the false-positive cap.");
+    if (calibration.noteStage1Feasible.length > 0) {
+      const best = calibration.noteStage1Feasible[0];
+      console.log(
+        `best top-only stage: noteMinRecallScore=${best.value} ` +
+          `Recall@1=${best.metrics.recallAt1.toFixed(4)} ` +
+          `FP=${best.metrics.falsePositiveRate.toFixed(4)}`,
+      );
+    }
+    if (calibration.noteStage2.length === 0) {
+      console.log("stage 2 was not reached: no noteMinRecallScore met the cap.");
+    } else if (calibration.noteStage2Feasible.length === 0) {
+      const best = [...calibration.noteStage2].sort((a, b) =>
+        a.metrics.falsePositiveRate - b.metrics.falsePositiveRate
+      )[0];
+      console.log(
+        `stage 2 has no feasible secondNoteRecallScore at noteMinRecallScore=` +
+          `${calibration.noteStage1Feasible[0]?.value}; best FP=` +
+          `${best.metrics.falsePositiveRate.toFixed(4)} at secondNoteRecallScore=${best.value}`,
+      );
+      const highestSecond = Math.max(
+        0,
+        ...result.captured.map((entry) =>
+          entry.rankedNotes[1]?.score ?? 0
+        ),
+      );
+      console.log(
+        `highest second-note score in the capture: ${highestSecond.toFixed(3)} ` +
+          `(grid ceiling ${THRESHOLD_GRID_END}).`,
+      );
+    }
+    reportNoteCandidates(result);
+    return;
+  }
+
+  const thresholds = calibration.noteThresholds;
+  console.log(
+    `calibrated: noteMinRecallScore=${thresholds.noteMinRecallScore} ` +
+      `secondNoteRecallScore=${thresholds.secondNoteRecallScore}`,
+  );
+  if (result.noteMetrics !== undefined) {
+    console.log(
+      `metrics: Recall@1=${result.noteMetrics.recallAt1.toFixed(4)} ` +
+        `Recall@2=${result.noteMetrics.recallAt2.toFixed(4)} ` +
+        `FP=${result.noteMetrics.falsePositiveRate.toFixed(4)} ` +
+        `avgTokens=${result.noteMetrics.averageInjectedTokens.toFixed(4)}`,
+    );
+  }
+  const falsePositives = noteFalsePositiveQueryIds(result.outcomes);
+  console.log(
+    `note false-positive queries: ` +
+      `${falsePositives.length === 0 ? "none" : falsePositives.join(", ")}`,
+  );
+  const missed = noteMissedQueryIds(result.outcomes, 1);
+  console.log(`note Recall@1 misses: ${missed.length === 0 ? "none" : missed.join(", ")}`);
+
+  const stage1 = constraintCounts(
+    calibration.noteStage1,
+    calibration.noteStage1Feasible,
+    (metrics) => metrics.recallAt1,
+  );
+  console.log(
+    `constraint analysis: noteMinRecallScore — ${stage1.rejectedByCap}/` +
+      `${THRESHOLD_GRID.length} grid values rejected by the cap, ` +
+      `${stage1.rejectedByObjective} rejected by Recall@1`,
+  );
+  const stage2 = constraintCounts(
+    calibration.noteStage2,
+    calibration.noteStage2Feasible,
+    (metrics) => metrics.recallAt2,
+  );
+  console.log(
+    `constraint analysis: secondNoteRecallScore — ${stage2.rejectedByCap}/` +
+      `${THRESHOLD_GRID.length} grid values rejected by the cap, ` +
+      `${stage2.rejectedByObjective} rejected by Recall@2`,
+  );
+  if (thresholds.noteMinRecallScore >= THRESHOLD_GRID_END) {
+    console.log(
+      `noteMinRecallScore sits at the grid ceiling ${THRESHOLD_GRID_END}: every note ` +
+        "positive scores above it, so the fixture cannot pin the threshold more tightly.",
+    );
+  }
+}
+
+/**
+ * Every query whose note candidates are non-empty, with their scores. A cap
+ * that cannot be met is a fixture problem, so the tool prints the evidence the
+ * maintainer needs to fix the notes or the queries.
+ */
+function reportNoteCandidates(result: BenchmarkResult): void {
+  console.log("");
+  console.log("note candidates (queries with at least one candidate):");
+  for (const entry of result.captured) {
+    if (entry.rankedNotes.length === 0) continue;
+    console.log([
+      entry.query.id,
+      entry.query.case,
+      entry.query.expectedNotes.map((path) => path.replace("notes/", "")).join("+") || "-",
+      entry.rankedNotes
+        .map((note) => `${note.path.replace("notes/", "")}:${note.score.toFixed(2)}`)
+        .join(" "),
+    ].join("\t"));
+  }
+}
+
+function reportQueries(result: BenchmarkResult): void {
   console.log("");
   console.log("per-query:");
   console.log(
-    ["id", "case", "ctx", "expected", "selected", "ranked", "tokens", "ms"].join("\t"),
+    [
+      "id",
+      "case",
+      "ctx",
+      "expected",
+      "selected",
+      "ranked",
+      "expectedNotes",
+      "selectedNotes",
+      "rankedNotes",
+      "tokens",
+      "noteTokens",
+      "ms",
+    ].join("\t"),
   );
   for (let index = 0; index < result.outcomes.length; index++) {
     const outcome = result.outcomes[index];
@@ -1006,10 +1645,43 @@ function report(result: BenchmarkResult): void {
         " ",
       ) ||
       "-",
+      outcome.query.expectedNotes.map((path) => path.replace("notes/", "")).join("+") || "-",
+      outcome.selectedNotes.map((path) => path.replace("notes/", "")).join("+") || "-",
+      result.captured[index].rankedNotes
+        .map((item) => `${item.path.replace("notes/", "")}:${item.score.toFixed(2)}`)
+        .join(" ") || "-",
       String(outcome.tokens),
+      String(outcome.noteTokens),
       outcome.latencyMs.toFixed(3),
     ].join("\t"));
   }
+}
+
+function report(result: BenchmarkResult): void {
+  const memoryQueries = result.queries.filter((query) => !isNoteQuery(query));
+  const positives = memoryQueries.filter((query) => query.expected.length > 0).length;
+  const notePositives = result.queries.filter((query) => query.expectedNotes.length > 0).length;
+  const maxFalsePositives = Math.floor(FALSE_POSITIVE_CAP * result.queries.length);
+  console.log(
+    `Memory Recall Fast-mode calibration — clock ${FIXED_CLOCK.toISOString()}`,
+  );
+  console.log(
+    `fixture: ${result.corpus.filter((entry) => entry.event.type === "memory").length} memories ` +
+      `(${result.corpus.length} events), ${result.notes.length} notes, ` +
+      `${memoryQueries.length} memory queries (${positives} positive, ` +
+      `${memoryQueries.length - positives} negative), ` +
+      `${result.queries.length - memoryQueries.length} note queries ` +
+      `(${notePositives} positive), false-positive cap ${FALSE_POSITIVE_CAP * 100}% ` +
+      `(at most ${maxFalsePositives} of ${result.queries.length} queries)`,
+  );
+  console.log(
+    `grid: ${THRESHOLD_GRID_START}..${THRESHOLD_GRID_END} step ${THRESHOLD_GRID_STEP} ` +
+      `(${THRESHOLD_GRID.length} values), secondResultRatio ${SECOND_RESULT_RATIO}`,
+  );
+
+  reportMemoryCalibration(result);
+  reportNoteCalibration(result);
+  reportQueries(result);
 }
 
 interface Options {
@@ -1055,7 +1727,10 @@ async function main(): Promise<void> {
   const result = await runBenchmark();
   if (!options.quiet) report(result);
 
-  if (!result.calibration.feasible || result.calibration.thresholds === undefined) {
+  if (
+    !result.calibration.feasible || result.calibration.thresholds === undefined ||
+    !result.calibration.noteFeasible || result.calibration.noteThresholds === undefined
+  ) {
     console.error(
       "memory-recall-benchmark: the 5% false-positive cap is unattainable; " +
         "fix the fixture or the ranking, never the cap.",
@@ -1065,17 +1740,24 @@ async function main(): Promise<void> {
   }
   if (options.quiet) {
     const thresholds = result.calibration.thresholds;
+    const noteThresholds = result.calibration.noteThresholds;
     console.log(
-      `minRecallScore=${thresholds.minRecallScore} secondRecallScore=${thresholds.secondRecallScore}`,
+      `minRecallScore=${thresholds.minRecallScore} ` +
+        `secondRecallScore=${thresholds.secondRecallScore} ` +
+        `noteMinRecallScore=${noteThresholds.noteMinRecallScore} ` +
+        `secondNoteRecallScore=${noteThresholds.secondNoteRecallScore}`,
     );
   }
   if (options.write) {
     await writeMetrics(result);
     console.log(`wrote ${METRICS_URL.pathname}`);
     const thresholds = result.calibration.thresholds;
+    const noteThresholds = result.calibration.noteThresholds;
     console.log("paste into config.example.yaml and recall-config.ts:");
     console.log(`    minRecallScore: ${thresholds.minRecallScore}`);
     console.log(`    secondRecallScore: ${thresholds.secondRecallScore}`);
+    console.log(`    noteMinRecallScore: ${noteThresholds.noteMinRecallScore}`);
+    console.log(`    secondNoteRecallScore: ${noteThresholds.secondNoteRecallScore}`);
   }
 }
 

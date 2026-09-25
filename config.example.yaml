@@ -246,8 +246,8 @@ memory:
     # for notes separately).
     minRecallScore: 6.75 # Fast Recall: minimum top score (default: 6.75)
     secondRecallScore: 6.5 # Fast Recall: minimum score of a second memory (default: 6.5)
-    noteMinRecallScore: 3 # Fast Recall: minimum top note score (provisional until the benchmark calibrates it)
-    secondNoteRecallScore: 3 # Fast Recall: minimum score of a second note (provisional until the benchmark calibrates it)
+    noteMinRecallScore: 11.5 # Fast Recall: minimum top note score (default: 11.5, calibrated by the benchmark)
+    secondNoteRecallScore: 9.25 # Fast Recall: minimum score of a second note (default: 9.25, calibrated by the benchmark)
     secondResultRatio: 0.65 # Fast Recall: minimum second-to-first score ratio, 0-1 (default: 0.65)
     deepRecallMaxTokens: 1024 # Deep Recall: token budget of the whole output (default: 1024)
     deepMinRecallScore: 0 # Deep Recall: minimum score to keep, 0 = eligibility alone (default: 0)
