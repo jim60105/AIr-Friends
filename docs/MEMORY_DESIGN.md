@@ -507,8 +507,6 @@ The system is fully functional without running the migration script — but work
 
 ```yaml
 memory:
-  search_limit: 10            # Max results per search
-  max_chars: 2000             # Max characters per memory content
   workingTierLimit: 20        # Working-tier entries before auto-demotion to archive
   recall:
     fastRecallEnabled: true   # Per-turn Fast Recall search and section (kill switch)
@@ -532,14 +530,15 @@ memoryMaintenance:
 
 | Env var | Config path | Type |
 |---------|-------------|------|
-| `MEMORY_SEARCH_LIMIT` | `memory.search_limit` | Integer |
-| `MEMORY_MAX_CHARS` | `memory.max_chars` | Integer |
 | `MEMORY_WORKING_TIER_LIMIT` | `memory.workingTierLimit` | Integer |
 | `CONVERSATION_SUMMARY_MODEL` | `conversationSummary.model` | String |
 | `MEMORY_MAINTENANCE_ENABLED` | `memoryMaintenance.enabled` | `"true"` / `"false"` |
 | `MEMORY_MAINTENANCE_MODEL` | `memoryMaintenance.model` | String |
 | `MEMORY_MAINTENANCE_MIN_MEMORY_COUNT` | `memoryMaintenance.minMemoryCount` | Integer |
 | `MEMORY_MAINTENANCE_INTERVAL_MS` | `memoryMaintenance.intervalMs` | Integer |
+
+Retrieval budgets are owned by `memory.recall`; the `memory-search` skill's
+per-call `limit` parameter (default 10) is the result-count knob.
 
 ### Skill API parameters (additive, backward compatible)
 
