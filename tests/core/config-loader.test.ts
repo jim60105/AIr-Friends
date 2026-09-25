@@ -2512,6 +2512,9 @@ Deno.test("Config - applies memory.recall defaults", async () => {
     const result = await loadConfig(dir);
     assertEquals(result.memory.recall?.fastRecallMaxResults, 2);
     assertEquals(result.memory.recall?.fastRecallMaxTokens, 192);
+    assertEquals(result.memory.recall?.coreMaxTokens, 512);
+    assertEquals(result.memory.recall?.workingMaxItems, 4);
+    assertEquals(result.memory.recall?.workingMaxTokens, 384);
     assertEquals(result.memory.recall?.minRecallScore, 6.75);
     assertEquals(result.memory.recall?.secondRecallScore, 6.5);
     assertEquals(result.memory.recall?.secondResultRatio, 0.65);
@@ -2529,8 +2532,51 @@ Deno.test("Config - memory.recall keeps every default a partial override does no
     const result = await loadConfig(dir);
     assertEquals(result.memory.recall?.fastRecallMaxTokens, 128);
     assertEquals(result.memory.recall?.fastRecallMaxResults, 2);
+    assertEquals(result.memory.recall?.coreMaxTokens, 512);
+    assertEquals(result.memory.recall?.workingMaxItems, 4);
+    assertEquals(result.memory.recall?.workingMaxTokens, 384);
     assertEquals(result.memory.recall?.secondResultRatio, 0.65);
     assertEquals(result.memory.recall?.deepRecallMaxTokens, 1024);
+  });
+});
+
+Deno.test("Config - rejects a negative memory.recall.coreMaxTokens", async () => {
+  const memory = `memory:
+  recall:
+    coreMaxTokens: -1`;
+
+  await withTestConfig(recallConfig(memory), async (dir) => {
+    await assertRejects(() => loadConfig(dir), ConfigError);
+  });
+});
+
+Deno.test("Config - rejects a negative memory.recall.workingMaxItems", async () => {
+  const memory = `memory:
+  recall:
+    workingMaxItems: -1`;
+
+  await withTestConfig(recallConfig(memory), async (dir) => {
+    await assertRejects(() => loadConfig(dir), ConfigError);
+  });
+});
+
+Deno.test("Config - rejects a negative memory.recall.workingMaxTokens", async () => {
+  const memory = `memory:
+  recall:
+    workingMaxTokens: -1`;
+
+  await withTestConfig(recallConfig(memory), async (dir) => {
+    await assertRejects(() => loadConfig(dir), ConfigError);
+  });
+});
+
+Deno.test("Config - rejects a non-integer memory.recall.workingMaxItems", async () => {
+  const memory = `memory:
+  recall:
+    workingMaxItems: 1.5`;
+
+  await withTestConfig(recallConfig(memory), async (dir) => {
+    await assertRejects(() => loadConfig(dir), ConfigError);
   });
 });
 

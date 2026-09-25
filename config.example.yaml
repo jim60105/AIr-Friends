@@ -232,6 +232,12 @@ memory:
   recall:
     fastRecallMaxResults: 2 # Fast Recall: maximum selected memories (default: 2)
     fastRecallMaxTokens: 192 # Fast Recall: token budget of the memory section (default: 192)
+    # Fixed loading budgets. User memories are considered before channel ones,
+    # so a large user core can crowd out channel core memories; raise the
+    # budget if too much context is lost.
+    coreMaxTokens: 512 # Fixed loading: token budget shared by the user and channel core sections (default: 512)
+    workingMaxItems: 4 # Fixed loading: newest working-tier candidates considered, user and channel together (default: 4)
+    workingMaxTokens: 384 # Fixed loading: token budget shared by the user and channel working entries (default: 384)
     # Score thresholds are calibrated by scripts/memory-recall-benchmark.ts from
     # tests/fixtures/memory-recall/ (at most 5% memory false positives).
     minRecallScore: 6.75 # Fast Recall: minimum top score (default: 6.75)

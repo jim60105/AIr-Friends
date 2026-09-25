@@ -423,6 +423,28 @@ export interface MemoryRecallConfig {
    */
   fastRecallMaxTokens: number;
 
+  /**
+   * Fixed loading: token budget shared by the user and the channel core
+   * sections (default: 512). User core memories are considered first, so a
+   * large user core can crowd out channel core memories. A core memory that
+   * does not fit is skipped whole and stays reachable through retrieval.
+   */
+  coreMaxTokens: number;
+
+  /**
+   * Fixed loading: number of newest working-tier candidates considered across
+   * the user and channel sources (default: 4). This is separate from
+   * `memory.workingTierLimit`, which governs storage demotion.
+   */
+  workingMaxItems: number;
+
+  /**
+   * Fixed loading: token budget shared by the user and the channel working
+   * entries (default: 384). A working memory that does not fit is skipped and
+   * is never replaced by an older candidate.
+   */
+  workingMaxTokens: number;
+
   /** Fast Recall: minimum score of the top memory (calibrated by the offline benchmark). */
   minRecallScore: number;
 

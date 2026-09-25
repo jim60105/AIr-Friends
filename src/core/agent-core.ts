@@ -105,13 +105,21 @@ export class AgentCore {
     }
 
     // Initialize context assembler
-    const contextAssembler = new ContextAssembler(this.memoryStore, {
-      systemPromptPath: config.agent.systemPromptPath,
-      recentMessageLimit: config.memory.recentMessageLimit,
-      tokenLimit: config.agent.tokenLimit,
-      memoryMaxChars: config.memory.maxChars,
-      agentType: config.agent.defaultAgentType,
-    });
+    // The workspace manager is required for the channel memory sections: without
+    // it the assembler cannot resolve the channel workspace, so channel memories
+    // would never reach a channel session's context.
+    const contextAssembler = new ContextAssembler(
+      this.memoryStore,
+      {
+        systemPromptPath: config.agent.systemPromptPath,
+        recentMessageLimit: config.memory.recentMessageLimit,
+        tokenLimit: config.agent.tokenLimit,
+        memoryMaxChars: config.memory.maxChars,
+        agentType: config.agent.defaultAgentType,
+        recall: config.memory.recall,
+      },
+      this.workspaceManager,
+    );
 
     // Initialize reply policy (needed by orchestrator and message handler)
     this.replyPolicy = new ReplyPolicyEvaluator(config.replyPolicy, config.channels);

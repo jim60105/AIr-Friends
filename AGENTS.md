@@ -267,11 +267,16 @@ The `memory-search` skill automatically searches both user memories and agent wo
 
 Initial context comprises:
 
-| Source                   | Limit               |
-| ------------------------ | ------------------- |
-| High-importance memories | All enabled         |
-| Recent channel messages  | 20 messages (fixed) |
-| Guild-related context    | Configurable        |
+| Source                  | Limit                                                                              |
+| ----------------------- | ---------------------------------------------------------------------------------- |
+| Core-tier memories      | Within `memory.recall.coreMaxTokens` (default 512), user then channel              |
+| Working-tier memories   | Newest `memory.recall.workingMaxItems` (default 4) within `workingMaxTokens` (384) |
+| Recent channel messages | 20 messages (fixed)                                                                |
+| Guild-related context   | Configurable                                                                       |
+
+Only the tier decides what is loaded at session start; `importance` is a retrieval
+ranking bonus only. A memory a budget skips keeps its tier and stays reachable through
+`memory-search`.
 
 **No automatic memory compression or summarization during normal message handling**.
 Optional scheduled memory maintenance can be enabled separately.

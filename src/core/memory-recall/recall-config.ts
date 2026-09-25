@@ -19,6 +19,9 @@ import type { MemoryRecallConfig } from "../../types/config.ts";
 export const DEFAULT_RECALL_CONFIG: MemoryRecallConfig = {
   fastRecallMaxResults: 2,
   fastRecallMaxTokens: 192,
+  coreMaxTokens: 512,
+  workingMaxItems: 4,
+  workingMaxTokens: 384,
   minRecallScore: 6.75,
   secondRecallScore: 6.5,
   secondResultRatio: 0.65,

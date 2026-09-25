@@ -16,11 +16,11 @@ AIr-Friends uses a **plain-text, append-only, tiered memory system** stored as J
 
 Memories are organized into three tiers that control how they participate in context assembly:
 
-| Tier | Loaded at session start | Initial decay | Mutability |
-|------|------------------------|---------------|------------|
-| **Core** | Always (full content) | 1.0 (pinned) | Agent promotes/demotes via patch |
-| **Working** | Recent N entries (default 20) | 0.8 | Auto-created (summaries); promoted to core or consolidated to archive by maintenance |
-| **Archive** | Never (search-only) | 0.5 | Demoted from working by maintenance; decay decreases over time |
+| Tier        | Loaded at session start                                                    | Initial decay | Mutability                                                                           |
+| ----------- | -------------------------------------------------------------------------- | ------------- | ------------------------------------------------------------------------------------ |
+| **Core**    | Within `memory.recall.coreMaxTokens` (512)                                 | 1.0 (pinned)  | Agent promotes/demotes via patch                                                     |
+| **Working** | Newest `memory.recall.workingMaxItems` (4) within `workingMaxTokens` (384) | 0.8           | Auto-created (summaries); promoted to core or consolidated to archive by maintenance |
+| **Archive** | Never (retrieval only)                                                     | 0.5           | Demoted from working by maintenance; decay decreases over time                       |
 
 ### Tier transitions
 
@@ -296,11 +296,11 @@ At session start, the context assembler loads memories in this order:
 ┌─────────────────────────────────────────────────┐
 │            Context Assembly Pipeline             │
 ├─────────────────────────────────────────────────┤
-│ 1. User core-tier memories (all enabled)        │  ── always loaded
-│ 2. User working-tier memories (recent N=20)     │  ── bounded
-│ 3. Channel core memories (if in channel)        │  ── always loaded
-│ 4. Channel working memories (if in channel)     │  ── bounded
-│ 5. Recent channel messages (last 20)            │  ── unchanged
+│ 1. User core-tier memories (oldest first)       │  ── core budget
+│ 2. Channel core memories (if in channel)        │  ── core budget
+│ 3. Newest working-tier memories, user and       │  ── working budget
+│    channel merged                               │
+│ 4. Recent channel messages (last 20)            │  ── unchanged
 ├─────────────────────────────────────────────────┤
 │ Archive tier → NOT pre-loaded                   │
 │ Available via memory-search skill only          │
@@ -325,17 +325,33 @@ At session start, the context assembler loads memories in this order:
 Channel memories are rendered as attributed, unverified user contributions (F15), not
 as trusted "Channel Knowledge". See the channel-memory trust model in §4.
 
-### Token budget
+### Fixed memory budgets
 
-| Source | Approximate budget |
-|--------|-------------------|
-| User core memories | Unlimited (all enabled) |
-| User working memories | Last 20 entries |
-| Channel core memories | Unlimited (all enabled) |
-| Channel working memories | Last 20 entries |
-| Archive memories | 0 (search-only) |
+Only the tier decides what is injected at session start. `importance` never does: an
+`importance: "high"` memory outside the core tier is not injected, because importance
+is a ranking bonus for retrieval only. Promote a memory to the core tier to guarantee
+its injection.
 
-The working-tier limit is configurable via `memory.workingTierLimit` (default: 20).
+| Source                   | Budget                                                                                          |
+| ------------------------ | ----------------------------------------------------------------------------------------------- |
+| User core memories       | `memory.recall.coreMaxTokens` (default 512)                                                     |
+| Channel core memories    | the remainder of the same core budget, considered after the user's                              |
+| User working memories    | the newest `memory.recall.workingMaxItems` (default 4)                                          |
+| Channel working memories | merged with the user's before selection, sharing `memory.recall.workingMaxTokens` (default 384) |
+| Archive memories         | 0 (never pre-loaded)                                                                            |
+
+Core memories are considered user first, then channel, each in `createdAt` ascending
+order. A memory is injected when its rendered line fits the remaining budget, and is
+skipped whole otherwise; the memories after it are still considered. Working memories
+from both sources are merged, the newest `workingMaxItems` are taken, and each is kept
+while its rendered line fits the remaining `workingMaxTokens`; a working memory skipped
+for size is never replaced by an older one. The injected memories are presented in
+chronological order.
+
+These budgets are prompt configuration, not storage: `memory.workingTierLimit`
+(default 20) still governs when working-tier memories are demoted to archive, and a
+memory skipped by a budget keeps its tier. Skipped memories stay reachable through the
+`memory-search` skill.
 
 ## 9. Search Scoring
 
@@ -408,7 +424,7 @@ deno run --allow-read --allow-write scripts/migrate-memory-v2.ts --data-dir ./da
 
 | v1 field | v2 field | Mapping |
 |----------|----------|---------|
-| `importance: "high"` | `tier: "core"`, `decay: 1.0` | High-importance → always-loaded core |
+| `importance: "high"` | `tier: "core"`, `decay: 1.0` | High-importance → core tier, injected within the core budget |
 | `importance: "normal"` | `tier: "archive"`, `decay: 0.5` | Normal → search-only archive |
 | (absent) | `category: "fact"` | Default category for all migrated entries |
 | (absent) | `scope: "user"` | All existing memories are user-scoped |
@@ -449,7 +465,12 @@ The system is fully functional without running the migration script — but work
 memory:
   search_limit: 10            # Max results per search
   max_chars: 2000             # Max characters per memory content
-  workingTierLimit: 20        # Working-tier entries loaded per session
+  workingTierLimit: 20        # Working-tier entries before auto-demotion to archive
+  recall:
+    coreMaxTokens: 512        # Token budget shared by the user and channel core sections
+    workingMaxItems: 4        # Newest working-tier candidates injected
+    workingMaxTokens: 384     # Token budget shared by the user and channel working entries
+    deepRecallMaxTokens: 1024 # memory-search output budget
 
 conversationSummary:
   model: "gpt-5-mini"         # Model for summary generation (default: agent.model)
