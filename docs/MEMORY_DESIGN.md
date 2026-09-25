@@ -439,3 +439,59 @@ memoryMaintenance:
 | `memory-search` | `tier`, `category`, `scope` | (unfiltered) |
 | `memory-patch` | `tier`, `category`, `decay` | (no change) |
 | `memory-stats` | — | Reports `byTier`, `byCategory` breakdowns |
+
+## 12. Recall tokenizer (Memory Recall v2)
+
+Memory Recall v2 (`docs/superpowers/specs/2026-09-25-memory-recall-v2-design.md`)
+replaces keyword `rg` search with a deterministic, CPU-only tokenizer
+(`src/core/memory-recall/tokenizer.ts`). The same pipeline processes queries,
+memories and note chunks, so indexing and querying always agree.
+
+Pipeline (in order):
+
+1. Unicode NFKC normalization; Latin letters are lowercased.
+2. **Entity tokens (weight 1.5)**: maximal alphanumeric runs joined by `-`, `.`
+   or `_` (`air-friends`, `v0.31.1`), CamelCase/PascalCase words (`OpenClaw`),
+   and two **adjacent short plain alphanumeric tokens** (both ≤ 8 characters,
+   neither part of a run or CamelCase entity, at least one containing a digit)
+   joined into one entity (`a7c ii`, `air75 v3`). Component parts of every
+   entity are emitted as word tokens (`air`, `friends`, `open`, `claw`).
+   Run-entity parts split at the separators only; CamelCase parts split at case
+   boundaries. Entity parts never participate in pair joining, and the pair
+   scan is left-to-right greedy (`a b2 c` pairs `a b2` and leaves `c` as a
+   word), so the emitted vocabulary is deterministic.
+3. **Word tokens (weight 1.0)**: each CJK run is segmented with
+   `@node-rs/jieba` (precise mode, HMM on) using the vendored
+   Traditional-capable dictionary `assets/jieba/dict.txt.big` (fxsjy/jieba, MIT,
+   pinned commit, sha256 recorded in `assets/jieba/README.md`).
+4. **Bigram tokens (weight 0.25)**: every adjacent character pair of every CJK
+   run. Bigrams are emitted unconditionally — including pairs that contain
+   stopword characters — because the fallback tier (entities plus bigrams)
+   depends on them; only tokens *equal* to a stopword are dropped.
+5. Punctuation, whitespace and the fixed single-character CJK stopwords
+   (`的 了 在 是 我 你 他 也 就 都 和 與`) are dropped.
+
+The tokenizer never modifies its input and never converts between Simplified
+and Traditional forms; the same input always yields the same tokens in the same
+order.
+
+**Term semantics for consumers (changes 2–9)**: terms are opaque. Consumers
+must never whitespace-split a term (`air75 v3` is a single entity term) and
+must not assume uniqueness — duplicates are emitted as-is (`鍵盤` appears both
+as a word and as a bigram). No deduplication or stopword filtering happens
+below the level of the emitted token stream.
+
+**Segmentation degradation**: if jieba or its dictionary cannot be loaded
+(missing binding, missing `--allow-ffi`, unreadable file), the tokenizer logs
+one error (once per process) and continues emitting entity and bigram tokens
+only; it never throws to its caller. The segmenter is a lazy module-level
+singleton, so the 8.6 MB dictionary is read at most once per process. If
+segmentation throws mid-call, the words already emitted for that run stay and
+the remaining runs of the call degrade to bigrams-only.
+
+**Runtime requirement**: loading the jieba native binding needs the `--allow-ffi`
+Deno permission. It is declared in every `deno.json` task that runs the
+application or tests (`dev`, `start`, `start:config`, `test`, `test:watch`,
+`test:coverage`, `test:coverage:lcov`, `test:unit`, `test:integration`, `ci`)
+and in the container `CMD`; the container image also carries `assets/` so the
+dictionary is present at `/app/assets/jieba/dict.txt.big`.

@@ -68,10 +68,14 @@ WORKDIR /app
 # Copy dependency files and source code
 COPY deno.json deno.lock ./
 COPY src/ ./src/
+COPY assets/ ./assets/
 
 # Pre-cache dependencies by caching the main entry point
 # Deno caches modules in DENO_DIR (default: /deno-dir/ in official image)
-RUN deno cache --lock=deno.lock src/main.ts
+# The jieba native binding is cached explicitly: nothing imports it yet, but the
+# recall tokenizer (and its offline `deno eval` smoke checks) rely on it at runtime.
+RUN deno cache --lock=deno.lock src/main.ts && \
+    deno cache --lock=deno.lock "npm:@node-rs/jieba"
 
 ########################################
 # Final stage
@@ -139,6 +143,7 @@ COPY --link --chown=$UID:0 --chmod=775 agent-config/opencode.json /home/deno/.co
 COPY --link --chown=$UID:0 --chmod=775 deno.json deno.lock /app/
 COPY --link --chown=$UID:0 --chmod=775 config.example.yaml /app/config.yaml
 COPY --link --chown=$UID:0 --chmod=775 src/ /app/src/
+COPY --link --chown=$UID:0 --chmod=775 assets/ /app/assets/
 # Copy default prompts (can be overridden by mounting custom prompts to /app/prompts)
 COPY --link --chown=$UID:0 --chmod=775 prompts/ /app/prompts/
 
@@ -179,7 +184,7 @@ STOPSIGNAL SIGTERM
 ENTRYPOINT ["dumb-init", "--"]
 
 # Default command to run the chatbot
-CMD ["deno", "run", "--allow-net", "--allow-read", "--allow-write", "--allow-env", "--allow-run", "src/main.ts"]
+CMD ["deno", "run", "--allow-net", "--allow-read", "--allow-write", "--allow-env", "--allow-run", "--allow-ffi", "src/main.ts"]
 
 ARG VERSION
 ARG RELEASE

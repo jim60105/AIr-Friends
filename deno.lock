@@ -17,6 +17,8 @@
     "jsr:@std/yaml@*": "1.1.1",
     "jsr:@std/yaml@1": "1.1.1",
     "npm:@agentclientprotocol/sdk@~0.14.1": "0.14.1_zod@4.4.3",
+    "npm:@node-rs/jieba@*": "2.0.3",
+    "npm:@node-rs/jieba@2": "2.0.3",
     "npm:discord.js@14": "14.26.4",
     "npm:misskey-js@2025.12.2": "2025.12.2",
     "npm:prom-client@15": "15.1.3"
@@ -136,6 +138,89 @@
         "discord-api-types",
         "tslib",
         "ws"
+      ]
+    },
+    "@node-rs/jieba-android-arm-eabi@2.0.3": {
+      "integrity": "sha512-1gzgvufnDttRGEDu1gVAuiG8FDPvfEfW6+8Lnj4MvOVcU8GiBGevt73crmt8Hg+BSHPGCiKacwOUE0CMjUWeug==",
+      "os": ["android"],
+      "cpu": ["arm"]
+    },
+    "@node-rs/jieba-android-arm64@2.0.3": {
+      "integrity": "sha512-Q65QkV58y2ac0uGnzQHGuQkIwzGqneUwhUZk6LdYnowfF8ammoOu7N9EB4ZhKrr8qiHl0RVkjoEZ03/vP/VkHQ==",
+      "os": ["android"],
+      "cpu": ["arm64"]
+    },
+    "@node-rs/jieba-darwin-arm64@2.0.3": {
+      "integrity": "sha512-7ShzvHZBCkUNNTII3jztazEnCHvn7CiiTsasFQ8FJZVk7wNk36aJgXSehrWWahryR1CFYMTKdMD9GLSJsdtrDQ==",
+      "os": ["darwin"],
+      "cpu": ["arm64"]
+    },
+    "@node-rs/jieba-darwin-x64@2.0.3": {
+      "integrity": "sha512-k1hg7TaBMEloyZDwsrYWT69ufnRrRYN6ZtF3b64lKX/lDhx1NTgEar6OxeuOScfyneb6f7+o43gB1vqfbbsfXQ==",
+      "os": ["darwin"],
+      "cpu": ["x64"]
+    },
+    "@node-rs/jieba-freebsd-x64@2.0.3": {
+      "integrity": "sha512-hgmnTFT2AkLVjN5+CQW/U5x5lSqJqgUuEoqoOcHk2hxtFe3ZzuFxOzfQAIgKsEifkgrvljsCShZHcunRGuY8vA==",
+      "os": ["freebsd"],
+      "cpu": ["x64"]
+    },
+    "@node-rs/jieba-linux-arm-gnueabihf@2.0.3": {
+      "integrity": "sha512-gka8cb+o/WQcPfwstQ0yQGakf/FM5vBr1sx5AMcdztWZQ9sTQ9nzzbPn5IxGNQWdZjFBwcrLizq8lhNU668Fzg==",
+      "os": ["linux"],
+      "cpu": ["arm"]
+    },
+    "@node-rs/jieba-linux-arm64-gnu@2.0.3": {
+      "integrity": "sha512-w5IPNrxQIC9z8V0Rp1PPlQTO7LOCRNPN9GrATk6pMnPOjyyhAZ1TcetNUdZmPoQ5X/r0/mWU9lcb2xAkwXYR2Q==",
+      "os": ["linux"],
+      "cpu": ["arm64"]
+    },
+    "@node-rs/jieba-linux-arm64-musl@2.0.3": {
+      "integrity": "sha512-nRWFAqM0cwg4BE5NEupHeZEM5QpfzJKcyxrTUFg1kUVY+g5Hlvcujo8gwUsuogcSIcLJDjyHxaF2rl24vdVnDA==",
+      "os": ["linux"],
+      "cpu": ["arm64"]
+    },
+    "@node-rs/jieba-linux-x64-gnu@2.0.3": {
+      "integrity": "sha512-/pg9Re50PAr2Y6olCuinNIyRm20ZiUPldUcBWBKO1+hY6S1PCNaWZLtuntzZKOuK05D4IXgq5pvunZIDrYI15g==",
+      "os": ["linux"],
+      "cpu": ["x64"]
+    },
+    "@node-rs/jieba-linux-x64-musl@2.0.3": {
+      "integrity": "sha512-jZYdwF9EcJay1srsGR7Z88OGGBbOluzPtzK8PMkuicdGmW1ax7cc0fNGpIoxzvu6Qc5ZNUl1U/gGAzpA/kxndA==",
+      "os": ["linux"],
+      "cpu": ["x64"]
+    },
+    "@node-rs/jieba-win32-arm64-msvc@2.0.3": {
+      "integrity": "sha512-CsbWsf52DYkj05Xejw3B48dykY7joSAJKxopwL81vHxRDFNqut7caejxYhj7UbkeDoSeJrPjG2l0Nlv34e0/GQ==",
+      "os": ["win32"],
+      "cpu": ["arm64"]
+    },
+    "@node-rs/jieba-win32-ia32-msvc@2.0.3": {
+      "integrity": "sha512-OAoxbIK/AFNgm6R002k6Zhrto7SHWS5M/roVqdFD89LPXCdHOi1QDMZoXYX/y34ITRyzuXY00KL+nrd4jFg9Bw==",
+      "os": ["win32"],
+      "cpu": ["ia32"]
+    },
+    "@node-rs/jieba-win32-x64-msvc@2.0.3": {
+      "integrity": "sha512-m9elDBggy4aCLN3MkZlwIzAHctU8G2/F2KfbEQ15FDwACfvVWlzXb8YXc38o845P+dKFttag2Znv0R66tFOH2A==",
+      "os": ["win32"],
+      "cpu": ["x64"]
+    },
+    "@node-rs/jieba@2.0.3": {
+      "integrity": "sha512-WfTweEAbwHNPV4BvbhyQfG5E4wUQWnjy7x9Li4yYgwm+c4hlkuREkMcpCS0tTo+eTyDIBZ/kFVylns2blPBZxg==",
+      "optionalDependencies": [
+        "@node-rs/jieba-android-arm-eabi",
+        "@node-rs/jieba-android-arm64",
+        "@node-rs/jieba-darwin-arm64",
+        "@node-rs/jieba-darwin-x64",
+        "@node-rs/jieba-freebsd-x64",
+        "@node-rs/jieba-linux-arm-gnueabihf",
+        "@node-rs/jieba-linux-arm64-gnu",
+        "@node-rs/jieba-linux-arm64-musl",
+        "@node-rs/jieba-linux-x64-gnu",
+        "@node-rs/jieba-linux-x64-musl",
+        "@node-rs/jieba-win32-arm64-msvc",
+        "@node-rs/jieba-win32-ia32-msvc",
+        "@node-rs/jieba-win32-x64-msvc"
       ]
     },
     "@opentelemetry/api@1.9.1": {
@@ -293,6 +378,7 @@
       "jsr:@std/testing@^1.0.17",
       "jsr:@std/yaml@1",
       "npm:@agentclientprotocol/sdk@~0.14.1",
+      "npm:@node-rs/jieba@2",
       "npm:discord.js@14",
       "npm:misskey-js@2025.12.2",
       "npm:prom-client@15"

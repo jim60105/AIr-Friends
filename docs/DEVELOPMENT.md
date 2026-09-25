@@ -51,7 +51,7 @@ This guide provides comprehensive instructions for developing and customizing AI
 6. **Run with YOLO mode (auto-approve all permissions)**
 
    ```bash
-   deno run --allow-net --allow-read --allow-write --allow-env --allow-run src/main.ts --yolo
+   deno run --allow-net --allow-read --allow-write --allow-env --allow-run --allow-ffi src/main.ts --yolo
    ```
 
 > [!WARNING]\
