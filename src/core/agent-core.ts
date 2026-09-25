@@ -111,6 +111,7 @@ export class AgentCore {
       tokenLimit: config.agent.tokenLimit,
       memoryMaxChars: config.memory.maxChars,
       agentType: config.agent.defaultAgentType,
+      recall: config.memory.recall,
     });
 
     // Initialize reply policy (needed by orchestrator and message handler)

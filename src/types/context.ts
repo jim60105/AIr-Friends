@@ -3,18 +3,19 @@
 import type { ResolvedMemory } from "./memory.ts";
 import type { PlatformMessage } from "./events.ts";
 import type { PlatformEmoji } from "./platform.ts";
+import type { MemoryRecallConfig } from "./config.ts";
 
 /**
  * Assembled context for an Agent session
  */
 export interface AssembledContext {
-  /** Important memories (high importance, fully loaded) — backward compat alias for coreMemories */
+  /** Important memories — backward compat alias for coreMemories */
   importantMemories: ResolvedMemory[];
 
-  /** Core-tier memories (always fully loaded) */
+  /** Core-tier memories selected within `memory.recall.coreMaxTokens` */
   coreMemories: ResolvedMemory[];
 
-  /** Working-tier memories (bounded, most recent) */
+  /** Working-tier memories selected within the working budgets */
   workingMemories: ResolvedMemory[];
 
   /** Channel core-tier memories (non-DM only) */
@@ -22,6 +23,12 @@ export interface AssembledContext {
 
   /** Channel working-tier memories (non-DM only) */
   channelWorkingMemories: ResolvedMemory[];
+
+  /**
+   * Ids of the fixed memories actually injected. Fast Recall excludes them, so
+   * a memory dropped by the fixed budgets stays eligible for retrieval.
+   */
+  injectedIds: string[];
 
   /** Recent messages from the current channel */
   recentMessages: PlatformMessage[];
@@ -93,6 +100,12 @@ export interface ContextAssemblyConfig {
 
   /** The agent type used for prompt rendering (e.g. "opencode") */
   agentType?: string;
+
+  /**
+   * Memory Recall configuration (`memory.recall`), which supplies the fixed
+   * memory budgets. Optional so hand-built configs fall back to the defaults.
+   */
+  recall?: MemoryRecallConfig;
 }
 
 /**

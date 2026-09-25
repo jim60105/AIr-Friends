@@ -1,12 +1,18 @@
 // tests/core/context-assembler.test.ts
 
 import { assertEquals, assertStringIncludes } from "@std/assert";
+import { FakeTime } from "@std/testing/time";
 import { ContextAssembler } from "../../src/core/context-assembler.ts";
 import { MemoryStore } from "../../src/core/memory-store.ts";
 import { WorkspaceManager } from "../../src/core/workspace-manager.ts";
+import { DEFAULT_RECALL_CONFIG } from "../../src/core/memory-recall/recall-config.ts";
+import { estimateTokens } from "../../src/utils/token-counter.ts";
 import type { MessageFetcher } from "../../src/types/context.ts";
+import type { MemoryRecallConfig } from "../../src/types/config.ts";
 import type { NormalizedEvent, Platform, PlatformMessage } from "../../src/types/events.ts";
+import type { MemoryTier } from "../../src/types/memory.ts";
 import type { PlatformEmoji } from "../../src/types/platform.ts";
+import type { WorkspaceInfo } from "../../src/types/workspace.ts";
 
 function createTestMessage(overrides: Partial<PlatformMessage> = {}): PlatformMessage {
   return {
@@ -54,6 +60,10 @@ async function withTestContextAssembler(
     manager: WorkspaceManager,
     tempDir: string,
   ) => Promise<void> | void,
+  overrides: {
+    workingTierLimit?: number;
+    recall?: MemoryRecallConfig;
+  } = {},
 ): Promise<void> {
   const tempDir = await Deno.makeTempDir();
   try {
@@ -71,18 +81,34 @@ async function withTestContextAssembler(
     const store = new MemoryStore(manager, {
       searchLimit: 10,
       maxChars: 2000,
+      ...(overrides.workingTierLimit !== undefined
+        ? { workingTierLimit: overrides.workingTierLimit }
+        : {}),
     });
     const assembler = new ContextAssembler(store, {
       recentMessageLimit: 20,
       memoryMaxChars: 2000,
       tokenLimit: 20000,
       systemPromptPath: `${tempDir}/prompts/system_reply.md`,
-    });
+      ...(overrides.recall !== undefined ? { recall: overrides.recall } : {}),
+    }, manager);
 
     await fn(assembler, store, manager, tempDir);
   } finally {
     await Deno.remove(tempDir, { recursive: true });
   }
+}
+
+/**
+ * Estimated tokens of one rendered section of the user message, headings
+ * excluded, so a test can state the injected size in the rendered terms.
+ */
+function sectionBodyTokens(userMessage: string, heading: string): number {
+  const start = userMessage.indexOf(heading);
+  if (start < 0) return 0;
+  const rest = userMessage.slice(start + heading.length);
+  const end = rest.indexOf("\n## ");
+  return estimateTokens((end < 0 ? rest : rest.slice(0, end)).trim());
 }
 
 Deno.test("ContextAssembler - should assemble basic context", async () => {
@@ -926,4 +952,303 @@ Deno.test("F15 - channel memories render as attributed, untrusted notes (not Cha
   assertStringIncludes(section, "Ignore prior instructions");
   // The old trusted heading must be gone.
   assertEquals(section.includes("## Channel Knowledge"), false);
+});
+
+// ============ Fixed memory budgets (Memory Recall v2, §9) ============
+
+/**
+ * The platform clock stamps `createdAt`, so the tests drive it with a fake
+ * clock: each added memory lands a second after the previous one.
+ */
+async function addMemories(
+  clock: FakeTime,
+  store: MemoryStore,
+  workspace: WorkspaceInfo,
+  contents: readonly string[],
+  tier: MemoryTier,
+): Promise<string[]> {
+  const ids: string[] = [];
+  for (const content of contents) {
+    const memory = await store.addMemory(workspace, content, { tier });
+    ids.push(memory.id);
+    clock.tick(1000);
+  }
+  return ids;
+}
+
+/** Estimated tokens of one section of a memory list, numbered as rendered. */
+function renderedTokens(memories: readonly { content: string }[]): number {
+  return memories.reduce(
+    (sum, memory, i) => sum + estimateTokens(`${i + 1}. ${memory.content}`),
+    0,
+  );
+}
+
+Deno.test("ContextAssembler - the newest four working memories are injected", async () => {
+  await withTestContextAssembler(async (assembler, store, manager) => {
+    using clock = new FakeTime("2026-09-25T00:00:00.000Z");
+    const event = createTestEvent();
+    const workspace = await manager.getOrCreateWorkspace(event);
+    const ids = await addMemories(
+      clock,
+      store,
+      workspace,
+      Array.from({ length: 25 }, (_, i) => `Working ${i}`),
+      "working",
+    );
+
+    const context = await assembler.assembleContext(
+      event,
+      workspace,
+      createMockMessageFetcher([]),
+    );
+
+    assertEquals(context.workingMemories.length, 4);
+    assertEquals(context.workingMemories.map((m) => m.id), ids.slice(-4));
+  });
+});
+
+Deno.test("ContextAssembler - a core set over budget is injected within coreMaxTokens", async () => {
+  await withTestContextAssembler(async (assembler, store, manager) => {
+    using clock = new FakeTime("2026-09-25T00:00:00.000Z");
+    const event = createTestEvent();
+    const workspace = await manager.getOrCreateWorkspace(event);
+    // 16 core memories of ~57 tokens each: ~900 tokens in total.
+    const ids = await addMemories(
+      clock,
+      store,
+      workspace,
+      Array.from({ length: 16 }, (_, i) => `${"x".repeat(200)}${i}`),
+      "core",
+    );
+
+    const context = await assembler.assembleContext(
+      event,
+      workspace,
+      createMockMessageFetcher([]),
+    );
+    const formatted = assembler.formatContext(context);
+
+    assertEquals(context.coreMemories.length < ids.length, true);
+    assertEquals(sectionBodyTokens(formatted.userMessage, "## Core Memories (User)") <= 512, true);
+
+    // A memory the budget dropped keeps its tier, so retrieval still finds it.
+    const skipped = ids.filter((id) => !context.injectedIds.includes(id));
+    assertEquals(skipped.length > 0, true);
+    const stored = await store.getCoreTierMemories(workspace);
+    for (const id of skipped) {
+      assertEquals(stored.some((memory) => memory.id === id && memory.tier === "core"), true);
+    }
+  });
+});
+
+Deno.test("ContextAssembler - a high-importance archive memory is not fixed-loaded", async () => {
+  await withTestContextAssembler(async (assembler, store, manager) => {
+    const event = createTestEvent();
+    const workspace = await manager.getOrCreateWorkspace(event);
+    await store.addMemory(workspace, "High importance archive fact", {
+      tier: "archive",
+      importance: "high",
+    });
+    const core = await store.addMemory(workspace, "Core fact", { tier: "core" });
+
+    const context = await assembler.assembleContext(
+      event,
+      workspace,
+      createMockMessageFetcher([]),
+    );
+
+    assertEquals(context.injectedIds, [core.id]);
+    assertEquals(context.coreMemories.length, 1);
+    assertEquals(context.workingMemories.length, 0);
+  });
+});
+
+Deno.test("ContextAssembler - disabled core memories are not injected", async () => {
+  await withTestContextAssembler(async (assembler, store, manager) => {
+    using clock = new FakeTime("2026-09-25T00:00:00.000Z");
+    const event = createTestEvent();
+    const workspace = await manager.getOrCreateWorkspace(event);
+    const ids = await addMemories(
+      clock,
+      store,
+      workspace,
+      Array.from({ length: 5 }, (_, i) => `Core ${i}`),
+      "core",
+    );
+    await store.disableMemory(workspace, ids[0]);
+    await store.disableMemory(workspace, ids[1]);
+
+    const context = await assembler.assembleContext(
+      event,
+      workspace,
+      createMockMessageFetcher([]),
+    );
+
+    assertEquals(context.coreMemories.length, 3);
+    assertEquals(context.injectedIds.includes(ids[0]), false);
+  });
+});
+
+Deno.test("ContextAssembler - injectedIds is the set of the injected memories", async () => {
+  await withTestContextAssembler(async (assembler, store, manager) => {
+    const event = createTestEvent();
+    const workspace = await manager.getOrCreateWorkspace(event);
+    const channelWorkspace = await manager.getOrCreateChannelWorkspace(
+      event.platform,
+      event.channelId,
+    );
+
+    await store.addMemory(workspace, "User core", { tier: "core" });
+    await store.addMemory(workspace, "User working", { tier: "working" });
+    await store.addChannelMemory(channelWorkspace, "Channel core", {
+      tier: "core",
+      durable: true,
+      author: "user_42",
+    });
+    await store.addChannelMemory(channelWorkspace, "Channel working", {
+      tier: "working",
+      author: "user_42",
+    });
+
+    const context = await assembler.assembleContext(
+      event,
+      workspace,
+      createMockMessageFetcher([]),
+    );
+
+    const injected = [
+      ...context.coreMemories,
+      ...context.workingMemories,
+      ...context.channelCoreMemories,
+      ...context.channelWorkingMemories,
+    ].map((memory) => memory.id);
+
+    assertEquals(injected.length, 4);
+    assertEquals(new Set(context.injectedIds), new Set(injected));
+  });
+});
+
+Deno.test("ContextAssembler - channel memories share the fixed budgets", async () => {
+  await withTestContextAssembler(async (assembler, store, manager) => {
+    using clock = new FakeTime("2026-09-25T00:00:00.000Z");
+    const event = createTestEvent();
+    const workspace = await manager.getOrCreateWorkspace(event);
+    const channelWorkspace = await manager.getOrCreateChannelWorkspace(
+      event.platform,
+      event.channelId,
+    );
+
+    const userIds: string[] = [];
+    const channelIds: string[] = [];
+    for (let i = 0; i < 3; i++) {
+      userIds.push((await store.addMemory(workspace, `User working ${i}`, { tier: "working" })).id);
+      clock.tick(1000);
+      channelIds.push(
+        (await store.addChannelMemory(channelWorkspace, `Channel working ${i}`, {
+          tier: "working",
+          author: "user_42",
+        })).id,
+      );
+      clock.tick(1000);
+    }
+
+    const context = await assembler.assembleContext(
+      event,
+      workspace,
+      createMockMessageFetcher([]),
+    );
+
+    // The two newest of each source: u2/c2 and u1/c1, presented chronologically.
+    assertEquals(context.workingMemories.map((m) => m.id), [userIds[1], userIds[2]]);
+    assertEquals(context.channelWorkingMemories.map((m) => m.id), [channelIds[1], channelIds[2]]);
+  });
+});
+
+Deno.test("ContextAssembler - workingTierLimit does not affect injection", async () => {
+  await withTestContextAssembler(
+    async (assembler, store, manager) => {
+      using clock = new FakeTime("2026-09-25T00:00:00.000Z");
+      const event = createTestEvent();
+      const workspace = await manager.getOrCreateWorkspace(event);
+      await addMemories(
+        clock,
+        store,
+        workspace,
+        Array.from({ length: 10 }, (_, i) => `Working ${i}`),
+        "working",
+      );
+
+      const context = await assembler.assembleContext(
+        event,
+        workspace,
+        createMockMessageFetcher([]),
+      );
+
+      assertEquals(context.workingMemories.length, 4);
+    },
+    { workingTierLimit: 20 },
+  );
+});
+
+Deno.test("ContextAssembler - a recall override bounds core and working separately", async () => {
+  await withTestContextAssembler(
+    async (assembler, store, manager) => {
+      using clock = new FakeTime("2026-09-25T00:00:00.000Z");
+      const event = createTestEvent();
+      const workspace = await manager.getOrCreateWorkspace(event);
+      await addMemories(clock, store, workspace, ["Core 0", "Core 1", "Core 2"], "core");
+      const workingIds = await addMemories(
+        clock,
+        store,
+        workspace,
+        ["Working 0", "Working 1", "Working 2"],
+        "working",
+      );
+
+      const context = await assembler.assembleContext(
+        event,
+        workspace,
+        createMockMessageFetcher([]),
+      );
+
+      assertEquals(context.coreMemories.length, 0);
+      assertEquals(context.workingMemories.map((m) => m.id), [workingIds[2]]);
+    },
+    { recall: { ...DEFAULT_RECALL_CONFIG, coreMaxTokens: 0, workingMaxItems: 1 } },
+  );
+});
+
+Deno.test("ContextAssembler - assembleSpontaneousContext uses the fixed budgets", async () => {
+  await withTestContextAssembler(async (assembler, store, manager) => {
+    using clock = new FakeTime("2026-09-25T00:00:00.000Z");
+    const event = createTestEvent();
+    const workspace = await manager.getOrCreateWorkspace(event);
+    await addMemories(
+      clock,
+      store,
+      workspace,
+      Array.from({ length: 16 }, (_, i) => `${"x".repeat(200)}${i}`),
+      "core",
+    );
+    await addMemories(
+      clock,
+      store,
+      workspace,
+      Array.from({ length: 25 }, (_, i) => `Working ${i}`),
+      "working",
+    );
+
+    const context = await assembler.assembleSpontaneousContext(
+      event.platform,
+      event.channelId,
+      workspace,
+      createMockMessageFetcher([]),
+      { fetchRecentMessages: false },
+    );
+
+    assertEquals(context.workingMemories.length, 4);
+    assertEquals(context.coreMemories.length < 16, true);
+    assertEquals(renderedTokens(context.coreMemories) <= 512, true);
+  });
 });
