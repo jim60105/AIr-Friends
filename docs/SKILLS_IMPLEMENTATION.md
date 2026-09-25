@@ -65,15 +65,16 @@ Located in `skills/{name}/SKILL.md`, these files follow the [Agent Skills Standa
 - **Key Features**:
   - Append-only (cannot be deleted)
   - Private memories only in DM contexts
-  - High importance memories always loaded into context
 
 ### 2. memory-search.md
 
-- **Purpose**: Search through saved memories
+- **Purpose**: Retrieve memories and workspace notes with a natural-language query
 - **Parameters**:
-  - `query-file` (required): Path of the payload file containing the search keywords (staged in `$TMPDIR/$SESSION_ID/`)
-  - `limit`: Maximum results (default: 10)
-- **Returns**: Array of matching memories
+  - `query-file` (required): Path of the payload file containing the natural-language query (staged in `$TMPDIR/$SESSION_ID/`)
+  - `limit`: Maximum results (default: 10, capped at 10)
+  - `category`: Filter by `fact`, `preference`, `episode`, `summary` or `relationship`
+  - `scope`: `user`, `channel`, or omit to search both
+- **Returns**: `memories` in descending recall-score order, each with `score` and `matchedTerms`, plus an `agentNotes` section of workspace note pointers
 
 ### 3. send-reply.md
 
@@ -225,7 +226,7 @@ Legacy flags are rejected in both forms (`--flag value` and `--flag=value`) with
 Handles all memory-related operations:
 
 - `handleMemorySave`: Validates parameters and saves memory using MemoryStore
-- `handleMemorySearch`: Searches memories by keywords
+- `handleMemorySearch`: Runs the `memory-recall` retriever (Deep Recall) and returns relevance-ranked memories and note pointers
 - `handleMemoryPatch`: Patches memory metadata
 - `handleMemoryStats`: Returns memory statistics
 - `handleMemoryExport`: Exports memories as file via DM

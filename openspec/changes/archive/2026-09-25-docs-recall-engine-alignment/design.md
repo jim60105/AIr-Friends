@@ -17,7 +17,7 @@ The recall engine (BM25 lexical score + entity/phrase/metadata bonuses, tier bud
 
 - **Reuse the canonical wording, don't restate the spec.** The tier-vs-importance sentences already in `AGENTS.md` (~279-281) and `docs/MEMORY_DESIGN.md` are the source text; stale passages are replaced with condensed versions of it rather than new prose, so the three documents cannot drift apart again at the next spec edit. Alternative considered: link to `docs/MEMORY_DESIGN.md` everywhere instead of restating — rejected because `DESIGN.md` and `SKILLS_IMPLEMENTATION.md` are standalone overviews whose readers expect inline behavior text.
 - **Keep `rg` in the container docs.** The binary is still installed (Containerfile) and used by the agent's file-reading allow-list (`agent-sandbox-hardening` spec); only the stated purpose changes from "memory search" to in-workspace file reading. Removing the line would misstate the image contents.
-- **`memory-search` doc wording tracks the skill contract** in `skills/memory-search/SKILL.md` (natural-language query, `userMemories`/`agentNotes`, `score`, `matchedTerms`), which is already updated — documentation quotes the skill contract, not the retriever internals.
+- **`memory-search` doc wording tracks the skill contract** in `skills/memory-search/SKILL.md` (natural-language query, `memories`/`agentNotes`, `score`, `matchedTerms`), which is already updated — documentation quotes the skill contract, not the retriever internals.
 
 ## Risks / Trade-offs
 

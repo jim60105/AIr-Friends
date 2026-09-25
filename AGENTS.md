@@ -261,7 +261,7 @@ data/agent-workspace/
     └── {YYYY-MM-DD}.md    # Daily entries
 ```
 
-The `memory-search` skill automatically searches both user memories and agent workspace notes, returning results in separate `userMemories` and `agentNotes` sections.
+The `memory-search` skill searches both user memories and agent workspace notes with the recall engine, returning memories in a `memories` section and note pointers in an `agentNotes` section.
 
 ### 2. Context Assembly (Feature 02)
 
@@ -1318,7 +1318,7 @@ You are Yuna. This is a private chat.
 
 - The container includes pre-installed binaries:
   - `opencode` - OpenCode CLI (latest release)
-  - `rg` - ripgrep 15.1.0 for memory search
+  - `rg` - ripgrep (from the Debian apt package) for agent-side in-workspace file reading
   - `dumb-init` - Used as PID 1 and to wrap agent subprocesses for proper signal forwarding
 - OpenCode configuration is pre-configured at `/home/deno/.config/opencode/opencode.json`
 - Skills are copied to `/home/deno/.agents/skills/` for agent discovery

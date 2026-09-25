@@ -297,10 +297,10 @@ During an active session, the `SESSION_ID` environment variable is set for the a
          │
          ▼
 4. Context Assembly
-   - Load high-importance memories (full)
+   - Load core-tier memories, then the newest working-tier ones (within the `memory.recall` budgets)
+   - Run Fast Recall (top memories and agent workspace note pointers)
    - Load recent channel messages (up to 20)
    - Load related guild interactions (configurable)
-   - Search normal-importance memories (on demand)
          │
          ▼
 5. Agent Session Creation
@@ -321,13 +321,14 @@ During an active session, the `SESSION_ID` environment variable is set for the a
 
 ### Context Assembly
 
-Initial context comprises three data sources:
+Initial context comprises the following sources (budget keys live under `memory.recall`):
 
-| Source          | Content                                 | Limit        |
-| --------------- | --------------------------------------- | ------------ |
-| Memory          | High-importance memories from workspace | All enabled  |
-| Recent Messages | Last N messages from same channel       | 20 (fixed)   |
-| Guild Context   | Related interactions from same guild    | Configurable |
+| Source          | Content                                                   | Limit                                                                                |
+| --------------- | --------------------------------------------------------- | ------------------------------------------------------------------------------------ |
+| Memory          | Core-tier memories, then the newest working-tier memories | `coreMaxTokens` (512), then `workingMaxItems` (4) within `workingMaxTokens` (384)    |
+| Fast Recall     | Top-scoring memories and agent workspace note pointers    | Top 2 (default) within `fastRecallMaxTokens` (192) / `fastRecallNoteMaxTokens` (256) |
+| Recent Messages | Last N messages from same channel                         | 20 (fixed)                                                                           |
+| Guild Context   | Related interactions from same guild                      | Configurable                                                                         |
 
 **`/clear` Command:**
 
@@ -343,7 +344,7 @@ This allows users to reset the conversation context within the same channel (use
 The Agent can request additional context during reasoning by calling:
 
 - `fetch-context` — Fetch more messages from the platform
-- `memory-search` — Search memory by keywords
+- `memory-search` — Retrieve memories and workspace notes via the natural-language recall engine
 
 > [!NOTE]
 > The normal message flow does **not** perform inline memory compression or summarization.
@@ -415,16 +416,16 @@ Both files exist in every workspace. Each line is a JSON event. No new files are
 }
 ```
 
-| Field        | Description                                      |
-| ------------ | ------------------------------------------------ |
-| `id`         | Unique identifier                                |
-| `ts`         | ISO 8601 timestamp                               |
-| `enabled`    | Whether memory is active                         |
-| `visibility` | `public` or `private`                            |
-| `importance` | `high` (always loaded) or `normal` (searched)    |
-| `content`    | Memory content (plain text)                      |
-| `relatedTo`  | IDs of semantically related memories (optional)  |
-| `supersedes` | IDs of memories this entry supersedes (optional) |
+| Field        | Description                                                   |
+| ------------ | ------------------------------------------------------------- |
+| `id`         | Unique identifier                                             |
+| `ts`         | ISO 8601 timestamp                                            |
+| `enabled`    | Whether memory is active                                      |
+| `visibility` | `public` or `private`                                         |
+| `importance` | `high` or `normal`; ranking bonus only — tier decides loading |
+| `content`    | Memory content (plain text)                                   |
+| `relatedTo`  | IDs of semantically related memories (optional)               |
+| `supersedes` | IDs of memories this entry supersedes (optional)              |
 
 **Patch Event (type=patch):**
 
@@ -447,17 +448,37 @@ Both files exist in every workspace. Each line is a JSON event. No new files are
 
 ### Memory Retrieval
 
-**High-Importance Memories:**
+**Fixed loading (session start):**
 
-- Automatically loaded during context assembly
-- Sorted by timestamp (oldest to newest)
-- No search required
+- Only the tier decides what is loaded: core-tier memories within
+  `memory.recall.coreMaxTokens` (user first, then channel), then the newest
+  `workingMaxItems` working-tier memories within `memory.recall.workingMaxTokens`
+- `importance` is a retrieval ranking bonus, never a loading rule; a memory a
+  budget skips keeps its tier and stays reachable through `memory-search`
 
-**Normal-Importance Memories:**
+**Fast Recall:**
 
-- Retrieved via full-text search using `rg` (ripgrep)
-- Results limited by hit count and total characters
-- Searched on demand or during initial assembly
+- Every triggered session also runs one Fast Recall pass and renders the
+  top-scoring memories (top 2 by default, within `memory.recall.fastRecallMaxTokens`)
+  and agent workspace note pointers (top 2 by default, within
+  `fastRecallNoteMaxTokens`) under three headings:
+  `## Relevant Memory`, `## Relevant Channel Notes` (attributed, unverified
+  channel memories) and `## Possibly Relevant Workspace Notes` (agent workspace
+  note pointers)
+- Memories already injected by fixed loading are excluded, the sections are
+  omitted when nothing is selected, and `memory.recall.fastRecallEnabled: false`
+  disables the pass
+
+**`memory-search` (Deep Recall):**
+
+- Retrieves memories by natural-language query through the lexical recall engine
+  (`src/core/memory-recall/`); `rg` plays no part in retrieval
+- Each eligible memory scores BM25 lexical relevance plus exact-entity,
+  exact-phrase, metadata (including a +0.20 bonus for `importance: "high"`),
+  temporal and relation bonuses, so importance only reorders close results
+- Results are ranked by score descending, each carrying `score` and `matchedTerms`,
+  bounded by the Deep Recall token budget; workspace notes come back as pointers in
+  a separate `agentNotes` section
 
 **Memory Statistics:**
 
@@ -478,7 +499,7 @@ In addition to per-user memory workspaces, the Agent has a global workspace at `
 
 - **Not pre-loaded in context**: Workspace content is NOT included in the system prompt or initial context. The agent reads files on-demand using `$AGENT_WORKSPACE` env var and bash commands.
 - **Index-guided search**: `notes/_index.md` serves as a quick-reference index so the agent can decide which notes to read without loading everything.
-- **Integrated with memory-search**: The `memory-search` skill searches both user memories AND agent workspace notes, returning results in separate sections (`userMemories` and `agentNotes`).
+- **Integrated with memory-search**: The `memory-search` skill searches both user memories AND agent workspace notes with the recall engine, returning memories in a `memories` section and note pointers in an `agentNotes` section.
 - **Privacy boundary**: User private information must use `memory-save` skill (per-user workspace). The agent workspace is for agent's own knowledge only.
 - **Markdown format**: All files use `.md` for token efficiency and structure.
 
@@ -620,19 +641,16 @@ Environment-specific config overrides base config.
 **Included Binaries:**
 
 - **opencode** - OpenCode CLI (latest release)
-- **rg** (ripgrep 15.1.0) - For memory search operations
+- **rg** (ripgrep, from the Debian apt package) - For agent-side in-workspace file reading under the ACP permission gate
 - **curl** - For health checks
 - **dumb-init** - For proper signal handling as PID 1 and wrapping agent subprocesses
 
 **Multi-Stage Build:**
 
 ```dockerfile
-# Stage 1: Unpack binaries (opencode, ripgrep)
+# Stage 1: Unpack the OpenCode binary
 FROM base AS opencode-unpacker
 # ... download and extract opencode
-
-FROM base AS ripgrip-unpacker
-# ... download and extract ripgrep
 
 # Stage 2: Cache dependencies
 FROM base AS cache
@@ -644,9 +662,8 @@ RUN deno cache --lock=deno.lock src/main.ts
 # Stage 3: Final runtime
 FROM base AS final
 WORKDIR /app
-# Copy binaries from unpack stages
+# Copy the binary from the unpack stage (ripgrep comes from the base image's apt packages)
 COPY --from=opencode-unpacker /opencode/opencode /usr/local/bin/opencode
-COPY --from=ripgrip-unpacker /ripgrip/.../rg /usr/local/bin/rg
 # Copy cached dependencies
 COPY --from=cache /deno-dir/ /deno-dir/
 # Copy application files
