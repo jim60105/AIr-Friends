@@ -245,7 +245,7 @@ Deno.test("compareScoredMemories - orders by score, then createdAt, then id", ()
   assertEquals(ids([...items].sort(compareScoredMemories)), ["c", "z", "a", "b"]);
 });
 
-Deno.test("scoreMemories - the same input twice gives deep-equal results", () => {
+Deno.test("scoreMemories - repeated and reordered input gives deep-equal results", () => {
   const build = () => [
     index({ id: "a", content: "我喜歡喝無糖綠茶" }),
     index({ id: "b", content: "keyboard mouse", decay: 0.5, importance: "high" }),
@@ -255,7 +255,11 @@ Deno.test("scoreMemories - the same input twice gives deep-equal results", () =>
 
   const first = scoreMemories(build(), buildQuery(message), NO_HINTS, NOW);
   const second = scoreMemories(build(), buildQuery(message), NO_HINTS, NOW);
+  // Statistics and the comparator are order independent, so the population
+  // order cannot leak into the ranking.
+  const reversed = scoreMemories(build().reverse(), buildQuery(message), NO_HINTS, NOW);
 
   assert(first.length > 1);
   assertEquals(first, second);
+  assertEquals(first, reversed);
 });

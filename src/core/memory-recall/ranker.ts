@@ -137,7 +137,8 @@ function entityBonus(doc: IndexedMemory, query: RecallQuery): number {
 
 /**
  * Slides windows of 2 to 6 adjacent current-message tokens over the normalized
- * text and stops at the first hit of at least four characters.
+ * text and stops at the first hit of at least four characters. The bonus is a
+ * fixed amount, so which window hits first cannot change the score.
  */
 function hasExactPhrase(phraseTokens: readonly SearchToken[], normalizedText: string): boolean {
   if (phraseTokens.length < PHRASE_MIN_TOKENS) return false;
