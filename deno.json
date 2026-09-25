@@ -38,7 +38,7 @@
     "test:coverage:lcov": "deno test --allow-net --allow-read --allow-write --allow-env --allow-run --allow-ffi --coverage=coverage && deno coverage coverage --lcov --output=coverage.lcov --exclude='tests/'",
     "test:unit": "deno test --allow-net --allow-read --allow-write --allow-env --allow-run --allow-ffi --parallel tests/ --ignore=tests/integration",
     "test:integration": "deno test --allow-net --allow-read --allow-write --allow-env --allow-run --allow-ffi tests/integration",
-    "ci": "deno fmt --check && deno lint && deno check src/main.ts && deno test --allow-net --allow-read --allow-write --allow-env --allow-run --allow-ffi",
+    "ci": "deno task fmt:check && deno task lint && deno task check && deno test --allow-net --allow-read --allow-write --allow-env --allow-run --allow-ffi",
     "fmt": "deno fmt src/ tests/",
     "fmt:check": "deno fmt --check src/ tests/",
     "lint": "deno lint src/ tests/",
