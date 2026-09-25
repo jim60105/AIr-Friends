@@ -13,7 +13,7 @@
 - Remove `memoryMaxChars` from `ContextAssemblyConfig` (`src/types/context.ts`) and its wiring in `agent-core.ts`; the assembler reads only `recentMessageLimit`, `tokenLimit`, `systemPromptPath`, `agentType`, `recall`.
 - The `memory-search` skill's per-call `limit` parameter (default 10, `src/skills/memory-handler.ts` `params.limit ?? 10`) is the surviving result-count knob and is unchanged; the `memory.recall` budgets remain the injection knobs.
 - Remove the two keys from `config.example.yaml` (~219-220) and from the config examples in `AGENTS.md` (~391-392) and `docs/DESIGN.md` (~566-568); remove the `MEMORY_SEARCH_LIMIT` / `MEMORY_MAX_CHARS` rows and the `search_limit` / `max_chars` example lines from `docs/MEMORY_DESIGN.md` (~510-511, 535-536). These env vars were documentation-only in `MEMORY_DESIGN.md`; `src/utils/env.ts` never mapped them (verified).
-- Update every construction site: `agent-core.ts`, `scripts/memory-recall-benchmark.ts`, and all `tests/` fixtures that pass `searchLimit: 10, maxChars: 2000`; drop the `assertEquals(result.memory.searchLimit, 10)` assertion in `tests/core/config-loader.test.ts` (~line 78).
+- Update every construction site: `agent-core.ts`, `scripts/memory-recall-benchmark.ts`, and all `tests/` fixtures that pass `searchLimit: 10, maxChars: 2000` (295 occurrences across 33 test files — mechanical, `deno check` catches misses); drop the `assertEquals(result.memory.searchLimit, 10)` assertion in `tests/core/config-loader.test.ts` (~line 78).
 
 ## Capabilities
 
@@ -28,6 +28,6 @@ None.
 ## Impact
 
 - **Code**: `src/types/config.ts`, `src/types/context.ts`, `src/core/config-loader.ts`, `src/core/memory-store.ts`, `src/core/agent-core.ts`.
-- **Tests**: ~35 fixture sites across `tests/` (mechanical removal), `tests/core/config-loader.test.ts` assertion, plus a new regression test that a legacy config containing the removed keys loads without error and without the fields.
+- **Tests**: 295 field occurrences across 33 `tests/` files (mechanical removal), `tests/core/config-loader.test.ts` assertion, plus a new regression test that a legacy config containing the removed keys loads without error and without the fields.
 - **Docs**: `config.example.yaml`, `AGENTS.md`, `docs/DESIGN.md`, `docs/MEMORY_DESIGN.md`.
 - **Unaffected**: `memory.workingTierLimit` (still read by `MemoryStore`), `memory.recall.*`, the `memory-search` `limit` parameter, `note-chunker.ts`'s unrelated local `maxChars` parameter.

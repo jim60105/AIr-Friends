@@ -6,9 +6,10 @@
 
 #### Scenario: Fields absent from loaded config
 
-- **GIVEN** any `config.yaml`
+- **GIVEN** a `config.yaml` that does not set `memory.searchLimit` or `memory.maxChars`
 - **WHEN** the configuration is loaded
-- **THEN** the `memory` section SHALL NOT contain `searchLimit` or `maxChars`
+- **THEN** the `memory` section SHALL NOT contain `searchLimit` or `maxChars`: the fields are absent from the config model and the loader injects no defaults for them
+- **AND** when a legacy file does set them, the merged values SHALL be inert and never read (see "Legacy keys ignored")
 
 #### Scenario: Legacy keys ignored
 
