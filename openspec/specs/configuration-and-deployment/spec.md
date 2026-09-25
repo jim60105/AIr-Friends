@@ -159,7 +159,7 @@ The system SHALL validate the final merged configuration and reject invalid conf
 
 - **GIVEN** optional config sections are missing
 - **WHEN** validation runs
-- **THEN** defaults SHALL be applied for: `memory` (searchLimit=10, maxChars=2000, recentMessageLimit=20), `logging` (level="INFO"), `health` (enabled=false, port=8080), `skillApi` (enabled=true, port=3001, host="127.0.0.1"), `replyPolicy` ("channels"), `rateLimit`, `gitBackup`, `sandbox`, `idleTimeout`, `dashboard` (enabled=false, port=8090, passphrase=""), and others
+- **THEN** defaults SHALL be applied for: `memory` (recentMessageLimit=20, workingTierLimit=20), `logging` (level="INFO"), `health` (enabled=false, port=8080), `skillApi` (enabled=true, port=3001, host="127.0.0.1"), `replyPolicy` ("channels"), `rateLimit`, `gitBackup`, `sandbox`, `idleTimeout`, `dashboard` (enabled=false, port=8090, passphrase=""), and others
 
 #### Scenario: Dashboard Config Defaults
 
@@ -616,3 +616,27 @@ Values outside their allowed range SHALL be rejected at load time with a `Config
 - **GIVEN** `config.yaml` sets `memory.recall.fastRecallNoteMaxResults: 0`
 - **WHEN** Fast Recall runs
 - **THEN** no note SHALL be selected
+
+### Requirement: Removed Memory Search Config Fields
+
+`memory.searchLimit` and `memory.maxChars` SHALL NOT exist in the configuration model, the loader defaults, `MemoryStoreConfig`, `ContextAssemblyConfig`, or the startup log. Retrieval budgets are owned solely by `memory.recall` (injection) and the `memory-search` skill's per-call `limit` parameter (search results). Existing configuration files that still set `memory.searchLimit` or `memory.maxChars` SHALL load without error: the keys are merged and ignored, with no validation, warning, or environment-variable mapping.
+
+#### Scenario: Fields absent from loaded config
+
+- **GIVEN** a `config.yaml` that does not set `memory.searchLimit` or `memory.maxChars`
+- **WHEN** the configuration is loaded
+- **THEN** the `memory` section SHALL NOT contain `searchLimit` or `maxChars`: the fields are absent from the config model and the loader injects no defaults for them
+- **AND** when a legacy file does set them, the merged values SHALL be inert and never read (see "Legacy keys ignored")
+
+#### Scenario: Legacy keys ignored
+
+- **GIVEN** a `config.yaml` that sets `memory.searchLimit: 5` and `memory.maxChars: 1000`
+- **WHEN** the configuration is loaded
+- **THEN** loading SHALL succeed with no error and no startup log field derived from those values
+- **AND** retrieval budgets SHALL be unaffected by them
+
+#### Scenario: Surviving knobs unchanged
+
+- **GIVEN** `memory.workingTierLimit`, a `memory.recall` budget, and a `memory-search` call with an explicit `limit`
+- **WHEN** the configuration is loaded and a search runs
+- **THEN** each SHALL behave exactly as specified before this removal
