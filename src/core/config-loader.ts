@@ -589,6 +589,21 @@ function validateConfig(config: Record<string, unknown>): void {
       integer: true,
       expect: "an integer >= 0",
     }),
+    coreMaxTokens: requireRecallNumber(recallValues, "coreMaxTokens", {
+      min: 0,
+      integer: true,
+      expect: "an integer >= 0",
+    }),
+    workingMaxItems: requireRecallNumber(recallValues, "workingMaxItems", {
+      min: 0,
+      integer: true,
+      expect: "an integer >= 0",
+    }),
+    workingMaxTokens: requireRecallNumber(recallValues, "workingMaxTokens", {
+      min: 0,
+      integer: true,
+      expect: "an integer >= 0",
+    }),
     minRecallScore: requireRecallNumber(recallValues, "minRecallScore", {
       min: 0,
       expect: "a number >= 0",
