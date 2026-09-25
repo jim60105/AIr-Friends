@@ -2,11 +2,10 @@
 
 import { assertEquals } from "@std/assert";
 import { MemoryHandler } from "@skills/memory-handler.ts";
-import { DEFAULT_RECALL_CONFIG } from "@core/memory-recall/recall-config.ts";
-import { MemoryRetriever } from "@core/memory-recall/retriever.ts";
 import { MemoryStore } from "@core/memory-store.ts";
 import { WorkspaceManager } from "@core/workspace-manager.ts";
 import type { MemorySearchEntry, SkillContext } from "@skills/types.ts";
+import type { NoteRecallResult } from "../../src/types/memory.ts";
 import type { WorkspaceInfo } from "../../src/types/workspace.ts";
 import type { PlatformAdapter } from "@platforms/platform-adapter.ts";
 
@@ -255,6 +254,7 @@ async function withSearchHandler(
     handler: MemoryHandler;
     store: MemoryStore;
     manager: WorkspaceManager;
+    tempDir: string;
     workspace: WorkspaceInfo;
     context: SkillContext;
   }) => Promise<void>,
@@ -283,7 +283,7 @@ async function withSearchHandler(
       workspaceManager: manager,
     };
 
-    await fn({ handler, store, manager, workspace, context });
+    await fn({ handler, store, manager, tempDir, workspace, context });
   } finally {
     await Deno.remove(tempDir, { recursive: true });
   }
@@ -453,22 +453,67 @@ Deno.test("MemoryHandler - handleMemorySearch caps the result count at 10", asyn
   });
 });
 
-Deno.test("MemoryHandler - handleMemorySearch honours the retriever's Deep Recall budget", async () => {
-  await withSearchHandler(false, async ({ store, workspace, context }) => {
-    await store.addMemory(workspace, "keyboard", { visibility: "public" });
-    await store.addMemory(workspace, `keyboard ${"filler ".repeat(60)}`, {
+Deno.test("MemoryHandler - handleMemorySearch skips an item that does not fit the shared budget", async () => {
+  await withSearchHandler(false, async ({ handler, store, workspace, context }) => {
+    // The long memory outranks the short one, but its serialized entry alone
+    // exceeds `deepRecallMaxTokens`, so it is skipped and the short one fits.
+    await store.addMemory(workspace, `keyboard ${"filler ".repeat(600)}`, {
       visibility: "public",
+      importance: "high",
+      tier: "working",
+      decay: 1,
     });
+    await store.addMemory(workspace, "keyboard", { visibility: "public" });
 
-    const handler = new MemoryHandler(
-      store,
-      new MemoryRetriever(store, { ...DEFAULT_RECALL_CONFIG, deepRecallMaxTokens: 60 }),
-    );
     const result = await handler.handleMemorySearch({ query: "keyboard" }, context);
 
-    // The long memory ranks second and no longer fits the budget.
-    const memories = searchedMemories(result);
-    assertEquals(memories.map((m) => m.content), ["keyboard"]);
+    assertEquals(searchedMemories(result).map((m) => m.content), ["keyboard"]);
+  });
+});
+
+Deno.test("MemoryHandler - handleMemorySearch drops a lower-scoring memory for a higher-scoring note", async () => {
+  await withSearchHandler(false, async ({ handler, store, workspace, context, tempDir }) => {
+    // The memory matches one query word and is oversized; the note matches both
+    // words, so the note is admitted first and the memory no longer fits.
+    await store.addMemory(workspace, `keyboard ${"filler ".repeat(600)}`, {
+      visibility: "public",
+    });
+    const agentWorkspacePath = await makeAgentWorkspace(tempDir);
+    await Deno.writeTextFile(
+      `${agentWorkspacePath}/notes/input.md`,
+      "# Input\n\nkeyboard mouse\n",
+    );
+
+    const result = await handler.handleMemorySearch(
+      { query: "keyboard mouse" },
+      { ...context, agentWorkspacePath },
+    );
+
+    const data = result.data as { memories: unknown[]; agentNotes: NoteRecallResult[] };
+    assertEquals(data.agentNotes.length, 1);
+    assertEquals(data.agentNotes[0].path, `${agentWorkspacePath}/notes/input.md`);
+    assertEquals(data.memories, []);
+  });
+});
+
+Deno.test("MemoryHandler - handleMemorySearch skips a note whose pointer exceeds the budget", async () => {
+  await withSearchHandler(false, async ({ handler, context, tempDir }) => {
+    const agentWorkspacePath = await makeAgentWorkspace(tempDir);
+    // Three long CJK chunks: the pointer alone is larger than the whole budget.
+    const body = "鍵盤".repeat(400);
+    await Deno.writeTextFile(
+      `${agentWorkspacePath}/notes/huge.md`,
+      ["# 巨大", "", "## 一", body, "", "## 二", body, "", "## 三", body].join("\n") + "\n",
+    );
+
+    const result = await handler.handleMemorySearch(
+      { query: "鍵盤" },
+      { ...context, agentWorkspacePath },
+    );
+
+    const data = result.data as { memories: unknown[]; agentNotes: unknown[] };
+    assertEquals(data.memories, []);
+    assertEquals(data.agentNotes, []);
   });
 });
 
@@ -1317,62 +1362,48 @@ Deno.test("MemoryHandler - handleMemorySave without relatedTo/supersedes omits t
 
 // ============ Agent Workspace Search Tests ============
 
-Deno.test("MemoryHandler - handleMemorySearch searches agent workspace notes", async () => {
-  const tempDir = await Deno.makeTempDir();
-  const workspaceManager = new WorkspaceManager({
-    repoPath: tempDir,
-    workspacesDir: "workspaces",
-  });
-  const memoryStore = new MemoryStore(workspaceManager, {
-    searchLimit: 10,
-    maxChars: 2000,
-  });
-  const handler = new MemoryHandler(memoryStore);
-
-  const workspace: WorkspaceInfo = {
-    key: "discord/123",
-    components: { platform: "discord", userId: "123" },
-    path: `${tempDir}/workspaces/discord/123`,
-    tmpPath: `${tempDir}/workspaces/discord/123/tmp`,
-    isDm: false,
-  };
-
-  // Create workspace and memory files
-  await Deno.mkdir(workspace.path, { recursive: true });
-  await Deno.writeTextFile(`${workspace.path}/memory.public.jsonl`, "");
-  await Deno.writeTextFile(`${workspace.path}/memory.private.jsonl`, "");
-
-  // Create agent workspace with a note
+/** Creates the agent workspace of a search fixture and returns its path. */
+async function makeAgentWorkspace(tempDir: string): Promise<string> {
   const agentWorkspacePath = `${tempDir}/agent-workspace`;
   await Deno.mkdir(`${agentWorkspacePath}/notes`, { recursive: true });
-  await Deno.writeTextFile(
-    `${agentWorkspacePath}/notes/cooking.md`,
-    "# Cooking Notes\n\nBest pasta recipe uses fresh tomatoes\n",
-  );
+  await Deno.writeTextFile(`${agentWorkspacePath}/README.md`, "# Agent Workspace\n");
   await Deno.writeTextFile(`${agentWorkspacePath}/notes/_index.md`, "# Notes Index\n");
+  return agentWorkspacePath;
+}
 
-  const context: SkillContext = {
-    workspace,
-    platformAdapter: createMockPlatformAdapter(),
-    channelId: "channel123",
-    userId: "123",
-    agentWorkspacePath,
-  };
+Deno.test("MemoryHandler - handleMemorySearch returns note pointers", async () => {
+  await withSearchHandler(false, async ({ handler, context, tempDir }) => {
+    const agentWorkspacePath = await makeAgentWorkspace(tempDir);
+    await Deno.writeTextFile(
+      `${agentWorkspacePath}/notes/cooking.md`,
+      "# Cooking Notes\n\nBest pasta recipe uses fresh tomatoes\n",
+    );
 
-  const result = await handler.handleMemorySearch(
-    { query: "pasta" },
-    context,
-  );
+    const result = await handler.handleMemorySearch(
+      { query: "pasta" },
+      { ...context, agentWorkspacePath },
+    );
 
-  assertEquals(result.success, true);
-  const data = result.data as { memories: unknown[]; agentNotes: unknown[] };
-  assertEquals(Array.isArray(data.agentNotes), true);
-  assertEquals(data.agentNotes.length > 0, true);
+    assertEquals(result.success, true);
+    const data = result.data as { memories: unknown[]; agentNotes: NoteRecallResult[] };
+    assertEquals(data.memories, []);
+    assertEquals(data.agentNotes.length, 1);
 
-  const note = data.agentNotes[0] as { filePath: string; matchedLines: unknown[] };
-  assertEquals(note.filePath, "notes/cooking.md");
-
-  await Deno.remove(tempDir, { recursive: true });
+    const [note] = data.agentNotes;
+    assertEquals(note.path, `${agentWorkspacePath}/notes/cooking.md`);
+    assertEquals(note.title, "Cooking Notes");
+    assertEquals(note.headingPath, ["Cooking Notes"]);
+    assertEquals(note.lineStart, 1);
+    assertEquals(note.lineEnd, 3);
+    assertEquals(note.excerpt, "Best pasta recipe uses fresh tomatoes");
+    assertEquals(note.fileTokens > 0, true);
+    assertEquals(note.modifiedAt.endsWith("Z"), true);
+    assertEquals(note.score > 0, true);
+    assertEquals(note.matchedTerms, ["pasta"]);
+    assertEquals(note.chunks?.length, 1);
+    // The pointer never carries the file content.
+    assertEquals(JSON.stringify(note).includes("# Cooking Notes"), false);
+  });
 });
 
 Deno.test("MemoryHandler - handleMemorySearch returns empty agentNotes when no workspace", async () => {

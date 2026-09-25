@@ -58,6 +58,19 @@ Memory results come from **Deep Recall**. Each entry carries the memory fields (
 
 Results are sorted by descending `score`, and no id appears twice. `--limit` is capped at 10, and the returned memories are bounded by the Deep Recall token budget (`memory.recall.deepRecallMaxTokens`).
 
+`agentNotes` carries workspace note **pointers** — never the file content — each with:
+
+- `path`: absolute path of the note file, ready to read;
+- `title` and `headingPath`;
+- `lineStart` and `lineEnd` of the best-matching chunk;
+- `excerpt`: the best-matching sentence or sentences of that chunk;
+- `fileTokens`: estimated tokens of the whole file;
+- `modifiedAt`: ISO date;
+- `score` and `matchedTerms`;
+- `chunks`: up to three best-matching chunks, each with `headingPath`, `lineStart`, `lineEnd` and `excerpt`.
+
+Notes share the Deep Recall token budget with memories: both are admitted in descending `score` order, so a note can displace a lower-scoring memory and vice versa. Read a listed file with its `path` only when its excerpt is relevant but incomplete.
+
 Write the query as **natural language**, not as keywords: the whole query text is tokenized (segmented and normalized), not split on whitespace, so `我喜歡喝的綠茶` matches a memory that says `我喜歡喝無糖綠茶`. `--scope` searches `user`, `channel`, or — when omitted — both, ranked in one list.
 
 ## Critical Rules

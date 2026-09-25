@@ -1,6 +1,14 @@
 // src/core/memory-recall/ranker.ts
 
-import type { IndexedMemory, QueryHints, RecallQuery, ScoredMemory, SearchToken } from "./types.ts";
+import type {
+  IndexedMemory,
+  IndexedNoteChunk,
+  IndexedNoteFile,
+  QueryHints,
+  RecallQuery,
+  ScoredMemory,
+  SearchToken,
+} from "./types.ts";
 
 /** BM25 parameters (Memory Recall v2 design, §5.3). */
 const K1 = 1.2;
@@ -32,6 +40,40 @@ const MS_PER_DAY = 86_400_000;
  */
 const CJK_CHAR_RE = /[\u3400-\u4dbf\u4e00-\u9fff]/;
 
+/** The part of a document BM25 is computed from. */
+interface LexicalDocument {
+  tf: Map<string, number>;
+  length: number;
+}
+
+/** BM25 statistics of one population: its size, average length and term `df`. */
+interface CorpusStats {
+  n: number;
+  avgdl: number;
+  df: Map<string, number>;
+}
+
+/** A scored note chunk. */
+export interface ScoredNoteChunk {
+  file: IndexedNoteFile;
+  chunk: IndexedNoteChunk;
+  /** BM25 sum over the matched query terms, before bonuses. */
+  lexicalScore: number;
+  /** `lexicalScore` plus the entity and phrase bonuses. */
+  score: number;
+  /** Distinct matched query terms, sorted. */
+  matchedTerms: string[];
+}
+
+/** One note file with its matching chunks, aggregated per file. */
+export interface ScoredNoteFile {
+  file: IndexedNoteFile;
+  /** The file's best-scoring chunk, which represents the file. */
+  best: ScoredNoteChunk;
+  /** Every matching chunk of the file, score descending then line ascending. */
+  chunks: ScoredNoteChunk[];
+}
+
 /**
  * Scores every memory that matches at least one query token, in ranking order:
  * score descending, then `createdAt` descending, then id ascending. Bonuses are
@@ -50,47 +92,68 @@ export function scoreMemories(
   now: Date,
   supersededIds?: ReadonlySet<string>,
 ): ScoredMemory[] {
-  const n = population.length;
-  if (n === 0) return [];
-
-  let totalLength = 0;
-  for (const doc of population) totalLength += doc.length;
-  const avgdl = totalLength / n;
-
-  // `df` is seeded for every query key, so counting needs a single probe per
-  // document term and a matched key always has a count.
-  const df = new Map<string, number>();
-  for (const key of query.tokens.keys()) df.set(key, 0);
-  for (const doc of population) {
-    for (const key of doc.tf.keys()) {
-      const count = df.get(key);
-      if (count !== undefined) df.set(key, count + 1);
-    }
-  }
+  const stats = corpusStats(population, query);
+  if (stats.n === 0) return [];
 
   const superseded = supersededIds ?? collectSupersededIds(population);
   const scored: ScoredMemory[] = [];
   for (const doc of population) {
-    let lexicalScore = 0;
-    const matched = new Set<string>();
-    for (const token of query.tokens.values()) {
-      const tf = doc.tf.get(token.key);
-      if (tf === undefined) continue;
-      lexicalScore += bm25(tf, doc.length, avgdl, df.get(token.key) ?? 0, n) * token.weight;
-      matched.add(token.term);
-    }
-    if (lexicalScore <= 0) continue;
+    const lexical = lexicalScoreFor(doc, stats, query);
+    if (lexical.score <= 0) continue;
 
     const recency = recencyBonus(doc.memory.createdAt, now);
-    const score = lexicalScore +
-      entityBonus(doc, query) +
+    const score = lexical.score +
+      entityBonus(doc.entities, query) +
       (hasExactPhrase(query.phraseTokens, doc.normalizedText) ? EXACT_PHRASE_BONUS : 0) +
       metadataBonus(doc, hints, recency) +
       temporalBonus(doc, hints, superseded, recency);
-    scored.push({ indexed: doc, lexicalScore, score, matchedTerms: [...matched].sort() });
+    scored.push({
+      indexed: doc,
+      lexicalScore: lexical.score,
+      score,
+      matchedTerms: lexical.matchedTerms,
+    });
   }
 
   return scored.sort(compareScoredMemories);
+}
+
+/**
+ * Scores the note chunks of every file and aggregates them per file (Memory
+ * Recall v2 design, §6). `N`, `df` and the average length come from note chunks
+ * alone, because chunk and memory lengths differ widely, and only the lexical,
+ * entity and phrase terms apply: a note carries no memory metadata. A file's
+ * best-scoring chunk is its representative and its score.
+ */
+export function scoreNoteFiles(
+  files: readonly IndexedNoteFile[],
+  query: RecallQuery,
+): ScoredNoteFile[] {
+  const stats = corpusStats(files.flatMap((file) => file.chunks), query);
+  const scored: ScoredNoteFile[] = [];
+
+  for (const file of files) {
+    const chunks: ScoredNoteChunk[] = [];
+    for (const chunk of file.chunks) {
+      const lexical = lexicalScoreFor(chunk, stats, query);
+      if (lexical.score <= 0) continue;
+      const score = lexical.score +
+        entityBonus(chunk.entities, query) +
+        (hasExactPhrase(query.phraseTokens, chunk.normalizedText) ? EXACT_PHRASE_BONUS : 0);
+      chunks.push({
+        file,
+        chunk,
+        lexicalScore: lexical.score,
+        score,
+        matchedTerms: lexical.matchedTerms,
+      });
+    }
+    if (chunks.length === 0) continue;
+    chunks.sort(compareScoredNoteChunks);
+    scored.push({ file, best: chunks[0], chunks });
+  }
+
+  return scored.sort(compareScoredNoteFiles);
 }
 
 /**
@@ -105,6 +168,56 @@ export function compareScoredMemories(a: ScoredMemory, b: ScoredMemory): number 
   const aId = a.indexed.memory.id;
   const bId = b.indexed.memory.id;
   return aId < bId ? -1 : aId > bId ? 1 : 0;
+}
+
+/** Note chunk order: score descending, then line ascending. */
+function compareScoredNoteChunks(a: ScoredNoteChunk, b: ScoredNoteChunk): number {
+  if (a.score !== b.score) return b.score - a.score;
+  return a.chunk.lineStart - b.chunk.lineStart;
+}
+
+/** Note file order: score descending, then path ascending. */
+function compareScoredNoteFiles(a: ScoredNoteFile, b: ScoredNoteFile): number {
+  if (a.best.score !== b.best.score) return b.best.score - a.best.score;
+  return a.file.path < b.file.path ? -1 : a.file.path > b.file.path ? 1 : 0;
+}
+
+/** Size, average length and per-query-term document frequency of one population. */
+function corpusStats(docs: readonly LexicalDocument[], query: RecallQuery): CorpusStats {
+  const n = docs.length;
+  let totalLength = 0;
+  for (const doc of docs) totalLength += doc.length;
+
+  // `df` is seeded for every query key, so counting needs a single probe per
+  // document term and a matched key always has a count.
+  const df = new Map<string, number>();
+  for (const key of query.tokens.keys()) df.set(key, 0);
+  for (const doc of docs) {
+    for (const key of doc.tf.keys()) {
+      const count = df.get(key);
+      if (count !== undefined) df.set(key, count + 1);
+    }
+  }
+
+  return { n, avgdl: n === 0 ? 0 : totalLength / n, df };
+}
+
+/** BM25 sum of one document over the matched query terms, before bonuses. */
+function lexicalScoreFor(
+  doc: LexicalDocument,
+  stats: CorpusStats,
+  query: RecallQuery,
+): { score: number; matchedTerms: string[] } {
+  let score = 0;
+  const matched = new Set<string>();
+  for (const token of query.tokens.values()) {
+    const tf = doc.tf.get(token.key);
+    if (tf === undefined) continue;
+    score += bm25(tf, doc.length, stats.avgdl, stats.df.get(token.key) ?? 0, stats.n) *
+      token.weight;
+    matched.add(token.term);
+  }
+  return { score, matchedTerms: [...matched].sort() };
 }
 
 function bm25(tf: number, dl: number, avgdl: number, df: number, n: number): number {
@@ -127,10 +240,10 @@ function recencyBonus(createdAt: string, now: Date): number {
   return RECENCY_BONUS_MAX * Math.max(0, 1 - ageDays / RECENCY_HORIZON_DAYS);
 }
 
-/** At most once, when an entity of the current message appears in the memory. */
-function entityBonus(doc: IndexedMemory, query: RecallQuery): number {
+/** At most once, when an entity of the current message appears in the document. */
+function entityBonus(entities: ReadonlySet<string>, query: RecallQuery): number {
   for (const entity of query.entities) {
-    if (doc.entities.has(entity)) return EXACT_ENTITY_BONUS;
+    if (entities.has(entity)) return EXACT_ENTITY_BONUS;
   }
   return 0;
 }

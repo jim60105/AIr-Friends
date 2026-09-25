@@ -80,3 +80,40 @@ export interface ScoredMemory {
   /** Distinct matched query terms, sorted. */
   matchedTerms: string[];
 }
+
+/**
+ * One note chunk with its lexical index (Memory Recall v2 design, §6). The
+ * tokenizer is the same instance the retriever uses for queries, so a query and
+ * a chunk can never disagree about how a text is tokenized.
+ */
+export interface IndexedNoteChunk {
+  /** Heading path of the chunk, `[title]` for text before the first `##`. */
+  headingPath: string[];
+  /** 1-based inclusive line range of the chunk. */
+  lineStart: number;
+  lineEnd: number;
+  /** Original chunk text, the source of excerpts. */
+  text: string;
+  /** Term frequencies keyed by `tokenKey`. */
+  tf: Map<string, number>;
+  /** Entity terms of the chunk. */
+  entities: Set<string>;
+  /** Content normalized with NFKC and lowercased, for the phrase check. */
+  normalizedText: string;
+  /** Token count, the BM25 document length. */
+  length: number;
+}
+
+/** An indexed agent workspace note file. */
+export interface IndexedNoteFile {
+  /** Absolute path, built from the workspace path the caller passed. */
+  path: string;
+  /** Document title: the first level-1 heading, otherwise the file name. */
+  title: string;
+  /** Estimated tokens of the whole file. */
+  fileTokens: number;
+  /** ISO date the file was last modified. */
+  modifiedAt: string;
+  /** Chunks in line order. */
+  chunks: IndexedNoteChunk[];
+}
