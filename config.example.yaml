@@ -232,10 +232,10 @@ memory:
   recall:
     fastRecallMaxResults: 2 # Fast Recall: maximum selected memories (default: 2)
     fastRecallMaxTokens: 192 # Fast Recall: token budget of the memory section (default: 192)
-    # Score thresholds are provisional until the offline benchmark calibrates
-    # them (`memory-recall-calibration`).
-    minRecallScore: 3.0 # Fast Recall: minimum top score (default: 3.0)
-    secondRecallScore: 3.0 # Fast Recall: minimum score of a second memory (default: 3.0)
+    # Score thresholds are calibrated by scripts/memory-recall-benchmark.ts from
+    # tests/fixtures/memory-recall/ (at most 5% memory false positives).
+    minRecallScore: 6.75 # Fast Recall: minimum top score (default: 6.75)
+    secondRecallScore: 6.5 # Fast Recall: minimum score of a second memory (default: 6.5)
     secondResultRatio: 0.65 # Fast Recall: minimum second-to-first score ratio, 0-1 (default: 0.65)
     deepRecallMaxTokens: 1024 # Deep Recall: token budget of the whole output (default: 1024)
     deepMinRecallScore: 0 # Deep Recall: minimum score to keep, 0 = eligibility alone (default: 0)

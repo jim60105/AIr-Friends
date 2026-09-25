@@ -2512,8 +2512,8 @@ Deno.test("Config - applies memory.recall defaults", async () => {
     const result = await loadConfig(dir);
     assertEquals(result.memory.recall?.fastRecallMaxResults, 2);
     assertEquals(result.memory.recall?.fastRecallMaxTokens, 192);
-    assertEquals(result.memory.recall?.minRecallScore, 3.0);
-    assertEquals(result.memory.recall?.secondRecallScore, 3.0);
+    assertEquals(result.memory.recall?.minRecallScore, 6.75);
+    assertEquals(result.memory.recall?.secondRecallScore, 6.5);
     assertEquals(result.memory.recall?.secondResultRatio, 0.65);
     assertEquals(result.memory.recall?.deepRecallMaxTokens, 1024);
     assertEquals(result.memory.recall?.deepMinRecallScore, 0);

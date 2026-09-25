@@ -11,6 +11,6 @@
 
 ## 3. Apply and gate
 
-- [ ] 3.1 Set the calibrated defaults in `src/core/memory-recall/recall-config.ts` (the single source the config loader spreads into `memory.recall`) and `config.example.yaml`, removing the "provisional" notes. Verify that the config-loader default test is updated and passes.
+- [x] 3.1 Set the calibrated defaults in `src/core/memory-recall/recall-config.ts` (the single source the config loader spreads into `memory.recall`) and `config.example.yaml`, removing the "provisional" notes. Verify that the config-loader default test is updated and passes.
 - [ ] 3.2 Add `tests/core/memory-recall/benchmark.test.ts`, which reruns the benchmark with the default config and asserts metric equality with `metrics.json`, a false-positive rate of at most 5% and p95 latency below 50 ms. Verify that it passes, and that it fails when `minRecallScore` is temporarily lowered by 1.0.
 - [ ] 3.3 Record the calibrated thresholds and metrics in `docs/MEMORY_DESIGN.md`. Run `deno task ci` and verify that it passes.
