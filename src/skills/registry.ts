@@ -27,6 +27,7 @@ export class SkillRegistry {
   private contextHandler: ContextHandler;
   private reminderHandler: ReminderHandler | null = null;
   private fileHandler: FileHandler | null = null;
+  private readonly memoryRetriever: MemoryRetriever;
 
   constructor(
     memoryStore: MemoryStore,
@@ -36,8 +37,8 @@ export class SkillRegistry {
     recallConfig?: MemoryRecallConfig,
   ) {
     // One retriever per process: every session shares its snapshot cache.
-    const retriever = new MemoryRetriever(memoryStore, recallConfig ?? DEFAULT_RECALL_CONFIG);
-    this.memoryHandler = new MemoryHandler(memoryStore, retriever);
+    this.memoryRetriever = new MemoryRetriever(memoryStore, recallConfig ?? DEFAULT_RECALL_CONFIG);
+    this.memoryHandler = new MemoryHandler(memoryStore, this.memoryRetriever);
     this.replyHandler = new ReplyHandler();
     this.reactionHandler = new ReactionHandler();
     this.contextHandler = new ContextHandler();
@@ -170,5 +171,14 @@ export class SkillRegistry {
    */
   getReminderHandler(): ReminderHandler | null {
     return this.reminderHandler;
+  }
+
+  /**
+   * Get the process-wide recall engine, so a second component (the context
+   * assembler's Fast Recall) ranks over the same snapshot cache as
+   * `memory-search` instead of paying for its own.
+   */
+  getMemoryRetriever(): MemoryRetriever {
+    return this.memoryRetriever;
   }
 }

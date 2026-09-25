@@ -7,6 +7,8 @@ import { WorkspaceManager } from "./workspace-manager.ts";
 import { loadSystemPrompt } from "./config-loader.ts";
 import { DEFAULT_RECALL_CONFIG } from "./memory-recall/recall-config.ts";
 import { renderFixedMemoryLine, selectFixedMemories } from "./memory-recall/fixed-selection.ts";
+import { renderFastRecallSection } from "./memory-recall/fast-recall.ts";
+import { MemoryRetriever } from "./memory-recall/retriever.ts";
 import type { FixedMemoryBudgets } from "./memory-recall/fixed-selection.ts";
 import type { TemplateVariables } from "../types/template.ts";
 import type {
@@ -16,7 +18,7 @@ import type {
   FormattedContext,
   MessageFetcher,
 } from "../types/context.ts";
-import type { WorkspaceInfo } from "../types/workspace.ts";
+import type { ChannelWorkspaceInfo, WorkspaceInfo } from "../types/workspace.ts";
 import type { NormalizedEvent, Platform, PlatformMessage } from "../types/events.ts";
 import type { ResolvedMemory } from "../types/memory.ts";
 import type { PlatformEmoji } from "../types/platform.ts";
@@ -27,15 +29,22 @@ export class ContextAssembler {
   private readonly memoryStore: MemoryStore;
   private readonly config: ContextAssemblyConfig;
   private readonly workspaceManager?: WorkspaceManager;
+  private readonly retriever: MemoryRetriever;
 
   constructor(
     memoryStore: MemoryStore,
     config: ContextAssemblyConfig,
     workspaceManager?: WorkspaceManager,
+    retriever?: MemoryRetriever,
   ) {
     this.memoryStore = memoryStore;
     this.config = config;
     this.workspaceManager = workspaceManager;
+    // One retriever per process: the application passes the instance its
+    // MemoryHandler already uses, so both share one snapshot cache. A
+    // hand-built assembler gets an equivalent default.
+    this.retriever = retriever ??
+      new MemoryRetriever(memoryStore, config.recall ?? DEFAULT_RECALL_CONFIG);
   }
 
   /**
@@ -108,6 +117,7 @@ export class ContextAssembler {
     _sessionId?: string,
     model?: string,
     yolo?: boolean,
+    _agentWorkspacePath?: string,
   ): Promise<AssembledContext> {
     logger.info("Assembling context", {
       workspaceKey: workspace.key,
@@ -145,9 +155,10 @@ export class ContextAssembler {
     // Load channel memory candidates if in a channel context
     let channelCore: ResolvedMemory[] = [];
     let channelWorking: ResolvedMemory[] = [];
+    let channelWorkspace: ChannelWorkspaceInfo | undefined;
     if (!event.isDm && event.channelId && this.workspaceManager) {
       try {
-        const channelWorkspace = await this.workspaceManager.getOrCreateChannelWorkspace(
+        channelWorkspace = await this.workspaceManager.getOrCreateChannelWorkspace(
           event.platform,
           event.channelId,
         );
@@ -195,6 +206,16 @@ export class ContextAssembler {
         filteredCount: recentMessages.length,
       });
     }
+
+    // Fast Recall needs the previous message, so it runs after the history is
+    // fetched. A failure leaves the session without the section.
+    const fastRecall = await this.selectFastRecall(
+      event,
+      workspace,
+      channelWorkspace,
+      recentMessages,
+      injectedIds,
+    );
 
     // Fetch related messages if available and in guild context
     let relatedMessages: PlatformMessage[] | undefined;
@@ -262,6 +283,7 @@ export class ContextAssembler {
       relatedMessages,
       triggerMessage,
       availableEmojis,
+      fastRecall ?? [],
     );
 
     const context: AssembledContext = {
@@ -277,6 +299,7 @@ export class ContextAssembler {
       estimatedTokens,
       availableEmojis,
       injectedIds,
+      ...(fastRecall === undefined ? {} : { fastRecall }),
       assembledAt: new Date(),
     };
 
@@ -297,6 +320,67 @@ export class ContextAssembler {
   }
 
   /**
+   * Runs Fast Recall for one triggered session (Memory Recall v2 design, §8).
+   *
+   * The query is the trigger message plus the same user's previous message
+   * after the last `/clear`, and the exclusion set is the memories fixed
+   * loading already injected. Returns `undefined` when Fast Recall did not run
+   * — disabled by `memory.recall.fastRecallEnabled`, or a failure, which is
+   * logged and leaves the session without the section — and the selected
+   * memories (possibly none) when it did.
+   */
+  private async selectFastRecall(
+    event: NormalizedEvent,
+    workspace: WorkspaceInfo,
+    channelWorkspace: ChannelWorkspaceInfo | undefined,
+    recentMessages: readonly PlatformMessage[],
+    injectedIds: readonly string[],
+  ): Promise<ResolvedMemory[] | undefined> {
+    const recall = this.config.recall ?? DEFAULT_RECALL_CONFIG;
+    if (!recall.fastRecallEnabled) return undefined;
+
+    const previousUserMessage = this.previousUserMessage(event, recentMessages);
+    try {
+      const response = await this.retriever.search({
+        mode: "fast",
+        query: event.content,
+        ...(previousUserMessage === undefined ? {} : { previousUserMessage }),
+        workspace,
+        ...(channelWorkspace === undefined ? {} : { channelWorkspace }),
+        excludeIds: new Set(injectedIds),
+      });
+      return response.memories.map((item) => item.memory);
+    } catch (error) {
+      logger.warn("Fast Recall failed", { error: String(error) });
+      return undefined;
+    }
+  }
+
+  /**
+   * The same user's most recent earlier message in the fetched history, or
+   * `undefined` when the user has not spoken since the last `/clear`. Its text
+   * contributes query tokens only and is never rendered (Memory Recall v2
+   * design, §5.1).
+   */
+  private previousUserMessage(
+    event: NormalizedEvent,
+    recentMessages: readonly PlatformMessage[],
+  ): string | undefined {
+    // Newest first: the history is chronological.
+    for (let i = recentMessages.length - 1; i >= 0; i--) {
+      const message = recentMessages[i];
+      if (
+        message.userId === event.userId &&
+        message.messageId !== event.messageId &&
+        !message.isBot
+      ) {
+        return message.content;
+      }
+    }
+    return undefined;
+  }
+
+  /**
    * Calculate estimated token count for the context
    */
   private calculateTokenEstimate(
@@ -306,8 +390,9 @@ export class ContextAssembler {
     relatedMessages: PlatformMessage[] | undefined,
     triggerMessage: PlatformMessage,
     emojis?: PlatformEmoji[],
+    fastRecall: ResolvedMemory[] = [],
   ): number {
-    const memoriesText = memories.map((m) => m.content).join("\n");
+    const memoriesText = [...memories, ...fastRecall].map((m) => m.content).join("\n");
     const recentText = recentMessages
       .map((m) => `${m.username}: ${m.content}`)
       .join("\n");
@@ -341,11 +426,16 @@ export class ContextAssembler {
       context.channelWorkingMemories,
     );
 
+    // Fast Recall renders directly after the fixed memory sections.
+    const fastRecallSection = renderFastRecallSection(context.fastRecall ?? []);
+
     // Calculate trigger message section
     const triggerSection = this.formatTriggerSection(context.triggerMessage);
 
-    // Calculate tokens used by mandatory sections (memories + trigger)
-    const mandatoryTokens = estimateTokens(memoriesSection) + estimateTokens(triggerSection);
+    // Calculate tokens used by mandatory sections (memories + Fast Recall + trigger)
+    const mandatoryTokens = estimateTokens(memoriesSection) +
+      estimateTokens(fastRecallSection) +
+      estimateTokens(triggerSection);
     const remainingAfterMandatory = availableTokens - mandatoryTokens;
 
     // Allocate conversation budget FIRST, then give remaining to emojis.
@@ -367,6 +457,7 @@ export class ContextAssembler {
     // Build user message with context
     const userMessage = this.buildUserMessage(
       memoriesSection,
+      fastRecallSection,
       conversationSection,
       emojiSection,
       context.triggerMessage,
@@ -703,6 +794,7 @@ export class ContextAssembler {
    */
   private buildUserMessage(
     memoriesSection: string,
+    fastRecallSection: string,
     conversationSection: string,
     emojiSection: string,
     triggerMessage: PlatformMessage,
@@ -711,6 +803,10 @@ export class ContextAssembler {
 
     if (memoriesSection) {
       parts.push(memoriesSection);
+    }
+
+    if (fastRecallSection) {
+      parts.push(fastRecallSection);
     }
 
     if (conversationSection) {
