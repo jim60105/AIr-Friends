@@ -20,4 +20,5 @@ Current task: `"ci": "deno fmt --check && deno lint && deno check src/main.ts &&
 ## Risks / Trade-offs
 
 - A file under `docs/` etc. that someone does want format-checked gains no gate — accepted; it had no passing gate before either, and CI never checked it.
+- The lint step narrows together with the fmt step (unscoped `deno lint` → `deno task lint`, `src/ tests/`), so the 18 TypeScript files under `skills/**/scripts/`, `skills/lib/` and `scripts/` leave the local gate. Accepted for the same reason: the unscoped lint step also fails on master (one `no-unused-vars` in `scripts/memory-recall-benchmark.ts`), CI only ever ran the scoped `deno task lint`, and the proposal already frames `ci` as composing the workflow's commands.
 - Task nesting (`deno task` inside `deno task`) adds negligible process overhead; behavior on failure (exit code propagation through `&&`) is identical.
