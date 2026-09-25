@@ -3,7 +3,7 @@
 - [x] 1.1 Download `dict.txt.big` from fxsjy/jieba at a pinned commit into `assets/jieba/`, add `LICENSE` (MIT, copied from upstream) and `README.md` (source URL, commit, sha256). Verify with `sha256sum` against the README.
 - [x] 1.2 Add `"@node-rs/jieba": "npm:@node-rs/jieba@^2"` to the `deno.json` imports, then run `deno cache src/main.ts`. Verify that `deno.lock` now lists `@node-rs/jieba` and `@node-rs/jieba-linux-x64-gnu`.
 - [x] 1.3 Add `--allow-ffi` to the `dev`, `start`, `start:config`, `test`, `test:watch`, `test:coverage`, `test:coverage:lcov`, `test:unit`, `test:integration` and `ci` tasks in `deno.json`. Verify with `grep -c allow-ffi deno.json`.
-- [ ] 1.4 In `Containerfile`, add `--allow-ffi` to `CMD`, and copy `assets/` into both the cache stage and the final stage (`/app/assets/`). Confirm `.containerignore` does not exclude `assets/`. Verify with `podman build` and a `deno eval` inside the image that segments `喜歡` as one word.
+- [x] 1.4 In `Containerfile`, add `--allow-ffi` to `CMD`, and copy `assets/` into both the cache stage and the final stage (`/app/assets/`). Confirm `.containerignore` does not exclude `assets/`. Verify with `podman build` and a `deno eval` inside the image that segments `喜歡` as one word.
 
 ## 2. Tokenizer
 
