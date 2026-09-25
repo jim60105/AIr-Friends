@@ -2,6 +2,8 @@
 
 import { assertEquals } from "@std/assert";
 import { MemoryHandler } from "@skills/memory-handler.ts";
+import { DEFAULT_RECALL_CONFIG } from "@core/memory-recall/recall-config.ts";
+import { MemoryRetriever } from "@core/memory-recall/retriever.ts";
 import { MemoryStore } from "@core/memory-store.ts";
 import { WorkspaceManager } from "@core/workspace-manager.ts";
 import type { MemorySearchEntry, SkillContext } from "@skills/types.ts";
@@ -431,6 +433,42 @@ Deno.test("MemoryHandler - handleMemorySearch rejects an invalid category or sco
     const badScope = await handler.handleMemorySearch({ query: "test", scope: "guild" }, context);
     assertEquals(badScope.success, false);
     assertEquals(badScope.error, "Invalid 'scope' parameter. Must be 'user' or 'channel'");
+  });
+});
+
+Deno.test("MemoryHandler - handleMemorySearch caps the result count at 10", async () => {
+  await withSearchHandler(false, async ({ handler, store, workspace, context }) => {
+    for (let i = 0; i < 12; i++) {
+      await store.addMemory(workspace, `keyboard note ${i}`, { visibility: "public" });
+    }
+
+    // The engine caps the requested limit, not the handler.
+    const result = await handler.handleMemorySearch({ query: "keyboard", limit: 50 }, context);
+
+    const memories = searchedMemories(result);
+    assertEquals(memories.length, 10);
+    for (let i = 1; i < memories.length; i++) {
+      assertEquals(memories[i - 1].score >= memories[i].score, true);
+    }
+  });
+});
+
+Deno.test("MemoryHandler - handleMemorySearch honours the retriever's Deep Recall budget", async () => {
+  await withSearchHandler(false, async ({ store, workspace, context }) => {
+    await store.addMemory(workspace, "keyboard", { visibility: "public" });
+    await store.addMemory(workspace, `keyboard ${"filler ".repeat(60)}`, {
+      visibility: "public",
+    });
+
+    const handler = new MemoryHandler(
+      store,
+      new MemoryRetriever(store, { ...DEFAULT_RECALL_CONFIG, deepRecallMaxTokens: 60 }),
+    );
+    const result = await handler.handleMemorySearch({ query: "keyboard" }, context);
+
+    // The long memory ranks second and no longer fits the budget.
+    const memories = searchedMemories(result);
+    assertEquals(memories.map((m) => m.content), ["keyboard"]);
   });
 });
 
