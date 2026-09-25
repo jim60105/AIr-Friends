@@ -65,33 +65,6 @@ Deno.test({
 });
 
 Deno.test({
-  name: "Integration: Search memories with category filter",
-  async fn() {
-    await withTestMemoryStore(async (store, workspace) => {
-      await store.addMemory(workspace, "Likes dark mode", {
-        category: "preference",
-        tier: "archive",
-      });
-      await store.addMemory(workspace, "Met at conference 2024", {
-        category: "episode",
-        tier: "archive",
-      });
-
-      const preferences = await store.searchMemories(
-        workspace,
-        ["dark", "conference"],
-        {},
-        "preference",
-      );
-      assertEquals(preferences.length, 1);
-      assertEquals(preferences[0].category, "preference");
-    });
-  },
-  sanitizeResources: false,
-  sanitizeOps: false,
-});
-
-Deno.test({
   name: "Integration: Patch decay value",
   async fn() {
     await withTestMemoryStore(async (store, workspace) => {

@@ -2,9 +2,11 @@
 
 import { assertEquals } from "@std/assert";
 import { MemoryHandler } from "@skills/memory-handler.ts";
+import { DEFAULT_RECALL_CONFIG } from "@core/memory-recall/recall-config.ts";
+import { MemoryRetriever } from "@core/memory-recall/retriever.ts";
 import { MemoryStore } from "@core/memory-store.ts";
 import { WorkspaceManager } from "@core/workspace-manager.ts";
-import type { SkillContext } from "@skills/types.ts";
+import type { MemorySearchEntry, SkillContext } from "@skills/types.ts";
 import type { WorkspaceInfo } from "../../src/types/workspace.ts";
 import type { PlatformAdapter } from "@platforms/platform-adapter.ts";
 
@@ -232,10 +234,242 @@ Deno.test("MemoryHandler - handleMemorySearch searches memories in DM context", 
   );
 
   assertEquals(result.success, true);
-  assertEquals(typeof result.data, "object");
+  const data = result.data as { memories: MemorySearchEntry[] };
+  assertEquals(data.memories.length, 1);
+  assertEquals(data.memories[0].content, "User likes hiking in mountains");
+  assertEquals(data.memories[0].scope, "user");
+  assertEquals(data.memories[0].matchedTerms, ["hiking", "mountains"]);
+  assertEquals(data.memories[0].score > 0, true);
 
   // Cleanup
   await Deno.remove(tempDir, { recursive: true });
+});
+
+/**
+ * A handler over a fresh temp workspace, plus the store and manager needed to
+ * seed user, private and channel memories before searching.
+ */
+async function withSearchHandler(
+  isDm: boolean,
+  fn: (fixture: {
+    handler: MemoryHandler;
+    store: MemoryStore;
+    manager: WorkspaceManager;
+    workspace: WorkspaceInfo;
+    context: SkillContext;
+  }) => Promise<void>,
+): Promise<void> {
+  const tempDir = await Deno.makeTempDir();
+  try {
+    const manager = new WorkspaceManager({ repoPath: tempDir, workspacesDir: "workspaces" });
+    const store = new MemoryStore(manager, { searchLimit: 10, maxChars: 2000 });
+    const handler = new MemoryHandler(store);
+    const workspace: WorkspaceInfo = {
+      key: "discord/123",
+      components: { platform: "discord", userId: "123" },
+      path: `${tempDir}/workspaces/discord/123`,
+      tmpPath: `${tempDir}/workspaces/discord/123/tmp`,
+      isDm,
+    };
+    await Deno.mkdir(workspace.path, { recursive: true });
+    await Deno.writeTextFile(`${workspace.path}/memory.public.jsonl`, "");
+    await Deno.writeTextFile(`${workspace.path}/memory.private.jsonl`, "");
+
+    const context: SkillContext = {
+      workspace,
+      platformAdapter: createMockPlatformAdapter(),
+      channelId: "456",
+      userId: "123",
+      workspaceManager: manager,
+    };
+
+    await fn({ handler, store, manager, workspace, context });
+  } finally {
+    await Deno.remove(tempDir, { recursive: true });
+  }
+}
+
+/** The `memories` array of a successful memory-search result. */
+function searchedMemories(result: { data?: unknown }): MemorySearchEntry[] {
+  const data = result.data as { memories: MemorySearchEntry[] };
+  return data.memories;
+}
+
+Deno.test("MemoryHandler - handleMemorySearch ranks by relevance with score and matchedTerms", async () => {
+  await withSearchHandler(false, async ({ handler, store, workspace, context }) => {
+    await store.addMemory(workspace, "鍵盤", { visibility: "public" });
+    await store.addMemory(workspace, "Air75 V3 鍵盤", { visibility: "public" });
+
+    const result = await handler.handleMemorySearch({ query: "Air75 V3 鍵盤" }, context);
+
+    assertEquals(result.success, true);
+    const memories = searchedMemories(result);
+    assertEquals(memories.map((m) => m.content), ["Air75 V3 鍵盤", "鍵盤"]);
+    for (let i = 1; i < memories.length; i++) {
+      assertEquals(memories[i - 1].score >= memories[i].score, true);
+    }
+    assertEquals(memories[0].matchedTerms.includes("air75 v3"), true);
+    assertEquals(memories[0].matchedTerms.includes("鍵盤"), true);
+    for (const memory of memories) {
+      assertEquals(Math.round(memory.score * 1000) / 1000, memory.score);
+    }
+  });
+});
+
+Deno.test("MemoryHandler - handleMemorySearch tokenizes the query as a whole", async () => {
+  await withSearchHandler(false, async ({ handler, store, workspace, context }) => {
+    await store.addMemory(workspace, "我喜歡喝無糖綠茶", { visibility: "public" });
+
+    // Whitespace splitting would look for this exact substring and find nothing.
+    const result = await handler.handleMemorySearch({ query: "我喜歡喝的綠茶" }, context);
+
+    assertEquals(result.success, true);
+    const memories = searchedMemories(result);
+    assertEquals(memories.length, 1);
+    assertEquals(memories[0].content, "我喜歡喝無糖綠茶");
+  });
+});
+
+Deno.test("MemoryHandler - handleMemorySearch searches both scopes by default", async () => {
+  await withSearchHandler(false, async ({ handler, store, manager, workspace, context }) => {
+    await store.addMemory(workspace, "User deployment notes", { visibility: "public" });
+    const channelWorkspace = await manager.getOrCreateChannelWorkspace("discord", "456");
+    await store.addChannelMemory(channelWorkspace, "Channel deployment policy");
+
+    const result = await handler.handleMemorySearch({ query: "deployment" }, context);
+
+    const memories = searchedMemories(result);
+    assertEquals(memories.map((m) => m.scope).sort(), ["channel", "user"]);
+    assertEquals(memories.map((m) => m.content).sort(), [
+      "Channel deployment policy",
+      "User deployment notes",
+    ]);
+  });
+});
+
+Deno.test("MemoryHandler - handleMemorySearch with scope channel returns channel memories only", async () => {
+  await withSearchHandler(false, async ({ handler, store, manager, workspace, context }) => {
+    await store.addMemory(workspace, "User deployment notes", { visibility: "public" });
+    const channelWorkspace = await manager.getOrCreateChannelWorkspace("discord", "456");
+    await store.addChannelMemory(channelWorkspace, "Channel deployment policy");
+
+    const result = await handler.handleMemorySearch(
+      { query: "deployment", scope: "channel" },
+      context,
+    );
+
+    const memories = searchedMemories(result);
+    assertEquals(memories.length, 1);
+    assertEquals(memories[0].content, "Channel deployment policy");
+    assertEquals(memories[0].scope, "channel");
+  });
+});
+
+Deno.test("MemoryHandler - handleMemorySearch in a DM never returns channel memories", async () => {
+  await withSearchHandler(true, async ({ handler, store, manager, workspace, context }) => {
+    await store.addMemory(workspace, "Private deployment plan", { visibility: "private" });
+    const channelWorkspace = await manager.getOrCreateChannelWorkspace("discord", "456");
+    await store.addChannelMemory(channelWorkspace, "Channel deployment policy");
+
+    const everyScope = await handler.handleMemorySearch({ query: "deployment" }, context);
+    assertEquals(searchedMemories(everyScope).map((m) => m.content), ["Private deployment plan"]);
+
+    const channelOnly = await handler.handleMemorySearch(
+      { query: "deployment", scope: "channel" },
+      context,
+    );
+    assertEquals(searchedMemories(channelOnly), []);
+  });
+});
+
+Deno.test("MemoryHandler - handleMemorySearch filters by category", async () => {
+  await withSearchHandler(false, async ({ handler, store, workspace, context }) => {
+    await store.addMemory(workspace, "Prefers dark mode", {
+      visibility: "public",
+      category: "preference",
+    });
+    await store.addMemory(workspace, "Dark mode shipped in v2", {
+      visibility: "public",
+      category: "fact",
+    });
+
+    const result = await handler.handleMemorySearch(
+      { query: "dark mode", category: "preference" },
+      context,
+    );
+
+    const memories = searchedMemories(result);
+    assertEquals(memories.length, 1);
+    assertEquals(memories[0].category, "preference");
+  });
+});
+
+Deno.test("MemoryHandler - handleMemorySearch returns only memories that match the query", async () => {
+  await withSearchHandler(false, async ({ handler, store, workspace, context }) => {
+    await store.addMemory(workspace, "keyboard facts", { visibility: "public" });
+    await store.addMemory(workspace, "mouse facts", { visibility: "public" });
+    await store.addMemory(workspace, "monitor facts", { visibility: "public" });
+
+    const result = await handler.handleMemorySearch({ query: "keyboard" }, context);
+
+    const memories = searchedMemories(result);
+    assertEquals(memories.length, 1);
+    assertEquals(memories[0].content, "keyboard facts");
+  });
+});
+
+Deno.test("MemoryHandler - handleMemorySearch rejects an invalid category or scope", async () => {
+  await withSearchHandler(false, async ({ handler, context }) => {
+    const badCategory = await handler.handleMemorySearch(
+      { query: "test", category: "hobby" },
+      context,
+    );
+    assertEquals(badCategory.success, false);
+    assertEquals(
+      badCategory.error,
+      "Invalid 'category' parameter. Must be 'fact', 'preference', 'episode', 'summary', or 'relationship'",
+    );
+
+    const badScope = await handler.handleMemorySearch({ query: "test", scope: "guild" }, context);
+    assertEquals(badScope.success, false);
+    assertEquals(badScope.error, "Invalid 'scope' parameter. Must be 'user' or 'channel'");
+  });
+});
+
+Deno.test("MemoryHandler - handleMemorySearch caps the result count at 10", async () => {
+  await withSearchHandler(false, async ({ handler, store, workspace, context }) => {
+    for (let i = 0; i < 12; i++) {
+      await store.addMemory(workspace, `keyboard note ${i}`, { visibility: "public" });
+    }
+
+    // The engine caps the requested limit, not the handler.
+    const result = await handler.handleMemorySearch({ query: "keyboard", limit: 50 }, context);
+
+    const memories = searchedMemories(result);
+    assertEquals(memories.length, 10);
+    for (let i = 1; i < memories.length; i++) {
+      assertEquals(memories[i - 1].score >= memories[i].score, true);
+    }
+  });
+});
+
+Deno.test("MemoryHandler - handleMemorySearch honours the retriever's Deep Recall budget", async () => {
+  await withSearchHandler(false, async ({ store, workspace, context }) => {
+    await store.addMemory(workspace, "keyboard", { visibility: "public" });
+    await store.addMemory(workspace, `keyboard ${"filler ".repeat(60)}`, {
+      visibility: "public",
+    });
+
+    const handler = new MemoryHandler(
+      store,
+      new MemoryRetriever(store, { ...DEFAULT_RECALL_CONFIG, deepRecallMaxTokens: 60 }),
+    );
+    const result = await handler.handleMemorySearch({ query: "keyboard" }, context);
+
+    // The long memory ranks second and no longer fits the budget.
+    const memories = searchedMemories(result);
+    assertEquals(memories.map((m) => m.content), ["keyboard"]);
+  });
 });
 
 Deno.test("MemoryHandler - handleMemoryPatch patches memory", async () => {

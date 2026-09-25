@@ -1,7 +1,7 @@
 // src/core/memory-store.ts
 
 import { createLogger } from "@utils/logger.ts";
-import { searchMultipleKeywords, SearchOptions } from "@utils/text-search.ts";
+import { searchMultipleKeywords } from "@utils/text-search.ts";
 import { WorkspaceManager } from "./workspace-manager.ts";
 import {
   AgentNoteSearchResult,
@@ -364,31 +364,6 @@ export class MemoryStore {
   }
 
   /**
-   * Get all important memories (for initial context)
-   * Uses both tier === "core" and importance === "high" for backward compatibility
-   * DM context → both private and public memories
-   * Non-DM context → public memories only
-   */
-  async getImportantMemories(workspace: WorkspaceInfo): Promise<ResolvedMemory[]> {
-    const publicMemories = await this.loadAllMemories(workspace, "public");
-    const importantPublic = publicMemories.filter(
-      (m) => m.enabled && (m.tier === "core" || m.importance === "high"),
-    );
-
-    if (workspace.isDm) {
-      const privateMemories = await this.loadAllMemories(workspace, "private");
-      const importantPrivate = privateMemories.filter(
-        (m) => m.enabled && (m.tier === "core" || m.importance === "high"),
-      );
-      return [...importantPublic, ...importantPrivate].sort(
-        (a, b) => a.createdAt.localeCompare(b.createdAt),
-      );
-    }
-
-    return importantPublic.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
-  }
-
-  /**
    * Get recent working-tier memories sorted by creation time (newest first)
    */
   async getRecentWorkingMemories(
@@ -426,74 +401,6 @@ export class MemoryStore {
     }
 
     return enabledPublic;
-  }
-
-  /**
-   * Search memories by keywords
-   * DM context → both private and public memory
-   * Non-DM context → public memory only
-   */
-  async searchMemories(
-    workspace: WorkspaceInfo,
-    keywords: string[],
-    options: SearchOptions = {},
-    category?: MemoryCategory,
-  ): Promise<ResolvedMemory[]> {
-    const searchOpts: SearchOptions = {
-      maxResults: options.maxResults ?? this.config.searchLimit,
-      maxChars: options.maxChars ?? this.config.maxChars,
-      caseInsensitive: true,
-    };
-
-    const results: ResolvedMemory[] = [];
-    const seenIds = new Set<string>();
-
-    // Determine which files to search based on context
-    const visibilities: MemoryVisibility[] = workspace.isDm ? ["public", "private"] : ["public"];
-
-    for (const visibility of visibilities) {
-      const memoryPath = this.getMemoryFilePathFor(workspace, visibility);
-      const searchResults = await searchMultipleKeywords(
-        memoryPath,
-        keywords,
-        searchOpts,
-      );
-
-      for (const result of searchResults) {
-        try {
-          const event = JSON.parse(result.content) as MemoryLogEvent;
-          if (event.type === "memory" && !seenIds.has(event.id)) {
-            seenIds.add(event.id);
-            // Load full resolved memory
-            const memory = await this.findMemoryById(workspace, event.id);
-            if (memory && memory.enabled) {
-              if (!category || memory.category === category) {
-                results.push(memory);
-              }
-            }
-          }
-        } catch {
-          // Skip invalid JSON
-        }
-      }
-    }
-
-    // Sort results by decay-weighted relevance score
-    const scoredResults = results.map((m) => ({
-      memory: m,
-      score: m.decay * this.computeRecencyBonus(m.createdAt),
-    }));
-    scoredResults.sort((a, b) => b.score - a.score);
-
-    return scoredResults.map((r) => r.memory).slice(0, searchOpts.maxResults);
-  }
-
-  /**
-   * Compute recency bonus: 1.0 + (0.5 * (1.0 - ageDays / 365)) clamped to [1.0, 1.5]
-   */
-  private computeRecencyBonus(createdAt: string): number {
-    const ageDays = (Date.now() - new Date(createdAt).getTime()) / (1000 * 60 * 60 * 24);
-    return Math.max(1.0, Math.min(1.5, 1.0 + 0.5 * (1.0 - ageDays / 365)));
   }
 
   /**
@@ -733,54 +640,6 @@ export class MemoryStore {
     });
 
     return entry;
-  }
-
-  /**
-   * Search channel memories by keywords
-   */
-  async searchChannelMemories(
-    channelWorkspace: ChannelWorkspaceInfo,
-    keywords: string[],
-    options: SearchOptions = {},
-    category?: MemoryCategory,
-  ): Promise<ResolvedMemory[]> {
-    const searchOpts: SearchOptions = {
-      maxResults: options.maxResults ?? this.config.searchLimit,
-      maxChars: options.maxChars ?? this.config.maxChars,
-      caseInsensitive: true,
-    };
-
-    const filePath = this.workspaceManager.getChannelMemoryFilePath(channelWorkspace);
-    const searchResults = await searchMultipleKeywords(filePath, keywords, searchOpts);
-
-    const results: ResolvedMemory[] = [];
-    const seenIds = new Set<string>();
-    const allMemories = await this.loadChannelMemories(channelWorkspace);
-    const memoryMap = new Map(allMemories.map((m) => [m.id, m]));
-
-    for (const result of searchResults) {
-      try {
-        const event = JSON.parse(result.content) as MemoryLogEvent;
-        if (event.type === "memory" && !seenIds.has(event.id)) {
-          seenIds.add(event.id);
-          const memory = memoryMap.get(event.id);
-          if (memory && memory.enabled) {
-            if (!category || memory.category === category) {
-              results.push(memory);
-            }
-          }
-        }
-      } catch {
-        // Skip invalid JSON
-      }
-    }
-
-    const scoredResults = results.map((m) => ({
-      memory: m,
-      score: m.decay * this.computeRecencyBonus(m.createdAt),
-    }));
-    scoredResults.sort((a, b) => b.score - a.score);
-    return scoredResults.map((r) => r.memory).slice(0, searchOpts.maxResults);
   }
 
   /**

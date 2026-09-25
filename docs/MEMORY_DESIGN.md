@@ -9,7 +9,7 @@ AIr-Friends uses a **plain-text, append-only, tiered memory system** stored as J
 - **Plain-text JSONL** — readable with `rg`, `jq`, `cat`; diffable with `git diff`
 - **Append-only** — no line is ever modified or deleted; full audit trail by default
 - **Git-friendly** — the entire `data/` directory can be backed up via `git push`
-- **No embeddings or databases** — retrieval uses keyword search + decay scoring
+- **No embeddings or databases** — retrieval uses a deterministic, CPU-only lexical recall engine (§9, §12)
 - **Tiered storage** — not all memories deserve equal context budget
 
 ## 2. Tier Lifecycle
@@ -229,26 +229,26 @@ conversationSummary:
 
 ## 6. Decay Math
 
-### Formula
+### Search contribution
+
+Retrieval is ranked by lexical relevance; `decay` and recency only add bounded
+bonuses on top of it (§9):
 
 ```
-relevance = keyword_match_count × decay × recency_bonus
+decay_bonus   = 0.20 × decay
+recency_bonus = 0.20 × max(0, 1.0 − age_days / 365)
 ```
 
-### Recency bonus
-
-```
-recency_bonus = 1.0 + 0.5 × (1.0 − age_days / 365)
-```
-
-Clamped to **[1.0, 1.5]**:
+Both bonuses are applied only to memories with a positive lexical score, so they
+reorder results of similar relevance and never make a non-matching memory
+eligible. The recency bonus fades linearly to zero:
 
 | Memory age | Recency bonus |
 |-----------|---------------|
-| < 1 day | 1.5 |
-| 6 months | ~1.25 |
-| 1 year | 1.0 |
-| > 1 year | 1.0 |
+| < 1 day | 0.20 |
+| 6 months | ~0.10 |
+| 1 year | 0.0 |
+| > 1 year | 0.0 |
 
 ### Decay defaults per tier
 
@@ -339,19 +339,31 @@ The working-tier limit is configurable via `memory.workingTierLimit` (default: 2
 
 ## 9. Search Scoring
 
-When `memory-search` executes a keyword query:
+`memory-search` runs the recall engine in Deep mode
+(`src/core/memory-recall/`). The query is tokenized as a whole — it is not split
+on whitespace — and memories are ranked by lexical relevance:
 
 ```
-score = keyword_match_count × decay × recency_bonus
+final_score = lexical_score (BM25 over the matched query terms)
+            + exact_entity_bonus + exact_phrase_bonus
+            + metadata_bonus (importance, tier, recency, decay, preference)
+            + temporal_bonus + relation_bonus
 ```
 
-1. `rg` finds matching lines across JSONL files (user + channel + agent workspace).
-2. Each match is resolved to a `ResolvedMemory`.
-3. `recency_bonus` is calculated from `ts` field: `clamp(1.0 + 0.5 × (1.0 − age_days/365), 1.0, 1.5)`.
-4. Results are sorted by score descending.
-5. `decay` value is included in each result for transparency.
-
-**Tier filtering**: Search accepts optional `tier` and `category` parameters. The index enables fast pre-filtering before hitting the JSONL files.
+1. A memory is a candidate only when it is `enabled`, passes the scope and
+   visibility rules (DM: the user's public and private memories; guild channel:
+   the user's public memories plus the channel's) and matches at least one
+   word/entity token or two distinct bigram tokens.
+2. Bonuses apply only when the lexical score is positive, so metadata can
+   reorder close results but never makes a non-matching memory eligible.
+3. Results are sorted by `final_score` descending, then `createdAt` descending,
+   then id ascending.
+4. Each result carries `score` (rounded to 3 decimals) and `matchedTerms`;
+   `decay` is still included for transparency.
+5. `limit` (default 10) is capped at 10, and the output is bounded by
+   `memory.recall.deepRecallMaxTokens`.
+6. Without a `scope` parameter, user and channel memories are searched and
+   ranked together; `scope` and `category` are the only filters.
 
 ## 10. Migration (v1 → v2)
 
@@ -436,7 +448,7 @@ memoryMaintenance:
 | Skill | New parameters | Defaults |
 |-------|---------------|----------|
 | `memory-save` | `tier`, `category`, `scope`, `decay` | `"archive"`, `"fact"`, `"user"`, `0.5` |
-| `memory-search` | `tier`, `category`, `scope` | (unfiltered) |
+| `memory-search` | `category`, `scope` | (unfiltered; both scopes searched) |
 | `memory-patch` | `tier`, `category`, `decay` | (no change) |
 | `memory-stats` | — | Reports `byTier`, `byCategory` breakdowns |
 

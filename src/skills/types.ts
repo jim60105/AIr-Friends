@@ -109,10 +109,24 @@ export interface MemorySearchParams {
 }
 
 /**
+ * One memory entry of the memory-search skill result.
+ *
+ * It is the memory shape the skill has always returned (everything but the F15
+ * `author` attribution) plus the recall diagnostics of the Deep Recall engine.
+ */
+export interface MemorySearchEntry extends Omit<ResolvedMemory, "author"> {
+  /** Recall score, rounded to 3 decimals (Deep Recall, diagnostics). */
+  score: number;
+  /** Distinct query terms this memory matched, sorted. */
+  matchedTerms: string[];
+}
+
+/**
  * Result for memory-search skill
  */
 export interface MemorySearchResult {
-  memories: ResolvedMemory[];
+  /** Memories in descending recall score order, no duplicate ids. */
+  memories: MemorySearchEntry[];
   agentNotes?: AgentNoteSearchResult[];
 }
 

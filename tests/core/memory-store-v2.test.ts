@@ -249,63 +249,7 @@ Deno.test("MemoryStore v2 - getRecentWorkingMemories respects limit", async () =
   });
 });
 
-// ── 7. searchMemories with category filter ──
-
-Deno.test("MemoryStore v2 - searchMemories filters by category", async () => {
-  await withTestMemoryStore(false, async (store, workspace) => {
-    await store.addMemory(workspace, "User likes cats", { category: "preference" });
-    await store.addMemory(workspace, "User adopted a cat", { category: "episode" });
-    await store.addMemory(workspace, "User has a cat named Mochi", { category: "fact" });
-
-    const prefs = await store.searchMemories(workspace, ["cat"], {}, "preference");
-    assertEquals(prefs.length, 1);
-    assertEquals(prefs[0].category, "preference");
-
-    const facts = await store.searchMemories(workspace, ["cat"], {}, "fact");
-    assertEquals(facts.length, 1);
-    assertEquals(facts[0].category, "fact");
-  });
-});
-
-// ── 8. Decay-weighted search scoring ──
-
-Deno.test("MemoryStore v2 - higher decay entries rank higher in search", async () => {
-  await withTestMemoryStore(false, async (store, workspace) => {
-    // Both created at ~same time, so recency bonus is equal
-    await store.addMemory(workspace, "Low decay food preference", {
-      tier: "archive",
-      decay: 0.1,
-    });
-    await store.addMemory(workspace, "High decay food preference", {
-      tier: "working",
-      decay: 0.99,
-    });
-
-    const results = await store.searchMemories(workspace, ["food"]);
-    assertEquals(results.length, 2);
-    assertEquals(results[0].content, "High decay food preference");
-    assertEquals(results[1].content, "Low decay food preference");
-  });
-});
-
-// ── 9. Recency bonus ──
-
-Deno.test("MemoryStore v2 - computeRecencyBonus gives recent entries higher score", async () => {
-  await withTestMemoryStore(false, async (store, workspace) => {
-    // Create two memories with same decay but manipulate timestamps via JSONL
-    // We test indirectly: a memory created "now" should rank higher than
-    // one with identical decay if both match the same keyword
-    // Since both are created nearly simultaneously with same decay, they should
-    // both appear. The key test is that the scoring mechanism doesn't crash.
-    await store.addMemory(workspace, "Recent music note", { decay: 0.5 });
-    await store.addMemory(workspace, "Another music note", { decay: 0.5 });
-
-    const results = await store.searchMemories(workspace, ["music"]);
-    assertEquals(results.length, 2);
-  });
-});
-
-// ── 10. Backward compatibility ──
+// ── 8. Backward compatibility ──
 
 Deno.test("MemoryStore v2 - entries without tier use importance fallback", async () => {
   await withTestMemoryStore(false, async (store, workspace, manager) => {
@@ -400,37 +344,6 @@ Deno.test("MemoryStore v2 - addChannelMemory creates memory with scope=channel",
     const loaded = await store.loadChannelMemories(channelWorkspace);
     assertEquals(loaded.length, 1);
     assertEquals(loaded[0].scope, "channel");
-  });
-});
-
-Deno.test("MemoryStore v2 - searchChannelMemories returns matching entries", async () => {
-  await withTestChannelStore(async (store, channelWorkspace) => {
-    await store.addChannelMemory(channelWorkspace, "Channel rule about coding");
-    await store.addChannelMemory(channelWorkspace, "Channel rule about design");
-    await store.addChannelMemory(channelWorkspace, "Unrelated topic");
-
-    const results = await store.searchChannelMemories(channelWorkspace, ["rule"]);
-    assertEquals(results.length, 2);
-  });
-});
-
-Deno.test("MemoryStore v2 - searchChannelMemories filters by category", async () => {
-  await withTestChannelStore(async (store, channelWorkspace) => {
-    await store.addChannelMemory(channelWorkspace, "Team prefers TypeScript", {
-      category: "preference",
-    });
-    await store.addChannelMemory(channelWorkspace, "Team meeting happened", {
-      category: "episode",
-    });
-
-    const prefs = await store.searchChannelMemories(
-      channelWorkspace,
-      ["team"],
-      {},
-      "preference",
-    );
-    assertEquals(prefs.length, 1);
-    assertEquals(prefs[0].category, "preference");
   });
 });
 

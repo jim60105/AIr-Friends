@@ -66,10 +66,10 @@ Deno.test("MemoryStore - should add high importance memory", async () => {
 
     assertEquals(memory.importance, "high");
 
-    // Should be in important memories
-    const important = await store.getImportantMemories(workspace);
-    assertEquals(important.length, 1);
-    assertEquals(important[0].content, "Important fact");
+    // High importance defaults the tier to core
+    const core = await store.getCoreTierMemories(workspace);
+    assertEquals(core.length, 1);
+    assertEquals(core[0].content, "Important fact");
   });
 });
 
@@ -103,16 +103,16 @@ Deno.test("MemoryStore - should patch memory to disable", async () => {
       importance: "high",
     });
 
-    // Verify it's in important memories
-    let important = await store.getImportantMemories(workspace);
-    assertEquals(important.length, 1);
+    // Verify it is in the core tier
+    let core = await store.getCoreTierMemories(workspace);
+    assertEquals(core.length, 1);
 
     // Disable it
     await store.disableMemory(workspace, memory.id);
 
-    // Should no longer be in important memories
-    important = await store.getImportantMemories(workspace);
-    assertEquals(important.length, 0);
+    // Should no longer be in the core tier
+    core = await store.getCoreTierMemories(workspace);
+    assertEquals(core.length, 0);
   });
 });
 
@@ -121,16 +121,17 @@ Deno.test("MemoryStore - should patch memory importance", async () => {
     // Add a normal importance memory
     const memory = await store.addMemory(workspace, "Initially normal");
 
-    // Verify not in important memories
-    let important = await store.getImportantMemories(workspace);
-    assertEquals(important.length, 0);
+    let loaded = await store.loadAllMemories(workspace, "public");
+    assertEquals(loaded[0].importance, "normal");
 
     // Upgrade to high importance
     await store.patchMemory(workspace, memory.id, { importance: "high" });
 
-    // Should now be in important memories
-    important = await store.getImportantMemories(workspace);
-    assertEquals(important.length, 1);
+    // The patch changes importance; the storage tier only changes when patched
+    loaded = await store.loadAllMemories(workspace, "public");
+    assertEquals(loaded.length, 1);
+    assertEquals(loaded[0].importance, "high");
+    assertEquals(loaded[0].tier, "archive");
   });
 });
 
@@ -146,41 +147,20 @@ Deno.test("MemoryStore - should fail to patch non-existent memory", async () => 
   });
 });
 
-Deno.test("MemoryStore - should search memories by keyword", async () => {
-  await withTestMemoryStore(false, async (store, workspace) => {
-    await store.addMemory(workspace, "Favorite color is blue");
-    await store.addMemory(workspace, "Favorite food is pizza");
-    await store.addMemory(workspace, "Birthday is January 1st");
-
-    const results = await store.searchMemories(workspace, ["favorite"]);
-    assertEquals(results.length, 2);
-  });
-});
-
-Deno.test("MemoryStore - should not return disabled memories in search", async () => {
-  await withTestMemoryStore(false, async (store, workspace) => {
-    const memory = await store.addMemory(workspace, "Soon to be disabled");
-    await store.disableMemory(workspace, memory.id);
-
-    const results = await store.searchMemories(workspace, ["disabled"]);
-    assertEquals(results.length, 0);
-  });
-});
-
 Deno.test("MemoryStore - should preserve memory order by timestamp", async () => {
   await withTestMemoryStore(false, async (store, workspace) => {
     await store.addMemory(workspace, "First memory", { importance: "high" });
     await new Promise((r) => setTimeout(r, 10)); // Small delay
     await store.addMemory(workspace, "Second memory", { importance: "high" });
 
-    const important = await store.getImportantMemories(workspace);
-    assertEquals(important.length, 2);
-    assertEquals(important[0].content, "First memory");
-    assertEquals(important[1].content, "Second memory");
+    const core = await store.getCoreTierMemories(workspace);
+    assertEquals(core.length, 2);
+    assertEquals(core[0].content, "First memory");
+    assertEquals(core[1].content, "Second memory");
   });
 });
 
-Deno.test("MemoryStore - DM should get both private and public important memories", async () => {
+Deno.test("MemoryStore - DM should get both private and public core memories", async () => {
   await withTestMemoryStore(true, async (store, workspace) => {
     // Add a public memory
     await store.addMemory(workspace, "Public important", {
@@ -194,56 +174,26 @@ Deno.test("MemoryStore - DM should get both private and public important memorie
       importance: "high",
     });
 
-    // In DM context, getImportantMemories should return BOTH
-    const important = await store.getImportantMemories(workspace);
-    assertEquals(important.length, 2);
-    const contents = important.map((m) => m.content);
+    // In DM context, getCoreTierMemories should return BOTH
+    const core = await store.getCoreTierMemories(workspace);
+    assertEquals(core.length, 2);
+    const contents = core.map((m) => m.content);
     assertEquals(contents.includes("Public important"), true);
     assertEquals(contents.includes("Private important"), true);
   });
 });
 
-Deno.test("MemoryStore - non-DM should only get public important memories", async () => {
+Deno.test("MemoryStore - non-DM should only get public core memories", async () => {
   await withTestMemoryStore(false, async (store, workspace) => {
     await store.addMemory(workspace, "Public important", {
       visibility: "public",
       importance: "high",
     });
 
-    const important = await store.getImportantMemories(workspace);
-    assertEquals(important.length, 1);
-    assertEquals(important[0].content, "Public important");
-    assertEquals(important[0].visibility, "public");
-  });
-});
-
-Deno.test("MemoryStore - DM search should search both private and public memory", async () => {
-  await withTestMemoryStore(true, async (store, workspace) => {
-    // Add one public and one private memory
-    await store.addMemory(workspace, "Public favorite color is blue", {
-      visibility: "public",
-    });
-    await store.addMemory(workspace, "Private favorite color is red", {
-      visibility: "private",
-    });
-
-    // In DM, search should find BOTH memories
-    const results = await store.searchMemories(workspace, ["favorite"]);
-    assertEquals(results.length, 2);
-    const visibilities = results.map((r) => r.visibility).sort();
-    assertEquals(visibilities, ["private", "public"]);
-  });
-});
-
-Deno.test("MemoryStore - non-DM search should only search public memory", async () => {
-  await withTestMemoryStore(false, async (store, workspace) => {
-    await store.addMemory(workspace, "Public favorite food is pizza", {
-      visibility: "public",
-    });
-
-    const results = await store.searchMemories(workspace, ["favorite"]);
-    assertEquals(results.length, 1);
-    assertEquals(results[0].visibility, "public");
+    const core = await store.getCoreTierMemories(workspace);
+    assertEquals(core.length, 1);
+    assertEquals(core[0].content, "Public important");
+    assertEquals(core[0].visibility, "public");
   });
 });
 
@@ -259,16 +209,12 @@ Deno.test("MemoryStore - countEnabledMemories returns correct count", async () =
 
 Deno.test("MemoryStore - countEnabledMemories excludes disabled memories", async () => {
   await withTestMemoryStore(false, async (store, workspace) => {
-    const active = await store.addMemory(workspace, "Active memory");
+    await store.addMemory(workspace, "Active memory");
     const disabled = await store.addMemory(workspace, "Disabled memory");
     await store.disableMemory(workspace, disabled.id);
 
     const count = await store.countEnabledMemories(workspace);
     assertEquals(count, 1);
-
-    const results = await store.searchMemories(workspace, ["memory"]);
-    assertEquals(results.some((m) => m.id === active.id), true);
-    assertEquals(results.some((m) => m.id === disabled.id), false);
   });
 });
 

@@ -98,25 +98,6 @@ These defaults ensure that existing memory-save calls without the new fields con
 - **WHEN** the memory is loaded by `loadAllMemories()`
 - **THEN** it SHALL be treated as `tier: "archive"`, `category: "fact"`, `scope: "user"`, `decay: 0.5`
 
-### Requirement: High-Importance vs Normal Memory Loading
-
-The system SHALL distinguish between high-importance and normal memories during retrieval:
-
-- **High-importance memories** (`importance = "high"`, `enabled = true`): SHALL be fully loaded via `getImportantMemories()` and included in initial context without search. Results SHALL be sorted by `createdAt` (oldest first).
-- **Normal memories** (`importance = "normal"`): SHALL be retrieved via full-text search using `rg` (ripgrep), bounded by `searchLimit` (max result count) and `maxChars` (cumulative character limit). Results SHALL be deduplicated by ID before returning.
-
-#### Scenario: All high-importance memories loaded into context
-- **GIVEN** a user has 5 high-importance enabled memories
-- **WHEN** `getImportantMemories()` is called
-- **THEN** all 5 memories SHALL be returned, sorted by `createdAt` ascending
-
-#### Scenario: Normal memories searched with ripgrep
-- **GIVEN** a user has many normal-importance memories
-- **WHEN** `searchMemories()` is called with keywords
-- **THEN** the system SHALL use `searchMultipleKeywords()` (backed by `rg`) for full-text search
-- **AND** results SHALL be limited by `searchLimit` and `maxChars`
-- **AND** results SHALL be deduplicated by memory ID
-
 ### Requirement: Visibility Scoping
 
 The system SHALL enforce visibility scoping based on the conversation context:
@@ -208,3 +189,14 @@ The system SHALL support memory export via `handleMemoryExport()`. Exports SHALL
 - **GIVEN** a user requests export with `importance = "high"`
 - **WHEN** `handleMemoryExport()` is called
 - **THEN** only high-importance memories SHALL be included in the export
+
+### Requirement: Memory Retrieval by Relevance
+
+Enabled memories SHALL be retrieved by query through the `memory-recall` capability, which ranks by lexical relevance and returns deduplicated memories within the requested result count and token budget. The system SHALL NOT use substring search over raw JSONL lines for memory retrieval.
+
+#### Scenario: Normal memories retrieved by relevance
+- **GIVEN** a user has many normal-importance memories
+- **WHEN** `memory-search` is called with a query
+- **THEN** results SHALL be produced by the `memory-recall` capability, ordered by relevance score
+- **AND** results SHALL be deduplicated by memory ID
+- **AND** results SHALL be limited by the requested count and the Deep Recall token budget
