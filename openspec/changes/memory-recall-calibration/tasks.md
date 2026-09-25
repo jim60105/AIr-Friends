@@ -5,9 +5,9 @@
 
 ## 2. Benchmark script
 
-- [ ] 2.1 Implement `scripts/memory-recall-benchmark.ts`: materialize the fixture into a temporary workspace, run Fast Recall per query with the fixed clock, and compute Recall@1, Recall@2, false-positive rate, average injected tokens and p95 latency. Verify by running `deno run --allow-read --allow-write --allow-env --allow-ffi scripts/memory-recall-benchmark.ts` and checking the report prints.
-- [ ] 2.2 Add grid search and tie-breaking for `minRecallScore` and `secondRecallScore`, a non-zero exit when the 5% cap is unattainable, and a `--write` flag that writes `metrics.json`. Verify with a run that produces `metrics.json`.
-- [ ] 2.3 Timebox tuning to 2 hours: if the cap is unmet, stop and report the best rate and the failing queries instead of weakening the gate.
+- [x] 2.1 Implement `scripts/memory-recall-benchmark.ts`: materialize the fixture into a temporary workspace, run Fast Recall per query with the fixed clock, and compute Recall@1, Recall@2, false-positive rate, average injected tokens and p95 latency. Verify by running `deno run --allow-read --allow-write --allow-env --allow-ffi scripts/memory-recall-benchmark.ts` and checking the report prints.
+- [x] 2.2 Add grid search and tie-breaking for `minRecallScore` and `secondRecallScore`, a non-zero exit when the 5% cap is unattainable, and a `--write` flag that writes `metrics.json`. Verify with a run that produces `metrics.json`.
+- [x] 2.3 Timebox tuning to 2 hours: if the cap is unmet, stop and report the best rate and the failing queries instead of weakening the gate.
 
 ## 3. Apply and gate
 
