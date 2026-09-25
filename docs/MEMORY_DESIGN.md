@@ -457,7 +457,9 @@ Pipeline (in order):
    joined into one entity (`a7c ii`, `air75 v3`). Component parts of every
    entity are emitted as word tokens (`air`, `friends`, `open`, `claw`).
    Run-entity parts split at the separators only; CamelCase parts split at case
-   boundaries. Entity parts never participate in pair joining.
+   boundaries. Entity parts never participate in pair joining, and the pair
+   scan is left-to-right greedy (`a b2 c` pairs `a b2` and leaves `c` as a
+   word), so the emitted vocabulary is deterministic.
 3. **Word tokens (weight 1.0)**: each CJK run is segmented with
    `@node-rs/jieba` (precise mode, HMM on) using the vendored
    Traditional-capable dictionary `assets/jieba/dict.txt.big` (fxsjy/jieba, MIT,
@@ -473,11 +475,19 @@ The tokenizer never modifies its input and never converts between Simplified
 and Traditional forms; the same input always yields the same tokens in the same
 order.
 
+**Term semantics for consumers (changes 2–9)**: terms are opaque. Consumers
+must never whitespace-split a term (`air75 v3` is a single entity term) and
+must not assume uniqueness — duplicates are emitted as-is (`鍵盤` appears both
+as a word and as a bigram). No deduplication or stopword filtering happens
+below the level of the emitted token stream.
+
 **Segmentation degradation**: if jieba or its dictionary cannot be loaded
 (missing binding, missing `--allow-ffi`, unreadable file), the tokenizer logs
 one error (once per process) and continues emitting entity and bigram tokens
 only; it never throws to its caller. The segmenter is a lazy module-level
-singleton, so the 8.6 MB dictionary is read at most once per process.
+singleton, so the 8.6 MB dictionary is read at most once per process. If
+segmentation throws mid-call, the words already emitted for that run stay and
+the remaining runs of the call degrade to bigrams-only.
 
 **Runtime requirement**: loading the jieba native binding needs the `--allow-ffi`
 Deno permission. It is declared in every `deno.json` task that runs the

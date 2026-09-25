@@ -75,6 +75,15 @@ Deno.test("MemoryTokenizer - a lone stopword yields no tokens", () => {
   assertEquals(tokenizer.tokenize("的"), []);
 });
 
+Deno.test("MemoryTokenizer - prototype-chain keys are not treated as stopwords", () => {
+  // `constructor` shares a name with Object.prototype.constructor; a plain
+  // object stopword table would drop it via prototype lookup. It must survive.
+  const tokens = tokenizer.tokenize("a constructor b");
+  assert(hasToken(tokens, "constructor", "word"));
+  assert(hasToken(tokens, "a", "word"));
+  assert(hasToken(tokens, "b", "word"));
+});
+
 Deno.test("MemoryTokenizer - run entities join with - . _ and emit parts as words", () => {
   const tokens = tokenizer.tokenize("v0.31.1");
   assertEquals(tokens, [

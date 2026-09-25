@@ -16,8 +16,10 @@ const WEIGHTS: Record<TokenKind, number> = {
 /**
  * Single-character CJK stopwords (design D7). These appear in nearly every
  * memory; dropping them is the primary false-positive gate. The list is fixed.
+ * A null prototype keeps prototype-chain keys (e.g. `constructor`) from being
+ * mistaken for stopword entries.
  */
-const STOPWORDS: Record<string, true> = {
+const STOPWORDS: Record<string, true> = Object.assign(Object.create(null), {
   "的": true,
   "了": true,
   "在": true,
@@ -30,7 +32,7 @@ const STOPWORDS: Record<string, true> = {
   "都": true,
   "和": true,
   "與": true,
-};
+});
 
 /**
  * Two standalone alphanumeric tokens are joined into one entity only when both
