@@ -65,9 +65,13 @@ export class MemoryStore {
   }
 
   /**
-   * Get the appropriate memory file path
+   * Absolute path of a workspace's public or private memory file.
+   *
+   * Read-only companion to `loadAllMemories` for callers that need the file's
+   * identity rather than its content — the recall snapshot cache stats and keys
+   * it by this path.
    */
-  private getMemoryPath(
+  getMemoryFilePathFor(
     workspace: WorkspaceInfo,
     visibility: MemoryVisibility,
   ): string {
@@ -448,7 +452,7 @@ export class MemoryStore {
     const visibilities: MemoryVisibility[] = workspace.isDm ? ["public", "private"] : ["public"];
 
     for (const visibility of visibilities) {
-      const memoryPath = this.getMemoryPath(workspace, visibility);
+      const memoryPath = this.getMemoryFilePathFor(workspace, visibility);
       const searchResults = await searchMultipleKeywords(
         memoryPath,
         keywords,
@@ -623,7 +627,7 @@ export class MemoryStore {
    * Read a channel memory file's content
    */
   private async readChannelMemoryFile(channelWorkspace: ChannelWorkspaceInfo): Promise<string> {
-    const filePath = this.workspaceManager.getChannelMemoryFilePath(channelWorkspace);
+    const filePath = this.getChannelMemoryFilePathFor(channelWorkspace);
     try {
       return await Deno.readTextFile(filePath);
     } catch (error) {
@@ -642,6 +646,16 @@ export class MemoryStore {
     if (!content.trim()) return [];
     const events = this.parseMemoryLog(content);
     return this.resolveMemories(events);
+  }
+
+  /**
+   * Absolute path of a channel workspace's memory file.
+   *
+   * Read-only companion to `loadChannelMemories`, for callers that need the
+   * file's identity rather than its content.
+   */
+  getChannelMemoryFilePathFor(channelWorkspace: ChannelWorkspaceInfo): string {
+    return this.workspaceManager.getChannelMemoryFilePath(channelWorkspace);
   }
 
   /**
