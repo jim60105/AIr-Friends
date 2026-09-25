@@ -16,7 +16,7 @@ The Memory Recall v2 series replaced the ripgrep/keyword memory search and the "
   - Skill list (~line 346): the `memory-search` one-liner "Search memory by keywords" becomes natural-language retrieval via the recall engine.
 - `docs/SKILLS_IMPLEMENTATION.md`:
   - `memory-save` key features (~line 68): drop "High importance memories always loaded into context".
-  - `memory-search` (~lines 72-76): queries are natural-language (not "search keywords"); results come from the recall engine in relevance order with `score` and `matchedTerms`, split into `userMemories` and `agentNotes` sections.
+  - `memory-search` (~lines 72-76): queries are natural-language (not "search keywords"); results come from the recall engine in relevance order with `score` and `matchedTerms`, returned in a `memories` section and an `agentNotes` section.
   - Memory handler (~line 228): `handleMemorySearch` delegates to the `memory-recall` retriever instead of "searches memories by keywords".
 - `docs/CONTAINER_TOOLS.md` (~line 26): the `ripgrep` table entry no longer says "Used internally by the memory search skill"; same purpose fix as the `docs/DESIGN.md` / `AGENTS.md` binary entries.
 - `AGENTS.md`: the memory/context sections were already updated during the series; the only stale line left is the container binary entry (~line 1321) "rg - ripgrep 15.1.0 for memory search", fixed the same way as in `docs/DESIGN.md`. The `searchLimit`/`maxChars` example lines (~391-392) are left to `remove-dead-memory-config`.

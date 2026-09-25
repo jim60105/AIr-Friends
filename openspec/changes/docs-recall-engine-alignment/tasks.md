@@ -10,7 +10,7 @@
 ## 2. docs/SKILLS_IMPLEMENTATION.md
 
 - [ ] 2.1 `memory-save` key features (~line 68): remove "High importance memories always loaded into context".
-- [ ] 2.2 `memory-search` (~72-76): natural-language query via `query-file`; results from the recall engine in relevance order with `score` and `matchedTerms`, in `userMemories`/`agentNotes` sections. Matches `skills/memory-search/SKILL.md`.
+- [ ] 2.2 `memory-search` (~72-76): natural-language query via `query-file`; results from the recall engine in relevance order with `score` and `matchedTerms`, in a `memories` section and an `agentNotes` section. Matches `skills/memory-search/SKILL.md`.
 - [ ] 2.3 Memory handler list (~line 228): `handleMemorySearch` searches via the `memory-recall` retriever (relevance-ranked), not "by keywords".
 
 ## 3. docs/CONTAINER_TOOLS.md and AGENTS.md
