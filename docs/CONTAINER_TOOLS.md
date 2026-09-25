@@ -23,7 +23,7 @@ This document lists all common tools pre-installed in the AIr-Friends container 
 
 | Package     | Command                                           | Description                                                                                                                                                                                         |
 | ----------- | ------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `ripgrep`   | `rg`                                              | Recursively search files for regex patterns. Extremely fast; respects `.gitignore` rules by default. Used internally by the memory search skill.                                                    |
+| `ripgrep`   | `rg`                                              | Recursively search files for regex patterns. Extremely fast; respects `.gitignore` rules by default. Available to the agent for in-workspace file reading under the ACP permission gate.            |
 | `jq`        | `jq`                                              | Command-line JSON processor. Parse, filter, transform, and format JSON data. Essential for working with API responses and JSONL memory files.                                                       |
 | `moreutils` | `sponge`, `ts`, `vidir`, `chronic`, `ifdata`, ... | A collection of useful Unix utilities. `sponge` soaks up stdin and writes to a file (avoids read-write conflicts); `ts` adds timestamps to lines; `chronic` runs a command quietly unless it fails. |
 
