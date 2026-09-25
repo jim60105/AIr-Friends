@@ -96,19 +96,6 @@ Channel memories SHALL use the same `MemoryEntry` format as user memories, with 
 - **WHEN** the entry is persisted
 - **THEN** it SHALL NOT be stored with a non-decaying `decay: 1.0` core pin; it SHALL decay on the normal schedule
 
-### Requirement: Channel Memory Search
-
-The `memory-search` skill SHALL support searching channel memories when `scope: "channel"` and `channelId` are provided. Search SHALL use the same ripgrep-based full-text search as user memories.
-
-#### Scenario: Search channel memories
-- **GIVEN** channel `ch-456` has memories containing the word "deployment"
-- **WHEN** `memory-search` is called with `scope: "channel"`, `channelId: "ch-456"`, and query "deployment"
-- **THEN** matching channel memories SHALL be returned
-
-#### Scenario: Search defaults to user scope
-- **WHEN** `memory-search` is called without a `scope` parameter
-- **THEN** only user-scoped memories SHALL be searched
-
 ### Requirement: Channel Memory Bounds and Moderation
 
 The system SHALL bound the number of channel core-tier entries per channel and SHALL provide an in-app path to remove (disable) a channel memory entry. Channel-memory listing and disabling SHALL be available through the passphrase-gated dashboard so an operator can remove a planted or abusive entry.
@@ -165,3 +152,23 @@ The `memory-patch` skill SHALL support patching channel-scoped memories when cal
 - **WHEN** the agent calls `memory-patch` with `memory_id: "mem_abc_123"` and no `scope` parameter
 - **THEN** the patch event SHALL be appended to the user's memory file exactly as before this change
 - **AND** all previously patchable fields including `visibility` SHALL remain patchable for user scope
+
+### Requirement: Channel Memory Recall Search
+
+The `memory-search` skill SHALL support searching channel memories when the session has a channel context. Search SHALL use the same recall engine, ranking and Deep Recall rules as user memories. When `scope` is `"channel"`, only channel memories SHALL be searched. When `scope` is `"user"`, only user memories SHALL be searched. When `scope` is omitted, both SHALL be searched and ranked together.
+
+#### Scenario: Search channel memories
+- **GIVEN** channel `ch-456` has memories containing the word "deployment"
+- **WHEN** `memory-search` is called in channel `ch-456` with `scope: "channel"` and query "deployment"
+- **THEN** matching channel memories SHALL be returned
+- **AND** no user memories SHALL be returned
+
+#### Scenario: Search defaults to both scopes
+- **GIVEN** a session in channel `ch-456` where both the user and the channel have memories matching the query
+- **WHEN** `memory-search` is called without a `scope` parameter
+- **THEN** matching memories from both scopes SHALL be returned in one relevance-ordered list
+
+#### Scenario: No channel context
+- **GIVEN** a DM session
+- **WHEN** `memory-search` is called with `scope: "channel"`
+- **THEN** no channel memories SHALL be returned
