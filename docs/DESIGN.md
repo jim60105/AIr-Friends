@@ -663,7 +663,7 @@ COPY agent-config/opencode.json /home/deno/.config/opencode/opencode.json
 USER deno
 ENTRYPOINT ["dumb-init", "--"]
 # Default command includes --yolo flag (safe in container environment)
-CMD ["deno", "run", "--allow-net", "--allow-read", "--allow-write", "--allow-env", "--allow-run", "src/main.ts", "--yolo"]
+CMD ["deno", "run", "--allow-net", "--allow-read", "--allow-write", "--allow-env", "--allow-run", "--allow-ffi", "src/main.ts", "--yolo"]
 ```
 
 **Required Labels:**
@@ -962,6 +962,7 @@ Required permissions for production:
 | Write       | `--allow-write` | Memory log files in workspaces                    |
 | Environment | `--allow-env`   | Read tokens and configuration                     |
 | Run         | `--allow-run`   | Spawning ACP agent subprocesses and skill scripts |
+| FFI         | `--allow-ffi`   | Loading the jieba native binding (memory recall tokenizer) |
 
 > [!WARNING]
 > Never use `--allow-all` or overly permissive settings. Permissions must be explicitly declared.

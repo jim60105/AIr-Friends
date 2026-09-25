@@ -98,7 +98,7 @@ deno fmt --check src/ tests/
 When running manually, use these explicit permissions:
 
 ```bash
-deno run --allow-net --allow-read --allow-write --allow-env --allow-run src/main.ts
+deno run --allow-net --allow-read --allow-write --allow-env --allow-run --allow-ffi src/main.ts
 ```
 
 **Never use `--allow-all`**. Required permissions:
@@ -110,6 +110,7 @@ deno run --allow-net --allow-read --allow-write --allow-env --allow-run src/main
 | `--allow-write` | Memory log files in workspace directories         |
 | `--allow-env`   | Environment variables (tokens, configuration)     |
 | `--allow-run`   | Spawning ACP agent subprocesses and skill scripts |
+| `--allow-ffi`   | Loading the jieba native binding (memory recall tokenizer) |
 
 #### YOLO Mode
 
@@ -151,7 +152,7 @@ channels:
 The `--dry-run` flag enables dry run / debug mode. The system assembles context but does NOT call the ACP Agent — instead, the assembled prompt is written to an output directory:
 
 ```bash
-deno run --allow-net --allow-read --allow-write --allow-env --allow-run src/main.ts --dry-run
+deno run --allow-net --allow-read --allow-write --allow-env --allow-run --allow-ffi src/main.ts --dry-run
 ```
 
 **Use cases**:

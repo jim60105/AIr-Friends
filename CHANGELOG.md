@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- Memory Recall v2 change 1/9: the recall tokenizer (`src/core/memory-recall/tokenizer.ts`) with `@node-rs/jieba` and the vendored Traditional-capable dictionary `assets/jieba/dict.txt.big` (fxsjy/jieba, MIT, pinned commit) — NFKC normalization, entity extraction (`air-friends`, `OpenClaw`, `a7c ii`, `air75 v3`), CJK word segmentation and bigrams with fixed weights (entity 1.5 / word 1.0 / bigram 0.25), a fixed single-character CJK stopword list, and deterministic ordering; the tokenizer degrades to entity + bigram tokens when the segmenter cannot load (one logged error, never thrown). Loading the jieba native binding requires Deno's FFI permission, so `--allow-ffi` is now declared in every `deno.json` task that runs the application or tests (`dev`, `start`, `start:config`, `test`, `test:watch`, `test:coverage`, `test:coverage:lcov`, `test:unit`, `test:integration`, `ci`), in the container `CMD`, and `assets/` is copied into the container image
+
 ## [0.31.1] - 2026-09-24
 
 ### Fixed
