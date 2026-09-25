@@ -152,6 +152,24 @@ Deno.test("selectFixedMemories - the working token budget is enforced", () => {
   assertEquals(sectionTokens(selection.userWorking) <= BUDGETS.workingMaxTokens, true);
 });
 
+Deno.test("selectFixedMemories - the working budget keeps the entries that fill it exactly", () => {
+  // Five working memories of 96 tokens each: four fill the 384-token budget
+  // exactly, and the fifth is skipped rather than replacing an earlier one.
+  const userWorking = Array.from(
+    { length: 5 },
+    (_, i) => mem(`w${i}`, i, { tier: "working", content: "x".repeat(346) }),
+  );
+
+  const selection = selectFixedMemories(
+    { userCore: [], channelCore: [], userWorking, channelWorking: [] },
+    { ...BUDGETS, workingMaxItems: 5 },
+  );
+
+  assertEquals(ids(selection.userWorking), ["w1", "w2", "w3", "w4"]);
+  assertEquals(sectionTokens(selection.userWorking), BUDGETS.workingMaxTokens);
+  assertEquals(selection.injectedIds.includes("w0"), false);
+});
+
 Deno.test("selectFixedMemories - a working candidate skipped for size is not replaced", () => {
   const userWorking = [
     mem("w0", 0, { tier: "working", content: SMALL }),
