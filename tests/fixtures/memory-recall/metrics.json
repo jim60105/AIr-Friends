@@ -1,0 +1,20 @@
+{
+  "clock": "2026-09-01T00:00:00.000Z",
+  "grid": {
+    "start": 0.5,
+    "end": 12,
+    "step": 0.25
+  },
+  "falsePositiveCap": 0.05,
+  "secondResultRatio": 0.65,
+  "queryCount": 40,
+  "positiveQueryCount": 23,
+  "negativeQueryCount": 17,
+  "minRecallScore": 6.75,
+  "secondRecallScore": 6.5,
+  "recallAt1": 0.9565217391304348,
+  "recallAt2": 1,
+  "falsePositiveRate": 0.025,
+  "falsePositiveQueryCount": 1,
+  "averageInjectedTokens": 17.85
+}

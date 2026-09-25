@@ -423,10 +423,10 @@ export interface MemoryRecallConfig {
    */
   fastRecallMaxTokens: number;
 
-  /** Fast Recall: minimum score of the top memory (provisional until calibration). */
+  /** Fast Recall: minimum score of the top memory (calibrated by the offline benchmark). */
   minRecallScore: number;
 
-  /** Fast Recall: minimum score of a second memory (provisional until calibration). */
+  /** Fast Recall: minimum score of a second memory (calibrated by the offline benchmark). */
   secondRecallScore: number;
 
   /** Fast Recall: minimum ratio of the second score to the top score (default: 0.65). */
