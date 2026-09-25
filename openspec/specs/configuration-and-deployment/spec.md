@@ -302,6 +302,7 @@ The project SHALL use `deno.json` as the central configuration file with import 
 - **GIVEN** `deno.json` defines tasks
 - **WHEN** a developer runs `deno task <name>`
 - **THEN** the following tasks SHALL be available: `dev` (watch mode), `start` (production), `test` (parallel tests), `fmt` (format), `lint` (lint), `check` (type check), `ci` (fmt check + lint + type check + test)
+- **AND** the `ci` task's fmt-check and lint steps SHALL be scoped to `src/` and `tests/` — the same scopes as `fmt:check` and `lint`, matching the GitHub Actions workflow — so the task passes on a repository whose non-code assets (vendored data, docs, archives) are not format-managed and whose TypeScript outside `src/` and `tests/` (skill scripts, benchmark scripts) is not lint-managed
 
 #### Scenario: Formatting Rules
 
