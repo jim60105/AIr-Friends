@@ -1,7 +1,7 @@
 # Memory Recall v2 Design
 
 - Date: 2026-09-25
-- Status: Approved in brainstorming, pending spec review
+- Status: Approved in brainstorming; split into 9 OpenSpec changes (section 17), reviewed by an independent critique pass
 - Source: `tmp/AIr-Friends Memory Recall v2 實作交接指南.md` (handoff guide); this document records the validated design and every deliberate deviation from that guide.
 
 ## 1. Goal
@@ -28,7 +28,10 @@ No backward compatibility is required: the project has no released users.
 | D7 | Add a small fixed stopword list for single CJK function characters (such as `的 了 在 是 我 你 他 也 就 都 和 與`). | These characters appear in nearly every memory, and false-positive rate is the primary gate. |
 | D8 | Channel-scope memories keep their F15 attribution and "unverified" framing inside Fast Recall, in a separate sub-section that shares the memory budget. | Flattening them into `Relevant memory:` would present member-written content as trusted memory in another user's turn. |
 | D9 | Fast Recall and Deep Recall also search agent workspace notes. Notes return a pointer (absolute path, heading path, line range, excerpt, file size), never full content. | The agent decides whether to read the full file. |
-| D10 | Delete `searchMemories`, `searchChannelMemories`, `computeRecencyBonus`, `searchAgentWorkspace` and `src/utils/text-search.ts` (plus its test). | The new engine replaces all of them, and `memory-store.ts` is their only importer. |
+| D10 | Delete `searchMemories`, `searchChannelMemories`, `computeRecencyBonus`, `getImportantMemories`, `searchAgentWorkspace` and `src/utils/text-search.ts` (plus its test). | The new engine replaces them. `memory-store.ts` is the only importer of `text-search.ts`. `getImportantMemories` has no production caller. |
+| D11 | Only tier decides fixed loading. `importance: "high"` on a non-core memory no longer guarantees injection and becomes a ranking bonus. | This follows from the tier-based budgets. Promote a memory to core to guarantee injection. |
+| D12 | The note walk never follows symbolic links and skips any entry whose real path is outside the agent workspace. | The workspace is agent-writable. A planted link to another user's `memory.private.jsonl` would otherwise leak across users through excerpts. |
+| D13 | `MemoryHandler` and `ContextAssembler` take an optional shared `MemoryRetriever`. When it is omitted, they build a default retriever from their `MemoryStore`. | Production shares one snapshot cache, and the 60+ existing test constructions keep compiling without no-op doubles. |
 
 ## 3. Architecture
 
@@ -133,10 +136,10 @@ Hints are detected on the current message only. Latin terms match on word bounda
 
 ## 6. Notes
 
-- **Sources**: `.md` files under the agent workspace (`notes/`, `journal/` and any subfolder), excluding `README.md` and `notes/_index.md`. The whole tree is walked on every search; only files whose `size + mtime` changed are re-chunked.
+- **Sources**: `.md` files under the agent workspace (`notes/`, `journal/` and any subfolder), excluding `README.md` and `notes/_index.md`. The whole tree is walked on every search; only files whose `size + mtime` changed are re-chunked. Symbolic links are skipped, and any file or directory whose real path is outside the workspace is not read (D12).
 - **Chunking**: split at `##` and `###` headings. Sections longer than about 600 characters are split again on blank lines. Each chunk records the absolute path, document title (first `#` heading, otherwise the file name), heading path, line range and file `mtime`.
 - **Ranking**: same tokenizer and BM25, with separate note statistics. Only the lexical, entity and phrase terms apply. Results are aggregated per file, and the best chunk represents the file.
-- **Excerpt**: the sentence or sentences in the representative chunk with the most matched terms, wrapped in `…`. Limit is about 160 characters in fast mode and about 320 in deep mode.
+- **Excerpt**: the sentence or sentences in the representative chunk with the most distinct matched terms (ties go to the earliest sentence), wrapped in `…`. Limit is about 160 characters in fast mode and about 320 in deep mode.
 - **Path**: absolute path resolved from `agentWorkspacePath`, matching `/app/data/agent-workspace` in `prompts/agent_workspace.md`, so the agent can `cat` it directly.
 - Notes are searched only when the session has an agent workspace path. Otherwise `notes` is empty.
 
@@ -204,7 +207,7 @@ interface MemoryRetriever {
 ### Deep mode
 
 - `maxResults` comes from the tool `--limit`, capped at 10, for both memories and notes.
-- Budget is `deepRecallMaxTokens` for memories and notes together.
+- Budget is `deepRecallMaxTokens` for memories and notes together. Items from both lists are admitted in descending score order, and any item that does not fit is skipped. Each item is measured by its serialized output entry.
 - Memories and notes both use `deepMinRecallScore` (default 0, meaning candidate eligibility only). Historical and superseded memories are allowed.
 
 ### Fast Recall prompt section
@@ -268,15 +271,16 @@ memory:
 ## 12. Calibration and benchmark
 
 - Fixtures in `tests/fixtures/memory-recall/`:
-  - `corpus.jsonl`: about 60 memories, mainly Traditional Chinese with mixed English, product names and model numbers, supersede chains, `relatedTo` links and channel memories.
+  - `corpus.jsonl`: about 40 memories, mainly Traditional Chinese with mixed English, product names and model numbers, supersede chains, `relatedTo` links and channel memories.
   - `notes/`: about 10 Markdown notes.
-  - `queries.yaml`: about 60 queries, each with expected memory ids and note paths; about 40% are negatives expecting nothing.
+  - `queries.yaml`: about 35 memory queries plus note queries, each with expected memory ids and note paths. About 40% are negatives expecting nothing, including adversarial English hint words ("before 5pm").
 - False-positive rate = share of queries where Fast Recall injects at least one item outside the expected set, computed separately for memories and notes.
 - `scripts/memory-recall-benchmark.ts` grid-searches thresholds:
   - `minRecallScore` / `noteMinRecallScore`: the value that maximizes Recall@1 while false-positive rate stays at or below 5%.
   - `secondRecallScore` / `secondNoteRecallScore`: the same rule on Recall@2.
 - The script reports Recall@1, Recall@2, false-positive rate, average injected tokens and p95 search latency, separately for memories and notes.
-- Regression test: rerun with the default thresholds and assert the recorded Recall@1, Recall@2, false-positive rate and average injected tokens exactly (the pipeline is deterministic). p95 latency is reported but not gated.
+- Regression test: rerun with the default thresholds and assert the recorded Recall@1, Recall@2, false-positive rate and average injected tokens exactly (the pipeline is deterministic). p95 latency is gated by a generous 50 ms ceiling, which catches only pathological regressions.
+- Tuning is timeboxed to 2 hours per calibration pass. If the 5% cap is still unmet, work stops for a decision instead of weakening the gate.
 - No network or LLM calls happen in tests or benchmarks.
 
 ## 13. Error handling
@@ -320,3 +324,44 @@ memory:
 ## 16. Out of scope
 
 Embeddings, vector databases, LLM query rewriting, LLM reranking, persisted indexes, extra inference services, and changes to the memory write format.
+
+## 17. Delivery plan
+
+The design is delivered as nine OpenSpec changes under `openspec/changes/`. Each is sized for at most 8 hours of implementation. An independent review simulated archiving all of them in order with the OpenSpec CLI and found no structural conflicts.
+
+### 17.1 Proposal list
+
+| # | Change | Scope | Depends on | Estimate |
+|---|---|---|---|---|
+| 1 | `memory-recall-tokenizer` | jieba plus vendored `dict.txt.big`, tokenizer, stopwords, segmenter degradation, `--allow-ffi` in tasks and the container | none | 4–5 h |
+| 2 | `memory-recall-scoring` | Query hints, query merging, `IndexedMemory`, BM25, bonuses, deterministic ordering (pure) | 1 | 6–7 h |
+| 3 | `memory-recall-retriever` | Snapshot cache, eligibility and supersede, `relatedTo` expansion, Fast and Deep selection, `memory.recall` selection config, provisional thresholds | 2 | 7 h |
+| 4 | `memory-recall-calibration` | Memory fixture, benchmark script, calibrated memory thresholds, regression and latency gate | 3 | 7 h (2 h tuning timebox) |
+| 5 | `memory-deep-recall` | `memory-search` on the engine (relevance order, `score`, `matchedTerms`, both scopes); remove ripgrep memory search and `getImportantMemories` | 3 | 5 h |
+| 6 | `memory-fixed-budgets` | Core 512 tokens, working 4 items within 384 tokens, tier-only fixed loading, `injectedIds` | 5 | 5 h |
+| 7 | `memory-fast-recall-context` | Fast Recall in `ContextAssembler`, memory and unverified channel sub-sections, previous-message query, failure isolation, `fastRecallEnabled`, prompt update | 4, 6 | 6 h |
+| 8 | `note-recall` | Note chunking and indexing with symlink and real-path containment, note ranking, pointer format, Deep Recall notes with the shared budget, removal of `text-search.ts` | 5 | 7–8 h |
+| 9 | `note-fast-recall` | Fast Recall note pointers (2 notes / 256 tokens), note sub-section, note calibration, note config | 4, 7, 8 | 6 h |
+
+### 17.2 Implementation batches
+
+Changes in the same batch have no dependency on each other and can run in parallel, each in its own worktree. A batch starts only after every change it depends on is implemented, merged and archived.
+
+| Batch | Changes | Notes |
+|---|---|---|
+| 1 | `memory-recall-tokenizer` | Verify the container image loads the native binding before moving on. |
+| 2 | `memory-recall-scoring` | Pure code only. |
+| 3 | `memory-recall-retriever` | The engine is complete but has no callers yet. |
+| 4 | `memory-recall-calibration` ‖ `memory-deep-recall` | Calibration touches fixtures, the script and config defaults. Deep Recall touches the handler and `MemoryStore`. They do not overlap. |
+| 5 | `memory-fixed-budgets` ‖ `note-recall` | Fixed budgets touch `ContextAssembler`. Note recall touches the handler, the snapshot cache and `MemoryStore` note search. Expect only trivial merge conflicts in `MemoryStore`. |
+| 6 | `memory-fast-recall-context` | This is the first change visible to users on every turn. `fastRecallEnabled: false` is the kill switch. |
+| 7 | `note-fast-recall` | Completes the series. |
+
+### 17.3 Review outcomes folded into the plan
+
+- The Deep Recall budget is specified once for "items", so adding notes in change 8 extends the rule instead of contradicting it.
+- Note indexing gains a spec-level symlink and containment requirement with tests (D12).
+- The original engine, context and note changes were each split in two to fit 8 hours. Calibration got a smaller first fixture and an explicit tuning timebox.
+- Optional retriever injection avoids editing more than 60 existing constructor call sites (D13).
+- Accepted without change: unbounded snapshot-cache growth (bounded by workspace count; the process restarts on deploy), unscoped `--allow-ffi` (the binding path is version-dependent), and `memory-fixed-budgets` exceeding the CLI's 10-delta hint (the deltas are mostly rewording; the code is 5 tasks).
+
