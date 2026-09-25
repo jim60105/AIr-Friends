@@ -654,6 +654,12 @@ export function noteFixturePath(agentWorkspacePath: string, path: string): strin
  * Rendered tokens of the given note pointers, measured at the canonical
  * workspace root rather than the fixture's temporary one, so the recorded note
  * metric is the same on every run and every machine.
+ *
+ * This is a measurement-stability device only: the engine measures the real
+ * absolute path, whose length varies with `workspace.repoPath` and with the
+ * temporary root, and this value is a reported average that no selection ever
+ * reads. A deployment whose repo path is not the documented one injects a note
+ * entry a couple of tokens larger or smaller than the recorded average.
  */
 function noteSectionTokens(
   notes: readonly NoteRecallResult[],
@@ -678,8 +684,10 @@ export function memoryOutcomes(outcomes: readonly QueryOutcome[]): QueryOutcome[
  * The threshold and ratio rules are then replayed over this capture offline.
  * That replay is exact because the engine applies both after ranking and after
  * the `relatedTo` boost, and the fixture's memories and notes always fit their
- * Fast Recall budgets; `assertModelMatches` fails the run when that stops being
- * true.
+ * Fast Recall budgets — the memory budget and the note budget both, which is
+ * why the note capture is permissive on its own thresholds too. The model does
+ * not replay either budget; `assertModelMatches` fails the run when one of them
+ * starts to bind, because the engine would then drop an entry the model keeps.
  */
 export async function captureRanked(
   queries: readonly QuerySpec[],
