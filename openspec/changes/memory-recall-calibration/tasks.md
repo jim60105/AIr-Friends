@@ -13,4 +13,4 @@
 
 - [x] 3.1 Set the calibrated defaults in `src/core/memory-recall/recall-config.ts` (the single source the config loader spreads into `memory.recall`) and `config.example.yaml`, removing the "provisional" notes. Verify that the config-loader default test is updated and passes.
 - [x] 3.2 Add `tests/core/memory-recall/benchmark.test.ts`, which reruns the benchmark with the default config and asserts metric equality with `metrics.json`, a false-positive rate of at most 5% and p95 latency below 50 ms. Verify that it passes, and that it fails when `minRecallScore` is temporarily lowered by 1.0.
-- [ ] 3.3 Record the calibrated thresholds and metrics in `docs/MEMORY_DESIGN.md`. Run `deno task ci` and verify that it passes.
+- [x] 3.3 Record the calibrated thresholds and metrics in `docs/MEMORY_DESIGN.md`. Run the project gates (`deno fmt --check src/ tests/`, `deno lint src/ tests/`, `deno check src/main.ts`, `deno test`) and verify that they pass. The first step of `deno task ci` (`deno fmt --check`, whole repository) fails on master as well, on 260 pre-existing unformatted files that this change does not touch.

@@ -495,3 +495,54 @@ application or tests (`dev`, `start`, `start:config`, `test`, `test:watch`,
 `test:coverage`, `test:coverage:lcov`, `test:unit`, `test:integration`, `ci`)
 and in the container `CMD`; the container image also carries `assets/` so the
 dictionary is present at `/app/assets/jieba/dict.txt.big`.
+
+## 13. Recall threshold calibration (Memory Recall v2)
+
+Fast Recall's two score thresholds are derived from a committed offline fixture
+instead of being picked by hand. Fast Recall injects memories without the agent
+asking, so a false positive costs more than a miss, and the calibration optimizes
+for precision under a fixed false-positive cap.
+
+| Item | Value |
+|------|-------|
+| Fixture corpus | `tests/fixtures/memory-recall/corpus.jsonl` — 41 memory events plus 2 patch events, tagged with their source file (`user-public`, `user-private`, `channel`) |
+| Fixture queries | `tests/fixtures/memory-recall/queries.yaml` — 40 labeled queries, 17 of which expect nothing |
+| Benchmark script | `scripts/memory-recall-benchmark.ts` |
+| Recorded results | `tests/fixtures/memory-recall/metrics.json` |
+| Regression test | `tests/core/memory-recall/benchmark.test.ts` |
+| Fixed clock | `2026-09-01T00:00:00Z` |
+| Grid | `0.5` to `12.0` in steps of `0.25` (47 values) |
+| False-positive cap | 5% of all queries — at most 2 of the 40 |
+
+Calibrated defaults (`src/core/memory-recall/recall-config.ts`, mirrored in
+`config.example.yaml`):
+
+| Threshold | Value | Rule |
+|-----------|-------|------|
+| `minRecallScore` | `6.75` | grid value maximizing Recall@1 subject to the cap, evaluated with the second selection disabled so the metric isolates the first selection |
+| `secondRecallScore` | `6.5` | grid value maximizing Recall@2 under the same cap with `minRecallScore` fixed |
+
+Ties break on the lower false-positive rate, then on the higher threshold. The
+false-positive rate is the share of all queries for which Fast Recall selects at
+least one memory outside the query's expected set; Recall@k counts a positive
+query as recalled when at least one expected id is among the first k selected.
+
+Recorded metrics at those defaults: Recall@1 `0.9565` (22/23 positives), Recall@2
+`1.0` (23/23), false-positive rate `0.025` (1 of 40 — `q24`, the fixture's
+deliberately hard query, where the warm-up memory outranks the training-frequency
+memory and the correct answer is the admitted second result), average injected
+tokens `17.85`.
+
+**Regenerating.** `deno run --allow-read --allow-write --allow-env --allow-ffi
+scripts/memory-recall-benchmark.ts` prints the report, the per-query ranking and a
+constraint analysis; add `--write` to refresh `metrics.json`, then copy the printed
+thresholds into `recall-config.ts` and `config.example.yaml`. The script exits
+non-zero when no grid value meets the cap, reporting the best achievable rate and
+the failing queries: the fix is then in the fixture or in the ranking, never in the
+cap. Tuning is timeboxed to two hours per pass.
+
+The regression test reruns the fixture with the default configuration and asserts
+Recall@1, Recall@2, the false-positive rate and the average injected tokens exactly,
+plus a p95 search latency below 50 ms measured after one warm-up pass. The ceiling is
+generous on purpose — the observed cost is under a millisecond — so only pathological
+regressions fail. The benchmark makes no network request and no LLM call.
