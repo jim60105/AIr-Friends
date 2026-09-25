@@ -1,6 +1,6 @@
 ---
 name: memory-search
-description: Search through saved memories and your personal workspace notes by keywords. Use when you need to recall previous conversations, information about the user, or your own knowledge notes.
+description: Search through saved memories and your personal workspace notes with a natural-language query. Use when you need to recall previous conversations, information about the user, or your own knowledge notes.
 allowed-tools: Bash
 ---
 
@@ -40,8 +40,8 @@ Search through saved memories to retrieve relevant information.
 
 ## Parameters
 
-- `--query-file`: (Required) Path of the payload file containing the search keywords
-- `--limit`: (Optional) Maximum number of results (default: 10)
+- `--query-file`: (Required) Path of the payload file containing the search query
+- `--limit`: (Optional) Maximum number of results (default: 10, capped at 10)
 - `--category`: (Optional) Filter results by category: `fact`, `preference`, `episode`, `summary`, or `relationship`
 - `--scope`: (Optional) `user`, `channel`, or omit to search both user and channel memories
 
@@ -51,7 +51,14 @@ If the script fails, read the JSON error on stderr. It contains the fix. Common 
 
 ## Response Format
 
-Results include `tier`, `category`, `scope`, and `decay` fields for each memory entry. Results are sorted by decay-weighted relevance (higher decay × relevance score = higher ranking).
+Memory results come from **Deep Recall**. Each entry carries the memory fields (`id`, `enabled`, `visibility`, `importance`, `content`, `createdAt`, `lastModifiedAt`, `tier`, `category`, `scope`, `decay`, `relatedTo`, `supersedes`) plus:
+
+- `score`: the recall score, rounded to 3 decimals;
+- `matchedTerms`: the query terms this memory matched.
+
+Results are sorted by descending `score`, and no id appears twice. `--limit` is capped at 10, and the returned memories are bounded by the Deep Recall token budget (`memory.recall.deepRecallMaxTokens`).
+
+Write the query as **natural language**, not as keywords: the whole query text is tokenized (segmented and normalized), not split on whitespace, so `我喜歡喝的綠茶` matches a memory that says `我喜歡喝無糖綠茶`. `--scope` searches `user`, `channel`, or — when omitted — both, ranked in one list.
 
 ## Critical Rules
 
