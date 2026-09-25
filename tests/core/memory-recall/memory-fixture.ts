@@ -1,8 +1,9 @@
 // tests/core/memory-recall/memory-fixture.ts
 
-import { indexMemory } from "@core/memory-recall/indexed-memory.ts";
+import { indexMemory, lexicalIndex } from "@core/memory-recall/indexed-memory.ts";
 import { MemoryTokenizer } from "@core/memory-recall/tokenizer.ts";
-import type { IndexedMemory } from "@core/memory-recall/types.ts";
+import type { IndexedMemory, IndexedNoteFile } from "@core/memory-recall/types.ts";
+import { estimateTokens } from "@utils/token-counter.ts";
 import type { ResolvedMemory } from "../../../src/types/memory.ts";
 
 /** Fixed clock for every scoring test. ISO-8601, so string order is chronological. */
@@ -36,4 +37,30 @@ export function makeMemory(overrides: Partial<ResolvedMemory> = {}): ResolvedMem
 /** Indexes a memory with the shared tokenizer. */
 export function index(overrides: Partial<ResolvedMemory> = {}): IndexedMemory {
   return indexMemory(makeMemory(overrides), tokenizer);
+}
+
+/** An indexed note file built from chunk texts with their heading paths. */
+export function noteFile(
+  path: string,
+  chunks: Array<{ headingPath: string[]; text: string }>,
+): IndexedNoteFile {
+  let lineStart = 1;
+  return {
+    path,
+    title: path.slice(path.lastIndexOf("/") + 1).replace(/\.md$/, ""),
+    fileTokens: estimateTokens(chunks.map((chunk) => chunk.text).join("\n")),
+    modifiedAt: NOW_ISO,
+    chunks: chunks.map((chunk) => {
+      const lineEnd = lineStart + chunk.text.split("\n").length - 1;
+      const indexed = {
+        headingPath: chunk.headingPath,
+        lineStart,
+        lineEnd,
+        text: chunk.text,
+        ...lexicalIndex(chunk.text, tokenizer),
+      };
+      lineStart = lineEnd + 2;
+      return indexed;
+    }),
+  };
 }

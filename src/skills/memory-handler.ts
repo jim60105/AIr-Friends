@@ -4,10 +4,12 @@ import { createLogger } from "@utils/logger.ts";
 import { MemoryStore } from "@core/memory-store.ts";
 import { DEFAULT_RECALL_CONFIG } from "@core/memory-recall/recall-config.ts";
 import { MemoryRetriever } from "@core/memory-recall/retriever.ts";
+import type { MemoryRecallResult } from "@core/memory-recall/retriever.ts";
 import type {
   MemoryExportParams,
   MemoryPatchParams,
   MemorySaveParams,
+  MemorySearchEntry,
   MemorySearchParams,
   MemorySearchResult,
   SkillContext,
@@ -21,11 +23,13 @@ import type {
   MemoryScope,
   MemoryTier,
   MemoryVisibility,
+  NoteRecallResult,
   ResolvedMemory,
 } from "../types/memory.ts";
 import type { ChannelWorkspaceInfo } from "../types/workspace.ts";
 
 import { memoryOperationsTotal } from "@utils/metrics.ts";
+import { estimateTokens } from "@utils/token-counter.ts";
 
 const logger = createLogger("MemoryHandler");
 
@@ -362,13 +366,14 @@ export class MemoryHandler {
         }
       }
 
-      // Deep Recall ranks the whole query text; `maxTokens` is left to the
-      // retriever, which resolves it to `memory.recall.deepRecallMaxTokens`.
+      // Deep Recall ranks the whole query text. Its token budget is applied
+      // below, because memories and notes share it.
       const response = await this.retriever.search({
         mode: "deep",
         query: params.query,
         workspace: context.workspace,
         channelWorkspace,
+        agentWorkspacePath: context.agentWorkspacePath,
         category,
         scope,
         maxResults: limit,
@@ -381,45 +386,10 @@ export class MemoryHandler {
       });
       memoryOperationsTotal.labels("search", "public").inc();
 
-      const result: MemorySearchResult = {
-        memories: response.memories.map((entry) => {
-          const m = entry.memory;
-          return {
-            id: m.id,
-            enabled: m.enabled,
-            visibility: m.visibility,
-            importance: m.importance,
-            content: m.content,
-            createdAt: m.createdAt,
-            lastModifiedAt: m.lastModifiedAt,
-            tier: m.tier,
-            category: m.category,
-            scope: m.scope,
-            decay: m.decay,
-            relatedTo: m.relatedTo,
-            supersedes: m.supersedes,
-            score: Math.round(entry.score * 1000) / 1000,
-            matchedTerms: entry.matchedTerms,
-          };
-        }),
-      };
-
-      // Search agent workspace notes if available
-      if (context.agentWorkspacePath) {
-        try {
-          const keywords = params.query.trim().split(/\s+/);
-          result.agentNotes = await this.memoryStore.searchAgentWorkspace(
-            context.agentWorkspacePath,
-            keywords,
-            limit,
-          );
-        } catch (error) {
-          logger.warn("Failed to search agent workspace", {
-            error: error instanceof Error ? error.message : String(error),
-          });
-          result.agentNotes = [];
-        }
-      }
+      const admitted = this.admitDeepOutput(response.memories, response.notes);
+      const result: MemorySearchResult = { memories: admitted.memories };
+      // The section exists only for a session that has an agent workspace.
+      if (context.agentWorkspacePath) result.agentNotes = admitted.notes;
 
       return {
         success: true,
@@ -437,6 +407,56 @@ export class MemoryHandler {
       };
     }
   };
+
+  /**
+   * Deep Recall budget merge (Memory Recall v2 design, §8): memories and notes
+   * are admitted in descending score order while their serialized output
+   * entries fit `memory.recall.deepRecallMaxTokens`, which is what the agent
+   * receives. An item that does not fit is skipped and a later, smaller one is
+   * still considered, so the combined output never exceeds the budget. Equal
+   * scores keep the memory before the note.
+   *
+   * Ordering uses the engine score, before the rounding the output applies, so
+   * a near tie cannot be inverted by the value the agent sees.
+   */
+  private admitDeepOutput(
+    memories: readonly MemoryRecallResult[],
+    notes: readonly NoteRecallResult[],
+  ): { memories: MemorySearchEntry[]; notes: NoteRecallResult[] } {
+    type DeepItem =
+      | { kind: "memory"; score: number; entry: MemorySearchEntry }
+      | { kind: "note"; score: number; entry: NoteRecallResult };
+    const items: DeepItem[] = [
+      ...memories.map((item): DeepItem => ({
+        kind: "memory",
+        score: item.score,
+        entry: toSearchEntry(item),
+      })),
+      ...notes.map((note): DeepItem => ({
+        kind: "note",
+        score: note.score,
+        entry: { ...note, score: Math.round(note.score * 1000) / 1000 },
+      })),
+    ];
+    items.sort((a, b) => {
+      if (a.score !== b.score) return b.score - a.score;
+      if (a.kind === b.kind) return 0;
+      return a.kind === "memory" ? -1 : 1;
+    });
+
+    const budget = this.retriever.deepRecallMaxTokens;
+    const keptMemories: MemorySearchEntry[] = [];
+    const keptNotes: NoteRecallResult[] = [];
+    let tokens = 0;
+    for (const item of items) {
+      const size = estimateTokens(JSON.stringify(item.entry));
+      if (tokens + size > budget) continue;
+      tokens += size;
+      if (item.kind === "memory") keptMemories.push(item.entry);
+      else keptNotes.push(item.entry);
+    }
+    return { memories: keptMemories, notes: keptNotes };
+  }
 
   /**
    * Handle memory-stats skill
@@ -903,4 +923,29 @@ export class MemoryHandler {
       2,
     );
   }
+}
+
+/**
+ * The `memory-search` output entry of one recalled memory: the memory fields
+ * plus the recall diagnostics, with `score` rounded to 3 decimals.
+ */
+function toSearchEntry(entry: MemoryRecallResult): MemorySearchEntry {
+  const m = entry.memory;
+  return {
+    id: m.id,
+    enabled: m.enabled,
+    visibility: m.visibility,
+    importance: m.importance,
+    content: m.content,
+    createdAt: m.createdAt,
+    lastModifiedAt: m.lastModifiedAt,
+    tier: m.tier,
+    category: m.category,
+    scope: m.scope,
+    decay: m.decay,
+    relatedTo: m.relatedTo,
+    supersedes: m.supersedes,
+    score: Math.round(entry.score * 1000) / 1000,
+    matchedTerms: entry.matchedTerms,
+  };
 }

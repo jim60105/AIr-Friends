@@ -361,9 +361,40 @@ final_score = lexical_score (BM25 over the matched query terms)
 4. Each result carries `score` (rounded to 3 decimals) and `matchedTerms`;
    `decay` is still included for transparency.
 5. `limit` (default 10) is capped at 10, and the output is bounded by
-   `memory.recall.deepRecallMaxTokens`.
+   `memory.recall.deepRecallMaxTokens`, measured on the serialized entries of
+   memories and notes together.
 6. Without a `scope` parameter, user and channel memories are searched and
    ranked together; `scope` and `category` are the only filters.
+
+### Workspace notes
+
+The same engine ranks the agent's workspace notes. Every `.md` file under
+`{repoPath}/agent-workspace/` is indexed as heading-based chunks, except the
+root `README.md` and `notes/_index.md`. The file list is re-read on every
+search and only files whose size or modification time changed are re-chunked.
+Symbolic links are never followed and every entry must resolve, by real path,
+inside the workspace, so a planted link cannot leak another file through an
+excerpt. A file with more than one hard link is skipped as well: a hard link is
+not a symbolic link, so it passes both checks while still naming another user's
+memory file, and a legitimate note is singly-linked.
+
+- A chunk starts at every `##` or `###` heading and carries the file's absolute
+  path, its title, its heading path, its line range and the file's modification
+  time. A chunk longer than about 600 characters is split again at blank lines.
+- Notes are ranked by lexical score plus the entity and phrase bonuses, with
+  `N`, `df` and the average length computed over note chunks alone, because
+  chunk and memory lengths differ widely. A file is represented by its
+  best-scoring chunk and appears once.
+- Each `agentNotes` entry is a pointer — absolute path, title, heading path,
+  line range, excerpt, `fileTokens`, `modifiedAt`, `score`, `matchedTerms` and
+  up to three chunks — never the file content, so the agent can decide whether
+  to read the file.
+- Notes and memories share `memory.recall.deepRecallMaxTokens`: both are
+  admitted in descending score order and each item is measured by its
+  serialized output entry. Because a serialized entry is much larger than a
+  rendered line, the effective Deep Recall output is smaller than it was when
+  only memories were measured; a note whose pointer alone exceeds the budget is
+  skipped.
 
 ## 10. Migration (v1 → v2)
 

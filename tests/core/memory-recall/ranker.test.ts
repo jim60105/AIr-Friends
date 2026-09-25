@@ -2,9 +2,13 @@
 
 import { assert, assertAlmostEquals, assertEquals } from "@std/assert";
 import { buildQuery, detectHints } from "@core/memory-recall/query-hints.ts";
-import { compareScoredMemories, scoreMemories } from "@core/memory-recall/ranker.ts";
+import {
+  compareScoredMemories,
+  scoreMemories,
+  scoreNoteFiles,
+} from "@core/memory-recall/ranker.ts";
 import type { QueryHints, ScoredMemory } from "@core/memory-recall/types.ts";
-import { DAY_MS, index, NOW } from "./memory-fixture.ts";
+import { DAY_MS, index, noteFile, NOW } from "./memory-fixture.ts";
 
 const NO_HINTS: QueryHints = { current: false, historical: false, preference: false };
 
@@ -262,4 +266,87 @@ Deno.test("scoreMemories - repeated and reordered input gives deep-equal results
   assert(first.length > 1);
   assertEquals(first, second);
   assertEquals(first, reversed);
+});
+
+Deno.test("scoreNoteFiles - scores a chunk with note-only statistics and no memory metadata", () => {
+  const scored = scoreNoteFiles(
+    [noteFile("/ws/notes/a.md", [{ headingPath: ["A"], text: "keyboard" }])],
+    buildQuery("keyboard"),
+  );
+
+  assertEquals(scored.length, 1);
+  // N = df = 1 and dl = avgdl = 1, so the score is the bare idf: no recency and
+  // no metadata bonus, which a memory of the same content would carry.
+  assertAlmostEquals(scored[0].best.score, Math.log(4 / 3), 1e-9);
+  assertEquals(scored[0].best.matchedTerms, ["keyboard"]);
+  assertEquals(scored[0].best.chunk.headingPath, ["A"]);
+});
+
+Deno.test("scoreNoteFiles - aggregates per file with the best chunk as representative", () => {
+  const file = noteFile("/ws/notes/a.md", [
+    { headingPath: ["A"], text: "keyboard" },
+    { headingPath: ["B"], text: "keyboard keyboard keyboard" },
+  ]);
+
+  const scored = scoreNoteFiles([file], buildQuery("keyboard"));
+
+  assertEquals(scored.length, 1);
+  assertEquals(scored[0].chunks.length, 2);
+  assertEquals(scored[0].best.chunk.headingPath, ["B"]);
+  assertEquals(scored[0].best.score, scored[0].chunks[0].score);
+  assert(scored[0].best.score > scored[0].chunks[1].score);
+});
+
+Deno.test("scoreNoteFiles - a file without a matching chunk is absent", () => {
+  const files = [noteFile("/ws/notes/a.md", [{ headingPath: ["A"], text: "monitor" }])];
+
+  assertEquals(scoreNoteFiles(files, buildQuery("keyboard")), []);
+  assertEquals(scoreNoteFiles([], buildQuery("keyboard")), []);
+});
+
+Deno.test("scoreNoteFiles - files rank by best score, then by path", () => {
+  const byScore = scoreNoteFiles(
+    [
+      noteFile("/ws/notes/a.md", [{ headingPath: ["A"], text: "keyboard" }]),
+      noteFile("/ws/notes/z.md", [{ headingPath: ["Z"], text: "keyboard keyboard keyboard" }]),
+    ],
+    buildQuery("keyboard"),
+  );
+  assertEquals(byScore.map((item) => item.file.path), ["/ws/notes/z.md", "/ws/notes/a.md"]);
+
+  const byPath = scoreNoteFiles(
+    [
+      noteFile("/ws/notes/b.md", [{ headingPath: ["B"], text: "keyboard" }]),
+      noteFile("/ws/notes/a.md", [{ headingPath: ["A"], text: "keyboard" }]),
+    ],
+    buildQuery("keyboard"),
+  );
+  assertEquals(byPath.map((item) => item.file.path), ["/ws/notes/a.md", "/ws/notes/b.md"]);
+});
+
+Deno.test("scoreNoteFiles - chunks of one file rank by score, then by line", () => {
+  const file = noteFile("/ws/notes/a.md", [
+    { headingPath: ["A"], text: "keyboard" },
+    { headingPath: ["B"], text: "keyboard" },
+    { headingPath: ["C"], text: "keyboard keyboard" },
+  ]);
+
+  const scored = scoreNoteFiles([file], buildQuery("keyboard"));
+
+  assertEquals(
+    scored[0].chunks.map((item) => item.chunk.headingPath[0]),
+    ["C", "A", "B"],
+  );
+  assert(scored[0].chunks[1].chunk.lineStart < scored[0].chunks[2].chunk.lineStart);
+});
+
+Deno.test("scoreNoteFiles - the entity and phrase bonuses apply to a note chunk", () => {
+  const scored = scoreNoteFiles(
+    [noteFile("/ws/notes/a.md", [{ headingPath: ["A"], text: "air75 v3" }])],
+    buildQuery("air75 v3"),
+  );
+
+  // N = df = 1 and dl = avgdl = 3, so every matched term scores idf; 1.5 exact
+  // entity + 2.0 exact phrase, and no recency term.
+  assertAlmostEquals(scored[0].best.score, Math.log(4 / 3) * 3.5 + 3.5, 1e-9);
 });

@@ -26,6 +26,10 @@ Series design: `docs/superpowers/specs/2026-09-25-memory-recall-v2-design.md`, s
   - Entries with `isSymlink` are skipped without following them.
   - For every directory and file, `Deno.realPath` must stay under the real path of `agentWorkspacePath`, checked with the existing `validatePathWithinBoundary()`. A failure is skipped with a debug log.
   - Skipping symlinks outright is simpler than resolving them, and there is no legitimate need for links in the workspace.
+  - A file with more than one hard link is skipped too: a hard link is not a
+    symbolic link, so it passes `isSymlink` and the real-path check while still
+    naming another user's `memory.private.jsonl` from inside the workspace. A
+    legitimate note is singly-linked.
 - **Snapshot**: the same `snapshot-cache.ts`, keyed by file path with size and mtime, storing chunks and `fileTokens`.
 - **Separate statistics**: note `N`, `df` and `avgdl` come from note chunks only, because chunk and memory lengths differ widely.
 - **Excerpt**:

@@ -2,7 +2,7 @@
 
 import type { WorkspaceInfo } from "../types/workspace.ts";
 import type { PlatformAdapter } from "@platforms/platform-adapter.ts";
-import type { AgentNoteSearchResult, ResolvedMemory } from "../types/memory.ts";
+import type { NoteRecallResult, ResolvedMemory } from "../types/memory.ts";
 import type { PlatformMessage } from "../types/events.ts";
 import type { WorkspaceManager } from "@core/workspace-manager.ts";
 
@@ -127,7 +127,12 @@ export interface MemorySearchEntry extends Omit<ResolvedMemory, "author"> {
 export interface MemorySearchResult {
   /** Memories in descending recall score order, no duplicate ids. */
   memories: MemorySearchEntry[];
-  agentNotes?: AgentNoteSearchResult[];
+  /**
+   * Agent workspace note pointers, present only when the session has an agent
+   * workspace. Empty when no note matched or the shared Deep Recall budget
+   * admitted none.
+   */
+  agentNotes?: NoteRecallResult[];
 }
 
 /**

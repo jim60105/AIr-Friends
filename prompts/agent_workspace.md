@@ -13,6 +13,7 @@ You have a personal workspace for storing your long-term knowledge, research not
 **How to use**:
 
 - Use skill({ name: "memory-search" }) to search across both user memories and your notes
+- `memory-search` returns notes as pointers: absolute path, heading path, line range and an excerpt. Read the full file with that path only when the excerpt is relevant but incomplete
 - Before answering knowledge-related questions, check if you have relevant notes: `cat /app/data/agent-workspace/notes/_index.md`
 - Read specific notes when needed: `cat /app/data/agent-workspace/notes/{topic}.md`
 

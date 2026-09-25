@@ -1,15 +1,22 @@
 // src/core/memory-recall/retriever.ts
 
 import { estimateMemorySectionTokens } from "./fast-recall.ts";
+import { buildExcerpt } from "./note-chunker.ts";
 import { buildQuery, detectHints } from "./query-hints.ts";
-import { compareScoredMemories, scoreMemories } from "./ranker.ts";
+import { compareScoredMemories, scoreMemories, scoreNoteFiles } from "./ranker.ts";
+import type { ScoredNoteFile } from "./ranker.ts";
 import { MemorySnapshotCache } from "./snapshot-cache.ts";
 import type { DocumentLoader } from "./snapshot-cache.ts";
 import { MemoryTokenizer } from "./tokenizer.ts";
 import type { IndexedMemory, QueryHints, RecallQuery, ScoredMemory } from "./types.ts";
 import type { MemoryStore } from "../memory-store.ts";
 import type { MemoryRecallConfig } from "../../types/config.ts";
-import type { MemoryCategory, MemoryScope, ResolvedMemory } from "../../types/memory.ts";
+import type {
+  MemoryCategory,
+  MemoryScope,
+  NoteRecallResult,
+  ResolvedMemory,
+} from "../../types/memory.ts";
 import type { ChannelWorkspaceInfo, WorkspaceInfo } from "../../types/workspace.ts";
 
 /** Recall mode (Memory Recall v2 design, §7). */
@@ -17,6 +24,12 @@ export type RecallMode = "fast" | "deep";
 
 /** Deep Recall never returns more than this many memories. */
 export const DEEP_RECALL_MAX_LIMIT = 10;
+
+/** Characters of a note excerpt in Deep Recall (Memory Recall v2 design, §6). */
+const DEEP_NOTE_EXCERPT_CHARS = 320;
+
+/** Note chunks a Deep Recall pointer carries, in score order. */
+const NOTE_CHUNK_LIMIT = 3;
 
 /** Relation bonus of a related memory, as a fraction of its parent's score. */
 const RELATED_BONUS_RATIO = 0.2;
@@ -49,13 +62,13 @@ export interface MemoryRecallRequest {
   /** Ids of memories already present in the context. */
   excludeIds?: ReadonlySet<string>;
 
+  /** Agent workspace root; notes are searched only when it is given. */
+  agentWorkspacePath?: string;
+
   mode: RecallMode;
 
   /** Deep Recall: requested result count, capped at `DEEP_RECALL_MAX_LIMIT`. */
   maxResults?: number;
-
-  /** Deep Recall: token budget; defaults to `deepRecallMaxTokens`. */
-  maxTokens?: number;
 
   /** Restricts eligibility to one category. */
   category?: MemoryCategory;
@@ -75,12 +88,17 @@ export interface MemoryRecallResult {
   matchedTerms: string[];
 }
 
-/** The memories a recall request selected. Notes join in a later change. */
+/** What a recall request selected. */
 export interface RecallResponse {
   memories: MemoryRecallResult[];
+  /**
+   * Note pointers. Empty in Fast Recall, which returns notes from a later
+   * change, and empty without an agent workspace.
+   */
+  notes: NoteRecallResult[];
 }
 
-/** A selection plus the token cost of rendering it. */
+/** A Fast Recall selection plus the token cost of rendering it. */
 export interface MemorySelection {
   /** Selected memories, in ranking order. */
   memories: ScoredMemory[];
@@ -121,21 +139,39 @@ export class MemoryRetriever {
     this.now = options.now ?? (() => new Date());
   }
 
-  /** Runs one recall request and returns the memories its mode selected. */
+  /**
+   * Deep Recall budget of the whole skill output, resolved from
+   * `memory.recall`. The skill measures its serialized memory and note entries
+   * against it, because the budget is shared by both kinds (Memory Recall v2
+   * design, §8).
+   */
+  get deepRecallMaxTokens(): number {
+    return this.recallConfig.deepRecallMaxTokens;
+  }
+
+  /** Runs one recall request and returns what its mode selected. */
   async search(request: MemoryRecallRequest): Promise<RecallResponse> {
     const hints = detectHints(request.query);
     const query = buildQuery(request.query, request.previousUserMessage);
     const ranked = await this.rank(request, query, hints);
-    // Fast Recall reads its limits from `memory.recall`; Deep Recall takes the
-    // caller's limit and budget, capped by the engine.
-    const deepOptions = {
-      limit: request.maxResults ?? DEEP_RECALL_MAX_LIMIT,
-      maxTokens: request.maxTokens ?? this.recallConfig.deepRecallMaxTokens,
+    if (request.mode === "fast") {
+      // Fast Recall notes arrive with a later change, so the walk is skipped
+      // and a per-turn Fast Recall never pays for note indexing.
+      return { memories: this.selectFast(ranked).memories.map(toRecallResult), notes: [] };
+    }
+
+    // Deep Recall takes the caller's limit, capped by the engine; its token
+    // budget is the skill's, because memories and notes share it.
+    const limit = Math.min(
+      Math.max(request.maxResults ?? DEEP_RECALL_MAX_LIMIT, 0),
+      DEEP_RECALL_MAX_LIMIT,
+    );
+    return {
+      memories: this.selectDeep(ranked, limit).map(toRecallResult),
+      notes: request.agentWorkspacePath === undefined
+        ? []
+        : await this.selectDeepNotes(request.agentWorkspacePath, query, limit),
     };
-    const selection = request.mode === "fast"
-      ? this.selectFast(ranked)
-      : this.selectDeep(ranked, deepOptions);
-    return { memories: selection.memories.map(toRecallResult) };
   }
 
   /**
@@ -168,20 +204,31 @@ export class MemoryRetriever {
   /**
    * Deep Recall selection: every memory at or above `deepMinRecallScore` (0 by
    * default, so eligibility alone qualifies) up to the capped limit, admitted in
-   * descending score order within the budget. Superseded memories stay eligible.
-   *
-   * The budget is measured with the Fast Recall line format plus its headings,
-   * which is a conservative stand-in for the serialized skill entry: it reserves
-   * a few tokens that the Deep output never renders, so it can only under-fill
-   * `deepRecallMaxTokens`, never exceed it.
+   * ranking order. Superseded memories stay eligible. The token budget is left
+   * to the caller, because it is shared with the note results and measured on
+   * the serialized output entries.
    */
-  selectDeep(
-    ranked: readonly ScoredMemory[],
-    options: { limit: number; maxTokens: number },
-  ): MemorySelection {
-    const limit = Math.min(Math.max(options.limit, 0), DEEP_RECALL_MAX_LIMIT);
-    const kept = ranked.filter((item) => item.score >= this.recallConfig.deepMinRecallScore);
-    return this.fitBudget(kept, limit, options.maxTokens);
+  selectDeep(ranked: readonly ScoredMemory[], limit: number): ScoredMemory[] {
+    const capped = Math.min(Math.max(limit, 0), DEEP_RECALL_MAX_LIMIT);
+    return ranked
+      .filter((item) => item.score >= this.recallConfig.deepMinRecallScore)
+      .slice(0, capped);
+  }
+
+  /**
+   * Deep Recall note selection: the workspace notes at or above
+   * `deepMinRecallScore`, best first, up to the capped limit.
+   */
+  private async selectDeepNotes(
+    agentWorkspacePath: string,
+    query: RecallQuery,
+    limit: number,
+  ): Promise<NoteRecallResult[]> {
+    const files = await this.cache.getNotes(agentWorkspacePath);
+    return scoreNoteFiles(files, query)
+      .filter((item) => item.best.score >= this.recallConfig.deepMinRecallScore)
+      .slice(0, limit)
+      .map(toNoteResult);
   }
 
   /**
@@ -346,5 +393,28 @@ function toRecallResult(item: ScoredMemory): MemoryRecallResult {
     memory: item.indexed.memory,
     score: item.score,
     matchedTerms: item.matchedTerms,
+  };
+}
+
+/** Deep Recall pointer of one note file (Memory Recall v2 design, §6). */
+function toNoteResult(item: ScoredNoteFile): NoteRecallResult {
+  const best = item.best;
+  return {
+    path: item.file.path,
+    title: item.file.title,
+    headingPath: best.chunk.headingPath,
+    lineStart: best.chunk.lineStart,
+    lineEnd: best.chunk.lineEnd,
+    excerpt: buildExcerpt(best.chunk.text, best.matchedTerms, DEEP_NOTE_EXCERPT_CHARS),
+    fileTokens: item.file.fileTokens,
+    modifiedAt: item.file.modifiedAt,
+    score: best.score,
+    matchedTerms: best.matchedTerms,
+    chunks: item.chunks.slice(0, NOTE_CHUNK_LIMIT).map((scored) => ({
+      headingPath: scored.chunk.headingPath,
+      lineStart: scored.chunk.lineStart,
+      lineEnd: scored.chunk.lineEnd,
+      excerpt: buildExcerpt(scored.chunk.text, scored.matchedTerms, DEEP_NOTE_EXCERPT_CHARS),
+    })),
   };
 }

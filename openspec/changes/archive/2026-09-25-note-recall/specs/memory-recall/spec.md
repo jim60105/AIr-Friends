@@ -8,7 +8,7 @@ When a session has an agent workspace, recall SHALL index every `.md` file under
 - **Chunk metadata**: each chunk SHALL record the file's absolute path, the document title (the first level-1 heading, otherwise the file name without extension), its heading path, its 1-based start and end lines, and the file's modification time.
 - **Freshness**: the file list SHALL be re-read on every search. Each file SHALL be re-chunked only when its size or modification time changed.
 - **Ranking**: notes SHALL be ranked by lexical score, entity bonus and phrase bonus only, with `N`, `df` and average length computed over note chunks alone. Results SHALL be aggregated per file, with the file's best-scoring chunk as its representative and score.
-- **Containment**: symbolic links SHALL NOT be followed. Every file and directory SHALL resolve, by real path, inside the agent workspace; any entry that resolves outside it SHALL be skipped and SHALL NOT be read.
+- **Containment**: symbolic links SHALL NOT be followed. Every file and directory SHALL resolve, by real path, inside the agent workspace; any entry that resolves outside it SHALL be skipped and SHALL NOT be read. A file with more than one hard link SHALL be skipped as well, because a hard link passes both checks while still naming another file's content from inside the workspace.
 - When the session has no agent workspace, note results SHALL be empty.
 
 #### Scenario: Index page is not a result
@@ -31,6 +31,11 @@ When a session has an agent workspace, recall SHALL index every `.md` file under
 - **AND** `notes/linked-dir` is a symbolic link to a directory outside the workspace
 - **WHEN** recall runs with a query matching that private content
 - **THEN** neither link SHALL be read or returned
+
+#### Scenario: Hard-linked file is not indexed
+- **GIVEN** `notes/leak.md` is a hard link to a user's `memory.private.jsonl`
+- **WHEN** recall runs with a query matching that private content
+- **THEN** the link SHALL NOT be read or returned
 
 #### Scenario: Journal entries are searchable
 - **GIVEN** `journal/2026-09-20.md` matches the query

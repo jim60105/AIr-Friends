@@ -150,7 +150,6 @@ AIr-Friends/
 │       ├── metrics.ts
 │       ├── path-validator.ts
 │       ├── rss-fetcher.ts
-│       ├── text-search.ts
 │       └── token-counter.ts
 ├── skills/                  # Shell-based skill scripts
 │   ├── memory-save/

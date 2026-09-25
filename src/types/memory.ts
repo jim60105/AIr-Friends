@@ -162,9 +162,6 @@ export interface ResolvedMemory {
   author?: string;
 }
 
-/**
- * Agent workspace note search result
- */
 /** Statistics for a single memory category (public or private) */
 export interface MemoryStatCategory {
   total: number;
@@ -206,10 +203,55 @@ export interface MemoryStats {
   };
 }
 
-export interface AgentNoteSearchResult {
-  filePath: string;
-  matchedLines: Array<{
-    lineNumber: number;
-    content: string;
-  }>;
+/**
+ * One matching chunk of an agent workspace note, as returned by Deep Recall.
+ */
+export interface NoteRecallChunk {
+  /** Heading path of the chunk, `[title]` for text before the first `##`. */
+  headingPath: string[];
+
+  /** 1-based inclusive line range of the chunk. */
+  lineStart: number;
+  lineEnd: number;
+
+  /** Excerpt of the chunk around its matched terms. */
+  excerpt: string;
+}
+
+/**
+ * One agent workspace note as a Deep Recall pointer (Memory Recall v2 design,
+ * §6). It carries everything needed to decide whether to open the file and
+ * never the full content.
+ */
+export interface NoteRecallResult {
+  /** Absolute path, the same workspace path the agent was given. */
+  path: string;
+
+  /** Document title: the first level-1 heading, otherwise the file name. */
+  title: string;
+
+  /** Heading path of the representative chunk. */
+  headingPath: string[];
+
+  /** 1-based inclusive line range of the representative chunk. */
+  lineStart: number;
+  lineEnd: number;
+
+  /** Excerpt of the representative chunk around its matched terms. */
+  excerpt: string;
+
+  /** Estimated tokens of the whole file. */
+  fileTokens: number;
+
+  /** ISO date the file was last modified. */
+  modifiedAt: string;
+
+  /** Final score, that of the representative chunk. */
+  score: number;
+
+  /** Distinct query terms the representative chunk matched, sorted. */
+  matchedTerms: string[];
+
+  /** Deep Recall only: up to three best chunks of the file, in score order. */
+  chunks?: NoteRecallChunk[];
 }

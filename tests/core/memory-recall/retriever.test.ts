@@ -1,16 +1,12 @@
 // tests/core/memory-recall/retriever.test.ts
 
 import { assert, assertAlmostEquals, assertEquals } from "@std/assert";
-import {
-  estimateMemorySectionTokens,
-  RELEVANT_CHANNEL_MEMORY_HEADING,
-} from "@core/memory-recall/fast-recall.ts";
+import { estimateMemorySectionTokens } from "@core/memory-recall/fast-recall.ts";
 import { DEFAULT_RECALL_CONFIG } from "@core/memory-recall/recall-config.ts";
 import { MemoryRetriever } from "@core/memory-recall/retriever.ts";
 import type { MemoryRecallRequest, RecallResponse } from "@core/memory-recall/retriever.ts";
 import { MemoryStore } from "@core/memory-store.ts";
 import { WorkspaceManager } from "@core/workspace-manager.ts";
-import { estimateTokens } from "@utils/token-counter.ts";
 import type { MemoryRecallConfig } from "../../../src/types/config.ts";
 import type { Platform } from "../../../src/types/events.ts";
 import type { MemoryEntry, MemoryLogEvent, MemoryPatch } from "../../../src/types/memory.ts";
@@ -70,6 +66,8 @@ interface Fixture {
   dmWorkspace: WorkspaceInfo;
   guildWorkspace: WorkspaceInfo;
   channelWorkspace: ChannelWorkspaceInfo;
+  /** Agent workspace root, with its default files and a `notes/` directory. */
+  agentWorkspacePath: string;
   /** Absolute path of the user's public memory file. */
   publicPath: string;
   /** Absolute path of the user's private memory file. */
@@ -96,12 +94,17 @@ async function withFixture(fn: (fixture: Fixture) => Promise<void>): Promise<voi
     const dmWorkspace = await manager.getOrCreateWorkspace(event(true));
     const guildWorkspace = await manager.getOrCreateWorkspace(event(false));
     const channelWorkspace = await manager.getOrCreateChannelWorkspace("discord", "channel123");
+    const agentWorkspacePath = `${tempDir}/agent-workspace`;
+    await Deno.mkdir(`${agentWorkspacePath}/notes`, { recursive: true });
+    await Deno.writeTextFile(`${agentWorkspacePath}/README.md`, "# Agent Workspace\n");
+    await Deno.writeTextFile(`${agentWorkspacePath}/notes/_index.md`, "# Notes Index\n");
 
     await fn({
       store,
       dmWorkspace,
       guildWorkspace,
       channelWorkspace,
+      agentWorkspacePath,
       publicPath: store.getMemoryFilePathFor(dmWorkspace, "public"),
       privatePath: store.getMemoryFilePathFor(dmWorkspace, "private"),
       channelPath: store.getChannelMemoryFilePathFor(channelWorkspace),
@@ -665,30 +668,6 @@ Deno.test("search - Deep Recall caps the limit at 10", async () => {
   });
 });
 
-Deno.test("search - Deep Recall skips an item that does not fit the budget", async () => {
-  await withFixture(async (fixture) => {
-    await writeMemoryLog(fixture.publicPath, [
-      memoryEvent({
-        id: "long",
-        content: "鍵盤".repeat(80),
-        importance: "high",
-        tier: "working",
-        decay: 1,
-      }),
-      memoryEvent({ id: "short", content: "鍵盤" }),
-    ]);
-
-    const result = await permissiveRetriever(fixture.store).search({
-      mode: "deep",
-      query: "鍵盤",
-      workspace: fixture.dmWorkspace,
-      maxTokens: 60,
-    });
-
-    assertEquals(ids(result), ["short"]);
-  });
-});
-
 Deno.test("search - Deep Recall drops memories below deepMinRecallScore", async () => {
   await withFixture(async (fixture) => {
     await writeMemoryLog(fixture.publicPath, [
@@ -705,42 +684,6 @@ Deno.test("search - Deep Recall drops memories below deepMinRecallScore", async 
     assertEquals(
       ids(await permissiveRetriever(fixture.store, { deepMinRecallScore: 3 }).search(request)),
       ["strong"],
-    );
-  });
-});
-
-Deno.test("search - the Deep budget measures the attributed channel line", async () => {
-  await withFixture(async (fixture) => {
-    await writeMemoryLog(fixture.channelPath, [
-      memoryEvent({ id: "channel-mem", content: "鍵盤", scope: "channel", author: "user-9" }),
-    ]);
-    const request: MemoryRecallRequest = {
-      mode: "deep",
-      query: "鍵盤",
-      workspace: fixture.guildWorkspace,
-      channelWorkspace: fixture.channelWorkspace,
-    };
-    // Exactly the channel heading plus the attributed line.
-    const exact = estimateTokens(RELEVANT_CHANNEL_MEMORY_HEADING) +
-      estimateTokens("- [from user-9] 鍵盤");
-
-    assertEquals(
-      ids(
-        await permissiveRetriever(fixture.store).search({
-          ...request,
-          maxTokens: exact,
-        }),
-      ),
-      ["channel-mem"],
-    );
-    assertEquals(
-      ids(
-        await permissiveRetriever(fixture.store).search({
-          ...request,
-          maxTokens: exact - 1,
-        }),
-      ),
-      [],
     );
   });
 });
@@ -854,5 +797,167 @@ Deno.test("search - a patch that disables a memory takes effect on the next sear
     await writeMemoryLog(fixture.publicPath, [patchEvent("first", { enabled: false })], true);
 
     assertEquals(ids(await retriever.search(request)), []);
+  });
+});
+
+Deno.test("search - Deep Recall returns a note pointer", async () => {
+  await withFixture(async (fixture) => {
+    const path = `${fixture.agentWorkspacePath}/notes/cooking.md`;
+    await Deno.writeTextFile(
+      path,
+      "# Cooking Notes\n\nBest pasta recipe uses fresh tomatoes.\n",
+    );
+
+    const result = await permissiveRetriever(fixture.store).search({
+      mode: "deep",
+      query: "pasta",
+      workspace: fixture.dmWorkspace,
+      agentWorkspacePath: fixture.agentWorkspacePath,
+    });
+
+    assertEquals(result.memories, []);
+    assertEquals(result.notes.length, 1);
+    const [note] = result.notes;
+    assertEquals(note.path, path);
+    assertEquals(note.title, "Cooking Notes");
+    assertEquals(note.headingPath, ["Cooking Notes"]);
+    assertEquals(note.lineStart, 1);
+    assertEquals(note.lineEnd, 3);
+    assertEquals(note.excerpt, "Best pasta recipe uses fresh tomatoes.");
+    assert(note.fileTokens > 0);
+    assertEquals(note.modifiedAt.endsWith("Z"), true);
+    assert(note.score > 0);
+    assertEquals(note.matchedTerms, ["pasta"]);
+    assertEquals(note.chunks?.length, 1);
+  });
+});
+
+Deno.test("search - a note appears once with its best chunk and at most three chunks", async () => {
+  await withFixture(async (fixture) => {
+    const path = `${fixture.agentWorkspacePath}/notes/guide.md`;
+    await Deno.writeTextFile(
+      path,
+      [
+        "# Guide",
+        "",
+        "## One",
+        "keyboard one",
+        "",
+        "## Two",
+        "keyboard two keyboard",
+        "",
+        "## Three",
+        "keyboard three",
+        "",
+        "## Four",
+        "keyboard four",
+      ].join("\n") + "\n",
+    );
+
+    const result = await permissiveRetriever(fixture.store).search({
+      mode: "deep",
+      query: "keyboard",
+      workspace: fixture.dmWorkspace,
+      agentWorkspacePath: fixture.agentWorkspacePath,
+    });
+
+    assertEquals(result.notes.length, 1);
+    const [note] = result.notes;
+    assertEquals(note.chunks?.length, 3);
+    assertEquals(note.headingPath, note.chunks?.[0].headingPath);
+    assertEquals(note.lineStart, note.chunks?.[0].lineStart);
+    assertEquals(note.excerpt, note.chunks?.[0].excerpt);
+    // The representative chunk is the highest scoring one, and every chunk of
+    // the pointer is in score order.
+    assertEquals(note.headingPath, ["Guide", "Two"]);
+    assertEquals(
+      note.chunks?.map((chunk) => chunk.headingPath[1]),
+      ["Two", "One", "Three"],
+    );
+  });
+});
+
+Deno.test("search - the notes index page is not a result", async () => {
+  await withFixture(async (fixture) => {
+    await Deno.writeTextFile(
+      `${fixture.agentWorkspacePath}/notes/_index.md`,
+      "# Notes Index\n\n- keyboard guide\n",
+    );
+
+    const result = await permissiveRetriever(fixture.store).search({
+      mode: "deep",
+      query: "keyboard",
+      workspace: fixture.dmWorkspace,
+      agentWorkspacePath: fixture.agentWorkspacePath,
+    });
+
+    assertEquals(result.notes, []);
+  });
+});
+
+Deno.test("search - a note symlinked outside the workspace is not indexed", async () => {
+  await withFixture(async (fixture) => {
+    const privatePath = `${fixture.agentWorkspacePath}/../memory.private.jsonl`;
+    await Deno.writeTextFile(privatePath, "leaked keyboard secret\n");
+    await Deno.symlink(privatePath, `${fixture.agentWorkspacePath}/notes/leak.md`);
+
+    const result = await permissiveRetriever(fixture.store).search({
+      mode: "deep",
+      query: "keyboard",
+      workspace: fixture.dmWorkspace,
+      agentWorkspacePath: fixture.agentWorkspacePath,
+    });
+
+    assertEquals(result.notes, []);
+  });
+});
+
+Deno.test("search - notes are empty without an agent workspace", async () => {
+  await withFixture(async (fixture) => {
+    await Deno.writeTextFile(`${fixture.agentWorkspacePath}/notes/cooking.md`, "# C\n\npasta\n");
+
+    const result = await permissiveRetriever(fixture.store).search({
+      mode: "deep",
+      query: "pasta",
+      workspace: fixture.dmWorkspace,
+    });
+
+    assertEquals(result.notes, []);
+  });
+});
+
+Deno.test("search - Fast Recall returns no notes", async () => {
+  await withFixture(async (fixture) => {
+    await Deno.writeTextFile(`${fixture.agentWorkspacePath}/notes/cooking.md`, "# C\n\npasta\n");
+
+    const result = await permissiveRetriever(fixture.store).search({
+      mode: "fast",
+      query: "pasta",
+      workspace: fixture.dmWorkspace,
+      agentWorkspacePath: fixture.agentWorkspacePath,
+    });
+
+    assertEquals(result.notes, []);
+  });
+});
+
+Deno.test("search - Deep Recall caps the note count at the limit", async () => {
+  await withFixture(async (fixture) => {
+    for (let index = 0; index < 12; index++) {
+      await Deno.writeTextFile(
+        `${fixture.agentWorkspacePath}/notes/note-${String(index).padStart(2, "0")}.md`,
+        `# Note ${index}\n\nkeyboard\n`,
+      );
+    }
+
+    const result = await permissiveRetriever(fixture.store).search({
+      mode: "deep",
+      query: "keyboard",
+      workspace: fixture.dmWorkspace,
+      agentWorkspacePath: fixture.agentWorkspacePath,
+      maxResults: 50,
+    });
+
+    assertEquals(result.notes.length, 10);
   });
 });
