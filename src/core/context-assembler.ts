@@ -381,7 +381,11 @@ export class ContextAssembler {
   }
 
   /**
-   * Calculate estimated token count for the context
+   * Calculate estimated token count for the context.
+   *
+   * The estimate is content-only: the rendered decorations (section headings and
+   * the `- ` / `N. ` list prefixes) are excluded, as they always have been for
+   * the fixed memories. `formatContext()` charges the rendered sections instead.
    */
   private calculateTokenEstimate(
     systemPrompt: string,
@@ -432,7 +436,9 @@ export class ContextAssembler {
     // Calculate trigger message section
     const triggerSection = this.formatTriggerSection(context.triggerMessage);
 
-    // Calculate tokens used by mandatory sections (memories + Fast Recall + trigger)
+    // Calculate tokens used by mandatory sections (memories + Fast Recall + trigger).
+    // The rendered sections carry their decorations, so those are charged here;
+    // `memory.recall`'s budgets bound the rendered lines plus the headings.
     const mandatoryTokens = estimateTokens(memoriesSection) +
       estimateTokens(fastRecallSection) +
       estimateTokens(triggerSection);

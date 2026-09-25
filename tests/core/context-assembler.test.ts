@@ -1366,6 +1366,33 @@ Deno.test("ContextAssembler - Fast Recall keeps the unverified framing of a chan
   });
 });
 
+Deno.test("ContextAssembler - Fast Recall never recalls another channel's memories", async () => {
+  await withTestContextAssembler(async (assembler, store, manager) => {
+    const event = createTestEvent({ content: "Air75 V3 鍵盤" });
+    const workspace = await manager.getOrCreateWorkspace(event);
+    for (let i = 0; i < 4; i++) {
+      await store.addMemory(workspace, `喜歡無糖綠茶 ${i}`, { tier: "archive" });
+    }
+    const here = await manager.getOrCreateChannelWorkspace(event.platform, event.channelId);
+    const elsewhere = await manager.getOrCreateChannelWorkspace(event.platform, "another-channel");
+    await store.addChannelMemory(here, "Air75 V3 鍵盤", { tier: "archive", author: "user-9" });
+    await store.addChannelMemory(elsewhere, "Air75 V3 鍵盤", {
+      tier: "archive",
+      author: "user-8",
+    });
+
+    const context = await assembler.assembleContext(
+      event,
+      workspace,
+      createMockMessageFetcher([]),
+    );
+    const formatted = assembler.formatContext(context);
+
+    assertEquals(context.fastRecall?.map((m) => m.author), ["user-9"]);
+    assertEquals(formatted.userMessage.includes("user-8"), false);
+  });
+});
+
 Deno.test("ContextAssembler - Fast Recall queries with the trigger and the same user's previous message", async () => {
   const { retriever, requests } = recordingRetriever();
   await withTestContextAssembler(async (assembler, store, manager) => {
@@ -1500,7 +1527,10 @@ Deno.test("ContextAssembler - the memory portion stays within the three budgets 
     assertEquals(context.fastRecall?.map((m) => m.content), ["Air75 V3 鍵盤"]);
 
     // The memory portion is everything the fixed sections and Fast Recall
-    // contribute, so each budget must hold on its own.
+    // contribute, so each budget must hold on its own. `sectionBodyTokens`
+    // returns 0 for an absent heading, so the Fast Recall heading is asserted
+    // first: otherwise its bound would be vacuous.
+    assertStringIncludes(formatted.userMessage, "## Relevant Memory");
     assertEquals(sectionBodyTokens(formatted.userMessage, "## Core Memories (User)") <= 512, true);
     assertEquals(sectionBodyTokens(formatted.userMessage, "## Recent Context (User)") <= 384, true);
     assertEquals(sectionBodyTokens(formatted.userMessage, "## Relevant Memory") <= 192, true);
