@@ -16,6 +16,7 @@ import type {
   GitCredentialConfig,
   IdleTimeoutConfig,
   MemoryMaintenanceConfig,
+  MemoryRecallConfig,
   RateLimitConfig,
   RemindersConfig,
   SandboxConfig,
@@ -24,6 +25,7 @@ import type {
 import type { MCPServerConfig } from "../acp/types.ts";
 import { VALID_PLATFORMS } from "../types/events.ts";
 import { ConfigError, ErrorCode } from "../types/errors.ts";
+import { DEFAULT_RECALL_CONFIG } from "./memory-recall/recall-config.ts";
 import { DISCORD_WHITELIST_PATTERN } from "../platforms/discord/discord-config.ts";
 import { MISSKEY_WHITELIST_PATTERN } from "../platforms/misskey/misskey-config.ts";
 
@@ -107,6 +109,48 @@ function normalizeSectionReasoningEffort(
   }
 }
 
+/** Bounds and shape of one `memory.recall` key. */
+interface RecallKeyRule {
+  /** Lower bound; inclusive unless `exclusiveMin` is set. */
+  min: number;
+  /** Inclusive upper bound. */
+  max?: number;
+  /** Requires a whole number. */
+  integer?: boolean;
+  /** Makes the lower bound exclusive. */
+  exclusiveMin?: boolean;
+  /** Human-readable expectation, used in the error message. */
+  expect: string;
+}
+
+/**
+ * Validates one numeric `memory.recall` key and returns it. Unlike the looser
+ * sections, which clamp out-of-range values with a warning, an invalid recall
+ * key fails the whole load with a `ConfigError` (Memory Recall v2 design, §10).
+ */
+function requireRecallNumber(
+  section: Record<string, unknown>,
+  key: keyof MemoryRecallConfig,
+  rule: RecallKeyRule,
+): number {
+  const value = section[key];
+  const label = `memory.recall.${key}`;
+  const inRange = typeof value === "number" &&
+    Number.isFinite(value) &&
+    (rule.exclusiveMin ? value > rule.min : value >= rule.min) &&
+    (rule.max === undefined || value <= rule.max) &&
+    (rule.integer !== true || Number.isInteger(value));
+
+  if (!inRange) {
+    throw new ConfigError(
+      ErrorCode.CONFIG_INVALID,
+      `${label} must be ${rule.expect}`,
+      { field: label, value },
+    );
+  }
+  return value as number;
+}
+
 /** Load and normalize channel configs from raw input */
 function loadChannels(rawChannels: unknown[]): ChannelConfig[] {
   const channels: ChannelConfig[] = [];
@@ -154,6 +198,7 @@ const DEFAULT_CONFIG: Partial<Config> = {
     maxChars: 2000,
     recentMessageLimit: 20,
     workingTierLimit: 20,
+    recall: { ...DEFAULT_RECALL_CONFIG },
   },
   logging: {
     level: "INFO",
@@ -512,6 +557,64 @@ function validateConfig(config: Record<string, unknown>): void {
       [sr.minIntervalMs, sr.maxIntervalMs] = [sr.maxIntervalMs, sr.minIntervalMs];
     }
   }
+
+  // Memory recall selection defaults and validation
+  const memorySection = typeof config.memory === "object" && config.memory !== null
+    ? config.memory as Record<string, unknown>
+    : {};
+  const rawRecall = memorySection.recall;
+  if (
+    rawRecall !== undefined &&
+    (typeof rawRecall !== "object" || rawRecall === null || Array.isArray(rawRecall))
+  ) {
+    throw new ConfigError(
+      ErrorCode.CONFIG_INVALID,
+      "memory.recall must be a mapping",
+      { field: "memory.recall", value: rawRecall },
+    );
+  }
+
+  const recallValues: Record<string, unknown> = {
+    ...DEFAULT_RECALL_CONFIG,
+    ...(rawRecall as Record<string, unknown> | undefined),
+  };
+  const recall: MemoryRecallConfig = {
+    fastRecallMaxResults: requireRecallNumber(recallValues, "fastRecallMaxResults", {
+      min: 0,
+      integer: true,
+      expect: "an integer >= 0",
+    }),
+    fastRecallMaxTokens: requireRecallNumber(recallValues, "fastRecallMaxTokens", {
+      min: 0,
+      integer: true,
+      expect: "an integer >= 0",
+    }),
+    minRecallScore: requireRecallNumber(recallValues, "minRecallScore", {
+      min: 0,
+      expect: "a number >= 0",
+    }),
+    secondRecallScore: requireRecallNumber(recallValues, "secondRecallScore", {
+      min: 0,
+      expect: "a number >= 0",
+    }),
+    secondResultRatio: requireRecallNumber(recallValues, "secondResultRatio", {
+      min: 0,
+      max: 1,
+      expect: "a number between 0 and 1",
+    }),
+    deepRecallMaxTokens: requireRecallNumber(recallValues, "deepRecallMaxTokens", {
+      min: 0,
+      integer: true,
+      exclusiveMin: true,
+      expect: "an integer greater than 0",
+    }),
+    deepMinRecallScore: requireRecallNumber(recallValues, "deepMinRecallScore", {
+      min: 0,
+      expect: "a number >= 0",
+    }),
+  };
+  memorySection.recall = recall;
+  config.memory = memorySection;
 
   // Memory Maintenance defaults and validation
   if (!config.memoryMaintenance) {

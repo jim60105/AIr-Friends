@@ -227,6 +227,18 @@ memory:
   #   "curated" — user-driven channel writes are rejected; durable channel
   #     knowledge comes only from an operator/curated flow.
   channelWritePolicy: sessions
+  # Memory Recall v2 selection. Every key is optional and falls back to its
+  # default; a value outside its allowed range fails configuration loading.
+  recall:
+    fastRecallMaxResults: 2 # Fast Recall: maximum selected memories (default: 2)
+    fastRecallMaxTokens: 192 # Fast Recall: token budget of the memory section (default: 192)
+    # Score thresholds are provisional until the offline benchmark calibrates
+    # them (`memory-recall-calibration`).
+    minRecallScore: 3.0 # Fast Recall: minimum top score (default: 3.0)
+    secondRecallScore: 3.0 # Fast Recall: minimum score of a second memory (default: 3.0)
+    secondResultRatio: 0.65 # Fast Recall: minimum second-to-first score ratio, 0-1 (default: 0.65)
+    deepRecallMaxTokens: 1024 # Deep Recall: token budget of the whole output (default: 1024)
+    deepMinRecallScore: 0 # Deep Recall: minimum score to keep, 0 = eligibility alone (default: 0)
 
 # Conversation summary - auto-generate summaries after each session
 conversationSummary:
