@@ -2513,11 +2513,15 @@ Deno.test("Config - applies memory.recall defaults", async () => {
     assertEquals(result.memory.recall?.fastRecallEnabled, true);
     assertEquals(result.memory.recall?.fastRecallMaxResults, 2);
     assertEquals(result.memory.recall?.fastRecallMaxTokens, 192);
+    assertEquals(result.memory.recall?.fastRecallNoteMaxResults, 2);
+    assertEquals(result.memory.recall?.fastRecallNoteMaxTokens, 256);
     assertEquals(result.memory.recall?.coreMaxTokens, 512);
     assertEquals(result.memory.recall?.workingMaxItems, 4);
     assertEquals(result.memory.recall?.workingMaxTokens, 384);
     assertEquals(result.memory.recall?.minRecallScore, 6.75);
     assertEquals(result.memory.recall?.secondRecallScore, 6.5);
+    assertEquals(result.memory.recall?.noteMinRecallScore, 3);
+    assertEquals(result.memory.recall?.secondNoteRecallScore, 3);
     assertEquals(result.memory.recall?.secondResultRatio, 0.65);
     assertEquals(result.memory.recall?.deepRecallMaxTokens, 1024);
     assertEquals(result.memory.recall?.deepMinRecallScore, 0);
@@ -2534,9 +2538,13 @@ Deno.test("Config - memory.recall keeps every default a partial override does no
     assertEquals(result.memory.recall?.fastRecallMaxTokens, 128);
     assertEquals(result.memory.recall?.fastRecallEnabled, true);
     assertEquals(result.memory.recall?.fastRecallMaxResults, 2);
+    assertEquals(result.memory.recall?.fastRecallNoteMaxResults, 2);
+    assertEquals(result.memory.recall?.fastRecallNoteMaxTokens, 256);
     assertEquals(result.memory.recall?.coreMaxTokens, 512);
     assertEquals(result.memory.recall?.workingMaxItems, 4);
     assertEquals(result.memory.recall?.workingMaxTokens, 384);
+    assertEquals(result.memory.recall?.noteMinRecallScore, 3);
+    assertEquals(result.memory.recall?.secondNoteRecallScore, 3);
     assertEquals(result.memory.recall?.secondResultRatio, 0.65);
     assertEquals(result.memory.recall?.deepRecallMaxTokens, 1024);
   });
@@ -2636,6 +2644,86 @@ Deno.test("Config - rejects a non-boolean memory.recall.fastRecallEnabled", asyn
   const memory = `memory:
   recall:
     fastRecallEnabled: "yes"`;
+
+  await withTestConfig(recallConfig(memory), async (dir) => {
+    await assertRejects(() => loadConfig(dir), ConfigError);
+  });
+});
+
+Deno.test("Config - rejects a negative memory.recall.fastRecallNoteMaxResults", async () => {
+  const memory = `memory:
+  recall:
+    fastRecallNoteMaxResults: -1`;
+
+  await withTestConfig(recallConfig(memory), async (dir) => {
+    await assertRejects(() => loadConfig(dir), ConfigError);
+  });
+});
+
+Deno.test("Config - rejects a non-integer memory.recall.fastRecallNoteMaxResults", async () => {
+  const memory = `memory:
+  recall:
+    fastRecallNoteMaxResults: 1.5`;
+
+  await withTestConfig(recallConfig(memory), async (dir) => {
+    await assertRejects(() => loadConfig(dir), ConfigError);
+  });
+});
+
+Deno.test("Config - rejects a negative memory.recall.fastRecallNoteMaxTokens", async () => {
+  const memory = `memory:
+  recall:
+    fastRecallNoteMaxTokens: -1`;
+
+  await withTestConfig(recallConfig(memory), async (dir) => {
+    await assertRejects(() => loadConfig(dir), ConfigError);
+  });
+});
+
+Deno.test("Config - rejects a non-integer memory.recall.fastRecallNoteMaxTokens", async () => {
+  const memory = `memory:
+  recall:
+    fastRecallNoteMaxTokens: 1.5`;
+
+  await withTestConfig(recallConfig(memory), async (dir) => {
+    await assertRejects(() => loadConfig(dir), ConfigError);
+  });
+});
+
+Deno.test("Config - rejects a negative memory.recall.noteMinRecallScore", async () => {
+  const memory = `memory:
+  recall:
+    noteMinRecallScore: -0.5`;
+
+  await withTestConfig(recallConfig(memory), async (dir) => {
+    await assertRejects(() => loadConfig(dir), ConfigError);
+  });
+});
+
+Deno.test("Config - rejects a non-numeric memory.recall.noteMinRecallScore", async () => {
+  const memory = `memory:
+  recall:
+    noteMinRecallScore: "3"`;
+
+  await withTestConfig(recallConfig(memory), async (dir) => {
+    await assertRejects(() => loadConfig(dir), ConfigError);
+  });
+});
+
+Deno.test("Config - rejects a negative memory.recall.secondNoteRecallScore", async () => {
+  const memory = `memory:
+  recall:
+    secondNoteRecallScore: -0.5`;
+
+  await withTestConfig(recallConfig(memory), async (dir) => {
+    await assertRejects(() => loadConfig(dir), ConfigError);
+  });
+});
+
+Deno.test("Config - rejects a non-numeric memory.recall.secondNoteRecallScore", async () => {
+  const memory = `memory:
+  recall:
+    secondNoteRecallScore: "3"`;
 
   await withTestConfig(recallConfig(memory), async (dir) => {
     await assertRejects(() => loadConfig(dir), ConfigError);

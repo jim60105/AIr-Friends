@@ -432,6 +432,20 @@ export interface MemoryRecallConfig {
   fastRecallMaxTokens: number;
 
   /**
+   * Fast Recall: maximum selected note pointers (default: 2). `0` selects none
+   * and skips the note walk entirely, which is the note off-switch; a value
+   * above 2 cannot select more than the first and the second.
+   */
+  fastRecallNoteMaxResults: number;
+
+  /**
+   * Fast Recall: token budget of the rendered note sub-section (default: 256),
+   * independent of `fastRecallMaxTokens`. `0` fits no note entry and therefore
+   * selects none.
+   */
+  fastRecallNoteMaxTokens: number;
+
+  /**
    * Fixed loading: token budget shared by the user and the channel core
    * sections (default: 512). User core memories are considered first, so a
    * large user core can crowd out channel core memories. A core memory that
@@ -459,7 +473,17 @@ export interface MemoryRecallConfig {
   /** Fast Recall: minimum score of a second memory (calibrated by the offline benchmark). */
   secondRecallScore: number;
 
-  /** Fast Recall: minimum ratio of the second score to the top score (default: 0.65). */
+  /** Fast Recall: minimum score of the top note (calibrated by the offline benchmark). */
+  noteMinRecallScore: number;
+
+  /** Fast Recall: minimum score of a second note (calibrated by the offline benchmark). */
+  secondNoteRecallScore: number;
+
+  /**
+   * Fast Recall: minimum ratio of the second score to the top score (default:
+   * 0.65). Shared by the memory and the note selection, which are otherwise
+   * independent.
+   */
   secondResultRatio: number;
 
   /** Deep Recall: token budget of the whole output (default: 1024). */

@@ -233,6 +233,8 @@ memory:
     fastRecallEnabled: true # Fast Recall: run the per-turn recall search and render its section (default: true)
     fastRecallMaxResults: 2 # Fast Recall: maximum selected memories (default: 2)
     fastRecallMaxTokens: 192 # Fast Recall: token budget of the memory section (default: 192)
+    fastRecallNoteMaxResults: 2 # Fast Recall: maximum selected agent workspace note pointers (default: 2; 0 turns note pointers off)
+    fastRecallNoteMaxTokens: 256 # Fast Recall: token budget of the note sub-section, independent of the memory budget (default: 256)
     # Fixed loading budgets. User memories are considered before channel ones,
     # so a large user core can crowd out channel core memories; raise the
     # budget if too much context is lost.
@@ -240,9 +242,12 @@ memory:
     workingMaxItems: 4 # Fixed loading: newest working-tier candidates considered, user and channel together (default: 4)
     workingMaxTokens: 384 # Fixed loading: token budget shared by the user and channel working entries (default: 384)
     # Score thresholds are calibrated by scripts/memory-recall-benchmark.ts from
-    # tests/fixtures/memory-recall/ (at most 5% memory false positives).
+    # tests/fixtures/memory-recall/ (at most 5% false positives, for memories and
+    # for notes separately).
     minRecallScore: 6.75 # Fast Recall: minimum top score (default: 6.75)
     secondRecallScore: 6.5 # Fast Recall: minimum score of a second memory (default: 6.5)
+    noteMinRecallScore: 3 # Fast Recall: minimum top note score (provisional until the benchmark calibrates it)
+    secondNoteRecallScore: 3 # Fast Recall: minimum score of a second note (provisional until the benchmark calibrates it)
     secondResultRatio: 0.65 # Fast Recall: minimum second-to-first score ratio, 0-1 (default: 0.65)
     deepRecallMaxTokens: 1024 # Deep Recall: token budget of the whole output (default: 1024)
     deepMinRecallScore: 0 # Deep Recall: minimum score to keep, 0 = eligibility alone (default: 0)
