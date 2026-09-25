@@ -164,3 +164,4 @@ config.local.yaml
 config.yaml
 my-prompts/
 tmp/
+.worktrees/
