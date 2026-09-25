@@ -1,6 +1,6 @@
 // src/core/memory-recall/retriever.ts
 
-import { estimateMemorySectionTokens } from "./fast-recall.ts";
+import { estimateMemorySectionTokens, estimateNoteSectionTokens } from "./fast-recall.ts";
 import { buildExcerpt } from "./note-chunker.ts";
 import { buildQuery, detectHints } from "./query-hints.ts";
 import { compareScoredMemories, scoreMemories, scoreNoteFiles } from "./ranker.ts";
@@ -27,6 +27,9 @@ export const DEEP_RECALL_MAX_LIMIT = 10;
 
 /** Characters of a note excerpt in Deep Recall (Memory Recall v2 design, §6). */
 const DEEP_NOTE_EXCERPT_CHARS = 320;
+
+/** Characters of a note excerpt in Fast Recall (Memory Recall v2 design, §8). */
+const FAST_NOTE_EXCERPT_CHARS = 160;
 
 /** Note chunks a Deep Recall pointer carries, in score order. */
 const NOTE_CHUNK_LIMIT = 3;
@@ -92,8 +95,9 @@ export interface MemoryRecallResult {
 export interface RecallResponse {
   memories: MemoryRecallResult[];
   /**
-   * Note pointers. Empty in Fast Recall, which returns notes from a later
-   * change, and empty without an agent workspace.
+   * Note pointers: the Fast Recall selection, or the Deep Recall selection.
+   * Empty without an agent workspace, and empty in Fast Recall when
+   * `memory.recall.fastRecallNoteMaxResults` is 0.
    */
   notes: NoteRecallResult[];
 }
@@ -155,9 +159,15 @@ export class MemoryRetriever {
     const query = buildQuery(request.query, request.previousUserMessage);
     const ranked = await this.rank(request, query, hints);
     if (request.mode === "fast") {
-      // Fast Recall notes arrive with a later change, so the walk is skipped
-      // and a per-turn Fast Recall never pays for note indexing.
-      return { memories: this.selectFast(ranked).memories.map(toRecallResult), notes: [] };
+      return {
+        memories: this.selectFast(ranked).memories.map(toRecallResult),
+        // Notes are selected by their own rule and their own budget, so a note
+        // can never displace a memory and the note walk is skipped entirely
+        // when note pointers are off.
+        notes: request.agentWorkspacePath === undefined
+          ? []
+          : await this.selectFastNotes(request.agentWorkspacePath, query),
+      };
     }
 
     // Deep Recall takes the caller's limit, capped by the engine; its token
@@ -202,6 +212,43 @@ export class MemoryRetriever {
   }
 
   /**
+   * Fast Recall note selection: the same rule as the memory selection
+   * (`noteMinRecallScore`, `secondNoteRecallScore`, the shared
+   * `secondResultRatio`) over the note files, with its own result limit and its
+   * own token budget (Memory Recall v2 design, §8).
+   */
+  private async selectFastNotes(
+    agentWorkspacePath: string,
+    query: RecallQuery,
+  ): Promise<NoteRecallResult[]> {
+    const config = this.recallConfig;
+    // `0` is the note off-switch: no note is selected and the walk is skipped.
+    if (config.fastRecallNoteMaxResults < 1 || config.fastRecallNoteMaxTokens < 1) return [];
+
+    const files = await this.cache.getNotes(agentWorkspacePath);
+    const ranked = scoreNoteFiles(files, query);
+    const top = ranked[0];
+    if (top === undefined || top.best.score < config.noteMinRecallScore) return [];
+
+    const candidates = [top];
+    const second = ranked[1];
+    if (
+      config.fastRecallNoteMaxResults >= 2 &&
+      second !== undefined &&
+      second.best.score >= config.secondNoteRecallScore &&
+      second.best.score >= config.secondResultRatio * top.best.score
+    ) {
+      candidates.push(second);
+    }
+
+    return this.fitNoteBudget(
+      candidates,
+      config.fastRecallNoteMaxResults,
+      config.fastRecallNoteMaxTokens,
+    );
+  }
+
+  /**
    * Deep Recall selection: every memory at or above `deepMinRecallScore` (0 by
    * default, so eligibility alone qualifies) up to the capped limit, admitted in
    * ranking order. Superseded memories stay eligible. The token budget is left
@@ -228,7 +275,7 @@ export class MemoryRetriever {
     return scoreNoteFiles(files, query)
       .filter((item) => item.best.score >= this.recallConfig.deepMinRecallScore)
       .slice(0, limit)
-      .map(toNoteResult);
+      .map((item) => toNoteResult(item, DEEP_NOTE_EXCERPT_CHARS, NOTE_CHUNK_LIMIT));
   }
 
   /**
@@ -255,6 +302,28 @@ export class MemoryRetriever {
       memories,
       tokens: estimateMemorySectionTokens(memories.map((item) => item.indexed.memory)),
     };
+  }
+
+  /**
+   * Admits note candidates in rank order while fewer than `limit` are admitted
+   * and the rendered sub-section still fits `maxTokens`, heading included. A
+   * note that does not fit is skipped and a later, smaller one is still
+   * considered; nothing is added to fill a gap.
+   */
+  private fitNoteBudget(
+    candidates: readonly ScoredNoteFile[],
+    limit: number,
+    maxTokens: number,
+  ): NoteRecallResult[] {
+    const results = candidates.map((item) => toNoteResult(item, FAST_NOTE_EXCERPT_CHARS, 0));
+    const notes: NoteRecallResult[] = [];
+    for (const result of results) {
+      if (notes.length >= limit) break;
+      const next = [...notes, result];
+      if (estimateNoteSectionTokens(next) > maxTokens) continue;
+      notes.push(result);
+    }
+    return notes;
   }
 
   /** Ranked, eligible memories of a request, before mode selection. */
@@ -396,8 +465,16 @@ function toRecallResult(item: ScoredMemory): MemoryRecallResult {
   };
 }
 
-/** Deep Recall pointer of one note file (Memory Recall v2 design, §6). */
-function toNoteResult(item: ScoredNoteFile): NoteRecallResult {
+/**
+ * Pointer of one note file (Memory Recall v2 design, §6 and §8). Deep Recall
+ * carries its best `chunkLimit` chunks; Fast Recall passes `0` and the key is
+ * omitted, because a Fast pointer is a single excerpt.
+ */
+function toNoteResult(
+  item: ScoredNoteFile,
+  excerptChars: number,
+  chunkLimit: number,
+): NoteRecallResult {
   const best = item.best;
   return {
     path: item.file.path,
@@ -405,16 +482,20 @@ function toNoteResult(item: ScoredNoteFile): NoteRecallResult {
     headingPath: best.chunk.headingPath,
     lineStart: best.chunk.lineStart,
     lineEnd: best.chunk.lineEnd,
-    excerpt: buildExcerpt(best.chunk.text, best.matchedTerms, DEEP_NOTE_EXCERPT_CHARS),
+    excerpt: buildExcerpt(best.chunk.text, best.matchedTerms, excerptChars),
     fileTokens: item.file.fileTokens,
     modifiedAt: item.file.modifiedAt,
     score: best.score,
     matchedTerms: best.matchedTerms,
-    chunks: item.chunks.slice(0, NOTE_CHUNK_LIMIT).map((scored) => ({
-      headingPath: scored.chunk.headingPath,
-      lineStart: scored.chunk.lineStart,
-      lineEnd: scored.chunk.lineEnd,
-      excerpt: buildExcerpt(scored.chunk.text, scored.matchedTerms, DEEP_NOTE_EXCERPT_CHARS),
-    })),
+    ...(chunkLimit > 0
+      ? {
+        chunks: item.chunks.slice(0, chunkLimit).map((scored) => ({
+          headingPath: scored.chunk.headingPath,
+          lineStart: scored.chunk.lineStart,
+          lineEnd: scored.chunk.lineEnd,
+          excerpt: buildExcerpt(scored.chunk.text, scored.matchedTerms, excerptChars),
+        })),
+      }
+      : {}),
   };
 }

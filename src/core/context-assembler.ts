@@ -7,7 +7,7 @@ import { WorkspaceManager } from "./workspace-manager.ts";
 import { loadSystemPrompt } from "./config-loader.ts";
 import { DEFAULT_RECALL_CONFIG } from "./memory-recall/recall-config.ts";
 import { renderFixedMemoryLine, selectFixedMemories } from "./memory-recall/fixed-selection.ts";
-import { renderFastRecallSection } from "./memory-recall/fast-recall.ts";
+import { renderFastRecallSection, renderNoteEntry } from "./memory-recall/fast-recall.ts";
 import { MemoryRetriever } from "./memory-recall/retriever.ts";
 import type { FixedMemoryBudgets } from "./memory-recall/fixed-selection.ts";
 import type { TemplateVariables } from "../types/template.ts";
@@ -20,7 +20,7 @@ import type {
 } from "../types/context.ts";
 import type { ChannelWorkspaceInfo, WorkspaceInfo } from "../types/workspace.ts";
 import type { NormalizedEvent, Platform, PlatformMessage } from "../types/events.ts";
-import type { ResolvedMemory } from "../types/memory.ts";
+import type { NoteRecallResult, ResolvedMemory } from "../types/memory.ts";
 import type { PlatformEmoji } from "../types/platform.ts";
 
 const logger = createLogger("ContextAssembler");
@@ -117,7 +117,7 @@ export class ContextAssembler {
     _sessionId?: string,
     model?: string,
     yolo?: boolean,
-    _agentWorkspacePath?: string,
+    agentWorkspacePath?: string,
   ): Promise<AssembledContext> {
     logger.info("Assembling context", {
       workspaceKey: workspace.key,
@@ -215,6 +215,7 @@ export class ContextAssembler {
       channelWorkspace,
       recentMessages,
       injectedIds,
+      agentWorkspacePath,
     );
 
     // Fetch related messages if available and in guild context
@@ -283,7 +284,8 @@ export class ContextAssembler {
       relatedMessages,
       triggerMessage,
       availableEmojis,
-      fastRecall ?? [],
+      fastRecall?.memories ?? [],
+      fastRecall?.notes ?? [],
     );
 
     const context: AssembledContext = {
@@ -299,7 +301,9 @@ export class ContextAssembler {
       estimatedTokens,
       availableEmojis,
       injectedIds,
-      ...(fastRecall === undefined ? {} : { fastRecall }),
+      ...(fastRecall === undefined
+        ? {}
+        : { fastRecall: fastRecall.memories, fastRecallNotes: fastRecall.notes }),
       assembledAt: new Date(),
     };
 
@@ -327,7 +331,7 @@ export class ContextAssembler {
    * loading already injected. Returns `undefined` when Fast Recall did not run
    * — disabled by `memory.recall.fastRecallEnabled`, or a failure, which is
    * logged and leaves the session without the section — and the selected
-   * memories (possibly none) when it did.
+   * memories and note pointers (possibly none) when it did.
    */
   private async selectFastRecall(
     event: NormalizedEvent,
@@ -335,7 +339,8 @@ export class ContextAssembler {
     channelWorkspace: ChannelWorkspaceInfo | undefined,
     recentMessages: readonly PlatformMessage[],
     injectedIds: readonly string[],
-  ): Promise<ResolvedMemory[] | undefined> {
+    agentWorkspacePath: string | undefined,
+  ): Promise<{ memories: ResolvedMemory[]; notes: NoteRecallResult[] } | undefined> {
     const recall = this.config.recall ?? DEFAULT_RECALL_CONFIG;
     if (!recall.fastRecallEnabled) return undefined;
 
@@ -347,9 +352,13 @@ export class ContextAssembler {
         ...(previousUserMessage === undefined ? {} : { previousUserMessage }),
         workspace,
         ...(channelWorkspace === undefined ? {} : { channelWorkspace }),
+        ...(agentWorkspacePath === undefined ? {} : { agentWorkspacePath }),
         excludeIds: new Set(injectedIds),
       });
-      return response.memories.map((item) => item.memory);
+      return {
+        memories: response.memories.map((item) => item.memory),
+        notes: response.notes,
+      };
     } catch (error) {
       logger.warn("Fast Recall failed", { error: String(error) });
       return undefined;
@@ -395,8 +404,14 @@ export class ContextAssembler {
     triggerMessage: PlatformMessage,
     emojis?: PlatformEmoji[],
     fastRecall: ResolvedMemory[] = [],
+    fastRecallNotes: readonly NoteRecallResult[] = [],
   ): number {
-    const memoriesText = [...memories, ...fastRecall].map((m) => m.content).join("\n");
+    // A note contributes its rendered pointer, because the path, the location
+    // line and the excerpt are all that ever reaches the prompt.
+    const memoriesText = [
+      ...[...memories, ...fastRecall].map((m) => m.content),
+      ...fastRecallNotes.map(renderNoteEntry),
+    ].join("\n");
     const recentText = recentMessages
       .map((m) => `${m.username}: ${m.content}`)
       .join("\n");
@@ -431,7 +446,10 @@ export class ContextAssembler {
     );
 
     // Fast Recall renders directly after the fixed memory sections.
-    const fastRecallSection = renderFastRecallSection(context.fastRecall ?? []);
+    const fastRecallSection = renderFastRecallSection(
+      context.fastRecall ?? [],
+      context.fastRecallNotes ?? [],
+    );
 
     // Calculate trigger message section
     const triggerSection = this.formatTriggerSection(context.triggerMessage);

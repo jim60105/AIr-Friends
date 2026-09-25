@@ -6,6 +6,7 @@ import { ContextAssembler } from "../../src/core/context-assembler.ts";
 import { MemoryStore } from "../../src/core/memory-store.ts";
 import { WorkspaceManager } from "../../src/core/workspace-manager.ts";
 import { DEFAULT_RECALL_CONFIG } from "../../src/core/memory-recall/recall-config.ts";
+import { RELEVANT_NOTE_HEADING } from "../../src/core/memory-recall/fast-recall.ts";
 import { estimateTokens } from "../../src/utils/token-counter.ts";
 import type { MessageFetcher } from "../../src/types/context.ts";
 import type { MemoryRecallConfig } from "../../src/types/config.ts";
@@ -1541,5 +1542,218 @@ Deno.test("ContextAssembler - the memory portion stays within the three budgets 
     );
     const body = portion.split("\n").filter((line) => !line.startsWith("## ")).join("\n");
     assertEquals(estimateTokens(body) <= 512 + 384 + 192, true);
+  });
+});
+
+/** Creates the agent workspace tree a note test writes into. */
+async function createAgentWorkspace(tempDir: string): Promise<string> {
+  const agentWorkspacePath = `${tempDir}/agent-workspace`;
+  await Deno.mkdir(`${agentWorkspacePath}/notes`, { recursive: true });
+  return agentWorkspacePath;
+}
+
+Deno.test("ContextAssembler - Fast Recall renders a note pointer after the memories", async () => {
+  await withTestContextAssembler(async (assembler, store, manager, tempDir) => {
+    const event = createTestEvent({ content: "website builders" });
+    const workspace = await manager.getOrCreateWorkspace(event);
+    await store.addMemory(workspace, "喜歡無糖綠茶", { tier: "archive" });
+    const agentWorkspacePath = await createAgentWorkspace(tempDir);
+    await Deno.writeTextFile(
+      `${agentWorkspacePath}/notes/vtuber-official-website-guide.md`,
+      [
+        "# VTuber Guide",
+        "",
+        "## Website Tiers",
+        "",
+        "Level 3 uses online website builders such as Weebly.",
+        "The full body of this note carries a distinctive marker SECRETMARKER that must never " +
+        "reach the prompt under any circumstances.",
+        "",
+      ].join("\n"),
+    );
+
+    const context = await assembler.assembleContext(
+      event,
+      workspace,
+      createMockMessageFetcher([]),
+      undefined,
+      undefined,
+      undefined,
+      agentWorkspacePath,
+    );
+    const formatted = assembler.formatContext(context);
+
+    // A memory that does not match the trigger is not selected, and the note
+    // selection is independent of the memory selection.
+    assertEquals(context.fastRecall, []);
+    assertEquals(context.fastRecallNotes?.map((note) => note.path), [
+      `${agentWorkspacePath}/notes/vtuber-official-website-guide.md`,
+    ]);
+
+    assertStringIncludes(formatted.userMessage, RELEVANT_NOTE_HEADING);
+    assertStringIncludes(
+      formatted.userMessage,
+      `- ${agentWorkspacePath}/notes/vtuber-official-website-guide.md`,
+    );
+    assertStringIncludes(formatted.userMessage, "VTuber Guide › Website Tiers (L3–L6");
+    assertStringIncludes(
+      formatted.userMessage,
+      '"Level 3 uses online website builders such as Weebly."',
+    );
+    // Only the excerpt reaches the prompt, never the rest of the file.
+    assertEquals(formatted.userMessage.includes("SECRETMARKER"), false);
+    // A notes-only selection renders no memory sub-section.
+    assertEquals(formatted.userMessage.includes("## Relevant Memory"), false);
+  }, { recall: { ...DEFAULT_RECALL_CONFIG, noteMinRecallScore: 0 } });
+});
+
+Deno.test("ContextAssembler - a note pointer never displaces a memory", async () => {
+  await withTestContextAssembler(async (assembler, store, manager, tempDir) => {
+    const event = createTestEvent({ content: "無糖綠茶" });
+    const workspace = await manager.getOrCreateWorkspace(event);
+    await store.addMemory(workspace, "我喜歡無糖綠茶", { tier: "archive" });
+    const agentWorkspacePath = await createAgentWorkspace(tempDir);
+    await Deno.writeTextFile(
+      `${agentWorkspacePath}/notes/tea.md`,
+      "# Tea Notes\n\n## 無糖綠茶\n\n無糖綠茶最好喝。\n",
+    );
+
+    const context = await assembler.assembleContext(
+      event,
+      workspace,
+      createMockMessageFetcher([]),
+      undefined,
+      undefined,
+      undefined,
+      agentWorkspacePath,
+    );
+    const formatted = assembler.formatContext(context);
+
+    assertEquals(context.fastRecall?.map((memory) => memory.content), ["我喜歡無糖綠茶"]);
+    assertEquals(context.fastRecallNotes?.length, 1);
+    assertEquals(
+      formatted.userMessage.indexOf(RELEVANT_NOTE_HEADING) >
+        formatted.userMessage.indexOf("## Relevant Memory"),
+      true,
+    );
+  }, {
+    recall: {
+      ...DEFAULT_RECALL_CONFIG,
+      minRecallScore: 0,
+      secondRecallScore: 0,
+      noteMinRecallScore: 0,
+    },
+  });
+});
+
+Deno.test("ContextAssembler - Fast Recall forwards the agent workspace path", async () => {
+  const { retriever, requests } = recordingRetriever();
+  await withTestContextAssembler(async (assembler, _store, manager, tempDir) => {
+    const event = createTestEvent();
+    const workspace = await manager.getOrCreateWorkspace(event);
+    const agentWorkspacePath = await createAgentWorkspace(tempDir);
+
+    await assembler.assembleContext(
+      event,
+      workspace,
+      createMockMessageFetcher([]),
+      undefined,
+      undefined,
+      undefined,
+      agentWorkspacePath,
+    );
+
+    assertEquals(requests.length, 1);
+    assertEquals(requests[0].agentWorkspacePath, agentWorkspacePath);
+  }, { retriever });
+});
+
+Deno.test("ContextAssembler - no agent workspace means no note search and no note section", async () => {
+  const { retriever, requests } = recordingRetriever();
+  await withTestContextAssembler(async (assembler, _store, manager) => {
+    const event = createTestEvent();
+    const workspace = await manager.getOrCreateWorkspace(event);
+
+    const context = await assembler.assembleContext(
+      event,
+      workspace,
+      createMockMessageFetcher([]),
+    );
+    const formatted = assembler.formatContext(context);
+
+    assertEquals(requests.length, 1);
+    assertEquals("agentWorkspacePath" in requests[0], false);
+    assertEquals(context.fastRecallNotes, []);
+    assertEquals(formatted.userMessage.includes(RELEVANT_NOTE_HEADING), false);
+  }, { retriever });
+});
+
+Deno.test("ContextAssembler - the memory and note portion stays within the four budgets", async () => {
+  await withTestContextAssembler(async (assembler, store, manager, tempDir) => {
+    using clock = new FakeTime("2026-09-25T00:00:00.000Z");
+    const event = createTestEvent({ content: "Air75 V3 鍵盤" });
+    const workspace = await manager.getOrCreateWorkspace(event);
+    await addMemories(
+      clock,
+      store,
+      workspace,
+      Array.from({ length: 300 }, (_, i) => `Core memory ${i} ${"x".repeat(90)}`),
+      "core",
+    );
+    await addMemories(
+      clock,
+      store,
+      workspace,
+      Array.from({ length: 199 }, (_, i) => `Working memory ${i} ${"x".repeat(90)}`),
+      "working",
+    );
+    // The 500th memory: archive tier, so only Fast Recall can reach it.
+    await store.addMemory(workspace, "Air75 V3 鍵盤", { tier: "archive" });
+
+    const agentWorkspacePath = await createAgentWorkspace(tempDir);
+    for (let index = 0; index < 50; index++) {
+      // Only the first note matches the trigger; the others are a note-only
+      // corpus whose statistics the ranking is computed over.
+      await Deno.writeTextFile(
+        `${agentWorkspacePath}/notes/note-${String(index).padStart(2, "0")}.md`,
+        index === 0
+          ? "# Keyboard Build Log\n\n## 鍵盤\n\nAir75 V3 鍵盤 Air75 V3 鍵盤 Air75 V3 鍵盤\n"
+          : `# Note ${index}\n\n## 其他主題\n\n${"筆記內容 ".repeat(20)}\n`,
+      );
+    }
+
+    const context = await assembler.assembleContext(
+      event,
+      workspace,
+      createMockMessageFetcher([]),
+      undefined,
+      undefined,
+      undefined,
+      agentWorkspacePath,
+    );
+    const formatted = assembler.formatContext(context);
+
+    assertEquals(context.fastRecall?.map((memory) => memory.content), ["Air75 V3 鍵盤"]);
+    assertEquals(context.fastRecallNotes?.length, 1);
+
+    // Each budget must hold on its own. `sectionBodyTokens` returns 0 for an
+    // absent heading, so the note heading is asserted first: otherwise its
+    // bound would be vacuous.
+    assertStringIncludes(formatted.userMessage, "## Relevant Memory");
+    assertStringIncludes(formatted.userMessage, RELEVANT_NOTE_HEADING);
+    assertEquals(sectionBodyTokens(formatted.userMessage, "## Core Memories (User)") <= 512, true);
+    assertEquals(sectionBodyTokens(formatted.userMessage, "## Recent Context (User)") <= 384, true);
+    assertEquals(sectionBodyTokens(formatted.userMessage, "## Relevant Memory") <= 192, true);
+    assertEquals(
+      sectionBodyTokens(formatted.userMessage, RELEVANT_NOTE_HEADING) <= 256,
+      true,
+    );
+
+    const portion = formatted.userMessage.slice(
+      0,
+      formatted.userMessage.indexOf("## Current Message"),
+    );
+    const body = portion.split("\n").filter((line) => !line.startsWith("## ")).join("\n");
+    assertEquals(estimateTokens(body) <= 512 + 384 + 192 + 256, true);
   });
 });

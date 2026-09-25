@@ -611,6 +611,16 @@ function validateConfig(config: Record<string, unknown>): void {
       integer: true,
       expect: "an integer >= 0",
     }),
+    fastRecallNoteMaxResults: requireRecallNumber(recallValues, "fastRecallNoteMaxResults", {
+      min: 0,
+      integer: true,
+      expect: "an integer >= 0",
+    }),
+    fastRecallNoteMaxTokens: requireRecallNumber(recallValues, "fastRecallNoteMaxTokens", {
+      min: 0,
+      integer: true,
+      expect: "an integer >= 0",
+    }),
     coreMaxTokens: requireRecallNumber(recallValues, "coreMaxTokens", {
       min: 0,
       integer: true,
@@ -631,6 +641,14 @@ function validateConfig(config: Record<string, unknown>): void {
       expect: "a number >= 0",
     }),
     secondRecallScore: requireRecallNumber(recallValues, "secondRecallScore", {
+      min: 0,
+      expect: "a number >= 0",
+    }),
+    noteMinRecallScore: requireRecallNumber(recallValues, "noteMinRecallScore", {
+      min: 0,
+      expect: "a number >= 0",
+    }),
+    secondNoteRecallScore: requireRecallNumber(recallValues, "secondNoteRecallScore", {
       min: 0,
       expect: "a number >= 0",
     }),

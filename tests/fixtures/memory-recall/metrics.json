@@ -16,5 +16,17 @@
   "recallAt2": 1,
   "falsePositiveRate": 0.025,
   "falsePositiveQueryCount": 1,
-  "averageInjectedTokens": 17.85
+  "averageInjectedTokens": 17.85,
+  "notes": {
+    "noteCount": 12,
+    "noteQueryCount": 56,
+    "notePositiveQueryCount": 11,
+    "noteMinRecallScore": 11.5,
+    "secondNoteRecallScore": 9.25,
+    "recallAt1": 0.9090909090909091,
+    "recallAt2": 1,
+    "falsePositiveRate": 0.03571428571428571,
+    "falsePositiveQueryCount": 2,
+    "averageInjectedTokens": 20.964285714285715
+  }
 }

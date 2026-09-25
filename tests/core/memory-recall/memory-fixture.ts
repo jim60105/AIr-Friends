@@ -4,7 +4,7 @@ import { indexMemory, lexicalIndex } from "@core/memory-recall/indexed-memory.ts
 import { MemoryTokenizer } from "@core/memory-recall/tokenizer.ts";
 import type { IndexedMemory, IndexedNoteFile } from "@core/memory-recall/types.ts";
 import { estimateTokens } from "@utils/token-counter.ts";
-import type { ResolvedMemory } from "../../../src/types/memory.ts";
+import type { NoteRecallResult, ResolvedMemory } from "../../../src/types/memory.ts";
 
 /** Fixed clock for every scoring test. ISO-8601, so string order is chronological. */
 export const NOW = new Date("2026-09-25T00:00:00.000Z");
@@ -62,5 +62,22 @@ export function noteFile(
       lineStart = lineEnd + 2;
       return indexed;
     }),
+  };
+}
+
+/** A note pointer with neutral fields; tests override only what they assert. */
+export function makeNote(overrides: Partial<NoteRecallResult> = {}): NoteRecallResult {
+  return {
+    path: "/app/data/agent-workspace/notes/cooking.md",
+    title: "Cooking Notes",
+    headingPath: ["Cooking Notes", "Pasta"],
+    lineStart: 3,
+    lineEnd: 9,
+    excerpt: "Best pasta recipe uses fresh tomatoes.",
+    fileTokens: 420,
+    modifiedAt: "2026-08-29T10:11:12.000Z",
+    score: 4.5,
+    matchedTerms: ["pasta"],
+    ...overrides,
   };
 }

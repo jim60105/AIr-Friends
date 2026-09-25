@@ -1,6 +1,6 @@
 // src/types/context.ts
 
-import type { ResolvedMemory } from "./memory.ts";
+import type { NoteRecallResult, ResolvedMemory } from "./memory.ts";
 import type { PlatformMessage } from "./events.ts";
 import type { PlatformEmoji } from "./platform.ts";
 import type { MemoryRecallConfig } from "./config.ts";
@@ -37,6 +37,14 @@ export interface AssembledContext {
    * and selected nothing.
    */
   fastRecall?: ResolvedMemory[];
+
+  /**
+   * Agent-workspace note pointers Fast Recall selected for this turn, rendered
+   * by `formatContext()` after the memory sub-sections. Written together with
+   * `fastRecall`, so it is `undefined` exactly when Fast Recall did not run and
+   * empty when it ran and selected no note.
+   */
+  fastRecallNotes?: NoteRecallResult[];
 
   /** Recent messages from the current channel */
   recentMessages: PlatformMessage[];

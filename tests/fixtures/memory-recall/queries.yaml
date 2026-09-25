@@ -1,11 +1,19 @@
 # Labeled Fast Recall queries for the offline benchmark (Memory Recall v2, §12).
 #
 # `expected` is the set of memory ids Fast Recall may select without being
-# counted as a false positive; an empty list is a negative query. `context`
-# picks the fixture conversation: `dm` sees the user's public and private
-# memories, `guild` sees the user's public memories and the channel file.
+# counted as a false positive; an empty list is a negative query. `expectedNotes`
+# is the same for the agent workspace notes, as paths relative to the fixture's
+# `notes/` directory; a query without the field expects no note.
+# `context` picks the fixture conversation: `dm` sees the user's public and
+# private memories, `guild` sees the user's public memories and the channel file.
 # `case` names the fixture scenario the query covers (the spec requires at
 # least one query for each of its cases).
+#
+# A `note-` case marks a query of the note metric set. The memory thresholds and
+# the recorded memory metrics are computed over the memory queries alone, so
+# extending the fixture with note queries cannot move them; the note metrics are
+# computed over every query, because a note pointer injected on a memory turn is
+# still a note false positive.
 - id: q01
   case: natural-paraphrase
   context: dm
@@ -205,6 +213,104 @@
   expected: []
 - id: n16
   case: negative-hint-word
+  context: dm
+  current: recent 有什麼新的 update？
+  expected: []
+
+# Note queries: about the agent's own workspace notes, not about the user. Each
+# positive expects exactly one note, so a second note on the same query is a
+# false positive.
+- id: qn01
+  case: note-natural
+  context: dm
+  current: VTuber 官方網站的會員分級有哪些？
+  expected: []
+  expectedNotes: [notes/vtuber-official-website-guide.md]
+- id: qn02
+  case: note-natural
+  context: dm
+  current: Deno 的原生模組要怎麼載入？
+  expected: []
+  expectedNotes: [notes/deno-ffi-binding-notes.md]
+- id: qn03
+  case: note-natural
+  context: dm
+  current: Discord 的斜線指令要怎麼註冊？
+  expected: []
+  expectedNotes: [notes/discord-slash-command-notes.md]
+- id: qn04
+  case: note-natural
+  context: dm
+  current: RSS 訂閱來源的清單放在哪裡？
+  expected: []
+  expectedNotes: [notes/rss-feed-collection-notes.md]
+- id: qn05
+  case: note-mixed-script
+  context: dm
+  current: jieba 斷詞的自訂字典怎麼載入？
+  expected: []
+  expectedNotes: [notes/jieba-tokenizer-notes.md]
+- id: qn06
+  case: note-mixed-script
+  context: dm
+  current: Markdown 的標題層級要怎麼用？
+  expected: []
+  expectedNotes: [notes/markdown-heading-style.md]
+- id: qn07
+  case: note-natural
+  context: dm
+  current: 台灣鐵道旅行的列車怎麼選？
+  expected: []
+  expectedNotes: [notes/taiwan-rail-travel-notes.md]
+- id: qn08
+  case: note-natural
+  context: dm
+  current: 容器映像的多階段建置怎麼做？
+  expected: []
+  expectedNotes: [notes/container-image-notes.md]
+- id: qn09
+  case: note-natural
+  context: dm
+  current: 代理工作區的目錄配置長怎樣？
+  expected: []
+  expectedNotes: [notes/agent-workspace-layout.md]
+- id: qn10
+  case: note-natural
+  context: dm
+  current: 提示注入的防禦方式有哪些？
+  expected: []
+  expectedNotes: [notes/prompt-injection-defense.md]
+# The hard ranking case: the scheduler retry note outranks the expected backoff
+# note, so the expected note is only reachable through the second-note rule.
+# The outranking note is the query's single false positive.
+- id: qn11
+  case: note-hard-ranking
+  context: dm
+  current: 排程重試的退避
+  expected: []
+  expectedNotes: [notes/scheduler-backoff-notes.md]
+- id: qn12
+  case: note-negative-near-miss
+  context: dm
+  current: 官方網站的會員費用怎麼算？
+  expected: []
+- id: qn13
+  case: note-negative-near-miss
+  context: dm
+  current: 這個標題層級是不是設錯了？
+  expected: []
+- id: qn14
+  case: note-negative
+  context: dm
+  current: 幫我查一下最近的匯率。
+  expected: []
+- id: qn15
+  case: note-negative
+  context: dm
+  current: the latest build 什麼時候會好？
+  expected: []
+- id: qn16
+  case: note-negative
   context: dm
   current: recent 有什麼新的 update？
   expected: []

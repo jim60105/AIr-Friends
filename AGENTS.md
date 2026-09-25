@@ -272,6 +272,7 @@ Initial context comprises:
 | Core-tier memories      | Within `memory.recall.coreMaxTokens` (default 512), user then channel              |
 | Working-tier memories   | Newest `memory.recall.workingMaxItems` (default 4) within `workingMaxTokens` (384) |
 | Fast Recall memories    | Top 2 within `memory.recall.fastRecallMaxTokens` (default 192)                      |
+| Fast Recall notes       | Top 2 within `memory.recall.fastRecallNoteMaxTokens` (default 256)                  |
 | Recent channel messages | 20 messages (fixed)                                                                |
 | Guild-related context   | Configurable                                                                       |
 
@@ -282,10 +283,12 @@ ranking bonus only. A memory a budget skips keeps its tier and stays reachable t
 Fast Recall runs once per triggered session, using the trigger message and the same
 user's previous message after the last `/clear`, and excludes the memories fixed
 loading already injected. Its section (`## Relevant Memory`, and `## Relevant Channel
-Notes` for the attributed, unverified channel memories) is omitted when nothing is
-selected. Spontaneous posts never run it, a failure is logged and the session
-continues without the section, and `memory.recall.fastRecallEnabled: false` disables
-it.
+Notes` for the attributed, unverified channel memories, and `## Possibly Relevant
+Workspace Notes` for agent workspace note pointers) is omitted when nothing is
+selected. Note pointers are excerpts of at most about 160 characters with their path
+and location, never the note body, and are budgeted independently of the memories.
+Spontaneous posts never run it, a failure is logged and the session continues without
+the section, and `memory.recall.fastRecallEnabled: false` disables it.
 
 **No automatic memory compression or summarization during normal message handling**.
 Optional scheduled memory maintenance can be enabled separately.

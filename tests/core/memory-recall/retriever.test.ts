@@ -1,7 +1,10 @@
 // tests/core/memory-recall/retriever.test.ts
 
 import { assert, assertAlmostEquals, assertEquals } from "@std/assert";
-import { estimateMemorySectionTokens } from "@core/memory-recall/fast-recall.ts";
+import {
+  estimateMemorySectionTokens,
+  estimateNoteSectionTokens,
+} from "@core/memory-recall/fast-recall.ts";
 import { DEFAULT_RECALL_CONFIG } from "@core/memory-recall/recall-config.ts";
 import { MemoryRetriever } from "@core/memory-recall/retriever.ts";
 import type { MemoryRecallRequest, RecallResponse } from "@core/memory-recall/retriever.ts";
@@ -49,6 +52,13 @@ async function writeMemoryLog(
 ): Promise<void> {
   const body = events.map((event) => JSON.stringify(event)).join("\n") + "\n";
   await Deno.writeTextFile(path, body, { append });
+}
+
+/** Writes one agent workspace note and returns its absolute path. */
+async function writeNote(fixture: Fixture, name: string, content: string): Promise<string> {
+  const path = `${fixture.agentWorkspacePath}/notes/${name}`;
+  await Deno.writeTextFile(path, content);
+  return path;
 }
 
 function ids(response: RecallResponse): string[] {
@@ -926,16 +936,221 @@ Deno.test("search - notes are empty without an agent workspace", async () => {
   });
 });
 
-Deno.test("search - Fast Recall returns no notes", async () => {
+Deno.test("search - Fast Recall selects notes independently of the memories", async () => {
   await withFixture(async (fixture) => {
-    await Deno.writeTextFile(`${fixture.agentWorkspacePath}/notes/cooking.md`, "# C\n\npasta\n");
+    await writeMemoryLog(fixture.publicPath, [
+      memoryEvent({ id: "top", content: "鍵盤 keyboard" }),
+      memoryEvent({ id: "second", content: "鍵盤" }),
+    ]);
+    await writeNote(fixture, "a.md", "# A\n\n## 鍵盤\n\n鍵盤 keyboard notes\n");
+    await writeNote(fixture, "b.md", "# B\n\n## 鍵盤\n\n鍵盤 keyboard notes\n");
 
-    const result = await permissiveRetriever(fixture.store).search({
+    const result = await permissiveRetriever(fixture.store, {
+      secondResultRatio: 0,
+      noteMinRecallScore: 0,
+      secondNoteRecallScore: 0,
+    }).search({
       mode: "fast",
-      query: "pasta",
+      query: "鍵盤 keyboard",
       workspace: fixture.dmWorkspace,
       agentWorkspacePath: fixture.agentWorkspacePath,
     });
+
+    // Neither kind displaces the other: the note budget and the memory budget
+    // are separate, and the same ratio gates the second of each kind.
+    assertEquals(ids(result), ["top", "second"]);
+    assertEquals(result.notes.map((note) => note.path), [
+      `${fixture.agentWorkspacePath}/notes/a.md`,
+      `${fixture.agentWorkspacePath}/notes/b.md`,
+    ]);
+  });
+});
+
+Deno.test("search - Fast Recall omits a note below noteMinRecallScore", async () => {
+  await withFixture(async (fixture) => {
+    const path = await writeNote(fixture, "a.md", "# A\n\n## 鍵盤\n\n鍵盤 keyboard notes\n");
+    const request: MemoryRecallRequest = {
+      mode: "fast",
+      query: "鍵盤",
+      workspace: fixture.dmWorkspace,
+      agentWorkspacePath: fixture.agentWorkspacePath,
+    };
+
+    const scored = await permissiveRetriever(fixture.store, { noteMinRecallScore: 0 })
+      .search(request);
+    assertEquals(scored.notes.map((note) => note.path), [path]);
+    const score = scored.notes[0].score;
+
+    // The comparison is on the note's own score, at and just above it.
+    assertEquals(
+      (await permissiveRetriever(fixture.store, { noteMinRecallScore: score + 0.01 })
+        .search(request)).notes,
+      [],
+    );
+    assertEquals(
+      (await permissiveRetriever(fixture.store, { noteMinRecallScore: score })
+        .search(request)).notes.length,
+      1,
+    );
+  });
+});
+
+Deno.test("search - Fast Recall selects no note when fastRecallNoteMaxResults is 0", async () => {
+  await withFixture(async (fixture) => {
+    await writeMemoryLog(fixture.publicPath, [memoryEvent({ id: "mem", content: "鍵盤" })]);
+    await writeNote(fixture, "a.md", "# A\n\n## 鍵盤\n\n鍵盤 keyboard notes\n");
+    const request: MemoryRecallRequest = {
+      mode: "fast",
+      query: "鍵盤",
+      workspace: fixture.dmWorkspace,
+      agentWorkspacePath: fixture.agentWorkspacePath,
+    };
+
+    const result = await permissiveRetriever(fixture.store, {
+      noteMinRecallScore: 0,
+      fastRecallNoteMaxResults: 0,
+    }).search(request);
+
+    assertEquals(result.notes, []);
+    // The off-switch is the notes' own; the memories are unaffected.
+    assertEquals(ids(result), ["mem"]);
+  });
+});
+
+Deno.test("search - the note budget and the memory budget are independent", async () => {
+  await withFixture(async (fixture) => {
+    await writeMemoryLog(fixture.publicPath, [memoryEvent({ id: "mem", content: "鍵盤" })]);
+    const path = await writeNote(fixture, "a.md", "# A\n\n## 鍵盤\n\n鍵盤 keyboard notes\n");
+    const request: MemoryRecallRequest = {
+      mode: "fast",
+      query: "鍵盤",
+      workspace: fixture.dmWorkspace,
+      agentWorkspacePath: fixture.agentWorkspacePath,
+    };
+
+    // An exhausted note budget leaves the memory selection untouched.
+    const notesOff = await permissiveRetriever(fixture.store, {
+      noteMinRecallScore: 0,
+      fastRecallNoteMaxTokens: 0,
+    }).search(request);
+    assertEquals(notesOff.notes, []);
+    assertEquals(ids(notesOff), ["mem"]);
+
+    // An exhausted memory budget leaves the note selection untouched.
+    const memoriesOff = await permissiveRetriever(fixture.store, {
+      noteMinRecallScore: 0,
+      fastRecallMaxTokens: 0,
+    }).search(request);
+    assertEquals(ids(memoriesOff), []);
+    assertEquals(memoriesOff.notes.map((note) => note.path), [path]);
+  });
+});
+
+Deno.test("search - Fast Recall takes a second note only when both conditions hold", async () => {
+  await withFixture(async (fixture) => {
+    await writeNote(fixture, "strong.md", "# S\n\n## 鍵盤\n\n鍵盤 keyboard 鍵盤\n");
+    await writeNote(fixture, "weak.md", "# W\n\n## 鍵盤\n\nkeyboard 鍵盤\n");
+    const request: MemoryRecallRequest = {
+      mode: "fast",
+      query: "鍵盤 keyboard",
+      workspace: fixture.dmWorkspace,
+      agentWorkspacePath: fixture.agentWorkspacePath,
+    };
+    const permissiveNotes: Partial<MemoryRecallConfig> = {
+      noteMinRecallScore: 0,
+      secondNoteRecallScore: 0,
+    };
+
+    const both = await permissiveRetriever(fixture.store, {
+      ...permissiveNotes,
+      secondResultRatio: 0,
+    }).search(request);
+    assertEquals(both.notes.length, 2);
+
+    // The weak note scores below the top note, so a ratio of 1 rejects it.
+    const byRatio = await permissiveRetriever(fixture.store, {
+      ...permissiveNotes,
+      secondResultRatio: 1,
+    }).search(request);
+    assertEquals(byRatio.notes.map((note) => note.path), [
+      `${fixture.agentWorkspacePath}/notes/strong.md`,
+    ]);
+
+    // A secondNoteRecallScore above every note rejects it as well.
+    const byScore = await permissiveRetriever(fixture.store, {
+      ...permissiveNotes,
+      secondNoteRecallScore: 100,
+    }).search(request);
+    assertEquals(byScore.notes.length, 1);
+  });
+});
+
+Deno.test("search - Fast Recall skips a note that does not fit the note budget", async () => {
+  await withFixture(async (fixture) => {
+    await writeNote(fixture, "a.md", "# A\n\n## 鍵盤\n\n鍵盤 keyboard notes\n");
+    await writeNote(fixture, "b.md", "# B\n\n## 鍵盤\n\n鍵盤 keyboard notes\n");
+    const request: MemoryRecallRequest = {
+      mode: "fast",
+      query: "鍵盤 keyboard",
+      workspace: fixture.dmWorkspace,
+      agentWorkspacePath: fixture.agentWorkspacePath,
+    };
+    const permissiveNotes: Partial<MemoryRecallConfig> = {
+      noteMinRecallScore: 0,
+      secondNoteRecallScore: 0,
+      secondResultRatio: 0,
+    };
+
+    const both = await permissiveRetriever(fixture.store, permissiveNotes).search(request);
+    assertEquals(both.notes.length, 2);
+
+    // A budget that fits the heading plus exactly one entry admits one note.
+    const oneEntry = estimateNoteSectionTokens(both.notes.slice(0, 1));
+    const limited = await permissiveRetriever(fixture.store, {
+      ...permissiveNotes,
+      fastRecallNoteMaxTokens: oneEntry,
+    }).search(request);
+    assertEquals(limited.notes.map((note) => note.path), [both.notes[0].path]);
+    assert(estimateNoteSectionTokens(limited.notes) <= oneEntry);
+  });
+});
+
+Deno.test("search - a Fast Recall note pointer is one excerpt without deep chunks", async () => {
+  await withFixture(async (fixture) => {
+    await writeNote(
+      fixture,
+      "long.md",
+      `# Long\n\n## 鍵盤\n\n${"鍵盤 keyboard notes. ".repeat(30)}\n`,
+    );
+
+    const result = await permissiveRetriever(fixture.store, { noteMinRecallScore: 0 })
+      .search({
+        mode: "fast",
+        query: "鍵盤",
+        workspace: fixture.dmWorkspace,
+        agentWorkspacePath: fixture.agentWorkspacePath,
+      });
+
+    assertEquals(result.notes.length, 1);
+    assertEquals(result.notes[0].chunks, undefined);
+    // 160 characters, plus the two `…` the cutter may add at the ends.
+    assert(
+      result.notes[0].excerpt.length <= 162,
+      `excerpt is ${result.notes[0].excerpt.length} characters`,
+    );
+  });
+});
+
+Deno.test("search - Fast Recall notes are empty without an agent workspace", async () => {
+  await withFixture(async (fixture) => {
+    await writeNote(fixture, "a.md", "# A\n\n## 鍵盤\n\n鍵盤 keyboard notes\n");
+
+    const result = await permissiveRetriever(fixture.store, { noteMinRecallScore: 0 })
+      .search({
+        mode: "fast",
+        query: "鍵盤",
+        workspace: fixture.dmWorkspace,
+      });
 
     assertEquals(result.notes, []);
   });
