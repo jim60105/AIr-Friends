@@ -20,7 +20,7 @@ None.
 
 ### Modified Capabilities
 
-- `configuration-and-deployment`: "Deno Project Structure" — the `ci` task scenario pins fmt-checking to the `src/` and `tests/` scopes (matching `fmt:check`), so the local gate is passable on master.
+- `configuration-and-deployment`: "Deno Project Structure" — the `ci` task scenario pins fmt-checking and linting to the `src/` and `tests/` scopes (matching `fmt:check` and `lint`), so the local gate is passable on master.
 
 ## Impact
 
