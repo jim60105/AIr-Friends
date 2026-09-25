@@ -50,7 +50,6 @@ import { DEFAULT_RECALL_CONFIG } from "@core/memory-recall/recall-config.ts";
 import { MemoryRetriever } from "@core/memory-recall/retriever.ts";
 import type {
   MemoryRecallRequest,
-  MemoryRecallResult,
   RecallResponse,
 } from "@core/memory-recall/retriever.ts";
 import { MemoryStore } from "@core/memory-store.ts";
