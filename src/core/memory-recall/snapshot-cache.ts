@@ -80,6 +80,12 @@ export class MemorySnapshotCache {
    * The stamp is read before the load on purpose: when a write lands while the
    * load runs, the stored stamp stays behind the file, so the next search
    * rebuilds instead of treating documents read before the write as fresh.
+   *
+   * Reuse therefore rests on size and mtime changing on every write. Every
+   * `MemoryStore` writer appends to the JSONL file (`addMemory`, `patchMemory`,
+   * `addChannelMemory`, `patchChannelMemory`), and memory maintenance acts
+   * through patches, so a size-preserving rewrite does not exist today. Any
+   * future compaction must invalidate this cache.
    */
   private async rebuild(load: DocumentLoader, stamp: Stamp | null): Promise<SnapshotEntry> {
     const memories = await load();

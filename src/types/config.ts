@@ -410,10 +410,17 @@ export interface MemoryConfig {
  * design, §10).
  */
 export interface MemoryRecallConfig {
-  /** Fast Recall: maximum number of selected memories (default: 2). */
+  /**
+   * Fast Recall: maximum number of selected memories (default: 2). `0` selects
+   * none, and a value above 2 cannot select more than the first and the second.
+   */
   fastRecallMaxResults: number;
 
-  /** Fast Recall: token budget of the rendered memory section (default: 192). */
+  /**
+   * Fast Recall: token budget of the rendered memory section (default: 192).
+   * `0` fits no memory and therefore disables Fast Recall; use the kill switch
+   * `memory.recall.fastRecallEnabled` (a later change) to disable it explicitly.
+   */
   fastRecallMaxTokens: number;
 
   /** Fast Recall: minimum score of the top memory (provisional until calibration). */

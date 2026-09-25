@@ -1,12 +1,16 @@
 // tests/core/memory-recall/retriever.test.ts
 
 import { assert, assertAlmostEquals, assertEquals } from "@std/assert";
-import { estimateMemorySectionTokens } from "@core/memory-recall/fast-recall.ts";
+import {
+  estimateMemorySectionTokens,
+  RELEVANT_CHANNEL_MEMORY_HEADING,
+} from "@core/memory-recall/fast-recall.ts";
 import { DEFAULT_RECALL_CONFIG } from "@core/memory-recall/recall-config.ts";
 import { MemoryRetriever } from "@core/memory-recall/retriever.ts";
 import type { MemoryRecallRequest, RecallResponse } from "@core/memory-recall/retriever.ts";
 import { MemoryStore } from "@core/memory-store.ts";
 import { WorkspaceManager } from "@core/workspace-manager.ts";
+import { estimateTokens } from "@utils/token-counter.ts";
 import type { MemoryRecallConfig } from "../../../src/types/config.ts";
 import type { Platform } from "../../../src/types/events.ts";
 import type { MemoryEntry, MemoryLogEvent, MemoryPatch } from "../../../src/types/memory.ts";
@@ -157,7 +161,12 @@ Deno.test("search - returns the complete resolved memory with score and matched 
 
 Deno.test("search - a private memory is recalled only in a DM", async () => {
   await withFixture(async (fixture) => {
-    await writeMemoryLog(fixture.publicPath, [memoryEvent({ id: "public", content: "鍵盤" })]);
+    await writeMemoryLog(fixture.publicPath, [
+      memoryEvent({ id: "public", content: "鍵盤" }),
+      // A visibility patch appends to the file the memory already lives in, so
+      // a public-file row can carry visibility: "private".
+      memoryEvent({ id: "patched", content: "鍵盤", visibility: "private" }),
+    ]);
     await writeMemoryLog(fixture.privatePath, [
       memoryEvent({ id: "private", content: "鍵盤", visibility: "private" }),
     ]);
@@ -172,11 +181,11 @@ Deno.test("search - a private memory is recalled only in a DM", async () => {
     assertEquals(ids(guild), ["public"]);
 
     const dm = await retriever.search({
-      mode: "fast",
+      mode: "deep",
       query: "鍵盤",
       workspace: fixture.dmWorkspace,
     });
-    assertEquals(ids(dm).sort(), ["private", "public"]);
+    assertEquals(ids(dm).sort(), ["patched", "private", "public"]);
   });
 });
 
@@ -422,6 +431,78 @@ Deno.test("search - relatedTo does not expand past one hop", async () => {
   });
 });
 
+Deno.test("search - a relation bonus never propagates a second hop", async () => {
+  await withFixture(async (fixture) => {
+    // b boosts a, and a lists c. a must boost c with its own direct score, not
+    // with the score it just received, so the bonus cannot chain.
+    const request: MemoryRecallRequest = {
+      mode: "deep",
+      query: "keyboard mouse",
+      workspace: fixture.dmWorkspace,
+    };
+    await writeMemoryLog(fixture.publicPath, [
+      memoryEvent({ id: "b", content: "keyboard mouse" }),
+      memoryEvent({ id: "a", content: "keyboard" }),
+      memoryEvent({ id: "c", content: "keyboard" }),
+    ]);
+    const withoutRelation = await permissiveRetriever(fixture.store).search(request);
+
+    await writeMemoryLog(fixture.publicPath, [
+      memoryEvent({ id: "b", content: "keyboard mouse", relatedTo: ["a"] }),
+      memoryEvent({ id: "a", content: "keyboard", relatedTo: ["c"] }),
+      memoryEvent({ id: "c", content: "keyboard" }),
+    ]);
+    const withRelation = await permissiveRetriever(fixture.store).search(request);
+
+    const parentScore = scoreOf(withoutRelation, "b");
+    assertAlmostEquals(
+      scoreOf(withRelation, "a"),
+      scoreOf(withoutRelation, "a") + 0.2 * parentScore,
+      1e-9,
+    );
+    assertAlmostEquals(
+      scoreOf(withRelation, "c"),
+      scoreOf(withoutRelation, "c") + 0.2 * scoreOf(withoutRelation, "a"),
+      1e-9,
+    );
+  });
+});
+
+Deno.test("search - one candidate adds at most two related memories", async () => {
+  await withFixture(async (fixture) => {
+    const request: MemoryRecallRequest = {
+      mode: "deep",
+      query: "keyboard mouse",
+      workspace: fixture.dmWorkspace,
+    };
+    await writeMemoryLog(fixture.publicPath, [
+      memoryEvent({ id: "parent", content: "keyboard mouse" }),
+      memoryEvent({ id: "r1", content: "keyboard" }),
+      memoryEvent({ id: "r2", content: "keyboard" }),
+      memoryEvent({ id: "r3", content: "keyboard" }),
+    ]);
+    const withoutRelation = await permissiveRetriever(fixture.store).search(request);
+
+    await writeMemoryLog(fixture.publicPath, [
+      memoryEvent({ id: "parent", content: "keyboard mouse", relatedTo: ["r1", "r2", "r3"] }),
+      memoryEvent({ id: "r1", content: "keyboard" }),
+      memoryEvent({ id: "r2", content: "keyboard" }),
+      memoryEvent({ id: "r3", content: "keyboard" }),
+    ]);
+    const withRelation = await permissiveRetriever(fixture.store).search(request);
+
+    const bonus = 0.2 * scoreOf(withoutRelation, "parent");
+    for (const id of ["r1", "r2"]) {
+      assertAlmostEquals(scoreOf(withRelation, id), scoreOf(withoutRelation, id) + bonus, 1e-9);
+    }
+    assertAlmostEquals(
+      scoreOf(withRelation, "r3"),
+      scoreOf(withoutRelation, "r3"),
+      1e-9,
+    );
+  });
+});
+
 Deno.test("search - Fast Recall selects nothing below minRecallScore", async () => {
   await withFixture(async (fixture) => {
     await writeMemoryLog(fixture.publicPath, [memoryEvent({ id: "only", content: "鍵盤" })]);
@@ -608,6 +689,87 @@ Deno.test("search - Deep Recall skips an item that does not fit the budget", asy
   });
 });
 
+Deno.test("search - Deep Recall drops memories below deepMinRecallScore", async () => {
+  await withFixture(async (fixture) => {
+    await writeMemoryLog(fixture.publicPath, [
+      memoryEvent({ id: "strong", content: "Air75 V3 鍵盤" }),
+      memoryEvent({ id: "weak", content: "鍵盤" }),
+    ]);
+    const request: MemoryRecallRequest = {
+      mode: "deep",
+      query: "Air75 V3 鍵盤",
+      workspace: fixture.dmWorkspace,
+    };
+
+    assertEquals(ids(await permissiveRetriever(fixture.store).search(request)), ["strong", "weak"]);
+    assertEquals(
+      ids(await permissiveRetriever(fixture.store, { deepMinRecallScore: 3 }).search(request)),
+      ["strong"],
+    );
+  });
+});
+
+Deno.test("search - the Deep budget measures the attributed channel line", async () => {
+  await withFixture(async (fixture) => {
+    await writeMemoryLog(fixture.channelPath, [
+      memoryEvent({ id: "channel-mem", content: "鍵盤", scope: "channel", author: "user-9" }),
+    ]);
+    const request: MemoryRecallRequest = {
+      mode: "deep",
+      query: "鍵盤",
+      workspace: fixture.guildWorkspace,
+      channelWorkspace: fixture.channelWorkspace,
+    };
+    // Exactly the channel heading plus the attributed line.
+    const exact = estimateTokens(RELEVANT_CHANNEL_MEMORY_HEADING) +
+      estimateTokens("- [from user-9] 鍵盤");
+
+    assertEquals(
+      ids(
+        await permissiveRetriever(fixture.store).search({
+          ...request,
+          maxTokens: exact,
+        }),
+      ),
+      ["channel-mem"],
+    );
+    assertEquals(
+      ids(
+        await permissiveRetriever(fixture.store).search({
+          ...request,
+          maxTokens: exact - 1,
+        }),
+      ),
+      [],
+    );
+  });
+});
+
+Deno.test("search - fastRecallMaxResults caps the Fast selection", async () => {
+  await withFixture(async (fixture) => {
+    await writeMemoryLog(fixture.publicPath, [
+      memoryEvent({ id: "a", content: "keyboard" }),
+      memoryEvent({ id: "b", content: "keyboard" }),
+    ]);
+    const request: MemoryRecallRequest = {
+      mode: "fast",
+      query: "keyboard",
+      workspace: fixture.dmWorkspace,
+    };
+
+    // Equal scores clear both second-result conditions.
+    assertEquals(ids(await permissiveRetriever(fixture.store).search(request)), ["a", "b"]);
+    assertEquals(
+      ids(await permissiveRetriever(fixture.store, { fastRecallMaxResults: 1 }).search(request)),
+      ["a"],
+    );
+    assertEquals(
+      ids(await permissiveRetriever(fixture.store, { fastRecallMaxResults: 0 }).search(request)),
+      [],
+    );
+  });
+});
+
 Deno.test("search - the same request twice returns deep-equal results", async () => {
   await withFixture(async (fixture) => {
     await writeMemoryLog(fixture.publicPath, [
@@ -615,7 +777,6 @@ Deno.test("search - the same request twice returns deep-equal results", async ()
       memoryEvent({ id: "b", content: "鍵盤", category: "preference" }),
       memoryEvent({ id: "c", content: "螢幕" }),
     ]);
-    const retriever = permissiveRetriever(fixture.store);
     const request: MemoryRecallRequest = {
       mode: "deep",
       query: "鍵盤",
@@ -623,7 +784,11 @@ Deno.test("search - the same request twice returns deep-equal results", async ()
       workspace: fixture.dmWorkspace,
     };
 
-    assertEquals(await retriever.search(request), await retriever.search(request));
+    // A fresh retriever rebuilds the snapshot from the same files, so this also
+    // covers cold-cache determinism, not just a warm in-memory hit.
+    const cold = await permissiveRetriever(fixture.store).search(request);
+    assertEquals(await permissiveRetriever(fixture.store).search(request), cold);
+    assertEquals(await permissiveRetriever(fixture.store).search(request), cold);
   });
 });
 

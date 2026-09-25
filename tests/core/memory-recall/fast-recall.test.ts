@@ -35,14 +35,10 @@ Deno.test("estimateMemorySectionTokens - counts each heading once plus one line 
   const channelLine = estimateTokens("- [from user-9] keyboard");
 
   assertEquals(estimateMemorySectionTokens([]), 0);
-  assertEquals(
-    estimateMemorySectionTokens([user]),
-    estimateTokens(RELEVANT_MEMORY_HEADING) + userLine,
-  );
-  assertEquals(
-    estimateMemorySectionTokens([user, user]),
-    estimateTokens(RELEVANT_MEMORY_HEADING) + 2 * userLine,
-  );
+  // Literals: the user heading is 5 estimated tokens and a short line is 3, so
+  // a heading charged per entry instead of per kind cannot pass.
+  assertEquals(estimateMemorySectionTokens([user]), 8);
+  assertEquals(estimateMemorySectionTokens([user, user]), 11);
   assertEquals(
     estimateMemorySectionTokens([channel]),
     estimateTokens(RELEVANT_CHANNEL_MEMORY_HEADING) + channelLine,
@@ -53,5 +49,10 @@ Deno.test("estimateMemorySectionTokens - counts each heading once plus one line 
       estimateTokens(RELEVANT_CHANNEL_MEMORY_HEADING) +
       userLine +
       channelLine,
+  );
+  // The measurement does not depend on the order the memories were selected in.
+  assertEquals(
+    estimateMemorySectionTokens([channel, user]),
+    estimateMemorySectionTokens([user, channel]),
   );
 });

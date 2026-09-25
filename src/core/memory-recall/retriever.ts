@@ -169,6 +169,11 @@ export class MemoryRetriever {
    * Deep Recall selection: every memory at or above `deepMinRecallScore` (0 by
    * default, so eligibility alone qualifies) up to the capped limit, admitted in
    * descending score order within the budget. Superseded memories stay eligible.
+   *
+   * The budget is measured with the Fast Recall line format plus its headings,
+   * which is a conservative stand-in for the serialized skill entry: it reserves
+   * a few tokens that the Deep output never renders, so it can only under-fill
+   * `deepRecallMaxTokens`, never exceed it.
    */
   selectDeep(
     ranked: readonly ScoredMemory[],
