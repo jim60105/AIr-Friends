@@ -62,8 +62,6 @@ export class AgentCore {
 
     // Initialize memory store
     this.memoryStore = new MemoryStore(this.workspaceManager, {
-      searchLimit: config.memory.searchLimit,
-      maxChars: config.memory.maxChars,
       workingTierLimit: config.memory.workingTierLimit ?? 20,
     });
 
@@ -114,7 +112,6 @@ export class AgentCore {
         systemPromptPath: config.agent.systemPromptPath,
         recentMessageLimit: config.memory.recentMessageLimit,
         tokenLimit: config.agent.tokenLimit,
-        memoryMaxChars: config.memory.maxChars,
         agentType: config.agent.defaultAgentType,
         recall: config.memory.recall,
       },
@@ -161,7 +158,6 @@ export class AgentCore {
     logger.info("Agent Core initialized", {
       workspaceRoot: config.workspace.repoPath,
       tokenLimit: config.agent.tokenLimit,
-      memorySearchLimit: config.memory.searchLimit,
       skillApiEnabled: config.skillApi?.enabled ?? false,
     });
   }

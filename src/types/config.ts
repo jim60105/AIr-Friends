@@ -375,12 +375,6 @@ export interface ModelRoutingConfig {
  * Memory system configuration
  */
 export interface MemoryConfig {
-  /** Maximum number of search results to return */
-  searchLimit: number;
-
-  /** Maximum characters for memory content */
-  maxChars: number;
-
   /** Number of recent messages to include in context */
   recentMessageLimit: number;
 
