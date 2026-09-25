@@ -1,6 +1,8 @@
 // src/skills/registry.ts
 
 import { createLogger } from "@utils/logger.ts";
+import { DEFAULT_RECALL_CONFIG } from "@core/memory-recall/recall-config.ts";
+import { MemoryRetriever } from "@core/memory-recall/retriever.ts";
 import { MemoryHandler } from "./memory-handler.ts";
 import { ReplyHandler } from "./reply-handler.ts";
 import { ReactionHandler } from "./reaction-handler.ts";
@@ -10,7 +12,7 @@ import { FileHandler } from "./file-handler.ts";
 import type { ReminderStore } from "@core/reminder-store.ts";
 import type { SkillContext, SkillHandler, SkillResult } from "./types.ts";
 import type { MemoryStore } from "@core/memory-store.ts";
-import type { RemindersConfig, SendFileSkillConfig } from "../types/config.ts";
+import type { MemoryRecallConfig, RemindersConfig, SendFileSkillConfig } from "../types/config.ts";
 
 const logger = createLogger("SkillRegistry");
 
@@ -31,8 +33,11 @@ export class SkillRegistry {
     remindersConfig?: RemindersConfig,
     reminderStore?: ReminderStore,
     sendFileConfig?: SendFileSkillConfig,
+    recallConfig?: MemoryRecallConfig,
   ) {
-    this.memoryHandler = new MemoryHandler(memoryStore);
+    // One retriever per process: every session shares its snapshot cache.
+    const retriever = new MemoryRetriever(memoryStore, recallConfig ?? DEFAULT_RECALL_CONFIG);
+    this.memoryHandler = new MemoryHandler(memoryStore, retriever);
     this.replyHandler = new ReplyHandler();
     this.reactionHandler = new ReactionHandler();
     this.contextHandler = new ContextHandler();

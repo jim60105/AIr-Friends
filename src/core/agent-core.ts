@@ -78,6 +78,7 @@ export class AgentCore {
       config.reminders,
       reminderStore,
       config.skills?.sendFile,
+      config.memory.recall,
     );
     const skillRegistry = this.skillRegistry;
 

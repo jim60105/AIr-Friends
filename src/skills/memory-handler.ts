@@ -2,6 +2,8 @@
 
 import { createLogger } from "@utils/logger.ts";
 import { MemoryStore } from "@core/memory-store.ts";
+import { DEFAULT_RECALL_CONFIG } from "@core/memory-recall/recall-config.ts";
+import { MemoryRetriever } from "@core/memory-recall/retriever.ts";
 import type {
   MemoryExportParams,
   MemoryPatchParams,
@@ -21,13 +23,27 @@ import type {
   MemoryVisibility,
   ResolvedMemory,
 } from "../types/memory.ts";
+import type { ChannelWorkspaceInfo } from "../types/workspace.ts";
 
 import { memoryOperationsTotal } from "@utils/metrics.ts";
 
 const logger = createLogger("MemoryHandler");
 
 export class MemoryHandler {
-  constructor(private readonly memoryStore: MemoryStore) {}
+  /**
+   * The recall engine behind `memory-search`. Production passes one shared
+   * instance so its snapshot cache is reused across sessions; a caller that
+   * omits it gets a private retriever over the same store (Memory Recall v2
+   * design, D13).
+   */
+  private readonly retriever: MemoryRetriever;
+
+  constructor(
+    private readonly memoryStore: MemoryStore,
+    retriever?: MemoryRetriever,
+  ) {
+    this.retriever = retriever ?? new MemoryRetriever(memoryStore, DEFAULT_RECALL_CONFIG);
+  }
 
   /**
    * Handle memory-save skill
@@ -324,85 +340,74 @@ export class MemoryHandler {
         };
       }
 
-      // Split query into keywords
-      const keywords = params.query.trim().split(/\s+/);
-
-      // Search user memories (unless scope is explicitly "channel")
-      let memories: ResolvedMemory[] = [];
-      if (scope !== "channel") {
-        memories = await this.memoryStore.searchMemories(
-          context.workspace,
-          keywords,
-          { maxResults: limit },
-          category,
-        );
-      }
-
-      // Search channel memories if scope is "channel" or not specified and channelId available
-      let channelMemories: ResolvedMemory[] = [];
+      // A DM has no channel workspace; the engine also refuses channel-scoped
+      // memories in a DM, so the channel workspace is resolved only outside one
+      // and only when channel memories are in scope.
+      let channelWorkspace: ChannelWorkspaceInfo | undefined;
       if (
-        (scope === "channel" || scope === undefined) &&
+        !context.workspace.isDm &&
+        scope !== "user" &&
         context.channelId &&
         context.workspaceManager
       ) {
         try {
-          const channelWorkspace = await context.workspaceManager.getOrCreateChannelWorkspace(
+          channelWorkspace = await context.workspaceManager.getOrCreateChannelWorkspace(
             context.workspace.components.platform,
             context.channelId,
           );
-          channelMemories = await this.memoryStore.searchChannelMemories(
-            channelWorkspace,
-            keywords,
-            { maxResults: limit },
-            category,
-          );
         } catch (error) {
-          logger.warn("Failed to search channel memories", {
+          logger.warn("Failed to resolve channel workspace for search", {
             error: error instanceof Error ? error.message : String(error),
           });
         }
       }
 
-      // Merge and deduplicate results
-      const seenIds = new Set<string>();
-      const mergedMemories: ResolvedMemory[] = [];
-      for (const m of [...memories, ...channelMemories]) {
-        if (!seenIds.has(m.id)) {
-          seenIds.add(m.id);
-          mergedMemories.push(m);
-        }
-      }
-      // Limit total results
-      const finalMemories = mergedMemories.slice(0, limit);
+      // Deep Recall ranks the whole query text; `maxTokens` is left to the
+      // retriever, which resolves it to `memory.recall.deepRecallMaxTokens`.
+      const response = await this.retriever.search({
+        mode: "deep",
+        query: params.query,
+        workspace: context.workspace,
+        channelWorkspace,
+        category,
+        scope,
+        maxResults: limit,
+      });
 
       logger.info("Memory search via skill: query returned {resultsCount} results", {
         workspaceKey: context.workspace.key,
         query: params.query,
-        resultsCount: finalMemories.length,
+        resultsCount: response.memories.length,
       });
       memoryOperationsTotal.labels("search", "public").inc();
 
       const result: MemorySearchResult = {
-        memories: finalMemories.map((m) => ({
-          id: m.id,
-          enabled: m.enabled,
-          visibility: m.visibility,
-          importance: m.importance,
-          content: m.content,
-          createdAt: m.createdAt,
-          lastModifiedAt: m.lastModifiedAt,
-          tier: m.tier,
-          category: m.category,
-          scope: m.scope,
-          decay: m.decay,
-          relatedTo: m.relatedTo,
-          supersedes: m.supersedes,
-        })),
+        memories: response.memories.map((entry) => {
+          const m = entry.memory;
+          return {
+            id: m.id,
+            enabled: m.enabled,
+            visibility: m.visibility,
+            importance: m.importance,
+            content: m.content,
+            createdAt: m.createdAt,
+            lastModifiedAt: m.lastModifiedAt,
+            tier: m.tier,
+            category: m.category,
+            scope: m.scope,
+            decay: m.decay,
+            relatedTo: m.relatedTo,
+            supersedes: m.supersedes,
+            score: Math.round(entry.score * 1000) / 1000,
+            matchedTerms: entry.matchedTerms,
+          };
+        }),
       };
 
       // Search agent workspace notes if available
       if (context.agentWorkspacePath) {
         try {
+          const keywords = params.query.trim().split(/\s+/);
           result.agentNotes = await this.memoryStore.searchAgentWorkspace(
             context.agentWorkspacePath,
             keywords,
