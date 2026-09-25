@@ -1,7 +1,7 @@
 # agent-sandbox-hardening Specification
 
 ## Purpose
-TBD - created by archiving change fix-security-audit-findings. Update Purpose after archive.
+Constrain the ACP agent subprocess so a compromised or prompt-injected agent cannot escape its session: a cleared, allowlisted environment, entrypoint-anchored command whitelisting, workspace-confined reads and writes, and permission gating that no filesystem-touching bash tool can self-authorize around.
 ## Requirements
 ### Requirement: Agent Subprocess Environment Isolation
 
