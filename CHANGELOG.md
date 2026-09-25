@@ -7,13 +7,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.32.0] - 2026-09-26
+
 ### Added
 
 - Memory Recall v2 change 1/9: the recall tokenizer (`src/core/memory-recall/tokenizer.ts`) with `@node-rs/jieba` and the vendored Traditional-capable dictionary `assets/jieba/dict.txt.big` (fxsjy/jieba, MIT, pinned commit) — NFKC normalization, entity extraction (`air-friends`, `OpenClaw`, `a7c ii`, `air75 v3`), CJK word segmentation and bigrams with fixed weights (entity 1.5 / word 1.0 / bigram 0.25), a fixed single-character CJK stopword list, and deterministic ordering; the tokenizer degrades to entity + bigram tokens when the segmenter cannot load (one logged error, never thrown). Loading the jieba native binding requires Deno's FFI permission, so `--allow-ffi` is now declared in every `deno.json` task that runs the application or tests (`dev`, `start`, `start:config`, `test`, `test:watch`, `test:coverage`, `test:coverage:lcov`, `test:unit`, `test:integration`, `ci`), in the container `CMD`, and `assets/` is copied into the container image
+- Memory Recall v2 scoring: a deterministic lexical ranker (`src/core/memory-recall/ranker.ts`) — BM25 (k1 1.2, b 0.75) over population-derived statistics, with exact entity and phrase bonuses plus bounded metadata, temporal/recency, and `relatedTo` relation bonuses, and a deterministic tie-free comparator; memories are indexed once per file into kind-keyed term frequencies
+- Memory Recall v2 retriever: `MemoryRetriever.search()` resolves the conversation's memory files (user public/private, current channel), filters by enabled, visibility, scope, and the supersede rule, scores through the ranker, expands `relatedTo` one hop, and selects Fast or Deep Recall results within their caps and token budgets; a `MemorySnapshotCache` keeps one indexed snapshot per memory JSONL file, rebuilt whenever its size or mtime changes, so searches are CPU-only, deterministic, and never persist an index
+- Fast Recall in initial context: every triggered session now runs one Fast Recall search over the trigger message plus the same user's previous message after the last `/clear`, excluding what fixed loading already injected, and renders the selected memories directly after the fixed memory sections under `## Relevant Memory` (channel memories attributed as unverified member contributions); a failure is logged and the session proceeds without the section, spontaneous posts never run it, and `memory.recall.fastRecallEnabled: false` (default `true`) turns it off
+- Fast Recall note pointers: high-confidence agent-workspace notes are selected alongside memories in their own sub-section with an independent budget — each pointer is the absolute path, title/heading path, line range, approximate file tokens, update date, and a ~160-character excerpt, never the note body; configured via `memory.recall.fastRecallNoteMaxResults` (2), `fastRecallNoteMaxTokens` (256), `noteMinRecallScore` (11.5) and `secondNoteRecallScore` (9.25), with `fastRecallNoteMaxResults: 0` skipping the note walk
+- Fixed memory budgets: fixed session-start loading is decided by tier alone (`importance` is now only a retrieval ranking bonus) and bounded by new `memory.recall` keys — `coreMaxTokens` (512), `workingMaxItems` (4), and `workingMaxTokens` (384), validated at config load; a memory a budget skips keeps its tier and stays reachable through `memory-search`
+- Deep Recall in `memory-search`: the skill now runs the recall engine on the natural-language query instead of substring matching — results are ranked by relevance, each entry carries `score` and `matchedTerms`, both scopes are searched when `scope` is omitted, `limit` is capped at 10, and the output is bounded by `memory.recall.deepRecallMaxTokens`
+- Agent-workspace notes in Deep Recall: `memory-search` returns workspace notes as ranked `agentNotes` pointers (path, heading path, line range, excerpt, up to three chunks) scored with the same tokenizer and BM25 over note-only statistics, sharing the Deep Recall token budget with memories; notes are indexed from a symlink- and escape-safe workspace walk with per-file caching
+- Offline threshold calibration: `scripts/memory-recall-benchmark.ts` searches a committed labeled fixture (41 memories, 40 memory queries, 12 notes, 16 note queries) and grid-searches the Fast Recall thresholds under a 5% false-positive cap, recording Recall@1 0.9565, Recall@2 1.0, and the calibrated `minRecallScore` 6.75 / `secondRecallScore` 6.5 (note thresholds above) in `metrics.json`; a companion test re-derives the metrics and thresholds and gates p95 search latency under 50 ms
+
+### Changed
+
+- Scoped `deno task ci`'s format-check and lint steps to `src/` and `tests/`, matching the GitHub Actions workflow, so the local gate is passable instead of failing on pre-existing unformatted non-code files
+- Reference documentation (`docs/DESIGN.md`, `docs/MEMORY_DESIGN.md`, `docs/SKILLS_IMPLEMENTATION.md`, `docs/CONTAINER_TOOLS.md`, `AGENTS.md`) rewritten to describe the shipped recall engine: tier-based fixed loading, Deep Recall output, and `ripgrep`'s actual purpose (agent-side in-workspace file reading) instead of the v1-era "high-importance always loaded" and rg-backed memory-search wording
 
 ### Removed
 
 - **BREAKING (config surface)**: Removed the dead `memory.searchLimit` / `memory.maxChars` configuration keys — no retrieval code has read them since the recall engine replaced keyword search, so retrieval budgets come from `memory.recall` and the `memory-search` skill's per-call `limit` parameter. The keys are gone from `MemoryConfig`, the loader defaults, `MemoryStoreConfig`, `config.example.yaml`, `AGENTS.md`, `docs/DESIGN.md`, and `docs/MEMORY_DESIGN.md` (including the `MEMORY_SEARCH_LIMIT` / `MEMORY_MAX_CHARS` rows, which never had an env mapping), and the consumerless `memoryMaxChars` / `memorySearchLimit` wiring and startup-log field are gone with them. Existing `config.yaml` files that still set the keys keep loading unchanged — unknown keys are merged and ignored — and operators should delete them
+- Removed the legacy retrieval paths the recall engine replaced: `MemoryStore.searchMemories`, `searchChannelMemories`, `getImportantMemories`, the ripgrep-based `searchAgentWorkspace` note search, and `src/utils/text-search.ts`
+
+### Fixed
+
+- Fixed channel memories never reaching a channel session's context: the workspace manager is now passed to the context assembler, so channel core/working memories and their fixed budgets work in production
+- Fixed the note indexer treating a hard link as safe: note files with more than one link are skipped, because a hard link passes the symlink and real-path containment checks while still naming another user's private memory file from inside the agent workspace
+- Fixed prototype-chain keys (e.g. `constructor`) being silently dropped by the tokenizer's stopword lookup, which lost realistic code-corpus terms
+- Fixed the Deep Recall memory/note merge ordering on the 3-decimal-rounded display score, which could invert a near tie against the engine's ranking; ordering now uses the unrounded engine score
+- Fixed `deno lint` no-unused-vars failure in the recall benchmark (dropped the unused `MemoryRecallResult` type import)
 
 ## [0.31.1] - 2026-09-24
 
@@ -1118,7 +1142,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ---
 
-[Unreleased]: https://github.com/jim60105/AIr-Friends/compare/v0.31.1...HEAD
+[Unreleased]: https://github.com/jim60105/AIr-Friends/compare/v0.32.0...HEAD
+[0.32.0]: https://github.com/jim60105/AIr-Friends/compare/v0.31.1...v0.32.0
 [0.31.1]: https://github.com/jim60105/AIr-Friends/compare/v0.31.0...v0.31.1
 [0.31.0]: https://github.com/jim60105/AIr-Friends/compare/v0.30.0...v0.31.0
 [0.30.0]: https://github.com/jim60105/AIr-Friends/compare/v0.29.0...v0.30.0
