@@ -60,10 +60,7 @@ Deno.test("Integration: Agent workspace end-to-end flow", async () => {
     );
 
     // 4. Search via memory-search
-    const memoryStore = new MemoryStore(workspaceManager, {
-      searchLimit: 10,
-      maxChars: 2000,
-    });
+    const memoryStore = new MemoryStore(workspaceManager, {});
     const handler = new MemoryHandler(memoryStore);
 
     const workspace: WorkspaceInfo = {

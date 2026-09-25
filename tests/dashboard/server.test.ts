@@ -77,7 +77,7 @@ function createMinimalConfig(): Config {
       tokenLimit: 20000,
       autoApproveSkills: [],
     },
-    memory: { searchLimit: 10, maxChars: 2000 },
+    memory: {},
     workspace: { repoPath: "./data", workspacesDir: "workspaces" },
     replyPolicy: "channels",
     channels: [],

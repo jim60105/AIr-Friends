@@ -584,10 +584,6 @@ agent:
   systemPromptPath: "./prompts/system_reply.md"
   tokenLimit: 4096
 
-memory:
-  searchLimit: 10
-  maxChars: 2000
-
 workspace:
   repoPath: "./data"
   workspacesDir: "workspaces"

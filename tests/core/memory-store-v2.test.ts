@@ -33,10 +33,7 @@ async function withTestMemoryStore(
       repoPath: tempDir,
       workspacesDir: "workspaces",
     });
-    const store = new MemoryStore(manager, {
-      searchLimit: 10,
-      maxChars: 2000,
-    });
+    const store = new MemoryStore(manager, {});
     const event = createTestEvent({ isDm });
     const workspace = await manager.getOrCreateWorkspace(event);
 
@@ -59,10 +56,7 @@ async function withTestChannelStore(
       repoPath: tempDir,
       workspacesDir: "workspaces",
     });
-    const store = new MemoryStore(manager, {
-      searchLimit: 10,
-      maxChars: 2000,
-    });
+    const store = new MemoryStore(manager, {});
     const channelWorkspace = await manager.getOrCreateChannelWorkspace("discord", "chan_test_123");
 
     await fn(store, channelWorkspace, manager);

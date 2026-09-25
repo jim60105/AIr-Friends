@@ -92,8 +92,6 @@ function createTestConfig(
       defaultAgentType: "opencode",
     },
     memory: {
-      searchLimit: 10,
-      maxChars: 2000,
       recentMessageLimit: 20,
       workingTierLimit: 20,
     },

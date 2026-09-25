@@ -77,8 +77,6 @@ function createTestOrchestrator(): { orchestrator: TestableOrchestrator; cleanup
       defaultAgentType: "opencode",
     },
     memory: {
-      searchLimit: 10,
-      maxChars: 2000,
       recentMessageLimit: 20,
       workingTierLimit: 20,
     },
@@ -95,16 +93,12 @@ function createTestOrchestrator(): { orchestrator: TestableOrchestrator; cleanup
     repoPath: config.workspace.repoPath,
     workspacesDir: config.workspace.workspacesDir,
   });
-  const memoryStore = new MemoryStore(workspaceManager, {
-    searchLimit: config.memory.searchLimit,
-    maxChars: config.memory.maxChars,
-  });
+  const memoryStore = new MemoryStore(workspaceManager, {});
   const skillRegistry = new SkillRegistry(memoryStore);
   const contextAssembler = new ContextAssembler(memoryStore, {
     systemPromptPath: config.agent.systemPromptPath,
     recentMessageLimit: config.memory.recentMessageLimit,
     tokenLimit: config.agent.tokenLimit,
-    memoryMaxChars: config.memory.maxChars,
   });
   const sessionRegistry = new SessionRegistry();
 

@@ -82,7 +82,7 @@ function createTestConfig(tempDir: string): Config {
       tokenLimit: 20000,
       defaultAgentType: "opencode",
     },
-    memory: { searchLimit: 10, maxChars: 2000, recentMessageLimit: 20, workingTierLimit: 20 },
+    memory: { recentMessageLimit: 20, workingTierLimit: 20 },
     workspace: { repoPath: tempDir, workspacesDir: "workspaces" },
     logging: { level: "FATAL" },
     accessControl: { replyTo: "whitelist", whitelist: [] },
@@ -134,7 +134,7 @@ async function createReminderTestOrchestrator(tempDir: string) {
     repoPath: tempDir,
     workspacesDir: "workspaces",
   });
-  const memoryStore = new MemoryStore(workspaceManager, { searchLimit: 10, maxChars: 2000 });
+  const memoryStore = new MemoryStore(workspaceManager, {});
   const skillRegistry = new SkillRegistry(memoryStore);
 
   await Deno.mkdir(`${tempDir}/prompts`, { recursive: true });
@@ -151,7 +151,6 @@ async function createReminderTestOrchestrator(tempDir: string) {
     systemPromptPath: `${tempDir}/prompts/system_reply.md`,
     recentMessageLimit: 20,
     tokenLimit: 20000,
-    memoryMaxChars: 2000,
   });
   const sessionRegistry = new SessionRegistry();
   const orchestrator = new TestableSessionOrchestrator(

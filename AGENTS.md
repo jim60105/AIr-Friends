@@ -388,8 +388,6 @@ interface PatchEvent {
 
 ```yaml
 memory:
-  searchLimit: 10
-  maxChars: 2000
   recentMessageLimit: 20
   workingTierLimit: 20  # Max working-tier memories before demotion to archive
 
@@ -1481,10 +1479,6 @@ agent:
   #     args: ["-y", "@modelcontextprotocol/server-github"]
   #     env:
   #       GITHUB_TOKEN: "${GITHUB_TOKEN}"
-
-memory:
-  search_limit: 10
-  max_chars: 2000
 
 workspace:
   repo_path: "./data"

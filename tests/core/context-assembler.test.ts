@@ -87,8 +87,6 @@ async function withTestContextAssembler(
       workspacesDir: "workspaces",
     });
     const store = new MemoryStore(manager, {
-      searchLimit: 10,
-      maxChars: 2000,
       ...(overrides.workingTierLimit !== undefined
         ? { workingTierLimit: overrides.workingTierLimit }
         : {}),
@@ -97,7 +95,6 @@ async function withTestContextAssembler(
       store,
       {
         recentMessageLimit: 20,
-        memoryMaxChars: 2000,
         tokenLimit: 20000,
         systemPromptPath: `${tempDir}/prompts/system_reply.md`,
         ...(overrides.recall !== undefined ? { recall: overrides.recall } : {}),
@@ -366,15 +363,11 @@ Deno.test("ContextAssembler - should remove oldest messages when exceeding token
       repoPath: tempDir,
       workspacesDir: "workspaces",
     });
-    const store = new MemoryStore(manager, {
-      searchLimit: 10,
-      maxChars: 2000,
-    });
+    const store = new MemoryStore(manager, {});
 
     // Create assembler with very small token limit
     const assembler = new ContextAssembler(store, {
       recentMessageLimit: 20,
-      memoryMaxChars: 2000,
       tokenLimit: 500, // Very small limit to trigger truncation
       systemPromptPath: `${tempDir}/prompts/system_reply.md`,
     });
@@ -931,10 +924,9 @@ Deno.test("ContextAssembler - formatFileSize via attachment description", async 
 
 Deno.test("F15 - channel memories render as attributed, untrusted notes (not Channel Knowledge)", () => {
   const manager = new WorkspaceManager({ repoPath: "/tmp", workspacesDir: "workspaces" });
-  const store = new MemoryStore(manager, { searchLimit: 10, maxChars: 2000 });
+  const store = new MemoryStore(manager, {});
   const assembler = new ContextAssembler(store, {
     recentMessageLimit: 20,
-    memoryMaxChars: 2000,
     tokenLimit: 20000,
     systemPromptPath: "/tmp/does-not-exist.md",
   });

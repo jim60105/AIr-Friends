@@ -90,7 +90,7 @@ async function withFixture(fn: (fixture: Fixture) => Promise<void>): Promise<voi
   const tempDir = await Deno.makeTempDir();
   try {
     const manager = new WorkspaceManager({ repoPath: tempDir, workspacesDir: "workspaces" });
-    const store = new MemoryStore(manager, { searchLimit: 10, maxChars: 2000 });
+    const store = new MemoryStore(manager, {});
     const event = (isDm: boolean) => ({
       platform: "discord" as Platform,
       channelId: "channel123",

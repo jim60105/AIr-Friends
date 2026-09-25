@@ -139,7 +139,7 @@ function buildTestConfig(tempDir: string, jwtDir: string): Config {
       sharedProcess: { enabled: true, jwtDir, reclaimIdleMs: 120_000 },
       idleTimeout: { enabled: true, timeoutMs: 300_000, checkIntervalMs: 10_000 },
     },
-    memory: { searchLimit: 10, maxChars: 2000 },
+    memory: {},
     workspace: { repoPath: tempDir, workspacesDir: "workspaces" },
     logging: { level: "info" },
     replyPolicy: "channels",
@@ -269,10 +269,7 @@ Deno.test({
         repoPath: tempDir,
         workspacesDir: "workspaces",
       });
-      const memoryStore = new MemoryStore(workspaceManager, {
-        searchLimit: 10,
-        maxChars: 2000,
-      });
+      const memoryStore = new MemoryStore(workspaceManager, {});
       const skillRegistry = new SkillRegistry(memoryStore);
       const logger = createLogger("IntegrationSharedProcess");
 
@@ -432,10 +429,7 @@ Deno.test({
         repoPath: tempDir,
         workspacesDir: "workspaces",
       });
-      const memoryStore = new MemoryStore(workspaceManager, {
-        searchLimit: 10,
-        maxChars: 2000,
-      });
+      const memoryStore = new MemoryStore(workspaceManager, {});
       const skillRegistry = new SkillRegistry(memoryStore);
       const logger = createLogger("IntegrationSharedProcess");
 

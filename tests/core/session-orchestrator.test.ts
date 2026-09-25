@@ -93,8 +93,6 @@ function createTestConfig(tempDir: string): Config {
       defaultAgentType: "opencode",
     },
     memory: {
-      searchLimit: 10,
-      maxChars: 2000,
       recentMessageLimit: 20,
       workingTierLimit: 20,
     },
@@ -145,16 +143,12 @@ Deno.test("SessionOrchestrator - constructs successfully", async () => {
       repoPath: config.workspace.repoPath,
       workspacesDir: config.workspace.workspacesDir,
     });
-    const memoryStore = new MemoryStore(workspaceManager, {
-      searchLimit: config.memory.searchLimit,
-      maxChars: config.memory.maxChars,
-    });
+    const memoryStore = new MemoryStore(workspaceManager, {});
     const skillRegistry = new SkillRegistry(memoryStore);
     const contextAssembler = new ContextAssembler(memoryStore, {
       systemPromptPath: config.agent.systemPromptPath,
       recentMessageLimit: config.memory.recentMessageLimit,
       tokenLimit: config.agent.tokenLimit,
-      memoryMaxChars: config.memory.maxChars,
     });
 
     const sessionRegistry = new SessionRegistry();
@@ -184,10 +178,7 @@ Deno.test("SessionOrchestrator - processMessage creates workspace", async () => 
       repoPath: config.workspace.repoPath,
       workspacesDir: config.workspace.workspacesDir,
     });
-    const memoryStore = new MemoryStore(workspaceManager, {
-      searchLimit: config.memory.searchLimit,
-      maxChars: config.memory.maxChars,
-    });
+    const memoryStore = new MemoryStore(workspaceManager, {});
     const skillRegistry = new SkillRegistry(memoryStore);
 
     // Create a system prompt file
@@ -201,7 +192,6 @@ Deno.test("SessionOrchestrator - processMessage creates workspace", async () => 
       systemPromptPath: `${tempDir}/prompts/system_reply.md`,
       recentMessageLimit: config.memory.recentMessageLimit,
       tokenLimit: config.agent.tokenLimit,
-      memoryMaxChars: config.memory.maxChars,
     });
 
     const sessionRegistry = new SessionRegistry();
@@ -249,10 +239,7 @@ Deno.test("SessionOrchestrator - skips agent execution for /clear command", asyn
       repoPath: config.workspace.repoPath,
       workspacesDir: config.workspace.workspacesDir,
     });
-    const memoryStore = new MemoryStore(workspaceManager, {
-      searchLimit: config.memory.searchLimit,
-      maxChars: config.memory.maxChars,
-    });
+    const memoryStore = new MemoryStore(workspaceManager, {});
     const skillRegistry = new SkillRegistry(memoryStore);
 
     // Create a system prompt file
@@ -266,7 +253,6 @@ Deno.test("SessionOrchestrator - skips agent execution for /clear command", asyn
       systemPromptPath: `${tempDir}/prompts/system_reply.md`,
       recentMessageLimit: config.memory.recentMessageLimit,
       tokenLimit: config.agent.tokenLimit,
-      memoryMaxChars: config.memory.maxChars,
     });
 
     const sessionRegistry = new SessionRegistry();
@@ -313,10 +299,7 @@ Deno.test("SessionOrchestrator - handles /clear with leading whitespace", async 
       repoPath: config.workspace.repoPath,
       workspacesDir: config.workspace.workspacesDir,
     });
-    const memoryStore = new MemoryStore(workspaceManager, {
-      searchLimit: config.memory.searchLimit,
-      maxChars: config.memory.maxChars,
-    });
+    const memoryStore = new MemoryStore(workspaceManager, {});
     const skillRegistry = new SkillRegistry(memoryStore);
 
     await Deno.mkdir(`${tempDir}/prompts`, { recursive: true });
@@ -329,7 +312,6 @@ Deno.test("SessionOrchestrator - handles /clear with leading whitespace", async 
       systemPromptPath: `${tempDir}/prompts/system_reply.md`,
       recentMessageLimit: config.memory.recentMessageLimit,
       tokenLimit: config.agent.tokenLimit,
-      memoryMaxChars: config.memory.maxChars,
     });
 
     const sessionRegistry = new SessionRegistry();
@@ -366,10 +348,7 @@ Deno.test("SessionOrchestrator - processMessage handles agent failure gracefully
       repoPath: config.workspace.repoPath,
       workspacesDir: config.workspace.workspacesDir,
     });
-    const memoryStore = new MemoryStore(workspaceManager, {
-      searchLimit: config.memory.searchLimit,
-      maxChars: config.memory.maxChars,
-    });
+    const memoryStore = new MemoryStore(workspaceManager, {});
     const skillRegistry = new SkillRegistry(memoryStore);
 
     // Create a system prompt file
@@ -383,7 +362,6 @@ Deno.test("SessionOrchestrator - processMessage handles agent failure gracefully
       systemPromptPath: `${tempDir}/prompts/system_reply.md`,
       recentMessageLimit: config.memory.recentMessageLimit,
       tokenLimit: config.agent.tokenLimit,
-      memoryMaxChars: config.memory.maxChars,
     });
 
     const sessionRegistry = new SessionRegistry();
@@ -423,10 +401,7 @@ Deno.test("SessionOrchestrator - reply state is accessible via skill registry", 
       repoPath: config.workspace.repoPath,
       workspacesDir: config.workspace.workspacesDir,
     });
-    const memoryStore = new MemoryStore(workspaceManager, {
-      searchLimit: config.memory.searchLimit,
-      maxChars: config.memory.maxChars,
-    });
+    const memoryStore = new MemoryStore(workspaceManager, {});
     const skillRegistry = new SkillRegistry(memoryStore);
 
     // Verify reply handler is accessible and supports clear/check operations
@@ -626,10 +601,7 @@ async function createTestableOrchestrator(
     repoPath: config.workspace.repoPath,
     workspacesDir: config.workspace.workspacesDir,
   });
-  const memoryStore = new MemoryStore(workspaceManager, {
-    searchLimit: config.memory.searchLimit,
-    maxChars: config.memory.maxChars,
-  });
+  const memoryStore = new MemoryStore(workspaceManager, {});
   const skillRegistry = new SkillRegistry(memoryStore);
 
   await Deno.mkdir(`${tempDir}/prompts`, { recursive: true });
@@ -696,7 +668,6 @@ Use this session ID when calling skills that require --session-id parameter.
     systemPromptPath: `${tempDir}/prompts/system_reply.md`,
     recentMessageLimit: config.memory.recentMessageLimit,
     tokenLimit: config.agent.tokenLimit,
-    memoryMaxChars: config.memory.maxChars,
   });
 
   const sessionRegistry = new SessionRegistry();
@@ -1399,10 +1370,7 @@ Deno.test("SessionOrchestrator - processSpontaneousPost with skillApi disabled",
       repoPath: config.workspace.repoPath,
       workspacesDir: config.workspace.workspacesDir,
     });
-    const memoryStore = new MemoryStore(workspaceManager, {
-      searchLimit: config.memory.searchLimit,
-      maxChars: config.memory.maxChars,
-    });
+    const memoryStore = new MemoryStore(workspaceManager, {});
     const skillRegistry = new SkillRegistry(memoryStore);
 
     await Deno.mkdir(`${tempDir}/prompts`, { recursive: true });
@@ -1415,7 +1383,6 @@ Deno.test("SessionOrchestrator - processSpontaneousPost with skillApi disabled",
       systemPromptPath: `${tempDir}/prompts/system_reply.md`,
       recentMessageLimit: config.memory.recentMessageLimit,
       tokenLimit: config.agent.tokenLimit,
-      memoryMaxChars: config.memory.maxChars,
     });
 
     const sessionRegistry = new SessionRegistry();
@@ -1654,10 +1621,7 @@ Deno.test("SessionOrchestrator - processSelfResearch handles agent connection fa
       repoPath: config.workspace.repoPath,
       workspacesDir: config.workspace.workspacesDir,
     });
-    const memoryStore = new MemoryStore(workspaceManager, {
-      searchLimit: config.memory.searchLimit,
-      maxChars: config.memory.maxChars,
-    });
+    const memoryStore = new MemoryStore(workspaceManager, {});
     const skillRegistry = new SkillRegistry(memoryStore);
 
     await Deno.mkdir(`${tempDir}/prompts`, { recursive: true });
@@ -1674,7 +1638,6 @@ Deno.test("SessionOrchestrator - processSelfResearch handles agent connection fa
       systemPromptPath: `${tempDir}/prompts/system_reply.md`,
       recentMessageLimit: config.memory.recentMessageLimit,
       tokenLimit: config.agent.tokenLimit,
-      memoryMaxChars: config.memory.maxChars,
     });
 
     const sessionRegistry = new SessionRegistry();
@@ -2273,10 +2236,7 @@ Deno.test("SessionOrchestrator - processMemoryMaintenance handles agent connecti
       repoPath: config.workspace.repoPath,
       workspacesDir: config.workspace.workspacesDir,
     });
-    const memoryStore = new MemoryStore(workspaceManager, {
-      searchLimit: config.memory.searchLimit,
-      maxChars: config.memory.maxChars,
-    });
+    const memoryStore = new MemoryStore(workspaceManager, {});
     const skillRegistry = new SkillRegistry(memoryStore);
 
     await Deno.mkdir(`${tempDir}/prompts`, { recursive: true });
@@ -2293,7 +2253,6 @@ Deno.test("SessionOrchestrator - processMemoryMaintenance handles agent connecti
       systemPromptPath: `${tempDir}/prompts/system_reply.md`,
       recentMessageLimit: config.memory.recentMessageLimit,
       tokenLimit: config.agent.tokenLimit,
-      memoryMaxChars: config.memory.maxChars,
     });
 
     const sessionRegistry = new SessionRegistry();

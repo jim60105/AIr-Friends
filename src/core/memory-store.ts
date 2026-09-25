@@ -24,8 +24,6 @@ import { ErrorCode, MemoryError } from "../types/errors.ts";
 const logger = createLogger("MemoryStore");
 
 export interface MemoryStoreConfig {
-  searchLimit: number;
-  maxChars: number;
   workingTierLimit?: number;
 }
 

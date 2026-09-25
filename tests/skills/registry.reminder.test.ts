@@ -12,7 +12,7 @@ Deno.test("SkillRegistry - registers reminder skills when enabled", async () => 
       repoPath: tempDir,
       workspacesDir: "workspaces",
     });
-    const memoryStore = new MemoryStore(workspaceManager, { searchLimit: 10, maxChars: 2000 });
+    const memoryStore = new MemoryStore(workspaceManager, {});
     const remindersConfig: RemindersConfig = {
       enabled: true,
       maxRemindersPerUser: 20,
@@ -39,7 +39,7 @@ Deno.test("SkillRegistry - does not register reminder skills when disabled", asy
       repoPath: tempDir,
       workspacesDir: "workspaces",
     });
-    const memoryStore = new MemoryStore(workspaceManager, { searchLimit: 10, maxChars: 2000 });
+    const memoryStore = new MemoryStore(workspaceManager, {});
     const registry = new SkillRegistry(memoryStore);
 
     assertEquals(registry.getReminderHandler(), null);

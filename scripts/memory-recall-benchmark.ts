@@ -518,7 +518,7 @@ export async function materializeFixture(
 ): Promise<Fixture> {
   const root = await Deno.makeTempDir({ prefix: "memory-recall-benchmark-" });
   const manager = new WorkspaceManager({ repoPath: root, workspacesDir: "workspaces" });
-  const store = new MemoryStore(manager, { searchLimit: 10, maxChars: 2000 });
+  const store = new MemoryStore(manager, {});
   const event = (isDm: boolean) => ({
     platform: "discord" as Platform,
     channelId: "channel123",

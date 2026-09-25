@@ -42,8 +42,6 @@ const createTestConfig = (overrides: Partial<Config> = {}): Config => {
       ...overrides.agent,
     },
     memory: {
-      searchLimit: 10,
-      maxChars: 2000,
       recentMessageLimit: 20,
       workingTierLimit: 20,
     },

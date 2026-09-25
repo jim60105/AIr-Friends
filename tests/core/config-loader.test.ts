@@ -75,9 +75,40 @@ workspace:
   await withTestConfig(config, async (dir) => {
     const result = await loadConfig(dir);
     // Default values should be applied
-    assertEquals(result.memory.searchLimit, 10);
     assertEquals(result.memory.recentMessageLimit, 20);
     assertEquals(result.logging.level, "INFO");
+  });
+});
+
+Deno.test("Config - removed memory.searchLimit/maxChars inject no defaults", async () => {
+  await withTestConfig(recallConfig(""), async (dir) => {
+    const result = await loadConfig(dir);
+    assertEquals(Object.hasOwn(result.memory, "searchLimit"), false);
+    assertEquals(Object.hasOwn(result.memory, "maxChars"), false);
+    assertEquals(result.memory.workingTierLimit, 20);
+    assertEquals(result.memory.recall?.coreMaxTokens, 512);
+  });
+});
+
+Deno.test("Config - legacy memory.searchLimit/maxChars keys load without error and stay inert", async () => {
+  const memory = `memory:
+  searchLimit: 5
+  maxChars: 1000
+  recall:
+    fastRecallMaxTokens: 128`;
+
+  await withTestConfig(recallConfig(memory), async (dir) => {
+    const result = await loadConfig(dir);
+    // The legacy keys are merged verbatim — never defaulted, never read.
+    const merged = result.memory as unknown as Record<string, unknown>;
+    assertEquals(merged.searchLimit, 5);
+    assertEquals(merged.maxChars, 1000);
+    // Retrieval budgets and the surviving knobs are unaffected: the explicit
+    // budget survives and every other budget still falls back to its default.
+    assertEquals(result.memory.workingTierLimit, 20);
+    assertEquals(result.memory.recall?.fastRecallMaxTokens, 128);
+    assertEquals(result.memory.recall?.coreMaxTokens, 512);
+    assertEquals(result.memory.recall?.fastRecallEnabled, true);
   });
 });
 

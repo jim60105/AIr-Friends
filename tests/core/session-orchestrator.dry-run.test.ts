@@ -123,7 +123,7 @@ function createTestConfig(tempDir: string, dryRunEnabled = true): Config {
         mockReply: "（Dry run 模式 — 此為測試回覆）",
       },
     },
-    memory: { searchLimit: 10, maxChars: 2000, recentMessageLimit: 20, workingTierLimit: 20 },
+    memory: { recentMessageLimit: 20, workingTierLimit: 20 },
     workspace: { repoPath: tempDir, workspacesDir: "workspaces" },
     logging: { level: "FATAL" },
     accessControl: { replyTo: "whitelist", whitelist: [] },
@@ -154,7 +154,7 @@ async function createOrchestrator(tempDir: string, dryRunEnabled = true, sendFil
     repoPath: tempDir,
     workspacesDir: "workspaces",
   });
-  const memoryStore = new MemoryStore(workspaceManager, { searchLimit: 10, maxChars: 2000 });
+  const memoryStore = new MemoryStore(workspaceManager, {});
   const skillRegistry = new SkillRegistry(
     memoryStore,
     undefined,
@@ -188,7 +188,6 @@ async function createOrchestrator(tempDir: string, dryRunEnabled = true, sendFil
     systemPromptPath: `${tempDir}/prompts/system_reply.md`,
     recentMessageLimit: 20,
     tokenLimit: 20000,
-    memoryMaxChars: 2000,
   });
   const sessionRegistry = new SessionRegistry();
   const orchestrator = new TestableSessionOrchestrator(

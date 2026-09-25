@@ -215,8 +215,6 @@ function loadChannels(rawChannels: unknown[]): ChannelConfig[] {
  */
 const DEFAULT_CONFIG: Partial<Config> = {
   memory: {
-    searchLimit: 10,
-    maxChars: 2000,
     recentMessageLimit: 20,
     workingTierLimit: 20,
     recall: { ...DEFAULT_RECALL_CONFIG },

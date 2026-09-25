@@ -105,9 +105,6 @@ export interface ContextAssemblyConfig {
   /** Maximum number of recent messages to include */
   recentMessageLimit: number;
 
-  /** Maximum characters for memory content */
-  memoryMaxChars: number;
-
   /** Maximum total tokens for context */
   tokenLimit: number;
 
