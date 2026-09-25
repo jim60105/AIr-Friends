@@ -1,6 +1,7 @@
 // tests/core/agent-core.test.ts
 
-import { assertEquals, assertExists } from "@std/assert";
+import { assertEquals, assertExists, assertStringIncludes } from "@std/assert";
+import { join } from "@std/path";
 import { AgentCore } from "@core/agent-core.ts";
 import type { Config } from "../../src/types/config.ts";
 import type { NormalizedEvent, PlatformMessage } from "../../src/types/events.ts";
@@ -314,6 +315,59 @@ Deno.test("AgentCore - getMemoryStore returns memory store", async () => {
 
     const memoryStore = agentCore.getMemoryStore();
     assertExists(memoryStore);
+
+    await agentCore.shutdown();
+  } finally {
+    await Deno.remove(tempDir, { recursive: true });
+  }
+});
+
+Deno.test("AgentCore - a channel session's context carries the channel memories", async () => {
+  const tempDir = await Deno.makeTempDir();
+  try {
+    await Deno.mkdir(`${tempDir}/prompts`, { recursive: true });
+    await Deno.writeTextFile(
+      `${tempDir}/prompts/system_reply.md`,
+      "You are a helpful assistant.\n\n{{ userContextMessage }}",
+    );
+
+    const config = createTestConfig(tempDir, "all", []);
+    config.agent.dryRun = {
+      enabled: true,
+      outputPath: `${tempDir}/dry-run/`,
+      mockReply: "dry run reply",
+    };
+
+    const agentCore = new AgentCore(config);
+    const channelWorkspace = await agentCore.getWorkspaceManager().getOrCreateChannelWorkspace(
+      "discord",
+      "test_channel",
+    );
+    await agentCore.getMemoryStore().addChannelMemory(
+      channelWorkspace,
+      "The channel meets on Tuesdays",
+      { tier: "core", durable: true, author: "user_42" },
+    );
+
+    const mockAdapter = new MockPlatformAdapter();
+    agentCore.registerPlatform(mockAdapter as unknown as PlatformAdapter);
+
+    // The adapter awaits the whole session, and the dry run writes the prompt the
+    // session assembled, so the file is complete when the event returns.
+    await mockAdapter.triggerEvent(createTestEvent());
+
+    const promptDir = `${tempDir}/dry-run/`;
+    const promptFiles: string[] = [];
+    for await (const entry of Deno.readDir(promptDir)) {
+      if (entry.name.startsWith("message_") && entry.name.endsWith(".md")) {
+        promptFiles.push(entry.name);
+      }
+    }
+    assertEquals(promptFiles.length, 1);
+    const prompt = await Deno.readTextFile(join(promptDir, promptFiles[0]));
+
+    assertStringIncludes(prompt, "## Channel Notes");
+    assertStringIncludes(prompt, "[from user_42] The channel meets on Tuesdays");
 
     await agentCore.shutdown();
   } finally {
