@@ -30,6 +30,14 @@ export interface AssembledContext {
    */
   injectedIds: string[];
 
+  /**
+   * Memories Fast Recall selected for this turn, in ranking order, rendered by
+   * `formatContext()` after the fixed memory sections. `undefined` when Fast
+   * Recall did not run (disabled, or a failure); an empty array means it ran
+   * and selected nothing.
+   */
+  fastRecall?: ResolvedMemory[];
+
   /** Recent messages from the current channel */
   recentMessages: PlatformMessage[];
 

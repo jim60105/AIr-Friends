@@ -119,6 +119,7 @@ export class AgentCore {
         recall: config.memory.recall,
       },
       this.workspaceManager,
+      skillRegistry.getMemoryRetriever(),
     );
 
     // Initialize reply policy (needed by orchestrator and message handler)

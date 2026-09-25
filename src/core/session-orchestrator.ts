@@ -556,6 +556,7 @@ export class SessionOrchestrator {
         shellSessionId ?? undefined,
         resolvedModel,
         yoloDecision.enabled,
+        agentWorkspacePath,
       );
       sessionLogger.debug("Context assembled", {
         memoriesCount: context.importantMemories.length,

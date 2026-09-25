@@ -230,6 +230,7 @@ memory:
   # Memory Recall v2 selection. Every key is optional and falls back to its
   # default; a value outside its allowed range fails configuration loading.
   recall:
+    fastRecallEnabled: true # Fast Recall: run the per-turn recall search and render its section (default: true)
     fastRecallMaxResults: 2 # Fast Recall: maximum selected memories (default: 2)
     fastRecallMaxTokens: 192 # Fast Recall: token budget of the memory section (default: 192)
     # Fixed loading budgets. User memories are considered before channel ones,

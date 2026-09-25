@@ -271,12 +271,21 @@ Initial context comprises:
 | ----------------------- | ---------------------------------------------------------------------------------- |
 | Core-tier memories      | Within `memory.recall.coreMaxTokens` (default 512), user then channel              |
 | Working-tier memories   | Newest `memory.recall.workingMaxItems` (default 4) within `workingMaxTokens` (384) |
+| Fast Recall memories    | Top 2 within `memory.recall.fastRecallMaxTokens` (default 192)                      |
 | Recent channel messages | 20 messages (fixed)                                                                |
 | Guild-related context   | Configurable                                                                       |
 
 Only the tier decides what is loaded at session start; `importance` is a retrieval
 ranking bonus only. A memory a budget skips keeps its tier and stays reachable through
 `memory-search`.
+
+Fast Recall runs once per triggered session, using the trigger message and the same
+user's previous message after the last `/clear`, and excludes the memories fixed
+loading already injected. Its section (`## Relevant Memory`, and `## Relevant Channel
+Notes` for the attributed, unverified channel memories) is omitted when nothing is
+selected. Spontaneous posts never run it, a failure is logged and the session
+continues without the section, and `memory.recall.fastRecallEnabled: false` disables
+it.
 
 **No automatic memory compression or summarization during normal message handling**.
 Optional scheduled memory maintenance can be enabled separately.
