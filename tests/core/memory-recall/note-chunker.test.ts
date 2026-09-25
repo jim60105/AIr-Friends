@@ -144,13 +144,15 @@ Deno.test("buildExcerpt - appends the following sentences while under the limit"
 
 Deno.test("buildExcerpt - cuts around the first matched term and marks both ends", () => {
   const text = `${"x".repeat(200)} Portaly ${"y".repeat(200)}`;
+  const maxChars = 100;
 
-  const excerpt = buildExcerpt(text, ["portaly"], 100);
+  const excerpt = buildExcerpt(text, ["portaly"], maxChars);
 
   assert(excerpt.includes("Portaly"), `excerpt lost the matched term: ${excerpt}`);
   assert(excerpt.startsWith("…"), excerpt);
   assert(excerpt.endsWith("…"), excerpt);
-  assert(excerpt.length <= 102, `excerpt is ${excerpt.length} characters`);
+  // The window is `maxChars` characters plus one `…` at each cut end.
+  assert(excerpt.length <= maxChars + 2, `excerpt is ${excerpt.length} characters`);
 });
 
 Deno.test("buildExcerpt - an unmatched note still yields an excerpt", () => {

@@ -374,7 +374,9 @@ root `README.md` and `notes/_index.md`. The file list is re-read on every
 search and only files whose size or modification time changed are re-chunked.
 Symbolic links are never followed and every entry must resolve, by real path,
 inside the workspace, so a planted link cannot leak another file through an
-excerpt.
+excerpt. A file with more than one hard link is skipped as well: a hard link is
+not a symbolic link, so it passes both checks while still naming another user's
+memory file, and a legitimate note is singly-linked.
 
 - A chunk starts at every `##` or `###` heading and carries the file's absolute
   path, its title, its heading path, its line range and the file's modification

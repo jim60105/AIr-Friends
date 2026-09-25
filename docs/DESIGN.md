@@ -885,7 +885,6 @@ AIr-Friends/
 │       ├── rss-fetcher.ts
 │       ├── gelf-transport.ts
 │       ├── path-validator.ts
-│       ├── text-search.ts
 │       └── token-counter.ts
 ├── skills/                  # Shell-based skill scripts
 │   ├── memory-save/

@@ -4,6 +4,7 @@ import { createLogger } from "@utils/logger.ts";
 import { MemoryStore } from "@core/memory-store.ts";
 import { DEFAULT_RECALL_CONFIG } from "@core/memory-recall/recall-config.ts";
 import { MemoryRetriever } from "@core/memory-recall/retriever.ts";
+import type { MemoryRecallResult } from "@core/memory-recall/retriever.ts";
 import type {
   MemoryExportParams,
   MemoryPatchParams,
@@ -385,32 +386,7 @@ export class MemoryHandler {
       });
       memoryOperationsTotal.labels("search", "public").inc();
 
-      const memories: MemorySearchEntry[] = response.memories.map((entry) => {
-        const m = entry.memory;
-        return {
-          id: m.id,
-          enabled: m.enabled,
-          visibility: m.visibility,
-          importance: m.importance,
-          content: m.content,
-          createdAt: m.createdAt,
-          lastModifiedAt: m.lastModifiedAt,
-          tier: m.tier,
-          category: m.category,
-          scope: m.scope,
-          decay: m.decay,
-          relatedTo: m.relatedTo,
-          supersedes: m.supersedes,
-          score: Math.round(entry.score * 1000) / 1000,
-          matchedTerms: entry.matchedTerms,
-        };
-      });
-      const notes: NoteRecallResult[] = response.notes.map((note) => ({
-        ...note,
-        score: Math.round(note.score * 1000) / 1000,
-      }));
-
-      const admitted = this.admitDeepOutput(memories, notes);
+      const admitted = this.admitDeepOutput(response.memories, response.notes);
       const result: MemorySearchResult = { memories: admitted.memories };
       // The section exists only for a session that has an agent workspace.
       if (context.agentWorkspacePath) result.agentNotes = admitted.notes;
@@ -439,17 +415,28 @@ export class MemoryHandler {
    * receives. An item that does not fit is skipped and a later, smaller one is
    * still considered, so the combined output never exceeds the budget. Equal
    * scores keep the memory before the note.
+   *
+   * Ordering uses the engine score, before the rounding the output applies, so
+   * a near tie cannot be inverted by the value the agent sees.
    */
   private admitDeepOutput(
-    memories: readonly MemorySearchEntry[],
+    memories: readonly MemoryRecallResult[],
     notes: readonly NoteRecallResult[],
   ): { memories: MemorySearchEntry[]; notes: NoteRecallResult[] } {
     type DeepItem =
-      | { kind: "memory"; score: number; memory: MemorySearchEntry }
-      | { kind: "note"; score: number; note: NoteRecallResult };
+      | { kind: "memory"; score: number; entry: MemorySearchEntry }
+      | { kind: "note"; score: number; entry: NoteRecallResult };
     const items: DeepItem[] = [
-      ...memories.map((memory): DeepItem => ({ kind: "memory", score: memory.score, memory })),
-      ...notes.map((note): DeepItem => ({ kind: "note", score: note.score, note })),
+      ...memories.map((item): DeepItem => ({
+        kind: "memory",
+        score: item.score,
+        entry: toSearchEntry(item),
+      })),
+      ...notes.map((note): DeepItem => ({
+        kind: "note",
+        score: note.score,
+        entry: { ...note, score: Math.round(note.score * 1000) / 1000 },
+      })),
     ];
     items.sort((a, b) => {
       if (a.score !== b.score) return b.score - a.score;
@@ -462,13 +449,11 @@ export class MemoryHandler {
     const keptNotes: NoteRecallResult[] = [];
     let tokens = 0;
     for (const item of items) {
-      const size = estimateTokens(
-        JSON.stringify(item.kind === "memory" ? item.memory : item.note),
-      );
+      const size = estimateTokens(JSON.stringify(item.entry));
       if (tokens + size > budget) continue;
       tokens += size;
-      if (item.kind === "memory") keptMemories.push(item.memory);
-      else keptNotes.push(item.note);
+      if (item.kind === "memory") keptMemories.push(item.entry);
+      else keptNotes.push(item.entry);
     }
     return { memories: keptMemories, notes: keptNotes };
   }
@@ -938,4 +923,29 @@ export class MemoryHandler {
       2,
     );
   }
+}
+
+/**
+ * The `memory-search` output entry of one recalled memory: the memory fields
+ * plus the recall diagnostics, with `score` rounded to 3 decimals.
+ */
+function toSearchEntry(entry: MemoryRecallResult): MemorySearchEntry {
+  const m = entry.memory;
+  return {
+    id: m.id,
+    enabled: m.enabled,
+    visibility: m.visibility,
+    importance: m.importance,
+    content: m.content,
+    createdAt: m.createdAt,
+    lastModifiedAt: m.lastModifiedAt,
+    tier: m.tier,
+    category: m.category,
+    scope: m.scope,
+    decay: m.decay,
+    relatedTo: m.relatedTo,
+    supersedes: m.supersedes,
+    score: Math.round(entry.score * 1000) / 1000,
+    matchedTerms: entry.matchedTerms,
+  };
 }

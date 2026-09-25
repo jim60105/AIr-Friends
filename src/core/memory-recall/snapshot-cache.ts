@@ -12,10 +12,12 @@ import type { ResolvedMemory } from "../../types/memory.ts";
 
 const logger = createLogger("MemorySnapshotCache");
 
-/** Identity of a file: its size and modification time. */
+/** Identity of a file: its size, modification time and link count. */
 interface Stamp {
   size: number;
   mtimeMs: number;
+  /** Hard links to the file; a note is rejected when it has more than one. */
+  nlink: number;
 }
 
 /** One cached memory file: the stamp its documents were built for and the documents. */
@@ -221,6 +223,11 @@ export class MemorySnapshotCache {
    * could have been swapped for a link escaping the workspace since the walk.
    * A link planted after the read can only serve the content that was already
    * validated, and any stamp change forces a fresh check.
+   *
+   * A file with more than one hard link is rejected as well: a hard link is not
+   * a symbolic link, so `isSymlink` and `realPath` both accept it, yet it can
+   * name another user's `memory.private.jsonl` from inside the workspace, which
+   * is the leak D12 exists to prevent. A legitimate note is singly-linked.
    */
   private async rebuildNote(
     path: string,
@@ -229,6 +236,10 @@ export class MemorySnapshotCache {
   ): Promise<NoteSnapshotEntry> {
     if (stamp === null) return { stamp, note: null };
     try {
+      if (stamp.nlink > 1) {
+        logger.debug("Skipping a hard-linked agent workspace note", { path });
+        return { stamp, note: null };
+      }
       if (!await this.resolvesInside(path, boundary)) return { stamp, note: null };
       const content = await Deno.readTextFile(path);
       const parsed = parseNote(content, path);
@@ -279,7 +290,7 @@ export class MemorySnapshotCache {
 async function statStamp(path: string): Promise<Stamp | null> {
   try {
     const stat = await Deno.stat(path);
-    return { size: stat.size, mtimeMs: stat.mtime?.getTime() ?? 0 };
+    return { size: stat.size, mtimeMs: stat.mtime?.getTime() ?? 0, nlink: stat.nlink ?? 1 };
   } catch (error) {
     if (error instanceof Deno.errors.NotFound) return null;
     throw error;

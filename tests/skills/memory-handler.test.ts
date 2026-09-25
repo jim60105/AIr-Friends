@@ -474,7 +474,8 @@ Deno.test("MemoryHandler - handleMemorySearch skips an item that does not fit th
 Deno.test("MemoryHandler - handleMemorySearch drops a lower-scoring memory for a higher-scoring note", async () => {
   await withSearchHandler(false, async ({ handler, store, workspace, context, tempDir }) => {
     // The memory matches one query word and is oversized; the note matches both
-    // words, so the note is admitted first and the memory no longer fits.
+    // words, so the note is admitted first. The memory is then dropped because
+    // its own serialized size, not the note's admission, leaves no room.
     await store.addMemory(workspace, `keyboard ${"filler ".repeat(600)}`, {
       visibility: "public",
     });

@@ -351,6 +351,21 @@ Deno.test("MemorySnapshotCache - an unreadable note is skipped, not thrown", asy
   });
 });
 
+Deno.test("MemorySnapshotCache - a hard-linked note is not read", async () => {
+  await withNoteWorkspace(async ({ root, tempDir, cache }) => {
+    // A hard link is not a symbolic link: `isSymlink` and `realPath` both accept
+    // it, so the link count is what keeps another file's content out.
+    const privatePath = `${tempDir}/memory.private.jsonl`;
+    await Deno.writeTextFile(privatePath, "leaked keyboard secret\n");
+    await Deno.link(privatePath, `${root}/notes/leak.md`);
+    await Deno.writeTextFile(`${root}/notes/real.md`, "# Real\n\nkeyboard\n");
+
+    const notes = await cache.getNotes(root);
+
+    assertEquals(notePaths(notes), [`${root}/notes/real.md`]);
+  });
+});
+
 Deno.test("MemorySnapshotCache - a symlinked workspace root is walked at its given path", async () => {
   await withNoteWorkspace(async ({ root, tempDir, cache }) => {
     await Deno.writeTextFile(`${root}/notes/topic.md`, "# Topic\n\nkeyboard\n");
