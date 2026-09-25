@@ -151,6 +151,27 @@ function requireRecallNumber(
   return value as number;
 }
 
+/**
+ * Validates one boolean `memory.recall` key and returns it, with the same
+ * fail-the-load rule as `requireRecallNumber`. A quoted `"yes"` is a string,
+ * not a boolean, so it is rejected rather than coerced.
+ */
+function requireRecallBoolean(
+  section: Record<string, unknown>,
+  key: keyof MemoryRecallConfig,
+): boolean {
+  const value = section[key];
+  if (typeof value !== "boolean") {
+    const label = `memory.recall.${key}`;
+    throw new ConfigError(
+      ErrorCode.CONFIG_INVALID,
+      `${label} must be a boolean`,
+      { field: label, value },
+    );
+  }
+  return value;
+}
+
 /** Load and normalize channel configs from raw input */
 function loadChannels(rawChannels: unknown[]): ChannelConfig[] {
   const channels: ChannelConfig[] = [];
@@ -579,6 +600,7 @@ function validateConfig(config: Record<string, unknown>): void {
     ...(rawRecall as Record<string, unknown> | undefined),
   };
   const recall: MemoryRecallConfig = {
+    fastRecallEnabled: requireRecallBoolean(recallValues, "fastRecallEnabled"),
     fastRecallMaxResults: requireRecallNumber(recallValues, "fastRecallMaxResults", {
       min: 0,
       integer: true,

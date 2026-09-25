@@ -17,6 +17,7 @@ import type { MemoryRecallConfig } from "../../types/config.ts";
  * fails when a ranking change moves the recorded metrics.
  */
 export const DEFAULT_RECALL_CONFIG: MemoryRecallConfig = {
+  fastRecallEnabled: true,
   fastRecallMaxResults: 2,
   fastRecallMaxTokens: 192,
   coreMaxTokens: 512,

@@ -2510,6 +2510,7 @@ ${memory}
 Deno.test("Config - applies memory.recall defaults", async () => {
   await withTestConfig(recallConfig(""), async (dir) => {
     const result = await loadConfig(dir);
+    assertEquals(result.memory.recall?.fastRecallEnabled, true);
     assertEquals(result.memory.recall?.fastRecallMaxResults, 2);
     assertEquals(result.memory.recall?.fastRecallMaxTokens, 192);
     assertEquals(result.memory.recall?.coreMaxTokens, 512);
@@ -2531,6 +2532,7 @@ Deno.test("Config - memory.recall keeps every default a partial override does no
   await withTestConfig(recallConfig(memory), async (dir) => {
     const result = await loadConfig(dir);
     assertEquals(result.memory.recall?.fastRecallMaxTokens, 128);
+    assertEquals(result.memory.recall?.fastRecallEnabled, true);
     assertEquals(result.memory.recall?.fastRecallMaxResults, 2);
     assertEquals(result.memory.recall?.coreMaxTokens, 512);
     assertEquals(result.memory.recall?.workingMaxItems, 4);
@@ -2624,6 +2626,16 @@ Deno.test("Config - rejects a non-numeric memory.recall.minRecallScore", async (
   const memory = `memory:
   recall:
     minRecallScore: "3"`;
+
+  await withTestConfig(recallConfig(memory), async (dir) => {
+    await assertRejects(() => loadConfig(dir), ConfigError);
+  });
+});
+
+Deno.test("Config - rejects a non-boolean memory.recall.fastRecallEnabled", async () => {
+  const memory = `memory:
+  recall:
+    fastRecallEnabled: "yes"`;
 
   await withTestConfig(recallConfig(memory), async (dir) => {
     await assertRejects(() => loadConfig(dir), ConfigError);

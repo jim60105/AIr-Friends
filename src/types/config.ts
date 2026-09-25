@@ -411,6 +411,14 @@ export interface MemoryConfig {
  */
 export interface MemoryRecallConfig {
   /**
+   * Fast Recall kill switch (default: true). When `false` the context
+   * assembler runs no recall search for a triggered session and renders no
+   * Fast Recall section. This gates the assembler, not the engine: a direct
+   * `MemoryRetriever.search()` call still ranks.
+   */
+  fastRecallEnabled: boolean;
+
+  /**
    * Fast Recall: maximum number of selected memories (default: 2). `0` selects
    * none, and a value above 2 cannot select more than the first and the second.
    */
@@ -418,8 +426,8 @@ export interface MemoryRecallConfig {
 
   /**
    * Fast Recall: token budget of the rendered memory section (default: 192).
-   * `0` fits no memory and therefore disables Fast Recall; use the kill switch
-   * `memory.recall.fastRecallEnabled` (a later change) to disable it explicitly.
+   * `0` fits no memory and therefore selects none; use the kill switch
+   * `memory.recall.fastRecallEnabled` to disable Fast Recall explicitly.
    */
   fastRecallMaxTokens: number;
 
