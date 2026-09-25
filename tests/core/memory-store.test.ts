@@ -1,6 +1,7 @@
 // tests/core/memory-store.test.ts
 
-import { assertEquals, assertRejects } from "@std/assert";
+import { assert, assertEquals, assertRejects } from "@std/assert";
+import { join } from "@std/path";
 import { MemoryStore } from "../../src/core/memory-store.ts";
 import { WorkspaceManager } from "../../src/core/workspace-manager.ts";
 import { MemoryError } from "../../src/types/errors.ts";
@@ -408,5 +409,28 @@ Deno.test("MemoryStore - getMemoryStats - reflects patches correctly", async () 
     assertEquals(stats.public.total, 2);
     assertEquals(stats.public.enabled, 1);
     assertEquals(stats.public.disabled, 1);
+  });
+});
+
+Deno.test("MemoryStore - path helpers return the files the store writes to", async () => {
+  await withTestMemoryStore(true, async (store, workspace, manager) => {
+    const publicMemory = await store.addMemory(workspace, "Public content");
+    const privateMemory = await store.addMemory(workspace, "Private content", {
+      visibility: "private",
+    });
+
+    const publicPath = store.getMemoryFilePathFor(workspace, "public");
+    const privatePath = store.getMemoryFilePathFor(workspace, "private");
+    assertEquals(publicPath, join(workspace.path, "memory.public.jsonl"));
+    assertEquals(privatePath, join(workspace.path, "memory.private.jsonl"));
+    assert((await Deno.readTextFile(publicPath)).includes(publicMemory.id));
+    assert((await Deno.readTextFile(privatePath)).includes(privateMemory.id));
+
+    const channelWorkspace = await manager.getOrCreateChannelWorkspace("discord", "channel123");
+    const channelMemory = await store.addChannelMemory(channelWorkspace, "Channel content");
+
+    const channelPath = store.getChannelMemoryFilePathFor(channelWorkspace);
+    assertEquals(channelPath, join(channelWorkspace.path, "memory.channel.jsonl"));
+    assert((await Deno.readTextFile(channelPath)).includes(channelMemory.id));
   });
 });

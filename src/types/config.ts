@@ -396,6 +396,47 @@ export interface MemoryConfig {
    *   knowledge comes only from an operator/curated flow.
    */
   channelWritePolicy?: "sessions" | "curated";
+
+  /**
+   * Memory Recall v2 selection configuration. Always populated by the config
+   * loader; optional so hand-built `Config` literals stay valid.
+   */
+  recall?: MemoryRecallConfig;
+}
+
+/**
+ * Memory Recall v2 selection configuration (`memory.recall`). Every key is
+ * optional in `config.yaml` and falls back to its default (Memory Recall v2
+ * design, §10).
+ */
+export interface MemoryRecallConfig {
+  /**
+   * Fast Recall: maximum number of selected memories (default: 2). `0` selects
+   * none, and a value above 2 cannot select more than the first and the second.
+   */
+  fastRecallMaxResults: number;
+
+  /**
+   * Fast Recall: token budget of the rendered memory section (default: 192).
+   * `0` fits no memory and therefore disables Fast Recall; use the kill switch
+   * `memory.recall.fastRecallEnabled` (a later change) to disable it explicitly.
+   */
+  fastRecallMaxTokens: number;
+
+  /** Fast Recall: minimum score of the top memory (provisional until calibration). */
+  minRecallScore: number;
+
+  /** Fast Recall: minimum score of a second memory (provisional until calibration). */
+  secondRecallScore: number;
+
+  /** Fast Recall: minimum ratio of the second score to the top score (default: 0.65). */
+  secondResultRatio: number;
+
+  /** Deep Recall: token budget of the whole output (default: 1024). */
+  deepRecallMaxTokens: number;
+
+  /** Deep Recall: minimum score to keep, 0 = eligibility alone qualifies (default: 0). */
+  deepMinRecallScore: number;
 }
 
 /**

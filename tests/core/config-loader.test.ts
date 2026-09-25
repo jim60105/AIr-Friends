@@ -2484,3 +2484,102 @@ workspace:
     Deno.env.delete("AGENT_CONNECT_TIMEOUT_MS");
   }
 });
+
+// --- memory.recall configuration tests ---
+
+/** Minimal valid configuration; `memory` is appended per test. */
+function recallConfig(memory: string): string {
+  return `
+platforms:
+  discord:
+    token: "test-token"
+    enabled: true
+  misskey:
+    enabled: false
+agent:
+  model: "gpt-4"
+  systemPromptPath: "./prompts/system_reply.md"
+  tokenLimit: 20000
+workspace:
+  repoPath: "./data"
+  workspacesDir: "workspaces"
+${memory}
+`;
+}
+
+Deno.test("Config - applies memory.recall defaults", async () => {
+  await withTestConfig(recallConfig(""), async (dir) => {
+    const result = await loadConfig(dir);
+    assertEquals(result.memory.recall?.fastRecallMaxResults, 2);
+    assertEquals(result.memory.recall?.fastRecallMaxTokens, 192);
+    assertEquals(result.memory.recall?.minRecallScore, 3.0);
+    assertEquals(result.memory.recall?.secondRecallScore, 3.0);
+    assertEquals(result.memory.recall?.secondResultRatio, 0.65);
+    assertEquals(result.memory.recall?.deepRecallMaxTokens, 1024);
+    assertEquals(result.memory.recall?.deepMinRecallScore, 0);
+  });
+});
+
+Deno.test("Config - memory.recall keeps every default a partial override does not set", async () => {
+  const memory = `memory:
+  recall:
+    fastRecallMaxTokens: 128`;
+
+  await withTestConfig(recallConfig(memory), async (dir) => {
+    const result = await loadConfig(dir);
+    assertEquals(result.memory.recall?.fastRecallMaxTokens, 128);
+    assertEquals(result.memory.recall?.fastRecallMaxResults, 2);
+    assertEquals(result.memory.recall?.secondResultRatio, 0.65);
+    assertEquals(result.memory.recall?.deepRecallMaxTokens, 1024);
+  });
+});
+
+Deno.test("Config - rejects a memory.recall.secondResultRatio above 1", async () => {
+  const memory = `memory:
+  recall:
+    secondResultRatio: 1.5`;
+
+  await withTestConfig(recallConfig(memory), async (dir) => {
+    await assertRejects(() => loadConfig(dir), ConfigError);
+  });
+});
+
+Deno.test("Config - rejects a negative memory.recall.minRecallScore", async () => {
+  const memory = `memory:
+  recall:
+    minRecallScore: -0.5`;
+
+  await withTestConfig(recallConfig(memory), async (dir) => {
+    await assertRejects(() => loadConfig(dir), ConfigError);
+  });
+});
+
+Deno.test("Config - rejects a non-integer memory.recall.fastRecallMaxResults", async () => {
+  const memory = `memory:
+  recall:
+    fastRecallMaxResults: 1.5`;
+
+  await withTestConfig(recallConfig(memory), async (dir) => {
+    await assertRejects(() => loadConfig(dir), ConfigError);
+  });
+});
+
+Deno.test("Config - rejects a memory.recall.deepRecallMaxTokens of zero", async () => {
+  const memory = `memory:
+  recall:
+    deepRecallMaxTokens: 0`;
+
+  await withTestConfig(recallConfig(memory), async (dir) => {
+    await assertRejects(() => loadConfig(dir), ConfigError);
+  });
+});
+
+Deno.test("Config - rejects a non-numeric memory.recall.minRecallScore", async () => {
+  const memory = `memory:
+  recall:
+    minRecallScore: "3"`;
+
+  await withTestConfig(recallConfig(memory), async (dir) => {
+    await assertRejects(() => loadConfig(dir), ConfigError);
+  });
+});
