@@ -457,15 +457,28 @@ export async function withFixture<T>(
   }
 }
 
+/** Engine settings a probe needs to differ from the shipped defaults. */
+export interface RetrieverOptions {
+  secondResultRatio?: number;
+  /** 1 admits only the first candidate, which is how the engine disables the second. */
+  fastRecallMaxResults?: number;
+}
+
 /** A retriever over the fixture with the given thresholds and the fixed clock. */
 export function createRetriever(
   store: MemoryStore,
   thresholds: Thresholds,
-  secondResultRatio: number = SECOND_RESULT_RATIO,
+  options: RetrieverOptions = {},
 ): MemoryRetriever {
   return new MemoryRetriever(
     store,
-    { ...DEFAULT_RECALL_CONFIG, ...thresholds, secondResultRatio },
+    {
+      ...DEFAULT_RECALL_CONFIG,
+      ...thresholds,
+      secondResultRatio: options.secondResultRatio ?? SECOND_RESULT_RATIO,
+      fastRecallMaxResults: options.fastRecallMaxResults ??
+        DEFAULT_RECALL_CONFIG.fastRecallMaxResults,
+    },
     { now: () => FIXED_CLOCK },
   );
 }
@@ -501,7 +514,7 @@ export async function captureRanked(
   const retriever = createRetriever(workspaces.store, {
     minRecallScore: 0,
     secondRecallScore: 0,
-  }, 0);
+  }, { secondResultRatio: 0 });
   const captured: CapturedQuery[] = [];
   for (const query of queries) {
     const response = await retriever.search(toRequest(query, workspaces));
@@ -686,8 +699,9 @@ export async function runPass(
   queries: readonly QuerySpec[],
   workspaces: FixtureWorkspaces,
   thresholds: Thresholds,
+  options: RetrieverOptions = {},
 ): Promise<QueryOutcome[]> {
-  const retriever = createRetriever(workspaces.store, thresholds);
+  const retriever = createRetriever(workspaces.store, thresholds, options);
   const outcomes: QueryOutcome[] = [];
   for (const query of queries) {
     const started = performance.now();
@@ -753,6 +767,23 @@ function probePairs(calibrated: Thresholds): Thresholds[] {
   });
 }
 
+/**
+ * Threshold pairs that sit exactly on the comparisons the model shares with the
+ * engine: the first candidate is admitted at score equality with
+ * `minRecallScore`, and the second at score equality with `secondRecallScore`
+ * but not just above it. Taken from the first captured query with a second
+ * candidate.
+ */
+function boundaryPairs(captured: readonly CapturedQuery[]): Thresholds[] {
+  const item = captured.find((entry) => entry.ranked.length > 1);
+  if (item === undefined) return [];
+  const [top, second] = item.ranked;
+  return [
+    { minRecallScore: top.score, secondRecallScore: second.score },
+    { minRecallScore: top.score, secondRecallScore: second.score + 0.01 },
+  ];
+}
+
 /** Runs the whole benchmark: capture, calibrate, measure, verify. */
 export async function runBenchmark(): Promise<BenchmarkResult> {
   const { corpus, queries } = await loadFixture();
@@ -769,6 +800,24 @@ export async function runBenchmark(): Promise<BenchmarkResult> {
     await runPass(queries, fixture.workspaces, thresholds);
     const outcomes = await runPass(queries, fixture.workspaces, thresholds);
     assertModelMatches(captured, outcomes, thresholds, true);
+
+    // The calibration also trusts the model with the second selection disabled,
+    // so that geometry is checked against an engine that can only return one
+    // candidate, together with the equality boundaries of the comparisons the
+    // model re-implements.
+    const topOnly: Thresholds = {
+      minRecallScore: thresholds.minRecallScore,
+      secondRecallScore: thresholds.secondRecallScore,
+    };
+    assertModelMatches(
+      captured,
+      await runPass(queries, fixture.workspaces, topOnly, { fastRecallMaxResults: 1 }),
+      topOnly,
+      false,
+    );
+    for (const probe of boundaryPairs(captured)) {
+      assertModelMatches(captured, await runPass(queries, fixture.workspaces, probe), probe, true);
+    }
 
     for (const probe of probePairs(thresholds)) {
       if (
@@ -873,6 +922,17 @@ function report(result: BenchmarkResult): void {
       console.log(
         "the top-only configuration is the only one that meets the cap; " +
           "the fixture needs a query whose expected memory is ranked second.",
+      );
+      const highestSecond = Math.max(
+        0,
+        ...result.captured.map((entry) =>
+          entry.ranked[1]?.score ?? 0
+        ),
+      );
+      console.log(
+        `highest second-candidate score in the capture: ${highestSecond.toFixed(3)} ` +
+          `(grid ceiling ${THRESHOLD_GRID_END}); a value above the ceiling means the ` +
+          "second selection cannot be disabled through the grid at all.",
       );
     }
     return;
@@ -1012,6 +1072,10 @@ async function main(): Promise<void> {
   if (options.write) {
     await writeMetrics(result);
     console.log(`wrote ${METRICS_URL.pathname}`);
+    const thresholds = result.calibration.thresholds;
+    console.log("paste into config.example.yaml and recall-config.ts:");
+    console.log(`    minRecallScore: ${thresholds.minRecallScore}`);
+    console.log(`    secondRecallScore: ${thresholds.secondRecallScore}`);
   }
 }
 
