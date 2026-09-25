@@ -641,19 +641,16 @@ Environment-specific config overrides base config.
 **Included Binaries:**
 
 - **opencode** - OpenCode CLI (latest release)
-- **rg** (ripgrep 15.1.0) - For agent-side in-workspace file reading under the ACP permission gate
+- **rg** (ripgrep, from the Debian apt package) - For agent-side in-workspace file reading under the ACP permission gate
 - **curl** - For health checks
 - **dumb-init** - For proper signal handling as PID 1 and wrapping agent subprocesses
 
 **Multi-Stage Build:**
 
 ```dockerfile
-# Stage 1: Unpack binaries (opencode, ripgrep)
+# Stage 1: Unpack the OpenCode binary
 FROM base AS opencode-unpacker
 # ... download and extract opencode
-
-FROM base AS ripgrip-unpacker
-# ... download and extract ripgrep
 
 # Stage 2: Cache dependencies
 FROM base AS cache
@@ -665,9 +662,8 @@ RUN deno cache --lock=deno.lock src/main.ts
 # Stage 3: Final runtime
 FROM base AS final
 WORKDIR /app
-# Copy binaries from unpack stages
+# Copy the binary from the unpack stage (ripgrep comes from the base image's apt packages)
 COPY --from=opencode-unpacker /opencode/opencode /usr/local/bin/opencode
-COPY --from=ripgrip-unpacker /ripgrip/.../rg /usr/local/bin/rg
 # Copy cached dependencies
 COPY --from=cache /deno-dir/ /deno-dir/
 # Copy application files

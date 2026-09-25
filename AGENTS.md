@@ -1318,7 +1318,7 @@ You are Yuna. This is a private chat.
 
 - The container includes pre-installed binaries:
   - `opencode` - OpenCode CLI (latest release)
-  - `rg` - ripgrep 15.1.0 for agent-side in-workspace file reading
+  - `rg` - ripgrep (from the Debian apt package) for agent-side in-workspace file reading
   - `dumb-init` - Used as PID 1 and to wrap agent subprocesses for proper signal forwarding
 - OpenCode configuration is pre-configured at `/home/deno/.config/opencode/opencode.json`
 - Skills are copied to `/home/deno/.agents/skills/` for agent discovery
