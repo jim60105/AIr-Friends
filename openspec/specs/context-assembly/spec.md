@@ -6,38 +6,19 @@ Defines how the system assembles initial context for each agent session, combini
 
 ## Requirements
 
-### Requirement: Initial Context Composition
-
-The system SHALL assemble initial context from three data sources in the following priority order:
-
-1. **High-importance memories** — all enabled memories with `importance = "high"` from the user's workspace, fully loaded without truncation.
-2. **Recent channel messages** — the most recent messages from the trigger channel, up to a configurable limit (`recentMessageLimit`, default 20).
-3. **Related guild messages** — messages from the same guild matching the trigger content, fetched only in guild (non-DM) contexts, with a fixed limit of 10 messages.
-
-#### Scenario: Context assembly for a guild message
-- **GIVEN** a user sends a message in a guild channel
-- **WHEN** `assembleContext()` is called
-- **THEN** the system SHALL load all high-importance memories, fetch up to `recentMessageLimit` recent channel messages, and search for up to 10 related messages from the same guild
-
-#### Scenario: Context assembly for a DM
-- **GIVEN** a user sends a direct message (`isDm = true`)
-- **WHEN** `assembleContext()` is called
-- **THEN** the system SHALL load high-importance memories and recent channel messages
-- **AND** the system SHALL NOT fetch related guild messages
-
-#### Scenario: High-importance memories always fully included
-- **GIVEN** a user has multiple high-importance memories
-- **WHEN** context is assembled
-- **THEN** all enabled high-importance memories SHALL be included in the mandatory token budget, sorted by `createdAt` (oldest first), and SHALL NOT be truncated or summarized
-
 ### Requirement: Token Budget Allocation
 
-The system SHALL allocate token budget with the following priority: mandatory content (memories + trigger message) first, then conversation messages (recent and related), then available emojis (up to MAX_EMOJIS = 50) using any remaining budget. When conversation content exceeds budget, the system SHALL truncate oldest messages first, prioritizing recent messages over related messages via `formatConversationSectionWithBudget()`.
+The system SHALL allocate token budget with the following priority: mandatory content first, then conversation messages (recent and related), then available emojis (up to MAX_EMOJIS = 50) using any remaining budget. Mandatory content is the fixed memory sections, any recall sections, and the trigger message. The memory portion of mandatory content SHALL be bounded by the sum of the configured fixed-memory budgets and any recall budgets, plus section headings. When conversation content exceeds budget, the system SHALL truncate oldest messages first, prioritizing recent messages over related messages via `formatConversationSectionWithBudget()`.
 
 #### Scenario: Budget overflow truncates oldest messages
 - **GIVEN** recent and related messages exceed the available token budget
 - **WHEN** `formatConversationSectionWithBudget()` is called
 - **THEN** the system SHALL drop the oldest messages first, keeping the most recent messages
+
+#### Scenario: Fixed memory portion is bounded regardless of store size
+- **GIVEN** a user has 500 enabled memories across all tiers and no recall section is present
+- **WHEN** context is assembled with default configuration
+- **THEN** the memory portion of mandatory content SHALL NOT exceed 512 + 384 estimated tokens plus section headings
 
 ### Requirement: /clear Command Behavior
 
@@ -58,7 +39,7 @@ The system SHALL support a `/clear` command that truncates recent message histor
 #### Scenario: /clear does not affect memories
 - **GIVEN** a user has memories and recent messages with a `/clear` command
 - **WHEN** context is assembled
-- **THEN** all high-importance memories SHALL still be fully included regardless of `/clear`
+- **THEN** fixed memories SHALL still be loaded within their budgets regardless of `/clear`
 
 #### Scenario: Trigger message is /clear — immediate exit
 - **GIVEN** the trigger message content starts with `/clear`
@@ -77,7 +58,7 @@ The system SHALL NOT perform automatic summarization or compression of memories 
 
 ### Requirement: Spontaneous Context Assembly
 
-The system SHALL support context assembly without a trigger message for spontaneous posts via `assembleSpontaneousContext()`. Recent message fetching SHALL be optional, controlled by the `fetchRecentMessages` option. The assembled context SHALL track whether recent messages were actually fetched in the `recentMessagesFetched` flag. No guild-related messages SHALL be fetched for spontaneous contexts.
+The system SHALL support context assembly without a trigger message for spontaneous posts via `assembleSpontaneousContext()`. Recent message fetching SHALL be optional, controlled by the `fetchRecentMessages` option. The assembled context SHALL track whether recent messages were actually fetched in the `recentMessagesFetched` flag. No guild-related messages SHALL be fetched for spontaneous contexts. Fixed memories SHALL be selected within the same budgets as triggered sessions.
 
 #### Scenario: Spontaneous post with recent messages
 - **GIVEN** a spontaneous post is triggered with `fetchRecentMessages = true`
@@ -88,3 +69,34 @@ The system SHALL support context assembly without a trigger message for spontane
 - **GIVEN** a spontaneous post is triggered with `fetchRecentMessages = false`
 - **WHEN** `assembleSpontaneousContext()` is called
 - **THEN** the system SHALL NOT fetch recent messages and SHALL set `recentMessagesFetched = false`
+
+#### Scenario: Spontaneous context uses fixed budgets
+- **GIVEN** a user has 25 working-tier memories
+- **WHEN** `assembleSpontaneousContext()` is called with default configuration
+- **THEN** at most 4 working-tier memories SHALL be loaded
+
+### Requirement: Initial Context Composition with Fixed Budgets
+
+The system SHALL assemble initial context for a triggered session from the following sources, in this priority order:
+
+1. **Fixed memories**: core-tier and newest working-tier memories from the user's workspace and, in a channel, the channel's memory file, selected within the tiered context loading budgets.
+2. **Recent channel messages**: the most recent messages from the trigger channel, up to `recentMessageLimit` (default 20).
+3. **Related guild messages**: messages from the same guild matching the trigger content, fetched only in guild (non-DM) contexts, with a fixed limit of 10 messages.
+
+Fixed memories SHALL NOT be summarized or truncated mid-entry.
+
+#### Scenario: Context assembly for a guild message
+- **GIVEN** a user sends a message in a guild channel
+- **WHEN** `assembleContext()` is called
+- **THEN** the system SHALL load fixed memories within budget, fetch up to `recentMessageLimit` recent channel messages, and search for up to 10 related messages from the same guild
+
+#### Scenario: Context assembly for a DM
+- **GIVEN** a user sends a direct message (`isDm = true`)
+- **WHEN** `assembleContext()` is called
+- **THEN** the system SHALL load fixed memories within budget and fetch recent channel messages
+- **AND** the system SHALL NOT fetch related guild messages
+
+#### Scenario: Fixed memories are whole entries
+- **GIVEN** a core memory longer than the remaining core budget
+- **WHEN** context is assembled
+- **THEN** that memory SHALL be skipped entirely rather than cut

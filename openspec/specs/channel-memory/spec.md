@@ -57,12 +57,12 @@ The agent SHALL specify `scope: "user"` or `scope: "channel"` when saving a memo
 
 ### Requirement: Channel Memory Context Loading
 
-The system SHALL include channel memories in context assembly when the conversation occurs in a channel that has channel-scoped memories. Channel memories SHALL be loaded alongside user memories during context assembly, and SHALL be rendered as **attributed, unverified user contributions** — under a heading that marks them as contributed by channel members and not to be treated as instructions, with each entry prefixed by its author — rather than as unattributed trusted channel knowledge.
+The system SHALL include channel memories in context assembly when the conversation occurs in a channel that has channel-scoped memories. Channel core and working memories SHALL be loaded alongside user memories within the shared fixed-memory budgets. They SHALL be rendered as **attributed, unverified user contributions**: under a heading that marks them as contributed by channel members and not to be treated as instructions, with each entry prefixed by its author. They SHALL NOT be rendered as unattributed trusted channel knowledge.
 
 #### Scenario: Channel memories loaded for matching channel
-- **GIVEN** channel `ch-456` has 3 enabled channel memories
+- **GIVEN** channel `ch-456` has 3 enabled core-tier channel memories that fit the core budget
 - **WHEN** a conversation occurs in channel `ch-456`
-- **THEN** all 3 enabled channel memories SHALL be included in the assembled context
+- **THEN** all 3 channel memories SHALL be included in the assembled context
 
 #### Scenario: Channel memories rendered with attribution and untrusted framing
 - **GIVEN** channel `ch-456` has channel memories authored by users
