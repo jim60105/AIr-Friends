@@ -16,7 +16,7 @@ The Misskey adapter SHALL support three distinct channel types identified by cha
 - **WHEN** fetching recent messages
 - **THEN** it SHALL fetch incoming notes via `notes/mentions` and keep only notes with `userId` equal to the channel's user, applying no `replyId`-based inclusion
 - **AND** it SHALL fetch the bot's own notes via `users/notes` with `withReplies: true`, keeping only notes with `visibility` `"specified"` whose `visibleUserIds` include the channel's user
-- **AND** it SHALL merge both sources, deduplicate by note ID, and return them sorted chronologically with at most `limit` entries
+- **AND** it SHALL merge both sources, deduplicate by note ID, sort ascending by `createdAt`, and return the most recent `limit` entries
 
 #### Scenario: DM channel excludes unrelated replies
 

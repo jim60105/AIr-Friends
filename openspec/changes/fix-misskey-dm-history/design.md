@@ -19,6 +19,7 @@ See proposal.md - Why. Constraint from Misskey semantics: a note the bot sends w
 
 - [Recent history may be truncated unevenly if one side dominates the mention/timeline queries] → Acceptable: same `limit`-window trade-off already exists for single-source channels; documented in task tests.
 - [`visibleUserIds` absent on some forks → outgoing side silently empty] → Merge degrades to current incoming-only behavior plus the fixed filter, which is still an improvement; no crash.
+- [Outgoing filter may also include the bot's specified-visibility notes to that user that are not replies] → Intended per the review's recommendation (doc item 3): any specified note visible to the peer belongs in the shared context.
 
 ## Migration Plan
 
