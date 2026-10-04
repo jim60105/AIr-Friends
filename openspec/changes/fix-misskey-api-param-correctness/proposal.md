@@ -16,8 +16,8 @@ A static review of AIr-Friends' Misskey API usage against Misskey 2026.10.0 (`tm
 
 ### Modified Capabilities
 
-- `platform-abstraction`: adds a requirement that Misskey REST requests use spec-conformant parameter names and clamp `limit` to `1..100` at the adapter boundary.
-- `skills-and-reply`: adds a requirement bounding the `fetch-context` `limit` parameter to `1..100`.
+- `platform-abstraction`: adds a new requirement that Misskey REST requests use spec-conformant parameter names and clamp `limit` to `1..100` at the adapter boundary.
+- `skills-and-reply`: adds a new requirement bounding the `fetch-context` `limit` parameter to integers `1..100` (no existing requirement covers `fetch-context` limit validation; the delta is ADDED, not MODIFIED).
 
 ## Non-goals
 
