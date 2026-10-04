@@ -43,6 +43,13 @@ import {
 
 const logger = createLogger("MisskeyAdapter");
 
+/**
+ * Misskey rejects `limit` outside 1..100 with `INVALID_PARAM` on every
+ * paginated endpoint used by this adapter.
+ */
+const MISSKEY_MIN_LIMIT = 1;
+const MISSKEY_MAX_LIMIT = 100;
+
 export class MisskeyAdapter extends PlatformAdapter {
   readonly platform: Platform = "misskey";
   readonly capabilities: PlatformCapabilities = {
@@ -417,6 +424,27 @@ export class MisskeyAdapter extends PlatformAdapter {
   }
 
   /**
+   * Normalize a `limit` to the range Misskey endpoints accept (1..100).
+   *
+   * Callers are internal code (and, for `fetch-context`, agent input), so an
+   * out-of-range value is clamped rather than thrown; the debug log keeps a
+   * misconfiguration visible without failing the request.
+   */
+  private normalizeLimit(limit: number): number {
+    const floored = Number.isFinite(limit) ? Math.floor(limit) : MISSKEY_MIN_LIMIT;
+    const normalized = Math.min(MISSKEY_MAX_LIMIT, Math.max(MISSKEY_MIN_LIMIT, floored));
+
+    if (normalized !== limit) {
+      logger.debug("Normalized Misskey limit to the allowed range", {
+        requested: limit,
+        applied: normalized,
+      });
+    }
+
+    return normalized;
+  }
+
+  /**
    * Fetch recent messages (for context)
    * Supports notes, DMs, and chat messages
    */
@@ -424,6 +452,8 @@ export class MisskeyAdapter extends PlatformAdapter {
     channelId: string,
     limit: number,
   ): Promise<PlatformMessage[]> {
+    limit = this.normalizeLimit(limit);
+
     try {
       // For timeline:self, fetch the bot's own recent notes
       if (channelId === "timeline:self") {
@@ -434,7 +464,7 @@ export class MisskeyAdapter extends PlatformAdapter {
           {
             userId: this.botId,
             limit,
-            includeReplies: false,
+            withReplies: false,
           },
         );
 
@@ -616,6 +646,8 @@ export class MisskeyAdapter extends PlatformAdapter {
     query: string,
     limit: number,
   ): Promise<PlatformMessage[]> {
+    limit = this.normalizeLimit(limit);
+
     try {
       const notes = await this.client.request<MisskeyNote[]>(
         "notes/search",

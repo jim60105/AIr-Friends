@@ -1003,6 +1003,99 @@ Deno.test("fetchRecentMessages - note: notes/conversation returns deep chain in 
   const showCalls = calledEndpoints.filter((e) => e === "notes/show");
   assertEquals(showCalls.length, 1);
 });
+
+// ==================== MisskeyAdapter limit normalization Tests ====================
+
+/**
+ * Misskey rejects `limit` outside 1..100 with INVALID_PARAM, so the adapter
+ * clamps every paginated request at its boundary.
+ */
+Deno.test("fetchRecentMessages - clamps out-of-range limits at the adapter boundary", async () => {
+  const cases: Array<[number, number]> = [
+    [0, 1],
+    [-5, 1],
+    [Number.NaN, 1],
+    [10.5, 10],
+    [20, 20],
+    [100, 100],
+    [101, 100],
+    [250, 100],
+  ];
+
+  for (const [input, expected] of cases) {
+    const calls: Array<{ endpoint: string; params: Record<string, unknown> }> = [];
+    const adapter = createAdapterWithMockClient((endpoint, params) => {
+      calls.push({ endpoint, params });
+      return [];
+    });
+
+    await adapter.fetchRecentMessages("chat:user1", input);
+
+    assertEquals(
+      calls,
+      [{ endpoint: "chat/messages/user-timeline", params: { userId: "user1", limit: expected } }],
+      `limit ${input} should be issued as ${expected}`,
+    );
+  }
+});
+
+Deno.test("fetchRecentMessages - timeline:self sends withReplies and clamps the limit", async () => {
+  const calls: Array<{ endpoint: string; params: Record<string, unknown> }> = [];
+  const adapter = createAdapterWithMockClient((endpoint, params) => {
+    calls.push({ endpoint, params });
+    return [];
+  });
+
+  await adapter.fetchRecentMessages("timeline:self", 250);
+
+  assertEquals(calls.length, 1);
+  assertEquals(calls[0].endpoint, "users/notes");
+  assertEquals(calls[0].params, { userId: "bot123", limit: 100, withReplies: false });
+  assertEquals("includeReplies" in calls[0].params, false);
+});
+
+Deno.test("fetchRecentMessages - dm: channel clamps the limit", async () => {
+  const calls: Array<{ endpoint: string; params: Record<string, unknown> }> = [];
+  const adapter = createAdapterWithMockClient((endpoint, params) => {
+    calls.push({ endpoint, params });
+    return [];
+  });
+
+  await adapter.fetchRecentMessages("dm:user9", 250);
+
+  assertEquals(calls, [{ endpoint: "notes/mentions", params: { limit: 100 } }]);
+});
+
+Deno.test("fetchRecentMessages - note: channel clamps the limit for conversation and replies", async () => {
+  const calls: Array<{ endpoint: string; params: Record<string, unknown> }> = [];
+  const adapter = createAdapterWithFullMockClient((endpoint, params) => {
+    calls.push({ endpoint, params });
+    if (endpoint === "notes/show") {
+      return createMockNote({ id: String(params.noteId), replyId: "anc1" });
+    }
+    return [];
+  });
+
+  await adapter.fetchRecentMessages("note:targetNote", 250);
+
+  const conversationCall = calls.find((c) => c.endpoint === "notes/conversation");
+  const childrenCall = calls.find((c) => c.endpoint === "notes/children");
+  assertEquals(conversationCall?.params, { noteId: "targetNote", limit: 100 });
+  assertEquals(childrenCall?.params, { noteId: "targetNote", limit: 100 });
+});
+
+Deno.test("searchRelatedMessages - clamps the limit", async () => {
+  const calls: Array<{ endpoint: string; params: Record<string, unknown> }> = [];
+  const adapter = createAdapterWithMockClient((endpoint, params) => {
+    calls.push({ endpoint, params });
+    return [];
+  });
+
+  await adapter.searchRelatedMessages("guild1", "channel1", "hello", 250);
+
+  assertEquals(calls, [{ endpoint: "notes/search", params: { query: "hello", limit: 100 } }]);
+});
+
 Deno.test("normalizeMisskeyNote - files produce attachments", () => {
   const file = {
     id: "file1",
