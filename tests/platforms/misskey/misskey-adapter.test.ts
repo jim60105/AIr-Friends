@@ -1015,10 +1015,12 @@ Deno.test("fetchRecentMessages - clamps out-of-range limits at the adapter bound
     [0, 1],
     [-5, 1],
     [Number.NaN, 1],
+    [Number.NEGATIVE_INFINITY, 1],
     [10.5, 10],
     [20, 20],
     [100, 100],
     [101, 100],
+    [Number.POSITIVE_INFINITY, 100],
     [250, 100],
   ];
 
@@ -1082,6 +1084,21 @@ Deno.test("fetchRecentMessages - note: channel clamps the limit for conversation
   const childrenCall = calls.find((c) => c.endpoint === "notes/children");
   assertEquals(conversationCall?.params, { noteId: "targetNote", limit: 100 });
   assertEquals(childrenCall?.params, { noteId: "targetNote", limit: 100 });
+});
+
+Deno.test("fetchRecentMessages - note: clamps the limit for the notes/replies fallback", async () => {
+  const calls: Array<{ endpoint: string; params: Record<string, unknown> }> = [];
+  const adapter = createAdapterWithMockClient((endpoint, params) => {
+    calls.push({ endpoint, params });
+    if (endpoint === "notes/show") return createMockNote({ id: String(params.noteId) });
+    if (endpoint === "notes/children") throw new Error("No such endpoint");
+    return [];
+  });
+
+  await adapter.fetchRecentMessages("note:targetNote", 250);
+
+  const repliesCall = calls.find((c) => c.endpoint === "notes/replies");
+  assertEquals(repliesCall?.params, { noteId: "targetNote", limit: 100 });
 });
 
 Deno.test("searchRelatedMessages - clamps the limit", async () => {

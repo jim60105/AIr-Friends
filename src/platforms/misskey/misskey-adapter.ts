@@ -431,7 +431,8 @@ export class MisskeyAdapter extends PlatformAdapter {
    * misconfiguration visible without failing the request.
    */
   private normalizeLimit(limit: number): number {
-    const floored = Number.isFinite(limit) ? Math.floor(limit) : MISSKEY_MIN_LIMIT;
+    // NaN has no meaningful bound; ±Infinity falls through to the clamp below.
+    const floored = Number.isNaN(limit) ? MISSKEY_MIN_LIMIT : Math.floor(limit);
     const normalized = Math.min(MISSKEY_MAX_LIMIT, Math.max(MISSKEY_MIN_LIMIT, floored));
 
     if (normalized !== limit) {
