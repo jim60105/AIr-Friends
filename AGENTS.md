@@ -494,6 +494,7 @@ Platform adapters must implement:
 - **Username Format**: When building context, usernames are formatted as `@DisplayName (userId)` for better identification in conversation history
 - **Note Channel ID**: Notes use `note:{noteId}` as channel ID for reply threading
 - **DM Channel ID**: DMs use `dm:{userId}` as channel ID
+- **DM History Window**: `dm:{userId}` history is bidirectional: incoming notes come from `notes/mentions` (kept only when authored by that user) and the bot's own outgoing notes come from `users/notes` with `withReplies: true` (kept only when `visibility` is `specified` and `visibleUserIds` includes that user), merged, deduplicated by note ID, and sorted oldest-first. Both queries request only the most recent `limit` raw results, so a bot that posted more than `limit` notes since its last reply to this user may show an empty outgoing side; raise the limit if full DM fidelity is needed.
 - **Chat Channel ID**: Private chat messages use `chat:{userId}` as channel ID, supporting Misskey's chat feature for 1-on-1 messaging
 - **Bot Filtering**: `shouldRespondToNote()` and `shouldRespondToChatMessage()` check `user.isBot` / `fromUser?.isBot` to ignore messages from bot accounts, preventing multi-instance infinite loops. Bot messages in recent history are correctly marked as `[Bot]` via `isBot` in `noteToPlatformMessage()` and `chatMessageToPlatformMessage()`.
 - **Note Edit Strategy**: Misskey API has no `notes/update` endpoint. `editMessage()` uses a delete-and-recreate strategy (`notes/delete` → `notes/create`). The new note's `replyId` points to the edited reply's recorded thread parent (`lastReplyAnchorMessageId` — the message it was created as a reply to: the file message when the reply followed a file send, otherwise the trigger note), never the current anchor, so an edit never rewrites thread topology. The returned `messageId` will be different from the original.
@@ -503,7 +504,7 @@ Platform adapters must implement:
 | Channel ID Format | Description                          | API Endpoint                                                  |
 | ----------------- | ------------------------------------ | ------------------------------------------------------------- |
 | `note:{noteId}`   | Public note conversation thread      | `notes/replies`, `notes/create`                               |
-| `dm:{userId}`     | Direct message via specified notes   | `notes/mentions`                                              |
+| `dm:{userId}`     | Direct message via specified notes   | `notes/mentions`, `users/notes`                               |
 | `chat:{userId}`   | Private chat room with specific user | `chat/messages/user-timeline`, `chat/messages/create-to-user` |
 
 ### 6. ACP Client Integration
