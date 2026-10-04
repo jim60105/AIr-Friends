@@ -5,8 +5,9 @@ Two Misskey API semantics gaps from the static review (`tmp/misskey-api-issue.md
 ## What Changes
 
 - Reorder the reply-fetch preference for `note:{noteId}` threads: `notes/replies` (direct replies only) first, `notes/children` retained as the fork-compatibility fallback.
-- Narrow the fallback trigger: fall through to the next strategy only on endpoint-unavailable/compatibility errors (e.g. HTTP 404 / `NO_SUCH_ENDPOINT`-class failures); rate-limit, `INVALID_PARAM`, and transient (5xx) errors propagate with their original failure information instead of silently degrading.
-- Preserve reaction-availability metadata from the `emojis` endpoint on `PlatformEmoji` and verify note reactions after `notes/reactions/create` by reading back `myReaction` via `notes/show`, reporting the reaction the server actually stored rather than blindly echoing the requested emoji. Chat-message reactions (`chat/messages/react`) are unchanged.
+- Narrow the fallback trigger: fall through to the next strategy only on endpoint-unavailable/compatibility errors (e.g. HTTP 404 / `NO_SUCH_ENDPOINT`-class failures); rate-limit, `INVALID_PARAM`, and transient (5xx) errors are no longer swallowed as "endpoint missing" and propagate out of the fetch helpers. To preserve the existing Error Resilience contract (history fetch failures must not crash sessions), note-thread assembly degrades to the parts it successfully fetched and logs the original error, rather than failing the whole `fetchRecentMessages` call.
+- Extend `ReactionResult` with optional `storedReaction` and `verified` fields; verify note reactions after `notes/reactions/create` by reading back `myReaction` via `notes/show`. A policy-downgraded reaction stays `success: true` (the POST succeeded) but carries the stored emoji; the `react-message` skill then reports the stored reaction to the agent instead of echoing the requested emoji, still marking the reaction sent so no retry loop fires. Chat-message reactions (`chat/messages/react`) are unchanged.
+- Preserve reaction-availability metadata from the `emojis` endpoint on `PlatformEmoji` so restricted emojis are distinguishable; annotating the agent-facing emoji listing itself is implementation-only (the `context-assembly` spec budgets the emoji section but does not dictate per-entry rendering).
 
 ## Capabilities
 
@@ -17,6 +18,7 @@ Two Misskey API semantics gaps from the static review (`tmp/misskey-api-issue.md
 ### Modified Capabilities
 
 - `platform-abstraction`: the "Misskey Fallback Chains for Fork Compatibility" requirement changes (replies-first preference, fallback only on endpoint-missing/compat errors); the note-reaction path gains post-send verification semantics, and the emoji listing carries availability metadata.
+- `skills-and-reply`: the "Reaction Handling" requirement changes so `react-message` reports the adapter-verified stored reaction instead of echoing the requested emoji.
 
 ## Non-goals
 
