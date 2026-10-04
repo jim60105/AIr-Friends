@@ -3,7 +3,9 @@
 ## Purpose
 
 Defines the shell-based skill execution architecture, Skill API HTTP server, session authentication, available skills, reply rules, retry mechanism, edit-reply behavior, and content processing (XML stripping, newline unescaping).
+
 ## Requirements
+
 ### Requirement: Shell-Based Skill Execution
 
 Skills SHALL be implemented as Deno TypeScript scripts located in `skills/{skill-name}/scripts/` directories. Each skill SHALL have a `SKILL.md` file describing its usage for the agent. External ACP Agents SHALL execute these scripts with a `--session-id` parameter. Scripts SHALL use the shared client library at `skills/lib/client.ts` to communicate back to the main bot via HTTP. Skill scripts SHALL NOT accept free-text content (reply text, memory content, search queries, captions, reminder text) as CLI argument values in any form: any free-text argument SHALL be passed via a payload-file flag (e.g. `--message-file`, `--content-file`, `--query-file`, `--caption-file`) whose content is read from a file staged in the session-scoped TMPDIR, so that no user-facing content ever appears on a shell command line. The legacy free-text flags (`--message`, `--content`, `--query`, `--caption`) SHALL be rejected with a clear error in both invocation forms (`--flag value` and `--flag=value`); a script invoked with a legacy flag SHALL exit non-zero and SHALL NOT call the Skill API. The skill client library SHALL resolve the owning session id from the `SESSION_ID` environment variable in per-spawn mode, or from the orchestrator-maintained current-session pointer file in shared-process mode (that pointer is written ONLY while the session holds the global execution lease, via an atomic temp-file+rename write, and cleared on release), and SHALL present the owning session's JWT — in neither mode SHALL the agent need to read files or pass extra parameters. In shared-process mode the agent process environment SHALL NOT contain `SESSION_ID` (a spawn-time frozen value would name a different session), and the pointer SHALL be the sole identity source: when the pointer is unreadable or malformed (schema violation: `sessionId` must be a non-empty string) the library SHALL fail with a stable `SKILL_SESSION_UNRESOLVED` structured error — the typed error SHALL carry the code in a machine-readable `code` field so identity-only scripts (which do not touch payload files) surface it identically to payload scripts — rather than falling back to any environment value. The `--session-id` argument SHALL remain required, but its value is advisory in shared-process mode: the library SHALL substitute the pointer-resolved owning session in the API request body so the server's JWT `sub` check stays authoritative. The skill script SHALL snapshot the owning session id and the JWT file content ONCE at script start, so a backgrounded or late-running skill subprocess cannot observe a later session's pointer or JWT file. Scripts SHALL be executed directly (shebang `#!/usr/bin/env -S deno run --allow-net --allow-env --allow-read --allow-write`); the `--allow-read` permission is required for reading the staged payload file and the per-session JWT file, and `--allow-write` enables the script's best-effort deletion of the consumed payload file. Each `SKILL.md` SHALL describe the session-id source truthfully: the session id rendered in the system prompt is authoritative; `$SESSION_ID` is present only in per-spawn deployments.
@@ -594,3 +596,31 @@ When a `send-file` `--file-paths` value is RELATIVE, resolves inside the workspa
 - **WHEN** `--file-paths "nope.png"` refers to a nonexistent file with no workspace-key segment match
 - **THEN** the existing plain stat-failure error SHALL be returned without the prefixed code
 
+### Requirement: Fetch-Context Limit Bounds
+
+The `fetch-context` skill SHALL validate its `limit` parameter against the Misskey API specification bounds: when provided, `limit` MUST be an integer in the inclusive range `1..100`. An out-of-range or non-integer `limit` SHALL be rejected with an instructive failure message before any platform adapter call, and SHALL NOT be forwarded to the platform. When omitted, the default `limit` SHALL remain `20`.
+
+#### Scenario: Limit above the upper bound rejected
+
+- **GIVEN** a `fetch-context` request with `limit = 101`
+- **WHEN** the context handler validates the parameters
+- **THEN** the request SHALL fail with an error stating `limit` must be between 1 and 100
+- **AND** no platform adapter call SHALL be made
+
+#### Scenario: Fractional limit rejected
+
+- **GIVEN** a `fetch-context` request with `limit = 10.5`
+- **WHEN** the context handler validates the parameters
+- **THEN** the request SHALL fail with an error stating `limit` must be an integer between 1 and 100
+
+#### Scenario: In-range limit accepted
+
+- **GIVEN** a `fetch-context` request with `limit = 100`
+- **WHEN** the context handler validates the parameters
+- **THEN** validation SHALL succeed and the adapter SHALL be called with `limit = 100`
+
+#### Scenario: Omitted limit uses default
+
+- **GIVEN** a `fetch-context` request with no `limit` parameter
+- **WHEN** the context handler validates the parameters
+- **THEN** validation SHALL succeed and the adapter SHALL be called with `limit = 20`

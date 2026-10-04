@@ -106,33 +106,52 @@ Deno.test("ContextHandler - handleFetchContext validates type parameter", async 
   );
 });
 
-Deno.test("ContextHandler - handleFetchContext validates limit parameter", async () => {
+Deno.test("ContextHandler - handleFetchContext rejects invalid limit parameters", async () => {
   const handler = new ContextHandler();
-  const context = createTestContext(createMockPlatformAdapter());
+  const adapter = createMockPlatformAdapter();
+  const limits: number[] = [];
+  adapter.fetchRecentMessages = (_channelId, limit) => {
+    limits.push(limit);
+    return Promise.resolve([]);
+  };
+  const context = createTestContext(adapter);
 
-  // Invalid limit (not a number)
-  const result1 = await handler.handleFetchContext(
-    { type: "recent_messages", limit: "ten" },
-    context,
-  );
-  assertEquals(result1.success, false);
-  assertEquals(result1.error, "Invalid 'limit' parameter. Must be a positive number");
+  const expectedError = "Invalid 'limit' parameter. Must be an integer between 1 and 100";
 
-  // Invalid limit (negative)
-  const result2 = await handler.handleFetchContext(
-    { type: "recent_messages", limit: -5 },
-    context,
-  );
-  assertEquals(result2.success, false);
-  assertEquals(result2.error, "Invalid 'limit' parameter. Must be a positive number");
+  for (const invalid of ["ten", -5, 0, 101, 10.5, Number.NaN]) {
+    const result = await handler.handleFetchContext(
+      { type: "recent_messages", limit: invalid },
+      context,
+    );
+    assertEquals(result.success, false, `limit ${invalid} should be rejected`);
+    assertEquals(result.error, expectedError);
+  }
 
-  // Invalid limit (zero)
-  const result3 = await handler.handleFetchContext(
-    { type: "recent_messages", limit: 0 },
-    context,
-  );
-  assertEquals(result3.success, false);
-  assertEquals(result3.error, "Invalid 'limit' parameter. Must be a positive number");
+  // Rejected values are never forwarded to the platform adapter
+  assertEquals(limits, []);
+});
+
+Deno.test("ContextHandler - handleFetchContext accepts limit bounds and defaults", async () => {
+  const handler = new ContextHandler();
+
+  const cases: Array<[number | undefined, number]> = [[1, 1], [100, 100], [undefined, 20]];
+  for (const [limit, expected] of cases) {
+    const adapter = createMockPlatformAdapter();
+    const limits: number[] = [];
+    adapter.fetchRecentMessages = (_channelId, value) => {
+      limits.push(value);
+      return Promise.resolve([]);
+    };
+    const context = createTestContext(adapter);
+
+    const result = await handler.handleFetchContext(
+      limit === undefined ? { type: "recent_messages" } : { type: "recent_messages", limit },
+      context,
+    );
+
+    assertEquals(result.success, true);
+    assertEquals(limits, [expected], `limit ${limit} should reach the adapter as ${expected}`);
+  }
 });
 
 Deno.test("ContextHandler - handleFetchContext fetches recent messages", async () => {
