@@ -22,7 +22,7 @@ AIr-Friends is a multi-platform conversational AI bot that acts as an **ACP (Age
 | Language        | TypeScript               | (Deno native) |
 | ACP SDK         | @agentclientprotocol/sdk | 0.14.1        |
 | Discord Library | discord.js               | ^14.0.0       |
-| Misskey Library | misskey-js               | 2025.12.2     |
+| Misskey Library | misskey-js               | 2026.10.0     |
 | Configuration   | YAML (via @std/yaml)     | -             |
 | Testing         | Deno.test + @std/assert  | -             |
 
