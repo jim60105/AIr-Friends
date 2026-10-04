@@ -1,25 +1,130 @@
 // src/platforms/misskey/misskey-client.ts
 
-import { api as MisskeyApi, Stream } from "misskey-js";
+import { api as MisskeyApi, type Endpoints, Stream } from "misskey-js";
 import { MisskeyAdapterConfig } from "./misskey-config.ts";
 import { createLogger } from "@utils/logger.ts";
 import { ErrorCode, PlatformError } from "../../types/errors.ts";
 
 const logger = createLogger("MisskeyClient");
 
+/** Parameters accepted by a misskey-js endpoint. */
+type RequestParams<E extends keyof Endpoints> = Endpoints[E]["req"];
+
+/** Response returned by a misskey-js endpoint for concrete parameters. */
+type RequestResponse<E extends keyof Endpoints, P extends RequestParams<E>> =
+  MisskeyApi.SwitchCaseResponseType<E, P>;
+
+/**
+ * Keys of an endpoint's request type, distributed over union request types
+ * (`users/show`, for example, accepts a union of parameter shapes whose keys
+ * computed with plain `keyof` would collapse to `never`).
+ */
+type RequestKeys<E extends keyof Endpoints> = RequestParams<E> extends infer R
+  ? R extends unknown ? keyof R : never
+  : never;
+
+/**
+ * A request's parameters plus `never` for every key the endpoint does not
+ * accept.
+ *
+ * Governing the parameter type by the *inferred* argument type (rather than
+ * relying on generic inference alone) is what makes an unknown request field a
+ * compile error: excess property checks do not run against a type parameter
+ * constraint, so a misspelled field such as the historical `includeReplies`
+ * would otherwise compile and only fail at the server.
+ *
+ * Note the limit of this check: it validates the set of keys, not which
+ * combination of optional keys belongs to one variant of a union request type.
+ */
+type StrictParams<E extends keyof Endpoints, P> =
+  & P
+  & Record<Exclude<keyof P, RequestKeys<E>>, never>;
+
+/**
+ * Forward a request to the SDK's `APIClient.request`.
+ *
+ * misskey-js declares `request` as one overload per endpoint, which TypeScript
+ * cannot resolve from a generic endpoint value, and the package exports no
+ * generic request type. The overload set is exactly the generic form asserted
+ * here, so the assertion is sound; the public `request()` signature carries the
+ * endpoint typing. `this` is bound explicitly because the SDK method reads
+ * `this.origin` / `this.credential` / `this.fetch`.
+ */
+function forwardRequest<E extends keyof Endpoints, P extends RequestParams<E>>(
+  api: MisskeyApi.APIClient,
+  endpoint: E,
+  params: P,
+): Promise<RequestResponse<E, P>> {
+  const request = api.request as unknown as (
+    this: MisskeyApi.APIClient,
+    endpoint: E,
+    params: P,
+  ) => Promise<RequestResponse<E, P>>;
+
+  return request.call(api, endpoint, params);
+}
+
+/**
+ * `fetch` adapter for Drive uploads.
+ *
+ * The SDK parses the response body before it looks at the HTTP status, so an
+ * upload failure would reach callers as a bare JSON `SyntaxError` (a gateway's
+ * non-JSON body) or as the server's error object with the status discarded —
+ * losing the retryability classification the upload path has always applied.
+ * Classifying the status in the SDK's injectable transport keeps that contract
+ * while the endpoint, credential, and multipart encoding stay the SDK's.
+ */
+const uploadFetch: MisskeyApi.FetchLike = async (input, init) => {
+  const response = await fetch(input, init);
+
+  if (!response.ok) {
+    const body = await response.text();
+    const context = { endpoint: "drive/files/create", status: response.status };
+
+    // HTTP 502/503/504 indicate gateway-level issues
+    if (response.status >= 502 && response.status <= 504) {
+      throw new PlatformError(
+        ErrorCode.PLATFORM_CONNECTION_FAILED,
+        `Misskey server unavailable (${response.status}): ${body}`,
+        context,
+      );
+    }
+
+    throw new PlatformError(
+      ErrorCode.PLATFORM_API_ERROR,
+      `Drive upload failed (${response.status}): ${body}`,
+      context,
+    );
+  }
+
+  return { status: response.status, json: () => response.json() };
+};
+
 /**
  * Misskey client wrapper
  */
 export class MisskeyClient {
   private readonly api: MisskeyApi.APIClient;
+  private readonly uploadApi: MisskeyApi.APIClient;
   private stream: Stream | null = null;
   private readonly config: MisskeyAdapterConfig;
 
   constructor(config: MisskeyAdapterConfig) {
     this.config = config;
+
+    const origin = `${config.secure ? "https" : "http"}://${config.host}`;
     this.api = new MisskeyApi.APIClient({
-      origin: `${config.secure ? "https" : "http"}://${config.host}`,
+      origin,
       credential: config.token,
+    });
+    // Uploads classify HTTP failures by status (see `uploadFetch`), which the
+    // SDK's own error contract cannot express. Every other endpoint keeps the
+    // SDK's error shape unchanged: the adapter's fork-compatibility fallback
+    // reads the server error code off it.
+    this.uploadApi = new MisskeyApi.APIClient({
+      origin,
+      credential: config.token,
+      fetch: uploadFetch,
     });
   }
 
@@ -69,16 +174,19 @@ export class MisskeyClient {
   }
 
   /**
-   * Make an API request
+   * Make an API request with the endpoint's own parameter and response types.
+   *
+   * An endpoint the server does not have, an unknown request field, or a field
+   * of the wrong shape fails type-checking instead of failing at the server.
    */
-  async request<T = unknown>(
-    endpoint: string,
-    // deno-lint-ignore no-explicit-any
-    params: Record<string, any> = {},
-  ): Promise<T> {
+  async request<E extends keyof Endpoints, P extends RequestParams<E> = RequestParams<E>>(
+    endpoint: E,
+    // Omitted parameters fall back to `{}`, which is what the SDK itself
+    // defaults to; the assertion only states that for this endpoint's shape.
+    params: StrictParams<E, P> = {} as StrictParams<E, P>,
+  ): Promise<RequestResponse<E, P>> {
     try {
-      // deno-lint-ignore no-explicit-any
-      return await this.api.request(endpoint as any, params as any);
+      return await forwardRequest(this.api, endpoint, params);
     } catch (error) {
       // Detect non-JSON responses (e.g., "Bad Gateway", "Service Unavailable")
       // which indicate the server is unreachable rather than an API-level error
@@ -119,49 +227,24 @@ export class MisskeyClient {
   }
 
   /**
-   * Upload a file to Misskey Drive via multipart/form-data.
-   * The standard APIClient.request() only supports JSON bodies,
-   * but drive/files/create requires multipart/form-data.
+   * Upload a file to Misskey Drive.
+   *
+   * The SDK's typed `drive/files/create` request builds the multipart body and
+   * appends the credential itself; failures are classified by status through
+   * `uploadFetch`.
    */
   async uploadFile(
     fileContent: Uint8Array,
     fileName: string,
   ): Promise<{ id: string; url: string }> {
-    const formData = new FormData();
-    formData.append("i", this.config.token);
-    formData.append("name", fileName);
-    formData.append(
-      "file",
-      new Blob([new Uint8Array(fileContent)]),
-      fileName,
+    const result = await forwardRequest<"drive/files/create", RequestParams<"drive/files/create">>(
+      this.uploadApi,
+      "drive/files/create",
+      // The copy narrows the view to a plain `ArrayBuffer`-backed buffer, which
+      // is what `BlobPart` accepts.
+      { name: fileName, file: new File([new Uint8Array(fileContent)], fileName) },
     );
 
-    const origin = `${this.config.secure ? "https" : "http"}://${this.config.host}`;
-    const response = await fetch(`${origin}/api/drive/files/create`, {
-      method: "POST",
-      body: formData,
-    });
-
-    if (!response.ok) {
-      const errorBody = await response.text();
-
-      // HTTP 502/503/504 indicate gateway-level issues
-      if (response.status >= 502 && response.status <= 504) {
-        throw new PlatformError(
-          ErrorCode.PLATFORM_CONNECTION_FAILED,
-          `Misskey server unavailable (${response.status}): ${errorBody}`,
-          { endpoint: "drive/files/create", status: response.status },
-        );
-      }
-
-      throw new PlatformError(
-        ErrorCode.PLATFORM_API_ERROR,
-        `Drive upload failed (${response.status}): ${errorBody}`,
-        { endpoint: "drive/files/create", status: response.status },
-      );
-    }
-
-    const result = await response.json();
     logger.info("File uploaded to Misskey Drive", {
       fileId: result.id,
       fileName,

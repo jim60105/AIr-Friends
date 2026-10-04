@@ -1,6 +1,6 @@
 // src/platforms/misskey/misskey-adapter.ts
 
-import { ChannelConnection, type Channels } from "misskey-js";
+import { ChannelConnection, type Channels, type entities } from "misskey-js";
 import { createLogger } from "@utils/logger.ts";
 import { PlatformAdapter } from "@platforms/platform-adapter.ts";
 import type { Platform, PlatformMessage } from "../../types/events.ts";
@@ -27,7 +27,6 @@ import {
 } from "./misskey-config.ts";
 import {
   buildReplyParams,
-  ChatMessageLite,
   chatMessageToPlatformMessage,
   isDirectMessage,
   isMentionToBot,
@@ -347,7 +346,7 @@ export class MisskeyAdapter extends PlatformAdapter {
     const userId = channelId.slice(5); // Remove "chat:" prefix
 
     try {
-      const params: Record<string, unknown> = {
+      const params: entities.ChatMessagesCreateToUserRequest = {
         toUserId: userId,
         text: content,
       };
@@ -355,7 +354,7 @@ export class MisskeyAdapter extends PlatformAdapter {
         params.fileId = fileId;
       }
 
-      const result = await this.client.request<ChatMessageLite>(
+      const result = await this.client.request(
         "chat/messages/create-to-user",
         params,
       );
@@ -392,7 +391,7 @@ export class MisskeyAdapter extends PlatformAdapter {
     text: string | null,
     options?: { replyToMessageId?: string; fileIds?: string[] },
   ): Promise<ReplyResult> {
-    const params: Record<string, unknown> = {
+    const params: entities.NotesCreateRequest = {
       text,
     };
 
@@ -403,7 +402,7 @@ export class MisskeyAdapter extends PlatformAdapter {
     if (options?.replyToMessageId) {
       params.replyId = options.replyToMessageId;
 
-      const originalNote = await this.client.request<MisskeyNote>(
+      const originalNote = await this.client.request(
         "notes/show",
         { noteId: options.replyToMessageId },
       );
@@ -412,7 +411,7 @@ export class MisskeyAdapter extends PlatformAdapter {
       Object.assign(params, replyParams);
     }
 
-    const createdNote = await this.client.request<{ createdNote: MisskeyNote }>(
+    const createdNote = await this.client.request(
       "notes/create",
       params,
     );
@@ -460,7 +459,7 @@ export class MisskeyAdapter extends PlatformAdapter {
       if (channelId === "timeline:self") {
         if (!this.botId) return [];
 
-        const notes = await this.client.request<MisskeyNote[]>(
+        const notes = await this.client.request(
           "users/notes",
           {
             userId: this.botId,
@@ -475,7 +474,7 @@ export class MisskeyAdapter extends PlatformAdapter {
       // For chat:userId, fetch chat message timeline with that user
       if (channelId.startsWith("chat:")) {
         const userId = channelId.slice(5);
-        const messages = await this.client.request<ChatMessageLite[]>(
+        const messages = await this.client.request(
           "chat/messages/user-timeline",
           { userId, limit },
         );
@@ -493,7 +492,7 @@ export class MisskeyAdapter extends PlatformAdapter {
         // Incoming: notes/mentions returns notes the bot is mentioned in or is
         // listed as a visible recipient of. Keep only notes authored by this
         // user — the `replyId` heuristic admitted unrelated third-party replies.
-        const incoming = await this.client.request<MisskeyNote[]>(
+        const incoming = await this.client.request(
           "notes/mentions",
           { limit },
         );
@@ -504,7 +503,7 @@ export class MisskeyAdapter extends PlatformAdapter {
         // users/notes has no server-side "specified to user X" filter.
         let fromBot: MisskeyNote[] = [];
         if (this.botId) {
-          const own = await this.client.request<MisskeyNote[]>(
+          const own = await this.client.request(
             "users/notes",
             { userId: this.botId, withReplies: true, limit },
           );
@@ -540,7 +539,7 @@ export class MisskeyAdapter extends PlatformAdapter {
         const noteId = channelId.slice(5);
 
         // Fetch the current note first — notes/show is available on all forks
-        const currentNote = await this.client.request<MisskeyNote>(
+        const currentNote = await this.client.request(
           "notes/show",
           { noteId },
         );
@@ -636,7 +635,7 @@ export class MisskeyAdapter extends PlatformAdapter {
   ): Promise<MisskeyNote[]> {
     // Try notes/replies first — the discussion thread is the direct replies
     try {
-      return await this.client.request<MisskeyNote[]>(
+      return await this.client.request(
         "notes/replies",
         { noteId, limit },
       );
@@ -647,7 +646,7 @@ export class MisskeyAdapter extends PlatformAdapter {
 
     // Fallback to notes/children (broader — includes replies + quote renotes)
     try {
-      return await this.client.request<MisskeyNote[]>(
+      return await this.client.request(
         "notes/children",
         { noteId, limit },
       );
@@ -675,7 +674,7 @@ export class MisskeyAdapter extends PlatformAdapter {
 
     // Try notes/conversation first (returns ancestors in one call)
     try {
-      const ancestors = await this.client.request<MisskeyNote[]>(
+      const ancestors = await this.client.request(
         "notes/conversation",
         { noteId: currentNote.id, limit },
       );
@@ -697,7 +696,9 @@ export class MisskeyAdapter extends PlatformAdapter {
     let cursorReplyId: string | null | undefined = currentNote.replyId;
     while (cursorReplyId && ancestors.length < limit) {
       try {
-        const parent: MisskeyNote = await this.client.request<MisskeyNote>(
+        // The annotation breaks the inference cycle: the request's `noteId`
+        // argument is the previous iteration's `parent.replyId`.
+        const parent: MisskeyNote = await this.client.request(
           "notes/show",
           { noteId: cursorReplyId },
         );
@@ -732,7 +733,7 @@ export class MisskeyAdapter extends PlatformAdapter {
     limit = this.normalizeLimit(limit);
 
     try {
-      const notes = await this.client.request<MisskeyNote[]>(
+      const notes = await this.client.request(
         "notes/search",
         { query, limit },
       );
@@ -758,17 +759,7 @@ export class MisskeyAdapter extends PlatformAdapter {
     }
 
     try {
-      const response = await this.client.request<{
-        emojis: Array<{
-          name: string;
-          category: string | null;
-          aliases: string[];
-          url: string;
-          isSensitive?: boolean;
-          localOnly?: boolean;
-          roleIdsThatCanBeUsedThisEmojiAsReaction?: string[];
-        }>;
-      }>("emojis", {});
+      const response = await this.client.request("emojis", {});
 
       const emojis: PlatformEmoji[] = response.emojis.map((e) => ({
         name: e.name,
@@ -841,7 +832,7 @@ export class MisskeyAdapter extends PlatformAdapter {
       // note back to report what was actually stored. The POST succeeded, so a
       // failed or empty readback is unconfirmed, never a call failure.
       try {
-        const note = await this.client.request<MisskeyNote>("notes/show", {
+        const note = await this.client.request("notes/show", {
           noteId: messageId,
         });
         const storedReaction = note.myReaction ?? undefined;
@@ -888,12 +879,7 @@ export class MisskeyAdapter extends PlatformAdapter {
    */
   async getUsername(userId: string): Promise<string> {
     try {
-      const user = await this.client.request<
-        { username: string; name: string | null }
-      >(
-        "users/show",
-        { userId },
-      );
+      const user = await this.client.request("users/show", { userId });
       return user.name ?? user.username;
     } catch {
       return userId;
@@ -932,7 +918,7 @@ export class MisskeyAdapter extends PlatformAdapter {
       let visibleUserIds: string[] | undefined;
 
       try {
-        const oldNote = await this.client.request<MisskeyNote>(
+        const oldNote = await this.client.request(
           "notes/show",
           { noteId },
         );
@@ -949,7 +935,7 @@ export class MisskeyAdapter extends PlatformAdapter {
       logger.debug("Old note deleted for edit", { noteId });
 
       // Step 3: Create new note, replying to the original trigger note
-      const createParams: Record<string, unknown> = {
+      const createParams: entities.NotesCreateRequest = {
         text: newContent,
         visibility,
       };
@@ -963,7 +949,7 @@ export class MisskeyAdapter extends PlatformAdapter {
         createParams.replyId = replyToMessageId;
 
         try {
-          const originalNote = await this.client.request<MisskeyNote>(
+          const originalNote = await this.client.request(
             "notes/show",
             { noteId: replyToMessageId },
           );
@@ -976,7 +962,7 @@ export class MisskeyAdapter extends PlatformAdapter {
         }
       }
 
-      const result = await this.client.request<{ createdNote: MisskeyNote }>(
+      const result = await this.client.request(
         "notes/create",
         createParams,
       );
@@ -1012,7 +998,7 @@ export class MisskeyAdapter extends PlatformAdapter {
       logger.debug("Old chat message deleted for edit", { messageId });
 
       // Step 2: Recreate message
-      const result = await this.client.request<ChatMessageLite>(
+      const result = await this.client.request(
         "chat/messages/create-to-user",
         {
           toUserId: userId,
@@ -1151,14 +1137,14 @@ export class MisskeyAdapter extends PlatformAdapter {
 
     for (let i = 0; i < driveFiles.length; i++) {
       try {
-        const params: Record<string, unknown> = {
+        const params: entities.ChatMessagesCreateToUserRequest = {
           toUserId: userId,
           // Caption only on the first message of the batch
           text: i === 0 ? (options?.comment ?? null) : null,
           fileId: driveFiles[i].id,
         };
 
-        const result = await this.client.request<ChatMessageLite>(
+        const result = await this.client.request(
           "chat/messages/create-to-user",
           params,
         );
@@ -1272,9 +1258,7 @@ export class MisskeyAdapter extends PlatformAdapter {
     // Chat messages use chat/messages/show to check reactions
     if (channelId.startsWith("chat:")) {
       try {
-        const message = await this.client.request<{
-          reactions: Array<{ reaction: string; user: { id: string } }>;
-        }>("chat/messages/show", { messageId });
+        const message = await this.client.request("chat/messages/show", { messageId });
 
         return message.reactions.some((r) => r.user.id === this.botId);
       } catch (error) {
@@ -1288,7 +1272,7 @@ export class MisskeyAdapter extends PlatformAdapter {
     }
 
     try {
-      const note = await this.client.request<MisskeyNote>("notes/show", {
+      const note = await this.client.request("notes/show", {
         noteId: messageId,
       });
       return note.myReaction != null;
@@ -1313,7 +1297,7 @@ export class MisskeyAdapter extends PlatformAdapter {
     if (!this.botUsername) return false;
 
     try {
-      const note = await this.client.request<MisskeyNote>("notes/show", {
+      const note = await this.client.request("notes/show", {
         noteId: messageId,
       });
       return isMentionToBot(note, this.botUsername);
@@ -1337,14 +1321,14 @@ export class MisskeyAdapter extends PlatformAdapter {
   ): Promise<PlatformMessage | null> {
     try {
       if (channelId.startsWith("chat:")) {
-        const message = await this.client.request<MisskeyMessage>(
+        const message = await this.client.request(
           "chat/messages/show",
           { messageId },
         );
         return chatMessageToPlatformMessage(message, this.botId!);
       }
 
-      const note = await this.client.request<MisskeyNote>(
+      const note = await this.client.request(
         "notes/show",
         { noteId: messageId },
       );
