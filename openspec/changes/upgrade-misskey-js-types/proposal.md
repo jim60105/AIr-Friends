@@ -22,6 +22,7 @@ The static review (`tmp/misskey-api-issue.md`) recommends aligning `misskey-js` 
 
 - No behavior changes: parameter renames, limit clamping, DM history, thread semantics, and reaction verification belong to the other batch changes and are already merged when this lands.
 - No adoption of new 2026.10.0 SDK features (chat pagination, streaming types) beyond what compiling requires.
+- No fix of the `ChatMessageLite.fromUser` display-name fallback noted in the review (the 2026.10.0 `ChatMessageLiteFor1on1` has only `fromUserId`, so chat-timeline display names fall back to user IDs): display-quality issue, explicitly out of scope for the typing upgrade.
 
 ## Batch
 
