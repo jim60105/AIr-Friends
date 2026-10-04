@@ -513,9 +513,14 @@ export class MisskeyAdapter extends PlatformAdapter {
               note.visibility === "specified" &&
               note.visibleUserIds?.includes(userId) === true,
           );
+        } else {
+          logger.debug("Skipping outgoing DM history fetch; botId is not set", {
+            userId,
+          });
         }
 
-        // Merge, deduplicate by note ID (the incoming copy wins ties), sort
+        // Merge, deduplicate by note ID (the incoming copy wins ties — the
+        // overlap is rare, but the guard keeps the history unambiguous), sort
         // ascending, and keep the most recent `limit`.
         const seen = new Set<string>();
         const merged = [...fromUser, ...fromBot].filter((note) => {
