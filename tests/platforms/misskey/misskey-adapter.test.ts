@@ -2165,6 +2165,79 @@ Deno.test("MisskeyAdapter.addReaction - handles chat reaction failure", async ()
   assertEquals(typeof result.error, "string");
 });
 
+Deno.test("MisskeyAdapter.addReaction - reports the stored reaction and pins the readback request", async () => {
+  const adapter = createMockMisskeyAdapter();
+  const calls: Array<{ endpoint: string; params: Record<string, unknown> }> = [];
+  mockClientRequest(adapter, (endpoint: string, params: Record<string, unknown>) => {
+    calls.push({ endpoint, params });
+    if (endpoint === "notes/show") return Promise.resolve({ id: "note1", myReaction: "👍" });
+    return Promise.resolve();
+  });
+
+  const result = await adapter.addReaction("note:abc", "note1", "👍");
+
+  assertEquals(result, { success: true, storedReaction: "👍", verified: true });
+  assertEquals(calls, [
+    { endpoint: "notes/reactions/create", params: { noteId: "note1", reaction: "👍" } },
+    // notes/show accepts only noteId; the authenticated Note carries myReaction
+    { endpoint: "notes/show", params: { noteId: "note1" } },
+  ]);
+});
+
+Deno.test("MisskeyAdapter.addReaction - reports the server's downgraded reaction", async () => {
+  const adapter = createMockMisskeyAdapter();
+  mockClientRequest(adapter, (endpoint: string) => {
+    if (endpoint === "notes/show") {
+      return Promise.resolve({ id: "note1", myReaction: ":restricted:" });
+    }
+    return Promise.resolve();
+  });
+
+  const result = await adapter.addReaction("note:abc", "note1", ":requested:");
+
+  assertEquals(result, { success: true, storedReaction: ":restricted:", verified: true });
+});
+
+Deno.test("MisskeyAdapter.addReaction - reports unconfirmed when the readback fails", async () => {
+  const adapter = createMockMisskeyAdapter();
+  mockClientRequest(adapter, (endpoint: string) => {
+    if (endpoint === "notes/show") return Promise.reject(new Error("readback failed"));
+    return Promise.resolve();
+  });
+
+  const result = await adapter.addReaction("note:abc", "note1", "👍");
+
+  assertEquals(result, { success: true, verified: false });
+});
+
+Deno.test("MisskeyAdapter.addReaction - reports unconfirmed when the readback has no stored reaction", async () => {
+  const adapter = createMockMisskeyAdapter();
+  mockClientRequest(adapter, (endpoint: string) => {
+    if (endpoint === "notes/show") return Promise.resolve({ id: "note1", myReaction: null });
+    return Promise.resolve();
+  });
+
+  const result = await adapter.addReaction("note:abc", "note1", "👍");
+
+  assertEquals(result, { success: true, verified: false });
+});
+
+Deno.test("MisskeyAdapter.addReaction - a failed notes/reactions/create stays a failure", async () => {
+  const adapter = createMockMisskeyAdapter();
+  const calls: string[] = [];
+  mockClientRequest(adapter, (endpoint: string) => {
+    calls.push(endpoint);
+    if (endpoint === "notes/reactions/create") return Promise.reject(INVALID_PARAM);
+    return Promise.resolve({ id: "note1", myReaction: "👍" });
+  });
+
+  const result = await adapter.addReaction("note:abc", "note1", "👍");
+
+  assertEquals(result.success, false);
+  assertEquals(typeof result.error, "string");
+  assertEquals(calls, ["notes/reactions/create"]);
+});
+
 Deno.test("MisskeyAdapter.hasBotReaction - returns false on API error", async () => {
   const adapter = createMockMisskeyAdapter();
   mockClientRequest(adapter, () => {

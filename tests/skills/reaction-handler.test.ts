@@ -6,10 +6,11 @@ import type { SkillContext } from "@skills/types.ts";
 import type { WorkspaceInfo } from "../../src/types/workspace.ts";
 import type { PlatformAdapter } from "@platforms/platform-adapter.ts";
 import type { Platform } from "../../src/types/events.ts";
+import type { ReactionResult } from "../../src/types/platform.ts";
 
 // Create a mock platform adapter
 const createMockPlatformAdapter = (
-  addReactionResult: { success: boolean; error?: string } = { success: true },
+  addReactionResult: ReactionResult = { success: true },
 ): PlatformAdapter => {
   return {
     platform: "discord",
@@ -69,6 +70,87 @@ Deno.test("ReactionHandler - handleReactMessage succeeds with valid emoji", asyn
 
   assertEquals(result.success, true);
   assertEquals(typeof result.data, "object");
+});
+
+Deno.test("ReactionHandler - reports the requested emoji when the stored reaction matches", async () => {
+  const handler = new ReactionHandler();
+  const workspace = createTestWorkspace();
+
+  const context: SkillContext = {
+    workspace,
+    platformAdapter: createMockPlatformAdapter({
+      success: true,
+      storedReaction: "👍",
+      verified: true,
+    }),
+    channelId: "456",
+    userId: "123",
+    replyToMessageId: "msg_trigger",
+    triggerMessageId: "msg_trigger",
+  };
+
+  const result = await handler.handleReactMessage({ emoji: "👍" }, context);
+  const data = result.data as Record<string, unknown>;
+
+  assertEquals(result.success, true);
+  assertEquals(data.emoji, "👍");
+  assertEquals("requestedEmoji" in data, false);
+  assertEquals("reactionStoredAsDifferentEmoji" in data, false);
+  assertEquals("reactionVerified" in data, false);
+  assertEquals(handler.hasReactionSent(workspace.key, "456"), true);
+});
+
+Deno.test("ReactionHandler - reports the stored reaction when the server downgraded it", async () => {
+  const handler = new ReactionHandler();
+  const workspace = createTestWorkspace();
+
+  const context: SkillContext = {
+    workspace,
+    platformAdapter: createMockPlatformAdapter({
+      success: true,
+      storedReaction: ":fallback:",
+      verified: true,
+    }),
+    channelId: "456",
+    userId: "123",
+    replyToMessageId: "msg_trigger",
+    triggerMessageId: "msg_trigger",
+  };
+
+  const result = await handler.handleReactMessage({ emoji: ":restricted:" }, context);
+  const data = result.data as Record<string, unknown>;
+
+  assertEquals(result.success, true);
+  assertEquals(data.emoji, ":fallback:");
+  assertEquals(data.requestedEmoji, ":restricted:");
+  assertEquals(data.reactionStoredAsDifferentEmoji, true);
+  assertEquals(typeof data.note, "string");
+  // The downgrade still counts as a response: no missing-reply retry fires
+  assertEquals(handler.hasReactionSent(workspace.key, "456"), true);
+});
+
+Deno.test("ReactionHandler - reports an unconfirmed reaction when the readback failed", async () => {
+  const handler = new ReactionHandler();
+  const workspace = createTestWorkspace();
+
+  const context: SkillContext = {
+    workspace,
+    platformAdapter: createMockPlatformAdapter({ success: true, verified: false }),
+    channelId: "456",
+    userId: "123",
+    replyToMessageId: "msg_trigger",
+    triggerMessageId: "msg_trigger",
+  };
+
+  const result = await handler.handleReactMessage({ emoji: "👍" }, context);
+  const data = result.data as Record<string, unknown>;
+
+  assertEquals(result.success, true);
+  assertEquals(data.emoji, "👍");
+  assertEquals(data.reactionVerified, false);
+  assertEquals("reactionStoredAsDifferentEmoji" in data, false);
+  assertEquals(typeof data.note, "string");
+  assertEquals(handler.hasReactionSent(workspace.key, "456"), true);
 });
 
 Deno.test("ReactionHandler - handleReactMessage fails with missing emoji", async () => {

@@ -828,7 +828,38 @@ export class MisskeyAdapter extends PlatformAdapter {
 
       logger.debug("Reaction added", { noteId: messageId, emoji });
 
-      return { success: true };
+      // Misskey can accept the POST and still store a different reaction
+      // (sensitive emoji, role restriction, reactionAcceptance), so read the
+      // note back to report what was actually stored. The POST succeeded, so a
+      // failed or empty readback is unconfirmed, never a call failure.
+      try {
+        const note = await this.client.request<MisskeyNote>("notes/show", {
+          noteId: messageId,
+        });
+        const storedReaction = note.myReaction ?? undefined;
+
+        if (storedReaction === undefined) {
+          logger.warn("Reaction readback found no stored reaction", { noteId: messageId, emoji });
+          return { success: true, verified: false };
+        }
+
+        if (storedReaction !== emoji) {
+          logger.warn("Server stored a different reaction than requested", {
+            noteId: messageId,
+            requested: emoji,
+            stored: storedReaction,
+          });
+        }
+
+        return { success: true, storedReaction, verified: true };
+      } catch (error) {
+        logger.warn("Failed to verify the stored reaction via notes/show", {
+          noteId: messageId,
+          emoji,
+          error: error instanceof Error ? error.message : String(error),
+        });
+        return { success: true, verified: false };
+      }
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
       logger.error("Failed to add reaction", {

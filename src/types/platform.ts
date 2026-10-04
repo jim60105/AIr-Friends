@@ -144,4 +144,20 @@ export interface SendFileResult {
 export interface ReactionResult {
   success: boolean;
   error?: string;
+
+  /**
+   * The reaction the server actually stored, as reported by a post-send
+   * readback (Misskey note reactions). Present only when verification ran and
+   * found a stored reaction; a value different from the requested emoji means
+   * the server downgraded it.
+   */
+  storedReaction?: string;
+
+  /**
+   * `false` when post-send verification was attempted but could not confirm the
+   * stored reaction (readback failed, or the readback reported no reaction).
+   * A confirmed readback reports `true`; platforms without verification leave
+   * this undefined.
+   */
+  verified?: boolean;
 }
