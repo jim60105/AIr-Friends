@@ -38,10 +38,12 @@ export class ContextHandler {
       }
 
       const limit = params.limit ?? 20;
-      if (typeof limit !== "number" || limit < 1) {
+      if (
+        typeof limit !== "number" || !Number.isInteger(limit) || limit < 1 || limit > 100
+      ) {
         return {
           success: false,
-          error: "Invalid 'limit' parameter. Must be a positive number",
+          error: "Invalid 'limit' parameter. Must be an integer between 1 and 100",
         };
       }
 

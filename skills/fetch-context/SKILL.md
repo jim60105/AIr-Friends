@@ -45,6 +45,14 @@ The `search_messages` query is OPTIONAL per type. When present, it MUST NOT appe
 - `search_messages`: Search for messages by keyword (query passed via `--query-file`)
 - `user_info`: Get information about the current user
 
+## Parameters
+
+- `--limit` (optional): maximum number of items to fetch. MUST be an integer in the range
+  `1`–`100`; the default is `20`. A non-integer or out-of-range value is rejected by the
+  skill with an error naming the allowed range.
+- `--type` (required): one of `recent_messages`, `search_messages`, `user_info`.
+- `--query-file` (required for `search_messages`): payload file holding the query text.
+
 ## Error Codes
 
 If the script fails, read the JSON error on stderr. It contains the fix. Common codes: `SKILL_LEGACY_FLAG` (you used the removed `--query` flag — stage the text in `$TMPDIR/$SESSION_ID/query.md` and use `--query-file`), `SKILL_PAYLOAD_OUT_OF_BOUNDS` (payload path outside `$TMPDIR/$SESSION_ID/`), `SKILL_PAYLOAD_NOT_FOUND` (payload file not written yet — write it first with the edit/write tool).
