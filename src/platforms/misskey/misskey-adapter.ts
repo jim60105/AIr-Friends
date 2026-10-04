@@ -545,13 +545,30 @@ export class MisskeyAdapter extends PlatformAdapter {
           { noteId },
         );
 
-        // Fetch replies with fallback chain for fork compatibility:
-        // notes/children (broader, available on most forks) → notes/replies → empty
-        const replies = await this.fetchRepliesWithFallback(noteId, limit);
+        // Thread assembly is best-effort: the fetch helpers only absorb
+        // endpoint-missing errors (fork compatibility), so any other failure
+        // (rate limit, INVALID_PARAM, 5xx) propagates here and degrades the
+        // thread to the parts that succeeded instead of failing the whole
+        // recent-messages fetch (Error Resilience).
+        let replies: MisskeyNote[] = [];
+        try {
+          replies = await this.fetchRepliesWithFallback(noteId, limit);
+        } catch (error) {
+          logger.warn("Failed to fetch note replies; assembling thread without them", {
+            noteId,
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
 
-        // Fetch ancestor notes with fallback chain for fork compatibility:
-        // notes/conversation (single call) → replyId chain walk via notes/show
-        const ancestors = await this.fetchAncestorsWithFallback(currentNote, limit);
+        let ancestors: MisskeyNote[] = [];
+        try {
+          ancestors = await this.fetchAncestorsWithFallback(currentNote, limit);
+        } catch (error) {
+          logger.warn("Failed to fetch note ancestors; assembling thread without them", {
+            noteId,
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
 
         const allNotes = [...ancestors, currentNote, ...replies];
 
@@ -585,32 +602,58 @@ export class MisskeyAdapter extends PlatformAdapter {
   }
 
   /**
+   * Whether an error from `MisskeyClient.request()` means the endpoint does not
+   * exist on this server (fork compatibility) rather than a transient or
+   * request-level failure (rate limit, `INVALID_PARAM`, 5xx, permission).
+   *
+   * misskey-js rejects with the server's error body (`{ id, code, message, kind,
+   * info }`) and no HTTP status, so a missing endpoint surfaces as
+   * `code: "NO_SUCH_ENDPOINT"`. A 404 `status`/`statusCode` is also accepted, for
+   * fork variants (or a future misskey-js release) that surface one.
+   */
+  private isEndpointUnavailableError(error: unknown): boolean {
+    if (typeof error !== "object" || error === null) return false;
+
+    const { status, statusCode, code } = error as {
+      status?: unknown;
+      statusCode?: unknown;
+      code?: unknown;
+    };
+
+    if (status === 404 || statusCode === 404) return true;
+    return code === "NO_SUCH_ENDPOINT";
+  }
+
+  /**
    * Fetch replies to a note with fallback chain for fork compatibility.
-   * Tries notes/children first (available on most forks), then notes/replies,
-   * and falls back to an empty array if neither endpoint exists.
+   * Tries notes/replies first (direct replies only), then notes/children (which
+   * also includes quote renotes), and falls back to an empty array only when
+   * neither endpoint exists on the server. Any other failure propagates.
    */
   private async fetchRepliesWithFallback(
     noteId: string,
     limit: number,
   ): Promise<MisskeyNote[]> {
-    // Try notes/children first (broader — includes replies + quote renotes)
-    try {
-      return await this.client.request<MisskeyNote[]>(
-        "notes/children",
-        { noteId, limit },
-      );
-    } catch {
-      logger.debug("notes/children endpoint unavailable, trying notes/replies", { noteId });
-    }
-
-    // Fallback to notes/replies
+    // Try notes/replies first — the discussion thread is the direct replies
     try {
       return await this.client.request<MisskeyNote[]>(
         "notes/replies",
         { noteId, limit },
       );
-    } catch {
-      logger.debug("notes/replies endpoint unavailable, skipping replies fetch", { noteId });
+    } catch (error) {
+      if (!this.isEndpointUnavailableError(error)) throw error;
+      logger.debug("notes/replies endpoint unavailable, trying notes/children", { noteId });
+    }
+
+    // Fallback to notes/children (broader — includes replies + quote renotes)
+    try {
+      return await this.client.request<MisskeyNote[]>(
+        "notes/children",
+        { noteId, limit },
+      );
+    } catch (error) {
+      if (!this.isEndpointUnavailableError(error)) throw error;
+      logger.debug("notes/children endpoint unavailable, skipping replies fetch", { noteId });
     }
 
     // Both endpoints failed — return empty array
@@ -620,7 +663,9 @@ export class MisskeyAdapter extends PlatformAdapter {
   /**
    * Fetch ancestor notes with fallback chain for fork compatibility.
    * Tries notes/conversation first (single API call), then falls back to
-   * walking the replyId chain via repeated notes/show calls.
+   * walking the replyId chain via repeated notes/show calls. The walk is only
+   * tried when notes/conversation is missing from the server; any other
+   * conversation failure propagates.
    */
   private async fetchAncestorsWithFallback(
     currentNote: MisskeyNote,
@@ -639,13 +684,15 @@ export class MisskeyAdapter extends PlatformAdapter {
         count: ancestors.length,
       });
       return ancestors;
-    } catch {
+    } catch (error) {
+      if (!this.isEndpointUnavailableError(error)) throw error;
       logger.debug("notes/conversation endpoint unavailable, falling back to replyId chain walk", {
         noteId: currentNote.id,
       });
     }
 
-    // Fallback: walk the replyId chain via notes/show
+    // Fallback: walk the replyId chain via notes/show. There is no narrower
+    // strategy left, so a failed step keeps the ancestors fetched so far.
     const ancestors: MisskeyNote[] = [];
     let cursorReplyId: string | null | undefined = currentNote.replyId;
     while (cursorReplyId && ancestors.length < limit) {
