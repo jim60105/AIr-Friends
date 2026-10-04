@@ -35,6 +35,8 @@ type RequestKeys<E extends keyof Endpoints> = RequestParams<E> extends infer R
  *
  * Note the limit of this check: it validates the set of keys, not which
  * combination of optional keys belongs to one variant of a union request type.
+ * Endpoints whose request type has an index signature (the SDK's `EmptyRequest`
+ * for `i` and `emojis`) accept any key by construction.
  */
 type StrictParams<E extends keyof Endpoints, P> =
   & P
@@ -77,7 +79,9 @@ function forwardRequest<E extends keyof Endpoints, P extends RequestParams<E>>(
 const uploadFetch: MisskeyApi.FetchLike = async (input, init) => {
   const response = await fetch(input, init);
 
-  if (!response.ok) {
+  // The SDK resolves only 200 and 204; every other status is a failure here so
+  // the classification below is the single owner of the upload error contract.
+  if (response.status !== 200 && response.status !== 204) {
     const body = await response.text();
     const context = { endpoint: "drive/files/create", status: response.status };
 
@@ -129,7 +133,9 @@ export class MisskeyClient {
   }
 
   /**
-   * Get the API client
+   * Get the API client. Drive uploads deliberately run through a separate
+   * client with a status-classifying `fetch` (see `uploadFile`), so callers
+   * must not route multipart requests through this one.
    */
   getApi(): MisskeyApi.APIClient {
     return this.api;
@@ -181,9 +187,7 @@ export class MisskeyClient {
    */
   async request<E extends keyof Endpoints, P extends RequestParams<E> = RequestParams<E>>(
     endpoint: E,
-    // Omitted parameters fall back to `{}`, which is what the SDK itself
-    // defaults to; the assertion only states that for this endpoint's shape.
-    params: StrictParams<E, P> = {} as StrictParams<E, P>,
+    params: StrictParams<E, P>,
   ): Promise<RequestResponse<E, P>> {
     try {
       return await forwardRequest(this.api, endpoint, params);
@@ -223,7 +227,7 @@ export class MisskeyClient {
     username: string;
     name: string | null;
   }> {
-    return this.request("i");
+    return this.request("i", {});
   }
 
   /**

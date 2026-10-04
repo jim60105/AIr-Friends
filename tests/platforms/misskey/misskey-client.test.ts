@@ -42,7 +42,7 @@ Deno.test("MisskeyClient.request - throws PlatformError on non-JSON response", a
   });
 
   const error = await assertRejects(
-    () => client.request("i"),
+    () => client.request("i", {}),
     PlatformError,
   );
   assertEquals(error.code, ErrorCode.PLATFORM_CONNECTION_FAILED);
@@ -56,7 +56,7 @@ Deno.test("MisskeyClient.request - passes through normal API errors unchanged", 
   });
 
   await assertRejects(
-    () => client.request("i"),
+    () => client.request("i", {}),
     Error,
     "AUTHENTICATION_FAILED",
   );
@@ -69,7 +69,7 @@ Deno.test("MisskeyClient.request - does not catch non-JSON SyntaxError", async (
   });
 
   await assertRejects(
-    () => client.request("i"),
+    () => client.request("i", {}),
     SyntaxError,
     "Unexpected identifier",
   );
