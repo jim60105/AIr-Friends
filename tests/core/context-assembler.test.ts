@@ -654,6 +654,67 @@ Deno.test("ContextAssembler - formatEmojiSection groups by category", async () =
   });
 });
 
+Deno.test("ContextAssembler - formatEmojiSection marks reaction-restricted emojis", async () => {
+  await withTestContextAssembler(async (assembler, _store, manager) => {
+    const event = createTestEvent();
+    const workspace = await manager.getOrCreateWorkspace(event);
+
+    // Instance fixture: unrestricted, sensitive, role-restricted, and an emoji
+    // whose role list is present but empty (unrestricted).
+    const testEmojis: PlatformEmoji[] = [
+      {
+        name: "free",
+        animated: false,
+        useInText: ":free:",
+        useAsReaction: ":free:",
+        category: "Reactions",
+      },
+      {
+        name: "sensitive_one",
+        animated: false,
+        useInText: ":sensitive_one:",
+        useAsReaction: ":sensitive_one:",
+        category: "Reactions",
+        isSensitive: true,
+      },
+      {
+        name: "role_only",
+        animated: false,
+        useInText: ":role_only:",
+        useAsReaction: ":role_only:",
+        category: "Reactions",
+        localOnly: true,
+        roleIdsThatCanBeUsedThisEmojiAsReaction: ["role1"],
+      },
+      {
+        name: "open_roles",
+        animated: false,
+        useInText: ":open_roles:",
+        useAsReaction: ":open_roles:",
+        category: "Reactions",
+        roleIdsThatCanBeUsedThisEmojiAsReaction: [],
+      },
+    ];
+
+    const fetcher = createMockMessageFetcher([], testEmojis);
+    const context = await assembler.assembleContext(event, workspace, fetcher);
+    const formatted = assembler.formatContext(context);
+
+    assertStringIncludes(
+      formatted.userMessage,
+      "<e><t>:sensitive_one:</t><r>:sensitive_one:</r></e> (reaction restricted: sensitive)",
+    );
+    assertStringIncludes(
+      formatted.userMessage,
+      "<e><t>:role_only:</t><r>:role_only:</r></e> (reaction restricted: role-restricted)",
+    );
+    assertStringIncludes(formatted.userMessage, "<e><t>:free:</t><r>:free:</r></e>");
+    assertStringIncludes(formatted.userMessage, "<e><t>:open_roles:</t><r>:open_roles:</r></e>");
+    // Only the two restricted entries are annotated
+    assertEquals(formatted.userMessage.split("(reaction restricted:").length - 1, 2);
+  });
+});
+
 // ============ Spontaneous context tests ============
 
 Deno.test("ContextAssembler - assembleSpontaneousContext without recent messages", async () => {

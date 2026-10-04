@@ -104,6 +104,26 @@ export interface PlatformEmoji {
    * Misskey: ":name:" or Unicode character
    */
   useAsReaction: string;
+
+  /**
+   * Misskey: the instance flags this emoji as sensitive (NSFW), so some
+   * contexts (e.g. non-sensitive-only reaction acceptance) reject it as a
+   * reaction.
+   */
+  isSensitive?: boolean;
+
+  /**
+   * Misskey: the emoji is intended for local users only. Metadata only — it is
+   * not a reaction restriction.
+   */
+  localOnly?: boolean;
+
+  /**
+   * Misskey: role IDs allowed to use this emoji as a reaction. Absent or empty
+   * means unrestricted; a non-empty array means emojis outside those roles
+   * cannot react with it.
+   */
+  roleIdsThatCanBeUsedThisEmojiAsReaction?: string[];
 }
 
 /**

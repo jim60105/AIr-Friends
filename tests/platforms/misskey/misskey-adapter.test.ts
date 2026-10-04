@@ -2530,3 +2530,52 @@ Deno.test("MisskeyAdapter.fetchMessage - returns null on error", async () => {
   const result = await adapter.fetchMessage("note:someNote", "nonexistent");
   assertEquals(result, null);
 });
+
+// ==================== MisskeyAdapter.fetchEmojis Tests ====================
+
+Deno.test("MisskeyAdapter.fetchEmojis - preserves reaction-availability metadata", async () => {
+  const adapter = createMockMisskeyAdapter();
+  mockClientRequest(adapter, (endpoint: string) => {
+    if (endpoint === "emojis") {
+      return Promise.resolve({
+        emojis: [
+          { name: "plain", category: "Test", aliases: [], url: "https://example.com/plain.png" },
+          {
+            name: "sensitive_one",
+            category: "Test",
+            aliases: [],
+            url: "https://example.com/s.png",
+            isSensitive: true,
+          },
+          {
+            name: "role_only",
+            category: "Test",
+            aliases: [],
+            url: "https://example.com/r.png",
+            localOnly: true,
+            roleIdsThatCanBeUsedThisEmojiAsReaction: ["role1"],
+          },
+          {
+            name: "open_roles",
+            category: "Test",
+            aliases: [],
+            url: "https://example.com/o.png",
+            roleIdsThatCanBeUsedThisEmojiAsReaction: [],
+          },
+        ],
+      });
+    }
+    return Promise.resolve({});
+  });
+
+  const emojis = await adapter.fetchEmojis();
+  const find = (name: string) => emojis.find((e) => e.name === name);
+
+  assertEquals(find("sensitive_one")?.isSensitive, true);
+  assertEquals(find("sensitive_one")?.roleIdsThatCanBeUsedThisEmojiAsReaction, undefined);
+  assertEquals(find("role_only")?.roleIdsThatCanBeUsedThisEmojiAsReaction, ["role1"]);
+  assertEquals(find("role_only")?.localOnly, true);
+  assertEquals(find("open_roles")?.roleIdsThatCanBeUsedThisEmojiAsReaction, []);
+  assertEquals(find("plain")?.isSensitive, undefined);
+  assertEquals(find("plain")?.useAsReaction, ":plain:");
+});

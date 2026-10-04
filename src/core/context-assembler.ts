@@ -607,7 +607,20 @@ export class ContextAssembler {
       for (const emoji of categoryEmojis) {
         if (count >= MAX_EMOJIS) break;
 
-        const line = `<e><t>${emoji.useInText}</t><r>${emoji.useAsReaction}</r></e>`;
+        // Mark reaction restrictions so a restricted emoji is not presented as
+        // universally usable. `localOnly` is deliberately not annotated: it is
+        // visibility metadata, not a reaction restriction.
+        const restrictions: string[] = [];
+        if (emoji.isSensitive) restrictions.push("sensitive");
+        if ((emoji.roleIdsThatCanBeUsedThisEmojiAsReaction?.length ?? 0) > 0) {
+          restrictions.push("role-restricted");
+        }
+
+        const line = restrictions.length > 0
+          ? `<e><t>${emoji.useInText}</t><r>${emoji.useAsReaction}</r></e> (reaction restricted: ${
+            restrictions.join(", ")
+          })`
+          : `<e><t>${emoji.useInText}</t><r>${emoji.useAsReaction}</r></e>`;
         const lineTokens = estimateTokens(line);
 
         if (usedTokens + lineTokens > tokenBudget) break;

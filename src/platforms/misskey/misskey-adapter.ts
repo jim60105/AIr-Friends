@@ -764,6 +764,9 @@ export class MisskeyAdapter extends PlatformAdapter {
           category: string | null;
           aliases: string[];
           url: string;
+          isSensitive?: boolean;
+          localOnly?: boolean;
+          roleIdsThatCanBeUsedThisEmojiAsReaction?: string[];
         }>;
       }>("emojis", {});
 
@@ -773,6 +776,11 @@ export class MisskeyAdapter extends PlatformAdapter {
         category: e.category,
         useInText: `:${e.name}:`,
         useAsReaction: `:${e.name}:`,
+        // Reaction-availability metadata: preserved so consumers can tell
+        // restricted emojis from universally usable ones.
+        isSensitive: e.isSensitive,
+        localOnly: e.localOnly,
+        roleIdsThatCanBeUsedThisEmojiAsReaction: e.roleIdsThatCanBeUsedThisEmojiAsReaction,
       }));
 
       this.emojiCache = emojis;
