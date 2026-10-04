@@ -125,9 +125,7 @@ export class ReactionHandler {
           emoji: downgraded ? storedReaction : requestedEmoji,
           messageId: context.triggerMessageId,
           timestamp: new Date().toISOString(),
-          ...(downgraded
-            ? { requestedEmoji, reactionStoredAsDifferentEmoji: true }
-            : {}),
+          ...(downgraded ? { requestedEmoji, reactionStoredAsDifferentEmoji: true } : {}),
           ...(unconfirmed ? { reactionVerified: false } : {}),
           ...(note !== undefined ? { note } : {}),
           nextAction: "Reaction success. Never call react-message skill second time.",
