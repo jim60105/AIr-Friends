@@ -6,8 +6,8 @@
 
 ## 2. Note reaction verification
 
-- [ ] 2.1 Extend `ReactionResult` in `src/types/platform.ts` with optional `storedReaction?: string` and `verified?: boolean`; extend the adapter's `MisskeyNote` type with optional `myReaction?: string | null`; verify with `deno task check`.
-- [ ] 2.2 In `addReaction()`'s note branch, after `notes/reactions/create` succeeds, call `notes/show` with `{ noteId, myReaction: true }` and compare the bot's stored reaction to the requested emoji: match → `{ success: true, storedReaction }`; mismatch → `{ success: true, storedReaction: <stored> }`; readback throws → `{ success: true, verified: false }`. Verify with tests for all three outcomes.
+- [ ] 2.1 Extend `ReactionResult` in `src/types/platform.ts` with optional `storedReaction?: string` and `verified?: boolean`; the adapter's `MisskeyNote` type needs no local extension because it aliases misskey-js's `Note` schema, which already declares `myReaction?: string | null`; verify with `deno task check`.
+- [ ] 2.2 In `addReaction()`'s note branch, after `notes/reactions/create` succeeds, call `notes/show` with `{ noteId }` (only request field; the authenticated `Note` carries `myReaction`) and compare the bot's stored reaction to the requested emoji: match → `{ success: true, storedReaction }`; mismatch → `{ success: true, storedReaction: <stored> }`; readback throws or reports no stored reaction → `{ success: true, verified: false }`. Verify with tests for all three outcomes.
 - [ ] 2.3 In `src/skills/reaction-handler.ts`, when `result.storedReaction` differs from the requested emoji, return skill result data reporting the stored reaction and noting the requested emoji was not applied as such; still call `markReactionSent`. Verify with handler tests for: match (reports requested emoji as today), mismatch (reports stored emoji, reaction marked sent, `success: true`), `verified: false` (reports unconfirmed).
 
 ## 3. Emoji reaction-availability metadata
