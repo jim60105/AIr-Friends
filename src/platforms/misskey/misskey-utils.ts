@@ -14,25 +14,16 @@ export type MisskeyNote = entities.Note;
 export type MisskeyMessage = entities.ChatMessage;
 
 /**
- * Misskey ChatMessageLiteFor1on1 type for API responses
- * The API returns a lighter version without full user objects
+ * Misskey chat message as returned by the 1-on-1 chat endpoints
+ * (`chat/messages/create-to-user`, `chat/messages/user-timeline`).
+ *
+ * Those responses carry only `fromUserId`; the optional `fromUser` keeps them
+ * usable through the same helpers as the streaming `newChatMessage` payload
+ * (`entities.ChatMessage`), which does carry the sender.
  */
-export interface ChatMessageLite {
-  id: string;
-  createdAt: string;
-  fromUserId: string;
-  fromUser?: {
-    id: string;
-    name: string | null;
-    username: string;
-    isBot?: boolean;
-  };
-  toUserId: string;
-  text: string | null;
-  fileId: string | null;
-  file?: unknown;
-  reactions: Array<{ reaction: string }>;
-}
+export type ChatMessageLite = entities.ChatMessageLiteFor1on1 & {
+  fromUser?: Pick<entities.UserLite, "id" | "name" | "username" | "isBot"> | null;
+};
 
 /**
  * Convert Misskey Note to NormalizedEvent
@@ -257,17 +248,7 @@ export function chatMessageToPlatformMessage(
 
   // Extract file attachment if present
   const attachments: Attachment[] = [];
-  const file = message.file as
-    | {
-      id: string;
-      url: string;
-      type: string;
-      name: string;
-      size: number;
-      properties?: { width?: number; height?: number };
-    }
-    | null
-    | undefined;
+  const file = message.file;
   if (file) {
     attachments.push({
       id: file.id,

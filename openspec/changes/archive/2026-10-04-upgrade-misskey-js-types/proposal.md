@@ -6,7 +6,7 @@ The static review (`tmp/misskey-api-issue.md`) recommends aligning `misskey-js` 
 
 - Upgrade the `misskey-js` dependency from `npm:misskey-js@2025.12.2` to `npm:misskey-js@2026.10.0` in `deno.json`.
 - Narrow `MisskeyClient.request()` from `(endpoint: string, params: Record<string, any>)` to misskey-js's typed endpoint dispatch (`api.request<endpoint, params>` generics or the typed `apis` surface), eliminating the `endpoint as any` / `params as any` casts; call sites that pass invalid parameter names or read nonexistent response fields SHALL fail type-checking.
-- Replace the hand-rolled multipart `drive/files/create` upload with the SDK's own typed request now that `APIClient.request()` builds `FormData` for `requireFile` endpoints (the in-code comment claiming JSON-only support is outdated for this version), removing the duplicate request/error-handling path.
+- Replace the hand-rolled multipart `drive/files/create` upload with the SDK's own typed request now that `APIClient.request()` builds `FormData` for `requireFile` endpoints (the in-code comment claiming JSON-only support is outdated for this version), removing the duplicate request path. The SDK parses the response body before it looks at the HTTP status, so uploads go through an SDK-injectable `fetch` that classifies non-2xx responses by status (design D3) — upload failure codes and retryability stay exactly as the manual implementation reported them (`502`–`504` retryable connection failure, other statuses non-retryable API error).
 
 ## Capabilities
 
