@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- Misskey note reactions are verified after the post: `addReaction()` reads the note back via `notes/show` and reports the server's stored reaction as `storedReaction` on `ReactionResult` (or `verified: false` when the readback failed or found no reaction). `react-message` therefore reports a policy-downgraded reaction (sensitive emoji, role restriction, `reactionAcceptance`) instead of echoing the requested emoji, and still marks the reaction sent so no missing-reply retry fires
+- Misskey `fetchEmojis()` preserves the instance's reaction-availability metadata (`isSensitive`, `localOnly`, `roleIdsThatCanBeUsedThisEmojiAsReaction`) on `PlatformEmoji` (Discord leaves the fields undefined), and the agent-facing emoji listing annotates sensitive and role-restricted entries so a restricted emoji is not presented as universally usable
+
+### Fixed
+
+- Misskey `note:{noteId}` history now prefers `notes/replies` (direct replies) over `notes/children` (which also returns quote renotes), and its fork-compatibility fallback is entered only for endpoint-missing errors (`NO_SUCH_ENDPOINT`-class failures / HTTP 404) — rate-limit, `INVALID_PARAM`, and 5xx failures no longer silently degrade to the narrower endpoint or an empty reply list; they propagate out of the fetch helper and the thread assembly degrades to the parts it fetched while logging the original error, so the session still gets context instead of failing
+
 ## [0.32.0] - 2026-09-26
 
 ### Added

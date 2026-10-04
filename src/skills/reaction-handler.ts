@@ -92,22 +92,42 @@ export class ReactionHandler {
         };
       }
 
-      // Mark reaction as sent
+      const requestedEmoji = params.emoji;
+      const storedReaction = result.storedReaction;
+      // A readback that failed (or reported no reaction) leaves the outcome
+      // unconfirmed; a confirmed readback with a different emoji is a downgrade.
+      const unconfirmed = result.verified === false;
+      const downgraded = !unconfirmed && storedReaction !== undefined &&
+        storedReaction !== requestedEmoji;
+
+      // Mark reaction as sent even on a downgrade: the server holds a reaction,
+      // so the session counts as responded and no missing-reply retry fires.
       this.markReactionSent(context);
 
       logger.info("Reaction {emoji} added via skill to message {messageId}", {
         workspaceKey: context.workspace.key,
         channelId: context.channelId,
-        emoji: params.emoji,
+        emoji: requestedEmoji,
         messageId: context.triggerMessageId,
+        ...(storedReaction !== undefined ? { storedReaction } : {}),
+        ...(unconfirmed ? { verified: false } : {}),
       });
+
+      const note = downgraded
+        ? `The server stored ${storedReaction} instead of the requested ${requestedEmoji}; the requested emoji was not applied as such.`
+        : unconfirmed
+        ? `The reaction request succeeded but the stored reaction could not be confirmed; it may differ from the requested ${requestedEmoji}.`
+        : undefined;
 
       return {
         success: true,
         data: {
-          emoji: params.emoji,
+          emoji: downgraded ? storedReaction : requestedEmoji,
           messageId: context.triggerMessageId,
           timestamp: new Date().toISOString(),
+          ...(downgraded ? { requestedEmoji, reactionStoredAsDifferentEmoji: true } : {}),
+          ...(unconfirmed ? { reactionVerified: false } : {}),
+          ...(note !== undefined ? { note } : {}),
           nextAction: "Reaction success. Never call react-message skill second time.",
         },
       };

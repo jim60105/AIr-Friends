@@ -453,13 +453,50 @@ Deno.test("shouldRespondToChatMessage - should not respond when DM not allowed",
 // ==================== MisskeyAdapter.fetchRecentMessages (note: channel) Tests ====================
 
 /**
+ * Error shapes a Misskey server produces, as `MisskeyClient.request()` surfaces
+ * them: misskey-js rejects with the server's error body, so an endpoint-missing
+ * failure carries `code: "NO_SUCH_ENDPOINT"` and no HTTP status.
+ */
+type MockApiError = { code: string; message: string; id: string; kind: "client" | "server" };
+
+const ENDPOINT_MISSING: MockApiError = {
+  code: "NO_SUCH_ENDPOINT",
+  message: "No such endpoint.",
+  id: "err-no-such-endpoint",
+  kind: "client",
+};
+const RATE_LIMITED: MockApiError = {
+  code: "RATE_LIMIT_EXCEEDED",
+  message: "Rate limit exceeded.",
+  id: "err-rate-limit",
+  kind: "client",
+};
+const INVALID_PARAM: MockApiError = {
+  code: "INVALID_PARAM",
+  message: "Invalid param.",
+  id: "err-invalid-param",
+  kind: "client",
+};
+const SERVER_ERROR: MockApiError = {
+  code: "INTERNAL_ERROR",
+  message: "Internal error.",
+  id: "err-internal",
+  kind: "server",
+};
+
+/**
  * Helper to create a MisskeyAdapter with a stubbed client.request method.
  * Sets botId via the private field so fetchRecentMessages can function.
- * By default, notes/conversation throws to trigger the replyId chain fallback.
+ * By default, notes/conversation rejects as endpoint-missing, which triggers the
+ * replyId chain walk fallback; pass `conversationError: "transient"` to reject it
+ * with a rate-limit error instead (no fallback), or `"none"` to delegate it to
+ * the request handler.
  */
 function createAdapterWithMockClient(
   requestHandler: (endpoint: string, params: Record<string, unknown>) => unknown,
+  options: { conversationError?: "missing" | "transient" | "none" } = {},
 ): MisskeyAdapter {
+  const conversationError = options.conversationError ?? "missing";
   const adapter = new MisskeyAdapter({
     host: "misskey.test",
     token: "test-token",
@@ -473,9 +510,9 @@ function createAdapterWithMockClient(
   // deno-lint-ignore no-explicit-any
   const client = (adapter as any).client;
   client.request = (endpoint: string, params: Record<string, unknown> = {}) => {
-    // Default: throw for notes/conversation to test the replyId chain fallback
     if (endpoint === "notes/conversation") {
-      return Promise.reject(new Error("notes/conversation not available (mock)"));
+      if (conversationError === "missing") return Promise.reject(ENDPOINT_MISSING);
+      if (conversationError === "transient") return Promise.reject(RATE_LIMITED);
     }
     return Promise.resolve(requestHandler(endpoint, params));
   };
@@ -509,7 +546,7 @@ Deno.test("fetchRecentMessages - note: channel fetches ancestors, current note, 
       if (params.noteId === "noteABC") return current;
       if (params.noteId === "ancestor1") return ancestor;
     }
-    if (endpoint === "notes/children") return [reply];
+    if (endpoint === "notes/replies") return [reply];
     return [];
   });
 
@@ -519,6 +556,8 @@ Deno.test("fetchRecentMessages - note: channel fetches ancestors, current note, 
   assertEquals(messages[0].messageId, "ancestor1");
   assertEquals(messages[1].messageId, "noteABC");
   assertEquals(messages[2].messageId, "reply1");
+  // notes/replies is the preferred endpoint; notes/children is not consulted
+  assertEquals(endpoints.includes("notes/children"), false);
 });
 
 Deno.test("fetchRecentMessages - note: channel deduplicates notes", async () => {
@@ -533,7 +572,7 @@ Deno.test("fetchRecentMessages - note: channel deduplicates notes", async () => 
     if (endpoint === "notes/show") {
       if (params.noteId === "noteABC") return note;
     }
-    if (endpoint === "notes/children") return [note];
+    if (endpoint === "notes/replies") return [note];
     return [];
   });
 
@@ -567,7 +606,7 @@ Deno.test("fetchRecentMessages - note: channel sorts chronologically", async () 
       if (params.noteId === "mid") return mid;
       if (params.noteId === "late") return late;
     }
-    if (endpoint === "notes/children") return [early];
+    if (endpoint === "notes/replies") return [early];
     return [];
   });
 
@@ -593,7 +632,7 @@ Deno.test("fetchRecentMessages - note: channel applies limit keeping latest note
       const found = notes.find((n) => n.id === params.noteId);
       if (found) return found;
     }
-    if (endpoint === "notes/children") return [notes[3], notes[4]];
+    if (endpoint === "notes/replies") return [notes[3], notes[4]];
     return [];
   });
 
@@ -616,7 +655,7 @@ Deno.test("fetchRecentMessages - note: channel with empty ancestors and replies"
 
   const adapter = createAdapterWithMockClient((endpoint, params) => {
     if (endpoint === "notes/show" && params.noteId === "noteOnly") return current;
-    if (endpoint === "notes/children") return [];
+    if (endpoint === "notes/replies") return [];
     return [];
   });
 
@@ -645,10 +684,14 @@ Deno.test("fetchRecentMessages - note: channel passes noteId and limit to API ca
   await adapter.fetchRecentMessages("note:targetNote", 15);
 
   const showCall = capturedCalls.find((c) => c.endpoint === "notes/show");
-  const childrenCall = capturedCalls.find((c) => c.endpoint === "notes/children");
+  const repliesCall = capturedCalls.find((c) => c.endpoint === "notes/replies");
 
   assertEquals(showCall?.params, { noteId: "targetNote" });
-  assertEquals(childrenCall?.params, { noteId: "targetNote", limit: 15 });
+  assertEquals(repliesCall?.params, { noteId: "targetNote", limit: 15 });
+  assertEquals(
+    capturedCalls.some((c) => c.endpoint === "notes/children"),
+    false,
+  );
 });
 
 Deno.test("fetchRecentMessages - note: channel wraps API errors in PlatformError", async () => {
@@ -764,7 +807,7 @@ Deno.test("fetchRecentMessages - chat channel returns messages sorted oldest-fir
 
 // ==================== Replies Fallback Chain Tests ====================
 
-Deno.test("fetchRecentMessages - note: falls back to notes/replies when notes/children fails", async () => {
+Deno.test("fetchRecentMessages - note: falls back to notes/children when notes/replies is missing", async () => {
   const current = createMockNote({
     id: "noteX",
     text: "current",
@@ -781,8 +824,8 @@ Deno.test("fetchRecentMessages - note: falls back to notes/replies when notes/ch
   const adapter = createAdapterWithMockClient((endpoint, params) => {
     calledEndpoints.push(endpoint);
     if (endpoint === "notes/show" && params.noteId === "noteX") return current;
-    if (endpoint === "notes/children") throw new Error("No such endpoint");
-    if (endpoint === "notes/replies") return [reply];
+    if (endpoint === "notes/replies") return Promise.reject(ENDPOINT_MISSING);
+    if (endpoint === "notes/children") return [reply];
     return [];
   });
 
@@ -791,16 +834,47 @@ Deno.test("fetchRecentMessages - note: falls back to notes/replies when notes/ch
   assertEquals(messages.length, 2);
   assertEquals(messages[0].messageId, "noteX");
   assertEquals(messages[1].messageId, "replyX");
-  // Verify notes/children was tried first, then notes/replies
+  // Verify notes/replies was tried first, then notes/children
   assertEquals(calledEndpoints.includes("notes/children"), true);
   assertEquals(calledEndpoints.includes("notes/replies"), true);
   assertEquals(
-    calledEndpoints.indexOf("notes/children") < calledEndpoints.indexOf("notes/replies"),
+    calledEndpoints.indexOf("notes/replies") < calledEndpoints.indexOf("notes/children"),
     true,
   );
 });
 
-Deno.test("fetchRecentMessages - note: returns current note when both reply endpoints fail", async () => {
+Deno.test("fetchRecentMessages - note: a 404 status from notes/replies also triggers the fallback", async () => {
+  const current = createMockNote({
+    id: "noteF",
+    text: "current",
+    createdAt: "2024-01-01T01:00:00.000Z",
+    replyId: null,
+  });
+  const reply = createMockNote({
+    id: "replyF",
+    text: "a reply",
+    createdAt: "2024-01-01T02:00:00.000Z",
+  });
+
+  const calledEndpoints: string[] = [];
+  const adapter = createAdapterWithMockClient((endpoint, params) => {
+    calledEndpoints.push(endpoint);
+    if (endpoint === "notes/show" && params.noteId === "noteF") return current;
+    // A fork (or a future client) may surface the missing endpoint as a 404 status
+    if (endpoint === "notes/replies") {
+      return Promise.reject(Object.assign(new Error("Not Found"), { status: 404 }));
+    }
+    if (endpoint === "notes/children") return [reply];
+    return [];
+  });
+
+  const messages = await adapter.fetchRecentMessages("note:noteF", 20);
+
+  assertEquals(messages.map((m) => m.messageId), ["noteF", "replyF"]);
+  assertEquals(calledEndpoints.includes("notes/children"), true);
+});
+
+Deno.test("fetchRecentMessages - note: returns current note when both reply endpoints are missing", async () => {
   const current = createMockNote({
     id: "noteY",
     text: "standalone",
@@ -808,21 +882,91 @@ Deno.test("fetchRecentMessages - note: returns current note when both reply endp
     replyId: null,
   });
 
+  const calledEndpoints: string[] = [];
   const adapter = createAdapterWithMockClient((endpoint, params) => {
+    calledEndpoints.push(endpoint);
     if (endpoint === "notes/show" && params.noteId === "noteY") return current;
-    if (endpoint === "notes/children") throw new Error("No such endpoint");
-    if (endpoint === "notes/replies") throw new Error("No such endpoint");
+    if (endpoint === "notes/replies") return Promise.reject(ENDPOINT_MISSING);
+    if (endpoint === "notes/children") return Promise.reject(ENDPOINT_MISSING);
     return [];
   });
 
-  // Should still return the current note even when both reply endpoints fail
+  // Should still return the current note when both reply endpoints are missing
   const messages = await adapter.fetchRecentMessages("note:noteY", 20);
 
   assertEquals(messages.length, 1);
   assertEquals(messages[0].messageId, "noteY");
+  // Both endpoints were consulted; the empty reply list came from the
+  // endpoint-missing path, not from a swallowed transient error
+  assertEquals(calledEndpoints.includes("notes/replies"), true);
+  assertEquals(calledEndpoints.includes("notes/children"), true);
 });
 
-Deno.test("fetchRecentMessages - note: ancestors still work when reply endpoints fail", async () => {
+Deno.test("fetchRecentMessages - note: transient reply errors do not fall back and do not fake an empty list", async () => {
+  const transientErrors = [RATE_LIMITED, INVALID_PARAM, SERVER_ERROR];
+
+  for (const error of transientErrors) {
+    const current = createMockNote({
+      id: "noteT",
+      text: "current",
+      createdAt: "2024-01-01T01:00:00.000Z",
+      replyId: null,
+    });
+    const reply = createMockNote({
+      id: "replyT",
+      text: "a reply",
+      createdAt: "2024-01-01T02:00:00.000Z",
+    });
+
+    const calledEndpoints: string[] = [];
+    const adapter = createAdapterWithMockClient((endpoint, params) => {
+      calledEndpoints.push(endpoint);
+      if (endpoint === "notes/show" && params.noteId === "noteT") return current;
+      if (endpoint === "notes/replies") return Promise.reject(error);
+      if (endpoint === "notes/children") return [reply];
+      return [];
+    });
+
+    const messages = await adapter.fetchRecentMessages("note:noteT", 20);
+
+    assertEquals(calledEndpoints.includes("notes/replies"), true);
+    assertEquals(calledEndpoints.includes("notes/children"), false);
+    // The transient failure degraded the thread; it was not reported as an
+    // empty reply list (the fallback endpoint would have produced replyT)
+    assertEquals(messages.map((m) => m.messageId), ["noteT"]);
+  }
+});
+
+Deno.test("fetchRecentMessages - note: a transient reply failure still returns the fetched ancestors", async () => {
+  const ancestor = createMockNote({
+    id: "ancD",
+    text: "ancestor",
+    createdAt: "2024-01-01T00:00:00.000Z",
+    replyId: null,
+  });
+  const current = createMockNote({
+    id: "noteD",
+    text: "current",
+    createdAt: "2024-01-01T01:00:00.000Z",
+    replyId: "ancD",
+  });
+
+  const calledEndpoints: string[] = [];
+  const adapter = createAdapterWithFullMockClient((endpoint, params) => {
+    calledEndpoints.push(endpoint);
+    if (endpoint === "notes/show" && params.noteId === "noteD") return current;
+    if (endpoint === "notes/conversation") return [ancestor];
+    if (endpoint === "notes/replies") return Promise.reject(RATE_LIMITED);
+    return [];
+  });
+
+  const messages = await adapter.fetchRecentMessages("note:noteD", 20);
+
+  assertEquals(messages.map((m) => m.messageId), ["ancD", "noteD"]);
+  assertEquals(calledEndpoints.includes("notes/children"), false);
+});
+
+Deno.test("fetchRecentMessages - note: ancestors still work when reply endpoints are missing", async () => {
   const parent = createMockNote({
     id: "parentZ",
     text: "parent note",
@@ -841,8 +985,8 @@ Deno.test("fetchRecentMessages - note: ancestors still work when reply endpoints
       if (params.noteId === "noteZ") return current;
       if (params.noteId === "parentZ") return parent;
     }
-    if (endpoint === "notes/children") throw new Error("No such endpoint");
-    if (endpoint === "notes/replies") throw new Error("No such endpoint");
+    if (endpoint === "notes/replies") return Promise.reject(ENDPOINT_MISSING);
+    if (endpoint === "notes/children") return Promise.reject(ENDPOINT_MISSING);
     return [];
   });
 
@@ -896,7 +1040,7 @@ Deno.test("fetchRecentMessages - note: uses notes/conversation for ancestors whe
     calledEndpoints.push(endpoint);
     if (endpoint === "notes/show" && params.noteId === "cur1") return current;
     if (endpoint === "notes/conversation") return [ancestor];
-    if (endpoint === "notes/children") return [];
+    if (endpoint === "notes/replies") return [];
     return [];
   });
 
@@ -924,14 +1068,14 @@ Deno.test("fetchRecentMessages - note: falls back to replyId walk when notes/con
   });
 
   const calledEndpoints: string[] = [];
-  // Use the default mock client which throws for notes/conversation
+  // Use the default mock client, which rejects notes/conversation as missing
   const adapter = createAdapterWithMockClient((endpoint, params) => {
     calledEndpoints.push(endpoint);
     if (endpoint === "notes/show") {
       if (params.noteId === "cur2") return current;
       if (params.noteId === "anc2") return ancestor;
     }
-    if (endpoint === "notes/children") return [];
+    if (endpoint === "notes/replies") return [];
     return [];
   });
 
@@ -960,7 +1104,7 @@ Deno.test("fetchRecentMessages - note: deep ancestor chain (7 levels)", async ()
       const found = notes.find((n) => n.id === params.noteId);
       if (found) return found;
     }
-    if (endpoint === "notes/children") return [];
+    if (endpoint === "notes/replies") return [];
     return [];
   });
 
@@ -988,7 +1132,7 @@ Deno.test("fetchRecentMessages - note: notes/conversation returns deep chain in 
     if (endpoint === "notes/show" && params.noteId === "conv6") return notes[6];
     // notes/conversation returns ancestors (excluding current) in reverse order
     if (endpoint === "notes/conversation") return notes.slice(0, 6).reverse();
-    if (endpoint === "notes/children") return [];
+    if (endpoint === "notes/replies") return [];
     return [];
   });
 
@@ -1002,6 +1146,63 @@ Deno.test("fetchRecentMessages - note: notes/conversation returns deep chain in 
   // notes/show was only called for the current note, not for ancestor walk
   const showCalls = calledEndpoints.filter((e) => e === "notes/show");
   assertEquals(showCalls.length, 1);
+});
+
+Deno.test("fetchRecentMessages - note: a transient notes/conversation error does not trigger the replyId walk", async () => {
+  const current = createMockNote({
+    id: "noteG",
+    text: "current note",
+    createdAt: "2024-01-01T01:00:00.000Z",
+    replyId: "parentG",
+  });
+
+  const showCalls: string[] = [];
+  const adapter = createAdapterWithMockClient((endpoint, params) => {
+    if (endpoint === "notes/show") {
+      showCalls.push(String(params.noteId));
+      if (params.noteId === "noteG") return current;
+      if (params.noteId === "parentG") return createMockNote({ id: "parentG", replyId: null });
+    }
+    if (endpoint === "notes/replies") return [];
+    return [];
+  }, { conversationError: "transient" });
+
+  const messages = await adapter.fetchRecentMessages("note:noteG", 20);
+
+  // The thread degraded to the current note; the narrower walk was not tried
+  assertEquals(messages.map((m) => m.messageId), ["noteG"]);
+  assertEquals(showCalls, ["noteG"]);
+});
+
+Deno.test("fetchRecentMessages - note: the replyId walk keeps partial ancestors when a step fails", async () => {
+  const parent = createMockNote({
+    id: "parentW",
+    text: "parent",
+    createdAt: "2024-01-01T00:00:00.000Z",
+    replyId: "grandparentW",
+  });
+  const current = createMockNote({
+    id: "noteW",
+    text: "current note",
+    createdAt: "2024-01-01T01:00:00.000Z",
+    replyId: "parentW",
+  });
+
+  const adapter = createAdapterWithMockClient((endpoint, params) => {
+    if (endpoint === "notes/show") {
+      if (params.noteId === "noteW") return current;
+      if (params.noteId === "parentW") return parent;
+      if (params.noteId === "grandparentW") return Promise.reject(RATE_LIMITED);
+    }
+    if (endpoint === "notes/replies") return [];
+    return [];
+  });
+
+  const messages = await adapter.fetchRecentMessages("note:noteW", 20);
+
+  // There is no narrower strategy than the walk, so it degrades to the
+  // ancestors it already fetched instead of discarding them
+  assertEquals(messages.map((m) => m.messageId), ["parentW", "noteW"]);
 });
 
 // ==================== MisskeyAdapter limit normalization Tests ====================
@@ -1084,17 +1285,17 @@ Deno.test("fetchRecentMessages - note: channel clamps the limit for conversation
   await adapter.fetchRecentMessages("note:targetNote", 250);
 
   const conversationCall = calls.find((c) => c.endpoint === "notes/conversation");
-  const childrenCall = calls.find((c) => c.endpoint === "notes/children");
+  const repliesCall = calls.find((c) => c.endpoint === "notes/replies");
   assertEquals(conversationCall?.params, { noteId: "targetNote", limit: 100 });
-  assertEquals(childrenCall?.params, { noteId: "targetNote", limit: 100 });
+  assertEquals(repliesCall?.params, { noteId: "targetNote", limit: 100 });
+  assertEquals(calls.some((c) => c.endpoint === "notes/children"), false);
 });
 
-Deno.test("fetchRecentMessages - note: clamps the limit for the notes/replies fallback", async () => {
+Deno.test("fetchRecentMessages - note: clamps the limit for the primary notes/replies request", async () => {
   const calls: Array<{ endpoint: string; params: Record<string, unknown> }> = [];
   const adapter = createAdapterWithMockClient((endpoint, params) => {
     calls.push({ endpoint, params });
     if (endpoint === "notes/show") return createMockNote({ id: String(params.noteId) });
-    if (endpoint === "notes/children") throw new Error("No such endpoint");
     return [];
   });
 
@@ -1102,6 +1303,7 @@ Deno.test("fetchRecentMessages - note: clamps the limit for the notes/replies fa
 
   const repliesCall = calls.find((c) => c.endpoint === "notes/replies");
   assertEquals(repliesCall?.params, { noteId: "targetNote", limit: 100 });
+  assertEquals(calls.some((c) => c.endpoint === "notes/children"), false);
 });
 
 Deno.test("searchRelatedMessages - clamps the limit", async () => {
@@ -1963,6 +2165,79 @@ Deno.test("MisskeyAdapter.addReaction - handles chat reaction failure", async ()
   assertEquals(typeof result.error, "string");
 });
 
+Deno.test("MisskeyAdapter.addReaction - reports the stored reaction and pins the readback request", async () => {
+  const adapter = createMockMisskeyAdapter();
+  const calls: Array<{ endpoint: string; params: Record<string, unknown> }> = [];
+  mockClientRequest(adapter, (endpoint: string, params: Record<string, unknown>) => {
+    calls.push({ endpoint, params });
+    if (endpoint === "notes/show") return Promise.resolve({ id: "note1", myReaction: "👍" });
+    return Promise.resolve();
+  });
+
+  const result = await adapter.addReaction("note:abc", "note1", "👍");
+
+  assertEquals(result, { success: true, storedReaction: "👍", verified: true });
+  assertEquals(calls, [
+    { endpoint: "notes/reactions/create", params: { noteId: "note1", reaction: "👍" } },
+    // notes/show accepts only noteId; the authenticated Note carries myReaction
+    { endpoint: "notes/show", params: { noteId: "note1" } },
+  ]);
+});
+
+Deno.test("MisskeyAdapter.addReaction - reports the server's downgraded reaction", async () => {
+  const adapter = createMockMisskeyAdapter();
+  mockClientRequest(adapter, (endpoint: string) => {
+    if (endpoint === "notes/show") {
+      return Promise.resolve({ id: "note1", myReaction: ":restricted:" });
+    }
+    return Promise.resolve();
+  });
+
+  const result = await adapter.addReaction("note:abc", "note1", ":requested:");
+
+  assertEquals(result, { success: true, storedReaction: ":restricted:", verified: true });
+});
+
+Deno.test("MisskeyAdapter.addReaction - reports unconfirmed when the readback fails", async () => {
+  const adapter = createMockMisskeyAdapter();
+  mockClientRequest(adapter, (endpoint: string) => {
+    if (endpoint === "notes/show") return Promise.reject(new Error("readback failed"));
+    return Promise.resolve();
+  });
+
+  const result = await adapter.addReaction("note:abc", "note1", "👍");
+
+  assertEquals(result, { success: true, verified: false });
+});
+
+Deno.test("MisskeyAdapter.addReaction - reports unconfirmed when the readback has no stored reaction", async () => {
+  const adapter = createMockMisskeyAdapter();
+  mockClientRequest(adapter, (endpoint: string) => {
+    if (endpoint === "notes/show") return Promise.resolve({ id: "note1", myReaction: null });
+    return Promise.resolve();
+  });
+
+  const result = await adapter.addReaction("note:abc", "note1", "👍");
+
+  assertEquals(result, { success: true, verified: false });
+});
+
+Deno.test("MisskeyAdapter.addReaction - a failed notes/reactions/create stays a failure", async () => {
+  const adapter = createMockMisskeyAdapter();
+  const calls: string[] = [];
+  mockClientRequest(adapter, (endpoint: string) => {
+    calls.push(endpoint);
+    if (endpoint === "notes/reactions/create") return Promise.reject(INVALID_PARAM);
+    return Promise.resolve({ id: "note1", myReaction: "👍" });
+  });
+
+  const result = await adapter.addReaction("note:abc", "note1", "👍");
+
+  assertEquals(result.success, false);
+  assertEquals(typeof result.error, "string");
+  assertEquals(calls, ["notes/reactions/create"]);
+});
+
 Deno.test("MisskeyAdapter.hasBotReaction - returns false on API error", async () => {
   const adapter = createMockMisskeyAdapter();
   mockClientRequest(adapter, () => {
@@ -2254,4 +2529,53 @@ Deno.test("MisskeyAdapter.fetchMessage - returns null on error", async () => {
 
   const result = await adapter.fetchMessage("note:someNote", "nonexistent");
   assertEquals(result, null);
+});
+
+// ==================== MisskeyAdapter.fetchEmojis Tests ====================
+
+Deno.test("MisskeyAdapter.fetchEmojis - preserves reaction-availability metadata", async () => {
+  const adapter = createMockMisskeyAdapter();
+  mockClientRequest(adapter, (endpoint: string) => {
+    if (endpoint === "emojis") {
+      return Promise.resolve({
+        emojis: [
+          { name: "plain", category: "Test", aliases: [], url: "https://example.com/plain.png" },
+          {
+            name: "sensitive_one",
+            category: "Test",
+            aliases: [],
+            url: "https://example.com/s.png",
+            isSensitive: true,
+          },
+          {
+            name: "role_only",
+            category: "Test",
+            aliases: [],
+            url: "https://example.com/r.png",
+            localOnly: true,
+            roleIdsThatCanBeUsedThisEmojiAsReaction: ["role1"],
+          },
+          {
+            name: "open_roles",
+            category: "Test",
+            aliases: [],
+            url: "https://example.com/o.png",
+            roleIdsThatCanBeUsedThisEmojiAsReaction: [],
+          },
+        ],
+      });
+    }
+    return Promise.resolve({});
+  });
+
+  const emojis = await adapter.fetchEmojis();
+  const find = (name: string) => emojis.find((e) => e.name === name);
+
+  assertEquals(find("sensitive_one")?.isSensitive, true);
+  assertEquals(find("sensitive_one")?.roleIdsThatCanBeUsedThisEmojiAsReaction, undefined);
+  assertEquals(find("role_only")?.roleIdsThatCanBeUsedThisEmojiAsReaction, ["role1"]);
+  assertEquals(find("role_only")?.localOnly, true);
+  assertEquals(find("open_roles")?.roleIdsThatCanBeUsedThisEmojiAsReaction, []);
+  assertEquals(find("plain")?.isSensitive, undefined);
+  assertEquals(find("plain")?.useAsReaction, ":plain:");
 });
