@@ -1065,7 +1065,10 @@ Deno.test("fetchRecentMessages - dm: channel clamps the limit", async () => {
 
   await adapter.fetchRecentMessages("dm:user9", 250);
 
-  assertEquals(calls, [{ endpoint: "notes/mentions", params: { limit: 100 } }]);
+  assertEquals(calls, [
+    { endpoint: "notes/mentions", params: { limit: 100 } },
+    { endpoint: "users/notes", params: { userId: "bot123", withReplies: true, limit: 100 } },
+  ]);
 });
 
 Deno.test("fetchRecentMessages - note: channel clamps the limit for conversation and replies", async () => {
@@ -1111,6 +1114,169 @@ Deno.test("searchRelatedMessages - clamps the limit", async () => {
   await adapter.searchRelatedMessages("guild1", "channel1", "hello", 250);
 
   assertEquals(calls, [{ endpoint: "notes/search", params: { query: "hello", limit: 100 } }]);
+});
+
+// ==================== MisskeyAdapter.fetchRecentMessages (dm: channel) Tests ====================
+
+/** A note authored by the bot (the mock helper sets botId to "bot123"). */
+function createMockBotNote(overrides: Partial<MisskeyNote> = {}): MisskeyNote {
+  const user = { ...createMockNote().user, id: "bot123", username: "testbot" };
+  return createMockNote({ userId: "bot123", user, ...overrides });
+}
+
+Deno.test("fetchRecentMessages - dm: channel keeps only the bot's specified notes visible to the user", async () => {
+  const toTarget = createMockBotNote({
+    id: "out-target",
+    createdAt: "2024-01-01T02:00:00.000Z",
+    visibility: "specified",
+    visibleUserIds: ["user9"],
+  });
+  const toOther = createMockBotNote({
+    id: "out-other",
+    createdAt: "2024-01-01T03:00:00.000Z",
+    visibility: "specified",
+    visibleUserIds: ["userOther"],
+  });
+  const publicNote = createMockBotNote({
+    id: "out-public",
+    createdAt: "2024-01-01T04:00:00.000Z",
+    visibility: "public",
+    visibleUserIds: [],
+  });
+  const followersNote = createMockBotNote({
+    id: "out-followers",
+    createdAt: "2024-01-01T05:00:00.000Z",
+    visibility: "followers",
+    visibleUserIds: [],
+  });
+  // Forks (or older payloads) may omit visibleUserIds entirely.
+  const noVisibleIds = createMockBotNote({
+    id: "out-no-visible",
+    createdAt: "2024-01-01T06:00:00.000Z",
+    visibility: "specified",
+  });
+
+  const adapter = createAdapterWithMockClient((endpoint) => {
+    if (endpoint === "users/notes") {
+      return [toTarget, toOther, publicNote, followersNote, noVisibleIds];
+    }
+    return [];
+  });
+
+  const messages = await adapter.fetchRecentMessages("dm:user9", 20);
+
+  assertEquals(messages.map((m) => m.messageId), ["out-target"]);
+});
+
+Deno.test("fetchRecentMessages - dm: channel merges, dedupes, sorts, and applies the limit", async () => {
+  const incomingLater = createMockNote({
+    id: "inc-1",
+    userId: "user9",
+    createdAt: "2024-01-01T03:00:00.000Z",
+  });
+  const incomingFirst = createMockNote({
+    id: "dup",
+    userId: "user9",
+    createdAt: "2024-01-01T02:00:00.000Z",
+  });
+  const botDup = createMockBotNote({
+    id: "dup",
+    createdAt: "2024-01-01T02:00:00.000Z",
+    visibility: "specified",
+    visibleUserIds: ["user9"],
+  });
+  const botOut1 = createMockBotNote({
+    id: "out-1",
+    createdAt: "2024-01-01T04:00:00.000Z",
+    visibility: "specified",
+    visibleUserIds: ["user9"],
+  });
+  const botOut2 = createMockBotNote({
+    id: "out-2",
+    createdAt: "2024-01-01T01:00:00.000Z",
+    visibility: "specified",
+    visibleUserIds: ["user9"],
+  });
+
+  const adapter = createAdapterWithMockClient((endpoint) => {
+    if (endpoint === "notes/mentions") return [incomingLater, incomingFirst];
+    if (endpoint === "users/notes") return [botDup, botOut1, botOut2];
+    return [];
+  });
+
+  // Unique by id: out-2@01:00, dup@02:00, inc-1@03:00, out-1@04:00 → keep the
+  // most recent 3 (same-source arrays are deliberately unsorted here).
+  const messages = await adapter.fetchRecentMessages("dm:user9", 3);
+
+  assertEquals(messages.map((m) => m.messageId), ["dup", "inc-1", "out-1"]);
+  // The incoming copy wins the dedupe tie, so the survivor is not the bot's.
+  const dup = messages.find((m) => m.messageId === "dup")!;
+  assertEquals(dup.userId, "user9");
+  assertEquals(dup.isBot, false);
+});
+
+Deno.test("fetchRecentMessages - dm: channel excludes third-party replies that mention the bot", async () => {
+  const thirdParty = createMockNote({
+    id: "third-party",
+    userId: "thirduser",
+    text: "@testbot hello",
+    replyId: "someNote",
+    createdAt: "2024-01-01T01:00:00.000Z",
+  });
+
+  const adapter = createAdapterWithMockClient((endpoint) => {
+    if (endpoint === "notes/mentions") return [thirdParty];
+    return [];
+  });
+
+  const messages = await adapter.fetchRecentMessages("dm:user9", 20);
+
+  assertEquals(messages, []);
+});
+
+Deno.test("fetchRecentMessages - dm: channel includes the bot's own specified reply to the user", async () => {
+  const botReply = createMockBotNote({
+    id: "bot-reply",
+    text: "hi there",
+    replyId: "userMsg",
+    createdAt: "2024-01-01T02:00:00.000Z",
+    visibility: "specified",
+    visibleUserIds: ["user9"],
+  });
+
+  const adapter = createAdapterWithMockClient((endpoint) => {
+    if (endpoint === "users/notes") return [botReply];
+    return [];
+  });
+
+  const messages = await adapter.fetchRecentMessages("dm:user9", 20);
+
+  assertEquals(messages.length, 1);
+  assertEquals(messages[0].messageId, "bot-reply");
+  assertEquals(messages[0].isBot, true);
+  assertEquals(messages[0].content, "hi there");
+});
+
+Deno.test("fetchRecentMessages - dm: channel skips the outgoing fetch when botId is unset", async () => {
+  const incoming = createMockNote({
+    id: "inc-1",
+    userId: "user9",
+    createdAt: "2024-01-01T01:00:00.000Z",
+  });
+  const endpoints: string[] = [];
+  const adapter = createAdapterWithMockClient((endpoint) => {
+    endpoints.push(endpoint);
+    if (endpoint === "notes/mentions") return [incoming];
+    return [];
+  });
+  // `botId` is private; a structural view is the only way to null it from a test.
+  const mutableAdapter = adapter as unknown as { botId: string | null };
+  mutableAdapter.botId = null;
+
+  const messages = await adapter.fetchRecentMessages("dm:user9", 20);
+
+  assertEquals(messages.map((m) => m.messageId), ["inc-1"]);
+  assertEquals(endpoints, ["notes/mentions"]);
 });
 
 Deno.test("normalizeMisskeyNote - files produce attachments", () => {

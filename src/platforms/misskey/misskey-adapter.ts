@@ -484,20 +484,55 @@ export class MisskeyAdapter extends PlatformAdapter {
           .sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
       }
 
-      // If channelId starts with "dm:", fetch DM history via notes
+      // If channelId starts with "dm:", fetch bidirectional DM history via notes.
+      // Both source queries take the most recent `limit` raw results; the merge
+      // below then keeps the most recent `limit` of the union.
       if (channelId.startsWith("dm:")) {
         const userId = channelId.slice(3);
-        const messages = await this.client.request<MisskeyNote[]>(
+
+        // Incoming: notes/mentions returns notes the bot is mentioned in or is
+        // listed as a visible recipient of. Keep only notes authored by this
+        // user — the `replyId` heuristic admitted unrelated third-party replies.
+        const incoming = await this.client.request<MisskeyNote[]>(
           "notes/mentions",
           { limit },
         );
+        const fromUser = incoming.filter((note) => note.userId === userId);
 
-        // Filter to only include messages from/to this user
-        const filtered = messages.filter(
-          (note) => note.userId === userId || note.replyId,
+        // Outgoing: the bot's own notes (withReplies, since DM replies are
+        // replies), filtered client-side to those this user is allowed to see.
+        // users/notes has no server-side "specified to user X" filter.
+        let fromBot: MisskeyNote[] = [];
+        if (this.botId) {
+          const own = await this.client.request<MisskeyNote[]>(
+            "users/notes",
+            { userId: this.botId, withReplies: true, limit },
+          );
+          fromBot = own.filter(
+            (note) =>
+              note.visibility === "specified" &&
+              note.visibleUserIds?.includes(userId) === true,
+          );
+        } else {
+          logger.debug("Skipping outgoing DM history fetch; botId is not set", {
+            userId,
+          });
+        }
+
+        // Merge, deduplicate by note ID (the incoming copy wins ties — the
+        // overlap is rare, but the guard keeps the history unambiguous), sort
+        // ascending, and keep the most recent `limit`.
+        const seen = new Set<string>();
+        const merged = [...fromUser, ...fromBot].filter((note) => {
+          if (seen.has(note.id)) return false;
+          seen.add(note.id);
+          return true;
+        });
+        merged.sort(
+          (a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime(),
         );
 
-        return filtered.map((note) => noteToPlatformMessage(note, this.botId!));
+        return merged.slice(-limit).map((note) => noteToPlatformMessage(note, this.botId!));
       }
 
       // For note:xxx, fetch the full conversation thread (ancestors + current + replies)
