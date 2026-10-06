@@ -1,0 +1,57 @@
+## Context
+
+See `proposal.md` — Why. The live gate lives in `src/acp/client.ts`: `genericCommandRejectionReason()`/`multiCommandRejectionReason()` tokenize a command, reject shell operators/unknown entrypoints/dangerous flags, and pass every remaining token through `genericArgWithinWorkspace()`, which expands home/harness tokens, rejects URI schemes and attached absolute/traversal option values, then decides with `resolve()` + `isWithinDir()` (lexical) against `allowedDirs` assembled in `requestPermission()` (session cwd, agent workspace, `processTmpDir`, a lexically-derived tool-output dir) plus a lexical data-root/sibling-session branch. Row 2 shipped `src/acp/filesystem-roots.ts` (context/root identity/target observation with fail-closed reasons) and deliberately excluded the process TMPDIR, OpenCode tool-output dir and data root from its structured-sink role set; row 3 shipped `src/acp/filesystem-access.ts` semantics; row 4 cut the sinks over and explicitly left this gate's lexical policy in place. The OpenCode data layout is `src/utils/opencode-paths.ts` (`opencodeDataRoot`/`sessionXdgDataHome`/`opencodeToolOutputDir`).
+
+## Goals / Non-Goals
+
+**Goals:** Canonical physical containment for generic-command path arguments; an explicit, documented command-gate root-role enumeration covering the three roles row 2 excluded; byte-for-byte decision parity for every existing allow/deny case (representation change only); fail-closed on unresolvable canonical identity; obsolete lexical path-argument containment removed at its call site.
+
+**Non-Goals:** The allow-list contents, dangerous-flag set, tokenization, shell-operator/fd-redirect rules, chain-segmentation rule, skill auto-approve matchers (`matchesScriptPath`/`matchesCommandPrefix` with their own lexical `referencesOutOfWorkspacePath` D5 approximation — owned by the existing behavior, unchanged here), structured-path sinks and skills-root rules (row 4), any tool-inventory/provenance/MCP decision (14a) or handler wiring (14b), OMP launch/process state (row 9), destructive normalization (row 5), bwrap command-execution confinement (F12 D4), and any clamp in native YOLO (D6).
+
+## Decisions
+
+### 1. Focused async decision module, single entry point
+
+Create `src/acp/command-path-policy.ts` owning the generic-command gate decision: the allow-list, dangerous-flag set, and structural pre-checks move out of `client.ts` (clean cutover, no re-export shims; `client.test.ts`/`permission-gate-generic.test.ts` imports update to the new module). Because canonical observation needs metadata IO, the public entry becomes async:
+
+- `genericCommandRejectionReason(segment, gateContext) -> Promise<GenericCommandRejection | null>`
+- `multiCommandRejectionReason(command, gateContext) -> Promise<GenericCommandRejection | null>` (same per-segment chaining rule, byte-identical single-segment equivalence)
+
+`GenericCommandRejection` keeps exactly `shell_operator | first_token_not_allowed | dangerous_flag | path_outside_boundary` — a canonical observation failure maps to `path_outside_boundary` and logs the predecessor failure name, so audit codes and the retry-prompt rejection vocabulary are untouched (row 13/22 consumers unaffected). `gateContext` is a new `CommandGateContext` built by `client.ts` from the existing per-session gate context + client config (session ACP id, Skill API session id, cwd, shared workspace, `processTmpDir`, `config.xdgDataHome`, runtime env values, session/context generation). Alternative considered: keep the gate inline in `client.ts`; rejected per design §4 (focused policy module rather than growing the client) and to keep the 14a-delegated "common command policy" boundary separable for 14b.
+
+### 2. Command-gate root-role enumeration (the row-2 exclusions, made explicit)
+
+Row 2's `CanonicalSessionRoots` roles (`workspace`, `staging`, `shared`, `trusted-skills`) do NOT cover what today's `allowedDirs` uses. `command-path-policy.ts` builds a `CommandGateRootSet` composed by CONSTRUCTING additional root entries in the row-2 root-identity shape (configured + canonical path + observed identity) and passing the extended set to row 2's target observation; `filesystem-roots.ts` is never edited and its structured-sink role semantics are unchanged (a downstream structured sink still cannot use process TMPDIR or tool-output as a grant — this enumeration is command-gate policy, not a row-2 amendment):
+
+- `workspace` — the requesting session's canonical workspace (row 2 role, reused).
+- `staging` — `{canonical workspace}/tmp/{skillSessionId}` inherits workspace membership; the command gate grants via workspace/tmp as today (`$TMPDIR` = `{cwd}/tmp`), with no restricted staging-only clamp added.
+- `shared` — configured shared Agent workspace when present (row 2 role, reused); absent grants nothing.
+- `process-tmp` — `config.processTmpDir` (shared-process mode channel-scoped shell temp), canonicalized and required to exist as a directory; never set in per-spawn mode. This is a row-2-excluded role the command gate adds deliberately, mirroring today's `allowedDirs.push(processTmpDir)`.
+- `tool-output` — the session's OpenCode tool-output dir derived through `src/utils/opencode-paths.ts` exactly as today (`config.xdgDataHome ?? sessionXdgDataHome(cwd, sessionId)` → `opencodeToolOutputDir(...)`). It receives a role ONLY when canonical observation proves it sits inside the session workspace/TMPDIR (per-spawn) or inside the pool-key data root carried in `config.xdgDataHome` (shared mode); any other resolution fails closed — the shared home-rooted `~/.local/share/opencode/tool-output` NEVER receives a role. A granted tool-output role covers that directory only; it confers nothing on sibling directories.
+- `data-root` ISOLATION BOUNDARY, not an access role: a canonical target physically inside the data root (`{...}/opencode-data`, i.e. `dirname(config.xdgDataHome)` in shared mode or `opencodeDataRoot(cwd)` per-spawn) is approved only if it is ALSO inside THIS session's own data home — the same cross-session rule re-expressed on canonical identities, including the enumerating root-listing denial (`ls {dataRoot}` rejected).
+
+The old call-site construction of `allowedDirs`/`toolOutputDir`/`dataRoot` via `isWithinDir`/`resolve` is deleted; the same inputs flow into `CommandGateContext`.
+
+### 3. Token pipeline order preserved exactly; only the final step changes
+
+Per token: (1) unquoted-shell-expansion screening (`containsUnquotedShellExpansion`, unchanged); (2) `--flag=`/quote normalization (unchanged); (3) URI-scheme rejection (unchanged); (4) known-token expansion `~`/`~/…`/`$HOME`/`${HOME}`/`$XDG_DATA_HOME`/`${XDG_DATA_HOME}`/`$TMPDIR`/`$AGENT_WORKSPACE`/`$SESSION_ID` (unchanged; unexpandable `~user` forms and known-variable-without-runtime-value still return rejection before any IO); (5) attached short-option absolute/traversal rejection (`-o/etc/x`, `-f../sibling/file`, `-o../x`, unchanged — these stay syntactic rejections, NOT path observations, so no case can gain approval by becoming canonical); (6) NEW canonical decision replaces `resolve()`+`isWithinDir`: relative tokens anchor to the session cwd (never daemon cwd); the expanded token is observed through row 2's target observation against the `CommandGateRootSet` with existing-or-prospective semantics (`pdftotext in.pdf out.txt` output targets that do not yet exist receive the prospective-ancestor observation and are approved iff that ancestor is canonically inside a granted role — same verdict as the lexical check gave); every observed parent/final symlink must stay inside the same granted root; escape/loop/dangling/unresolvable/`invalid_root`/`root_unavailable`/`path_changed` → `path_outside_boundary`, never lexical fallback; then (7) the data-root isolation rule on the canonical identity. Structural pre-checks (operators, fd-redirect tolerance, first-token allow-list, dangerous flags) keep their exact precedence ahead of the per-token loop.
+
+### 4. Parity is the acceptance contract
+
+Every existing allow/deny case — all of `tests/acp/permission-gate-generic.test.ts`, the `client.test.ts` F12 blocks, and the `requestPermission` integration cases — is re-expressed with identical expected verdicts. Pure structural cases (operators, first token, dangerous flags, unexpandable tokens, attached traversal) stay synchronous string tests; path-containment cases move onto real temporary filesystems (two session workspaces incl. same-string-prefix siblings, shared workspace, process tmp, per-session and foreign data homes) so canonical observation has real objects. New canonical-only cases: in-workspace file symlinked to external file or sibling workspace (parent-link and final-link), contained symlink approved with canonical destination, raced/replaced-path observation fails closed, data-root enumeration and sibling-session data denial decided on canonical identity, tool-output role granted/rejected per construction rule, and a parity manifest asserting the allow-list set and flag set are unchanged (OpenCode `ask`-routed commands keep identical approval status; nothing gains or loses approval incidentally).
+
+### 5. Client cutover, confined and serialized
+
+`requestPermission()` keeps ownership of segment flattening, skill-whitelist matcher precedence, audit reasons, and rejection recording; only the generic-gate branch changes to build `CommandGateContext` and await the policy module. The deleted client-local pieces are exactly `genericArgWithinWorkspace`, the lexical containment branches of `genericCommandRejectionReason`/`multiCommandRejectionReason`, and the `allowedDirs`/`toolOutputDir`/`dataRoot` assembly inside the execute branch — the shared-file conflict note in `proposal.md` governs ordering with rows 4/5/13/14a/14b/16 in `client.ts`. YOLO returns before this branch (unchanged), so no clamp reaches native YOLO; OpenCode restricted sessions and future OMP restricted sessions see the same gate, canonically decided.
+
+## Risks / Trade-offs
+
+- Per-token metadata IO adds latency to restricted permission decisions → decisions are per-segment bounded (token count is small) and metadata-only; no content IO, no retry loop.
+- Canonical observation is decision-time only: the command's own IO runs natively and a racing path replacement after approval is not prevented → stated in docs; command-execution containment remains F12 D4 bwrap scope, never claimed closed here.
+- Row 2's `Result` reasons do not map 1:1 to the four-member `GenericCommandRejection` → intentional: coarse audit reason preserved for consumer stability, fine cause logged; a finer enum would churn the retry-prompt vocabulary owned elsewhere.
+- Making previously-sync exported functions async touches every existing unit test → confined to the two gate test files plus `client.test.ts` imports; parity manifest catches accidental verdict drift.
+- Contained symlinks become approvable where row 3 rejects them for structured IO → acceptable asymmetry, documented: the command gate approves decision-time membership only; the command's IO is not delegated through row 3, so no claim of operation-preserving containment is made either way.
+
+## Migration Plan
+
+Single cutover on `requestPermission`'s generic-command branch; no config, no data migration, no rollout flag. Rollback = revert the change; the removed lexical helpers return with it. Predecessor rows 2/3/4 must be applied first (application gate; P0 verdicts inherited unchanged).
