@@ -1,7 +1,7 @@
 # Oh My Pi Integration Design
 
 - Date: 2026-10-06
-- Status: Design sections approved in brainstorming; written specification pending user review.
+- Status: Approved; sequential OpenSpec proposal generation authorized.
 - AIr-Friends baseline: `0f3c4e06dd6b56056d6eeeb21c2664f4edc70452`.
 - OMP production baseline: official `v18.6.1`, source commit
   `2a2c6dcbbb558c0f8145f67f28b3370984f2bf60`.
@@ -491,9 +491,10 @@ pending an explicit user design decision; that incompatibility cannot be hidden 
 
 ## 16. Planned OpenSpec change boundaries and dependencies
 
-These are design-level work packages, not OpenSpec artifacts already created. The writing-plans step
-will turn them into implementation plans and appropriately sized dependent changes. Every package
-retains the complete behavior assigned here; no package is a placeholder runtime implementation.
+These are design-level work packages, not individual OpenSpec changes. The user requested sequential
+`os-propose` calls, with each proposal sized for at most eight hours including implementation,
+unit/mock testing, and documentation. Subdivide these packages accordingly. Every package retains
+the complete behavior assigned here; no package is a placeholder runtime implementation.
 
 | Package                                | Scope                                                                                                                                                            | Dependencies |
 | -------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------ |
