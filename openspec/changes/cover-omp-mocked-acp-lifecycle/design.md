@@ -58,20 +58,20 @@ Every synthetic-positive element (established readiness tuple, trusted-provenanc
 
 Each scenario names its required component intersections, and a scenario touching one component's already-unit-tested decision is rejected in review:
 
-| Scenario | Components interacting (≥2) |
-| --- | --- |
-| Happy path init/new/prompt/cancel/load | pool mode-acquisition (10) × readiness gate consumption (13) × config-options cache population (6) |
-| Crash→reconnect→same-mode load | recovery ownership (11) × pool mode entry re-entry (10) × real load-cache restore + stable-first model/reasoning reapplication (6) × gate-context restore (11/4) |
-| Post-load catalog miss | recovery (11) × explicit catalog-miss error (6) × per-session isolation incl. sibling lease/state untouched (10) |
-| Cross-mode rejection (both directions) | recorded ownership fields (10) × verify-before-teardown violation (11) × opposite-mode live process/lease untouched assertion (10) |
-| Gate-context correct-session after crash | gate-context restore (11) × real row-4 read/write authorization evaluated on the re-issued prompt |
-| Deny-until-ready first prompt | orchestrator gate call site (13) × real `NotReady` channel seam × zero-prompt-RPC assertion through the recorded connection |
-| Established-readiness allow (labeled) | readiness decision (13) × orchestrator ordering §10 step 5 (after model/reasoning set — asserts row 6 ran first, row 13 gate second, in one flow) |
-| Refresh → epoch bump → readiness reset → re-admit/deny | 14b handler body × 14a provenance/inventory/MCP-admission modules × row 13 readiness reset × connector epoch state |
-| Denied tool → bounded fail-closed error | 14b error shapes × client-visible surface (composition tier) |
-| Dual-mode lease serialization | pool mode-split entries (10) × orchestrator lease around two concurrent session runs |
-| Restricted LSP posture across respawn/load | row 15 flag+overlay composition × row 11 recovery respawn path × D6 YOLO exemption |
-| OpenCode regression byte-compare | pool key/env/command byte-identity (10) × readiness/extension non-involvement (13/14b) × `agent-config` yolo untouched (15) |
+| Scenario                                               | Components interacting (≥2)                                                                                                                                      |
+| ------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Happy path init/new/prompt/cancel/load                 | pool mode-acquisition (10) × readiness gate consumption (13) × config-options cache population (6)                                                               |
+| Crash→reconnect→same-mode load                         | recovery ownership (11) × pool mode entry re-entry (10) × real load-cache restore + stable-first model/reasoning reapplication (6) × gate-context restore (11/4) |
+| Post-load catalog miss                                 | recovery (11) × explicit catalog-miss error (6) × per-session isolation incl. sibling lease/state untouched (10)                                                 |
+| Cross-mode rejection (both directions)                 | recorded ownership fields (10) × verify-before-teardown violation (11) × opposite-mode live process/lease untouched assertion (10)                               |
+| Gate-context correct-session after crash               | gate-context restore (11) × real row-4 read/write authorization evaluated on the re-issued prompt                                                                |
+| Deny-until-ready first prompt                          | orchestrator gate call site (13) × real `NotReady` channel seam × zero-prompt-RPC assertion through the recorded connection                                      |
+| Established-readiness allow (labeled)                  | readiness decision (13) × orchestrator ordering §10 step 5 (after model/reasoning set — asserts row 6 ran first, row 13 gate second, in one flow)                |
+| Refresh → epoch bump → readiness reset → re-admit/deny | 14b handler body × 14a provenance/inventory/MCP-admission modules × row 13 readiness reset × connector epoch state                                               |
+| Denied tool → bounded fail-closed error                | 14b error shapes × client-visible surface (composition tier)                                                                                                     |
+| Dual-mode lease serialization                          | pool mode-split entries (10) × orchestrator lease around two concurrent session runs                                                                             |
+| Restricted LSP posture across respawn/load             | row 15 flag+overlay composition × row 11 recovery respawn path × D6 YOLO exemption                                                                               |
+| OpenCode regression byte-compare                       | pool key/env/command byte-identity (10) × readiness/extension non-involvement (13/14b) × `agent-config` yolo untouched (15)                                      |
 
 ### D4. Registry/provenance composition without the native binary
 
@@ -83,11 +83,11 @@ The mock subprocess does not load the trusted extension (the pinned binary would
 
 ### D6. Redundancy audit and deletion discipline
 
-Before finishing, diff the new matrix against rows 1–20's landed test files. A unit case is deletable only if (a) it asserts a single-component decision, (b) a new combined scenario asserts the SAME observable outcome through real code, and (c) the deletion commit message names the case and the superseding scenario. Expected volume is small (the per-row suites were written decision-first, this suite is flow-first); if the audit finds zero true redundancies, deleting nothing is a passing outcome — this proposal does not require deletions, it requires justification for each.
+Before finishing, diff the new matrix against rows 1–20's landed test files. A unit case is deletable only if (a) it asserts a single-component decision, (b) a new combined scenario asserts the SAME observable outcome through real code, and (c) the deletion commit message names the case and the superseding scenario. Deletions are BOUNDED to test files owned by OMP-batch rows (this suite's own tree and files this batch created); an OpenCode-inherited regression case is never deletable as "superseded" by an OMP mock suite — the design section-14 OpenCode row stands on those cases (batch-review fix). Expected volume is small (the per-row suites were written decision-first, this suite is flow-first); if the audit finds zero true redundancies, deleting nothing is a passing outcome — this proposal does not require deletions, it requires justification for each.
 
 ### D7. Honesty assertions are first-class test content
 
-Each fail-closed seam gets at least one combined scenario asserted on its DENY outcome: readiness unresolved → `readiness_rejected`, zero prompt RPC, no fallback spawn; undecodable destructive intent through the full wiring → shared fail-closed verdict with zero side effect; surviving lower-layer approval record fixture → never grants through 14b; MCP admission basis fixtures labeled `needs-mechanism-audit` in the assertion data. Allow-path scenarios all route through `SyntheticPositive` carriers, and a suite-level guard test scans (via the carrier's runtime registry, not source text) that every allow fixture is registered as synthetic — replacing fragile source-text snapshots with a runtime ledger.
+Each fail-closed seam gets at least one combined scenario asserted on its DENY outcome: readiness unresolved → `readiness_rejected`, zero prompt RPC, no fallback spawn; undecodable destructive intent through the full wiring → shared fail-closed verdict with zero side effect; surviving lower-layer approval record fixture → never grants through 14b; MCP admission basis fixtures labeled `needs-mechanism-audit` in the assertion data. Allow-path scenarios all route through `SyntheticPositive` carriers, and a suite-level guard test scans (via the carrier's runtime registry, not source text) that every allow fixture is registered as synthetic — replacing fragile source-text snapshots with a runtime ledger. The README test-map note states explicitly (batch-review fix) that the 14a/14b composition scenarios bypass row 13's prompt gate BY CONSTRUCTION (the mock subprocess does not load the trusted extension) and are composition evidence only — green here is never gated-pipeline or native-enforcement evidence. `FakeTime` coverage of the readiness establishment timeout exercises only this codebase's timeout handling; it never implies the real control channel's native timeout behavior is verified (design section-15 checklist item; batch-review note).
 
 ## Risks / Trade-offs
 
