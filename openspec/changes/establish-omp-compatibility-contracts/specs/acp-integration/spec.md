@@ -19,6 +19,11 @@ The integration compatibility report SHALL cover pre-import discovery exclusion,
 - **THEN** the report SHALL record the concrete incompatibility and its counterexample
 - **AND** downstream application SHALL remain blocked until an explicit user-approved decision and corresponding source-backed contract revision resolve the conflict
 
+#### Scenario: Hypothetical positive fixtures do not certify native support
+- **WHEN** a positive structural/admission fixture uses explicitly hypothetical test-only mechanisms because the actual pinned ledger is blocked
+- **THEN** the check SHALL exercise the real contract validator while labeling its input and result synthetic and keeping them separate from source evidence
+- **AND** the actual compatibility verdict SHALL remain blocked; complete named blocked fixtures SHALL satisfy P0 acceptance without requiring a passing real pinned ledger or an unsupported native decoder
+
 ### Requirement: OMP Pre-Import Discovery Compatibility Contract
 
 The compatibility contract SHALL distinguish exact trusted-extension loading from independent executable custom-tool, plugin, factory, configured-root and dependency discovery. Supported exclusion SHALL occur before unowned module top-level code or factory execution, on initial creation and recovery, and SHALL account for canonical paths, symlinks and workspace-owned dependencies. A post-import lifecycle/tool-name filter SHALL NOT establish this boundary.
@@ -75,9 +80,14 @@ The destructive contract SHALL carry trustworthy native operation input, parser/
 
 #### Scenario: Later destructive target cannot be omitted
 - **GIVEN** a native-shaped patch first targets an allowed location and later deletes or moves outside the boundary
-- **WHEN** the fixture is evaluated using the complete contract
+- **WHEN** an established supported format/parser completely decodes the fixture for contract evaluation
 - **THEN** it SHALL expose the later target and report denial with no mutation attempt
 - **AND** first-operation-only native permission locations SHALL NOT be accepted as proof of completeness
+
+#### Scenario: Missing supported decoder is a complete blocked outcome
+- **WHEN** the bounded source audit cannot establish supported complete decoding for a native-shaped destructive fixture
+- **THEN** the contract SHALL report the named incomplete/incompatible mechanism and authorize zero mutation attempts
+- **AND** that blocked fixture SHALL satisfy P0 acceptance without implementing a speculative parser, while downstream normalization/application remains blocked
 
 #### Scenario: Incomplete or mismatched operation is rejected
 - **WHEN** a fixture contains a title-only request, missing move destination, unparseable patch or raw-input/execution mismatch
