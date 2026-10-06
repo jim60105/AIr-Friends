@@ -1,0 +1,30 @@
+# Tasks: make-skill-staging-agent-portable
+
+## 1. Prompt Rendering Contract (1.50h)
+
+- [ ] 1.1 Add one internal staging-dir composition helper (design D2) for `{workspace.tmpPath}/{shellSessionId}` in `src/core/` and verify with a unit test that it returns the canonical absolute staging path for a given workspace/session pair and nothing else (no resolution, no env reads)
+- [ ] 1.2 Make `ContextAssembler.assembleContext()` and `assembleSpontaneousContext()` pass `sessionId` and `tmpDir` into their system-prompt `templateVars` (parameter rename from `_sessionId`) and verify by rendering the bundled `system_reply.md`/`system_spontaneous.md` through the real template engine with assembler inputs: rendered text contains the literal id and absolute staging dir
+- [ ] 1.3 Make `buildSelfResearchPrompt` in `src/core/session-orchestrator.ts` pass `tmpDir` alongside its existing `sessionId`, and verify `system_self_research.md` renders the absolute staging directory block
+- [ ] 1.4 Remove the `{{ sessionId || "$SESSION_ID" }}` / `{{ tmpDir || "$TMPDIR/$SESSION_ID" }}` fallback forms from `prompts/system_reply.md`, `system_spontaneous.md`, `system_self_research.md`, `system_summary.md`, `system_memory_maintenance.md` (and the channel-lurk/reminder templates if their rendered text names session identity or staging — grep at implementation time), re-anchoring the staging-block wording to absolute-literal guidance, and verify every bundled payload-staging template renders with no `$TMPDIR`/`$SESSION_ID` token inside staging/session-id instruction lines
+
+## 2. Retry Strategy Literal-First (0.50h)
+
+- [ ] 2.1 Make `RetryPromptContext.sessionId`/`stagingDir` mandatory, drop the `?? "$TMPDIR/$SESSION_ID"` / `?? "$SESSION_ID"` fallbacks and the pooled-only env note in `buildDefaultRetryMessage`, require the context in `getRetryPromptStrategy`, update every orchestrator construction site (message, spontaneous, self-research, reminder, reconnect paths) to the shared helper from 1.1, and verify with unit tests that the built retry text for both agent types contains the literal id + absolute staging dir and no unexpanded token in per-spawn AND pooled shapes
+
+## 3. Skill Instruction Surface Sweep (1.50h)
+
+- [ ] 3.1 Rewrite the payload recipes in `skills/send-reply/SKILL.md`, `edit-reply/SKILL.md`, `send-file/SKILL.md`, `memory-save/SKILL.md`, `memory-search/SKILL.md`, `fetch-context/SKILL.md`, `set-reminder/SKILL.md` per design D5 (absolute-literal staging anchored on the system-prompt rendering; `--message-file`/`--content-file`/`--query-file`/`--caption-file` tables and error-code text re-anchored; no token paths) and verify each file contains no `$TMPDIR/$SESSION_ID` staging instruction (grep check) while legacy-flag warnings and quota text substance is retained
+- [ ] 3.2 Update `--session-id` usage text to the literal-rendered-id contract in the remaining skill docs (`react-message`, `get-message`, `cancel-reminder`, `list-reminders`, `memory-export`, `memory-patch`, `memory-stats`) and verify none instructs `--session-id "$SESSION_ID"` anymore
+- [ ] 3.3 Update token-bearing example strings in `skills/{send-reply,edit-reply,send-file,memory-save,memory-search,fetch-context,set-reminder}/scripts/*.ts` and the `twoStepGuidance`/`outOfBoundsMessage`/`notFoundMessage` guidance in `skills/lib/payload.ts` (and `skills/lib/client.ts` doc comments) to literal-first wording that still names the enforced staging base; verify guidance-message unit tests pass updated and no `resolvePayloadBase`/`resolvePayloadPath` logic line changed (diff review + existing suite green)
+
+## 4. Backward-Compat And Delivery Tests (3.00h)
+
+- [ ] 4.1 Extend the payload-helper suite with the pinned compatibility cases (design D6): shell-expanded legacy path resolves/reads/ deletes exactly as today in per-spawn mode; shared-mode pointer-only precedence, `SKILL_SESSION_UNRESOLVED` fail-before-touch, sibling-prefix and symlink-escape rejection all unchanged; and an ACP-side compat assertion that structured-tool token paths still expand to the canonical staging root (existing row-2/4 expansion behavior, no new code)
+- [ ] 4.2 Add prompt-render consumer tests enumerating every payload-staging session type (normal, spontaneous, lurk, self-research, summary, memory maintenance, reminder) asserting the rendered prompt carries the literal Skill API session id and absolute staging directory and no unexpanded token in structured-tool instructions
+- [ ] 4.3 Add the end-to-end mocked delivery test (design §14 reply-flow row): real `send-reply` payload contract + real Skill API handler + reply-handler with a mock platform, in per-spawn env and pooled env (`SKILL_SHARED_PROCESS=1`, valid `active.json` pointer, `SKILL_JWT_DIR`, NO `SESSION_ID` env): prompt-rendered absolute staging file → send-reply → exactly one intended reply recorded, no duplicate retry/fallback delivery, in both shapes
+
+## 5. Docs And Verification (1.00h)
+
+- [ ] 5.1 Update `AGENTS.md` §4 payload-file note (literal-first contract + retained legacy expansion sentence), `docs/AGENT_PERMISSIONS.md` token-expansion note (marked legacy-compat; prompts now render literals), shared-process consumer docs reflecting the row-10 no-frozen-`SESSION_ID` invariant with per-prompt literal delivery, and `CHANGELOG.md`; verify doc text matches the implemented wording and no `config.example.yaml`/`.env.example`/`helm/values.yaml` field was introduced
+- [ ] 5.2 Run `deno task fmt:check`, `lint`, `check`, `test:unit`, `test:integration` and existing coverage tasks; verify >75% coverage on touched modules with no newly added live-agent, provider, platform-delivery, container or bwrap execution
+- [ ] 5.3 Clean-cutover confirmation in the handoff: every prompt path in the spec scenarios renders literals, every enumerated SKILL.md is swept, the retry builder has no token fallback, `payload.ts` behavior diff is guidance-text/doc-only, and rows 2/3/4/9/10 surfaces are untouched; reserved contingency **0.50h** (total ≤ 8.00h)
