@@ -1,0 +1,95 @@
+## Context
+
+See `proposal.md` — Why. Binding inputs: approved design §7 "Readiness and registry changes" ("Install the restricted `tool_call` enforcement handler synchronously during trusted-module loading… Check the live tool's origin on every restricted call. Operator MCP registration and refresh can occur after startup and must not bypass this check. Reset readiness on recovery and verify it again; do not reuse a prior process instance's acknowledgement."), §6 default-deny posture ("Unknown tools/internal schemes — Default reject in restricted mode. A name match alone is insufficient authorization"; "MCP — provenance remains authoritative after registration/reconnection"), §5 ("Do not require a form-elicitation interaction to execute an already authorized capability"), §2 D6 (YOLO gets no restricted clamps), §3 out-of-scope (no human form-elicitation UI), and §13 (bounded rejection diagnostics, no secrets, fail closed with no unguarded fallback).
+
+Predecessor consumption (no redefinition):
+
+- **14a** (`src/acp/omp/tool-inventory.ts`, `tool-provenance.ts`, `approval-records.ts`, `destructive-decision.ts`): the exported decision vocabulary (`ToolOrigin`, `InputShape`, `RouteSurface`, `RestrictedToolDecision`, the `rejected_*` reason codes, `allow-gated-pending-adapter`, the MCP mechanism-status table, `restrictedToolPolicyGates`) is this change's sole decision source. This wiring is 14a's FIRST runtime consumer; before it lands, the tables are inert. The modules are pure by 14a's contract — the wiring is where observation happens.
+- **Row 13** (`policy-readiness.ts` + the trusted-module readiness-signal module): the synchronously-registered policy-free `tool_call` handler SLOT, the `ReadySignal` (`handlerInstalled`, `lifecycleInit`, `policyRevision`, `registryEpoch`, `resourceGeneration`), the keyed readiness state, and the `ReadinessChannel` seam that ships UNIMPLEMENTED (`no-supported-mechanism` at the pin). This change attaches the handler body to the slot; it never touches the establishment contract or the prompt gate.
+- **Row 12** (the trusted-extension tree: `index.ts`, `bootstrap.ts`, `surfaces.ts`, `ownership.ts`, `critical-skills.ts`; `src/acp/omp/discovery-guard.ts`): frozen pre-import decision, owned-module identity, `resourceGeneration`, init-failure→ACP-error observability — consumed read-only; the tree is extended by one sibling module plus the slot attach.
+- **P0** (`src/acp/omp/compatibility-contracts.ts`): the `supported | candidate-to-verify | no-supported-mechanism` vocabulary; the pinned readiness evidence that `extensions/runner.ts` `emitToolCall` blocks handler errors/timeouts (the fail-closed execution mechanism this wiring rides) while `extensions/types.ts` offers synchronous handler registration and `getAllTools` source metadata; the absence of any MCP boundary row; the fixture rule (synthetic fixtures labeled, never clearing ledgers).
+- **Rows 4/5/8**: sink policy, destructive conformance module, and `recordResetGate` are reached only THROUGH 14a's tables; this change imports none of them directly and edits none.
+
+Current-state constraint: the native approval lookup uses exact tool keys with no wildcard default-deny (design §7), so between trusted-module load and 14b there is NO execution-time restricted boundary at all — every restricted tool call, including unlisted tools and same-name workspace/host impersonations, would run. 14b is what makes the design's operative boundary exist at the call seam.
+
+## Goals / Non-Goals
+
+**Goals:** The row-13 slot filled with a per-call handler that composes 14a's decisions against LIVE observed state (current recorded origin, current registry epoch, current resource generation), covers every restricted call including mid-session arrivals, fails closed with bounded non-secret client-observable errors, re-admits post-start MCP refreshes on the fresh epoch with zero elicitation and zero one-shot ack, registers only in the restricted process, and carries every inherited unresolved seam as fail-closed named data with `userDecisionRequired` markers — inside ~1 engineer-day including tests and docs.
+
+**Non-Goals:** No decision tables or table edits (14a — landed; new decision logic here is a defect, not a shortcut); no readiness establishment, reset logic, or prompt-gate changes (row 13 — landed; the signal is consumed); no pre-import bootstrap or critical-skill internals (row 12 — landed); no command-path canonicalization (14c — landed, independent); no LSP disablement or implicit-startup work (row 15); no network transport (17–19 — their `allow-gated-pending-adapter` routes fail closed here until they land); no packaging/digests (row 20); no destructive normalizer (row 5 via 14a); no generic human-elicitation/form/approval UI (design §3 non-goal, §5); no new ACP method or notification name; no native patch, fork, or pin change; no new config/env/Helm field; no claim that any mock shows the official binary invoking the handler or enforcing a denial.
+
+## Decisions
+
+### 1. One handler body, attached to row 13's slot, composed purely from 14a exports
+
+New sibling `enforcement.ts` in the contracted tree exports the handler body the slot dispatches to; row 13's synchronous load-time registration sequence stays byte-identical except that the slot it registers now carries this body (attach, not restructure — if row 13's registration and this body land in either order during serial integration, the slot's no-policy state is structurally unable to admit, matching row 13's "slot uninstalled ⇒ never ready" structural argument):
+
+```
+ToolCallObservation = {              // assembled fresh per call, never cached
+  toolKey, toolName, recordedOrigin, // origin from the live tool-metadata surface (getAllTools-class)
+  registryEpoch, resourceGeneration, // row 13 signal + row 12 counter, read fresh
+  decodedInputShape                  // per pinned schema, handed to 14a's classifier
+}
+handleRestrictedToolCall(obs) ->
+  | { proceed, completingAuthority } // 14a allow-gated/sink-routed/admitted-MCP outcome
+  | { block, error: EnforcementError }
+EnforcementError = { code, capability?, route?, originCategory?, seam? }  // bounded, static
+```
+
+Composition order per call, each step a pure call into 14a: (1) `tool-inventory` decision on (name, origin, input shape) — unknown/unlisted names and named OMP-only surfaces deny here; (2) `tool-provenance` decision on the CURRENT recorded origin + epoch currency — same name from host/workspace/unowned-discovery denies, stale epoch yields the re-observe denial; (3) the alternate-(capability, route) table — internal scheme / config-device / debug / AST / SSH / LSP-adjacent denies even when the ordinary route would allow; (4) destructive-shaped calls go to `destructive-decision` (row-5 conformance verbatim); (5) `approval-records` interpretation runs as an ADVISORY cross-check only — a surviving lower-layer `allow` never short-circuits steps 1–4. `proceed` never means "authorized by this handler"; it means 14a named the completing predecessor authority (row 4 sink, existing command gate via 14c-hardened policy, row 5 all-target pass, MCP client ownership) that the native permission path still has to satisfy. The wiring maintains zero decision tables of its own; `src/acp/omp/tool-enforcement-wiring.ts` exports only composition/ordering data, freshness rules, the error vocabulary, the seam table, and gate values — consumer-visible vocabulary in the `discovery-guard.ts`/`policy-readiness.ts` posture so tests and docs read one artifact.
+
+### 2. Every call, live origin, no one-shot filter
+
+The handler is consulted per call; there is no filtered-registry snapshot, startup-only pass, or memoized decision. Per-call freshness is three reads, none of them cached across calls: the tool's CURRENT recorded origin from the live tool-metadata surface (row 13's signal derives `registryEpoch` from exactly this observation class, never name-only comparison), the current `registryEpoch`, and row 12's current `resourceGeneration`. A tool appearing mid-session (dynamic registration, recovery re-discovery) is therefore automatically in scope: the tables key on what the live registry records at call time, not on what was present at load. Stale origin or stale generation decisions deny (re-observe), which structurally forbids "decided at startup, trusted forever". Handler-internal failure or timeout fails the call closed — the pinned `emitToolCall` semantics (row 13's cited evidence: handler errors/timeouts block the tool call) carry real denials once this body is attached; the wiring adds no catch-and-continue path, and a thrown `session_start` is still never assumed to reject the native session (P0).
+
+### 3. Bounded fail-closed error shapes, client-observable, non-secret
+
+A blocked call surfaces as the pinned tool-call error (the same observable surface row 12 uses for init-failure ACP errors), carrying one code from the union of 14a's reason vocabulary (`rejected_tool_inventory`, `rejected_tool_provenance`, `rejected_alternate_route`, `rejected_approval_record_survivor`, `rejected_destructive_*`) plus wiring-level codes (`rejected_enforcement_seam`, `rejected_stale_observation`, `rejected_pending_adapter` for 14a's pending-adapter outcomes). Each error names at most: capability id, route surface, origin category, epoch/generation staleness element — static strings from finite enums. NEVER path content, file/argument payloads, model text, credential, token, or secret material (design §13). The client sees an ordinary failed tool call through existing error handling; nothing here feeds the retry-permission-rejection buffer (echoing denials into prompts is row 13's rejected pattern for readiness and stays rejected for policy denials that name seams). Denials remain observable without becoming an elicitation: no `requestPermission()` call, no form, no interactive surface is invoked on any block path.
+
+### 4. Post-start MCP registry-refresh admission: re-invoke, no elicitation, no ack
+
+When operator/client-owned MCP tools register or refresh after startup, the wiring's registry-refresh path does exactly three things: advance `registryEpoch` (derived from the live tool-metadata observation via row 13's signal semantics — never chat content, never name-only diff), drop cached origin observations (there are none — D2 makes this structural), and re-invoke 14a's MCP-admission decision for the fresh epoch on each affected call. Refreshed tools that pass admission (client ownership + current epoch + no alternate-route surface) proceed on the native permission path; refreshed tools that fail (wrong origin, unowned discovery, alternate-route surface) stay denied with the bounded codes. There is no form-elicitation, no approval UI, no human interaction anywhere in the path (design §3/§5; 14a's admission is a machine decision), and no one-shot acknowledgement: admission is re-decided per call from current data, and row 13's readiness reset on epoch advance is consumed, never bypassed — after a refresh, prompts flow through row 13's re-verification requirement exactly as row 13 shipped it (in the real deployment that is denial while the channel seam stands; in labeled synthetic fixtures it is the wiring test's setup).
+
+Rejected alternatives: freezing the admitted-MCP set at startup (violates §7's "registration and refresh… must not bypass"); admitting refreshes on a one-shot ack (violates per-call live-origin); routing refresh admission through `requestPermission()` (turns an already-authorized capability into an interactive interaction — design §5 non-goal).
+
+### 5. Restricted-only registration; YOLO and OpenCode structurally see nothing
+
+The handler body attaches ONLY in the restricted process: registration is gated on the same restricted-mode signal row 13's readiness-state keying uses (the module's own restricted-mode identity from row 9's launch posture — `--trusted-extension` present with the restricted overlay, never a mode inferred from chat or tool content). The native-YOLO process (row 8/9's yolo overlay, no restricted tool_call policy per D6 and design §5 "Do not load restricted approval records or execute restricted extension tool-denial rules in this process") registers no handler and cannot deny; the shared bootstrap's YOLO branch (design §5) stays non-restricted-capability. OpenCode loads no OMP extension at all — no handler, no tables, byte-unchanged flow. The exemption is structural (registration site), not a runtime `if (mode != yolo)` inside the decision path, so a mode-field bug cannot leak clamps into YOLO or denials into OpenCode; the wiring's own entry additionally denies (fail closed) if the observed process identity is not the restricted one.
+
+### 6. Seam table: fail closed at every inherited unresolved gate, markers carried
+
+`enforcement-seams.ts` (data) + the wiring module's `enforcementWiringGates` export enumerate each inherited seam, its source verdict verbatim, and the handler's fail-closed behavior at it:
+
+| Seam | Inherited verdict (verbatim source) | Handler behavior | Marker on block |
+| --- | --- | --- | --- |
+| MCP admission mechanism basis | `needs-mechanism-audit` / `candidate-to-verify`; P0 ledger has NO MCP boundary row (14a §7) | Admission decision runs and can pass/fail per 14a; the mechanism BASIS never inflates: exported status stays audit-needed in every code path and document | `seam: mcp-admission-basis` |
+| Readiness establishment | `ReadinessChannel` UNIMPLEMENTED, `no-supported-mechanism` (row 13) | Wiring never establishes/bypasses readiness; real restricted sessions are denied upstream at row 13's prompt gate; handler allow paths exist only in labeled synthetic fixtures | `seam: readiness-channel` |
+| Approval-record reset | INCOMPATIBLE, folded-overlay survival (P0 via row 8/14a) | Records advisory-only; surviving lower-layer `allow` cannot admit (14a rule enforced at composition step 5 ordering) | `seam: record-reset` |
+| Destructive-intent decoding | UNRESOLVED at the pin (P0 via row 5/14a) | Undecodable/incomplete native-shaped destructive input → row-5 shared fail-closed verdict through 14a; no speculative decoder in the wiring | `seam: destructive-intent` |
+| Network parity adapters | rows 17–19 not landed | 14a's `allow-gated-pending-adapter` blocks at the call (`rejected_pending_adapter`) — fail closed, never silent native transport | `seam: pending-adapter` |
+| Pre-import exclusion / critical skills | unresolved (row 12 gates) | Consumed as-is: init failure already fails session setup before any call; wiring adds no second claim | gate data only |
+
+Every seam entry carries `userDecisionRequired: true` and the pinned verdict text; resolution of any seam requires the source-backed P0 revision + explicit user decision its source change mandates. The wiring MUST NOT manufacture a passing admission/readiness/grant to turn a fixture green: allow-path fixtures are labeled synthetic (P0 fixture rule), no fixture flips any status field, and the docs state plainly that while the seams stand, the real restricted deployment is denied before the handler is ever reached — this change is what WILL guard calls once the gates resolve, not evidence that anything is guarded today.
+
+### 7. Tests validate wiring decisions only
+
+`tests/acp/omp-tool-enforcement-wiring.test.ts` (+ refresh/error-shape suite): a denied-tool fixture (unlisted name, wrong-origin same-name, alternate-route pair) reaches the fail-closed `EnforcementError` with its bounded code and no secret fields; live-not-cached provenance proven by mutating the registry fixture between two identical calls and observing the decision change (a cached-decision implementation fails this test); post-start refresh re-admits an owned-MCP tool on the fresh epoch and rejects an untrusted refresh, with zero elicitation calls asserted; stale-epoch and stale-generation fixtures deny re-observe; `allow-gated-pending-adapter` blocks; destructive undecodable fixture returns the row-5 fail-closed verdict verbatim (14a replay preserved); YOLO-process fixture registers no handler and OpenCode flow loads no extension handler; every seam fixture fails closed carrying its marker while `enforcementWiringGates` still reports every inherited verdict verbatim after all tests pass. Negative assertions frozen: no test asserts the native binary invoked the handler, honored a block, enforced inventory, performed record reset, or decoded destructive intent; row 4/5/14a suites run unchanged to prove read-only consumption.
+
+Rejected alternative: a connector-side mock asserting "handler ran in the native process" — that is exactly the fabricated native evidence P0 §fixture-rule and design §15 forbid; runtime handler invocation stays on the user checklist.
+
+## Risks / Trade-offs
+
+- **Wiring misread as runtime enforcement while seams stand** → gate data + docs + spec state the denial-before-handler reality; the checklist item (real handler invocation, real provenance observation, real block enforcement) remains user-owned and unverified (design §15, row 22 checklist).
+- **Origin observation could be staler than true registry state** → per-call fresh reads plus 14a's stale-epoch re-observe denial bound the window; the observation surface itself is part of the user's runtime verification; residual native-timing risk documented, not hidden.
+- **Slot/body attach ordering during serial integration (13 → 14b)** → both intermediate states fail closed by construction (unfilled slot structurally cannot admit per row 13; body without slot is never dispatched); integration owner lands them in one sequence.
+- **Composition-order bugs could let an advisory record or pending-adapter row leak an allow** → ordering is data in `tool-enforcement-wiring.ts`, asserted by table-driven tests including step-5 non-short-circuit and pending-adapter block fixtures.
+- **Error text could leak payload/secret** → error fields are finite static enums, tested for absence of free-text fields; row 12's bounded-diagnostic posture reused, not re-invented.
+- **Shared-file exposure minimal** → new sibling files exclusive here; only the slot attach point is shared with row 13 (serial, same tree, pre-row-20); docs/CHANGELOG append-only cross-links.
+
+## Migration Plan
+
+Additive and inert in normal deployment until the gates resolve: OpenCode byte-unchanged, YOLO registers nothing, real restricted sessions are denied at row 13's prompt gate before tool calls occur. Rollback reverts one commit (detach the body; the tree returns to row 13's policy-free slot). No configuration, data, or state migration exists.
+
+## Open Questions
+
+None blocking. Whether rows 17–19 land before or after this change only changes when `rejected_pending_adapter` stops firing; the composition table already distinguishes it. If row 13's `ReadinessChannel` gains a supported mechanism via P0 revision + user decision, the wiring needs no structural change — its seam table simply records the new verdict.
