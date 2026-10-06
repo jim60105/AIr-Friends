@@ -1,0 +1,72 @@
+## Why
+
+Design §9/D4 require the restricted OMP deployment to keep URL-read/web-fetch capability while the adapter — not env-var hope — owns the transport boundary, yet P0 recorded the native transport adaptation as only PARTIAL: at the pinned OMP source the `fetchOverride` seam (`tools/index.ts` `ToolSession.fetch`, consumed by `tools/fetch.ts` `renderHtmlToText`) reaches only some enrichment paths, while the primary page load (`loadPage`), the binary path (`fetchBinary`), and every secondary scraper URL go to **global fetch with `redirect: "follow"`** — automatic hop following is not per-hop authorization, and `HTTP_PROXY` presence alone is not enforcement. Until a controlled adapter lands, 14a's `allow-gated-pending-adapter` decision makes 14b block every URL-read call (`rejected_pending_adapter`), which is fail-closed but is capability denial, not the approved parity.
+
+## What Changes
+
+- Add the trusted URL-fetch transport adapter as a pure decision core plus its consumer contract: given a model-supplied URL (or a scraper-derived secondary URL), the egress policy, and a mocked injectable DNS/fetch transport, decide `allow-direct | allow-via-proxy | block` with per-target, per-hop reasoning. The decision core reuses the existing `src/utils/ssrf.ts` rules verbatim as the single classifier (scheme http/https; host resolves to a public address; loopback/RFC1918/link-local/ULA/unspecified/multicast/reserved rejected; cloud-metadata never exemptable); it never re-implements or forks a second SSRF table, and `ssrf.ts` stays read-only.
+- Add manual per-hop redirect validation IN the adapter decision logic: redirects are followed one hop at a time, every hop's URL re-validated through the same rules (hop 1 = initial URL, up to `MAX_REDIRECT_HOPS = 5`, exceeding the bound blocks), the native automatic `redirect: "follow"` is never an accepted substitute, and scraper secondary URLs (markdown alternates, feed alternates, document/link retries) receive the same validation as model-supplied URLs.
+- Add explicit proxy transport selection from the egress policy: when `agent.sandbox.egressProxy` is true and `agent.sandbox.unrestrictedEgress` is false (the enforced posture), allowed targets route through the already-running AIr validating egress proxy endpoint (`getRunningEgressProxyUrl()`); under an operator-selected `unrestrictedEgress` deployment the adapter keeps today's operator-chosen posture (existing best-effort env routing, documented as not kernel-guaranteed) and does NOT newly deny public targets or invent YOLO-only network denials (D6); enforcement posture values are consumed, never redefined.
+- Add text-vs-binary path distinction mirroring the native shape: the adapter exposes a text route (page/markdown-style body with bounded size) and a binary route (bytes with content-length limit and content-disposition/extension hints), each with its own mocked-transport acceptance cases; neither path logs credentials or payload content — decision records carry URL host, hop index, decision, and reason code only.
+- Enumerate per pinned source which URL-read routes are interceptable via SUPPORTED mechanisms vs the P0-recorded bypasses, as machine-readable route data with source citations, and resolve each bypass route honestly:
+  - **SUPPORTED interception**: the trusted extension's `registerTool` name-replacement of the `read` tool — pinned source shows the extension API exposes `registerTool` (`extensibility/extensions/types.ts`), the session build applies registered extension tools over the registry for the same name (last-extension-wins in `ExtensionRunner.getRegisteredTool`, natives captured before replacement), and `ctx.invokeTool` reaches the unwrapped native for delegation. The replacement serves the URL branch of native `read` (including the file-shape `materializeReadUrlToFile`/`fetchReadUrl` consumers) entirely through the adapter, so `loadPage`/`fetchBinary`/secondary-URL global-fetch routes are never invoked on URL reads; non-URL paths delegate to the captured native. This is verified in-row with the citations above and stays on the section-15 user checklist for real-binary confirmation.
+  - **RECORDED PARTIAL, not selected as the mechanism**: the `ToolSession.fetch`/`fetchOverride` enrichment seam exists in pinned source but no supported ACP-bootstrapped injection point sets it (session construction does not populate it at the pin), so it cannot complete URL reads on its own — the P0 bypass verdict for every path it does not cover stands.
+  - **REMAINS BLOCKED under enforcing egress policy**: any URL-reading native route the replacement does not cover — notably provider/scraper subrequests reached through web-search and code-search tool surfaces (owned by rows 18/19) and any discovered native consumer not routed through the replaced `read` tool — keeps 14a's `allow-gated-pending-adapter` outcome and 14b's `rejected_pending_adapter` block with its `userDecisionRequired` marker. Never silently native for private-target risk.
+- Update the 14a pending-adapter seam data ADDITIVELY: the web-fetch/URL-read inventory row records this change's completing adapter for the covered route set (a `completing-adapter` marker naming this change and the route table), while the web-search and public-code-search rows stay `allow-gated-pending-adapter`; 14b's composition already distinguishes completed from pending routes, and no table shape is revisited.
+- Keep trusted loopback traffic categorically distinct from model fetch targets: the Skill API loopback call, the configured provider endpoints, and the proxy endpoint itself are fixed transport facts of the deployment, never entries in the model-target decision; the adapter MUST NOT authorize an arbitrary loopback/private target merely because a trusted loopback call exists (design §9), and `pi-internal://`/custom-scheme inputs are rejected at the URL branch as the alternate-route surface 14a already denies.
+- Document that `HTTP_PROXY` presence alone is non-enforcement: env routing is best-effort convenience for env-honoring clients; the authoritative decision for adapted URL reads is the adapter's per-hop decision plus the validating proxy, and the existing empty-netns deferral stays as recorded.
+- Acceptance is deterministic unit/mock ONLY: mocked fetch transport, mocked DNS resolution, and synthetic redirect chains assert allow/deny decisions, proxy routing selection under both egress policies, per-hop re-validation, text/binary paths, the 5-hop limit, credential-free records, and the route-table verdicts. NOTHING contacts the network. Tests certify adapter decisions only; actual native OMP invoking the replacement/adapter stays on the design section-15 user checklist, and no mock clears the P0 bypass verdict or proves native hook coverage.
+- Explicit non-goals (owned elsewhere, named): web-search provider wiring (row 18 `adapt-omp-web-search`), public code search (row 19 `adapt-omp-public-code-search`), OpenCode's existing attachment/SSRF `safeFetch` behavior (unchanged, reused read-only), sandbox/egress CONFIG defaults (consumed, never changed), packaging (row 20), readiness and tool-policy decisions (rows 13/14a/14b, consumed), 14b handler wiring (consumed, not re-wired), native binary builds, live network verification.
+- No new `config.yaml`, `.env`, or Helm field expected: inputs are the existing `agent.sandbox.egressProxy`, `egressProxyPort`, `unrestrictedEgress`, `egressAllowHosts`, and the factory's existing proxy env assembly. If implementation surfaces any new field, this change synchronizes `config.example.yaml`, `.env.example`, and `helm/values.yaml` itself.
+
+## Capabilities
+
+### New Capabilities
+
+None. Reuse the existing `acp-integration` capability; the URL-fetch transport requirements extend it rather than fork a parallel network specification.
+
+### Modified Capabilities
+
+- `acp-integration`: Add requirements for the controlled URL-fetch transport adapter decision core (existing SSRF rules, manual per-hop re-validation with the 5-hop bound, text/binary distinction, credential-free decision records), policy-selected proxy routing under enforcing egress with operator unrestricted-egress posture preserved, the supported-vs-blocked route enumeration as machine-readable data with pinned citations and per-route `userDecisionRequired` honesty, the trusted-loopback/provider-route separation from model fetch targets, the additive 14a seam completion for covered URL-read routes only, and the mock-only acceptance boundary. P0 transport verdicts, row 4's unchanged read sink, and the 14a/14b pending-adapter seam semantics are consumed verbatim.
+
+## Impact
+
+Eventual implementation owns: the pure decision module `src/acp/omp/fetch-transport.ts` and the route enumeration `src/acp/omp/fetch-routes.ts` (both new, exclusive to this change until consumers land); the trusted-extension read-replacement sibling module in the row-12/14b tree (extended serially 12→13→14b→17, before row 20's digest cut); the additive seam-data update to 14a's inventory row for the URL-read row only; tests under `tests/acp/` (mock transport + mock DNS + synthetic redirects); `docs/OMP_NETWORK.md` (new), a cross-link from `docs/AGENT_PERMISSIONS.md` Network Egress Mediation, and one `CHANGELOG.md` entry. `src/utils/ssrf.ts`, `src/utils/egress-proxy.ts`, the sandbox config, and row 4's filesystem sink are read-only imports, untouched.
+
+Application gate inherited from P0: the transport-adaptation boundary verdict is PARTIAL (fetchOverride incomplete; `loadPage`/`fetchBinary` automatic-redirect bypass). This change selects the registerTool replacement as the supported completion mechanism with source citations and keeps every uncovered route blocked; the selection itself remains subject to the section-15 native observation, and no local suite may be cited as clearing P0's bypass record or proving the compiled binary invokes the replacement.
+
+## Workday Budget
+
+|| Eventual implementation activity | Hours |
+| --- | ---: |
+| Re-verify pinned citations (fetch.ts, scrapers, registerTool override loop, ToolSession.fetch injection absence) and freeze the route table data | 1.00 |
+| Pure decision core `fetch-transport.ts` (policy selection, per-hop loop, text/binary, credential-free records) reusing `ssrf.ts` | 1.50 |
+| Route enumeration + additive 14a seam marker (`fetch-routes.ts`, completed/pending/blocked verdicts) | 0.75 |
+| Trusted-extension read-replacement sibling (URL branch → adapter; non-URL → captured native via `ctx.invokeTool`) and factory transport facts hookup | 1.75 |
+| Deterministic unit/mock tests (mock fetch + mock DNS + synthetic chains, both egress policies, hop limit, binary/text, no-credential logging, route verdicts, loopback separation) | 1.75 |
+| `docs/OMP_NETWORK.md` + `AGENT_PERMISSIONS.md` cross-link + CHANGELOG | 0.50 |
+| Applicable focused type/unit checks, OpenSpec verification, contingency | 0.75 |
+| **Total hard ceiling** | **8.00** |
+
+## Batch:
+
+depends-on: establish-omp-compatibility-contracts
+depends-on: enforce-acp-filesystem-authorization
+depends-on: define-omp-restricted-tool-decisions
+depends-on: wire-omp-restricted-tool-enforcement
+
+||| Change | Relationship | Code/spec conflict notes |
+| --- | --- | --- |
+| establish-omp-compatibility-contracts (P0) | Contract + verdict consumer | Consumes `TransportContract` fields and the PARTIAL transport verdict verbatim; this change's route table records the selected supported mechanism and every surviving bypass with the P0 evidence, never relabeling `loadPage`/`fetchBinary`/fetchOverride coverage. No new ledger row is invented; native-use claims stay user-owned. |
+| enforce-acp-filesystem-authorization (row 4) | Read-sink consumer, unchanged | URL-read results land in the same row-4 filesystem/read sinks; this change adds no sink behavior and does not weaken materialization staging boundaries. `filesystem-policy.ts` not touched. |
+| define-omp-restricted-tool-decisions (14a) | Seam-data consumer + additive updater | The web-fetch/URL-read inventory row gains an additive completing-adapter marker naming this change and its covered-route table; the web-search and public-code-search rows keep `allow-gated-pending-adapter` untouched. No table-shape or decision-semantics change; the pending-vs-completed distinction tests from 14a keep passing. |
+| wire-omp-restricted-tool-enforcement (14b) | Composition consumer | 14b keeps blocking routes whose adapter has not landed (`rejected_pending_adapter`); completed routes proceed to the replacement/adapter. The handler still gates every call first — the replacement tool never bypasses the enforcement composition, and this change edits no wiring files, only extends the same trusted-extension tree with one sibling module. |
+| adapt-omp-web-search (row 18) | Successor | Provider subrequests/search transport are row 18's; they keep the pending-adapter block until then and reuse this change's decision core and route table. No search-provider feature here. |
+| adapt-omp-public-code-search (row 19) | Successor | Same as row 18 for code/docs search backends. |
+| package-pinned-omp-runtime (row 20) | Downstream, same-module-tree | Row 20 digests the extended trusted-extension tree; this change's sibling module must land before the digest cut and must not alter the contract path. |
+| cover-omp-mocked-acp-lifecycle / finish-omp-mocked-skill-handoff (21/22) | Final regression/docs | Row 21 may exercise the replacement across modes without duplicating this change's mock-transport unit cases; row 22 extends (never rewrites) `docs/OMP_NETWORK.md`. Zero config sync owed here unless a field surfaces. |
+
+- Shared-file conflict: the trusted-extension tree is extended serially 12→13→14b→17 (one new sibling module plus its attach, before row 20's digest cut); 14a's seam data is updated in-row additively (marker only, append to the URL-read row); `src/utils/ssrf.ts` and `src/utils/egress-proxy.ts` are read-only imports; `docs/AGENT_PERMISSIONS.md` and `CHANGELOG.md` are serial append/cross-link across the batch.
+- Spec-conflict: ADDED requirements are uniquely named within `acp-integration`; rows 18/19 add search-route requirements without modifying the fetch-route requirements, and no row may turn a blocked route into a claimed-supported verdict without a P0 revision plus explicit user decision.
+
+Individual rubber-duck review is intentionally skipped under the batch update; the parent reviews all completed proposals together.
