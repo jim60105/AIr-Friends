@@ -269,61 +269,51 @@ export function resolveSessionPath(
     };
   }
 
-  const tmpDir = resolve(context.sessionCwd, "tmp");
-  const skillSessionId = context.skillSessionId;
-  const sharedWorkspace = context.sharedWorkspacePath;
+  // Single-pass token scanner to avoid re-evaluating replaced values or $& patterns
+  let tokenFailure: RootPathFailure | undefined;
+  const expanded = rawPath.replace(
+    /\$\{([A-Za-z0-9_]+)\}|\$([A-Za-z0-9_]+)/g,
+    (fullMatch, braced, unbraced) => {
+      const varName = braced || unbraced;
+      if (varName === "TMPDIR") {
+        return resolve(context.sessionCwd, "tmp");
+      }
+      if (varName === "SESSION_ID") {
+        return context.skillSessionId;
+      }
+      if (varName === "AGENT_WORKSPACE") {
+        if (!context.sharedWorkspacePath) {
+          tokenFailure = {
+            ok: false,
+            reason: "unresolved_token",
+            message:
+              `${fullMatch} token used but no sharedWorkspacePath configured in session context`,
+          };
+          return fullMatch;
+        }
+        return context.sharedWorkspacePath;
+      }
 
-  let expanded = rawPath;
-
-  // Exact braced forms first
-  if (expanded.includes("${TMPDIR}")) {
-    expanded = expanded.split("${TMPDIR}").join(tmpDir);
-  }
-  if (expanded.includes("${SESSION_ID}")) {
-    expanded = expanded.split("${SESSION_ID}").join(skillSessionId);
-  }
-  if (expanded.includes("${AGENT_WORKSPACE}")) {
-    if (!sharedWorkspace) {
-      return {
+      // Any other variable name is unresolved
+      tokenFailure = {
         ok: false,
         reason: "unresolved_token",
-        message:
-          "${AGENT_WORKSPACE} token used but no sharedWorkspacePath configured in session context",
+        message: `Path contains unresolved variable or shell token: '${rawPath}'`,
       };
-    }
-    expanded = expanded.split("${AGENT_WORKSPACE}").join(sharedWorkspace);
-  }
+      return fullMatch;
+    },
+  );
 
-  // Unbraced forms with variable-name boundary
-  // $TMPDIR
-  if (/\$TMPDIR(?![A-Za-z0-9_])/.test(expanded)) {
-    expanded = expanded.replace(/\$TMPDIR(?![A-Za-z0-9_])/g, tmpDir);
-  }
-
-  // $SESSION_ID
-  if (/\$SESSION_ID(?![A-Za-z0-9_])/.test(expanded)) {
-    expanded = expanded.replace(/\$SESSION_ID(?![A-Za-z0-9_])/g, skillSessionId);
-  }
-
-  // $AGENT_WORKSPACE
-  if (/\$AGENT_WORKSPACE(?![A-Za-z0-9_])/.test(expanded)) {
-    if (!sharedWorkspace) {
-      return {
-        ok: false,
-        reason: "unresolved_token",
-        message:
-          "$AGENT_WORKSPACE token used but no sharedWorkspacePath configured in session context",
-      };
-    }
-    expanded = expanded.replace(/\$AGENT_WORKSPACE(?![A-Za-z0-9_])/g, sharedWorkspace);
+  if (tokenFailure) {
+    return tokenFailure;
   }
 
   // Any remaining variable syntax ($VAR or ${VAR}) is unresolved
-  if (/\$[A-Za-z_{]/.test(expanded)) {
+  if (/\$[A-Za-z_{]/.test(expanded) || expanded.includes("${")) {
     return {
       ok: false,
       reason: "unresolved_token",
-      message: `Path contains unresolved variable or shell token: '${expanded}'`,
+      message: `Path contains unresolved variable or shell token: '${rawPath}'`,
     };
   }
 
@@ -411,49 +401,83 @@ export async function canonicalizeSessionRoots(
   const configuredStaging = resolve(context.sessionCwd, "tmp", context.skillSessionId);
 
   let stagingInfo: CanonicalRootInfo;
+  let stagingLstat: Deno.FileInfo | undefined;
   try {
-    await reader.lstat(configuredStaging);
-    // Staging exists physically
-    const canonicalStaging = await reader.realPath(configuredStaging);
-    const destInfo = await reader.lstat(canonicalStaging);
-    if (!destInfo.isDirectory) {
+    stagingLstat = await reader.lstat(configuredStaging);
+  } catch {
+    stagingLstat = undefined;
+  }
+
+  if (stagingLstat !== undefined) {
+    try {
+      // Staging exists physically
+      const canonicalStaging = await reader.realPath(configuredStaging);
+      const destInfo = await reader.lstat(canonicalStaging);
+      if (!destInfo.isDirectory) {
+        return {
+          ok: false,
+          reason: "invalid_root",
+          message: `Staging target '${canonicalStaging}' is not a directory`,
+        };
+      }
+
+      if (canonicalStaging !== expectedCanonicalStaging) {
+        return {
+          ok: false,
+          reason: "invalid_root",
+          message:
+            `Physical staging path '${canonicalStaging}' does not match expected canonical staging '${expectedCanonicalStaging}'`,
+        };
+      }
+
+      stagingInfo = {
+        role: "staging",
+        configuredPath: configuredStaging,
+        canonicalPath: canonicalStaging,
+        identity: extractIdentity(destInfo),
+        readOnly: false,
+      };
+    } catch (err) {
+      const errName =
+        (err && typeof err === "object" && "name" in err && typeof err.name === "string")
+          ? err.name
+          : undefined;
+      if (
+        stagingLstat.isSymlink &&
+        (errName === "NotFound" ||
+          (err instanceof Error && err.message.toLowerCase().includes("no such file")))
+      ) {
+        return {
+          ok: false,
+          reason: "dangling_symlink",
+          message: `Staging directory '${configuredStaging}' is a dangling symlink`,
+          cause: err,
+        };
+      }
       return {
         ok: false,
-        reason: "invalid_root",
-        message: `Staging target '${canonicalStaging}' is not a directory`,
+        reason: "canonicalization_failed",
+        message: `Failed to canonicalize existing staging path '${configuredStaging}'`,
+        cause: err,
       };
     }
-
-    if (canonicalStaging !== expectedCanonicalStaging) {
-      return {
-        ok: false,
-        reason: "invalid_root",
-        message:
-          `Physical staging path '${canonicalStaging}' does not match expected canonical staging '${expectedCanonicalStaging}'`,
-      };
+  } else {
+    // Initial lstat failed; check if it was true NotFound
+    let lstatErr: unknown;
+    try {
+      await reader.lstat(configuredStaging);
+    } catch (e) {
+      lstatErr = e;
     }
-
-    stagingInfo = {
-      role: "staging",
-      configuredPath: configuredStaging,
-      canonicalPath: canonicalStaging,
-      identity: extractIdentity(destInfo),
-      readOnly: false,
-    };
-  } catch (err) {
-    // If not found, staging is prospective
-    const errorKind =
-      (err && typeof err === "object" && "name" in err && typeof err.name === "string")
-        ? err.name
-        : undefined;
-    const isNotFound = errorKind === "NotFound" ||
-      (err instanceof Error && err.message.toLowerCase().includes("no such file"));
+    const isNotFound = (lstatErr && typeof lstatErr === "object" && "name" in lstatErr &&
+      lstatErr.name === "NotFound") ||
+      (lstatErr instanceof Error && lstatErr.message.toLowerCase().includes("no such file"));
     if (!isNotFound) {
       return {
         ok: false,
         reason: "root_unavailable",
         message: `Failed to inspect staging path '${configuredStaging}'`,
-        cause: err,
+        cause: lstatErr,
       };
     }
 
@@ -486,6 +510,10 @@ export async function canonicalizeSessionRoots(
           message:
             `Workspace 'tmp' directory links to '${canonicalTmp}', which diverges from expected '${expectedTmp}'`,
         };
+      }
+      const tmpDestInfo = await reader.lstat(canonicalTmp);
+      if (!tmpDestInfo.isDirectory) {
+        return { ok: false, reason: "invalid_root", message: `Workspace 'tmp' is not a directory` };
       }
       prospectiveAncestor = canonicalTmp;
       missingSuffix = [context.skillSessionId];
@@ -645,6 +673,9 @@ async function tracePathUnderRoot(
   const baseCanonical = candidateRoot.canonicalPath;
   const observedSymlinks: ObservedSymlink[] = [];
 
+  // For prospective roots, candidateRoot.configuredPath or canonicalPath represents the eventual staging path.
+  // E.g. /workspace/tmp/skill-x.
+  // Relative part from candidateRoot:
   // Break the relative path into segments from base
   let relativePart: string;
   if (normTarget === candidateRoot.configuredPath) {
@@ -661,6 +692,20 @@ async function tracePathUnderRoot(
       observedSymlinks,
       failureReason: "outside_roots",
       failureMessage: `Target path '${normTarget}' is not lexically inside candidate root`,
+    };
+  }
+
+  if (candidateRoot.isProspective) {
+    // For prospective roots, physical traversal starts from prospectiveAncestor
+    // and the segments to traverse are the prospectiveMissingSuffix followed by relativePart
+    const missingSuffix = candidateRoot.prospectiveMissingSuffix || [];
+    const extraSegments = relativePart ? relativePart.split(SEPARATOR).filter(Boolean) : [];
+    const allProspectiveSegments = [...missingSuffix, ...extraSegments];
+    return {
+      status: "missing",
+      observedSymlinks,
+      prospectiveAncestor: candidateRoot.prospectiveAncestor || baseCanonical,
+      missingSuffix: allProspectiveSegments,
     };
   }
 
@@ -949,6 +994,16 @@ export async function resolveFilesystemTarget(
     if (check.status === "exists") {
       const canonicalDest = check.finalCanonicalPath!;
       const fileInfo = check.fileInfo!;
+      // For file-or-new, if target exists, it must be a regular file, NOT a directory
+      if (expectation === "file-or-new" && !fileInfo.isFile) {
+        firstFatalFailure = {
+          ok: false,
+          reason: "wrong_target_type",
+          message:
+            `Target '${canonicalDest}' exists but is a directory; 'file-or-new' expects a regular file`,
+        };
+        continue;
+      }
 
       // Special node check: reject FIFO, socket, block/char device
       if (!fileInfo.isFile && !fileInfo.isDirectory && !fileInfo.isSymlink) {

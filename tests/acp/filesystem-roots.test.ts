@@ -281,6 +281,110 @@ Deno.test("Task 3.2: Staging alias to other session or ordinary directory fails 
   }
 });
 
+Deno.test("Task 3.2: Dangling staging symlink fails closed with dangling_symlink", async () => {
+  const tempDir = await Deno.makeTempDir({ prefix: "dangling_staging_test_" });
+  try {
+    const workspace = join(tempDir, "workspace");
+    await Deno.mkdir(workspace);
+    await Deno.mkdir(join(workspace, "tmp"));
+
+    // Staging links to a nonexistent destination
+    const stagingLink = join(workspace, "tmp", "skill-dangling");
+    await Deno.symlink(join(workspace, "tmp", "does-not-exist"), stagingLink);
+
+    const context: SessionContext = {
+      acpSessionId: "session-dang",
+      skillSessionId: "skill-dangling",
+      sessionCwd: workspace,
+      explicitStagingPath: stagingLink,
+      sessionContextGeneration: "gen-1",
+    };
+
+    const res = await canonicalizeSessionRoots(context);
+    assertEquals(res.ok, false);
+    if (!res.ok) {
+      assertEquals(res.reason, "dangling_symlink");
+    }
+  } finally {
+    await Deno.remove(tempDir, { recursive: true });
+  }
+});
+
+Deno.test("Task 3.2: Prospective staging target receives staging role", async () => {
+  const tempDir = await Deno.makeTempDir({ prefix: "prosp_staging_role_test_" });
+  try {
+    const workspace = join(tempDir, "workspace");
+    await Deno.mkdir(workspace);
+
+    const context: SessionContext = {
+      acpSessionId: "session-prosp",
+      skillSessionId: "skill-prosp",
+      sessionCwd: workspace,
+      explicitStagingPath: join(workspace, "tmp", "skill-prosp"),
+      sessionContextGeneration: "gen-1",
+    };
+
+    const roots = unwrap(await canonicalizeSessionRoots(context));
+    const stagingRoot = roots.roots.find((r) => r.role === "staging")!;
+    assertEquals(stagingRoot.isProspective, true);
+
+    // Requesting prospective file inside prospective staging
+    const pathRes = unwrap(
+      resolveSessionPath("tmp/skill-prosp/new-payload.md", context),
+    );
+    const targetRes = unwrap(
+      await resolveFilesystemTarget(pathRes, roots, "file-or-new"),
+    );
+
+    // Must receive both workspace and staging roles!
+    assertEquals(targetRes.roles.includes("workspace"), true);
+    assertEquals(targetRes.roles.includes("staging"), true);
+    assertEquals(targetRes.targetType, "prospective");
+  } finally {
+    await Deno.remove(tempDir, { recursive: true });
+  }
+});
+
+Deno.test("Task 3.2: Existing directory rejected under file-or-new", async () => {
+  const tempDir = await Deno.makeTempDir({ prefix: "dir_file_or_new_test_" });
+  try {
+    const workspace = join(tempDir, "workspace");
+    await Deno.mkdir(workspace);
+    const existingSubdir = join(workspace, "my-dir");
+    await Deno.mkdir(existingSubdir);
+
+    const context: SessionContext = {
+      acpSessionId: "session-dir",
+      skillSessionId: "skill-dir",
+      sessionCwd: workspace,
+      explicitStagingPath: join(workspace, "tmp", "skill-dir"),
+      sessionContextGeneration: "gen-1",
+    };
+
+    const roots = unwrap(await canonicalizeSessionRoots(context));
+    const pathRes = unwrap(resolveSessionPath("my-dir", context));
+
+    // file-or-new on an existing directory MUST fail with wrong_target_type
+    const resFileOrNew = await resolveFilesystemTarget(
+      pathRes,
+      roots,
+      "file-or-new",
+    );
+    assertEquals(resFileOrNew.ok, false);
+    if (!resFileOrNew.ok) {
+      assertEquals(resFileOrNew.reason, "wrong_target_type");
+    }
+
+    // existing-directory MUST succeed
+    const resDir = unwrap(
+      await resolveFilesystemTarget(pathRes, roots, "existing-directory"),
+    );
+    assertEquals(resDir.targetType, "directory");
+  } finally {
+    await Deno.remove(tempDir, { recursive: true });
+  }
+});
+
 Deno.test("Task 3.2: Internal vs escaping symlinks and boundary-safe containment", async () => {
   const tempDir = await Deno.makeTempDir({ prefix: "symlink_containment_test_" });
   try {
