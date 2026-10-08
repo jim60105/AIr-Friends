@@ -15,6 +15,12 @@ The system SHALL preserve an available quoted reference in the current message a
 - **WHEN** each context is formatted
 - **THEN** each retained entry SHALL contain its attributed reference using the same third-party boundary contract
 
+#### Scenario: Spontaneous template preserves source
+- **GIVEN** a spontaneous-post context includes a quoted source with text and file metadata
+- **WHEN** history is projected into the spontaneous template and the final prompt is rendered
+- **THEN** the final prompt SHALL contain the source body, separate author, warning boundary and quoted file metadata
+- **AND** ordinary spontaneous history without quotes SHALL retain its existing speaker-line format
+
 #### Scenario: Unavailable source is visible
 - **GIVEN** quote enrichment fails or exhausts its budget
 - **WHEN** the trigger or retained history entry is formatted
@@ -49,7 +55,7 @@ All untrusted quote fields, including text, identity, author names, URLs and att
 
 ### Requirement: Quote-Aware Token Accounting
 
-Context estimates SHALL include rendered quoted data, attribution, warning boundaries and quoted attachment metadata. The trigger's complete quote SHALL count as mandatory content under the existing trigger policy. History admission SHALL count an outer message and its quote as one whole candidate, preserve recent-over-related priority and drop oldest candidates first when required. No quote body SHALL be summarized or cut mid-reference. Final formatted token estimates SHALL reflect the actual system and user text, including every rendered occurrence of a repeated current/history note. When mandatory content alone exceeds the configured limit, the system SHALL report its actual estimate and omit discretionary history/emojis under the existing soft-budget behavior.
+Context estimates SHALL include rendered quoted data, attribution, warning boundaries and quoted attachment metadata. The trigger's complete quote SHALL count as mandatory content under the existing trigger policy. Triggered-session history admission SHALL count an outer message and its quote as one whole candidate, preserve recent-over-related priority and drop oldest candidates first when required. No quote body SHALL be summarized or cut mid-reference. Final formatted token estimates SHALL reflect the actual system and user text, including every rendered occurrence of a repeated current/history note. When mandatory content alone exceeds the configured limit, the system SHALL report its actual estimate and omit discretionary history/emojis under the existing soft-budget behavior. Spontaneous contexts SHALL charge their emitted quote references while retaining existing count-based retrieval and unrelated-content estimate conventions.
 
 #### Scenario: Quote overhead changes history admission
 - **GIVEN** an old quoted history candidate fits by outer body alone but exceeds available budget when its reference is counted
@@ -68,3 +74,9 @@ Context estimates SHALL include rendered quoted data, attribution, warning bound
 - **WHEN** pre-format and final estimates are calculated
 - **THEN** the pre-format estimate SHALL include each reference's complete rendered cost
 - **AND** the final estimate SHALL equal the existing token counter's result for actual system and user text
+
+#### Scenario: Spontaneous estimate counts its emitted reference
+- **GIVEN** spontaneous history includes a quote with encoded multiline text and attachment metadata
+- **WHEN** its context estimate and final template prompt are produced
+- **THEN** the estimate SHALL include the complete same reference fragment emitted into the template
+- **AND** existing spontaneous retrieval and unrelated-content estimate conventions SHALL remain unchanged
