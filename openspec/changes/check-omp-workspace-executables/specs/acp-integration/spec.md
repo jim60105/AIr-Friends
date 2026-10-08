@@ -67,7 +67,7 @@ The integration SHALL combine the existing frozen trusted-module bootstrap decis
 
 ### Requirement: Fail-Closed Session Setup When Exclusion Cannot Be Established
 
-Failed deployment preflight, executable workspace discoveries, invalid owned module/dependency identity, escaping links, inconsistent environment or stale session evidence SHALL reject the affected restricted setup/recovery before the native protected request. This SHALL retain the existing bounded fail-closed rejection as fallback. Native `no-supported-mechanism` alone SHALL NOT undo decision 1's explicitly adopted deployment disposition. Extension lifecycle failure SHALL NOT be claimed to provide authenticated client-observable readiness.
+Failed deployment preflight, executable workspace discoveries, invalid owned module/dependency identity, escaping links, inconsistent environment or stale session evidence SHALL reject BOTH restricted and native-yolo OMP spawn, session creation, load/recovery and repository-triggered refresh before the protected native operation. The existing bounded fail-closed rejection SHALL remain the fallback. Native `no-supported-mechanism` alone SHALL NOT undo decision 1's deployment disposition. Extension lifecycle failure SHALL NOT establish authenticated client-observable readiness.
 
 #### Scenario: Session creation fails visibly
 - **GIVEN** preflight cannot establish the selected deployment controls
@@ -100,8 +100,8 @@ Failed deployment preflight, executable workspace discoveries, invalid owned mod
 - **AND** missing restricted capabilities, runner.emit logging without startup failure, absence of readiness signal and incomplete default-deny/callback equivalence SHALL remain explicit
 
 #### Scenario: Deployment controls do not add restricted YOLO tool policy
-- **WHEN** the same preflight operates on native-yolo
-- **THEN** it SHALL impose deployment source/ownership checks only
+- **WHEN** native-yolo spawn, new/load/recovery or repository-triggered refresh finds an executable custom-tool/plugin source or cannot establish deployment ownership
+- **THEN** it SHALL reject before the protected native operation under the same deployment source/ownership checks
 - **AND** no restricted capability set or readiness handshake SHALL be added
 
 ### Requirement: Discovery And Critical-Selection Compatibility Gates Remain Blocking

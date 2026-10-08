@@ -37,6 +37,8 @@ Own `src/acp/omp/discovery-guard.ts`, existing `src/acp/omp/extension/*` bootstr
 | Applicable checks and review contingency | 1.25 |
 | **Hard ceiling including implementation/testing/docs** | **8.00** |
 
+Sizing relies on row 26's authoritative roots/metadata observation and pre-native seam, the archived guard decision/failure objects, and the completed mock lifecycle harness. Extend those objects with the pinned executable-entry inventory and append one executable check at the seam; do not implement a second filesystem backend, recursive whole-repository executable scan or native import interceptor. Exercise entry/link failure cases through table-driven observer tests and lifecycle ordering through the existing both-mode harness. The 1.25h verification/contingency allocation covers integration review.
+
 ## Batch:
 
 depends-on: translate-omp-owned-settings
