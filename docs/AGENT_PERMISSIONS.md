@@ -267,6 +267,18 @@ This is independent of the agent's own file access — it applies to the ACP pro
 
 ---
 
+### Secure Canonical Access Primitives (`secure-acp-filesystem-access`)
+
+To prevent TOCTOU races between path validation and content IO, the secure access modules (`src/acp/filesystem-access.ts` and `src/acp/filesystem-access-linux.ts`) provide descriptor-bound UTF-8 read, existing-file overwrite, and exclusive new-file creation:
+- **Supported Platform & Architecture**: Linux little-endian x86_64 and aarch64 with GNU glibc (>=2.28), kernel >=5.6 supplying working `openat2` and descriptor `statx`, and Deno FFI permission (`--allow-ffi`). Direct owned system libc locations are used (`/lib/x86_64-linux-gnu/libc.so.6`, `/lib/aarch64-linux-gnu/libc.so.6`); no third-party native package or build step is introduced. Other operating systems or libc layouts fail closed with `unsupported_platform` or `secure_access_unavailable`.
+- **Constrained Resolution & Symlinks**: Files are opened beneath the identity-checked canonical root descriptor using `openat2` with `RESOLVE_BENEATH | RESOLVE_NO_SYMLINKS | RESOLVE_NO_MAGICLINKS` and `O_NOFOLLOW`. Request-time parent or final symlinks, including contained symlinks, are strictly rejected (`unsafe_traversal`).
+- **Descriptor-Bound Mutation & No Namespace Freezing**: Content operations bind to the opened file descriptor and verify exact `statx` type/identity. This guarantees descriptor binding (an opened file cannot be redirected by pathname substitution), not universal namespace freezing (concurrent same-inode edits or background moves outside ACP are not blocked). Existing overwrite checks type and identity before `ftruncate(fd, 0)`. Replacement entries are never truncated.
+- **Exclusive Creation & Existing Parents**: Prospective new files are created exclusively (`O_CREAT | O_EXCL`, mode `0600`). The full path must reside in an already existing parent directory; no recursive `mkdir` is performed (`parent_missing`). Missing or prospective roots return `root_unavailable`.
+- **Partial IO & Cleanup**: IO failures return honest `io_failed` results; partial byte transfers do not promise atomic rollback. All descriptors are guaranteed closed on all paths in `finally`.
+- **Downstream Cutover Status**: Client callbacks in `src/acp/client.ts` (`readTextFile`, `writeTextFile`) remain unchanged at this layer; direct adoption and role selection belong to the downstream consumer change `enforce-acp-filesystem-authorization`. Real agent execution, live container environments, and bubblewrap evidence remain unverified/user-owned.
+
+---
+
 ## Layer 5 — Sandbox Isolation
 
 The `SandboxManager` applies OS-level isolation to the agent subprocess before it starts.
