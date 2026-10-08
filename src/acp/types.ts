@@ -97,7 +97,28 @@ export interface AgentConfig {
 /**
  * Supported ACP Agent types
  */
-export type AgentType = "opencode";
+export type AgentType = "opencode" | "omp";
+
+/**
+ * Complete set of supported ACP Agent types recognized across configuration,
+ * default selection, dashboard validation, and factory dispatch.
+ */
+export const SUPPORTED_AGENT_TYPES: readonly AgentType[] = [
+  "opencode",
+  "omp",
+] as const;
+
+/**
+ * Strict acceptance predicate for supported ACP agent types.
+ * Acceptance at configuration/selection layer is distinct from launch availability.
+ * Values differing only by case or surrounding whitespace are NOT supported.
+ */
+export function isSupportedAgentType(value: unknown): value is AgentType {
+  return (
+    typeof value === "string" &&
+    (SUPPORTED_AGENT_TYPES as readonly string[]).includes(value)
+  );
+}
 
 /**
  * MCP transport capabilities reported by Agent

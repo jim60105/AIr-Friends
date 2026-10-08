@@ -173,6 +173,27 @@ async function loginAndGetCookie(baseUrl: string): Promise<string> {
 // ============================
 
 Deno.test({
+  name:
+    "DashboardServer - POST /api/chat/connect with agentType 'omp' passes validation (fails at connection)",
+  sanitizeResources: false,
+  sanitizeOps: false,
+}, async () => {
+  const t = await createTestServer();
+  try {
+    const cookie = await loginAndGetCookie(t.baseUrl);
+    const res = await fetch(`${t.baseUrl}/api/chat/connect`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Cookie: cookie },
+      body: JSON.stringify({ agentType: "omp", model: "google/gemini-3-pro" }),
+    });
+    // Passes 400 validation, proceeds to connect and fails at connection establishment (returns 500)
+    assertEquals(res.status, 500);
+  } finally {
+    await t.cleanup();
+  }
+});
+
+Deno.test({
   name: "DashboardServer - login with correct passphrase returns 200 + Set-Cookie",
   sanitizeResources: false,
   sanitizeOps: false,

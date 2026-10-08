@@ -212,7 +212,7 @@ Configuration is loaded from `config.yaml` (YAML format). See [config.example.ya
 | Variable                    | Description                                                                                        |
 | --------------------------- | -------------------------------------------------------------------------------------------------- |
 | `AGENT_MODEL`               | LLM model identifier (e.g., "gpt-5-mini")                                                          |
-| `AGENT_DEFAULT_TYPE`        | Default ACP agent type (opencode)                                                                  |
+| `AGENT_DEFAULT_TYPE`        | Default ACP agent type (`opencode` [default], `omp`; unknown values fail startup)                   |
 | `AGENT_SKILLS_DIR`          | Skills directory path (default: "skills")                                                          |
 | `AGENT_EXTERNAL_SKILLS`     | External skills to install at startup (JSON string, e.g. `[{"repo":"owner/repo","skill":"name"}]`) |
 | `AGENT_AUTO_APPROVE_SKILLS` | Skill names to auto-approve in restricted mode (comma-separated)                                   |

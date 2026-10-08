@@ -3,6 +3,8 @@
 import { assertEquals, assertRejects } from "@std/assert";
 import { loadConfig, loadSystemPrompt } from "@core/config-loader.ts";
 import { ConfigError } from "../../src/types/errors.ts";
+import { ErrorCode } from "../../src/types/errors.ts";
+import { getDefaultAgentType } from "../../src/acp/agent-factory.ts";
 import type { TemplateVariables } from "../../src/types/template.ts";
 import { join } from "@std/path";
 
@@ -52,6 +54,150 @@ workspace:
     assertEquals(result.platforms.discord.enabled, true);
     assertEquals(result.agent.model, "gpt-4");
     assertEquals(result.workspace.repoPath, "./data");
+  });
+});
+
+// --- agent.defaultAgentType configuration tests ---
+
+async function withEnv(
+  key: string,
+  value: string | undefined,
+  fn: () => Promise<void>,
+): Promise<void> {
+  const prev = Deno.env.get(key);
+  if (value === undefined) {
+    Deno.env.delete(key);
+  } else {
+    Deno.env.set(key, value);
+  }
+  try {
+    await fn();
+  } finally {
+    if (prev === undefined) {
+      Deno.env.delete(key);
+    } else {
+      Deno.env.set(key, prev);
+    }
+  }
+}
+
+const agentTypeConfig = (agentSnippet: string) => `
+platforms:
+  discord:
+    token: "test-token"
+    enabled: true
+  misskey:
+    enabled: false
+agent:
+  model: "gpt-4"
+  systemPromptPath: "./prompts/system_reply.md"
+  tokenLimit: 20000
+${agentSnippet}
+workspace:
+  repoPath: "./data"
+  workspacesDir: "workspaces"
+`;
+
+Deno.test("Config - omitted defaultAgentType loads with effective default opencode", async () => {
+  await withTestConfig(agentTypeConfig(""), async (dir) => {
+    const result = await loadConfig(dir);
+    assertEquals(result.agent.defaultAgentType, undefined);
+    assertEquals(getDefaultAgentType(result), "opencode");
+  });
+});
+
+Deno.test("Config - defaultAgentType: 'omp' in YAML loads as omp", async () => {
+  const snippet = `  defaultAgentType: "omp"`;
+  await withTestConfig(agentTypeConfig(snippet), async (dir) => {
+    const result = await loadConfig(dir);
+    assertEquals(result.agent.defaultAgentType, "omp");
+    assertEquals(getDefaultAgentType(result), "omp");
+  });
+});
+
+Deno.test("Config - AGENT_DEFAULT_TYPE=omp env override loads as omp", async () => {
+  await withEnv("AGENT_DEFAULT_TYPE", "omp", async () => {
+    await withTestConfig(agentTypeConfig(""), async (dir) => {
+      const result = await loadConfig(dir);
+      assertEquals(result.agent.defaultAgentType, "omp");
+      assertEquals(getDefaultAgentType(result), "omp");
+    });
+  });
+});
+
+Deno.test("Config - invalid defaultAgentType values fail startup with ConfigError", async () => {
+  const invalidValues = [
+    '"pi"',
+    '"OpenCode"',
+    '" omp "',
+    "true",
+    '""',
+  ];
+
+  for (const val of invalidValues) {
+    const snippet = `  defaultAgentType: ${val}`;
+    await withTestConfig(agentTypeConfig(snippet), async (dir) => {
+      let caughtError: ConfigError | null = null;
+      try {
+        await loadConfig(dir);
+      } catch (err) {
+        if (err instanceof ConfigError) {
+          caughtError = err;
+        }
+      }
+      assertEquals(caughtError !== null, true, `Should have rejected defaultAgentType: ${val}`);
+      assertEquals(caughtError?.code, ErrorCode.CONFIG_INVALID);
+      assertEquals(caughtError?.message.includes("agent.defaultAgentType"), true);
+      assertEquals(caughtError?.message.includes("opencode, omp"), true);
+    });
+  }
+});
+
+Deno.test("Config - invalid AGENT_DEFAULT_TYPE env overrides fail startup with ConfigError", async () => {
+  const invalidEnvValues = [
+    "pi",
+    "OpenCode",
+    " omp ",
+    "true",
+  ];
+
+  for (const envVal of invalidEnvValues) {
+    await withEnv("AGENT_DEFAULT_TYPE", envVal, async () => {
+      await withTestConfig(agentTypeConfig(""), async (dir) => {
+        let caughtError: ConfigError | null = null;
+        try {
+          await loadConfig(dir);
+        } catch (err) {
+          if (err instanceof ConfigError) {
+            caughtError = err;
+          }
+        }
+        assertEquals(caughtError !== null, true, `Should have rejected env override: ${envVal}`);
+        assertEquals(caughtError?.code, ErrorCode.CONFIG_INVALID);
+        assertEquals(caughtError?.message.includes("agent.defaultAgentType"), true);
+        assertEquals(caughtError?.message.includes("opencode, omp"), true);
+        assertEquals(caughtError?.context?.field, "agent.defaultAgentType");
+      });
+    });
+  }
+});
+
+Deno.test("Config - unresolved ${AGENT_DEFAULT_TYPE} expansion to empty string fails with ConfigError", async () => {
+  await withEnv("AGENT_DEFAULT_TYPE", undefined, async () => {
+    const snippet = `  defaultAgentType: "\${AGENT_DEFAULT_TYPE}"`;
+    await withTestConfig(agentTypeConfig(snippet), async (dir) => {
+      let caughtError: ConfigError | null = null;
+      try {
+        await loadConfig(dir);
+      } catch (err) {
+        if (err instanceof ConfigError) {
+          caughtError = err;
+        }
+      }
+      assertEquals(caughtError !== null, true, "Should have rejected empty expansion");
+      assertEquals(caughtError?.code, ErrorCode.CONFIG_INVALID);
+      assertEquals(caughtError?.context?.field, "agent.defaultAgentType");
+    });
   });
 });
 

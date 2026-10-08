@@ -26,6 +26,34 @@ Deno.test("applyEnvOverrides - DISCORD_ENABLED=true sets platforms.discord.enabl
   }
 });
 
+Deno.test("applyEnvOverrides - AGENT_DEFAULT_TYPE sets agent.defaultAgentType to omp", () => {
+  Deno.env.set("AGENT_DEFAULT_TYPE", "omp");
+  try {
+    const config: Record<string, unknown> = {
+      agent: { defaultAgentType: "unset" },
+    };
+    applyEnvOverrides(config);
+    const agent = config.agent as { defaultAgentType: string };
+    assertEquals(agent.defaultAgentType, "omp");
+  } finally {
+    Deno.env.delete("AGENT_DEFAULT_TYPE");
+  }
+});
+
+Deno.test("applyEnvOverrides - empty AGENT_DEFAULT_TYPE does not override", () => {
+  Deno.env.set("AGENT_DEFAULT_TYPE", "");
+  try {
+    const config: Record<string, unknown> = {
+      agent: { defaultAgentType: "original" },
+    };
+    applyEnvOverrides(config);
+    const agent = config.agent as { defaultAgentType: string };
+    assertEquals(agent.defaultAgentType, "original");
+  } finally {
+    Deno.env.delete("AGENT_DEFAULT_TYPE");
+  }
+});
+
 Deno.test("applyEnvOverrides - DISCORD_ENABLED=false sets platforms.discord.enabled to boolean false", () => {
   Deno.env.set("DISCORD_ENABLED", "false");
   try {

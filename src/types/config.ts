@@ -2,6 +2,7 @@
 
 import type { LogLevel } from "./logger.ts";
 import type { AuditPhase } from "./audit.ts";
+import type { AgentType } from "../acp/types.ts";
 
 /**
  * Base platform configuration
@@ -185,8 +186,8 @@ export interface AgentConfig {
   /** OpenRouter API key for OpenRouter provider (optional) */
   openRouterApiKey?: string;
 
-  /** Default ACP agent type to use ("opencode") */
-  defaultAgentType?: "opencode";
+  /** Default ACP agent type to use: "opencode" (default when omitted) | "omp" */
+  defaultAgentType?: AgentType;
 
   /** Model routing configuration (optional) */
   modelRouting?: ModelRoutingConfig;

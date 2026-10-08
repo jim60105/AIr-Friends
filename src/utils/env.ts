@@ -8,6 +8,8 @@ const OPENROUTER_API_KEY_PATH = "agent.openRouterApiKey";
 
 /**
  * Environment variable mapping for config overrides
+ * Note: AGENT_DEFAULT_TYPE maps directly to agent.defaultAgentType ("opencode" | "omp").
+ * Unknown values are rejected at config load time.
  */
 export const ENV_MAPPINGS = {
   DISCORD_TOKEN: "platforms.discord.token",

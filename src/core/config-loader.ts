@@ -22,7 +22,7 @@ import type {
   SandboxConfig,
   UserMCPServerConfig,
 } from "../types/config.ts";
-import type { MCPServerConfig } from "../acp/types.ts";
+import { isSupportedAgentType, type MCPServerConfig } from "../acp/types.ts";
 import { VALID_PLATFORMS } from "../types/events.ts";
 import { ConfigError, ErrorCode } from "../types/errors.ts";
 import { DEFAULT_RECALL_CONFIG } from "./memory-recall/recall-config.ts";
@@ -452,6 +452,20 @@ function validateConfig(config: Record<string, unknown>): void {
           validReplyPolicies.join(", ")
         }`,
         { replyPolicy: config.replyPolicy, validValues: validReplyPolicies },
+      );
+    }
+  }
+
+  // Validate agent.defaultAgentType value
+  const agent = config.agent as Record<string, unknown> | undefined;
+  if (agent?.defaultAgentType !== undefined) {
+    const defaultAgentType = agent.defaultAgentType;
+    if (!isSupportedAgentType(defaultAgentType)) {
+      const rawValue = String(defaultAgentType);
+      throw new ConfigError(
+        ErrorCode.CONFIG_INVALID,
+        `Invalid agent.defaultAgentType value: "${rawValue}". Must be one of: opencode, omp`,
+        { field: "agent.defaultAgentType", value: defaultAgentType },
       );
     }
   }

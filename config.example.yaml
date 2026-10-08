@@ -62,7 +62,7 @@ agent:
   geminiApiKey: "${GEMINI_API_KEY}" # Optional OpenCode Gemini provider API key (env: GEMINI_API_KEY)
   opencodeApiKey: "${OPENCODE_API_KEY}" # Optional OpenCode API key (env: OPENCODE_API_KEY)
   openRouterApiKey: "${OPENROUTER_API_KEY}" # Optional OpenRouter API key (env: OPENROUTER_API_KEY)
-  defaultAgentType: "${AGENT_DEFAULT_TYPE}" # Default ACP agent: "opencode" (env: AGENT_DEFAULT_TYPE)
+  defaultAgentType: "${AGENT_DEFAULT_TYPE}" # Default ACP agent: "opencode" (default) | "omp" (env: AGENT_DEFAULT_TYPE; unknown values fail startup). Note: the variable must be set or this line removed.
   skillsDir: "skills" # Path to skills directory (default: "skills"); use "/home/deno/.agents/skills" for container deployment; override with env AGENT_SKILLS_DIR
 
   # Reasoning effort (ACP thought_level): controls how hard the model "thinks".

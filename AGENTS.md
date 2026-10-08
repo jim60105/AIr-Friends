@@ -624,7 +624,7 @@ and the effort independently while keeping them tied to the same matched rule.
 **Agent Selection**:
 
 - Set via `agent.defaultAgentType` in config or `AGENT_DEFAULT_TYPE` env var
-- Valid value: `"opencode"`
+- Valid values: `"opencode"` (default when omitted) | `"omp"`. Unknown values fail startup with a load-time error. Note: configuration acceptance is distinct from launch availability.
 - Container includes the pre-installed `opencode` binary
 
 **External MCP Servers**:
