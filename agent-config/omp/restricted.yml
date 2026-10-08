@@ -1,0 +1,99 @@
+# Pinned deployment-owned OMP configuration overlay for restricted mode.
+# Pinned to official OMP v18.6.1 / 2a2c6dcbbb558c0f8145f67f28b3370984f2bf60.
+tools:
+  approvalMode: write
+lsp:
+  enabled: false
+startup:
+  checkUpdate: false
+marketplace:
+  autoUpdate: off
+update:
+  channel: stable
+compaction:
+  enabled: true
+disabledProviders:
+  - abliteration
+  - aimlapi
+  - aiand
+  - alibaba-coding-plan
+  - alibaba-token-plan
+  - amazon-bedrock
+  - anthropic
+  - apple
+  - azure
+  - baseten
+  - bedrock-mantle
+  - cerebras
+  - charm-hyper
+  - cline-pass
+  - cloudflare-ai-gateway
+  - commandcode
+  - coreweave
+  - cursor
+  - deepinfra
+  - deepseek
+  - devin
+  - factory-droid
+  - firepass
+  - fireworks
+  - github-copilot
+  - gitlab-duo
+  - gitlab-duo-agent
+  - gmi-cloud
+  - google-antigravity
+  - google-gemini-cli
+  - google-vertex
+  - groq
+  - helmcode
+  - huggingface
+  - kilo
+  - kimi-code
+  - llama.cpp
+  - litellm
+  - lm-studio
+  - local
+  - meta
+  - minimax
+  - minimax-code
+  - minimax-code-cn
+  - mistral
+  - moonshot
+  - muse-code
+  - nanogpt
+  - novita
+  - nvidia
+  - ollama
+  - ollama-cloud
+  - opencode-go
+  - opencode-zen
+  - openai
+  - openai-codex
+  - qianfan
+  - qwen-portal
+  - sakana
+  - siliconflow
+  - siliconflow-cn
+  - singularityapi-dev
+  - singularityapi-tech
+  - snowflake
+  - stepfun
+  - synthetic
+  - together
+  - typesafe
+  - umans
+  - venice
+  - vercel-ai-gateway
+  - vllm
+  - wafer-serverless
+  - web
+  - xai
+  - xai-oauth
+  - xiaomi
+  - xiaomi-token-plan-ams
+  - xiaomi-token-plan-cn
+  - xiaomi-token-plan-sgp
+  - yolo-auto
+  - zai
+  - zenmux
+  - zhipu-coding-plan
