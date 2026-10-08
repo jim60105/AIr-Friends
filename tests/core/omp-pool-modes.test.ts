@@ -80,7 +80,9 @@ Deno.test("OMP acquisition matrix: entry points, resolved modes, ownership, audi
                     ) {
                       await Deno.writeTextFile(
                         join(promptDir, `system_${name}.md`),
-                        name === "summary" ? "SUMMARY" : "TURN {{ yolo }}",
+                        `${
+                          name === "summary" ? "SUMMARY" : "TURN {{ yolo }}"
+                        }\nID={{ sessionId }}\nTMP={{ tmpDir }}`,
                       );
                     }
                     const config: Config = {
@@ -213,11 +215,25 @@ Deno.test("OMP acquisition matrix: entry points, resolved modes, ownership, audi
                         setSessionGateContext: () => {},
                         supportsImageContent: () => false,
                         getClient: () => null,
-                        prompt: (_id: string, text: string) => {
+                        prompt: async (_id: string, text: string) => {
                           assertEquals(_id, "acp-id");
                           const session = checkOwnership();
+                          if (!skillEnabled) {
+                            assert(
+                              !text.includes(sessionId),
+                              "Internal ID must not enter agent prompts",
+                            );
+                          }
+                          const staging = text.match(/^TMP=(.+)$/m)?.[1];
+                          if (staging) {
+                            assert(
+                              (await Deno.stat(staging)).isDirectory,
+                              "Advertised staging directory must exist",
+                            );
+                            if (!skillEnabled) assertEquals(staging, session.workspace.tmpPath);
+                          }
                           prompts++;
-                          if (text === "SUMMARY") {
+                          if (text.startsWith("SUMMARY")) {
                             assertEquals(creates, 1);
                             assertEquals(acquisitions, usesPool ? 1 : 0);
                             if (usesPool) {

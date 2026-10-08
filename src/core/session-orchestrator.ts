@@ -1166,7 +1166,7 @@ export class SessionOrchestrator {
           const retryStrategy = getRetryPromptStrategy(agentType, undefined, {
             sharedProcess: !!this.processPool,
             sessionId: this.skillSessionId(shellSessionId),
-            stagingDir: shellSessionId
+            stagingDir: this.skillSessionId(shellSessionId)
               ? `${workspace.tmpPath}/${shellSessionId}`
               : workspace.tmpPath,
           });
@@ -1192,7 +1192,7 @@ export class SessionOrchestrator {
               {
                 sharedProcess: !!this.processPool,
                 sessionId: this.skillSessionId(shellSessionId),
-                stagingDir: shellSessionId
+                stagingDir: this.skillSessionId(shellSessionId)
                   ? `${workspace.tmpPath}/${shellSessionId}`
                   : workspace.tmpPath,
               },
@@ -1520,10 +1520,12 @@ export class SessionOrchestrator {
       // 4. Build prompt from template
       const fullPrompt = await this.buildSpontaneousPromptFromTemplate(
         context,
-        shellSessionId,
+        this.skillSessionId(shellSessionId) ?? null,
         resolvedModel,
         yoloDecision.enabled,
-        shellSessionId ? `${workspace.tmpPath}/${shellSessionId}` : workspace.tmpPath,
+        this.skillSessionId(shellSessionId)
+          ? `${workspace.tmpPath}/${shellSessionId}`
+          : workspace.tmpPath,
       );
 
       sessionLogger.debug("Spontaneous prompt built", {
@@ -1772,7 +1774,7 @@ export class SessionOrchestrator {
           const retryStrategy = getRetryPromptStrategy(agentType, undefined, {
             sharedProcess: !!this.processPool,
             sessionId: this.skillSessionId(shellSessionId),
-            stagingDir: shellSessionId
+            stagingDir: this.skillSessionId(shellSessionId)
               ? `${workspace.tmpPath}/${shellSessionId}`
               : workspace.tmpPath,
           });
@@ -1794,7 +1796,7 @@ export class SessionOrchestrator {
               {
                 sharedProcess: !!this.processPool,
                 sessionId: this.skillSessionId(shellSessionId),
-                stagingDir: shellSessionId
+                stagingDir: this.skillSessionId(shellSessionId)
                   ? `${workspace.tmpPath}/${shellSessionId}`
                   : workspace.tmpPath,
               },
@@ -1987,7 +1989,7 @@ export class SessionOrchestrator {
       // 3. Build self-research prompt
       const fullPrompt = await this.buildSelfResearchPrompt(
         rssItems,
-        shellSessionId,
+        this.skillSessionId(shellSessionId) ?? null,
         resolvedModel,
         this.yolo,
       );
@@ -2542,7 +2544,7 @@ export class SessionOrchestrator {
 
       const fullPrompt = await this.buildMemoryMaintenancePrompt(
         workspaceKey,
-        shellSessionId,
+        this.skillSessionId(shellSessionId) ?? null,
         workspace,
         resolvedModel,
         this.yolo,
@@ -3341,7 +3343,7 @@ export class SessionOrchestrator {
       // 4. Build reminder prompt
       const fullPrompt = await this.buildReminderPrompt(
         reminder,
-        shellSessionId,
+        this.skillSessionId(shellSessionId) ?? null,
         resolvedModel,
         yoloDecision.enabled,
       );
@@ -3530,7 +3532,7 @@ export class SessionOrchestrator {
           const retryStrategy = getRetryPromptStrategy(agentType, undefined, {
             sharedProcess: !!this.processPool,
             sessionId: this.skillSessionId(shellSessionId),
-            stagingDir: shellSessionId
+            stagingDir: this.skillSessionId(shellSessionId)
               ? `${workspace.tmpPath}/${shellSessionId}`
               : workspace.tmpPath,
           });
@@ -3552,7 +3554,7 @@ export class SessionOrchestrator {
               {
                 sharedProcess: !!this.processPool,
                 sessionId: this.skillSessionId(shellSessionId),
-                stagingDir: shellSessionId
+                stagingDir: this.skillSessionId(shellSessionId)
                   ? `${workspace.tmpPath}/${shellSessionId}`
                   : workspace.tmpPath,
               },
@@ -3820,7 +3822,7 @@ export class SessionOrchestrator {
           const retryCtx: RetryPromptContext = {
             sharedProcess: true,
             sessionId: this.skillSessionId(shellSessionId),
-            stagingDir: shellSessionId
+            stagingDir: this.skillSessionId(shellSessionId)
               ? `${workspace.tmpPath}/${shellSessionId}`
               : workspace.tmpPath,
           };
@@ -4783,7 +4785,9 @@ export class SessionOrchestrator {
         const env = createTemplateEngine(promptDir);
         const summaryPrompt = await renderTemplate(env, summaryPromptPath, {
           sessionId: this.skillSessionId(shellSessionId),
-          tmpDir: shellSessionId ? `${workspace.tmpPath}/${shellSessionId}` : workspace.tmpPath,
+          tmpDir: this.skillSessionId(shellSessionId)
+            ? `${workspace.tmpPath}/${shellSessionId}`
+            : workspace.tmpPath,
         });
 
         sessionLogger.info("Generating conversation summary");

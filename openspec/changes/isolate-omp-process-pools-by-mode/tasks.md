@@ -45,6 +45,13 @@ issues in unchanged `tests/acp/agent-factory-omp.test.ts` and
 `tests/acp/omp-settings.test.ts` (unused/unversioned imports); no predecessor logic
 or security boundary was changed to suppress them.
 
+The takeover post-implementation critique found an internal identity leaking into
+disabled-API prompts and selecting uncreated staging paths. The follow-up uses
+the nullable external skill identity in every prompt/staging decision; the 224-case
+matrix now interpolates session ID and tmp directory, rejects internal IDs in
+disabled-API prompts, and checks that every advertised staging directory exists.
+That matrix, type check, scoped lint, and strict validation passed after the fix.
+
 - [x] 6.1 `docs/OMP_POOL_MODES.md`: pool entry identity (mode additive over row 9's state-namespace segment), dual-mode channel coexistence, lease-serialization-preserved statement (pool split ≠ parallel persona), OpenCode byte-identity statement, per-entry-point resolution-before-acquisition table, ownership fields + explicit row-11 read-only handoff, inherited P0/row-8/row-12/20 gate list, mock-only evidence limits; cross-link `docs/OMP_SPAWN.md` (row 9).
 - [x] 6.2 CHANGELOG entry; confirm `config.example.yaml`, `.env.example`, `helm/values.yaml` need NO change (mode from existing global flag + reply-policy config; agent type from row 7) — if any new field sneaks in during implementation, synchronize all three in THIS change.
 - [x] 6.3 Run applicable focused checks only (`deno check src/main.ts`, `deno test tests/core/agent-process-pool.test.ts tests/core/session-orchestrator.test.ts tests/acp/agent-factory.test.ts`, `deno lint src/ tests/`), no live agents; `openspec validate isolate-omp-process-pools-by-mode --strict` passes.
