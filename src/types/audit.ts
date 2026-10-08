@@ -21,6 +21,7 @@ export type AuditPhase =
   | "reply_edited"
   | "file_sent"
   | "retry_triggered"
+  | "process_acquired"
   | "session_end"
   | "permission_approved"
   | "permission_denied";
@@ -67,6 +68,11 @@ export interface SessionAuditEntry {
     // agent_connect
     agentType?: string;
     capabilities?: Record<string, unknown>;
+
+    // process_acquired
+    permissionMode?: string;
+    processNamespace?: string;
+    pooled?: boolean;
 
     // prompt_sent
     promptLength?: number;

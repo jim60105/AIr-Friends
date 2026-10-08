@@ -2,6 +2,7 @@
 
 import { assertEquals, assertExists, assertStringIncludes } from "@std/assert";
 import { SessionOrchestrator } from "@core/session-orchestrator.ts";
+
 import { activeSessionsGauge, selfResearchNoNoteTotal, sessionsTotal } from "@utils/metrics.ts";
 import type { AgentProcessPool } from "@core/agent-process-pool.ts";
 import type { CompletedSessionStore } from "../../src/dashboard/completed-session-store.ts";

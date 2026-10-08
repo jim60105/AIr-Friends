@@ -52,6 +52,18 @@ export interface ActiveSession {
   fileSendCount: number;
   /** Number of successful memory-save calls in this session (crash-recovery ops note) */
   memorySaveCount?: number;
+  /**
+   * Acquisition-time permission mode ("restricted" | "native-yolo" | "yolo-switch").
+   * Written once at process acquisition/spawn and immutable thereafter.
+   * Read and verified by `restore-mode-owned-acp-sessions` on reconnect/load.
+   */
+  permissionMode?: "restricted" | "native-yolo" | "yolo-switch";
+  /**
+   * Acquisition-time process/state namespace root path.
+   * Written once at process acquisition/spawn and immutable thereafter.
+   * Read and verified by `restore-mode-owned-acp-sessions` on reconnect/load.
+   */
+  processNamespace?: string;
   /** Agent's global workspace path */
   agentWorkspacePath?: string;
   /** Last time this session was touched by an authenticated call (F13 idle TTL) */
@@ -447,6 +459,28 @@ export class SessionRegistry {
     const session = this.sessions.get(sessionId);
     if (session) {
       session.lastSentMessageId = messageId;
+    }
+  }
+
+  /**
+   * Record session ownership at acquisition.
+   * Immutable write-once contract: identical repeated values are harmless,
+   * conflicting values are ignored and not allowed to overwrite the original values.
+   */
+  recordOwnership(
+    sessionId: string,
+    ownership: {
+      permissionMode: "restricted" | "native-yolo" | "yolo-switch";
+      processNamespace: string;
+    },
+  ): void {
+    const session = this.sessions.get(sessionId);
+    if (!session) return;
+    if (session.permissionMode === undefined) {
+      session.permissionMode = ownership.permissionMode;
+    }
+    if (session.processNamespace === undefined) {
+      session.processNamespace = ownership.processNamespace;
     }
   }
 

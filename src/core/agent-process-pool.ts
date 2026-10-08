@@ -15,7 +15,8 @@
 
 import { createLogger } from "@utils/logger.ts";
 import { AgentConnector } from "@acp/agent-connector.ts";
-import type { AgentConnectorOptions } from "@acp/types.ts";
+import type { AgentConnectorOptions, AgentType } from "@acp/types.ts";
+import { ompAgentDir, ompLaunchCwd, ompProcessTmpDir, ompXdgDataHome } from "@utils/omp-paths.ts";
 import {
   deleteSessionJwtFile,
   issueSessionJwtFile,
@@ -48,11 +49,36 @@ const CHILD_KILL_WINDOW_MS = 4_000;
 
 export type SessionPriority = "interactive" | "maintenance";
 
+/** Permission mode for OMP pool process scoping ("restricted" | "native-yolo"). */
+export type PoolPermissionMode = "restricted" | "native-yolo";
+
+/**
+ * Compute the pool entry key for process map lookups.
+ * For OpenCode, returns `poolKey` verbatim.
+ * For OMP, returns `${poolKey}:${permissionMode}`.
+ */
+export function poolEntryKey(
+  poolKey: string,
+  agentType: AgentType,
+  permissionMode: PoolPermissionMode,
+): string {
+  if (agentType === "omp") {
+    return `${poolKey}:${permissionMode}`;
+  }
+  return poolKey;
+}
+
 export interface PoolRunOptions {
   poolKey: string;
+  /** Deployment agent type ("opencode" | "omp"). Consumed explicitly; never inferred. */
+  agentType: AgentType;
+  /** Resolved permission mode ("restricted" | "native-yolo"). Consumed explicitly; never inferred. */
+  permissionMode: PoolPermissionMode;
   sessionType: string;
   /** Shell (Skill API) session id — used for the per-session JWT + pointer. */
   shellSessionId: string | null;
+  /** Internal ownership identity, independent of external Skill API availability. */
+  registrySessionId?: string;
   /** The ACP session id (returned by the runner) for possible `session/load` recovery. */
   priority: SessionPriority;
   /** Connector options used to (lazily) spawn the pool key's process. */
@@ -62,7 +88,10 @@ export interface PoolRunOptions {
 }
 
 interface PoolEntry {
+  entryKey: string;
   poolKey: string;
+  agentType: AgentType;
+  permissionMode: PoolPermissionMode;
   connector: AgentConnector;
   refCount: number;
   lastActivity: number;
@@ -150,8 +179,8 @@ export class AgentProcessPool {
       };
       // Queue-activity touch (spec): a queued session is excluded from the
       // registry idle reaper while it waits — the sweeper keeps refreshing it.
-      if (options.shellSessionId) {
-        this.sessionRegistry.touch(options.shellSessionId);
+      if (options.registrySessionId ?? options.shellSessionId) {
+        this.sessionRegistry.touch((options.registrySessionId ?? options.shellSessionId)!);
       }
       (options.priority === "interactive" ? this.interactiveQueue : this.maintenanceQueue).push(
         item,
@@ -162,6 +191,11 @@ export class AgentProcessPool {
 
   /** Serve the FIFO lanes: interactive first, with the starvation guard. */
   private serviceQueue(): void {
+    // Global execution-lease serialization guarantee:
+    // Splitting process pools by permission mode preserves single-lease execution.
+    // The single `inFlight` slot covers all entries regardless of agentType or
+    // permissionMode. Interactive vs maintenance lanes, starvation guard, and
+    // release lifecycle remain strictly serialized (verified by preservation tests).
     if (this.inFlight !== null) return;
 
     // Starvation guard: after MAINTENANCE_STARVE_LIMIT interactive sessions have
@@ -188,8 +222,10 @@ export class AgentProcessPool {
       // (the sweeper is only periodic): cancel it instead of starting it.
       if (Date.now() - next.queuedAt >= this.queueDeadlineMs) {
         const expired = next;
-        if (expired.options.shellSessionId) {
-          this.sessionRegistry.remove(expired.options.shellSessionId);
+        if (expired.options.registrySessionId ?? expired.options.shellSessionId) {
+          this.sessionRegistry.remove(
+            (expired.options.registrySessionId ?? expired.options.shellSessionId)!,
+          );
         }
         expired.resolveResult?.(undefined, true);
         logger.warn(
@@ -219,17 +255,25 @@ export class AgentProcessPool {
     const { options } = item;
     let entry: PoolEntry | undefined;
     let jwtRenewal: ReturnType<typeof setInterval> | undefined;
+    let ownershipHeartbeat: ReturnType<typeof setInterval> | undefined;
     let renewalActive = false;
     const pendingRenewals = new Set<Promise<void>>();
     try {
       // Keep queued/in-flight sessions alive against the registry idle reaper.
-      if (options.shellSessionId) {
-        this.sessionRegistry.touch(options.shellSessionId);
+      if (options.registrySessionId ?? options.shellSessionId) {
+        this.sessionRegistry.touch((options.registrySessionId ?? options.shellSessionId)!);
       }
 
-      entry = await this.acquireProcess(options.poolKey, options.connectorOptions);
+      const entryKey = poolEntryKey(options.poolKey, options.agentType, options.permissionMode);
+      entry = await this.acquireProcess(entryKey, options);
       entry.refCount++;
       entry.lastActivity = Date.now();
+      if (options.registrySessionId && !options.shellSessionId) {
+        ownershipHeartbeat = setInterval(
+          () => this.sessionRegistry.touch(options.registrySessionId!),
+          this.jwtRenewalIntervalMs,
+        );
+      }
 
       // Issue (or re-issue) the per-session JWT with a fresh `exp`, written
       // atomically (temp file, chmod 0600, rename) to {jwtDir}/{sessionId}.jwt.
@@ -274,6 +318,7 @@ export class AgentProcessPool {
       // await between the flag clear and clearInterval), so a late or stalled
       // renewal can never resurrect the JWT file after the release deletes it.
       renewalActive = false;
+      if (ownershipHeartbeat !== undefined) clearInterval(ownershipHeartbeat);
       if (jwtRenewal !== undefined) clearInterval(jwtRenewal);
       if (pendingRenewals.size > 0) {
         await Promise.allSettled([...pendingRenewals]);
@@ -318,10 +363,10 @@ export class AgentProcessPool {
 
   /** Lazy-spawn or reuse the pool key's live process (generation-checked). */
   private async acquireProcess(
-    poolKey: string,
-    connectorOptions: AgentConnectorOptions,
+    entryKey: string,
+    options: PoolRunOptions,
   ): Promise<PoolEntry> {
-    let entry = this.entries.get(poolKey);
+    let entry = this.entries.get(entryKey);
 
     // A reclaim in progress blocks new acquires until the old process fully exits
     // (same-generation check) — this prevents two opencode processes from opening
@@ -330,13 +375,13 @@ export class AgentProcessPool {
       await entry.connector.disconnect();
       // Identity check: a concurrent acquire may already have removed the
       // reclaiming entry and installed a fresh one — never evict that.
-      if (this.entries.get(poolKey) === entry) {
-        this.entries.delete(poolKey);
+      if (this.entries.get(entryKey) === entry) {
+        this.entries.delete(entryKey);
         entry = undefined;
       } else {
-        entry = this.entries.get(poolKey);
+        entry = this.entries.get(entryKey);
       }
-      if (!entry) return this.acquireProcess(poolKey, connectorOptions);
+      if (!entry) return this.acquireProcess(entryKey, options);
     }
 
     // A dead process (crash, the drain-timeout tree-kill, or an external kill)
@@ -347,12 +392,12 @@ export class AgentProcessPool {
         (entry.processPid !== undefined && !(await processAlive(entry.processPid))))
     ) {
       await entry.connector.disconnect();
-      if (this.entries.get(poolKey) === entry) {
-        this.entries.delete(poolKey);
+      if (this.entries.get(entryKey) === entry) {
+        this.entries.delete(entryKey);
         entry = undefined;
       } else {
         // A concurrent acquire already replaced it — reuse the replacement.
-        entry = this.entries.get(poolKey);
+        entry = this.entries.get(entryKey);
       }
     }
 
@@ -365,11 +410,19 @@ export class AgentProcessPool {
     // Lazy spawn: create a fresh connector and connect (spawn the subprocess).
     // The connector spawns `dumb-init -- opencode acp` with cwd = the pool key's
     // channel-cwd directory, so those channel-scoped directories must exist first.
-    await this.ensureSharedDirs(poolKey);
-    const connector = this.connectorFactory(connectorOptions);
+    await this.ensureSharedDirs(
+      entryKey,
+      options.agentType,
+      options.poolKey,
+      options.permissionMode,
+    );
+    const connector = this.connectorFactory(options.connectorOptions);
     await connector.connect();
     entry = {
-      poolKey,
+      entryKey,
+      poolKey: options.poolKey,
+      agentType: options.agentType,
+      permissionMode: options.permissionMode,
       connector,
       refCount: 0,
       lastActivity: Date.now(),
@@ -377,8 +430,13 @@ export class AgentProcessPool {
       reclaiming: false,
       processPid: connector.getProcessPid(),
     };
-    this.entries.set(poolKey, entry);
-    logger.info("Spawning shared agent process for pool key {poolKey}", { poolKey });
+    this.entries.set(entryKey, entry);
+    logger.info("Spawning shared agent process for pool entry {entryKey}", {
+      entryKey,
+      poolKey: options.poolKey,
+      agentType: options.agentType,
+      permissionMode: options.permissionMode,
+    });
     return entry;
   }
 
@@ -386,7 +444,7 @@ export class AgentProcessPool {
   private scheduleReclaim(entry: PoolEntry): void {
     if (entry.reclaimTimer) clearTimeout(entry.reclaimTimer);
     entry.reclaimTimer = setTimeout(async () => {
-      const current = this.entries.get(entry.poolKey);
+      const current = this.entries.get(entry.entryKey);
       // Same-generation check: the timer may fire after the entry was replaced.
       if (!current || current.generation !== entry.generation) return;
       if (current.refCount > 0) {
@@ -399,15 +457,17 @@ export class AgentProcessPool {
         await current.connector.disconnect();
         // Identity check: if a concurrent acquire already replaced this entry,
         // do not evict the replacement (it is a live, leased process).
-        if (this.entries.get(current.poolKey) === current) {
-          this.entries.delete(current.poolKey);
+        if (this.entries.get(current.entryKey) === current) {
+          this.entries.delete(current.entryKey);
         }
-        logger.info("Reclaimed idle agent process for pool key {poolKey}", {
+        logger.info("Reclaimed idle agent process for pool entry {entryKey}", {
+          entryKey: current.entryKey,
           poolKey: current.poolKey,
           idleMs: Date.now() - current.lastActivity,
         });
       } catch (error) {
-        logger.error("Failed to reclaim agent process for {poolKey}: {error}", {
+        logger.error("Failed to reclaim agent process for {entryKey}: {error}", {
+          entryKey: current.entryKey,
           poolKey: current.poolKey,
           error: error instanceof Error ? error.message : String(error),
         });
@@ -416,14 +476,26 @@ export class AgentProcessPool {
   }
 
   /**
-   * Create the pool key's channel-scoped directories (process cwd, shell TMPDIR,
-   * OpenCode data root) under the bot data root. Without these, the connector's
-   * `dumb-init` spawn fails with "No such cwd" and OpenCode cannot write session
-   * state for `session/load` recovery.
+   * Create shared directories under the bot data root.
+   * For OpenCode: creates channel-cwd, channel-tmp, and opencode-data for poolKey (byte-identical to before).
+   * For OMP: ensures mode-distinct state roots exist under omp-pools/{poolKey}/{mode}.
    */
-  private async ensureSharedDirs(poolKey: string): Promise<void> {
+  private async ensureSharedDirs(
+    _entryKey: string,
+    agentType: AgentType,
+    poolKey: string,
+    permissionMode: PoolPermissionMode,
+  ): Promise<void> {
     const dataRoot = this.config.workspace?.repoPath;
     if (!dataRoot) return;
+    if (agentType === "omp") {
+      const baseRoot = resolve(join(dataRoot, "omp-pools", poolKey));
+      await Deno.mkdir(ompAgentDir(baseRoot, permissionMode), { recursive: true });
+      await Deno.mkdir(ompProcessTmpDir(baseRoot, permissionMode), { recursive: true });
+      await Deno.mkdir(ompLaunchCwd(baseRoot, permissionMode), { recursive: true });
+      await Deno.mkdir(ompXdgDataHome(baseRoot, permissionMode), { recursive: true });
+      return;
+    }
     for (const sub of ["channel-cwd", "channel-tmp", "opencode-data"]) {
       // Resolve lexically so the created directory string is byte-identical to
       // the absolute paths exported into the agent process env (proposal:
@@ -539,18 +611,22 @@ export class AgentProcessPool {
         const waitedMs = now - item.queuedAt;
         if (waitedMs >= this.queueDeadlineMs) {
           queue.splice(i, 1);
-          if (item.options.shellSessionId) {
-            this.sessionRegistry.remove(item.options.shellSessionId);
+          if (item.options.registrySessionId ?? item.options.shellSessionId) {
+            this.sessionRegistry.remove(
+              (item.options.registrySessionId ?? item.options.shellSessionId)!,
+            );
           }
           item.resolveResult?.(undefined, true);
           logger.warn(
             "Queue deadline exceeded for session {sessionId} after {waitedMs}ms",
             { sessionId: item.options.shellSessionId, waitedMs },
           );
-        } else if (item.options.shellSessionId) {
+        } else if (item.options.registrySessionId ?? item.options.shellSessionId) {
           // Queue-activity touch (spec): still-queued sessions stay excluded
           // from the registry idle reaper while they wait for the lease.
-          this.sessionRegistry.touch(item.options.shellSessionId);
+          this.sessionRegistry.touch(
+            (item.options.registrySessionId ?? item.options.shellSessionId)!,
+          );
         }
       }
     }

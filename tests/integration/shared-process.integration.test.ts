@@ -353,6 +353,8 @@ Deno.test({
         const result = await pool.run(
           {
             poolKey,
+            agentType: "opencode",
+            permissionMode: "restricted",
             sessionType: label,
             shellSessionId: sessionId,
             priority: "interactive",
@@ -514,6 +516,8 @@ Deno.test({
       const runPromise = pool.run(
         {
           poolKey,
+          agentType: "opencode",
+          permissionMode: "restricted",
           sessionType: "message",
           shellSessionId: sessionId,
           priority: "interactive",
