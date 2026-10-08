@@ -6,6 +6,15 @@ import { buildSkillAutoApproveList, ChatbotClient, type SessionGateContext } fro
 import type { AgentCapabilities, AgentConnectorOptions, MCPServerConfig } from "./types.ts";
 import type { SkillRegistry } from "@skills/registry.ts";
 import type { Logger } from "@utils/logger.ts";
+import {
+  collectOptionValues,
+  findOptionByCategory,
+  formatAdvertisedValuesPreview,
+  KNOWN_REASONING_EFFORT_TOKENS,
+  resolveModelSelection,
+  resolveReasoningValue,
+  THOUGHT_LEVEL_CATEGORY,
+} from "./session-config.ts";
 
 /**
  * Timeout in milliseconds for graceful agent process shutdown
@@ -56,13 +65,9 @@ export type ReasoningEffortOutcome =
   | "failed";
 
 /**
- * Reasoning-effort tokens that have an agreed meaning (used for availability validation).
- * Exported so tests can pin consistency with `KNOWN_REASONING_EFFORTS` in the config loader.
+ * Export KNOWN_REASONING_EFFORT_TOKENS from session-config for backward-compatibility.
  */
-export const KNOWN_REASONING_EFFORT_TOKENS = ["none", "low", "medium", "high", "xhigh", "max"];
-
-/** ACP config option category that represents reasoning / thought level. */
-const THOUGHT_LEVEL_CATEGORY = "thought_level";
+export { KNOWN_REASONING_EFFORT_TOKENS };
 
 /**
  * AgentConnector manages the lifecycle of ACP Agent connections
@@ -435,7 +440,16 @@ export class AgentConnector {
   }
 
   /**
-   * Set the model for a session
+   * Set the model for a session using stable-first canonical selection.
+   *
+   * If the session's latest cached config options advertise a `category: "model"` option,
+   * the requested model ID is matched case-insensitively and the canonical advertised
+   * value is sent via `setSessionConfigOption`, refreshing the cache from the response.
+   * If the advertised catalog does not contain the requested model under any casing,
+   * this method throws a descriptive Error and does NOT fall back to unstable.
+   *
+   * Only when no stable `category: "model"` option is advertised does this fall back
+   * to `unstable_setSessionModel`.
    */
   async setSessionModel(sessionId: string, modelId: string): Promise<void> {
     if (!this.connection) {
@@ -443,14 +457,50 @@ export class AgentConnector {
     }
 
     const logger = this.options.logger as Logger;
+    const cachedOptions = this.sessionConfigOptions.get(sessionId);
+    const selection = resolveModelSelection(cachedOptions, modelId);
 
-    await this.raceAgainstCrash(this.connection.unstable_setSessionModel({
-      sessionId,
-      modelId,
-    }));
-
-    this.sessionModelIds.set(sessionId, modelId);
-    logger.info("Session model set to {modelId} for session {sessionId}", { sessionId, modelId });
+    if (selection.kind === "stable") {
+      const response = await this.raceAgainstCrash(this.connection.setSessionConfigOption({
+        sessionId,
+        configId: selection.configId,
+        value: selection.value,
+      }));
+      this.refreshFromConfigOptionResponse(sessionId, response);
+      this.sessionModelIds.set(sessionId, selection.value);
+      logger.info(
+        "Session model set to {modelId} (canonical: {canonical}) for session {sessionId}",
+        {
+          sessionId,
+          modelId,
+          canonical: selection.value,
+        },
+      );
+    } else if (selection.kind === "unstable-fallback") {
+      await this.raceAgainstCrash(this.connection.unstable_setSessionModel({
+        sessionId,
+        modelId,
+      }));
+      this.sessionModelIds.set(sessionId, modelId);
+      logger.info("Session model set to {modelId} via unstable fallback for session {sessionId}", {
+        sessionId,
+        modelId,
+      });
+    } else {
+      logger.warn(
+        "Requested model {modelId} not offered in advertised catalog for session {sessionId}",
+        {
+          sessionId,
+          modelId,
+          agentType: this.options.agentType,
+          advertisedValues: selection.advertisedValues,
+        },
+      );
+      const preview = formatAdvertisedValuesPreview(selection.advertisedValues);
+      throw new Error(
+        `Requested model '${modelId}' is not offered in advertised catalog for agent '${this.options.agentType}'. Available: ${preview}`,
+      );
+    }
   }
 
   /**
@@ -484,33 +534,23 @@ export class AgentConnector {
   }
 
   /**
-   * Find the currently advertised `thought_level` config option for a session, if any.
+   * Refresh config options cache from a `set_config_option` response object.
    */
-  private findThoughtLevelOption(sessionId: string): acp.SessionConfigOption | undefined {
-    return this.sessionConfigOptions.get(sessionId)?.find((opt) =>
-      opt.category === THOUGHT_LEVEL_CATEGORY
+  private refreshFromConfigOptionResponse(sessionId: string, response: unknown): void {
+    const configOptions = response && typeof response === "object" && "configOptions" in response
+      ? (response as { configOptions?: unknown }).configOptions
+      : undefined;
+    this.refreshSessionConfigOptions(
+      sessionId,
+      Array.isArray(configOptions) ? (configOptions as acp.SessionConfigOption[]) : undefined,
     );
   }
 
   /**
-   * Collect the available value ids for a config option, flattening grouped options.
+   * Find the currently advertised `thought_level` config option for a session, if any.
    */
-  private collectOptionValues(option: acp.SessionConfigOption): string[] {
-    const values: string[] = [];
-    const options = (option as { options?: unknown }).options;
-    if (!Array.isArray(options)) return values;
-    for (const entry of options as Array<Record<string, unknown>>) {
-      if (typeof entry.value === "string") {
-        // Flat SessionConfigSelectOption
-        values.push(entry.value);
-      } else if (Array.isArray(entry.options)) {
-        // SessionConfigSelectGroup: collect its nested option values
-        for (const nested of entry.options as Array<Record<string, unknown>>) {
-          if (typeof nested.value === "string") values.push(nested.value);
-        }
-      }
-    }
-    return values;
+  private findThoughtLevelOption(sessionId: string): acp.SessionConfigOption | undefined {
+    return findOptionByCategory(this.sessionConfigOptions.get(sessionId), THOUGHT_LEVEL_CATEGORY);
   }
 
   /**
@@ -548,18 +588,10 @@ export class AgentConnector {
       return "unsupported";
     }
 
-    // For known-vocabulary values, skip rather than send an invalid value the agent would reject.
-    // Passthrough (agent-specific) tokens are sent as-is and any error is caught.
-    //
-    // Match case-insensitively against the agent's advertised values, but SEND the agent's
-    // canonical casing when a case-insensitive match exists (agents define their own value casing).
-    const availableValues = this.collectOptionValues(option);
-    const isKnownToken = KNOWN_REASONING_EFFORT_TOKENS.includes(trimmed.toLowerCase());
-    const canonicalMatch = availableValues.find(
-      (v) => v.toLowerCase() === trimmed.toLowerCase(),
-    );
+    const availableValues = collectOptionValues(option);
+    const resolved = resolveReasoningValue(trimmed, availableValues);
 
-    if (isKnownToken && availableValues.length > 0 && canonicalMatch === undefined) {
+    if (resolved.kind === "not-offered") {
       logger.warn(
         "Requested reasoning effort {requested} not offered by model; skipping",
         {
@@ -574,8 +606,7 @@ export class AgentConnector {
       return "skipped_unavailable";
     }
 
-    // Prefer the agent's canonical-cased value when matched; otherwise send the trimmed token.
-    const valueToSend = canonicalMatch ?? trimmed;
+    const valueToSend = resolved.value;
 
     try {
       const response = await this.raceAgainstCrash(this.connection.setSessionConfigOption({
@@ -583,11 +614,7 @@ export class AgentConnector {
         configId: option.id,
         value: valueToSend,
       }));
-      // The response carries the complete updated config option state.
-      this.refreshSessionConfigOptions(
-        sessionId,
-        (response as { configOptions?: acp.SessionConfigOption[] })?.configOptions,
-      );
+      this.refreshFromConfigOptionResponse(sessionId, response);
       logger.info(
         "Reasoning effort {requested} applied for session {sessionId}",
         { sessionId, requested: trimmed, sent: valueToSend, configId: option.id },
@@ -959,17 +986,22 @@ export class AgentConnector {
    * @param sessionId the ACP session to resume
    * @param cwd the session's working directory (required by `session/load`)
    * @param mcpServers the session's MCP servers (required by `session/load`)
+   * @param opts optional configuration including reasoningEffort to reapply
    * @returns true if reconnection succeeded and the session was loaded.
+   * @throws Error if model re-establishment fails against the post-load catalog
    */
   async reconnectAndResumeSession(
     sessionId: string,
     cwd: string,
     mcpServers: MCPServerConfig[] = [],
+    opts?: { reasoningEffort?: string },
   ): Promise<boolean> {
     const logger = this.options.logger as Logger;
 
     logger.info("Attempting to reconnect and resume session {sessionId}", { sessionId });
 
+    // Capture prior model ID before disconnect() resets sessionModelIds map
+    const priorModelId = this.sessionModelIds.get(sessionId);
     // Disconnect old connection (kills the dead/dying process)
     await this.disconnect();
 
@@ -995,12 +1027,32 @@ export class AgentConnector {
       return false;
     }
     const supportedServers = this.filterSupportedMCPServers(mcpServers);
-    await this.raceAgainstCrash(this.connection.loadSession({
+    const loadResponse = await this.raceAgainstCrash(this.connection.loadSession({
       sessionId,
       cwd,
       mcpServers: supportedServers.map((server) => this.convertMCPServerConfig(server)),
     }));
+    this.refreshFromConfigOptionResponse(sessionId, loadResponse);
     this.setSessionGateContext(sessionId, { cwd });
+
+    // Re-establish the session's prior model through stable-first selection
+    if (priorModelId !== undefined) {
+      await this.setSessionModel(sessionId, priorModelId);
+    }
+
+    // Reapply reasoning effort best-effort if supplied and active
+    if (opts?.reasoningEffort && AgentConnector.isReasoningEffortActive(opts.reasoningEffort)) {
+      const outcome = await this.setReasoningEffort(sessionId, opts.reasoningEffort);
+      logger.info(
+        "Reasoning effort reapplication outcome {outcome} for resumed session {sessionId}",
+        {
+          sessionId,
+          requested: opts.reasoningEffort,
+          outcome,
+        },
+      );
+    }
+
     logger.info("Session {sessionId} resumed via session/load", { sessionId });
     return true;
   }

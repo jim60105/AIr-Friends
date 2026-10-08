@@ -72,6 +72,386 @@ Deno.test("AgentConnector - capabilities checking", async (t) => {
   });
 });
 
+Deno.test("reconnectAndResumeSession - post-load catalog miss rejects without unstable fallback or reasoning work", async () => {
+  const connector = createMockConnectorWithCapabilities({ loadSession: true });
+  const rpcCalls: string[] = [];
+
+  (connector["sessionModelIds"] as Map<string, string>).set("sess_fail", "missing-model");
+
+  connector.connect = () => {
+    connector["connection"] = {
+      loadSession: () => {
+        rpcCalls.push("loadSession");
+        return Promise.resolve({
+          configOptions: [
+            {
+              id: "cfg_model",
+              category: "model",
+              name: "Model",
+              options: [{ value: "other-model", name: "Other" }],
+            },
+          ],
+        });
+      },
+      unstable_setSessionModel: () => {
+        rpcCalls.push("unstable_setSessionModel");
+        return Promise.resolve();
+      },
+      setSessionConfigOption: () => {
+        rpcCalls.push("setSessionConfigOption");
+        return Promise.resolve({ configOptions: [] });
+      },
+    } as unknown as typeof connector["connection"];
+    return Promise.resolve();
+  };
+  connector.disconnect = () => {
+    (connector["sessionConfigOptions"] as Map<string, unknown>).clear();
+    (connector["sessionModelIds"] as Map<string, unknown>).clear();
+    return Promise.resolve();
+  };
+
+  await assertRejects(
+    () =>
+      connector.reconnectAndResumeSession("sess_fail", "/workspace", [], {
+        reasoningEffort: "high",
+      }),
+    Error,
+    "Requested model 'missing-model' is not offered in advertised catalog",
+  );
+
+  assertEquals(rpcCalls, ["loadSession"]);
+});
+
+Deno.test("reconnectAndResumeSession - load response without configOptions clears cache and takes unstable fallback", async () => {
+  const connector = createMockConnectorWithCapabilities({ loadSession: true });
+  const rpcCalls: string[] = [];
+
+  (connector["sessionModelIds"] as Map<string, string>).set("sess_unstable", "prior-model");
+
+  connector.connect = () => {
+    connector["connection"] = {
+      loadSession: () => {
+        rpcCalls.push("loadSession");
+        return Promise.resolve({}); // No configOptions in response
+      },
+      unstable_setSessionModel: (params: { modelId: string }) => {
+        rpcCalls.push(`unstable_setSessionModel:${params.modelId}`);
+        return Promise.resolve();
+      },
+    } as unknown as typeof connector["connection"];
+    return Promise.resolve();
+  };
+  connector.disconnect = () => {
+    (connector["sessionConfigOptions"] as Map<string, unknown>).clear();
+    (connector["sessionModelIds"] as Map<string, unknown>).clear();
+    return Promise.resolve();
+  };
+
+  const success = await connector.reconnectAndResumeSession("sess_unstable", "/workspace");
+  assertEquals(success, true);
+  assertEquals(rpcCalls, ["loadSession", "unstable_setSessionModel:prior-model"]);
+});
+
+Deno.test("setSessionModel - response omitting configOptions clears cache (nullish-clear semantics)", async () => {
+  const connector = createMockConnectorWithCapabilities({});
+  connector["connection"] = {
+    setSessionConfigOption: () => Promise.resolve({}), // No configOptions returned
+  } as unknown as typeof connector["connection"];
+
+  (connector["sessionConfigOptions"] as Map<string, acp.SessionConfigOption[]>).set("s1", [
+    {
+      id: "cfg_model",
+      category: "model",
+      name: "Model",
+      type: "select",
+      currentValue: "m1",
+      options: [{ value: "m1", name: "M1" }],
+    },
+  ]);
+
+  await connector.setSessionModel("s1", "m1");
+  const cached = (connector["sessionConfigOptions"] as Map<string, acp.SessionConfigOption[]>).get(
+    "s1",
+  );
+  assertEquals(cached, []);
+});
+
+// --- setSessionModel & reconnectAndResumeSession tests ---
+
+Deno.test("setSessionModel - stable advertised model catalog sends session/set_config_option with canonical value and refreshes cache", async () => {
+  const connector = createMockConnectorWithCapabilities({});
+  const setCalls: { sessionId: string; configId: string; value: string }[] = [];
+  let unstableCalled = false;
+
+  connector["connection"] = {
+    setSessionConfigOption: (params: { sessionId: string; configId: string; value: string }) => {
+      setCalls.push(params);
+      return Promise.resolve({
+        configOptions: [
+          {
+            id: "model",
+            category: "model",
+            currentValue: params.value,
+            options: [{ value: "gpt-4o", name: "GPT-4o" }],
+          },
+        ],
+      });
+    },
+    unstable_setSessionModel: () => {
+      unstableCalled = true;
+      return Promise.resolve();
+    },
+  } as unknown as typeof connector["connection"];
+
+  // Seed grouped + mixed-casing model option
+  (connector["sessionConfigOptions"] as Map<string, acp.SessionConfigOption[]>).set("s1", [
+    {
+      id: "cfg_model",
+      category: "model",
+      name: "Model",
+      type: "select",
+      currentValue: "gpt-4o",
+      options: [
+        {
+          group: "openai",
+          name: "OpenAI",
+          options: [{ value: "OpenAI/GPT-4o", name: "GPT-4o" }],
+        },
+        { value: "anthropic/claude-3-5-sonnet", name: "Claude" },
+      ] as unknown as acp.SessionConfigSelectOption[],
+    },
+  ]);
+
+  await connector.setSessionModel("s1", "openai/gpt-4o");
+  assertEquals(unstableCalled, false);
+  assertEquals(setCalls.length, 1);
+  assertEquals(setCalls[0], {
+    sessionId: "s1",
+    configId: "cfg_model",
+    value: "OpenAI/GPT-4o",
+  });
+  assertEquals((connector["sessionModelIds"] as Map<string, string>).get("s1"), "OpenAI/GPT-4o");
+
+  // Cache refreshed from response
+  const cached = (connector["sessionConfigOptions"] as Map<string, acp.SessionConfigOption[]>).get(
+    "s1",
+  )!;
+  assertEquals(cached[0].currentValue, "OpenAI/GPT-4o");
+});
+
+Deno.test("setSessionModel - stable option absence sends exact unstable request", async () => {
+  const connector = createMockConnectorWithCapabilities({});
+  let setConfigCalled = false;
+  const unstableCalls: { sessionId: string; modelId: string }[] = [];
+
+  connector["connection"] = {
+    setSessionConfigOption: () => {
+      setConfigCalled = true;
+      return Promise.resolve({ configOptions: [] });
+    },
+    unstable_setSessionModel: (params: { sessionId: string; modelId: string }) => {
+      unstableCalls.push(params);
+      return Promise.resolve();
+    },
+  } as unknown as typeof connector["connection"];
+
+  // No model option cached (only thought_level)
+  (connector["sessionConfigOptions"] as Map<string, acp.SessionConfigOption[]>).set("s1", [
+    {
+      id: "thought_level",
+      category: "thought_level",
+      name: "Thought",
+      type: "select",
+      currentValue: "high",
+      options: [{ value: "high", name: "High" }],
+    },
+  ]);
+
+  await connector.setSessionModel("s1", "opencode/custom-model");
+  assertEquals(setConfigCalled, false);
+  assertEquals(unstableCalls.length, 1);
+  assertEquals(unstableCalls[0], { sessionId: "s1", modelId: "opencode/custom-model" });
+  assertEquals(
+    (connector["sessionModelIds"] as Map<string, string>).get("s1"),
+    "opencode/custom-model",
+  );
+});
+
+Deno.test("setSessionModel - catalog miss rejects with explicit error and zero model-setting calls", async () => {
+  const connector = createMockConnectorWithCapabilities({});
+  let setConfigCalled = false;
+  let unstableCalled = false;
+
+  connector["connection"] = {
+    setSessionConfigOption: () => {
+      setConfigCalled = true;
+      return Promise.resolve({ configOptions: [] });
+    },
+    unstable_setSessionModel: () => {
+      unstableCalled = true;
+      return Promise.resolve();
+    },
+  } as unknown as typeof connector["connection"];
+
+  (connector["sessionConfigOptions"] as Map<string, acp.SessionConfigOption[]>).set("s1", [
+    {
+      id: "cfg_model",
+      category: "model",
+      name: "Model",
+      type: "select",
+      currentValue: "m1",
+      options: [{ value: "m1", name: "M1" }],
+    },
+  ]);
+
+  await assertRejects(
+    () => connector.setSessionModel("s1", "non-existent-model"),
+    Error,
+    "Requested model 'non-existent-model' is not offered in advertised catalog",
+  );
+
+  assertEquals(setConfigCalled, false);
+  assertEquals(unstableCalled, false);
+});
+
+Deno.test("setSessionModel - config_option_update between sessions makes selection use refreshed catalog", async () => {
+  const connector = createMockConnectorWithCapabilities({});
+  const setCalls: { sessionId: string; configId: string; value: string }[] = [];
+
+  connector["connection"] = {
+    setSessionConfigOption: (params: { sessionId: string; configId: string; value: string }) => {
+      setCalls.push(params);
+      return Promise.resolve({ configOptions: [] });
+    },
+  } as unknown as typeof connector["connection"];
+
+  // Initial catalog lacks new-model
+  (connector["sessionConfigOptions"] as Map<string, acp.SessionConfigOption[]>).set("s1", [
+    {
+      id: "cfg_model",
+      category: "model",
+      name: "Model",
+      type: "select",
+      currentValue: "m1",
+      options: [{ value: "m1", name: "M1" }],
+    },
+  ]);
+
+  await assertRejects(() => connector.setSessionModel("s1", "new-model"), Error);
+
+  // Agent fires config_option_update (simulated via listener)
+  connector["refreshSessionConfigOptions"]("s1", [
+    {
+      id: "cfg_model",
+      category: "model",
+      name: "Model",
+      type: "select",
+      currentValue: "m1",
+      options: [
+        { value: "m1", name: "M1" },
+        { value: "New-Model", name: "New Model" },
+      ],
+    },
+  ]);
+
+  await connector.setSessionModel("s1", "new-model");
+  assertEquals(setCalls.length, 1);
+  assertEquals(setCalls[0].value, "New-Model");
+});
+
+Deno.test("setReasoningEffort - none/off cases end-to-end including applied on Off", async () => {
+  const connector = createMockConnectorWithCapabilities({});
+  const { calls } = injectThoughtLevel(connector, [
+    { value: "low", name: "Low" },
+    { value: "Off", name: "Off" },
+  ]);
+
+  const outcome = await connector.setReasoningEffort("s", "none");
+  assertEquals(outcome, "applied");
+  assertEquals(calls.length, 1);
+  assertEquals(calls[0].value, "Off");
+});
+
+Deno.test("reconnectAndResumeSession - restores cache from load response and re-sends model/reasoning", async () => {
+  const connector = createMockConnectorWithCapabilities({ loadSession: true });
+  const rpcOrder: string[] = [];
+
+  // Pre-seed model ID before reconnect
+  (connector["sessionModelIds"] as Map<string, string>).set(
+    "sess_restore",
+    "provider/target-model",
+  );
+
+  // Mock connect() and disconnect() so process spawning is bypassed
+  connector.connect = () => {
+    connector["connection"] = {
+      loadSession: () => {
+        rpcOrder.push("loadSession");
+        return Promise.resolve({
+          configOptions: [
+            {
+              id: "cfg_model",
+              category: "model",
+              name: "Model",
+              type: "select",
+              currentValue: "initial",
+              options: [{ value: "provider/Target-Model", name: "Target" }],
+            },
+            {
+              id: "thought_level",
+              category: "thought_level",
+              name: "Thought",
+              type: "select",
+              currentValue: "low",
+              options: [{ value: "high", name: "High" }],
+            },
+          ],
+        });
+      },
+      setSessionConfigOption: (params: { configId: string; value: string }) => {
+        rpcOrder.push(`set_config_option:${params.configId}:${params.value}`);
+        return Promise.resolve({
+          configOptions: [
+            {
+              id: "cfg_model",
+              category: "model",
+              name: "Model",
+              currentValue: params.value,
+            },
+            {
+              id: "thought_level",
+              category: "thought_level",
+              name: "Thought",
+              options: [{ value: "high", name: "High" }],
+            },
+          ],
+        });
+      },
+    } as unknown as typeof connector["connection"];
+    return Promise.resolve();
+  };
+  connector.disconnect = () => {
+    (connector["sessionConfigOptions"] as Map<string, unknown>).clear();
+    (connector["sessionModelIds"] as Map<string, unknown>).clear();
+    return Promise.resolve();
+  };
+
+  const success = await connector.reconnectAndResumeSession("sess_restore", "/workspace", [], {
+    reasoningEffort: "high",
+  });
+
+  assertEquals(success, true);
+  assertEquals(rpcOrder, [
+    "loadSession",
+    "set_config_option:cfg_model:provider/Target-Model",
+    "set_config_option:thought_level:high",
+  ]);
+  assertEquals(
+    (connector["sessionModelIds"] as Map<string, string>).get("sess_restore"),
+    "provider/Target-Model",
+  );
+});
+
 Deno.test("AgentConnector - MCP transport filtering", async (t) => {
   await t.step("should allow stdio transport (always supported)", () => {
     const connector = createMockConnectorWithCapabilities({
