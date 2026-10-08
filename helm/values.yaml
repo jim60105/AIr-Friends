@@ -49,7 +49,7 @@ env:
   # "default" = do not configure. Per-rule/per-section values go in config / MODEL_ROUTING_RULES.
   AGENT_REASONING_EFFORT: 'default'
 
-  # Default ACP agent type (opencode)
+  # Default ACP agent type: opencode (default) | omp
   AGENT_DEFAULT_TYPE: 'opencode'
 
   # Bootstrap OpenCode version-check minimum (observability only, never blocks startup).

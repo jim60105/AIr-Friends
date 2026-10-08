@@ -75,6 +75,35 @@ Deno.test("createAgentConfig - creates opencode config correctly", () => {
   assertEquals(agentConfig.env?.OPENCODE_API_KEY, "oc1");
 });
 
+Deno.test("getDefaultAgentType - returns omp when configured", () => {
+  const config = createTestConfig({
+    agent: {
+      model: "test",
+      systemPromptPath: "./test.md",
+      tokenLimit: 20000,
+      defaultAgentType: "omp",
+    },
+  });
+  assertEquals(getDefaultAgentType(config), "omp");
+});
+
+Deno.test("createAgentConfig - throws unknown agent type for omp (acceptance is not launch support)", () => {
+  const config = createTestConfig({
+    agent: {
+      model: "test",
+      systemPromptPath: "./test.md",
+      tokenLimit: 20000,
+    },
+  });
+  assertThrows(
+    () => {
+      createAgentConfig("omp", "/tmp/workspace", config);
+    },
+    Error,
+    "Unknown agent type: omp",
+  );
+});
+
 Deno.test("createAgentConfig - sets TMPDIR to workspace-scoped tmp directory", () => {
   const config = createTestConfig();
   const agentConfig = createAgentConfig("opencode", "/tmp/workspace", config);

@@ -599,7 +599,7 @@ workspace:
 | `MISSKEY_HOST`             | Misskey instance host                                                      |
 | `MISSKEY_TOKEN`            | Misskey access token                                                       |
 | `AGENT_MODEL`              | LLM model identifier (e.g., "gpt-5-mini")                                  |
-| `AGENT_DEFAULT_TYPE`       | ACP agent type (opencode)                                                  |
+| `AGENT_DEFAULT_TYPE`       | ACP agent type (`opencode` [default], `omp`; unknown values fail startup)   |
 | `REPLY_POLICY`             | Reply policy mode (`all`/`public`/`channels`) (REPLY_TO accepted as alias) |
 | `CHANNELS`                 | Channel entries (JSON array, replaces config)                              |
 | `LOG_LEVEL`                | Logging level (DEBUG/INFO/WARN/ERROR)                                      |

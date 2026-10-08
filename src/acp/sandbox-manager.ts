@@ -36,6 +36,12 @@ const BASE_ALLOWED_ENV = [
   "TMPDIR",
   // Per-session XDG data home (F12): OpenCode's data dir is scoped under the session
   // TMPDIR so truncated tool outputs stay inside the session workspace.
+  // NOTE: This entry is the existing OpenCode tool-output scoping mechanism (the factory
+  // always sets the value it passes: session-scoped under the session TMPDIR per-spawn,
+  // pool-key-scoped in shared mode) and it is NOT a grant of scoped state to an OMP process.
+  // PI_CODING_AGENT_DIR under the selected process's TMPDIR/omp-agent and mode-distinct state roots
+  // are owned by translate-omp-owned-settings (row 8) and spawn-mode-scoped-omp-agents (row 9).
+  // Do not drop, rename, or re-scope this variable here.
   "XDG_DATA_HOME",
   // Browser automation
   "AGENT_BROWSER_EXECUTABLE_PATH",
@@ -62,7 +68,40 @@ const AGENT_TYPE_ENV: Record<string, string[]> = {
     "OPENCODE_API_KEY",
     "GOOGLE_GENERATIVE_AI_API_KEY",
   ],
+  // Gemini and OpenRouter are the supported provider credentials for OMP.
+  // Other provider keys require an approved configuration change.
+  omp: [
+    "GEMINI_API_KEY",
+    "OPENROUTER_API_KEY",
+  ],
 };
+
+/**
+ * Variables that MUST NEVER reach any agent subprocess through any source when
+ * environment filtering is enabled (unless explicitly in that agent type's approved set).
+ */
+const NEVER_PASS_ENV = new Set([
+  // Platform tokens
+  "DISCORD_TOKEN",
+  "MISSKEY_TOKEN",
+  // Dashboard credentials
+  "DASHBOARD_PASSPHRASE",
+  // Raw Skill API server secret
+  "AGENT_SKILL_API_SECRET",
+  // Unapproved provider keys (OPENCODE_API_KEY / GOOGLE_GENERATIVE_AI_API_KEY are approved only for opencode)
+  "OPENCODE_API_KEY",
+  "GOOGLE_GENERATIVE_AI_API_KEY",
+  "GITHUB_TOKEN",
+  "COPILOT_GITHUB_TOKEN",
+  "GIT_BACKUP_AUTH_PASSWORD",
+  // Profile/XDG state selectors
+  "XDG_CONFIG_HOME",
+  "XDG_STATE_HOME",
+  "XDG_CACHE_HOME",
+  "OMP_PROFILE",
+  "PI_PROFILE",
+  "PI_CODING_AGENT_DIR",
+]);
 
 export interface SpawnOptions {
   command: string;
@@ -171,8 +210,27 @@ export class SandboxManager {
       ...this.config.allowedEnvVars,
     ]);
 
+    const agentAllowed = AGENT_TYPE_ENV[agentType] ?? [];
+
+    // Deduplicate and warn for operator-configured allowedEnvVars that collide with NEVER_PASS_ENV
+    const warnedExclusions = new Set<string>();
+    for (const configuredVar of this.config.allowedEnvVars) {
+      const isForbidden = NEVER_PASS_ENV.has(configuredVar) &&
+        !agentAllowed.includes(configuredVar);
+      if (isForbidden && !warnedExclusions.has(configuredVar)) {
+        warnedExclusions.add(configuredVar);
+        logger.warn(
+          "Excluding never-pass variable from sandbox allowedEnvVars: {envVar}",
+          { envVar: configuredVar },
+        );
+      }
+    }
+
     const filtered: Record<string, string> = {};
     for (const key of allowed) {
+      if (NEVER_PASS_ENV.has(key) && !agentAllowed.includes(key)) {
+        continue;
+      }
       if (key in baseEnv) {
         filtered[key] = baseEnv[key];
       }

@@ -17,6 +17,7 @@ import { loadSessionsFromAuditLogs } from "./audit-history-loader.ts";
 import type { SessionRegistry } from "../skill-api/session-registry.ts";
 import type { AuditConfig, Config, DashboardConfig } from "../types/config.ts";
 import type { AgentType } from "@acp/types.ts";
+import { isSupportedAgentType } from "@acp/types.ts";
 import { AgentConnector } from "@acp/agent-connector.ts";
 import { createAgentConfig, getDefaultAgentType } from "@acp/agent-factory.ts";
 import type { AgentConnectorOptions, ClientConfig } from "@acp/types.ts";
@@ -642,7 +643,7 @@ export class DashboardServer {
     }
 
     const rawAgentType = body.agentType ?? getDefaultAgentType(this.deps.appConfig);
-    if (rawAgentType !== "opencode") {
+    if (!isSupportedAgentType(rawAgentType)) {
       return this.json({ error: "Invalid agent type" }, 400);
     }
     const agentType: AgentType = rawAgentType;

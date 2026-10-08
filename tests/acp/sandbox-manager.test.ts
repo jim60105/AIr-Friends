@@ -92,6 +92,100 @@ Deno.test("SandboxManager - opencode agent allows all provider API keys", () => 
   assertEquals(opts.env["GOOGLE_GENERATIVE_AI_API_KEY"], "gg_xxx");
 });
 
+Deno.test("SandboxManager - omp agent allows only Gemini and OpenRouter credentials", () => {
+  const sandbox = new SandboxManager(createSandboxConfig());
+  const baseEnv = {
+    PATH: "/usr/bin",
+    GEMINI_API_KEY: "gm_xxx",
+    OPENROUTER_API_KEY: "or_xxx",
+    OPENCODE_API_KEY: "oc_xxx",
+    GOOGLE_GENERATIVE_AI_API_KEY: "gg_xxx",
+  };
+  const opts = sandbox.buildSpawnOptions("omp", "omp", [], baseEnv, "/tmp");
+  assertEquals(opts.env["GEMINI_API_KEY"], "gm_xxx");
+  assertEquals(opts.env["OPENROUTER_API_KEY"], "or_xxx");
+  assertEquals(opts.env["OPENCODE_API_KEY"], undefined);
+  assertEquals(opts.env["GOOGLE_GENERATIVE_AI_API_KEY"], undefined);
+});
+
+Deno.test("SandboxManager - platform and dashboard credentials never reach any agent", () => {
+  for (const agentType of ["opencode", "omp"]) {
+    const sandbox = new SandboxManager(createSandboxConfig());
+    const baseEnv = {
+      PATH: "/usr/bin",
+      GEMINI_API_KEY: "gm_xxx",
+      OPENROUTER_API_KEY: "or_xxx",
+      DISCORD_TOKEN: "discord_secret",
+      MISSKEY_TOKEN: "misskey_secret",
+      DASHBOARD_PASSPHRASE: "dashboard_secret",
+      AGENT_SKILL_API_SECRET: "skill_secret",
+      GITHUB_TOKEN: "gh_secret",
+      COPILOT_GITHUB_TOKEN: "copilot_secret",
+      GIT_BACKUP_AUTH_PASSWORD: "git_backup_secret",
+      XDG_CONFIG_HOME: "/etc/config",
+      XDG_STATE_HOME: "/etc/state",
+      XDG_CACHE_HOME: "/etc/cache",
+      OMP_PROFILE: "custom_omp_profile",
+      PI_PROFILE: "custom_pi_profile",
+      PI_CODING_AGENT_DIR: "/etc/pi_coding_agent",
+    };
+    const opts = sandbox.buildSpawnOptions(agentType, "agent", [], baseEnv, "/tmp");
+    assertEquals(opts.env["DISCORD_TOKEN"], undefined);
+    assertEquals(opts.env["MISSKEY_TOKEN"], undefined);
+    assertEquals(opts.env["DASHBOARD_PASSPHRASE"], undefined);
+    assertEquals(opts.env["AGENT_SKILL_API_SECRET"], undefined);
+    assertEquals(opts.env["GITHUB_TOKEN"], undefined);
+    assertEquals(opts.env["COPILOT_GITHUB_TOKEN"], undefined);
+    assertEquals(opts.env["GIT_BACKUP_AUTH_PASSWORD"], undefined);
+    assertEquals(opts.env["XDG_CONFIG_HOME"], undefined);
+    assertEquals(opts.env["XDG_STATE_HOME"], undefined);
+    assertEquals(opts.env["XDG_CACHE_HOME"], undefined);
+    assertEquals(opts.env["OMP_PROFILE"], undefined);
+    assertEquals(opts.env["PI_PROFILE"], undefined);
+    assertEquals(opts.env["PI_CODING_AGENT_DIR"], undefined);
+  }
+});
+
+Deno.test("SandboxManager - allowedEnvVars cannot widen never-pass credentials or selectors", () => {
+  // Verify that an operator attempting to pass never-pass variables via allowedEnvVars is blocked
+  const sandbox = new SandboxManager(createSandboxConfig({
+    allowedEnvVars: [
+      "MY_TOOL_FLAG",
+      "OPENCODE_API_KEY",
+      "XDG_CONFIG_HOME",
+      "DISCORD_TOKEN",
+      "DASHBOARD_PASSPHRASE",
+      "AGENT_SKILL_API_SECRET",
+      "GITHUB_TOKEN",
+      "PI_CODING_AGENT_DIR",
+      // duplicate to verify deduplication
+      "OPENCODE_API_KEY",
+    ],
+  }));
+  const baseEnv = {
+    PATH: "/usr/bin",
+    MY_TOOL_FLAG: "active",
+    OPENCODE_API_KEY: "stolen_oc_key",
+    XDG_CONFIG_HOME: "/malicious/config",
+    DISCORD_TOKEN: "stolen_token",
+    DASHBOARD_PASSPHRASE: "stolen_pass",
+    AGENT_SKILL_API_SECRET: "stolen_secret",
+    GITHUB_TOKEN: "stolen_gh",
+    GEMINI_API_KEY: "gm_xxx",
+    OPENROUTER_API_KEY: "or_xxx",
+  };
+  const opts = sandbox.buildSpawnOptions("omp", "omp", [], baseEnv, "/tmp");
+  assertEquals(opts.env["MY_TOOL_FLAG"], "active");
+  assertEquals(opts.env["OPENCODE_API_KEY"], undefined);
+  assertEquals(opts.env["XDG_CONFIG_HOME"], undefined);
+  assertEquals(opts.env["DISCORD_TOKEN"], undefined);
+  assertEquals(opts.env["DASHBOARD_PASSPHRASE"], undefined);
+  assertEquals(opts.env["AGENT_SKILL_API_SECRET"], undefined);
+  assertEquals(opts.env["GITHUB_TOKEN"], undefined);
+  assertEquals(opts.env["GEMINI_API_KEY"], "gm_xxx");
+  assertEquals(opts.env["OPENROUTER_API_KEY"], "or_xxx");
+});
+
 Deno.test("SandboxManager - egress proxy env vars pass through the filter (F14)", () => {
   const sandbox = new SandboxManager(createSandboxConfig());
   const baseEnv = {
