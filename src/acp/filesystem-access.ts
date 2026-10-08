@@ -1,0 +1,386 @@
+/**
+ * Core operation contracts, types, and pure validation logic for secure ACP filesystem access.
+ *
+ * Implements OpenSpec change `secure-acp-filesystem-access`.
+ */
+
+import { SEPARATOR } from "@std/path";
+import {
+  CanonicalRootInfo,
+  CanonicalSessionRoots,
+  CanonicalTarget,
+  isWithinRoot,
+  ObservedIdentity,
+  RootRole,
+  SessionContext,
+  validateSessionContext,
+} from "./filesystem-roots.ts";
+import { type LinuxNativeCalls, performLinuxSecureAccess } from "./filesystem-access-linux.ts";
+
+export type FilesystemAccessFailureReason =
+  | "invalid_context"
+  | "outside_roots"
+  | "identity_unavailable"
+  | "path_changed"
+  | "unsafe_traversal"
+  | "root_unavailable"
+  | "parent_missing"
+  | "wrong_target_type"
+  | "unsupported_platform"
+  | "secure_access_unavailable"
+  | "access_denied"
+  | "io_failed";
+
+export interface FilesystemAccessFailure {
+  readonly ok: false;
+  readonly reason: FilesystemAccessFailureReason;
+  readonly message: string;
+  readonly cause?: unknown;
+}
+
+export interface FilesystemAccessSuccess<T> {
+  readonly ok: true;
+  readonly value: T;
+}
+
+export type FilesystemAccessResult<T> =
+  | FilesystemAccessSuccess<T>
+  | FilesystemAccessFailure;
+
+export interface ReadCanonicalTextFileOptions {
+  readonly context: SessionContext;
+  readonly roots: CanonicalSessionRoots;
+  readonly target: CanonicalTarget;
+  readonly selectedRole: RootRole;
+  /** Injectable native backend calls for testing */
+  readonly nativeCalls?: LinuxNativeCalls;
+}
+
+export interface WriteCanonicalTextFileOptions {
+  readonly context: SessionContext;
+  readonly roots: CanonicalSessionRoots;
+  readonly target: CanonicalTarget;
+  readonly selectedRole: RootRole;
+  readonly content: string;
+  /** Injectable native backend calls for testing */
+  readonly nativeCalls?: LinuxNativeCalls;
+}
+
+export interface ValidatedAccessAdmission {
+  readonly selectedRoot: CanonicalRootInfo;
+  readonly relativePath: string;
+  readonly isNewFile: boolean;
+}
+
+/**
+ * Validates that an ObservedIdentity has finite, safe, non-negative integer dev and ino.
+ */
+export function isValidSafeIdentity(identity?: ObservedIdentity): boolean {
+  if (!identity) return false;
+  const { dev, ino } = identity;
+  if (typeof dev !== "number" || typeof ino !== "number") return false;
+  if (!Number.isSafeInteger(dev) || !Number.isSafeInteger(ino)) return false;
+  if (dev < 0 || ino < 0) return false;
+  return true;
+}
+
+/**
+ * Validate that a relative path consists of safe relative components without null bytes or .. traversal.
+ */
+export function isValidRelativeComponentPath(relPath: string): boolean {
+  if (typeof relPath !== "string" || relPath.length === 0) return false;
+  if (relPath.includes("\0")) return false;
+  const parts = relPath.split("/").filter((p) => p.length > 0);
+  if (parts.length === 0) return false;
+  for (const part of parts) {
+    if (part === "." || part === "..") return false;
+    if (part.includes("\0") || part.includes("\\")) return false;
+  }
+  return true;
+}
+
+/**
+ * Pure admission check enforcing:
+ * - Session and generation matching between context, roots, and target.
+ * - Selected role presence in target.roles and roots.roots.
+ * - Prohibition of writes to "trusted-skills" role.
+ * - No request-time child symlinks (target.observedSymlinks must be empty).
+ * - Root availability (no prospective roots).
+ * - Exact identity availability for root (and existing target).
+ * - Proper parent existence for prospective new files.
+ * - Derivation of canonical-target relative path against the selected root.
+ */
+export function validateAccessAdmission(
+  context: SessionContext,
+  roots: CanonicalSessionRoots,
+  target: CanonicalTarget,
+  selectedRole: RootRole,
+  isWrite: boolean,
+): FilesystemAccessResult<ValidatedAccessAdmission> {
+  // 1. Session context and generation alignment
+  const contextValidation = validateSessionContext(context);
+  if (!contextValidation.ok) {
+    return {
+      ok: false,
+      reason: "invalid_context",
+      message: `Invalid session context: ${contextValidation.message}`,
+    };
+  }
+  if (
+    typeof context.sessionContextGeneration !== "string" ||
+    context.sessionContextGeneration.trim().length === 0 ||
+    typeof roots.sessionContextGeneration !== "string" ||
+    roots.sessionContextGeneration.trim().length === 0 ||
+    typeof target.sessionContextGeneration !== "string" ||
+    target.sessionContextGeneration.trim().length === 0 ||
+    typeof context.acpSessionId !== "string" ||
+    context.acpSessionId.trim().length === 0 ||
+    typeof roots.acpSessionId !== "string" ||
+    roots.acpSessionId.trim().length === 0 ||
+    typeof target.acpSessionId !== "string" ||
+    target.acpSessionId.trim().length === 0
+  ) {
+    return {
+      ok: false,
+      reason: "invalid_context",
+      message: "Session context or generation is empty or not a valid string.",
+    };
+  }
+
+  if (
+    context.acpSessionId !== roots.acpSessionId ||
+    context.acpSessionId !== target.acpSessionId ||
+    context.sessionContextGeneration !== roots.sessionContextGeneration ||
+    context.sessionContextGeneration !== target.sessionContextGeneration
+  ) {
+    return {
+      ok: false,
+      reason: "invalid_context",
+      message:
+        "Session ID or context generation mismatch between context, roots, and target observation.",
+    };
+  }
+  // 2. Write to trusted-skills root is denied
+  if (isWrite && selectedRole === "trusted-skills") {
+    return {
+      ok: false,
+      reason: "access_denied",
+      message: "Trusted-skills root is strictly read-only; writes are denied.",
+    };
+  }
+  // 3. Selected role must exist in target.roles
+  if (!target.roles.includes(selectedRole)) {
+    return {
+      ok: false,
+      reason: "outside_roots",
+      message:
+        `Selected role '${selectedRole}' is not an applicable role for this target observation.`,
+    };
+  }
+
+  // Find selected root record in roots.roots
+  const selectedRoot = roots.roots.find((r) => r.role === selectedRole);
+  if (!selectedRoot) {
+    return {
+      ok: false,
+      reason: "outside_roots",
+      message: `Selected root role '${selectedRole}' not found in canonical session roots.`,
+    };
+  }
+
+  // Verify target.rootIdentities also contains a matching root entry
+  const targetRootInfo = target.rootIdentities.find((r) => r.role === selectedRole);
+  if (
+    !targetRootInfo ||
+    targetRootInfo.canonicalPath !== selectedRoot.canonicalPath
+  ) {
+    return {
+      ok: false,
+      reason: "outside_roots",
+      message:
+        `Root identity for selected role '${selectedRole}' does not match between roots and target.`,
+    };
+  }
+
+  // 4. Prospective root is unavailable for IO
+  if (selectedRoot.isProspective) {
+    return {
+      ok: false,
+      reason: "root_unavailable",
+      message:
+        `Selected root '${selectedRole}' is prospective and cannot provide an IO capability.`,
+    };
+  }
+
+  // 5. Root identity check: must have valid, finite, safe non-negative dev and ino
+  if (!isValidSafeIdentity(selectedRoot.identity)) {
+    return {
+      ok: false,
+      reason: "identity_unavailable",
+      message: `Selected root '${selectedRole}' lacks a valid safe exact filesystem identity.`,
+    };
+  }
+
+  if (
+    !isValidSafeIdentity(targetRootInfo.identity) ||
+    targetRootInfo.identity?.dev !== selectedRoot.identity?.dev ||
+    targetRootInfo.identity?.ino !== selectedRoot.identity?.ino
+  ) {
+    return {
+      ok: false,
+      reason: "identity_unavailable",
+      message:
+        `Selected root identity for '${selectedRole}' does not match between roots and target or is unsafe.`,
+    };
+  }
+
+  // 6. Child symlinks rejection (request-time traversal under candidate root)
+  if (target.observedSymlinks && target.observedSymlinks.length > 0) {
+    return {
+      ok: false,
+      reason: "unsafe_traversal",
+      message: "Request-time child or final symlinks are not permitted under secure access.",
+    };
+  }
+
+  // 7. Check target type & parent requirements
+  const isNewFile = target.targetType === "prospective";
+  if (isNewFile) {
+    if (!isWrite) {
+      return {
+        ok: false,
+        reason: "path_changed",
+        message: "Cannot read prospective target that does not exist.",
+      };
+    }
+    // For prospective new file, missing suffix must be exactly length 1 (only the final file name is missing)
+    if (
+      !target.prospectiveMissingSuffix ||
+      target.prospectiveMissingSuffix.length !== 1
+    ) {
+      return {
+        ok: false,
+        reason: "parent_missing",
+        message:
+          "Creation requires a complete existing parent directory path; intermediate directories cannot be created.",
+      };
+    }
+  } else {
+    // Existing target: must be a regular file, not a directory
+    if (target.targetType !== "file") {
+      return {
+        ok: false,
+        reason: "wrong_target_type",
+        message: `Target type is '${target.targetType}', but regular file is required.`,
+      };
+    }
+    // Existing target must have a valid safe identity
+    if (!isValidSafeIdentity(target.targetIdentity)) {
+      return {
+        ok: false,
+        reason: "identity_unavailable",
+        message: "Existing target lacks a valid safe exact filesystem identity.",
+      };
+    }
+  }
+
+  // 8. Derive the relative path beneath the selected root's canonical path
+  const canonicalTarget = target.canonicalTarget;
+  const canonicalRoot = selectedRoot.canonicalPath;
+
+  if (canonicalTarget === canonicalRoot) {
+    return {
+      ok: false,
+      reason: "wrong_target_type",
+      message: "Target is the root directory itself, not a regular file.",
+    };
+  }
+
+  if (!isWithinRoot(canonicalTarget, canonicalRoot)) {
+    return {
+      ok: false,
+      reason: "outside_roots",
+      message:
+        `Canonical target '${canonicalTarget}' is not within selected canonical root '${canonicalRoot}'.`,
+    };
+  }
+
+  // Extract relative path
+  let relativePath = canonicalTarget.slice(canonicalRoot.length);
+  if (relativePath.startsWith(SEPARATOR) || relativePath.startsWith("/")) {
+    relativePath = relativePath.slice(1);
+  }
+
+  if (!isValidRelativeComponentPath(relativePath)) {
+    return {
+      ok: false,
+      reason: "outside_roots",
+      message: `Derived relative path '${relativePath}' contains invalid components.`,
+    };
+  }
+
+  return {
+    ok: true,
+    value: {
+      selectedRoot,
+      relativePath,
+      isNewFile,
+    },
+  };
+}
+
+/**
+ * Reads a UTF-8 text file securely using canonical observations and descriptor-only IO.
+ */
+export function readCanonicalTextFile(
+  options: ReadCanonicalTextFileOptions,
+): FilesystemAccessResult<string> {
+  const admission = validateAccessAdmission(
+    options.context,
+    options.roots,
+    options.target,
+    options.selectedRole,
+    false,
+  );
+  if (!admission.ok) {
+    return admission;
+  }
+
+  return performLinuxSecureAccess({
+    operation: "read",
+    selectedRoot: admission.value.selectedRoot,
+    target: options.target,
+    relativePath: admission.value.relativePath,
+    isNewFile: false,
+    content: "",
+    nativeCalls: options.nativeCalls,
+  });
+}
+
+/**
+ * Writes or overwrites a UTF-8 text file securely using canonical observations and descriptor-only IO.
+ */
+export function writeCanonicalTextFile(
+  options: WriteCanonicalTextFileOptions,
+): FilesystemAccessResult<void> {
+  const admission = validateAccessAdmission(
+    options.context,
+    options.roots,
+    options.target,
+    options.selectedRole,
+    true,
+  );
+  if (!admission.ok) {
+    return admission;
+  }
+
+  return performLinuxSecureAccess({
+    operation: "write",
+    selectedRoot: admission.value.selectedRoot,
+    target: options.target,
+    relativePath: admission.value.relativePath,
+    isNewFile: admission.value.isNewFile,
+    content: options.content,
+    nativeCalls: options.nativeCalls,
+  });
+}
