@@ -1,6 +1,6 @@
 ## 1. Predecessor consumption and contract alignment (0.75 hours)
 
-- [ ] 1.1 Read the P0 compatibility ledger rows for pre-import exclusion and critical-skill ownership, `src/acp/omp/compatibility-contracts.ts` `DiscoveryContract`/`CriticalSkillContract`, row 2 `src/acp/filesystem-roots.ts` root-identity API and failure reasons, row 8 `src/acp/omp-settings.ts` composition/env posture, and row 9 `src/utils/omp-paths.ts` `OMP_TRUSTED_EXTENSION_PATH` plus owned state-root helpers. Verify the surface table in `design.md` §2 is reproduced from the pinned ledger verbatim (statuses not inferred) and that no path literal is hardcoded instead of imported. Do not edit any predecessor artifact or relabel a recorded verdict.
+- [x] 1.1 Read the P0 compatibility ledger rows for pre-import exclusion and critical-skill ownership, `src/acp/omp/compatibility-contracts.ts` `DiscoveryContract`/`CriticalSkillContract`, row 2 `src/acp/filesystem-roots.ts` root-identity API and failure reasons, row 8 `src/acp/omp-settings.ts` composition/env posture, and row 9 `src/utils/omp-paths.ts` `OMP_TRUSTED_EXTENSION_PATH` plus owned state-root helpers. Verify the surface table in `design.md` §2 is reproduced from the pinned ledger verbatim (statuses not inferred) and that no path literal is hardcoded instead of imported. Do not edit any predecessor artifact or relabel a recorded verdict.
 
 ## 2. Pure decision module (1.75 hours)
 
