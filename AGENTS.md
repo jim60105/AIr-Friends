@@ -548,7 +548,7 @@ await connector.connect();
 
 // 2. Create session with workspace and optional MCP servers
 const sessionId = await connector.createSession(mcpServers);
-await connector.setSessionModel(sessionId, "gpt-4");
+await connector.setSessionModel(sessionId, "gpt-4"); // Stable-first canonical selection
 
 // 3. Switch to YOLO mode agent for OpenCode when YOLO is enabled
 const modeOverride = getSessionModeOverride(agentType, yolo);
@@ -565,6 +565,15 @@ const response = await connector.prompt(sessionId, assembledContext);
 // 6. Disconnect when done
 await connector.disconnect();
 ```
+
+**Session Model Selection (Stable-First)**:
+
+`AgentConnector.setSessionModel()` follows a stable-first selection policy:
+- **Stable Option Discovery**: Inspects the session's latest cached config options (`sessionConfigOptions`) for a `category: "model"` option. Grouped option lists (`SessionConfigSelectGroup`) and flat lists are flattened for matching.
+- **Canonical Value Resolution**: The requested model ID is matched case-insensitively against the agent's advertised model catalog. On match, the canonical advertised value (in the agent's advertised casing; first advertised on case-only ties) is sent via `session/set_config_option`, and the cache is refreshed from the response. The canonical value actually sent is recorded in `sessionModelIds`.
+- **Explicit Catalog Miss**: If the agent advertises a `category: "model"` option but the requested model is not found under any casing (including empty advertised catalogs), `setSessionModel()` throws an explicit error naming the requested model, the agent type, and a length-bounded preview of available models. It **never** falls back to unstable model-setting upon a catalog miss and never invents model IDs.
+- **Unstable Fallback**: Only when the session advertises **no** `category: "model"` option does model selection fall back to `unstable_setSessionModel()`.
+- **Cache Restoration on Reconnect**: `reconnectAndResumeSession()` consumes the `session/load` response's `configOptions` to restore the session's canonical cache. Reconnecting re-applies the prior model through the same stable-first selection path (a post-load catalog miss fails the session in isolation) and then reapplies active reasoning effort best-effort.
 
 **Reasoning Effort (ACP `thought_level`)**:
 
@@ -598,6 +607,7 @@ and the effort independently while keeping them tied to the same matched rule.
   alter the available reasoning options.
 - For known-vocabulary values not offered by the model, the call is skipped with a structured warning
   (rather than sending an invalid value); agent-specific passthrough tokens are sent as-is.
+- **None → Off Alias**: When `"none"` is requested and no exact case-insensitive `"none"` exists in the advertised `thought_level` catalog, the system maps to the advertised `"off"` value (in the agent's canonical casing) and reports outcome `applied`. Exact `"none"` always wins if advertised. No other token is ever aliased.
 
 **Environment Variable Override**:
 
