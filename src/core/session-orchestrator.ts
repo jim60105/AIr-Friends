@@ -753,6 +753,7 @@ export class SessionOrchestrator {
               yolo: yoloDecision.enabled,
               canWriteAgentWorkspace: false,
               allowedWriteExtensions: this.config.agent.sandbox?.allowedWriteExtensions,
+              trustedSkills: clientConfig.trustedSkills,
             });
             await this.applyReasoningEffort(connector, acpSessionId, resolvedReasoningEffort, sl2);
 
@@ -3766,6 +3767,7 @@ export class SessionOrchestrator {
           yolo: yoloEnabled,
           canWriteAgentWorkspace: connectorOptions.clientConfig?.canWriteAgentWorkspace,
           allowedWriteExtensions: this.config.agent.sandbox?.allowedWriteExtensions,
+          trustedSkills: connectorOptions.clientConfig?.trustedSkills,
         });
         await this.applyReasoningEffort(connector, acpSessionId, resolvedReasoningEffort, sl);
 

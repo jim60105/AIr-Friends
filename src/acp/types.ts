@@ -1,6 +1,8 @@
 // src/acp/types.ts
 
 import type { IdleTimeoutConfig } from "../types/config.ts";
+import type { TrustedSkillsRootConfig } from "./filesystem-roots.ts";
+import type { LinuxNativeCalls } from "./filesystem-access-linux.ts";
 
 /**
  * Configuration for ACP Client
@@ -75,6 +77,12 @@ export interface ClientConfig {
    * falls back to the per-session workspace-scoped data home.
    */
   xdgDataHome?: string;
+
+  /** Deployment-owned trusted skills provenance */
+  trustedSkills?: TrustedSkillsRootConfig;
+
+  /** Optional injectable native backend calls for testing */
+  nativeCalls?: LinuxNativeCalls;
 }
 
 /**

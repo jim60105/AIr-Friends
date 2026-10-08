@@ -306,7 +306,10 @@ export class AgentConnector {
 
     // Shared-process mode: register the per-session working directory with the client
     // so the permission gate confines this session to the session's own workspace.
-    this.setSessionGateContext(result.sessionId, { cwd: sessionCwd });
+    this.setSessionGateContext(result.sessionId, {
+      cwd: sessionCwd,
+      trustedSkills: this.options.clientConfig?.trustedSkills,
+    });
 
     // Capture initial config options (session-scoped); refreshed later via
     // config_option_update notifications and set_config_option responses.
@@ -1033,7 +1036,10 @@ export class AgentConnector {
       mcpServers: supportedServers.map((server) => this.convertMCPServerConfig(server)),
     }));
     this.refreshFromConfigOptionResponse(sessionId, loadResponse);
-    this.setSessionGateContext(sessionId, { cwd });
+    this.setSessionGateContext(sessionId, {
+      cwd,
+      trustedSkills: this.options.clientConfig?.trustedSkills,
+    });
 
     // Re-establish the session's prior model through stable-first selection
     if (priorModelId !== undefined) {
