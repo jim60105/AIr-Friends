@@ -1,7 +1,7 @@
 ## 1. Dependency and consumer alignment (0.50 hours)
 
-- [ ] 1.1 Read the actual compatibility verdict and `CriticalSkillContract` delivered by `establish-omp-compatibility-contracts`, plus its source-blocking requirements. Verify all required boundaries are source-supported under an explicit approved design before applying this dependent change; incompatible/unresolved verdicts block application regardless of completed P0 tasks or synthetic positive fixtures. Do not invent native APIs, change the pin or re-audit unrelated native mechanisms here.
-- [ ] 1.2 Align the design.md helper inputs/outputs with existing session-context and canonical Skill API staging semantics. Verify workspace cwd, ACP/Skill API identities, context generation and staging are explicit, and process TMPDIR/state creates no root grant. Confirm rows 3/4 consume the new module and own all protected IO/client adoption; no client/factory/orchestrator/Skill API cutover is part of this task.
+- [x] 1.1 Read the actual compatibility verdict and `CriticalSkillContract` delivered by `establish-omp-compatibility-contracts`, plus its source-blocking requirements. Verify all required boundaries are source-supported under an explicit approved design before applying this dependent change; incompatible/unresolved verdicts block application regardless of completed P0 tasks or synthetic positive fixtures. Do not invent native APIs, change the pin or re-audit unrelated native mechanisms here.
+- [x] 1.2 Align the design.md helper inputs/outputs with existing session-context and canonical Skill API staging semantics. Verify workspace cwd, ACP/Skill API identities, context generation and staging are explicit, and process TMPDIR/state creates no root grant. Confirm rows 3/4 consume the new module and own all protected IO/client adoption; no client/factory/orchestrator/Skill API cutover is part of this task.
 
 ## 2. Complete canonical helper library (3.00 hours)
 
