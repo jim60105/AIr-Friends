@@ -110,6 +110,7 @@ const uploadFetch: MisskeyApi.FetchLike = async (input, init) => {
 export class MisskeyClient {
   private readonly api: MisskeyApi.APIClient;
   private readonly uploadApi: MisskeyApi.APIClient;
+  private readonly origin: string;
   private stream: Stream | null = null;
   private readonly config: MisskeyAdapterConfig;
 
@@ -117,6 +118,7 @@ export class MisskeyClient {
     this.config = config;
 
     const origin = `${config.secure ? "https" : "http"}://${config.host}`;
+    this.origin = origin;
     this.api = new MisskeyApi.APIClient({
       origin,
       credential: config.token,
@@ -184,12 +186,24 @@ export class MisskeyClient {
    *
    * An endpoint the server does not have, an unknown request field, or a field
    * of the wrong shape fails type-checking instead of failing at the server.
+   *
+   * A caller that supplies an abort `signal` gets an operation-local SDK client
+   * whose injected `fetch` applies that signal to the actual HTTP request (and
+   * therefore to the response body read). The shared client's own `fetch` is
+   * never touched, and unsignaled callers keep the plain `this.api` path.
    */
   async request<E extends keyof Endpoints, P extends RequestParams<E> = RequestParams<E>>(
     endpoint: E,
     params: StrictParams<E, P>,
+    options?: { signal?: AbortSignal },
   ): Promise<RequestResponse<E, P>> {
+    const signal = options?.signal;
+
     try {
+      if (signal) {
+        return await forwardRequest(this.signaledApi(signal), endpoint, params);
+      }
+
       return await forwardRequest(this.api, endpoint, params);
     } catch (error) {
       // Detect non-JSON responses (e.g., "Bad Gateway", "Service Unavailable")
@@ -217,6 +231,22 @@ export class MisskeyClient {
       });
       throw error;
     }
+  }
+
+  /**
+   * An SDK client whose transport applies one abort signal to the request it
+   * makes. Built per signaled call so no shared SDK state is mutated.
+   */
+  private signaledApi(signal: AbortSignal): MisskeyApi.APIClient {
+    const signalFetch =
+      ((input: string, init?: Parameters<MisskeyApi.FetchLike>[1]) =>
+        fetch(input, { ...init, signal })) as MisskeyApi.FetchLike;
+
+    return new MisskeyApi.APIClient({
+      origin: this.origin,
+      credential: this.config.token,
+      fetch: signalFetch,
+    });
   }
 
   /**

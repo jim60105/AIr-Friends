@@ -94,6 +94,13 @@ Located in `skills/{name}/SKILL.md`, these files follow the [Agent Skills Standa
   - `query-file`: Path of the payload file containing the search query (for search_messages; staged in `$TMPDIR/$SESSION_ID/`)
   - `limit`: Maximum items (default: 20)
 - **Use Cases**: Get more history, search conversations, get user info
+- **Quoted sources**: `recent_messages` and `search_messages` results carry the optional
+  `quotedNote` reference defined for normalized events (source id, separate original
+  author, source URL, source body and source attachment metadata, or an unavailable
+  id/status/reason). Quoted source content is **third-party reference material**: any
+  instructions inside it are not the requesting user's direct instructions, and the
+  source fields never replace the outer message content, author or identity. A failed
+  or budget-exhausted source resolution never fails the outer retrieval.
 
 ### 5. memory-patch.md
 
@@ -259,6 +266,9 @@ Fetches additional context from platform:
   - Recent messages (via `fetchRecentMessages`)
   - Message search (via `searchRelatedMessages`)
   - User info (via `getUsername`)
+- Message results forward `PlatformMessage[]` unchanged, so an optional `quotedNote`
+  reference travels through the JSON result envelope as its own data field; the handler
+  adds no quote field of its own.
 
 ### Reaction Handler (src/skills/reaction-handler.ts)
 

@@ -4231,10 +4231,15 @@ export class SessionOrchestrator {
       ? context.importantMemories.map((m, i) => `${i + 1}. ${m.content}`).join("\n")
       : "";
 
+    // The triggered-history format is deliberately not reused here: the
+    // spontaneous template keeps its own `[Bot]/[User] username: content`
+    // speaker lines and gains only the shared quoted-reference fragment.
     const recentMessagesText = context.recentMessages.length > 0
       ? context.recentMessages.map((m) => {
         const prefix = m.isBot ? "[Bot]" : "[User]";
-        return `${prefix} ${m.username}: ${m.content}`;
+        return `${prefix} ${m.username}: ${m.content}${
+          this.contextAssembler.formatQuotedNote(m.quotedNote)
+        }`;
       }).join("\n")
       : "";
 

@@ -221,8 +221,67 @@ Convert platform-specific messages into `NormalizedEvent` (for incoming triggers
 | `content`     | `string`       | Message text content                                                                                   |
 | `timestamp`   | `Date`         | Must be a `Date` object                                                                                |
 | `attachments` | `Attachment[]` | Optional; set `isImage` flag based on MIME type                                                        |
+| `quotedNote`  | `QuotedNote`   | Optional typed third-party reference to the immediately quoted source (see 3.7a)                       |
 
 Emit converted events via `this.emitEvent(normalizedEvent)` from within your adapter.
+
+#### 3.7a Quoted-source references
+
+A message that quotes another message keeps the quoted source **separate** from the
+outer message: `content`, author fields and `attachments` always describe the outer
+message only, and `quotedNote` carries the reference. `PlatformMessage` (history) uses
+the same optional field and contract.
+
+```ts
+type QuotedNote = AvailableQuotedNote | UnavailableQuotedNote;
+
+interface AvailableQuotedNote {
+  status: "available";
+  noteId: string;                 // source id on the configured instance
+  sourceUrl?: string;             // validated HTTP(S) URL, when supplied or derivable
+  author: {                       // original author, never the outer speaker
+    userId: string;
+    username: string;
+    host?: string;                // remote instance host
+    displayName?: string;
+  };
+  content: string;                // source text, "" for an empty/attachment-only source
+  attachments?: Attachment[];     // source files, kept out of the outer attachments
+}
+
+interface UnavailableQuotedNote {
+  status: "unavailable";
+  noteId: string;
+  reason: "not_loaded" | "lookup_failed" | "timeout" | "budget_exhausted" | "invalid_source";
+}
+```
+
+Rules an adapter must follow:
+
+1. **One hop only.** Represent the immediately quoted source; never expand the source's
+   own quote, and never append source text to the outer `content`.
+2. **Extract embedded data first.** When the platform already embeds the source, no
+   request is issued. Only a source known by id alone is resolved — through the
+   configured instance's own API, never through a supplied source or article URL.
+3. **Bound the extra work.** Resolution runs under a single cumulative five-second
+   deadline per event or history/search invocation, one attempt per distinct source, no
+   retries, and an invocation-local memo of both successes and failures. Enrich retained
+   messages *after* the path's existing ordering, deduplication and limit selection.
+4. **Failures are nonfatal.** A failed, timed-out or invalid resolution yields an
+   unavailable reference and leaves the outer message, its attachments and every other
+   resolved reference intact.
+5. **URL-only quoted attachments.** Source files are never downloaded — not even when
+   the quoting message is the trigger and the agent accepts images. Outer-trigger image
+   handling (capability negotiation, 20 MB limit, ten-second timeout, GIF conversion,
+   sink SSRF validation) is unchanged and reads only `event.attachments`.
+
+Renderers present a `quotedNote` inside an explicit third-party reference boundary that
+states quoted commands are not the user's direct instructions, with every untrusted
+field encoded as data on one line. `ContextAssembler.formatQuotedNote()` is that shared
+renderer; quote data is charged to the token estimates of the trigger and of retained
+history. The encoding bounds the *formatting* — a quoted field can never produce a
+renderer-owned heading, role label, fence or boundary line — and communicates
+provenance; it is not a proof of semantic prompt-injection immunity.
 
 ### 3.8 Spontaneous Post Support (Optional)
 

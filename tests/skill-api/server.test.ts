@@ -7,6 +7,8 @@ import { SkillRegistry } from "../../src/skills/registry.ts";
 import { MemoryStore } from "../../src/core/memory-store.ts";
 import { createSkillJwt } from "../../src/utils/skill-jwt.ts";
 import { WorkspaceManager } from "../../src/core/workspace-manager.ts";
+import type { PlatformAdapter } from "../../src/platforms/platform-adapter.ts";
+import type { PlatformMessage, QuotedNote } from "../../src/types/events.ts";
 
 // Build request headers, optionally with the per-session caller token (F13).
 function jsonHeaders(token?: string): Record<string, string> {
@@ -3368,6 +3370,124 @@ Deno.test("SkillAPIServer - Misskey chat partial delivery records the last deliv
 
     await server.stop();
     sessionRegistry.stop();
+  } finally {
+    await Deno.remove(tempDir, { recursive: true });
+  }
+});
+
+// ==================== fetch-context quoted references over the skill API ====================
+
+/** The `fetch-context` HTTP response as the transport decodes it. */
+interface FetchContextResponse {
+  success: boolean;
+  data: { type: string; data: PlatformMessage[] };
+}
+
+/** A Misskey adapter whose history carries one plain and one quoted message. */
+function quotedHistoryAdapter(quoted: QuotedNote, plain: PlatformMessage): PlatformAdapter {
+  const quotedMessage: PlatformMessage = { ...plain, messageId: "msg-quoted", quotedNote: quoted };
+
+  // Only the three accessors `fetch-context` reads are supplied.
+  return {
+    fetchRecentMessages: () => Promise.resolve([plain, quotedMessage]),
+    searchRelatedMessages: () => Promise.resolve([quotedMessage]),
+    getSearchGuildId: (channelId: string) => channelId,
+  } as unknown as PlatformAdapter;
+}
+
+Deno.test("SkillAPIServer - fetch-context preserves quoted references in recent and search results", async () => {
+  const tempDir = await Deno.makeTempDir();
+  try {
+    const sessionRegistry = new SessionRegistry();
+    const workspaceManager = new WorkspaceManager({
+      repoPath: tempDir,
+      workspacesDir: "workspaces",
+    });
+    const memoryStore = new MemoryStore(workspaceManager, {});
+    const skillRegistry = new SkillRegistry(memoryStore);
+
+    const quoted: QuotedNote = {
+      status: "available",
+      noteId: "src1",
+      sourceUrl: "https://remote.example/notes/src1",
+      author: { userId: "a1", username: "sourceauthor", host: "remote.example" },
+      content: "quoted body",
+      attachments: [{
+        id: "f1",
+        url: "https://remote.example/f.png",
+        mimeType: "image/png",
+        filename: "f.png",
+        isImage: true,
+      }],
+    };
+    const plain: PlatformMessage = {
+      messageId: "msg-plain",
+      userId: "900",
+      username: "User Nine",
+      content: "plain message",
+      timestamp: new Date(0),
+      isBot: false,
+    };
+
+    const wsDir = `${tempDir}/workspaces/misskey/900`;
+    await Deno.mkdir(wsDir, { recursive: true });
+    const sessionId = sessionRegistry.register({
+      platform: "misskey",
+      channelId: "note:chan",
+      userId: "900",
+      isDm: false,
+      workspace: {
+        key: "misskey/900",
+        components: { platform: "misskey", userId: "900" },
+        path: wsDir,
+        tmpPath: `${wsDir}/tmp`,
+        isDm: false,
+      },
+      platformAdapter: quotedHistoryAdapter(quoted, plain),
+    });
+
+    const port = 3301;
+    const server = new SkillAPIServer(
+      sessionRegistry,
+      skillRegistry,
+      { port, host: "127.0.0.1" },
+      TEST_SKILL_SECRET,
+    );
+    server.start();
+    await waitForServer(port);
+
+    try {
+      const token = await makeSessionJwt(sessionRegistry, sessionId);
+      const post = (parameters: Record<string, unknown>) =>
+        fetch(`http://localhost:${port}/api/skill/fetch-context`, {
+          method: "POST",
+          headers: jsonHeaders(token),
+          body: JSON.stringify({ sessionId, parameters }),
+        });
+
+      const recentResponse = await post({ type: "recent_messages", limit: 10 });
+      assertEquals(recentResponse.status, 200);
+      // Our own JSON response, read back through the HTTP boundary.
+      const recent = await recentResponse.json() as FetchContextResponse;
+      assertEquals(recent.success, true);
+      assertEquals(recent.data.type, "recent_messages");
+      assertEquals(recent.data.data[1].quotedNote, quoted);
+      // The outer message keeps its own content and identity.
+      assertEquals(recent.data.data[1].content, "plain message");
+      assertEquals(recent.data.data[1].userId, "900");
+      // An ordinary message gains no quote field.
+      assertEquals("quotedNote" in recent.data.data[0], false);
+
+      const searchResponse = await post({ type: "search_messages", query: "quoted", limit: 5 });
+      assertEquals(searchResponse.status, 200);
+      const search = await searchResponse.json() as FetchContextResponse;
+      assertEquals(search.success, true);
+      assertEquals(search.data.type, "search_messages");
+      assertEquals(search.data.data[0].quotedNote, quoted);
+    } finally {
+      await server.stop();
+      sessionRegistry.stop();
+    }
   } finally {
     await Deno.remove(tempDir, { recursive: true });
   }
