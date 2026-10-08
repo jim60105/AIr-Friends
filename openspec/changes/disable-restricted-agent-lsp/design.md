@@ -12,7 +12,7 @@ Goals are mode-specific OMP LSP disable wiring, explicit per-agent OpenCode lsp 
 
 ### D1. OMP disable carriers cover both modes
 
-Restricted launch adds `--no-lsp` while preserving row 8's `restricted.yml` `lsp.enabled: false`. Native-yolo gets `lsp.enabled: false` in `agent-config/omp/native-yolo.yml` and/or `--no-lsp` in its launch branch. Implementation records the selected carrier and tests it; neither mode may remain without the disable. Settings order and mode-isolated state/env remain unchanged. This is an intentional exception to prior native-yolo no-LSP-key/no-LSP-flag assertions, with native YOLO approval posture and absence of restricted handler retained.
+Both OMP launch branches add `--no-lsp`, while restricted mode preserves row 8's `restricted.yml` `lsp.enabled: false`. Row 17 owns these factory flags and the OpenCode permission maps. Row 25 `pin-omp-yolo-lsp-settings` exclusively owns the mandatory `lsp.enabled: false` native-YOLO overlay pin and `src/acp/omp-settings.ts` content/composition/validator cutover; row 17 must not edit them. Serialize row 17 → row 25. Both modes have an unconditional flag before the later settings pin lands. Settings order and mode-isolated state/env remain unchanged, with native YOLO approval posture and absence of restricted handler retained.
 
 ### D2. Pinned cold-start audit records residual coverage honestly
 
@@ -36,8 +36,8 @@ Per-agent explicit denial may not stop implicit OpenCode server boot; the pin's 
 
 ## Migration Plan
 
-Land config/flag LSP carriers together after numbered row 15 and before packaging. Rebuild picks up config bytes; no data migration. Rollback reverts this change's LSP-only config/flag and conditional additive rows without reverting predecessor permission changes.
+Land both-mode factory flags and OpenCode permission-map denials together after numbered row 15 and before original packaging. Row 25 lands after every original active row, owns the native-YOLO settings pin/validator cutover and recuts its installed-input digest. Rebuild picks up config bytes; no data migration. Rollback reverts this change's LSP-only permissions/flags and conditional additive rows without reverting predecessor permission changes or row 25's settings changes.
 
 ## Open Questions
 
-The native-yolo settings-versus-flag carrier is decided from the pinned supported surfaces at implementation and recorded in the handoff. No user decision is pending for LSP-all-off, and incomplete native coverage never changes the recorded verdicts.
+Carrier ownership is settled. Row 17 supplies `--no-lsp` for both OMP modes and OpenCode per-agent denials; row 25 supplies the native-YOLO settings pin and validator/content changes after row 17. No user decision is pending for LSP-all-off, and incomplete native coverage never changes the recorded verdicts.

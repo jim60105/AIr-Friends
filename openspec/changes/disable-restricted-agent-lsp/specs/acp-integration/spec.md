@@ -2,7 +2,7 @@
 
 ### Requirement: OMP Both Modes Carry The LSP Disable
 
-OMP restricted and native-YOLO sessions SHALL both carry the pinned LSP disable. Restricted mode SHALL compose `--no-lsp` with the existing `lsp.enabled: false` overlay pin; native-YOLO SHALL carry `lsp.enabled: false` in its mode overlay and/or `--no-lsp` in its launch arguments. No restricted tool policy SHALL be copied into YOLO.
+OMP restricted and native-YOLO sessions SHALL both carry `--no-lsp` in their factory launch arguments. Restricted mode SHALL retain the existing `lsp.enabled: false` overlay pin. Row 17 SHALL land before row 25, which exclusively owns the native-YOLO overlay LSP pin and settings content/composition/validator cutover. No restricted tool policy SHALL be copied into YOLO.
 
 #### Scenario: Restricted flag and settings pin compose
 - **WHEN** a restricted OMP launch is assembled
@@ -11,7 +11,7 @@ OMP restricted and native-YOLO sessions SHALL both carry the pinned LSP disable.
 
 #### Scenario: Native-YOLO carries its own disable
 - **WHEN** a native-YOLO OMP launch and mode overlay are assembled
-- **THEN** its settings and/or arguments SHALL carry the LSP disable
+- **THEN** its launch arguments SHALL carry --no-lsp exactly once, independently of the later row-25 settings pin
 - **AND** its native approval posture and mode-isolated state SHALL remain unchanged with no restricted handler or approval-record load
 
 ### Requirement: OpenCode Both Agents Explicitly Deny The LSP Tool

@@ -7,7 +7,7 @@
 
 ## 2. OMP both-mode wiring (0.75 hours)
 
-- [ ] 2.1 Add restricted `--no-lsp` over the unchanged restricted overlay pin. Put `lsp.enabled: false` in agent-config/omp/native-yolo.yml and/or add `--no-lsp` to the native-yolo launch branch; record chosen carrier. Verify both modes carry LSP disable, no unrelated settings/state/env change, and native YOLO keeps native approval mode with no restricted handler.
+- [ ] 2.1 Add `--no-lsp` to BOTH OMP factory launch branches over the unchanged restricted overlay pin. Row 17 lands before row 25 `pin-omp-yolo-lsp-settings`; do not edit agent-config/omp/native-yolo.yml or src/acp/omp-settings.ts content/composition/validator, which row 25 exclusively owns. Verify both modes carry the flag, no unrelated settings/state/env change, and native YOLO keeps native approval mode with no restricted handler.
 
 ## 3. OpenCode both-agent configuration (1.00 hours)
 
@@ -20,7 +20,7 @@
 
 ## 5. Consumer-visible unit/mock tests (2.00 hours)
 
-- [ ] 5.1 Test restricted flag+overlay pin and selected native-yolo disable carrier, correct overlay order/state isolation, and no restricted handler/approval records in YOLO. Revise old no-YOLO-LSP assertions only; do not delete unrelated factory invariants.
+- [ ] 5.1 Test both-mode `--no-lsp` flags and unchanged restricted overlay pin, correct overlay order/state isolation, and no restricted handler/approval records in YOLO. Revise old no-YOLO-LSP-flag assertions only; settings asset/composition/validator tests belong to row 25. Do not delete unrelated factory invariants.
 - [ ] 5.2 Parse OpenCode config and assert explicit lsp deny for build and yolo, no global clamp, and unrelated permission entries equal the file as landed after numbered row 15. Never require full yolo byte equality across the LSP change.
 - [ ] 5.3 Test conditional restricted cold-start denials and residual evidence records without native suppression claims. Supply final lifecycle/handoff baselines from opencode.json as landed after numbered rows 15 and 17.
 
@@ -32,5 +32,5 @@
 
 ## 7. Verification and contingency (0.50 hours)
 
-- [ ] 7.1 Run strict OpenSpec validation and focused config/factory/decision tests once; no live agents or language-server observation. Confirm no new config/env/Helm fields (synchronize trio only if eventual implementation introduces one), declared impact only, and packaging digest handoff includes any native-yolo overlay bytes.
-- [ ] 7.2 Contingency reserve 0.25h within the 8.00h ceiling; report carrier choice, shared-file baseline and every unverified runtime property.
+- [ ] 7.1 Run strict OpenSpec validation and focused config/factory/decision tests once; no live agents or language-server observation. Confirm no new config/env/Helm fields (synchronize trio only if eventual implementation introduces one), declared impact only, and row 25 retains exclusive native-yolo settings content/validator and same-change digest ownership.
+- [ ] 7.2 Contingency reserve 0.25h within the 8.00h ceiling; report both-mode factory flags, row 17 → row 25 serialization, shared-file baseline and every unverified runtime property.
