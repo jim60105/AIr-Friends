@@ -36,6 +36,8 @@ Own `agent-config/omp/restricted.yml` and `native-yolo.yml` skill-source entries
 | Applicable checks and review contingency | 1.25 |
 | **Hard ceiling including implementation/testing/docs** | **8.00** |
 
+Sizing relies on the existing canonical critical selector, trusted-read root validator, settings validator and resource-generation lifecycle tests. Add registered settings/root declaration and candidate filtering at their existing interfaces, avoiding a replacement native skill loader or new staging/delivery harness. Table-driven source/collision cases and the existing new/load/refresh harness provide the required coverage without duplicating end-to-end delivery work. The 1.25h verification/contingency allocation remains inside the hard ceiling.
+
 ## Batch:
 
 depends-on: translate-omp-owned-settings
