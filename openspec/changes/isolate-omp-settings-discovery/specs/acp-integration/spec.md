@@ -71,6 +71,7 @@ Before OMP spawn and native session new/load/recovery or repository-triggered re
 - **WHEN** session new/load or recovery is attempted despite a neutral process launch cwd
 - **THEN** setup SHALL reject before the native request with a bounded content/credential-free source reason
 - **AND** the hostile file SHALL remain unchanged
+- **AND** accepting that workspace SHALL require its deployment/workspace owner to remove the forbidden source; no native suppression of an existing project source SHALL be claimed
 
 #### Scenario: Polluted reused state fails closed
 - **GIVEN** the mode's global agent directory contains config.yml, config.yaml or legacy settings.json outside the owned overlays

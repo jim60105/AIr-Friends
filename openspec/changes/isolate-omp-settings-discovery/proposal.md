@@ -36,6 +36,8 @@ Implementation owner covers `src/acp/omp-settings.ts`, `src/acp/sandbox-manager.
 | Applicable checks and review contingency | 1.25 |
 | **Hard ceiling including implementation/testing/docs** | **8.00** |
 
+Sizing assumes reuse of the landed canonical filesystem primitives, mode-state selectors and final mock ACP harness. The implementation adds a bounded pinned source-path table, one observer and one shared pre-native lifecycle call site; it introduces no mount/filter backend or native watcher. Table-driven fixtures cover all source failures, then the existing lifecycle harness exercises both modes/shapes without repeating every filesystem case through every lifecycle combination. The 1.25h verification/contingency allocation is retained. Existing project-source detection rejects the workspace until its owner removes the source; this package does not implement native project-source suppression.
+
 ## Batch:
 
 depends-on: translate-omp-owned-settings
