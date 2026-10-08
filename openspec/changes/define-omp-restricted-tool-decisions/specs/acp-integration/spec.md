@@ -185,18 +185,18 @@ The restricted decision SHALL admit client-owned operator MCP tools purely on ow
 - **THEN** the exported status table SHALL cite the ledger gap explicitly so downstream wiring and combined-regression consumers inherit the label
 - **AND** the admission decision SHALL require no generic human elicitation
 
-### Requirement: Restricted Tool Decision Compatibility Gates Remain Blocking
+### Requirement: Restricted Tool Decision Verdicts Retain Decided Dispositions
 
-The restricted tool decision modules SHALL export a named compatibility gate carrying, verbatim from the pinned ledger, the authoritative record-reset verdict as incompatible-as-stated and the complete destructive-intent verdict as unresolved, each with a required user decision, mirroring the owned-settings and readiness gates; while those gates stand, the modules SHALL ship and be locally testable as the restricted execution-time default-deny that holds the boundary.
+The restricted tool decision modules SHALL preserve the inherited authoritative record-reset incompatible-as-stated and complete destructive-intent unresolved verdicts verbatim, independently from their DECIDED user dispositions. Settings-discovery-path control SHALL replace reset reliance, and the complete ACP-mediated destructive path SHALL remain the boundary with incomplete native shapes denied. No readiness gate or further pending decision SHALL be required.
 
 #### Scenario: Passing decision tests cannot clear the gates
 - **WHEN** every decision-table, provenance, record-interpretation, and destructive-consumption test passes
-- **THEN** the exported gate SHALL still report record-reset incompatible and destructive-intent unresolved with pinned verdict text and required user decisions
+- **THEN** the exported gate SHALL still report record-reset incompatible and destructive-intent unresolved with pinned verdict text and their DECIDED dispositions
 - **AND** no synthetic allow-fixture SHALL be citable as native support
 
-#### Scenario: Gate resolution requires a user decision
+#### Scenario: Decided dispositions do not assert native support
 - **WHEN** an implementer proposes to treat the record reset or destructive decoding as solved
-- **THEN** the change SHALL be blocked until the compatibility contract records a source-backed supported mechanism at the pin and an explicit user decision adopts it
+- **THEN** the DECIDED deployment dispositions SHALL govern application while the native verdicts remain unchanged; any new native-support claim SHALL require source-backed evidence
 - **AND** these specifications SHALL NOT be rewritten to claim support in advance of that decision
 
 #### Scenario: Unit and mock evidence validates decision logic only

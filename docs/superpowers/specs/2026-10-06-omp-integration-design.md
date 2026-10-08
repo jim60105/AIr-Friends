@@ -599,3 +599,37 @@ lifecycle-readiness gap, incomplete destructive intent, native network transport
 lexical filesystem containment, critical skill selection, merged approval-record behavior, and
 recovery cache loss. Sections 7–10 turn those findings into explicit contracts and acceptance cases.
 They do not record a successful real-runtime security verification.
+
+## Decision follow-up amendment (2026-10-09)
+
+This amendment clarifies and supersedes section 2a items 2 and 5 and any conflicting readiness or
+LSP-only-YOLO statements elsewhere, without rewriting the approved decision rows or pinned ledger.
+
+`gate-omp-policy-readiness` (numbered row 13) is removed from the batch by user decision, without
+renumbering the remaining rows. Client-observable authenticated readiness, ReadySignal/channel
+consumption and readiness reset on recovery or registry refresh are cancelled. The named
+`onGateContextRestored` hook remains after gate-context restoration and before resumption, with no
+readiness assertion. `wire-omp-restricted-tool-enforcement` owns synchronous handler-slot
+registration/attachment and live registryEpoch observation, consuming discovery resourceGeneration
+for stale-generation denial. Per-call live-origin and fresh-epoch requirements remain.
+
+If the extension handler is not installed, the pinned non-YOLO native approval mode plus the
+client ACP policy remain the boundary for ACP-mediated operations; client denials remain
+fail-closed. `runner.emit` only logs lifecycle-hook errors and does not fail session startup, so an
+extension that fails to load leaves the session without the restricted capability set. This is an
+accepted residual risk without a client-observable readiness assertion, equivalent native
+default-deny claim or proof of complete ACP callback coverage.
+
+Decision 5 covers BOTH agents: LSP disabled for OMP restricted+YOLO and OpenCode build+yolo.
+OMP native-YOLO carries the disable in `agent-config/omp/native-yolo.yml` and/or its `--no-lsp`
+launch argument. OpenCode explicitly denies the `lsp` tool per agent for both build and yolo in
+`agent-config/opencode.json`; no global clamp is introduced. This supersedes any interpretation of
+section 2a item 5 as selecting a global OpenCode disable, while preserving native YOLO approval
+posture and exclusion of restricted tool policies. Per-agent explicit denial does not establish
+implicit server suppression or clear recorded incompatibility/unresolved verdicts. Serialize
+numbered row 15 before row 17 for opencode.json claims; final baselines use the file after both.
+
+All seven dispositions are DECIDED. The pinned OMP v18.6.1 and OpenCode 1.18.21 evidence remains
+authoritative and unchanged; source, synthetic mock and user-owned runtime evidence remain
+separate. The historical section 15 readiness observation is cancelled, not verified; residual
+extension-load and both-agent/both-mode implicit LSP observations remain user-owned and unverified.

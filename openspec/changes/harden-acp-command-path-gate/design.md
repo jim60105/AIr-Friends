@@ -17,7 +17,7 @@ Create `src/acp/command-path-policy.ts` owning the generic-command gate decision
 - `genericCommandRejectionReason(segment, gateContext) -> Promise<GenericCommandRejection | null>`
 - `multiCommandRejectionReason(command, gateContext) -> Promise<GenericCommandRejection | null>` (same per-segment chaining rule, byte-identical single-segment equivalence)
 
-`GenericCommandRejection` keeps exactly `shell_operator | first_token_not_allowed | dangerous_flag | path_outside_boundary` — a canonical observation failure maps to `path_outside_boundary` and logs the predecessor failure name, so audit codes and the retry-prompt rejection vocabulary are untouched (row 13/22 consumers unaffected). `gateContext` is a new `CommandGateContext` built by `client.ts` from the existing per-session gate context + client config (session ACP id, Skill API session id, cwd, shared workspace, `processTmpDir`, `config.xdgDataHome`, runtime env values, session/context generation). Alternative considered: keep the gate inline in `client.ts`; rejected per design §4 (focused policy module rather than growing the client) and to keep the 14a-delegated "common command policy" boundary separable for 14b.
+`GenericCommandRejection` keeps exactly `shell_operator | first_token_not_allowed | dangerous_flag | path_outside_boundary` — a canonical observation failure maps to `path_outside_boundary` and logs the predecessor failure name, so audit codes and the retry-prompt rejection vocabulary are untouched (final regression consumers unaffected). `gateContext` is a new `CommandGateContext` built by `client.ts` from the existing per-session gate context + client config (session ACP id, Skill API session id, cwd, shared workspace, `processTmpDir`, `config.xdgDataHome`, runtime env values, session/context generation). Alternative considered: keep the gate inline in `client.ts`; rejected per design §4 (focused policy module rather than growing the client) and to keep the 14a-delegated "common command policy" boundary separable for 14b.
 
 ### 2. Command-gate root-role enumeration (the row-2 exclusions, made explicit)
 
@@ -42,7 +42,7 @@ Every existing allow/deny case — all of `tests/acp/permission-gate-generic.tes
 
 ### 5. Client cutover, confined and serialized
 
-`requestPermission()` keeps ownership of segment flattening, skill-whitelist matcher precedence, audit reasons, and rejection recording; only the generic-gate branch changes to build `CommandGateContext` and await the policy module. The deleted client-local pieces are exactly `genericArgWithinWorkspace`, the lexical containment branches of `genericCommandRejectionReason`/`multiCommandRejectionReason`, and the `allowedDirs`/`toolOutputDir`/`dataRoot` assembly inside the execute branch — the shared-file conflict note in `proposal.md` governs ordering with rows 4/5/13/14a/14b/16 in `client.ts`. YOLO returns before this branch (unchanged), so no clamp reaches native YOLO; OpenCode restricted sessions and future OMP restricted sessions see the same gate, canonically decided.
+`requestPermission()` keeps ownership of segment flattening, skill-whitelist matcher precedence, audit reasons, and rejection recording; only the generic-gate branch changes to build `CommandGateContext` and await the policy module. The deleted client-local pieces are exactly `genericArgWithinWorkspace`, the lexical containment branches of `genericCommandRejectionReason`/`multiCommandRejectionReason`, and the `allowedDirs`/`toolOutputDir`/`dataRoot` assembly inside the execute branch — the shared-file conflict note in `proposal.md` governs ordering with rows 4/5/14a/14b/16 in `client.ts`. YOLO returns before this branch (unchanged), so no clamp reaches native YOLO; OpenCode restricted sessions and future OMP restricted sessions see the same gate, canonically decided.
 
 ## Risks / Trade-offs
 
@@ -55,3 +55,7 @@ Every existing allow/deny case — all of `tests/acp/permission-gate-generic.tes
 ## Migration Plan
 
 Single cutover on `requestPermission`'s generic-command branch; no config, no data migration, no rollout flag. Rollback = revert the change; the removed lexical helpers return with it. Predecessor rows 2/3/4 must be applied first (application gate; P0 verdicts inherited unchanged).
+
+## Shared configuration ordering clarification (2026-10-09)
+
+Serialize this numbered row 15 before LSP row 17 on `agent-config/opencode.json`. Command-gate YOLO exemption remains; yolo configuration byte equality is local to command hardening and intentionally ends when row 17 adds its explicit LSP denial. No global clamp or unrelated permission change is introduced. Final regression baselines reflect both landed rows.

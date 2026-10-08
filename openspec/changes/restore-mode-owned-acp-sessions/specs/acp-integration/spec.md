@@ -59,7 +59,7 @@ For an agent type whose sessions carry ownership provenance, the connector SHALL
 - **THEN** it SHALL match by construction
 - **AND** the agent type's existing recovery behavior SHALL remain unchanged
 
-### Requirement: Gate-Context Restoration And Readiness Seam In Connector Recovery
+### Requirement: Gate-Context Restoration And Recovery Hook In Connector Recovery
 
 After a successful same-mode `session/load`, the connector SHALL re-register the recovered session id's OWN complete per-session gate context (cwd, owning skill session id, per-session permission flags), supplied by the caller and consistent with the recovery cwd, before reporting recovery success, and SHALL NOT substitute another session's cached gate context or the process-frozen client configuration when the session's own context cannot be established.
 
@@ -79,7 +79,7 @@ After a successful same-mode `session/load`, the connector SHALL re-register the
 - **WHEN** restoration is attempted
 - **THEN** it SHALL fail closed as a gate-context restore failure for that session rather than silently overwriting either value
 
-#### Scenario: Readiness seam is a positioned no-op attach point
+#### Scenario: Recovery hook is a positioned no-op attach point
 - **GIVEN** a successful same-mode recovery with no post-restore hook supplied
 - **WHEN** recovery completes
 - **THEN** resumption SHALL proceed without any readiness assertion

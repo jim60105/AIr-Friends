@@ -130,11 +130,11 @@ When operator or client-owned MCP tools register or refresh AFTER startup, the w
 - **WHEN** its origin observation or the epoch later goes stale
 - **THEN** subsequent calls SHALL deny on staleness without honoring any earlier refresh-time admission
 
-#### Scenario: Refresh does not bypass readiness reset
+#### Scenario: Refresh freshness uses the registry epoch only
 - **GIVEN** a registry refresh that advances the epoch during a session flow
-- **WHEN** the next prompt or call is evaluated
-- **THEN** the readiness reset behavior shipped by the readiness requirements SHALL apply unchanged
-- **AND** the enforcement wiring SHALL have neither established nor bypassed readiness
+- **WHEN** the next restricted tool call is evaluated
+- **THEN** the current registry epoch SHALL be observed afresh and a stale observation SHALL deny
+- **AND** no readiness signal, reset, channel or handshake SHALL be consumed
 
 #### Scenario: Unowned-discovery refresh stays denied
 - **GIVEN** a post-start MCP registration or refresh recorded under unowned discovery
@@ -164,38 +164,38 @@ The enforcement handler SHALL be attached only in the restricted trusted-extensi
 
 ### Requirement: Fail-Closed Behavior At Unresolved Inherited Seams
 
-The wiring SHALL export a named enforcement-wiring gate enumerating every inherited unresolved seam with its source verdict reproduced verbatim and a required user decision, together with the handler's fail-closed behavior at each seam.
+The wiring SHALL export a named enforcement-wiring gate enumerating every inherited unresolved seam with its source verdict reproduced verbatim and its DECIDED user disposition, together with the handler's fail-closed behavior at each seam.
 
 #### Scenario: Seam fixtures fail closed carrying markers
-- **WHEN** a fixture exercises each unresolved seam — MCP basis, readiness channel, record survival, destructive undecodability, pending adapter
+- **WHEN** a fixture exercises each unresolved seam — record survival, destructive undecodability, pending adapter
 - **THEN** the call SHALL be blocked fail-closed with its bounded code and the named seam marker
-- **AND** no seam fixture SHALL produce an allow, a grant, or an established-readiness side effect
+- **AND** no seam fixture SHALL produce an allow or grant contrary to policy
 
 #### Scenario: Passing wiring tests cannot clear the gates
 - **WHEN** every wiring, refresh, error-shape, and exemption test passes
-- **THEN** the exported gate SHALL still report each inherited verdict verbatim with its required user decision
+- **THEN** the exported gate SHALL still report each inherited verdict verbatim with its DECIDED disposition where recorded
 - **AND** no synthetic allow-fixture SHALL be citable as native support for any seam
 
 #### Scenario: Gate resolution requires the source decision
 - **WHEN** an implementer proposes to treat any listed seam as resolved
-- **THEN** the change SHALL be blocked until the owning boundary records a source-backed supported mechanism in the compatibility contract and an explicit user decision adopts it
+- **THEN** the recorded user dispositions SHALL govern application without changing the inherited verdict; only source-backed evidence may support a new native-mechanism claim
 - **AND** these specifications SHALL NOT be rewritten to claim support in advance
 
 #### Scenario: The gate enumerates every inherited seam's verdict
-- **GIVEN** the inherited unresolved seams — MCP admission mechanism basis needing a mechanism audit with no boundary row in the pinned compatibility ledger, readiness establishment channel unimplemented, authoritative approval-record reset incompatible, complete destructive-intent decoding unresolved, network-parity adapters pending, and discovery-side gates consumed as shipped
+- **GIVEN** the inherited unresolved seams — MCP admission mechanism basis needing a mechanism audit with no boundary row in the pinned compatibility ledger, authoritative approval-record reset incompatible, complete destructive-intent decoding unresolved, network-parity adapters pending, and discovery-side gates consumed as shipped
 - **WHEN** the named enforcement-wiring gate is read
-- **THEN** each seam SHALL appear with its source verdict reproduced verbatim and a required user decision
+- **THEN** each seam SHALL appear with its source verdict reproduced verbatim and its DECIDED user disposition
 
 #### Scenario: No manufactured status completes a fixture or flow
-- **GIVEN** any fixture or flow requiring an allow, grant, readiness, decoding, or mechanism status
+- **GIVEN** any fixture or flow requiring an allow, grant, decoding, or mechanism status
 - **WHEN** it runs against the wiring
-- **THEN** the wiring SHALL NOT manufacture a passing admission, readiness, grant, decoding, or mechanism status to complete it
+- **THEN** the wiring SHALL NOT manufacture a passing admission, grant, decoding, or mechanism status to complete it
 - **AND** allow-path fixtures SHALL be labeled synthetic, and no fixture or passing test SHALL relabel a status or clear a gate
 
-#### Scenario: Docs state the upstream-denial scope while seams stand
+#### Scenario: Docs state the absence-of-handler residual risk
 - **GIVEN** the unresolved seams still standing
 - **WHEN** documentation describes the wiring's runtime limits
-- **THEN** it SHALL state that real restricted sessions are denied upstream before handler dispatch
+- **THEN** it SHALL state that no readiness handshake is required and, when handler installation fails, the pinned non-YOLO native approval mode plus client ACP policy remain the ACP-mediated boundary, with fail-closed client policy denials
 - **AND** the wiring's evidence SHALL be described as covering wiring decisions only
 
 ### Requirement: Enforcement Wiring Evidence Limited To Wiring Decisions
@@ -208,7 +208,7 @@ Automated unit and mock evidence SHALL validate the wiring decisions and shapes 
 - **AND** user-facing documentation SHALL keep the runtime checklist items explicitly unverified
 
 #### Scenario: Predecessor suites prove read-only consumption
-- **GIVEN** the decision-module, sink-policy, destructive-policy, readiness, and discovery suites
+- **GIVEN** the decision-module, sink-policy, destructive-policy and discovery suites
 - **WHEN** they run unchanged alongside this change
 - **THEN** they SHALL pass without modification
 - **AND** the wiring SHALL have imported their modules without editing them
@@ -221,3 +221,9 @@ Automated unit and mock evidence SHALL validate the wiring decisions and shapes 
 #### Scenario: Real invocation stays user-owned runtime verification
 - **WHEN** real handler invocation and block enforcement by the official OMP binary are considered
 - **THEN** they SHALL remain user-owned runtime verification marked unverified until observed
+
+#### Scenario: Lifecycle errors do not prove handler installation
+- **GIVEN** an extension that fails to load
+- **WHEN** pinned `runner.emit` logs a lifecycle-hook error without failing startup
+- **THEN** the session may lack the restricted capability set and no client-observable readiness assertion SHALL be made
+- **AND** the native approval/client ACP fallback SHALL NOT be described as equivalent execution-time default-deny or proof of native callback coverage

@@ -44,7 +44,7 @@ The repository SHALL provide exactly one consolidated user-owned runtime verific
 #### Scenario: Checklist carries the design list unverified
 - **WHEN** the consolidated checklist artifact is inspected
 - **THEN** every user-owned runtime observation named in the approved design's verification section SHALL appear as a checklist row
-- **AND** each row's runtime outcome SHALL read unverified with space for a user observation
+- **AND** each active row's runtime outcome SHALL read unverified with space for a user observation, while historically cancelled readiness observations SHALL be marked cancelled by user decision with the accepted residual risk retained
 - **AND** no row SHALL cite unit or mock results as runtime verification
 
 #### Scenario: OMP documents resolve to one checklist home
@@ -60,7 +60,7 @@ The repository SHALL provide exactly one consolidated user-owned runtime verific
 #### Scenario: Predecessor documentation gains cross-links only
 - **GIVEN** a predecessor document with existing verification content
 - **WHEN** its cross-link to the consolidated checklist artifact is added
-- **THEN** its existing content SHALL be extended with the cross-link only and never rewritten
+- **THEN** its existing content SHALL be extended with the cross-link only, except the explicitly authorized decision-register section 1a and batch-index synchronization; pinned ledger verdicts SHALL never be rewritten
 
 ### Requirement: Batch Documentation Final-Consistency Pass
 
@@ -86,9 +86,23 @@ The final documentation pass SHALL consolidate the batch's change-history entrie
 - **GIVEN** the agent-facing documentation's integration status
 - **WHEN** it is read
 - **THEN** it SHALL state that the proposals are approved and the implementation lands through the applied changes
-- **AND** full security consumption of restricted OMP SHALL be described as gated by unresolved compatibility verdicts pending explicit user decisions and user runtime verification
+- **AND** all seven user dispositions SHALL be described as DECIDED while pinned incompatible/unresolved verdicts stay unchanged and runtime verification stays user-owned/unverified
 
 #### Scenario: Payload-file and prompt contract is recorded in final form
 - **WHEN** the documentation of the payload-file and prompt contract is inspected
 - **THEN** it SHALL record literal session ids and absolute staging paths in prompts and skill recipes
 - **AND** the legacy token-path expansion SHALL be retained for existing OpenCode callers only
+
+### Requirement: Final OMP Decision Register And Batch Synchronization
+
+The final synchronization SHALL preserve the decision register as authoritative, state all seven dispositions DECIDED without relabeling pinned incompatible/unresolved verdicts, record gate-omp-policy-readiness removed from the batch with client-observable readiness cancelled, and state LSP-all-off for OMP restricted+YOLO and OpenCode build+yolo through per-agent OpenCode denies. The CHANGELOG SHALL record those planning decisions and their evidence limits exactly once.
+
+#### Scenario: Final documents reflect decided posture
+- **WHEN** the batch-final documentation synchronization completes
+- **THEN** decision register and index SHALL retain all seven DECIDED dispositions and unchanged pinned verdicts, show row 13 removed without renumbering, and name both agents and both modes for LSP denial
+- **AND** the accepted absent-handler residual risk and cancelled readiness requirement SHALL be recorded without native enforcement claims
+
+#### Scenario: Planning decisions receive one changelog entry
+- **WHEN** CHANGELOG is consolidated
+- **THEN** the readiness cancellation, row 13 removal and both-agent LSP posture SHALL be recorded once with their evidence limits
+- **AND** no mock result SHALL be described as clearing a native compatibility verdict

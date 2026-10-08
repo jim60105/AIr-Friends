@@ -19,7 +19,7 @@ The combined mock-ACP lifecycle integration suite SHALL drive the real `AgentCon
 #### Scenario: Registry-refresh re-admission composes through the shipped decision modules
 - **GIVEN** a restricted composition fixture whose live tool-metadata observation gains or replaces an operator MCP tool after startup
 - **WHEN** the registry epoch advances
-- **THEN** readiness SHALL reset, provenance SHALL be re-observed on the fresh epoch, and admission or denial SHALL be produced by the shipped decision modules through the shipped wiring
+- **THEN** provenance SHALL be re-observed on the fresh epoch, and admission or denial SHALL be produced by the shipped decision modules through the shipped wiring
 - **AND** a denied call SHALL surface the bounded fail-closed error shape with no stale-epoch grant honored
 
 #### Scenario: Dual-mode coexistence still serializes on the global lease
@@ -31,7 +31,7 @@ The combined mock-ACP lifecycle integration suite SHALL drive the real `AgentCon
 - **GIVEN** an OpenCode session driving initialize/new/prompt/cancel/load and pool reuse through the same harness
 - **WHEN** pool keys, spawn environment, and command strings are captured
 - **THEN** they SHALL byte-match the current shipped OpenCode values
-- **AND** no readiness verification, trusted extension, or restricted clamp SHALL be involved
+- **AND** no readiness verification or OMP trusted extension SHALL be involved, and the baseline SHALL retain build+yolo per-agent explicit lsp denies after numbered rows 15 and 17
 
 #### Scenario: Happy path completes through real pool wiring
 - **GIVEN** mock ACP subprocess and scripted in-process connection fixtures for a restricted session
@@ -40,20 +40,20 @@ The combined mock-ACP lifecycle integration suite SHALL drive the real `AgentCon
 - **AND** the scenario SHALL exercise at least two shipped components together
 
 #### Scenario: LSP disablement posture survives crash-respawn and same-mode load
-- **GIVEN** a restricted OMP session with restricted LSP disablement in effect
+- **GIVEN** an OMP session in either restricted or native-YOLO mode with its selected LSP disable carrier
 - **WHEN** the mock subprocess crashes, respawns, or the session is re-loaded in the same mode
-- **THEN** the restricted LSP disablement posture SHALL be preserved across crash-respawn and same-mode load
-- **AND** native-YOLO sessions SHALL remain exempt from the disablement
+- **THEN** the selected mode's LSP disable carrier SHALL be preserved across crash-respawn and same-mode load
+- **AND** native-YOLO SHALL carry its LSP disable without loading restricted tool policy, and no fixture SHALL certify implicit startup suppression
 
 ### Requirement: Fail-Closed Honest Posture Assertions in the Lifecycle Suite
 
 Every unresolved inherited seam exercised by the combined lifecycle suite SHALL be asserted on its deny or blocked outcome, and every allow-path fixture SHALL be carried as a labeled synthetic positive verified by a runtime suite guard. No test name, comment, or assertion SHALL claim or imply that the native OMP binary invokes a handler, honors a denial, rejects a cross-mode load, emits readiness, or suppresses a language server.
 
-#### Scenario: Unresolved readiness denies the first prompt through the real orchestrator path
-- **GIVEN** a restricted OMP session with the shipped unimplemented readiness channel
-- **WHEN** its first normal prompt is requested through the orchestrator
-- **THEN** the run SHALL end with the bounded readiness-rejection reason
-- **AND** zero prompt RPCs SHALL be recorded and no fallback spawn or mode promotion SHALL occur
+#### Scenario: Absent-handler sessions retain the native approval and ACP client boundary
+- **GIVEN** a restricted OMP session whose extension handler is not installed
+- **WHEN** an unauthorized ACP-mediated operation is requested through the real client policy
+- **THEN** the operation SHALL fail closed with the client policy's bounded denial and zero side effects
+- **AND** the pinned non-YOLO native approval launch posture SHALL remain unchanged with no readiness handshake, fallback spawn or mode promotion
 
 #### Scenario: Synthetic allow fixtures are registered and labeled
 - **GIVEN** any scenario in which a restricted call or prompt is allowed
@@ -86,11 +86,11 @@ Every unresolved inherited seam exercised by the combined lifecycle suite SHALL 
 
 ### Requirement: Shared OMP Mock Session Builder Contract
 
-The suite SHALL extract a shared mock-session builder exposing scenario composition for permission mode, recorded ownership context, config-option catalog shape, readiness state (defaulting to unresolved fail-closed), registry epoch with live tool-observation fixtures, and destructive-input shape, with every synthetic positive wrapped in a labeled carrier and no default allow path.
+The suite SHALL extract a shared mock-session builder exposing scenario composition for permission mode, recorded ownership context, config-option catalog shape, handler availability (default absent with non-YOLO native approval and ACP client fallback), registry epoch with live tool-observation fixtures, and destructive-input shape, with every synthetic positive wrapped in a labeled carrier and no default allow path.
 
 #### Scenario: Default composition is fail-closed
-- **WHEN** the builder is invoked without an explicit readiness or trusted-provenance override
-- **THEN** the composed fixture SHALL carry unresolved readiness and untrusted-default tool observations
+- **WHEN** the builder is invoked without an explicit synthetic installed-handler or trusted-provenance override
+- **THEN** the composed fixture SHALL carry an absent handler and untrusted-default tool observations, with ACP client denials still fail-closed
 - **AND** any scenario allowing execution SHALL have explicitly supplied a labeled synthetic positive
 
 #### Scenario: Follow-up suite consumes the builder without modification
@@ -101,9 +101,9 @@ The suite SHALL extract a shared mock-session builder exposing scenario composit
 
 #### Scenario: Composition surface covers every scenario dimension
 - **GIVEN** a scenario composing a mock OMP session through the shared builder
-- **WHEN** it configures permission mode, recorded ownership context, config-option catalog shape (flat, grouped, catalog-miss, absent), readiness state, registry epoch with live tool-observation fixtures, or destructive-input shape
+- **WHEN** it configures permission mode, recorded ownership context, config-option catalog shape (flat, grouped, catalog-miss, absent), handler availability, registry epoch with live tool-observation fixtures, or destructive-input shape
 - **THEN** the builder SHALL expose each dimension's scenario composition
-- **AND** readiness SHALL default to unresolved fail-closed with no default allow path
+- **AND** handler availability SHALL default to absent without any readiness assertion; client policy denials and untrusted handler observations SHALL fail closed
 
 ### Requirement: Lifecycle Suite Determinism and Execution Boundaries
 
@@ -134,3 +134,9 @@ The combined suite SHALL NOT duplicate single-component unit assertions already 
 - **WHEN** a predecessor unit test case is deleted alongside this suite
 - **THEN** the deletion commit SHALL name the case and the combined scenario whose real-code flow asserts the same observable outcome
 - **AND** no unit assertion SHALL be weakened, only removed under this rule or left intact
+
+#### Scenario: Missing handler is an accepted residual risk
+- **GIVEN** pinned runner.emit logs extension lifecycle-hook errors without failing startup
+- **WHEN** an extension fails to load
+- **THEN** the session may run without the restricted capability set and no client-observable readiness assertion SHALL be made
+- **AND** native non-YOLO approval plus client ACP policy SHALL NOT be claimed equivalent to installed-handler default-deny or proof of native callback coverage

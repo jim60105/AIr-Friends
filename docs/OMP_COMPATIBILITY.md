@@ -27,9 +27,10 @@ any longer, and the remaining batch changes implement the single posture recorde
 
 The section 3 ledger is unchanged and remains the authoritative record of what the pinned OMP
 `v18.6.1` does and does not support. The pinned binary still provides none of the mechanisms the
-user's dispositions work around; no ledger row, status, citation, or evidence limit is relabeled or
+user's DECIDED dispositions work around; no ledger row, status, citation, or evidence limit is relabeled or
 relaxed. Each decision below is the user's chosen disposition of a recorded gap, taken under
-deployment ownership rather than as a claim of native support.
+deployment ownership rather than as a claim of native support. All seven dispositions are
+**DECIDED (2026-10-09)**; native support verdicts remain unchanged.
 
 1. **Pre-import executable discovery exclusion** — disposition of section 3 boundary 1 (recorded
    `incompatible`). The boundary is carried by deployment control: the image and deployment keep
@@ -40,12 +41,17 @@ deployment ownership rather than as a claim of native support.
    `guard-omp-executable-discovery`.
 2. **Authenticated policy readiness** — disposition of section 3 boundary 2 (recorded
    `unresolved`). The requirement for a client-observable, authenticated readiness handshake is
-   cancelled. Restricted OMP relies on the extension's synchronously installed `tool_call`
-   enforcement handler plus the client's ACP permission policy as the only boundary. The residual
-   risk is recorded and accepted: `runner.emit` only logs lifecycle-hook errors and does not fail
-   session startup, so an extension that fails to load leaves the session running without the
-   restricted capability set and no client-observable signal exists. No readiness claim is made.
-   Carried by `gate-omp-policy-readiness`.
+   cancelled. The installed synchronous `tool_call` enforcement handler supplies the restricted
+   execution-time decisions. If the handler is not installed, the pinned non-YOLO native approval
+   mode plus the client ACP policy remain the boundary for ACP-mediated operations, with client
+   denials fail-closed. The residual risk is recorded and accepted: `runner.emit` only logs
+   lifecycle-hook errors and does not fail session startup, so an extension that fails to load
+   leaves the session without the restricted capability set and no client-observable signal exists.
+   This fallback does not establish equivalent native default-deny or complete ACP callback
+   coverage. No readiness claim is made. `gate-omp-policy-readiness` is removed from the batch by
+   user decision; the client-observable readiness requirement is cancelled, with handler wiring
+   carried by `wire-omp-restricted-tool-enforcement` and fallback posture consumed by the remaining
+   lifecycle and recovery changes.
 3. **Authoritative approval-record reset** — disposition of section 3 boundary 3 (recorded
    `incompatible`). Settings discovery paths are controlled instead of the reset overlay: only the
    owned `--config` overlays are visible, with HOME, XDG and project settings sources filtered out,
@@ -55,10 +61,14 @@ deployment ownership rather than as a claim of native support.
    The ACP-mediated destructive path is kept with complete location lists, and native shapes
    (multi-file patches and first-operation-only lists) are denied fail-closed. Carried by
    `normalize-acp-destructive-targets`.
-5. **Restricted-only LSP** — disposition of section 3 boundaries 5a and 5b (recorded `unresolved`
-   and `incompatible`). LSP is disabled entirely, in both restricted and YOLO modes. This
-   supersedes design decision D6's "YOLO has no added LSP/tool denials", and YOLO parity with
-   `agent-config/opencode.json` (which keeps LSP for `build` and `yolo`) is intentionally dropped.
+5. **LSP disabled for both agents in both modes** — disposition of section 3 boundaries 5a and 5b (recorded `unresolved`
+   and `incompatible`). LSP is disabled for OMP restricted+YOLO and OpenCode build+yolo. OMP
+   native-YOLO receives the disable in its mode overlay and/or `--no-lsp` launch argument.
+   `agent-config/opencode.json` explicitly denies the `lsp` tool per agent for BOTH `build` and
+   `yolo`, without a top-level global clamp. This supersedes design decision D6's LSP exemption;
+   YOLO otherwise retains native approval posture and receives no restricted tool policy.
+   Per-agent tool denial does not clear the pinned implicit-startup incompatibility or establish
+   native server suppression; runtime observations remain user-owned and unverified.
    Carried by `disable-restricted-agent-lsp`.
 6. **Native transport adaptation** — disposition of section 3 boundary 6 (recorded `incompatible`).
    The trusted-extension replacement tool covers the approved routes (URL read, web search, public

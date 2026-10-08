@@ -50,10 +50,10 @@ The repository SHALL provide a combined deterministic integration suite that dri
 
 Every skill-handoff scenario SHALL assert the inherited fail-closed seams on their deny or blocked outcome wherever they would otherwise be silent, and every restricted allow path SHALL be enabled only by a labeled synthetic positive registered in the suite's runtime synthetic-positive ledger.
 
-#### Scenario: Unresolved readiness still denies before any skill call
-- **GIVEN** a restricted scenario composed without a synthetic established-readiness fixture
-- **WHEN** the orchestrator attempts its first prompt
-- **THEN** the run SHALL end with the bounded readiness-rejection reason
+#### Scenario: Absent-handler ACP policy denial prevents unauthorized skill effects
+- **GIVEN** a restricted scenario with no installed extension handler and pinned non-YOLO native approval launch posture
+- **WHEN** an unauthorized ACP-mediated operation is evaluated by client policy
+- **THEN** the operation SHALL fail closed with its bounded client-policy denial, without any readiness handshake
 - **AND** zero skill invocations and zero platform deliveries SHALL be recorded
 
 #### Scenario: Rejected skill call composes with the retry gate without fallback delivery
