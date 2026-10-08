@@ -989,3 +989,43 @@ Deno.test("SessionRegistry - touch() refreshes the idle timer (F13)", async () =
 
   registry.stop();
 });
+
+Deno.test("SessionRegistry - recordOwnership write-once immutable semantics", () => {
+  const registry = new SessionRegistry();
+  const mockWorkspace = {
+    key: "test/123",
+    components: { platform: "discord" as const, userId: "123" },
+    path: "/tmp/test",
+    tmpPath: "/tmp/test/tmp",
+    isDm: false,
+  };
+  const sid = registry.register({
+    platform: "discord",
+    channelId: "456",
+    userId: "123",
+    isDm: false,
+    workspace: mockWorkspace,
+  });
+
+  // Initial acquisition records ownership
+  registry.recordOwnership(sid, {
+    permissionMode: "native-yolo",
+    processNamespace: "/tmp/data/omp/native-yolo",
+  });
+
+  const s1 = registry.get(sid);
+  assertEquals(s1?.permissionMode, "native-yolo");
+  assertEquals(s1?.processNamespace, "/tmp/data/omp/native-yolo");
+
+  // Conflicting second write is ignored (write-once invariant)
+  registry.recordOwnership(sid, {
+    permissionMode: "restricted",
+    processNamespace: "/tmp/data/omp/restricted",
+  });
+
+  const s2 = registry.get(sid);
+  assertEquals(s2?.permissionMode, "native-yolo");
+  assertEquals(s2?.processNamespace, "/tmp/data/omp/native-yolo");
+
+  registry.stop();
+});

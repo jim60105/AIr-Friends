@@ -3,8 +3,8 @@
 import { assertEquals } from "@std/assert";
 import type { AuditPhase } from "../../src/types/audit.ts";
 
-// 8.1: Verify all 20 AuditPhase literals are valid
-Deno.test("AuditPhase - all 20 phase literals are assignable", () => {
+// 8.1: Verify all 21 AuditPhase literals are valid
+Deno.test("AuditPhase - all 21 phase literals are assignable", () => {
   const phases: AuditPhase[] = [
     "trigger_received",
     "session_start",
@@ -23,11 +23,12 @@ Deno.test("AuditPhase - all 20 phase literals are assignable", () => {
     "reply_edited",
     "file_sent",
     "retry_triggered",
+    "process_acquired",
     "session_end",
     "permission_approved",
     "permission_denied",
   ];
-  assertEquals(phases.length, 20);
+  assertEquals(phases.length, 21);
   // Each assignment above is a compile-time check that the literal is valid
   for (const phase of phases) {
     assertEquals(typeof phase, "string");
@@ -53,12 +54,13 @@ Deno.test("AuditPhase - phase literals are distinct", () => {
     "reply_edited",
     "file_sent",
     "retry_triggered",
+    "process_acquired",
     "session_end",
     "permission_approved",
     "permission_denied",
   ];
   const unique = new Set(phases);
-  assertEquals(unique.size, 20);
+  assertEquals(unique.size, 21);
 });
 
 // file_sent data accepts the delivered message IDs (verbatim, not user content)
@@ -82,4 +84,29 @@ Deno.test("Audit - file_sent entry data accepts messageId/messageIds", () => {
   assertEquals(entry.data.filesCount, 2);
   assertEquals(entry.data.messageId, "file-2");
   assertEquals(entry.data.messageIds, ["file-1", "file-2"]);
+});
+
+Deno.test("Audit - process_acquired entry data accepts ownership payload", () => {
+  const entry: {
+    phase: AuditPhase;
+    data: {
+      sessionId?: string;
+      agentType?: string;
+      permissionMode?: string;
+      processNamespace?: string;
+      pooled?: boolean;
+    };
+  } = {
+    phase: "process_acquired",
+    data: {
+      sessionId: "sess-1",
+      agentType: "omp",
+      permissionMode: "native-yolo",
+      processNamespace: "/tmp/data/omp/native-yolo",
+      pooled: true,
+    },
+  };
+  assertEquals(entry.phase, "process_acquired");
+  assertEquals(entry.data.permissionMode, "native-yolo");
+  assertEquals(entry.data.pooled, true);
 });

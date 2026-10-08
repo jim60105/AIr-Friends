@@ -4,7 +4,7 @@
 
 ### Requirement: Per-Channel Shared ACP Process Pool
 
-The system SHALL maintain a pool of long-lived ACP agent subprocesses keyed by a canonical pool key. Message and channel-lurk sessions SHALL use the key `{platform}:{channelId}`; spontaneous-post sessions SHALL use the scheduler's target channel (e.g. `dm:{userId}`, `misskey/timeline/self`); self-research sessions SHALL use `self-research:{userId}` and memory-maintenance sessions SHALL use `memory-maintenance:{workspaceKey}` (each non-message session type gets its own process, effectively per-run). The pool's process identity SHALL additionally include, for agent type `omp` only, the deployment agent type and the session's resolved effective permission mode: the entry identity for `omp` SHALL be composed from the canonical pool key plus the resolved mode, so a same-mode request for the same pool key reuses the live process while a different-mode request acquires or lazily spawns a SEPARATE process carrying that mode's spawn-scoped state namespace. A pool key whose sessions carry different resolved modes SHALL therefore be able to hold two concurrent `omp` processes (restricted and native-YOLO). For agent type `opencode` the entry identity SHALL remain exactly the canonical pool key — the mode SHALL NOT participate in OpenCode pool identity. The acquisition options SHALL carry the agent type and resolved permission mode explicitly; the pool SHALL NOT infer either from a live connector, an existing entry, or its own state. When no live process exists for an entry identity and a session for it starts, the system SHALL lazily spawn one agent subprocess (restricted/YOLO `omp` or `opencode acp` per the entry) with the spawn configuration built from the explicitly supplied resolved mode, and keep it alive across that entry's sessions. The pool SHALL track a per-process reference count (queued, acquiring, in-flight, and recovering sessions all hold a lease); when no leased sessions remain for the entry and the configured reclaim idle time has elapsed, the system SHALL terminate that process and remove it from the pool, re-checking idleness under the pool lock so a concurrent acquire never races the reclaim. Each pool entry SHALL carry a generation counter and a `reclaiming` state: a reclaim marks the entry non-acquirable under the pool lock, waits for the old process to fully exit before a new spawn for the same entry identity is allowed, and the reclaim timer callback SHALL re-validate that it belongs to the same generation — so two agent processes never open the same mode-scoped process state root (or the OpenCode channel-scoped data root) at once, and a restricted-mode entry's reclaim never interacts with a concurrently live native-YOLO entry of the same pool key. Spawn-time creation of the entry's process working/temporary/state directories SHALL follow the entry identity so each mode's spawn gets its own directories and OpenCode's existing channel-scoped directory paths remain byte-identical.
+The system SHALL maintain a pool of long-lived ACP agent subprocesses keyed by a canonical entry identity, lazily spawning one subprocess per entry and reusing it across that entry's sessions. For agent type `omp` the entry identity SHALL additionally carry the deployment agent type and the session's resolved effective permission mode; for agent type `opencode` it SHALL remain exactly the canonical pool key.
 
 #### Scenario: Reclaim and respawn never double-open the channel data root
 - **GIVEN** a pool key's process is being reclaimed (marked `reclaiming`; the old process is still exiting)
@@ -60,6 +60,27 @@ The system SHALL maintain a pool of long-lived ACP agent subprocesses keyed by a
 - **GIVEN** a message or channel-lurk session for a channel, or a spontaneous-post session
 - **WHEN** the session requests an agent process
 - **THEN** the system SHALL key the pool on `{platform}:{channelId}` for message/channel-lurk sessions and on the scheduler's target channel (e.g. `dm:{userId}`, `misskey/timeline/self`) for spontaneous-post sessions, each non-message session type getting its own process
+
+#### Scenario: Lazy spawn and reuse follow the entry identity
+- **GIVEN** no live process exists for an entry identity and a session for it starts
+- **WHEN** the pool serves that session
+- **THEN** the system SHALL lazily spawn one agent subprocess — restricted/YOLO `omp` or `opencode acp` per the entry — with the spawn configuration built from the explicitly supplied resolved mode, and SHALL keep it alive across that entry's sessions
+
+#### Scenario: Every lease state counts as a lease
+- **GIVEN** an entry whose sessions are queued, acquiring, in-flight, or recovering
+- **WHEN** that entry's reclaim decision is evaluated
+- **THEN** each of those states SHALL count as holding a lease and SHALL prevent the entry's process from being reclaimed
+
+#### Scenario: Reclaim is non-acquirable and generation-checked
+- **GIVEN** a pool entry carrying a generation counter and a `reclaiming` state
+- **WHEN** the entry's reclaim fires
+- **THEN** the entry SHALL be non-acquirable while `reclaiming`, a new spawn for the same entry identity SHALL wait until the old process has fully exited, and the reclaim timer callback SHALL re-validate that it belongs to the same generation
+
+#### Scenario: Spawn directories follow the entry identity
+- **GIVEN** a lazily spawned entry
+- **WHEN** its process working, temporary, and state directories are created
+- **THEN** they SHALL follow the entry identity so each mode's spawn gets its own directories
+- **AND** OpenCode's existing channel-scoped directory paths SHALL remain byte-identical
 
 ## ADDED Requirements
 

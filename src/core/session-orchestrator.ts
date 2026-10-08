@@ -4,7 +4,7 @@ import { createLogger } from "@utils/logger.ts";
 import type { ReplyPolicyEvaluator, YoloDecision } from "./reply-policy.ts";
 import { AgentConnector } from "@acp/agent-connector.ts";
 import { AgentProcessPool } from "./agent-process-pool.ts";
-import type { PoolRunOptions } from "./agent-process-pool.ts";
+import type { PoolPermissionMode, PoolRunOptions } from "./agent-process-pool.ts";
 import * as acp from "@agentclientprotocol/sdk";
 import {
   createAgentConfig,
@@ -553,7 +553,7 @@ export class SessionOrchestrator {
         event,
         workspace,
         platformAdapter,
-        shellSessionId ?? undefined,
+        this.skillSessionId(shellSessionId),
         resolvedModel,
         yoloDecision.enabled,
         agentWorkspacePath,
@@ -579,7 +579,7 @@ export class SessionOrchestrator {
       // 4. Re-render system prompt with user context to produce the full prompt
       const fullPrompt = await this.contextAssembler.renderFullPrompt(
         event,
-        shellSessionId ?? undefined,
+        this.skillSessionId(shellSessionId),
         formattedContext.userMessage,
         resolvedModel,
         yoloDecision.enabled,
@@ -630,11 +630,15 @@ export class SessionOrchestrator {
         autoApproveSkills: this.config.agent.autoApproveSkills,
         allowedWriteExtensions: this.config.agent.sandbox?.allowedWriteExtensions,
         logAgentStreamChunks: this.config.logging?.agentStreamChunks ?? false,
-        sessionId: shellSessionId ?? undefined,
+        sessionId: this.skillSessionId(shellSessionId),
       };
 
       // 5. Build ACP connector
       const agentType = getDefaultAgentType(this.config);
+      // Mode resolution precedes acquisition: derive permissionMode before createAgentConfig / pool.run
+      const permissionMode: PoolPermissionMode = yoloDecision.enabled
+        ? "native-yolo"
+        : "restricted";
 
       if (this.processPool) {
         // === SHARED-PROCESS MODE ===
@@ -649,7 +653,7 @@ export class SessionOrchestrator {
           this.config,
           yoloDecision.enabled,
           agentWorkspacePath,
-          shellSessionId ?? undefined,
+          this.skillSessionId(shellSessionId),
           poolKey,
         );
         // Shared-process mode: the pool-key data root drives the permission
@@ -672,8 +676,11 @@ export class SessionOrchestrator {
         const poolResult = await this.processPool.run(
           {
             poolKey,
+            agentType,
+            permissionMode,
             sessionType,
-            shellSessionId,
+            registrySessionId: shellSessionId ?? undefined,
+            shellSessionId: this.skillSessionId(shellSessionId) ?? null,
             priority: "interactive",
             connectorOptions: {
               agentConfig,
@@ -690,6 +697,25 @@ export class SessionOrchestrator {
             // ACP session lifecycle on the shared connection (one process serves
             // many sessions; per-session params come from newSession/setSession*).
             const sl = sessionLogger;
+
+            // Record session ownership at acquisition (before first ACP call/createSession)
+            const ownershipMode = agentType === "opencode" ? "yolo-switch" : permissionMode;
+            const processNamespace = agentType === "omp"
+              ? (agentConfig.env?.["PI_CODING_AGENT_DIR"] ?? agentConfig.env?.["TMPDIR"] ?? "")
+              : (agentConfig.env?.["XDG_DATA_HOME"] ?? poolKey);
+            if (shellSessionId) {
+              this.sessionRegistry.recordOwnership(shellSessionId, {
+                permissionMode: ownershipMode,
+                processNamespace,
+              });
+            }
+            await auditWriter?.write("process_acquired", {
+              sessionId: shellSessionId ?? undefined,
+              agentType,
+              permissionMode: ownershipMode,
+              processNamespace,
+              pooled: true,
+            });
 
             // Spec: a channel-lurk trigger queued for a long time behind other
             // sessions is re-validated at LEASE acquisition; the cycle is skipped
@@ -929,16 +955,17 @@ export class SessionOrchestrator {
       // Per-spawn mode: issue the session's Skill API JWT file (the process pool
       // does this in shared mode). Skill scripts present it as Bearer auth.
       await this.issuePerSpawnJwt(clientConfig.sessionId);
+      const perSpawnAgentConfig = createAgentConfig(
+        agentType,
+        workspace.path,
+        this.config,
+        yoloDecision.enabled,
+        agentWorkspacePath,
+        this.skillSessionId(shellSessionId),
+        undefined, // poolKey: per-spawn mode; the process pool passes the pool key in shared mode
+      );
       const connector = this.createConnector({
-        agentConfig: createAgentConfig(
-          agentType,
-          workspace.path,
-          this.config,
-          yoloDecision.enabled,
-          agentWorkspacePath,
-          shellSessionId ?? undefined,
-          undefined, // poolKey: per-spawn mode; the process pool passes the pool key in shared mode
-        ),
+        agentConfig: perSpawnAgentConfig,
         clientConfig,
         skillRegistry: this.skillRegistry,
         logger: sessionLogger,
@@ -970,6 +997,28 @@ export class SessionOrchestrator {
       try {
         await connector.connect();
         sessionLogger.info("Agent connected");
+
+        // Record ownership and emit process_acquired at per-spawn acquisition
+        const perSpawnOwnershipMode = agentType === "opencode"
+          ? (yoloDecision.enabled ? "native-yolo" : "restricted")
+          : permissionMode;
+        const perSpawnNamespace = agentType === "omp"
+          ? (perSpawnAgentConfig.env?.["PI_CODING_AGENT_DIR"] ??
+            perSpawnAgentConfig.env?.["TMPDIR"] ?? "")
+          : (perSpawnAgentConfig.env?.["XDG_DATA_HOME"] ?? workspace.path);
+        if (shellSessionId) {
+          this.sessionRegistry.recordOwnership(shellSessionId, {
+            permissionMode: perSpawnOwnershipMode,
+            processNamespace: perSpawnNamespace,
+          });
+        }
+        await auditWriter?.write("process_acquired", {
+          sessionId: shellSessionId ?? undefined,
+          agentType,
+          permissionMode: perSpawnOwnershipMode,
+          processNamespace: perSpawnNamespace,
+          pooled: false,
+        });
 
         // Audit: agent_connect
         await auditWriter?.write("agent_connect", {
@@ -1116,8 +1165,8 @@ export class SessionOrchestrator {
 
           const retryStrategy = getRetryPromptStrategy(agentType, undefined, {
             sharedProcess: !!this.processPool,
-            sessionId: shellSessionId ?? undefined,
-            stagingDir: shellSessionId
+            sessionId: this.skillSessionId(shellSessionId),
+            stagingDir: this.skillSessionId(shellSessionId)
               ? `${workspace.tmpPath}/${shellSessionId}`
               : workspace.tmpPath,
           });
@@ -1142,8 +1191,8 @@ export class SessionOrchestrator {
               sessionLogger,
               {
                 sharedProcess: !!this.processPool,
-                sessionId: shellSessionId ?? undefined,
-                stagingDir: shellSessionId
+                sessionId: this.skillSessionId(shellSessionId),
+                stagingDir: this.skillSessionId(shellSessionId)
                   ? `${workspace.tmpPath}/${shellSessionId}`
                   : workspace.tmpPath,
               },
@@ -1317,7 +1366,10 @@ export class SessionOrchestrator {
       return result;
     } finally {
       try {
-        activeSessionsGauge.dec();
+        {
+          if (shellSessionId) this.sessionRegistry.remove(shellSessionId);
+          activeSessionsGauge.dec();
+        }
       } catch (error) {
         sessionLogger.error("Failed to decrement active sessions gauge", {
           platform: event.platform,
@@ -1460,7 +1512,7 @@ export class SessionOrchestrator {
         workspace,
         platformAdapter,
         { fetchRecentMessages: options.fetchRecentMessages },
-        shellSessionId ?? undefined,
+        this.skillSessionId(shellSessionId),
         resolvedModel,
         yoloDecision.enabled,
       );
@@ -1468,10 +1520,12 @@ export class SessionOrchestrator {
       // 4. Build prompt from template
       const fullPrompt = await this.buildSpontaneousPromptFromTemplate(
         context,
-        shellSessionId,
+        this.skillSessionId(shellSessionId) ?? null,
         resolvedModel,
         yoloDecision.enabled,
-        shellSessionId ? `${workspace.tmpPath}/${shellSessionId}` : workspace.tmpPath,
+        this.skillSessionId(shellSessionId)
+          ? `${workspace.tmpPath}/${shellSessionId}`
+          : workspace.tmpPath,
       );
 
       sessionLogger.debug("Spontaneous prompt built", {
@@ -1513,11 +1567,15 @@ export class SessionOrchestrator {
         autoApproveSkills: this.config.agent.autoApproveSkills,
         allowedWriteExtensions: this.config.agent.sandbox?.allowedWriteExtensions,
         logAgentStreamChunks: this.config.logging?.agentStreamChunks ?? false,
-        sessionId: shellSessionId ?? undefined,
+        sessionId: this.skillSessionId(shellSessionId),
       };
 
       // 6. Build and execute ACP connector
       const agentType = getDefaultAgentType(this.config);
+      // Mode resolution precedes acquisition: derive permissionMode before createAgentConfig / pool.run
+      const permissionMode: PoolPermissionMode = yoloDecision.enabled
+        ? "native-yolo"
+        : "restricted";
 
       if (this.processPool) {
         // Shared-process mode: run on the target channel's pool key under the
@@ -1525,6 +1583,8 @@ export class SessionOrchestrator {
         const poolKey = `${platform}:${channelId}`;
         result = await this.runSharedPoolSession({
           poolKey,
+          agentType,
+          permissionMode,
           sessionType: "spontaneous",
           shellSessionId,
           priority: "interactive",
@@ -1535,7 +1595,7 @@ export class SessionOrchestrator {
               this.config,
               yoloDecision.enabled,
               agentWorkspacePath,
-              shellSessionId ?? undefined,
+              this.skillSessionId(shellSessionId),
               poolKey,
             ),
             clientConfig,
@@ -1566,16 +1626,17 @@ export class SessionOrchestrator {
       // Per-spawn mode: issue the session's Skill API JWT file (the process pool
       // does this in shared mode). Skill scripts present it as Bearer auth.
       await this.issuePerSpawnJwt(clientConfig.sessionId);
+      const perSpawnAgentConfig = createAgentConfig(
+        agentType,
+        workspace.path,
+        this.config,
+        yoloDecision.enabled,
+        agentWorkspacePath,
+        this.skillSessionId(shellSessionId),
+        undefined, // poolKey: per-spawn mode; the process pool passes the pool key in shared mode
+      );
       const connector = this.createConnector({
-        agentConfig: createAgentConfig(
-          agentType,
-          workspace.path,
-          this.config,
-          yoloDecision.enabled,
-          agentWorkspacePath,
-          shellSessionId ?? undefined,
-          undefined, // poolKey: per-spawn mode; the process pool passes the pool key in shared mode
-        ),
+        agentConfig: perSpawnAgentConfig,
         clientConfig,
         skillRegistry: this.skillRegistry,
         logger: sessionLogger,
@@ -1597,6 +1658,28 @@ export class SessionOrchestrator {
       try {
         await connector.connect();
         sessionLogger.info("Agent connected");
+
+        // Record ownership and emit process_acquired at per-spawn acquisition
+        const perSpawnOwnershipMode = agentType === "opencode"
+          ? (yoloDecision.enabled ? "native-yolo" : "restricted")
+          : permissionMode;
+        const perSpawnNamespace = agentType === "omp"
+          ? (perSpawnAgentConfig.env?.["PI_CODING_AGENT_DIR"] ??
+            perSpawnAgentConfig.env?.["TMPDIR"] ?? "")
+          : (perSpawnAgentConfig.env?.["XDG_DATA_HOME"] ?? workspace.path);
+        if (shellSessionId) {
+          this.sessionRegistry.recordOwnership(shellSessionId, {
+            permissionMode: perSpawnOwnershipMode,
+            processNamespace: perSpawnNamespace,
+          });
+        }
+        await auditWriter?.write("process_acquired", {
+          sessionId: shellSessionId ?? undefined,
+          agentType,
+          permissionMode: perSpawnOwnershipMode,
+          processNamespace: perSpawnNamespace,
+          pooled: false,
+        });
 
         // Audit: agent_connect
         await auditWriter?.write("agent_connect", {
@@ -1690,8 +1773,8 @@ export class SessionOrchestrator {
 
           const retryStrategy = getRetryPromptStrategy(agentType, undefined, {
             sharedProcess: !!this.processPool,
-            sessionId: shellSessionId ?? undefined,
-            stagingDir: shellSessionId
+            sessionId: this.skillSessionId(shellSessionId),
+            stagingDir: this.skillSessionId(shellSessionId)
               ? `${workspace.tmpPath}/${shellSessionId}`
               : workspace.tmpPath,
           });
@@ -1712,8 +1795,8 @@ export class SessionOrchestrator {
               sessionLogger,
               {
                 sharedProcess: !!this.processPool,
-                sessionId: shellSessionId ?? undefined,
-                stagingDir: shellSessionId
+                sessionId: this.skillSessionId(shellSessionId),
+                stagingDir: this.skillSessionId(shellSessionId)
                   ? `${workspace.tmpPath}/${shellSessionId}`
                   : workspace.tmpPath,
               },
@@ -1777,7 +1860,10 @@ export class SessionOrchestrator {
       return result;
     } finally {
       try {
-        activeSessionsGauge.dec();
+        {
+          if (shellSessionId) this.sessionRegistry.remove(shellSessionId);
+          activeSessionsGauge.dec();
+        }
       } catch (error) {
         sessionLogger.error("Failed to decrement active sessions gauge", {
           platform,
@@ -1903,7 +1989,7 @@ export class SessionOrchestrator {
       // 3. Build self-research prompt
       const fullPrompt = await this.buildSelfResearchPrompt(
         rssItems,
-        shellSessionId,
+        this.skillSessionId(shellSessionId) ?? null,
         resolvedModel,
         this.yolo,
       );
@@ -1937,7 +2023,7 @@ export class SessionOrchestrator {
         channelId: "internal",
         isDM: false,
         yolo: this.yolo,
-        sessionId: shellSessionId ?? undefined,
+        sessionId: this.skillSessionId(shellSessionId),
         autoApproveSkills: this.config.agent.autoApproveSkills,
         allowedWriteExtensions: this.config.agent.sandbox?.allowedWriteExtensions,
         logAgentStreamChunks: this.config.logging?.agentStreamChunks ?? false,
@@ -1949,6 +2035,8 @@ export class SessionOrchestrator {
 
       // 5. Build and execute ACP connector (use selfResearch model)
       const agentType = getDefaultAgentType(this.config);
+      // Mode resolution precedes acquisition: derive permissionMode from global flag before createAgentConfig / pool.run
+      const permissionMode: PoolPermissionMode = this.yolo ? "native-yolo" : "restricted";
 
       if (this.processPool) {
         // Shared-process mode: self-research sessions share one long-lived
@@ -1957,6 +2045,8 @@ export class SessionOrchestrator {
         const poolKey = `self-research:self-research`;
         result = await this.runSharedPoolSession({
           poolKey,
+          agentType,
+          permissionMode,
           sessionType: "self_research",
           shellSessionId,
           priority: "maintenance",
@@ -1967,7 +2057,7 @@ export class SessionOrchestrator {
               this.config,
               this.yolo,
               agentWorkspacePath,
-              shellSessionId ?? undefined,
+              this.skillSessionId(shellSessionId),
               poolKey,
             ),
             clientConfig,
@@ -1998,16 +2088,17 @@ export class SessionOrchestrator {
       // Per-spawn mode: issue the session's Skill API JWT file (the process pool
       // does this in shared mode). Skill scripts present it as Bearer auth.
       await this.issuePerSpawnJwt(clientConfig.sessionId);
+      const perSpawnAgentConfig = createAgentConfig(
+        agentType,
+        workspace.path,
+        this.config,
+        this.yolo,
+        agentWorkspacePath,
+        this.skillSessionId(shellSessionId),
+        undefined, // poolKey: per-spawn mode; the process pool passes the pool key in shared mode
+      );
       const connector = this.createConnector({
-        agentConfig: createAgentConfig(
-          agentType,
-          workspace.path,
-          this.config,
-          this.yolo,
-          agentWorkspacePath,
-          shellSessionId ?? undefined,
-          undefined, // poolKey: per-spawn mode; the process pool passes the pool key in shared mode
-        ),
+        agentConfig: perSpawnAgentConfig,
         clientConfig,
         skillRegistry: this.skillRegistry,
         logger: sessionLogger,
@@ -2029,6 +2120,29 @@ export class SessionOrchestrator {
       try {
         await connector.connect();
         sessionLogger.info("Agent connected");
+
+        // Record ownership and emit process_acquired at per-spawn acquisition
+        const perSpawnOwnershipMode = agentType === "opencode"
+          ? (this.yolo ? "native-yolo" : "restricted")
+          : permissionMode;
+        const perSpawnNamespace = agentType === "omp"
+          ? (perSpawnAgentConfig.env?.["PI_CODING_AGENT_DIR"] ??
+            perSpawnAgentConfig.env?.["TMPDIR"] ?? "")
+          : (perSpawnAgentConfig.env?.["XDG_DATA_HOME"] ?? workspace.path);
+        if (shellSessionId) {
+          this.sessionRegistry.recordOwnership(shellSessionId, {
+            permissionMode: perSpawnOwnershipMode,
+            processNamespace: perSpawnNamespace,
+          });
+        }
+        await auditWriter?.write("process_acquired", {
+          sessionId: shellSessionId ?? undefined,
+          agentType,
+          permissionMode: perSpawnOwnershipMode,
+          processNamespace: perSpawnNamespace,
+          pooled: false,
+        });
+
         await auditWriter?.write("agent_connect", { agentType: getDefaultAgentType(this.config) });
 
         // Inject audit writer for permission decision auditing
@@ -2299,7 +2413,10 @@ export class SessionOrchestrator {
       return result;
     } finally {
       try {
-        activeSessionsGauge.dec();
+        {
+          if (shellSessionId) this.sessionRegistry.remove(shellSessionId);
+          activeSessionsGauge.dec();
+        }
       } catch (error) {
         sessionLogger.error("Failed to decrement active sessions gauge", {
           platform: "internal",
@@ -2427,7 +2544,7 @@ export class SessionOrchestrator {
 
       const fullPrompt = await this.buildMemoryMaintenancePrompt(
         workspaceKey,
-        shellSessionId,
+        this.skillSessionId(shellSessionId) ?? null,
         workspace,
         resolvedModel,
         this.yolo,
@@ -2463,10 +2580,12 @@ export class SessionOrchestrator {
         autoApproveSkills: this.config.agent.autoApproveSkills,
         allowedWriteExtensions: this.config.agent.sandbox?.allowedWriteExtensions,
         logAgentStreamChunks: this.config.logging?.agentStreamChunks ?? false,
-        sessionId: shellSessionId ?? undefined,
+        sessionId: this.skillSessionId(shellSessionId),
       };
 
       const agentType = getDefaultAgentType(this.config);
+      // Mode resolution precedes acquisition: derive permissionMode from global flag before createAgentConfig / pool.run
+      const permissionMode: PoolPermissionMode = this.yolo ? "native-yolo" : "restricted";
 
       if (this.processPool) {
         // Shared-process mode: one long-lived process per workspace's
@@ -2474,6 +2593,8 @@ export class SessionOrchestrator {
         const poolKey = `memory-maintenance:${workspaceKey}`;
         result = await this.runSharedPoolSession({
           poolKey,
+          agentType,
+          permissionMode,
           sessionType: "memory_maintenance",
           shellSessionId,
           priority: "maintenance",
@@ -2484,7 +2605,7 @@ export class SessionOrchestrator {
               this.config,
               this.yolo,
               agentWorkspacePath,
-              shellSessionId ?? undefined,
+              this.skillSessionId(shellSessionId),
               poolKey,
             ),
             clientConfig,
@@ -2515,16 +2636,17 @@ export class SessionOrchestrator {
       // Per-spawn mode: issue the session's Skill API JWT file (the process pool
       // does this in shared mode). Skill scripts present it as Bearer auth.
       await this.issuePerSpawnJwt(clientConfig.sessionId);
+      const perSpawnAgentConfig = createAgentConfig(
+        agentType,
+        workspace.path,
+        this.config,
+        this.yolo,
+        agentWorkspacePath,
+        this.skillSessionId(shellSessionId),
+        undefined, // poolKey: per-spawn mode; the process pool passes the pool key in shared mode
+      );
       const connector = this.createConnector({
-        agentConfig: createAgentConfig(
-          agentType,
-          workspace.path,
-          this.config,
-          this.yolo,
-          agentWorkspacePath,
-          shellSessionId ?? undefined,
-          undefined, // poolKey: per-spawn mode; the process pool passes the pool key in shared mode
-        ),
+        agentConfig: perSpawnAgentConfig,
         clientConfig,
         skillRegistry: this.skillRegistry,
         logger: sessionLogger,
@@ -2546,6 +2668,29 @@ export class SessionOrchestrator {
       try {
         await connector.connect();
         sessionLogger.info("Agent connected");
+
+        // Record ownership and emit process_acquired at per-spawn acquisition
+        const perSpawnOwnershipMode = agentType === "opencode"
+          ? (this.yolo ? "native-yolo" : "restricted")
+          : permissionMode;
+        const perSpawnNamespace = agentType === "omp"
+          ? (perSpawnAgentConfig.env?.["PI_CODING_AGENT_DIR"] ??
+            perSpawnAgentConfig.env?.["TMPDIR"] ?? "")
+          : (perSpawnAgentConfig.env?.["XDG_DATA_HOME"] ?? workspace.path);
+        if (shellSessionId) {
+          this.sessionRegistry.recordOwnership(shellSessionId, {
+            permissionMode: perSpawnOwnershipMode,
+            processNamespace: perSpawnNamespace,
+          });
+        }
+        await auditWriter?.write("process_acquired", {
+          sessionId: shellSessionId ?? undefined,
+          agentType,
+          permissionMode: perSpawnOwnershipMode,
+          processNamespace: perSpawnNamespace,
+          pooled: false,
+        });
+
         await auditWriter?.write("agent_connect", { agentType: getDefaultAgentType(this.config) });
 
         // Inject audit writer for permission decision auditing
@@ -2665,7 +2810,10 @@ export class SessionOrchestrator {
       return result;
     } finally {
       try {
-        activeSessionsGauge.dec();
+        {
+          if (shellSessionId) this.sessionRegistry.remove(shellSessionId);
+          activeSessionsGauge.dec();
+        }
       } catch (error) {
         sessionLogger.error("Failed to decrement active sessions gauge", {
           platform,
@@ -2840,26 +2988,29 @@ export class SessionOrchestrator {
         channelId: channelWorkspace.channelId,
         isDM: false,
         yolo: this.yolo,
-        sessionId: shellSessionId ?? undefined,
+        sessionId: this.skillSessionId(shellSessionId),
         autoApproveSkills: this.config.agent.autoApproveSkills,
         allowedWriteExtensions: this.config.agent.sandbox?.allowedWriteExtensions,
         logAgentStreamChunks: this.config.logging?.agentStreamChunks ?? false,
       };
 
       const agentType = getDefaultAgentType(this.config);
+      // Mode resolution precedes acquisition: derive permissionMode from global flag before createAgentConfig
+      const permissionMode: PoolPermissionMode = this.yolo ? "native-yolo" : "restricted";
       // Per-spawn mode: issue the session's Skill API JWT file (the process pool
       // does this in shared mode). Skill scripts present it as Bearer auth.
       await this.issuePerSpawnJwt(clientConfig.sessionId);
+      const channelAgentConfig = createAgentConfig(
+        agentType,
+        channelWorkspace.path,
+        this.config,
+        this.yolo,
+        agentWorkspacePath,
+        this.skillSessionId(shellSessionId),
+        undefined, // poolKey: per-spawn mode; the process pool passes the pool key in shared mode
+      );
       const connector = this.createConnector({
-        agentConfig: createAgentConfig(
-          agentType,
-          channelWorkspace.path,
-          this.config,
-          this.yolo,
-          agentWorkspacePath,
-          shellSessionId ?? undefined,
-          undefined, // poolKey: per-spawn mode; the process pool passes the pool key in shared mode
-        ),
+        agentConfig: channelAgentConfig,
         clientConfig,
         skillRegistry: this.skillRegistry,
         logger: sessionLogger,
@@ -2880,6 +3031,29 @@ export class SessionOrchestrator {
       try {
         await connector.connect();
         sessionLogger.info("Agent connected");
+
+        // Record ownership and emit process_acquired at per-spawn acquisition
+        const perSpawnOwnershipMode = agentType === "opencode"
+          ? (this.yolo ? "native-yolo" : "restricted")
+          : permissionMode;
+        const perSpawnNamespace = agentType === "omp"
+          ? (channelAgentConfig.env?.["PI_CODING_AGENT_DIR"] ??
+            channelAgentConfig.env?.["TMPDIR"] ?? "")
+          : (channelAgentConfig.env?.["XDG_DATA_HOME"] ?? channelWorkspace.path);
+        if (shellSessionId) {
+          this.sessionRegistry.recordOwnership(shellSessionId, {
+            permissionMode: perSpawnOwnershipMode,
+            processNamespace: perSpawnNamespace,
+          });
+        }
+        await auditWriter?.write("process_acquired", {
+          sessionId: shellSessionId ?? undefined,
+          agentType,
+          permissionMode: perSpawnOwnershipMode,
+          processNamespace: perSpawnNamespace,
+          pooled: false,
+        });
+
         await auditWriter?.write("agent_connect", { agentType });
 
         if (auditWriter) {
@@ -2998,7 +3172,10 @@ export class SessionOrchestrator {
       return result;
     } finally {
       try {
-        activeSessionsGauge.dec();
+        {
+          if (shellSessionId) this.sessionRegistry.remove(shellSessionId);
+          activeSessionsGauge.dec();
+        }
       } catch (error) {
         sessionLogger.error("Failed to decrement active sessions gauge", {
           platform,
@@ -3166,7 +3343,7 @@ export class SessionOrchestrator {
       // 4. Build reminder prompt
       const fullPrompt = await this.buildReminderPrompt(
         reminder,
-        shellSessionId,
+        this.skillSessionId(shellSessionId) ?? null,
         resolvedModel,
         yoloDecision.enabled,
       );
@@ -3202,24 +3379,29 @@ export class SessionOrchestrator {
         autoApproveSkills: this.config.agent.autoApproveSkills,
         allowedWriteExtensions: this.config.agent.sandbox?.allowedWriteExtensions,
         logAgentStreamChunks: this.config.logging?.agentStreamChunks ?? false,
-        sessionId: shellSessionId ?? undefined,
+        sessionId: this.skillSessionId(shellSessionId),
       };
 
       // 6. Build and execute ACP connector
       const agentType = getDefaultAgentType(this.config);
+      // Mode resolution precedes acquisition: derive permissionMode before createAgentConfig
+      const permissionMode: PoolPermissionMode = yoloDecision.enabled
+        ? "native-yolo"
+        : "restricted";
       // Per-spawn mode: issue the session's Skill API JWT file (the process pool
       // does this in shared mode). Skill scripts present it as Bearer auth.
       await this.issuePerSpawnJwt(clientConfig.sessionId);
+      const reminderAgentConfig = createAgentConfig(
+        agentType,
+        workspace.path,
+        this.config,
+        yoloDecision.enabled,
+        agentWorkspacePath,
+        this.skillSessionId(shellSessionId),
+        undefined, // poolKey: per-spawn mode; the process pool passes the pool key in shared mode
+      );
       const connector = this.createConnector({
-        agentConfig: createAgentConfig(
-          agentType,
-          workspace.path,
-          this.config,
-          yoloDecision.enabled,
-          agentWorkspacePath,
-          shellSessionId ?? undefined,
-          undefined, // poolKey: per-spawn mode; the process pool passes the pool key in shared mode
-        ),
+        agentConfig: reminderAgentConfig,
         clientConfig,
         skillRegistry: this.skillRegistry,
         logger: sessionLogger,
@@ -3241,6 +3423,29 @@ export class SessionOrchestrator {
       try {
         await connector.connect();
         sessionLogger.info("Agent connected");
+
+        // Record ownership and emit process_acquired at per-spawn acquisition
+        const perSpawnOwnershipMode = agentType === "opencode"
+          ? (yoloDecision.enabled ? "native-yolo" : "restricted")
+          : permissionMode;
+        const perSpawnNamespace = agentType === "omp"
+          ? (reminderAgentConfig.env?.["PI_CODING_AGENT_DIR"] ??
+            reminderAgentConfig.env?.["TMPDIR"] ?? "")
+          : (reminderAgentConfig.env?.["XDG_DATA_HOME"] ?? workspace.path);
+        if (shellSessionId) {
+          this.sessionRegistry.recordOwnership(shellSessionId, {
+            permissionMode: perSpawnOwnershipMode,
+            processNamespace: perSpawnNamespace,
+          });
+        }
+        await auditWriter?.write("process_acquired", {
+          sessionId: shellSessionId ?? undefined,
+          agentType,
+          permissionMode: perSpawnOwnershipMode,
+          processNamespace: perSpawnNamespace,
+          pooled: false,
+        });
+
         await auditWriter?.write("agent_connect", { agentType: getDefaultAgentType(this.config) });
 
         // Inject audit writer for permission decision auditing
@@ -3326,8 +3531,8 @@ export class SessionOrchestrator {
 
           const retryStrategy = getRetryPromptStrategy(agentType, undefined, {
             sharedProcess: !!this.processPool,
-            sessionId: shellSessionId ?? undefined,
-            stagingDir: shellSessionId
+            sessionId: this.skillSessionId(shellSessionId),
+            stagingDir: this.skillSessionId(shellSessionId)
               ? `${workspace.tmpPath}/${shellSessionId}`
               : workspace.tmpPath,
           });
@@ -3348,8 +3553,8 @@ export class SessionOrchestrator {
               sessionLogger,
               {
                 sharedProcess: !!this.processPool,
-                sessionId: shellSessionId ?? undefined,
-                stagingDir: shellSessionId
+                sessionId: this.skillSessionId(shellSessionId),
+                stagingDir: this.skillSessionId(shellSessionId)
                   ? `${workspace.tmpPath}/${shellSessionId}`
                   : workspace.tmpPath,
               },
@@ -3423,7 +3628,10 @@ export class SessionOrchestrator {
       return result;
     } finally {
       try {
-        activeSessionsGauge.dec();
+        {
+          if (shellSessionId) this.sessionRegistry.remove(shellSessionId);
+          activeSessionsGauge.dec();
+        }
       } catch (error) {
         sessionLogger.error("Failed to decrement active sessions gauge", {
           platform,
@@ -3460,6 +3668,8 @@ export class SessionOrchestrator {
    */
   private async runSharedPoolSession(params: {
     poolKey: string;
+    agentType: AgentType;
+    permissionMode: PoolPermissionMode;
     sessionType: string;
     shellSessionId: string | null;
     priority: "interactive" | "maintenance";
@@ -3478,6 +3688,8 @@ export class SessionOrchestrator {
   }): Promise<SessionResponse> {
     const {
       poolKey,
+      agentType,
+      permissionMode,
       sessionType,
       shellSessionId,
       priority,
@@ -3494,7 +3706,6 @@ export class SessionOrchestrator {
       routingContext,
       sessionStartTime,
     } = params;
-    const agentType = getDefaultAgentType(this.config);
     if (!this.processPool) {
       throw new Error("runSharedPoolSession called without a process pool (per-spawn mode)");
     }
@@ -3507,8 +3718,38 @@ export class SessionOrchestrator {
     }
 
     const poolResult = await this.processPool.run(
-      { poolKey, sessionType, shellSessionId, priority, connectorOptions, sessionCwd },
+      {
+        poolKey,
+        agentType,
+        permissionMode,
+        sessionType,
+        registrySessionId: shellSessionId ?? undefined,
+        shellSessionId: this.skillSessionId(shellSessionId) ?? null,
+        priority,
+        connectorOptions,
+        sessionCwd,
+      },
       async (connector: AgentConnector) => {
+        // Record session ownership at acquisition (before first ACP call/createSession)
+        const ownershipMode = agentType === "opencode" ? "yolo-switch" : permissionMode;
+        const processNamespace = agentType === "omp"
+          ? (connectorOptions.agentConfig?.env?.["PI_CODING_AGENT_DIR"] ??
+            connectorOptions.agentConfig?.env?.["TMPDIR"] ?? "")
+          : (connectorOptions.agentConfig?.env?.["XDG_DATA_HOME"] ?? poolKey);
+        if (shellSessionId) {
+          this.sessionRegistry.recordOwnership(shellSessionId, {
+            permissionMode: ownershipMode,
+            processNamespace,
+          });
+        }
+        await auditWriter?.write("process_acquired", {
+          sessionId: shellSessionId ?? undefined,
+          agentType,
+          permissionMode: ownershipMode,
+          processNamespace,
+          pooled: true,
+        });
+
         // ACP session lifecycle on the shared connection: per-session params
         // come from newSession (cwd) + setSession* (model/mode/config).
         const acpSessionId = await connector.createSession(this.getMCPServers(), sessionCwd);
@@ -3521,7 +3762,7 @@ export class SessionOrchestrator {
         // Per-session gate context (shared mode) — see runSessionWithPool comment.
         connector.setSessionGateContext(acpSessionId, {
           cwd: sessionCwd,
-          shellSessionId: shellSessionId ?? undefined,
+          shellSessionId: this.skillSessionId(shellSessionId),
           yolo: yoloEnabled,
           canWriteAgentWorkspace: connectorOptions.clientConfig?.canWriteAgentWorkspace,
           allowedWriteExtensions: this.config.agent.sandbox?.allowedWriteExtensions,
@@ -3580,8 +3821,8 @@ export class SessionOrchestrator {
           // Shared-process retry guidance: literal session id + staging dir.
           const retryCtx: RetryPromptContext = {
             sharedProcess: true,
-            sessionId: shellSessionId ?? undefined,
-            stagingDir: shellSessionId
+            sessionId: this.skillSessionId(shellSessionId),
+            stagingDir: this.skillSessionId(shellSessionId)
               ? `${workspace.tmpPath}/${shellSessionId}`
               : workspace.tmpPath,
           };
@@ -3910,13 +4151,20 @@ export class SessionOrchestrator {
     return resolveSkillJwtDir(this.config.agent.sharedProcess?.jwtDir);
   }
 
+  /** Internal ownership is not an external skill identity when the API is disabled. */
+  private skillSessionId(registrySessionId: string | null): string | undefined {
+    return this.config.skillApi?.enabled ? registrySessionId ?? undefined : undefined;
+  }
+
   /**
    * Per-spawn mode: issue the session's Skill API JWT file so skill scripts can
    * present it as Bearer auth (the process pool does this at lease acquisition
    * in shared mode). No-op in shared mode or without a registered session.
    */
   private async issuePerSpawnJwt(shellSessionId?: string): Promise<void> {
-    if (this.processPool || !shellSessionId || !this.skillApiSecret) return;
+    if (
+      !this.config.skillApi?.enabled || this.processPool || !shellSessionId || !this.skillApiSecret
+    ) return;
     try {
       await issueSessionJwtFile({
         jwtDir: this.skillJwtDir,
@@ -3934,7 +4182,9 @@ export class SessionOrchestrator {
 
   /** Per-spawn mode: delete the session's JWT file at session end. */
   private async cleanupPerSpawnJwt(shellSessionId?: string): Promise<void> {
-    if (this.processPool || !shellSessionId || !this.skillApiSecret) return;
+    if (
+      !this.config.skillApi?.enabled || this.processPool || !shellSessionId || !this.skillApiSecret
+    ) return;
     try {
       await deleteSessionJwtFile(this.skillJwtDir, shellSessionId);
     } catch (error) {
@@ -3972,27 +4222,27 @@ export class SessionOrchestrator {
   }> {
     const agentWorkspacePath = await this.workspaceManager.getOrCreateAgentWorkspace();
     let { sessionLogger } = params;
-    let shellSessionId: string | null = null;
+    // Always register an ActiveSession in sessionRegistry to record in-bot session
+    // ownership (permissionMode, processNamespace) and audit logging across all modes.
+    const shellSessionId = this.sessionRegistry.register({
+      platform: params.platform,
+      channelId: params.channelId,
+      userId: params.userId,
+      guildId: params.guildId,
+      isDm: params.isDm,
+      workspace: params.workspace,
+      platformAdapter: params.platformAdapter,
+      triggerEvent: params.triggerEvent,
+      agentWorkspacePath,
+      workspaceManager: this.workspaceManager,
+      // F15: authorize channel-scope memory writes per the configured policy.
+      canWriteChannelMemory: (this.config.memory.channelWritePolicy ?? "sessions") === "sessions",
+    });
+
+    sessionLogger.info("Shell session {shellSessionId} registered", { shellSessionId });
+    sessionLogger = sessionLogger.withContext({ shellSessionId });
 
     if (this.config.skillApi?.enabled) {
-      shellSessionId = this.sessionRegistry.register({
-        platform: params.platform,
-        channelId: params.channelId,
-        userId: params.userId,
-        guildId: params.guildId,
-        isDm: params.isDm,
-        workspace: params.workspace,
-        platformAdapter: params.platformAdapter,
-        triggerEvent: params.triggerEvent,
-        agentWorkspacePath,
-        workspaceManager: this.workspaceManager,
-        // F15: authorize channel-scope memory writes per the configured policy.
-        canWriteChannelMemory: (this.config.memory.channelWritePolicy ?? "sessions") === "sessions",
-      });
-
-      sessionLogger.info("Shell session {shellSessionId} registered", { shellSessionId });
-      sessionLogger = sessionLogger.withContext({ shellSessionId });
-
       // Pre-create the session-scoped payload staging directory
       // `{workspace}/tmp/{sessionId}` so the agent's `$TMPDIR/$SESSION_ID/...`
       // payload writes (via its edit/write tool or `writeTextFile`) have an
@@ -4494,7 +4744,9 @@ export class SessionOrchestrator {
 
   /**
    * Generate a conversation summary after a successful session (fire-and-forget).
-   * Runs on the same ACP session. Errors are caught and logged, never propagated.
+   * Invariant: Runs on the already-acquired ACP session under the same execution lease
+   * and performs ZERO pool acquisitions or process spawns.
+   * Errors are caught and logged, never propagated.
    */
   private async generateConversationSummary(
     connector: AgentConnector,
@@ -4532,8 +4784,10 @@ export class SessionOrchestrator {
         const summaryPromptPath = join(promptDir, "system_summary.md");
         const env = createTemplateEngine(promptDir);
         const summaryPrompt = await renderTemplate(env, summaryPromptPath, {
-          sessionId: shellSessionId ?? undefined,
-          tmpDir: shellSessionId ? `${workspace.tmpPath}/${shellSessionId}` : workspace.tmpPath,
+          sessionId: this.skillSessionId(shellSessionId),
+          tmpDir: this.skillSessionId(shellSessionId)
+            ? `${workspace.tmpPath}/${shellSessionId}`
+            : workspace.tmpPath,
         });
 
         sessionLogger.info("Generating conversation summary");

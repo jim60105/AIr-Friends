@@ -5,6 +5,7 @@
 
 import { assert, assertEquals } from "@std/assert";
 import { AgentProcessPool } from "../../src/core/agent-process-pool.ts";
+import { poolEntryKey } from "../../src/core/agent-process-pool.ts";
 import { SessionRegistry } from "../../src/skill-api/session-registry.ts";
 import type { AgentConnectorOptions } from "../../src/acp/types.ts";
 import type { AgentConnector } from "../../src/acp/agent-connector.ts";
@@ -150,6 +151,8 @@ Deno.test("pool - lazy-spawns once and reuses the process for the same pool key"
   const r1 = await pool.run(
     {
       poolKey: "discord:discord/123",
+      agentType: "opencode",
+      permissionMode: "restricted",
       sessionType: "message",
       shellSessionId: sid1,
       priority: "interactive",
@@ -164,6 +167,8 @@ Deno.test("pool - lazy-spawns once and reuses the process for the same pool key"
   const r2 = await pool.run(
     {
       poolKey: "discord:discord/123",
+      agentType: "opencode",
+      permissionMode: "restricted",
       sessionType: "message",
       shellSessionId: sid2,
       priority: "interactive",
@@ -200,6 +205,8 @@ Deno.test("pool - serializes sessions from different pool keys (global execution
   const p1 = pool.run(
     {
       poolKey: "discord:discord/1",
+      agentType: "opencode",
+      permissionMode: "restricted",
       sessionType: "message",
       shellSessionId: sidA,
       priority: "interactive",
@@ -218,6 +225,8 @@ Deno.test("pool - serializes sessions from different pool keys (global execution
   const p2 = pool.run(
     {
       poolKey: "discord:discord/2",
+      agentType: "opencode",
+      permissionMode: "restricted",
       sessionType: "message",
       shellSessionId: sidB,
       priority: "interactive",
@@ -271,6 +280,8 @@ Deno.test("pool - interactive sessions take queue priority over maintenance (sta
   const pBlocker = pool.run(
     {
       poolKey: "discord:discord/7",
+      agentType: "omp",
+      permissionMode: "restricted",
       sessionType: "message",
       shellSessionId: sidBlocker,
       priority: "interactive",
@@ -291,6 +302,8 @@ Deno.test("pool - interactive sessions take queue priority over maintenance (sta
   const pMaint = pool.run(
     {
       poolKey: "memory-maintenance:discord/999",
+      agentType: "omp",
+      permissionMode: "restricted",
       sessionType: "memory_maintenance",
       shellSessionId: sidMaint,
       priority: "maintenance",
@@ -305,7 +318,9 @@ Deno.test("pool - interactive sessions take queue priority over maintenance (sta
   );
   const pInt = pool.run(
     {
-      poolKey: "discord:discord/1",
+      poolKey: "discord:discord/7",
+      agentType: "omp",
+      permissionMode: "native-yolo",
       sessionType: "message",
       shellSessionId: sidInt,
       priority: "interactive",
@@ -353,6 +368,8 @@ Deno.test("pool - queue deadline cancels still-queued sessions", async () => {
   const pBlocker = pool.run(
     {
       poolKey: "discord:discord/1",
+      agentType: "opencode",
+      permissionMode: "restricted",
       sessionType: "message",
       shellSessionId: sidBlocker,
       priority: "interactive",
@@ -370,6 +387,8 @@ Deno.test("pool - queue deadline cancels still-queued sessions", async () => {
   const pQueued = pool.run(
     {
       poolKey: "discord:discord/2",
+      agentType: "opencode",
+      permissionMode: "restricted",
       sessionType: "message",
       shellSessionId: sidQueued,
       priority: "interactive",
@@ -418,6 +437,8 @@ Deno.test("pool - issues per-session JWT and writes the active pointer while the
   const result = await pool.run(
     {
       poolKey: "discord:discord/123",
+      agentType: "opencode",
+      permissionMode: "restricted",
       sessionType: "message",
       shellSessionId: sid,
       priority: "interactive",
@@ -499,6 +520,8 @@ Deno.test("pool - relative jwtDir config writes JWT + pointer at the resolved ab
     await pool.run(
       {
         poolKey: "discord:discord/789",
+        agentType: "opencode",
+        permissionMode: "restricted",
         sessionType: "message",
         shellSessionId: sid,
         priority: "interactive",
@@ -556,6 +579,8 @@ Deno.test("pool - JWT renewals during the lease never resurrect the JWT file aft
   await pool.run(
     {
       poolKey: "discord:discord/123",
+      agentType: "opencode",
+      permissionMode: "restricted",
       sessionType: "message",
       shellSessionId: sid,
       priority: "interactive",
@@ -593,4 +618,298 @@ Deno.test("pool - JWT renewals during the lease never resurrect the JWT file aft
 
   await stopPool(pool);
   await Deno.remove(jwtDir, { recursive: true });
+});
+
+Deno.test("pool - poolEntryKey helper", () => {
+  assertEquals(poolEntryKey("discord:123", "opencode", "restricted"), "discord:123");
+  assertEquals(poolEntryKey("discord:123", "opencode", "native-yolo"), "discord:123");
+  assertEquals(poolEntryKey("discord:123", "omp", "restricted"), "discord:123:restricted");
+  assertEquals(poolEntryKey("discord:123", "omp", "native-yolo"), "discord:123:native-yolo");
+});
+
+Deno.test("pool - OMP same-mode reuse and cross-mode separation with dual-mode coexistence", async () => {
+  const registry = new SessionRegistry(1000);
+  const spawnedConfigs: AgentConnectorOptions[] = [];
+  const pool = new AgentProcessPool(
+    makeConfig(),
+    registry,
+    "test-secret-0123456789abcdef0123456789",
+    (opts) => {
+      spawnedConfigs.push(opts);
+      return new StubConnector() as unknown as AgentConnector;
+    },
+  );
+
+  const sidRestricted1 = registerSession(registry, { channelId: "discord/123" });
+  const sidRestricted2 = registerSession(registry, { channelId: "discord/123" });
+  const sidYolo1 = registerSession(registry, { channelId: "discord/123" });
+
+  // 1. First restricted OMP request spawns a process
+  const r1 = await pool.run(
+    {
+      poolKey: "discord:discord/123",
+      agentType: "omp",
+      permissionMode: "restricted",
+      sessionType: "message",
+      shellSessionId: sidRestricted1,
+      priority: "interactive",
+      connectorOptions: {
+        ...makeConnectorOptions(),
+        agentType: "omp",
+      },
+      sessionCwd: "/tmp/test/workspaces/discord/123",
+    },
+    () => Promise.resolve("acp-restr-1"),
+  );
+  assertEquals(r1.acpSessionId, "acp-restr-1");
+  assertEquals(spawnedConfigs.length, 1);
+
+  // 2. Second restricted OMP request reuses the live restricted process (no second spawn)
+  const r2 = await pool.run(
+    {
+      poolKey: "discord:discord/123",
+      agentType: "omp",
+      permissionMode: "restricted",
+      sessionType: "message",
+      shellSessionId: sidRestricted2,
+      priority: "interactive",
+      connectorOptions: {
+        ...makeConnectorOptions(),
+        agentType: "omp",
+      },
+      sessionCwd: "/tmp/test/workspaces/discord/123",
+    },
+    () => Promise.resolve("acp-restr-2"),
+  );
+  assertEquals(r2.acpSessionId, "acp-restr-2");
+  assertEquals(spawnedConfigs.length, 1);
+
+  // 3. Native-YOLO OMP request for same channel spawns a SEPARATE process
+  const r3 = await pool.run(
+    {
+      poolKey: "discord:discord/123",
+      agentType: "omp",
+      permissionMode: "native-yolo",
+      sessionType: "message",
+      shellSessionId: sidYolo1,
+      priority: "interactive",
+      connectorOptions: {
+        ...makeConnectorOptions(),
+        agentType: "omp",
+      },
+      sessionCwd: "/tmp/test/workspaces/discord/123",
+    },
+    () => Promise.resolve("acp-yolo-1"),
+  );
+  assertEquals(r3.acpSessionId, "acp-yolo-1");
+  assertEquals(spawnedConfigs.length, 2);
+
+  await stopPool(pool);
+});
+
+Deno.test("pool - OMP lease preservation across mode-split entries", async () => {
+  const registry = new SessionRegistry(1000);
+  const pool = new AgentProcessPool(
+    makeConfig(),
+    registry,
+    "test-secret-0123456789abcdef0123456789",
+    () => new StubConnector() as unknown as AgentConnector,
+  );
+
+  const sidRestr = registerSession(registry, { channelId: "discord/123" });
+  const sidYolo = registerSession(registry, { channelId: "discord/123" });
+
+  const executionOrder: string[] = [];
+  let restrictedInFlight = false;
+  let yoloRanConcurrently = false;
+
+  const pRestricted = pool.run(
+    {
+      poolKey: "discord:discord/123",
+      agentType: "omp",
+      permissionMode: "restricted",
+      sessionType: "message",
+      shellSessionId: sidRestr,
+      priority: "interactive",
+      connectorOptions: makeConnectorOptions(),
+      sessionCwd: "/tmp/test/workspaces/discord/123",
+    },
+    async () => {
+      restrictedInFlight = true;
+      executionOrder.push("restricted-start");
+      await new Promise((r) => setTimeout(r, 40));
+      executionOrder.push("restricted-end");
+      restrictedInFlight = false;
+      return "acp-restr";
+    },
+  );
+
+  const pYolo = pool.run(
+    {
+      poolKey: "discord:discord/123",
+      agentType: "omp",
+      permissionMode: "native-yolo",
+      sessionType: "message",
+      shellSessionId: sidYolo,
+      priority: "interactive",
+      connectorOptions: makeConnectorOptions(),
+      sessionCwd: "/tmp/test/workspaces/discord/123",
+    },
+    async () => {
+      if (restrictedInFlight) {
+        yoloRanConcurrently = true;
+      }
+      executionOrder.push("yolo-start");
+      await new Promise((r) => setTimeout(r, 20));
+      executionOrder.push("yolo-end");
+      return "acp-yolo";
+    },
+  );
+
+  await Promise.all([pRestricted, pYolo]);
+  assert(
+    !yoloRanConcurrently,
+    "Native-YOLO session must not run concurrently with restricted session",
+  );
+  assertEquals(executionOrder, [
+    "restricted-start",
+    "restricted-end",
+    "yolo-start",
+    "yolo-end",
+  ]);
+
+  await stopPool(pool);
+});
+
+Deno.test("pool - OpenCode byte-identity regression", async () => {
+  const registry = new SessionRegistry(1000);
+  const spawned: AgentConnectorOptions[] = [];
+  const pool = new AgentProcessPool(
+    makeConfig(),
+    registry,
+    "test-secret-0123456789abcdef0123456789",
+    (opts) => {
+      spawned.push(opts);
+      return new StubConnector() as unknown as AgentConnector;
+    },
+  );
+
+  const sid1 = registerSession(registry, { channelId: "discord/channel-1" });
+  const sid2 = registerSession(registry, { channelId: "discord/channel-1" });
+
+  await pool.run(
+    {
+      poolKey: "discord:channel-1",
+      agentType: "opencode",
+      permissionMode: "restricted",
+      sessionType: "message",
+      shellSessionId: sid1,
+      priority: "interactive",
+      connectorOptions: makeConnectorOptions(),
+      sessionCwd: "/tmp/test/workspaces/discord/channel-1",
+    },
+    () => Promise.resolve("acp-1"),
+  );
+
+  // OpenCode ignores permissionMode in pool identity: second run with different mode reuses the process
+  await pool.run(
+    {
+      poolKey: "discord:channel-1",
+      agentType: "opencode",
+      permissionMode: "native-yolo",
+      sessionType: "message",
+      shellSessionId: sid2,
+      priority: "interactive",
+      connectorOptions: makeConnectorOptions(),
+      sessionCwd: "/tmp/test/workspaces/discord/channel-1",
+    },
+    () => Promise.resolve("acp-2"),
+  );
+
+  assertEquals(
+    spawned.length,
+    1,
+    "OpenCode with different resolved modes must reuse the single process",
+  );
+  await stopPool(pool);
+});
+
+Deno.test("pool - per-mode reclaim independence for OMP", async () => {
+  const registry = new SessionRegistry(1000);
+  const config = makeConfig();
+  // Configure fast reclaim idle ms
+  config.agent.sharedProcess = {
+    enabled: true,
+    jwtDir: "data/skill-jwt",
+    reclaimIdleMs: 50,
+  };
+
+  const disconnectedPids: string[] = [];
+  class TrackingConnector extends StubConnector {
+    constructor(public id: string) {
+      super();
+    }
+    override async disconnect(): Promise<void> {
+      await super.disconnect();
+      disconnectedPids.push(this.id);
+    }
+  }
+
+  const pool = new AgentProcessPool(
+    config,
+    registry,
+    "test-secret-0123456789abcdef0123456789",
+    (opts) => new TrackingConnector(opts.agentConfig?.cwd ?? "conn") as unknown as AgentConnector,
+  );
+
+  const sidRestr = registerSession(registry, { channelId: "discord/123" });
+  const sidYolo = registerSession(registry, { channelId: "discord/123" });
+
+  // Run restricted session and finish it (refcount goes to 0 -> reclaim scheduled)
+  await pool.run(
+    {
+      poolKey: "discord:discord/123",
+      agentType: "omp",
+      permissionMode: "restricted",
+      sessionType: "message",
+      shellSessionId: sidRestr,
+      priority: "interactive",
+      connectorOptions: {
+        ...makeConnectorOptions(),
+        agentConfig: { ...makeConnectorOptions().agentConfig!, cwd: "restr" },
+      },
+      sessionCwd: "/tmp/test/workspaces/discord/123",
+    },
+    () => Promise.resolve("restr-done"),
+  );
+
+  // Start YOLO session and keep it running while restricted gets reclaimed
+  const yoloPromise = pool.run(
+    {
+      poolKey: "discord:discord/123",
+      agentType: "omp",
+      permissionMode: "native-yolo",
+      sessionType: "message",
+      shellSessionId: sidYolo,
+      priority: "interactive",
+      connectorOptions: {
+        ...makeConnectorOptions(),
+        agentConfig: { ...makeConnectorOptions().agentConfig!, cwd: "yolo" },
+      },
+      sessionCwd: "/tmp/test/workspaces/discord/123",
+    },
+    async () => {
+      // Hold YOLO lease past the 50ms reclaim time of restricted
+      await new Promise((r) => setTimeout(r, 100));
+      return "yolo-done";
+    },
+  );
+
+  await yoloPromise;
+
+  // Restricted entry must have been reclaimed (disconnected), but YOLO entry was leased
+  assert(disconnectedPids.includes("restr"), "Restricted process should be reclaimed");
+  assertEquals(disconnectedPids.includes("yolo"), false, "Leased YOLO entry must remain untouched");
+
+  await stopPool(pool);
 });
