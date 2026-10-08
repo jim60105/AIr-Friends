@@ -3,7 +3,9 @@
 ## Purpose
 
 Per-context reasoning/thought level resolved through the model-selection chain (routing rule → section → global) and applied to ACP agent sessions via the ACP Session Config Options `thought_level` category, with best-effort graceful degradation when unsupported.
+
 ## Requirements
+
 ### Requirement: Per-Context Reasoning Effort Resolution
 
 The system SHALL resolve the effective reasoning/thought level per session through a precedence chain: (1) a matching `agent.modelRouting` rule's `reasoningEffort` if set (a matching rule that omits it falls back immediately), then (2) the session type's section value, then (3) the global `agent.reasoningEffort`. Resolution SHALL be performed by a `resolveReasoningEffort()` resolver that reuses the same first-match-wins rule matching as model resolution.
@@ -156,7 +158,7 @@ The system SHALL resolve the effective reasoning effort and attempt to apply it 
 
 ### Requirement: Best-Effort Reasoning Effort Application
 
-Applying reasoning effort SHALL be best-effort and SHALL NOT cause a session to fail. When the connected agent/model does not advertise a `thought_level` configuration option, or when applying the value fails, the system SHALL log the outcome and continue the session.
+Applying reasoning effort SHALL be best-effort and SHALL NOT cause a session to fail. When the connected agent/model advertises no `thought_level` option, or when applying the value fails, the system SHALL log the outcome and continue the session. Among the advertised values it SHALL prefer the canonical case-insensitive exact match of the requested value, and a requested `"none"` with no exact `none` SHALL be sent as the advertised `off` value when one exists.
 
 #### Scenario: Agent does not advertise thought_level
 
@@ -172,9 +174,33 @@ Applying reasoning effort SHALL be best-effort and SHALL NOT cause a session to 
 
 #### Scenario: Known value not offered by the model is skipped
 
-- **GIVEN** the resolved reasoning effort is a normalized value (e.g., `"none"`) that is not present among the advertised `thought_level` option's available values
+- **GIVEN** the resolved reasoning effort is a normalized value other than `"none"` (e.g., `"high"`) that is not present among the advertised `thought_level` option's available values under any casing
 - **WHEN** the system attempts to apply reasoning effort
 - **THEN** it SHALL log a structured warning (including the requested value, the option's available values, the model, and the agent type) and SHALL NOT send an invalid value
+
+#### Scenario: None with no exact none uses the advertised off alias
+
+- **GIVEN** the resolved reasoning effort is `"none"` and the advertised `thought_level` available values contain no exact `none` (any casing) but do contain `off` (any casing)
+- **WHEN** the system attempts to apply reasoning effort
+- **THEN** it SHALL send the advertised `off` value in the agent's casing and report outcome `applied`
+
+#### Scenario: None skips when neither none nor off is advertised
+
+- **GIVEN** the resolved reasoning effort is `"none"` and the advertised `thought_level` available values contain neither an exact `none` nor an `off`
+- **WHEN** the system attempts to apply reasoning effort
+- **THEN** it SHALL log the structured not-offered warning and report outcome `skipped_unavailable`, SHALL NOT send any value
+
+#### Scenario: Exact match wins over the off alias
+
+- **GIVEN** the resolved reasoning effort is `"none"` and the advertised values include both an exact `none` and an `off`
+- **WHEN** the system attempts to apply reasoning effort
+- **THEN** it SHALL send the exact canonical `none` match
+
+#### Scenario: No other requested token is aliased
+
+- **GIVEN** the advertised `thought_level` values include `off` but not the requested token, and the requested token is not `"none"`
+- **WHEN** the system attempts to apply reasoning effort
+- **THEN** the system SHALL NOT substitute any other advertised value, including `off`, for the requested token
 
 #### Scenario: Extended level offered by the model is applied
 
@@ -193,6 +219,12 @@ Applying reasoning effort SHALL be best-effort and SHALL NOT cause a session to 
 - **GIVEN** the resolved reasoning effort is an agent-specific passthrough token (outside the normalized vocabulary) and a `thought_level` option is advertised
 - **WHEN** the system attempts to apply reasoning effort
 - **THEN** it SHALL send the token as-is and SHALL catch and log any agent error without failing the session
+
+#### Scenario: Default remains a no-op before catalog inspection
+
+- **GIVEN** the resolved reasoning effort is `"default"` or empty
+- **WHEN** the system attempts to apply reasoning effort
+- **THEN** it SHALL report `skipped` without inspecting advertised values or contacting the agent
 
 ### Requirement: Reasoning Effort Discovered from Live Session Config State
 
@@ -231,4 +263,3 @@ The system SHALL emit an observable outcome for each reasoning-effort applicatio
 - **GIVEN** a passthrough token is sent and the agent rejects it
 - **WHEN** reasoning effort is applied
 - **THEN** the outcome SHALL be `failed`, the error SHALL be logged, and the session SHALL continue
-

@@ -182,6 +182,32 @@ Deno.test("createSession - rejects promptly when subprocess exits mid-call", asy
   resolveExit({ code: 1, signal: null, success: false });
 
   await assertRejects(() => call, Error, "Agent process exited unexpectedly");
+  assertEquals(connector["sessionModelIds"].get("sess"), undefined);
+});
+
+Deno.test("setSessionModel (stable) - rejects promptly when subprocess exits mid-call", async () => {
+  const { logger } = createCapturingLogger();
+  const connector = createConnector(logger);
+  const { resolveExit } = setupCrashSignal(connector);
+  connector["connection"] = {
+    setSessionConfigOption: () => new Promise(() => {}),
+  } as unknown as typeof connector["connection"];
+  (connector["sessionConfigOptions"] as Map<string, unknown>).set("sess", [
+    {
+      id: "model",
+      category: "model",
+      name: "Model",
+      type: "select",
+      currentValue: "m1",
+      options: [{ value: "model-1", name: "Model 1" }],
+    },
+  ]);
+
+  const call = connector.setSessionModel("sess", "model-1");
+  resolveExit({ code: 1, signal: null, success: false });
+
+  await assertRejects(() => call, Error, "Agent process exited unexpectedly");
+  assertEquals(connector["sessionModelIds"].get("sess"), undefined);
 });
 
 Deno.test("setSessionModel - rejects promptly when subprocess exits mid-call", async () => {
