@@ -28,3 +28,19 @@ The environment of a shared process SHALL be fixed at spawn time. Its `XDG_DATA_
 - **THEN** the process environment SHALL contain NO `SESSION_ID` variable and SHALL carry `SKILL_SHARED_PROCESS=1`
 - **AND** each session's prompt SHALL name that session's own literal Skill API session id and absolute staging directory, and the skill invocation SHALL carry that literal `--session-id`
 - **AND** the second session's payload staging SHALL resolve to `sess_B`'s own staging directory regardless of which session id the CLI argument or environment carries
+
+#### Scenario: Skill-JWT directory carried, API secret withheld
+- **GIVEN** the pool spawns a shared agent process
+- **WHEN** the process environment is constructed
+- **THEN** it SHALL carry the skill-JWT directory (`SKILL_JWT_DIR`, under which the per-session JWT files live), and the deployment `SKILL_API_SECRET` SHALL NOT be placed in the agent process environment (the bot process alone holds it, as both issuer and verifier)
+
+#### Scenario: Per-session parameters and payload staging
+- **GIVEN** multiple sessions share one process connection
+- **WHEN** each session runs on the shared process
+- **THEN** per-session ACP parameters (session `cwd`, MCP servers, model, mode, reasoning effort) SHALL be applied per session on the shared connection, and a session's payload staging SHALL use that session's own workspace tmp dir, carried to the agent via a per-session `tmpDir` prompt variable
+
+#### Scenario: Permission gate confines file access in shared mode
+- **GIVEN** shared-process mode is active
+- **WHEN** the agent performs file access
+- **THEN** the permission gate SHALL confine access to the session's own workspace, the session-scoped payload staging dir (the rendered `tmpDir`), the pool-key-scoped data root (OpenCode tool-output), and the agent workspace
+- **AND** agent reads of the shared OpenCode DB or another session's tool-output files SHALL be rejected in restricted mode, so cross-USER visibility is impossible while cross-session visibility within the pool key is the accepted trade-off

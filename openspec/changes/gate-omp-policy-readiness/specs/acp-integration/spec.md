@@ -2,7 +2,7 @@
 
 ### Requirement: Trusted-Module Restricted Readiness Signal
 
-The AIr-owned trusted extension module SHALL install its restricted `tool_call` enforcement-handler slot synchronously during trusted-module loading and SHALL emit, for the exact current process instance and ACP session, a bounded readiness signal carrying handler-installation status, lifecycle-initialization status, policy revision, live tool-registry epoch, and the discovery guard's resource generation. The signal SHALL carry no restricted tool policy content: tool inventory, provenance default-deny, alternate-entry blocking, and destructive-action admission belong to the restricted tool policy change. Every restricted session's readiness state SHALL initialize to false, and a signal reporting the handler slot uninstalled SHALL be structurally unable to yield readiness in any consumer. The integration SHALL derive the registry epoch from live tool-identity/provenance observations — including operator MCP registration and refresh occurring after startup — and SHALL NOT derive any readiness value from chat content, prompt text, tool titles, or session-update payloads.
+The trusted extension module SHALL install its restricted `tool_call` enforcement-handler slot synchronously during trusted-module loading and SHALL emit, for the exact current process instance and ACP session, a bounded readiness signal carrying handler-installation status, lifecycle-initialization status, policy revision, live tool-registry epoch, and the discovery guard's resource generation.
 
 #### Scenario: Signal is emitted at module load with false default
 - **GIVEN** a restricted OMP process whose trusted module loaded successfully
@@ -21,9 +21,19 @@ The AIr-owned trusted extension module SHALL install its restricted `tool_call` 
 - **THEN** the signal's registry epoch SHALL advance
 - **AND** the previous readiness assertion SHALL no longer match the current epoch
 
+#### Scenario: Uninstalled handler slot cannot yield readiness
+- **GIVEN** a signal reporting the restricted `tool_call` enforcement-handler slot uninstalled
+- **WHEN** any consumer evaluates readiness from that signal
+- **THEN** the signal SHALL be structurally unable to yield readiness in that consumer
+
+#### Scenario: Registry epoch derives from live observations only
+- **WHEN** the registry epoch and readiness values are computed
+- **THEN** the registry epoch SHALL derive from live tool-identity/provenance observations, including operator MCP registration and refresh occurring after startup
+- **AND** no readiness value SHALL be derived from chat content, prompt text, tool titles, or session-update payloads
+
 ### Requirement: Authenticated Readiness Establishment Contract
 
-Readiness for a restricted OMP session SHALL be established only by a result validated against the compatibility contract's readiness tuple — current process instance, current ACP session identity, restricted mode, fresh challenge, policy revision, and registry epoch — together with control-channel evidence and an independently verified identity binding. Authentication SHALL use process/session-scoped material only: the raw platform token and the raw Skill API server secret SHALL NOT be used as or embedded in the authenticator, and shared-secret material SHALL NOT be placed where model-visible files, workspaces, or native tooling can read it. Chat content SHALL NOT be able to set, advance, or renew readiness through any code path. Each mechanism element SHALL carry the pinned contract's status label — the synchronous registration and lifecycle-failure signal as supported, the native-to-ACP session-identity binding as candidate-to-verify, and the narrow authenticated control channel as recorded by the pinned contract — and the integration SHALL NOT define, rename, or invent an ACP method or notification to carry readiness.
+Readiness for a restricted OMP session SHALL be established only by a result validated against the compatibility contract's readiness tuple — current process instance, current ACP session identity, restricted mode, fresh challenge, policy revision, and registry epoch — together with control-channel evidence and an independently verified identity binding.
 
 #### Scenario: Forbidden authenticators reject
 - **WHEN** establishment evidence cites the platform token, the Skill API server secret, or any secret readable by the model or native tooling
@@ -47,9 +57,19 @@ Readiness for a restricted OMP session SHALL be established only by a result val
 - **THEN** the fixture SHALL be labeled adapter evidence at the candidate-to-verify status
 - **AND** no result SHALL mark the native-to-ACP identity binding supported without a pinned-contract revision
 
+#### Scenario: Authentication uses process-scoped material only
+- **WHEN** the establishment authenticator is constructed
+- **THEN** it SHALL use process/session-scoped material only, with the raw platform token and the raw Skill API server secret neither used as nor embedded in the authenticator
+- **AND** shared-secret material SHALL NOT be placed where model-visible files, workspaces, or native tooling can read it
+
+#### Scenario: Mechanism elements carry pinned status labels
+- **WHEN** mechanism element statuses are reported
+- **THEN** each SHALL carry the pinned contract's label: the synchronous registration and lifecycle-failure signal as supported, the native-to-ACP session-identity binding as candidate-to-verify, and the narrow authenticated control channel as recorded by the pinned contract
+- **AND** the integration SHALL NOT define, rename, or invent an ACP method or notification to carry readiness
+
 ### Requirement: Restricted Session First-Prompt Readiness Gate
 
-For agent type `omp` with resolved permission mode restricted, the connector SHALL verify, before the first normal prompt of that ACP session — after gate-context registration and model/reasoning application complete — that readiness is established for that exact session and current process instance. When readiness is not established, the session SHALL be denied: the run SHALL end through the affected session's existing error handling with a bounded machine-readable readiness rejection reason, and the integration SHALL NOT spawn or reuse an unguarded or extensionless process, SHALL NOT substitute another agent type, SHALL NOT promote the session to a permissive mode, and SHALL NOT retry the prompt against the readiness gate. A lifecycle-handler failure, timeout, or partial initialization SHALL leave restricted execution blocked. Successful session creation or session load alone SHALL NOT establish readiness, and readiness SHALL NOT be requested or enforced for native-YOLO OMP sessions or for any OpenCode session. A readiness verification failure SHALL NOT be recorded into the permission-rejection buffer consumed by retry-prompt enrichment.
+For agent type `omp` with resolved permission mode restricted, the connector SHALL verify, before the first normal prompt of that ACP session — after gate-context registration and model/reasoning application complete — that readiness is established for that exact session and current process instance, and SHALL deny the first prompt with a bounded machine-readable readiness rejection reason through the session's existing error handling when readiness is not established.
 
 #### Scenario: Not-ready restricted session is denied before prompting
 - **GIVEN** a restricted OMP session with no established readiness
@@ -86,9 +106,13 @@ For agent type `omp` with resolved permission mode restricted, the connector SHA
 - **THEN** no readiness state SHALL be created and no readiness decision SHALL occur
 - **AND** the flow SHALL be behaviorally unchanged
 
+#### Scenario: Verification failure skips the retry-prompt enrichment buffer
+- **WHEN** a readiness verification fails for a restricted session
+- **THEN** the failure SHALL NOT be recorded into the permission-rejection buffer consumed by retry-prompt enrichment
+
 ### Requirement: Readiness Reset And Re-Verification Across Transitions
 
-Restricted readiness SHALL be reset and re-verified on new session creation, session load, crash-reconnect recovery, connection re-establishment or process respawn, pool reclaim, post-start operator MCP registration or tool-registry refresh, and any change of the trusted module's resource generation. Re-verification SHALL re-check the current process instance, session identity, challenge freshness, policy revision, registry epoch, and resource generation on every evaluation, and SHALL NOT be satisfied by a one-time startup acknowledgement. An acknowledgement established for a prior process instance SHALL NOT be reused after a respawn, and process identity SHALL NOT rely on a process id alone. Recovery re-verification SHALL attach to the recovery change's named post-restore hook without relocating or altering gate-context restoration, and a rejected re-verification SHALL fail only the affected session's recovery.
+Restricted readiness SHALL be reset and re-verified on new session creation, session load, crash-reconnect recovery, connection re-establishment or process respawn, pool reclaim, post-start operator MCP registration or tool-registry refresh, and any change of the trusted module's resource generation. Re-verification SHALL re-check the current process instance, session identity, challenge freshness, policy revision, registry epoch, and resource generation.
 
 #### Scenario: Recovery re-verifies on the new process instance
 - **GIVEN** a restricted session recovered after process death, with an acknowledgement established on the dead process instance
@@ -113,9 +137,27 @@ Restricted readiness SHALL be reset and re-verified on new session creation, ses
 - **THEN** only the affected session's recovery SHALL fail, with the recovery change's bounded readiness reason
 - **AND** the sibling session's readiness state, gate context, process, and lease SHALL be unaffected
 
+#### Scenario: Startup acknowledgement alone never satisfies re-verification
+- **GIVEN** a restricted session with only a one-time startup acknowledgement
+- **WHEN** re-verification runs on the same process instance
+- **THEN** the acknowledgement SHALL NOT satisfy re-verification by itself
+- **AND** re-verification SHALL re-check the process instance, session identity, challenge freshness, policy revision, registry epoch, and resource generation on every evaluation
+
+#### Scenario: Prior-instance acknowledgements do not survive a respawn
+- **GIVEN** an acknowledgement established on a prior process instance
+- **WHEN** a respawn occurs and re-verification runs
+- **THEN** the acknowledgement SHALL NOT be reused after the respawn
+- **AND** process identity SHALL NOT be determined by a process id alone
+
+#### Scenario: Recovery re-verification attaches to the named post-restore hook
+- **GIVEN** a restricted session being recovered
+- **WHEN** recovery re-verification is scheduled
+- **THEN** it SHALL attach to the recovery change's named post-restore hook
+- **AND** gate-context restoration SHALL NOT be relocated or altered by re-verification
+
 ### Requirement: Readiness Compatibility Gate Remains Blocking
 
-The integration SHALL record a named application gate carrying the pinned policy-readiness verdict verbatim — partial support, overall unresolved, with the narrow authenticated control channel and the native-to-ACP identity binding unresolved at the pin — together with a required user decision. While that gate stands, the establishment channel SHALL remain unimplemented so that every real restricted-session evaluation resolves to not-ready and the prompt gate denies, and resolution SHALL require a source-backed supported mechanism recorded in the compatibility contract plus an explicit user design decision. Automated unit and mock evidence SHALL validate the client decision logic and the module's readiness-signal contract only — deny-when-not-ready, allow-when-a-labeled-synthetic-fixture-establishes-readiness, reset-on-refresh, cross-process-instance non-reuse, native-YOLO exemption, OpenCode non-regression — and SHALL NOT be presented as evidence that the official binary emits, verifies, or enforces readiness.
+The integration SHALL record a named application gate carrying the pinned policy-readiness verdict verbatim — partial support, overall unresolved, with the narrow authenticated control channel and the native-to-ACP identity binding unresolved at the pin — together with a required user decision; while that gate stands, the establishment channel SHALL remain unimplemented so that every real restricted-session evaluation resolves to not-ready and the prompt gate denies.
 
 #### Scenario: Passing mocks cannot clear the gate
 - **WHEN** every readiness decision, signal, and gate test passes
@@ -137,3 +179,9 @@ The integration SHALL record a named application gate carrying the pinned policy
 - **WHEN** readiness verification runs or fails
 - **THEN** no form elicitation, interactive approval prompt, or human-confirmation UI SHALL be invoked
 - **AND** an already authorized capability SHALL NOT require a human interaction to execute
+
+#### Scenario: Automated evidence validates only the contract surface
+- **GIVEN** automated unit and mock evidence
+- **WHEN** it is used to substantiate readiness behavior
+- **THEN** it SHALL validate only the client decision logic and the module's readiness-signal contract — deny-when-not-ready, allow-when-a-labeled-synthetic-fixture-establishes-readiness, reset-on-refresh, cross-process-instance non-reuse, native-YOLO exemption, OpenCode non-regression
+- **AND** it SHALL NOT be presented as evidence that the official binary emits, verifies, or enforces readiness

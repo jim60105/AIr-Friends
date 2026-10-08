@@ -5,7 +5,7 @@ Constrain the ACP agent subprocess so a compromised or prompt-injected agent can
 ## Requirements
 ### Requirement: Agent Subprocess Environment Isolation
 
-The system SHALL spawn the ACP agent subprocess with a cleared parent environment so that the child receives ONLY the explicitly-built allowlisted environment variables and inherits NO variables from the parent bot process. The `Deno.Command` used to spawn the agent SHALL set `clearEnv: true`. The allowlisted base environment variables SHALL include the skill-authentication variable `SKILL_JWT_DIR` (shared-process mode — the agent receives only the per-session JWT file, a minimal session capability), alongside `PATH`, `HOME`, `TMPDIR`, `DENO_DIR`, `SESSION_ID`, and `AGENT_WORKSPACE`. The deployment `SKILL_API_SECRET` SHALL NOT be placed in the agent environment; it is held only by the bot process (JWT issuer and Skill API verifier).
+The system SHALL spawn the ACP agent subprocess with a cleared parent environment so that it receives ONLY the explicitly-built allowlisted environment variables and inherits NO variables from the parent bot process; the `Deno.Command` used to spawn the agent SHALL set `clearEnv: true`.
 
 #### Scenario: Parent secret not inherited by agent
 
@@ -19,11 +19,16 @@ The system SHALL spawn the ACP agent subprocess with a cleared parent environmen
 - **WHEN** the agent subprocess is spawned with `clearEnv: true`
 - **THEN** the agent subprocess environment SHALL contain exactly those built variables (plus agent-type-specific variables) and nothing inherited from the parent
 
+#### Scenario: Deployment secret kept out of the agent environment
+
+- **GIVEN** the bot process holds the deployment `SKILL_API_SECRET` (it is the JWT issuer and Skill API verifier)
+- **WHEN** the agent configuration builds the subprocess environment
+- **THEN** `SKILL_API_SECRET` SHALL NOT be placed in the agent environment
+- **AND** in shared-process mode the agent receives only the per-session JWT file via `SKILL_JWT_DIR`, a minimal session capability
+
 ### Requirement: Entrypoint-Anchored Command Whitelist Matching
 
-In restricted mode, the command whitelist matcher SHALL approve a skill-script execution only when the whitelisted script path is the actual invocation entrypoint. A whitelisted script path appearing merely as a trailing argument to an arbitrary command SHALL NOT be approved. The matcher SHALL tolerate a whitespace-delimited fd-to-fd redirection token (`N>&M` with the source descriptor `M` restricted to a standard stream, `1` or `2`; e.g. `2>&1`, `1>&2`) anywhere in the command: such a token SHALL be ignored for the shell-operator check, SHALL be skipped when locating the invocation entrypoint (it is not a real argument and MUST NOT be mistaken for the script), and SHALL NOT affect entrypoint resolution, so a skill invocation suffixed with `2>&1` — or carrying `2>&1` between `run` and the script — remains approved. The first-token allow-list check SHALL still operate on the original tokens so a redirect can never masquerade as the entrypoint. Only space/tab SHALL be treated as a token separator: a newline next to a tolerated token is a command separator and SHALL remain rejected. Any other shell operator, file-referencing redirection, or redirect whose source descriptor is not a standard stream SHALL continue to be rejected.
-
-When the command is a multi-command invocation — two or more commands separated by the command-sequence operators `;`, `&&`, or `||` appearing OUTSIDE quotes — the matcher SHALL split the invocation into its non-empty command segments using quote-aware splitting (separators recognized only outside single or double quotes, with shell-correct backslash-escape handling inside double quotes; an unbalanced quote SHALL disable splitting so the whole command is evaluated as one segment) and SHALL approve the invocation ONLY when EVERY segment independently matches a whitelisted script entrypoint or command prefix, or passes the generic-command gate. A segment that consists ONLY of tolerated fd-redirect tokens (e.g. the `2>&1` in a glued `2>&1&&cat ...`) SHALL be rejected as an operator artifact (`shell_operator`), never skipped. The D5 legacy free-text flag check (`--message` / `--content` / `--query` / `--caption`) SHALL remain on the full original command, not per segment. Single-segment commands SHALL be evaluated exactly as before.
+In restricted mode, the command whitelist matcher SHALL approve a skill-script execution only when the whitelisted script path is the actual invocation entrypoint; a whitelisted script path appearing merely as a trailing argument to an arbitrary command SHALL NOT be approved.
 
 #### Scenario: Legitimate skill invocation approved
 
@@ -73,6 +78,37 @@ When the command is a multi-command invocation — two or more commands separate
 - **WHEN** the matcher evaluates the command
 - **THEN** it SHALL NOT approve the command
 
+#### Scenario: Tolerated fd-to-fd redirect skipped when locating the entrypoint
+
+- **GIVEN** a whitelisted skill script at `skills/memory-save/scripts/memory-save.ts`
+- **WHEN** the matcher evaluates `deno run 2>&1 skills/memory-save/scripts/memory-save.ts --session-id x`
+- **THEN** it SHALL approve the command because the tolerated `2>&1` token is skipped when locating the invocation entrypoint (it is not a real argument and MUST NOT be mistaken for the script)
+- **AND** the first-token allow-list check SHALL still operate on the original tokens so a redirect can never masquerade as the entrypoint
+
+#### Scenario: Newline next to a tolerated redirect token remains rejected
+
+- **GIVEN** a whitelisted skill script at `skills/memory-save/scripts/memory-save.ts`
+- **WHEN** the matcher evaluates `deno run skills/memory-save/scripts/memory-save.ts --session-id x 2>&1\nrm victim`
+- **THEN** it SHALL NOT approve the command because only space/tab are token separators: a newline next to a tolerated token is a command separator, not a token boundary, so the command remains rejected
+
+#### Scenario: Non-tolerated operators and redirections remain rejected
+
+- **GIVEN** a whitelisted skill script at `skills/memory-save/scripts/memory-save.ts`
+- **WHEN** the matcher evaluates a command that carries a `1>&3` redirect, a file-referencing redirection (`2>/tmp/x`, `2>&1/tmp/x`, `> file`), or another shell operator alongside the script
+- **THEN** it SHALL NOT approve the command, because any shell operator, file-referencing redirection, or redirect whose source descriptor is not a standard stream (`1` or `2`) continues to be rejected
+
+#### Scenario: Unbalanced quote disables multi-command splitting
+
+- **GIVEN** a restricted-mode session with `agent-browser` on the command-prefix whitelist
+- **WHEN** the agent requests `agent-browser open https://example.com; cat 'unbalanced`
+- **THEN** the matcher SHALL evaluate the whole invocation as a single segment (the unbalanced quote disables splitting) and SHALL NOT approve it because the residual `;` shell operator remains
+
+#### Scenario: Legacy free-text flag check applies to the full original command
+
+- **GIVEN** a restricted-mode session with `agent-browser` on the command-prefix whitelist
+- **WHEN** the agent requests a multi-command invocation whose full original command contains a legacy free-text flag (`--message` / `--content` / `--query` / `--caption`)
+- **THEN** the D5 legacy free-text flag check SHALL remain on the full original command, not per segment
+
 ### Requirement: Agent Workspace Write Gating
 
 The ACP client `ClientConfig` SHALL include a `canWriteAgentWorkspace` flag. Edit/write requests targeting the shared agent workspace SHALL be approved ONLY when `canWriteAgentWorkspace` is `true`, in addition to passing existing path and extension checks. This gate SHALL be enforced at BOTH the `requestPermission` edit/write branch AND the `writeTextFile` handler (which are separate code paths). Writes to the per-session TMPDIR SHALL remain allowed regardless of this flag.
@@ -103,7 +139,7 @@ The ACP client `ClientConfig` SHALL include a `canWriteAgentWorkspace` flag. Edi
 
 ### Requirement: Boundary-Safe Path Validation
 
-All ACP client path boundary checks (`isPathAllowed`, `isAgentWorkspacePath`, `isWithinTmpDir`) SHALL treat a candidate path as inside a base directory only when the resolved candidate equals the resolved base OR begins with the resolved base followed by a path separator. A sibling path that merely shares a string prefix with the base SHALL be rejected. `readTextFile` SHALL additionally enforce an explicit read-extension allowlist (memory JSONL `.jsonl`, markdown `.md`, plain text `.txt`) and deny other extensions; this read allowlist is intentionally distinct from (and broader than) the write allowlist so legitimate agent reads of workspace memory files are not blocked.
+All ACP client path boundary checks (`isPathAllowed`, `isAgentWorkspacePath`, `isWithinTmpDir`) SHALL treat a candidate path as inside a base directory only when the resolved candidate equals the resolved base or begins with the resolved base followed by a path separator, and a sibling path that merely shares a string prefix with the base SHALL be rejected.
 
 #### Scenario: Sibling-prefix path rejected
 
@@ -129,9 +165,16 @@ All ACP client path boundary checks (`isPathAllowed`, `isAgentWorkspacePath`, `i
 - **WHEN** `readTextFile` evaluates the request
 - **THEN** the read SHALL be rejected
 
+#### Scenario: Read allowlist distinct from write allowlist
+
+- **GIVEN** an agent read request for a workspace memory file (memory JSONL `.jsonl`, markdown `.md`, or plain text `.txt`)
+- **WHEN** `readTextFile` evaluates the request
+- **THEN** the read SHALL be allowed, because `readTextFile` SHALL enforce an explicit read-extension allowlist
+- **AND** the read allowlist SHALL be intentionally distinct from, and broader than, the write allowlist, so legitimate agent reads of workspace memory files are not blocked
+
 ### Requirement: Filesystem-Touching Bash Tools Route Through the ACP Gate
 
-The agent permission map (`agent-config/opencode.json`) SHALL NOT set a filesystem-touching bash tool to `"allow"` in the restricted (non-YOLO) profile, because an `"allow"` verdict causes OpenCode to self-authorize the tool call and return without forwarding it to the ACP client's `requestPermission()`, making the Layer-3 boundary unreachable. This applies to the entire set of file-reading or file-emitting utilities the profile exposes — not only the obvious `cat`/`head`/`tail`/`ls`/`find`, but also every equivalent read primitive (`rg`, `wc`, `file`, `tree`, `jq`, `pdftotext`, `pdfinfo`, `pdfimages`, `pdftoppm`, `pandoc`, `exiftool`, `ffprobe`), the media/archive tools that read and write files (`ffmpeg`, `magick`, `convert`, `identify`, `mogrify`, `unzip`, `zip`, `7zz`), and `agent-browser`. All such entries SHALL be configured `"ask"` so OpenCode forwards the decision to the ACP client, where boundary checks are enforced. (Skill-invocation patterns already matched by the ACP client's entrypoint-anchored logic may remain `"allow"`.)
+The agent permission map (`agent-config/opencode.json`) SHALL NOT set any filesystem-touching bash tool to `"allow"` in the restricted (non-YOLO) profile, because an `"allow"` verdict makes OpenCode self-authorize the call and never reach the ACP client's `requestPermission()`; every such entry SHALL be configured `"ask"` so the decision reaches the ACP client, where boundary checks are enforced.
 
 #### Scenario: A read-capable bash tool is not self-authorized at the agent layer
 
@@ -145,21 +188,21 @@ The agent permission map (`agent-config/opencode.json`) SHALL NOT set a filesyst
 - **WHEN** its bash allow-list is inspected
 - **THEN** no entry capable of reading or writing arbitrary file content (search/read utilities, document/media/archive tools, or `agent-browser`) SHALL be set to `"allow"`
 
+#### Scenario: Media/archive tools never self-authorized
+
+- **GIVEN** the restricted-profile permission map
+- **WHEN** an entry for a media or archive tool that reads and writes files (`ffmpeg`, `magick`, `convert`, `identify`, `mogrify`, `unzip`, `zip`, `7zz`) is configured
+- **THEN** it SHALL be set to `"ask"`, not `"allow"`
+
+#### Scenario: Entrypoint-matched skill patterns may remain allow
+
+- **GIVEN** a skill-invocation pattern already matched by the ACP client's entrypoint-anchored skill logic
+- **WHEN** the restricted-profile permission map is configured
+- **THEN** that pattern MAY remain `"allow"`, while generic filesystem-touching bash tools stay `"ask"`
+
 ### Requirement: Generic-Command Workspace Confinement
 
-The restricted-mode ACP permission gate SHALL approve a generic bash command (a command whose first token is on an explicit allow-list) ONLY when every path-like argument — both inputs and outputs — resolves inside the session workspace, the session TMPDIR, the agent workspace, or the session-scoped OpenCode tool-output directory, AND the command contains no code-execution / arbitrary-target argument flag (e.g. `find -exec`/`-delete`/`-fprintf`, `rg --pre`). A command referencing any path outside those boundaries (as a read source OR a write/output target), or using such a flag, SHALL be rejected. The shared, home-rooted OpenCode tool-output directory (`$HOME/.local/share/opencode/tool-output` or any other home-rooted location) SHALL NOT be within bounds.
-
-A generic command SHALL be rejected when it contains shell operators that enable command chaining or file redirection (`;`, `|`, `&`, backtick, `$()`, `>`, `<`, `#`, newline), with the following exception: the command-sequence operators `;`, `&&`, and `||` SHALL NOT by themselves reject a multi-command invocation. A multi-command invocation SHALL be split into its non-empty command segments using quote-aware splitting (separators recognized only outside single or double quotes, with shell-correct backslash-escape handling inside double quotes; an unbalanced quote SHALL disable splitting so the whole command is evaluated as one segment; a command containing no separator SHALL be evaluated exactly as today) and SHALL be approved ONLY when EVERY segment independently satisfies this requirement — first token on the allow-list, no dangerous flag, every path argument in-bounds, and no residual shell operator (subject to the fd-to-fd exception below). A segment that consists ONLY of tolerated fd-redirect tokens SHALL be rejected as an operator artifact (`shell_operator`), never skipped. The whole invocation SHALL be rejected when ANY segment fails, and the rejection SHALL report the FIRST failing segment's cause. Pipes `|`, backgrounding `&`, and newline separators SHALL NOT be splitting boundaries; a command containing them SHALL be rejected.
-
-An exception SHALL apply to a whitespace-delimited argument token that is EXACTLY `N>&M`, where `N` is one-or-more decimal digits and `M` is the descriptor of a standard stream (`1` or `2`; e.g. `2>&1`, `1>&2`, `3>&1`): such a token duplicates an already-open standard output/error stream and references no path on disk, so it SHALL be removed from the shell-operator check and SHALL NOT be treated as a path argument. The removal SHALL treat only space/tab as a token separator — a newline next to a tolerated token is a shell command separator, NOT a token boundary, so the filtered command SHALL retain the newline and SHALL be rejected. Any other redirection form SHALL remain rejected, including redirects to a file (`2>/dev/null`, `2>/tmp/x`, `> file`), `>&word` with a non-numeric `word`, digit-prefixed filenames (`2>&1/tmp/x`, `2>&1x`) which a shell opens for writing, and redirects whose source descriptor is not a standard stream (`1>&3`, `2>&3`, `9>&99`) — these are not exact `N>&[12]` tokens and remain subject to the shell-operator and path-containment rejections.
-
-Home-anchored argument tokens SHALL be expanded against the runtime values before the containment check: the exact forms `~`, `~/...`, `$HOME`, `$HOME/...`, `${HOME}`, `${HOME}/...` SHALL expand the `~`/`$HOME` reference to the runtime home directory, and `$XDG_DATA_HOME`, `$XDG_DATA_HOME/...`, `${XDG_DATA_HOME}`, `${XDG_DATA_HOME}/...` SHALL expand to the session's `XDG_DATA_HOME` value. Expansion SHALL be applied to the token after quote stripping and `--flag=value` splitting, including inside attached option values (e.g. `-o$HOME/...`), so an attached option carrying an expanded absolute path is subject to the same attached-absolute-path rejection as a literal one. The containment check SHALL be applied to the expanded path, so a token that expands outside an allowed directory (e.g. `~/.ssh/id_rsa`, `$HOME/.git-credentials`, `$HOME/../etc/passwd`, `-o$HOME/.ssh/x`) SHALL be rejected. Any other home-anchored token (e.g. `~otheruser/...`, `~notexpanded`) SHALL be rejected.
-
-Attached short-option values SHALL be rejected when they are absolute or traversal-anchored: a `-`-prefixed token whose glued value starts with `/` or `..`, or contains `/../` (e.g. `-o/etc/cron.d`, `-f../sibling-user/file`, `-o../x`, `-oout/../x`), SHALL be rejected — such values resolve against the agent's cwd and escape the workspace. Bare flags (`-r`) and safe attached values (`-n5`, `-fprogram.jq`) SHALL pass.
-
-A path argument that resolves inside the session's OpenCode data area (`{sessionWorkspace}/tmp/opencode-data`) but OUTSIDE the session's own data home SHALL be rejected even though it lexically resolves inside the session workspace: sibling/previous sessions' truncated tool outputs (and the data-area root listing that would enumerate them) are never within bounds, while the session's own data home remains readable.
-
-The allow-list SHALL be limited to plain search/read/stat utilities whose only file access is via ordinary path arguments the lexical check can see — i.e. `rg`, `cat`, `head`, `tail`, `ls`, `find`, `wc`, `file`, `tree`, `jq`, `pdftotext`, `pdfinfo`, `pdfimages`, `pdftoppm`. Tools that read or write files through their own argument DSL, an argument/response indirection file, an embedded protocol/coder, or a filter/preprocessor that executes code (e.g. ImageMagick `magick`/`convert`/`identify`/`mogrify` via `caption:@`/`label:@`/`msl:` coders, `exiftool -@` argfiles, `ffmpeg`/`ffprobe` protocols like `-f lavfi -i movie=`, `pandoc --lua-filter`, and the `unzip`/`zip`/`7zz` archive tools via attached `-o` output or archive path traversal) SHALL NOT be on the allow-list, because a lexical path check cannot bound them; they are only safe under the filesystem confinement (D4) and remain default-deny at this gate until it is active. Interpreters and mutating system tools (e.g. `python`, `git`, `rm`, `mv`, `dd`, `chmod`, `mkdir`) SHALL NOT be on the allow-list and SHALL remain default-deny.
+The restricted-mode ACP permission gate SHALL approve a generic bash command (first token on an explicit allow-list) ONLY when every path-like argument — inputs and outputs — resolves inside the session workspace, session TMPDIR, agent workspace, or session-scoped OpenCode tool-output directory, AND it contains no code-execution / arbitrary-target argument flag; any path outside those boundaries or such a flag SHALL cause rejection.
 
 #### Scenario: In-workspace generic command approved
 
@@ -306,9 +349,53 @@ The allow-list SHALL be limited to plain search/read/stat utilities whose only f
 - **WHEN** the agent requests an interpreter or mutating tool such as `python`, `git`, `rm`, or `mkdir` against an in-workspace path
 - **THEN** the allow-list SHALL NOT approve it (it remains subject to default-deny / existing rules)
 
+#### Scenario: Agent workspace path argument approved
+
+- **GIVEN** a restricted-mode session whose agent workspace is `/app/data/agent-workspace`
+- **WHEN** the agent requests `cat /app/data/agent-workspace/notes/_index.md`
+- **THEN** the gate SHALL approve the command because the path argument resolves inside the agent workspace boundary
+
+#### Scenario: Allow-list limited to plain search/read/stat utilities
+
+- **GIVEN** a restricted-mode session
+- **WHEN** the generic-command allow-list is inspected
+- **THEN** it SHALL contain only plain search/read/stat utilities whose file access is via ordinary path arguments — `rg`, `cat`, `head`, `tail`, `ls`, `find`, `wc`, `file`, `tree`, `jq`, `pdftotext`, `pdfinfo`, `pdfimages`, `pdftoppm`
+- **AND** interpreters and mutating system tools (e.g. `python`, `git`, `rm`, `mv`, `dd`, `chmod`, `mkdir`) SHALL NOT be on the allow-list and SHALL remain default-deny
+
+#### Scenario: Redirect-only segment rejected as operator artifact
+
+- **GIVEN** a restricted-mode session whose workspace is `/app/data/workspaces/discord/123`
+- **WHEN** the agent requests `2>&1&&cat /etc/passwd` or `2>&1; cat /app/data/workspaces/discord/123/notes.md`
+- **THEN** the gate SHALL reject the invocation with `shell_operator` because a segment consisting only of tolerated fd-redirect tokens is an operator artifact, never a command, and the whole invocation fails when any segment fails
+
+#### Scenario: Backslash-escaped double quote keeps separators inside quotes
+
+- **GIVEN** a restricted-mode session whose workspace is `/app/data/workspaces/discord/123`
+- **WHEN** the agent requests `rg "said \"hi\"; bye" /app/data/workspaces/discord/123/notes.md`
+- **THEN** the gate SHALL treat the command as a single segment and approve it, because with shell-correct backslash-escape handling inside double quotes the escaped `\"` does not close the string, so the `;` stays inside quotes and is not a splitting boundary
+
+#### Scenario: Command substitution, backtick, backgrounding, and comment operators rejected
+
+- **GIVEN** a restricted-mode session whose workspace is `/app/data/workspaces/discord/123`
+- **WHEN** the agent requests `cat /app/data/workspaces/discord/123/notes.md $(echo /etc/passwd)`, ``cat /app/data/workspaces/discord/123/notes.md `cat /etc/passwd` ``, `cat < /etc/passwd`, `cat /app/data/workspaces/discord/123/notes.md &`, or `ls /app/data/workspaces/discord/123/ 2>&1 # comment`
+- **THEN** the gate SHALL reject the command, because `$()`, backticks, `<`, `&`, and `#` are shell operators that enable command chaining or file redirection and are not tolerated fd-to-fd tokens
+
+#### Scenario: Sibling-session data area rejected despite lexical containment
+
+- **GIVEN** a restricted-mode session whose workspace is `/app/data/workspaces/discord/123` (data area root `/app/data/workspaces/discord/123/tmp/opencode-data`)
+- **WHEN** the agent requests `cat /app/data/workspaces/discord/123/tmp/opencode-data/sess_other/opencode/tool-output/tool_x` or `ls /app/data/workspaces/discord/123/tmp/opencode-data`
+- **THEN** the gate SHALL reject the command even though the path lexically resolves inside the session workspace, because it resolves inside the data area but outside the session's own data home
+- **AND** the session's own data home remains readable
+
+#### Scenario: Rejection reports the first failing segment's cause
+
+- **GIVEN** a restricted-mode session whose workspace is `/app/data/workspaces/discord/123`
+- **WHEN** the agent requests `cat /etc/passwd; ls /var/log` (both segments fail the gate)
+- **THEN** the gate SHALL reject the whole invocation because ANY failing segment fails the call, and the rejection SHALL report the FIRST failing segment's cause (the `/etc/passwd` read resolves outside the allowed directories)
+
 ### Requirement: Shell-Expansion Token Rejection
 
-The per-token path checks of the ACP permission gate (the generic-command gate's `genericArgWithinWorkspace` and the skill matchers' `referencesOutOfWorkspacePath`) SHALL reject argument tokens whose runtime shell expansion could resolve outside the allowed directories. Only a fixed set of harness-set variables SHALL be expandable: `$HOME`/`${HOME}`, `$XDG_DATA_HOME`/`${XDG_DATA_HOME}` (expanded and containment-checked in the generic gate as today), and `$TMPDIR`/`${TMPDIR}`, `$AGENT_WORKSPACE`/`${AGENT_WORKSPACE}`, `$SESSION_ID`/`${SESSION_ID}` (in the generic gate these SHALL be expanded and containment-checked; in the skill matchers they SHALL be recognized as known variables without expansion, preserving the `--content-file $TMPDIR/$SESSION_ID/x.md` payload contract). Every other UNQUOTED `$VAR`/`${VAR}` reference SHALL be rejected, because an unquoted expansion can be word-split into an out-of-workspace path (e.g. `$IFS/etc/passwd`). A `$` reference inside single quotes is literal and SHALL be allowed. A double-quoted `$VAR`/`${VAR}` reference to a non-harness variable SHALL be rejected when it BEGINS the token's path content (e.g. `"$X/etc/passwd"`, `"$X"`, `"$_"`, `--flag="$X"`): a quoted expansion is not word-split, but an UNSET variable expands to empty, and an empty expansion followed by a literal `/...` or `..` suffix IS an absolute/traversal path (a set variable can also carry an absolute value directly). A double-quoted reference EMBEDDED after literal text (`"price $X"`, `"a$X"`) SHALL be allowed: a literal prefix keeps the expanded result relative. Any unquoted brace-expansion token (`{...}` — e.g. `{safe,/etc/passwd}`) SHALL be rejected, since brace expansion can enumerate out-of-workspace paths. A `--flag=` prefix SHALL be normalized away before the scan so an attached-option value is judged on its own path content.
+The per-token path checks of the ACP permission gate SHALL reject argument tokens whose runtime shell expansion could resolve outside the allowed directories; only the fixed harness-set variables SHALL be expandable — `$HOME`, `$XDG_DATA_HOME`, `$TMPDIR`, `$AGENT_WORKSPACE`, `$SESSION_ID` and their `${...}` forms — and every other unquoted `$VAR`/`${VAR}` reference SHALL be rejected.
 
 #### Scenario: Unquoted unknown variable rejected
 
@@ -346,9 +433,15 @@ The per-token path checks of the ACP permission gate (the generic-command gate's
 - **WHEN** the matcher evaluates `deno run skills/memory-save/scripts/memory-save.ts --content-file $TMPDIR/$SESSION_ID/x.md --session-id x`
 - **THEN** it SHALL approve the command because `$TMPDIR`/`$SESSION_ID` are known harness-set variables in the skill matcher and the entrypoint is the whitelisted script
 
+#### Scenario: Attached-option value judged after flag-prefix normalization
+
+- **GIVEN** a restricted-mode session
+- **WHEN** the agent requests `cat --file="$X/etc/passwd"` or `rg --pattern=$IFS /app/data/workspaces/discord/123/notes.md`
+- **THEN** the gate SHALL normalize away the `--flag=` prefix before the token scan so the attached-option value is judged on its own path content, and a non-harness `$VAR` reference beginning that value SHALL be rejected
+
 ### Requirement: Per-Session Tool-Output Isolation
 
-The system SHALL scope the ACP agent subprocess's OpenCode data directory. In per-spawn mode the subprocess SHALL receive a session-scoped `XDG_DATA_HOME` whose value is a directory inside the session's TMPDIR: when the session has a session id (skill-backed sessions) the value SHALL be `{sessionWorkspace}/tmp/opencode-data/{sessionId}`; sessions without one (internal system sessions with dedicated workspaces) use `{sessionWorkspace}/tmp/opencode-data`. In shared-process mode the channel process SHALL receive a channel-scoped `XDG_DATA_HOME` of the form `{dataRoot}/opencode-data/{poolKey}` (a channel/pool-key-scoped data root under the bot data root, deliberately OUTSIDE any user's workspace), fixed at process spawn time. The sandbox environment filter SHALL include `XDG_DATA_HOME` in its allowed base environment variables. The permission gate's tool-output boundary SHALL use the session-scoped value in per-spawn mode and the channel-scoped data root in shared-process mode, and SHALL reject any path that resolves inside the data area but outside the allowed data home (sibling/previous sessions' data dirs are never readable, even though they lexically resolve inside the workspace). The workspace TMPDIR (including the data area) SHALL be removed when no active sessions remain for the workspace.
+The system SHALL scope the ACP agent subprocess's OpenCode data directory via `XDG_DATA_HOME`: in per-spawn mode the subprocess SHALL receive a session-scoped value inside the session's TMPDIR (`{sessionWorkspace}/tmp/opencode-data/{sessionId}` when the session has an id, else `{sessionWorkspace}/tmp/opencode-data`), and in shared-process mode the channel process SHALL receive `{dataRoot}/opencode-data/{poolKey}`, fixed at process spawn time.
 
 #### Scenario: Agent subprocess receives session-scoped XDG_DATA_HOME
 
@@ -388,9 +481,21 @@ The system SHALL scope the ACP agent subprocess's OpenCode data directory. In pe
 - **WHEN** the confinement argv is built
 - **THEN** the shared home-rooted OpenCode data directory (`$HOME/.local/share/opencode`) SHALL NOT be bound into the mount namespace — in per-spawn mode the agent's data dir lives under the session-scoped `XDG_DATA_HOME` inside the session workspace, and in shared-process mode under the channel-scoped data root (`{dataRoot}/opencode-data/{poolKey}`); the home-rooted shared dir is never written or visible to the confined process
 
+#### Scenario: XDG_DATA_HOME included in the sandbox environment filter
+
+- **GIVEN** the sandbox environment filter builds the agent subprocess's allowed base environment variables
+- **WHEN** the filter is applied to the subprocess environment
+- **THEN** `XDG_DATA_HOME` SHALL be included in the allowed base environment variables
+
+#### Scenario: Workspace TMPDIR removed when no sessions remain
+
+- **GIVEN** a workspace whose TMPDIR (including the OpenCode data area) has no active sessions
+- **WHEN** the last active session for that workspace ends
+- **THEN** the workspace TMPDIR SHALL be removed
+
 ### Requirement: OpenCode Tool-Output Directory Boundary
 
-The restricted-mode ACP permission gate SHALL add the session-scoped OpenCode tool-output directory to its generic-command containment boundaries ONLY when the resolved directory is inside the session workspace or the session TMPDIR. When it is (the normal case under per-session `XDG_DATA_HOME` isolation), the directory SHALL be added without duplication if it is not already contained by an existing allowed directory (containment test direction: the candidate is contained by an existing allowed directory). When it is NOT inside the session workspace/TMPDIR, the directory SHALL NOT be added and the gate SHALL fail closed — the shared home-rooted tool-output directory SHALL never be within bounds.
+The restricted-mode ACP permission gate SHALL add the session-scoped OpenCode tool-output directory to its generic-command containment boundaries ONLY when the resolved directory is inside the session workspace or the session TMPDIR (then without duplication if already contained by an existing allowed directory); otherwise SHALL NOT be added and the gate SHALL fail closed, so the shared home-rooted tool-output directory is never within bounds.
 
 #### Scenario: Session-local tool-output directory added to the boundary
 
@@ -410,13 +515,15 @@ The restricted-mode ACP permission gate SHALL add the session-scoped OpenCode to
 - **WHEN** the gate assembles its allowed directories
 - **THEN** the directory SHALL NOT be added, and a generic command referencing it SHALL be rejected
 
+#### Scenario: Shared home-rooted tool-output directory never added
+
+- **GIVEN** a session whose tool-output directory would resolve to the shared home-rooted location (`$HOME/.local/share/opencode/tool-output`), outside the session workspace and TMPDIR
+- **WHEN** the gate assembles its allowed directories
+- **THEN** the directory SHALL NOT be added, and a generic command referencing it SHALL be rejected (the gate fails closed)
+
 ### Requirement: Agent Filesystem Confinement
 
-When filesystem confinement is enabled (`sandbox.filesystemConfinement`), the agent subprocess SHALL run under a filesystem confinement that prevents it from reading the daemon's process environment (`/proc/1/environ`) and other users' workspace directories, independent of the permission-layer configuration, so that a permissive or misconfigured permission map cannot re-expose those paths. Because the container runs unprivileged under a single UID (OpenShift arbitrary-UID model), the confinement SHALL be achieved by a filesystem-namespace mechanism (bubblewrap mount namespace with a fresh `/proc`) rather than by switching the subprocess to a second UID. If confinement is enabled but the mechanism is unavailable in the runtime, the system SHALL fail closed at startup with an actionable error rather than starting the agent unconfined.
-
-Confinement is OPT-IN (default off) because the fresh-`/proc` mount it relies on cannot be established inside a doubly-nested user namespace (e.g. rootless podman) and its viability is therefore runtime-dependent and SHALL be verified against the real deployment (`scripts/probe-sandbox-caps.sh`) before enabling; the authoritative permission gate (`requestPermission` routing, generic-command confinement, URI-scheme rejection) provides the primary protection independent of this defense-in-depth layer.
-
-On Kubernetes the mechanism's availability depends on a chain of runtime prerequisites, established empirically on Talos 1.7.2 / K8s 1.30 / containerd 1.7: (1) the node must permit unprivileged user namespaces (`user.max_user_namespaces > 0`); (2) the pod must not run under the default containerd seccomp profile, which gates `unshare`/`clone(CLONE_NEWUSER)` on `CAP_SYS_ADMIN`, so an explicit `seccompProfile` and a relaxed PodSecurity level are required; (3) the CRI's `MNT_LOCKED` masked `/proc` paths make the kernel refuse a fresh procfs mount, requiring `securityContext.procMount: Unmasked`, which since K8s 1.30 additionally requires `hostUsers: false` and therefore containerd 2.0+ (or CRI-O ≥ 1.25). Documented in `docs/AGENT_PERMISSIONS.md` and `helm/values.yaml`. Clusters that cannot satisfy the chain SHALL keep `filesystemConfinement` disabled and rely on the always-on protections.
+When filesystem confinement is enabled (`sandbox.filesystemConfinement`), the agent subprocess SHALL run under a bubblewrap filesystem-namespace confinement with a fresh `/proc` (never a second UID, since the container runs unprivileged under a single UID) that prevents reading the daemon's process environment (`/proc/1/environ`) and other users' workspace directories; if the mechanism is unavailable, the system SHALL fail closed rather than run the agent unconfined.
 
 #### Scenario: Daemon environ not readable by the agent
 
@@ -442,4 +549,18 @@ On Kubernetes the mechanism's availability depends on a chain of runtime prerequ
 - **WHEN** the operator configures the deployment
 - **THEN** the documented guidance SHALL be to keep `filesystemConfinement` disabled and rely on the always-on permission gate, environment filtering, and egress mediation
 - **AND** if it is enabled anyway, startup SHALL fail closed rather than run the agent unconfined
+
+#### Scenario: Confinement is opt-in and verified before enabling
+
+- **GIVEN** a deployment considering enabling `filesystemConfinement`
+- **WHEN** the fresh-`/proc` mount cannot be established (e.g. inside a doubly-nested user namespace under rootless podman) or viability has not been verified against the real deployment
+- **THEN** confinement SHALL remain off by default (it is OPT-IN) and SHALL be verified with `scripts/probe-sandbox-caps.sh` before enabling
+- **AND** the authoritative permission gate (`requestPermission` routing, generic-command confinement, URI-scheme rejection) SHALL provide the primary protection independent of this defense-in-depth layer
+
+#### Scenario: Kubernetes prerequisite chain must be satisfied for confinement
+
+- **GIVEN** a Kubernetes deployment planning to enable `filesystemConfinement`
+- **WHEN** the operator assesses the runtime prerequisites — node unprivileged user namespaces (`user.max_user_namespaces > 0`); an explicit `seccompProfile` and relaxed PodSecurity level (the default containerd profile gates `unshare`/`clone(CLONE_NEWUSER)` on `CAP_SYS_ADMIN`); and `securityContext.procMount: Unmasked` for the `MNT_LOCKED` masked `/proc`, which since K8s 1.30 additionally requires `hostUsers: false` and therefore containerd 2.0+ (or CRI-O ≥ 1.25)
+- **THEN** the operator SHALL follow the chain documented in `docs/AGENT_PERMISSIONS.md` and `helm/values.yaml` (established empirically on Talos 1.7.2 / K8s 1.30 / containerd 1.7)
+- **AND** clusters that cannot satisfy the chain SHALL keep `filesystemConfinement` disabled and rely on the always-on protections
 

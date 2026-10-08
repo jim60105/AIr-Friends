@@ -362,7 +362,7 @@ The system SHALL support automatic installation of external agent skills at star
 
 ### Requirement: Dashboard Configuration Section
 
-The configuration system SHALL support a `dashboard` config section with `enabled` (boolean, default `false`), `port` (number, default `8090`), `host` (string, default `127.0.0.1`), `passphrase` (string, required when enabled, minimum 16 characters), `behindHttpsProxy` (boolean, default `false`), and `trustedProxies` (string array of real connection addresses whose `X-Forwarded-For` header is trusted for rate-limit keying, default empty). Each new field SHALL have a corresponding environment variable override.
+The configuration system SHALL support a `dashboard` config section with `enabled`, `port`, `host`, `passphrase`, `behindHttpsProxy`, and `trustedProxies` fields. Each field SHALL have a corresponding environment variable override.
 
 #### Scenario: Dashboard Config in YAML
 
@@ -405,6 +405,14 @@ The configuration system SHALL support a `dashboard` config section with `enable
 - **GIVEN** the project documentation files
 - **WHEN** `config.example.yaml`, `.env.example`, and `helm/values.yaml` are examined
 - **THEN** they SHALL include the `dashboard` section with `enabled`, `port`, `host`, `passphrase`, `behindHttpsProxy`, and `trustedProxies` fields
+
+#### Scenario: Dashboard field defaults and passphrase strength
+
+- **GIVEN** the `dashboard` section is absent or partially set in the config
+- **WHEN** the configuration is loaded
+- **THEN** defaults SHALL apply: `enabled` (boolean `false`), `port` (number `8090`), `host` (string `127.0.0.1`), `behindHttpsProxy` (boolean `false`), and `trustedProxies` (empty array)
+- **AND** `trustedProxies` SHALL hold real connection addresses whose `X-Forwarded-For` header is trusted for rate-limit keying
+- **AND** `passphrase` SHALL be a string of at least 16 characters and SHALL be required when `enabled` is `true`
 
 ### Requirement: Dashboard Passphrase as Kubernetes Secret
 
@@ -450,12 +458,7 @@ The `values.yaml` SHALL include a `dashboard` section with `service` and `ingres
 
 ### Requirement: Reasoning Effort Configuration Fields
 
-The configuration system SHALL support reasoning-effort fields at three levels, all sharing one `ReasoningEffort` string type and one normalization helper:
-- the **global** `agent.reasoningEffort` (defaults to `"default"` when missing);
-- the **per-rule** `reasoningEffort` on each `agent.modelRouting.rules[]` entry (optional, unset when omitted);
-- the **per-section** `reasoningEffort` on `selfResearch`, `memoryMaintenance`, and `conversationSummary` (optional, unset when omitted).
-
-The shared normalization SHALL trim and lowercase values, treat present-but-empty as `"default"`, accept the recognized values (`"none"`, `"low"`, `"medium"`, `"high"`, `"xhigh"`, `"max"`, `"default"`), and otherwise preserve the token as passthrough with a warning. Omitted optional per-rule and per-section fields SHALL remain unset (not coerced to `"default"`).
+The configuration system SHALL support reasoning-effort fields at three levels — the global `agent.reasoningEffort`, the per-rule `reasoningEffort` on each `agent.modelRouting.rules[]` entry, and the per-section `reasoningEffort` on `selfResearch`, `memoryMaintenance`, and `conversationSummary` — all sharing one `ReasoningEffort` string type and one normalization helper.
 
 #### Scenario: Global default applied when missing
 
@@ -505,6 +508,13 @@ The shared normalization SHALL trim and lowercase values, treat present-but-empt
 - **WHEN** the values are examined
 - **THEN** it SHALL include an `AGENT_REASONING_EFFORT` entry under the `env:` section
 
+#### Scenario: Normalization of empty and unrecognized values
+
+- **GIVEN** a reasoning-effort value at any level is present but empty, or is a token outside the recognized set
+- **WHEN** configuration is loaded and normalized
+- **THEN** a present-but-empty value SHALL be treated as `"default"`
+- **AND** a token outside the recognized values (`"none"`, `"low"`, `"medium"`, `"high"`, `"xhigh"`, `"max"`, `"default"`) SHALL be preserved as passthrough with a warning
+
 ### Requirement: Self-Research Completion Verification Configuration
 
 The configuration system SHALL support `selfResearch.verifyCompletion`, a boolean field (default `true`) that controls whether self-research sessions verify research-note production and run the corrective retry. The field SHALL be overridable via the `SELF_RESEARCH_VERIFY_COMPLETION` environment variable (`"true"` / `"false"`, matching the `ENV_MAPPINGS` pattern), and SHALL be documented in `config.example.yaml`, `.env.example`, and `helm/values.yaml` per project convention.
@@ -529,19 +539,7 @@ The configuration system SHALL support `selfResearch.verifyCompletion`, a boolea
 
 ### Requirement: Memory Recall Configuration
 
-The configuration system SHALL support a `memory.recall` section with the following keys. Every key SHALL be optional and fall back to its default.
-
-| Key | Type | Default |
-|---|---|---|
-| `fastRecallMaxResults` | integer ≥ 0 | `2` |
-| `fastRecallMaxTokens` | integer ≥ 0 | `192` |
-| `minRecallScore` | number ≥ 0 | set by threshold calibration |
-| `secondRecallScore` | number ≥ 0 | set by threshold calibration |
-| `secondResultRatio` | number in [0, 1] | `0.65` |
-| `deepRecallMaxTokens` | integer > 0 | `1024` |
-| `deepMinRecallScore` | number ≥ 0 | `0` |
-
-Values outside their allowed range SHALL be rejected at load time with a `ConfigError`. `config.example.yaml` SHALL document every key with its default.
+The configuration system SHALL support a `memory.recall` section whose keys are each optional and fall back to their defaults. Values outside their allowed range SHALL be rejected at load time with a `ConfigError`, and `config.example.yaml` SHALL document every key with its default.
 
 #### Scenario: Defaults applied
 - **GIVEN** `config.yaml` has no `memory.recall` section
@@ -558,17 +556,25 @@ Values outside their allowed range SHALL be rejected at load time with a `Config
 - **WHEN** the configuration is loaded
 - **THEN** loading SHALL fail with a `ConfigError`
 
-### Requirement: Fixed Memory Budget Configuration
+#### Scenario: Recall keys and defaults
 
-The `memory.recall` configuration section SHALL also support the following keys. Every key SHALL be optional and fall back to its default.
+- **GIVEN** the `memory.recall` section is loaded
+- **WHEN** a documented key is missing
+- **THEN** it SHALL fall back to its default as listed below
 
 | Key | Type | Default |
 |---|---|---|
-| `coreMaxTokens` | integer ≥ 0 | `512` |
-| `workingMaxItems` | integer ≥ 0 | `4` |
-| `workingMaxTokens` | integer ≥ 0 | `384` |
+| `fastRecallMaxResults` | integer ≥ 0 | `2` |
+| `fastRecallMaxTokens` | integer ≥ 0 | `192` |
+| `minRecallScore` | number ≥ 0 | set by threshold calibration |
+| `secondRecallScore` | number ≥ 0 | set by threshold calibration |
+| `secondResultRatio` | number in [0, 1] | `0.65` |
+| `deepRecallMaxTokens` | integer > 0 | `1024` |
+| `deepMinRecallScore` | number ≥ 0 | `0` |
 
-Values outside their allowed range SHALL be rejected at load time with a `ConfigError`. `memory.workingTierLimit` SHALL keep its storage meaning and SHALL NOT affect injection. `config.example.yaml` SHALL document every key with its default.
+### Requirement: Fixed Memory Budget Configuration
+
+The `memory.recall` configuration section SHALL also support fixed-memory-budget keys, each optional and falling back to its default. Values outside their allowed range SHALL be rejected at load time with a `ConfigError`, and `config.example.yaml` SHALL document every key with its default.
 
 #### Scenario: Budget defaults applied
 - **GIVEN** `config.yaml` has no `memory.recall` section
@@ -579,6 +585,19 @@ Values outside their allowed range SHALL be rejected at load time with a `Config
 - **GIVEN** `config.yaml` sets `memory.recall.coreMaxTokens: -1`
 - **WHEN** the configuration is loaded
 - **THEN** loading SHALL fail with a `ConfigError`
+
+#### Scenario: Fixed budget keys and defaults
+
+- **GIVEN** the `memory.recall` section is loaded
+- **WHEN** a documented key is missing
+- **THEN** `memory.workingTierLimit` SHALL keep its storage meaning and SHALL NOT affect injection
+- **AND** each documented key SHALL fall back to its default as listed below
+
+| Key | Type | Default |
+|---|---|---|
+| `coreMaxTokens` | integer ≥ 0 | `512` |
+| `workingMaxItems` | integer ≥ 0 | `4` |
+| `workingMaxTokens` | integer ≥ 0 | `384` |
 
 ### Requirement: Fast Recall Toggle Configuration
 
@@ -596,16 +615,7 @@ The `memory.recall` configuration section SHALL support `fastRecallEnabled` (boo
 
 ### Requirement: Note Recall Configuration
 
-The `memory.recall` configuration section SHALL also support the following keys. Every key SHALL be optional and fall back to its default.
-
-| Key | Type | Default |
-|---|---|---|
-| `fastRecallNoteMaxResults` | integer ≥ 0 | `2` |
-| `fastRecallNoteMaxTokens` | integer ≥ 0 | `256` |
-| `noteMinRecallScore` | number ≥ 0 | set by note threshold calibration |
-| `secondNoteRecallScore` | number ≥ 0 | set by note threshold calibration |
-
-Values outside their allowed range SHALL be rejected at load time with a `ConfigError`. `config.example.yaml` SHALL document every key with its default.
+The `memory.recall` configuration section SHALL also support note-recall keys, each optional and falling back to its default. Values outside their allowed range SHALL be rejected at load time with a `ConfigError`, and `config.example.yaml` SHALL document every key with its default.
 
 #### Scenario: Note defaults applied
 - **GIVEN** `config.yaml` has no `memory.recall` section
@@ -617,9 +627,22 @@ Values outside their allowed range SHALL be rejected at load time with a `Config
 - **WHEN** Fast Recall runs
 - **THEN** no note SHALL be selected
 
+#### Scenario: Note recall keys and defaults
+
+- **GIVEN** the `memory.recall` section is loaded
+- **WHEN** a documented key is missing
+- **THEN** it SHALL fall back to its default as listed below
+
+| Key | Type | Default |
+|---|---|---|
+| `fastRecallNoteMaxResults` | integer ≥ 0 | `2` |
+| `fastRecallNoteMaxTokens` | integer ≥ 0 | `256` |
+| `noteMinRecallScore` | number ≥ 0 | set by note threshold calibration |
+| `secondNoteRecallScore` | number ≥ 0 | set by note threshold calibration |
+
 ### Requirement: Removed Memory Search Config Fields
 
-`memory.searchLimit` and `memory.maxChars` SHALL NOT exist in the configuration model, the loader defaults, `MemoryStoreConfig`, `ContextAssemblyConfig`, or the startup log. Retrieval budgets are owned solely by `memory.recall` (injection) and the `memory-search` skill's per-call `limit` parameter (search results). Existing configuration files that still set `memory.searchLimit` or `memory.maxChars` SHALL load without error: the keys are merged and ignored, with no validation, warning, or environment-variable mapping.
+`memory.searchLimit` and `memory.maxChars` SHALL NOT exist in the configuration model, the loader defaults, `MemoryStoreConfig`, `ContextAssemblyConfig`, or the startup log. Existing configuration files that still set them SHALL load without error: the keys SHALL be merged and ignored, with no validation, warning, or environment-variable mapping.
 
 #### Scenario: Fields absent from loaded config
 
@@ -640,3 +663,10 @@ Values outside their allowed range SHALL be rejected at load time with a `Config
 - **GIVEN** `memory.workingTierLimit`, a `memory.recall` budget, and a `memory-search` call with an explicit `limit`
 - **WHEN** the configuration is loaded and a search runs
 - **THEN** each SHALL behave exactly as specified before this removal
+
+#### Scenario: Retrieval budget ownership
+
+- **GIVEN** configuration is loaded and a search performs
+- **WHEN** retrieval budgets are determined
+- **THEN** injection budgets SHALL be owned solely by `memory.recall`
+- **AND** search-result budgets SHALL be owned solely by the `memory-search` skill's per-call `limit` parameter

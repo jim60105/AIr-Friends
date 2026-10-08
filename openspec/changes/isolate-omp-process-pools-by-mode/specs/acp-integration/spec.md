@@ -4,7 +4,7 @@
 
 ### Requirement: Per-Spawn OMP Mode Distinctness And Shared-Process Skill Identity Invariants
 
-Per-spawn (non-pool) agent spawns SHALL follow the same permission-mode distinctness as pooled acquisition: every per-spawn session path SHALL pass the session's resolved effective permission mode into the agent configuration exactly as the pooled paths do, so a restricted per-spawn OMP process and a native-YOLO per-spawn OMP process never share a process state root. Shared (pooled) subprocesses SHALL keep exporting the shared-process marker (`SKILL_SHARED_PROCESS=1`) and SHALL continue NOT to freeze a process-wide `SESSION_ID` in the spawn environment, regardless of agent type or permission mode — the per-session pointer remains the sole shared-mode skill identity source. These invariants SHALL hold identically for both OMP modes and for OpenCode, because later payload-portability work consumes them.
+Per-spawn (non-pool) agent spawns SHALL pass the session's resolved effective permission mode into the agent configuration exactly as the pooled paths do, so that a restricted per-spawn OMP process and a native-YOLO per-spawn OMP process never share a process state root.
 
 #### Scenario: Per-spawn OMP modes get distinct state roots
 - **GIVEN** an OMP deployment in per-spawn mode where one session resolves restricted and another resolves native-YOLO
@@ -21,9 +21,19 @@ Per-spawn (non-pool) agent spawns SHALL follow the same permission-mode distinct
 - **WHEN** both runs build their agent configuration
 - **THEN** both SHALL receive the same resolved permission mode, with no path defaulting, re-resolving differently, or reading a stale/global-only value where the entry point had a per-session decision available
 
+#### Scenario: Shared-process marker invariants hold for every agent type
+- **GIVEN** any shared (pooled) subprocess, regardless of agent type or permission mode
+- **WHEN** its spawn environment is built
+- **THEN** the environment SHALL keep exporting the shared-process marker (`SKILL_SHARED_PROCESS=1`) and SHALL NOT freeze a process-wide `SESSION_ID`, keeping the per-session pointer as the sole shared-mode skill identity source
+
+#### Scenario: Invariants hold for both OMP modes and OpenCode
+- **GIVEN** an OMP deployment in either permission mode or an OpenCode deployment exercising the spawn and skill-identity paths
+- **WHEN** the per-spawn distinctness and shared-process identity invariants are checked
+- **THEN** they SHALL hold identically, because later payload-portability work consumes them
+
 ### Requirement: Session Ownership Record Written At Acquisition
 
-At the moment a session acquires (or spawns) its agent process — pooled or per-spawn — the system SHALL record in the in-bot session-ownership bookkeeping (the registry's active-session record, plus a bounded audit event alongside the existing session-start/agent-connect events) the session's ORIGINAL resolved permission mode and the process/state namespace selected for that acquisition (the mode-scoped OMP state namespace for OMP entries; the existing pool-key-scoped data-root identity for OpenCode). The recorded values SHALL be durable for the session's lifetime, SHALL be written from the same explicitly resolved values used to build the acquisition, and SHALL NOT be mutated by later per-session activity. This change establishes the WRITE side of the interface; reconnect/`session/load` verification against these fields, gate-context restoration, and rejection of opposite-mode loads are owned by `restore-mode-owned-acp-sessions` (row 11), which SHALL consume — never redefine — these fields.
+At the moment a session acquires or spawns its agent process — pooled or per-spawn — the system SHALL record the session's ORIGINAL resolved permission mode and the process/state namespace selected for that acquisition in the in-bot session-ownership bookkeeping.
 
 #### Scenario: Ownership fields written at pooled acquisition
 - **GIVEN** an OMP deployment pooled session whose resolved mode is native-YOLO
@@ -44,3 +54,18 @@ At the moment a session acquires (or spawns) its agent process — pooled or per
 - **GIVEN** an OpenCode pooled session running with per-session YOLO switching
 - **WHEN** its ownership record is written at acquisition
 - **THEN** the record SHALL name the existing pool-key-scoped data-root identity and OpenCode reuse behavior SHALL be unchanged; no OpenCode session SHALL be split or rejected because of the new fields
+
+#### Scenario: Bookkeeping spans registry record and audit event
+- **GIVEN** a session acquiring or spawning its agent process, pooled or per-spawn
+- **WHEN** the ownership values are recorded
+- **THEN** the system SHALL write them to the registry's active-session record and emit a bounded audit event alongside the existing session-start/agent-connect events
+
+#### Scenario: Record is durable and written from resolved values
+- **GIVEN** an ownership record written from the same explicitly resolved values used to build the acquisition
+- **WHEN** later per-session activity runs
+- **THEN** the recorded values SHALL remain durable for the session's lifetime and SHALL NOT be mutated by that activity
+
+#### Scenario: Restore owner consumes the record without redefining it
+- **GIVEN** the write side of the ownership interface established here
+- **WHEN** reconnect/`session/load` verification, gate-context restoration, or rejection of opposite-mode loads runs (owned by `restore-mode-owned-acp-sessions`, row 11)
+- **THEN** that owner SHALL consume, never redefine, the recorded fields

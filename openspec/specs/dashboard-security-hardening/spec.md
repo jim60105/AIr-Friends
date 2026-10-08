@@ -34,7 +34,7 @@ The dashboard server SHALL attach security headers to every HTTP response. The h
 
 ### Requirement: Login Rate Limiting
 
-The dashboard SHALL enforce rate limiting on `POST /api/auth/login` using a sliding window. The maximum number of attempts and the window duration SHALL be configurable. When the limit is exceeded, the server SHALL return HTTP 429 with a `Retry-After` header. The per-IP rate-limit key SHALL be derived from the real connection address (`info.remoteAddr`); the `X-Forwarded-For` header SHALL be honored ONLY when the real connection address is in a configured `dashboard.trustedProxies` allow-list. In addition to per-IP limiting, the dashboard SHALL maintain a global failed-attempt counter with backoff so that rotating the client IP (or a spoofed `X-Forwarded-For`) cannot yield unlimited attempts.
+The dashboard SHALL enforce rate limiting on `POST /api/auth/login` using a sliding window, returning HTTP 429 with a `Retry-After` header when the limit is exceeded.
 
 #### Scenario: Rate-limit key uses real connection address
 - **GIVEN** the request's real connection address is `203.0.113.5` and `dashboard.trustedProxies` does NOT include it
@@ -61,6 +61,11 @@ The dashboard SHALL enforce rate limiting on `POST /api/auth/login` using a slid
 - **WHEN** a 6th login attempt is made within 60 seconds from the same real connection address
 - **THEN** the server SHALL return HTTP 429
 - **AND** the response SHALL include a `Retry-After` header indicating seconds until the window resets
+
+#### Scenario: Rate limit parameters are configurable
+- **GIVEN** the maximum number of attempts and the sliding-window duration are configured (e.g., `dashboard.rateLimit.maxAttempts` and `dashboard.rateLimit.windowMs`)
+- **WHEN** login attempts arrive within the configured window
+- **THEN** the enforced limit and window SHALL follow the configured values
 
 ### Requirement: Session Token Expiration
 

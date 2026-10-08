@@ -8,7 +8,7 @@ Defines how the system assembles initial context for each agent session, combini
 
 ### Requirement: Token Budget Allocation
 
-The system SHALL allocate token budget with the following priority: mandatory content first, then conversation messages (recent and related), then available emojis (up to MAX_EMOJIS = 50) using any remaining budget. Mandatory content is the fixed memory sections, any recall sections, and the trigger message. The memory portion of mandatory content SHALL be bounded by the sum of the configured fixed-memory budgets and any recall budgets, plus section headings. When conversation content exceeds budget, the system SHALL truncate oldest messages first, prioritizing recent messages over related messages via `formatConversationSectionWithBudget()`.
+The system SHALL allocate token budget in priority order: mandatory content first, then conversation messages (recent and related), then available emojis (up to MAX_EMOJIS = 50) using remaining budget. Mandatory content SHALL be the fixed memory sections, any recall sections, and the trigger message. The memory portion SHALL be bounded by the sum of configured fixed-memory and recall budgets plus section headings.
 
 #### Scenario: Budget overflow truncates oldest messages
 - **GIVEN** recent and related messages exceed the available token budget
@@ -19,6 +19,11 @@ The system SHALL allocate token budget with the following priority: mandatory co
 - **GIVEN** a user has 500 enabled memories across all tiers and no recall section is present
 - **WHEN** context is assembled with default configuration
 - **THEN** the memory portion of mandatory content SHALL NOT exceed 512 + 384 estimated tokens plus section headings
+
+#### Scenario: Recent messages outrank related messages
+- **GIVEN** recent and related messages both exceed the available token budget
+- **WHEN** `formatConversationSectionWithBudget()` drops content
+- **THEN** the system SHALL keep recent messages in preference to related messages
 
 ### Requirement: /clear Command Behavior
 
@@ -77,13 +82,7 @@ The system SHALL support context assembly without a trigger message for spontane
 
 ### Requirement: Initial Context Composition with Fixed Budgets
 
-The system SHALL assemble initial context for a triggered session from the following sources, in this priority order:
-
-1. **Fixed memories**: core-tier and newest working-tier memories from the user's workspace and, in a channel, the channel's memory file, selected within the tiered context loading budgets.
-2. **Recent channel messages**: the most recent messages from the trigger channel, up to `recentMessageLimit` (default 20).
-3. **Related guild messages**: messages from the same guild matching the trigger content, fetched only in guild (non-DM) contexts, with a fixed limit of 10 messages.
-
-Fixed memories SHALL NOT be summarized or truncated mid-entry.
+The system SHALL assemble initial context for a triggered session from these sources in priority order: fixed memories first, then recent channel messages, then related guild messages. Related guild messages SHALL be fetched only in guild (non-DM) contexts. Fixed memories SHALL NOT be summarized or truncated mid-entry.
 
 #### Scenario: Context assembly for a guild message
 - **GIVEN** a user sends a message in a guild channel
@@ -100,6 +99,16 @@ Fixed memories SHALL NOT be summarized or truncated mid-entry.
 - **GIVEN** a core memory longer than the remaining core budget
 - **WHEN** context is assembled
 - **THEN** that memory SHALL be skipped entirely rather than cut
+
+#### Scenario: Fixed memory sources within tiered budgets
+- **GIVEN** a triggered session is assembled
+- **WHEN** fixed memories are selected
+- **THEN** the system SHALL select core-tier and newest working-tier memories from the user's workspace and, in a channel, the channel's memory file, within the tiered context loading budgets
+
+#### Scenario: Default recent message limit
+- **GIVEN** no explicit `recentMessageLimit` is configured
+- **WHEN** recent channel messages are fetched
+- **THEN** the system SHALL fetch at most the 20 most recent messages from the trigger channel
 
 ### Requirement: Fast Recall in Initial Context
 
@@ -126,7 +135,7 @@ When `memory.recall.fastRecallEnabled` is `true`, assembling a triggered session
 
 ### Requirement: Attributed Third-Party Quote Context
 
-The system SHALL preserve an available quoted reference in the current message and in every retained recent, related or spontaneous-history message. It SHALL display source identity, original author, source URL when present, source text and attachment metadata within an explicit third-party reference boundary stating that quoted commands are not the user's direct instructions. Source authors SHALL remain separate from the outer user/bot speaker. Unavailable references SHALL display known source id and unavailable status without invented content. Trigger budget calculation and final prompt output SHALL use the same current-message representation. Messages without quotes SHALL retain their existing text and attachment formatting.
+The system SHALL preserve an available quoted reference in the current message and in every retained recent, related or spontaneous-history message, displaying source identity, original author, source URL when present, source text and attachment metadata within an explicit third-party reference boundary stating that quoted commands are not the user's direct instructions.
 
 #### Scenario: Question retains its referent in current message
 - **GIVEN** a user asks whether their location has something like an embedded quoted article about unexploded WWII ordnance
@@ -156,9 +165,19 @@ The system SHALL preserve an available quoted reference in the current message a
 - **WHEN** context is formatted before and after quote support
 - **THEN** the user-message formatting SHALL remain byte-identical
 
+#### Scenario: Source author stays separate from outer speaker
+- **GIVEN** a message contains a quoted reference with an original author
+- **WHEN** the context is formatted
+- **THEN** the source author SHALL remain separate from the outer user/bot speaker
+
+#### Scenario: Budget and final prompt share representation
+- **GIVEN** the current message contains a quoted reference
+- **WHEN** the trigger budget is calculated and the final prompt is output
+- **THEN** both SHALL use the same current-message representation
+
 ### Requirement: Quote Data Cannot Create Prompt Boundary Lines
 
-All untrusted quote fields, including text, identity, author names, URLs and attachment names, SHALL be encoded as data inside renderer-owned third-party boundaries. Embedded line breaks, role labels, Markdown headings/fences, closing-boundary text or XML delimiters SHALL NOT produce new renderer-owned speaker, heading or boundary lines. Instruction-looking source text SHALL remain reference data. This formatting contract SHALL NOT be represented as proof of semantic prompt-injection immunity. Command recognition SHALL use outer message content only.
+All untrusted quote fields, including text, identity, author names, URLs and attachment names, SHALL be encoded as data inside renderer-owned third-party boundaries, and embedded line breaks, role labels, Markdown headings/fences, closing-boundary text or XML delimiters SHALL NOT produce new renderer-owned speaker, heading or boundary lines.
 
 #### Scenario: Instruction-looking quote retains boundary
 - **GIVEN** source text says to ignore earlier instructions and identifies itself as a new current message
@@ -177,9 +196,19 @@ All untrusted quote fields, including text, identity, author names, URLs and att
 - **WHEN** context and history are assembled
 - **THEN** the quote SHALL NOT clear history, suppress the session or change command recognition
 
+#### Scenario: Boundary contract is not injection immunity
+- **GIVEN** quote fields are rendered inside third-party boundaries
+- **WHEN** the formatting contract is evaluated
+- **THEN** the contract SHALL NOT be represented as proof of semantic prompt-injection immunity
+
+#### Scenario: Command recognition reads only outer content
+- **GIVEN** a quoted source contains command-like text
+- **WHEN** command recognition runs
+- **THEN** the system SHALL recognize commands from outer message content only
+
 ### Requirement: Quote-Aware Token Accounting
 
-Context estimates SHALL include rendered quoted data, attribution, warning boundaries and quoted attachment metadata. The trigger's complete quote SHALL count as mandatory content under the existing trigger policy. Triggered-session history admission SHALL count an outer message and its quote as one whole candidate, preserve recent-over-related priority and drop oldest candidates first when required. No quote body SHALL be summarized or cut mid-reference. Final formatted token estimates SHALL reflect the actual system and user text, including every rendered occurrence of a repeated current/history note. When mandatory content alone exceeds the configured limit, the system SHALL report its actual estimate and omit discretionary history/emojis under the existing soft-budget behavior. Spontaneous contexts SHALL charge their emitted quote references while retaining existing count-based retrieval and unrelated-content estimate conventions.
+Context estimates SHALL include rendered quoted data, attribution, warning boundaries and quoted attachment metadata, and the trigger's complete quote SHALL count as mandatory content under the existing trigger policy. No quote body SHALL be summarized or cut mid-reference.
 
 #### Scenario: Quote overhead changes history admission
 - **GIVEN** an old quoted history candidate fits by outer body alone but exceeds available budget when its reference is counted
@@ -204,3 +233,14 @@ Context estimates SHALL include rendered quoted data, attribution, warning bound
 - **WHEN** its context estimate and final template prompt are produced
 - **THEN** the estimate SHALL include the complete same reference fragment emitted into the template
 - **AND** existing spontaneous retrieval and unrelated-content estimate conventions SHALL remain unchanged
+
+#### Scenario: Whole-candidate admission order
+- **GIVEN** triggered-session history contains messages with quotes
+- **WHEN** conversation admission occurs
+- **THEN** each outer message and its quote SHALL count as one whole candidate
+- **AND** admission SHALL preserve recent-over-related priority and drop oldest candidates first when required
+
+#### Scenario: Repeated current/history notes counted
+- **GIVEN** a current/history note renders in both the current message and retained history
+- **WHEN** final formatted token estimates are calculated
+- **THEN** the estimate SHALL include every rendered occurrence of the repeated note

@@ -2,7 +2,7 @@
 
 ### Requirement: Combined Mock-ACP Lifecycle Integration Suite
 
-The repository SHALL provide a combined deterministic mock-ACP lifecycle integration suite that drives the real `AgentConnector`, `AgentProcessPool`, and `SessionOrchestrator` wiring through mock ACP subprocess and scripted in-process connection fixtures, covering at minimum: the initialize/new/prompt/cancel/load happy path; a mock subprocess crash followed by same-mode reconnect and `session/load` with the canonical config-options cache restored from the load response and model/reasoning reapplied through the shipped stable-first logic; cross-mode session-load ownership rejection in both directions (restricted context against a native-YOLO-owned session and native-YOLO context against a restricted-owned session); correct-session gate-context restoration after crash with the re-issued prompt's filesystem authorization evaluated against the recovered session's own context; the restricted first-prompt deny-until-ready gate including the post-start operator-MCP registry-refresh sequence (epoch advance → readiness reset → live re-observation → admission or denial decided by the shipped decision modules); dual-mode pool coexistence with the single global execution lease; restricted LSP disablement posture preserved across crash-respawn and same-mode load with native-YOLO exemption; and OpenCode-only lifecycle regression flows with pool identity, spawn environment, and command strings byte-compared against the current shipped values where meaningful. Every scenario SHALL require at least two shipped components to interact; the suite SHALL NOT restate a single-component decision assertion already shipped by predecessor per-row unit suites.
+The combined mock-ACP lifecycle integration suite SHALL drive the real `AgentConnector`, `AgentProcessPool`, and `SessionOrchestrator` wiring through mock ACP subprocess and in-process connection fixtures, covering happy path, crash recovery, cross-mode rejection, registry-refresh re-admission, lease serialization, LSP posture, and OpenCode flows. Every scenario SHALL exercise at least two shipped components and SHALL NOT restate a predecessor single-component unit assertion.
 
 #### Scenario: Crash recovery restores config and ownership in one flow
 - **GIVEN** a restricted OMP session established through real pool acquisition with a recorded ownership context
@@ -33,9 +33,21 @@ The repository SHALL provide a combined deterministic mock-ACP lifecycle integra
 - **THEN** they SHALL byte-match the current shipped OpenCode values
 - **AND** no readiness verification, trusted extension, or restricted clamp SHALL be involved
 
+#### Scenario: Happy path completes through real pool wiring
+- **GIVEN** mock ACP subprocess and scripted in-process connection fixtures for a restricted session
+- **WHEN** the suite drives initialize, new, prompt, cancel, and load through the combined harness
+- **THEN** each step SHALL complete through the real `AgentConnector`, `AgentProcessPool`, and `SessionOrchestrator` wiring
+- **AND** the scenario SHALL exercise at least two shipped components together
+
+#### Scenario: LSP disablement posture survives crash-respawn and same-mode load
+- **GIVEN** a restricted OMP session with restricted LSP disablement in effect
+- **WHEN** the mock subprocess crashes, respawns, or the session is re-loaded in the same mode
+- **THEN** the restricted LSP disablement posture SHALL be preserved across crash-respawn and same-mode load
+- **AND** native-YOLO sessions SHALL remain exempt from the disablement
+
 ### Requirement: Fail-Closed Honest Posture Assertions in the Lifecycle Suite
 
-Every unresolved inherited seam exercised by the combined lifecycle suite SHALL be asserted on its deny or blocked outcome: the unimplemented readiness control channel SHALL resolve not-ready and deny the restricted first prompt; the MCP admission basis SHALL appear at its `needs-mechanism-audit` / `candidate-to-verify` status; surviving lower-layer approval records SHALL never produce a grant; and undecodable destructive intent SHALL yield the shipped shared fail-closed verdict with zero side effect. Every allow-path fixture (established readiness tuple, trusted tool provenance, admitted MCP tool) SHALL be carried as a labeled synthetic positive, and a suite-level guard SHALL verify at runtime that every exercised allow fixture is registered as synthetic. No test name, comment, or assertion in the suite SHALL claim or imply that the native OMP binary invokes a handler, honors a denial, rejects a cross-mode load, emits readiness, or suppresses a language server.
+Every unresolved inherited seam exercised by the combined lifecycle suite SHALL be asserted on its deny or blocked outcome, and every allow-path fixture SHALL be carried as a labeled synthetic positive verified by a runtime suite guard. No test name, comment, or assertion SHALL claim or imply that the native OMP binary invokes a handler, honors a denial, rejects a cross-mode load, emits readiness, or suppresses a language server.
 
 #### Scenario: Unresolved readiness denies the first prompt through the real orchestrator path
 - **GIVEN** a restricted OMP session with the shipped unimplemented readiness channel
@@ -55,9 +67,26 @@ Every unresolved inherited seam exercised by the combined lifecycle suite SHALL 
 - **THEN** the shared fail-closed verdict SHALL be returned
 - **AND** no filesystem side effect or grant SHALL occur
 
+#### Scenario: MCP admission basis appears at honest audit status
+- **GIVEN** a restricted composition fixture exercising the MCP admission basis
+- **WHEN** its admission basis is asserted by the lifecycle suite
+- **THEN** the basis SHALL appear at its `needs-mechanism-audit` / `candidate-to-verify` status
+- **AND** it SHALL not be presented as an allow-path claim
+
+#### Scenario: Surviving lower-layer approval records never grant
+- **GIVEN** lower-layer approval records surviving in a restricted flow
+- **WHEN** the suite inspects them while asserting a deny or blocked outcome
+- **THEN** surviving lower-layer approval records SHALL never produce a grant
+- **AND** the denied or blocked outcome SHALL be the sole asserted result
+
+#### Scenario: No test wording claims native OMP behavior
+- **GIVEN** the combined suite's test names, comments, and assertions
+- **WHEN** they are reviewed for posture honesty
+- **THEN** none SHALL claim or imply that the native OMP binary invokes a handler, honors a denial, rejects a cross-mode load, emits readiness, or suppresses a language server
+
 ### Requirement: Shared OMP Mock Session Builder Contract
 
-The suite SHALL extract a shared mock-session builder exposing scenario composition for permission mode, recorded ownership context, config-option catalog shape (flat, grouped, catalog-miss, absent), readiness state (defaulting to unresolved fail-closed), registry epoch with live tool-observation fixtures, and destructive-input shape, with every synthetic positive wrapped in a labeled carrier and no default allow path. The builder SHALL be importable unchanged by the follow-up mocked skill-handoff regression, which SHALL extend it additively rather than restructure it.
+The suite SHALL extract a shared mock-session builder exposing scenario composition for permission mode, recorded ownership context, config-option catalog shape, readiness state (defaulting to unresolved fail-closed), registry epoch with live tool-observation fixtures, and destructive-input shape, with every synthetic positive wrapped in a labeled carrier and no default allow path.
 
 #### Scenario: Default composition is fail-closed
 - **WHEN** the builder is invoked without an explicit readiness or trusted-provenance override
@@ -70,9 +99,15 @@ The suite SHALL extract a shared mock-session builder exposing scenario composit
 - **THEN** it SHALL add any needed fields additively in its own change
 - **AND** the existing builder behavior for lifecycle scenarios SHALL remain unchanged
 
+#### Scenario: Composition surface covers every scenario dimension
+- **GIVEN** a scenario composing a mock OMP session through the shared builder
+- **WHEN** it configures permission mode, recorded ownership context, config-option catalog shape (flat, grouped, catalog-miss, absent), readiness state, registry epoch with live tool-observation fixtures, or destructive-input shape
+- **THEN** the builder SHALL expose each dimension's scenario composition
+- **AND** readiness SHALL default to unresolved fail-closed with no default allow path
+
 ### Requirement: Lifecycle Suite Determinism and Execution Boundaries
 
-The combined lifecycle suite SHALL be deterministic: timer-driven paths SHALL use the repository's fake-time pattern, subprocess interactions SHALL be bounded on explicit recorded RPCs or the connector's crash signal, and no new test SHALL rely on wall-clock sleeps or delay-based kill races. The suite SHALL require no network access to external hosts, no real agent, no official `omp` executable, no provider or paid credentials, and no container or bwrap execution; it SHALL run under the existing integration test task and coverage gates without silently invoking live-agent acceptance.
+The combined lifecycle suite SHALL be deterministic: timer-driven paths SHALL use the repository's fake-time pattern, subprocess interactions SHALL be bounded on explicit recorded RPCs or the connector's crash signal, and no new test SHALL rely on wall-clock sleeps or delay-based kill races. The suite SHALL require no network access, real agent, official `omp` executable, provider or paid credentials, or container/bwrap execution.
 
 #### Scenario: No sleep-dependent new tests
 - **WHEN** the new suite's tests are examined for timing behavior
@@ -84,6 +119,12 @@ The combined lifecycle suite SHALL be deterministic: timer-driven paths SHALL us
 - **WHEN** the suite runs
 - **THEN** only in-process fixtures and `deno`-launched mock subprocesses SHALL be spawned
 - **AND** no `omp --version`, container build, bwrap invocation, or external provider request SHALL occur
+
+#### Scenario: No live external dependencies
+- **GIVEN** the repository's integration test task executes the combined suite
+- **WHEN** the suite runs
+- **THEN** it SHALL require no network access to external hosts, no real agent, and no official `omp` executable
+- **AND** no provider or paid credential SHALL be used, and the suite SHALL run under the existing integration task and coverage gates without silently invoking live-agent acceptance
 
 ### Requirement: Non-Duplication and Justified Deletion Rule for the Lifecycle Suite
 

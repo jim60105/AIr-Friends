@@ -2,7 +2,7 @@
 
 ### Requirement: Trusted-Module Pre-Import Discovery Exclusion Bootstrap
 
-The AIr-owned trusted extension module SHALL compute, at load time inside the trusted module and before any untrusted executable tool or plugin module can import, a single frozen pre-import exclusion decision covering every discovery/import surface recorded by the pinned compatibility contract: native custom-tool discovery roots, plugin entry points, configured module roots, workspace-owned dependencies, symlinked/linked roots, and load/refresh rediscovery. Each surface SHALL carry the mechanism this integration applies plus a status of exactly `supported`, `candidate-to-verify`, or `no-supported-mechanism` as recorded at the pinned source revision, and the extension-disability surface SHALL NOT be generalized to custom-tool or plugin discovery. The bootstrap SHALL NOT import a candidate module to inspect its factory, metadata, or name, and SHALL NOT treat a host guard, preloaded-path input, post-import tool-name filter, or lifecycle allowlist as an import boundary.
+The AIr-owned trusted extension module SHALL compute, at load time inside the trusted module and before any untrusted executable tool or plugin module can import, a single frozen pre-import exclusion decision covering every discovery/import surface recorded by the pinned compatibility contract.
 
 #### Scenario: Unowned candidate is excluded without import
 - **GIVEN** a discovery fixture supplies a workspace-owned custom tool root, a plugin entry, a configured module root, a workspace-owned dependency, or a linked root outside the owned root
@@ -20,9 +20,24 @@ The AIr-owned trusted extension module SHALL compute, at load time inside the tr
 - **WHEN** native state changes after module load, including registry or project-layer transitions
 - **THEN** the pre-import decision SHALL remain the load-time frozen value and SHALL be re-consulted, not reopened, on subsequent session creation or recovery
 
+#### Scenario: Every pinned surface carries its mechanism and status
+- **GIVEN** the pinned compatibility contract records discovery surfaces including native custom-tool discovery roots, plugin entry points, configured module roots, workspace-owned dependencies, symlinked/linked roots, and load/refresh rediscovery
+- **WHEN** the frozen pre-import decision is computed
+- **THEN** each surface SHALL carry both the mechanism this integration applies and a status of exactly `supported`, `candidate-to-verify`, or `no-supported-mechanism` as recorded at the pinned source revision
+
+#### Scenario: Extension-disability is not generalized to other discovery
+- **GIVEN** the extension-disable flag is present in the launch
+- **WHEN** custom-tool or plugin discovery surfaces are covered by the decision
+- **THEN** the extension-disability surface SHALL NOT be generalized to custom-tool or plugin discovery
+
+#### Scenario: No import or host guard acts as an import boundary
+- **WHEN** the bootstrap excludes a candidate without inspecting it
+- **THEN** the bootstrap SHALL NOT import the candidate module to inspect its factory, metadata, or name
+- **AND** SHALL NOT treat a host guard, preloaded-path input, post-import tool-name filter, or lifecycle allowlist as an import boundary
+
 ### Requirement: Fail-Closed Session Setup When Exclusion Cannot Be Established
 
-When the required pre-import exclusion cannot be established — a surface with no supported mechanism, a violated owned-module or dependency-closure identity, an owned-root symlink escape, or a contradicted deployment environment posture — trusted-module initialization SHALL fail and the affected session creation or recovery SHALL fail as an ACP request error observable to the client, naming the failing surface and its status with a bounded message free of credentials or file content. Session setup SHALL NOT degrade to a partially guarded session, an extensionless or unguarded process, or a different agent type.
+When the required pre-import exclusion cannot be established — a surface with no supported mechanism, a violated owned-module or dependency-closure identity, an owned-root symlink escape, or a contradicted deployment environment posture — trusted-module initialization SHALL fail and the affected session creation or recovery SHALL fail as an ACP request error observable to the client.
 
 #### Scenario: Session creation fails visibly
 - **GIVEN** the bootstrap decision contains an unresolved exclusion blocker
@@ -40,9 +55,18 @@ When the required pre-import exclusion cannot be established — a surface with 
 - **THEN** the integration SHALL NOT proceed to launch or reuse an agent process without the trusted module
 - **AND** SHALL NOT substitute another agent type or an unguarded fallback
 
+#### Scenario: Failure message is bounded and credential-free
+- **WHEN** session creation or recovery fails as an ACP request error
+- **THEN** the error SHALL name the failing surface and its status
+- **AND** the message SHALL be bounded and free of credentials or file content
+
+#### Scenario: No degraded session shape is produced
+- **WHEN** session setup cannot complete under the trusted-module guard
+- **THEN** setup SHALL NOT degrade to a partially guarded session, an extensionless or unguarded process, or a different agent type
+
 ### Requirement: Exact Owned-Module Trust Scope
 
-Only the module at the contracted deployment-owned path imported from the owned path constants, together with its pinned image-owned dependency closure, SHALL be trusted. A candidate occupying a workspace path, a home-directory path, or a package-cache/npx-discoverable path SHALL gain nothing, even when byte-identical to the owned module. A candidate matching a critical skill name or critical tool name SHALL gain nothing by name alone. A symlink or linked package that leaves the owned canonical root SHALL be untrusted even when its destination is otherwise readable, and owned-root trust SHALL reuse the canonical filesystem-root identity decisions rather than a second canonicalizer or a lexical prefix test. Owned-module identity SHALL NOT depend on permission mode.
+Only the module at the contracted deployment-owned path imported from the owned path constants, together with its pinned image-owned dependency closure, SHALL be trusted.
 
 #### Scenario: Identical module outside the owned root is untrusted
 - **GIVEN** a workspace, home, or package-cache path holds a copy of the owned module content
@@ -62,9 +86,24 @@ Only the module at the contracted deployment-owned path imported from the owned 
 - **THEN** the candidate SHALL be untrusted with the canonical symlink-escape or identity-mismatch reason
 - **AND** ordinary skills and workspace content outside the owned root SHALL remain unaffected otherwise
 
+#### Scenario: Owned-root trust reuses canonical root identity
+- **GIVEN** an owned-root path is evaluated for trust
+- **WHEN** the ownership decision is computed
+- **THEN** trust SHALL reuse the canonical filesystem-root identity decisions
+- **AND** SHALL NOT apply a second canonicalizer or a lexical prefix test
+
+#### Scenario: Escape is untrusted despite a readable destination
+- **GIVEN** a symlink or linked package inside the owned root leaves the owned canonical root
+- **WHEN** the ownership decision is evaluated
+- **THEN** the linked module SHALL be untrusted even when its destination is otherwise readable
+
+#### Scenario: Permission mode is not part of owned-module identity
+- **WHEN** owned-module identity is evaluated
+- **THEN** identity SHALL NOT depend on permission mode
+
 ### Requirement: Canonical Critical-Skill Ownership Across New, Load, and Refresh
 
-Critical skill identifiers SHALL resolve only to canonical instruction paths inside the pinned owned skills root, carrying the source identity, collision decision, and current resource generation from the compatibility contract. Untrusted project and workspace discovery SHALL be excluded from critical-name resolution, so same-name project or workspace content and escaping links cannot satisfy a critical identifier. Ordinary skills SHALL remain globally enabled: this boundary SHALL NOT disable skills globally, SHALL NOT introduce or pin a skills configuration key, and SHALL NOT remove provider skills. The ownership decision SHALL hold on initial creation, recovery, and every registry/skill-snapshot refresh, and a stale generation or another session's snapshot SHALL fail resolution.
+Critical skill identifiers SHALL resolve only to canonical instruction paths inside the pinned owned skills root, carrying the source identity, collision decision, and current resource generation from the compatibility contract.
 
 #### Scenario: Owned skill wins over same-name workspace content
 - **GIVEN** an owned critical skill and same-name project/workspace candidates are both discoverable
@@ -83,9 +122,14 @@ Critical skill identifiers SHALL resolve only to canonical instruction paths ins
 - **THEN** each resolution SHALL consult the current canonical selection and current resource generation
 - **AND** a stale-generation or foreign-session snapshot SHALL be rejected with the contract's stale-resource reason
 
+#### Scenario: Escaping link cannot satisfy a critical identifier
+- **GIVEN** a candidate is discoverable only through a link that escapes the pinned owned skills root
+- **WHEN** the critical identifier is resolved
+- **THEN** the candidate SHALL NOT satisfy the critical identifier
+
 ### Requirement: Discovery And Critical-Selection Compatibility Gates Remain Blocking
 
-The integration SHALL record two named application gates carrying the pinned verdicts verbatim: pre-import exclusion — extension flags alone incompatible and the supported full mechanism unresolved — and critical skill ownership — name-only trust incompatible and canonical selection unresolved. While either gate stands, full security consumption of OMP session setup SHALL remain blocked, and resolution of either gate SHALL require a source-backed supported mechanism adopted through an explicit user design decision together with a compatibility-contract revision. Automated unit and mock evidence in this change SHALL validate decision logic only — which roots, paths, and names would be excluded, and the fail-closed error shape — and SHALL NOT be presented as evidence that the official executable enforces the exclusion or canonical selection.
+The integration SHALL record two named application gates carrying the pinned verdicts verbatim, and while either gate stands, full security consumption of OMP session setup SHALL remain blocked.
 
 #### Scenario: Passing mocks cannot clear a gate
 - **WHEN** the exclusion, ownership, and critical-skill decision tests all pass
@@ -102,3 +146,14 @@ The integration SHALL record two named application gates carrying the pinned ver
 - **WHEN** restricted execution is assessed
 - **THEN** the restricted execution-time default-deny and filesystem authorization boundaries owned by other changes SHALL be documented as operative
 - **AND** discovery-side exclusion SHALL be documented as defense in depth rather than a substitute
+
+#### Scenario: Gate verdicts are recorded verbatim
+- **WHEN** the two application gates are recorded
+- **THEN** the pre-import exclusion gate SHALL carry the pinned verdict "extension flags alone incompatible and the supported full mechanism unresolved"
+- **AND** the critical skill ownership gate SHALL carry the pinned verdict "name-only trust incompatible and canonical selection unresolved"
+
+#### Scenario: Automated evidence validates decision logic only
+- **GIVEN** automated unit and mock evidence is produced for this change
+- **WHEN** that evidence is offered in support of either gate
+- **THEN** the evidence SHALL validate decision logic only — which roots, paths, and names would be excluded, and the fail-closed error shape
+- **AND** SHALL NOT be presented as evidence that the official executable enforces the exclusion or canonical selection

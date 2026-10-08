@@ -49,7 +49,7 @@ Each `process*` method (`processMessageInternal`, `processSpontaneousPost`, `pro
 
 ### Requirement: Session response finalization
 
-Every `process*` method SHALL resolve with a `SessionResponse` object on ALL completion paths — success, no-reply, queue-deadline cancellation, lurk-trigger skip, and idle-timeout session loss — and SHALL NOT let post-session bookkeeping (the `finally` block that records session metrics) throw in place of that response. Post-session metrics SHALL be recorded with the `success` value of the response ACTUALLY returned; a bookkeeping failure SHALL be logged and swallowed, never propagated, and never replace a computed response.
+Every `process*` method SHALL resolve with a `SessionResponse` object on all completion paths, and SHALL NOT let post-session bookkeeping (the `finally` block) throw in place of that response.
 
 #### Scenario: Pooled message session resolves cleanly
 - **GIVEN** shared-process (pool) mode is active
@@ -69,3 +69,18 @@ Every `process*` method SHALL resolve with a `SessionResponse` object on ALL com
 - **WHEN** a `process*` method's `finally` runs
 - **THEN** the error SHALL be logged
 - **AND** the originally computed `SessionResponse` SHALL still be returned to the caller
+
+#### Scenario: All completion paths resolve with SessionResponse
+- **GIVEN** a session ends via success, no-reply, queue-deadline cancellation, lurk-trigger skip, or idle-timeout session loss
+- **WHEN** the corresponding `process*` method completes
+- **THEN** it SHALL resolve with a `SessionResponse` object on every one of those paths
+
+#### Scenario: Metrics reflect the response actually returned
+- **GIVEN** a `process*` method has computed its `SessionResponse`
+- **WHEN** post-session metrics are recorded in the `finally` block
+- **THEN** they SHALL be recorded with the `success` value of the response ACTUALLY returned
+
+#### Scenario: Bookkeeping failure is swallowed
+- **GIVEN** the `finally` block bookkeeping throws unexpectedly
+- **WHEN** a `process*` method completes
+- **THEN** the failure SHALL be logged and swallowed, never propagated to the caller, and never replace a computed response

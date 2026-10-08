@@ -17,18 +17,7 @@ The system SHALL use the Vento template engine (`ventojs`) for rendering all pro
 
 ### Requirement: Template Processing Rules
 
-The system SHALL support the following Vento template syntax:
-
-| Syntax                              | Behavior                                              |
-| ----------------------------------- | ----------------------------------------------------- |
-| `{{ variableName }}`                | Output a template variable value                      |
-| `{{ include "./filename.md" }}`     | Load and inline a file from the prompts directory     |
-| `{{ if condition }}...{{ /if }}`    | Conditional rendering                                 |
-| `{{ set name }}...{{ /set }}`       | Assign content to a local variable                    |
-| `{{- ... -}}`                       | Trim surrounding whitespace                           |
-| `{{# comment #}}`                   | Comment excluded from output                          |
-
-The final rendered output SHALL be trimmed of leading and trailing whitespace via `result.content.trim()`.
+The system SHALL support the Vento template syntax, including variable output, `{{ include "file.md" }}` directives, conditionals, `set` assignments, comments, and whitespace-trim markers. The final rendered output SHALL be trimmed of leading and trailing whitespace via `result.content.trim()`.
 
 #### Scenario: Variable interpolation
 - **GIVEN** a template containing `{{ platform }}`
@@ -52,6 +41,26 @@ The final rendered output SHALL be trimmed of leading and trailing whitespace vi
 - **GIVEN** a template containing `{{ include "./nonexistent.md" }}`
 - **WHEN** the template is rendered
 - **THEN** a `ConfigError` SHALL be thrown with the missing file information
+
+#### Scenario: Set assignment
+- **GIVEN** a template containing `{{ set name }}...{{ /set }}`
+- **WHEN** the template is rendered
+- **THEN** `name` SHALL be assigned the enclosed content as a local variable
+
+#### Scenario: Whitespace trimming
+- **GIVEN** a template containing `{{- ... -}}`
+- **WHEN** the template is rendered
+- **THEN** the surrounding whitespace SHALL be trimmed from the enclosed syntax
+
+#### Scenario: Comment exclusion
+- **GIVEN** a template containing `{{# comment #}}`
+- **WHEN** the template is rendered
+- **THEN** the comment SHALL be excluded from the output
+
+#### Scenario: Output trimming
+- **GIVEN** the prompted template has been fully rendered
+- **WHEN** `result.content.trim()` is applied
+- **THEN** leading and trailing whitespace SHALL be removed from the final rendered output
 
 ### Requirement: Template Rendering Functions
 
@@ -84,53 +93,7 @@ The `loadSystemPrompt(path, variables)` function SHALL verify the prompt file ex
 
 ### Requirement: Available Template Variables
 
-The `TemplateVariables` interface SHALL define the following variables available in all templates:
-
-**Core variables (always available):**
-
-| Variable               | Type                            | Description                                          |
-| ---------------------- | ------------------------------- | ---------------------------------------------------- |
-| `isDm`                 | `boolean`                       | Whether this is a direct message conversation        |
-| `platform`             | `"discord" \| "misskey" \| "internal"` | Platform identifier                           |
-| `userId`               | `string`                        | User's platform ID                                   |
-| `channelId`            | `string`                        | Channel/conversation ID                              |
-| `guildId`              | `string`                        | Server/guild ID (empty string if N/A)                |
-| `agentType`            | `string` (optional)             | ACP agent type (`"opencode"`)                        |
-| `model`                | `string` (optional)             | Model identifier                                     |
-| `yolo`                 | `boolean` (optional)            | Whether YOLO mode is enabled                         |
-| `canWriteAgentWorkspace` | `boolean` (optional)          | Whether session allows writing to agent workspace    |
-| `userContextMessage`   | `string` (optional)             | Pre-formatted user context (normal message only)     |
-
-**Spontaneous post variables:**
-
-| Variable                | Type                 | Description                              |
-| ----------------------- | -------------------- | ---------------------------------------- |
-| `recentMessagesFetched` | `boolean` (optional) | Whether recent messages were fetched     |
-| `importantMemories`     | `string` (optional)  | Formatted important memories text        |
-| `recentMessages`        | `string` (optional)  | Formatted recent messages text           |
-| `availableEmojis`       | `string` (optional)  | Formatted available emojis text          |
-
-**Memory maintenance variables:**
-
-| Variable          | Type                | Description                               |
-| ----------------- | ------------------- | ----------------------------------------- |
-| `workspaceKey`    | `string` (optional) | Workspace key                             |
-| `memoriesDump`    | `string` (optional) | JSON dump of enabled memories             |
-| `minMemoryCount`  | `number` (optional) | Minimum memory count threshold            |
-
-**Self-research variables:**
-
-| Variable   | Type                | Description                    |
-| ---------- | ------------------- | ------------------------------ |
-| `rssItems` | `string` (optional) | Formatted RSS items block      |
-
-**Reminder variables:**
-
-| Variable             | Type                | Description                          |
-| -------------------- | ------------------- | ------------------------------------ |
-| `reminderMessage`    | `string` (optional) | Reminder message content             |
-| `reminderCreatedAt`  | `string` (optional) | Reminder creation timestamp          |
-| `reminderScheduledAt`| `string` (optional) | Reminder scheduled delivery timestamp|
+The `TemplateVariables` interface SHALL expose the variables available in all templates, spanning core conversation context, spontaneous post, memory maintenance, self-research, and reminder categories.
 
 #### Scenario: Core variables available
 - **GIVEN** a normal message session
@@ -141,6 +104,45 @@ The `TemplateVariables` interface SHALL define the following variables available
 - **GIVEN** a spontaneous post session
 - **WHEN** the template is rendered
 - **THEN** `recentMessagesFetched`, `importantMemories`, `recentMessages`, and `availableEmojis` SHALL be available
+
+#### Scenario: Core variable details
+- **GIVEN** a template is rendered
+- **THEN** `isDm` (boolean) SHALL indicate whether the conversation is a direct message
+- **AND** `platform` SHALL be `"discord"`, `"misskey"`, or `"internal"`
+- **AND** `userId` (string) SHALL hold the user's platform ID
+- **AND** `channelId` (string) SHALL hold the channel/conversation ID
+- **AND** `guildId` (string) SHALL hold the server/guild ID, empty string if N/A
+- **AND** `agentType` (string, optional) SHALL be the ACP agent type (`"opencode"`)
+- **AND** `model` (string, optional) SHALL hold the model identifier
+- **AND** `yolo` (boolean, optional) SHALL indicate whether YOLO mode is enabled
+- **AND** `canWriteAgentWorkspace` (boolean, optional) SHALL indicate whether the session allows writing to the agent workspace
+- **AND** `userContextMessage` (string, optional) SHALL hold the pre-formatted user context (normal message only)
+
+#### Scenario: Spontaneous variable details
+- **GIVEN** a spontaneous post session
+- **THEN** `recentMessagesFetched` (boolean, optional) SHALL indicate whether recent messages were fetched
+- **AND** `importantMemories` (string, optional) SHALL hold formatted important memories text
+- **AND** `recentMessages` (string, optional) SHALL hold formatted recent messages text
+- **AND** `availableEmojis` (string, optional) SHALL hold formatted available emojis text
+
+#### Scenario: Memory maintenance variables
+- **GIVEN** a memory maintenance session
+- **WHEN** the template is rendered
+- **THEN** `workspaceKey` (string, optional) SHALL hold the workspace key
+- **AND** `memoriesDump` (string, optional) SHALL hold a JSON dump of enabled memories
+- **AND** `minMemoryCount` (number, optional) SHALL hold the minimum memory count threshold
+
+#### Scenario: Self-research variables
+- **GIVEN** a self-research session
+- **WHEN** the template is rendered
+- **THEN** `rssItems` (string, optional) SHALL hold the formatted RSS items block
+
+#### Scenario: Reminder variables
+- **GIVEN** a reminder session
+- **WHEN** the template is rendered
+- **THEN** `reminderMessage` (string, optional) SHALL hold the reminder message content
+- **AND** `reminderCreatedAt` (string, optional) SHALL hold the reminder creation timestamp
+- **AND** `reminderScheduledAt` (string, optional) SHALL hold the reminder scheduled delivery timestamp
 
 ### Requirement: Container Deployment
 

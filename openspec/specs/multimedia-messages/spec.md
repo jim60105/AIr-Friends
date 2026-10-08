@@ -117,7 +117,7 @@ Only trigger message images SHALL be downloaded for `ContentBlock` inclusion. Im
 
 ### Requirement: Size Limit and Download Timeout
 
-Images exceeding 20 MB SHALL NOT be downloaded; they SHALL be described by URL only. Images with `image/gif` MIME type SHALL be downloaded, converted to static WebP format using ImageMagick, and sent as `ContentBlock::Image` with `image/webp` MIME type. The conversion SHALL extract only the first frame. If conversion fails, the system SHALL fall back to text-description-only. Image downloads SHALL have a 10-second timeout. Download failures (timeout, network error, HTTP error) SHALL be non-fatal — the system SHALL fall back to URL-only text description without throwing errors.
+Images exceeding 20 MB SHALL NOT be downloaded and SHALL be described by URL only. Image downloads SHALL have a 10-second timeout, and download failures (timeout, network error, HTTP error) SHALL be non-fatal, causing the image to fall back to URL-only text description without throwing errors.
 
 #### Scenario: Image exceeds 20 MB
 
@@ -170,7 +170,7 @@ The `attachments` field on `NormalizedEvent` and `PlatformMessage` SHALL be opti
 
 ### Requirement: Attachment URL SSRF Validation
 
-The system SHALL validate every attachment URL immediately before each server-side fetch to prevent Server-Side Request Forgery. This validation SHALL be enforced at the download sink itself (the image downloader in the session orchestrator), applied to every network request regardless of which platform or code path populated the attachment URL; platform ingestion-time validation is optional defense-in-depth and SHALL NOT be the sole guard. Validation SHALL: (1) require the URL scheme to be `http` or `https`; (2) resolve the host and reject the fetch when any resolved address is loopback, private (RFC1918), link-local (`169.254.0.0/16`, `fe80::/10`), unique-local (`fc00::/7`), unspecified, or multicast; and (3) fetch with manual redirect handling, re-validating each redirect target against the same rules before following, up to a maximum of 5 redirect hops (aborting beyond that). A URL that fails validation SHALL NOT be fetched; the attachment SHALL fall back to URL-only text description.
+The system SHALL validate every attachment URL immediately before each server-side fetch at the download sink, applied to every network request regardless of platform or code path; validation SHALL require the URL scheme to be `http` or `https` and reject hosts resolving to loopback, private (RFC1918), link-local, unique-local, unspecified, or multicast addresses. A URL failing validation SHALL NOT be fetched and SHALL fall back to URL-only text description.
 
 #### Scenario: Loopback URL rejected
 
@@ -203,9 +203,23 @@ The system SHALL validate every attachment URL immediately before each server-si
 - **WHEN** the system evaluates the URL
 - **THEN** the fetch SHALL proceed (subject to existing size and timeout constraints)
 
+#### Scenario: Redirects re-validated up to a hop limit
+
+- **GIVEN** a fetched URL redirects to another target
+- **WHEN** the system follows the redirect with manual redirect handling
+- **THEN** it SHALL re-validate each redirect target against the same validation rules before following
+- **AND** it SHALL abort the fetch beyond a maximum of 5 redirect hops
+
+#### Scenario: Ingestion-time validation is defense-in-depth
+
+- **GIVEN** an attachment URL was previously validated at platform ingestion time
+- **WHEN** the download sink prepares to fetch the URL
+- **THEN** the sink SHALL still validate the URL itself before each fetch
+- **AND** ingestion-time validation SHALL NOT be the sole guard against SSRF
+
 ### Requirement: Fetch SSRF DNS-Rebinding Mitigation
 
-The daemon-side SSRF-validated fetch (`safeFetch`) SHALL connect to the specific IP address that was validated, rather than re-resolving the hostname independently at connection time, so that a second, attacker-controlled DNS resolution cannot substitute an internal address between validation and connection. When connect-time IP pinning is not directly expressible, the implementation SHALL resolve the host to a validated address and perform the connection against that address while preserving the original `Host`/SNI, and SHALL re-apply the address-range checks to the pinned address.
+The daemon-side SSRF-validated fetch (`safeFetch`) SHALL connect to the specific IP address that was validated, rather than re-resolving the hostname at connection time, so a second, attacker-controlled DNS resolution cannot substitute an internal address between validation and connection.
 
 #### Scenario: Validated address is the one connected to
 - **GIVEN** a URL whose hostname first resolves to a public address that passes validation
@@ -217,9 +231,15 @@ The daemon-side SSRF-validated fetch (`safeFetch`) SHALL connect to the specific
 - **WHEN** `safeFetch` connects using the pinned validated address
 - **THEN** the internal address SHALL NOT be contacted
 
+#### Scenario: Connect-time pinning not directly expressible
+- **GIVEN** connect-time IP pinning is not directly expressible
+- **WHEN** `safeFetch` connects to the URL
+- **THEN** the implementation SHALL resolve the host to a validated address and connect against that address while preserving the original `Host` header and SNI
+- **AND** it SHALL re-apply the address-range checks to the pinned address
+
 ### Requirement: Quoted Attachment Provenance and URL-Only Context
 
-Quoted-source attachments SHALL remain owned by the quoted reference and SHALL NOT be merged into the outer message attachments. Their URLs and available metadata SHALL be represented as encoded third-party reference data alongside the source author. The daemon SHALL NOT download quoted-source images, GIFs or other files for prompt content, including when the outer note is the trigger and the agent supports image input. Retained historical quote attachments SHALL likewise be URL-only. Existing outer-trigger capability negotiation, 20 MB size limit, ten-second timeout, GIF conversion, text fallback and sink SSRF validation SHALL remain unchanged.
+Quoted-source attachments SHALL remain owned by the quoted reference and SHALL NOT be merged into the outer message attachments; their URLs and available metadata SHALL be represented as encoded third-party reference data alongside the source author. The daemon SHALL NOT download quoted-source images, GIFs or other files for prompt content, including when the outer note is the trigger and the agent supports image input.
 
 #### Scenario: Mixed outer and quoted files retain ownership
 - **GIVEN** a trigger has its own image and quotes a source with an image and a PDF

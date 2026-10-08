@@ -23,32 +23,7 @@ The system SHALL create a `SessionAuditWriter` instance per session when audit i
 
 ### Requirement: Audit Phases
 
-The system SHALL support the following audit phases as defined in `AuditPhase`:
-
-| Phase                  | Description                          |
-| ---------------------- | ------------------------------------ |
-| `trigger_received`     | Incoming trigger event recorded      |
-| `session_start`        | Session registered and configured    |
-| `rate_limit_checked`   | Rate limit evaluation result         |
-| `context_assembly`     | Context assembly completed           |
-| `yolo_resolution`      | YOLO mode resolution                 |
-| `agent_connect`        | Agent subprocess connected           |
-| `prompt_sent`          | Prompt sent to agent                 |
-| `agent_message`        | Full prompt/context sent to agent    |
-| `skill_call`           | Skill API invoked                    |
-| `memory_operation`     | Memory skill operation               |
-| `agent_response`       | Agent response received              |
-| `agent_complete_message` | Agent complete buffered response   |
-| `agent_complete_thought` | Agent complete buffered thought process |
-| `reply_sent`           | Reply sent to platform               |
-| `reply_edited`         | Reply edited on platform             |
-| `file_sent`            | File(s) sent to platform via `send-file` |
-| `retry_triggered`      | Missing-reply retry activated        |
-| `session_end`          | Session lifecycle completed          |
-| `permission_approved`  | Permission request approved          |
-| `permission_denied`    | Permission request denied            |
-
-Each entry SHALL contain an ISO 8601 `ts` timestamp, the `phase` string, and a `data` object with phase-specific payload fields.
+The system SHALL support the audit phases defined in `AuditPhase`. Each audit entry SHALL contain an ISO 8601 `ts` timestamp, the `phase` string, and a `data` object carrying phase-specific payload fields.
 
 #### Scenario: Skill call audit entry
 - **GIVEN** audit is enabled and `skill_call` phase is included
@@ -71,6 +46,11 @@ Each entry SHALL contain an ISO 8601 `ts` timestamp, the `phase` string, and a `
 - **WHEN** a message session completes successfully by sending a file without a text reply
 - **THEN** the session JSONL file SHALL contain a `file_sent` entry in the `skill_call`/`reply_sent` region
 - **AND** the `session_end` entry SHALL have `fileSent: true` and `replySent: false`
+
+#### Scenario: Supported audit phases
+- **GIVEN** audit is enabled
+- **WHEN** a session lifecycle event or skill operation occurs
+- **THEN** the recorded phase SHALL be one of `trigger_received` (incoming trigger event), `session_start` (session registered and configured), `rate_limit_checked` (rate limit evaluation result), `context_assembly` (context assembly completed), `yolo_resolution` (YOLO mode resolution), `agent_connect` (agent subprocess connected), `prompt_sent` (prompt sent to agent), `agent_message` (full prompt/context sent to agent), `skill_call` (skill API invoked), `memory_operation` (memory skill operation), `agent_response` (agent response received), `agent_complete_message` (agent complete buffered response), `agent_complete_thought` (agent complete buffered thought process), `reply_sent` (reply sent to platform), `reply_edited` (reply edited on platform), `file_sent` (file(s) sent to platform via `send-file`), `retry_triggered` (missing-reply retry activated), `session_end` (session lifecycle completed), `permission_approved` (permission request approved), `permission_denied` (permission request denied)
 
 ### Requirement: Trigger Received Audit Phase
 
@@ -134,7 +114,7 @@ The system SHALL write a `reply_edited` audit entry when the `edit-reply` skill 
 
 ### Requirement: File Sent Audit Phase
 
-The system SHALL write a `file_sent` audit entry when the `send-file` skill delivers at least one file. The entry data SHALL contain `filesCount` (integer, number of files delivered), `messageId` (string, the last delivered message ID — the session reply anchor), `messageIds` (array of strings, all delivered message IDs in send order), `captionHash` (SHA-256 hash of the caption text when `hashContent` is true; omitted otherwise), `fileNamesHash` (SHA-256 hash of the comma-joined file names when `hashContent` is true; the plain comma-joined file names otherwise), and `platform`. Message IDs are platform message identifiers, not user content, and SHALL be recorded verbatim regardless of `hashContent`. Individual file content SHALL NOT be hashed or recorded (files may be large binary data). On partial delivery (e.g. Misskey chat mid-batch failure), the entry SHALL still be written with the delivered count and the delivered message IDs, and the failure SHALL additionally be visible via the `skill_call` entry's `skillResult`.
+The system SHALL write a `file_sent` audit entry when the `send-file` skill delivers at least one file. The entry SHALL contain `filesCount` (files delivered), `messageId` (last delivered message ID, the session reply anchor), `messageIds` (all delivered message IDs in send order), `captionHash` (SHA-256 of the caption when `hashContent` is true, omitted otherwise), `fileNamesHash` (SHA-256 of comma-joined file names when `hashContent` true, plain names otherwise), and `platform`.
 
 #### Scenario: Successful multi-file send
 - **GIVEN** audit is enabled with `hashContent: true`
@@ -157,9 +137,21 @@ The system SHALL write a `file_sent` audit entry when the `send-file` skill deli
 - **WHEN** `send-file` delivers 1 of 2 files on Misskey chat before a mid-batch failure, delivering message ID `file-1`
 - **THEN** a `file_sent` entry SHALL be written with `filesCount: 1`, `messageId: "file-1"`, and `messageIds: ["file-1"]`
 
+#### Scenario: Hashing and verbatim message IDs
+- **GIVEN** `send-file` delivers at least one file
+- **WHEN** a `file_sent` entry is written
+- **THEN** `captionHash` SHALL be the SHA-256 hash of the caption text when `hashContent` is true and omitted otherwise, and `fileNamesHash` SHALL be the SHA-256 hash of the comma-joined file names when `hashContent` is true and the plain comma-joined file names otherwise
+- **AND** `messageId` and `messageIds` SHALL record the platform message identifiers verbatim regardless of `hashContent`
+- **AND** individual file content SHALL NOT be hashed or recorded, as files may be large binary data
+
+#### Scenario: Partial delivery failure visibility via skill call
+- **GIVEN** `send-file` delivers only some files before a mid-batch failure
+- **WHEN** the partial `file_sent` entry is written with the delivered count and delivered message IDs
+- **THEN** the failure SHALL additionally be visible via the `skill_call` entry's `skillResult`
+
 ### Requirement: Memory Operation Audit Phase
 
-The system SHALL write a `memory_operation` audit entry for each memory skill invocation (`memory-save`, `memory-search`, `memory-patch`, `memory-stats`). The entry data SHALL contain `operation` (`"save"`, `"search"`, `"patch"`, `"stats"`), `memoryId` (the memory ID for save/patch, empty for search/stats), `visibility` (`"public"` or `"private"`, when applicable), `tier` (when applicable), `category` (when applicable), and `resultCount` (number of results for search, `0` for other operations). Content fields (`content`, `query`) SHALL be subject to the existing content hashing rules.
+The system SHALL write a `memory_operation` audit entry for each memory skill invocation (`memory-save`, `memory-search`, `memory-patch`, `memory-stats`). The entry SHALL contain `operation` (`"save"`/`"search"`/`"patch"`/`"stats"`), `memoryId`, `visibility`, `tier`, `category` (each when applicable), and `resultCount`.
 
 #### Scenario: Memory save operation
 - **WHEN** `memory-save` is called with visibility `public`, tier `working`, category `fact`, and content `"User likes TypeScript"`
@@ -172,6 +164,12 @@ The system SHALL write a `memory_operation` audit entry for each memory skill in
 #### Scenario: Memory patch operation
 - **WHEN** `memory-patch` is called to disable memory `mem_001`
 - **THEN** a `memory_operation` entry SHALL be written with `operation: "patch"`, `memoryId: "mem_001"`
+
+#### Scenario: Field semantics and content hashing
+- **GIVEN** a memory skill invocation occurs
+- **WHEN** a `memory_operation` entry is written
+- **THEN** `memoryId` SHALL be the memory ID for save/patch and empty for search/stats; `visibility` SHALL be `"public"` or `"private"` when applicable; `tier` and `category` SHALL be recorded when applicable; `resultCount` SHALL be the number of results for search and `0` for other operations
+- **AND** the `content` and `query` fields SHALL be subject to the existing content hashing rules
 
 ### Requirement: Retry Triggered Audit Phase
 
@@ -332,16 +330,14 @@ The system SHALL increment the `airfriends_audit_entries_total` counter with lab
 
 ### Requirement: Environment Variable Overrides
 
-The following environment variables SHALL override their corresponding configuration values:
-
-| Environment Variable    | Config Path            | Type                  |
-| ----------------------- | ---------------------- | --------------------- |
-| `AUDIT_ENABLED`         | `audit.enabled`        | `"true"` / `"false"`  |
-| `AUDIT_RETENTION_DAYS`  | `audit.retentionDays`  | Integer string        |
-| `AUDIT_HASH_CONTENT`    | `audit.hashContent`    | `"true"` / `"false"`  |
-| `AUDIT_INCLUDED_PHASES` | `audit.includedPhases` | Comma-separated list  |
+The following environment variables SHALL override their corresponding configuration values at load time: `AUDIT_ENABLED` -> `audit.enabled`, `AUDIT_RETENTION_DAYS` -> `audit.retentionDays`, `AUDIT_HASH_CONTENT` -> `audit.hashContent`, and `AUDIT_INCLUDED_PHASES` -> `audit.includedPhases`.
 
 #### Scenario: Env override for included phases
 - **GIVEN** `AUDIT_INCLUDED_PHASES` is set to `"skill_call,reply_sent,session_end"`
 - **WHEN** configuration is loaded
 - **THEN** `audit.includedPhases` SHALL be `["skill_call", "reply_sent", "session_end"]`
+
+#### Scenario: Type coercion from environment
+- **GIVEN** an environment variable override is present
+- **WHEN** configuration is loaded
+- **THEN** `AUDIT_ENABLED` and `AUDIT_HASH_CONTENT` SHALL be parsed as `"true"` or `"false"`, `AUDIT_RETENTION_DAYS` SHALL be parsed as an integer string, and `AUDIT_INCLUDED_PHASES` SHALL be parsed as a comma-separated list

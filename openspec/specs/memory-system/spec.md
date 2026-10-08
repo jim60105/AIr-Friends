@@ -44,28 +44,7 @@ Events SHALL only be appended; existing lines SHALL NOT be modified or deleted. 
 
 ### Requirement: Memory Event Structure
 
-Each memory event (type `"memory"`) SHALL contain the following required fields:
-
-| Field        | Type                    | Description                          |
-| ------------ | ----------------------- | ------------------------------------ |
-| `id`         | `string`                | Unique ID (format: `mem_{base36_ts}_{random6}`) |
-| `ts`         | `string`                | ISO 8601 timestamp                   |
-| `type`       | `"memory"`              | Event type literal                   |
-| `enabled`    | `boolean`               | Whether the memory is active         |
-| `visibility` | `"public" \| "private"` | Visibility scope                     |
-| `importance` | `"high" \| "normal"`    | Importance level (retained for backward compatibility) |
-| `content`    | `string`                | Plain text content                   |
-| `tier`       | `"core" \| "working" \| "archive"` | Storage tier                |
-| `category`   | `"fact" \| "preference" \| "episode" \| "summary" \| "relationship"` | Content category |
-| `decay`      | `number`                | Importance-weighted temporal relevance (0.0–1.0) |
-| `scope`      | `"user" \| "channel"`   | Whether this memory is per-user or per-channel |
-
-Each memory event MAY contain the following optional fields:
-
-| Field        | Type       | Description                                    |
-| ------------ | ---------- | ---------------------------------------------- |
-| `relatedTo`  | `string[]` | IDs of semantically related memories           |
-| `supersedes` | `string[]` | IDs of memories this entry logically supersedes |
+Each memory event of type `"memory"` SHALL contain the required fields and MAY contain the optional fields `relatedTo` and `supersedes`; the scenarios below specify every field's type, format, and meaning.
 
 #### Scenario: Memory with all new fields
 - **WHEN** a memory is saved with `tier: "core"`, `category: "preference"`, `decay: 1.0`, `scope: "user"`
@@ -76,18 +55,33 @@ Each memory event MAY contain the following optional fields:
 - **WHEN** the system generates an ID
 - **THEN** the ID SHALL follow the format `mem_{timestamp_base36}_{random_6_chars}`
 
+#### Scenario: Required fields stored on every memory
+- **WHEN** a memory event is saved
+- **THEN** the stored event SHALL contain the required fields `id`, `ts`, `type`, `enabled`, `visibility`, `importance`, `content`, `tier`, `category`, `decay`, and `scope`
+
+#### Scenario: Required field types and formats
+- **GIVEN** a memory event in JSONL
+- **WHEN** its fields are inspected
+- **THEN** `id` SHALL be a string formatted `mem_{base36_ts}_{random6}`
+- **AND** `ts` SHALL be an ISO 8601 timestamp string
+- **AND** `type` SHALL be the literal `"memory"`
+- **AND** `enabled` SHALL be a boolean
+- **AND** `visibility` SHALL be `"public"` or `"private"`
+- **AND** `importance` SHALL be `"high"` or `"normal"` (retained for backward compatibility)
+- **AND** `content` SHALL be plain text
+- **AND** `tier` SHALL be `"core"`, `"working"`, or `"archive"`
+- **AND** `category` SHALL be one of `"fact"`, `"preference"`, `"episode"`, `"summary"`, and `"relationship"`
+- **AND** `decay` SHALL be a number from 0.0 to 1.0 representing importance-weighted temporal relevance
+- **AND** `scope` SHALL be `"user"` or `"channel"`, indicating per-user or per-channel storage
+
+#### Scenario: Optional relationship fields
+- **WHEN** a memory is saved with related or superseded memories
+- **THEN** the event MAY include `relatedTo` as a `string[]` of IDs of semantically related memories
+- **AND** MAY include `supersedes` as a `string[]` of IDs of memories this entry logically supersedes
+
 ### Requirement: Default Values for Backward Compatibility
 
-When new fields are not provided, the system SHALL apply the following defaults:
-
-| Field      | Default     |
-| ---------- | ----------- |
-| `tier`     | `"archive"` (or `"core"` when `importance` is `"high"` for backward compatibility) |
-| `category` | `"fact"`    |
-| `scope`    | `"user"`    |
-| `decay`    | Per-tier default (see importance-decay spec) |
-
-These defaults ensure that existing memory-save calls without the new fields continue to work, and that pre-migration memories loaded without these fields behave predictably. When `importance` is `"high"` and `tier` is not explicitly provided, the system SHALL derive `tier: "core"` to maintain backward compatibility with the legacy importance-based context loading.
+When new fields are not provided, the system SHALL apply default values so existing memory-save calls without the new fields and pre-migration memories loaded without them behave predictably; the specific defaults and the high-importance tier derivation are specified in the scenarios below.
 
 #### Scenario: Save without new fields uses defaults
 - **WHEN** `memory-save` is called with only `content`, `visibility`, and `importance`
@@ -97,6 +91,16 @@ These defaults ensure that existing memory-save calls without the new fields con
 - **GIVEN** a memory event in JSONL has no `tier`, `category`, `scope`, or `decay` fields
 - **WHEN** the memory is loaded by `loadAllMemories()`
 - **THEN** it SHALL be treated as `tier: "archive"`, `category: "fact"`, `scope: "user"`, `decay: 0.5`
+
+#### Scenario: High-importance default tier derivation
+- **GIVEN** a memory saved with `importance: "high"` and no explicit `tier`
+- **WHEN** the memory is stored
+- **THEN** the system SHALL derive `tier: "core"` for backward compatibility with legacy importance-based context loading
+
+#### Scenario: Per-tier default decay values
+- **GIVEN** a memory saved or loaded without an explicit `decay` value
+- **WHEN** its `decay` value is resolved
+- **THEN** `decay` SHALL be set to the per-tier default defined in the importance-decay spec
 
 ### Requirement: Visibility Scoping
 
@@ -118,18 +122,7 @@ The system SHALL enforce visibility scoping based on the conversation context:
 
 ### Requirement: Patch Events
 
-The system SHALL support patch events (type `"patch"`) to modify memory attributes without deleting memories. Memories SHALL NOT be deleted; they can only be disabled via a patch event setting `enabled = false`. Patch events SHALL be appended to the same JSONL file as the original memory.
-
-A patch event SHALL contain:
-
-| Field      | Type     | Description                |
-| ---------- | -------- | -------------------------- |
-| `id`       | `string` | Unique patch event ID      |
-| `ts`       | `string` | ISO 8601 timestamp         |
-| `type`     | `"patch"`| Event type literal         |
-| `targetId` | `string` | ID of the memory to modify |
-
-A patch event MAY modify these fields: `enabled`, `visibility`, `importance`, `relatedTo`, `supersedes`, `tier`, `category`, `decay`.
+The system SHALL support patch events (type `"patch"`) that modify memory attributes without deleting memories; memories SHALL NOT be deleted and SHALL be disabled only via a patch event setting `enabled = false`, appended to the same JSONL file as the original memory.
 
 #### Scenario: Disabling a memory via patch
 - **GIVEN** an enabled memory with ID `mem_abc_123`
@@ -154,26 +147,36 @@ A patch event MAY modify these fields: `enabled`, `visibility`, `importance`, `r
 - **AND** `relatedTo` and `supersedes` arrays SHALL be merged via Set union (deduplicated) across the original entry and all patches
 - **AND** `lastModifiedAt` SHALL reflect the timestamp of the most recent patch
 
+#### Scenario: Patch event required fields
+- **WHEN** a patch event is appended
+- **THEN** it SHALL contain the fields `id` (unique patch event ID), `ts` (ISO 8601 timestamp), `type` (literal `"patch"`), and `targetId` (ID of the memory to modify)
+
+#### Scenario: Patchable memory attributes
+- **GIVEN** an existing memory
+- **WHEN** `patchMemory()` is called
+- **THEN** the patch event MAY modify the fields `enabled`, `visibility`, `importance`, `relatedTo`, `supersedes`, `tier`, `category`, and `decay`
+
 ### Requirement: Memory Statistics
 
-The system SHALL provide memory statistics via `getMemoryStats()` returning per-visibility (`public`/`private`) counts:
-
-- `total`: total number of memories
-- `enabled`: count of enabled memories
-- `disabled`: count of disabled memories
-- `highImportance`: count of high-importance memories
-- `normalImportance`: count of normal-importance memories
-
-Additionally, statistics SHALL include:
-- Per-tier counts (`core`, `working`, `archive`)
-- Per-category counts (`fact`, `preference`, `episode`, `summary`, `relationship`)
-
-A summary section SHALL aggregate counts across all visibility levels.
+The system SHALL provide memory statistics via `getMemoryStats()` returning per-visibility (`public`/`private`) counts, per-tier and per-category counts, and a summary section aggregating counts across all visibility levels.
 
 #### Scenario: Stats reflect current memory state with tiers and categories
 - **GIVEN** a workspace with memories across different tiers and categories
 - **WHEN** `getMemoryStats()` is called
 - **THEN** the system SHALL return accurate per-visibility, per-tier, and per-category counts
+
+#### Scenario: Per-visibility counts
+- **WHEN** `getMemoryStats()` is called
+- **THEN** the returned statistics SHALL include per-visibility counts of `total` memories, `enabled` memories, `disabled` memories, `highImportance` memories, and `normalImportance` memories
+
+#### Scenario: Per-tier and per-category counts
+- **WHEN** `getMemoryStats()` is called
+- **THEN** the statistics SHALL include per-tier counts for `core`, `working`, and `archive`
+- **AND** per-category counts for `fact`, `preference`, `episode`, `summary`, and `relationship`
+
+#### Scenario: Summary aggregates across visibilities
+- **WHEN** `getMemoryStats()` is called
+- **THEN** a summary section SHALL aggregate counts across all visibility levels
 
 ### Requirement: Memory Export
 

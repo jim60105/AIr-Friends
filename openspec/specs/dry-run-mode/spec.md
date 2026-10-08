@@ -77,13 +77,7 @@ The `handleDryRun` method SHALL return a `SessionResponse` with `success: true` 
 
 ### Requirement: Configuration
 
-Dry run mode SHALL be configured under `agent.dryRun` with the following fields:
-
-| Field        | Type    | Default                              | Description                          |
-| ------------ | ------- | ------------------------------------ | ------------------------------------ |
-| `enabled`    | boolean | `false`                              | Enable dry run mode                  |
-| `outputPath` | string  | `"./data/dry-run/"`                  | Output directory for assembled prompts |
-| `mockReply`  | string  | `"（Dry run 模式 — 此為測試回覆）"` | Mock reply text (empty = no reply)   |
+Dry run mode SHALL be configured under the `agent.dryRun` configuration object, which SHALL support the `enabled`, `outputPath`, and `mockReply` fields.
 
 #### Scenario: Default configuration values
 - **GIVEN** no `agent.dryRun` configuration is provided
@@ -91,6 +85,17 @@ Dry run mode SHALL be configured under `agent.dryRun` with the following fields:
 - **THEN** `enabled` SHALL default to `false`
 - **AND** `outputPath` SHALL default to `"./data/dry-run/"`
 - **AND** `mockReply` SHALL default to `"（Dry run 模式 — 此為測試回覆）"`
+
+#### Scenario: Configuration field types
+- **GIVEN** the `agent.dryRun` configuration object is loaded
+- **WHEN** each configuration field is inspected
+- **THEN** `enabled` SHALL be a boolean, `outputPath` SHALL be a string, and `mockReply` SHALL be a string
+
+#### Scenario: Configuration field semantics
+- **GIVEN** the `agent.dryRun` configuration object is loaded
+- **WHEN** each configuration field is applied
+- **THEN** a `true` `enabled` SHALL activate dry run mode, `outputPath` SHALL name the output directory for assembled prompts, and a non-empty `mockReply` SHALL be sent as the mock reply text
+- **AND** an empty `mockReply` SHALL disable mock replies
 
 ### Requirement: Environment Variable Overrides
 

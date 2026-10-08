@@ -2,7 +2,7 @@
 
 ### Requirement: Public-Code-Search Surface Audit Frozen From Both Pins
 
-The change SHALL enumerate, as machine-readable route data with pinned-source citations, every public code/documentation search surface at the OpenCode packaging pin and the pinned OMP revision, tiered `supported`, `candidate-to-verify`, or `no-supported-mechanism`, and SHALL record the audit verdicts verbatim rather than assuming an equivalent backend exists. The audit SHALL record that the packaging pin's own public-code-search tool was removed upstream before that pin and that its permission rule therefore binds to no shipped tool id, that the deployment ships no code-search skill and no code-search token in either agent credential path, and that the pinned agent's only public-code-search surface is a search operation that shells out to an external CLI whose authentication store and subprocess transport are outside the controlled boundary. Keyless scraping code-search handlers that exist only as secondary handlers inside the completed URL-read route SHALL be marked `candidate-to-verify` and NOT selected as a dedicated search backend.
+The change SHALL enumerate every public code/documentation search surface at the OpenCode packaging pin and the pinned OMP revision as machine-readable route data with pinned-source citations, tiered `supported`, `candidate-to-verify`, or `no-supported-mechanism`, and SHALL record audit verdicts verbatim rather than assuming an equivalent backend exists.
 
 #### Scenario: Tiering carries citations and the removal verdict
 - **WHEN** the code-search route table is read
@@ -16,9 +16,24 @@ The change SHALL enumerate, as machine-readable route data with pinned-source ci
 - **THEN** no route, fixture, or documentation page introduced by this change SHALL claim a code-search skill or code-search token that the audit cannot cite
 - **AND** keyless scraping handlers SHALL remain not-selected while their existence inside the completed URL-read route is recorded as unchanged
 
+#### Scenario: Audit records no skill or token shipped
+- **GIVEN** the deployment's shipped skills and both agent credential paths
+- **WHEN** the code-search audit data is inspected
+- **THEN** the audit SHALL record that no code-search skill and no code-search token exist in either agent credential path
+
+#### Scenario: Removed tool's permission binds to no shipped tool id
+- **WHEN** the packaging pin's tool-removal finding is recorded
+- **THEN** the audit SHALL record that the tool was removed upstream before that pin and that its permission rule binds to no shipped tool id
+
+#### Scenario: Keyless handlers tiered but never selected
+- **GIVEN** keyless scraping code-search handlers present only as secondary handlers inside the completed URL-read route
+- **WHEN** the tiering data is read
+- **THEN** they SHALL be marked `candidate-to-verify`
+- **AND** none SHALL be selected as a dedicated search backend
+
 ### Requirement: Public-Code-Search Adapter Hops Delegate to the Controlled Transport
 
-The public-code-search adapter contract SHALL route every search-endpoint request and every result-enrichment subrequest through the controlled transport decision core established for URL reads — the same single SSRF rule set, the same enforcing-posture validating-proxy routing and operator unrestricted-egress posture preservation, and the same manual per-hop redirect revalidation with the existing hop bound. The contract SHALL NOT re-implement, fork, soften, or bypass that rule set, SHALL NOT introduce a second network stack or a new posture value, SHALL NOT issue any request through an unguarded transport retry path, and SHALL treat environment proxy presence as non-enforcement exactly as the URL-read and web-search adapters do.
+The public-code-search adapter contract SHALL route every search-endpoint request and every result-enrichment subrequest through the controlled transport decision core established for URL reads, reusing the same SSRF rule set, egress-posture handling, and manual per-hop redirect revalidation without re-implementing, forking, softening, or bypassing it.
 
 #### Scenario: Search endpoint decision follows the consumed egress posture
 - **GIVEN** a mocked public code-search endpoint whose host resolves, via mocked DNS, to public addresses only
@@ -38,9 +53,18 @@ The public-code-search adapter contract SHALL route every search-endpoint reques
 - **THEN** the private-`Location` hop SHALL block at that hop and the over-bound chain SHALL block with the hop-limit reason
 - **AND** every issued attempt SHALL carry a prior controlled-transport decision
 
+#### Scenario: No second stack, posture value, or unguarded retry
+- **WHEN** the contract issues search and enrichment hops under the shared rule set
+- **THEN** no request SHALL traverse a second network stack, rely on a new posture value, or pass through an unguarded transport retry path
+
+#### Scenario: Environment proxy presence is non-enforcement
+- **GIVEN** an environment proxy configured for the process
+- **WHEN** the adapter contract plans search and enrichment hops
+- **THEN** the proxy's presence SHALL be treated as non-enforcement exactly as the URL-read and web-search adapters treat it
+
 ### Requirement: Public-Code-Search Interface Parity Contract
 
-The completed public-code-search route contract SHALL preserve a useful-search interface: the query parameters passed through, results carrying code or documentation excerpts with source attribution and repository/path metadata plus language information, documented result-size bounds mirroring the pinned search limits and per-item preview bounds, and a query echo. Provider authentication, rate-limit, HTTP, malformed-response, and no-results handling SHALL follow the web-search adapter's honesty rules verbatim: honest tool errors in the native failure-message shape, no fabricated results, no unguarded transport retry outside the controlled path, no silent backend switch beyond availability semantics, and an empty result distinguished from an error. Decision records and logs SHALL carry at most host, hop index, decision, and reason code.
+The completed public-code-search route contract SHALL preserve a useful-search interface: query parameters passed through, results carrying code or documentation excerpts with source attribution, repository/path metadata, and language information, a query echo, and documented result-size bounds mirroring the pinned search limits and per-item preview bounds.
 
 #### Scenario: Excerpt and attribution shape pinned
 - **GIVEN** a mocked code-search response containing text matches with repository and path metadata
@@ -65,9 +89,19 @@ The completed public-code-search route contract SHALL preserve a useful-search i
 - **WHEN** the resulting decision records and log lines are inspected
 - **THEN** neither SHALL contain the credential, header, query string, response payload, or excerpt bytes
 
+#### Scenario: Decision records bounded to routing fields
+- **WHEN** any decision record or log line is written for a public-code-search hop
+- **THEN** it SHALL carry at most the host, hop index, decision, and reason code
+
+#### Scenario: HTTP errors stay within the honesty rules
+- **GIVEN** a mocked HTTP error response from the search provider
+- **WHEN** the contract serves it
+- **THEN** the outcome SHALL be an honest tool error in the native failure-message shape naming the provider
+- **AND** no fabricated result, unguarded transport retry outside the controlled path, or silent backend switch beyond availability semantics SHALL occur
+
 ### Requirement: Unsupported Public-Code-Search Backend Fails Closed Without Secret Promotion
 
-When no supported public-code-search backend exists for the restricted process under the approved credential path, the route SHALL remain blocked with the pending-adapter outcome and a user-decision marker rather than inventing a mechanism, selecting a keyless scraping backend, or requiring a new credential field; the capability gap and the available user decisions SHALL be documented. The contract SHALL NOT re-point a credential whose registered purpose is unrelated to search — a deployment that configures such a credential for another subsystem SHALL still receive the blocked decision — and SHALL NOT pass any never-pass credential name into an agent subprocess as a consequence of this contract. No trusted-extension search tool SHALL be registered while no supported backend exists; the reserved completion mechanism SHALL be recorded as unconsumed.
+When no supported public-code-search backend exists for the restricted process under the approved credential path, the route SHALL remain blocked with the pending-adapter outcome and a user-decision marker, SHALL NOT invent a mechanism, select a keyless scraping backend, require a new credential field, or pass a never-pass credential name into an agent subprocess, and the reserved completion mechanism SHALL be recorded as unconsumed.
 
 #### Scenario: Absent supported credential yields fail-closed block
 - **GIVEN** a restricted-process fixture whose credential inputs contain no supported code-search credential
@@ -86,9 +120,13 @@ When no supported public-code-search backend exists for the restricted process u
 - **THEN** no public-code-search tool SHALL be registered
 - **AND** the route table SHALL record the reserved replacement mechanism as the future completion path with its observation owned by the user runtime checklist
 
+#### Scenario: Capability gap and user decisions documented
+- **WHEN** the blocked public-code-search outcome is presented
+- **THEN** the capability gap and the available user decisions SHALL be documented
+
 ### Requirement: Public-Code-Search Seam Completion Additive and Cross-Table Consistent
 
-The restricted tool-inventory seam SHALL be updated additively: the public code/docs search row gains a completing-adapter marker naming this change and its route table, activated exactly where the route table's supported-backend predicate holds, and while that predicate never holds the effective outcome SHALL remain the pending-adapter decision distinguishable from a plain allow. The marker SHALL complete no table shape, composition order, or error vocabulary owned by the enforcement wiring; the URL-read and web-search route sets SHALL remain byte-identical; and the URL-fetch route registry SHALL be consumed read-only, with a test pinning that a route is never recorded pending by one table while another claims adapter completion for the same contract state.
+The restricted tool-inventory seam SHALL be updated additively: the public code/docs search row gains a completing-adapter marker naming this change and its route table, activated exactly where the route table's supported-backend predicate holds, and while that predicate never holds the effective outcome SHALL remain the pending-adapter decision distinguishable from a plain allow.
 
 #### Scenario: Unsupported state keeps the seam pending
 - **WHEN** the updated seam data is evaluated with the current credential state
@@ -104,9 +142,19 @@ The restricted tool-inventory seam SHALL be updated additively: the public code/
 - **WHEN** the pending-versus-allow and completed-versus-pending assertions from the predecessor decisions and wiring are re-run against the updated data
 - **THEN** they SHALL pass unchanged
 
+#### Scenario: Marker leaves enforcement wiring untouched
+- **WHEN** the updated seam and the enforcement wiring are compared
+- **THEN** the marker SHALL complete no table shape, composition order, or error vocabulary owned by the enforcement wiring
+
+#### Scenario: Registry consumed read-only with conflict pinned
+- **GIVEN** the URL-fetch route registry as the shared route source
+- **WHEN** the code-search seam update is applied to the tables
+- **THEN** the URL-fetch route registry SHALL be consumed read-only
+- **AND** a test SHALL pin that no route is recorded pending by one table while another claims adapter completion for the same contract state
+
 ### Requirement: Public-Code-Search Acceptance Is Deterministic Mock-Only
 
-All public-code-search acceptance SHALL run against mocked search endpoints, mocked DNS resolution, and synthetic redirect chains with zero network contact and no live or paid search, certifying allow/deny/routing decisions under both egress postures, hop-bound and per-hop revalidation behavior, credential-presence decisions including the never-pass case, excerpt/attribution/error/empty result shapes, the fail-closed documented gap with zero issued requests, unrestricted-egress posture preservation, and the route-table and seam-data verdicts. Native-side behavior — what the compiled agent actually exposes and whether a future reserved mechanism is honored — SHALL remain on the user-owned runtime verification checklist, and no mock SHALL be presented as proof of native hook coverage or as clearing the pinned transport-bypass record.
+All public-code-search acceptance SHALL run against mocked search endpoints, mocked DNS resolution, and synthetic redirect chains with zero network contact and no live or paid search, certifying the allow/deny/routing decisions, revalidation behavior, credential-presence decisions, result and error shapes, fail-closed gap, and route-table verdicts.
 
 #### Scenario: Whole suite runs without network access
 - **WHEN** the public-code-search test suites execute
@@ -116,3 +164,11 @@ All public-code-search acceptance SHALL run against mocked search endpoints, moc
 #### Scenario: Native behavior claims stay user-owned
 - **WHEN** the implementation handoff is assembled
 - **THEN** the checklist SHALL carry the observation of real code-search traffic through the reserved mechanism and the confirmation that the external-CLI native surface is unreachable in restricted mode, both marked unverified until user-observed
+
+#### Scenario: Mocks certify the full decision matrix
+- **WHEN** the mocked public-code-search acceptance executes
+- **THEN** the assertions SHALL certify allow/deny/routing decisions under both egress postures, hop-bound and per-hop revalidation behavior, credential-presence decisions including the never-pass case, excerpt/attribution/error/empty result shapes, the fail-closed documented gap with zero issued requests, unrestricted-egress posture preservation, and the route-table and seam-data verdicts
+
+#### Scenario: Mocks never prove native behavior
+- **WHEN** the mock-only results are reported
+- **THEN** no mock SHALL be presented as proof of native hook coverage or as clearing the pinned transport-bypass record

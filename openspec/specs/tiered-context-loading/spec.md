@@ -19,7 +19,7 @@ Memories without a `tier` field SHALL default to `tier: "archive"` during loadin
 
 ### Requirement: Core Tier Loaded Within Token Budget
 
-Only tier decides fixed loading; `importance` SHALL NOT cause a memory to be fixed-loaded. Enabled core-tier memories (`tier: "core"`) SHALL be loaded into the session context at startup within a token budget of `memory.recall.coreMaxTokens` (default 512). User core memories SHALL be considered first, then channel core memories in a channel context, each in `createdAt` ascending order. A memory SHALL be added when its rendered line fits the remaining budget and SHALL be skipped otherwise, and later memories SHALL still be considered. Skipped core memories SHALL keep their tier and SHALL remain reachable through Fast Recall and `memory-search`.
+Only tier decides fixed loading; `importance` SHALL NOT cause fixed loading. Enabled core-tier memories (`tier: "core"`) SHALL be loaded at startup within the `memory.recall.coreMaxTokens` budget (default 512), user memories before channel memories, each in `createdAt` ascending order. A memory SHALL be added only if its rendered line fits the remaining budget; later memories SHALL still be considered.
 
 #### Scenario: Core memories within budget all loaded
 - **GIVEN** a user has 15 enabled core-tier memories totaling 300 estimated tokens
@@ -43,15 +43,15 @@ Only tier decides fixed loading; `importance` SHALL NOT cause a memory to be fix
 - **WHEN** context assembly runs
 - **THEN** only the 3 enabled core-tier memories SHALL be considered for loading
 
+#### Scenario: Skipped core memories remain reachable
+- **GIVEN** a core-tier memory was skipped because it did not fit the remaining token budget
+- **WHEN** context assembly runs
+- **THEN** the memory SHALL keep its `tier: "core"`
+- **AND** it SHALL remain reachable through Fast Recall and `memory-search`
+
 ### Requirement: Working Tier Loads Newest Entries Within Budget
 
-The system SHALL load the newest enabled working-tier memories (`tier: "working"`) at session start. In a channel context, the user's and the channel's working memories SHALL be merged before selection. The system SHALL:
-
-- take the newest `memory.recall.workingMaxItems` (default 4) candidates by `createdAt`;
-- walk those candidates from newest to oldest, keeping each one whose rendered line fits the remaining `memory.recall.workingMaxTokens` (default 384) and skipping the rest; older candidates beyond the first `workingMaxItems` SHALL NOT replace skipped ones;
-- present the selected memories in chronological order.
-
-`memory.workingTierLimit` SHALL NOT control injection. Working memories that are not injected SHALL keep their tier and SHALL remain reachable through Fast Recall and `memory-search`.
+The system SHALL load the newest enabled working-tier memories (`tier: "working"`) at session start, taking at most `memory.recall.workingMaxItems` (default 4) newest candidates by `createdAt`, keeping each one whose rendered line fits the remaining `memory.recall.workingMaxTokens` budget (default 384), and presenting the selected memories in chronological order. `memory.workingTierLimit` SHALL NOT control injection.
 
 #### Scenario: Default working selection
 - **GIVEN** a user has 25 enabled working-tier memories of 50 estimated tokens each
@@ -73,6 +73,22 @@ The system SHALL load the newest enabled working-tier memories (`tier: "working"
 - **GIVEN** `memory.workingTierLimit` is 20 and `memory.recall.workingMaxItems` is 4
 - **WHEN** context assembly runs for a user with 10 working memories
 - **THEN** at most 4 working memories SHALL be injected
+
+#### Scenario: Channel working memories merged before selection
+- **GIVEN** a channel context with both user and channel working-tier memories
+- **WHEN** context assembly runs
+- **THEN** the user's and the channel's working memories SHALL be merged before selecting the newest candidates
+
+#### Scenario: Skipped working candidates not replaced
+- **GIVEN** a candidate working-tier memory exceeds the remaining token budget and is skipped
+- **WHEN** context assembly walks the candidates from newest to oldest
+- **THEN** older candidates beyond the first `workingMaxItems` SHALL NOT replace the skipped one
+
+#### Scenario: Non-injected working memories remain reachable
+- **GIVEN** a working-tier memory was not injected due to the item or token budget
+- **WHEN** context assembly runs
+- **THEN** the memory SHALL keep its `tier: "working"`
+- **AND** it SHALL remain reachable through Fast Recall and `memory-search`
 
 ### Requirement: Archive Tier Retrieval-Only
 

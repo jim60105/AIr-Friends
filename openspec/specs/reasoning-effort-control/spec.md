@@ -6,13 +6,7 @@ Per-context reasoning/thought level resolved through the model-selection chain (
 ## Requirements
 ### Requirement: Per-Context Reasoning Effort Resolution
 
-The system SHALL resolve the effective reasoning/thought level **per session** through a precedence chain that uses the **same match ordering and fallback structure** as model selection, with one explicit difference: a matching routing rule that omits `reasoningEffort` falls back immediately rather than continuing to later rules. The chain is: (1) the first matching `agent.modelRouting` rule's `reasoningEffort` if set, then (2) the session type's section value (`selfResearch.reasoningEffort`, `memoryMaintenance.reasoningEffort`, `conversationSummary.reasoningEffort`), then (3) the global `agent.reasoningEffort`. Resolution SHALL be performed by a `resolveReasoningEffort()` resolver that reuses the same first-match-wins rule matching as model resolution.
-
-The final resolved value SHALL always be a concrete string (never `undefined`), because the global `agent.reasoningEffort` defaults to `"default"`. The value `"default"` means "do not configure reasoning effort".
-
-Message, spontaneous, channel-lurk, and dashboard / manual sessions have no section-level reasoning-effort field and therefore use the global value as their fallback only.
-
-All reasoning-effort values SHALL be strings sharing one normalized vocabulary: `"none"`, `"low"`, `"medium"`, `"high"`, `"xhigh"`, `"max"`, plus the sentinel `"default"`. An **omitted** routing-rule or section field SHALL NOT contribute to resolution (the chain falls through to the next level); this is distinct from the value `"default"`, which terminates the chain with "do not configure".
+The system SHALL resolve the effective reasoning/thought level per session through a precedence chain: (1) a matching `agent.modelRouting` rule's `reasoningEffort` if set (a matching rule that omits it falls back immediately), then (2) the session type's section value, then (3) the global `agent.reasoningEffort`. Resolution SHALL be performed by a `resolveReasoningEffort()` resolver that reuses the same first-match-wins rule matching as model resolution.
 
 #### Scenario: Routing rule reasoning effort wins
 
@@ -62,6 +56,25 @@ All reasoning-effort values SHALL be strings sharing one normalized vocabulary: 
 - **WHEN** reasoning effort is resolved
 - **THEN** the effective value SHALL be `"max"`
 
+#### Scenario: Resolution always yields a concrete string
+
+- **GIVEN** no routing-rule, section, or global reasoning-effort value is set
+- **WHEN** reasoning effort is resolved
+- **THEN** the value SHALL be a concrete string (never `undefined`), equal to the global default `"default"`, which means "do not configure reasoning effort"
+
+#### Scenario: Sessions without a section field use the global fallback
+
+- **GIVEN** a message, spontaneous, channel-lurk, or dashboard / manual session (no section-level reasoning-effort field)
+- **WHEN** reasoning effort is resolved
+- **THEN** the global `agent.reasoningEffort` SHALL be the fallback
+
+#### Scenario: Normalized vocabulary and omitted fields
+
+- **GIVEN** reasoning-effort values across routing rules, sections, and global
+- **WHEN** resolution or normalization occurs
+- **THEN** all values SHALL be strings in the normalized vocabulary `"none"`, `"low"`, `"medium"`, `"high"`, `"xhigh"`, `"max"`, plus the sentinel `"default"`
+- **AND** an omitted routing-rule or section field SHALL NOT contribute (the chain falls through), which is distinct from the value `"default"` that terminates the chain with "do not configure"
+
 ### Requirement: Shared Reasoning Effort Normalization
 
 The system SHALL normalize every reasoning-effort field (global, per-rule, per-section) and the `AGENT_REASONING_EFFORT` env value with one shared helper: trim whitespace, treat present-but-empty as `"default"`, lowercase, accept the known vocabulary, and otherwise preserve the token as passthrough with a warning. Omitted optional fields SHALL remain unset (not coerced to `"default"`).
@@ -97,7 +110,7 @@ The system SHALL support overriding the **global** `agent.reasoningEffort` via t
 
 ### Requirement: Resolved Reasoning Effort Applied After Every Model Setting
 
-The system SHALL resolve the effective reasoning effort (per Per-Context Reasoning Effort Resolution) and attempt to apply it after **every** successful session model setting, for all model-setting paths: message, channel-lurk, spontaneous, self-research, memory-maintenance, the conversation-summary path (including its mid-session model swap and restore), and the dashboard / manual session path. The application step SHALL always receive the concrete resolved value returned by `resolveReasoningEffort()` (never `undefined`). The dashboard / manual session path SHALL use `agent.reasoningEffort` as its fallback (no section value). The reconciliation SHALL occur after the session model has been set so that it targets the resolved model's available options.
+The system SHALL resolve the effective reasoning effort and attempt to apply it after **every** successful session model setting, for all model-setting paths: message, channel-lurk, spontaneous, self-research, memory-maintenance, the conversation-summary path (including its mid-session model swap and restore), and the dashboard / manual session path. The reconciliation SHALL occur after the session model is set so it targets the resolved model's available options.
 
 #### Scenario: Applied after model setting for a message session
 
@@ -128,6 +141,18 @@ The system SHALL resolve the effective reasoning effort (per Per-Context Reasoni
 - **GIVEN** the resolved reasoning effort is `"default"`
 - **WHEN** any session is configured
 - **THEN** the system SHALL NOT send any reasoning-effort configuration to the agent
+
+#### Scenario: Application always receives a concrete value
+
+- **GIVEN** a session model is set and reasoning effort is to be applied
+- **WHEN** the application step runs
+- **THEN** it SHALL receive the concrete resolved value returned by `resolveReasoningEffort()` (never `undefined`)
+
+#### Scenario: Dashboard and manual sessions use the global fallback
+
+- **GIVEN** a dashboard / manual session path (no section-level reasoning-effort field)
+- **WHEN** reasoning effort is applied after the session model is set
+- **THEN** `agent.reasoningEffort` SHALL be used as the fallback
 
 ### Requirement: Best-Effort Reasoning Effort Application
 

@@ -2,7 +2,7 @@
 
 ### Requirement: Pinned OMP Compatibility Evidence
 
-The integration compatibility report SHALL cover pre-import discovery exclusion, authenticated policy readiness, authoritative approval-record reset, complete destructive intent, restricted-only LSP in both agents, native transport adaptation and critical-skill ownership. Each required boundary and relevant subcase SHALL declare supported, incompatible or unresolved status, exact release/source revision and source mechanism reachability, limitations, downstream owner, deterministic fixture evidence and user-owned runtime verification. Official OMP SHALL remain `v18.6.1` / `2a2c6dcbbb558c0f8145f67f28b3370984f2bf60`, OpenCode packaging SHALL remain `1.18.21`, and ACP SDK SHALL remain `0.14.1` with client terminal capability false. Unsupported or unresolved mechanisms SHALL block downstream application; passing mocks SHALL NOT manufacture native support.
+The integration compatibility report SHALL declare, for each required boundary and relevant subcase, a supported, incompatible or unresolved status backed by exact pinned release/source revision, source mechanism reachability and deterministic fixture evidence.
 
 #### Scenario: Complete supported contract is consumable
 - **WHEN** all seven boundaries and subcases have matching pinned source evidence for supported official-executable or trusted-extension entry points
@@ -24,6 +24,23 @@ The integration compatibility report SHALL cover pre-import discovery exclusion,
 - **THEN** the check SHALL exercise the real contract validator while labeling its input and result synthetic and keeping them separate from source evidence
 - **AND** the actual compatibility verdict SHALL remain blocked; complete named blocked fixtures SHALL satisfy P0 acceptance without requiring a passing real pinned ledger or an unsupported native decoder
 
+#### Scenario: All seven boundaries are covered
+- **WHEN** the compatibility report is produced for pre-import discovery exclusion, authenticated policy readiness, authoritative approval-record reset, complete destructive intent, restricted-only LSP in both agents, native transport adaptation and critical-skill ownership
+- **THEN** each required boundary and its relevant subcases SHALL receive their own declared status and evidence set
+
+#### Scenario: Per-boundary evidence is complete
+- **WHEN** a boundary declares a status
+- **THEN** the report SHALL state the exact release/source revision, source mechanism reachability, limitations, downstream owner, deterministic fixture evidence and user-owned runtime verification for that boundary and its subcases
+
+#### Scenario: Pinned versions remain fixed
+- **WHEN** the report pins the official OMP release
+- **THEN** OMP SHALL remain `v18.6.1` / `2a2c6dcbbb558c0f8145f67f28b3370984f2bf60`, OpenCode packaging SHALL remain `1.18.21`, and ACP SDK SHALL remain `0.14.1` with client terminal capability false
+
+#### Scenario: Unresolved mechanism blocks application
+- **WHEN** any mechanism stays unsupported or unresolved
+- **THEN** the report SHALL block downstream application
+- **AND** passing mocks SHALL NOT manufacture native support
+
 ### Requirement: OMP Pre-Import Discovery Compatibility Contract
 
 The compatibility contract SHALL distinguish exact trusted-extension loading from independent executable custom-tool, plugin, factory, configured-root and dependency discovery. Supported exclusion SHALL occur before unowned module top-level code or factory execution, on initial creation and recovery, and SHALL account for canonical paths, symlinks and workspace-owned dependencies. A post-import lifecycle/tool-name filter SHALL NOT establish this boundary.
@@ -40,7 +57,7 @@ The compatibility contract SHALL distinguish exact trusted-extension loading fro
 
 ### Requirement: OMP Policy Readiness Compatibility Contract
 
-The readiness contract SHALL require an authenticated control result bound to the current process instance, ACP session identity, restricted mode, fresh challenge, policy revision and registry epoch. It SHALL identify a supported channel, trusted credential origin and native-to-ACP identity mapping independent of chat/workspace assertions, without reusing raw platform or Skill API server secrets. Initial/new/load/restart/registry-transition state SHALL be unready until current prerequisites are satisfied. Successful session creation or lifecycle completion alone SHALL NOT certify readiness.
+The readiness contract SHALL require an authenticated control result bound to the current process instance, ACP session identity, restricted mode, fresh challenge, policy revision and registry epoch.
 
 #### Scenario: Current authenticated identity is accepted
 - **WHEN** a source-backed control-channel fixture supplies a verified result matching all current readiness values after complete initialization
@@ -56,9 +73,19 @@ The readiness contract SHALL require an authenticated control result bound to th
 - **WHEN** source inspection cannot establish authenticated channel reachability or exact ACP identity binding
 - **THEN** the boundary SHALL remain blocked even if a mock handshake succeeds
 
+#### Scenario: Channel and credential provenance is required
+- **WHEN** the contract evaluates readiness support
+- **THEN** it SHALL require a supported control channel, trusted credential origin and native-to-ACP identity mapping independent of chat or workspace assertions
+- **AND** it SHALL NOT reuse raw platform or Skill API server secrets
+
+#### Scenario: Initial or restarted state is unready
+- **WHEN** the process is in an initial, new, load, restart or registry-transition state
+- **THEN** readiness SHALL remain unready until all current prerequisites are satisfied
+- **AND** a successful session creation or lifecycle completion alone SHALL NOT certify readiness
+
 ### Requirement: OMP Authoritative Record Compatibility Contract
 
-The record contract SHALL evaluate effective full approval records using the pinned loader's actual lower-layer, CLI-overlay aggregation, runtime and environment precedence. Restricted and YOLO mode records SHALL NOT retain unintended lower-layer grants, prompts or denials. Empty mappings, unknown setting keys and invalid values falling back to defaults SHALL NOT be treated as authority. A null-reset followed by a mode mapping SHALL be certified only if source actually preserves reset semantics across the full merge sequence.
+The record contract SHALL evaluate effective full approval records using the pinned loader's actual lower-layer, CLI-overlay aggregation, runtime and environment precedence.
 
 #### Scenario: Aggregated reset counterexample is retained
 - **GIVEN** lower records contain an unknown-tool grant and reset plus mode CLI files supply null followed by a read mapping
@@ -69,6 +96,18 @@ The record contract SHALL evaluate effective full approval records using the pin
 #### Scenario: Both modes require full authority
 - **WHEN** a restricted fixture retains a lower grant or a YOLO fixture retains project prompt/deny entries
 - **THEN** the contract validator SHALL reject authoritative-mode composition with the specific residual entries
+
+#### Scenario: Restricted and YOLO modes keep no residue
+- **WHEN** restricted or YOLO mode records are composed
+- **THEN** they SHALL NOT retain unintended lower-layer grants, prompts or denials
+
+#### Scenario: Default fallbacks are not authority
+- **WHEN** evaluation encounters empty mappings, unknown setting keys or invalid values falling back to defaults
+- **THEN** they SHALL NOT be treated as authority
+
+#### Scenario: Null-reset requires preserved reset semantics
+- **WHEN** a null-reset is followed by a mode mapping
+- **THEN** certification SHALL occur only if source actually preserves reset semantics across the full merge sequence
 
 ### Requirement: OMP Complete Destructive Intent Compatibility Contract
 
@@ -107,7 +146,7 @@ The LSP contract SHALL identify supported mode-scoped suppression of both explic
 
 ### Requirement: OMP Native Transport Compatibility Contract
 
-The transport contract SHALL identify supported adaptation reachability for native URL-read text/binary paths, web search and public code/documentation search, including redirects and secondary scraper/provider requests. Under configured enforcing egress, every relevant hop SHALL be validated through existing egress rules and the explicitly controlled proxy/transport, with honest errors and no unguarded retry. Explicit unrestricted egress and approved provider routing SHALL remain distinct from arbitrary tool targets. Proxy environment presence or a partial native fetch override SHALL NOT prove complete native coverage.
+The transport contract SHALL identify supported adaptation reachability for native URL-read text/binary paths, web search and public code/documentation search, including redirects and secondary scraper/provider requests.
 
 #### Scenario: Partial native transport override is rejected
 - **WHEN** source-backed route fixtures cover enrichment fetches but binary, alternate-page, redirect or search routes bypass the controlled transport
@@ -121,6 +160,19 @@ The transport contract SHALL identify supported adaptation reachability for nati
 #### Scenario: Explicit unrestricted egress is not redefined
 - **WHEN** the operator selects the existing unrestricted-egress posture
 - **THEN** the fixture expectation SHALL follow that selected posture rather than impose a newly invented YOLO-only network denial
+
+#### Scenario: Enforcing egress validates every hop
+- **WHEN** enforcing egress is configured
+- **THEN** every relevant hop SHALL be validated through existing egress rules and the explicitly controlled proxy or transport
+- **AND** failures SHALL produce honest errors with no unguarded retry
+
+#### Scenario: Selected egress postures stay distinct
+- **WHEN** explicit unrestricted egress or approved provider routing is selected
+- **THEN** it SHALL remain distinct from arbitrary tool targets
+
+#### Scenario: Proxy presence is not coverage
+- **WHEN** proxy environment variables are present or only a partial native fetch override exists
+- **THEN** the contract SHALL NOT accept them as proof of complete native coverage
 
 ### Requirement: OMP Critical Skill Ownership Compatibility Contract
 

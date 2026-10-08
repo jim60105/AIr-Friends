@@ -2,7 +2,7 @@
 
 ### Requirement: Stable-First Canonical Model Selection
 
-When a session's latest cached session configuration options advertise a configuration option with `category: "model"`, setting the session model SHALL select that option: it SHALL flatten the option's supported values including nested option groups, match the requested model ID case-insensitively, and send the agent's canonical advertised value through the stable session config-option mechanism, refreshing the cached configuration options from the response. The session's recorded current model ID SHALL be the canonical value actually sent. When no `category: "model"` option is advertised, the system SHALL use the existing unstable model-setting mechanism unchanged. The system SHALL NOT rewrite or invent model IDs that the agent's catalog does not contain.
+When the session's latest cached configuration options advertise an option with `category: "model"`, setting the session model SHALL select that stable option and send the agent's canonical advertised value through the stable config-option mechanism. When no such option is advertised, the existing unstable model-setting mechanism SHALL be used unchanged.
 
 #### Scenario: Flat advertised catalog selects the canonical value
 - **GIVEN** the session's cached config options include a `category: "model"` option advertising values `["gpt-4o", "claude-sonnet-x"]`
@@ -34,9 +34,19 @@ When a session's latest cached session configuration options advertise a configu
 - **WHEN** the session model is set
 - **THEN** model-option discovery and value matching SHALL use the latest cached options
 
+#### Scenario: Canonical value is recorded as the current model
+- **GIVEN** the session model was set through the stable config-option mechanism
+- **WHEN** the session records the model selection
+- **THEN** the recorded current model ID SHALL be the canonical advertised value actually sent
+
+#### Scenario: No model IDs are invented outside the advertised catalog
+- **GIVEN** the agent's catalog does not contain the requested model ID under any casing
+- **WHEN** the session model is set
+- **THEN** the system SHALL NOT rewrite or invent a model ID that the agent's catalog does not contain
+
 ### Requirement: Reasoning Value Canonicalization With None/Off Alias
 
-When applying a reasoning effort value, the system SHALL prefer the canonical case-insensitive exact match among the advertised `thought_level` values. If the requested value is `none` and no exact `none` match exists among the flattened advertised values, the system SHALL send the advertised `off` value when one exists (in its advertised casing); if neither an exact `none` nor an `off` exists, the existing not-offered skip behavior SHALL apply unchanged. The alias SHALL apply only to a requested `none` and SHALL NOT rewrite any other token, and a requested value with an exact match SHALL keep sending that exact match even when `off` is also advertised. The `default`/empty value SHALL remain a no-op evaluated before any catalog inspection.
+Applying a reasoning effort value SHALL prefer the canonical case-insensitive exact match among the advertised `thought_level` values; when the requested value is `none` and no exact `none` exists, the advertised `off` value SHALL be sent when one is offered, otherwise the existing not-offered skip behavior SHALL apply unchanged. The alias SHALL NOT apply to any other requested value.
 
 #### Scenario: None maps to advertised off
 - **GIVEN** the advertised `thought_level` values are `["low", "Off"]` (no exact `none`)
@@ -58,9 +68,14 @@ When applying a reasoning effort value, the system SHALL prefer the canonical ca
 - **WHEN** reasoning effort `"low"` is applied
 - **THEN** the system SHALL NOT send `off` and SHALL follow the existing not-offered/passthrough rules unchanged
 
+#### Scenario: Default or empty value is a no-op
+- **GIVEN** the reasoning effort value is `default` or empty
+- **WHEN** reasoning effort is applied
+- **THEN** the value SHALL be a no-op evaluated before any catalog inspection
+
 ### Requirement: Load-Response Config Options Cache Restoration
 
-The system SHALL consume the `session/load` response and refresh the session's cached configuration options from its `configOptions` field, using the same complete-list replacement semantics as other refresh sources (a nullish list clears the cache for that session). After a successful reconnect-and-resume, the system SHALL re-establish the session's previously set model through the same stable-first selection above — an explicit error if the restored catalog lacks that model, the unstable path if the restored options advertise no `model` option — and, when the caller supplies an active resolved reasoning effort, SHALL reapply reasoning effort through the existing best-effort application after the model. Model-then-reasoning ordering SHALL be preserved because advertised reasoning values depend on the model. A restoration failure SHALL remain isolated to the affected session.
+The system SHALL consume the `session/load` response and refresh the session's cached configuration options from its `configOptions` field with the same complete-list replacement semantics as other refresh sources (a nullish list clears the cache). After a successful reconnect-and-resume, the previously set model SHALL be re-established through the same stable-first selection above.
 
 #### Scenario: Load response restores the canonical cache
 - **GIVEN** a reconnected agent's `session/load` response includes `configOptions` with a `category: "model"` option
@@ -89,6 +104,16 @@ The system SHALL consume the `session/load` response and refresh the session's c
 - **GIVEN** the caller supplies an active resolved reasoning effort for the resumed session
 - **WHEN** reconnect-and-resume completes the model re-establishment
 - **THEN** the system SHALL attempt reasoning application through the existing best-effort path and SHALL log its outcome without failing the session
+
+#### Scenario: Model-then-reasoning ordering is preserved on resume
+- **GIVEN** reconnect-and-resume re-establishes the previously set model and the caller supplies an active resolved reasoning effort
+- **WHEN** the resumed session proceeds to reasoning application
+- **THEN** reasoning effort SHALL be applied after the model, because advertised reasoning values depend on the model
+
+#### Scenario: Restoration failure stays isolated to the affected session
+- **GIVEN** any step of the model or reasoning restoration fails during reconnect-and-resume
+- **WHEN** the failure occurs
+- **THEN** the restoration failure SHALL remain isolated to the affected session
 
 ### Requirement: Session Config Resolution Shared Surface
 

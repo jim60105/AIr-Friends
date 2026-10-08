@@ -2,7 +2,7 @@
 
 ### Requirement: Deployment Agent Type Value Domain And Synchronization
 
-The configuration system SHALL treat `agent.defaultAgentType` as a deployment-level selection with the accepted value domain `"opencode" | "omp"`. The existing `AGENT_DEFAULT_TYPE` environment override SHALL target the same field and the same domain. Validation SHALL run at configuration-load time against the final merged value: an omitted value remains `"opencode"`; `"opencode"` and `"omp"` are accepted unchanged; any other value — including one differing only by case or surrounding whitespace, a non-string, or an empty string — SHALL fail the load with `ConfigError` (`ErrorCode.CONFIG_INVALID`) naming `agent.defaultAgentType` and the valid values. Whenever the accepted domain of this field changes, `config.example.yaml`, `.env.example`, and `helm/values.yaml` SHALL ALL be updated within the same change: each SHALL describe `opencode` as the default and `omp` as the other valid value, with no document describing a narrower or wider domain than the loader accepts.
+The configuration system SHALL treat `agent.defaultAgentType` as a deployment-level selection with the accepted value domain `"opencode" | "omp"`; the `AGENT_DEFAULT_TYPE` environment override SHALL target the same field and domain. Validation SHALL run at configuration-load time against the final merged value, accepting an omitted value as `"opencode"` and rejecting any other value (including a non-string) with `ConfigError` (`ErrorCode.CONFIG_INVALID`).
 
 #### Scenario: Omitted type keeps the OpenCode default
 - **GIVEN** neither the config file nor the environment sets `agent.defaultAgentType`
@@ -30,3 +30,9 @@ The configuration system SHALL treat `agent.defaultAgentType` as a deployment-le
 - **WHEN** `config.example.yaml`, `.env.example`, and `helm/values.yaml` are examined
 - **THEN** each SHALL document `AGENT_DEFAULT_TYPE`/`defaultAgentType` with `opencode` as the default and `omp` as a valid value
 - **AND** none SHALL claim the field accepts only `opencode`
+
+#### Scenario: Domain change updates all three documents in the same change
+- **GIVEN** the accepted domain of `agent.defaultAgentType` changes
+- **WHEN** the change is implemented
+- **THEN** `config.example.yaml`, `.env.example`, and `helm/values.yaml` SHALL ALL be updated within the same change
+- **AND** no document SHALL describe a narrower or wider domain than the loader accepts

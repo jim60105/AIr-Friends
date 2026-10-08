@@ -31,9 +31,15 @@ Defines the session monitoring APIs for active session listing, session history,
 
 ### Requirement: Session History
 
-`GET /api/sessions/history` SHALL return recently completed sessions (up to 100, ring buffer). Each entry SHALL include `auditSessionId` (string, primary identifier — the skill-API session ID in `sess_*` format, used for audit log file lookups), `type`, `platform`, `userId`, `startTime`, `endTime`, `status` ("success" | "failure"), and `durationMs`. Sessions SHALL be returned in descending order by `endedAt` (newest first). The response SHALL NOT include an `id` field separate from `auditSessionId`.
+`GET /api/sessions/history` SHALL return completed sessions (ring buffer, capacity 100). Each entry SHALL include `auditSessionId` (string, primary identifier, the skill-API session ID in `sess_*` format, used for audit log file lookups), `type`, `platform`, `userId`, `startTime`, `endTime`, `status` ("success"|"failure"), and `durationMs`, in descending order by `endedAt`. The response SHALL NOT include an `id` field separate from `auditSessionId`.
 
-The Session History table SHALL display the following columns: Session ID, Type, Platform, User, Time, Duration, Status. The Time column SHALL display the session start time. The Duration column SHALL display the session duration. The table SHALL use `table-fixed` layout with explicit column width distribution to prevent horizontal overflow.
+#### Scenario: Session History table displays no overflow
+
+- **WHEN** the Session History table is rendered with session data
+- **THEN** it SHALL display the columns Session ID, Type, Platform, User, Time, Duration, and Status
+- **AND** the Time column SHALL display the formatted session start time
+- **AND** the Duration column SHALL display the formatted session duration
+- **AND** the table SHALL use `table-fixed` layout with explicit column width distribution to prevent horizontal overflow
 
 #### Scenario: Session history returns newest first
 
@@ -97,12 +103,14 @@ The Session History table SHALL display the following columns: Session ID, Type,
 
 ### Requirement: Session Detail View
 
-`GET /api/sessions/:id/audit` SHALL return audit log entries for a specific session by reading from the audit JSONL file. The `:id` parameter SHALL be the `auditSessionId` (skill-API session ID in `sess_*` format) from the `CompletedSession` record, which corresponds to the audit file naming convention. When a user clicks a session row to view audit data, the dashboard SHALL use `auditSessionId` (not the display ID) to query this endpoint.
+`GET /api/sessions/:id/audit` SHALL return audit log entries for a specific session by reading from the audit JSONL file. The `:id` parameter SHALL be the `auditSessionId` (skill-API session ID in `sess_*` format) from the `CompletedSession` record, which corresponds to the audit file naming convention. When a user clicks a session row, the dashboard SHALL use `auditSessionId` (not the display ID) to query this endpoint.
 
-The audit log UI SHALL display each entry with a clickable summary showing timestamp and phase, and an expandable section showing the full JSON data formatted with indentation (2-space indent). The JSON data SHALL NOT be truncated.
+#### Scenario: Audit entry displays formatted JSON with clickable summary
 
-Expanded audit rows SHALL persist across polling refreshes. When `pollHistory()` re-renders the session history table, any previously expanded audit rows SHALL be automatically re-expanded.
-
+- **WHEN** a user expands an audit entry in the session detail view
+- **THEN** each entry SHALL display a clickable summary showing timestamp and phase
+- **AND** an expandable section SHALL show the full JSON data formatted with 2-space indentation
+- **AND** the JSON data SHALL NOT be truncated
 #### Scenario: Returns Audit Entries for Valid Session
 
 - **GIVEN** audit logging is enabled and a session with `auditSessionId` `"sess_abc123"` has audit entries

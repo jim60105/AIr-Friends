@@ -4,7 +4,7 @@
 
 ### Requirement: Agent-Portable Staging And Session Identity
 
-Every prompt surface that instructs skill usage — normal message, spontaneous post, channel lurk, self-research, conversation summary, memory maintenance (workspace and channel), scheduled reminder, AND the missing-reply retry prompt — SHALL supply the literal active Skill API session id and the ABSOLUTE session staging directory (`{session workspace}/tmp/{literalSkillSessionId}`, the canonical payload staging location that is independent of any process-level `TMPDIR`), and every payload-staging instruction those prompts and the skill instruction files (`skills/*/SKILL.md`, skill script error/example text) give for structured file tools and payload-file flags SHALL direct the agent to those literal absolute paths, never to `$TMPDIR`/`$SESSION_ID` shell tokens. No payload-staging instruction in a rendered prompt SHALL contain an unexpanded `$TMPDIR` or `$SESSION_ID` token. This contract SHALL hold identically in per-spawn and shared-process (pooled) operation and for every agent type; a skill consumer SHALL NEVER depend on a frozen process-level `SESSION_ID` environment variable. The staging directory itself, its provisioning, and all containment/authorization semantics SHALL be unchanged — this requirement changes only the identity/path FORM of the instructions the agent receives.
+Every prompt surface that instructs skill usage SHALL supply the literal active Skill API session id and the absolute session staging directory (`{session workspace}/tmp/{literalSkillSessionId}`, the canonical payload staging location independent of any process-level `TMPDIR`), and every payload-staging instruction from those prompts and the skill instruction files SHALL direct the agent to those literal absolute paths, never to `$TMPDIR`/`$SESSION_ID` shell tokens.
 
 #### Scenario: Rendered prompts name literal id and absolute staging dir
 - **GIVEN** a session with Skill API id `sess_42` whose staging directory is `/abs/workspaces/discord/123/tmp/sess_42`
@@ -23,6 +23,29 @@ Every prompt surface that instructs skill usage — normal message, spontaneous 
 - **WHEN** a per-spawn session and a pooled session each stage a payload at the prompt-rendered absolute path and invoke `send-reply` through the real script payload contract
 - **THEN** exactly the intended reply SHALL be recorded for each session with NO duplicate retry or fallback delivery
 - **AND** the staging path consumed by the handler SHALL be the same absolute directory the prompt named
+
+#### Scenario: Prompt surfaces that instruct skill usage
+- **GIVEN** prompt surfaces that instruct skill usage: normal message, spontaneous post, channel lurk, self-research, conversation summary, memory maintenance (workspace and channel), scheduled reminder, and the missing-reply retry prompt
+- **WHEN** any of them is rendered for a session
+- **THEN** it SHALL supply the literal active Skill API session id and the absolute session staging directory (`{session workspace}/tmp/{literalSkillSessionId}`)
+
+#### Scenario: Skill instruction files direct to the same literal paths
+- **GIVEN** skill instruction files (`skills/*/SKILL.md`) and skill script error/example text that give payload-staging instructions for structured file tools and payload-file flags
+- **WHEN** the agent follows those instructions to stage a payload
+- **THEN** the instructions SHALL direct the agent to the literal session staging directory and session id, never to `$TMPDIR`/`$SESSION_ID` shell tokens
+- **AND** the payload-staging instructions covered by this requirement SHALL never name shell tokens as the target of a structured file tool or payload-file flag
+
+#### Scenario: Same contract in pooled and per-spawn for every agent type
+- **GIVEN** per-spawn and shared-process (pooled) operation and any agent type
+- **WHEN** a payload is staged and a skill is invoked
+- **THEN** the contract SHALL hold identically in per-spawn and shared-process (pooled) operation and for every agent type
+- **AND** a skill consumer SHALL NEVER depend on a frozen process-level `SESSION_ID` environment variable
+
+#### Scenario: Only the identity/path form changes, not staging semantics
+- **GIVEN** the session staging directory, its provisioning, and all containment/authorization semantics
+- **WHEN** prompts and skill instructions change the identity/path FORM they use
+- **THEN** the staging directory itself, its provisioning, and all containment/authorization semantics SHALL be unchanged
+- **AND** this requirement SHALL change only the identity/path FORM of the instructions the agent receives
 
 ## MODIFIED Requirements
 
@@ -94,6 +117,52 @@ Skill scripts that carry free-text content SHALL accept that content exclusively
 - **WHEN** the script parses its arguments
 - **THEN** the script SHALL proceed without a payload file, passing no caption/query parameter to the Skill API
 
+#### Scenario: Payload-file flag mapping per skill
+- **WHEN** a skill that carries free-text content is invoked
+- **THEN** `send-reply`/`edit-reply`/`set-reminder` SHALL use `--message-file`, `send-file` SHALL use `--caption-file`, `memory-save` SHALL use `--content-file`, and `memory-search`/`fetch-context` SHALL use `--query-file`
+
+#### Scenario: REQUIRED and OPTIONAL payload arguments
+- **GIVEN** a free-text argument of a skill
+- **WHEN** it is declared in the skill contract
+- **THEN** a REQUIRED free-text argument SHALL have exactly one payload-file flag
+- **AND** an OPTIONAL free-text argument (e.g. `send-file` caption, `fetch-context` query) MAY omit its payload-file flag, and when present SHALL accept exactly one
+
+#### Scenario: Payload staged and written verbatim
+- **GIVEN** a payload file staged in the session-scoped TMPDIR
+- **WHEN** the agent writes it
+- **THEN** it SHALL be written through the ACP filesystem interface (edit/write tool or `writeTextFile`) using the `$TMPDIR/$SESSION_ID`-anchored path in per-spawn mode, or the prompt-rendered staging directory in shared-process mode
+- **AND** its bytes SHALL be preserved verbatim with no shell interpretation
+
+#### Scenario: Session staging directory pre-created at setup
+- **GIVEN** a session is registered
+- **WHEN** the shell session is set up
+- **THEN** the system SHALL pre-create the session staging directory `{workspace}/tmp/{sessionId}`, because neither the agent's edit/write tool nor `writeTextFile` creates parent directories
+- **AND** the directory SHALL be removed with the rest of `{workspace}/tmp` when the last session for the workspace ends
+
+#### Scenario: Only the pointer staging directory is used in shared mode
+- **GIVEN** shared-process mode
+- **WHEN** a script resolves the staging directory
+- **THEN** it SHALL resolve it ONLY from the current-session pointer (`{staging}/{sessionId}` from `active.json`), with no CLI-argument fallback
+- **AND** a missing, unreadable, or malformed pointer SHALL make the script fail with the stable `SKILL_SESSION_UNRESOLVED` error BEFORE reading or deleting any payload file
+
+#### Scenario: Strict pointer schema
+- **GIVEN** a current-session pointer
+- **WHEN** it is validated
+- **THEN** `sessionId` and `staging` SHALL both be non-empty strings, and in shared mode `staging` SHALL be an absolute path (the pool writes absolute staging roots)
+- **AND** numbers, objects, empty strings, and relative staging SHALL all be malformed and fail identically
+- **AND** in per-spawn mode the staging directory SHALL be `{cwd}/tmp/{sessionId}` from the script's own `--session-id` argument (sessions without an id fall back to `{workspace}/tmp`)
+
+#### Scenario: Real-path containment re-checked
+- **GIVEN** a payload file that exists
+- **WHEN** the script processes it
+- **THEN** it SHALL resolve the file's real path (`Deno.realPath`) and SHALL re-check the real path for containment
+- **AND** a symlink that escapes the staging directory (e.g. pointing at `/etc/passwd` or into another session's directory) SHALL be rejected
+
+#### Scenario: On success the payload is deleted
+- **GIVEN** a successful payload-file invocation
+- **WHEN** the script has passed the file content to the Skill API as the corresponding JSON parameter (server-side behavior unchanged)
+- **THEN** the script SHALL best-effort delete the payload file afterwards
+
 ### Requirement: Retry on Missing Reply
 
 The system SHALL automatically retry when an ACP Agent completes a prompt turn (`stopReason === "end_turn"`) without having called `send-reply`, `react-message`, or `send-file`. The retry SHALL clear the reply state, send a second prompt on the same ACP session requesting the agent to send a reply, and if the retry also fails, return a failure response. A session that produced a reply, a reaction, or a file send SHALL NOT be retried. The retry prompt SHALL be instructive and agent-portable in EVERY spawn shape (per-spawn and pooled): it SHALL state that the turn ended without a reply, reaction, or file send; SHALL list the likely causes of a failed `send-reply`/`send-file` under the payload-file contract (legacy `--message`/`--caption` used and rejected, payload file never written, payload staged outside the session's staging directory, or a previous skill call that errored — with an instruction to read that error's output); SHALL give the correct two-step example invocation naming the LITERAL active Skill API session id and the ABSOLUTE staging directory (write the payload to `{absolute staging dir}/...` with the edit/write tool, then invoke the script with the payload-file flag pointing at that absolute path); and SHALL include the full `send-reply`, `react-message`, and `send-file` SKILL.md content. The retry prompt's file-tool and payload-flag instructions SHALL contain no unexpanded `$TMPDIR`/`$SESSION_ID` tokens in any spawn shape. Retry timing, attempt limits, and the reply-quota authority SHALL remain unchanged.
@@ -128,6 +197,17 @@ The system SHALL automatically retry when an ACP Agent completes a prompt turn (
 - **THEN** the retry mechanism SHALL NOT trigger
 - **AND** the session SHALL be recorded as successful with `fileSent: true`
 
+#### Scenario: Retry prompt lists payload-file failure causes
+- **GIVEN** an agent ends its turn without a reply, reaction, or file send
+- **WHEN** the retry prompt is sent
+- **THEN** it SHALL state that the turn ended without a reply, reaction, or file send
+- **AND** it SHALL list the likely causes of a failed `send-reply`/`send-file` under the payload-file contract: legacy `--message`/`--caption` used and rejected, payload file never written, payload staged outside `$TMPDIR/$SESSION_ID/`, or a previous skill call that errored (with an instruction to read that error's output)
+
+#### Scenario: Retry prompt gives the correct two-step example
+- **GIVEN** an agent whose reply or file send failed under the payload-file contract
+- **WHEN** the retry prompt is sent
+- **THEN** it SHALL give the correct two-step example: write the payload to `$TMPDIR/$SESSION_ID/...` with the edit/write tool, then invoke the script with the payload-file flag
+
 ### Requirement: Instructive Skill Error Messages
 
 Skill script contract failures SHALL produce structured, instructive errors that teach the correct usage, so the agent can self-correct mid-turn. The shared payload helper SHALL raise typed errors carrying a stable `code` and a guidance message; the scripts SHALL emit them as JSON on stderr (extending the existing `exitWithError` contract with a `code` field) and SHALL NOT call the Skill API. The guidance message SHALL state (a) what was wrong, (b) why it matters, and (c) the exact correct pattern with a copy-pasteable example invocation specific to the failing skill, anchored on the staging directory and session id RENDERED IN THE AGENT'S SYSTEM PROMPT (absolute literal paths) rather than on `$TMPDIR`/`$SESSION_ID` shell tokens. The error codes SHALL be: `SKILL_LEGACY_FLAG` (legacy free-text flag used, in either `--flag value` or `--flag=value` form — guidance SHALL state the flag was removed for security, forbid message content on the command line, and show the two-step payload-file flow), `SKILL_MISSING_PAYLOAD` (required payload flag absent — guidance SHALL name the required flag and show the two-step flow), `SKILL_PAYLOAD_OUT_OF_BOUNDS` (path resolves outside the session staging directory, including symlink escapes — guidance SHALL name the resolved staging base the script enforced and explain the payload must live under it and why, and show the correct form), `SKILL_PAYLOAD_NOT_FOUND` (file absent or unreadable — guidance SHALL instruct writing the file first with the edit/write tool under the rendered staging directory, then invoking the script), and `SKILL_SINGLE_FILE_FLAG` (the `send-file` script invoked with the removed singular `--file-path` flag in either form — guidance SHALL state that the flag was replaced by the repeatable `--file-paths` flag, explain that the skill supports multiple files per invocation, and show a copy-pasteable example with two or more `--file-paths` arguments), and `SKILL_SESSION_UNRESOLVED` (shared-process mode with a missing, unreadable, or malformed current-session pointer — the owning session cannot be resolved; guidance SHALL name the expected pointer path and the "invoke skills during a live turn" remedy). The `error` field SHALL be self-contained prose containing the fix and a full example command.
@@ -158,3 +238,15 @@ Skill script contract failures SHALL produce structured, instructive errors that
 - **GIVEN** an agent invokes `send-file` with `--file-path report.pdf` or `--file-path=report.pdf`
 - **WHEN** the script rejects the invocation
 - **THEN** the error SHALL have code `SKILL_SINGLE_FILE_FLAG`, SHALL state that `--file-path` was replaced by the repeatable `--file-paths` flag, and SHALL include a copy-pasteable example passing two or more files
+
+#### Scenario: Guidance states what was wrong, why it matters, and the correct pattern
+- **GIVEN** a skill script contract failure
+- **WHEN** the guidance message is produced
+- **THEN** it SHALL state (a) what was wrong, (b) why it matters, and (c) the exact correct pattern with a copy-pasteable example invocation specific to the failing skill
+- **AND** the `error` field SHALL be self-contained prose containing the fix and a full example command
+
+#### Scenario: SKILL_SESSION_UNRESOLVED error for an unresolvable shared-mode pointer
+- **GIVEN** shared-process mode with a missing, unreadable, or malformed current-session pointer
+- **WHEN** the owning session cannot be resolved
+- **THEN** the error SHALL have code `SKILL_SESSION_UNRESOLVED`
+- **AND** the guidance SHALL name the expected pointer path and the "invoke skills during a live turn" remedy

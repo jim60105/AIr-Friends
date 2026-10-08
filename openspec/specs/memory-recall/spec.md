@@ -7,15 +7,7 @@ Deterministic, CPU-only lexical retrieval over long-term memories and agent work
 
 ### Requirement: Text Normalization and Tokenization
 
-Queries, memory contents and note chunks SHALL be processed by the same tokenization pipeline:
-
-1. Apply Unicode NFKC normalization, then lowercase Latin letters.
-2. Extract entity tokens (weight 1.5): maximal alphanumeric runs joined by `-`, `.` or `_` (for example `air-friends`, `v0.31.1`), and CamelCase or PascalCase words (for example `OpenClaw`). The component parts of an entity SHALL also be emitted as word tokens. Two adjacent short alphanumeric tokens where at least one contains a digit SHALL also form one entity (for example `a7c ii`, `air75 v3`).
-3. Segment every run of CJK characters into words with a dictionary-based segmenter that supports Traditional Chinese, and emit each word as a word token (weight 1.0).
-4. Emit every adjacent character pair of every CJK run as a bigram token (weight 0.25).
-5. Drop punctuation, whitespace and a fixed list of single-character CJK stopwords.
-
-The tokenizer SHALL NOT modify its input. It SHALL NOT convert between Simplified and Traditional forms. The same input SHALL always produce the same tokens in the same order.
+Queries, memory contents and note chunks SHALL be processed by the same tokenization pipeline. The tokenizer SHALL NOT modify its input, SHALL NOT convert between Simplified and Traditional forms, and SHALL always produce the same tokens in the same order for the same input.
 
 #### Scenario: Traditional Chinese words are segmented as words
 - **WHEN** `使用者喜歡喝無糖綠茶` is tokenized
@@ -34,6 +26,31 @@ The tokenizer SHALL NOT modify its input. It SHALL NOT convert between Simplifie
 #### Scenario: Stopwords removed
 - **WHEN** `我的鍵盤` is tokenized
 - **THEN** no token SHALL be `的` or `我`
+
+#### Scenario: NFKC normalization and lowercasing
+- **WHEN** the tokenizer processes input with full-width letters and uppercase Latin letters
+- **THEN** tokens SHALL be derived from the NFKC-normalized, lowercased text
+
+#### Scenario: Entity tokens and their component parts
+- **WHEN** `air-friends` and `v0.31.1` are tokenized
+- **THEN** each SHALL be emitted as one entity token with weight 1.5
+- **AND** the component parts (`air`, `friends`, `v0`, `31`, `1`) SHALL also be emitted as word tokens
+
+#### Scenario: Adjacent short tokens with a digit form an entity
+- **WHEN** `a7c ii` or `air75 v3` is tokenized
+- **THEN** the pair SHALL be emitted as one entity token with weight 1.5
+
+#### Scenario: Segmented words carry weight 1.0
+- **WHEN** the tokenizer emits a dictionary-segmented CJK word
+- **THEN** the word token SHALL carry weight 1.0
+
+#### Scenario: CJK bigrams carry weight 0.25
+- **WHEN** the tokenizer emits a CJK bigram
+- **THEN** the bigram token SHALL carry weight 0.25
+
+#### Scenario: Punctuation and whitespace are dropped
+- **WHEN** the tokenizer processes text containing punctuation and whitespace
+- **THEN** it SHALL emit no token for punctuation or whitespace
 
 ### Requirement: Segmenter Degradation
 
@@ -73,20 +90,6 @@ The system SHALL detect hints in the current user message by fixed string matchi
 
 Each eligible memory SHALL be scored as `lexicalScore + exactEntityBonus + exactPhraseBonus + metadataBonus + temporalBonus + relationBonus`.
 
-- **Query weighting**: tokens from the current user message SHALL carry source weight 1.0, and tokens from the previous user message SHALL carry 0.35. When a term appears in both, the larger weight SHALL be used. The previous message SHALL be used only for query tokens.
-- **`lexicalScore`**: the sum over matched query terms of BM25 (k1 = 1.2, b = 0.75, IDF = `ln(1 + (N − df + 0.5) / (df + 0.5))`) multiplied by the token's kind weight and source weight. `N`, `df` and average document length SHALL be computed over the memories that pass the enabled, scope, visibility, filter and supersede rules of the current request.
-- **`exactEntityBonus`**: +1.5, at most once, when an entity from the current message appears in the memory.
-- **`exactPhraseBonus`**: +2.0, at most once, when a span of at least 2 adjacent non-stopword tokens and at least 4 characters from the current message appears verbatim in the normalized memory text.
-- **`metadataBonus`**:
-  - importance high: +0.20
-  - working tier: +0.15
-  - recency: `0.20 × max(0, 1 − ageDays / 365)`
-  - decay: `0.20 × decay`
-  - preference hint with `category = "preference"`: +0.30
-- **`temporalBonus`**: with a current hint, the recency term SHALL be added once more; with a historical hint, superseded memories SHALL receive +0.20.
-- **Bonus gating**: bonuses SHALL apply only when `lexicalScore > 0`.
-- **Ordering**: score descending, then `createdAt` descending, then id ascending.
-
 #### Scenario: Lexical relevance outranks metadata
 - **GIVEN** memory A strongly matches the query and has `decay: 0.3`
 - **AND** memory B weakly matches the query and has `decay: 1.0`, `importance: "high"` and `tier: "working"`
@@ -109,6 +112,44 @@ Each eligible memory SHALL be scored as `lexicalScore + exactEntityBonus + exact
 - **GIVEN** memory A matches only the previous user message and memory B matches the current message with the same terms
 - **WHEN** recall ranks them
 - **THEN** memory B SHALL rank above memory A
+
+#### Scenario: Query source weighting
+- **WHEN** a term appears in both the current and the previous user message
+- **THEN** it SHALL carry the larger of source weight 1.0 (current message) and 0.35 (previous message)
+- **AND** previous-message tokens SHALL be used only for query tokens
+
+#### Scenario: BM25 lexical score
+- **GIVEN** a matched query term with document frequency `df` in a corpus of `N` eligible memories
+- **WHEN** recall computes its lexical score
+- **THEN** it SHALL use BM25 with `k1 = 1.2`, `b = 0.75`, and IDF `ln(1 + (N − df + 0.5) / (df + 0.5))`, multiplied by the token's kind and source weights
+- **AND** `N`, `df` and average document length SHALL be computed over memories passing the enabled, scope, visibility, filter and supersede rules of the current request
+
+#### Scenario: Exact entity bonus
+- **WHEN** an entity from the current user message appears in the memory
+- **THEN** the memory SHALL receive +1.5, at most once
+
+#### Scenario: Exact phrase bonus
+- **GIVEN** a span of at least 2 adjacent non-stopword tokens and at least 4 characters from the current message
+- **WHEN** that span appears verbatim in the normalized memory text
+- **THEN** the memory SHALL receive +2.0, at most once
+
+#### Scenario: Metadata bonus components
+- **WHEN** a memory qualifies for a metadata bonus
+- **THEN** the bonus SHALL be: importance high +0.20, working tier +0.15, recency `0.20 × max(0, 1 − ageDays / 365)`, decay `0.20 × decay`, and +0.30 when a preference hint with `category = "preference"` is active
+
+#### Scenario: Temporal bonus
+- **WHEN** a current hint is active
+- **THEN** the recency term SHALL be added once more
+- **AND** with a historical hint, superseded memories SHALL receive +0.20
+
+#### Scenario: Bonuses require a positive lexical score
+- **GIVEN** a memory whose `lexicalScore` is zero
+- **WHEN** recall scores it
+- **THEN** no bonus SHALL apply
+
+#### Scenario: Tie-break ordering
+- **WHEN** two memories receive equal final scores
+- **THEN** they SHALL be ordered by `createdAt` descending, then by id ascending
 
 ### Requirement: Local Deterministic Execution
 
@@ -145,15 +186,7 @@ Recall SHALL keep an in-process snapshot of indexed memories per memory JSONL fi
 
 ### Requirement: Memory Eligibility
 
-A memory SHALL be eligible for recall only when all of the following hold:
-
-- It is enabled.
-- It belongs to the scopes and visibilities allowed for the conversation (DM: the user's public and private memories; guild channel: the user's public memories and the channel's memories).
-- It is not in the request's exclusion set.
-- It matches at least one word or entity token of the query, or at least two distinct bigram tokens.
-- It is not superseded, unless the query contains a historical hint or the request is Deep Recall. A memory is superseded when its id appears in the `supersedes` list of any enabled memory within the same allowed scopes.
-
-A request SHALL accept an optional `category` filter and an optional `scope` filter (`user` or `channel`) that further restrict eligibility. An omitted `scope` SHALL include every scope allowed for the conversation.
+A memory SHALL be eligible for recall only when it is enabled, belongs to the scopes and visibilities allowed for the conversation, is not in the request's exclusion set, and matches at least one word or entity token of the query or at least two distinct bigram tokens. A superseded memory SHALL NOT be eligible unless the query contains a historical hint or the request is Deep Recall.
 
 #### Scenario: Private memory never recalled outside DM
 - **GIVEN** a user has a private memory matching the query
@@ -185,6 +218,22 @@ A request SHALL accept an optional `category` filter and an optional `scope` fil
 - **WHEN** Deep Recall runs without a `scope` filter
 - **THEN** both memories SHALL be eligible
 
+#### Scenario: Superseded memory definition
+- **GIVEN** a memory whose id appears in the `supersedes` list of any enabled memory within the same allowed scopes
+- **WHEN** recall runs without a historical hint and not as Deep Recall
+- **THEN** that memory SHALL NOT be eligible
+
+#### Scenario: Conversation scopes
+- **GIVEN** a conversation where recall evaluates eligibility
+- **WHEN** the conversation is a DM or a guild channel
+- **THEN** in a DM the user's public and private memories SHALL be eligible, and in a guild channel the user's public memories and the channel's memories SHALL be eligible
+
+#### Scenario: Category and scope filters
+- **GIVEN** a request with an optional `category` filter and an optional `scope` filter (`user` or `channel`)
+- **WHEN** recall runs
+- **THEN** eligibility SHALL be further restricted to the given category and scope
+- **AND** an omitted `scope` SHALL include every scope allowed for the conversation
+
 ### Requirement: Related Memory Expansion
 
 After direct ranking, the system SHALL expand one hop along `relatedTo` from the top 5 direct memory candidates, adding at most 2 related memories per candidate. A related memory SHALL be added only if it satisfies Memory Eligibility and has `lexicalScore > 0`. Its score SHALL be its own score plus `0.20 × parentScore`. If it is already a direct candidate, the larger score SHALL be used. Expansion SHALL NOT continue past one hop.
@@ -215,14 +264,7 @@ Each memory result SHALL contain the complete resolved memory (all fields, inclu
 
 ### Requirement: Fast Recall Memory Selection
 
-In Fast Recall mode the system SHALL select memories with a precision-first rule:
-
-- If the top score is below `minRecallScore`, no memory SHALL be selected.
-- Otherwise the first SHALL be selected.
-- A second SHALL be selected only if its score is at least `secondRecallScore` and at least `secondResultRatio` × the top score.
-- No more than `fastRecallMaxResults` memories SHALL be selected.
-- The selected memories' rendered lines SHALL fit within `fastRecallMaxTokens`, including section headings. Memories SHALL be added in rank order, and one that does not fit the remaining budget SHALL be skipped.
-- Lower-scoring memories SHALL NOT be added to fill unused slots.
+In Fast Recall mode the system SHALL select memories with a precision-first rule: if the top score is below `minRecallScore`, no memory SHALL be selected; otherwise the first SHALL be selected, and a second SHALL be selected only if its score is at least `secondRecallScore` and at least `secondResultRatio` × the top score.
 
 #### Scenario: Low confidence yields nothing
 - **GIVEN** the best memory score is below `minRecallScore`
@@ -237,6 +279,17 @@ In Fast Recall mode the system SHALL select memories with a precision-first rule
 #### Scenario: Hard limits hold
 - **WHEN** Fast Recall runs on any corpus with default configuration
 - **THEN** at most 2 memories SHALL be selected and their rendered lines SHALL total at most 192 estimated tokens
+
+#### Scenario: Token budget applies to rendered lines
+- **GIVEN** selected memories whose rendered lines exceed `fastRecallMaxTokens` including section headings
+- **WHEN** memories are added in rank order
+- **THEN** a memory that does not fit the remaining budget SHALL be skipped
+- **AND** no more than `fastRecallMaxResults` memories SHALL be selected
+
+#### Scenario: Unused slots are not filled
+- **GIVEN** fewer memories selected than `fastRecallMaxResults`
+- **WHEN** Fast Recall runs
+- **THEN** lower-scoring memories SHALL NOT be added to fill unused slots
 
 ### Requirement: Deep Recall Memory Selection
 
@@ -253,19 +306,7 @@ In Deep Recall mode the system SHALL return up to `limit` memories, with `limit`
 
 ### Requirement: Memory Threshold Calibration
 
-The default values of `minRecallScore` and `secondRecallScore` SHALL be derived from a committed offline benchmark fixture. The fixture SHALL:
-
-- contain Traditional Chinese and mixed-script memories;
-- include supersede chains, `relatedTo` links, channel memories, and both DM and guild contexts;
-- label every query with its expected memory ids, with roughly 40% of queries expecting none.
-
-The memory false-positive rate SHALL be defined as the share of queries for which Fast Recall selects at least one memory outside the query's expected set.
-
-- `minRecallScore` SHALL be the grid value that maximizes Recall@1 subject to a false-positive rate of at most 5%.
-- `secondRecallScore` SHALL be the grid value that maximizes Recall@2 under the same limit, with `minRecallScore` fixed.
-- Ties SHALL be broken by the lower false-positive rate, then by the higher threshold.
-
-A regression test SHALL run Fast Recall over the fixture with the default configuration and a fixed clock. It SHALL assert that Recall@1, Recall@2, false-positive rate and average injected tokens equal the recorded values. It SHALL also assert that the p95 search latency over the fixture, measured after one warm-up pass, is below 50 ms. The ceiling is deliberately generous so that only large regressions fail.
+The default values of `minRecallScore` and `secondRecallScore` SHALL be derived from a committed offline benchmark fixture: `minRecallScore` SHALL be the grid value that maximizes Recall@1 subject to a false-positive rate of at most 5%, and `secondRecallScore` SHALL be the grid value that maximizes Recall@2 under the same limit with `minRecallScore` fixed.
 
 #### Scenario: Benchmark gate
 - **WHEN** the regression test runs with default configuration
@@ -289,15 +330,28 @@ A regression test SHALL run Fast Recall over the fixture with the default config
   - negative query
   - negative query that contains an English current or historical hint word used in an unrelated sense
 
+#### Scenario: Fixture composition
+- **WHEN** the committed benchmark fixture is inspected
+- **THEN** it SHALL contain Traditional Chinese and mixed-script memories, supersede chains, `relatedTo` links, channel memories, and both DM and guild contexts
+- **AND** every query SHALL be labelled with its expected memory ids, with roughly 40% of queries expecting none
+
+#### Scenario: False-positive rate definition
+- **WHEN** Fast Recall selects at least one memory outside a query's expected set
+- **THEN** that query SHALL count toward the memory false-positive rate
+
+#### Scenario: Threshold tie-breaking
+- **GIVEN** grid values with equal Recall@1 or Recall@2 under the false-positive limit
+- **WHEN** the thresholds are chosen
+- **THEN** ties SHALL be broken by the lower false-positive rate, then by the higher threshold
+
+#### Scenario: Regression test determinism
+- **WHEN** the regression test runs Fast Recall over the fixture with the default configuration and a fixed clock
+- **THEN** the recorded value assertions SHALL be deterministic
+- **AND** the p95 search latency, measured after one warm-up pass, SHALL be below 50 ms, a ceiling deliberately generous so that only large regressions fail
+
 ### Requirement: Deep Recall Skill Output
 
-The `memory-search` skill SHALL run recall in Deep mode with the whole query text, the session's workspace and channel context, and the optional `category`, `scope` and `limit` parameters. Its `memories` output SHALL:
-
-- list memories in descending score order;
-- give each entry the memory fields previously returned (`id`, `enabled`, `visibility`, `importance`, `content`, `createdAt`, `lastModifiedAt`, `tier`, `category`, `scope`, `decay`, `relatedTo`, `supersedes`) plus `score` (rounded to 3 decimals) and `matchedTerms`;
-- contain no duplicate ids.
-
-An invalid `limit`, `category` or `scope` SHALL still be rejected with the existing error messages.
+The `memory-search` skill SHALL run recall in Deep mode with the whole query text, the session's workspace and channel context, and the optional `category`, `scope` and `limit` parameters, and SHALL list its `memories` output in descending score order.
 
 #### Scenario: Relevance order with diagnostics
 - **GIVEN** three memories match a query with different scores
@@ -314,16 +368,22 @@ An invalid `limit`, `category` or `scope` SHALL still be rejected with the exist
 - **WHEN** `memory-search` is called with `category: "hobby"`
 - **THEN** the skill SHALL return an error listing the allowed categories
 
+#### Scenario: Memory entry fields
+- **WHEN** `memory-search` returns a `memories` entry
+- **THEN** it SHALL contain the memory fields `id`, `enabled`, `visibility`, `importance`, `content`, `createdAt`, `lastModifiedAt`, `tier`, `category`, `scope`, `decay`, `relatedTo`, `supersedes`, plus `score` rounded to 3 decimals and `matchedTerms`
+
+#### Scenario: No duplicate ids
+- **GIVEN** a memory eligible through multiple paths
+- **WHEN** `memory-search` returns `memories`
+- **THEN** its id SHALL appear at most once
+
+#### Scenario: Invalid limit or scope still rejected
+- **WHEN** `memory-search` is called with an invalid `limit` or `scope`
+- **THEN** the call SHALL still be rejected with the existing error messages
+
 ### Requirement: Note Indexing
 
-When a session has an agent workspace, recall SHALL index every `.md` file under it, recursively, except `README.md` at the workspace root and `notes/_index.md`.
-
-- **Chunking**: each file SHALL be split into chunks at level-2 and level-3 headings. A chunk longer than about 600 characters SHALL be split again at blank lines.
-- **Chunk metadata**: each chunk SHALL record the file's absolute path, the document title (the first level-1 heading, otherwise the file name without extension), its heading path, its 1-based start and end lines, and the file's modification time.
-- **Freshness**: the file list SHALL be re-read on every search. Each file SHALL be re-chunked only when its size or modification time changed.
-- **Ranking**: notes SHALL be ranked by lexical score, entity bonus and phrase bonus only, with `N`, `df` and average length computed over note chunks alone. Results SHALL be aggregated per file, with the file's best-scoring chunk as its representative and score.
-- **Containment**: symbolic links SHALL NOT be followed. Every file and directory SHALL resolve, by real path, inside the agent workspace; any entry that resolves outside it SHALL be skipped and SHALL NOT be read. A file with more than one hard link SHALL be skipped as well, because a hard link passes both checks while still naming another file's content from inside the workspace.
-- When the session has no agent workspace, note results SHALL be empty.
+When a session has an agent workspace, recall SHALL index every `.md` file under it, recursively, except `README.md` at the workspace root and `notes/_index.md`. When the session has no agent workspace, note results SHALL be empty.
 
 #### Scenario: Index page is not a result
 - **GIVEN** `notes/_index.md` lists a note title that matches the query
@@ -356,19 +416,33 @@ When a session has an agent workspace, recall SHALL index every `.md` file under
 - **WHEN** recall runs
 - **THEN** the journal file SHALL be eligible
 
+#### Scenario: Chunking at headings then blank lines
+- **WHEN** recall indexes a file
+- **THEN** the file SHALL be split into chunks at level-2 and level-3 headings
+- **AND** a chunk longer than about 600 characters SHALL be split again at blank lines
+
+#### Scenario: Chunk metadata
+- **WHEN** a chunk is produced
+- **THEN** it SHALL record the file's absolute path, the document title (the first level-1 heading, otherwise the file name without extension), its heading path, its 1-based start and end lines, and the file's modification time
+
+#### Scenario: Freshness re-reads the file list
+- **WHEN** a search runs
+- **THEN** the file list SHALL be re-read, and each file SHALL be re-chunked only when its size or modification time changed
+
+#### Scenario: Note ranking
+- **WHEN** notes are ranked
+- **THEN** they SHALL be ranked by lexical score, entity bonus and phrase bonus only, with `N`, `df` and average length computed over note chunks alone
+- **AND** results SHALL be aggregated per file, with the file's best-scoring chunk as its representative and score
+
+#### Scenario: Symbolic links are not followed
+- **WHEN** recall indexes the workspace
+- **THEN** symbolic links SHALL NOT be followed
+- **AND** every file and directory SHALL resolve, by real path, inside the agent workspace; any entry that resolves outside it SHALL be skipped and SHALL NOT be read
+- **AND** a file with more than one hard link SHALL be skipped as well
+
 ### Requirement: Note Result Format
 
-Each note result SHALL be a pointer and SHALL NOT contain the full file content. It SHALL contain:
-
-- `path`: the absolute file path (the same workspace path given to the agent);
-- `title` and `headingPath`;
-- `lineStart` and `lineEnd` of the representative chunk;
-- `excerpt`: the sentence or sentences of the representative chunk with the most distinct matched terms (ties broken by the earliest sentence in the chunk), at most about 160 characters in Fast Recall and about 320 in Deep Recall, prefixed and suffixed with `…` when cut;
-- `fileTokens`: the estimated token count of the whole file;
-- `modifiedAt`: ISO date;
-- `score` and `matchedTerms`.
-
-In Deep Recall a note result SHALL also include up to 3 `chunks`, each with `headingPath`, `lineStart`, `lineEnd` and `excerpt`, in score order.
+Each note result SHALL be a pointer and SHALL NOT contain the full file content.
 
 #### Scenario: Note result is a pointer
 - **GIVEN** a 4.8 KB note matches the query
@@ -380,9 +454,27 @@ In Deep Recall a note result SHALL also include up to 3 `chunks`, each with `hea
 - **WHEN** a note is returned for a query matching `Portaly`
 - **THEN** its excerpt SHALL contain `Portaly`
 
+#### Scenario: Pointer fields
+- **WHEN** a note result is returned
+- **THEN** it SHALL contain `path` (the absolute file path, the same workspace path given to the agent), `title`, `headingPath`, `lineStart` and `lineEnd` of the representative chunk, `fileTokens` (the estimated token count of the whole file), `modifiedAt` (an ISO date), `score` and `matchedTerms`
+
+#### Scenario: Excerpt selection
+- **WHEN** recall builds a note excerpt
+- **THEN** it SHALL use the sentence or sentences of the representative chunk with the most distinct matched terms, ties broken by the earliest sentence in the chunk
+- **AND** SHALL prefix and suffix it with `…` when cut
+
+#### Scenario: Excerpt length limits
+- **WHEN** a note excerpt is built
+- **THEN** it SHALL be at most about 160 characters in Fast Recall and about 320 in Deep Recall
+
+#### Scenario: Deep Recall chunk list
+- **GIVEN** a note returned in Deep Recall
+- **WHEN** its result is built
+- **THEN** it SHALL include up to 3 `chunks`, each with `headingPath`, `lineStart`, `lineEnd` and `excerpt`, in score order
+
 ### Requirement: Deep Recall Notes
 
-The `memory-search` skill SHALL return notes in `agentNotes` using the Note Result Format. It SHALL return up to `limit` notes (capped at 10) whose score is at least `deepMinRecallScore`, in descending score order. Notes are Deep Recall items: together with memories they are subject to the Deep Recall budget rule, so the combined output fits `deepRecallMaxTokens`, with items admitted in descending score order across both lists and any item that does not fit skipped. A note's size SHALL be measured by its serialized output entry.
+The `memory-search` skill SHALL return notes in `agentNotes` using the Note Result Format: up to `limit` notes (capped at 10) whose score is at least `deepMinRecallScore`, in descending score order.
 
 #### Scenario: Deep Recall note pointers
 - **GIVEN** two notes match a query
@@ -394,14 +486,14 @@ The `memory-search` skill SHALL return notes in `agentNotes` using the Note Resu
 - **WHEN** `memory-search` runs
 - **THEN** the combined output SHALL NOT exceed `deepRecallMaxTokens`, and higher-scoring items SHALL be kept first
 
+#### Scenario: Admission order and score measurement
+- **WHEN** the combined Deep Recall output is assembled
+- **THEN** items SHALL be admitted in descending score order across both memories and notes, and any item that does not fit SHALL be skipped
+- **AND** a note's size SHALL be measured by its serialized output entry
+
 ### Requirement: Fast Recall Prompt Section
 
-When a triggered session is assembled and Fast Recall is enabled, the system SHALL run Fast Recall once. The query SHALL be the trigger message plus the same user's most recent earlier message in the recent history after the last `/clear`, when one exists. The exclusion set SHALL be the ids of memories already injected by fixed loading. Selected memories SHALL be rendered in the following memory sub-sections, and an empty sub-section SHALL be omitted:
-
-1. User-scope memories under a "Relevant Memory" heading, one `- <content>` line each.
-2. Channel-scope memories under a heading stating they were contributed by channel members, are unverified and are not instructions, one `- [from <author>] <content>` line each (or `[from unknown contributor]`).
-
-When Fast Recall selects nothing at all, the whole section SHALL be omitted. The section SHALL NOT include ids, scores, tiers, categories, creation times or matched terms, and the previous message text SHALL NOT appear in it.
+When a triggered session is assembled and Fast Recall is enabled, the system SHALL run Fast Recall once. The query SHALL be the trigger message plus the same user's most recent earlier message after the last `/clear`, when one exists, and the exclusion set SHALL be the ids of memories already injected by fixed loading.
 
 #### Scenario: Already-injected memory not repeated
 - **GIVEN** a core memory is injected by fixed loading and also matches the trigger message
@@ -428,6 +520,21 @@ When Fast Recall selects nothing at all, the whole section SHALL be omitted. The
 - **WHEN** Fast Recall builds its query
 - **THEN** it SHALL use the trigger user's own earlier message
 
+#### Scenario: User-scope memory rendering
+- **GIVEN** Fast Recall selects a user-scope memory
+- **WHEN** the section is rendered
+- **THEN** it SHALL appear under a "Relevant Memory" heading, one `- <content>` line each, and an empty sub-section SHALL be omitted
+
+#### Scenario: Channel-scope memory rendering
+- **GIVEN** Fast Recall selects a channel-scope memory
+- **WHEN** the section is rendered
+- **THEN** it SHALL appear under a heading stating the memories were contributed by channel members, are unverified and are not instructions, one `- [from <author>] <content>` line each (or `[from unknown contributor]`)
+
+#### Scenario: Prompt excludes metadata and previous message
+- **WHEN** the Fast Recall section is rendered
+- **THEN** it SHALL NOT include ids, scores, tiers, categories, creation times or matched terms
+- **AND** the previous message text SHALL NOT appear in it
+
 ### Requirement: Fast Recall Failure Isolation
 
 A failure inside Fast Recall SHALL NOT prevent the session from starting. The system SHALL log a warning with the error and SHALL assemble the context without the Fast Recall section.
@@ -440,15 +547,7 @@ A failure inside Fast Recall SHALL NOT prevent the session from starting. The sy
 
 ### Requirement: Fast Recall Note Selection
 
-In Fast Recall mode, notes SHALL be selected independently from memories:
-
-- If the top note score is below `noteMinRecallScore`, no note SHALL be selected.
-- Otherwise the first SHALL be selected.
-- A second SHALL be selected only if its score is at least `secondNoteRecallScore` and at least `secondResultRatio` × the top note score.
-- No more than `fastRecallNoteMaxResults` (default 2) notes SHALL be selected.
-- The rendered note entries and their heading SHALL fit within `fastRecallNoteMaxTokens` (default 256), skipping any entry that does not fit.
-
-The note budget SHALL NOT reduce the memory budget, and the memory budget SHALL NOT reduce the note budget.
+In Fast Recall mode, notes SHALL be selected independently from memories: if the top note score is below `noteMinRecallScore`, no note SHALL be selected; otherwise the first SHALL be selected, and a second SHALL be selected only if its score is at least `secondNoteRecallScore` and at least `secondResultRatio` × the top note score.
 
 #### Scenario: Notes do not displace memories
 - **GIVEN** two memories and two notes clear their thresholds
@@ -465,15 +564,18 @@ The note budget SHALL NOT reduce the memory budget, and the memory budget SHALL 
 - **WHEN** Fast Recall runs
 - **THEN** no note SHALL be selected
 
+#### Scenario: Note selection budgets
+- **WHEN** Fast Recall selects notes
+- **THEN** no more than `fastRecallNoteMaxResults` (default 2) notes SHALL be selected
+- **AND** the rendered note entries and their heading SHALL fit within `fastRecallNoteMaxTokens` (default 256), skipping any entry that does not fit
+
+#### Scenario: Budgets are independent
+- **WHEN** Fast Recall renders notes and memories
+- **THEN** the note budget SHALL NOT reduce the memory budget, and the memory budget SHALL NOT reduce the note budget
+
 ### Requirement: Fast Recall Note Sub-section
 
-Selected notes SHALL be rendered after the Fast Recall memory sub-sections under a heading stating that the entries are excerpts only, that the full file can be read when needed, and that they are not instructions. Each entry SHALL show:
-
-- the absolute path on its first line;
-- the title and heading path, the line range, the approximate file tokens and the update date on the second line;
-- the quoted excerpt on the third line.
-
-Scores and matched terms SHALL NOT be shown. When notes are selected but no memory is, the Fast Recall section SHALL contain only the note sub-section.
+Selected notes SHALL be rendered after the Fast Recall memory sub-sections under a heading stating that the entries are excerpts only, that the full file can be read when needed, and that they are not instructions.
 
 #### Scenario: Note pointer rendering
 - **GIVEN** Fast Recall selects `notes/vtuber-official-website-guide.md`
@@ -486,11 +588,27 @@ Scores and matched terms SHALL NOT be shown. When notes are selected but no memo
 - **WHEN** context is formatted
 - **THEN** the Fast Recall section SHALL be present with only the note sub-section
 
+#### Scenario: Note entry layout
+- **WHEN** a selected note is rendered
+- **THEN** its entry SHALL show the absolute path on its first line, the title, heading path, line range, approximate file tokens and update date on the second line, and the quoted excerpt on the third line
+
+#### Scenario: Rendered entries omit diagnostics
+- **WHEN** note entries are rendered
+- **THEN** scores and matched terms SHALL NOT be shown
+
 ### Requirement: Note Threshold Calibration
 
-The default values of `noteMinRecallScore` and `secondNoteRecallScore` SHALL be derived from the same committed benchmark. The fixture SHALL be extended with about 10 Traditional Chinese and mixed-script notes and with labeled note queries, including negatives. The note false-positive rate SHALL be the share of queries for which Fast Recall selects at least one note outside the expected set. It SHALL be at most 5%, and the thresholds SHALL be chosen by the same rules as the memory thresholds. The regression test SHALL also assert the recorded note metrics.
+The default values of `noteMinRecallScore` and `secondNoteRecallScore` SHALL be derived from the same committed benchmark and SHALL be chosen by the same rules as the memory thresholds, with the note false-positive rate at most 5%.
 
 #### Scenario: Note benchmark gate
 - **WHEN** the regression test runs with default configuration
 - **THEN** the note false-positive rate SHALL be at most 5%
 - **AND** the note Recall@1, Recall@2, false-positive rate and average injected tokens SHALL equal the recorded values
+
+#### Scenario: Note fixture extension
+- **WHEN** the benchmark fixture is extended for notes
+- **THEN** it SHALL add about 10 Traditional Chinese and mixed-script notes and labeled note queries, including negatives
+
+#### Scenario: Note false-positive definition
+- **WHEN** Fast Recall selects at least one note outside a query's expected set
+- **THEN** that query SHALL count toward the note false-positive rate

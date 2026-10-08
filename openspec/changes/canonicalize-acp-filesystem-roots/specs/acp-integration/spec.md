@@ -2,7 +2,7 @@
 
 ### Requirement: Contextual ACP Filesystem Path Resolution
 
-The common filesystem helpers SHALL require the requesting ACP session's explicit context and SHALL expand supported legacy session tokens using that context only. Structured `$TMPDIR`/`${TMPDIR}` SHALL mean `{session cwd}/tmp`, `$SESSION_ID`/`${SESSION_ID}` SHALL mean the active Skill API session ID, and `$AGENT_WORKSPACE`/`${AGENT_WORKSPACE}` SHALL mean the explicitly configured shared workspace. Unbraced expansion SHALL respect variable-name boundaries. Relative paths SHALL resolve against the session cwd, not the daemon cwd. Missing/mismatched context, unavailable referenced token values, unresolved variable syntax, empty/NUL paths and URI/device references SHALL fail closed. Helpers SHALL NOT execute shell expansion, consult another session's fallback context, or derive grants from process environment. The normalized contextual path SHALL be the downstream target, not a differently interpreted raw input.
+The common filesystem helpers SHALL require the requesting ACP session's explicit context and SHALL expand supported legacy session tokens using that context only: structured `$TMPDIR`/`${TMPDIR}` SHALL mean `{session cwd}/tmp`, `$SESSION_ID`/`${SESSION_ID}` SHALL mean the active Skill API session ID, and `$AGENT_WORKSPACE`/`${AGENT_WORKSPACE}` SHALL mean the explicitly configured shared workspace.
 
 #### Scenario: Legacy and absolute staging paths agree
 - **GIVEN** a session with cwd `/data/user`, Skill API ID `skill-a`, and staging `/data/user/tmp/skill-a`
@@ -20,9 +20,22 @@ The common filesystem helpers SHALL require the requesting ACP session's explici
 - **WHEN** `notes.md` is resolved for that session
 - **THEN** the resulting normalized path SHALL be under the session cwd and SHALL NOT be derived from the daemon cwd
 
+#### Scenario: Unbraced tokens respect variable-name boundaries
+- **WHEN** a path contains a name such as `$TMPDIR2` or `$SESSION_ID2` that merely starts with a supported token
+- **THEN** unbraced expansion SHALL respect variable-name boundaries and SHALL NOT treat that name as the supported token
+
+#### Scenario: Unsafe path forms fail closed without shell or environment grants
+- **WHEN** a path relies on shell expansion, another session's fallback context, process-environment grants, unresolved variable syntax, empty/NUL segments, or URI/device references
+- **THEN** the helper SHALL fail closed with the applicable specific failure and no successful target
+- **AND** it SHALL NOT execute shell expansion, consult that fallback context, or derive grants from the process environment
+
+#### Scenario: Normalized context path is the downstream target
+- **WHEN** a request path is resolved against the session context
+- **THEN** the normalized contextual path SHALL be the downstream target, not a differently interpreted raw input
+
 ### Requirement: Canonical ACP Session Root Identity
 
-The helpers SHALL expose configured and canonical root identity for the requesting workspace, exact canonical Skill API staging location, optional shared Agent workspace and independently trusted read-only skills root. Configured workspace/shared/skills roots SHALL resolve to existing directories; absent optional roots SHALL grant nothing, while configured-but-invalid roots SHALL fail. A prospective staging directory SHALL be represented by its canonical existing directory ancestor and missing suffix without creating it. Staging identity SHALL correspond to `{canonical workspace}/tmp/{active Skill API ID}` and SHALL NOT resolve to a sibling session, ordinary workspace alias or process-state directory. Process TMPDIR and state roots SHALL NOT create additional authorizing roles. Observations SHALL carry session/context generation and available filesystem identities without inventing unavailable metadata.
+The helpers SHALL expose the configured and canonical root identity for the requesting workspace: the exact canonical Skill API staging location, the optional shared Agent workspace, and the independently trusted read-only skills root.
 
 #### Scenario: Lazy staging has a concrete physical anchor
 - **GIVEN** the workspace exists but its own `tmp/skill-a` directory does not
@@ -41,9 +54,28 @@ The helpers SHALL expose configured and canonical root identity for the requesti
 - **THEN** the output SHALL include both configured and canonical paths and observed identity
 - **AND** later request symlinks SHALL NOT establish additional roots
 
+#### Scenario: Configured roots exist, optional roots grant nothing
+- **GIVEN** workspace, shared or skills roots are configured for the requesting workspace
+- **WHEN** session root identity is constructed
+- **THEN** configured roots SHALL resolve to existing directories, absent optional roots SHALL grant nothing, and configured-but-invalid roots SHALL fail
+
+#### Scenario: Staging identity is workspace-derived
+- **WHEN** the canonical staging identity is exposed
+- **THEN** it SHALL correspond to `{canonical workspace}/tmp/{active Skill API ID}`
+- **AND** it SHALL NOT resolve to a sibling session, ordinary workspace alias or process-state directory
+
+#### Scenario: Process and state roots grant no authorizing roles
+- **WHEN** a process TMPDIR or state directory is observed during root construction
+- **THEN** it SHALL NOT create an additional authorizing role
+
+#### Scenario: Observations carry generation and available identity only
+- **WHEN** session roots are observed
+- **THEN** observations SHALL carry the session/context generation and available filesystem identities
+- **AND** they SHALL NOT invent unavailable metadata
+
 ### Requirement: Canonical ACP Existing and Prospective Target Decisions
 
-The helpers SHALL classify physical target membership with equal-or-separator containment against each applicable root. Existing targets SHALL return canonical destination, target type, root-relative destination and observed identity; missing new-file targets SHALL return a canonical existing directory ancestor, its identity and ordered missing suffix. Existing-only requests SHALL fail when absent. Special nodes and file/directory expectation mismatches SHALL fail. Every observed parent or final symlink traversal SHALL remain within the same applicable root to receive that root role. Escaping links SHALL NOT gain authority by reaching a different otherwise allowed root. Contained links MAY be eligible as canonical observations, but their raw spelling SHALL NOT be reopened as proof of safe access. Prospective decisions SHALL require confirmed absence rather than treating a dangling symlink, inaccessible object or canonicalization error as a missing file.
+The helpers SHALL classify a target's physical membership with equal-or-separator containment against each applicable root and SHALL return the canonical destination, target type, root-relative destination and observed identity for existing members.
 
 #### Scenario: Existing and nested new targets expose actionable observations
 - **WHEN** an existing regular file and a new nested file under an applicable root are observed
@@ -71,9 +103,26 @@ The helpers SHALL classify physical target membership with equal-or-separator co
 - **THEN** the helper SHALL return the applicable dangling-link, loop, type, canonicalization or path-changed failure
 - **AND** it SHALL NOT downgrade the failure to new-file success
 
+#### Scenario: Existing-only requests fail when absent
+- **WHEN** an existing-only request targets an absent path
+- **THEN** the helper SHALL fail rather than treat it as a prospective new-file target
+
+#### Scenario: Special nodes and expectation mismatches fail
+- **WHEN** a target is a special node or its type contradicts the requested file/directory expectation
+- **THEN** the helper SHALL fail with a specific failure
+
+#### Scenario: Escaping links gain no cross-root authority
+- **WHEN** an observed parent or final symlink leaves a candidate root and reaches a different otherwise allowed root
+- **THEN** the link SHALL NOT gain authority from that other root's allowance
+- **AND** every observed parent or final symlink traversal SHALL remain within the same applicable root to receive that root role
+
+#### Scenario: Raw link spelling is not proof of safe access
+- **WHEN** contained links are recorded as canonical observations for a candidate role
+- **THEN** their raw spelling SHALL NOT be reopened as proof of safe access
+
 ### Requirement: Trusted Read-Only ACP Skills Root Identity
 
-The skills-root helper SHALL consume deployment-owned canonical source/root identity from the predecessor critical-skill compatibility contract, not trust by name, workspace contents or arbitrary model-supplied directory. Explicit critical references SHALL match the contract's canonical instruction path and current session resource generation. The canonical skills root SHALL be disjoint from writable workspace/shared roots and SHALL grant a read-only role only. A skills-root link leaving that owned root SHALL fail trusted membership even if its destination lies within another readable root. These decisions SHALL NOT certify native OMP selection/discovery support, change unrelated workspace read-extension policy, or introduce a skills write exception.
+The skills-root helper SHALL consume deployment-owned canonical source/root identity from the predecessor critical-skill compatibility contract and SHALL NOT trust a directory by name, by workspace contents or as an arbitrary model-supplied location.
 
 #### Scenario: Owned skill instruction is readable as an observation
 - **GIVEN** a deployment-owned read-only root and a matching canonical current-generation instruction reference
@@ -86,9 +135,22 @@ The skills-root helper SHALL consume deployment-owned canonical source/root iden
 - **THEN** the helper SHALL return the specific ownership/containment/overlap failure
 - **AND** it SHALL NOT substitute a same-name file or globally disable skills to claim success
 
+#### Scenario: Critical references match contract path and generation
+- **WHEN** an explicit critical reference is resolved against the skills root
+- **THEN** it SHALL match the contract's canonical instruction path and the current session resource generation
+
+#### Scenario: Skills root is disjoint, read-only and non-escaping
+- **WHEN** the canonical skills root is established
+- **THEN** it SHALL be disjoint from writable workspace/shared roots and SHALL grant only a read-only role
+- **AND** a skills-root link leaving that owned root SHALL fail trusted membership even if its destination lies within another readable root
+
+#### Scenario: Trust decisions certify no native support or policy change
+- **WHEN** the helper reaches trusted read-only identity decisions
+- **THEN** those decisions SHALL NOT certify native OMP selection/discovery support, change unrelated workspace read-extension policy, or introduce a skills write exception
+
 ### Requirement: Fail-Closed ACP Root Observation and Evidence Limits
 
-All context/root/target helpers SHALL return either a complete successful observation or one finite specific failure, never a partial successful grant, empty root or lexical fallback. Failure categories SHALL distinguish invalid context/path/token, invalid/unavailable/overlapping root, outside-root/link escape, dangling/looping link, missing object, wrong type, canonicalization failure, changed path and trusted identity mismatch. Observations SHALL be scoped to the exact session/context generation and SHALL NOT be reusable permissions or race-proof access guarantees. Secure access through the actual operation and client sink adoption SHALL remain separate dependent changes. Unsupported predecessor source boundaries SHALL remain blockers regardless of helper mocks. Tests SHALL use real helper logic with temporary filesystems or deterministic metadata mocks only, and SHALL NOT claim native OMP enforcement.
+All context/root/target helpers SHALL return either one complete successful observation or one finite specific failure, and SHALL NOT return a partial successful grant, an empty root or a lexical fallback.
 
 #### Scenario: Canonicalization error fails closed
 - **WHEN** an applicable root or target metadata operation raises an error other than confirmed absence permitted by new-file semantics
@@ -110,3 +172,22 @@ All context/root/target helpers SHALL return either a complete successful observ
 - **WHEN** temporary-filesystem or synthetic contract fixtures pass while the actual P0 source verdict remains incompatible or unresolved
 - **THEN** the helper evidence SHALL remain local decision evidence only
 - **AND** downstream application SHALL remain blocked under the predecessor compatibility contract without manufactured native support
+
+#### Scenario: Failures carry one distinguished category
+- **WHEN** an observation fails
+- **THEN** the helper SHALL distinguish the category among invalid context/path/token, invalid/unavailable/overlapping root, outside-root/link escape, dangling/looping link, missing object, wrong type, canonicalization failure, changed path and trusted identity mismatch
+
+#### Scenario: Observations are scoped and not reusable
+- **WHEN** a successful observation is returned
+- **THEN** it SHALL be scoped to the exact session/context generation
+- **AND** it SHALL NOT be treated as a reusable permission or race-proof access guarantee
+
+#### Scenario: Secure access remains a separate dependent change
+- **WHEN** a successful observation is consumed by its caller
+- **THEN** secure access through the actual operation and client sink adoption SHALL remain separate dependent changes
+
+#### Scenario: Tests use real helper logic without native claims
+- **WHEN** observation and failure behavior is tested
+- **THEN** tests SHALL use real helper logic with temporary filesystems or deterministic metadata mocks only
+- **AND** they SHALL NOT claim native OMP enforcement
+- **AND** unsupported predecessor source boundaries SHALL remain blockers regardless of helper mocks

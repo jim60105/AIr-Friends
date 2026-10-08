@@ -2,7 +2,7 @@
 
 ### Requirement: Independent Restricted ACP Filesystem Write Authorization
 
-The ACP file-write sink SHALL authorize an ordinary restricted-mode write from the requesting session's own authoritative context and the target's canonical physical role, WITHOUT requiring or consulting any preceding permission request. It SHALL allow the requesting session's own canonical staging root; SHALL allow a shared Agent workspace target only when the session holds agent-workspace write authorization and the target carries an allowed write extension; SHALL deny every remaining ordinary user-workspace target, including one whose extension is otherwise allowed; and SHALL deny a target whose only applicable role is read-only trusted skills. A staging grant SHALL be the physical staging membership of the requesting session only: an alias or link reaching a sibling session's staging directory, an ordinary workspace directory or a process/state location SHALL NOT produce it. The same decision SHALL apply whether the agent reached the write through a permission request or called the file-write callback directly, and the preserved shared-authorization, shared-extension and outside-workspace reason codes SHALL keep their meanings.
+The ACP file-write sink SHALL authorize an ordinary restricted-mode write from the requesting session's authoritative context and the target's canonical physical role, WITHOUT requiring any preceding permission request: it SHALL allow the session's own staging root and, with agent-workspace write authorization and an allowed extension, a shared Agent workspace target; it SHALL deny every other user-workspace target and any target whose only role is read-only trusted skills.
 
 #### Scenario: Restricted staging write needs no preceding permission request
 - **GIVEN** a restricted session whose Skill API staging directory is provisioned under its own canonical workspace
@@ -27,9 +27,20 @@ The ACP file-write sink SHALL authorize an ordinary restricted-mode write from t
 - **THEN** both SHALL report the same authorization outcome and reason for the same canonical target role
 - **AND** neither outcome SHALL depend on the other having run first
 
+#### Scenario: Staging grant is the session's own physical staging membership
+- **GIVEN** a restricted session whose staging directory is provisioned under its own canonical workspace
+- **WHEN** a write target is an alias or link reaching a sibling session's staging directory, an ordinary workspace directory, or a process/state location
+- **THEN** the staging grant SHALL NOT be produced for that target
+- **AND** the target SHALL be decided by its canonical physical role alone
+
+#### Scenario: Preserved write reason codes keep their meanings
+- **GIVEN** a write denial that matches a shared-authorization, shared-extension or outside-workspace condition
+- **WHEN** the write sink records the denial
+- **THEN** the preserved reason code for that condition SHALL be used with its existing meaning
+
 ### Requirement: Protected-IO-Only ACP Filesystem Callback Execution
 
-Every ACP read and write callback decision SHALL be made on the requesting session's canonical root and target observations, and content IO SHALL occur only through the protected root-relative access operations under the single root role the authorization selected. A failed context, expansion, root construction, target observation, authorization or access step SHALL deny the operation with one mapped bounded reason and SHALL NOT fall back to ordinary path-based read/write, SHALL NOT retry under a broader root role, and SHALL NOT create a missing parent or staging directory as a side effect. The lexical sink predicates and the environment/HOME-derived skills trust rule they replaced SHALL be removed from the callback path, and no callback path SHALL remain that reaches content IO without an authorization decision.
+Every ACP read and write callback decision SHALL be made on the requesting session's canonical root and target observations, and content IO SHALL occur only through the protected root-relative access operations under the single root role the authorization selected.
 
 #### Scenario: No bypass remains on the callback path
 - **WHEN** the read and write callbacks are exercised across authorized, denied and error cases
@@ -52,9 +63,20 @@ Every ACP read and write callback decision SHALL be made on the requesting sessi
 - **THEN** the callback SHALL deny with the mapped bounded reason and perform no content read or write
 - **AND** sibling and external sentinel content SHALL remain unchanged
 
+#### Scenario: Failed steps deny without broader-role retry
+- **GIVEN** a failed context, expansion, root construction, target observation, authorization or access step
+- **WHEN** a read or write callback would fall back
+- **THEN** the callback SHALL deny the operation with one mapped bounded reason
+- **AND** it SHALL NOT retry under a broader root role
+
+#### Scenario: Lexical predicates and HOME-derived skills trust are removed from the callback path
+- **WHEN** the read and write callback paths are evaluated
+- **THEN** the callback path SHALL NOT include the lexical sink predicates or the environment/HOME-derived skills trust rule they replaced
+- **AND** no callback path SHALL remain that reaches content IO without an authorization decision
+
 ### Requirement: Read-Only Trusted Skills Access In ACP Callbacks
 
-ACP reading SHALL additionally admit a target whose canonical role is the deployment-owned read-only trusted skills root, subject to that root's ownership provenance and current resource-generation currency, and SHALL treat that admission as root-scoped rather than extension-allowlist-based. The trusted root SHALL confer read authority only: it SHALL NOT authorize any write in any mode, SHALL NOT authorize a file outside that owned root, and SHALL NOT change unrelated workspace read-extension rules. A workspace or project file SHALL NOT gain the trusted role by name, a link leaving the owned root SHALL NOT obtain it even when its destination is otherwise readable, and a stale generation, ownership mismatch or writable-root overlap SHALL fail with the specific trusted-identity reason and no fallback to another readable role. Absent supplied provenance, no trusted role SHALL exist. The previous environment/HOME-derived auto-approval of skill reads SHALL be replaced by this canonical classification, keeping the existing approved audit reason for a trusted skill read.
+ACP reading SHALL additionally admit a target whose canonical role is the deployment-owned read-only trusted skills root, subject to that root's ownership provenance and current resource-generation currency, and SHALL treat that admission as root-scoped rather than extension-allowlist-based.
 
 #### Scenario: Owned skill instruction is readable through the callback
 - **GIVEN** a deployment-owned read-only skills root with matching current-generation provenance
@@ -73,9 +95,31 @@ ACP reading SHALL additionally admit a target whose canonical role is the deploy
 - **THEN** the read SHALL still be denied by the unchanged workspace read-extension rule
 - **AND** the trusted root SHALL NOT authorize any arbitrary external file
 
+#### Scenario: Trusted root confers read authority only
+- **GIVEN** a deployment-owned read-only trusted skills root
+- **WHEN** the callback classifies any target under it
+- **THEN** the trust SHALL confer read authority only
+- **AND** it SHALL NOT authorize any write in any mode, any file outside the owned root, or any change to unrelated workspace read-extension rules
+
+#### Scenario: Name, link, and provenance failures deny the trusted role
+- **GIVEN** a workspace or project file merely sharing a skill's name, a link leaving the owned root whose destination is otherwise readable, or a root with a stale generation, ownership mismatch or writable-root overlap
+- **WHEN** the callback classifies the target
+- **THEN** it SHALL NOT gain the trusted role
+- **AND** a stale generation, ownership mismatch or writable-root overlap SHALL fail with the specific trusted-identity reason and no fallback to another readable role
+
+#### Scenario: No trusted role without supplied provenance
+- **WHEN** a skills root has no supplied ownership provenance
+- **THEN** no trusted role SHALL exist for it
+- **AND** the trusted classification SHALL NOT be applied
+
+#### Scenario: HOME-derived auto-approval is replaced by canonical classification
+- **WHEN** a skill read was previously auto-approved via the environment/HOME-derived rule
+- **THEN** it SHALL be classified through the canonical trusted-skills rule instead
+- **AND** a trusted skill read SHALL keep the existing approved audit reason
+
 ### Requirement: Bounded Specific ACP Filesystem Denial Diagnostics
 
-Each filesystem-sink denial SHALL record exactly one bounded, machine-readable reason identifying the failed decision — restricted in-workspace target, read-only trusted-skills target, trusted-identity/provenance failure, canonical-observation failure, filesystem-access failure, or missing session context — using the existing bounded rejection buffer and audit mirroring. Preserved reason codes SHALL keep their meanings, added codes SHALL be a finite documented set, and a single denial SHALL NOT be recorded twice under contradictory reasons. Recorded fields SHALL remain sanitized and length-bounded, and the callback error SHALL use a static message that exposes no file content, secret, or unbounded agent- or platform-supplied text.
+Each filesystem-sink denial SHALL record exactly one bounded, machine-readable reason identifying the failed decision — restricted in-workspace target, read-only trusted-skills target, trusted-identity/provenance failure, canonical-observation failure, filesystem-access failure, or missing session context — using the existing bounded rejection buffer and audit mirroring.
 
 #### Scenario: Every sink denial yields one specific bounded reason
 - **WHEN** each filesystem denial path is exercised once
@@ -87,6 +131,16 @@ Each filesystem-sink denial SHALL record exactly one bounded, machine-readable r
 - **WHEN** the missing-reply retry prompt is assembled
 - **THEN** the recorded reasons SHALL appear in the existing bounded rejection section
 - **AND** the previously documented reasons SHALL remain available for shared-authorization and extension denials
+
+#### Scenario: Reason codes stay preserved, finite and non-contradictory
+- **WHEN** a filesystem denial is recorded
+- **THEN** preserved reason codes SHALL keep their meanings and added codes SHALL form a finite documented set
+- **AND** a single denial SHALL NOT be recorded twice under contradictory reasons
+
+#### Scenario: Recorded fields and error messages stay bounded
+- **WHEN** a filesystem denial is recorded and its callback error is raised
+- **THEN** recorded fields SHALL remain sanitized and length-bounded
+- **AND** the callback error SHALL be a static message exposing no file content, secret, or unbounded agent- or platform-supplied text
 
 ## MODIFIED Requirements
 
@@ -237,6 +291,23 @@ Filesystem path checks used by the scoped edit/write approval and the file callb
 - **GIVEN** a permission request not matching any approval rule
 - **WHEN** `requestPermission()` evaluates the request
 - **THEN** it SHALL deny the request
+
+#### Scenario: Filesystem-touching bash tools gated by requestPermission
+- **GIVEN** a filesystem-touching bash tool whose permission is configured `"ask"` rather than `"allow"`
+- **WHEN** the tool invocation reaches the permission gate
+- **THEN** `requestPermission()` SHALL be the authoritative decision point for the command
+
+#### Scenario: Skill command with other legacy free-text flags rejected
+- **GIVEN** a whitelisted skill command whose whitespace-delimited tokens include `--content`, `--content=value`, `--query`, `--query=value`, `--caption`, or `--caption=value`
+- **WHEN** the gate evaluates the skill command for auto-approval
+- **THEN** the gate SHALL reject the command instead of approving it
+- **AND** distinct tokens `--content-file`, `--query-file`, `--caption-file` SHALL NOT trigger the rejection
+
+#### Scenario: SESSION_ID expansion consistent with script-side --session-id
+- **GIVEN** a shell session exists (message, spontaneous, self-research, memory-maintenance, channel memory-maintenance, reminder)
+- **WHEN** the gate expands `$SESSION_ID` in a path argument
+- **THEN** the client config's `sessionId` SHALL be set to the shell session id so expansion matches the script-side `--session-id`
+- **AND** flows without a shell session SHALL leave `sessionId` unset, so expansion yields an empty string matching the script-side `{workspace}/tmp` fallback
 
 ### Requirement: Permission Handling — YOLO Mode
 

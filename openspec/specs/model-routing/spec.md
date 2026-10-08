@@ -152,7 +152,7 @@ Invalid rules (missing `match` field, empty `model` string, invalid channel form
 
 ### Requirement: Per-Rule Reasoning Effort
 
-Each model routing rule MAY include an optional `reasoningEffort` field (string). When a rule matches and its `reasoningEffort` is set, that value SHALL be the resolved reasoning effort for the session. When a matching rule omits `reasoningEffort`, the rule SHALL NOT force a reasoning-effort value — resolution SHALL fall through to the caller-provided fallback (section value, then global). A rule's model override and its `reasoningEffort` SHALL be independent: a rule MAY set one without the other.
+Each model routing rule MAY include an optional `reasoningEffort` field (string). When a rule matches and its `reasoningEffort` is set, that value SHALL be the resolved reasoning effort for the session.
 
 #### Scenario: Rule with reasoning effort provides the value
 
@@ -178,9 +178,21 @@ Each model routing rule MAY include an optional `reasoningEffort` field (string)
 - **WHEN** configuration is loaded (from the config file or `MODEL_ROUTING_RULES` JSON)
 - **THEN** the rule SHALL remain valid, its `reasoningEffort` SHALL be preserved as `"ultra"` (passthrough), and a warning SHALL be logged — the rule SHALL NOT be filtered out solely because of a non-standard `reasoningEffort`
 
+#### Scenario: Omitted reasoning effort falls back through caller chain
+
+- **GIVEN** a matching routing rule that omits `reasoningEffort`
+- **WHEN** reasoning effort is resolved
+- **THEN** the rule SHALL NOT force a reasoning-effort value and resolution SHALL fall through to the caller-provided fallback (section value, then global)
+
+#### Scenario: Model override and reasoning effort are independent
+
+- **GIVEN** a routing rule with a `model` override but no `reasoningEffort`
+- **WHEN** the rule matches a session context
+- **THEN** the rule SHALL apply the model override and SHALL NOT force a reasoning-effort value, and the rule's model override and its `reasoningEffort` SHALL be independent: a rule MAY set one without the other
+
 ### Requirement: Reasoning Effort Resolver
 
-The system SHALL provide a `resolveReasoningEffort(routingConfig, context, fallbackEffort)` function that mirrors `resolveModel()`: it SHALL evaluate routing rules in declaration order using the same rule-matching logic and stop at the **first matching rule**. If that first matching rule has `reasoningEffort` set, it SHALL return that value; if the first matching rule omits `reasoningEffort`, it SHALL return `fallbackEffort` and SHALL NOT continue scanning later rules. When routing is disabled or no rule matches, it SHALL return `fallbackEffort`.
+The system SHALL provide a `resolveReasoningEffort(routingConfig, context, fallbackEffort)` function that mirrors `resolveModel()`: it SHALL evaluate routing rules in declaration order using the same rule-matching logic and return the first matching rule's `reasoningEffort`, or the `fallbackEffort` when that rule omits it. When routing is disabled or no rule matches, it SHALL return `fallbackEffort`.
 
 #### Scenario: First matching rule with reasoning effort wins
 

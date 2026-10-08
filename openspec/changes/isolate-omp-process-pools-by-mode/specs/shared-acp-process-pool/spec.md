@@ -56,11 +56,16 @@ The system SHALL maintain a pool of long-lived ACP agent subprocesses keyed by a
 - **WHEN** the pool lazily spawns the entry's process
 - **THEN** the spawn configuration SHALL be built from those explicit option values, and the pool SHALL NOT read or infer the mode or agent type from the live entry, its connector, or its own state
 
+#### Scenario: Message and spontaneous-post pool keys
+- **GIVEN** a message or channel-lurk session for a channel, or a spontaneous-post session
+- **WHEN** the session requests an agent process
+- **THEN** the system SHALL key the pool on `{platform}:{channelId}` for message/channel-lurk sessions and on the scheduler's target channel (e.g. `dm:{userId}`, `misskey/timeline/self`) for spontaneous-post sessions, each non-message session type getting its own process
+
 ## ADDED Requirements
 
 ### Requirement: Effective Permission Mode Resolution Before Acquisition
 
-For every session entry point, the system SHALL resolve the session's effective permission mode using the existing effective-YOLO resolution (global `--yolo` flag taking precedence, then per-channel/account `yolo` configuration, otherwise disabled) BEFORE constructing the agent spawn configuration or requesting a process from the pool, and no acquisition path SHALL spawn or reuse a process before that resolution completes. The enumerated entry points are: (1) normal message sessions, (2) channel-lurk sessions, (3) spontaneous-post sessions, (4) self-research sessions, (5) memory-maintenance (workspace) sessions, (6) channel memory-maintenance sessions, and (7) scheduled-reminder sessions — each in both shared-pool and per-spawn operation — plus (8) the shared pool runner and the pool's own acquire step, which SHALL consume the mode from the acquisition options rather than resolve or infer it, and (9) the conversation-summary step, which runs on the session's already-acquired process under the same lease and SHALL NOT acquire a second process. The resolution semantics themselves SHALL remain the existing ones: internal scheduler sessions (self-research, memory maintenance, channel memory maintenance) resolve from the global flag as today; this requirement governs ordering, explicitness, and coverage, not the YOLO decision rules.
+For every session entry point, the system SHALL resolve the session's effective permission mode — global `--yolo` flag first, then per-channel/account `yolo` configuration, otherwise disabled — BEFORE constructing the agent spawn configuration or requesting a process from the pool, and no acquisition path SHALL spawn or reuse a process before that resolution completes.
 
 #### Scenario: Message session resolves mode before spawning
 - **GIVEN** a normal message session for a channel with `yolo: true` account configuration
@@ -86,6 +91,21 @@ For every session entry point, the system SHALL resolve the session's effective 
 - **GIVEN** a pool that already holds a live entry for a pool key
 - **WHEN** an acquisition arrives whose explicit mode differs from every live entry's mode
 - **THEN** the pool SHALL treat the request by its explicit mode (acquiring a separate entry) rather than reusing or restamping the live entry's mode
+
+#### Scenario: Each entry point resolves in both operation modes
+- **GIVEN** any of the seven enumerated session entry points — normal message, channel-lurk, spontaneous-post, self-research, memory-maintenance (workspace), channel memory-maintenance, and scheduled-reminder — running in either shared-pool or per-spawn operation
+- **WHEN** the entry point prepares to acquire an agent process
+- **THEN** the effective permission mode SHALL be resolved before the spawn configuration is constructed or a process is requested
+
+#### Scenario: Pool runner and acquire step consume the explicit mode
+- **GIVEN** the shared pool runner or the pool's own acquire step processing an acquisition request
+- **WHEN** the request carries the resolved mode in its acquisition options
+- **THEN** the step SHALL consume that mode rather than resolve or infer it
+
+#### Scenario: Scheduler session resolution semantics remain unchanged
+- **GIVEN** internal scheduler sessions (self-research, memory maintenance, channel memory maintenance)
+- **WHEN** their effective permission mode is resolved
+- **THEN** resolution SHALL continue to come from the global `--yolo` flag as today; this requirement governs ordering, explicitness, and coverage, not the YOLO decision rules
 
 ### Requirement: Mode-Split Pools Preserve Global Lease Serialization
 

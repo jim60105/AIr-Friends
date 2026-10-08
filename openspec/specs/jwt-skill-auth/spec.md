@@ -24,7 +24,7 @@ At bootstrap the system SHALL generate a 256-bit CSPRNG deployment secret and pe
 
 ### Requirement: Per-Session Signed JWT Issuance
 
-For each session the system SHALL issue a standard 3-segment JWT: header `{"alg":"HS256"}`, payload `{ sub: <owning session id>, channel: <session's channel ID>, jti: <session's per-session caller token>, iat, exp }`, and an HMAC-SHA256 signature over `header.payload` using the deployment secret. To avoid expiry while a session waits in the serialization queue, the JWT SHALL be issued (or re-issued with a fresh `exp`) when the session ACQUIRES the execution lease, not at registration. The JWT `exp` SHALL be aligned to the session idle TTL (30 minutes); if the same lease outlives it, the system SHALL re-issue the JWT with a fresh `exp` within the lease. The JWT SHALL be written atomically (temp file + rename, mode `0600`, symlink-safe path handling) to a per-session file under `SKILL_JWT_DIR`, in a location outside the agent's restricted read boundary, and SHALL be deleted when the session ends. The current-session pointer file SHALL be written atomically ONLY while the session holds the execution lease (and cleared on release), so a later queued session cannot overwrite the in-flight session's pointer. The per-session JWT file SHALL use secure file hygiene: the temp file is created with mode `0600` BEFORE the atomic rename, the target path is validated as a regular file (`lstat`, no symlink), and the deployment secret SHALL be at least 32 bytes (256 bits). The configured skill-JWT directory SHALL be normalized to an absolute path ONCE and shared by every issuing/cleanup site and by the `SKILL_JWT_DIR` value exported to the agent process, so JWT and pointer files resolve identically from any working directory; a configured relative value SHALL keep its existing meaning (relative to the bot process working directory).
+For each session the system SHALL issue a standard 3-segment JWT (header `{"alg":"HS256"}`, payload `{ sub: <owning session id>, channel: <session's channel ID>, jti: <session's per-session caller token>, iat, exp }`) with an HMAC-SHA256 signature over `header.payload` using the deployment secret.
 
 #### Scenario: JWT issued at lease acquisition
 - **GIVEN** a session `sess_abc_123` (channel `discord/123`, caller token `abc...`) that is queued behind an in-flight session
@@ -41,9 +41,25 @@ For each session the system SHALL issue a standard 3-segment JWT: header `{"alg"
 - **WHEN** the later session's setup runs before it acquires the lease
 - **THEN** the current-session pointer file SHALL still contain the in-flight session's id, and SHALL be updated only when the later session acquires the lease
 
+#### Scenario: Long-lived lease triggers JWT re-issue
+- **GIVEN** a session whose JWT `exp` is aligned to the session idle TTL (30 minutes) and the same execution lease outlives it
+- **WHEN** the JWT's `exp` passes while the session still holds the lease
+- **THEN** the system SHALL re-issue the JWT with a fresh `exp` within the lease
+
+#### Scenario: JWT file written with secure atomic hygiene
+- **GIVEN** a per-session JWT being written under `SKILL_JWT_DIR` in a location outside the agent's restricted read boundary
+- **WHEN** the system persists the JWT file
+- **THEN** it SHALL create the temp file with mode `0600` before an atomic rename and validate the target as a regular file (`lstat`, no symlink)
+- **AND** the deployment secret SHALL be at least 32 bytes (256 bits)
+
+#### Scenario: Skill-JWT directory normalized once
+- **GIVEN** a configured skill-JWT directory (absolute or relative)
+- **WHEN** the system resolves it for issuing, cleanup, and the `SKILL_JWT_DIR` value exported to the agent process
+- **THEN** it SHALL normalize the configured value to an absolute path ONCE and share that single path across every site, so JWT and pointer files resolve identically from any working directory; a configured relative value SHALL keep its existing meaning (relative to the bot process working directory)
+
 ### Requirement: Skill Lib JWT Presentation
 
-The shared skill client library SHALL present the owning session's JWT as an `Authorization: Bearer <jwt>` header on Skill API requests. The owning session id SHALL be resolved from the `SESSION_ID` environment variable (per-spawn mode) or, in shared-process mode, from the orchestrator-maintained current-session pointer file (written only while the session holds the execution lease). The skill script SHALL snapshot the owning session id and the JWT file content ONCE at script start, so a backgrounded skill subprocess cannot observe a later session's pointer or JWT file. Because `SKILL_JWT_DIR` is exported as an absolute path, JWT and pointer file resolution SHALL NOT depend on the skill script's working directory. In neither case SHALL the agent need to read files or pass extra parameters. On lease release the system SHALL verify the pointer's current content equals the releasing session's id before clearing it (so a later session's pointer is never clobbered), and SHALL wait (bounded timeout, then kill the agent process tree) for the agent process's child processes (skill scripts) to fully exit before clearing the pointer and releasing the lease, so a backgrounded script that starts LATE cannot pick up the next session's pointer or JWT file.
+For a Skill API request the shared skill client library SHALL present the owning session's JWT as an `Authorization: Bearer <jwt>` header, resolving the owning session id from `SESSION_ID` (per-spawn mode) or from the current-session pointer file (shared-process mode); in neither case SHALL the agent need to read files or pass extra parameters.
 
 #### Scenario: Skill script presents the owning session's JWT
 - **GIVEN** a skill script running under the owning session `sess_abc_123`
@@ -65,9 +81,24 @@ The shared skill client library SHALL present the owning session's JWT as an `Au
 - **WHEN** the backgrounded script actually starts and reads the pointer
 - **THEN** the pool SHALL still be waiting for the agent's child processes to exit (killing the process tree on timeout) before clearing the pointer, so the script's snapshot resolves to the OWNING session's id and JWT file, not the next session's
 
+#### Scenario: Per-spawn mode resolves owner from SESSION_ID
+- **GIVEN** a per-spawn agent process running a skill script
+- **WHEN** the script invokes the shared client library
+- **THEN** the owning session id SHALL be resolved from the `SESSION_ID` environment variable and its JWT presented
+
+#### Scenario: Skill script snapshots owning identity once at start
+- **GIVEN** a skill script that starts and may later be backgrounded while the next session begins
+- **WHEN** the script starts
+- **THEN** it SHALL snapshot the owning session id and the JWT file content ONCE at script start, so it cannot observe a later session's pointer or JWT file
+
+#### Scenario: Lease cleared only after children exit and pointer verifies
+- **GIVEN** an in-flight session releases the execution lease while its agent process's child skill scripts may still be running
+- **WHEN** the system clears the current-session pointer and releases the lease
+- **THEN** it SHALL wait (bounded timeout, then kill the agent process tree) for all child processes to exit and SHALL verify the pointer's current content equals the releasing session's id before clearing it, so a later session's pointer is never clobbered
+
 ### Requirement: Server-Side JWT Verification
 
-The Skill API server SHALL verify the presented JWT with four checks before executing the skill handler: (1) the HMAC-SHA256 signature over `header.payload` matches the deployment secret (constant-time comparison); (2) the payload's `sub` equals the request's `sessionId`; (3) the payload's `channel` equals the session's registered channel ID; (4) the payload's `jti` equals the session's stored per-session caller token and `exp` has not passed. A request that fails any check SHALL be rejected (HTTP 403 for verification failures, HTTP 401 for expired or unknown session) and the skill handler SHALL NOT run.
+The Skill API server SHALL verify the presented JWT with four checks before executing the skill handler: (1) the HMAC-SHA256 signature over `header.payload` matches the deployment secret (constant-time comparison); (2) the payload's `sub` equals the request's `sessionId`; (3) the payload's `channel` equals the session's registered channel ID; (4) the payload's `jti` equals the session's stored per-session caller token and `exp` has not passed.
 
 #### Scenario: Valid JWT accepted
 - **GIVEN** an active session `sess_abc_123` (channel `discord/123`, caller token `abc...`)
@@ -94,9 +125,19 @@ The Skill API server SHALL verify the presented JWT with four checks before exec
 - **WHEN** the server authenticates it
 - **THEN** the request SHALL be rejected with HTTP 403 and the skill handler SHALL NOT run
 
+#### Scenario: Any failed check rejects and blocks execution
+- **GIVEN** a presented JWT that fails any of the four verification checks
+- **WHEN** the server authenticates it
+- **THEN** the request SHALL be rejected (HTTP 403 for verification failures, HTTP 401 for expired or unknown session) and the skill handler SHALL NOT run
+
+#### Scenario: Signature or channel mismatch rejected
+- **GIVEN** a presented JWT whose HMAC signature does not match the deployment secret, or whose `channel` differs from the session's registered channel ID
+- **WHEN** the server verifies it
+- **THEN** the request SHALL be rejected with HTTP 403 and the skill handler SHALL NOT run
+
 ### Requirement: Pool Process Identity Hygiene
 
-The shared pool process environment SHALL NOT export a per-session identity (`SESSION_ID`), because a value frozen at spawn time would misattribute every later session served by that process. In shared-process mode the current-session pointer is the sole source of owning-session identity; the skill client library SHALL raise a stable `SKILL_SESSION_UNRESOLVED` structured error (code carried in the typed error's `code` field, so payload and identity-only scripts surface it identically) when the pointer is unavailable or malformed (schema violation: non-string or empty session id) instead of falling back to any environment value. Per-spawn mode SHALL keep `$SESSION_ID` as its authoritative identity source.
+The shared pool process environment SHALL NOT export a per-session identity (`SESSION_ID`): a value frozen at spawn time would misattribute every later session served by that process.
 
 #### Scenario: No frozen identity in the pool environment
 - **GIVEN** the pool spawns a shared agent process while session `sess_A` holds the lease
@@ -107,4 +148,19 @@ The shared pool process environment SHALL NOT export a per-session identity (`SE
 - **GIVEN** session `sess_B` runs on the process that was spawned for `sess_A`
 - **WHEN** the agent runs `env` or any skill script during its turn
 - **THEN** no environment value SHALL name `sess_A`; the pointer, `active.json`, and the prompt-rendered session id all name `sess_B`
+
+#### Scenario: Current-session pointer is the sole identity source
+- **GIVEN** a shared-process pool serving consecutive sessions
+- **WHEN** a skill script resolves the owning session
+- **THEN** the current-session pointer SHALL be the sole source of owning-session identity
+
+#### Scenario: Unresolvable pointer raises structured error
+- **GIVEN** the current-session pointer is unavailable or malformed (schema violation: non-string or empty session id) in shared-process mode
+- **WHEN** a skill script resolves the owning session
+- **THEN** the skill client library SHALL raise the stable `SKILL_SESSION_UNRESOLVED` structured error (code carried in the typed error's `code` field, so payload and identity-only scripts surface it identically) instead of falling back to any environment value
+
+#### Scenario: Per-spawn mode keeps SESSION_ID authoritative
+- **GIVEN** a per-spawn agent process
+- **WHEN** a skill script resolves the owning session
+- **THEN** `$SESSION_ID` SHALL remain the authoritative identity source
 

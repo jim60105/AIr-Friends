@@ -6,7 +6,7 @@ Governs container-image packaging of external agent runtimes and deployment-owne
 
 ### Requirement: Pinned Official OMP Executable With Fail-Closed Checksum Verification
 
-The container image SHALL install the official OMP executable at an exact pinned release tag (`v18.6.1`) via an explicit build argument (`ARG OMP_VERSION`) with per-architecture SHA-256 checksum build arguments (`OMP_SHA256_X64`, `OMP_SHA256_ARM64`) whose defaults are the approved release digests. The architecture mapping SHALL send `amd64` to the x64 asset and `arm64` to the arm64 asset and SHALL fail the build naming any other architecture. Because the executable asset filename for a given libc/OS variant is not stable across the base image's floating Debian tag, the build SHALL select, within the exact release tag, the unique asset matching the architecture's name prefix and SHALL pin its SHA-256 verbatim, so any asset-name or content change under the same tag fails closed rather than installing silently. Checksum verification SHALL complete before any installation step consumes the bytes, and the executable SHALL be installed at the contracted image path. The image SHALL NOT introduce a new JavaScript/Bun runtime dependency solely to host the official binary and SHALL NOT add speculative runtime packages for it.
+The container image SHALL install the official OMP executable at an exact pinned release tag (`v18.6.1`) via an explicit build argument (`ARG OMP_VERSION`) with per-architecture SHA-256 checksum build arguments (`OMP_SHA256_X64`, `OMP_SHA256_ARM64`) whose defaults are the approved release digests, and SHALL complete checksum verification before any installation step consumes the bytes, with the executable installed at the contracted image path.
 
 #### Scenario: Exact-tag download with verified checksum precedes install
 - **GIVEN** a container build with the default or supplied `OMP_VERSION`
@@ -30,6 +30,18 @@ The container image SHALL install the official OMP executable at an exact pinned
 - **THEN** no step SHALL install a JavaScript/Bun runtime or speculative helper packages to support the official executable
 - **AND** the pre-existing application runtime base image SHALL remain the only such dependency
 
+#### Scenario: Architecture-to-asset mapping
+- **GIVEN** a build target architecture of `amd64` or `arm64`
+- **WHEN** the asset selection runs
+- **THEN** the mapping SHALL send `amd64` to the x64 asset and `arm64` to the arm64 asset
+- **AND** any other architecture SHALL fail the build naming the unsupported architecture
+
+#### Scenario: Unique asset selection within the exact tag
+- **GIVEN** the executable asset filename for a given libc/OS variant being unstable across the base image's floating Debian tag
+- **WHEN** the build selects the executable asset within the exact release tag
+- **THEN** it SHALL select the unique asset matching the architecture's name prefix and SHALL pin its SHA-256 verbatim
+- **AND** any asset-name or content change under the same tag SHALL fail closed rather than install silently
+
 ### Requirement: Official License and Third-Party Notices Installed and Verified
 
 The container image SHALL download the release's `LICENSE` and `THIRD-PARTY-NOTICES.txt` assets from the same exact version tag, verify each against its own SHA-256 build argument before installation, and install both under the image's third-party license location without displacing the project's existing license file.
@@ -47,7 +59,7 @@ The container image SHALL download the release's `LICENSE` and `THIRD-PARTY-NOTI
 
 ### Requirement: Deployment-Owned OMP Artifacts Installed Outside Agent-Writable Roots
 
-The container image SHALL install the deployment-owned OMP artifacts — the owned settings overlays, the owned system-prompt artifact, and the trusted-extension module tree exactly as authored by their content changes — under a root-owned image tree whose files are not writable by the agent's runtime user. The settings files SHALL be non-writable read-only content, directories SHALL not be group/other writable, and the executable SHALL be installed owned and mode-755 by the root-equivalent user rather than the agent user, so the agent process cannot modify the binary or owned tree it is governed by. The image build SHALL NOT modify the content of any owned artifact; installation is byte-for-byte the authored tree.
+The container image SHALL install the deployment-owned OMP artifacts — the owned settings overlays, the owned system-prompt artifact, and the trusted-extension module tree exactly as authored by their content changes — under a root-owned image tree not writable by the agent's runtime user, so the agent process cannot modify the binary or owned tree it is governed by.
 
 #### Scenario: Owned tree is not agent-writable
 - **WHEN** the finished image layout is asserted from the Containerfile install instructions
@@ -58,9 +70,14 @@ The container image SHALL install the deployment-owned OMP artifacts — the own
 - **WHEN** owned artifacts are copied into the image
 - **THEN** the copy SHALL use the authored source paths without rewriting, templating, or augmenting file content
 
+#### Scenario: Ownership and mode hardening specifics
+- **GIVEN** the finished image contains the owned tree
+- **WHEN** file modes and ownership are inspected
+- **THEN** the settings files SHALL be non-writable read-only content, directories SHALL not be group/other writable, and the executable SHALL be installed owned and mode-755 by the root-equivalent user rather than the agent user
+
 ### Requirement: Auditable Digest Manifest With Recut Invariant
 
-The image build SHALL record a SHA-256 digest manifest covering every installed owned file (extension tree, settings overlays, prompt artifact) in a root-owned, agent-non-writable manifest file, and the manifest SHALL record the pinned version and the trusted-extension serial composition fact, including the reserved-but-unconsumed extension slot whose eventual consumption would change the digest set. The manifest SHALL be cut only over final content: any change that lands content touching the installed owned inputs SHALL recut the manifest within the same change, and a content change shipping with a stale manifest is an acceptance failure.
+The image build SHALL record a SHA-256 digest manifest covering every installed owned file — the extension tree, settings overlays, and prompt artifact — in a root-owned, agent-non-writable manifest file, and SHALL record the pinned version and the trusted-extension serial composition fact, including the reserved-but-unconsumed extension slot whose eventual consumption would change the digest set.
 
 #### Scenario: Manifest covers every installed owned file
 - **WHEN** the digest manifest is produced for a fixture owned tree
@@ -75,7 +92,7 @@ The image build SHALL record a SHA-256 digest manifest covering every installed 
 
 ### Requirement: Development-Path to Image-Path Resolution Contract
 
-The resolution from each contracted development-tree path (trusted-extension entry, owned settings overlay, owned system-prompt artifact) to its installed image path SHALL be exported from the agent path module as a single source of truth, SHALL prefer the image path when it exists on disk, and SHALL fall back to the development-tree path otherwise, so development environments behave exactly as before installation. Operator-mounted mutable prompt overrides SHALL keep their existing mount semantics and SHALL NOT be relocated by the resolver. The launch assembly SHALL consume the resolver's result verbatim with no second path convention.
+The resolution from each contracted development-tree path — the trusted-extension entry, the owned settings overlay, and the owned system-prompt artifact — to its installed image path SHALL be exported from the agent path module as a single source of truth, SHALL prefer the image path when it exists on disk, and SHALL fall back to the development-tree path otherwise, so development environments behave exactly as before installation.
 
 #### Scenario: Image path wins when present
 - **GIVEN** a fixture filesystem containing the installed owned tree
@@ -92,3 +109,9 @@ The resolution from each contracted development-tree path (trusted-extension ent
 - **GIVEN** the operator-mounted prompt override path exists
 - **WHEN** the system-prompt mapping is resolved
 - **THEN** the existing mount-honoring mapping SHALL apply unchanged
+
+#### Scenario: Launch assembly consumes resolver output verbatim
+- **GIVEN** the resolver has produced the chosen path for each contracted artifact
+- **WHEN** the launch assembly starts the agent
+- **THEN** it SHALL consume the resolver's result verbatim with no second path convention
+- **AND** operator-mounted prompt overrides SHALL keep their existing mount semantics and SHALL NOT be relocated by the resolver

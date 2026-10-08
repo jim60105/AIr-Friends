@@ -2,7 +2,7 @@
 
 ### Requirement: Combined Mocked Skill-Handoff Regression Suite
 
-The repository SHALL provide a combined deterministic integration suite that drives the real `SessionOrchestrator` delivery path, the real Skill API server, session registry, and reply/file/reaction handlers, with a mock ACP agent (composed through the shared OMP mock-session builder consumed unchanged, its mock-agent fixture extended additively) and a mock platform adapter, in BOTH per-spawn and pooled spawn shapes, with no real platform service. The suite SHALL cover at minimum: the happy-path handoff where the prompt supplies the literal Skill API session id and absolute staging directory, the payload file is staged at that absolute path, the skill is invoked with the literal session id and absolute payload path, real authentication and payload containment accept it, and exactly one intended platform response is recorded; the missing-reply retry triggering exactly once with a literal-first retry prompt (literal id, absolute staging directory, no unexpanded tokens) and no duplicate or fallback delivery; `send-file` quota and message-id anchor invariants including rejection of file ids for `edit-reply`; at-least-one-response satisfaction by reaction-only and file-only turns without retry, with the conversation-summary gate remaining on a sent text reply; and an OpenCode regression flow whose pool keys, spawn environment, and command strings byte-match the shipped values with the legacy token-path expansion still functioning. The suite SHALL NOT restate single-component decisions already covered by predecessor unit suites or the payload-contract delivery test.
+The repository SHALL provide a combined deterministic integration suite that drives the real `SessionOrchestrator` delivery path, the real Skill API server, session registry, and reply/file/reaction handlers, with a mock ACP agent composed through the shared OMP mock-session builder consumed unchanged and its mock-agent fixture extended additively, and a mock platform adapter, in both per-spawn and pooled spawn shapes, with no real platform service.
 
 #### Scenario: Pooled handoff delivers exactly one intended response
 - **GIVEN** a pooled OMP session with no frozen subprocess session identity, a shared-process marker, and a valid active-session pointer
@@ -30,9 +30,25 @@ The repository SHALL provide a combined deterministic integration suite that dri
 - **AND** the legacy token-path payload resolution SHALL still deliver the response
 - **AND** no readiness verification or trusted-extension involvement SHALL appear
 
+#### Scenario: Handoff prompt carries literal identifiers
+- **GIVEN** the happy-path handoff prompt
+- **WHEN** the prompt is inspected
+- **THEN** it SHALL supply the literal Skill API session id and the absolute staging directory
+
+#### Scenario: Reaction-only turn satisfies the response gate
+- **GIVEN** a session whose only delivered output is a reaction
+- **WHEN** the turn completes
+- **THEN** the at-least-one-response gate SHALL be satisfied without retry
+- **AND** the conversation-summary gate SHALL trigger only on a sent text reply
+
+#### Scenario: Combined suite does not restate single-component coverage
+- **GIVEN** the scope of the combined suite
+- **WHEN** it is reviewed against the predecessor unit suites and the payload-contract delivery test
+- **THEN** it SHALL NOT restate single-component decisions already covered there
+
 ### Requirement: Skill-Handoff Suite Honest Posture and Determinism
 
-Every skill-handoff scenario SHALL assert the inherited fail-closed seams on their deny or blocked outcome wherever they would otherwise be silent, and every restricted allow path SHALL be enabled only by a labeled synthetic positive registered in the suite's runtime synthetic-positive ledger. The suite SHALL NOT execute a real OMP binary, real platform service, external network host, provider credential, container, or bwrap; the Skill API SHALL bind an ephemeral loopback port per test file; every timer-driven path SHALL use the repository's fake-time pattern; subprocess and skill-script completion SHALL be awaited on explicit recorded events rather than wall-clock sleeps; and the suite SHALL run under the existing integration test task and coverage gates without silently invoking live acceptance. No test name, comment, or assertion SHALL claim that the native binary staged a file, invoked a skill, delivered a platform response, or enforced any policy; payload staging by the mock fixture SHALL be documented as standing in for the agent's write, whose authorization decision is the client-side one under test.
+Every skill-handoff scenario SHALL assert the inherited fail-closed seams on their deny or blocked outcome wherever they would otherwise be silent, and every restricted allow path SHALL be enabled only by a labeled synthetic positive registered in the suite's runtime synthetic-positive ledger.
 
 #### Scenario: Unresolved readiness still denies before any skill call
 - **GIVEN** a restricted scenario composed without a synthetic established-readiness fixture
@@ -56,3 +72,23 @@ Every skill-handoff scenario SHALL assert the inherited fail-closed seams on the
 - **THEN** existing mock-agent OpenCode behavior and existing integration suites SHALL be byte-unchanged
 - **AND** any new fields on the shared mock-session builder SHALL be additive with existing lifecycle behavior unchanged
 - **AND** at most one pre-declared additive test-only production seam SHALL appear, if any, with production defaults preserved
+
+#### Scenario: Suite executes no real external component
+- **WHEN** the suite's execution is inspected
+- **THEN** it SHALL NOT execute a real OMP binary, real platform service, external network host, provider credential, container, or bwrap
+
+#### Scenario: Timer paths use fake time and recorded events
+- **GIVEN** any timer-driven path in the suite
+- **WHEN** it runs
+- **THEN** it SHALL use the repository's fake-time pattern
+- **AND** subprocess and skill-script completion SHALL be awaited on explicit recorded events rather than wall-clock sleeps
+
+#### Scenario: Suite runs under existing gates without live acceptance
+- **WHEN** the suite is executed by the repository's test tasks
+- **THEN** it SHALL run under the existing integration test task and coverage gates
+- **AND** it SHALL NOT silently invoke live acceptance
+
+#### Scenario: Claims never attribute actions to the native binary
+- **WHEN** the suite's test names, comments, and assertions are reviewed
+- **THEN** none SHALL claim that the native binary staged a file, invoked a skill, delivered a platform response, or enforced any policy
+- **AND** payload staging by the mock fixture SHALL be documented as standing in for the agent's write, whose authorization decision is the client-side one under test

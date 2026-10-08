@@ -2,7 +2,7 @@
 
 ### Requirement: Controlled URL-Fetch Transport Adapter Decision Core
 
-The restricted OMP deployment SHALL provide a URL-fetch transport adapter decision core that, for every model-supplied URL read and every scraper-derived secondary URL, decides `allow-direct`, `allow-via-proxy`, or `block` from the URL, the consumed egress posture, and an injectable DNS/transport boundary, reusing the existing SSRF rule set as the single classifier: scheme restricted to `http`/`https`, host must resolve to a public address, and loopback, private (RFC1918), link-local, unique-local, unspecified, multicast, reserved, and cloud-metadata addresses SHALL be rejected. The decision core SHALL NOT re-implement, fork, or soften that rule set, and SHALL treat `HTTP_PROXY` environment presence as non-enforcement.
+The restricted OMP deployment SHALL provide a URL-fetch transport adapter decision core that, for every model-supplied URL read and scraper-derived secondary URL, decides `allow-direct`, `allow-via-proxy`, or `block` from the URL, the consumed egress posture, and an injectable DNS/transport boundary, reusing the existing SSRF rule set as the single classifier. The core SHALL NOT re-implement, fork, or soften that rule set.
 
 #### Scenario: Public target admitted under either posture
 - **GIVEN** a mocked DNS answer containing only public addresses for an `https` model-supplied URL
@@ -21,9 +21,21 @@ The restricted OMP deployment SHALL provide a URL-fetch transport adapter decisi
 - **WHEN** the adapter decision core is consulted
 - **THEN** the decision SHALL be a block and the input SHALL NOT be proxied by the adapter
 
+#### Scenario: Shared classifier details stay the single rule set
+- **GIVEN** URL read inputs exercising scheme, resolution, and address-class rules
+- **WHEN** the decision core classifies them under either posture
+- **THEN** the scheme SHALL be restricted to `http`/`https`, the host SHALL resolve to a public address, and loopback, private (RFC1918), link-local, unique-local, unspecified, multicast, reserved, and cloud-metadata addresses SHALL be rejected
+- **AND** the decision SHALL come only from the shared SSRF rule set
+
+#### Scenario: HTTP_PROXY presence is non-enforcement
+- **GIVEN** an environment where `HTTP_PROXY` is present
+- **WHEN** the decision core classifies a URL read target
+- **THEN** the decision SHALL treat `HTTP_PROXY` presence as non-enforcement
+- **AND** the verdict SHALL be identical to one reached without `HTTP_PROXY`
+
 ### Requirement: Manual Per-Hop Redirect and Secondary-URL Re-Validation
 
-The adapter SHALL treat every redirect hop and every scraper secondary URL as a fresh decision input: redirect responses SHALL be handled manually (never by automatic native hop following), each hop target SHALL be re-validated through the same SSRF rules before the next request is issued, and the chain SHALL be bounded by the existing five-hop maximum, blocking with a distinct hop-limit reason when exceeded. A redirect or secondary URL from an initially public hop to a private, loopback, link-local, unique-local, or metadata target SHALL be blocked at that hop.
+The adapter SHALL treat every redirect hop and every scraper secondary URL as a fresh decision input: redirect responses SHALL be handled manually (never by automatic native hop following), and each hop target SHALL be re-validated through the same SSRF rules before the next request is issued, with the chain bounded by the existing five-hop maximum.
 
 #### Scenario: Public-to-private redirect blocked at the hop
 - **GIVEN** a synthetic redirect chain whose first hop is public and whose `Location` resolves, via mocked DNS, to a loopback address
@@ -41,9 +53,15 @@ The adapter SHALL treat every redirect hop and every scraper secondary URL as a 
 - **WHEN** the adapter decides the secondary request
 - **THEN** the secondary request SHALL be blocked under the same rules as a model-supplied URL
 
+#### Scenario: Hop to a restricted address class blocked at that hop
+- **GIVEN** a redirect hop or scraper secondary URL whose target resolves to a link-local, unique-local, or metadata address after an initially public hop
+- **WHEN** the adapter re-validates the hop
+- **THEN** the decision SHALL be a block at that hop
+- **AND** no request SHALL be issued to the restricted target
+
 ### Requirement: Egress-Policy-Selected Proxy Routing with Operator Posture Preserved
 
-When the consumed egress configuration is `egressProxy` enabled and `unrestrictedEgress` disabled, every adapter-allowed URL-read hop SHALL be routed through the running AIr validating egress proxy endpoint in addition to the adapter's own validation. When the operator has selected `unrestrictedEgress`, the adapter SHALL keep the operator's existing posture — validated model-supplied targets are fetched without a new proxy requirement, best-effort environment routing remains documented as not kernel-guaranteed, and the adapter SHALL introduce no additional denial beyond the shared SSRF rule set and no YOLO-only network denial. Configuration values SHALL be consumed unchanged.
+When the consumed egress configuration enables `egressProxy` and disables `unrestrictedEgress`, every adapter-allowed URL-read hop SHALL be routed through the running AIr validating egress proxy endpoint in addition to the adapter's own validation, with configuration values consumed unchanged.
 
 #### Scenario: Enforcing posture selects the proxy route
 - **GIVEN** the enforcing egress posture and a public validated target
@@ -57,9 +75,18 @@ When the consumed egress configuration is `egressProxy` enabled and `unrestricte
 - **THEN** the adapter SHALL allow them without proxy routing
 - **AND** only the shared rule set (private/metadata targets, hop bound) may still block
 
+#### Scenario: YOLO-only network denial is not introduced
+- **WHEN** the adapter composes denials under the unrestricted-egress posture
+- **THEN** the adapter SHALL introduce no additional denial beyond the shared SSRF rule set
+- **AND** the adapter SHALL introduce no YOLO-only network denial
+
+#### Scenario: Best-effort environment routing stays documented
+- **WHEN** best-effort environment routing is relied on under the unrestricted-egress posture
+- **THEN** it SHALL remain documented as not kernel-guaranteed
+
 ### Requirement: Text and Binary Fetch Paths with Credential-Free Decision Records
 
-The adapter SHALL expose distinct text and binary decision/transport paths mirroring the native URL-read shapes: a bounded text route for page and markdown bodies, and a binary route carrying content-length pre-check, streaming size cap, and content-disposition/extension hints. Adapter decision records and logs SHALL contain at most the target host, hop index, decision, and reason code; they SHALL NOT contain URL userinfo or query strings, request or response headers, credentials, or payload content.
+The adapter SHALL expose distinct text and binary decision/transport paths mirroring the native URL-read shapes: a bounded text route for page and markdown bodies, and a binary route carrying content-length pre-check, streaming size cap, and content-disposition/extension hints.
 
 #### Scenario: Binary route preserves native-shaped limits
 - **GIVEN** a mocked binary response with a declared content length above the configured maximum
@@ -72,9 +99,14 @@ The adapter SHALL expose distinct text and binary decision/transport paths mirro
 - **WHEN** the resulting decision records and adapter log lines are inspected
 - **THEN** neither SHALL contain the userinfo, query string, headers, credentials, or payload bytes
 
+#### Scenario: Records carry only the enumerated decision fields
+- **GIVEN** any adapter decision record or log line
+- **WHEN** its contents are inspected
+- **THEN** it SHALL contain at most the target host, hop index, decision, and reason code
+
 ### Requirement: Source-Cited Supported-Route Enumeration with Honest Blocked Residuals
 
-The change SHALL enumerate, as machine-readable route data with pinned-source citations, which native URL-read routes are interceptable by supported mechanisms versus the recorded bypasses. The URL branch of the model `read` tool (text route, binary route, and its secondary hops), including its file-materialization consumers, SHALL be marked completed by the trusted extension's controlled replacement of the `read` tool — the supported registration mechanism that overlays the registry for the same tool name while preserving delegation of non-URL inputs to the captured native implementation. The partial native fetch-override seam SHALL be recorded as existing but not selected, with its enrichment-only reach cited. Every route the replacement does not cover — including provider subrequests reached through web-search and code-search surfaces and any residual native consumer of the recorded automatic-redirect global-fetch paths — SHALL remain blocked under the enforcing posture with the existing pending-adapter decision and a `userDecisionRequired` marker; no route SHALL silently fall back to native transport for private-target risk.
+The change SHALL enumerate, as machine-readable route data with pinned-source citations, which native URL-read routes are interceptable by supported mechanisms versus the recorded bypasses, marking the `read` URL-branch routes (text, binary, secondary hops, and their materialization consumers) as completed via the trusted extension's controlled replacement of the `read` tool, and keeping every route the replacement does not cover blocked under the enforcing posture.
 
 #### Scenario: Completed routes are exactly the replaced read URL branch
 - **WHEN** the route table is read
@@ -92,6 +124,18 @@ The change SHALL enumerate, as machine-readable route data with pinned-source ci
 - **WHEN** enforcement composes the decision under the enforcing posture
 - **THEN** the call SHALL be blocked with the pending-adapter reason
 - **AND** no unadapted native transport SHALL be reachable through it
+
+#### Scenario: Replacement preserves non-URL delegation
+- **GIVEN** the trusted extension's controlled replacement of the `read` tool overlaying the registry for the same tool name
+- **WHEN** a non-URL input is routed to the tool
+- **THEN** the input SHALL be delegated to the captured native implementation
+- **AND** the replacement SHALL be the supported registration mechanism completing the URL branch
+
+#### Scenario: Partial fetch-override seam recorded as not selected
+- **GIVEN** the partial native fetch-override seam with enrichment-only reach
+- **WHEN** the route data is compiled
+- **THEN** the seam SHALL be recorded as existing but not selected
+- **AND** its enrichment-only reach SHALL be cited
 
 ### Requirement: Pending-Adapter Seam Completion Is Additive and Route-Scoped
 
@@ -115,7 +159,7 @@ The adapter's target decision SHALL apply only to model-supplied or fetch-derive
 
 ### Requirement: URL-Fetch Adapter Acceptance Is Deterministic Mock-Only
 
-All adapter acceptance SHALL run against a mocked fetch transport, mocked DNS resolution, and synthetic redirect chains with zero network contact, certifying allow/deny decisions, proxy-route selection under both egress postures, per-hop re-validation, the hop bound, text/binary behavior, credential-free records, and the route-table verdicts. Native-side behavior — the compiled agent actually invoking the replacement and adapter — SHALL remain on the user-owned runtime verification checklist, and no mock SHALL be presented as proof of native hook coverage or as clearing the pinned transport-bypass record.
+All adapter acceptance SHALL run against a mocked fetch transport, mocked DNS resolution, and synthetic redirect chains with zero network contact, certifying allow/deny decisions, proxy-route selection under both egress postures, per-hop re-validation, the hop bound, text/binary behavior, credential-free records, and route-table verdicts.
 
 #### Scenario: Whole suite runs without network access
 - **WHEN** the adapter test suites execute
@@ -125,3 +169,7 @@ All adapter acceptance SHALL run against a mocked fetch transport, mocked DNS re
 #### Scenario: Native use stays user-owned
 - **WHEN** the implementation handoff is assembled
 - **THEN** the checklist SHALL carry the observation of real URL-read traffic through the adapter/proxy, including binary/text fetches, redirects, and private-target failures, marked unverified until user-observed
+
+#### Scenario: No mock certifies native hook coverage
+- **WHEN** the mocked acceptance suites pass
+- **THEN** no mock SHALL be presented as proof of native hook coverage or as clearing the pinned transport-bypass record

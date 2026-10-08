@@ -89,7 +89,7 @@ The `GitBackupScheduler` SHALL execute backups at a fixed interval defined by `g
 
 ### Requirement: Authentication
 
-The service SHALL build an authenticated URL by injecting credentials into the remote URL. The password SHALL be resolved from `gitBackup.authPassword`, falling back to the `GITHUB_TOKEN` environment variable. The username SHALL be resolved from `gitBackup.authUser`, then `gitBackup.authorEmail`, then `"x-access-token"`. If no password is available, the plain remote URL SHALL be used. Credentials in git command output SHALL be redacted in logs: stdout/stderr content replaces `//user:pass@` with `//***:***@`, and any command argument containing `@` SHALL be logged as `[REDACTED_URL]`.
+The service SHALL build an authenticated URL by injecting credentials into the remote URL. The password SHALL be resolved from `gitBackup.authPassword`, falling back to the `GITHUB_TOKEN` environment variable; the username SHALL be resolved from `gitBackup.authUser`, then `gitBackup.authorEmail`, then `"x-access-token"`.
 
 #### Scenario: Auth with configured credentials
 - **GIVEN** `authUser` is `"bot"` and `authPassword` is `"secret"`
@@ -101,15 +101,20 @@ The service SHALL build an authenticated URL by injecting credentials into the r
 - **WHEN** a push is executed
 - **THEN** the `GITHUB_TOKEN` value SHALL be used as the password
 
+#### Scenario: No password available
+- **GIVEN** no password is available from `authPassword` or `GITHUB_TOKEN`
+- **WHEN** the authenticated URL is built
+- **THEN** the plain remote URL SHALL be used
+
+#### Scenario: Credentials redacted in logs
+- **GIVEN** a git command outputs text containing `//user:pass@` or is invoked with a credential-bearing argument
+- **WHEN** the command output or arguments are logged
+- **THEN** `//user:pass@` SHALL be replaced with `//***:***@` in stdout/stderr content
+- **AND** any command argument containing `@` SHALL be logged as `[REDACTED_URL]`
+
 ### Requirement: Push Conflict Resolution
 
-When a direct push fails, the service SHALL attempt conflict resolution in order:
-
-1. **Attempt 1**: Direct `git push`
-2. **Attempt 2**: `git fetch` → `git rebase origin/{branch}` → `git push` (if rebase fails, abort rebase; if abort itself fails, fall back to `git reset --hard HEAD`)
-3. **Attempt 3**: Create a `backup-{datetime}` fallback branch → push to that branch → switch back to the default branch
-
-During periodic backups (`performBackup`), the conflict resolution SHALL be limited to: direct push → fetch + rebase + retry push. If the retry also fails, the backup SHALL return `false`.
+When a direct push fails, the service SHALL attempt conflict resolution in order: (1) direct `git push`; (2) `git fetch`, `git rebase origin/{branch}`, `git push`; (3) create a `backup-{datetime}` fallback branch, push it, and switch back to the default branch.
 
 #### Scenario: Push conflict during initialization
 - **GIVEN** a direct push is rejected during initialization
@@ -122,6 +127,17 @@ During periodic backups (`performBackup`), the conflict resolution SHALL be limi
 - **WHEN** fetch and rebase succeed
 - **THEN** the push SHALL be retried once
 - **AND** if the retry fails, `performBackup()` SHALL return `false`
+
+#### Scenario: Rebase failure aborts and falls back
+- **GIVEN** `git rebase origin/{branch}` fails during conflict resolution
+- **WHEN** the rebase fails
+- **THEN** the rebase SHALL be aborted
+- **AND** if the abort itself fails, the service SHALL fall back to `git reset --hard HEAD`
+
+#### Scenario: Periodic backups use a limited resolution sequence
+- **GIVEN** a direct push fails during a periodic backup (`performBackup`)
+- **WHEN** conflict resolution is attempted
+- **THEN** the resolution SHALL be limited to direct push, then fetch + rebase + retry push
 
 ### Requirement: Author Configuration
 
@@ -152,7 +168,7 @@ Before staging files, the service SHALL deregister all submodules via `git submo
 
 ### Requirement: Expected git exit codes are not errors
 
-The git execution helper SHALL accept an explicit set of expected exit codes per invocation. An exit code within the expected set SHALL be logged at DEBUG level (with the command args and code), not ERROR. Only unexpected non-zero exit codes SHALL log "Git command failed" at ERROR. State-probe commands SHALL declare their legitimate non-zero codes: `diff --cached --quiet` expects exit 1 to mean "staged changes exist" (the normal backup-needed path) and `rev-parse --verify HEAD` expects exit 128 to mean "no commits yet" (fresh-repository initialization). Operation commands (add, commit, push, pull, fetch, clone) keep ERROR logging for all non-zero codes.
+The git execution helper SHALL accept an explicit set of expected exit codes per invocation. An exit code within the expected set SHALL be logged at DEBUG level (with the command args and code), not ERROR; only unexpected non-zero exit codes SHALL log "Git command failed" at ERROR.
 
 #### Scenario: Staged-changes probe is not an error
 - **GIVEN** the data directory has staged changes awaiting backup
@@ -165,24 +181,30 @@ The git execution helper SHALL accept an explicit set of expected exit codes per
 - **WHEN** `git push` exits non-zero
 - **THEN** the failure SHALL be logged at ERROR with redacted credentials, as before
 
+#### Scenario: Fresh-repository probe exit 128 is expected
+- **GIVEN** `rev-parse --verify HEAD` exits with code 128
+- **WHEN** the state-probe command runs during initialization of a fresh repository
+- **THEN** the exit code SHALL be logged at DEBUG as meaning "no commits yet"
+
+#### Scenario: Operation commands keep ERROR logging
+- **GIVEN** an operation command (add, commit, push, pull, fetch, clone) exits with a non-zero code
+- **WHEN** the operation command runs
+- **THEN** the exit code SHALL be logged at ERROR with "Git command failed"
+
 ### Requirement: Environment Variable Overrides
 
-The following environment variables SHALL override their corresponding configuration values:
-
-| Environment Variable      | Config Path              | Type    |
-| ------------------------- | ------------------------ | ------- |
-| `GIT_BACKUP_ENABLED`      | `gitBackup.enabled`      | Boolean |
-| `GIT_BACKUP_REMOTE_URL`   | `gitBackup.remoteUrl`    | String  |
-| `GIT_BACKUP_INTERVAL_MS`  | `gitBackup.intervalMs`   | Number  |
-| `GIT_BACKUP_AUTHOR_NAME`  | `gitBackup.authorName`   | String  |
-| `GIT_BACKUP_AUTHOR_EMAIL` | `gitBackup.authorEmail`  | String  |
-| `GIT_BACKUP_AUTH_USER`    | `gitBackup.authUser`     | String  |
-| `GIT_BACKUP_AUTH_PASSWORD` | `gitBackup.authPassword` | String  |
+The following environment variables SHALL override their corresponding configuration values: `GIT_BACKUP_ENABLED` → `gitBackup.enabled`, `GIT_BACKUP_REMOTE_URL` → `gitBackup.remoteUrl`, `GIT_BACKUP_INTERVAL_MS` → `gitBackup.intervalMs`, `GIT_BACKUP_AUTHOR_NAME` → `gitBackup.authorName`, `GIT_BACKUP_AUTHOR_EMAIL` → `gitBackup.authorEmail`, `GIT_BACKUP_AUTH_USER` → `gitBackup.authUser`, `GIT_BACKUP_AUTH_PASSWORD` → `gitBackup.authPassword`.
 
 #### Scenario: Override via environment variables
 - **GIVEN** `GIT_BACKUP_ENABLED=true` and `GIT_BACKUP_INTERVAL_MS=1800000`
 - **WHEN** the configuration is loaded
 - **THEN** git backup SHALL be enabled with interval 1,800,000 ms
+
+#### Scenario: Override values parsed by declared type
+- **GIVEN** an override environment variable from the list above is set
+- **WHEN** the configuration is loaded
+- **THEN** `GIT_BACKUP_ENABLED` SHALL be parsed as a Boolean and `GIT_BACKUP_INTERVAL_MS` as a Number
+- **AND** `GIT_BACKUP_REMOTE_URL`, `GIT_BACKUP_AUTHOR_NAME`, `GIT_BACKUP_AUTHOR_EMAIL`, `GIT_BACKUP_AUTH_USER`, and `GIT_BACKUP_AUTH_PASSWORD` SHALL be parsed as Strings
 
 ### Requirement: Data directory .gitignore is operator-owned
 

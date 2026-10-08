@@ -177,23 +177,49 @@ The following environment variables SHALL override the corresponding config valu
 
 ### Requirement: Differences from Spontaneous Posting
 
-The channel lurk feature SHALL differ from spontaneous posting in the following ways:
-
-| Aspect           | Spontaneous Post        | Channel Lurk Reply               |
-| ---------------- | ----------------------- | -------------------------------- |
-| Interval         | Random (min–max range)  | Fixed interval                   |
-| Trigger          | Unconditional           | All 4 conditions must pass       |
-| Target selection | Random from whitelist   | All whitelisted channels checked |
-| Trigger message  | None (self-initiated)   | Last message in channel          |
-| Session type     | `spontaneous`           | `channelLurk`                    |
-| Prompt template  | `system_spontaneous.md` | `system_reply.md`                |
-| Platform support | Discord + Misskey       | Discord only                     |
+The channel lurk feature SHALL differ from spontaneous posting in the following ways: it uses a fixed interval instead of a random min–max range, triggers only when all 4 conditions pass, checks all whitelisted channels, triggers on the last message, uses session type `channelLurk`, reuses the `system_reply.md` prompt template, and supports Discord only.
 
 #### Scenario: Channel lurk uses fixed interval and reuses reply prompt
 - **GIVEN** both spontaneous posting and channel lurk are enabled
 - **WHEN** each feature triggers a session
 - **THEN** spontaneous posting SHALL use a random interval and `system_spontaneous.md`
 - **AND** channel lurk SHALL use a fixed interval and `system_reply.md`
+
+#### Scenario: Fixed interval vs random min-max range
+- **GIVEN** both spontaneous posting and channel lurk are enabled
+- **WHEN** comparing scheduling behavior
+- **THEN** spontaneous posting SHALL schedule at a random interval within a min–max range
+- **AND** channel lurk SHALL schedule at a fixed interval
+
+#### Scenario: Unconditional vs conditional triggering
+- **GIVEN** both spontaneous posting and channel lurk are enabled
+- **WHEN** comparing trigger conditions
+- **THEN** spontaneous posting SHALL trigger unconditionally
+- **AND** channel lurk SHALL trigger only when all 4 conditions pass
+
+#### Scenario: Random vs all-channels target selection
+- **GIVEN** both spontaneous posting and channel lurk are enabled
+- **WHEN** comparing target selection
+- **THEN** spontaneous posting SHALL pick a random channel from the whitelist
+- **AND** channel lurk SHALL check all whitelisted channels
+
+#### Scenario: No trigger message vs last message
+- **GIVEN** both spontaneous posting and channel lurk are enabled
+- **WHEN** comparing what initiates a session
+- **THEN** spontaneous posting SHALL start with no trigger message (self-initiated)
+- **AND** channel lurk SHALL use the last message in the channel as its trigger message
+
+#### Scenario: Session type differences
+- **GIVEN** both spontaneous posting and channel lurk are enabled
+- **WHEN** each feature creates a session
+- **THEN** spontaneous posting SHALL use session type `spontaneous`
+- **AND** channel lurk SHALL use session type `channelLurk`
+
+#### Scenario: Platform support differences
+- **GIVEN** both spontaneous posting and channel lurk are enabled
+- **WHEN** comparing supported platforms
+- **THEN** spontaneous posting SHALL support Discord and Misskey
+- **AND** channel lurk SHALL support Discord only
 
 ### Requirement: State Persistence
 

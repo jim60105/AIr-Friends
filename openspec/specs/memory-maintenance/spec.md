@@ -238,19 +238,20 @@ The scheduler SHALL support `start()`, `stop()`, and `getStatus()` methods. Call
 
 ### Requirement: Environment Variable Overrides
 
-The following environment variables SHALL override the corresponding config values:
-
-| Environment Variable                  | Config Path                        |
-| ------------------------------------- | ---------------------------------- |
-| `MEMORY_MAINTENANCE_ENABLED`          | `memoryMaintenance.enabled`        |
-| `MEMORY_MAINTENANCE_MODEL`            | `memoryMaintenance.model`          |
-| `MEMORY_MAINTENANCE_MIN_MEMORY_COUNT` | `memoryMaintenance.minMemoryCount` |
-| `MEMORY_MAINTENANCE_INTERVAL_MS`      | `memoryMaintenance.intervalMs`     |
+The following environment variables SHALL override the corresponding `memoryMaintenance` config values when set in the environment: `MEMORY_MAINTENANCE_ENABLED`, `MEMORY_MAINTENANCE_MODEL`, `MEMORY_MAINTENANCE_MIN_MEMORY_COUNT`, `MEMORY_MAINTENANCE_INTERVAL_MS`.
 
 #### Scenario: Override via environment
 - **GIVEN** `MEMORY_MAINTENANCE_ENABLED=true` and `MEMORY_MAINTENANCE_MIN_MEMORY_COUNT=80`
 - **WHEN** the configuration is loaded
 - **THEN** maintenance is enabled with threshold 80
+
+#### Scenario: Full environment-to-config mapping
+- **GIVEN** `MEMORY_MAINTENANCE_ENABLED`, `MEMORY_MAINTENANCE_MODEL`, `MEMORY_MAINTENANCE_MIN_MEMORY_COUNT`, and `MEMORY_MAINTENANCE_INTERVAL_MS` are set
+- **WHEN** the configuration is loaded
+- **THEN** `MEMORY_MAINTENANCE_ENABLED` SHALL override `memoryMaintenance.enabled`
+- **AND** `MEMORY_MAINTENANCE_MODEL` SHALL override `memoryMaintenance.model`
+- **AND** `MEMORY_MAINTENANCE_MIN_MEMORY_COUNT` SHALL override `memoryMaintenance.minMemoryCount`
+- **AND** `MEMORY_MAINTENANCE_INTERVAL_MS` SHALL override `memoryMaintenance.intervalMs`
 
 ### Requirement: State Persistence
 

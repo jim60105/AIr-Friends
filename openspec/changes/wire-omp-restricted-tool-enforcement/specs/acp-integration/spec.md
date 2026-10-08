@@ -2,7 +2,7 @@
 
 ### Requirement: Trusted-Extension Tool-Call Enforcement Wiring
 
-The AIr-owned trusted extension SHALL attach the restricted `tool_call` enforcement handler body to the slot registered synchronously during trusted-module loading, and the body SHALL decide every restricted tool call by composing the restricted tool decision modules — inventory allow/default-deny, live-provenance admit/deny, alternate-capability-and-route blocking, destructive-intent consumption, and advisory approval-record interpretation — with no decision logic of its own: the composition table, call ordering, freshness rules, and error vocabulary are the only wiring-owned data, and any behavior change requiring new decision logic SHALL be made in the decision tables instead. The composition SHALL order the steps so that no advisory approval record, pending-adapter outcome, or completion-delegation marker can short-circuit an inventory, provenance, or alternate-route denial, and an allow-gated, sink-routed, or admitted-MCP outcome SHALL name the completing predecessor authority rather than assert authorization by the handler itself.
+The AIr-owned trusted extension SHALL attach the restricted `tool_call` enforcement handler body to the handler slot registered synchronously during trusted-module loading; that body SHALL decide every restricted tool call solely by composing the restricted tool decision modules — inventory allow/default-deny, live-provenance admit/deny, alternate-route blocking, destructive-intent consumption, and advisory approval-record interpretation — with no decision logic of its own.
 
 #### Scenario: Denied-tool fixture reaches the fail-closed block
 - **GIVEN** a restricted handler fixture presenting a tool the inventory decision denies
@@ -27,9 +27,26 @@ The AIr-owned trusted extension SHALL attach the restricted `tool_call` enforcem
 - **THEN** the denial SHALL stand and the record SHALL appear only as an advisory input in the decision trace
 - **AND** no composition ordering SHALL consult records before inventory, provenance, and alternate-route decisions
 
+#### Scenario: Wiring changes land in decision tables
+- **GIVEN** a behavior change requiring new decision logic, call ordering, freshness rules, or error-vocabulary entries
+- **WHEN** the wiring is implemented
+- **THEN** the change SHALL be made in the decision tables, which along with call ordering, freshness rules, and error vocabulary are the only wiring-owned data
+- **AND** the handler body SHALL acquire no decision logic of its own
+
+#### Scenario: Composition cannot be short-circuited
+- **GIVEN** a call carrying an advisory approval record, a pending-adapter outcome, or a completion-delegation marker
+- **WHEN** the handler body composes the steps in order
+- **THEN** no such record, outcome, or marker SHALL short-circuit an inventory, provenance, or alternate-route denial
+
+#### Scenario: Allowed outcomes name the completing authority
+- **GIVEN** an allow-gated, sink-routed, or admitted-MCP outcome
+- **WHEN** the handler body completes the decision
+- **THEN** it SHALL name the completing predecessor authority
+- **AND** the handler itself SHALL NOT assert authorization
+
 ### Requirement: Per-Call Consultation With Live Origin Observation
 
-The enforcement handler SHALL be consulted on EVERY restricted tool call, including tools that first appear mid-session through dynamic registration or recovery re-discovery, and SHALL read, fresh on each call, the tool's current recorded origin from the live tool-metadata observation, the current registry epoch, and the current resource generation; no decision, origin record, or registry snapshot SHALL be memoized across calls or trusted from startup. A stale origin observation or stale resource generation SHALL yield the re-observe denial rather than admission, and a handler-internal error or timeout SHALL fail the call closed through the pinned blocking semantics without any catch-and-continue path.
+The enforcement handler SHALL be consulted on EVERY restricted tool call, including tools that first appear mid-session through dynamic registration or recovery re-discovery, and SHALL read, fresh on each call, the tool's current recorded origin, the current registry epoch, and the current resource generation; no decision, origin record, or registry snapshot SHALL be memoized across calls or trusted from startup.
 
 #### Scenario: Mid-session tool is in scope automatically
 - **GIVEN** a tool registered after trusted-module load
@@ -55,9 +72,14 @@ The enforcement handler SHALL be consulted on EVERY restricted tool call, includ
 - **THEN** the tool call SHALL be blocked fail-closed
 - **AND** no code path SHALL continue the call after the failure
 
+#### Scenario: Stale resource generation denies until refreshed
+- **GIVEN** a call whose current resource generation is stale relative to the live tool-metadata observation
+- **WHEN** the handler composes the decision
+- **THEN** the call SHALL be denied with the re-observe denial rather than admitted
+
 ### Requirement: Bounded Fail-Closed Enforcement Errors
 
-A blocked restricted call SHALL surface to the client as a fail-closed tool-call error carrying exactly one bounded machine-readable code from the finite union of the decision-module reason vocabulary and the wiring-level codes for seam blocks, stale observations, and pending-adapter blocks. The error SHALL name at most the capability identifier, route surface, origin category, and stale element from static enumerations, and SHALL NOT contain file or argument payloads, model or chat content, credentials, tokens, secrets, or raw tool output. A blocked call SHALL NOT route through the permission-request path, SHALL NOT invoke any elicitation, form, or interactive approval surface, and SHALL NOT be echoed into the retry prompt rejection buffer.
+A blocked restricted call SHALL surface to the client as a fail-closed tool-call error carrying exactly one bounded machine-readable code from the finite union of the decision-module reason vocabulary and the wiring-level codes for seam blocks, stale observations, and pending-adapter blocks.
 
 #### Scenario: Error shape is bounded and non-secret
 - **WHEN** any block fixture's error is inspected
@@ -76,9 +98,20 @@ A blocked restricted call SHALL surface to the client as a fail-closed tool-call
 - **THEN** the call SHALL be blocked with the bounded pending-adapter reason
 - **AND** no unadapted native transport SHALL be reachable through that call
 
+#### Scenario: Error names only enumerated fields
+- **GIVEN** a blocked restricted call
+- **WHEN** its fail-closed error is surfaced
+- **THEN** the error SHALL name at most the capability identifier, route surface, origin category, and stale element, all from static enumerations
+- **AND** the error SHALL NOT contain file or argument payloads, model or chat content, credentials, tokens, secrets, or raw tool output
+
+#### Scenario: No retry-prompt echo of blocks
+- **GIVEN** a restricted call blocked by any enforcement reason
+- **WHEN** the failure is surfaced to the run
+- **THEN** the block SHALL NOT be echoed into the retry prompt rejection buffer
+
 ### Requirement: Post-Start MCP Registry Refresh Re-Admission
 
-When operator or client-owned MCP tools register or refresh AFTER startup, the wiring SHALL advance the registry epoch from the live tool-metadata observation, re-invoke the MCP admission decision for the fresh epoch, and decide per call from current data — with no generic human-elicitation or form UI anywhere in the path and no one-shot acknowledgement of refreshed tools. A refreshed tool that passes admission SHALL proceed only to its completing authority; a refreshed tool that fails admission — wrong origin, unowned discovery, or an alternate-route surface — SHALL remain denied with its bounded reason. The readiness reset triggered by an epoch advance SHALL be consumed as shipped and SHALL NOT be bypassed, delayed, or satisfied by the refresh path.
+When operator or client-owned MCP tools register or refresh AFTER startup, the wiring SHALL advance the registry epoch from the live tool-metadata observation, re-invoke the MCP admission decision for the fresh epoch, and decide each call from current data, with no generic human-elicitation or form UI anywhere in the path.
 
 #### Scenario: Refreshed owned MCP tool re-admitted on fresh epoch
 - **GIVEN** an operator MCP tool registered or refreshed after startup with client ownership and a current-epoch observation
@@ -103,9 +136,14 @@ When operator or client-owned MCP tools register or refresh AFTER startup, the w
 - **THEN** the readiness reset behavior shipped by the readiness requirements SHALL apply unchanged
 - **AND** the enforcement wiring SHALL have neither established nor bypassed readiness
 
+#### Scenario: Unowned-discovery refresh stays denied
+- **GIVEN** a post-start MCP registration or refresh recorded under unowned discovery
+- **WHEN** a restricted call to that tool is handled
+- **THEN** the tool SHALL remain denied with its bounded reason
+
 ### Requirement: Restricted-Only Enforcement Registration
 
-The enforcement handler SHALL be attached only in the restricted trusted-extension process, gated on the module's own restricted-mode launch identity, and the native-YOLO process SHALL register no restricted tool-call policy, load no restricted approval records, and be structurally incapable of these denials. OpenCode SHALL load no extension handler at all and SHALL be behaviorally unchanged. The exemption SHALL be structural at the registration site — not a mode check inside the decision path — and the handler entry SHALL additionally fail closed if the observed process identity is not the restricted one.
+The enforcement handler SHALL be attached only in the restricted trusted-extension process, gated on the module's own restricted-mode launch identity, and the exemption SHALL be structural at the registration site — not a mode check inside the decision path.
 
 #### Scenario: YOLO process registers no handler
 - **GIVEN** a native-YOLO OMP process fixture built from the shared bootstrap's YOLO branch
@@ -126,7 +164,7 @@ The enforcement handler SHALL be attached only in the restricted trusted-extensi
 
 ### Requirement: Fail-Closed Behavior At Unresolved Inherited Seams
 
-The wiring SHALL export a named enforcement-wiring gate enumerating every inherited unresolved seam with its source verdict reproduced verbatim and a required user decision — the MCP admission mechanism basis recorded as needing a mechanism audit with no boundary row in the pinned compatibility ledger, the readiness establishment channel unimplemented, the authoritative approval-record reset incompatible, complete destructive-intent decoding unresolved, network-parity adapters pending, and the discovery-side gates consumed as shipped — together with the handler's fail-closed behavior at each seam. The wiring SHALL NOT manufacture a passing admission, readiness, grant, decoding, or mechanism status to complete any fixture or flow: allow-path fixtures SHALL be labeled synthetic, no fixture or passing test SHALL relabel a status or clear a gate, and the documentation SHALL state that while the seams stand, real restricted sessions are denied upstream before handler dispatch and the wiring's evidence covers wiring decisions only.
+The wiring SHALL export a named enforcement-wiring gate enumerating every inherited unresolved seam with its source verdict reproduced verbatim and a required user decision, together with the handler's fail-closed behavior at each seam.
 
 #### Scenario: Seam fixtures fail closed carrying markers
 - **WHEN** a fixture exercises each unresolved seam — MCP basis, readiness channel, record survival, destructive undecodability, pending adapter
@@ -143,9 +181,26 @@ The wiring SHALL export a named enforcement-wiring gate enumerating every inheri
 - **THEN** the change SHALL be blocked until the owning boundary records a source-backed supported mechanism in the compatibility contract and an explicit user decision adopts it
 - **AND** these specifications SHALL NOT be rewritten to claim support in advance
 
+#### Scenario: The gate enumerates every inherited seam's verdict
+- **GIVEN** the inherited unresolved seams — MCP admission mechanism basis needing a mechanism audit with no boundary row in the pinned compatibility ledger, readiness establishment channel unimplemented, authoritative approval-record reset incompatible, complete destructive-intent decoding unresolved, network-parity adapters pending, and discovery-side gates consumed as shipped
+- **WHEN** the named enforcement-wiring gate is read
+- **THEN** each seam SHALL appear with its source verdict reproduced verbatim and a required user decision
+
+#### Scenario: No manufactured status completes a fixture or flow
+- **GIVEN** any fixture or flow requiring an allow, grant, readiness, decoding, or mechanism status
+- **WHEN** it runs against the wiring
+- **THEN** the wiring SHALL NOT manufacture a passing admission, readiness, grant, decoding, or mechanism status to complete it
+- **AND** allow-path fixtures SHALL be labeled synthetic, and no fixture or passing test SHALL relabel a status or clear a gate
+
+#### Scenario: Docs state the upstream-denial scope while seams stand
+- **GIVEN** the unresolved seams still standing
+- **WHEN** documentation describes the wiring's runtime limits
+- **THEN** it SHALL state that real restricted sessions are denied upstream before handler dispatch
+- **AND** the wiring's evidence SHALL be described as covering wiring decisions only
+
 ### Requirement: Enforcement Wiring Evidence Limited To Wiring Decisions
 
-Automated unit and mock evidence SHALL validate the wiring decisions and shapes only — denied fixtures reaching fail-closed bounded errors, provenance consumed live rather than cached, refresh re-admission and rejection on epoch, restricted-only registration with YOLO and OpenCode exemption, seam fail-closed markers, and composition ordering — and SHALL NOT assert, imply, or manufacture that the official OMP binary invokes the enforcement handler, honors a block, enforces an inventory decision, performs an approval-record reset, decodes destructive intent, or otherwise enforces any boundary; real handler invocation and block enforcement SHALL remain user-owned runtime verification marked unverified until observed.
+Automated unit and mock evidence SHALL validate the wiring decisions and shapes only — denied fixtures reaching fail-closed bounded errors, provenance consumed live rather than cached, refresh re-admission and rejection on epoch, restricted-only registration with YOLO and OpenCode exemption, seam fail-closed markers, and composition ordering.
 
 #### Scenario: No native-enforcement claim in fixtures
 - **WHEN** the wiring suites are reviewed and run
@@ -157,3 +212,12 @@ Automated unit and mock evidence SHALL validate the wiring decisions and shapes 
 - **WHEN** they run unchanged alongside this change
 - **THEN** they SHALL pass without modification
 - **AND** the wiring SHALL have imported their modules without editing them
+
+#### Scenario: No fixture asserts native enforcement
+- **GIVEN** the wiring unit and mock suites
+- **WHEN** they assert, imply, or describe what the official OMP binary does
+- **THEN** they SHALL NOT claim the binary invokes the enforcement handler, honors a block, enforces an inventory decision, performs an approval-record reset, decodes destructive intent, or otherwise enforces any boundary
+
+#### Scenario: Real invocation stays user-owned runtime verification
+- **WHEN** real handler invocation and block enforcement by the official OMP binary are considered
+- **THEN** they SHALL remain user-owned runtime verification marked unverified until observed

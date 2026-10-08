@@ -145,11 +145,7 @@ The research session SHALL follow this flow:
 
 ### Requirement: Research Session Completion Verification
 
-After a self-research ACP session ends with `end_turn`, the system SHALL verify that the agent actually produced research output before declaring success. Research output SHALL be defined as a new file, or a file whose content hash changed AND whose modification time is at or after the session start (minus at most 1 second of clock slack), under `$AGENT_WORKSPACE/notes/` or `$AGENT_WORKSPACE/journal/`, compared with a recursive fingerprint snapshot taken before the prompt was sent (fingerprint = relative path → size, mtimeMs, and content hash; the hash removes same-size/same-millisecond overwrite blind spots). A session that produced no research output SHALL NOT be reported as successful.
-
-When no research output was produced (and completion verification is enabled), the system SHALL send ONE corrective retry prompt on the SAME ACP session before failing: the retry prompt SHALL state that a research note must be written, SHALL embed the session's recent permission-rejection reasons (bounded via the existing per-session permission-rejection ring buffer and `formatPermissionRejections()`), SHALL name the commands OpenCode itself denies before the ACP gate (`echo`, `curl`, `git`, `python`, `mkdir`, …) so `|| echo`-style fallbacks are abandoned in favor of the Read tool, SHALL restate the sandbox usage rules (multi-command bash calls with `;`/`&&`/`||` allowed only when every command is individually allowed; `|`, `&`, `2>/dev/null`, `> file` rejected; webfetch 403/429 responses → switch to `agent-browser`), and SHALL require writing the note to `$AGENT_WORKSPACE/notes/{topic-slug}.md` and updating `$AGENT_WORKSPACE/notes/_index.md` (env-var paths, deployment-independent). After the retry, verification SHALL run again. If the retry also produced nothing, the session SHALL end as a failure: `success: false`, error reason `no_research_note`, a WARN log, an audit `session_end` entry with `success: false` and the reason, and the `airfriends_self_research_no_note_total` counter incremented exactly once per session (only when completion verification is enabled).
-
-The first turn's response SHALL be recorded as an audit `agent_response` entry with `isRetry: false` WITHOUT any `session_end` yet; the retry prompt SHALL be recorded as an audit `prompt_sent` entry and its response as `agent_response` with `isRetry: true`; exactly ONE `session_end` entry SHALL be written after the final verification outcome. Fingerprint snapshot or verification I/O errors SHALL NOT fail the session: the system SHALL log a warning and treat the session as having produced output (fail-safe — never retry on verification uncertainty). Non-`end_turn` stop reasons SHALL keep the existing behavior (failure without retry).
+After a self-research ACP session ends with `end_turn`, the system SHALL verify the agent produced research output before declaring success. Research output SHALL be a new file, or a content-hash-changed file with mtime at/after session start (≤1s clock slack), under `$AGENT_WORKSPACE/notes/` or `journal/`, compared with a recursive fingerprint snapshot (relative path → size, mtime, content hash). A session with no research output SHALL NOT be reported successful.
 
 #### Scenario: Note written in normal flow
 - **GIVEN** a self-research session with completion verification enabled
@@ -194,6 +190,29 @@ The first turn's response SHALL be recorded as an audit `agent_response` entry w
 - **GIVEN** a self-research session whose agent turn ends with a non-`end_turn` stop reason (e.g. `cancelled`)
 - **WHEN** the session completes
 - **THEN** the session SHALL be reported failed without any completion retry
+
+#### Scenario: Augment retry prompt with rejection context
+- **GIVEN** the system sends the one corrective retry on the same ACP session
+- **WHEN** the retry prompt is built
+- **THEN** it SHALL state that a research note must be written and SHALL embed the session's recent permission-rejection reasons (bounded via the per-session permission-rejection ring buffer and `formatPermissionRejections()`)
+- **AND** SHALL name the commands OpenCode denies before the ACP gate (`echo`, `curl`, `git`, `python`, `mkdir`, …) so `|| echo`-style fallbacks are abandoned in favor of the Read tool
+
+#### Scenario: Retry prompt restates sandbox and write rules
+- **GIVEN** the corrective retry prompt is being assembled
+- **WHEN** it instructs the agent's actions
+- **THEN** it SHALL restate the sandbox usage rules (multi-command bash with `;`/`&&`/`||` allowed only when every command is individually allowed; `|`, `&`, `2>/dev/null`, `> file` rejected; webfetch 403/429 responses → use `agent-browser`)
+- **AND** SHALL require writing the note to `$AGENT_WORKSPACE/notes/{topic-slug}.md` and updating `$AGENT_WORKSPACE/notes/_index.md` (env-var paths, deployment-independent)
+
+#### Scenario: Audit entries record each turn and one session_end
+- **GIVEN** a self-research session with completion verification enabled
+- **WHEN** the first turn and the optional corrective retry are recorded
+- **THEN** the first turn's response SHALL be an audit `agent_response` with `isRetry: false` without any preceding `session_end`
+- **AND** the retry prompt SHALL be recorded as `prompt_sent` and its response as `agent_response` with `isRetry: true`, with exactly ONE `session_end` written only after the final verification outcome
+
+#### Scenario: Failed final retry logs warning and metric
+- **GIVEN** the corrective retry also produced no research output
+- **WHEN** verification fails after the retry
+- **THEN** the session SHALL emit a WARN log and increment `airfriends_self_research_no_note_total` exactly once (only when completion verification is enabled)
 
 ### Requirement: Untrusted RSS Content Delimiting
 
@@ -274,26 +293,21 @@ The scheduler SHALL support `start()`, `stop()`, and `getStatus()` methods. Call
 
 ### Requirement: Environment Variable Overrides
 
-The following environment variables SHALL override the corresponding config values:
-
-| Environment Variable              | Config Path                      |
-| --------------------------------- | -------------------------------- |
-| `SELF_RESEARCH_ENABLED`           | `selfResearch.enabled`           |
-| `SELF_RESEARCH_MODEL`             | `selfResearch.model`             |
-| `SELF_RESEARCH_RSS_FEEDS`         | `selfResearch.rssFeeds`          |
-| `SELF_RESEARCH_MIN_INTERVAL_MS`   | `selfResearch.minIntervalMs`     |
-| `SELF_RESEARCH_MAX_INTERVAL_MS`   | `selfResearch.maxIntervalMs`     |
-
-`SELF_RESEARCH_RSS_FEEDS` accepts a JSON string (e.g., `'[{"url":"...","name":"..."}]'`).
+Environment variables SHALL override the corresponding config values when set. `SELF_RESEARCH_RSS_FEEDS` accepts a JSON string (e.g., `'[{"url":"...","name":"..."}]'`).
 
 #### Scenario: Override via environment
 - **GIVEN** `SELF_RESEARCH_ENABLED=true` and `SELF_RESEARCH_MODEL=gpt-5-mini`
 - **WHEN** configuration is loaded
 - **THEN** self-research is enabled with model `"gpt-5-mini"`
 
+#### Scenario: Environment variable to config mapping
+- **GIVEN** any of the overridable environment variables is set
+- **WHEN** configuration is loaded
+- **THEN** each SHALL override its config value: `SELF_RESEARCH_ENABLED`→`selfResearch.enabled`, `SELF_RESEARCH_MODEL`→`selfResearch.model`, `SELF_RESEARCH_RSS_FEEDS`→`selfResearch.rssFeeds`, `SELF_RESEARCH_MIN_INTERVAL_MS`→`selfResearch.minIntervalMs`, `SELF_RESEARCH_MAX_INTERVAL_MS`→`selfResearch.maxIntervalMs`
+
 ### Requirement: Completion Verification Configuration
 
-The completion verification behavior SHALL be controlled by `selfResearch.verifyCompletion`, a boolean config field defaulting to `true`. When `false`, self-research sessions SHALL use the legacy behavior: any `end_turn` counts as success, no fingerprint snapshot is taken, no retry runs, and the `airfriends_self_research_no_note_total` counter SHALL NOT be incremented (the outcome cannot be measured without verification). The field SHALL be overridable via the `SELF_RESEARCH_VERIFY_COMPLETION` environment variable (`"true"` / `"false"`), which SHALL be documented in `config.example.yaml`, `.env.example`, and `helm/values.yaml`.
+`selfResearch.verifyCompletion`, a boolean config field defaulting to `true`, SHALL control completion verification. When `false`, self-research sessions SHALL use legacy behavior: any `end_turn` counts as success, no fingerprint snapshot is taken, no retry runs, and the `airfriends_self_research_no_note_total` counter SHALL NOT be incremented (the outcome cannot be measured without verification).
 
 #### Scenario: Enabled by default
 - **GIVEN** no `verifyCompletion` field in the `selfResearch` config
@@ -304,6 +318,12 @@ The completion verification behavior SHALL be controlled by `selfResearch.verify
 - **GIVEN** `SELF_RESEARCH_VERIFY_COMPLETION=false`
 - **WHEN** configuration is loaded
 - **THEN** `selfResearch.verifyCompletion` SHALL be `false` and the legacy end_turn-equals-success behavior SHALL apply, with no snapshot, no retry, and no no-note counter increment
+
+#### Scenario: Document environment override in example configs
+- **GIVEN** the `SELF_RESEARCH_VERIFY_COMPLETION` environment variable (accepting `"true"` or `"false"`)
+- **WHEN** an administrator wants to configure verification via environment
+- **THEN** the variable SHALL be documented in `config.example.yaml`, `.env.example`, and `helm/values.yaml`
+- **AND** it SHALL override `selfResearch.verifyCompletion` when set
 
 ### Requirement: State Persistence
 

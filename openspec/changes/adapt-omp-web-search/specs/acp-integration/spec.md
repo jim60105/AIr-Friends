@@ -2,7 +2,7 @@
 
 ### Requirement: Controlled Web-Search Transport Routing Through the URL-Fetch Decision Core
 
-The restricted OMP deployment SHALL route every adapter-served web-search provider request and every provider result-enrichment subrequest through the controlled transport decision core established for URL reads — the same single SSRF rule set, the same enforcing-posture validating-proxy routing and operator unrestricted-egress posture preservation, and the same manual per-hop redirect revalidation with the existing hop bound. The web-search adapter SHALL NOT re-implement, fork, soften, or bypass that rule set, SHALL NOT issue a provider or enrichment request through an unguarded native transport retry path, and SHALL treat environment proxy presence as non-enforcement exactly as the URL-read adapter does.
+The restricted OMP deployment SHALL route every adapter-served web-search provider request and every provider result-enrichment subrequest through the same controlled transport decision core, single SSRF rule set, and manual per-hop redirect revalidation with the existing hop bound established for URL reads, and SHALL treat environment proxy presence as non-enforcement exactly as the URL-read adapter does.
 
 #### Scenario: Provider endpoint request follows the consumed egress posture
 - **GIVEN** a mocked provider endpoint whose host resolves, via mocked DNS, to public addresses only
@@ -21,10 +21,15 @@ The restricted OMP deployment SHALL route every adapter-served web-search provid
 - **WHEN** the restricted adapter serves the same request
 - **THEN** every issued attempt SHALL carry a prior controlled-transport decision
 - **AND** the test fixture SHALL show no request issued without one
+ 
+#### Scenario: Rule set is never reimplemented or softened
+- **GIVEN** the controlled decision core and SSRF rule set established for URL reads
+- **WHEN** the web-search adapter schedules provider or enrichment hops
+- **THEN** the adapter SHALL NOT re-implement, fork, soften, or bypass that rule set
 
 ### Requirement: Web-Search Backend Tiering Restricted to the Supported Credential Set
 
-The change SHALL enumerate, as machine-readable route data with pinned-source citations, every pinned web-search provider surface tiered `supported`, `candidate-to-verify`, or `no-supported-mechanism` relative to the agent's supported credential set (the Gemini and OpenRouter provider credentials passed by the agent-configuration change). Gemini provider-grounded search and OpenRouter web-plugin-grounded search reachable with those credentials SHALL be the only backends selected as supported. Backends requiring a credential outside the supported set SHALL be recorded `no-supported-mechanism` with a user-decision marker, and keyless scraping or arbitrary-provider engines SHALL be recorded as not selected; the adapter SHALL NOT require, recommend, or accept configuration for an unrelated vendor secret and SHALL NOT add a general search-provider configuration surface.
+The change SHALL enumerate every pinned web-search provider surface as machine-readable route data with pinned-source citations, tiered `supported`, `candidate-to-verify`, or `no-supported-mechanism` against the supported credential set (the Gemini and OpenRouter provider credentials passed by the agent-configuration change); only the Gemini and OpenRouter grounded backends reachable with those credentials SHALL be selected as supported.
 
 #### Scenario: Supported tiering is credential-set-keyed with citations
 - **WHEN** the search route table is read
@@ -37,10 +42,16 @@ The change SHALL enumerate, as machine-readable route data with pinned-source ci
 - **WHEN** the adapter selects a backend
 - **THEN** the selection SHALL come from the supported tier only
 - **AND** no test, fixture, documentation page, or configuration surface introduced by this change SHALL require a credential outside the supported set
+ 
+#### Scenario: No unrelated vendor secret is accepted
+- **GIVEN** an operator attempting to configure an unrelated vendor secret or a general search-provider surface
+- **WHEN** the web-search adapter is asked to adopt that configuration
+- **THEN** the adapter SHALL NOT require, recommend, or accept the unrelated secret
+- **AND** this change SHALL add no general search-provider configuration surface
 
 ### Requirement: Web-Search Native Interface, Citation, and Error Honesty
 
-The completed web-search route SHALL preserve the agent's native search-tool interface: the query parameter shape unchanged, the result envelope and formatted output layout carrying result excerpts with source attribution (title, URL, snippet/cited text and citation sections) matching the native formatter's structure, and the native distinction between an empty result and an error. Provider authentication, rate-limit, HTTP, malformed-response, and no-sources failures SHALL surface as honest tool errors in the native failure-message shape; the adapter SHALL NOT fabricate search results, SHALL NOT silently switch to a different backend beyond the availability semantics of the supported tier, and SHALL NOT switch agents. Decision records and logs SHALL carry at most host, hop index, decision, and reason code — never credentials, provider request headers, URL userinfo, query strings, or payload content.
+The completed web-search route SHALL preserve the agent's native search-tool interface — query parameter shape unchanged, result envelope with formatted output carrying titled, URL-attributed, cited excerpts matching the native formatter's structure, and the native empty-result-versus-error distinction — and SHALL surface provider authentication, rate-limit, HTTP, malformed-response, and no-sources failures as honest tool errors in the native failure-message shape.
 
 #### Scenario: Grounded success keeps native citation layout
 - **GIVEN** a mocked supported-provider response containing an answer with sources and citations
@@ -64,6 +75,16 @@ The completed web-search route SHALL preserve the agent's native search-tool int
 - **GIVEN** a completed-search fixture whose request headers carry a provider key and whose enrichment URL carries a query string
 - **WHEN** the resulting decision records and adapter log lines are inspected
 - **THEN** neither SHALL contain the credential, header, userinfo, query string, or payload bytes
+ 
+#### Scenario: HTTP and malformed responses fail honestly
+- **GIVEN** mocked provider responses with an HTTP transport failure and a malformed response body
+- **WHEN** each is served to the restricted adapter
+- **THEN** each SHALL surface as an honest tool error in the native failure-message shape
+- **AND** neither SHALL fabricate result content or switch agents
+
+#### Scenario: Decision records carry the minimal allowed fields
+- **WHEN** decision records and adapter log lines are produced for a completed search
+- **THEN** each SHALL carry at most host, hop index, decision, and reason code
 
 ### Requirement: Credential-Absent Web Search Fails Closed With a Documented Capability Gap
 
@@ -77,7 +98,7 @@ When neither supported backend's credential exists for the restricted process, t
 
 ### Requirement: Web-Search Seam Completion Is Additive, Route-Scoped, and Backend-Gated
 
-The restricted tool-inventory seam SHALL be updated additively: the web-search row gains a completing-adapter marker naming this change and its search route table, active exactly where a supported-tier backend is available under the supported credential set and a controlled-transport contract is satisfied; the public-code-search row and every credential-absent or unsupported-backend state SHALL retain the distinct pending-adapter outcome. The completion marker SHALL remain distinguishable from a plain allow, SHALL complete no table shape, composition order, or error vocabulary owned by the enforcement wiring, and the URL-read route set completed by the URL-fetch transport change SHALL remain byte-identical; the search route table and the URL-fetch route registry SHALL agree that a completed search route is never simultaneously reported pending by their data.
+The restricted tool-inventory seam SHALL be updated additively and backend-gated: the web-search row gains a completing-adapter marker, active exactly where a supported-tier backend exists under the supported credential set and a controlled-transport contract is satisfied, while the public-code-search row and every credential-absent or unsupported-backend state retain the distinct pending-adapter outcome; the completion marker SHALL remain distinguishable from a plain allow.
 
 #### Scenario: Only the web-search row completes where its contract holds
 - **WHEN** the updated seam data is inspected with a supported credential present
@@ -93,6 +114,11 @@ The restricted tool-inventory seam SHALL be updated additively: the web-search r
 - **WHEN** both the search route table and the URL-fetch route registry are read
 - **THEN** the URL-read completed routes SHALL be unchanged by this change
 - **AND** the search-provider subrequest route SHALL never be recorded pending by one table while the other claims adapter completion for the same satisfied contract
+ 
+#### Scenario: Completion never alters enforcement-owned wiring
+- **WHEN** the completing-adapter seam update is applied
+- **THEN** the update SHALL complete no table shape, composition order, or error vocabulary owned by the enforcement wiring
+- **AND** the URL-read route set completed by the URL-fetch transport change SHALL remain byte-identical
 
 ### Requirement: Native YOLO Web Search Keeps Native Behavior
 
@@ -106,7 +132,7 @@ The web-search replacement SHALL register and apply in restricted sessions only;
 
 ### Requirement: Web-Search Adapter Acceptance Is Deterministic Mock-Only
 
-All web-search adapter acceptance SHALL run against mocked provider endpoints, mocked DNS resolution, and synthetic redirect/enrichment chains with zero network contact and no live or paid search, certifying backend-selection and credential-scope decisions, allow/deny/routing outcomes under both egress postures, enrichment-subrequest revalidation, error-shape honesty, interface/citation layout stability, the credential-absent fail-closed path, and the route-table and seam-data verdicts. Native-side behavior — the compiled agent actually invoking the replacement and adapter — SHALL remain on the user-owned runtime verification checklist, and no mock SHALL be presented as proof of native hook coverage or as clearing the pinned transport-bypass record.
+All web-search adapter acceptance SHALL run deterministically against mocked provider endpoints, mocked DNS resolution, and synthetic redirect/enrichment chains with zero network contact and no live or paid search; native-side behavior — the compiled agent actually invoking the replacement and adapter — SHALL remain on the user-owned runtime verification checklist.
 
 #### Scenario: Whole suite runs without network access or paid providers
 - **WHEN** the web-search adapter test suites execute
@@ -116,3 +142,8 @@ All web-search adapter acceptance SHALL run against mocked provider endpoints, m
 #### Scenario: Native search-tool use stays user-owned
 - **WHEN** the implementation handoff is assembled
 - **THEN** the checklist SHALL carry the observation of real web-search traffic through the adapter/proxy — including enrichment redirects and private-target failures — marked unverified until user-observed
+ 
+#### Scenario: Mock suite certifies the restricted-decision surface
+- **WHEN** the mock-only acceptance suite executes
+- **THEN** the suite SHALL certify backend-selection and credential-scope decisions, allow/deny/routing outcomes under both egress postures, enrichment-subrequest revalidation, error-shape honesty, interface/citation layout stability, the credential-absent fail-closed path, and the route-table and seam-data verdicts
+- **AND** no mock SHALL be presented as proof of native hook coverage or as clearing the pinned transport-bypass record

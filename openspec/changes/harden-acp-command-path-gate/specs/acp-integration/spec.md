@@ -2,7 +2,7 @@
 
 ### Requirement: Canonical Generic-Command Path Argument Decision
 
-The generic-command gate SHALL decide every path argument of an allow-listed command — read input and write/output target — on the requesting session's canonical physical root membership rather than lexical string containment. The command gate SHALL maintain its OWN enumerated root-role set — the requesting session's canonical workspace, the shared Agent workspace when configured, the shared-process-mode process temporary directory when set, and the session's OpenCode tool-output directory — plus the OpenCode data root as a cross-session isolation boundary only. A tool-output directory SHALL receive a role only when canonical observation proves it lies inside the session workspace/TMPDIR or, in shared-process mode, inside the pool-key-scoped data root; the shared home-rooted OpenCode tool-output directory SHALL never receive a role and SHALL fail closed. A canonical target physically inside the data root but outside the requesting session's own data home, including the enumerating root listing, SHALL be denied. Known session/harness tokens (`~`, `~/...`, `$HOME`, `${HOME}`, `$XDG_DATA_HOME`, `${XDG_DATA_HOME}`, `$TMPDIR`, `${TMPDIR}`, `$AGENT_WORKSPACE`, `${AGENT_WORKSPACE}`, `$SESSION_ID`, `${SESSION_ID}`) SHALL be expanded against the session's authoritative values first and then decided canonically; unexpandable home-anchored forms and known variables without a runtime value SHALL remain rejected without observation. Any canonical-observation failure — symlink escape, loop, dangling link, unresolvable or unavailable root, changed path — SHALL deny the argument and SHALL never fall back to a lexical decision. This gate SHALL apply exactly where today's generic-command allow-list applies: restricted mode only, with the same allow-list and decision cases, and SHALL add no clamp to native YOLO.
+The generic-command gate SHALL decide every path argument of an allow-listed command — read input and write/output target — on the requesting session's canonical physical root membership rather than lexical string containment, and SHALL deny any argument whose canonical observation fails, never falling back to a lexical decision; it SHALL apply exactly where today's generic-command allow-list applies, restricted mode only, adding no clamp to native YOLO.
 
 #### Scenario: Symlink escape inside the workspace is denied
 
@@ -37,9 +37,30 @@ The generic-command gate SHALL decide every path argument of an allow-listed com
 - **THEN** the gate SHALL deny the argument with the existing `path_outside_boundary` cause vocabulary
 - **AND** it SHALL NOT approve on the basis of the raw or lexical spelling
 
+#### Scenario: Enumerated root-role set scoped to the session
+
+- **GIVEN** an allow-listed command whose path arguments target the requesting session's canonical workspace, the shared Agent workspace when configured, the shared-process-mode process temporary directory when set, the session's OpenCode tool-output directory, or the OpenCode data root
+- **WHEN** the canonical gate decides each path argument
+- **THEN** it SHALL grant roles only from its own enumerated root-role set, treating the OpenCode data root solely as a cross-session isolation boundary
+- **AND** an argument that holds no granted role SHALL be denied
+
+#### Scenario: Token expansion precedes canonical decision
+
+- **GIVEN** a path argument containing a known session or harness token — `~`, `~/...`, `$HOME`, `${HOME}`, `$XDG_DATA_HOME`, `${XDG_DATA_HOME}`, `$TMPDIR`, `${TMPDIR}`, `$AGENT_WORKSPACE`, `${AGENT_WORKSPACE}`, `$SESSION_ID`, `${SESSION_ID}`
+- **WHEN** the canonical gate evaluates the argument
+- **THEN** it SHALL expand the token against the requesting session's authoritative values before the canonical decision
+- **AND** unexpandable home-anchored forms and known variables without a runtime value SHALL remain rejected without observation
+
+#### Scenario: Broken or unstable canonical observation denied
+
+- **GIVEN** a path argument whose canonical observation encounters a symlink loop, dangling link, unresolvable or unavailable root, or a path that changed between observation and decision
+- **WHEN** the canonical gate evaluates the argument
+- **THEN** it SHALL deny the argument with the existing `path_outside_boundary` cause vocabulary
+- **AND** it SHALL NOT fall back to a lexical decision
+
 ### Requirement: Generic-Command Policy Parity Under Canonicalization
 
-Hardening the path-argument decision to canonical observations SHALL be a representation change only: the allow-listed tool set, dangerous-flag set, shell-operator and fd-redirect rules, per-segment chain evaluation rule, attached-option and URI-scheme rejections, unexpandable-token rejections, and every existing allow/deny case SHALL keep identical verdicts, so no OpenCode command routed to this gate gains or loses approval status incidentally. Restricted-mode OpenCode decisions SHALL be re-expressed canonically and OpenCode regression behavior preserved; the restricted tool inventory, provenance, and MCP admission decisions and trusted-extension handler wiring SHALL NOT be modified by this gate, and native YOLO SHALL continue to auto-approve before reaching it.
+Canonicalizing the path-argument decision SHALL be a representation change only: the allow-listed tool set, dangerous-flag set, shell-operator and fd-redirect rules, per-segment chain evaluation rule, attached-option and URI-scheme rejections, unexpandable-token rejections, and every existing allow/deny case SHALL keep identical verdicts, so no OpenCode command routed to this gate gains or loses approval status incidentally.
 
 #### Scenario: Inherited allow/deny cases keep their verdicts
 
@@ -54,6 +75,18 @@ Hardening the path-argument decision to canonical observations SHALL be a repres
 - **WHEN** `requestPermission()` evaluates both
 - **THEN** the YOLO session SHALL auto-approve before the generic-command gate as today
 - **AND** only the restricted session SHALL receive the canonicalized decision, with no new clamp added to either mode's approval surface
+
+#### Scenario: Restricted decisions re-expressed canonically
+
+- **GIVEN** a restricted-mode OpenCode command routed to the canonicalized generic-command gate
+- **WHEN** the gate evaluates the command
+- **THEN** the decision SHALL be re-expressed canonically and SHALL preserve OpenCode regression behavior
+
+#### Scenario: Non-verdict surfaces untouched
+
+- **GIVEN** the canonicalized generic-command gate in a restricted OpenCode session
+- **WHEN** the gate runs on an allow-listed command
+- **THEN** it SHALL NOT modify the restricted tool inventory, provenance, and MCP admission decisions, nor the trusted-extension handler wiring
 
 ## MODIFIED Requirements
 
@@ -174,3 +207,20 @@ Filesystem path checks used by the scoped edit/write approval and the file callb
 - **GIVEN** a permission request not matching any approval rule
 - **WHEN** `requestPermission()` evaluates the request
 - **THEN** it SHALL deny the request
+
+#### Scenario: Filesystem-touching bash tools gated by requestPermission
+- **GIVEN** a filesystem-touching bash tool whose permission is configured `"ask"` rather than `"allow"`
+- **WHEN** the tool invocation reaches the permission gate
+- **THEN** `requestPermission()` SHALL be the authoritative decision point for the command
+
+#### Scenario: Skill command with other legacy free-text flags rejected
+- **GIVEN** a whitelisted skill command whose whitespace-delimited tokens include `--content`, `--content=value`, `--query`, `--query=value`, `--caption`, or `--caption=value`
+- **WHEN** the gate evaluates the skill command for auto-approval
+- **THEN** the gate SHALL reject the command instead of approving it
+- **AND** distinct tokens `--content-file`, `--query-file`, `--caption-file` SHALL NOT trigger the rejection
+
+#### Scenario: SESSION_ID expansion consistent with script-side --session-id
+- **GIVEN** a shell session exists (message, spontaneous, self-research, memory-maintenance, channel memory-maintenance, reminder)
+- **WHEN** the gate expands `$SESSION_ID` in a path argument
+- **THEN** the client config's `sessionId` SHALL be set to the shell session id so expansion matches the script-side `--session-id`
+- **AND** flows without a shell session SHALL leave `sessionId` unset, so expansion yields an empty string matching the script-side `{workspace}/tmp` fallback

@@ -57,3 +57,9 @@ Both crash reconnect and `session/load` recovery SHALL target the session's reco
 - **WHEN** recovery completes and prompting resumes
 - **THEN** resumption SHALL proceed without asserting a policy-readiness result
 - **AND** the post-restore attach point where the later readiness change verifies restricted readiness SHALL exist but perform no verification and gate no prompt in this change
+
+#### Scenario: Side-effect state survives process restart
+- **GIVEN** a shared process dies while a session's prompt is in flight after the agent ran side-effectful skill operations
+- **WHEN** the agent process is restarted and the session is resumed
+- **THEN** the in-bot session registry state (`replySent`, `fileSent`, attempt counts) SHALL guard side-effectful operations (`send-reply`, `memory-save`), so no duplicate reply or memory event is produced
+- **AND** the recovery/retry prompt SHALL enumerate the session's already-executed skill operations (memory-save calls, reply attempts, file sends) so the resumed agent avoids re-doing side effects

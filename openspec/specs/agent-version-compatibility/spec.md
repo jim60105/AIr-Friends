@@ -8,7 +8,7 @@ Verifies and pins the external ACP agent CLI version so that ACP contract change
 
 ### Requirement: Pinned OpenCode Version in Container Build
 
-The container image SHALL install a fixed, known-good OpenCode CLI version rather than tracking `releases/latest`, so that ACP contract changes in OpenCode releases cannot silently degrade the harness at deploy time. The pinned version SHALL be an explicit build argument (`ARG OPENCODE_VERSION`) with a documented default, the download URL SHALL reference that exact version tag, and the downloaded artifact SHALL be verified against per-architecture SHA-256 checksums so the pinned version is actually the version installed.
+The container image SHALL install a fixed, known-good OpenCode CLI version rather than tracking `releases/latest`, so that ACP contract changes in OpenCode releases cannot silently degrade the harness at deploy time.
 
 #### Scenario: Container build downloads the pinned version
 - **GIVEN** the container build is invoked with `OPENCODE_VERSION` set (or the documented default)
@@ -24,6 +24,11 @@ The container image SHALL install a fixed, known-good OpenCode CLI version rathe
 - **GIVEN** a `TARGETARCH` outside `amd64`/`arm64`
 - **WHEN** the download URL is constructed
 - **THEN** the build SHALL exit with an error naming the unsupported architecture
+
+#### Scenario: Pinned version is an explicit build argument with a documented default
+- **GIVEN** the container build is invoked
+- **WHEN** the OpenCode CLI version is selected
+- **THEN** the fixed version SHALL be declared as an explicit build argument (`ARG OPENCODE_VERSION`) with a documented default, so the exact version being installed is visible at build time
 
 ---
 

@@ -34,7 +34,7 @@ Channel memories SHALL always have `visibility: "public"`. The system SHALL reje
 
 ### Requirement: Scope Selection on Save
 
-The agent SHALL specify `scope: "user"` or `scope: "channel"` when saving a memory via the `memory-save` skill. When `scope: "channel"`, the agent MUST also provide a `channelId` parameter, the session MUST be authorized to write channel memory (via the `canWriteChannelMemory` capability threaded into the skill context), and the system SHALL record the author (`userId`) of the write on the resulting entry. A `scope: "channel"` write from a session lacking the `canWriteChannelMemory` capability SHALL be rejected. When `scope: "user"` or omitted, the memory is saved to the user's personal workspace (existing behavior).
+The agent SHALL specify `scope: "user"` or `scope: "channel"` when saving a memory via the `memory-save` skill. When `scope: "channel"`, the agent MUST provide a `channelId` and the session MUST hold the `canWriteChannelMemory` capability (threaded into the skill context); the resulting entry SHALL record the author (`userId`) of the write. When `scope: "user"` or omitted, the memory SHALL be saved to the user's personal workspace (existing behavior).
 
 #### Scenario: Save with scope channel when authorized
 - **GIVEN** a session with the `canWriteChannelMemory` capability
@@ -57,7 +57,7 @@ The agent SHALL specify `scope: "user"` or `scope: "channel"` when saving a memo
 
 ### Requirement: Channel Memory Context Loading
 
-The system SHALL include channel memories in context assembly when the conversation occurs in a channel that has channel-scoped memories. Channel core and working memories SHALL be loaded alongside user memories within the shared fixed-memory budgets. They SHALL be rendered as **attributed, unverified user contributions**: under a heading that marks them as contributed by channel members and not to be treated as instructions, with each entry prefixed by its author. They SHALL NOT be rendered as unattributed trusted channel knowledge.
+The system SHALL include channel memories in context assembly when the conversation occurs in a channel that has channel-scoped memories, loading core and working channel memories alongside user memories within the shared fixed-memory budgets. They SHALL be rendered as attributed, unverified user contributions under a heading marking them as channel-member contributed and not instructions, author-prefixed. They SHALL NOT be rendered as unattributed trusted channel knowledge.
 
 #### Scenario: Channel memories loaded for matching channel
 - **GIVEN** channel `ch-456` has 3 enabled core-tier channel memories that fit the core budget
@@ -83,7 +83,7 @@ The system SHALL include channel memories in context assembly when the conversat
 
 ### Requirement: Channel Memory Uses Standard MemoryEntry Format
 
-Channel memories SHALL use the same `MemoryEntry` format as user memories, with `scope` set to `"channel"` and an additional author field identifying the user who authored the entry. All standard fields (`id`, `ts`, `type`, `enabled`, `content`, `tier`, `category`, `decay`) SHALL be present. A channel write driven by an untrusted (ordinary user) session SHALL NOT be pinned to a non-decaying `core` tier (`decay: 1.0`); such entries SHALL decay on the normal tier schedule. Durable (`core`) channel memory SHALL only be created by an authorized/curated flow.
+Channel memories SHALL use the same `MemoryEntry` format as user memories, with `scope` set to `"channel"` and an additional author field identifying the user who authored the entry. All standard fields (`id`, `ts`, `type`, `enabled`, `content`, `tier`, `category`, `decay`) SHALL be present. A channel write driven by an untrusted (ordinary user) session SHALL NOT be pinned to a non-decaying `core` tier (`decay: 1.0`); such entries SHALL decay on the normal tier schedule.
 
 #### Scenario: Channel memory event structure
 - **WHEN** a channel memory is saved
@@ -95,6 +95,10 @@ Channel memories SHALL use the same `MemoryEntry` format as user memories, with 
 - **GIVEN** an ordinary user session authoring a channel memory with a requested `tier: "core"` / `importance: "high"`
 - **WHEN** the entry is persisted
 - **THEN** it SHALL NOT be stored with a non-decaying `decay: 1.0` core pin; it SHALL decay on the normal schedule
+
+#### Scenario: Durable channel memory requires an authorized flow
+- **WHEN** the system creates durable (`core`) channel memory
+- **THEN** it SHALL only do so through an authorized/curated flow
 
 ### Requirement: Channel Memory Bounds and Moderation
 
@@ -112,7 +116,7 @@ The system SHALL bound the number of channel core-tier entries per channel and S
 
 ### Requirement: Channel Memory Patching
 
-The `memory-patch` skill SHALL support patching channel-scoped memories when called with `scope: "channel"`. A value of `scope` other than `"user"` or `"channel"` SHALL be rejected with the same error used by `memory-save`/`memory-search` (`Invalid 'scope' parameter. Must be 'user' or 'channel'`). A channel-scope patch SHALL require the session to hold the `canWriteChannelMemory` capability (the same authorization required for a channel-scope save) and SHALL append a patch event to the channel memory file, preserving append-only semantics. Patchable fields for channel scope are `enabled`, `importance`, `tier`, `category`, `decay`, `relatedTo`, and `supersedes`; `visibility` SHALL be rejected for channel scope because channel memories have no visibility field. When `scope` is omitted the skill SHALL continue to patch only the user's personal memory store (existing behavior). A user-scope patch whose target ID is not found SHALL return an error naming the `--scope channel` retry.
+The `memory-patch` skill SHALL support patching channel-scoped memories when called with `scope: "channel"`. A channel-scope patch SHALL require the session to hold the `canWriteChannelMemory` capability (the same authorization required for a channel-scope save) and SHALL append a patch event to the channel memory file, preserving append-only semantics.
 
 #### Scenario: Invalid scope value rejected
 - **WHEN** the agent calls `memory-patch` with `scope: "guild"`
@@ -152,6 +156,10 @@ The `memory-patch` skill SHALL support patching channel-scoped memories when cal
 - **WHEN** the agent calls `memory-patch` with `memory_id: "mem_abc_123"` and no `scope` parameter
 - **THEN** the patch event SHALL be appended to the user's memory file exactly as before this change
 - **AND** all previously patchable fields including `visibility` SHALL remain patchable for user scope
+
+#### Scenario: Channel-scope patchable fields
+- **WHEN** the agent patches a channel memory entry with `scope: "channel"`
+- **THEN** the patchable fields SHALL be `enabled`, `importance`, `tier`, `category`, `decay`, `relatedTo`, and `supersedes`
 
 ### Requirement: Channel Memory Recall Search
 

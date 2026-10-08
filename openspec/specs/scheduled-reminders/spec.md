@@ -195,7 +195,7 @@ Reminders SHALL be persisted per-user workspace. Each workspace has its own `rem
 
 ### Requirement: Configuration and Defaults
 
-The `reminders` config section SHALL default to: `enabled: false`, `minIntervalMs: 60000`, `checkIntervalMs: 30000`, `maxRemindersPerUser: 20`, `persistPath: "reminders.jsonl"`. Environment variables `REMINDERS_ENABLED`, `REMINDERS_MIN_INTERVAL_MS`, `REMINDERS_CHECK_INTERVAL_MS`, `REMINDERS_MAX_PER_USER`, and `REMINDERS_PERSIST_PATH` MAY override config values. Configuration validation SHALL clamp `minIntervalMs` to a minimum of `10000`, `checkIntervalMs` to a minimum of `5000`, and `maxRemindersPerUser` to a minimum of `1`, logging a warning when clamping occurs.
+The `reminders` config section SHALL default to `enabled: false`, `minIntervalMs: 60000`, `checkIntervalMs: 30000`, `maxRemindersPerUser: 20`, and `persistPath: "reminders.jsonl"`. Each value MAY be overridden by its corresponding `REMINDERS_*` environment variable.
 
 #### Scenario: Default configuration values
 
@@ -208,6 +208,24 @@ The `reminders` config section SHALL default to: `enabled: false`, `minIntervalM
 - **GIVEN** `reminders.minIntervalMs` is set to `5000`
 - **WHEN** configuration is validated
 - **THEN** the value SHALL be clamped to `10000` and a warning SHALL be logged
+
+#### Scenario: Environment variables override config values
+
+- **GIVEN** the `reminders` config section does not set a value or the section is absent
+- **WHEN** `REMINDERS_ENABLED`, `REMINDERS_MIN_INTERVAL_MS`, `REMINDERS_CHECK_INTERVAL_MS`, `REMINDERS_MAX_PER_USER`, or `REMINDERS_PERSIST_PATH` is set
+- **THEN** the corresponding config value (`enabled`, `minIntervalMs`, `checkIntervalMs`, `maxRemindersPerUser`, or `persistPath`) SHALL be overridden by the environment variable
+
+#### Scenario: Invalid checkIntervalMs clamped
+
+- **GIVEN** `reminders.checkIntervalMs` is set below `5000`
+- **WHEN** configuration is validated
+- **THEN** the value SHALL be clamped to `5000` and a warning SHALL be logged
+
+#### Scenario: Invalid maxRemindersPerUser clamped
+
+- **GIVEN** `reminders.maxRemindersPerUser` is set below `1`
+- **WHEN** configuration is validated
+- **THEN** the value SHALL be clamped to `1` and a warning SHALL be logged
 
 ### Requirement: Metrics Integration
 

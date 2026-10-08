@@ -8,7 +8,7 @@ Defines the shell-based skill execution architecture, Skill API HTTP server, ses
 
 ### Requirement: Shell-Based Skill Execution
 
-Skills SHALL be implemented as Deno TypeScript scripts located in `skills/{skill-name}/scripts/` directories. Each skill SHALL have a `SKILL.md` file describing its usage for the agent. External ACP Agents SHALL execute these scripts with a `--session-id` parameter. Scripts SHALL use the shared client library at `skills/lib/client.ts` to communicate back to the main bot via HTTP. Skill scripts SHALL NOT accept free-text content (reply text, memory content, search queries, captions, reminder text) as CLI argument values in any form: any free-text argument SHALL be passed via a payload-file flag (e.g. `--message-file`, `--content-file`, `--query-file`, `--caption-file`) whose content is read from a file staged in the session-scoped TMPDIR, so that no user-facing content ever appears on a shell command line. The legacy free-text flags (`--message`, `--content`, `--query`, `--caption`) SHALL be rejected with a clear error in both invocation forms (`--flag value` and `--flag=value`); a script invoked with a legacy flag SHALL exit non-zero and SHALL NOT call the Skill API. The skill client library SHALL resolve the owning session id from the `SESSION_ID` environment variable in per-spawn mode, or from the orchestrator-maintained current-session pointer file in shared-process mode (that pointer is written ONLY while the session holds the global execution lease, via an atomic temp-file+rename write, and cleared on release), and SHALL present the owning session's JWT — in neither mode SHALL the agent need to read files or pass extra parameters. In shared-process mode the agent process environment SHALL NOT contain `SESSION_ID` (a spawn-time frozen value would name a different session), and the pointer SHALL be the sole identity source: when the pointer is unreadable or malformed (schema violation: `sessionId` must be a non-empty string) the library SHALL fail with a stable `SKILL_SESSION_UNRESOLVED` structured error — the typed error SHALL carry the code in a machine-readable `code` field so identity-only scripts (which do not touch payload files) surface it identically to payload scripts — rather than falling back to any environment value. The `--session-id` argument SHALL remain required, but its value is advisory in shared-process mode: the library SHALL substitute the pointer-resolved owning session in the API request body so the server's JWT `sub` check stays authoritative. The skill script SHALL snapshot the owning session id and the JWT file content ONCE at script start, so a backgrounded or late-running skill subprocess cannot observe a later session's pointer or JWT file. Scripts SHALL be executed directly (shebang `#!/usr/bin/env -S deno run --allow-net --allow-env --allow-read --allow-write`); the `--allow-read` permission is required for reading the staged payload file and the per-session JWT file, and `--allow-write` enables the script's best-effort deletion of the consumed payload file. Each `SKILL.md` SHALL describe the session-id source truthfully: the session id rendered in the system prompt is authoritative; `$SESSION_ID` is present only in per-spawn deployments.
+Skills SHALL be implemented as Deno TypeScript scripts in `skills/{skill-name}/scripts/`, each with a `SKILL.md` describing its usage, and SHALL be executed with a `--session-id` parameter while using the shared client library at `skills/lib/client.ts` to communicate back to the main bot via HTTP.
 
 #### Scenario: Agent executes a skill script
 - **GIVEN** an ACP Agent decides to use the `memory-save` skill
@@ -48,6 +48,50 @@ Skills SHALL be implemented as Deno TypeScript scripts located in `skills/{skill
 - **THEN** the script SHALL exit with a non-zero status and an error instructing the use of the payload-file flag (e.g. `--message-file`)
 - **AND** the script SHALL NOT call the Skill API
 
+#### Scenario: Free-text content stays off the command line
+- **GIVEN** a skill script that carries free-text content (reply text, memory content, search queries, captions, reminder text)
+- **WHEN** the script is invoked
+- **THEN** the script SHALL NOT accept any free-text argument as a CLI value in any form
+- **AND** any free-text argument SHALL be passed via a payload-file flag (e.g. `--message-file`, `--content-file`, `--query-file`, `--caption-file`) whose content is read from a file staged in the session-scoped TMPDIR, so no user-facing content ever appears on a shell command line
+
+#### Scenario: Legacy free-text flags rejected in both forms
+- **GIVEN** a skill script invoked with a legacy free-text flag (`--message`, `--content`, `--query`, or `--caption`)
+- **WHEN** the flag is given in either form (`--flag value` or `--flag=value`)
+- **THEN** the script SHALL exit non-zero with a clear error and SHALL NOT call the Skill API
+
+#### Scenario: Owning session identity resolved without extra agent work
+- **GIVEN** a skill script executed by the agent
+- **WHEN** the shared client library resolves the owning session id
+- **THEN** in per-spawn mode it SHALL resolve from the `SESSION_ID` environment variable, and in shared-process mode from the orchestrator-maintained current-session pointer file (written ONLY while the session holds the global execution lease via an atomic temp-file+rename write, and cleared on release)
+- **AND** the library SHALL present the owning session's JWT, so in neither mode SHALL the agent need to read files or pass extra parameters
+
+#### Scenario: Shared-mode pointer is the sole identity source
+- **GIVEN** shared-process mode where the agent process environment SHALL NOT contain `SESSION_ID` (a spawn-time frozen value would name a different session)
+- **WHEN** a skill script resolves its owning session
+- **THEN** the pointer SHALL be the sole identity source and the library SHALL NOT fall back to any environment value
+- **AND** when the pointer is unreadable or malformed (`sessionId` must be a non-empty string), the library SHALL fail with a stable `SKILL_SESSION_UNRESOLVED` structured error carrying the code in a machine-readable `code` field
+
+#### Scenario: Session ID is advisory in shared-process mode
+- **GIVEN** shared-process mode
+- **WHEN** a skill script is invoked with an arbitrary `--session-id` value
+- **THEN** the library SHALL substitute the pointer-resolved owning session in the API request body so the server's JWT `sub` check stays authoritative
+
+#### Scenario: Skill snapshots identity at start
+- **GIVEN** a skill script that runs or may outlive the current turn
+- **WHEN** the script starts
+- **THEN** it SHALL snapshot the owning session id and the JWT file content ONCE at script start, so a backgrounded or late-running skill subprocess cannot observe a later session's pointer or JWT file
+
+#### Scenario: Skill scripts run with scoped Deno permissions
+- **GIVEN** a skill script is executed directly
+- **WHEN** it is run
+- **THEN** it SHALL use the shebang `#!/usr/bin/env -S deno run --allow-net --allow-env --allow-read --allow-write`
+- **AND** `--allow-read` SHALL be required for reading the staged payload file and the per-session JWT file, and `--allow-write` SHALL enable the script's best-effort deletion of the consumed payload file
+
+#### Scenario: SKILL.md describes the session-id source truthfully
+- **GIVEN** a skill's `SKILL.md`
+- **WHEN** it documents the session-id source
+- **THEN** it SHALL state that the session id rendered in the system prompt is authoritative, and that `$SESSION_ID` is present only in per-spawn deployments
+
 ### Requirement: Skill API HTTP Server
 
 The system SHALL run an HTTP server (configurable host/port, typically `localhost:3001`) that exposes skill endpoints at `POST /api/skill/{skill-name}`. The server SHALL only accept POST requests (returning appropriate errors for other methods). OPTIONS requests SHALL return 204 for CORS preflight. The server SHALL implement a 1-second TTL request cache for deduplication of concurrent duplicate requests.
@@ -64,9 +108,7 @@ The system SHALL run an HTTP server (configurable host/port, typically `localhos
 
 ### Requirement: Session-Based Authentication
 
-The system SHALL authenticate all Skill API requests with a per-session signed JWT (see the `jwt-skill-auth` capability): a valid session ID alone SHALL NOT be sufficient, and a raw per-session caller token presented raw on its own SHALL be rejected. At session registration the system SHALL mint a high-entropy per-session caller token (256-bit CSPRNG, distinct from the session ID) that becomes the JWT `jti` claim. The session's JWT (header `{"alg":"HS256"}`, payload `{ sub, channel, jti, iat, exp }`, HMAC-SHA256 signature with the deployment-level secret) SHALL be issued — or re-issued with a fresh `exp` — when the session acquires the global execution lease (NOT at registration), so a session queued behind a long in-flight session cannot present an expired JWT. Each Skill API request SHALL present the session's JWT via an `Authorization: Bearer <jwt>` header; the server SHALL verify (1) the signature (constant-time comparison), (2) `sub == sessionId`, (3) `channel == session channelId`, and (4) `jti == session caller token` and `exp` validity, rejecting any failure with HTTP 403 (401 for expired or unknown session). Sessions SHALL expire based on a configurable idle `timeoutMs`: the session registry SHALL treat a session idle beyond `timeoutMs` as absent on `get()`, run periodic cleanup, and refresh the session's `lastActivityAt` via `touch()` on each authenticated call.
-
-Note: the JWT is provisioned into the owning subprocess via the per-session JWT file and the current-session pointer, so it does not by itself defend against an attacker who can read that subprocess's files directly (that vector is addressed by agent filesystem confinement and the permission gate); its purpose is to ensure that knowledge of a session ID obtained through any other channel does not grant the ability to act as that session.
+The system SHALL authenticate all Skill API requests with a per-session signed JWT: a valid session ID alone SHALL NOT be sufficient, and a raw per-session caller token presented on its own SHALL be rejected.
 
 #### Scenario: Valid session ID without caller token rejected
 - **GIVEN** an active session `sess_abc_123`
@@ -98,46 +140,69 @@ Note: the JWT is provisioned into the owning subprocess via the per-session JWT 
 - **WHEN** each authenticated call is processed
 - **THEN** the session's `lastActivityAt` SHALL be refreshed via `touch()` so an actively used session does not expire mid-turn
 
+#### Scenario: Caller token minted at registration becomes the JWT jti
+- **GIVEN** a session is registered
+- **WHEN** the system authenticates it
+- **THEN** the system SHALL mint a high-entropy per-session caller token (256-bit CSPRNG, distinct from the session ID) that becomes the JWT `jti` claim
+
+#### Scenario: JWT issued on lease acquisition with a fresh exp
+- **GIVEN** a session JWT with header `{"alg":"HS256"}`, payload `{ sub, channel, jti, iat, exp }`, and an HMAC-SHA256 signature with the deployment-level secret
+- **WHEN** the session acquires the global execution lease (NOT at registration)
+- **THEN** the JWT SHALL be issued — or re-issued with a fresh `exp`
+- **AND** a session queued behind a long in-flight session SHALL NOT present an expired JWT
+
+#### Scenario: Bearer JWT verified on every request
+- **GIVEN** a Skill API request
+- **WHEN** it presents the session's JWT via an `Authorization: Bearer <jwt>` header
+- **THEN** the server SHALL verify (1) the signature (constant-time comparison), (2) `sub == sessionId`, (3) `channel == session channelId`, and (4) `jti == session caller token` and `exp` validity
+- **AND** any failure SHALL be rejected with HTTP 403 (401 for expired or unknown session)
+
+#### Scenario: Idle sessions expire
+- **GIVEN** a configurable idle `timeoutMs`
+- **WHEN** a session is idle beyond `timeoutMs`
+- **THEN** the session registry SHALL treat it as absent on `get()`, run periodic cleanup, and refresh the session's `lastActivityAt` via `touch()` on each authenticated call
+
+#### Scenario: JWT does not defend against subprocess file readers
+- **GIVEN** the JWT is provisioned into the owning subprocess via the per-session JWT file and the current-session pointer
+- **WHEN** an attacker can read that subprocess's files directly
+- **THEN** the JWT does not by itself defend against that vector (addressed by agent filesystem confinement and the permission gate)
+- **AND** its purpose SHALL be to ensure that knowledge of a session ID obtained through any other channel does not grant the ability to act as that session
+
 ### Requirement: Available Skills
 
-The system SHALL register the following skills via `SkillRegistry`:
-
-| Skill             | Handler              | Description                     |
-| ----------------- | -------------------- | ------------------------------- |
-| `memory-save`     | MemoryHandler        | Save a new memory               |
-| `memory-search`   | MemoryHandler        | Search existing memories        |
-| `memory-patch`    | MemoryHandler        | Update memory attributes        |
-| `memory-stats`    | MemoryHandler        | Get memory statistics           |
-| `memory-export`   | MemoryHandler        | Export memories as file          |
-| `send-reply`      | ReplyHandler         | Send a reply message            |
-| `edit-reply`      | ReplyHandler         | Edit a previously sent reply    |
-| `get-message`     | ReplyHandler         | Get a message by ID             |
-| `fetch-context`   | ContextHandler       | Fetch additional platform data  |
-| `react-message`   | ReactionHandler      | Add emoji reaction to a message |
-
-The following skills SHALL be registered conditionally based on configuration:
-
-| Skill              | Condition                         |
-| ------------------ | --------------------------------- |
-| `set-reminder`     | `remindersConfig?.enabled && reminderStore` |
-| `cancel-reminder`  | Same as above                     |
-| `list-reminders`   | Same as above                     |
-| `send-file`        | `sendFileConfig?.enabled`         |
+The system SHALL register core skills via `SkillRegistry`: `memory-save`, `memory-search`, `memory-patch`, `memory-stats`, `memory-export` (MemoryHandler), `send-reply`, `edit-reply`, `get-message` (ReplyHandler), `fetch-context` (ContextHandler), and `react-message` (ReactionHandler).
 
 #### Scenario: Conditional skill not registered
 - **GIVEN** reminders are not enabled in configuration
 - **WHEN** the skill registry initializes
 - **THEN** `set-reminder`, `cancel-reminder`, and `list-reminders` SHALL NOT be registered
 
+#### Scenario: Core skills register with their handlers
+- **WHEN** the skill registry initializes
+- **THEN** the memory skills (`memory-save`, `memory-search`, `memory-patch`, `memory-stats`, `memory-export`) SHALL be handled by `MemoryHandler`
+- **AND** `send-reply`, `edit-reply`, and `get-message` SHALL be handled by `ReplyHandler`
+- **AND** `fetch-context` SHALL be handled by `ContextHandler` and `react-message` by `ReactionHandler`
+
+#### Scenario: Core skills carry their documented purpose
+- **WHEN** a skill is registered
+- **THEN** `memory-save` (Save a new memory), `memory-search` (Search existing memories), `memory-patch` (Update memory attributes), `memory-stats` (Get memory statistics), and `memory-export` (Export memories as file) SHALL be available
+- **AND** `send-reply` (Send a reply message), `edit-reply` (Edit a previously sent reply), `get-message` (Get a message by ID), `fetch-context` (Fetch additional platform data), and `react-message` (Add emoji reaction to a message) SHALL be available
+
+#### Scenario: Reminder skills register only when reminders are enabled
+- **GIVEN** `remindersConfig?.enabled && reminderStore` is satisfied
+- **WHEN** the skill registry initializes
+- **THEN** `set-reminder`, `cancel-reminder`, and `list-reminders` SHALL be registered
+- **AND** otherwise they SHALL NOT be registered
+
+#### Scenario: send-file registers only when enabled
+- **GIVEN** `sendFileConfig?.enabled`
+- **WHEN** the skill registry initializes
+- **THEN** `send-file` SHALL be registered
+- **AND** it SHALL NOT be registered when send-file is disabled in configuration
+
 ### Requirement: Reply Rules
 
-The system SHALL enforce the following reply limits per session:
-
-- **`send-reply`**: Maximum 1 call per session (`MAX_REPLIES_PER_SESSION = 1`). Additional calls SHALL be rejected with HTTP 429 status and a message advising use of `edit-reply` instead.
-- **Doom-loop detection**: If `send-reply` is attempted 4 or more times (`MAX_REPLY_ATTEMPTS_BEFORE_TERMINATE = 4`), the system SHALL terminate the agent. In per-spawn mode the `onTerminateRequest` callback SHALL terminate the per-session subprocess; in shared-process mode it SHALL cancel the current ACP session via `session/cancel` and SHALL NOT terminate the shared channel process.
-- **`edit-reply`**: Requires a prior successful `send-reply` (`replySent = true`). If `edit-reply` is called 3 or more times (`MAX_EDIT_CALLS_BEFORE_TERMINATE = 3`), the system SHALL terminate the agent (per-spawn: process termination; shared-process: `session/cancel`).
-- **`send-file` quota**: `send-file` SHALL be limited to 1 successful call per session (`MAX_FILE_SENDS_PER_SESSION = 1`; a multi-file batch counts as one call). Additional calls SHALL be rejected with HTTP 429. If `send-file` is attempted 4 or more times (`MAX_FILE_SEND_ATTEMPTS_BEFORE_TERMINATE = 4`), the system SHALL terminate the agent via `onTerminateRequest` (doom-loop protection). `send-file` SHALL NOT be tracked by the reply count/doom-loop counters, SHALL NOT set `replySent`, SHALL NOT update the session's `lastSentMessageId`, and SHALL NOT trigger conversation summary generation. A file send is a distinct communication channel: it SHALL be tracked via the session file-send state, and a call is counted as successful when at least one file was delivered. `send-file` SHALL only be callable from user-triggered message/channelLurk sessions: triggerless sessions (spontaneous, self-research, memory-maintenance, reminders) SHALL be rejected with HTTP 403 because they only track replies and an untracked file send would cause duplicate output or repeat delivery. `send-file` skill results SHALL NOT be served from the request deduplication cache (the quota/doom-loop gate must run on every attempt, including identical repeated calls).
-- **Minimum response requirement**: At least one reply (via `send-reply`), one reaction (via `react-message`), or one file send (via `send-file`) SHALL be produced per session. If none of the three occurs when the agent completes, the retry mechanism SHALL trigger.
+The system SHALL enforce per-session reply limits: `send-reply` SHALL be limited to one successful call per session (`MAX_REPLIES_PER_SESSION = 1`), and attempts at or beyond `MAX_REPLY_ATTEMPTS_BEFORE_TERMINATE = 4` SHALL terminate the agent (the send-reply doom-loop).
 
 #### Scenario: Second send-reply rejected
 - **GIVEN** a session where `send-reply` has already been called once
@@ -181,9 +246,44 @@ The system SHALL enforce the following reply limits per session:
 - **WHEN** the agent repeats the exact same rejected `send-file` request 3 more times within the dedup-cache window
 - **THEN** each attempt SHALL be re-executed (not served from cache) and the 4th attempt SHALL trigger agent termination
 
+#### Scenario: edit-reply requires a prior reply and has its own doom-loop
+- **GIVEN** a session
+- **WHEN** `edit-reply` is called
+- **THEN** it SHALL require a prior successful `send-reply` (`replySent = true`)
+- **AND** if `edit-reply` is called 3 or more times (`MAX_EDIT_CALLS_BEFORE_TERMINATE = 3`), the system SHALL terminate the agent (per-spawn: process termination; shared-process: `session/cancel`)
+
+#### Scenario: send-file has its own one-call quota
+- **GIVEN** a session
+- **WHEN** `send-file` is called
+- **THEN** it SHALL be limited to 1 successful call per session (`MAX_FILE_SENDS_PER_SESSION = 1`; a multi-file batch counts as one call)
+- **AND** additional calls SHALL be rejected with HTTP 429, and if `send-file` is attempted 4 or more times (`MAX_FILE_SEND_ATTEMPTS_BEFORE_TERMINATE = 4`) the system SHALL terminate the agent via `onTerminateRequest` (doom-loop protection)
+
+#### Scenario: send-file is a distinct communication channel
+- **GIVEN** a successful `send-file` call
+- **WHEN** the session response is evaluated
+- **THEN** `send-file` SHALL NOT be tracked by the reply count/doom-loop counters, SHALL NOT set `replySent`, SHALL NOT update the session's `lastSentMessageId`, and SHALL NOT trigger conversation summary generation
+- **AND** it SHALL be tracked via the session file-send state, counted as successful when at least one file was delivered
+
+#### Scenario: send-file rejected in triggerless sessions
+- **GIVEN** a triggerless session (spontaneous, self-research, memory-maintenance, reminders)
+- **WHEN** `send-file` is called
+- **THEN** the session SHALL be rejected with HTTP 403, because such sessions only track replies and an untracked file send would cause duplicate output or repeat delivery
+
+#### Scenario: send-file results bypass the deduplication cache
+- **GIVEN** a `send-file` skill invocation
+- **WHEN** it completes
+- **THEN** the result SHALL NOT be served from the request deduplication cache
+- **AND** the quota/doom-loop gate SHALL run on every attempt, including identical repeated calls
+
+#### Scenario: Minimum response requirement triggers retry
+- **GIVEN** a session that completed with no reply, reaction, or file send
+- **WHEN** the agent completes
+- **THEN** at least one reply (`send-reply`), reaction (`react-message`), or file send (`send-file`) SHALL have been produced per session
+- **AND** if none of the three occurs, the retry mechanism SHALL trigger
+
 ### Requirement: Retry on Missing Reply
 
-The system SHALL automatically retry when an ACP Agent completes a prompt turn (`stopReason === "end_turn"`) without having called `send-reply`, `react-message`, or `send-file`. The retry SHALL clear the reply state, send a second prompt on the same ACP session requesting the agent to send a reply, and if the retry also fails, return a failure response. A session that produced a reply, a reaction, or a file send SHALL NOT be retried. The retry prompt SHALL be instructive: it SHALL state that the turn ended without a reply, reaction, or file send; SHALL list the likely causes of a failed `send-reply`/`send-file` under the payload-file contract (legacy `--message`/`--caption` used and rejected, payload file never written, payload staged outside `$TMPDIR/$SESSION_ID/`, or a previous skill call that errored — with an instruction to read that error's output); SHALL give the correct two-step example invocation (write the payload to `$TMPDIR/$SESSION_ID/...` with the edit/write tool, then invoke the script with the payload-file flag); and SHALL include the full `send-reply`, `react-message`, and `send-file` SKILL.md content.
+The system SHALL retry when an ACP Agent completes a prompt turn (`stopReason === "end_turn"`) without calling `send-reply`, `react-message`, or `send-file`: the retry SHALL clear the reply state, send a second prompt on the same ACP session, and return a failure response if the retry also fails; a session that produced a reply, reaction, or file send SHALL NOT be retried.
 
 #### Scenario: Successful retry produces reply
 - **GIVEN** an agent completes without sending a reply, reaction, or file
@@ -208,9 +308,21 @@ The system SHALL automatically retry when an ACP Agent completes a prompt turn (
 - **THEN** the retry mechanism SHALL NOT trigger
 - **AND** the session SHALL be recorded as successful with `fileSent: true`
 
+#### Scenario: Retry prompt lists payload-file failure causes
+- **GIVEN** an agent ends its turn without a reply, reaction, or file send
+- **WHEN** the retry prompt is sent
+- **THEN** it SHALL state that the turn ended without a reply, reaction, or file send
+- **AND** it SHALL list the likely causes of a failed `send-reply`/`send-file` under the payload-file contract: legacy `--message`/`--caption` used and rejected, payload file never written, payload staged outside `$TMPDIR/$SESSION_ID/`, or a previous skill call that errored (with an instruction to read that error's output)
+
+#### Scenario: Retry prompt gives the correct two-step example
+- **GIVEN** an agent whose reply or file send failed under the payload-file contract
+- **WHEN** the retry prompt is sent
+- **THEN** it SHALL give the correct two-step example: write the payload to `$TMPDIR/$SESSION_ID/...` with the edit/write tool, then invoke the script with the payload-file flag
+- **AND** it SHALL include the full `send-reply`, `react-message`, and `send-file` SKILL.md content
+
 ### Requirement: Instructive Skill Error Messages
 
-Skill script contract failures SHALL produce structured, instructive errors that teach the correct usage, so the agent can self-correct mid-turn. The shared payload helper SHALL raise typed errors carrying a stable `code` and a guidance message; the scripts SHALL emit them as JSON on stderr (extending the existing `exitWithError` contract with a `code` field) and SHALL NOT call the Skill API. The guidance message SHALL state (a) what was wrong, (b) why it matters, and (c) the exact correct pattern with a copy-pasteable example invocation specific to the failing skill. The error codes SHALL be: `SKILL_LEGACY_FLAG` (legacy free-text flag used, in either `--flag value` or `--flag=value` form — guidance SHALL state the flag was removed for security, forbid message content on the command line, and show the two-step payload-file flow), `SKILL_MISSING_PAYLOAD` (required payload flag absent — guidance SHALL name the required flag and show the two-step flow), `SKILL_PAYLOAD_OUT_OF_BOUNDS` (path resolves outside the session staging directory, including symlink escapes — guidance SHALL explain the payload must live under `$TMPDIR/$SESSION_ID/...` and why, and show the correct form), and `SKILL_PAYLOAD_NOT_FOUND` (file absent or unreadable — guidance SHALL instruct writing the file first with the edit/write tool, then invoking the script), and `SKILL_SINGLE_FILE_FLAG` (the `send-file` script invoked with the removed singular `--file-path` flag in either form — guidance SHALL state that the flag was replaced by the repeatable `--file-paths` flag, explain that the skill supports multiple files per invocation, and show a copy-pasteable example with two or more `--file-paths` arguments), and `SKILL_SESSION_UNRESOLVED` (shared-process mode with a missing, unreadable, or malformed current-session pointer — the owning session cannot be resolved; guidance SHALL name the expected pointer path and the "invoke skills during a live turn" remedy). The `error` field SHALL be self-contained prose containing the fix and a full example command.
+Skill script contract failures SHALL produce structured, instructive errors carrying a stable `code` and a guidance message, emitted as JSON on stderr, teaching the correct usage so the agent can self-correct mid-turn; on such failures the script SHALL NOT call the Skill API.
 
 #### Scenario: Legacy flag error teaches the payload-file flow
 - **GIVEN** an agent invokes `send-reply` with `--message "定價 $0.435"` or `--message=定價`
@@ -239,9 +351,21 @@ Skill script contract failures SHALL produce structured, instructive errors that
 - **THEN** the error SHALL have code `SKILL_SINGLE_FILE_FLAG`, SHALL state that `--file-path` was replaced by the repeatable `--file-paths` flag, and SHALL include a copy-pasteable example passing two or more files
 - **AND** the script SHALL NOT call the Skill API
 
+#### Scenario: Guidance states what was wrong, why it matters, and the correct pattern
+- **GIVEN** a skill script contract failure
+- **WHEN** the guidance message is produced
+- **THEN** it SHALL state (a) what was wrong, (b) why it matters, and (c) the exact correct pattern with a copy-pasteable example invocation specific to the failing skill
+- **AND** the `error` field SHALL be self-contained prose containing the fix and a full example command
+
+#### Scenario: SKILL_SESSION_UNRESOLVED error for an unresolvable shared-mode pointer
+- **GIVEN** shared-process mode with a missing, unreadable, or malformed current-session pointer
+- **WHEN** the owning session cannot be resolved
+- **THEN** the error SHALL have code `SKILL_SESSION_UNRESOLVED`
+- **AND** the guidance SHALL name the expected pointer path and the "invoke skills during a live turn" remedy
+
 ### Requirement: Payload-File Argument Passing
 
-Skill scripts that carry free-text content SHALL accept that content exclusively through a payload-file flag whose value is the path of a file staged in the session-scoped TMPDIR. The mapping SHALL be: `send-reply`/`edit-reply`/`set-reminder` use `--message-file`, `send-file` uses `--caption-file`, `memory-save` uses `--content-file`, `memory-search`/`fetch-context` use `--query-file`. A REQUIRED free-text argument SHALL have exactly one payload-file flag; an OPTIONAL free-text argument (e.g. `send-file` caption, `fetch-context` query) MAY omit its payload-file flag, and when present SHALL accept exactly one. The payload file SHALL be written by the agent through the ACP filesystem interface (edit/write tool or `writeTextFile`) using the `$TMPDIR/$SESSION_ID`-anchored path (per-spawn; in shared-process mode the agent writes to the prompt-rendered staging directory), so its bytes are preserved verbatim with no shell interpretation. The system SHALL pre-create the session staging directory `{workspace}/tmp/{sessionId}` at session setup (when the shell session is registered), because neither the agent's edit/write tool nor `writeTextFile` creates parent directories; the directory is removed with the rest of `{workspace}/tmp` when the last session for the workspace ends. The script SHALL resolve the payload path against its working directory and SHALL require the resolved path to be inside the session staging directory, using boundary-safe matching (equal-or-separator-prefixed) so prefix-sibling directories (`{base}-2`, `{base}2`) are rejected. The staging directory SHALL be resolved per mode: in SHARED-process mode ONLY from the current-session pointer (`{staging}/{sessionId}` from `active.json`) — with no CLI-argument fallback — and a missing, unreadable, or malformed pointer SHALL make the script fail with the stable `SKILL_SESSION_UNRESOLVED` error BEFORE reading or deleting any payload file. Malformed is defined by a strict pointer schema: `sessionId` and `staging` SHALL both be non-empty strings, and in shared mode `staging` SHALL be an absolute path (the pool writes absolute staging roots); numbers, objects, empty strings, and relative staging are all malformed and fail identically; in per-spawn mode the staging directory is `{cwd}/tmp/{sessionId}`, where the session id comes from the script's own `--session-id` argument (sessions without an id fall back to `{workspace}/tmp`). When the payload file exists, the script SHALL resolve its real path (`Deno.realPath`) and SHALL re-check the real path for containment, so a symlink that escapes the staging directory (e.g. pointing at `/etc/passwd` or into another session's directory) SHALL be rejected. When the payload flag is missing, the referenced file is absent or unreadable, the path is outside the staging directory, or the real path escapes it, the script SHALL exit non-zero with a structured error and SHALL NOT call the Skill API. On success the script SHALL pass the file content to the Skill API as the corresponding JSON parameter (server-side behavior unchanged), and SHALL best-effort delete the payload file afterwards. The script SHALL reject any legacy free-text flag in either invocation form before doing anything else.
+Skill scripts that carry free-text content SHALL accept that content exclusively through a payload-file flag whose value is the path of a file staged in the session-scoped TMPDIR, and SHALL NOT accept free-text content as a CLI argument value.
 
 #### Scenario: Valid session-scoped payload accepted
 - **GIVEN** a session with id `sess_own` whose workspace TMPDIR is `{workspace}/tmp`, and a payload file staged at `{workspace}/tmp/sess_own/reply.md`
@@ -301,18 +425,55 @@ Skill scripts that carry free-text content SHALL accept that content exclusively
 - **WHEN** the script parses its arguments
 - **THEN** the script SHALL proceed without a payload file, passing no caption/query parameter to the Skill API
 
+#### Scenario: Payload-file flag mapping per skill
+- **WHEN** a skill that carries free-text content is invoked
+- **THEN** `send-reply`/`edit-reply`/`set-reminder` SHALL use `--message-file`, `send-file` SHALL use `--caption-file`, `memory-save` SHALL use `--content-file`, and `memory-search`/`fetch-context` SHALL use `--query-file`
+
+#### Scenario: REQUIRED and OPTIONAL payload arguments
+- **GIVEN** a free-text argument of a skill
+- **WHEN** it is declared in the skill contract
+- **THEN** a REQUIRED free-text argument SHALL have exactly one payload-file flag
+- **AND** an OPTIONAL free-text argument (e.g. `send-file` caption, `fetch-context` query) MAY omit its payload-file flag, and when present SHALL accept exactly one
+
+#### Scenario: Payload staged and written verbatim
+- **GIVEN** a payload file staged in the session-scoped TMPDIR
+- **WHEN** the agent writes it
+- **THEN** it SHALL be written through the ACP filesystem interface (edit/write tool or `writeTextFile`) using the `$TMPDIR/$SESSION_ID`-anchored path in per-spawn mode, or the prompt-rendered staging directory in shared-process mode
+- **AND** its bytes SHALL be preserved verbatim with no shell interpretation
+
+#### Scenario: Session staging directory pre-created at setup
+- **GIVEN** a session is registered
+- **WHEN** the shell session is set up
+- **THEN** the system SHALL pre-create the session staging directory `{workspace}/tmp/{sessionId}`, because neither the agent's edit/write tool nor `writeTextFile` creates parent directories
+- **AND** the directory SHALL be removed with the rest of `{workspace}/tmp` when the last session for the workspace ends
+
+#### Scenario: Only the pointer staging directory is used in shared mode
+- **GIVEN** shared-process mode
+- **WHEN** a script resolves the staging directory
+- **THEN** it SHALL resolve it ONLY from the current-session pointer (`{staging}/{sessionId}` from `active.json`), with no CLI-argument fallback
+- **AND** a missing, unreadable, or malformed pointer SHALL make the script fail with the stable `SKILL_SESSION_UNRESOLVED` error BEFORE reading or deleting any payload file
+
+#### Scenario: Strict pointer schema
+- **GIVEN** a current-session pointer
+- **WHEN** it is validated
+- **THEN** `sessionId` and `staging` SHALL both be non-empty strings, and in shared mode `staging` SHALL be an absolute path (the pool writes absolute staging roots)
+- **AND** numbers, objects, empty strings, and relative staging SHALL all be malformed and fail identically
+- **AND** in per-spawn mode the staging directory SHALL be `{cwd}/tmp/{sessionId}` from the script's own `--session-id` argument (sessions without an id fall back to `{workspace}/tmp`)
+
+#### Scenario: Real-path containment re-checked
+- **GIVEN** a payload file that exists
+- **WHEN** the script processes it
+- **THEN** it SHALL resolve the file's real path (`Deno.realPath`) and SHALL re-check the real path for containment
+- **AND** a symlink that escapes the staging directory (e.g. pointing at `/etc/passwd` or into another session's directory) SHALL be rejected
+
+#### Scenario: On success the payload is deleted
+- **GIVEN** a successful payload-file invocation
+- **WHEN** the script has passed the file content to the Skill API as the corresponding JSON parameter (server-side behavior unchanged)
+- **THEN** the script SHALL best-effort delete the payload file afterwards
+
 ### Requirement: Reply Threading Anchor and Message ID Roles
 
-The system SHALL distinguish four message-ID roles per session so no tool can confuse the ID of a message the bot sent with the ID of the message being replied to:
-
-- **`lastSentMessageId`** — the ID of the last message sent via `send-reply` or `edit-reply`. It SHALL be updated ONLY by those two skills (the Skill API server refreshes it after each successful call, including Misskey's delete-and-recreate new ID). It is consumed by `edit-reply` scoping and by the `get-message` fallback. A message delivered by `send-file` SHALL NEVER be recorded here.
-- **`lastFileMessageId`** — the ID of the last message delivered by `send-file`. It SHALL be updated ONLY by `send-file`, and ONLY when at least one file was delivered (on Misskey chat partial delivery it SHALL be the last *delivered* message ID). It is consumed as the reply threading anchor and by the `get-message` fallback.
-- **`lastReplyAnchorMessageId`** — the message ID that the last text reply was created as a reply to (the reply anchor in effect when `send-reply` succeeded). It SHALL be recorded ONLY on a successful `send-reply` and SHALL NOT be changed by `edit-reply`. Misskey `edit-reply` re-creation SHALL thread to this recorded anchor, so editing a reply never rewrites its original thread parent.
-- **`triggerMessageId`** — the ID of the message that triggered the session (empty for triggerless sessions). It is the fallback reply anchor and the target of `react-message`.
-
-The session's **reply anchor** SHALL resolve to `lastFileMessageId ?? triggerMessageId`. `send-reply` SHALL thread its message to the reply anchor. Misskey `edit-reply` re-creation SHALL thread to `lastReplyAnchorMessageId` (falling back to the reply anchor when unset). `send-file` SHALL thread to the trigger message (its delivered ID is only recorded after the call succeeds, and only one `send-file` call per session is permitted, so the anchor is always the trigger when `send-file` runs). `react-message` SHALL target `triggerMessageId`, never the bot's own file message.
-
-The `get-message` skill SHALL resolve its target message as `params.messageId`, falling back to `lastSentMessageId`, then `lastFileMessageId`, and SHALL return an error when none exists.
+The system SHALL distinguish four per-session message-ID roles — `lastSentMessageId`, `lastFileMessageId`, `lastReplyAnchorMessageId`, and `triggerMessageId` — so no tool can confuse the ID of a message the bot sent with the ID of the message being replied to.
 
 #### Scenario: Send-reply after file send threads to the file message
 - **GIVEN** a session that delivered files via `send-file` (so `lastFileMessageId` is `file-note-1`) and has a trigger message `trigger-1`
@@ -343,15 +504,41 @@ The `get-message` skill SHALL resolve its target message as `params.messageId`, 
 - **WHEN** `get-message` is called without a `messageId` parameter
 - **THEN** the skill SHALL fetch the message identified by `lastFileMessageId`
 
+#### Scenario: lastSentMessageId records only the last text reply
+- **WHEN** a message is sent via `send-reply` or `edit-reply`
+- **THEN** the last sent message ID SHALL be recorded in `lastSentMessageId`, updated ONLY by those two skills, including after Misskey's delete-and-recreate new ID
+- **AND** a message delivered by `send-file` SHALL NEVER be recorded here
+- **AND** `lastSentMessageId` SHALL be consumed by `edit-reply` scoping and the `get-message` fallback
+
+#### Scenario: lastFileMessageId records only delivered file messages
+- **WHEN** a file is delivered by `send-file`
+- **THEN** its ID SHALL be recorded in `lastFileMessageId`, updated ONLY by `send-file` and ONLY when at least one file was delivered (on Misskey chat partial delivery, the last *delivered* message ID)
+- **AND** it SHALL be consumed as the reply threading anchor and by the `get-message` fallback
+
+#### Scenario: lastReplyAnchorMessageId records the reply's own anchor
+- **WHEN** a text reply is created
+- **THEN** `lastReplyAnchorMessageId` SHALL record the reply anchor in effect when `send-reply` succeeded, recorded ONLY on a successful `send-reply`
+- **AND** it SHALL NOT be changed by `edit-reply`, so Misskey `edit-reply` re-creation threads to this recorded anchor and never rewrites the original thread parent
+
+#### Scenario: triggerMessageId targets the triggering message
+- **GIVEN** a session triggered by a message
+- **WHEN** its message-ID roles are used
+- **THEN** `triggerMessageId` SHALL hold the ID of the triggering message (empty for triggerless sessions)
+- **AND** it SHALL be the fallback reply anchor and the target of `react-message`
+
+#### Scenario: Reply anchor resolution and threading
+- **WHEN** a message needs a reply anchor
+- **THEN** the session's reply anchor SHALL resolve to `lastFileMessageId ?? triggerMessageId`
+- **AND** `send-reply` SHALL thread to the reply anchor, Misskey `edit-reply` re-creation SHALL thread to `lastReplyAnchorMessageId` (falling back to the reply anchor when unset), `send-file` SHALL thread to the trigger message, and `react-message` SHALL target `triggerMessageId`, never the bot's own file message
+
+#### Scenario: get-message resolves its target with fallbacks
+- **WHEN** `get-message` is called
+- **THEN** it SHALL resolve its target as `params.messageId`, falling back to `lastSentMessageId`, then `lastFileMessageId`
+- **AND** it SHALL return an error when none of those exists
+
 ### Requirement: Edit-Reply Platform Behavior
 
-`edit-reply` SHALL only operate on the current session's own most-recently-sent **text reply** message: the handler SHALL reject the request when `params.messageId` does not equal `context.lastSentMessageId`. Because `send-file` records its delivered message ID in `lastFileMessageId` and NEVER in `lastSentMessageId`, file-message IDs SHALL NEVER be editable: any attempt to pass a `send-file` message ID to `edit-reply` SHALL be rejected by the same scoping check and SHALL NOT delete or edit the file message. Subject to that scoping, `edit-reply` SHALL behave differently depending on the platform:
-
-- **Discord**: SHALL use native `platformAdapter.editMessage()` to edit the message in-place.
-- **Misskey Notes** (`note:` channel prefix): SHALL use a delete-and-recreate strategy — delete the old note via `notes/delete`, then create a new note via `notes/create` with the message the edited reply was originally created as a reply to (`context.lastReplyAnchorMessageId`, falling back to the reply anchor) as `replyId` to preserve the reply's original thread parent. The returned `messageId` will differ from the original. Visibility and `visibleUserIds` SHALL be preserved.
-- **Misskey Chat** (`chat:` channel prefix): SHALL use a delete-and-recreate strategy via `chat/messages/delete` followed by `chat/messages/create-to-user`.
-
-If the delete step fails, the system SHALL abort without creating a new message and SHALL return an error.
+`edit-reply` SHALL operate only on the current session's own most-recently-sent **text reply**: the handler SHALL reject any request whose `params.messageId` does not equal `context.lastSentMessageId`, and file-message IDs SHALL NEVER be editable.
 
 #### Scenario: Edit-reply on foreign message rejected
 - **GIVEN** a session whose `context.lastSentMessageId` is `msg-A`
@@ -390,6 +577,22 @@ If the delete step fails, the system SHALL abort without creating a new message 
 - **WHEN** `edit-reply` is called again in the same session with the new note ID
 - **THEN** the session's tracked `lastSentMessageId` SHALL have been updated to that new ID after the first edit, so the second edit's scoping check SHALL pass and the edit SHALL proceed
 
+#### Scenario: Misskey note edit recreates the note on its original anchor
+- **GIVEN** a Misskey note reply (`note:` channel prefix) with a recorded `context.lastReplyAnchorMessageId`
+- **WHEN** `edit-reply` is called with the matching `messageId`
+- **THEN** the system SHALL delete the old note via `notes/delete` and create a new note via `notes/create` with `replyId` equal to `context.lastReplyAnchorMessageId` (falling back to the reply anchor)
+- **AND** the returned `messageId` SHALL differ from the original, and visibility and `visibleUserIds` SHALL be preserved
+
+#### Scenario: Misskey chat edit uses delete-and-recreate
+- **GIVEN** a Misskey chat reply (`chat:` channel prefix)
+- **WHEN** `edit-reply` is called with the matching `messageId`
+- **THEN** the system SHALL use a delete-and-recreate strategy via `chat/messages/delete` followed by `chat/messages/create-to-user`
+
+#### Scenario: Failed delete aborts the edit
+- **GIVEN** an `edit-reply` operation whose delete step fails
+- **WHEN** the delete is attempted
+- **THEN** the system SHALL abort without creating a new message and SHALL return an error
+
 ### Requirement: XML Tag Stripping
 
 The system SHALL strip XML-like tags from reply content before sending to platforms using the regex `/<\/?[a-zA-Z][a-zA-Z0-9_]*>/g`. Inner text between tags SHALL be preserved. This SHALL apply to `send-reply`, `edit-reply`, and the `send-file` caption.
@@ -420,7 +623,7 @@ The system SHALL convert literal `\n` sequences (2 characters: backslash + n) to
 
 ### Requirement: Reaction Handling
 
-The `react-message` skill SHALL add an emoji reaction to the message that triggered the session (`context.triggerMessageId`), even when the bot has since sent its own messages (e.g. a file message): a reaction SHALL NEVER target a message the bot itself sent. It SHALL require a non-empty `emoji` parameter and a valid `context.triggerMessageId` (the trigger message). The system SHALL track reactions per workspace:channel combination via `reactionSentMap` to prevent duplicate reactions. When the platform adapter reports the reaction as applied with a stored reaction different from the requested emoji, the skill SHALL report the stored reaction to the agent instead of echoing the requested emoji, and SHALL still mark the reaction as sent so the downgrade does not trigger retry loops.
+The `react-message` skill SHALL add an emoji reaction to the message that triggered the session (`context.triggerMessageId`), and SHALL NEVER target a message the bot itself sent.
 
 #### Scenario: Reaction added to trigger message
 - **GIVEN** a session triggered by a message
@@ -444,9 +647,26 @@ The `react-message` skill SHALL add an emoji reaction to the message that trigge
 - **THEN** the result data SHALL report the stored reaction (not the requested emoji) and indicate the requested emoji was not applied as such
 - **AND** the reaction SHALL be marked sent via `reactionSentMap`, so the session counts as responded and no missing-reply retry is triggered
 
+#### Scenario: Reaction requires a valid emoji and trigger message
+- **GIVEN** a `react-message` invocation
+- **WHEN** the handler validates it
+- **THEN** it SHALL require a non-empty `emoji` parameter and a valid `context.triggerMessageId` (the trigger message)
+- **AND** it SHALL NOT act when the emoji is empty or the trigger message is absent
+
+#### Scenario: Duplicate reactions prevented per channel
+- **GIVEN** a workspace:channel combination
+- **WHEN** `react-message` is called
+- **THEN** the system SHALL track reactions per workspace:channel combination via `reactionSentMap` to prevent duplicate reactions
+
+#### Scenario: Reaction after a file send stays on the trigger
+- **GIVEN** a session that has since sent its own messages (e.g. a file message)
+- **WHEN** `react-message` is called
+- **THEN** the reaction SHALL be added to `context.triggerMessageId`
+- **AND** it SHALL NEVER target a message the bot itself sent
+
 ### Requirement: Send-File Workspace Boundary
 
-The `send-file` skill SHALL accept multiple file paths per invocation via the `filePaths` parameter (a non-empty array of strings). Every requested path SHALL be validated before any file is sent: each path SHALL be within the user's workspace or the agent workspace (if available); path traversal (`..`) SHALL be blocked; files exceeding `config.maxFileSizeMb` (default: 25 MB) SHALL be rejected; only files with extensions in `config.allowedExtensions` SHALL be permitted; file read failures SHALL return an error without crashing. Containment SHALL be checked against the file's REAL path (`Deno.realPath`, symlink-aware): a symlink inside the workspace that resolves outside the workspace or agent-workspace boundary SHALL be rejected, because `Deno.stat`/`Deno.readFile` follow symlinks and would otherwise exfiltrate arbitrary host files. The batch SHALL additionally be checked before any file bytes are read: the number of files SHALL NOT exceed `config.maxFilesPerInvocation` (default: 10) and the total byte size SHALL NOT exceed `config.maxTotalSizeMb` (default: 50). Validation, batch-limit checks, and file reading SHALL be all-or-nothing (preflight): if any path fails validation, any limit is exceeded, or any read fails, the system SHALL reject the entire invocation and SHALL NOT send any file.
+The `send-file` skill SHALL validate every requested `filePaths` path before sending any file: each path SHALL be within the user's or agent's workspace, path traversal (`..`) SHALL be blocked, and any invalid, unsafe, or unreadable path SHALL reject the whole invocation.
 
 #### Scenario: Path traversal blocked
 - **GIVEN** a `send-file` request with path `../../etc/passwd`
@@ -482,9 +702,27 @@ The `send-file` skill SHALL accept multiple file paths per invocation via the `f
 - **THEN** the invocation SHALL be rejected
 - **AND** no file SHALL be read or sent
 
+#### Scenario: Per-file size and extension limits enforced
+- **GIVEN** a `send-file` request
+- **WHEN** `validateFilePath()` is called
+- **THEN** files exceeding `config.maxFileSizeMb` (default: 25 MB) SHALL be rejected, and only files with extensions in `config.allowedExtensions` SHALL be permitted
+- **AND** file read failures SHALL return an error without crashing
+
+#### Scenario: Real-path containment blocks symlink escapes
+- **GIVEN** a symlink inside the workspace that resolves outside the workspace or agent-workspace boundary
+- **WHEN** a `send-file` request for that path is validated
+- **THEN** containment SHALL be checked against the file's REAL path (`Deno.realPath`, symlink-aware) and the path SHALL be rejected
+- **AND** `Deno.stat`/`Deno.readFile` follow symlinks, so without this check they would exfiltrate arbitrary host files
+
+#### Scenario: Batch limits checked before any byte is read
+- **GIVEN** a multi-file `send-file` invocation
+- **WHEN** the batch is processed
+- **THEN** the number of files SHALL NOT exceed `config.maxFilesPerInvocation` (default: 10) and the total byte size SHALL NOT exceed `config.maxTotalSizeMb` (default: 50), checked before any file bytes are read
+- **AND** validation, batch-limit checks, and file reading SHALL be all-or-nothing (preflight): if any path fails validation, any limit is exceeded, or any read fails, the system SHALL reject the entire invocation and SHALL NOT send any file
+
 ### Requirement: Send-File Multi-File Sending
 
-The `send-file` skill SHALL support sending multiple files in one invocation. The skill script SHALL accept a repeatable `--file-paths` flag (short alias `-f`); each occurrence adds one file path, and at least one occurrence SHALL be required. The removed singular `--file-path` flag (either form) SHALL be rejected with code `SKILL_SINGLE_FILE_FLAG` and the script SHALL NOT call the Skill API. The script SHALL pass the paths to the Skill API as the `filePaths` array parameter. The optional caption SHALL follow the payload-file flow (`--caption-file`) and SHALL apply to the whole file batch. Delivery semantics per platform: on Discord, all files SHALL be sent in a single message with all attachments; on Misskey notes, all files SHALL be uploaded to Drive and attached to a single note via `fileIds`; on Misskey chat (whose API accepts one file per message), the system SHALL send one message per file, placing the caption text on the first message only. All Drive uploads SHALL complete before any message is created, and on ANY failure path that leaves uploads unreferenced by a delivered message (an upload failure mid-batch, a note-creation failure, or a chat mid-batch send failure) the adapter SHALL stop and best-effort delete the unreferenced Drive files. Delivery on Misskey chat SHALL NOT be atomic: if a message send fails mid-batch, the adapter SHALL stop, best-effort delete the not-yet-referenced Drive uploads, and return a partial-failure result carrying the delivered `messageIds` and the error. On any delivery, the handler SHALL return `data` containing `messageIds` (all delivered message IDs, in send order), `messageId` (the last delivered message ID), `filesCount` (the number of delivered files — used for audit and metrics), plus the `nextAction` exit hint used by `send-reply`. The `airfriends_files_sent_total` metric SHALL be incremented once per delivered file (not once per call).
+The `send-file` skill SHALL support sending multiple files in one invocation: the script SHALL accept a repeatable `--file-paths` flag (alias `-f`), with at least one occurrence required, and SHALL pass the paths to the Skill API as the `filePaths` array parameter.
 
 #### Scenario: Multiple files on Discord in one message
 - **GIVEN** a `send-file` invocation with `filePaths: ["a.png", "b.png"]` on a Discord channel
@@ -521,9 +759,41 @@ The `send-file` skill SHALL support sending multiple files in one invocation. Th
 - **THEN** the script SHALL exit non-zero with code `SKILL_SINGLE_FILE_FLAG` and an instructive message showing the repeatable `--file-paths` form
 - **AND** the script SHALL NOT call the Skill API
 
+#### Scenario: Removed singular flag rejected in either form
+- **GIVEN** a `send-file` script invoked with the removed singular `--file-path` flag
+- **WHEN** the flag is given in either form (`--file-path value` or `--file-path=value`)
+- **THEN** it SHALL be rejected with code `SKILL_SINGLE_FILE_FLAG` and the script SHALL NOT call the Skill API
+
+#### Scenario: Optional caption applies to the whole batch
+- **GIVEN** a multi-file `send-file` invocation
+- **WHEN** a caption is provided
+- **THEN** the optional caption SHALL follow the payload-file flow (`--caption-file`) and SHALL apply to the whole file batch
+
+#### Scenario: Drive uploads complete before any message is created
+- **GIVEN** a Misskey multi-file delivery
+- **WHEN** the handler executes
+- **THEN** all Drive uploads SHALL complete before any message is created
+- **AND** on ANY failure path that leaves uploads unreferenced by a delivered message (an upload failure mid-batch, a note-creation failure, or a chat mid-batch send failure), the adapter SHALL stop and best-effort delete the unreferenced Drive files
+
+#### Scenario: Misskey chat delivery is not atomic
+- **GIVEN** a Misskey chat multi-file delivery
+- **WHEN** a message send fails mid-batch
+- **THEN** the adapter SHALL stop, best-effort delete the not-yet-referenced Drive uploads, and return a partial-failure result carrying the delivered `messageIds` and the error
+
+#### Scenario: Result data reports delivered message IDs
+- **GIVEN** any `send-file` delivery
+- **WHEN** the handler returns
+- **THEN** the handler SHALL return `data` containing `messageIds` (all delivered message IDs, in send order), `messageId` (the last delivered message ID), `filesCount` (the number of delivered files — used for audit and metrics), plus the `nextAction` exit hint used by `send-reply`
+
+#### Scenario: Files-sent metric counts per delivered file
+- **GIVEN** a `send-file` delivery
+- **WHEN** files are delivered
+- **THEN** the `airfriends_files_sent_total` metric SHALL be incremented once per delivered file
+- **AND** it SHALL NOT be incremented once per call
+
 ### Requirement: Send-File Response Tracking
 
-The system SHALL track successful `send-file` calls as session responses, mirroring reply and reaction tracking. The file-sent state SHALL be session-scoped: `SessionRegistry` SHALL maintain a per-session `fileSent` flag (initialized `false` at registration, alongside the existing `replySent` flag) with `markFileSent(sessionId)` and `hasFileSent(sessionId)` operations. The Skill API server SHALL call `markFileSent()` when at least one file was delivered to the platform (including partial Misskey chat delivery); it SHALL NOT be marked on total failure. When at least one file was delivered, the Skill API server SHALL ALSO record the last delivered message ID as the session's `lastFileMessageId` via `setLastFileMessageId()`, resolving it from the result data as `messageId`, else the last entry of `messageIds`; if the result carries no usable message ID at all, the server SHALL log a warning and record nothing (the reply anchor stays on the trigger — it SHALL NOT record a bogus ID). On total failure it SHALL NOT record any ID. `lastFileMessageId` SHALL NEVER be written by `send-reply`, `edit-reply`, or any other skill, and `lastSentMessageId` SHALL NEVER be written by `send-file` — the ID roles stay strictly separate. The session orchestrator SHALL read `hasFileSent(sessionId)` (a missing/expired session SHALL be treated as `fileSent: false`) and SHALL consider the agent to have responded when `replySent || reactionSent || fileSent` is true. Because the state lives on the session record, it is inherently cleared when a session ends and can never leak across concurrent sessions on the same channel. The `SessionResponse` SHALL include a `fileSent` boolean, set to `false` explicitly in every flow that does not track file sends. Error-message dispatch SHALL be skipped when `fileSent` is true.
+The system SHALL track successful `send-file` calls as session responses: `SessionRegistry` SHALL maintain a per-session `fileSent` flag (initialized `false`) with `markFileSent(sessionId)` and `hasFileSent(sessionId)`, and the orchestrator SHALL treat the agent as responded when `replySent || reactionSent || fileSent` is true.
 
 #### Scenario: File send counts as a response
 - **GIVEN** a session where the agent called `send-file` successfully but neither `send-reply` nor `react-message`
@@ -579,9 +849,39 @@ The system SHALL track successful `send-file` calls as session responses, mirror
 - **WHEN** the reply dispatcher evaluates the response
 - **THEN** no error message SHALL be dispatched to the platform
 
+#### Scenario: fileSent marked only when at least one file is delivered
+- **GIVEN** a `send-file` skill result
+- **WHEN** the Skill API server processes it
+- **THEN** the server SHALL call `markFileSent()` when at least one file was delivered to the platform (including partial Misskey chat delivery)
+- **AND** it SHALL NOT be marked on total failure
+
+#### Scenario: lastFileMessageId recorded on delivery
+- **GIVEN** a `send-file` result with at least one delivered file
+- **WHEN** the Skill API server processes it
+- **THEN** it SHALL record the last delivered message ID as the session's `lastFileMessageId` via `setLastFileMessageId()`, resolving it from the result data as `messageId`, else the last entry of `messageIds`
+- **AND** if the result carries no usable message ID at all, the server SHALL log a warning and record nothing (the reply anchor stays on the trigger — it SHALL NOT record a bogus ID)
+- **AND** on total failure it SHALL NOT record any ID
+
+#### Scenario: File ID roles stay strictly separate
+- **GIVEN** a session's message-ID state
+- **WHEN** a skill writes an ID
+- **THEN** `lastFileMessageId` SHALL NEVER be written by `send-reply`, `edit-reply`, or any other skill, and `lastSentMessageId` SHALL NEVER be written by `send-file`
+
+#### Scenario: Orchestrator treats missing session as fileSent false
+- **GIVEN** the session orchestrator reads `hasFileSent(sessionId)`
+- **WHEN** the session is missing or expired
+- **THEN** it SHALL be treated as `fileSent: false`
+- **AND** the orchestrator SHALL consider the agent responded only when `replySent || reactionSent || fileSent` is true
+
+#### Scenario: File-send state is scoped to the session record
+- **WHEN** the session orchestrator evaluates success
+- **THEN** the file-sent state SHALL live on the session record, so it is inherently cleared when the session ends and can never leak across concurrent sessions on the same channel
+- **AND** the `SessionResponse` SHALL include a `fileSent` boolean, set to `false` explicitly in every flow that does not track file sends
+- **AND** error-message dispatch SHALL be skipped when `fileSent` is true
+
 ### Requirement: Instructive workspace-path errors for send-file
 
-When a `send-file` `--file-paths` value is RELATIVE, resolves inside the workspace boundary, but the file does not exist, AND the workspace-relative resolution contains a segment-boundary occurrence of the workspace's own `{platform}/{userId}` key, the handler SHALL return a structured failure with code `SKILL_FILE_PATH_WORKSPACE_PREFIXED` and a self-contained guidance error naming the workspace root and explaining the double-join. The guidance SHALL name the de-prefixed candidate path as the likely intended file ONLY when that candidate exists; otherwise it SHALL NOT guess and SHALL instead instruct re-checking paths relative to the workspace root. The handler SHALL NOT silently rewrite paths or send any candidate file. Absolute paths that resolve inside the workspace boundary SHALL continue to be accepted, and every other error path SHALL keep its existing generic message.
+When a `send-file` `--file-paths` value is relative, resolves inside the workspace boundary but the file does not exist, and contains a segment-boundary occurrence of the workspace's own `{platform}/{userId}` key, the handler SHALL return a structured failure with code `SKILL_FILE_PATH_WORKSPACE_PREFIXED` naming the workspace root and explaining the double-join.
 
 #### Scenario: Double-joined workspace path gets a corrected example
 - **GIVEN** workspace root `/app/data/workspaces/discord/123` and agent cwd equal to that root, and `out.png` existing at the workspace root
@@ -601,6 +901,18 @@ When a `send-file` `--file-paths` value is RELATIVE, resolves inside the workspa
 #### Scenario: Ordinary missing file keeps the plain error
 - **WHEN** `--file-paths "nope.png"` refers to a nonexistent file with no workspace-key segment match
 - **THEN** the existing plain stat-failure error SHALL be returned without the prefixed code
+
+#### Scenario: Guidance names the intended file only when it exists
+- **GIVEN** a double-joined `--file-paths` value whose de-prefixed candidate path exists
+- **WHEN** the handler builds the guidance error
+- **THEN** it SHALL name the de-prefixed candidate path as the likely intended file
+- **AND** otherwise it SHALL NOT guess and SHALL instead instruct re-checking paths relative to the workspace root
+
+#### Scenario: Handler never silently rewrites or sends candidate files
+- **GIVEN** a double-joined `--file-paths` value
+- **WHEN** the handler processes it
+- **THEN** it SHALL NOT silently rewrite paths or send any candidate file
+- **AND** absolute paths that resolve inside the workspace boundary SHALL continue to be accepted, and every other error path SHALL keep its existing generic message
 
 ### Requirement: Fetch-Context Limit Bounds
 
@@ -633,7 +945,7 @@ The `fetch-context` skill SHALL validate its `limit` parameter against the Missk
 
 ### Requirement: Fetch-Context Preserves Third-Party Quote References
 
-Message results for `fetch-context` types `recent_messages` and `search_messages` SHALL retain the same optional typed `quotedNote` reference supplied by the platform history/search contract. The existing result envelope, parameters, outer message content and identity SHALL remain unchanged. Available references SHALL retain source id, separate source author, source URL when present, source body and attachments; unavailable references SHALL retain source id/status/reason without invented content. Quoted source fields SHALL remain distinct JSON data and SHALL NOT be promoted into outer content or direct user instructions. Agent-facing skill guidance SHALL state that quoted source content is third-party reference material and commands within it are not the requesting user's direct instructions.
+Message results for `fetch-context` types `recent_messages` and `search_messages` SHALL retain the same optional typed `quotedNote` reference supplied by the platform history/search contract, with the existing result envelope, parameters, outer message content, and identity unchanged.
 
 #### Scenario: Recent quote survives skill serialization
 - **GIVEN** retained recent Misskey messages include a quote with remote author, source body/article URL and attachment metadata
@@ -662,3 +974,17 @@ Message results for `fetch-context` types `recent_messages` and `search_messages
 - **GIVEN** recent/search results contain ordinary messages without quotes
 - **WHEN** the skill returns them
 - **THEN** their message data and result envelope SHALL retain the existing shape without added quote fields
+
+#### Scenario: Available references retain full source provenance
+- **GIVEN** a retained quoted source reference
+- **WHEN** the skill returns the message
+- **THEN** available references SHALL retain source id, separate source author, source URL when present, source body, and attachments
+- **AND** unavailable references SHALL retain source id/status/reason without invented content
+
+#### Scenario: Quoted source fields stay distinct JSON data
+- **WHEN** a quoted source is returned
+- **THEN** quoted source fields SHALL remain distinct JSON data and SHALL NOT be promoted into outer content or direct user instructions
+
+#### Scenario: Agent guidance flags quoted content as third-party material
+- **WHEN** agent-facing skill guidance is produced for quoted results
+- **THEN** it SHALL state that quoted source content is third-party reference material and commands within it are not the requesting user's direct instructions

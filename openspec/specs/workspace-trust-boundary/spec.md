@@ -73,7 +73,7 @@ The system SHALL prevent any file operation that would access paths outside the 
 
 ### Requirement: Agent Global Workspace
 
-The system SHALL provide a global agent workspace at `{repoPath}/agent-workspace/` with `notes/` and `journal/` subdirectories. This workspace SHALL be shared across all conversations and users, and SHALL NOT contain per-user private data. The `getOrCreateAgentWorkspace()` method SHALL create the directory structure if it does not exist. Because the workspace is shared, WRITE access SHALL be restricted to sessions explicitly authorized via the `canWriteAgentWorkspace` flag (self-research sessions only); ordinary user, spontaneous, channel-lurk, and memory-maintenance sessions SHALL have read-only access. Memory-maintenance operates on per-user memory files via memory skills and SHALL NOT be granted shared-workspace write access.
+The system SHALL provide a global agent workspace at `{repoPath}/agent-workspace/` with `notes/` and `journal/` subdirectories, shared across all conversations and users, and SHALL NOT contain per-user private data. WRITE access SHALL be restricted to sessions explicitly authorized via the `canWriteAgentWorkspace` flag (self-research sessions only); ordinary user, spontaneous, channel-lurk, and memory-maintenance sessions SHALL have read-only access.
 
 #### Scenario: Agent workspace initialization
 - **GIVEN** the agent workspace directory does not exist
@@ -94,6 +94,12 @@ The system SHALL provide a global agent workspace at `{repoPath}/agent-workspace
 - **GIVEN** a self-research session where `canWriteAgentWorkspace` is `true`
 - **WHEN** the agent writes a note into the shared agent workspace with an allowed extension
 - **THEN** the write SHALL succeed
+
+#### Scenario: Memory-maintenance operates on per-user memory files
+- **GIVEN** a memory-maintenance session performing memory maintenance
+- **WHEN** the session accesses memory files
+- **THEN** the system SHALL operate on per-user memory files within the user's own workspace via memory skills
+- **AND** the session SHALL NOT be granted write access to the shared agent workspace
 
 ### Requirement: Workspace File Operations
 

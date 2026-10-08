@@ -62,3 +62,9 @@ Both crash reconnect and `session/load` recovery SHALL target the session's reco
 - **GIVEN** a recovered native-YOLO OMP session and a recovered OpenCode session
 - **WHEN** their recoveries complete and prompting resumes
 - **THEN** no readiness verification SHALL occur and no readiness denial SHALL be possible for either session
+
+#### Scenario: Side-effect state survives process restart
+- **GIVEN** a shared process dies while a session's prompt is in flight after the agent ran side-effectful skill operations
+- **WHEN** the agent process is restarted and the session is resumed
+- **THEN** the in-bot session registry state (`replySent`, `fileSent`, attempt counts) SHALL guard side-effectful operations (`send-reply`, `memory-save`), so no duplicate reply or memory event is produced
+- **AND** the recovery/retry prompt SHALL enumerate the session's already-executed skill operations (memory-save calls, reply attempts, file sends) so the resumed agent avoids re-doing side effects

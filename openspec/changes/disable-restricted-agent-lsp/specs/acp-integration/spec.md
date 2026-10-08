@@ -2,7 +2,7 @@
 
 ### Requirement: OMP Restricted Launch And Settings Both Carry The LSP Disable
 
-For restricted OMP mode the factory SHALL assemble the pinned candidate disable mechanism in full: the `--no-lsp` CLI argument (which maps to `enableLsp:false` and gates startup discovery/warmup per the pinned compatibility evidence) on top of the restricted overlay's already-pinned `lsp.enabled: false` setting consumed unchanged from the row-8 composition. Neither carrier alone SHALL be treated as complete suppression in documentation or tests until the lazy cold-start audit (this change's bounded pinned-source decision) records its verdict. The restricted `--no-lsp` argument SHALL be the only LSP-related addition to the row-9 restricted argument list, and the row-8 overlay pin SHALL NOT be moved, duplicated, or removed by this change.
+For restricted OMP mode the factory SHALL assemble the full pinned candidate disable mechanism: the `--no-lsp` CLI argument (mapping to `enableLsp:false`) on top of the restricted overlay's already-pinned `lsp.enabled: false` setting consumed unchanged from the row-8 composition, and neither carrier alone SHALL be treated as complete suppression in documentation or tests until the lazy cold-start audit records its verdict.
 
 #### Scenario: Restricted arguments carry the flag and the overlay pin
 - **GIVEN** the factory assembles a restricted `omp acp` launch from the row-8 restricted composition
@@ -18,9 +18,14 @@ For restricted OMP mode the factory SHALL assemble the pinned candidate disable 
 - **AND** no `lsp.*` key SHALL appear in any native-yolo overlay file
 - **AND** the trusted extension — the only carrier of LSP deny decisions — SHALL NOT be loaded for this launch
 
+#### Scenario: The flag is the only LSP addition and the overlay pin stays put
+- **WHEN** the restricted launch assembly is inspected
+- **THEN** `--no-lsp` SHALL be the only LSP-related addition to the row-9 restricted argument list, gating startup discovery/warmup per the pinned compatibility evidence
+- **AND** the row-8 overlay pin SHALL NOT be moved, duplicated, or removed by this change
+
 ### Requirement: OMP Lazy Cold-Start Route Is Audited Into A Decision Or An Honest Gate
 
-The implementation SHALL audit the pinned official OMP `v18.6.1` / `2a2c6dcbbb558c0f8145f67f28b3370984f2bf60` source for a lazy language-server cold-start route reachable from a restricted session's `edit`, `write`, or read-side diagnostic/format paths while `enableLsp:false` and `lsp.enabled:false` are in effect, and SHALL record exactly one of three verdicts with source symbols: (a) no residual route — the composed mechanisms are the supported suppression path pending user runtime verification; (b) a residual route reachable through the restricted tool surface — blocked by ADDITIVE default-deny rows in the restricted tool inventory keyed on the existing `lsp-adjacent` route surface, enforced by the already-wired handler without any new wiring; or (c) a residual native-internal route no AIr decision can reach — the supported parts ship, and the residual is recorded as an unresolved gate with `userDecisionRequired`. Under verdict (b) no shipped inventory row's semantics SHALL be edited, and under verdict (c) no documentation, test name, or changelog entry SHALL describe restricted LSP suppression as complete.
+The implementation SHALL audit the pinned OMP `v18.6.1` source (`2a2c6dcbbb558c0f8145f67f28b3370984f2bf60`) for a lazy language-server cold-start route reachable from a restricted session's `edit`, `write`, or read-side diagnostic/format paths while `enableLsp:false` and `lsp.enabled:false` are in effect, and SHALL record exactly one of three verdicts with source symbols: no residual route, a restricted-tool-surface route, or a native-internal route.
 
 #### Scenario: Residual tool-reachable route lands as an additive deny row
 - **GIVEN** the audit finds a cold-start trigger that arrives as a consultable restricted tool call despite the flag and settings pin
@@ -42,9 +47,26 @@ The implementation SHALL audit the pinned official OMP `v18.6.1` / `2a2c6dcbbb55
 - **THEN** it SHALL be cited only as config/flag/decision-wiring evidence
 - **AND** native restricted LSP suppression INCLUDING implicit startup SHALL remain listed unverified on the user runtime checklist
 
+#### Scenario: Verdict (a) records the composed mechanisms as the supported path
+- **GIVEN** the audit finds no residual route
+- **WHEN** a verdict is recorded
+- **THEN** the composed mechanisms SHALL be cited as the supported suppression path pending user runtime verification
+
+#### Scenario: Verdict (b) blocks through additive rows on the wired handler
+- **GIVEN** the audit finds a residual route reachable through the restricted tool surface
+- **WHEN** the restricted tool inventory is extended
+- **THEN** the route SHALL be blocked by ADDITIVE default-deny rows keyed on the existing `lsp-adjacent` route surface, enforced by the already-wired handler without any new wiring
+- **AND** no shipped inventory row's semantics SHALL be edited
+
+#### Scenario: Verdict (c) ships the supported parts behind an honest gate
+- **GIVEN** the audit finds a residual native-internal route no configuration decision can reach
+- **WHEN** the change ships
+- **THEN** the supported parts SHALL ship and the residual SHALL be recorded as an unresolved gate with `userDecisionRequired`
+- **AND** no documentation, test name, or changelog entry SHALL describe restricted LSP suppression as complete
+
 ### Requirement: OpenCode Restricted Agent Denies LSP Without Touching YOLO
 
-The `build`/restricted OpenCode agent configuration SHALL NOT grant the `lsp` permission — the existing agent-level `"*": "deny"` default SHALL deny the explicit tool — and the `yolo` agent block SHALL remain byte-identical to its current permissive policy, with no global top-level `lsp` disable applied while restricted-only removal is in effect. The implementation SHALL audit pinned OpenCode `1.18.21` whether per-agent permission denial also suppresses IMPLICIT language-server startup (automatic server boot with read/edit/write diagnostics) or whether server boot is driven only by the process-global `lsp` configuration; the global disable SHALL NOT be applied when it would also remove YOLO's LSP. If implicit startup cannot be scoped restricted-only by the pinned configuration, the explicit-tool deny SHALL still land as a strict improvement, the incompatibility SHALL be recorded with `userDecisionRequired`, and no artifact SHALL present restricted LSP removal as complete.
+The `build`/restricted OpenCode agent configuration SHALL NOT grant the `lsp` permission, the existing agent-level `"*": "deny"` default SHALL deny the explicit tool, the `yolo` agent block SHALL remain byte-identical to its current permissive policy, and no global top-level `lsp` disable SHALL be applied while restricted-only removal is in effect.
 
 #### Scenario: Build agent denies the lsp tool, yolo keeps everything
 - **WHEN** the restricted OpenCode agent configuration is parsed
@@ -65,9 +87,22 @@ The `build`/restricted OpenCode agent configuration SHALL NOT grant the `lsp` pe
 - **THEN** the `1.18.21` pin SHALL be consumed as-is
 - **AND** any bump SHALL be recorded as a separate user decision, not applied here
 
+#### Scenario: Implicit startup is resolved by the pinned-source audit
+- **GIVEN** pinned OpenCode `1.18.21`
+- **WHEN** the implementation determines whether per-agent permission denial also suppresses IMPLICIT language-server startup (automatic server boot with read/edit/write diagnostics) or whether server boot is driven only by the process-global `lsp` configuration
+- **THEN** the audit SHALL record which mechanism drives server boot
+- **AND** the global disable SHALL NOT be applied when it would also remove YOLO's LSP
+
+#### Scenario: Unscopable implicit startup still ships a strict improvement
+- **GIVEN** implicit startup cannot be scoped restricted-only by the pinned `1.18.21` configuration
+- **WHEN** the change completes
+- **THEN** the explicit-tool deny SHALL still land as a strict improvement
+- **AND** the incompatibility SHALL be recorded with `userDecisionRequired`
+- **AND** no artifact SHALL present restricted LSP removal as complete
+
 ### Requirement: Restricted-Only LSP Evidence And Documentation Boundary
 
-The change's documentation and handoff SHALL separate, per agent, what pinned-source audit claims, what unit/mock tests mechanically prove, and what remains user-owned runtime verification: the restricted launch/overlay carrying the disable, the OpenCode restricted agent denying the explicit tool while `yolo` keeps it, the cold-start decision path returning deny on fixtures, and YOLO exemption on both agents are unit/mock-provable; restricted native LSP removal including implicit startup, and native YOLO LSP availability on both agents, SHALL appear on the user runtime checklist marked unverified. `docs/AGENT_PERMISSIONS.md` SHALL reflect that the restricted `build` agent no longer lists `lsp` among allowed read-only tools and SHALL state the recorded per-agent mechanism verdicts with their evidence limits.
+The change's documentation and handoff SHALL separate, per agent, what the pinned-source audit claims, what unit/mock tests mechanically prove, and what remains user-owned runtime verification: restricted launch/overlay wiring and YOLO exemption are unit/mock-provable, while restricted native LSP removal including implicit startup and native YOLO LSP availability SHALL appear on the user runtime checklist marked unverified.
 
 #### Scenario: Documentation mirrors the recorded verdicts
 - **GIVEN** the audits recorded their verdicts for both agents (supported, additive-row extension, or `userDecisionRequired` gate)
@@ -78,3 +113,12 @@ The change's documentation and handoff SHALL separate, per agent, what pinned-so
 #### Scenario: Consumer-visible suite covers the wiring without native claims
 - **WHEN** the restricted-LSP unit/mock suite runs
 - **THEN** it SHALL assert: restricted launch carries `--no-lsp` plus the overlay pin; YOLO launches carry neither (both agents); the OpenCode `build` agent denies `lsp` while the `yolo` agent block is unchanged and no global disable exists; the cold-start decision fixture yields deny on a residual-route fixture (verdict b) or the gate record is present and complete (verdict c); and every test label SHALL describe wiring, never native suppression
+
+#### Scenario: Unit and mock suites own only the wiring claims
+- **WHEN** the change's documentation classifies what its suite mechanically proves
+- **THEN** the restricted launch/overlay carrying the disable, the OpenCode restricted agent denying the explicit tool while `yolo` keeps it, the cold-start decision path returning deny on fixtures, and YOLO exemption on both agents SHALL be presented as unit/mock-provable
+
+#### Scenario: AGENT_PERMISSIONS.md reflects the restricted tool list and verdicts
+- **WHEN** `docs/AGENT_PERMISSIONS.md` documents the restricted agent
+- **THEN** it SHALL no longer list `lsp` among the restricted `build` agent's allowed read-only tools
+- **AND** it SHALL state the recorded per-agent mechanism verdicts with their evidence limits

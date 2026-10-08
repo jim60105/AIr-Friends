@@ -31,9 +31,7 @@ Defines the read-only file browser for the agent workspace directory, including 
 
 ### Requirement: File Content Viewing
 
-`GET /api/workspace/file?path=<relative-path>` SHALL return the content of a file within `agent-workspace`. Only `.md` and `.txt` files SHALL be readable. The path parameter SHALL be normalized by stripping any leading `/` before validation. After normalization, the path MUST NOT contain `..` segments or `%2F` sequences. The resolved path MUST be within the agent workspace directory.
-
-The client-side file viewer SHALL differentiate between `.md` and `.txt` files: `.md` files SHALL be rendered as formatted HTML using a client-side markdown parser, while `.txt` files SHALL continue to be displayed as plain text in a `<pre>` block.
+`GET /api/workspace/file?path=<relative-path>` SHALL return the content of a file within `agent-workspace` when the path is valid. The requested file SHALL be readable only if its extension is `.md` or `.txt` and its normalized, resolved path stays inside `agent-workspace`.
 
 #### Scenario: Returns File Content for Valid Markdown File
 
@@ -68,6 +66,23 @@ The client-side file viewer SHALL differentiate between `.md` and `.txt` files: 
 - **GIVEN** the dashboard server is running
 - **WHEN** a `GET /api/workspace/file?path=notes/_index.md` request is received without a valid session cookie
 - **THEN** the server SHALL return HTTP 401
+
+#### Scenario: Rejects Encoded Traversal Sequences in Path
+
+- **GIVEN** the dashboard server is running
+- **WHEN** a `GET /api/workspace/file` request is received whose `path`, after normalization (including stripping any leading `/`), contains `..` segments or `%2F` sequences
+- **THEN** the server SHALL reject the request
+- **AND** the resolved path MUST be within the agent workspace directory
+
+#### Scenario: Renders Markdown Files as HTML
+
+- **GIVEN** a `.md` file's content is loaded in the client-side file viewer
+- **THEN** the viewer SHALL render the content as formatted HTML using a client-side markdown parser
+
+#### Scenario: Displays Text Files as Plain Text
+
+- **GIVEN** a `.txt` file's content is loaded in the client-side file viewer
+- **THEN** the viewer SHALL display the content as plain text in a `<pre>` block
 
 ### Requirement: Path Traversal Protection
 

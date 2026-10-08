@@ -6,7 +6,7 @@ Defines how AIr-Friends acts as an ACP (Agent Client Protocol) Client, spawning 
 ## Requirements
 ### Requirement: AgentConnector Subprocess Management
 
-The system SHALL manage the external OpenCode ACP agent lifecycle through the `AgentConnector` class. In per-session mode it SHALL spawn the agent as a subprocess with `dumb-init` for proper signal forwarding and communicate via stdio JSON-RPC. In shared-process mode the connector SHALL connect once per channel and create multiple ACP sessions over the same stdio connection. The subprocess SHALL be spawned with a cleared parent environment (`clearEnv: true`) so it receives ONLY the explicitly-built agent environment and inherits no parent secrets. Every outbound ACP call made through the connection (`initialize`, `createSession`, `setSessionModel`, `setSessionMode`, `setSessionConfigOption`, `prompt`, `cancel`) SHALL be raced against a per-subprocess crash signal so that an unexpected subprocess exit rejects any currently pending call instead of leaving it pending forever, regardless of idle-timeout configuration. When a shared process dies while a prompt is in flight, the system SHALL restart the channel process and resume the in-flight session via the ACP `loadSession` method (session history is persisted in the channel-scoped OpenCode data directory and replayed on load), applying controlled recovery: the prompt is re-issued ONLY if no response (reply, reaction, or file send) has been recorded for the session; if a response was already sent, the session completes without re-prompting. When the prompt IS re-issued, the recovery/retry prompt SHALL enumerate the session's already-executed skill operations (memory-save calls, reply attempts, file sends) so the resumed agent knows what has already happened and avoids re-doing side effects.
+The system SHALL manage the external OpenCode ACP agent lifecycle through the `AgentConnector` class: per-session mode spawns the agent subprocess with `dumb-init` and stdio JSON-RPC, while shared-process mode connects once per channel and creates multiple ACP sessions over the same stdio connection. Every outbound ACP call SHALL be raced against a per-subprocess crash signal so an unexpected subprocess exit rejects the pending call promptly.
 
 #### Scenario: Agent connection
 - **GIVEN** a valid `AgentConfig` with command, args, cwd, and env
@@ -96,6 +96,11 @@ The system SHALL manage the external OpenCode ACP agent lifecycle through the `A
 - **AND** the re-issued recovery prompt SHALL enumerate the session's already-executed skill operations (memory-save calls, reply attempts, file sends) so the agent avoids re-doing side effects
 - **AND** if a response had already been sent, the session SHALL complete without re-prompting, so no duplicate reply or memory event is produced
 
+#### Scenario: Session history persisted in the channel-scoped data directory
+- **GIVEN** a shared channel process dies while a session is in flight
+- **WHEN** the system restarts that channel's process to resume the session
+- **THEN** the session history replayed on load SHALL be the history persisted in the channel-scoped OpenCode data directory
+
 ### Requirement: Session Config Option Update Handling
 
 The `ChatbotClient` SHALL handle the `config_option_update` session notification and propagate the updated configuration options to the `AgentConnector` so that the connector's cached `configOptions` reflect the agent's current session configuration state.
@@ -179,9 +184,7 @@ The `ChatbotClient` SHALL accumulate text from `agent_thought_chunk` session upd
 
 ### Requirement: Permission Handling — Restricted Mode
 
-In restricted (non-YOLO) mode, the system SHALL selectively approve or deny permission requests based on whitelists and path validation. Edit/write requests SHALL be recognized by the ACP tool `kind` (`"edit"` — the kind OpenCode v1.17.13+ sends for its `write`, `edit`, `apply_patch`, and `patch` tools, whose `title` is the target file path) or by legacy title values (`"edit"`, `"edit_file"`, `"write"`, `"write_file"`), so scoped path validation always runs for file-modifying tools instead of falling through to unknown-tool rejection. Command whitelist matching SHALL be anchored to the invocation entrypoint, agent-workspace writes SHALL be gated by the session's `canWriteAgentWorkspace` flag, and all path boundary checks SHALL be boundary-safe (equal-or-separator-prefixed). Because filesystem-touching bash tools are routed to this gate (configured `"ask"` rather than `"allow"`), `requestPermission()` is the authoritative decision point for those commands: a generic allow-listed command SHALL be approved only when every path argument — input and output — resolves inside the session workspace/TMPDIR, and `referencesOutOfWorkspacePath` SHALL treat a filesystem-reaching URI-scheme token (e.g. `file://`, and other non-network schemes such as `ftp://`/`gopher://`) as referencing a path outside the workspace. Network URL schemes (`http://`/`https://`) are NOT treated as filesystem paths — `agent-browser` navigates to them legitimately and their egress is mediated separately (F14).
-
-Path boundary checks (`isPathAllowed`, `isAgentWorkspacePath`, and the TMPDIR containment check used by the scoped edit/write approval and `writeTextFile`) SHALL expand the session-bound tokens `$TMPDIR`, `${TMPDIR}`, `$SESSION_ID`, and `${SESSION_ID}` — to the resolved session TMPDIR (`{workingDir}/tmp`) and the session id respectively — before the boundary-safe containment check, so a literal `$TMPDIR/$SESSION_ID/...` path (as the agent types it into its edit/write tool) resolves and is approved exactly like the expanded absolute path. Any other `$VAR`-style token SHALL remain unexpanded and SHALL fail containment. Every session flow SHALL set the client config's `sessionId` to the shell session id when a shell session exists (message, spontaneous, self-research, memory-maintenance, channel memory-maintenance, reminder), so the gate expands `$SESSION_ID` consistently with the script-side `--session-id`; flows without a shell session leave it unset (expansion yields an empty string, matching the script-side `{workspace}/tmp` fallback). The canonical expanded path SHALL be the path actually used for file I/O: `readTextFile()` and `writeTextFile()` SHALL read/write the expanded path, not the raw request path, so the path that passed validation is the path that is accessed. When auto-approving a skill command (whitelisted script-path or command-prefix match), the gate SHALL reject — instead of approve — any command whose whitespace-delimited tokens include a legacy free-text skill argument flag in either invocation form (`--message`, `--message=value`, `--content`, `--content=value`, `--query`, `--query=value`, `--caption`, `--caption=value`; distinct tokens such as `--message-id`, `--message-file`, `--content-file`, `--query-file`, `--caption-file` SHALL NOT trigger the rejection), so free-text content can never be smuggled through a shell command line that reaches the gate.
+In restricted (non-YOLO) mode, `requestPermission()` SHALL selectively approve or deny permission requests based on whitelists and path validation. Command whitelist matching SHALL be anchored to the invocation entrypoint, agent-workspace writes SHALL be gated by the session's `canWriteAgentWorkspace` flag, and all path boundary checks SHALL be boundary-safe.
 
 #### Scenario: Registered skill auto-approval
 - **GIVEN** a permission request for a registered skill
@@ -285,6 +288,23 @@ Path boundary checks (`isPathAllowed`, `isAgentWorkspacePath`, and the TMPDIR co
 - **GIVEN** a permission request not matching any approval rule
 - **WHEN** `requestPermission()` evaluates the request
 - **THEN** it SHALL deny the request
+
+#### Scenario: Filesystem-touching bash tools gated by requestPermission
+- **GIVEN** a filesystem-touching bash tool whose permission is configured `"ask"` rather than `"allow"`
+- **WHEN** the tool invocation reaches the permission gate
+- **THEN** `requestPermission()` SHALL be the authoritative decision point for the command
+
+#### Scenario: Skill command with other legacy free-text flags rejected
+- **GIVEN** a whitelisted skill command whose whitespace-delimited tokens include `--content`, `--content=value`, `--query`, `--query=value`, `--caption`, or `--caption=value`
+- **WHEN** the gate evaluates the skill command for auto-approval
+- **THEN** the gate SHALL reject the command instead of approving it
+- **AND** distinct tokens `--content-file`, `--query-file`, `--caption-file` SHALL NOT trigger the rejection
+
+#### Scenario: SESSION_ID expansion consistent with script-side --session-id
+- **GIVEN** a shell session exists (message, spontaneous, self-research, memory-maintenance, channel memory-maintenance, reminder)
+- **WHEN** the gate expands `$SESSION_ID` in a path argument
+- **THEN** the client config's `sessionId` SHALL be set to the shell session id so expansion matches the script-side `--session-id`
+- **AND** flows without a shell session SHALL leave `sessionId` unset, so expansion yields an empty string matching the script-side `{workspace}/tmp` fallback
 
 ### Requirement: Permission Handling — YOLO Mode
 
@@ -404,9 +424,7 @@ The `SandboxManager` SHALL filter subprocess environment variables to a base all
 
 ### Requirement: SandboxManager Network Isolation
 
-The `SandboxManager` SHALL mediate the agent subprocess's network egress so that the default posture never grants the agent unmediated access to host-private networks. It SHALL support two egress-control modes: (a) full network-namespace isolation via the userns-first `unshare --user --map-root --net`, and (b) a validating-proxy mode in which the agent's outbound requests are routed through a local proxy that applies SSRF validation (scheme allow-list; reject loopback, private RFC1918, link-local, unique-local, unspecified, and multicast addresses) so that `webfetch`, `websearch`, and `agent-browser` all inherit the validation. The validating-proxy mode is the default because full network-namespace isolation gives the agent an empty network namespace that also severs its loopback access to the Skill API; the proxy mode keeps the Skill API reachable (via `NO_PROXY`) while blocking internal targets. When neither a validating egress path nor an explicit operator opt-in to unrestricted egress is configured, the agent SHALL fail closed rather than be given open egress.
-
-In validating-proxy mode, the operator MAY enumerate specific trusted destinations via `agent.sandbox.egressAllowHosts` (default empty). Each entry is a hostname or literal IP (no scheme, no port). The proxy SHALL exempt a destination from the disallowed-range rejection when its requested host matches an allowlist entry exactly (case-insensitive, after trimming and stripping IPv6 brackets), for both CONNECT tunneling and plain-HTTP forwarding; DNS resolution and connect-time address pinning SHALL still apply to allowlisted hostnames. The exemption SHALL NOT extend to the cloud-metadata address space: a resolved address of `169.254.169.254` or an IPv6 metadata equivalent (e.g. `fd00:ec2::254`) SHALL be rejected even when the requested host is allowlisted. Allowlisted hosts SHALL also be appended to the agent's `NO_PROXY`/`no_proxy` so env-honoring clients may connect to them directly. The allowlist SHALL be sourced exclusively from operator deployment configuration — the agent and chat users SHALL NOT be able to extend it at runtime. An empty allowlist SHALL produce behavior identical to the pre-allowlist posture.
+The `SandboxManager` SHALL mediate the agent subprocess's network egress so the default posture never grants the agent unmediated access to host-private networks, supporting two egress-control modes: full network-namespace isolation via the userns-first `unshare --user --map-root --net`, and the default validating-proxy mode. When neither a validating egress path nor an explicit operator opt-in to unrestricted egress is configured, the agent SHALL fail closed.
 
 #### Scenario: Network isolation uses the userns-first incantation
 - **GIVEN** full isolation is selected and a functional probe (not merely a binary-exists check) confirms a network namespace can actually be established at runtime
@@ -478,9 +496,30 @@ In validating-proxy mode, the operator MAY enumerate specific trusted destinatio
 - **WHEN** `buildSpawnOptions()` is called in a posture that expects mediation
 - **THEN** it SHALL fail closed with an actionable error and SHALL NOT silently fall through to unmediated open egress; unrestricted egress SHALL require the explicit opt-in
 
+#### Scenario: Validating-proxy is the default egress posture
+- **GIVEN** the default egress configuration
+- **WHEN** the agent subprocess is spawned
+- **THEN** the validating-proxy mode SHALL be used, because full network-namespace isolation would give the agent an empty namespace that also severs loopback access to the Skill API
+- **AND** the proxy mode SHALL keep the Skill API reachable (via `NO_PROXY`) while blocking internal targets
+
+#### Scenario: Allowlisted hostnames still resolved and pinned
+- **GIVEN** an `agent.sandbox.egressAllowHosts` entry that is a hostname (not a literal IP)
+- **WHEN** the agent connects to that host through the validating proxy
+- **THEN** the disallowed-range rejection SHALL be exempted based on the exact requested-host match, and DNS resolution and connect-time address pinning SHALL still apply to the allowlisted hostname
+
+#### Scenario: Allowlist is operator-configured only
+- **GIVEN** a validating-proxy deployment with an `agent.sandbox.egressAllowHosts` allowlist
+- **WHEN** an agent or chat user attempts to extend the trusted destinations
+- **THEN** the allowlist SHALL be sourced exclusively from operator deployment configuration and SHALL NOT be extendable at runtime by the agent or chat users
+
+#### Scenario: Empty allowlist keeps pre-allowlist posture
+- **GIVEN** `agent.sandbox.egressAllowHosts` is empty (the default)
+- **WHEN** the validating-proxy posture is active
+- **THEN** egress SHALL behave identically to the pre-allowlist posture
+
 ### Requirement: Egress Proxy Transport Fidelity
 
-The validating egress proxy (`src/utils/egress-proxy.ts`) SHALL relay bytes between the agent and the upstream origin without altering or losing them, and SHALL propagate connection lifecycle events in both directions, so that the mediation layer does not itself become a source of corrupted streams or zombie connections. Specifically: every byte handed to a socket SHALL be flushed even when the underlying `write` performs a short write; end-of-stream on one direction SHALL be forwarded to the peer as a half-close; a transport error SHALL tear down both connections; and forwarded plain-HTTP requests SHALL be rewritten to `Connection: close` semantics.
+The validating egress proxy (`src/utils/egress-proxy.ts`) SHALL relay bytes between the agent and the upstream origin without altering or losing them, and SHALL propagate connection lifecycle events in both directions, so the mediation layer does not itself become a source of corrupted streams or zombie connections.
 
 #### Scenario: Short writes are fully flushed
 - **GIVEN** a tunneled transfer large enough that the socket `write` returns fewer bytes than requested (TCP backpressure)
@@ -603,7 +642,7 @@ The system SHALL detect silently unresponsive agent connections via periodic idl
 
 ### Requirement: Retry on Missing Reply
 
-The system SHALL retry when an ACP agent completes without calling the `send-reply` skill. The retry prompt SHALL be enriched with the session's recent permission-rejection reasons (tool name, reason, and the command/path that was rejected) so the Agent can correct course instead of guessing why its actions were blocked. Rejection reasons are collected per session by the `ChatbotClient` on EVERY denial path in `requestPermission()` and `writeTextFile()` (legacy free-text flag, generic-command rejection, unauthorized shared-workspace write, disallowed extension, edit/write reject, unknown-tool reject, writeTextFile reject). The collected records SHALL NOT be cleared by `reset()` (which runs at the start of every prompt, including the retry) — they SHALL be cleared exactly once per logical session when a new ACP session is created, and the retry flow SHALL snapshot them before issuing the retry prompt, so the first turn's rejections are still available at retry time. The rejection section SHALL be bounded (at most 10 entries, per-field truncation, section character cap) and SHALL be framed as diagnostic data rather than instructions; when none were recorded, the section SHALL be omitted entirely. All agent-derived rejection fields (tool name, kind, command/path) SHALL be sanitized at record time — control characters stripped and each field bounded — so the diagnostic section cannot carry agent-influenced formatting into the prompt. Each denial SHALL record exactly one rejection entry with its specific cause (no generic duplicate for the same request).
+The system SHALL retry when an ACP agent completes without calling the `send-reply` skill, enriching the retry prompt with the session's recent permission-rejection reasons (tool name, reason, and the rejected command/path) so the Agent can correct course instead of guessing why its actions were blocked.
 
 #### Scenario: Retry on end_turn without reply
 - **GIVEN** the agent completes a prompt turn (`stopReason === "end_turn"`) without sending a reply
@@ -733,15 +772,7 @@ The `ChatbotClient` SHALL accumulate `agent_message_chunk` session updates into 
 
 ### Requirement: Agent Thought Chunk Logging with Dual-Format Text Extraction
 
-The `ChatbotClient` SHALL extract thought text from `agent_thought_chunk` session updates by
-checking both the `update.content` envelope format and the `update.text` direct string format, and
-SHALL include the extracted text in the log message template so it appears in the top-level
-`log_processed_message` field. Per-chunk DEBUG logging SHALL be emitted only when
-`logging.agentStreamChunks` is enabled (default `false`, env override
-`LOGGING_AGENT_STREAM_CHUNKS`); when disabled, the extraction and buffering behavior SHALL remain
-identical — the `thoughtBuffer` SHALL still accumulate every chunk and the complete-thought INFO
-summary SHALL still be flushed. When enabled, the same gating flag SHALL also gate the per-chunk
-`"Agent message chunk: {text}"` DEBUG log (message buffering and its INFO summary unchanged).
+The `ChatbotClient` SHALL extract thought text from `agent_thought_chunk` session updates by checking both the `update.content` envelope format and the `update.text` direct string format, and SHALL include the extracted text in the log message template so it appears in the top-level `log_processed_message` field.
 
 #### Scenario: Per-chunk logs suppressed by default
 - **WHEN** an `agent_thought_chunk` session update is received and `logging.agentStreamChunks` is unset or false
@@ -776,9 +807,20 @@ summary SHALL still be flushed. When enabled, the same gating flag SHALL also ga
 - **THEN** with chunk logging enabled the system SHALL log `"Agent thought: {text}"` with an empty
   `text`, and the buffer SHALL receive nothing
 
+#### Scenario: Stream-chunk logging flag configuration
+- **GIVEN** no explicit `logging.agentStreamChunks` value is configured
+- **WHEN** the client processes agent chunk updates
+- **THEN** per-chunk DEBUG logging SHALL default to off (`false`) and SHALL be overridable via the `LOGGING_AGENT_STREAM_CHUNKS` environment variable
+- **AND** when enabled, the same flag SHALL gate both the `Agent thought: {text}` and the `"Agent message chunk: {text}"` DEBUG logs, while buffering and the complete-thought/message INFO summaries remain unchanged
+
+#### Scenario: Extracted text in the top-level log field
+- **GIVEN** an `agent_thought_chunk` session update with extractable text (content envelope or direct `text` format)
+- **WHEN** the client logs the processed update
+- **THEN** the extracted text SHALL be included in the log message template so it appears in the top-level `log_processed_message` field
+
 ### Requirement: Session-Scoped Connector State
 
-In shared-process mode, `AgentConnector`'s mutable connection-level state (cached `configOptions`, current model ID, idle monitor) SHALL be indexed by ACP session ID, so that a later session's setup calls (`createSession`, `setSessionModel`, `setSessionMode`, `setSessionConfigOption`) cannot clobber the in-flight session's state. The global execution lease SHALL cover the session's ENTIRE agent lifecycle — `newSession`, model/mode/config-option calls, prompt/retry, `session/cancel`, recovery, and cleanup — so that at most one session touches the shared connection at a time.
+In shared-process mode, `AgentConnector`'s mutable connection-level state (cached `configOptions`, current model ID, idle monitor) SHALL be indexed by ACP session ID so a later session's setup calls cannot clobber the in-flight session's state. A global execution lease SHALL cover the session's entire lifecycle — `newSession`, model/mode/config-option setup, prompt/retry, `session/cancel`, recovery, and cleanup — so at most one session touches the shared connection at a time.
 
 #### Scenario: Later session's config calls don't clobber in-flight session state
 - **GIVEN** session A's prompt is in flight on a shared connection and session B is queued

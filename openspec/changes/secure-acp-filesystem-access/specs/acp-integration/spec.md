@@ -2,7 +2,7 @@
 
 ### Requirement: Secure ACP Canonical Observation Consumption
 
-Protected filesystem access SHALL consume the requesting session's current canonical root and target observations and one explicitly selected applicable root role. It SHALL require exact session/context generation, valid canonical root-relative components and usable exact filesystem identities. It SHALL NOT interpret a successful canonical observation as permission, re-expand the original raw path, consult process environment, substitute another session or select a broader root after failure. Access through a trusted-skills root SHALL be read-only. Client callback adoption and per-mode/extension authorization SHALL remain the separate dependent authorization change.
+Protected filesystem access SHALL consume the requesting session's current canonical root and target observations and one explicitly selected applicable root role, requiring exact session/context generation, valid canonical root-relative components and usable exact filesystem identities; access through a trusted-skills root SHALL be read-only.
 
 #### Scenario: Selected staging authority cannot broaden
 - **GIVEN** a target observation has independent workspace and staging roles
@@ -21,9 +21,20 @@ Protected filesystem access SHALL consume the requesting session's current canon
 - **THEN** the instruction text SHALL be eligible for the same secure read operation
 - **AND** a write selecting that role SHALL fail without mutation, including for a caller otherwise using broad YOLO permissions
 
+#### Scenario: Successful observation does not authorize reinterpretation
+- **GIVEN** a caller holds a successful canonical observation
+- **WHEN** access would re-expand the original raw path, consult process environment or substitute another session
+- **THEN** access SHALL operate only on the consumed canonical root-relative components and exact identities
+- **AND** a successful canonical observation SHALL NOT be interpreted as permission
+
+#### Scenario: Callback adoption and authorization remain dependent sinks
+- **WHEN** a caller expects client callback adoption or per-mode/extension authorization as part of secure access
+- **THEN** those SHALL remain covered by the separate dependent authorization change
+- **AND** this requirement SHALL NOT be described as covering that sink
+
 ### Requirement: Root-Relative No-Follow ACP Content Access
 
-Protected reads and writes SHALL establish an identity-checked canonical root capability and resolve the actual file beneath the explicitly selected root through a supported no-follow/root-relative mechanism. Request-time directory and final-file symlinks, including contained links, SHALL be rejected by the initially supported backend; newly introduced symlinks SHALL NOT redirect actual IO. A host-provisioned root alias SHALL remain usable through its observed canonical root identity. Content reads, truncation and writes SHALL use the same validated regular-file object that was securely opened, never a later path-based reopen. Ordinary realPath/lstat prechecks, final-component no-follow alone and optional subprocess confinement SHALL NOT be considered equivalent guarantees.
+Protected reads and writes SHALL establish an identity-checked canonical root capability and resolve the actual file beneath the explicitly selected root through a supported no-follow/root-relative mechanism, and SHALL reject request-time directory and final-file symlinks, including contained links, at the initially supported backend.
 
 #### Scenario: Existing regular file is read and overwritten securely
 - **GIVEN** an existing regular file under the selected root with matching observed identity
@@ -48,9 +59,19 @@ Protected reads and writes SHALL establish an identity-checked canonical root ca
 - **THEN** the access mechanism SHALL preserve that physical boundary without adding staging-only, extension, LSP, command or tool denials
 - **AND** it SHALL NOT claim to constrain native execution that bypasses ACP callbacks
 
+#### Scenario: Newly introduced symlinks cannot redirect opened content
+- **WHEN** a symlink is introduced or changed after secure opening beneath the selected root
+- **THEN** content reads, truncation and writes SHALL use the same validated regular-file object that was securely opened, never a later path-based reopen
+- **AND** the newly introduced symlink SHALL NOT redirect actual IO
+
+#### Scenario: Precheck and confinement shortcuts are not equivalent
+- **WHEN** resolution is attempted with ordinary realPath/lstat prechecks, final-component no-follow alone or optional subprocess confinement
+- **THEN** those SHALL NOT be considered equivalent guarantees to the supported no-follow/root-relative mechanism
+- **AND** a host-provisioned root alias SHALL remain usable only through its observed canonical root identity
+
 ### Requirement: Secure ACP Existing and New File Mutation Semantics
 
-An existing overwrite SHALL securely open without truncation or create fallback, verify regular-file type and observed identity, then truncate/write that same opened object. A new file SHALL be created only when the complete directory path already exists beneath the selected existing root, and creation SHALL be exclusive so that a raced-in entry cannot be overwritten. Missing parent directories or prospective roots SHALL produce a specific unavailable-root/parent failure without recursive directory creation. Directory or special-node targets SHALL NOT receive content IO. The primitives SHALL NOT promise atomic replacement or rollback: a content-IO failure after a safely opened mutation begins can leave partial in-root content, which SHALL be reported as failure rather than fabricated success.
+An existing overwrite SHALL securely open without truncation or create fallback, verify regular-file type and observed identity, then truncate and write that same opened object.
 
 #### Scenario: Replacement file is not truncated
 - **GIVEN** a regular file was observed for an existing overwrite
@@ -80,9 +101,20 @@ An existing overwrite SHALL securely open without truncation or create fallback,
 - **THEN** access SHALL return a specific type or IO failure and release its operation resources
 - **AND** it SHALL perform no content mutation for a type denial and SHALL NOT claim rollback of bytes already safely written before an IO failure
 
+#### Scenario: Creation requires a complete existing path
+- **GIVEN** a caller requests secure creation of a new file beneath the selected existing root
+- **WHEN** the final filename is absent but its complete directory path already exists
+- **THEN** creation SHALL be exclusive so that a raced-in entry cannot be overwritten
+- **AND** creation SHALL NOT occur when the complete directory path is missing or the root is prospective
+
+#### Scenario: Partial mutation is reported honestly
+- **WHEN** a content-IO failure occurs after a safely opened mutation has begun
+- **THEN** the operation SHALL report failure rather than fabricate success
+- **AND** the primitives SHALL NOT promise atomic replacement or rollback, so partial in-root content may remain
+
 ### Requirement: ACP Filesystem Replacement and Resource Failure Behavior
 
-Detectable root, observed ancestor or final-object identity mismatch before the relevant content step SHALL fail closed. Kernel resolution that cannot establish containment, stale observations, disappearance and unexpected existence SHALL produce one bounded failure without automatic retry or ordinary path-IO fallback. Successfully opened identity-checked root/file objects SHALL remain the operation authority through actual descriptor IO: a later pathname replacement SHALL NOT switch the operation to a replacement object. This guarantee SHALL NOT be described as freezing the filesystem namespace, rejecting every possible in-root rename, revoking an already opened inode after external rename/unlink, preventing concurrent same-inode content edits, or transactional rollback. All acquired resources SHALL be released on success and failure; raw exception content, secrets and file contents SHALL NOT be emitted as access diagnostics.
+Detectable root, observed ancestor or final-object identity mismatch before the relevant content step SHALL fail closed; resolution that cannot establish containment, stale observations, disappearance or unexpected existence SHALL produce one bounded failure without automatic retry or ordinary path-IO fallback.
 
 #### Scenario: Escaping replacement before open fails without side effect
 - **WHEN** a test replaces the root, an ancestor or final file with an escaping link between observation and the actual constrained open
@@ -105,9 +137,20 @@ Detectable root, observed ancestor or final-object identity mismatch before the 
 - **THEN** the operation SHALL either complete the requested byte transfer or return an honest bounded IO failure
 - **AND** it SHALL attempt cleanup of every acquired operation resource without changing the primary failure to success
 
+#### Scenario: Guarantee is descriptor binding, not namespace freezing
+- **GIVEN** a securely opened inode is later renamed, unlinked, concurrently edited or path-replaced
+- **WHEN** the guarantee is characterized in documentation or tests
+- **THEN** it SHALL NOT be described as freezing the filesystem namespace, rejecting every possible in-root rename, revoking the already opened inode after external rename/unlink, preventing concurrent same-inode content edits or providing transactional rollback
+- **AND** successfully opened identity-checked root/file objects SHALL remain the operation authority through actual descriptor IO
+
+#### Scenario: Resources are released and diagnostics stay non-sensitive
+- **WHEN** protected access completes or fails
+- **THEN** all acquired resources SHALL be released on success and failure
+- **AND** raw exception content, secrets and file contents SHALL NOT be emitted as access diagnostics
+
 ### Requirement: Explicit Secure ACP Filesystem Platform Policy
 
-The initially supported secure backend SHALL require Linux little-endian x86_64/aarch64, GNU glibc at an explicitly owned supported system location, Linux constrained-open and descriptor-metadata support, exact usable identities and Deno FFI permission. Platform/version identification alone SHALL NOT establish syscall availability under seccomp or prove a filesystem supplies required metadata. Unsupported OS/ABI/libc, missing library/symbol/permission, unavailable required syscall or unrepresentable identity SHALL fail closed with a bounded supported-platform/capability reason. The adapter SHALL NOT load agent/workspace-selected native modules, introduce a compiled/downloaded dependency or fall back to weaker portable access. These requirements SHALL remain identical regardless of agent type or authorization mode.
+The initially supported secure backend SHALL require Linux little-endian x86_64/aarch64, GNU glibc at an explicitly owned supported system location, Linux constrained-open and descriptor-metadata support, exact usable identities and Deno FFI permission.
 
 #### Scenario: Supported local filesystem uses the actual backend
 - **GIVEN** the supported system library, native ABI and constrained-open/metadata capability are actually available
@@ -120,9 +163,19 @@ The initially supported secure backend SHALL require Linux little-endian x86_64/
 - **THEN** access SHALL return the specific platform/capability failure without protected content IO
 - **AND** the same denial SHALL apply for OpenCode/OMP and restricted/YOLO callers without an unsafe fallback
 
+#### Scenario: Unsupported platform and missing capability fail closed
+- **WHEN** the OS/ABI/libc is unsupported, a required library/symbol/permission is missing, a required syscall is unavailable under seccomp or an identity is unrepresentable
+- **THEN** access SHALL fail closed with a bounded supported-platform/capability reason
+- **AND** platform/version identification alone SHALL NOT establish syscall availability or prove the filesystem supplies required metadata
+
+#### Scenario: No dynamic module loading or weaker portable fallback
+- **WHEN** the supported backend is requested but unavailable, or an agent/workspace-selected native module is offered
+- **THEN** the adapter SHALL NOT load agent/workspace-selected native modules, introduce a compiled/downloaded dependency or fall back to weaker portable access
+- **AND** these platform requirements SHALL remain identical regardless of agent type or authorization mode
+
 ### Requirement: Secure ACP Access Evidence and Consumer Handoff
 
-Acceptance SHALL exercise the actual access primitives with real canonical-observation logic, temporary filesystem fixtures and deterministic native-boundary mocks. Tests SHALL assert content, unchanged outside/sibling files, specific failures and descriptor ownership rather than source-string/forwarding-only assertions. Documentation SHALL identify unsupported traversal/platform cases, missing-parent behavior, system-libc/FFI authority and descriptor/partial-IO limits; existing callbacks SHALL NOT be described as hardened before the dependent sink cutover. Passing local access checks SHALL NOT certify OMP delegation, native tool enforcement, architecture image behavior or optional bwrap, and SHALL NOT clear predecessor native compatibility application blockers.
+Acceptance SHALL exercise the actual access primitives with real canonical-observation logic, temporary filesystem fixtures and deterministic native-boundary mocks, and tests SHALL assert content, unchanged outside/sibling files, specific failures and descriptor ownership rather than source-string or forwarding-only assertions.
 
 #### Scenario: Mocked replacement evidence has a concrete consumer effect
 - **WHEN** an instrumented native boundary schedules a real fixture root/ancestor/final swap at an explicit operation boundary
@@ -133,3 +186,8 @@ Acceptance SHALL exercise the actual access primitives with real canonical-obser
 - **WHEN** unit/temp/mock checks pass while the predecessor source verdict remains incompatible or unresolved
 - **THEN** the proposal's access evidence SHALL remain local primitive evidence only
 - **AND** downstream application SHALL remain gated; real agent/platform/container/bwrap observations SHALL remain user-owned and unverified
+
+#### Scenario: Documentation declares limits and sink readiness honestly
+- **WHEN** the proposal documents supported behavior and its limits
+- **THEN** documentation SHALL identify unsupported traversal/platform cases, missing-parent behavior, system-libc/FFI authority and descriptor/partial-IO limits
+- **AND** existing callbacks SHALL NOT be described as hardened before the dependent sink cutover

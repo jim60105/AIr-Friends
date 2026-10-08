@@ -2,7 +2,7 @@
 
 ### Requirement: Complete Destructive Operation Normalization
 
-The permission gate SHALL normalize every destructive-shaped request (ACP `delete`/`move` tool kinds, native delete/move titles, and multi-operation patch shapes) into an ordered, complete operation set before any authorization decision, using the P0 destructive-intent contract's trustworthy operation input, parser/edit-syntax provenance, and binding to the input that will execute. Every deletion target, every move source and destination, and every other patch mutation target SHALL be represented as its own target requiring its own decision; a title, a permission-location list, or a first operation SHALL NEVER stand in for the decoded set. An arbitrary title string SHALL NOT be approved as a destructive permission request. Normalization is a pure decision: it SHALL NOT create, modify, delete or move anything, and it SHALL NOT implement a speculative native edit syntax beyond the supported parsers established by the P0 contract.
+The permission gate SHALL normalize every destructive-shaped request (ACP `delete`/`move` tool kinds, native delete/move titles, and multi-operation patch shapes) into an ordered, complete operation set before any authorization decision, using the P0 destructive-intent contract's trustworthy operation input, parser/edit-syntax provenance, and binding to the input that will execute.
 
 #### Scenario: Complete native-shaped delete and move decode every target
 - **GIVEN** a restricted session and a supported-parser delete fixture with several targets and a complete move fixture
@@ -27,10 +27,19 @@ The permission gate SHALL normalize every destructive-shaped request (ACP `delet
 - **WHEN** the gate compares the two
 - **THEN** it SHALL reject with the bounded intent-mismatch/incomplete reason
 - **AND** it SHALL NOT approve the intersection of the two sets
+#### Scenario: Title, location list or first operation cannot stand in for the decoded set
+- **GIVEN** a destructive-shaped request whose title, permission-location list, or first operation is narrower than its decoded operation set
+- **WHEN** the gate decides authorization
+- **THEN** the title, the permission-location list, or the first operation SHALL NEVER stand in for the decoded set; an arbitrary title string SHALL NOT be approved as a destructive permission request
+
+#### Scenario: Normalization is a pure, parser-bounded decision
+- **WHEN** the permission gate normalizes a destructive request
+- **THEN** normalization SHALL be a pure decision that creates, modifies, deletes or moves nothing
+- **AND** it SHALL NOT implement a speculative native edit syntax beyond the supported parsers established by the P0 destructive-intent contract
 
 ### Requirement: All-Target Destructive Authorization Under The Common Policy
 
-For a normalized destructive request, the gate SHALL authorize each target through the same session-scoped filesystem decision used by the ordinary write sink — with no parallel destructive rule — and SHALL approve only when every target is authorized: every deletion target and every move source SHALL require an existing-target observation plus delete authority, every move destination and every patch mutation target SHALL require create/overwrite authority, and a single unauthorized target SHALL deny the whole request. Target decisions SHALL use canonical physical observations, including token expansion and escaping-symlink rejection, and trusted read-only skills targets SHALL be denied as both sources and destinations in every mode. The existing restricted staging/shared-write and native YOLO broad-containment rules SHALL decide destructive targets exactly as they decide ordinary writes, with no additional restricted clamp applied to YOLO.
+For a normalized destructive request, the gate SHALL authorize each target through the same session-scoped filesystem decision used by the ordinary write sink — with no parallel destructive rule — and SHALL approve only when every target is authorized, so a single unauthorized target SHALL deny the whole request.
 
 #### Scenario: Later escaping target denies the whole patch
 - **GIVEN** a restricted session, and a patch fixture whose first delete is inside the session staging root and whose second delete resolves outside the authorized roots
@@ -61,10 +70,27 @@ For a normalized destructive request, the gate SHALL authorize each target throu
 - **WHEN** a destructive target is physically inside its user workspace or the shared Agent workspace
 - **THEN** the target SHALL be authorized by broad containment with no staging-only rule, no write-extension filter and no `canWriteAgentWorkspace` requirement
 - **AND** escaping, sibling and read-only-skills targets SHALL still be denied, with the documented limitation that non-ACP native execution is unconstrained
+#### Scenario: Delete and move sources require existence plus delete authority
+- **GIVEN** a normalized destructive request naming a deletion target or a move source
+- **WHEN** the gate decides that target
+- **THEN** the target SHALL require an existing-target observation plus delete authority
+
+#### Scenario: Destinations and patch mutation targets require create/overwrite authority
+- **GIVEN** a normalized destructive request naming a move destination or a patch mutation target
+- **WHEN** the gate decides that target
+- **THEN** it SHALL require create/overwrite authority
+
+#### Scenario: Target decisions use canonical physical observations
+- **WHEN** the gate decides any destructive target
+- **THEN** it SHALL use canonical physical observations, including token expansion and escaping-symlink rejection
+
+#### Scenario: Ordinary write rules decide destructive targets without extra YOLO clamps
+- **WHEN** an existing restricted staging/shared-write rule or a native YOLO broad-containment rule decides a destructive target
+- **THEN** it SHALL decide the target exactly as it decides an ordinary write, with no additional restricted clamp applied to YOLO
 
 ### Requirement: Shared Client And Extension Destructive Decision Surface
 
-The destructive normalization and all-target decision logic SHALL be one reusable module consumed by the ACP permission gate and, when its owner wires the handler, by the deployment-owned OMP restricted-tool adapter, so the extension path and the client path evaluate the identical operation set and completeness verdict. An incomplete native location list SHALL NOT authorize a larger patch on either surface, and neither surface SHALL maintain a private duplicate of the target-completeness rules, the reason vocabulary, or the authorization table. The shared logic SHALL be pure with respect to the filesystem: consumers own observation and mutation.
+The destructive normalization and all-target decision logic SHALL be one reusable module consumed by the ACP permission gate and, when its owner wires the handler, by the deployment-owned OMP restricted-tool adapter, so the extension path and the client path evaluate the identical operation set and completeness verdict.
 
 #### Scenario: Both surfaces agree on one fixture
 - **GIVEN** the client permission gate and a mock extension-side adapter invoking the same shared module on one destructive fixture
@@ -81,6 +107,15 @@ The destructive normalization and all-target decision logic SHALL be one reusabl
 - **WHEN** the shared normalization and decision logic is exercised across its fixtures
 - **THEN** it SHALL consult only the observations and context supplied by its consumer
 - **AND** it SHALL create, modify, delete or move nothing itself
+#### Scenario: Neither surface keeps a private duplicate of decision logic
+- **WHEN** the ACP permission gate or the OMP restricted-tool adapter evaluates a destructive request
+- **THEN** neither surface SHALL maintain a private duplicate of the target-completeness rules, the reason vocabulary, or the authorization table
+
+#### Scenario: Incomplete native location list never authorizes a larger patch
+- **GIVEN** a client-side destructive request whose native location list names fewer operations than the bound input contains
+- **WHEN** either surface evaluates it
+- **THEN** the incomplete native location list SHALL NOT authorize a larger patch on either surface
+- **AND** both surfaces SHALL report the incomplete-intent denial
 
 ## MODIFIED Requirements
 
@@ -213,6 +248,23 @@ Filesystem path checks used by the scoped edit/write approval, the destructive t
 - **GIVEN** a permission request not matching any approval rule
 - **WHEN** `requestPermission()` evaluates the request
 - **THEN** it SHALL deny the request
+
+#### Scenario: Filesystem-touching bash tools gated by requestPermission
+- **GIVEN** a filesystem-touching bash tool whose permission is configured `"ask"` rather than `"allow"`
+- **WHEN** the tool invocation reaches the permission gate
+- **THEN** `requestPermission()` SHALL be the authoritative decision point for the command
+
+#### Scenario: Skill command with other legacy free-text flags rejected
+- **GIVEN** a whitelisted skill command whose whitespace-delimited tokens include `--content`, `--content=value`, `--query`, `--query=value`, `--caption`, or `--caption=value`
+- **WHEN** the gate evaluates the skill command for auto-approval
+- **THEN** the gate SHALL reject the command instead of approving it
+- **AND** distinct tokens `--content-file`, `--query-file`, `--caption-file` SHALL NOT trigger the rejection
+
+#### Scenario: SESSION_ID expansion consistent with script-side --session-id
+- **GIVEN** a shell session exists (message, spontaneous, self-research, memory-maintenance, channel memory-maintenance, reminder)
+- **WHEN** the gate expands `$SESSION_ID` in a path argument
+- **THEN** the client config's `sessionId` SHALL be set to the shell session id so expansion matches the script-side `--session-id`
+- **AND** flows without a shell session SHALL leave `sessionId` unset, so expansion yields an empty string matching the script-side `{workspace}/tmp` fallback
 
 ### Requirement: Permission Handling — YOLO Mode
 

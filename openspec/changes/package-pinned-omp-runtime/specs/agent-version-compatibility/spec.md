@@ -2,7 +2,7 @@
 
 ### Requirement: Bootstrap OMP Version Compatibility Check
 
-The system SHALL verify the installed OMP CLI version at bootstrap — only when the resolved deployment agent type is `omp` — against a known-good minimum (defaulting to the pinned image-intended version `18.6.1`) and surface a prominent, structured warning when the installed version is below it or cannot be determined. The check SHALL be non-fatal: startup proceeds regardless, the system SHALL NOT download, upgrade, or block on the outcome, and the container pin remains the actual prevention; the check is an observability measure mirroring the established OpenCode pattern. On OpenCode-only deployments the check SHALL NOT run, so no spurious warning is emitted for an intentionally absent binary.
+The system SHALL verify the installed OMP CLI version at bootstrap against a known-good minimum — defaulting to the pinned image-intended version `18.6.1` — only when the resolved deployment agent type is `omp`, and SHALL surface a prominent, structured warning when the installed version is below it or cannot be determined.
 
 #### Scenario: Installed version at or above the known-good minimum
 - **GIVEN** a mocked `omp --version` response reporting a version at or above the known-good minimum
@@ -33,9 +33,15 @@ The system SHALL verify the installed OMP CLI version at bootstrap — only when
 - **THEN** the OMP version check SHALL NOT execute
 - **AND** no `OMP version check:` marker SHALL appear in the startup log
 
+#### Scenario: Check is non-fatal observability
+- **GIVEN** the bootstrap OMP version check is running
+- **WHEN** the installed version is below the minimum or cannot be determined
+- **THEN** startup SHALL proceed regardless and the system SHALL NOT download, upgrade, or block on the outcome
+- **AND** the container pin SHALL remain the actual prevention, with the check an observability measure mirroring the established OpenCode pattern
+
 ### Requirement: OMP Version Minimum Environment Override
 
-The OMP known-good minimum SHALL be overridable at runtime via the `AGENT_OMP_MIN_VERSION` environment variable, honored when set and non-empty and ignored when blank, defaulting otherwise to the pinned known-good version. The variable's introduction SHALL be documented in this change across `config.example.yaml`, `.env.example`, and `helm/values.yaml` with exactly the same treatment the OpenCode counterpart variable receives today, and SHALL introduce no other new configuration, environment, or Helm field.
+The OMP known-good minimum SHALL be overridable at runtime via the `AGENT_OMP_MIN_VERSION` environment variable, honored when set and non-empty, ignored when blank, and defaulting otherwise to the pinned known-good version.
 
 #### Scenario: Non-empty override replaces the default minimum
 - **GIVEN** `AGENT_OMP_MIN_VERSION` is set to a version string
@@ -54,7 +60,7 @@ The OMP known-good minimum SHALL be overridable at runtime via the `AGENT_OMP_MI
 
 ### Requirement: OMP Version Health Acceptance Is Mock-Only
 
-Automated acceptance of the OMP version-health logic SHALL run exclusively against mocked command outputs and unit-level assertions, certifying the `OK`, `BELOW_MINIMUM`, and `UNKNOWN` decision paths, the override semantics, and the never-blocks-startup property without executing a real `omp` binary, building a container, or contacting the network. Real installed-binary, image-build, and architecture behavior remains user-owned manual verification and SHALL be stated as unverified by the automated suite.
+Automated acceptance of the OMP version-health logic SHALL run exclusively against mocked command outputs and unit-level assertions, certifying the `OK`, `BELOW_MINIMUM`, and `UNKNOWN` decision paths, the override semantics, and the never-blocks-startup property without executing a real `omp` binary, building a container, or contacting the network.
 
 #### Scenario: Marker decisions proven on mock outputs
 - **GIVEN** injected fake detectors returning a valid version, a below-minimum version, an unparseable string, a spawn failure, and a timeout

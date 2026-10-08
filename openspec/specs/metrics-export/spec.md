@@ -48,30 +48,7 @@ The system SHALL use a `prom-client` dedicated `Registry` instance (not the glob
 
 ### Requirement: Metric Definitions
 
-The system SHALL expose the following metrics with the specified types and labels:
-
-| Metric Name | Type | Labels |
-|---|---|---|
-| `airfriends_sessions_total` | Counter | `platform`, `type`, `status` |
-| `airfriends_session_duration_seconds` | Histogram | `platform`, `type`, `status` |
-| `airfriends_active_sessions` | Gauge | — |
-| `airfriends_messages_received_total` | Counter | `platform` |
-| `airfriends_replies_sent_total` | Counter | `platform` |
-| `airfriends_memory_operations_total` | Counter | `operation`, `visibility` |
-| `airfriends_skill_api_calls_total` | Counter | `skill`, `status` |
-| `airfriends_rate_limit_rejections_total` | Counter | `platform` |
-| `airfriends_audit_entries_total` | Counter | `phase` |
-| `airfriends_skill_readiness` | Gauge | `skill` |
-| `airfriends_files_sent_total` | Counter | `platform` |
-| `airfriends_reminders_set_total` | Counter | `platform` |
-| `airfriends_reminders_delivered_total` | Counter | `platform`, `status` |
-| `airfriends_reminders_cancelled_total` | Counter | `platform` |
-| `airfriends_idle_timeout_total` | Counter | `platform`, `outcome` |
-| `airfriends_self_research_no_note_total` | Counter | — |
-
-The `airfriends_files_sent_total` counter SHALL be incremented once per individual file delivered (a multi-file `send-file` invocation increments it by the number of delivered files), not once per invocation.
-
-The `airfriends_self_research_no_note_total` counter SHALL be incremented exactly once per self-research session that ends without producing any research output (no new or content-changed file under `$AGENT_WORKSPACE/notes/` or `journal/`), after the corrective retry ran — and ONLY when completion verification is enabled (`selfResearch.verifyCompletion !== false`); the disabled mode takes no snapshot, cannot measure the outcome, and SHALL NOT increment the counter.
+The system SHALL expose the set of metrics listed in the requirement's scenarios, each registered with the specified type and labels.
 
 #### Scenario: Session counter increments on success
 
@@ -109,6 +86,37 @@ The `airfriends_self_research_no_note_total` counter SHALL be incremented exactl
 - **GIVEN** `metrics.enabled` is `true` and `selfResearch.verifyCompletion` is `false`
 - **WHEN** a self-research session ends without producing a note
 - **THEN** `airfriends_self_research_no_note_total` SHALL NOT be incremented (the disabled mode performs no verification and cannot measure the outcome)
+
+#### Scenario: Output-free session defined by workspace changes
+
+- **GIVEN** `selfResearch.verifyCompletion` is enabled
+- **WHEN** determining whether a self-research session produced research output after its corrective retry ran
+- **THEN** the session SHALL count as producing no research output when no file under `$AGENT_WORKSPACE/notes/` or `journal/` is new or content-changed
+
+#### Scenario: Metrics are registered with types and labels
+
+- **GIVEN** the metrics module is initialized
+- **WHEN** metrics are registered on the dedicated registry
+- **THEN** the following metrics SHALL be registered with the specified types and labels:
+
+| Metric Name | Type | Labels |
+|---|---|---|
+| `airfriends_sessions_total` | Counter | `platform`, `type`, `status` |
+| `airfriends_session_duration_seconds` | Histogram | `platform`, `type`, `status` |
+| `airfriends_active_sessions` | Gauge | — |
+| `airfriends_messages_received_total` | Counter | `platform` |
+| `airfriends_replies_sent_total` | Counter | `platform` |
+| `airfriends_memory_operations_total` | Counter | `operation`, `visibility` |
+| `airfriends_skill_api_calls_total` | Counter | `skill`, `status` |
+| `airfriends_rate_limit_rejections_total` | Counter | `platform` |
+| `airfriends_audit_entries_total` | Counter | `phase` |
+| `airfriends_skill_readiness` | Gauge | `skill` |
+| `airfriends_files_sent_total` | Counter | `platform` |
+| `airfriends_reminders_set_total` | Counter | `platform` |
+| `airfriends_reminders_delivered_total` | Counter | `platform`, `status` |
+| `airfriends_reminders_cancelled_total` | Counter | `platform` |
+| `airfriends_idle_timeout_total` | Counter | `platform`, `outcome` |
+| `airfriends_self_research_no_note_total` | Counter | — |
 
 ### Requirement: Histogram Buckets
 

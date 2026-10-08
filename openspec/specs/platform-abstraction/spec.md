@@ -8,7 +8,7 @@ Defines the unified platform abstraction layer that normalizes events across Dis
 
 ### Requirement: NormalizedEvent Model
 
-The system SHALL normalize all incoming platform events into a `NormalizedEvent` structure with fields: `platform` (Platform type), `channelId`, `userId`, `username` (optional), `messageId`, `isDm`, `guildId` (empty string if not applicable), `content`, `timestamp`, `attachments` (optional array of `Attachment`), `quotedNote` (optional typed third-party note reference), and `raw` (optional, original platform object). For Misskey notes, `isDm` SHALL be derived from the note visibility: notes with visibility `"specified"` SHALL be classified as direct messages (`isDm` set to `true`). `content`, author fields and `attachments` SHALL describe the outer message only; quoted source data SHALL remain separate.
+The system SHALL normalize all incoming platform events into a `NormalizedEvent` structure carrying `platform`, `channelId`, `userId`, `username`, `messageId`, `isDm`, `guildId`, `content`, `timestamp`, `attachments`, `quotedNote`, and `raw`.
 
 #### Scenario: Discord message normalization
 - **GIVEN** a Discord message is received
@@ -36,6 +36,21 @@ The system SHALL normalize all incoming platform events into a `NormalizedEvent`
 - **WHEN** the event is normalized
 - **THEN** outer content, user id, workspace ownership, channel, visibility and reply anchor SHALL remain those of the quoting note
 - **AND** the quoted author and source SHALL occur only in the separate `quotedNote` reference
+
+#### Scenario: Misskey isDm derived from visibility
+- **GIVEN** a Misskey note with visibility `"specified"`
+- **WHEN** the note is normalized
+- **THEN** `isDm` SHALL be set to `true` (the note is classified as a direct message)
+
+#### Scenario: Optional and non-applicable fields
+- **GIVEN** a normalized event where optional data is absent or a field is not applicable
+- **WHEN** the `NormalizedEvent` is produced
+- **THEN** `username`, `attachments` (array of `Attachment`), `quotedNote` (typed third-party note reference), and `raw` (original platform object) SHALL be optional, and `guildId` SHALL be an empty string when not applicable
+
+#### Scenario: Outer message only
+- **GIVEN** an incoming platform event carrying a quoted source
+- **WHEN** the event is normalized
+- **THEN** `content`, author fields, and `attachments` SHALL describe the outer message only, and the quoted source data SHALL remain separate
 
 ### Requirement: Platform Type Validation
 
@@ -374,7 +389,7 @@ The Misskey adapter SHALL implement message editing via a delete-and-recreate st
 
 ### Requirement: Misskey Fallback Chains for Fork Compatibility
 
-The Misskey adapter SHALL implement API fallback chains for compatibility with Misskey forks. A fallback SHALL be triggered only by endpoint-unavailable or fork-compatibility errors (e.g. HTTP 404 responses or `NO_SUCH_ENDPOINT`-class API errors); rate-limit, invalid-parameter, and transient server errors (HTTP 5xx) SHALL NOT be swallowed as "endpoint unavailable" and SHALL NOT cause silent degradation to a narrower endpoint. Such errors SHALL propagate out of the fetch helper; note-thread assembly SHALL then degrade to the thread parts it successfully fetched (logging the original error) rather than failing the entire recent-messages fetch.
+The Misskey adapter SHALL implement API fallback chains for compatibility with Misskey forks, triggering a fallback only for endpoint-unavailable or fork-compatibility errors.
 
 #### Scenario: Reply fetching fallback
 
@@ -401,6 +416,27 @@ The Misskey adapter SHALL implement API fallback chains for compatibility with M
 - **GIVEN** a note thread assembly
 - **WHEN** fetching ancestor notes
 - **THEN** it SHALL try `notes/conversation` first, fall back to walking the `replyId` chain via `notes/show`, and apply the same endpoint-missing-only fallback trigger
+
+#### Scenario: Fallback trigger restriction
+- **GIVEN** a fetch failure that is not an endpoint-unavailable or fork-compatibility error
+- **WHEN** the fetch helper decides whether to fall back
+- **THEN** it SHALL NOT trigger a fallback for that failure
+
+#### Scenario: Endpoint-unavailable errors trigger fallback
+- **GIVEN** an HTTP 404 response or a `NO_SUCH_ENDPOINT`-class API error
+- **WHEN** the fetch helper encounters the error
+- **THEN** it SHALL fall back to the next endpoint in the chain
+
+#### Scenario: Non-fallback errors propagate
+- **GIVEN** a rate-limit, invalid-parameter, or transient server error (HTTP 5xx)
+- **WHEN** the fetch helper encounters the error
+- **THEN** it SHALL NOT swallow the error as "endpoint unavailable" and SHALL NOT silently degrade to a narrower endpoint
+- **AND** the error SHALL propagate out of the fetch helper
+
+#### Scenario: Degraded thread assembly
+- **GIVEN** an error propagates out of the fetch helper during note-thread assembly
+- **WHEN** the recent-messages fetch is assembled
+- **THEN** it SHALL degrade to the thread parts it successfully fetched (logging the original error) rather than failing the entire fetch
 
 ### Requirement: Misskey Spontaneous Target Selection
 
@@ -518,7 +554,7 @@ The Misskey adapter SHALL normalize every `limit` value passed to Misskey REST e
 
 ### Requirement: Misskey Note Reaction Verification
 
-When the Misskey adapter adds a reaction to a note via `notes/reactions/create`, it SHALL verify the stored result by reading the note back with `notes/show` and inspecting the bot's own reaction (`myReaction`). The reaction result SHALL carry, in addition to `success`, an optional `storedReaction` (the emoji the server actually stored, present when verification ran) and an optional `verified` flag (`false` when the post-send readback itself failed). A reaction whose POST succeeded SHALL always have `success: true` — a policy downgrade is not a call failure — but when `storedReaction` differs from the requested emoji the result SHALL NOT claim the requested emoji was applied, and when `verified` is `false` the result SHALL NOT present the requested emoji as confirmed.
+When the Misskey adapter adds a reaction to a note via `notes/reactions/create`, it SHALL verify the stored result by reading the note back with `notes/show` and inspecting the bot's own reaction (`myReaction`), and report the outcome via `success`, an optional `storedReaction`, and an optional `verified` flag.
 
 #### Scenario: Reaction stored as requested
 
@@ -539,6 +575,17 @@ When the Misskey adapter adds a reaction to a note via `notes/reactions/create`,
 - **THEN** the result SHALL have `success: true` and `verified: false`
 - **AND** the result SHALL NOT present `:requested_emoji:` as a confirmed-applied reaction
 
+#### Scenario: Policy downgrade is not a call failure
+- **GIVEN** a reaction POST that succeeds but whose `notes/show` readback reports a different stored reaction
+- **WHEN** the adapter returns the reaction result
+- **THEN** the result SHALL always have `success: true` (a policy downgrade is not a call failure)
+- **AND** the result SHALL NOT claim the requested emoji was applied when `storedReaction` differs from the requested emoji
+
+#### Scenario: Unverified result does not claim the emoji
+- **GIVEN** a reaction result where `verified` is `false`
+- **WHEN** the adapter returns the reaction result
+- **THEN** the result SHALL NOT present the requested emoji as confirmed-applied
+
 ### Requirement: Misskey Emoji Reaction-Availability Metadata
 
 When fetching custom emojis, the Misskey adapter SHALL preserve the reaction-availability fields returned by the `emojis` endpoint — `isSensitive`, `localOnly`, and `roleIdsThatCanBeUsedThisEmojiAsReaction` — on its emoji representation, so downstream consumers can distinguish emojis carrying reaction restrictions from universally usable ones.
@@ -557,7 +604,7 @@ When fetching custom emojis, the Misskey adapter SHALL preserve the reaction-ava
 
 ### Requirement: Misskey One-Hop Quoted Note Reference
 
-For a Misskey note with its own text or files and a quote relationship, the system SHALL preserve the immediately quoted source as a typed `quotedNote` reference. Available references SHALL contain source note id, original author identity and username with remote host when supplied, optional display name, source text and optional source attachments, plus a source HTTP(S) URL when available or derivable from the configured instance. Unavailable references SHALL contain the known source id and a finite status reason without invented source content. Missing quote data SHALL leave `quotedNote` absent for ordinary notes, Discord messages and Misskey chat. Source text SHALL remain unchanged by outer bot-mention removal.
+For a Misskey note with its own text or files and a quote relationship, the system SHALL preserve the immediately quoted source as a typed `quotedNote` reference.
 
 #### Scenario: Embedded source needs no request
 - **GIVEN** an eligible quote-renote with a valid complete embedded source, no reply parent and an article URL in source text
@@ -589,9 +636,29 @@ For a Misskey note with its own text or files and a quote relationship, the syst
 - **THEN** existing trigger/filter behavior SHALL be unchanged
 - **AND** no quote-driven source lookup, source-driven mention eligibility or additional quote reference SHALL be introduced
 
+#### Scenario: Available reference content
+- **GIVEN** an available quoted source
+- **WHEN** the quote is represented as `quotedNote`
+- **THEN** the reference SHALL contain source note id, original author identity and username with remote host when supplied, optional display name, source text and optional source attachments, plus a source HTTP(S) URL when available or derivable from the configured instance
+
+#### Scenario: Unavailable reference content
+- **GIVEN** a quoted source that is unavailable
+- **WHEN** the quote is represented
+- **THEN** the reference SHALL contain the known source id and a finite status reason without invented source content
+
+#### Scenario: Missing quote data leaves quotedNote absent
+- **GIVEN** an ordinary note, Discord message, or Misskey chat with no actual quoted source
+- **WHEN** the message is normalized
+- **THEN** `quotedNote` SHALL be absent
+
+#### Scenario: Outer bot-mention removal preserves source text
+- **GIVEN** a quoted source whose text would be affected by outer bot-mention removal
+- **WHEN** the source text is represented
+- **THEN** the source text SHALL remain unchanged by the outer bot-mention removal
+
 ### Requirement: Bounded Nonfatal Misskey Quote Resolution
 
-When an eligible retained note has an authoritative source id without usable embedded data, the system SHALL attempt source resolution through the configured Misskey instance only. Enrichment SHALL use a cumulative five-second deadline per event or history/search invocation, at most one request per distinct missing source id, invocation-local reuse of success/failure results and no retries. History enrichment SHALL apply only to retained outer messages after existing retrieval limits. The active request SHALL be aborted on timeout. Unavailable outcomes SHALL distinguish unattempted/not-loaded, lookup failure, timeout, exhausted enrichment budget and invalid source. Optional enrichment failure SHALL preserve the outer message and other successful context.
+When an eligible retained note has an authoritative source id without usable embedded data, the system SHALL attempt source resolution through the configured Misskey instance only, bounded by an enrichment budget and nonfatal on failure.
 
 #### Scenario: Source-id-only note is hydrated
 - **GIVEN** a quote contains a source id but no embedded source
@@ -622,3 +689,24 @@ When an eligible retained note has an authoritative source id without usable emb
 - **WHEN** source data is evaluated
 - **THEN** the invalid data SHALL NOT become an available reference
 - **AND** at most one authoritative-id lookup SHALL be attempted for unusable embedded data; invalid lookup output SHALL yield `invalid_source`
+
+#### Scenario: Enrichment bounded by deadline and request count
+- **GIVEN** several retained notes lack usable embedded source data
+- **WHEN** enrichment runs for an event or history/search invocation
+- **THEN** it SHALL use a cumulative five-second deadline, at most one request per distinct missing source id, invocation-local reuse of success/failure results, and no retries
+- **AND** the active request SHALL be aborted on timeout
+
+#### Scenario: History enrichment scope
+- **GIVEN** retained history messages
+- **WHEN** history enrichment occurs
+- **THEN** it SHALL apply only to retained outer messages after existing retrieval limits
+
+#### Scenario: Unavailable outcomes are distinguished
+- **GIVEN** a source that remains unresolved
+- **WHEN** the unavailable outcome is reported
+- **THEN** it SHALL distinguish unattempted/not-loaded, lookup failure, timeout, exhausted enrichment budget, and invalid source
+
+#### Scenario: Optional enrichment failure preserves context
+- **GIVEN** an optional source lookup fails
+- **WHEN** the related message is returned
+- **THEN** the outer message and other successful context SHALL be preserved
