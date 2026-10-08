@@ -557,6 +557,8 @@ class TestableSessionOrchestrator extends SessionOrchestrator {
    * behavior (loopback rejection) is covered separately in tests/utils/ssrf.test.ts.
    */
   allowLoopbackImageFetch = false;
+  /** Every URL the image pipeline attempted to download, in order. */
+  readonly imageFetchUrls: string[] = [];
 
   setConnectorSetup(setup: (connector: MockAgentConnector) => void): void {
     this.connectorSetup = setup;
@@ -571,6 +573,7 @@ class TestableSessionOrchestrator extends SessionOrchestrator {
   }
 
   protected override safeImageFetch(url: string, init?: RequestInit): Promise<Response> {
+    this.imageFetchUrls.push(url);
     if (this.allowLoopbackImageFetch) {
       return fetch(url, init);
     }
@@ -4599,14 +4602,32 @@ Deno.test("SessionOrchestrator - a spontaneous prompt without quotes keeps its s
     const { orchestrator, skillRegistry, sessionRegistry } = await createTestableOrchestrator(
       tempDir,
     );
-    const history: PlatformMessage[] = [{
-      messageId: "h1",
-      userId: "u1",
-      username: "User1",
-      content: "plain remark",
-      timestamp: new Date(),
-      isBot: false,
-    }];
+    const history: PlatformMessage[] = [
+      {
+        messageId: "h1",
+        userId: "u1",
+        username: "User1",
+        content: "plain remark",
+        timestamp: new Date(),
+        isBot: false,
+      },
+      {
+        messageId: "h2",
+        userId: "bot_id",
+        username: "Bot",
+        content: "bot remark",
+        timestamp: new Date(),
+        isBot: true,
+      },
+      {
+        messageId: "h3",
+        userId: "u2",
+        username: "User2",
+        content: "second remark",
+        timestamp: new Date(),
+        isBot: false,
+      },
+    ];
     const platformAdapter = new HistoryMockPlatformAdapter(history) as unknown as PlatformAdapter;
 
     let capturedPrompt = "";
@@ -4631,7 +4652,21 @@ Deno.test("SessionOrchestrator - a spontaneous prompt without quotes keeps its s
       fetchRecentMessages: true,
     });
 
-    assertStringIncludes(capturedPrompt, "## Recent Conversation\n\n[User] User1: plain remark");
+    // The emitted history is byte-identical to the quote-free format: the same
+    // `[Bot]/[User] username: content` speaker lines, joined by one newline,
+    // with no decoration added for a message that has no quote.
+    const heading = "## Recent Conversation\n\n";
+    assertStringIncludes(capturedPrompt, heading);
+    assertEquals(capturedPrompt.split("## Recent Conversation").length - 1, 1);
+    const section = capturedPrompt.slice(capturedPrompt.indexOf(heading) + heading.length);
+    assertEquals(
+      section.slice(0, section.indexOf("\n\n")),
+      [
+        "[User] User1: plain remark",
+        "[Bot] Bot: bot remark",
+        "[User] User2: second remark",
+      ].join("\n"),
+    );
     assertEquals(capturedPrompt.includes("Quoted reference"), false);
 
     sessionRegistry.stop();
@@ -4650,11 +4685,12 @@ async function runTriggeredPromptTurn(
   skillRegistry: SkillRegistry,
   workspaceManager: WorkspaceManager,
   event: NormalizedEvent,
+  options: { supportsImageContent?: boolean } = {},
 ): Promise<string | unknown[]> {
   let promptArg: string | unknown[] | null = null;
 
   orchestrator.setConnectorSetup((connector) => {
-    connector.supportsImageContent = () => true;
+    connector.supportsImageContent = () => options.supportsImageContent ?? true;
     connector.onPrompt = () => {
       // The first turn lands the reply, so no retry turn runs.
       const key = `${workspaceManager.getWorkspaceKeyFromEvent(event)}:${event.channelId}`;
@@ -4681,41 +4717,48 @@ Deno.test({
     const tempDir = await Deno.makeTempDir();
 
     try {
-      const { orchestrator, skillRegistry, workspaceManager, sessionRegistry } =
-        await createTestableOrchestrator(tempDir);
-      // Any fetch attempt against the loopback server would succeed here, so a
-      // zero hit count proves the quoted URL was never requested.
-      orchestrator.allowLoopbackImageFetch = true;
+      // With image capability on and off alike, the quoted image is never a
+      // download candidate.
+      for (const supportsImageContent of [true, false]) {
+        const { orchestrator, skillRegistry, workspaceManager, sessionRegistry } =
+          await createTestableOrchestrator(tempDir);
+        // A fetch attempt against the loopback server would succeed here, so
+        // the recorded attempts and the server's hit count both prove the
+        // quoted URL was never requested.
+        orchestrator.allowLoopbackImageFetch = true;
 
-      const event = createTestEvent();
-      event.quotedNote = {
-        status: "available",
-        noteId: "src-img",
-        author: { userId: "a1", username: "author" },
-        content: "",
-        attachments: [{
-          id: "q1",
-          url: quotedImageUrl,
-          mimeType: "image/png",
-          filename: "quoted.png",
-          isImage: true,
-        }],
-      };
+        const event = createTestEvent();
+        event.quotedNote = {
+          status: "available",
+          noteId: "src-img",
+          author: { userId: "a1", username: "author" },
+          content: "",
+          attachments: [{
+            id: "q1",
+            url: quotedImageUrl,
+            mimeType: "image/png",
+            filename: "quoted.png",
+            isImage: true,
+          }],
+        };
 
-      const promptArg = await runTriggeredPromptTurn(
-        orchestrator,
-        skillRegistry,
-        workspaceManager,
-        event,
-      );
+        const promptArg = await runTriggeredPromptTurn(
+          orchestrator,
+          skillRegistry,
+          workspaceManager,
+          event,
+          { supportsImageContent },
+        );
 
-      assertEquals(hits.size, 0);
-      assertEquals(typeof promptArg, "string");
-      const prompt = typeof promptArg === "string" ? promptArg : "";
-      assertStringIncludes(prompt, quotedImageUrl);
-      assertStringIncludes(prompt, "quoted.png");
+        assertEquals(orchestrator.imageFetchUrls, [], `capability=${supportsImageContent}`);
+        assertEquals(hits.size, 0, `capability=${supportsImageContent}`);
+        assertEquals(typeof promptArg, "string");
+        const prompt = typeof promptArg === "string" ? promptArg : "";
+        assertStringIncludes(prompt, quotedImageUrl);
+        assertStringIncludes(prompt, "quoted.png");
 
-      sessionRegistry.stop();
+        sessionRegistry.stop();
+      }
     } finally {
       await server.shutdown();
       await Deno.remove(tempDir, { recursive: true });
@@ -4778,7 +4821,9 @@ Deno.test({
         event,
       );
 
-      // Only the outer image reached the download pipeline.
+      // Only the outer image reached the download pipeline: exactly one
+      // download attempt, and it targeted the outer URL.
+      assertEquals(orchestrator.imageFetchUrls, [outerImageUrl]);
       assertEquals(hits.get("/outer.png"), 1);
       assertEquals(hits.get("/quoted.png"), undefined);
       assertEquals(hits.get("/quoted.pdf"), undefined);
@@ -4809,63 +4854,69 @@ Deno.test({
     const tempDir = await Deno.makeTempDir();
 
     try {
-      const { orchestrator, skillRegistry, workspaceManager, sessionRegistry } =
-        await createTestableOrchestrator(tempDir);
-      orchestrator.allowLoopbackImageFetch = true;
+      for (const supportsImageContent of [true, false]) {
+        const { orchestrator, skillRegistry, workspaceManager, sessionRegistry } =
+          await createTestableOrchestrator(tempDir);
+        orchestrator.allowLoopbackImageFetch = true;
 
-      const event = createTestEvent();
-      event.quotedNote = {
-        status: "available",
-        noteId: "src-hostile",
-        author: { userId: "a1", username: "author" },
-        content: "hostile files",
-        attachments: [
-          {
-            id: "q1",
-            url: loopbackUrl,
-            mimeType: "image/png",
-            filename: "private.png",
-            isImage: true,
-          },
-          {
-            id: "q2",
-            url: "file:///etc/passwd",
-            mimeType: "text/plain",
-            filename: "passwd",
-            isImage: false,
-          },
-          {
-            id: "q3",
-            url: "javascript:alert(1)",
-            mimeType: "image/png",
-            filename: "js.png",
-            isImage: true,
-          },
-          {
-            id: "q4",
-            url: "HTTPS://example.com/redirect",
-            mimeType: "image/png",
-            filename: "redir.png",
-            isImage: true,
-          },
-        ],
-      };
+        const event = createTestEvent();
+        event.quotedNote = {
+          status: "available",
+          noteId: "src-hostile",
+          author: { userId: "a1", username: "author" },
+          content: "hostile files",
+          attachments: [
+            {
+              id: "q1",
+              url: loopbackUrl,
+              mimeType: "image/png",
+              filename: "private.png",
+              isImage: true,
+            },
+            {
+              id: "q2",
+              url: "file:///etc/passwd",
+              mimeType: "text/plain",
+              filename: "passwd",
+              isImage: false,
+            },
+            {
+              id: "q3",
+              url: "javascript:alert(1)",
+              mimeType: "image/png",
+              filename: "js.png",
+              isImage: true,
+            },
+            {
+              id: "q4",
+              url: "HTTPS://example.com/redirect",
+              mimeType: "image/png",
+              filename: "redir.png",
+              isImage: true,
+            },
+          ],
+        };
 
-      const promptArg = await runTriggeredPromptTurn(
-        orchestrator,
-        skillRegistry,
-        workspaceManager,
-        event,
-      );
+        const promptArg = await runTriggeredPromptTurn(
+          orchestrator,
+          skillRegistry,
+          workspaceManager,
+          event,
+          { supportsImageContent },
+        );
 
-      assertEquals(hits.size, 0);
-      assertEquals(typeof promptArg, "string");
-      // Every URL remains reference data without granting fetch authorization.
-      const prompt = typeof promptArg === "string" ? promptArg : "";
-      assertStringIncludes(prompt, loopbackUrl);
-      assertStringIncludes(prompt, "file:///etc/passwd");
+        // No quoted URL reached the downloader, and no request was served —
+        // the loopback one included.
+        assertEquals(orchestrator.imageFetchUrls, [], `capability=${supportsImageContent}`);
+        assertEquals(hits.size, 0, `capability=${supportsImageContent}`);
+        assertEquals(typeof promptArg, "string");
+        // Every URL remains reference data without granting fetch authorization.
+        const prompt = typeof promptArg === "string" ? promptArg : "";
+        assertStringIncludes(prompt, loopbackUrl);
+        assertStringIncludes(prompt, "file:///etc/passwd");
 
-      sessionRegistry.stop();
+        sessionRegistry.stop();
+      }
     } finally {
       await server.shutdown();
       await Deno.remove(tempDir, { recursive: true });
