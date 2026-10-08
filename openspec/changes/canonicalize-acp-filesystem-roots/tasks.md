@@ -19,8 +19,8 @@
 
 ## 4. Required documentation and handoff (0.75 hours)
 
-- [ ] 4.1 Update existing `docs/AGENT_PERMISSIONS.md` with contextual roots, exact canonical staging versus process state, owned read-only skills identity, token/relative semantics, symlink/new-path outcomes, finite failures and the complete row 3/4 consumer handoff. Verify prechecks are described as observations, not race-proof access or deployed callback hardening; native non-ACP YOLO paths and native OMP support remain outside the evidence claim.
-- [ ] 4.2 Add a focused `CHANGELOG.md` entry and keep all six additive `acp-integration` helper requirements consistent with docs/tests. Verify P0 requirements remain unchanged, obsolete client path logic is reserved for row 4's clean cutover, and no config/environment fields, migrations or aliases were introduced; `config.example.yaml`, `.env.example` and `helm/values.yaml` intentionally remain unchanged.
+- [x] 4.1 Update existing `docs/AGENT_PERMISSIONS.md` with contextual roots, exact canonical staging versus process state, owned read-only skills identity, token/relative semantics, symlink/new-path outcomes, finite failures and the complete row 3/4 consumer handoff. Verify prechecks are described as observations, not race-proof access or deployed callback hardening; native non-ACP YOLO paths and native OMP support remain outside the evidence claim.
+- [x] 4.2 Add a focused `CHANGELOG.md` entry and keep all six additive `acp-integration` helper requirements consistent with docs/tests. Verify P0 requirements remain unchanged, obsolete client path logic is reserved for row 4's clean cutover, and no config/environment fields, migrations or aliases were introduced; `config.example.yaml`, `.env.example` and `helm/values.yaml` intentionally remain unchanged.
 
 ## 5. Verification and contingency (0.50 + 1.00 hours)
 
