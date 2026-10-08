@@ -308,6 +308,10 @@ export class AgentConnector {
     // so the permission gate confines this session to the session's own workspace.
     this.setSessionGateContext(result.sessionId, {
       cwd: sessionCwd,
+      shellSessionId: this.options.clientConfig?.sessionId,
+      yolo: this.options.clientConfig?.yolo,
+      canWriteAgentWorkspace: this.options.clientConfig?.canWriteAgentWorkspace,
+      allowedWriteExtensions: this.options.clientConfig?.allowedWriteExtensions,
       trustedSkills: this.options.clientConfig?.trustedSkills,
     });
 
@@ -786,7 +790,18 @@ export class AgentConnector {
    */
   setSessionGateContext(acpSessionId: string, ctx: SessionGateContext): void {
     const existing = this.sessionGateContexts.get(acpSessionId);
-    const merged: SessionGateContext = { ...existing, ...ctx };
+    const merged: SessionGateContext = {
+      ...existing,
+      ...ctx,
+      allowedWriteExtensions: (ctx.allowedWriteExtensions ?? existing?.allowedWriteExtensions)
+        ?.slice(),
+      trustedSkills: ctx.trustedSkills
+        ? {
+          ...ctx.trustedSkills,
+          criticalSkills: ctx.trustedSkills.criticalSkills.map((reference) => ({ ...reference })),
+        }
+        : ctx.trustedSkills,
+    };
     this.sessionGateContexts.set(acpSessionId, merged);
     this.client?.setSessionContext(acpSessionId, merged);
   }
@@ -1038,6 +1053,13 @@ export class AgentConnector {
     this.refreshFromConfigOptionResponse(sessionId, loadResponse);
     this.setSessionGateContext(sessionId, {
       cwd,
+      shellSessionId: this.sessionGateContexts.get(sessionId)?.shellSessionId ??
+        this.options.clientConfig?.sessionId,
+      yolo: this.sessionGateContexts.get(sessionId)?.yolo ?? this.options.clientConfig?.yolo,
+      canWriteAgentWorkspace: this.sessionGateContexts.get(sessionId)?.canWriteAgentWorkspace ??
+        this.options.clientConfig?.canWriteAgentWorkspace,
+      allowedWriteExtensions: this.sessionGateContexts.get(sessionId)?.allowedWriteExtensions ??
+        this.options.clientConfig?.allowedWriteExtensions,
       trustedSkills: this.options.clientConfig?.trustedSkills,
     });
 

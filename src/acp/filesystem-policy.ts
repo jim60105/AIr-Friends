@@ -8,15 +8,22 @@ import { extname } from "@std/path";
 import type {
   CanonicalSessionRoots,
   CanonicalTarget,
+  CriticalSkillReference,
   RootPathFailureReason,
   RootRole,
   SessionContext,
+  TrustedSkillsRootConfig,
 } from "./filesystem-roots.ts";
-import type {
-  FilesystemAccessFailureReason,
-} from "./filesystem-access.ts";
+import type { FilesystemAccessFailureReason } from "./filesystem-access.ts";
 import type { SessionGateContext } from "./client.ts";
 import type { ClientConfig } from "./types.ts";
+import { validateSessionContext } from "./filesystem-roots.ts";
+
+/** Trusted lifecycle input; never derived from a requested path or ambient HOME. */
+export interface TrustedSkillsSource extends TrustedSkillsRootConfig {
+  readonly canonicalOwnedRootPath: string;
+  readonly criticalSkills: readonly CriticalSkillReference[];
+}
 
 /**
  * Bounded denial reasons documented for ACP filesystem operations.
@@ -62,7 +69,11 @@ export function buildSessionFilesystemContext(
   gateCtx: SessionGateContext | undefined,
   clientConfig: ClientConfig,
   currentGeneration: string,
-): { ok: true; context: SessionContext } | { ok: false; reason: "rejected_filesystem_context"; message: string } {
+): { ok: true; context: SessionContext } | {
+  ok: false;
+  reason: "rejected_filesystem_context";
+  message: string;
+} {
   if (!acpSessionId || !gateCtx) {
     return {
       ok: false,
@@ -72,12 +83,12 @@ export function buildSessionFilesystemContext(
   }
 
   // Shell / skill session ID is required for explicit staging path
-  const skillSessionId = gateCtx.shellSessionId ?? clientConfig.sessionId;
-  if (!skillSessionId) {
+  const skillSessionId = gateCtx.shellSessionId;
+  if (!skillSessionId || !currentGeneration) {
     return {
       ok: false,
       reason: "rejected_filesystem_context",
-      message: "Missing shell/skill session ID in registered session context",
+      message: "Missing registered filesystem owner or generation",
     };
   }
 
@@ -102,6 +113,13 @@ export function buildSessionFilesystemContext(
     sessionContextGeneration: currentGeneration,
   };
 
+  if (!validateSessionContext(context).ok) {
+    return {
+      ok: false,
+      reason: "rejected_filesystem_context",
+      message: "Invalid registered filesystem context",
+    };
+  }
   return { ok: true, context };
 }
 
@@ -129,7 +147,10 @@ export const ROOT_PATH_FAILURE_MAP: Record<RootPathFailureReason, FilesystemDeni
 /**
  * Compile-time verified exhaustive map from FilesystemAccessFailureReason to bounded denial reasons.
  */
-export const FILESYSTEM_ACCESS_FAILURE_MAP: Record<FilesystemAccessFailureReason, FilesystemDenialReason> = {
+export const FILESYSTEM_ACCESS_FAILURE_MAP: Record<
+  FilesystemAccessFailureReason,
+  FilesystemDenialReason
+> = {
   invalid_context: "rejected_filesystem_context",
   outside_roots: "rejected_filesystem_path_unavailable",
   identity_unavailable: "rejected_filesystem_access",
@@ -208,7 +229,9 @@ export function authorizeFilesystemRead(
       return {
         ok: false,
         reason: "rejected_read_extension",
-        message: `File extension '${ext}' not allowed for reads (permitted: ${allowedReadExtensions.join(", ")})`,
+        message: `File extension '${ext}' not allowed for reads (permitted: ${
+          allowedReadExtensions.join(", ")
+        })`,
       };
     }
 
@@ -257,7 +280,7 @@ export function authorizeFilesystemWrite(
   } = params;
 
   // 1. Trusted skills root is ALWAYS write-denied in both restricted and YOLO modes
-  if (target.roles.includes("trusted-skills") && target.roles.length === 1) {
+  if (target.roles.includes("trusted-skills")) {
     return {
       ok: false,
       reason: "rejected_trusted_skills_read_only",
@@ -269,14 +292,6 @@ export function authorizeFilesystemWrite(
 
   // 2. YOLO mode: broad physical containment (workspace or shared role allowed for any extension)
   if (yolo) {
-    if (target.roles.includes("trusted-skills")) {
-      return {
-        ok: false,
-        reason: "rejected_trusted_skills_read_only",
-        message: "Trusted skills root is read-only even in YOLO mode",
-      };
-    }
-
     if (target.roles.includes("staging")) {
       return { ok: true, role: "staging", access, useTrustedReadRule: false };
     }
@@ -307,7 +322,8 @@ export function authorizeFilesystemWrite(
       return {
         ok: false,
         reason: "rejected_agent_workspace_write_unauthorized",
-        message: "Session is not authorized to write to the shared agent workspace (canWriteAgentWorkspace not set)",
+        message:
+          "Session is not authorized to write to the shared agent workspace (canWriteAgentWorkspace not set)",
       };
     }
 
@@ -317,7 +333,10 @@ export function authorizeFilesystemWrite(
       return {
         ok: false,
         reason: "rejected_write_extension",
-        message: `File extension '${ext}' not allowed for shared agent workspace writes (permitted: ${allowedWriteExtensions.join(", ")})`,
+        message:
+          `File extension '${ext}' not allowed for shared agent workspace writes (permitted: ${
+            allowedWriteExtensions.join(", ")
+          })`,
       };
     }
 
@@ -330,15 +349,6 @@ export function authorizeFilesystemWrite(
       ok: false,
       reason: "rejected_workspace_write_restricted",
       message: "Direct user workspace writes outside session staging root are restricted",
-    };
-  }
-
-  // d. If target has trusted-skills role along with others (though roots should be disjoint)
-  if (target.roles.includes("trusted-skills")) {
-    return {
-      ok: false,
-      reason: "rejected_trusted_skills_read_only",
-      message: "Trusted skills root is read-only",
     };
   }
 

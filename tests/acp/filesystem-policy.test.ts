@@ -48,7 +48,11 @@ const mockRoots: CanonicalSessionRoots = {
   ],
 };
 
-function createMockTarget(roles: CanonicalTarget["roles"], path: string, type: "file" | "directory" = "file"): CanonicalTarget {
+function createMockTarget(
+  roles: CanonicalTarget["roles"],
+  path: string,
+  type: CanonicalTarget["targetType"] = "file",
+): CanonicalTarget {
   return {
     acpSessionId: "acp-1",
     sessionContextGeneration: "gen-1",
@@ -86,11 +90,26 @@ Deno.test("Filesystem Policy: Failure mapping completeness and correctness", () 
   }
 
   // Check specific write mappings
-  assertEquals(mapRootPathFailureToDenial("outside_roots", true), "rejected_write_path_outside_workspace");
-  assertEquals(mapRootPathFailureToDenial("symlink_escape", true), "rejected_write_path_outside_workspace");
-  assertEquals(mapRootPathFailureToDenial("outside_roots", false), "rejected_filesystem_path_unavailable");
-  assertEquals(mapRootPathFailureToDenial("root_overlap", false), "rejected_trusted_skills_identity");
-  assertEquals(mapRootPathFailureToDenial("trusted_identity_mismatch", false), "rejected_trusted_skills_identity");
+  assertEquals(
+    mapRootPathFailureToDenial("outside_roots", true),
+    "rejected_write_path_outside_workspace",
+  );
+  assertEquals(
+    mapRootPathFailureToDenial("symlink_escape", true),
+    "rejected_write_path_outside_workspace",
+  );
+  assertEquals(
+    mapRootPathFailureToDenial("outside_roots", false),
+    "rejected_filesystem_path_unavailable",
+  );
+  assertEquals(
+    mapRootPathFailureToDenial("root_overlap", false),
+    "rejected_trusted_skills_identity",
+  );
+  assertEquals(
+    mapRootPathFailureToDenial("trusted_identity_mismatch", false),
+    "rejected_trusted_skills_identity",
+  );
 
   // All FilesystemAccessFailureReason keys must map correctly
   const accessReasons: FilesystemAccessFailureReason[] = [
@@ -111,10 +130,92 @@ Deno.test("Filesystem Policy: Failure mapping completeness and correctness", () 
     assertEquals(typeof FILESYSTEM_ACCESS_FAILURE_MAP[r], "string");
   }
 
-  assertEquals(mapAccessFailureToDenial("outside_roots", true), "rejected_write_path_outside_workspace");
-  assertEquals(mapAccessFailureToDenial("outside_roots", false), "rejected_filesystem_path_unavailable");
+  assertEquals(
+    mapAccessFailureToDenial("outside_roots", true),
+    "rejected_write_path_outside_workspace",
+  );
+  assertEquals(
+    mapAccessFailureToDenial("outside_roots", false),
+    "rejected_filesystem_path_unavailable",
+  );
   assertEquals(mapAccessFailureToDenial("root_unavailable", false), "rejected_filesystem_access");
   assertEquals(mapAccessFailureToDenial("parent_missing", true), "rejected_filesystem_access");
+});
+
+Deno.test("Filesystem Policy: every role combination selects one carried role without widening", () => {
+  const roles = ["workspace", "staging", "shared", "trusted-skills"] as const;
+  for (let mask = 0; mask < 16; mask++) {
+    const carried = roles.filter((_role, index) => mask & (1 << index));
+    for (const yolo of [false, true]) {
+      const target = createMockTarget(carried, "/observed/file.MD", "prospective");
+      const decision = authorizeFilesystemWrite({
+        roots: mockRoots,
+        target,
+        yolo,
+        canWriteAgentWorkspace: true,
+      });
+      if (carried.includes("trusted-skills")) {
+        assertEquals(decision.ok, false);
+        if (!decision.ok) assertEquals(decision.reason, "rejected_trusted_skills_read_only");
+      } else if (
+        carried.includes("staging") || carried.includes("shared") ||
+        (yolo && carried.includes("workspace"))
+      ) {
+        assertEquals(decision.ok, true);
+        if (decision.ok) {
+          assertEquals(
+            decision.role,
+            carried.includes("staging")
+              ? "staging"
+              : carried.includes("shared")
+              ? "shared"
+              : "workspace",
+          );
+          assertEquals(decision.access, "create");
+          assertEquals(carried.includes(decision.role), true);
+        }
+      } else {
+        assertEquals(decision.ok, false);
+        if (!decision.ok) {
+          assertEquals(
+            decision.reason,
+            carried.includes("workspace")
+              ? "rejected_workspace_write_restricted"
+              : "rejected_write_path_outside_workspace",
+          );
+        }
+      }
+    }
+  }
+  for (const allowedWriteExtensions of [undefined, [], [".txt"]]) {
+    const decision = authorizeFilesystemWrite({
+      roots: mockRoots,
+      target: createMockTarget(["workspace", "shared"], "/shared/file.MD"),
+      yolo: false,
+      canWriteAgentWorkspace: true,
+      allowedWriteExtensions,
+    });
+    assertEquals(decision.ok, allowedWriteExtensions === undefined);
+    if (!decision.ok) assertEquals(decision.reason, "rejected_write_extension");
+  }
+  const unauthorized = authorizeFilesystemWrite({
+    roots: mockRoots,
+    target: createMockTarget(["workspace", "shared"], "/shared/file.md"),
+    yolo: false,
+    canWriteAgentWorkspace: false,
+  });
+  assertEquals(unauthorized.ok, false);
+  if (!unauthorized.ok) {
+    assertEquals(unauthorized.reason, "rejected_agent_workspace_write_unauthorized");
+  }
+  for (const carried of [["staging", "workspace"], ["shared", "workspace"], []] as const) {
+    const read = authorizeFilesystemRead({
+      roots: mockRoots,
+      target: createMockTarget(carried, "/file.TXT"),
+    });
+    assertEquals(read.ok, carried.length > 0);
+    if (read.ok) assertEquals(read.role, carried[0]);
+  }
 });
 
 Deno.test("Filesystem Policy: buildSessionFilesystemContext", () => {
@@ -138,7 +239,10 @@ Deno.test("Filesystem Policy: buildSessionFilesystemContext", () => {
   if (!noCtx.ok) assertEquals(noCtx.reason, "rejected_filesystem_context");
 
   // Missing shellSessionId
-  const noShell = buildSessionFilesystemContext("acp-1", { cwd: "/ws" }, { ...clientConfig, sessionId: undefined }, "gen-1");
+  const noShell = buildSessionFilesystemContext("acp-1", { cwd: "/ws" }, {
+    ...clientConfig,
+    sessionId: undefined,
+  }, "gen-1");
   assertEquals(noShell.ok, false);
 
   // Success

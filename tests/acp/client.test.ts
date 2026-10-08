@@ -1,6 +1,6 @@
 // tests/acp/client.test.ts
 
-import { assertEquals } from "@std/assert";
+import { assertEquals, assertRejects } from "@std/assert";
 import {
   ALLOWED_READ_EXTENSIONS,
   buildSkillAutoApproveList,
@@ -26,6 +26,66 @@ import type { AuditConfig } from "../../src/types/config.ts";
 import type { SessionAuditEntry } from "../../src/types/audit.ts";
 import type { AuditPhase } from "../../src/types/audit.ts";
 import { join } from "@std/path";
+import type { ClientConfig } from "@acp/types.ts";
+import { createFilesystemTestCalls } from "./filesystem-test-calls.ts";
+
+function createRegisteredClient(
+  registry: SkillRegistry,
+  logger: Logger,
+  config: ClientConfig,
+  allowList?: SkillAutoApproveList,
+): ChatbotClient {
+  const client = new ChatbotClient(registry, logger, {
+    ...config,
+    nativeCalls: createFilesystemTestCalls(),
+  }, allowList);
+  Deno.mkdirSync(join(config.workingDir, "tmp", config.sessionId ?? "test-session"), {
+    recursive: true,
+  });
+  for (
+    const sessionId of ["test-session", "test", "s", config.sessionId].filter(Boolean) as string[]
+  ) {
+    client.setSessionContext(sessionId, {
+      cwd: config.workingDir,
+      shellSessionId: config.sessionId ?? "test-session",
+      yolo: config.yolo,
+      canWriteAgentWorkspace: config.canWriteAgentWorkspace,
+      allowedWriteExtensions: config.allowedWriteExtensions,
+    });
+  }
+  return client;
+}
+
+function createOwnedSkillsClient(
+  registry: SkillRegistry,
+  logger: Logger,
+  config: ClientConfig,
+  sessionId: string,
+): { client: ChatbotClient; instruction: string } {
+  const workspace = join(config.workingDir, "workspace");
+  const skills = join(config.workingDir, "owned-skills");
+  const instruction = join(skills, "send-reply", "SKILL.md");
+  Deno.mkdirSync(workspace);
+  Deno.mkdirSync(join(skills, "send-reply"), { recursive: true });
+  Deno.writeTextFileSync(instruction, "owned");
+  const client = new ChatbotClient(registry, logger, { ...config, workingDir: workspace });
+  client.setSessionContext(sessionId, {
+    cwd: workspace,
+    shellSessionId: "skill-session",
+    trustedSkills: {
+      ownedRootPath: skills,
+      canonicalOwnedRootPath: skills,
+      source: "deployment_owned",
+      criticalSkills: [{
+        skillId: "send-reply",
+        canonicalInstructionPath: instruction,
+        source: "deployment_owned",
+        sessionGenerationId: "gen-1",
+      }],
+    },
+  });
+  return { client, instruction };
+}
 
 // Create a minimal logger for testing
 const createTestLogger = (): Logger => {
@@ -56,7 +116,7 @@ Deno.test("ChatbotClient - constructs successfully", () => {
       isDM: false,
     };
 
-    const client = new ChatbotClient(skillRegistry, logger, config);
+    const client = createRegisteredClient(skillRegistry, logger, config);
     assertEquals(client.hasReplySent(), false);
   } finally {
     Deno.removeSync(tempDir, { recursive: true });
@@ -76,7 +136,7 @@ Deno.test("ChatbotClient - reset clears reply state", () => {
       isDM: false,
     };
 
-    const client = new ChatbotClient(skillRegistry, logger, config);
+    const client = createRegisteredClient(skillRegistry, logger, config);
     client.markReplySent();
     assertEquals(client.hasReplySent(), true);
 
@@ -100,7 +160,7 @@ Deno.test("ChatbotClient - requestPermission auto-approves registered skills", a
       isDM: false,
     };
 
-    const client = new ChatbotClient(skillRegistry, logger, config);
+    const client = createRegisteredClient(skillRegistry, logger, config);
 
     // Create a mock RequestPermissionRequest for a known skill
     const request: acp.RequestPermissionRequest = {
@@ -142,7 +202,7 @@ Deno.test("ChatbotClient - requestPermission rejects unknown skills", async () =
       isDM: false,
     };
 
-    const client = new ChatbotClient(skillRegistry, logger, config);
+    const client = createRegisteredClient(skillRegistry, logger, config);
 
     // Create a mock RequestPermissionRequest for unknown skill
     const request: acp.RequestPermissionRequest = {
@@ -184,11 +244,12 @@ Deno.test("ChatbotClient - requestPermission auto-approves skills directory read
       isDM: false,
     };
 
-    const client = new ChatbotClient(skillRegistry, logger, config);
-
-    // Create a mock RequestPermissionRequest for reading the OpenCode-effective
-    // skills directory (~/.agents/skills). Path is anchored under $HOME.
-    const home = Deno.env.get("HOME") ?? "/home/deno";
+    const { client, instruction } = createOwnedSkillsClient(
+      skillRegistry,
+      logger,
+      config,
+      "test-session",
+    );
     const request: acp.RequestPermissionRequest = {
       sessionId: "test-session",
       toolCall: {
@@ -198,7 +259,7 @@ Deno.test("ChatbotClient - requestPermission auto-approves skills directory read
         content: [],
         toolCallId: "test-id",
         locations: [
-          { path: `${home}/.agents/skills/send-reply/SKILL.md` },
+          { path: instruction },
         ],
       },
       options: [
@@ -235,7 +296,7 @@ Deno.test("ChatbotClient - requestPermission auto-approves skill shell execution
       scriptPaths: new Set(["skills/memory-save/scripts/memory-save.ts"]),
       commandPrefixes: new Set(["agent-browser"]),
     };
-    const client = new ChatbotClient(skillRegistry, logger, config, allowList);
+    const client = createRegisteredClient(skillRegistry, logger, config, allowList);
 
     // Create a mock RequestPermissionRequest for shell execution of skill command
     const request: acp.RequestPermissionRequest = {
@@ -281,7 +342,7 @@ Deno.test("ChatbotClient - requestPermission rejects non-skill shell execution",
       isDM: false,
     };
 
-    const client = new ChatbotClient(skillRegistry, logger, config);
+    const client = createRegisteredClient(skillRegistry, logger, config);
 
     // Create a mock RequestPermissionRequest for non-skill shell command
     const request: acp.RequestPermissionRequest = {
@@ -326,7 +387,7 @@ Deno.test("ChatbotClient - readTextFile validates path within working directory"
       isDM: false,
     };
 
-    const client = new ChatbotClient(skillRegistry, logger, config);
+    const client = createRegisteredClient(skillRegistry, logger, config);
 
     // Create a test file
     const testFilePath = `${tempDir}/test.txt`;
@@ -353,7 +414,7 @@ Deno.test("ChatbotClient - readTextFile rejects path outside working directory",
       isDM: false,
     };
 
-    const client = new ChatbotClient(skillRegistry, logger, config);
+    const client = createRegisteredClient(skillRegistry, logger, config);
 
     // Try to read file outside working directory
     let errorThrown = false;
@@ -382,10 +443,11 @@ Deno.test("ChatbotClient - writeTextFile validates path within working directory
       isDM: false,
     };
 
-    const client = new ChatbotClient(skillRegistry, logger, config);
+    const client = createRegisteredClient(skillRegistry, logger, config);
 
-    // Should succeed - file is within working directory
-    const testFilePath = `${tempDir}/test-write.txt`;
+    // The lifecycle provisions this session's staging directory.
+    const testFilePath = `${tempDir}/tmp/test-session/test-write.txt`;
+    await Deno.mkdir(join(tempDir, "tmp", "test-session"), { recursive: true });
     await client.writeTextFile({
       path: testFilePath,
       content: "new content",
@@ -412,7 +474,7 @@ Deno.test("ChatbotClient - writeTextFile rejects path outside working directory"
       isDM: false,
     };
 
-    const client = new ChatbotClient(skillRegistry, logger, config);
+    const client = createRegisteredClient(skillRegistry, logger, config);
 
     // Try to write file outside working directory
     let errorThrown = false;
@@ -445,7 +507,7 @@ Deno.test("ChatbotClient - sessionUpdate handles various update types", async ()
       isDM: false,
     };
 
-    const client = new ChatbotClient(skillRegistry, logger, config);
+    const client = createRegisteredClient(skillRegistry, logger, config);
 
     // Test agent_message_chunk
     await client.sessionUpdate({
@@ -495,7 +557,7 @@ Deno.test("ChatbotClient - sessionUpdate handles usage_update", async () => {
       isDM: false,
     };
 
-    const client = new ChatbotClient(skillRegistry, testLogger, config);
+    const client = createRegisteredClient(skillRegistry, testLogger, config);
 
     // Test usage_update
     await client.sessionUpdate({
@@ -543,7 +605,7 @@ Deno.test("ChatbotClient - sessionUpdate logs thought chunk from content envelop
       isDM: false,
       logAgentStreamChunks: true,
     };
-    const client = new ChatbotClient(skillRegistry, testLogger, config);
+    const client = createRegisteredClient(skillRegistry, testLogger, config);
 
     await client.sessionUpdate({
       update: {
@@ -581,7 +643,7 @@ Deno.test("ChatbotClient - sessionUpdate logs thought chunk from direct text", a
       isDM: false,
       logAgentStreamChunks: true,
     };
-    const client = new ChatbotClient(skillRegistry, testLogger, config);
+    const client = createRegisteredClient(skillRegistry, testLogger, config);
 
     await client.sessionUpdate({
       update: {
@@ -619,7 +681,7 @@ Deno.test("ChatbotClient - sessionUpdate logs thought chunk with empty text when
       isDM: false,
       logAgentStreamChunks: true,
     };
-    const client = new ChatbotClient(skillRegistry, testLogger, config);
+    const client = createRegisteredClient(skillRegistry, testLogger, config);
 
     await client.sessionUpdate({
       update: {
@@ -656,7 +718,7 @@ Deno.test("ChatbotClient - sessionUpdate prefers content envelope over direct te
       isDM: false,
       logAgentStreamChunks: true,
     };
-    const client = new ChatbotClient(skillRegistry, testLogger, config);
+    const client = createRegisteredClient(skillRegistry, testLogger, config);
 
     await client.sessionUpdate({
       update: {
@@ -695,7 +757,7 @@ Deno.test("ChatbotClient - sessionUpdate truncates thought text to 100 chars", a
       isDM: false,
       logAgentStreamChunks: true,
     };
-    const client = new ChatbotClient(skillRegistry, testLogger, config);
+    const client = createRegisteredClient(skillRegistry, testLogger, config);
     const longText = "a".repeat(150);
 
     await client.sessionUpdate({
@@ -741,7 +803,7 @@ Deno.test("ChatbotClient - default config suppresses per-chunk debug but still f
       channelId: "456",
       isDM: false,
     };
-    const client = new ChatbotClient(skillRegistry, testLogger, config);
+    const client = createRegisteredClient(skillRegistry, testLogger, config);
 
     // Chunks accumulate in the buffer despite the suppressed per-chunk logs
     await client.sessionUpdate({
@@ -835,7 +897,7 @@ Deno.test("ChatbotClient - sessionUpdate logs failed tool calls with details", a
       isDM: false,
     };
 
-    const client = new ChatbotClient(skillRegistry, testLogger, config);
+    const client = createRegisteredClient(skillRegistry, testLogger, config);
 
     // Test tool_call_update with failed status
     await client.sessionUpdate({
@@ -872,7 +934,7 @@ Deno.test("ChatbotClient - YOLO mode auto-approves all permission requests", asy
       yolo: true, // Enable YOLO mode
     };
 
-    const client = new ChatbotClient(skillRegistry, logger, config);
+    const client = createRegisteredClient(skillRegistry, logger, config);
 
     // Test with unknown skill - should be approved in YOLO mode
     const unknownSkillRequest: acp.RequestPermissionRequest = {
@@ -965,7 +1027,7 @@ Deno.test("ChatbotClient - YOLO mode disabled still rejects unknown operations",
       yolo: false, // Explicitly disable YOLO mode
     };
 
-    const client = new ChatbotClient(skillRegistry, logger, config);
+    const client = createRegisteredClient(skillRegistry, logger, config);
 
     // Test with dangerous shell command - should be rejected without YOLO mode
     const dangerousShellRequest: acp.RequestPermissionRequest = {
@@ -1014,7 +1076,7 @@ Deno.test("ChatbotClient - readTextFile allows agent workspace path", async () =
       isDM: false,
     };
 
-    const client = new ChatbotClient(skillRegistry, logger, config);
+    const client = createRegisteredClient(skillRegistry, logger, config);
 
     const testFilePath = `${agentWorkspace}/notes/test.md`;
     await Deno.mkdir(`${agentWorkspace}/notes`, { recursive: true });
@@ -1045,7 +1107,7 @@ Deno.test("ChatbotClient - writeTextFile allows agent workspace path when author
       canWriteAgentWorkspace: true,
     };
 
-    const client = new ChatbotClient(skillRegistry, logger, config);
+    const client = createRegisteredClient(skillRegistry, logger, config);
 
     const testFilePath = `${agentWorkspace}/test-write.md`;
     await client.writeTextFile({
@@ -1077,7 +1139,7 @@ Deno.test("ChatbotClient - still allows user workspace with agentWorkspacePath",
       isDM: false,
     };
 
-    const client = new ChatbotClient(skillRegistry, logger, config);
+    const client = createRegisteredClient(skillRegistry, logger, config);
 
     const testFilePath = `${tempDir}/test.txt`;
     await Deno.writeTextFile(testFilePath, "user workspace content");
@@ -1105,7 +1167,7 @@ Deno.test("ChatbotClient - rejects paths outside both workspaces", async () => {
       isDM: false,
     };
 
-    const client = new ChatbotClient(skillRegistry, logger, config);
+    const client = createRegisteredClient(skillRegistry, logger, config);
 
     let errorThrown = false;
     try {
@@ -1143,7 +1205,7 @@ Deno.test("ChatbotClient - requestPermission logs external directory access at I
       isDM: false,
     };
 
-    const client = new ChatbotClient(skillRegistry, testLogger, config);
+    const client = createRegisteredClient(skillRegistry, testLogger, config);
 
     const request: acp.RequestPermissionRequest = {
       sessionId: "test-session",
@@ -1197,7 +1259,7 @@ Deno.test("ChatbotClient - requestPermission logs bash command execution at INFO
       isDM: false,
     };
 
-    const client = new ChatbotClient(skillRegistry, testLogger, config);
+    const client = createRegisteredClient(skillRegistry, testLogger, config);
 
     const request: acp.RequestPermissionRequest = {
       sessionId: "test-session",
@@ -1252,7 +1314,7 @@ Deno.test("ChatbotClient - YOLO mode logs enhanced context with rawInput and loc
       yolo: true,
     };
 
-    const client = new ChatbotClient(skillRegistry, testLogger, config);
+    const client = createRegisteredClient(skillRegistry, testLogger, config);
 
     const request: acp.RequestPermissionRequest = {
       sessionId: "test-session",
@@ -1303,7 +1365,7 @@ Deno.test("ChatbotClient - requestPermission rejects edit tool in restricted mod
       scriptPaths: new Set(),
       commandPrefixes: new Set(),
     };
-    const client = new ChatbotClient(skillRegistry, logger, config, allowList);
+    const client = createRegisteredClient(skillRegistry, logger, config, allowList);
 
     const request: acp.RequestPermissionRequest = {
       sessionId: "test-session",
@@ -1346,7 +1408,7 @@ Deno.test("ChatbotClient - requestPermission approves edit tool in YOLO mode", a
       isDM: false,
       yolo: true,
     };
-    const client = new ChatbotClient(skillRegistry, logger, config);
+    const client = createRegisteredClient(skillRegistry, logger, config);
 
     const request: acp.RequestPermissionRequest = {
       sessionId: "test-session",
@@ -1390,7 +1452,7 @@ Deno.test("ChatbotClient - requestPermission approves agent-browser command", as
       scriptPaths: new Set(),
       commandPrefixes: new Set(["agent-browser"]),
     };
-    const client = new ChatbotClient(skillRegistry, logger, config, allowList);
+    const client = createRegisteredClient(skillRegistry, logger, config, allowList);
 
     const request: acp.RequestPermissionRequest = {
       sessionId: "test-session",
@@ -1436,7 +1498,7 @@ Deno.test("ChatbotClient - requestPermission rejects unknown skill command", asy
       scriptPaths: new Set(["skills/memory-save/scripts/memory-save.ts"]),
       commandPrefixes: new Set(),
     };
-    const client = new ChatbotClient(skillRegistry, logger, config, allowList);
+    const client = createRegisteredClient(skillRegistry, logger, config, allowList);
 
     const request: acp.RequestPermissionRequest = {
       sessionId: "test-session",
@@ -1484,7 +1546,7 @@ Deno.test("ChatbotClient - requestPermission rejects arbitrary bash command", as
       scriptPaths: new Set(["skills/memory-save/scripts/memory-save.ts"]),
       commandPrefixes: new Set(),
     };
-    const client = new ChatbotClient(skillRegistry, logger, config, allowList);
+    const client = createRegisteredClient(skillRegistry, logger, config, allowList);
 
     const request: acp.RequestPermissionRequest = {
       sessionId: "test-session",
@@ -1969,7 +2031,7 @@ Deno.test("ChatbotClient - rejects && chain injection in skill command", async (
       scriptPaths: new Set(["skills/memory-save/scripts/memory-save.ts"]),
       commandPrefixes: new Set(["agent-browser"]),
     };
-    const client = new ChatbotClient(skillRegistry, logger, config, allowList);
+    const client = createRegisteredClient(skillRegistry, logger, config, allowList);
 
     const request: acp.RequestPermissionRequest = {
       sessionId: "test-session",
@@ -2017,7 +2079,7 @@ Deno.test("ChatbotClient - rejects pipe and comment injection in skill command",
       scriptPaths: new Set(["skills/memory-save/scripts/memory-save.ts"]),
       commandPrefixes: new Set(),
     };
-    const client = new ChatbotClient(skillRegistry, logger, config, allowList);
+    const client = createRegisteredClient(skillRegistry, logger, config, allowList);
 
     const request: acp.RequestPermissionRequest = {
       sessionId: "test-session",
@@ -2065,7 +2127,7 @@ Deno.test("ChatbotClient - rejects semicolon injection in command prefix", async
       scriptPaths: new Set(),
       commandPrefixes: new Set(["agent-browser"]),
     };
-    const client = new ChatbotClient(skillRegistry, logger, config, allowList);
+    const client = createRegisteredClient(skillRegistry, logger, config, allowList);
 
     const request: acp.RequestPermissionRequest = {
       sessionId: "test-session",
@@ -2114,7 +2176,7 @@ Deno.test("ChatbotClient - approves the observed agent-browser ; chain failure s
       scriptPaths: new Set(),
       commandPrefixes: new Set(["agent-browser"]),
     };
-    const client = new ChatbotClient(skillRegistry, logger, config, allowList);
+    const client = createRegisteredClient(skillRegistry, logger, config, allowList);
 
     const request: acp.RequestPermissionRequest = {
       sessionId: "sess_chain",
@@ -2160,7 +2222,7 @@ Deno.test("ChatbotClient - approves an all-generic in-workspace chain", async ()
       isDM: false,
       sessionId: "sess_chain2",
     };
-    const client = new ChatbotClient(skillRegistry, logger, config);
+    const client = createRegisteredClient(skillRegistry, logger, config);
 
     const request: acp.RequestPermissionRequest = {
       sessionId: "sess_chain2",
@@ -2207,7 +2269,7 @@ Deno.test("ChatbotClient - rejects chains with a failing segment, one audit entr
       scriptPaths: new Set(),
       commandPrefixes: new Set(["agent-browser"]),
     };
-    const client = new ChatbotClient(skillRegistry, logger, config, allowList);
+    const client = createRegisteredClient(skillRegistry, logger, config, allowList);
     const auditConfig = createTestAuditConfig();
     const writer = new SessionAuditWriter(
       tempDir,
@@ -2375,7 +2437,7 @@ Deno.test("F12 D5 - skill payload invocation with $TMPDIR/$SESSION_ID still appr
       scriptPaths: new Set(["skills/memory-save/scripts/memory-save.ts"]),
       commandPrefixes: new Set(),
     };
-    const client = new ChatbotClient(skillRegistry, logger, config, allowList);
+    const client = createRegisteredClient(skillRegistry, logger, config, allowList);
 
     const request: acp.RequestPermissionRequest = {
       sessionId: "sess_own",
@@ -2425,7 +2487,7 @@ Deno.test("F12 D5 - unquoted unknown $VAR in a skill command is rejected", async
       scriptPaths: new Set(),
       commandPrefixes: new Set(["agent-browser"]),
     };
-    const client = new ChatbotClient(skillRegistry, logger, config, allowList);
+    const client = createRegisteredClient(skillRegistry, logger, config, allowList);
 
     const request: acp.RequestPermissionRequest = {
       sessionId: "sess_own",
@@ -2468,7 +2530,7 @@ Deno.test("F12 D5/D2 - line-continuation and token-start double-quoted escapes r
       isDM: false,
       sessionId: "sess_own",
     };
-    const client = new ChatbotClient(skillRegistry, logger, config);
+    const client = createRegisteredClient(skillRegistry, logger, config);
 
     // Each of these must be rejected: backslash-escaped newline (line
     // continuation → `cat /etc/passwd`), and double-quoted unknown `$VAR`
@@ -2548,7 +2610,7 @@ Deno.test("ChatbotClient - config-driven auto-approve list approves configured e
       scriptPaths: new Set(),
       commandPrefixes: new Set(["create-blog-post"]),
     };
-    const client = new ChatbotClient(skillRegistry, logger, config, allowList);
+    const client = createRegisteredClient(skillRegistry, logger, config, allowList);
 
     const request: acp.RequestPermissionRequest = {
       sessionId: "test-session",
@@ -2615,7 +2677,7 @@ Deno.test("Permission audit - approved permission writes audit entry (YOLO)", as
       yolo: true,
     };
 
-    const client = new ChatbotClient(skillRegistry, logger, config);
+    const client = createRegisteredClient(skillRegistry, logger, config);
     const auditConfig = createTestAuditConfig();
     const writer = new SessionAuditWriter(tempDir, "discord", "123", "sess-1", auditConfig);
     client.setAuditWriter(writer);
@@ -2668,7 +2730,7 @@ Deno.test("Permission audit - denied permission writes audit entry (rejected_unk
       isDM: false,
     };
 
-    const client = new ChatbotClient(skillRegistry, logger, config);
+    const client = createRegisteredClient(skillRegistry, logger, config);
     const auditConfig = createTestAuditConfig();
     const writer = new SessionAuditWriter(tempDir, "discord", "123", "sess-2", auditConfig);
     client.setAuditWriter(writer);
@@ -2725,7 +2787,7 @@ Deno.test("Permission audit - hashContent hashes command", async () => {
       commandPrefixes: new Set(["agent-browser"]),
     };
 
-    const client = new ChatbotClient(skillRegistry, logger, config, autoApproveList);
+    const client = createRegisteredClient(skillRegistry, logger, config, autoApproveList);
     const auditConfig = createTestAuditConfig({ hashContent: true });
     const writer = new SessionAuditWriter(tempDir, "discord", "123", "sess-3", auditConfig);
     client.setAuditWriter(writer);
@@ -2785,7 +2847,7 @@ Deno.test("Permission audit - no hashContent preserves command", async () => {
       commandPrefixes: new Set(["agent-browser"]),
     };
 
-    const client = new ChatbotClient(skillRegistry, logger, config, autoApproveList);
+    const client = createRegisteredClient(skillRegistry, logger, config, autoApproveList);
     const auditConfig = createTestAuditConfig({ hashContent: false });
     const writer = new SessionAuditWriter(tempDir, "discord", "123", "sess-4", auditConfig);
     client.setAuditWriter(writer);
@@ -2839,7 +2901,7 @@ Deno.test("Permission audit - no audit writer does not throw", async () => {
     };
 
     // No setAuditWriter call — auditWriter is undefined
-    const client = new ChatbotClient(skillRegistry, logger, config);
+    const client = createRegisteredClient(skillRegistry, logger, config);
 
     const request: acp.RequestPermissionRequest = {
       sessionId: "test-session",
@@ -2878,10 +2940,11 @@ Deno.test("Permission audit - edit/write rejection writes denied entry", async (
       isDM: false,
     };
 
-    const client = new ChatbotClient(skillRegistry, logger, config);
+    const client = createRegisteredClient(skillRegistry, logger, config);
     const auditConfig = createTestAuditConfig();
     const writer = new SessionAuditWriter(tempDir, "discord", "123", "sess-6", auditConfig);
     client.setAuditWriter(writer);
+    client.setSessionContext("sess-6", { cwd: tempDir, shellSessionId: "skill-session" });
 
     const request: acp.RequestPermissionRequest = {
       sessionId: "sess-6",
@@ -2932,7 +2995,12 @@ Deno.test("Permission audit - skills directory access writes approved entry", as
       isDM: false,
     };
 
-    const client = new ChatbotClient(skillRegistry, logger, config);
+    const { client, instruction } = createOwnedSkillsClient(
+      skillRegistry,
+      logger,
+      config,
+      "sess-7",
+    );
     const auditConfig = createTestAuditConfig();
     const writer = new SessionAuditWriter(tempDir, "discord", "123", "sess-7", auditConfig);
     client.setAuditWriter(writer);
@@ -2947,7 +3015,7 @@ Deno.test("Permission audit - skills directory access writes approved entry", as
         toolCallId: "test-id",
         rawInput: {},
         locations: [{
-          path: `${Deno.env.get("HOME") ?? "/home/deno"}/.agents/skills/memory-save/SKILL.md`,
+          path: instruction,
         }],
       },
       options: [
@@ -2988,7 +3056,7 @@ Deno.test("Permission audit - registered skill writes approved entry", async () 
       isDM: false,
     };
 
-    const client = new ChatbotClient(skillRegistry, logger, config);
+    const client = createRegisteredClient(skillRegistry, logger, config);
     const auditConfig = createTestAuditConfig();
     const writer = new SessionAuditWriter(tempDir, "discord", "123", "sess-8", auditConfig);
     client.setAuditWriter(writer);
@@ -3043,7 +3111,7 @@ Deno.test("Permission audit - rejected generic command writes out_of_workspace r
       sessionId: "sess_generic",
     };
 
-    const client = new ChatbotClient(skillRegistry, logger, config);
+    const client = createRegisteredClient(skillRegistry, logger, config);
     const auditConfig = createTestAuditConfig();
     const writer = new SessionAuditWriter(tempDir, "discord", "123", "sess_generic", auditConfig);
     client.setAuditWriter(writer);
@@ -3132,7 +3200,7 @@ Deno.test("Permission audit - multi-command request records the FIRST failing co
       isDM: false,
       sessionId: "sess_multi",
     };
-    const client = new ChatbotClient(skillRegistry, testLogger, config);
+    const client = createRegisteredClient(skillRegistry, testLogger, config);
     const auditConfig = createTestAuditConfig();
     const writer = new SessionAuditWriter(tempDir, "discord", "123", "sess_multi", auditConfig);
     client.setAuditWriter(writer);
@@ -3203,7 +3271,7 @@ Deno.test("Permission audit - includedPhases filtering works", async () => {
       yolo: true,
     };
 
-    const client = new ChatbotClient(skillRegistry, logger, config);
+    const client = createRegisteredClient(skillRegistry, logger, config);
     // Only record session_end — permission_approved should be filtered out
     const auditConfig = createTestAuditConfig({
       includedPhases: ["session_end"],
@@ -3273,7 +3341,7 @@ Deno.test("ChatbotClient - requestPermission allows edit to agent workspace when
       scriptPaths: new Set(),
       commandPrefixes: new Set(),
     };
-    const client = new ChatbotClient(skillRegistry, logger, config, allowList);
+    const client = createRegisteredClient(skillRegistry, logger, config, allowList);
 
     const request: acp.RequestPermissionRequest = {
       sessionId: "test-session",
@@ -3323,7 +3391,7 @@ Deno.test("ChatbotClient - requestPermission allows write_file to agent workspac
       scriptPaths: new Set(),
       commandPrefixes: new Set(),
     };
-    const client = new ChatbotClient(skillRegistry, logger, config, allowList);
+    const client = createRegisteredClient(skillRegistry, logger, config, allowList);
 
     const request: acp.RequestPermissionRequest = {
       sessionId: "test-session",
@@ -3372,7 +3440,7 @@ Deno.test("ChatbotClient - requestPermission rejects edit outside agent workspac
       scriptPaths: new Set(),
       commandPrefixes: new Set(),
     };
-    const client = new ChatbotClient(skillRegistry, logger, config, allowList);
+    const client = createRegisteredClient(skillRegistry, logger, config, allowList);
 
     const request: acp.RequestPermissionRequest = {
       sessionId: "test-session",
@@ -3404,7 +3472,7 @@ Deno.test("ChatbotClient - requestPermission rejects edit outside agent workspac
 
 Deno.test("ChatbotClient - requestPermission allows edit to workspace TMPDIR in restricted mode", async () => {
   const tempDir = Deno.makeTempDirSync();
-  const tmpSubDir = `${tempDir}/tmp`;
+  const tmpSubDir = `${tempDir}/tmp/test-session`;
   Deno.mkdirSync(tmpSubDir, { recursive: true });
   try {
     const skillRegistry = createTestSkillRegistry();
@@ -3420,7 +3488,7 @@ Deno.test("ChatbotClient - requestPermission allows edit to workspace TMPDIR in 
       scriptPaths: new Set(),
       commandPrefixes: new Set(),
     };
-    const client = new ChatbotClient(skillRegistry, logger, config, allowList);
+    const client = createRegisteredClient(skillRegistry, logger, config, allowList);
 
     const request: acp.RequestPermissionRequest = {
       sessionId: "test-session",
@@ -3469,7 +3537,7 @@ Deno.test("ChatbotClient - requestPermission rejects edit with no locations in r
       scriptPaths: new Set(),
       commandPrefixes: new Set(),
     };
-    const client = new ChatbotClient(skillRegistry, logger, config, allowList);
+    const client = createRegisteredClient(skillRegistry, logger, config, allowList);
 
     const request: acp.RequestPermissionRequest = {
       sessionId: "test-session",
@@ -3516,7 +3584,7 @@ Deno.test("ChatbotClient - requestPermission rejects edit with mixed paths (some
       scriptPaths: new Set(),
       commandPrefixes: new Set(),
     };
-    const client = new ChatbotClient(skillRegistry, logger, config, allowList);
+    const client = createRegisteredClient(skillRegistry, logger, config, allowList);
 
     const request: acp.RequestPermissionRequest = {
       sessionId: "test-session",
@@ -3571,7 +3639,7 @@ Deno.test("ChatbotClient - requestPermission allows .md write to agent workspace
       scriptPaths: new Set(),
       commandPrefixes: new Set(),
     };
-    const client = new ChatbotClient(skillRegistry, logger, config, allowList);
+    const client = createRegisteredClient(skillRegistry, logger, config, allowList);
 
     const request: acp.RequestPermissionRequest = {
       sessionId: "test-session",
@@ -3621,7 +3689,7 @@ Deno.test("ChatbotClient - requestPermission allows .txt write to agent workspac
       scriptPaths: new Set(),
       commandPrefixes: new Set(),
     };
-    const client = new ChatbotClient(skillRegistry, logger, config, allowList);
+    const client = createRegisteredClient(skillRegistry, logger, config, allowList);
 
     const request: acp.RequestPermissionRequest = {
       sessionId: "test-session",
@@ -3671,7 +3739,7 @@ Deno.test("ChatbotClient - requestPermission rejects .js write to agent workspac
       scriptPaths: new Set(),
       commandPrefixes: new Set(),
     };
-    const client = new ChatbotClient(skillRegistry, logger, config, allowList);
+    const client = createRegisteredClient(skillRegistry, logger, config, allowList);
 
     // Set up audit writer to capture the audit reason
     const auditEntries: SessionAuditEntry[] = [];
@@ -3753,7 +3821,7 @@ Deno.test("ChatbotClient - requestPermission rejects .py write to agent workspac
       scriptPaths: new Set(),
       commandPrefixes: new Set(),
     };
-    const client = new ChatbotClient(skillRegistry, logger, config, allowList);
+    const client = createRegisteredClient(skillRegistry, logger, config, allowList);
 
     const request: acp.RequestPermissionRequest = {
       sessionId: "test-session",
@@ -3803,7 +3871,7 @@ Deno.test("ChatbotClient - requestPermission rejects file without extension in a
       scriptPaths: new Set(),
       commandPrefixes: new Set(),
     };
-    const client = new ChatbotClient(skillRegistry, logger, config, allowList);
+    const client = createRegisteredClient(skillRegistry, logger, config, allowList);
 
     const request: acp.RequestPermissionRequest = {
       sessionId: "test-session",
@@ -3835,7 +3903,7 @@ Deno.test("ChatbotClient - requestPermission rejects file without extension in a
 Deno.test("ChatbotClient - requestPermission allows any extension in TMPDIR (exempt)", async () => {
   const tempDir = Deno.makeTempDirSync();
   const agentWorkspace = `${tempDir}/agent-workspace`;
-  const tmpSubDir = `${tempDir}/tmp`;
+  const tmpSubDir = `${tempDir}/tmp/test-session`;
   Deno.mkdirSync(agentWorkspace, { recursive: true });
   Deno.mkdirSync(tmpSubDir, { recursive: true });
   try {
@@ -3855,7 +3923,7 @@ Deno.test("ChatbotClient - requestPermission allows any extension in TMPDIR (exe
       scriptPaths: new Set(),
       commandPrefixes: new Set(),
     };
-    const client = new ChatbotClient(skillRegistry, logger, config, allowList);
+    const client = createRegisteredClient(skillRegistry, logger, config, allowList);
 
     const request: acp.RequestPermissionRequest = {
       sessionId: "test-session",
@@ -3902,7 +3970,7 @@ Deno.test("ChatbotClient - YOLO mode allows any extension write to agent workspa
       allowedWriteExtensions: [".md", ".txt"],
       canWriteAgentWorkspace: true,
     };
-    const client = new ChatbotClient(skillRegistry, logger, config);
+    const client = createRegisteredClient(skillRegistry, logger, config);
 
     const request: acp.RequestPermissionRequest = {
       sessionId: "test-session",
@@ -3952,7 +4020,7 @@ Deno.test("ChatbotClient - custom allowedWriteExtensions list works for requestP
       scriptPaths: new Set(),
       commandPrefixes: new Set(),
     };
-    const client = new ChatbotClient(skillRegistry, logger, config, allowList);
+    const client = createRegisteredClient(skillRegistry, logger, config, allowList);
 
     // .json should be allowed with custom list
     const jsonRequest: acp.RequestPermissionRequest = {
@@ -4004,7 +4072,7 @@ Deno.test("ChatbotClient - custom allowedWriteExtensions list works for requestP
   }
 });
 
-Deno.test("ChatbotClient - empty allowedWriteExtensions allows all extensions via requestPermission", async () => {
+Deno.test("ChatbotClient - empty allowedWriteExtensions denies shared extensions via requestPermission", async () => {
   const tempDir = Deno.makeTempDirSync();
   const agentWorkspace = `${tempDir}/agent-workspace`;
   Deno.mkdirSync(agentWorkspace, { recursive: true });
@@ -4025,7 +4093,7 @@ Deno.test("ChatbotClient - empty allowedWriteExtensions allows all extensions vi
       scriptPaths: new Set(),
       commandPrefixes: new Set(),
     };
-    const client = new ChatbotClient(skillRegistry, logger, config, allowList);
+    const client = createRegisteredClient(skillRegistry, logger, config, allowList);
 
     const request: acp.RequestPermissionRequest = {
       sessionId: "test-session",
@@ -4047,7 +4115,7 @@ Deno.test("ChatbotClient - empty allowedWriteExtensions allows all extensions vi
     const response = await client.requestPermission(request);
     assertEquals(response.outcome.outcome, "selected");
     if (response.outcome.outcome === "selected") {
-      assertEquals(response.outcome.optionId, "allow-1");
+      assertEquals(response.outcome.optionId, "reject-1");
     }
   } finally {
     Deno.removeSync(tempDir, { recursive: true });
@@ -4075,7 +4143,7 @@ Deno.test("ChatbotClient - allowedWriteExtensions is case insensitive for reques
       scriptPaths: new Set(),
       commandPrefixes: new Set(),
     };
-    const client = new ChatbotClient(skillRegistry, logger, config, allowList);
+    const client = createRegisteredClient(skillRegistry, logger, config, allowList);
 
     // .MD (uppercase) should be allowed
     const mdRequest: acp.RequestPermissionRequest = {
@@ -4147,7 +4215,7 @@ Deno.test("ChatbotClient - writeTextFile rejects non-allowed extension in agent 
       allowedWriteExtensions: [".md", ".txt"],
       canWriteAgentWorkspace: true,
     };
-    const client = new ChatbotClient(skillRegistry, logger, config);
+    const client = createRegisteredClient(skillRegistry, logger, config);
 
     let errorThrown = false;
     try {
@@ -4159,10 +4227,9 @@ Deno.test("ChatbotClient - writeTextFile rejects non-allowed extension in agent 
     } catch (error) {
       errorThrown = true;
       assertEquals(error instanceof acp.RequestError, true);
-      assertEquals(
-        (error as acp.RequestError).message.includes("extension not allowed"),
-        true,
-      );
+      if (error instanceof acp.RequestError) {
+        assertEquals(error.message, "Filesystem request denied: rejected_write_extension");
+      }
     }
     assertEquals(errorThrown, true);
   } finally {
@@ -4188,7 +4255,7 @@ Deno.test("ChatbotClient - writeTextFile allows .md in agent workspace (non-YOLO
       allowedWriteExtensions: [".md", ".txt"],
       canWriteAgentWorkspace: true,
     };
-    const client = new ChatbotClient(skillRegistry, logger, config);
+    const client = createRegisteredClient(skillRegistry, logger, config);
 
     const filePath = `${agentWorkspace}/notes/research.md`;
     await client.writeTextFile({
@@ -4222,7 +4289,7 @@ Deno.test("ChatbotClient - writeTextFile YOLO mode allows any extension in agent
       allowedWriteExtensions: [".md", ".txt"],
       canWriteAgentWorkspace: true,
     };
-    const client = new ChatbotClient(skillRegistry, logger, config);
+    const client = createRegisteredClient(skillRegistry, logger, config);
 
     const filePath = `${agentWorkspace}/script.py`;
     await client.writeTextFile({
@@ -4241,7 +4308,7 @@ Deno.test("ChatbotClient - writeTextFile YOLO mode allows any extension in agent
 Deno.test("ChatbotClient - writeTextFile allows any extension in TMPDIR (non-YOLO)", async () => {
   const tempDir = Deno.makeTempDirSync();
   const agentWorkspace = `${tempDir}/agent-workspace`;
-  const tmpSubDir = `${tempDir}/tmp`;
+  const tmpSubDir = `${tempDir}/tmp/test-session`;
   Deno.mkdirSync(agentWorkspace, { recursive: true });
   Deno.mkdirSync(tmpSubDir, { recursive: true });
   try {
@@ -4258,7 +4325,7 @@ Deno.test("ChatbotClient - writeTextFile allows any extension in TMPDIR (non-YOL
       allowedWriteExtensions: [".md", ".txt"],
       canWriteAgentWorkspace: true,
     };
-    const client = new ChatbotClient(skillRegistry, logger, config);
+    const client = createRegisteredClient(skillRegistry, logger, config);
 
     const filePath = `${tmpSubDir}/temp.js`;
     await client.writeTextFile({
@@ -4274,7 +4341,7 @@ Deno.test("ChatbotClient - writeTextFile allows any extension in TMPDIR (non-YOL
   }
 });
 
-Deno.test("ChatbotClient - writeTextFile allows any extension in working directory (non-agent-workspace)", async () => {
+Deno.test("ChatbotClient - ordinary workspace writes denied restricted and allowed YOLO", async () => {
   const tempDir = Deno.makeTempDirSync();
   const agentWorkspace = `${tempDir}/agent-workspace`;
   Deno.mkdirSync(agentWorkspace, { recursive: true });
@@ -4292,9 +4359,24 @@ Deno.test("ChatbotClient - writeTextFile allows any extension in working directo
       allowedWriteExtensions: [".md", ".txt"],
       canWriteAgentWorkspace: true,
     };
-    const client = new ChatbotClient(skillRegistry, logger, config);
+    const client = createRegisteredClient(skillRegistry, logger, config);
 
     const filePath = `${tempDir}/user-file.py`;
+    await assertRejects(() =>
+      client.writeTextFile({
+        path: filePath,
+        content: "denied",
+        sessionId: "test-session",
+      }), acp.RequestError);
+    assertEquals(
+      client.getRecentPermissionRejections().at(-1)?.reason,
+      "rejected_workspace_write_restricted",
+    );
+    client.setSessionContext("test-session", {
+      cwd: tempDir,
+      shellSessionId: "test-session",
+      yolo: true,
+    });
     await client.writeTextFile({
       path: filePath,
       content: "user content",
@@ -4330,7 +4412,7 @@ Deno.test("ChatbotClient - requestPermission extracts path from rawInput.path wh
       scriptPaths: new Set(),
       commandPrefixes: new Set(),
     };
-    const client = new ChatbotClient(skillRegistry, logger, config, allowList);
+    const client = createRegisteredClient(skillRegistry, logger, config, allowList);
 
     const request: acp.RequestPermissionRequest = {
       sessionId: "test-session",
@@ -4380,7 +4462,7 @@ Deno.test("ChatbotClient - requestPermission extracts path from rawInput.filePat
       scriptPaths: new Set(),
       commandPrefixes: new Set(),
     };
-    const client = new ChatbotClient(skillRegistry, logger, config, allowList);
+    const client = createRegisteredClient(skillRegistry, logger, config, allowList);
 
     const request: acp.RequestPermissionRequest = {
       sessionId: "test-session",
@@ -4430,7 +4512,7 @@ Deno.test("ChatbotClient - requestPermission extracts path from rawInput.filepat
       scriptPaths: new Set(),
       commandPrefixes: new Set(),
     };
-    const client = new ChatbotClient(skillRegistry, logger, config, allowList);
+    const client = createRegisteredClient(skillRegistry, logger, config, allowList);
 
     const request: acp.RequestPermissionRequest = {
       sessionId: "test-session",
@@ -4480,7 +4562,7 @@ Deno.test("ChatbotClient - requestPermission extracts paths from rawInput.paths 
       scriptPaths: new Set(),
       commandPrefixes: new Set(),
     };
-    const client = new ChatbotClient(skillRegistry, logger, config, allowList);
+    const client = createRegisteredClient(skillRegistry, logger, config, allowList);
 
     const request: acp.RequestPermissionRequest = {
       sessionId: "test-session",
@@ -4535,7 +4617,7 @@ Deno.test("ChatbotClient - requestPermission rejects rawInput path outside works
       scriptPaths: new Set(),
       commandPrefixes: new Set(),
     };
-    const client = new ChatbotClient(skillRegistry, logger, config, allowList);
+    const client = createRegisteredClient(skillRegistry, logger, config, allowList);
 
     const request: acp.RequestPermissionRequest = {
       sessionId: "test-session",
@@ -4585,7 +4667,7 @@ Deno.test("ChatbotClient - requestPermission rejects rawInput path with disallow
       scriptPaths: new Set(),
       commandPrefixes: new Set(),
     };
-    const client = new ChatbotClient(skillRegistry, logger, config, allowList);
+    const client = createRegisteredClient(skillRegistry, logger, config, allowList);
 
     const request: acp.RequestPermissionRequest = {
       sessionId: "test-session",
@@ -4635,7 +4717,7 @@ Deno.test("ChatbotClient - requestPermission ignores non-string rawInput values"
       scriptPaths: new Set(),
       commandPrefixes: new Set(),
     };
-    const client = new ChatbotClient(skillRegistry, logger, config, allowList);
+    const client = createRegisteredClient(skillRegistry, logger, config, allowList);
 
     const request: acp.RequestPermissionRequest = {
       sessionId: "test-session",
@@ -4685,7 +4767,7 @@ Deno.test("ChatbotClient - requestPermission uses locations over rawInput when b
       scriptPaths: new Set(),
       commandPrefixes: new Set(),
     };
-    const client = new ChatbotClient(skillRegistry, logger, config, allowList);
+    const client = createRegisteredClient(skillRegistry, logger, config, allowList);
 
     const request: acp.RequestPermissionRequest = {
       sessionId: "test-session",
@@ -4737,7 +4819,7 @@ Deno.test("ChatbotClient - flushMessageBuffer logs complete message after chunks
       isDM: false,
     };
 
-    const client = new ChatbotClient(skillRegistry, testLogger, config);
+    const client = createRegisteredClient(skillRegistry, testLogger, config);
 
     // Send 2 agent_message_chunk updates
     await client.sessionUpdate({
@@ -4806,7 +4888,7 @@ Deno.test("ChatbotClient - handles multiple message sequences separated by tool 
       isDM: false,
     };
 
-    const client = new ChatbotClient(skillRegistry, testLogger, config);
+    const client = createRegisteredClient(skillRegistry, testLogger, config);
 
     // First sequence: "First " + "message" → tool_call
     await client.sessionUpdate({
@@ -4898,7 +4980,7 @@ Deno.test("ChatbotClient - flushMessageBuffer is safe when buffer is empty", asy
       isDM: false,
     };
 
-    const client = new ChatbotClient(skillRegistry, testLogger, config);
+    const client = createRegisteredClient(skillRegistry, testLogger, config);
 
     // Send a tool_call without any preceding chunks
     await client.sessionUpdate({
@@ -4942,7 +5024,7 @@ Deno.test("ChatbotClient - reset flushes remaining message buffer", async () => 
       isDM: false,
     };
 
-    const client = new ChatbotClient(skillRegistry, testLogger, config);
+    const client = createRegisteredClient(skillRegistry, testLogger, config);
 
     // Send chunks
     await client.sessionUpdate({
@@ -4994,7 +5076,7 @@ Deno.test("ChatbotClient - non-text content chunks do not affect message buffer"
       isDM: false,
     };
 
-    const client = new ChatbotClient(skillRegistry, testLogger, config);
+    const client = createRegisteredClient(skillRegistry, testLogger, config);
 
     // Send an image content chunk
     await client.sessionUpdate({
@@ -5046,7 +5128,7 @@ Deno.test("ChatbotClient - single chunk produces complete message with chunkCoun
       isDM: false,
     };
 
-    const client = new ChatbotClient(skillRegistry, testLogger, config);
+    const client = createRegisteredClient(skillRegistry, testLogger, config);
 
     // Send exactly 1 agent_message_chunk
     await client.sessionUpdate({
@@ -5111,7 +5193,7 @@ Deno.test("ChatbotClient - flushMessageBuffer writes agent_complete_message audi
       isDM: false,
     };
 
-    const client = new ChatbotClient(skillRegistry, testLogger, config);
+    const client = createRegisteredClient(skillRegistry, testLogger, config);
     client.setAuditWriter(auditWriter);
 
     // Send chunks
@@ -5193,7 +5275,7 @@ Deno.test("ChatbotClient - flushMessageBuffer no audit entry when buffer empty",
       isDM: false,
     };
 
-    const client = new ChatbotClient(skillRegistry, testLogger, config);
+    const client = createRegisteredClient(skillRegistry, testLogger, config);
     client.setAuditWriter(auditWriter);
 
     // Trigger flush without any chunks
@@ -5229,7 +5311,7 @@ Deno.test("ChatbotClient - config_option_update refreshes via listener and updat
       channelId: "456",
       isDM: false,
     };
-    const client = new ChatbotClient(skillRegistry, logger, config);
+    const client = createRegisteredClient(skillRegistry, logger, config);
 
     const received: acp.SessionConfigOption[][] = [];
     client.setConfigOptionsListener((_sessionId, opts) => received.push(opts));
@@ -5276,7 +5358,7 @@ Deno.test("ChatbotClient - non-config_option_update does not invoke listener", a
       channelId: "456",
       isDM: false,
     };
-    const client = new ChatbotClient(skillRegistry, logger, config);
+    const client = createRegisteredClient(skillRegistry, logger, config);
 
     let called = false;
     client.setConfigOptionsListener(() => (called = true));
@@ -5302,7 +5384,7 @@ Deno.test("F3 requestPermission - ordinary session cannot write shared agent wor
   const agentWorkspace = `${tempDir}/agent-workspace`;
   Deno.mkdirSync(agentWorkspace, { recursive: true });
   try {
-    const client = new ChatbotClient(createTestSkillRegistry(), createTestLogger(), {
+    const client = createRegisteredClient(createTestSkillRegistry(), createTestLogger(), {
       workingDir: tempDir,
       agentWorkspacePath: agentWorkspace,
       platform: "discord",
@@ -5347,7 +5429,7 @@ Deno.test("F3 requestPermission - memory-maintenance session cannot write shared
   const agentWorkspace = `${tempDir}/agent-workspace`;
   Deno.mkdirSync(agentWorkspace, { recursive: true });
   try {
-    const client = new ChatbotClient(createTestSkillRegistry(), createTestLogger(), {
+    const client = createRegisteredClient(createTestSkillRegistry(), createTestLogger(), {
       workingDir: tempDir,
       agentWorkspacePath: agentWorkspace,
       platform: "discord",
@@ -5387,11 +5469,11 @@ Deno.test("F3 requestPermission - memory-maintenance session cannot write shared
 Deno.test("F3 requestPermission - TMPDIR write allowed regardless of flag", async () => {
   const tempDir = Deno.makeTempDirSync();
   const agentWorkspace = `${tempDir}/agent-workspace`;
-  const tmpSub = `${tempDir}/tmp`;
+  const tmpSub = `${tempDir}/tmp/test-session`;
   Deno.mkdirSync(agentWorkspace, { recursive: true });
   Deno.mkdirSync(tmpSub, { recursive: true });
   try {
-    const client = new ChatbotClient(createTestSkillRegistry(), createTestLogger(), {
+    const client = createRegisteredClient(createTestSkillRegistry(), createTestLogger(), {
       workingDir: tempDir,
       agentWorkspacePath: agentWorkspace,
       platform: "discord",
@@ -5432,7 +5514,7 @@ Deno.test("F3 writeTextFile - unauthorized session rejected at direct write sink
   const agentWorkspace = `${tempDir}/agent-workspace`;
   Deno.mkdirSync(agentWorkspace, { recursive: true });
   try {
-    const client = new ChatbotClient(createTestSkillRegistry(), createTestLogger(), {
+    const client = createRegisteredClient(createTestSkillRegistry(), createTestLogger(), {
       workingDir: tempDir,
       agentWorkspacePath: agentWorkspace,
       platform: "discord",
@@ -5472,7 +5554,7 @@ Deno.test("F3 writeTextFile - authorized self-research session write succeeds", 
   const agentWorkspace = `${tempDir}/agent-workspace`;
   Deno.mkdirSync(`${agentWorkspace}/notes`, { recursive: true });
   try {
-    const client = new ChatbotClient(createTestSkillRegistry(), createTestLogger(), {
+    const client = createRegisteredClient(createTestSkillRegistry(), createTestLogger(), {
       workingDir: tempDir,
       agentWorkspacePath: agentWorkspace,
       platform: "discord",
@@ -5518,7 +5600,7 @@ Deno.test("F4 readTextFile - sibling-prefix workspace path rejected", async () =
     const siblingFile = `${sibling}/memory.private.jsonl`;
     await Deno.writeTextFile(siblingFile, "secret");
 
-    const client = new ChatbotClient(createTestSkillRegistry(), createTestLogger(), {
+    const client = createRegisteredClient(createTestSkillRegistry(), createTestLogger(), {
       workingDir: base,
       platform: "discord",
       userId: "123",
@@ -5543,7 +5625,7 @@ Deno.test("F4 readTextFile - memory JSONL read allowed", async () => {
   try {
     const f = `${tempDir}/memory.public.jsonl`;
     await Deno.writeTextFile(f, '{"type":"memory"}');
-    const client = new ChatbotClient(createTestSkillRegistry(), createTestLogger(), {
+    const client = createRegisteredClient(createTestSkillRegistry(), createTestLogger(), {
       workingDir: tempDir,
       platform: "discord",
       userId: "123",
@@ -5562,7 +5644,7 @@ Deno.test("F4 readTextFile - disallowed extension (.json) rejected", async () =>
   try {
     const f = `${tempDir}/secrets.json`;
     await Deno.writeTextFile(f, '{"token":"abc"}');
-    const client = new ChatbotClient(createTestSkillRegistry(), createTestLogger(), {
+    const client = createRegisteredClient(createTestSkillRegistry(), createTestLogger(), {
       workingDir: tempDir,
       platform: "discord",
       userId: "123",
@@ -5608,7 +5690,7 @@ Deno.test("ChatbotClient - flushThoughtBuffer logs complete thought after chunks
       isDM: false,
     };
 
-    const client = new ChatbotClient(skillRegistry, testLogger, config);
+    const client = createRegisteredClient(skillRegistry, testLogger, config);
 
     await client.sessionUpdate({
       update: {
@@ -5673,7 +5755,7 @@ Deno.test("ChatbotClient - flushThoughtBuffer is safe when buffer is empty", () 
       isDM: false,
     };
 
-    const client = new ChatbotClient(skillRegistry, testLogger, config);
+    const client = createRegisteredClient(skillRegistry, testLogger, config);
     client.flushThoughtBuffer();
 
     assertEquals(infoLogs.length, 0);
@@ -5704,7 +5786,7 @@ Deno.test("ChatbotClient - deterministic flush ordering (flushThoughtBuffer befo
       isDM: false,
     };
 
-    const client = new ChatbotClient(skillRegistry, testLogger, config);
+    const client = createRegisteredClient(skillRegistry, testLogger, config);
 
     await client.sessionUpdate({
       update: {
@@ -5758,7 +5840,7 @@ Deno.test("ChatbotClient - flushThoughtBuffer writes agent_complete_thought audi
       isDM: false,
     };
 
-    const client = new ChatbotClient(skillRegistry, testLogger, config);
+    const client = createRegisteredClient(skillRegistry, testLogger, config);
     client.setAuditWriter(auditWriter);
 
     await client.sessionUpdate({
@@ -5835,7 +5917,7 @@ Deno.test("ChatbotClient - flushThoughtBuffer no audit entry when buffer empty",
       isDM: false,
     };
 
-    const client = new ChatbotClient(skillRegistry, testLogger, config);
+    const client = createRegisteredClient(skillRegistry, testLogger, config);
     client.setAuditWriter(auditWriter);
 
     await client.sessionUpdate({
@@ -5872,7 +5954,7 @@ Deno.test("ChatbotClient - requestPermission approves session tool-output read v
       sessionId: "sess_own",
     };
 
-    const client = new ChatbotClient(skillRegistry, logger, config);
+    const client = createRegisteredClient(skillRegistry, logger, config);
 
     // The session's own tool-output dir (under {workspace}/tmp/opencode-data/{sessionId})
     // must be within the generic-command boundary, so the observed self-research failure
@@ -5921,7 +6003,7 @@ Deno.test("ChatbotClient - requestPermission rejects shared/home-rooted and sibl
       sessionId: "sess_own",
     };
 
-    const client = new ChatbotClient(skillRegistry, logger, config);
+    const client = createRegisteredClient(skillRegistry, logger, config);
 
     // Non-session-local tool-output dirs are never within bounds — the gate fails closed:
     // the shared home-rooted one, a sibling user's workspace, and a concurrent session's
@@ -5976,7 +6058,7 @@ Deno.test("ChatbotClient - edit/write with $TMPDIR/$SESSION_ID tokens approved",
       isDM: false,
       sessionId: "sess_own",
     };
-    const client = new ChatbotClient(skillRegistry, logger, config);
+    const client = createRegisteredClient(skillRegistry, logger, config);
 
     for (
       const tokenPath of [
@@ -6026,7 +6108,7 @@ Deno.test("ChatbotClient - edit/write with unexpanded $TMPDIR2 / $OTHER tokens r
       isDM: false,
       sessionId: "sess_own",
     };
-    const client = new ChatbotClient(skillRegistry, logger, config);
+    const client = createRegisteredClient(skillRegistry, logger, config);
 
     for (const tokenPath of ["$TMPDIR2/x", "$OTHER/x"]) {
       const request: acp.RequestPermissionRequest = {
@@ -6075,7 +6157,7 @@ Deno.test("ChatbotClient - edit/write with $AGENT_WORKSPACE tokens approved for 
       sessionId: "sess_own",
       canWriteAgentWorkspace: true,
     };
-    const client = new ChatbotClient(skillRegistry, logger, config);
+    const client = createRegisteredClient(skillRegistry, logger, config);
 
     for (
       const tokenPath of [
@@ -6128,7 +6210,7 @@ Deno.test("ChatbotClient - readTextFile accepts $AGENT_WORKSPACE env-var paths",
       isDM: false,
       sessionId: "sess_own",
     };
-    const client = new ChatbotClient(skillRegistry, logger, config);
+    const client = createRegisteredClient(skillRegistry, logger, config);
 
     const result = await client.readTextFile({
       sessionId: "sess_own",
@@ -6153,7 +6235,7 @@ Deno.test("ChatbotClient - writeTextFile writes the EXPANDED $TMPDIR/$SESSION_ID
       isDM: false,
       sessionId: "sess_own",
     };
-    const client = new ChatbotClient(skillRegistry, logger, config);
+    const client = createRegisteredClient(skillRegistry, logger, config);
 
     // Create the staging dir the way the workspace would (writeTextFile does not mkdir).
     Deno.mkdirSync(join(tempDir, "tmp", "sess_own"), { recursive: true });
@@ -6203,7 +6285,7 @@ Deno.test("ChatbotClient - skill command with legacy free-text flag rejected in 
       scriptPaths: new Set(["skills/send-reply/scripts/send-reply.ts"]),
       commandPrefixes: new Set(),
     };
-    const client = new ChatbotClient(skillRegistry, logger, config, allowList);
+    const client = createRegisteredClient(skillRegistry, logger, config, allowList);
 
     const buildRequest = (command: string): acp.RequestPermissionRequest => ({
       sessionId: "sess_own",
@@ -6281,7 +6363,7 @@ function buildEditRequest(
 Deno.test("ChatbotClient - real write shape (kind edit, title=path, rawInput filePath/content) writing $TMPDIR/$SESSION_ID/reply.md auto-approved in restricted mode", async () => {
   const tempDir = Deno.makeTempDirSync();
   try {
-    const client = new ChatbotClient(createTestSkillRegistry(), createTestLogger(), {
+    const client = createRegisteredClient(createTestSkillRegistry(), createTestLogger(), {
       workingDir: tempDir,
       platform: "discord",
       userId: "123",
@@ -6310,7 +6392,7 @@ Deno.test("ChatbotClient - real write shape (kind edit, title=path, rawInput fil
 Deno.test("ChatbotClient - real edit shape (kind edit, title=path, rawInput filepath/diff) for in-workspace path approved", async () => {
   const tempDir = Deno.makeTempDirSync();
   try {
-    const client = new ChatbotClient(createTestSkillRegistry(), createTestLogger(), {
+    const client = createRegisteredClient(createTestSkillRegistry(), createTestLogger(), {
       workingDir: tempDir,
       platform: "discord",
       userId: "123",
@@ -6318,7 +6400,7 @@ Deno.test("ChatbotClient - real edit shape (kind edit, title=path, rawInput file
       isDM: false,
     }, { scriptPaths: new Set(), commandPrefixes: new Set() });
 
-    const inWorkspace = `${tempDir}/tmp/scratch.md`;
+    const inWorkspace = `${tempDir}/tmp/test-session/scratch.md`;
     const request = buildEditRequest({
       title: inWorkspace,
       rawInput: { filepath: inWorkspace, diff: "--- a/file.md\n+++ b/file.md" },
@@ -6338,7 +6420,7 @@ Deno.test("ChatbotClient - real edit shape (kind edit, title=path, rawInput file
 Deno.test("ChatbotClient - real edit shape with out-of-workspace path rejected", async () => {
   const tempDir = Deno.makeTempDirSync();
   try {
-    const client = new ChatbotClient(createTestSkillRegistry(), createTestLogger(), {
+    const client = createRegisteredClient(createTestSkillRegistry(), createTestLogger(), {
       workingDir: tempDir,
       platform: "discord",
       userId: "123",
@@ -6365,7 +6447,7 @@ Deno.test("ChatbotClient - real edit shape with out-of-workspace path rejected",
 Deno.test("ChatbotClient - real edit shape with empty locations AND unparseable rawInput rejected (fail-closed)", async () => {
   const tempDir = Deno.makeTempDirSync();
   try {
-    const client = new ChatbotClient(createTestSkillRegistry(), createTestLogger(), {
+    const client = createRegisteredClient(createTestSkillRegistry(), createTestLogger(), {
       workingDir: tempDir,
       platform: "discord",
       userId: "123",
@@ -6393,7 +6475,7 @@ Deno.test("ChatbotClient - real edit shape with empty locations AND unparseable 
 Deno.test("ChatbotClient - rejection recorded on unknown-tool denial path", async () => {
   const tempDir = Deno.makeTempDirSync();
   try {
-    const client = new ChatbotClient(createTestSkillRegistry(), createTestLogger(), {
+    const client = createRegisteredClient(createTestSkillRegistry(), createTestLogger(), {
       workingDir: tempDir,
       platform: "discord",
       userId: "123",
@@ -6433,7 +6515,7 @@ Deno.test("ChatbotClient - rejection recorded on unknown-tool denial path", asyn
 Deno.test("ChatbotClient - rejection recorded on edit/write denial with paths", async () => {
   const tempDir = Deno.makeTempDirSync();
   try {
-    const client = new ChatbotClient(createTestSkillRegistry(), createTestLogger(), {
+    const client = createRegisteredClient(createTestSkillRegistry(), createTestLogger(), {
       workingDir: tempDir,
       platform: "discord",
       userId: "123",
@@ -6450,7 +6532,7 @@ Deno.test("ChatbotClient - rejection recorded on edit/write denial with paths", 
     await client.requestPermission(request);
     const rejections = client.getRecentPermissionRejections();
     assertEquals(rejections.length, 1);
-    assertEquals(rejections[0].reason, "rejected_edit_write");
+    assertEquals(rejections[0].reason, "rejected_write_path_outside_workspace");
     assertEquals(rejections[0].commandOrPath, "/etc/passwd");
   } finally {
     Deno.removeSync(tempDir, { recursive: true });
@@ -6460,7 +6542,7 @@ Deno.test("ChatbotClient - rejection recorded on edit/write denial with paths", 
 Deno.test("ChatbotClient - rejection recorded on generic-command denial with failing command", async () => {
   const tempDir = Deno.makeTempDirSync();
   try {
-    const client = new ChatbotClient(createTestSkillRegistry(), createTestLogger(), {
+    const client = createRegisteredClient(createTestSkillRegistry(), createTestLogger(), {
       workingDir: tempDir,
       platform: "discord",
       userId: "123",
@@ -6497,7 +6579,7 @@ Deno.test("ChatbotClient - rejection recorded on generic-command denial with fai
 Deno.test("ChatbotClient - rejection recorded on skill free-text flag denial", async () => {
   const tempDir = Deno.makeTempDirSync();
   try {
-    const client = new ChatbotClient(createTestSkillRegistry(), createTestLogger(), {
+    const client = createRegisteredClient(createTestSkillRegistry(), createTestLogger(), {
       workingDir: tempDir,
       platform: "discord",
       userId: "123",
@@ -6541,7 +6623,7 @@ Deno.test("ChatbotClient - rejection recorded on skill free-text flag denial", a
 Deno.test("ChatbotClient - rejection recorded on writeTextFile denial", async () => {
   const tempDir = Deno.makeTempDirSync();
   try {
-    const client = new ChatbotClient(createTestSkillRegistry(), createTestLogger(), {
+    const client = createRegisteredClient(createTestSkillRegistry(), createTestLogger(), {
       workingDir: tempDir,
       platform: "discord",
       userId: "123",
@@ -6571,7 +6653,7 @@ Deno.test("ChatbotClient - rejection recorded on unauthorized shared-workspace w
   const tempDir = Deno.makeTempDirSync();
   try {
     const agentWorkspace = `${tempDir}/agent-workspace`;
-    const client = new ChatbotClient(createTestSkillRegistry(), createTestLogger(), {
+    const client = createRegisteredClient(createTestSkillRegistry(), createTestLogger(), {
       workingDir: tempDir,
       platform: "discord",
       userId: "123",
@@ -6586,6 +6668,7 @@ Deno.test("ChatbotClient - rejection recorded on unauthorized shared-workspace w
       rawInput: { filePath: `${agentWorkspace}/notes/topic.md`, content: "x" },
       locations: [{ path: `${agentWorkspace}/notes/topic.md` }],
     });
+    Deno.mkdirSync(join(agentWorkspace, "notes"), { recursive: true });
 
     await client.requestPermission(request);
     const rejections = client.getRecentPermissionRejections();
@@ -6601,7 +6684,7 @@ Deno.test("ChatbotClient - rejection recorded on disallowed-extension write deni
   const tempDir = Deno.makeTempDirSync();
   try {
     const agentWorkspace = `${tempDir}/agent-workspace`;
-    const client = new ChatbotClient(createTestSkillRegistry(), createTestLogger(), {
+    const client = createRegisteredClient(createTestSkillRegistry(), createTestLogger(), {
       workingDir: tempDir,
       platform: "discord",
       userId: "123",
@@ -6617,6 +6700,7 @@ Deno.test("ChatbotClient - rejection recorded on disallowed-extension write deni
       rawInput: { filePath: `${agentWorkspace}/notes/cache.json`, content: "x" },
       locations: [{ path: `${agentWorkspace}/notes/cache.json` }],
     });
+    Deno.mkdirSync(join(agentWorkspace, "notes"), { recursive: true });
 
     await client.requestPermission(request);
     const rejections = client.getRecentPermissionRejections();
@@ -6633,7 +6717,7 @@ Deno.test("ChatbotClient - rejection recorded on disallowed-extension write deni
 Deno.test("ChatbotClient - rejection buffer is bounded at 10 entries", async () => {
   const tempDir = Deno.makeTempDirSync();
   try {
-    const client = new ChatbotClient(createTestSkillRegistry(), createTestLogger(), {
+    const client = createRegisteredClient(createTestSkillRegistry(), createTestLogger(), {
       workingDir: tempDir,
       platform: "discord",
       userId: "123",
@@ -6674,7 +6758,7 @@ Deno.test("ChatbotClient - rejection buffer is bounded at 10 entries", async () 
 Deno.test("ChatbotClient - rejection fields sanitized and bounded at 200 chars (incl. marker)", async () => {
   const tempDir = Deno.makeTempDirSync();
   try {
-    const client = new ChatbotClient(createTestSkillRegistry(), createTestLogger(), {
+    const client = createRegisteredClient(createTestSkillRegistry(), createTestLogger(), {
       workingDir: tempDir,
       platform: "discord",
       userId: "123",
@@ -6722,7 +6806,7 @@ Deno.test("ChatbotClient - sanitizeRejectionField strips control chars and bound
 Deno.test("ChatbotClient - reset() does NOT clear rejection records, clearPermissionRejections() does", async () => {
   const tempDir = Deno.makeTempDirSync();
   try {
-    const client = new ChatbotClient(createTestSkillRegistry(), createTestLogger(), {
+    const client = createRegisteredClient(createTestSkillRegistry(), createTestLogger(), {
       workingDir: tempDir,
       platform: "discord",
       userId: "123",
@@ -6764,7 +6848,7 @@ Deno.test("ChatbotClient - reset() does NOT clear rejection records, clearPermis
 Deno.test("ChatbotClient - real edit shape with mixed valid/invalid multi-path rejected", async () => {
   const tempDir = Deno.makeTempDirSync();
   try {
-    const client = new ChatbotClient(createTestSkillRegistry(), createTestLogger(), {
+    const client = createRegisteredClient(createTestSkillRegistry(), createTestLogger(), {
       workingDir: tempDir,
       platform: "discord",
       userId: "123",
@@ -6791,7 +6875,7 @@ Deno.test("ChatbotClient - real edit shape with mixed valid/invalid multi-path r
 Deno.test("ChatbotClient - unknown-tool rejection preserved for non-edit kinds (kind other)", async () => {
   const tempDir = Deno.makeTempDirSync();
   try {
-    const client = new ChatbotClient(createTestSkillRegistry(), createTestLogger(), {
+    const client = createRegisteredClient(createTestSkillRegistry(), createTestLogger(), {
       workingDir: tempDir,
       platform: "discord",
       userId: "123",
@@ -6829,7 +6913,7 @@ Deno.test("ChatbotClient - unknown-tool rejection preserved for non-edit kinds (
 Deno.test("ChatbotClient - legacy write title shape (title write, kind edit) still recognized", async () => {
   const tempDir = Deno.makeTempDirSync();
   try {
-    const client = new ChatbotClient(createTestSkillRegistry(), createTestLogger(), {
+    const client = createRegisteredClient(createTestSkillRegistry(), createTestLogger(), {
       workingDir: tempDir,
       platform: "discord",
       userId: "123",
@@ -6837,7 +6921,7 @@ Deno.test("ChatbotClient - legacy write title shape (title write, kind edit) sti
       isDM: false,
     }, { scriptPaths: new Set(), commandPrefixes: new Set() });
 
-    const inWorkspace = `${tempDir}/tmp/legacy.md`;
+    const inWorkspace = `${tempDir}/tmp/test-session/legacy.md`;
     const request = buildEditRequest({
       title: "write",
       rawInput: { path: inWorkspace, content: "x" },

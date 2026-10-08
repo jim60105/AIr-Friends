@@ -1,7 +1,7 @@
 // src/acp/types.ts
 
 import type { IdleTimeoutConfig } from "../types/config.ts";
-import type { TrustedSkillsRootConfig } from "./filesystem-roots.ts";
+import type { TrustedSkillsSource } from "./filesystem-policy.ts";
 import type { LinuxNativeCalls } from "./filesystem-access-linux.ts";
 
 /**
@@ -79,7 +79,7 @@ export interface ClientConfig {
   xdgDataHome?: string;
 
   /** Deployment-owned trusted skills provenance */
-  trustedSkills?: TrustedSkillsRootConfig;
+  trustedSkills?: TrustedSkillsSource;
 
   /** Optional injectable native backend calls for testing */
   nativeCalls?: LinuxNativeCalls;
