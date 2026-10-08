@@ -1,5 +1,12 @@
 ## ADDED Requirements
 
+Implementation interpretation under user decision 4 (2026-10-09): supported
+native-shaped fixtures below are complete ACP-mediated JSON delete/move requests.
+Multi-delete and patch operation fixtures are trusted synthetic adapter inputs.
+Native multi-file patches and first-operation-only lists SHALL be denied; no
+speculative native parser SHALL be implemented. P0's `incompatible` ledger verdict
+is unchanged and no longer blocks application, as recorded in the decision register.
+
 ### Requirement: Complete Destructive Operation Normalization
 
 The permission gate SHALL normalize every destructive-shaped request (ACP `delete`/`move` tool kinds, native delete/move titles, and multi-operation patch shapes) into an ordered, complete operation set before any authorization decision, using the P0 destructive-intent contract's trustworthy operation input, parser/edit-syntax provenance, and binding to the input that will execute.

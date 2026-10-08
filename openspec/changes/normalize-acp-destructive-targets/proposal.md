@@ -1,5 +1,16 @@
 ## Why
 
+### Implementing reconciliation (2026-10-09)
+
+Decision 4 in `docs/OMP_COMPATIBILITY.md` §1a supersedes the historical application
+blocker referenced below; the section 3 `incompatible` verdict remains unchanged.
+The actual imported P0 type is `DestructiveIntentInput`, not
+`DestructiveIntentContract`. Accepted ACP-mediated inputs are complete JSON delete
+and move requests; native multi-file patches, unknown syntax and first-operation-only
+lists remain denied. Synthetic ordered-operation fixtures prove the shared policy
+only, not native decoding. References below to supported patch parsing describe
+trusted adapter fixtures, never permission to invent a native decoder.
+
 Native OMP delete/move requests and multi-operation patches are not equivalent to OpenCode `kind: "edit"`: the pinned permission gate can present only one delete or move in its explicit location list (`getEditDestructiveIntent` returns a single target; `extractPermissionLocations` cannot recover omitted later operations), so a location-list-driven approval would authorize a larger patch than what was verified. The current client classifies only `kind: "edit"`/legacy titles and checks whatever locations arrive, which is first-target-only by construction, and never rejects unparseable or endpoint-missing destructive input before mutation. Design §8 requires the complete target set normalized into one common all-target destructive policy that fails closed.
 
 ## What Changes

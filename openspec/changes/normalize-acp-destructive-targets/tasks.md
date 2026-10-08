@@ -1,5 +1,12 @@
 ## 1. Predecessor consumption and contract alignment (0.75h)
 
+Implementation reconciliation (2026-10-09): the real type is `DestructiveIntentInput`.
+User decision register §1a decision 4 supersedes all historical application-blocker
+wording in this checklist, without changing P0's ledger. Native multi-file patches
+are denied before authorization; target-specific patch decisions below concern
+trusted synthetic adapter fixtures. Delete authority is existing-only observation
+plus the predecessor's unchanged write decision, which has no delete parameter.
+
 - [ ] 1.1 Consume the actual `establish-omp-compatibility-contracts` destructive-intent verdict plus `canonicalize-acp-filesystem-roots` observation exports and `enforce-acp-filesystem-authorization`'s `filesystem-policy.ts` decision and `SessionGateContext`; record in the implementing handoff the exact `DestructiveIntentContract` fields imported, the observation/decision signatures reused, and the application-gate decision (a blocked/unresolved P0 destructive boundary halts application, not this change's drafting or local verification). Verify the handoff names no invented native OMP API method and no redefinition of roots, expansion, IO primitives or write policy.
 
 ## 2. Destructive normalization module (2.00h)
