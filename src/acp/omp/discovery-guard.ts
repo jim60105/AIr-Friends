@@ -9,7 +9,11 @@
  */
 
 import { resolve } from "@std/path";
-import { type SkillCandidate, validateCriticalSkillContract } from "./compatibility-contracts.ts";
+import {
+  type CriticalSkillDecision,
+  type SkillCandidate,
+  validateCriticalSkillContract,
+} from "./compatibility-contracts.ts";
 import {
   type CanonicalTarget,
   isWithinRoot,
@@ -152,6 +156,8 @@ export interface DiscoveryDecision {
   readonly excludedRoots: readonly ExcludedRootRecord[];
   readonly trustedRoots: readonly string[];
   readonly blockers: readonly DiscoveryBlocker[];
+  readonly criticalSkills: readonly CriticalSkillSelectionRecord[];
+  readonly resourceGeneration: string;
   readonly evaluatedAt: string;
 }
 
@@ -170,6 +176,8 @@ export interface DiscoveryDecisionInput {
   readonly escapingLinkedRoots?: readonly string[];
   readonly trustedModuleCanonicalPath?: string;
   readonly closureRoots?: readonly string[];
+  readonly criticalSkills?: readonly CriticalSkillSelectionRecord[];
+  readonly resourceGeneration?: string;
 }
 
 /**
@@ -209,7 +217,6 @@ export function computeDiscoveryDecision(input: DiscoveryDecisionInput): Discove
   ];
 
   // 1. Ambient extension discovery
-  // Must verify no additional uncontracted extension roots were presented
   const extraExtensions = (input.presentedExtensionRoots ?? []).filter(
     (ext) =>
       ext !== OMP_TRUSTED_EXTENSION_PATH && ext !== contractedModulePath &&
@@ -323,14 +330,13 @@ export function computeDiscoveryDecision(input: DiscoveryDecisionInput): Discove
     });
   }
 
-  // 7. Load/refresh rediscovery: posture check
-  // Captured in surfaces; valid as long as frozen decision governs lifetime.
-
   const decision: DiscoveryDecision = {
     surfaces: AUDITED_DISCOVERY_SURFACES,
     excludedRoots,
     trustedRoots,
     blockers,
+    criticalSkills: input.criticalSkills ?? [],
+    resourceGeneration: input.resourceGeneration ?? "gen-0",
     evaluatedAt: new Date().toISOString(),
   };
 
@@ -358,13 +364,7 @@ export interface EvaluateOwnedModuleOptions {
 
 /**
  * Evaluate exact owned-module ownership.
- *
- * Rules:
- * - Only contracted OMP_TRUSTED_EXTENSION_PATH and pinned image-owned closure roots are trusted.
- * - Workspace / HOME / package-cache locations are untrusted.
- * - Candidates matching critical skill / tool name gain nothing (name-only trust rejected).
- * - Symlinks escaping canonical owned root return symlink_escape / trusted_identity_mismatch.
- * - Identity is mode-independent (identical for restricted and native-yolo).
+ * Requires canonical filesystem verification via CanonicalTarget from row 2.
  */
 export function evaluateOwnedModuleOwnership(
   candidatePath: string,
@@ -375,7 +375,6 @@ export function evaluateOwnedModuleOwnership(
   const validRoots = [contractedPath, ...closure];
 
   // Check critical-name or tool-name match attempt
-  const lowerPath = candidatePath.toLowerCase();
   const criticalNames = [
     "skill",
     "tools",
@@ -400,7 +399,7 @@ export function evaluateOwnedModuleOwnership(
     };
   }
 
-  // If a CanonicalTarget from row 2 is provided, reuse its canonical identity directly
+  // Row 2 canonical identity verification
   if (options.canonicalTarget) {
     const target = options.canonicalTarget;
     const hasOwnedRole = target.roles.some(
@@ -448,10 +447,10 @@ export function evaluateOwnedModuleOwnership(
     };
   }
 
-  // Direct path-based resolution if CanonicalTarget was not supplied
+  // Without CanonicalTarget, untrusted locations are strictly rejected with reasons
   const resolvedCandidate = resolve(candidatePath);
+  const lowerPath = candidatePath.toLowerCase();
 
-  // Workspace / HOME / package-cache heuristic checks
   if (
     lowerPath.includes("/home/") ||
     lowerPath.includes("/workspace/") ||
@@ -468,7 +467,6 @@ export function evaluateOwnedModuleOwnership(
     };
   }
 
-  // Symlink checks
   if (options.isSymlink) {
     if (
       !options.symlinkTarget ||
@@ -524,23 +522,36 @@ export interface EvaluateCriticalSkillOptions {
 }
 
 /**
+ * Pinned critical skills per-ID canonical instruction relative paths.
+ */
+export const PINNED_CRITICAL_SKILLS: Readonly<Record<string, string>> = Object.freeze({
+  review: "review/SKILL.md",
+  destructive: "destructive/SKILL.md",
+  lsp: "lsp/SKILL.md",
+  readiness: "readiness/SKILL.md",
+});
+
+/**
+ * Session lifecycle transition record for critical skills across new/load/refresh.
+ */
+export interface SessionSkillLifecycleState {
+  readonly sessionId: string;
+  readonly resourceGeneration: string;
+  readonly activeSkills: readonly CriticalSkillSelectionRecord[];
+  readonly lifecycleEvent: "session_new" | "session_load" | "session_refresh";
+}
+
+/**
  * Evaluate critical-skill canonical ownership.
- *
- * Enforces:
- * - Exact critical skill id to canonical owned `SKILL.md` under owned skills root.
- * - Read-only owned root identity.
- * - Rejection of workspace/project candidates from critical-name resolution.
- * - Rejection of stale resource generations and foreign-session snapshots.
- * - Ordinary skills remain unaffected (only critical id resolution is pinned).
  */
 export function evaluateCriticalSkillSelection(
   skillId: string,
   candidate: SkillCandidate,
   options: EvaluateCriticalSkillOptions,
 ): CriticalSkillSelectionRecord {
-  // Session ownership check
+  // Candidate session ID must be present and match current session
   if (
-    options.candidateSessionId !== undefined &&
+    options.candidateSessionId === undefined ||
     options.candidateSessionId !== options.currentSessionId
   ) {
     return {
@@ -568,7 +579,7 @@ export function evaluateCriticalSkillSelection(
   }
 
   // Read-only root check
-  if (options.isReadOnlyRoot === false) {
+  if (options.isReadOnlyRoot !== true) {
     return {
       skillId,
       canonicalInstructionPath: candidate.canonicalPath,
@@ -579,10 +590,9 @@ export function evaluateCriticalSkillSelection(
     };
   }
 
-  // Expected canonical instruction file must end with SKILL.md
-  if (
-    !candidate.canonicalPath.endsWith("/SKILL.md") && !candidate.canonicalPath.endsWith("SKILL.md")
-  ) {
+  // Instruction file must end with /SKILL.md or match pinned relative file
+  const normalizedCandidate = candidate.canonicalPath.replace(/\\/g, "/");
+  if (!normalizedCandidate.endsWith("/SKILL.md")) {
     return {
       skillId,
       canonicalInstructionPath: candidate.canonicalPath,
@@ -594,8 +604,25 @@ export function evaluateCriticalSkillSelection(
     };
   }
 
+  // Expected path per pinned table if registered
+  const pinnedRelative = PINNED_CRITICAL_SKILLS[skillId];
+  if (pinnedRelative) {
+    const expectedPath = `${options.ownedSkillRoot.replace(/\/$/, "")}/${pinnedRelative}`;
+    if (candidate.canonicalPath !== expectedPath) {
+      return {
+        skillId,
+        canonicalInstructionPath: candidate.canonicalPath,
+        ownedSkillRoot: options.ownedSkillRoot,
+        sessionGenerationId: candidate.sessionGenerationId,
+        authoritative: false,
+        reason:
+          `Canonical instruction path '${candidate.canonicalPath}' does not match pinned canonical path '${expectedPath}'`,
+      };
+    }
+  }
+
   // Delegate to P0 validator
-  const p0Decision = validateCriticalSkillContract(
+  const p0Decision: CriticalSkillDecision = validateCriticalSkillContract(
     skillId,
     candidate,
     options.ownedSkillRoot,
@@ -609,6 +636,41 @@ export function evaluateCriticalSkillSelection(
     sessionGenerationId: candidate.sessionGenerationId,
     authoritative: p0Decision.authoritative,
     reason: p0Decision.reason,
+  };
+}
+
+/**
+ * Pure transition helper producing a fresh lifecycle state on new/load/refresh.
+ */
+export function transitionSkillLifecycleState(
+  sessionId: string,
+  event: "session_new" | "session_load" | "session_refresh",
+  priorState?: SessionSkillLifecycleState,
+  candidates: readonly SkillCandidate[] = [],
+  ownedSkillRoot = "/opt/air/skills",
+): SessionSkillLifecycleState {
+  const nextGenNumber = priorState
+    ? (parseInt(priorState.resourceGeneration.replace(/^gen-/, ""), 10) || 0) + 1
+    : 1;
+  const currentGen = `gen-${nextGenNumber}`;
+
+  const activeSkills: CriticalSkillSelectionRecord[] = [];
+  for (const cand of candidates) {
+    const sel = evaluateCriticalSkillSelection(cand.skillId, cand, {
+      ownedSkillRoot,
+      currentSessionGenerationId: currentGen,
+      currentSessionId: sessionId,
+      candidateSessionId: sessionId,
+      isReadOnlyRoot: true,
+    });
+    activeSkills.push(sel);
+  }
+
+  return {
+    sessionId,
+    resourceGeneration: currentGen,
+    activeSkills,
+    lifecycleEvent: event,
   };
 }
 

@@ -8,4 +8,7 @@ export {
   type CriticalSkillSelectionRecord,
   type EvaluateCriticalSkillOptions,
   evaluateCriticalSkillSelection,
+  PINNED_CRITICAL_SKILLS,
+  type SessionSkillLifecycleState,
+  transitionSkillLifecycleState,
 } from "../discovery-guard.ts";

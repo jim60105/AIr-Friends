@@ -6,10 +6,13 @@ import {
   evaluateCriticalSkillSelection,
   evaluateOwnedModuleOwnership,
   formatDiscoverySessionError,
+  PINNED_CRITICAL_SKILLS,
   preImportExclusionGate,
+  transitionSkillLifecycleState,
 } from "../../src/acp/omp/discovery-guard.ts";
 import { OMP_TRUSTED_EXTENSION_PATH, ompLaunchCwd } from "../../src/utils/omp-paths.ts";
 import type { SkillCandidate } from "../../src/acp/omp/compatibility-contracts.ts";
+import type { CanonicalTarget } from "../../src/acp/filesystem-roots.ts";
 
 Deno.test("Task 4.1: Table-driven exclusion tests over each audited surface", () => {
   const baseRoot = "/opt/air";
@@ -18,11 +21,15 @@ Deno.test("Task 4.1: Table-driven exclusion tests over each audited surface", ()
 
   // Fixture importer spy: counts how many candidate modules were imported
   let importAttempts = 0;
-  const importerSpy = (_modulePath: string) => {
+  const fixtureCandidates = [
+    "/workspace/project/.omp/tools/bad.ts",
+    "/workspace/plugins/malicious/index.ts",
+    "/workspace/node_modules/dep/index.ts",
+  ];
+  const _importerSpy = (modulePath: string) => {
     importAttempts++;
-    throw new Error("Importer spy should never be invoked during discovery exclusion");
+    throw new Error(`Forbidden candidate import attempted: ${modulePath}`);
   };
-  void importerSpy;
 
   const decisionInput: DiscoveryDecisionInput = {
     baseRoot,
@@ -36,7 +43,16 @@ Deno.test("Task 4.1: Table-driven exclusion tests over each audited surface", ()
     escapingLinkedRoots: ["/opt/air/omp-agent/restricted/escape-link"],
   };
 
+  // Run exclusion decision without invoking importer on any candidate
   const decision = computeDiscoveryDecision(decisionInput);
+
+  for (const cand of fixtureCandidates) {
+    // Assert candidate is listed in excludedRoots rather than imported
+    const isExcluded = decision.excludedRoots.some((r) => cand.startsWith(r.path));
+    assertEquals(isExcluded, true);
+    // Importer spy is never invoked
+  }
+  assertEquals(importAttempts, 0);
 
   // Verify all 7 surfaces present
   assertEquals(decision.surfaces.length, 7);
@@ -73,9 +89,6 @@ Deno.test("Task 4.1: Table-driven exclusion tests over each audited surface", ()
     true,
   );
 
-  // Importer spy recorded zero import attempts
-  assertEquals(importAttempts, 0);
-
   // Verify decision is frozen deeply
   assertEquals(Object.isFrozen(decision), true);
   assertEquals(Object.isFrozen(decision.surfaces), true);
@@ -83,7 +96,7 @@ Deno.test("Task 4.1: Table-driven exclusion tests over each audited surface", ()
   assertEquals(Object.isFrozen(decision.blockers), true);
 });
 
-Deno.test("Task 4.2: Owned-module ownership tests", () => {
+Deno.test("Task 4.2: Owned-module ownership tests with CanonicalTarget and reasons", () => {
   const baseRoot = "/opt/air";
   const trustedPath = `${baseRoot}/${OMP_TRUSTED_EXTENSION_PATH}`;
 
@@ -94,7 +107,46 @@ Deno.test("Task 4.2: Owned-module ownership tests", () => {
   });
   assertEquals(ownedRes.trusted, true);
 
-  // 2. Byte-identical copy in workspace / HOME / package-cache paths is untrusted
+  // 1b. With row 2 CanonicalTarget inside shared role
+  const mockSharedTarget: CanonicalTarget = {
+    acpSessionId: "session-1",
+    sessionContextGeneration: "1",
+    roles: ["shared"],
+    rootIdentities: [],
+    normalizedInput: trustedPath,
+    canonicalTarget: trustedPath,
+    rootRelativePath: OMP_TRUSTED_EXTENSION_PATH,
+    targetType: "file",
+    observedSymlinks: [],
+  };
+  const targetOwnedRes = evaluateOwnedModuleOwnership(trustedPath, {
+    baseRoot,
+    mode: "restricted",
+    canonicalTarget: mockSharedTarget,
+  });
+  assertEquals(targetOwnedRes.trusted, true);
+
+  // 2. CanonicalTarget in untrusted workspace role is untrusted
+  const mockWorkspaceTarget: CanonicalTarget = {
+    acpSessionId: "session-1",
+    sessionContextGeneration: "1",
+    roles: ["workspace"],
+    rootIdentities: [],
+    normalizedInput: "/workspace/app/index.ts",
+    canonicalTarget: "/workspace/app/index.ts",
+    rootRelativePath: "index.ts",
+    targetType: "file",
+    observedSymlinks: [],
+  };
+  const workspaceTargetRes = evaluateOwnedModuleOwnership("/workspace/app/index.ts", {
+    baseRoot,
+    mode: "restricted",
+    canonicalTarget: mockWorkspaceTarget,
+  });
+  assertEquals(workspaceTargetRes.trusted, false);
+  assertEquals(workspaceTargetRes.failureReason, "outside_roots");
+
+  // 3. Byte-identical copy in workspace / HOME / package-cache paths is untrusted
   const workspaceCopy = evaluateOwnedModuleOwnership("/workspace/app/index.ts", {
     baseRoot,
     mode: "restricted",
@@ -116,7 +168,7 @@ Deno.test("Task 4.2: Owned-module ownership tests", () => {
   assertEquals(cacheCopy.trusted, false);
   assertEquals(cacheCopy.failureReason, "outside_roots");
 
-  // 3. Candidate matching critical skill or tool name is untrusted by name
+  // 4. Candidate matching critical skill or tool name is untrusted by name
   const nameOnlyMatch = evaluateOwnedModuleOwnership("/tmp/skill.ts", {
     baseRoot,
     mode: "restricted",
@@ -131,7 +183,7 @@ Deno.test("Task 4.2: Owned-module ownership tests", () => {
   assertEquals(toolNameMatch.trusted, false);
   assertEquals(toolNameMatch.failureReason, "trusted_identity_mismatch");
 
-  // 4. Symlink escaping the owned canonical root is untrusted with symlink_escape
+  // 5. Symlink escaping the owned canonical root is untrusted with symlink_escape
   const escapingSymlink = evaluateOwnedModuleOwnership(`${baseRoot}/link.ts`, {
     baseRoot,
     mode: "restricted",
@@ -141,7 +193,7 @@ Deno.test("Task 4.2: Owned-module ownership tests", () => {
   assertEquals(escapingSymlink.trusted, false);
   assertEquals(escapingSymlink.failureReason, "symlink_escape");
 
-  // 5. Mode-independence: restricted vs native-yolo yields identical trust verdict
+  // 6. Mode-independence: restricted vs native-yolo yields identical trust verdict
   const restrictedResult = evaluateOwnedModuleOwnership(trustedPath, {
     baseRoot,
     mode: "restricted",
@@ -154,10 +206,13 @@ Deno.test("Task 4.2: Owned-module ownership tests", () => {
   assertEquals(restrictedResult.canonicalPath, yoloResult.canonicalPath);
 });
 
-Deno.test("Task 4.3: Critical-skill ownership decision-table tests", () => {
+Deno.test("Task 4.3: Critical-skill ownership decision-table and lifecycle tests", () => {
   const ownedSkillRoot = "/opt/air/skills";
   const currentSessionGenerationId = "gen-100";
   const currentSessionId = "session-alpha";
+
+  // Verify pinned skills dictionary exists
+  assertEquals(PINNED_CRITICAL_SKILLS["review"], "review/SKILL.md");
 
   // 1. Owned canonical selection wins over same-name workspace/project candidate
   const ownedCandidate: SkillCandidate = {
@@ -192,32 +247,27 @@ Deno.test("Task 4.3: Critical-skill ownership decision-table tests", () => {
   });
   assertEquals(workspaceSelection.authoritative, false);
 
-  // 2. Ordinary skills remain enabled (no global disable, no new key needed)
-  // Non-critical ordinary skills are not blocked by the critical skill contract
-  assertEquals(ownedSelection.authoritative, true);
-
-  // 3. Ownership holds across new/load/refresh event fixtures with fresh generation
-  const refreshedGenerationId = "gen-101";
-  const refreshedCandidate: SkillCandidate = {
+  // 2. Exact filename rejection: NOT-SKILL.md rejected even within owned root
+  const wrongFilenameCandidate: SkillCandidate = {
     skillId: "review",
-    resolvedPath: `${ownedSkillRoot}/review/SKILL.md`,
-    canonicalPath: `${ownedSkillRoot}/review/SKILL.md`,
+    resolvedPath: `${ownedSkillRoot}/review/NOT-SKILL.md`,
+    canonicalPath: `${ownedSkillRoot}/review/NOT-SKILL.md`,
     source: "deployment_owned",
-    sessionGenerationId: refreshedGenerationId,
+    sessionGenerationId: currentSessionGenerationId,
   };
-  const refreshSelection = evaluateCriticalSkillSelection("review", refreshedCandidate, {
+  const wrongFileSelection = evaluateCriticalSkillSelection("review", wrongFilenameCandidate, {
     ownedSkillRoot,
-    currentSessionGenerationId: refreshedGenerationId,
+    currentSessionGenerationId,
     currentSessionId,
     candidateSessionId: currentSessionId,
     isReadOnlyRoot: true,
   });
-  assertEquals(refreshSelection.authoritative, true);
+  assertEquals(wrongFileSelection.authoritative, false);
 
-  // 4. Stale-generation candidate rejects
+  // 3. Stale-generation candidate rejects
   const staleSelection = evaluateCriticalSkillSelection("review", ownedCandidate, {
     ownedSkillRoot,
-    currentSessionGenerationId: refreshedGenerationId, // session moved to gen-101, candidate has gen-100
+    currentSessionGenerationId: "gen-101",
     currentSessionId,
     candidateSessionId: currentSessionId,
     isReadOnlyRoot: true,
@@ -225,16 +275,36 @@ Deno.test("Task 4.3: Critical-skill ownership decision-table tests", () => {
   assertEquals(staleSelection.authoritative, false);
   assertEquals(staleSelection.reason.includes("Stale session generation ID"), true);
 
-  // 5. Foreign-session snapshot rejects
+  // 4. Foreign-session snapshot rejects
   const foreignSelection = evaluateCriticalSkillSelection("review", ownedCandidate, {
     ownedSkillRoot,
     currentSessionGenerationId,
     currentSessionId,
-    candidateSessionId: "session-beta", // foreign session
+    candidateSessionId: "session-beta",
     isReadOnlyRoot: true,
   });
   assertEquals(foreignSelection.authoritative, false);
   assertEquals(foreignSelection.reason.includes("Foreign session snapshot rejected"), true);
+
+  // 5. Lifecycle state transitions across new, load, and refresh
+  const sNew = transitionSkillLifecycleState(currentSessionId, "session_new", undefined, [
+    { ...ownedCandidate, sessionGenerationId: "gen-1" },
+  ]);
+  assertEquals(sNew.resourceGeneration, "gen-1");
+  assertEquals(sNew.lifecycleEvent, "session_new");
+  assertEquals(sNew.activeSkills[0].authoritative, true);
+
+  const sLoad = transitionSkillLifecycleState(currentSessionId, "session_load", sNew, [
+    { ...ownedCandidate, sessionGenerationId: "gen-2" },
+  ]);
+  assertEquals(sLoad.resourceGeneration, "gen-2");
+  assertEquals(sLoad.lifecycleEvent, "session_load");
+
+  const sRefresh = transitionSkillLifecycleState(currentSessionId, "session_refresh", sLoad, [
+    { ...ownedCandidate, sessionGenerationId: "gen-3" },
+  ]);
+  assertEquals(sRefresh.resourceGeneration, "gen-3");
+  assertEquals(sRefresh.lifecycleEvent, "session_refresh");
 });
 
 Deno.test("Task 4.4: Fail-closed and honesty gate tests", () => {
@@ -271,7 +341,6 @@ Deno.test("Task 4.4: Fail-closed and honesty gate tests", () => {
   assertEquals(criticalSkillSelectionGate.userDecisionRequired, true);
 
   // 3. Synthetic positive fixture cannot clear either gate
-  // Passing mock decision test does not alter honesty gate
   assertEquals(preImportExclusionGate.status, "unresolved");
   assertEquals(criticalSkillSelectionGate.status, "unresolved");
 });
