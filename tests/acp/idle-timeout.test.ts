@@ -7,6 +7,7 @@ import { SkillRegistry } from "@skills/registry.ts";
 import { MemoryStore } from "@core/memory-store.ts";
 import { WorkspaceManager } from "@core/workspace-manager.ts";
 import type { IdleTimeoutConfig } from "../../src/types/config.ts";
+import { createFilesystemTestCalls } from "./filesystem-test-calls.ts";
 
 const createTestLogger = (): Logger => {
   return new Logger("test", { level: LogLevel.FATAL });
@@ -183,9 +184,11 @@ Deno.test("ChatbotClient - readTextFile updates activity timestamp", async () =>
       userId: "123",
       channelId: "456",
       isDM: false,
+      nativeCalls: createFilesystemTestCalls(),
     });
 
     const testFile = `${tempDir}/test.txt`;
+    client.setSessionContext("test-session", { cwd: tempDir, shellSessionId: "skill-session" });
     await Deno.writeTextFile(testFile, "test content");
 
     await new Promise((r) => setTimeout(r, 20));
@@ -210,14 +213,17 @@ Deno.test("ChatbotClient - writeTextFile updates activity timestamp", async () =
       userId: "123",
       channelId: "456",
       isDM: false,
+      nativeCalls: createFilesystemTestCalls(),
     });
+    client.setSessionContext("test-session", { cwd: tempDir, shellSessionId: "skill-session" });
+    await Deno.mkdir(`${tempDir}/tmp/skill-session`, { recursive: true });
 
     await new Promise((r) => setTimeout(r, 20));
     const before = client.getLastActivityTimestamp();
     await new Promise((r) => setTimeout(r, 20));
 
     await client.writeTextFile({
-      path: `${tempDir}/write-test.txt`,
+      path: `${tempDir}/tmp/skill-session/write-test.txt`,
       content: "test",
       sessionId: "test-session",
     });
