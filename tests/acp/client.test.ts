@@ -5,17 +5,20 @@ import {
   ALLOWED_READ_EXTENSIONS,
   buildSkillAutoApproveList,
   ChatbotClient,
-  commandWithoutFdRedirects,
-  containsShellOperators,
-  genericCommandRejectionReason,
   isWithinDir,
   matchesCommandPrefix,
   matchesScriptPath,
   MAX_PERMISSION_REJECTION_FIELD_LENGTH,
   sanitizeRejectionField,
   type SkillAutoApproveList,
-  splitCommandSegments,
 } from "@acp/client.ts";
+import {
+  commandWithoutFdRedirects,
+  containsShellOperators,
+  splitCommandSegments,
+} from "@acp/command-syntax.ts";
+import { genericCommandRejectionReason } from "@acp/command-path-policy.ts";
+import { createCommandFixture } from "./command-test-fixture.ts";
 import * as acp from "@agentclientprotocol/sdk";
 import { Logger, LogLevel } from "@utils/logger.ts";
 import { SkillRegistry } from "@skills/registry.ts";
@@ -1982,40 +1985,172 @@ Deno.test("F12 D1 commandWithoutFdRedirects - keeps non-exact / non-standard red
 
 // --- F12 D1: genericCommandRejectionReason unit tests ---
 
-Deno.test("F12 D1 genericCommandRejectionReason - distinct causes", () => {
-  const base = "/tmp/ws";
-  const dirs = [base];
-  const home = "/home/deno";
-  const dataRoot = `${base}/tmp/opencode-data`;
-  const xdg = `${dataRoot}/sess`;
-  // Approved.
-  assertEquals(
-    genericCommandRejectionReason(`cat ${base}/x.md 2>&1`, base, dirs, home, xdg, dataRoot),
-    null,
-  );
-  // Shell operator.
-  assertEquals(
-    genericCommandRejectionReason(`cat ${base}/x.md 2>/dev/null`, base, dirs, home, xdg, dataRoot),
-    "shell_operator",
-  );
-  // First token not allowed.
-  assertEquals(
-    genericCommandRejectionReason(`python ${base}/x.py`, base, dirs, home, xdg, dataRoot),
-    "first_token_not_allowed",
-  );
-  // Dangerous flag.
-  assertEquals(
-    genericCommandRejectionReason(`find ${base} -delete`, base, dirs, home, xdg, dataRoot),
-    "dangerous_flag",
-  );
-  // Path outside boundary.
-  assertEquals(
-    genericCommandRejectionReason(`cat /etc/passwd 2>&1`, base, dirs, home, xdg, dataRoot),
-    "path_outside_boundary",
-  );
+Deno.test("F12 D1 genericCommandRejectionReason - distinct causes", async () => {
+  const fixture = createCommandFixture();
+  const base = fixture.workspace;
+  try {
+    // Approved.
+    assertEquals(
+      await genericCommandRejectionReason(`cat ${base}/x.md 2>&1`, fixture.context),
+      null,
+    );
+    // Shell operator.
+    assertEquals(
+      await genericCommandRejectionReason(`cat ${base}/x.md 2>/dev/null`, fixture.context),
+      "shell_operator",
+    );
+    // First token not allowed.
+    assertEquals(
+      await genericCommandRejectionReason(`python ${base}/x.py`, fixture.context),
+      "first_token_not_allowed",
+    );
+    // Dangerous flag.
+    assertEquals(
+      await genericCommandRejectionReason(`find ${base} -delete`, fixture.context),
+      "dangerous_flag",
+    );
+    // Path outside boundary.
+    assertEquals(
+      await genericCommandRejectionReason(`cat /etc/passwd 2>&1`, fixture.context),
+      "path_outside_boundary",
+    );
+  } finally {
+    fixture.cleanup();
+  }
 });
 
 // --- Integration tests: attack vector rejection through requestPermission ---
+
+Deno.test("canonical generic permission gate approves own file, rejects escapes once, and exempts YOLO", async () => {
+  const fixture = createCommandFixture();
+  try {
+    Deno.symlinkSync(join(fixture.sibling, "secret.md"), join(fixture.workspace, "escape.md"));
+    const config: ClientConfig = {
+      workingDir: fixture.workspace,
+      platform: "discord",
+      userId: "123",
+      channelId: "456",
+      isDM: false,
+      sessionId: "sess_own",
+    };
+    const client = createRegisteredClient(createTestSkillRegistry(), createTestLogger(), config, {
+      scriptPaths: new Set(),
+      commandPrefixes: new Set(),
+    });
+    const request = (command: string): acp.RequestPermissionRequest => ({
+      sessionId: "sess_own",
+      toolCall: {
+        title: "Execute shell command",
+        kind: "execute",
+        status: "pending",
+        content: [],
+        toolCallId: "canonical-command",
+        rawInput: { command },
+      },
+      options: [
+        { kind: "allow_once", optionId: "allow", name: "Allow once" },
+        { kind: "reject_once", optionId: "reject", name: "Reject once" },
+      ],
+    });
+    assertEquals((await client.requestPermission(request("cat notes.md"))).outcome, {
+      outcome: "selected",
+      optionId: "allow",
+    });
+    assertEquals(client.getRecentPermissionRejections(), []);
+    for (
+      const [command, reason] of [
+        ["cat escape.md", "rejected_generic_command_out_of_workspace"],
+        ["cat notes.md | wc", "rejected_generic_command_shell_operator"],
+        ["rm notes.md", "rejected_generic_command_first_token_not_allowed"],
+        ["find . -delete", "rejected_generic_command_dangerous_flag"],
+        [`cat ${"x".repeat(2000)} /etc/passwd`, "rejected_generic_command_out_of_workspace"],
+      ]
+    ) {
+      client.clearPermissionRejections();
+      assertEquals((await client.requestPermission(request(command))).outcome, {
+        outcome: "selected",
+        optionId: "reject",
+      });
+      const records = client.getRecentPermissionRejections();
+      assertEquals(records.length, 1);
+      assertEquals(records[0].reason, reason);
+      assertEquals(
+        (records[0].commandOrPath?.length ?? 0) <= MAX_PERMISSION_REJECTION_FIELD_LENGTH,
+        true,
+      );
+    }
+    client.clearPermissionRejections();
+    const unregistered = request("cat notes.md");
+    unregistered.sessionId = "unregistered";
+    assertEquals((await client.requestPermission(unregistered)).outcome, {
+      outcome: "selected",
+      optionId: "reject",
+    });
+    assertEquals(client.getRecentPermissionRejections().length, 1);
+    const yolo = createRegisteredClient(createTestSkillRegistry(), createTestLogger(), {
+      ...config,
+      yolo: true,
+    });
+    assertEquals((await yolo.requestPermission(request("cat escape.md"))).outcome, {
+      outcome: "selected",
+      optionId: "allow",
+    });
+    assertEquals(yolo.getRecentPermissionRejections(), []);
+  } finally {
+    fixture.cleanup();
+  }
+});
+
+Deno.test("canonical generic permission cannot approve a replaced session generation", async () => {
+  const fixture = createCommandFixture();
+  const originalRealPath = Deno.realPath;
+  try {
+    const client = createRegisteredClient(createTestSkillRegistry(), createTestLogger(), {
+      workingDir: fixture.workspace,
+      sessionId: "sess_own",
+      platform: "discord",
+      userId: "123",
+      channelId: "456",
+      isDM: false,
+    }, { scriptPaths: new Set(), commandPrefixes: new Set() });
+    let replaced = false;
+    Deno.realPath = (path) => {
+      if (!replaced && path === fixture.workspace) {
+        replaced = true;
+        client.setSessionContext("sess_own", {
+          cwd: fixture.sibling,
+          shellSessionId: "sess_own",
+        });
+      }
+      return originalRealPath(path);
+    };
+    const response = await client.requestPermission({
+      sessionId: "sess_own",
+      toolCall: {
+        title: "Execute shell command",
+        kind: "execute",
+        status: "pending",
+        content: [],
+        toolCallId: "generation-change",
+        rawInput: { command: "cat notes.md" },
+      },
+      options: [
+        { kind: "allow_once", optionId: "allow", name: "Allow once" },
+        { kind: "reject_once", optionId: "reject", name: "Reject once" },
+      ],
+    });
+    assertEquals(replaced, true);
+    assertEquals(response.outcome, { outcome: "selected", optionId: "reject" });
+    assertEquals(client.getRecentPermissionRejections().length, 1);
+    assertEquals(
+      client.getRecentPermissionRejections()[0].reason,
+      "rejected_generic_command_out_of_workspace",
+    );
+  } finally {
+    Deno.realPath = originalRealPath;
+    fixture.cleanup();
+  }
+});
 
 Deno.test("ChatbotClient - rejects && chain injection in skill command", async () => {
   const tempDir = Deno.makeTempDirSync();

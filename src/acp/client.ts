@@ -1,7 +1,7 @@
 // src/acp/client.ts
 
 import * as acp from "@agentclientprotocol/sdk";
-import { dirname, join, resolve, SEPARATOR } from "@std/path";
+import { join, resolve, SEPARATOR } from "@std/path";
 import type { SkillRegistry } from "@skills/registry.ts";
 import type { Logger } from "@utils/logger.ts";
 import type { ClientConfig, PermissionRejection } from "./types.ts";
@@ -9,10 +9,18 @@ import type { SkillContext } from "@skills/types.ts";
 import type { SessionAuditWriter } from "@core/audit-logger.ts";
 import { sha256Hash } from "@utils/hash.ts";
 import {
-  opencodeDataRoot,
-  opencodeToolOutputDir,
-  sessionXdgDataHome,
-} from "@utils/opencode-paths.ts";
+  commandWithoutFdRedirects,
+  containsShellOperators,
+  containsUnquotedShellExpansion,
+  FD_REDIRECT_TOKEN_PATTERN,
+  splitCommandSegments,
+  tokenizeShellCommand,
+} from "./command-syntax.ts";
+import {
+  type CommandGateContext,
+  type GenericCommandRejection,
+  genericCommandRejectionReason,
+} from "./command-path-policy.ts";
 import {
   canonicalizeSessionRoots,
   type CanonicalSessionRoots,
@@ -167,283 +175,6 @@ export function isWithinDir(path: string, base: string): boolean {
   }
 }
 
-/**
- * Check if a command string contains shell operators that could enable injection.
- * Rejects commands containing: ; | & ` ( ) > < # and newlines.
- *
- * Quote-aware (F12 D2 chaining rule): the command-sequence / redirection / comment
- * operators `;` `|` `&` `>` `<` `#` and newlines are only operators OUTSIDE quotes —
- * inside single or double quotes they are literal data that cannot chain or
- * redirect (a quoted `;` is an argument, a quoted `>` is a file name). Backticks
- * and `$()`-parens are detected EVEN INSIDE double quotes (command substitution
- * executes there); only single quotes make them literal.
- *
- * Note: `$` is intentionally allowed for shell variable expansion ($HOME, ${VAR}).
- * Command substitution `$()` is still caught because `(` is rejected.
- */
-export function containsShellOperators(cmd: string): boolean {
-  let quote: "'" | '"' | null = null;
-  for (let i = 0; i < cmd.length; i++) {
-    const ch = cmd[i];
-
-    // A literal newline is NEVER safe, in any quote state: unquoted it separates
-    // commands, and a backslash-escaped newline (`\<newline>`) is a line
-    // continuation that bash silently removes — `cat \<newline>/etc/passwd`
-    // executes `cat /etc/passwd`. Checked before escape/quote handling so no
-    // escape sequence can hide it.
-    if (ch === "\n") return true;
-
-    if (quote === "'") {
-      if (ch === "'") quote = null;
-      continue; // single-quoted text is fully literal
-    }
-
-    if (quote === '"') {
-      if (ch === "\\") {
-        // A backslash-escaped newline inside double quotes is also a line
-        // continuation — reject before the escape skips it.
-        if (cmd[i + 1] === "\n") return true;
-        i++;
-        continue;
-      }
-      if (ch === '"') {
-        quote = null;
-        continue;
-      }
-      // Backtick and `$(` execute even inside double quotes.
-      if (ch === "`" || ch === "(" || ch === ")") return true;
-      continue;
-    }
-
-    if (ch === "\\") {
-      // A backslash-escaped newline is a line continuation (the newline is
-      // silently removed) — reject before the escape skips it.
-      if (cmd[i + 1] === "\n") return true;
-      i++; // escaped char is literal
-      continue;
-    }
-    if (ch === "'") {
-      quote = "'";
-      continue;
-    }
-    if (ch === '"') {
-      quote = '"';
-      continue;
-    }
-    if (ch === "`" || ";|&()><#".includes(ch)) return true;
-  }
-  return false;
-}
-
-/**
- * Quote-aware whitespace tokenizer: splits a command on space/tab boundaries that
- * appear OUTSIDE quotes, keeping each quoted string (including its quotes) as ONE
- * token. Shell-correct backslash escapes are honored inside double quotes and
- * outside quotes (`\ ` → escaped space is part of the token).
- *
- * Unlike a naive `split(/\s+/)`, this preserves quote context per token so the
- * shell-expansion scanner and the path checks can tell quoted `$`/`{`/operators
- * from unquoted ones (F12 D2 chaining rule + F12 D5).
- */
-export function tokenizeShellCommand(cmd: string): string[] {
-  const tokens: string[] = [];
-  let current = "";
-  let quote: "'" | '"' | null = null;
-  let i = 0;
-  const n = cmd.length;
-
-  while (i < n) {
-    const ch = cmd[i];
-
-    if (quote === "'") {
-      if (ch === "'") quote = null;
-      current += ch;
-      i++;
-      continue;
-    }
-
-    if (quote === '"') {
-      if (ch === "\\" && i + 1 < n) {
-        current += ch + cmd[i + 1];
-        i += 2;
-        continue;
-      }
-      if (ch === '"') quote = null;
-      current += ch;
-      i++;
-      continue;
-    }
-
-    if (ch === "\\") {
-      if (i + 1 < n) {
-        current += ch + cmd[i + 1];
-        i += 2;
-      } else {
-        current += ch;
-        i++;
-      }
-      continue;
-    }
-    if (ch === "'" || ch === '"') {
-      quote = ch;
-      current += ch;
-      i++;
-      continue;
-    }
-    if (ch === " " || ch === "\t") {
-      if (current.length > 0) {
-        tokens.push(current);
-        current = "";
-      }
-      i++;
-      continue;
-    }
-    current += ch;
-    i++;
-  }
-
-  if (current.length > 0) tokens.push(current);
-  return tokens;
-}
-
-/**
- * Whole-token fd-to-fd redirection tolerated by the permission gates (F12 D1).
- *
- * A whitespace-delimited token that is EXACTLY `N>&M`, where `N` is one-or-more
- * decimal digits and `M` (the SOURCE descriptor) is a standard stream `1` or `2`
- * (e.g. `2>&1`, `1>&2`, `3>&1`), duplicates an already-open standard stdout/stderr
- * capture pipe and references no path on disk. Restricting the source descriptor to
- * the always-connected standard streams keeps the tolerance provably non-escaping:
- * an unchecked `1>&3`-style redirect could write into a harness-inherited high
- * descriptor the gate cannot see, so non-standard sources stay rejected.
- */
-export const FD_REDIRECT_TOKEN_PATTERN = /^\d+>&[12]$/;
-
-/**
- * Remove tolerated fd-to-fd redirection tokens from a command for the shell-operator
- * check and path-argument scan. Splits on shell TOKEN separators (space/tab only —
- * NOT newline, which is a shell command separator and must survive for the operator
- * check), drops tokens matching {@link FD_REDIRECT_TOKEN_PATTERN} in full, and rejoins
- * with single spaces.
- *
- * Only an UNQUOTED, exact, whitespace-delimited token with a standard-stream source
- * is dropped. Glued forms (`2>&1&&cat`, `2>&1;cat`), digit-prefixed filenames a shell
- * opens for writing (`2>&1/tmp/x`, `2>&1x`), file redirects (`2>/dev/null`),
- * non-standard source descriptors (`1>&3`, `9>&99`), and newline-separated second
- * commands (`2>&1\nrm victim`) all survive the filter, so their residual operator/path
- * is still detected. The real command still executes with the redirection (OpenCode
- * runs the original) — this only relaxes the permission decision.
- */
-export function commandWithoutFdRedirects(cmd: string): string {
-  return cmd.trim().split(/[ \t]+/)
-    .filter((t) => t.length > 0 && !FD_REDIRECT_TOKEN_PATTERN.test(t))
-    .join(" ");
-}
-
-/**
- * Quote-aware split of a multi-command bash invocation into its non-empty command
- * segments (F12 D2 chaining rule).
- *
- * Splits on the command-sequence operators `;`, `&&`, `||` ONLY when the operator
- * text appears OUTSIDE quotes:
- * - `'...'` single quotes are fully literal (no escapes).
- * - `"..."` double quotes honor shell-correct backslash escapes: `\` before
- *   `"` / `\` / `$` / backtick skips the next character (conservatively, any
- *   escaped character is skipped — a mis-escape can only over-reject, never
- *   under-reject, because every segment still passes the full single-command gate).
- * - `\` outside quotes escapes the next character.
- *
- * Segments are trimmed and empty ones are dropped (`; ;`, leading/trailing
- * separators). An unbalanced quote disables splitting entirely (returns `[cmd]`
- * — the single-command gate then evaluates the whole string; an unbalanced quote
- * can only cause a runtime shell error, never an escape). A command containing no
- * separator returns `[cmd]` byte-for-byte, so single-command behavior is
- * identical to today. Pipes `|`, backgrounding `&`, and newlines are NOT splitting
- * boundaries — a single `&`/`|` is left in the segment and rejected downstream.
- */
-export function splitCommandSegments(cmd: string): string[] {
-  const segments: string[] = [];
-  let current = "";
-  let quote: "'" | '"' | null = null;
-  let hasSeparator = false;
-  let i = 0;
-  const n = cmd.length;
-
-  while (i < n) {
-    const ch = cmd[i];
-
-    if (quote === "'") {
-      if (ch === "'") quote = null;
-      current += ch;
-      i++;
-      continue;
-    }
-
-    if (quote === '"') {
-      if (ch === "\\" && i + 1 < n) {
-        current += ch + cmd[i + 1];
-        i += 2;
-        continue;
-      }
-      if (ch === '"') quote = null;
-      current += ch;
-      i++;
-      continue;
-    }
-
-    // Unquoted state.
-    if (ch === "\\") {
-      if (i + 1 < n) {
-        current += ch + cmd[i + 1];
-        i += 2;
-      } else {
-        current += ch;
-        i++;
-      }
-      continue;
-    }
-    if (ch === "'" || ch === '"') {
-      quote = ch;
-      current += ch;
-      i++;
-      continue;
-    }
-    if (ch === ";") {
-      hasSeparator = true;
-      const trimmed = current.trim();
-      if (trimmed.length > 0) segments.push(trimmed);
-      current = "";
-      i++;
-      continue;
-    }
-    if (ch === "&" || ch === "|") {
-      if (cmd[i + 1] === ch) {
-        hasSeparator = true;
-        const trimmed = current.trim();
-        if (trimmed.length > 0) segments.push(trimmed);
-        current = "";
-        i += 2;
-        continue;
-      }
-      // Single `&` / `|` is not a splitting boundary; it survives in the segment
-      // and is rejected by the shell-operator check.
-      current += ch;
-      i++;
-      continue;
-    }
-
-    current += ch;
-    i++;
-  }
-
-  if (quote !== null) return [cmd]; // unbalanced quotes → splitting disabled
-  const trimmed = current.trim();
-  if (trimmed.length > 0) segments.push(trimmed);
-  // No separator found → byte-identical single-command evaluation.
-  if (!hasSeparator && segments.length <= 1 && segments[0] === cmd) return [cmd];
-  return segments;
-}
-
 /** Interpreters that may precede a skill script as the launcher (e.g. `deno run <script>`). */
 const ALLOWED_SCRIPT_INTERPRETERS = new Set(["deno"]);
 
@@ -584,513 +315,6 @@ export function matchesCommandPrefix(cmd: string, prefix: string): boolean {
     if (referencesOutOfWorkspacePath(tokens[i])) return false;
   }
   return true;
-}
-
-/**
- * Generic-command allow-list (F12 D2): the search/read and document/media/archive
- * utilities the restricted profile exposes. Because `agent-config/opencode.json` routes
- * these tools to `"ask"` (not `"allow"`), OpenCode forwards their execution to this ACP
- * gate; without an explicit allow-list they would hit default-deny and break every
- * legitimate in-workspace use. `agent-browser` is deliberately NOT here — its `file://`
- * argument is rejected by `referencesOutOfWorkspacePath` (D3) and its network behavior is
- * F14's concern. Interpreters and mutating system tools (`python`, `git`, `rm`, `mv`, `dd`,
- * `chmod`, `mkdir`, ...) are NOT here and remain default-deny.
- */
-export const GENERIC_COMMAND_ALLOWLIST: ReadonlySet<string> = new Set([
-  // Plain search/read/stat primitives whose ONLY file access is via ordinary path arguments
-  // (which the workspace-containment check below can see). Tools with their own file-reading
-  // argument DSL, an argument/response indirection file, an embedded protocol/coder, or an
-  // -exec/-delete/preprocessor code-exec facility are deliberately EXCLUDED — a lexical
-  // path check cannot bound those (e.g. ImageMagick `caption:@/proc/1/environ`, `exiftool -@`
-  // argfile, `ffmpeg -f lavfi -i movie=/etc/passwd`, `pandoc --lua-filter`, `7zz -o/etc`,
-  // archive path traversal). Those tools are only safe under the F12 D4 bwrap confinement,
-  // which contains them regardless of argv; until confinement is enabled+verified they stay
-  // default-denied at this gate.
-  "rg",
-  "cat",
-  "head",
-  "tail",
-  "ls",
-  "find",
-  "wc",
-  "file",
-  "tree",
-  "jq",
-  "pdftotext",
-  "pdfinfo",
-  "pdfimages",
-  "pdftoppm",
-]);
-
-/**
- * Argument flags that turn an allow-listed tool into a code-execution or arbitrary-file
- * read/write primitive whose target is NOT an ordinary path token (so the workspace check
- * cannot see it). Presence of any of these rejects the whole command. Examples:
- *   `find . -exec cat {} +` / `find . -delete` / `find . -fprintf /etc/x %p`  (find)
- *   `rg --pre <cmd> pattern .`                                                  (rg preprocessor)
- */
-const DANGEROUS_GENERIC_FLAGS: ReadonlySet<string> = new Set([
-  "-exec",
-  "-execdir",
-  "-ok",
-  "-okdir",
-  "-delete",
-  "-fprintf",
-  "-fprint",
-  "-fprint0",
-  "-fls",
-  "--pre",
-  "-@",
-  "--files-from",
-  "-T",
-  "--lua-filter",
-  "--filter",
-]);
-
-/**
- * Names of the harness-set environment variables the permission gates treat as
- * KNOWN (expandable / recognizable). Everything else an unquoted `$` references
- * is rejected (F12 D5) because its expansion could resolve out-of-workspace.
- */
-const KNOWN_ENV_REFERENCES = new Set([
-  "HOME",
-  "XDG_DATA_HOME",
-  "TMPDIR",
-  "AGENT_WORKSPACE",
-  "SESSION_ID",
-]);
-
-/**
- * Scan a single argument token for shell expansions that could resolve to an
- * out-of-workspace path at runtime (F12 D5).
- *
- * Returns `true` (reject) when the token contains:
- * - an UNQUOTED `$VAR` / `${VAR}` reference whose name is not one of the
- *   harness-set variables (e.g. `$IFS/etc/passwd`, `${OTHER}/x`) — an unquoted
- *   expansion can be word-split into an out-of-workspace path; or
- * - an UNQUOTED brace-expansion token (`{...}` — e.g. `{safe,/etc/passwd}`),
- *   which can enumerate out-of-workspace paths; or
- * - a DOUBLE-QUOTED `$VAR` / `${VAR}` reference to a non-harness variable that
- *   BEGINS the token's path content (e.g. `"$X/etc/passwd"`, `"$X"`, `"$_"`,
- *   `"$@"`, `--flag="$X"`): a quoted expansion is not word-split, but an UNSET
- *   variable expands to empty, and an empty expansion followed by a literal
- *   `/...` or `..` suffix IS an absolute / traversal path (a set variable can
- *   also carry an absolute value directly).
- *
- * Returns `false` (allow) for `$`/`{`/`}` inside single quotes (fully literal),
- * for EMBEDDED double-quoted references (`"price $X"`, `"a$X"` — a literal
- * prefix keeps the expanded result relative, and embedded `..`/`/` after a
- * literal prefix still resolves in-workspace), and for references escaped with
- * `\` (literal). Quote state is tracked with shell-correct backslash escapes
- * inside double quotes. A `--flag=` prefix is normalized away before scanning
- * so an attached-option value is judged on its own path content.
- */
-export function containsUnquotedShellExpansion(token: string): boolean {
-  // Normalize an attached `--flag=value` prefix (mirrors genericArgWithinWorkspace):
-  // the flag itself is literal; only the value's path content matters.
-  let t = token;
-  const eq = t.indexOf("=");
-  if (eq !== -1 && t.startsWith("-")) t = t.substring(eq + 1);
-
-  let quote: "'" | '"' | null = null;
-  let i = 0;
-  const n = t.length;
-
-  while (i < n) {
-    const ch = t[i];
-
-    if (quote === "'") {
-      if (ch === "'") quote = null;
-      i++;
-      continue;
-    }
-
-    if (quote === '"') {
-      if (ch === "\\") {
-        i++;
-        continue;
-      }
-      if (ch === '"') {
-        quote = null;
-        i++;
-        continue;
-      }
-      if (ch === "$") {
-        const name = referenceNameAt(t, i);
-        // A known harness variable is expanded and containment-checked later.
-        // An unknown reference is allowed ONLY when embedded after literal text;
-        // at the token start (right after the opening quote) an unset or
-        // path-valued expansion can turn the whole token absolute/traversal.
-        if (!KNOWN_ENV_REFERENCES.has(name)) {
-          if (t[i - 1] === '"') return true;
-        }
-        // Skip past the reference (and its `${...}` closer when applicable).
-        if (name === "") {
-          i++;
-          continue;
-        }
-        if (t[i + 1] === "{") {
-          const close = t.indexOf("}", i + 2);
-          i = close === -1 ? i + 1 : close + 1;
-          continue;
-        }
-        i += name.length + 1;
-        continue;
-      }
-      i++;
-      continue;
-    }
-
-    if (ch === "\\") {
-      i += 2; // escaped char is literal
-      continue;
-    }
-    if (ch === "'") {
-      quote = "'";
-      i++;
-      continue;
-    }
-    if (ch === '"') {
-      quote = '"';
-      i++;
-      continue;
-    }
-    if (ch === "$") {
-      if (t[i + 1] === "{") {
-        const close = t.indexOf("}", i + 2);
-        if (close === -1) return true; // unterminated `${...` is still a reference
-        const name = t.substring(i + 2, close);
-        if (!KNOWN_ENV_REFERENCES.has(name)) return true;
-        i = close + 1;
-        continue;
-      }
-      let j = i + 1;
-      while (j < n && /[A-Za-z0-9_]/.test(t[j])) j++;
-      const name = t.substring(i + 1, j);
-      // An empty name (`$@`, `$*`, `$:` ...) or an unknown name is a reference
-      // whose expansion the gate cannot bound.
-      if (name === "" || !KNOWN_ENV_REFERENCES.has(name)) return true;
-      i = j;
-      continue;
-    }
-    if (ch === "{" || ch === "}") return true;
-    i++;
-  }
-  return false;
-}
-
-/**
- * Read the variable name of a `$NAME` / `${NAME}` reference at position `i`
- * (which points at the `$`). Returns the name, or "" for non-name forms
- * (`$@`, `$*`, `$:`, an unterminated `${...`).
- */
-function referenceNameAt(token: string, i: number): string {
-  if (token[i + 1] === "{") {
-    const close = token.indexOf("}", i + 2);
-    if (close === -1) return "";
-    return token.substring(i + 2, close);
-  }
-  let j = i + 1;
-  while (j < token.length && /[A-Za-z0-9_]/.test(token[j])) j++;
-  return token.substring(i + 1, j);
-}
-
-/**
- * Runtime values of the harness-set environment variables available to the agent
- * subprocess. Provided by the permission-gate caller (requestPermission) from the
- * session client config; used to expand `$TMPDIR` / `$AGENT_WORKSPACE` /
- * `$SESSION_ID` references in generic-command argument tokens before the
- * containment check.
- */
-export interface KnownEnvRuntime {
-  tmpDir?: string;
-  agentWorkspace?: string;
-  sessionId?: string;
-}
-
-/**
- * Expand harness-set environment references in a command argument token (F12 D5):
- * - leading `~` / `~/...` expand against `home`
- * - `$HOME`, `${HOME}`, `$XDG_DATA_HOME`, `${XDG_DATA_HOME}` anywhere in the token
- *   expand against `home` / `xdgDataHome`
- * - `$TMPDIR`, `${TMPDIR}`, `$AGENT_WORKSPACE`, `${AGENT_WORKSPACE}`, `$SESSION_ID`,
- *   `${SESSION_ID}` expand against the runtime values from `runtimeEnv`
- *
- * Returns the expanded token, or `undefined` when the token is home-anchored in an
- * unexpandable form (`~otheruser/...`, `~notexpanded`) or references a known
- * variable whose runtime value is unavailable (fail-closed: the gate never guesses
- * at an expansion). Expansion is applied AFTER quote stripping and `--flag=value`
- * splitting — including inside attached option values — so `-o$HOME/...` becomes
- * an attached absolute path and is subject to the attached-absolute-path
- * rejection, closing the attached-option escape hole. Unknown `$VAR` references
- * were already rejected by {@link containsUnquotedShellExpansion} before this
- * expansion runs.
- */
-function expandKnownEnvReferences(
-  token: string,
-  home: string,
-  xdgDataHome: string,
-  runtimeEnv?: KnownEnvRuntime,
-): string | undefined {
-  if (token === "~" || token.startsWith("~/")) {
-    return home + token.substring(1);
-  }
-  if (token.startsWith("~")) return undefined;
-
-  const references: Array<[string, string | undefined]> = [
-    ["${HOME}", home],
-    ["$HOME", home],
-    ["${XDG_DATA_HOME}", xdgDataHome],
-    ["$XDG_DATA_HOME", xdgDataHome],
-    ["${TMPDIR}", runtimeEnv?.tmpDir],
-    ["$TMPDIR", runtimeEnv?.tmpDir],
-    ["${AGENT_WORKSPACE}", runtimeEnv?.agentWorkspace],
-    ["$AGENT_WORKSPACE", runtimeEnv?.agentWorkspace],
-    ["${SESSION_ID}", runtimeEnv?.sessionId],
-    ["$SESSION_ID", runtimeEnv?.sessionId],
-  ];
-  let expanded = token;
-  for (const [ref, value] of references) {
-    if (expanded.includes(ref)) {
-      if (value === undefined) return undefined; // known var without runtime value → fail closed
-      expanded = expanded.split(ref).join(value);
-    }
-  }
-  return expanded;
-}
-
-/**
- * Determine whether a single command argument stays inside the allowed workspace dirs.
- *
- * The agent's cwd is the session workspace, so relative tokens (search patterns, numbers,
- * flags, relative file names) always resolve inside it and pass harmlessly. Only tokens
- * that can escape — URI schemes, home-anchored paths, absolute paths, and parent traversal
- * — are resolved and containment-checked against the allowed dirs. This is an
- * over-approximation (a non-path relative token is treated as a harmless in-workspace path),
- * which is safe because the decision only ever GRANTS in-workspace access.
- *
- * `dataRoot` is the session's OpenCode data area root (`{workspace}/tmp/opencode-data`) and
- * `xdgDataHome` is THIS session's own data home under it. Any path that resolves inside the
- * data area but outside the session's own data home is another session's data (or the shared
- * root listing) and is rejected — cross-session isolation for truncated tool outputs.
- *
- * `runtimeEnv` supplies the runtime values for the harness-set variable expansions
- * (`$TMPDIR`, `$AGENT_WORKSPACE`, `$SESSION_ID`; F12 D5).
- */
-function genericArgWithinWorkspace(
-  token: string,
-  base: string,
-  allowedDirs: string[],
-  home: string,
-  xdgDataHome: string,
-  dataRoot: string,
-  runtimeEnv?: KnownEnvRuntime,
-): boolean {
-  // F12 D5: an unquoted non-harness `$VAR` reference or unquoted brace token could
-  // expand to an out-of-workspace path at runtime — reject before normalization so
-  // quote state is still visible (quoted references stay allowed).
-  if (containsUnquotedShellExpansion(token)) return false;
-
-  let t = token;
-  const eq = t.indexOf("=");
-  if (eq !== -1 && t.startsWith("-")) t = t.substring(eq + 1);
-  t = t.replace(/^["']+/, "").replace(/["']+$/, "");
-  if (t.length === 0) return true;
-
-  // URI schemes cannot be safely resolved into the workspace.
-  if (/^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//.test(t)) return false;
-
-  // Home-anchored / harness-env tokens are expanded against the runtime values and then run
-  // through the same checks as literal paths; unexpandable forms are rejected outright.
-  const expanded = expandKnownEnvReferences(t, home, xdgDataHome, runtimeEnv);
-  if (expanded === undefined) return false;
-  t = expanded;
-
-  // Attached-value option: a `-`-prefixed token whose glued value is absolute or
-  // traversal-anchored (e.g. `-o/etc/cron.d`, `-f../sibling/file`, `-o../x`, `-oout/../x`).
-  // A value starting with `..` resolves against the cwd and escapes the workspace; a value
-  // starting with `/` is absolute; `/../` traverses back out. Bare flags (`-r`) and safe
-  // attached values (`-n5`, `-fprogram.jq`) pass. (The `--flag=value` form is already
-  // normalized above.)
-  if (
-    t.startsWith("-") &&
-    (/^-{1,2}[a-zA-Z][a-zA-Z0-9-]*\//.test(t) ||
-      /^-{1,2}[a-zA-Z][a-zA-Z0-9-]*\.\./.test(t) ||
-      t.includes("/../"))
-  ) {
-    return false;
-  }
-
-  // Absolute or relative (incl. `../`): resolve and require containment. `resolve()`
-  // normalizes traversal, so `a/../../etc` escaping the workspace is rejected here.
-  const resolved = t.startsWith("/") ? resolve(t) : resolve(base, t);
-  if (!allowedDirs.some((d) => isWithinDir(resolved, d))) return false;
-
-  // Cross-session isolation (F12): inside the OpenCode data area, only this session's
-  // own data home is readable. Sibling/previous sessions' data dirs are rejected even
-  // though they lexically resolve inside the workspace.
-  if (isWithinDir(resolved, dataRoot) && !isWithinDir(resolved, xdgDataHome)) {
-    return false;
-  }
-  return true;
-}
-
-/**
- * Reasons a generic command can be rejected by the generic-command gate (F12 D2).
- * `isApprovedGenericCommand` returns whether the decision is `null`; `requestPermission`
- * uses the first failing command's reason for cause-specific logging and auditing.
- */
-export type GenericCommandRejection =
-  | "shell_operator"
-  | "first_token_not_allowed"
-  | "dangerous_flag"
-  | "path_outside_boundary";
-
-/**
- * Approve a generic bash command only when its first token is on {@link GENERIC_COMMAND_ALLOWLIST}
- * AND every path-like argument — read input OR write/output target — resolves inside the
- * session workspace/TMPDIR (F12 D2). `base` is the agent cwd used to resolve relative tokens;
- * `allowedDirs` are the containment boundaries (session workspace, agent workspace, session
- * tool-output dir). `home` / `xdgDataHome` / `dataRoot` are the runtime values used to expand
- * home-anchored tokens and enforce the per-session data-area boundary (defaults: the process
- * home and the session-scoped XDG data home derived from `base`).
- */
-export function isApprovedGenericCommand(
-  cmd: string,
-  base: string,
-  allowedDirs: string[],
-  home: string = Deno.env.get("HOME") ?? "/home/deno",
-  xdgDataHome: string = sessionXdgDataHome(base),
-  dataRoot: string = opencodeDataRoot(base),
-  runtimeEnv?: KnownEnvRuntime,
-): boolean {
-  return genericCommandRejectionReason(
-    cmd,
-    base,
-    allowedDirs,
-    home,
-    xdgDataHome,
-    dataRoot,
-    runtimeEnv,
-  ) === null;
-}
-
-/**
- * Single source of truth for the generic-command gate decision AND its reason, so the
- * decision and the rejection cause can never drift. Returns `null` when the command is
- * approved, or the FIRST reason it fails:
- *
- * - `"shell_operator"` — the command contains a shell operator other than a tolerated
- *   fd-to-fd redirection token (or a glued/digit-prefixed form that survived the filter)
- * - `"first_token_not_allowed"` — empty command or first token not on the allow-list
- * - `"dangerous_flag"` — a code-exec / arbitrary-target flag (e.g. `find -exec`) present
- * - `"path_outside_boundary"` — a path argument resolves outside the allowed directories
- *
- * A tolerated `N>&[12]` token is removed before the shell-operator check and skipped in the
- * per-token path-argument loop; the first-token allow-list check operates on the ORIGINAL
- * tokens so a redirect can never masquerade as the entrypoint.
- */
-export function genericCommandRejectionReason(
-  cmd: string,
-  base: string,
-  allowedDirs: string[],
-  home: string = Deno.env.get("HOME") ?? "/home/deno",
-  xdgDataHome: string = sessionXdgDataHome(base),
-  dataRoot: string = opencodeDataRoot(base),
-  runtimeEnv?: KnownEnvRuntime,
-): GenericCommandRejection | null {
-  if (containsShellOperators(commandWithoutFdRedirects(cmd))) return "shell_operator";
-  const tokens = tokenizeShellCommand(cmd).filter((t) => t.length > 0);
-  if (tokens.length === 0) return "first_token_not_allowed";
-  if (!GENERIC_COMMAND_ALLOWLIST.has(tokens[0])) return "first_token_not_allowed";
-  for (let i = 1; i < tokens.length; i++) {
-    // A tolerated fd-to-fd redirect token is not a path argument (F12 D1).
-    if (FD_REDIRECT_TOKEN_PATTERN.test(tokens[i])) continue;
-    // A code-exec / arbitrary-target flag rejects the whole command (e.g. `find -exec`,
-    // `find -delete`, `rg --pre`), independent of whether its path arguments are in-workspace.
-    if (DANGEROUS_GENERIC_FLAGS.has(tokens[i])) return "dangerous_flag";
-    if (
-      !genericArgWithinWorkspace(
-        tokens[i],
-        base,
-        allowedDirs,
-        home,
-        xdgDataHome,
-        dataRoot,
-        runtimeEnv,
-      )
-    ) {
-      return "path_outside_boundary";
-    }
-  }
-  return null;
-}
-
-/**
- * Evaluate a command that may be a `;`/`&&`/`||` multi-command invocation through
- * the generic-command gate segment by segment (F12 D2 chaining rule). Approved
- * (returns `null`) only when EVERY segment independently passes the exact
- * single-command gate it would face as its own tool call; otherwise the FIRST
- * failing segment's cause is returned.
- *
- * A segment consisting ONLY of tolerated fd-to-fd redirect tokens (e.g. the `2>&1`
- * in a glued `2>&1&&cat ...`) is an operator artifact, not a command — it SHALL be
- * rejected as `shell_operator`, never skipped. A command with no separator
- * (`splitCommandSegments` returns `[cmd]`) is evaluated byte-identically to
- * `genericCommandRejectionReason` today. Empty chains (e.g. `; ;`) fall back to
- * evaluating the raw command, which the residual operator rejects.
- */
-export function multiCommandRejectionReason(
-  cmd: string,
-  base: string,
-  allowedDirs: string[],
-  home: string = Deno.env.get("HOME") ?? "/home/deno",
-  xdgDataHome: string = sessionXdgDataHome(base),
-  dataRoot: string = opencodeDataRoot(base),
-  runtimeEnv?: KnownEnvRuntime,
-): GenericCommandRejection | null {
-  const segments = splitCommandSegments(cmd);
-  // Single-segment (no separator): byte-identical behavior to today.
-  if (segments.length === 1 && segments[0] === cmd) {
-    return genericCommandRejectionReason(
-      cmd,
-      base,
-      allowedDirs,
-      home,
-      xdgDataHome,
-      dataRoot,
-      runtimeEnv,
-    );
-  }
-  // Empty chain (`; ;`): only the operator is present; reject via the raw command.
-  if (segments.length === 0) {
-    return genericCommandRejectionReason(
-      cmd,
-      base,
-      allowedDirs,
-      home,
-      xdgDataHome,
-      dataRoot,
-      runtimeEnv,
-    );
-  }
-  for (const segment of segments) {
-    const tokens = segment.trim().split(/\s+/).filter((t) => t.length > 0);
-    if (tokens.length > 0 && tokens.every((t) => FD_REDIRECT_TOKEN_PATTERN.test(t))) {
-      return "shell_operator"; // operator artifact segment
-    }
-    const reason = genericCommandRejectionReason(
-      segment,
-      base,
-      allowedDirs,
-      home,
-      xdgDataHome,
-      dataRoot,
-      runtimeEnv,
-    );
-    if (reason !== null) return reason;
-  }
-  return null;
 }
 
 /**
@@ -1618,7 +842,7 @@ export class ChatbotClient implements acp.Client {
       : { outcome: { outcome: "cancelled" } };
   }
 
-  requestPermission(
+  async requestPermission(
     params: acp.RequestPermissionRequest,
   ): Promise<acp.RequestPermissionResponse> {
     this.updateActivity();
@@ -1843,58 +1067,24 @@ export class ChatbotClient implements acp.Client {
       // `setSessionCwd` (each user's workspace as the ACP `newSession.cwd`). Falls
       // back to the process-level workingDir (per-spawn mode or unregistered session).
       const sessionCwd = this.gateWorkingDir(params.sessionId);
-      const allowedDirs = [sessionCwd];
-      if (this.config.agentWorkspacePath) {
-        allowedDirs.push(this.config.agentWorkspacePath);
-      }
-      // Shared-process mode: the process-level TMPDIR (channel-scoped shell temp)
-      // is a legit in-bounds target for the session's own shell commands.
-      if (this.config.processTmpDir) {
-        allowedDirs.push(this.config.processTmpDir);
-      }
-      // Session-local OpenCode tool-output boundary (F12): in per-spawn mode the agent
-      // subprocess is spawned with a per-session `XDG_DATA_HOME` under the session TMPDIR,
-      // so truncated tool outputs land under the session workspace. In shared-process mode
-      // the process-level `XDG_DATA_HOME` is the pool-key-scoped data root
-      // (`{dataRoot}/opencode-data/{poolKey}`) carried in `config.xdgDataHome`, so the
-      // tool-output boundary becomes the channel-scoped root (outside any user workspace).
-      // The resolved tool-output dir is appended explicitly (deduped against existing
-      // allowed dirs) so the boundary stays self-documenting; any resolution outside the
-      // session workspace/TMPDIR (or pool-key data root in shared mode) fails closed.
-      const sessionDataHome = this.config.xdgDataHome ??
-        sessionXdgDataHome(sessionCwd, this.gateSessionId(params.sessionId) || undefined);
-      const toolOutputDir = opencodeToolOutputDir(sessionDataHome);
-      const inSharedDataRoot = !!this.config.xdgDataHome &&
-        isWithinDir(toolOutputDir, this.config.xdgDataHome);
-      const toolOutputCovered = allowedDirs.some((d) => isWithinDir(toolOutputDir, d));
-      if (
-        !toolOutputCovered &&
-        (inSharedDataRoot ||
-          isWithinDir(toolOutputDir, resolve(sessionCwd, "tmp")) ||
-          isWithinDir(toolOutputDir, sessionCwd))
-      ) {
-        allowedDirs.push(toolOutputDir);
-      }
-      const home = Deno.env.get("HOME") ?? "/home/deno";
-      // Cross-session data area: in shared-process mode this is the shared
-      // `{dataRoot}/opencode-data` area (parent of the pool-key dir); in per-spawn
-      // mode it is the session workspace's `{workingDir}/tmp/opencode-data` root.
-      const dataRoot = this.config.xdgDataHome
-        ? dirname(this.config.xdgDataHome)
-        : opencodeDataRoot(this.config.workingDir);
-      // Runtime values for the harness-set variable expansions (F12 D5). These mirror
-      // the subprocess environment agent-factory sets, so a `$TMPDIR`/`$AGENT_WORKSPACE`/
-      // `$SESSION_ID` reference expands to the same path the shell will use.
-      // `$TMPDIR` mirrors the REAL subprocess env: in shared-process mode that is
-      // the channel-scoped `processTmpDir` set by agent-factory (payload staging
-      // is a per-session dir given explicitly via the prompt `tmpDir` variable,
-      // never the process TMPDIR); in per-spawn mode it is the session's tmp dir.
-      // `$SESSION_ID` is per-session in shared mode (gate context), not the
-      // spawn-frozen config value.
-      const runtimeEnv: KnownEnvRuntime = {
-        tmpDir: this.config.processTmpDir ?? resolve(sessionCwd, "tmp"),
-        agentWorkspace: this.config.agentWorkspacePath ?? undefined,
-        sessionId: this.gateSessionId(params.sessionId) || undefined,
+      const registered = this.gateCtx(params.sessionId);
+      const commandContext: CommandGateContext = {
+        acpSessionId: params.sessionId,
+        skillSessionId: registered?.shellSessionId ?? "",
+        sessionCwd,
+        explicitStagingPath: resolve(sessionCwd, "tmp", registered?.shellSessionId ?? ""),
+        sharedWorkspacePath: this.config.agentWorkspacePath,
+        sessionContextGeneration: registered?.generation ?? "",
+        processTmpDir: this.config.processTmpDir,
+        xdgDataHome: this.config.xdgDataHome,
+        home: Deno.env.get("HOME") ?? "/home/deno",
+        runtimeEnv: {
+          tmpDir: this.config.processTmpDir ?? resolve(sessionCwd, "tmp"),
+          agentWorkspace: this.config.agentWorkspacePath,
+          sessionId: registered?.shellSessionId,
+        },
+        logFailure: (reason) =>
+          this.logger.warn("Canonical command path denied: {reason}", { reason }),
       };
 
       // Flatten every command into its segments in order; evaluate each segment.
@@ -1906,37 +1096,44 @@ export class ChatbotClient implements acp.Client {
       type SegmentDecision =
         | { approved: true; viaSkill: boolean }
         | { approved: false; reason: GenericCommandRejection };
-      const decisions: SegmentDecision[] = segments.map((segment): SegmentDecision => {
-        // A segment consisting ONLY of tolerated fd-redirect tokens is an operator
-        // artifact, not a command — reject it, never skip it.
-        const segmentTokens = segment.trim().split(/\s+/).filter((t) => t.length > 0);
-        if (
-          segmentTokens.length > 0 && segmentTokens.every((t) => FD_REDIRECT_TOKEN_PATTERN.test(t))
-        ) {
-          return { approved: false, reason: "shell_operator" };
-        }
-        // Skill-whitelist matchers (script paths then command prefixes).
-        const isScript = Array.from(this.skillAutoApproveList.scriptPaths).some(
-          (allowedPath) => matchesScriptPath(segment, allowedPath),
-        );
-        if (isScript) return { approved: true, viaSkill: true };
-        const isCommand = Array.from(this.skillAutoApproveList.commandPrefixes).some(
-          (prefix) => matchesCommandPrefix(segment, prefix),
-        );
-        if (isCommand) return { approved: true, viaSkill: true };
-        // Generic-command gate.
-        const reason = genericCommandRejectionReason(
-          segment,
-          sessionCwd,
-          allowedDirs,
-          home,
-          sessionDataHome,
-          dataRoot,
-          runtimeEnv,
-        );
-        return reason === null ? { approved: true, viaSkill: false } : { approved: false, reason };
-      });
+      const decisions: SegmentDecision[] = await Promise.all(
+        segments.map(async (segment): Promise<SegmentDecision> => {
+          // A segment consisting ONLY of tolerated fd-redirect tokens is an operator
+          // artifact, not a command — reject it, never skip it.
+          const segmentTokens = segment.trim().split(/\s+/).filter((t) => t.length > 0);
+          if (
+            segmentTokens.length > 0 &&
+            segmentTokens.every((t) => FD_REDIRECT_TOKEN_PATTERN.test(t))
+          ) {
+            return { approved: false, reason: "shell_operator" };
+          }
+          // Skill-whitelist matchers (script paths then command prefixes).
+          const isScript = Array.from(this.skillAutoApproveList.scriptPaths).some(
+            (allowedPath) => matchesScriptPath(segment, allowedPath),
+          );
+          if (isScript) return { approved: true, viaSkill: true };
+          const isCommand = Array.from(this.skillAutoApproveList.commandPrefixes).some(
+            (prefix) => matchesCommandPrefix(segment, prefix),
+          );
+          if (isCommand) return { approved: true, viaSkill: true };
+          // Generic-command gate.
+          const reason = await genericCommandRejectionReason(segment, commandContext);
+          return reason === null
+            ? { approved: true, viaSkill: false }
+            : { approved: false, reason };
+        }),
+      );
 
+      if (
+        decisions.some((decision) => decision.approved && !decision.viaSkill) &&
+        (!registered || this.gateCtx(params.sessionId)?.generation !== registered.generation)
+      ) {
+        const genericIndex = decisions.findIndex((decision) =>
+          decision.approved && !decision.viaSkill
+        );
+        decisions[genericIndex] = { approved: false, reason: "path_outside_boundary" };
+        this.logger.warn("Canonical command path denied: {reason}", { reason: "invalid_context" });
+      }
       const firstRejectedIndex = decisions.findIndex((d) => !d.approved);
 
       if (segments.length > 0 && firstRejectedIndex === -1) {
