@@ -1,0 +1,111 @@
+{
+  "provenance": {
+    "source": "official_omp_v18.6.1_schema_trace",
+    "commit": "2a2c6dcbbb558c0f8145f67f28b3370984f2bf60",
+    "description": "Native-shaped test fixtures for OMP owned settings validator and merge evaluation"
+  },
+  "invalidOverlays": {
+    "inventedKey": {
+      "tools": {
+        "approvalMode": "write",
+        "superSandbox": true
+      },
+      "compaction": { "enabled": true },
+      "startup": { "checkUpdate": false },
+      "marketplace": { "autoUpdate": "off" },
+      "update": { "channel": "stable" },
+      "lsp": { "enabled": false },
+      "disabledProviders": []
+    },
+    "caseMismatchedEnum": {
+      "tools": { "approvalMode": "Write" },
+      "compaction": { "enabled": true },
+      "startup": { "checkUpdate": false },
+      "marketplace": { "autoUpdate": "off" },
+      "update": { "channel": "stable" },
+      "lsp": { "enabled": false },
+      "disabledProviders": []
+    },
+    "restrictedKeyInYolo": {
+      "tools": { "approvalMode": "yolo" },
+      "compaction": { "enabled": true },
+      "startup": { "checkUpdate": false },
+      "marketplace": { "autoUpdate": "off" },
+      "update": { "channel": "stable" },
+      "lsp": { "enabled": false }
+    },
+    "disabledProvidersInYolo": {
+      "tools": { "approvalMode": "yolo" },
+      "compaction": { "enabled": true },
+      "startup": { "checkUpdate": false },
+      "marketplace": { "autoUpdate": "off" },
+      "update": { "channel": "stable" },
+      "disabledProviders": ["anthropic"]
+    },
+    "perToolApprovalInRestricted": {
+      "tools": {
+        "approvalMode": "write",
+        "approval": {
+          "bash": "deny"
+        }
+      },
+      "compaction": { "enabled": true },
+      "startup": { "checkUpdate": false },
+      "marketplace": { "autoUpdate": "off" },
+      "update": { "channel": "stable" },
+      "lsp": { "enabled": false },
+      "disabledProviders": []
+    },
+    "approvalNullReset": {
+      "tools": {
+        "approvalMode": "write",
+        "approval": null
+      },
+      "compaction": { "enabled": true },
+      "startup": { "checkUpdate": false },
+      "marketplace": { "autoUpdate": "off" },
+      "update": { "channel": "stable" },
+      "lsp": { "enabled": false },
+      "disabledProviders": []
+    }
+  },
+  "invalidModels": {
+    "containsModelId": {
+      "providers": {
+        "openrouter": {
+          "headers": { "X-Title": "AIr-Friends" },
+          "models": [
+            { "id": "deepseek/deepseek-v4-pro" }
+          ]
+        }
+      }
+    },
+    "containsApiKey": {
+      "providers": {
+        "openrouter": {
+          "headers": { "X-Title": "AIr-Friends" },
+          "apiKey": "sk-or-v1-secret-token"
+        }
+      }
+    },
+    "commandHeader": {
+      "providers": {
+        "openrouter": {
+          "headers": {
+            "X-Title": "! echo AIr-Friends"
+          }
+        }
+      }
+    }
+  },
+  "providerHeaderApplicationOrder": {
+    "description": "Simulates pinned packages/ai/src/providers/openai-shared.ts lines 228-231 and utils/openrouter-headers.ts",
+    "modelHeaders": {
+      "X-Title": "AIr-Friends"
+    },
+    "openRouterBuiltInHeaders": {
+      "HTTP-Referer": "https://omp.sh/",
+      "X-OpenRouter-Title": "omp"
+    }
+  }
+}
