@@ -6,7 +6,7 @@ import {
   loadConfig,
   normalizeReasoningEffort,
 } from "@core/config-loader.ts";
-import { KNOWN_REASONING_EFFORT_TOKENS } from "@acp/agent-connector.ts";
+import { KNOWN_REASONING_EFFORT_TOKENS } from "@acp/session-config.ts";
 
 // --- normalizeReasoningEffort (pure function) ---
 
