@@ -121,12 +121,33 @@ The `ChatbotClient` SHALL handle the `config_option_update` session notification
 
 ### Requirement: ChatbotClient ACP Client Interface
 
-The system SHALL implement the ACP `Client` interface via `ChatbotClient`, handling callbacks from external agents for permissions, session updates, and file operations.
+The system SHALL implement the ACP `Client` interface via `ChatbotClient`, handling callbacks from external agents for permissions, session updates, and file operations. File-operation callbacks SHALL resolve the requesting session's authoritative context, decide authorization on canonical physical root/target observations, and perform content IO only through the protected filesystem access operations under the single authorized root role.
 
 #### Scenario: Session update handling
 - **GIVEN** an active ACP session
 - **WHEN** the agent sends a `sessionUpdate` with message chunks or tool calls
 - **THEN** the client SHALL log the activity, update the `lastActivityTimestamp`, and write audit entries if an audit writer is configured
+
+#### Scenario: File read within an authorized physical root
+- **GIVEN** a `readTextFile` request whose target is physically inside the session workspace, the shared Agent workspace, or the trusted read-only skills root
+- **WHEN** the callback evaluates the request
+- **THEN** the client SHALL read and return the file content through the protected access operation under that selected root role, subject to the applicable read rule
+- **AND** a target that only lexically resembles an allowed root SHALL be denied
+
+#### Scenario: File write with the shared-workspace extension check
+- **GIVEN** a `writeTextFile` request for a shared Agent workspace path with an extension in the `allowedWriteExtensions` list (default: `.md`, `.txt`) and an authorized session
+- **WHEN** the callback evaluates the request
+- **THEN** the client SHALL write the content through the protected access operation under the shared root role
+
+#### Scenario: File write with disallowed extension
+- **GIVEN** a restricted `writeTextFile` request for a shared Agent workspace path whose extension is not in the allowed list
+- **WHEN** the write is attempted
+- **THEN** the client SHALL reject the write, record the existing extension rejection reason, log the denial, and perform no content IO
+
+#### Scenario: Filesystem capability remains delegated
+- **GIVEN** an agent connecting through the ACP client
+- **WHEN** session capabilities are advertised
+- **THEN** the client SHALL continue advertising filesystem read/write capability so native file operations are routed through these callbacks rather than agent-side IO
 
 ### Requirement: Agent Thought Chunk Buffering
 
@@ -186,7 +207,7 @@ The `ChatbotClient` SHALL accumulate text from `agent_thought_chunk` session upd
 
 ### Requirement: Permission Handling — Restricted Mode
 
-In restricted (non-YOLO) mode, `requestPermission()` SHALL selectively approve or deny permission requests based on whitelists and path validation. Command whitelist matching SHALL be anchored to the invocation entrypoint, agent-workspace writes SHALL be gated by the session's `canWriteAgentWorkspace` flag, and all path boundary checks SHALL be boundary-safe.
+In restricted (non-YOLO) mode, `requestPermission()` SHALL selectively approve or deny permission requests based on whitelists and path validation, deciding file-path containment on canonical physical root membership rather than lexical string containment. Its command-argument lexical check is a command-policy decision of its own, never a claim of physical containment of command execution, and classifies any filesystem-reaching URI-scheme token as outside the workspace.
 
 #### Scenario: Registered skill auto-approval
 - **GIVEN** a permission request for a registered skill
@@ -194,9 +215,10 @@ In restricted (non-YOLO) mode, `requestPermission()` SHALL selectively approve o
 - **THEN** it SHALL auto-approve the request
 
 #### Scenario: Skill directory read access
-- **GIVEN** a permission request to read files in the skills directory
+- **GIVEN** a permission request to read files inside the deployment-owned trusted skills root
 - **WHEN** `requestPermission()` evaluates the request
-- **THEN** it SHALL auto-approve the request
+- **THEN** it SHALL auto-approve the request with the existing skill-directory audit reason
+- **AND** a read anchored to an unowned HOME-discovered skills copy, a workspace skills directory, an escaping link or a stale resource generation SHALL NOT be auto-approved by this rule
 
 #### Scenario: Skill command whitelist approval by entrypoint
 - **GIVEN** a permission request to execute a command matching the auto-approve list
@@ -237,54 +259,62 @@ In restricted (non-YOLO) mode, `requestPermission()` SHALL selectively approve o
 #### Scenario: Edit/write request with OpenCode v1.17.13+ shape recognized
 - **GIVEN** a permission request whose `toolCall` has `kind: "edit"` and `title` set to the target file path (the shape OpenCode v1.17.13+ sends for `write`/`edit`/`apply_patch`/`patch`), e.g. `title: "$TMPDIR/$SESSION_ID/reply.md"` with `rawInput: { filePath: "$TMPDIR/$SESSION_ID/reply.md", content: "..." }`
 - **WHEN** `requestPermission()` evaluates the request
-- **THEN** it SHALL treat it as a scoped edit/write request and apply the workspace/TMPDIR boundary checks instead of rejecting it as an unknown tool call
+- **THEN** it SHALL treat it as a scoped edit/write request and apply the session-root authorization checks instead of rejecting it as an unknown tool call
 
 #### Scenario: Edit/write request with legacy title shape recognized
 - **GIVEN** a permission request whose `toolCall` has `title: "edit"`, `title: "edit_file"`, `title: "write"`, or `title: "write_file"` (the shapes older OpenCode versions and other ACP agents may send)
 - **WHEN** `requestPermission()` evaluates the request
-- **THEN** it SHALL treat it as a scoped edit/write request and apply the workspace/TMPDIR boundary checks instead of rejecting it as an unknown tool call
+- **THEN** it SHALL treat it as a scoped edit/write request and apply the session-root authorization checks instead of rejecting it as an unknown tool call
 
 #### Scenario: Edit/write within agent workspace requires write permission
-- **GIVEN** an edit/write permission request for a path within the agent workspace
+- **GIVEN** an edit/write permission request whose target physically resolves under the shared Agent workspace
 - **WHEN** the file extension passes the allowed extensions check
-- **THEN** it SHALL auto-approve the request ONLY if the session's `canWriteAgentWorkspace` flag is `true`; otherwise it SHALL reject the request with logging
+- **THEN** it SHALL auto-approve the request ONLY if the session's `canWriteAgentWorkspace` flag is `true`; otherwise it SHALL reject the request with the existing unauthorized reason and logging
 
 #### Scenario: Edit/write within TMPDIR
-- **GIVEN** an edit/write permission request for a path within the session TMPDIR
-- **WHEN** the file extension passes the allowed extensions check
-- **THEN** it SHALL auto-approve the request regardless of `canWriteAgentWorkspace`
+- **GIVEN** an edit/write permission request whose target physically resolves under the requesting session's own canonical staging root
+- **WHEN** the request is evaluated
+- **THEN** it SHALL auto-approve the request regardless of `canWriteAgentWorkspace` and without an extension filter
+
+#### Scenario: Edit/write to an ordinary user-workspace target is rejected in restricted mode
+- **GIVEN** a restricted edit/write request whose only applicable physical role is the user workspace, outside the requesting session's staging root
+- **WHEN** `requestPermission()` evaluates the request
+- **THEN** it SHALL reject the request with the specific restricted in-workspace reason
+- **AND** the same target SHALL be rejected by the independent write sink even if the permission request were approved by another rule
 
 #### Scenario: Edit/write with $TMPDIR/$SESSION_ID tokens approved
-- **GIVEN** a session with id `sess_own` whose TMPDIR resolves to `{workingDir}/tmp`
+- **GIVEN** a session with Skill API id `sess_own` whose staging root is `{session cwd}/tmp/sess_own`
 - **WHEN** an edit/write permission request or `writeTextFile` call uses the literal path `$TMPDIR/$SESSION_ID/reply.md` or `${TMPDIR}/${SESSION_ID}/reply.md`
-- **THEN** the tokens SHALL be expanded against the session TMPDIR and session id before the boundary check and SHALL be approved
+- **THEN** the tokens SHALL be expanded against the session's own context before the authorization check and SHALL be approved
 - **AND** a literal path `$TMPDIR2/reply.md` or `$OTHER/reply.md` SHALL remain unexpanded and SHALL NOT be approved
 
 #### Scenario: writeTextFile writes the expanded path
-- **GIVEN** a session whose TMPDIR is `{workingDir}/tmp`
+- **GIVEN** a session whose staging root is `{session cwd}/tmp/sess_own`
 - **WHEN** `writeTextFile` receives path `$TMPDIR/$SESSION_ID/reply.md` with content `定價 $0.435`
-- **THEN** the content SHALL be written verbatim to `{workingDir}/tmp/{sessionId}/reply.md` (the expanded path — no literal `$TMPDIR` directory under the bot's cwd)
+- **THEN** the content SHALL be written verbatim to `{session cwd}/tmp/sess_own/reply.md` through protected access under the staging root role (no literal `$TMPDIR` directory under the bot's cwd)
 - **AND** `readTextFile` on the same expanded path SHALL return the verbatim content including the `$` characters
 
 #### Scenario: Boundary-safe path checks reject sibling prefixes
-- **GIVEN** a path that shares a string prefix with an allowed base directory but is a sibling (e.g. `/data/workspaces/discord/1234` versus base `/data/workspaces/discord/123`)
-- **WHEN** a path boundary check evaluates the path
-- **THEN** it SHALL reject the path as outside the base
+- **GIVEN** a path that shares a string prefix with an allowed root as a sibling (e.g. `/data/workspaces/discord/1234` versus base `/data/workspaces/discord/123`), and a path inside a root that reaches a sibling workspace or external file through a parent or final symlink
+- **WHEN** the filesystem authorization decision evaluates either path
+- **THEN** it SHALL reject both as outside the authorized root with the mapped bounded reason
+- **AND** lexical prefix containment SHALL NOT override the physical decision
 
 #### Scenario: readTextFile extension check
-- **GIVEN** a read request for a path inside an allowed directory whose extension is not in the read allowlist (`.jsonl`, `.md`, `.txt`)
+- **GIVEN** a read request for a path physically inside an allowed writable root whose extension is not in the read allowlist (`.jsonl`, `.md`, `.txt`)
 - **WHEN** `readTextFile()` evaluates the request
 - **THEN** it SHALL reject the read
+- **AND** the trusted read-only skills root exception SHALL NOT broaden this workspace rule
 
 #### Scenario: readTextFile allows workspace memory reads
-- **GIVEN** a read request for `memory.public.jsonl` inside the workspace
+- **GIVEN** a read request for `memory.public.jsonl` physically inside the session workspace
 - **WHEN** `readTextFile()` evaluates the request
-- **THEN** it SHALL allow the read
+- **THEN** it SHALL allow the read through the protected access operation under the workspace root role
 
 #### Scenario: Edit/write rejection
-- **GIVEN** an edit/write permission request that cannot be resolved to a valid workspace path
+- **GIVEN** an edit/write permission request whose target context or canonical observation cannot be resolved
 - **WHEN** `requestPermission()` evaluates the request
-- **THEN** it SHALL reject the request with logging
+- **THEN** it SHALL reject the request with logging and the mapped bounded reason, without performing content IO
 
 #### Scenario: Default denial
 - **GIVEN** a permission request not matching any approval rule
@@ -310,12 +340,28 @@ In restricted (non-YOLO) mode, `requestPermission()` SHALL selectively approve o
 
 ### Requirement: Permission Handling — YOLO Mode
 
-In YOLO mode (global `--yolo` flag or per-channel `yolo: true`), the system SHALL auto-approve ALL permission requests.
+In YOLO mode (global `--yolo` flag or per-channel `yolo: true`), the system SHALL auto-approve ALL permission requests. YOLO SHALL additionally authorize ACP filesystem callbacks by broad physical containment only: a target holding the requesting session's user-workspace or the shared Agent workspace role SHALL be authorized with no staging-only restriction, no write-extension filter, no `canWriteAgentWorkspace` requirement and no restricted tool/LSP/command clamp.
 
 #### Scenario: YOLO auto-approve
 - **GIVEN** YOLO mode is enabled (globally or per-channel)
 - **WHEN** any permission request is received
 - **THEN** it SHALL be auto-approved with reason `"yolo_mode"`
+
+#### Scenario: YOLO filesystem callback keeps broad containment without restricted clamps
+- **GIVEN** a YOLO session
+- **WHEN** it writes any extension to any path physically inside its user workspace or the shared Agent workspace
+- **THEN** the write SHALL be authorized through the protected access operation under that broad root role
+- **AND** no restricted staging-only rule, extension allowlist or workspace-write authorization flag SHALL be applied
+
+#### Scenario: YOLO does not relax escape or read-only-root denial
+- **GIVEN** a YOLO session
+- **WHEN** it requests a write to an external or sibling-workspace target, a path whose containment observation escapes, or any path inside the trusted read-only skills root
+- **THEN** the write SHALL be denied with the mapped bounded reason and no content IO
+
+#### Scenario: YOLO behavior is identical for both agents
+- **GIVEN** an OpenCode and an OMP session in YOLO mode
+- **WHEN** the same filesystem callback target is presented to each
+- **THEN** both SHALL receive the same authorization outcome, with no restricted-mode policy copied into YOLO
 
 ### Requirement: Permission Audit Logging
 
@@ -2093,3 +2139,144 @@ At the moment a session acquires or spawns its agent process — pooled or per-s
 - **GIVEN** the write side of the ownership interface established here
 - **WHEN** reconnect/`session/load` verification, gate-context restoration, or rejection of opposite-mode loads runs (owned by `restore-mode-owned-acp-sessions`, row 11)
 - **THEN** that owner SHALL consume, never redefine, the recorded fields
+### Requirement: Independent Restricted ACP Filesystem Write Authorization
+
+The ACP file-write sink SHALL authorize an ordinary restricted-mode write from the requesting session's authoritative context and the target's canonical physical role, WITHOUT requiring any preceding permission request: it SHALL allow the session's own staging root and, with agent-workspace write authorization and an allowed extension, a shared Agent workspace target; it SHALL deny every other user-workspace target and any target whose only role is read-only trusted skills.
+
+#### Scenario: Restricted staging write needs no preceding permission request
+- **GIVEN** a restricted session whose Skill API staging directory is provisioned under its own canonical workspace
+- **WHEN** the agent calls the file-write callback for a path under that staging root without any preceding permission request
+- **THEN** the write SHALL be authorized and its content readable back under that staging root
+- **AND** no staging-only, shared-extension or `canWriteAgentWorkspace` rule SHALL have been required for that target
+
+#### Scenario: Ordinary restricted user-workspace write is denied
+- **GIVEN** a restricted session and a target physically inside that user workspace that is not the session's staging root
+- **WHEN** the agent calls the file-write callback, including for a `.md` file whose extension is otherwise allowed
+- **THEN** the write SHALL be denied with the specific restricted in-workspace reason
+- **AND** no content SHALL be created or modified at that target
+
+#### Scenario: Shared workspace rules keep their distinct reasons
+- **GIVEN** a restricted session without agent-workspace write authorization, and a second restricted session with it
+- **WHEN** each attempts a shared Agent workspace write with an allowed and a disallowed extension
+- **THEN** only the authorized session's allowed-extension write SHALL be authorized
+- **AND** the unauthorized and wrong-extension denials SHALL preserve the existing shared-authorization and extension rejection reasons rather than collapsing into the generic in-workspace reason
+
+#### Scenario: Direct callback matches the permission-request outcome
+- **WHEN** the same restricted-mode target is evaluated through the scoped edit/write permission path and through a direct file-write callback
+- **THEN** both SHALL report the same authorization outcome and reason for the same canonical target role
+- **AND** neither outcome SHALL depend on the other having run first
+
+#### Scenario: Staging grant is the session's own physical staging membership
+- **GIVEN** a restricted session whose staging directory is provisioned under its own canonical workspace
+- **WHEN** a write target is an alias or link reaching a sibling session's staging directory, an ordinary workspace directory, or a process/state location
+- **THEN** the staging grant SHALL NOT be produced for that target
+- **AND** the target SHALL be decided by its canonical physical role alone
+
+#### Scenario: Preserved write reason codes keep their meanings
+- **GIVEN** a write denial that matches a shared-authorization, shared-extension or outside-workspace condition
+- **WHEN** the write sink records the denial
+- **THEN** the preserved reason code for that condition SHALL be used with its existing meaning
+
+### Requirement: Protected-IO-Only ACP Filesystem Callback Execution
+
+Every ACP read and write callback decision SHALL be made on the requesting session's canonical root and target observations, and content IO SHALL occur only through the protected root-relative access operations under the single root role the authorization selected.
+
+#### Scenario: No bypass remains on the callback path
+- **WHEN** the read and write callbacks are exercised across authorized, denied and error cases
+- **THEN** every attempted content read or write SHALL carry an explicitly selected authorized root role
+- **AND** every denial SHALL have occurred before any content IO with no ordinary path-based operation performed
+
+#### Scenario: Unprovisioned staging is surfaced, not repaired
+- **GIVEN** a session whose staging directory was not provisioned by its lifecycle owner
+- **WHEN** the agent writes to a path under that staging root
+- **THEN** the callback SHALL deny with the mapped unavailable-root/parent-missing filesystem-access reason
+- **AND** it SHALL NOT create any directory to make the write succeed
+
+#### Scenario: Unregistered session context is denied, not defaulted
+- **WHEN** a filesystem callback arrives for an ACP session with no registered authoritative context
+- **THEN** the callback SHALL deny with the specific missing-filesystem-context reason
+- **AND** it SHALL NOT fall back to a process-level, daemon-cwd or another session's workspace containment rule
+
+#### Scenario: Escaping or replaced path never reaches content IO
+- **WHEN** a target observation reports an outside-root, symlink-escape, dangling-link, loop, wrong-type or changed-path condition, or the protected operation reports its own containment/replacement failure
+- **THEN** the callback SHALL deny with the mapped bounded reason and perform no content read or write
+- **AND** sibling and external sentinel content SHALL remain unchanged
+
+#### Scenario: Failed steps deny without broader-role retry
+- **GIVEN** a failed context, expansion, root construction, target observation, authorization or access step
+- **WHEN** a read or write callback would fall back
+- **THEN** the callback SHALL deny the operation with one mapped bounded reason
+- **AND** it SHALL NOT retry under a broader root role
+
+#### Scenario: Lexical predicates and HOME-derived skills trust are removed from the callback path
+- **WHEN** the read and write callback paths are evaluated
+- **THEN** the callback path SHALL NOT include the lexical sink predicates or the environment/HOME-derived skills trust rule they replaced
+- **AND** no callback path SHALL remain that reaches content IO without an authorization decision
+
+### Requirement: Read-Only Trusted Skills Access In ACP Callbacks
+
+ACP reading SHALL additionally admit a target whose canonical role is the deployment-owned read-only trusted skills root, subject to that root's ownership provenance and current resource-generation currency, and SHALL treat that admission as root-scoped rather than extension-allowlist-based.
+
+#### Scenario: Owned skill instruction is readable through the callback
+- **GIVEN** a deployment-owned read-only skills root with matching current-generation provenance
+- **WHEN** the agent reads an owned instruction file inside that root, including one whose extension is not in the workspace read allowlist
+- **THEN** the read SHALL be authorized and return the owned file's content
+- **AND** no write to that root SHALL be authorized afterward, for a restricted or YOLO session
+
+#### Scenario: Permission-path skill read uses the same classification
+- **WHEN** a restricted read permission request's locations resolve to the trusted skills role
+- **THEN** the request SHALL be approved with the existing skill-directory audit reason
+- **AND** a request anchored to an unowned HOME-discovered or workspace skills copy, an escaping link, a stale generation or an unowned root SHALL NOT be approved by the trusted rule
+
+#### Scenario: Trusted exception does not broaden workspace reads
+- **GIVEN** a workspace target whose extension is outside the read allowlist
+- **WHEN** it is read while a trusted skills root is configured
+- **THEN** the read SHALL still be denied by the unchanged workspace read-extension rule
+- **AND** the trusted root SHALL NOT authorize any arbitrary external file
+
+#### Scenario: Trusted root confers read authority only
+- **GIVEN** a deployment-owned read-only trusted skills root
+- **WHEN** the callback classifies any target under it
+- **THEN** the trust SHALL confer read authority only
+- **AND** it SHALL NOT authorize any write in any mode, any file outside the owned root, or any change to unrelated workspace read-extension rules
+
+#### Scenario: Name, link, and provenance failures deny the trusted role
+- **GIVEN** a workspace or project file merely sharing a skill's name, a link leaving the owned root whose destination is otherwise readable, or a root with a stale generation, ownership mismatch or writable-root overlap
+- **WHEN** the callback classifies the target
+- **THEN** it SHALL NOT gain the trusted role
+- **AND** a stale generation, ownership mismatch or writable-root overlap SHALL fail with the specific trusted-identity reason and no fallback to another readable role
+
+#### Scenario: No trusted role without supplied provenance
+- **WHEN** a skills root has no supplied ownership provenance
+- **THEN** no trusted role SHALL exist for it
+- **AND** the trusted classification SHALL NOT be applied
+
+#### Scenario: HOME-derived auto-approval is replaced by canonical classification
+- **WHEN** a skill read was previously auto-approved via the environment/HOME-derived rule
+- **THEN** it SHALL be classified through the canonical trusted-skills rule instead
+- **AND** a trusted skill read SHALL keep the existing approved audit reason
+
+### Requirement: Bounded Specific ACP Filesystem Denial Diagnostics
+
+Each filesystem-sink denial SHALL record exactly one bounded, machine-readable reason identifying the failed decision — restricted in-workspace target, read-only trusted-skills target, trusted-identity/provenance failure, canonical-observation failure, filesystem-access failure, or missing session context — using the existing bounded rejection buffer and audit mirroring.
+
+#### Scenario: Every sink denial yields one specific bounded reason
+- **WHEN** each filesystem denial path is exercised once
+- **THEN** exactly one recorded rejection SHALL appear for that denial with its named reason and bounded path field
+- **AND** the raised callback error SHALL carry a static reason message without file content or raw platform error text
+
+#### Scenario: Existing retry diagnostics keep working
+- **GIVEN** a session that experienced filesystem denials during a turn that produced no reply
+- **WHEN** the missing-reply retry prompt is assembled
+- **THEN** the recorded reasons SHALL appear in the existing bounded rejection section
+- **AND** the previously documented reasons SHALL remain available for shared-authorization and extension denials
+
+#### Scenario: Reason codes stay preserved, finite and non-contradictory
+- **WHEN** a filesystem denial is recorded
+- **THEN** preserved reason codes SHALL keep their meanings and added codes SHALL form a finite documented set
+- **AND** a single denial SHALL NOT be recorded twice under contradictory reasons
+
+#### Scenario: Recorded fields and error messages stay bounded
+- **WHEN** a filesystem denial is recorded and its callback error is raised
+- **THEN** recorded fields SHALL remain sanitized and length-bounded
+- **AND** the callback error SHALL be a static message exposing no file content, secret, or unbounded agent- or platform-supplied text

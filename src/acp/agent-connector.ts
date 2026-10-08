@@ -189,9 +189,7 @@ export class AgentConnector {
     });
 
     // Replay cached per-session gate contexts onto the fresh client (reconnect).
-    for (const [sid, ctx] of this.sessionGateContexts) {
-      this.client.setSessionContext(sid, ctx);
-    }
+    this.replaySessionGateContexts();
 
     // Create ClientSideConnection with proper stream order
     const stream = acp.ndJsonStream(output, input);
@@ -306,7 +304,14 @@ export class AgentConnector {
 
     // Shared-process mode: register the per-session working directory with the client
     // so the permission gate confines this session to the session's own workspace.
-    this.setSessionGateContext(result.sessionId, { cwd: sessionCwd });
+    this.setSessionGateContext(result.sessionId, {
+      cwd: sessionCwd,
+      shellSessionId: this.options.clientConfig?.sessionId,
+      yolo: this.options.clientConfig?.yolo,
+      canWriteAgentWorkspace: this.options.clientConfig?.canWriteAgentWorkspace,
+      allowedWriteExtensions: this.options.clientConfig?.allowedWriteExtensions,
+      trustedSkills: this.options.clientConfig?.trustedSkills,
+    });
 
     // Capture initial config options (session-scoped); refreshed later via
     // config_option_update notifications and set_config_option responses.
@@ -783,9 +788,32 @@ export class AgentConnector {
    */
   setSessionGateContext(acpSessionId: string, ctx: SessionGateContext): void {
     const existing = this.sessionGateContexts.get(acpSessionId);
-    const merged: SessionGateContext = { ...existing, ...ctx };
+    const merged: SessionGateContext = {
+      ...existing,
+      ...ctx,
+      allowedWriteExtensions: (ctx.allowedWriteExtensions ?? existing?.allowedWriteExtensions)
+        ?.slice(),
+      trustedSkills: ctx.trustedSkills
+        ? {
+          ...ctx.trustedSkills,
+          criticalSkills: ctx.trustedSkills.criticalSkills.map((reference) => ({ ...reference })),
+        }
+        : ctx.trustedSkills,
+    };
     this.sessionGateContexts.set(acpSessionId, merged);
     this.client?.setSessionContext(acpSessionId, merged);
+  }
+
+  /**
+   * Replay the cached per-session gate contexts onto the current client. The client is
+   * fresh after a respawn and assigns fresh registration generations, so replayed
+   * critical-skill references — which keep the previous instance's generation verbatim —
+   * stay denied. The replay restores context identity, never trust.
+   */
+  private replaySessionGateContexts(): void {
+    for (const [sid, ctx] of this.sessionGateContexts) {
+      this.client?.setSessionContext(sid, ctx);
+    }
   }
 
   /**
@@ -1033,7 +1061,17 @@ export class AgentConnector {
       mcpServers: supportedServers.map((server) => this.convertMCPServerConfig(server)),
     }));
     this.refreshFromConfigOptionResponse(sessionId, loadResponse);
-    this.setSessionGateContext(sessionId, { cwd });
+    this.setSessionGateContext(sessionId, {
+      cwd,
+      shellSessionId: this.sessionGateContexts.get(sessionId)?.shellSessionId ??
+        this.options.clientConfig?.sessionId,
+      yolo: this.sessionGateContexts.get(sessionId)?.yolo ?? this.options.clientConfig?.yolo,
+      canWriteAgentWorkspace: this.sessionGateContexts.get(sessionId)?.canWriteAgentWorkspace ??
+        this.options.clientConfig?.canWriteAgentWorkspace,
+      allowedWriteExtensions: this.sessionGateContexts.get(sessionId)?.allowedWriteExtensions ??
+        this.options.clientConfig?.allowedWriteExtensions,
+      trustedSkills: this.options.clientConfig?.trustedSkills,
+    });
 
     // Re-establish the session's prior model through stable-first selection
     if (priorModelId !== undefined) {

@@ -13,6 +13,24 @@ import {
   opencodeToolOutputDir,
   sessionXdgDataHome,
 } from "@utils/opencode-paths.ts";
+import {
+  canonicalizeSessionRoots,
+  type CanonicalSessionRoots,
+  resolveFilesystemTarget,
+  resolveSessionPath,
+  type RootPathResult,
+  type SessionContext,
+} from "./filesystem-roots.ts";
+import { readCanonicalTextFile, writeCanonicalTextFile } from "./filesystem-access.ts";
+import {
+  authorizeFilesystemRead,
+  authorizeFilesystemWrite,
+  buildSessionFilesystemContext,
+  type FilesystemDenialReason,
+  mapAccessFailureToDenial,
+  mapRootPathFailureToDenial,
+  type TrustedSkillsSource,
+} from "./filesystem-policy.ts";
 
 /**
  * Auto-approved skill lists for restricted (non-YOLO) mode.
@@ -139,16 +157,6 @@ export function isWithinDir(path: string, base: string): boolean {
   } catch {
     return false;
   }
-}
-
-/**
- * Check whether a file path's extension is in the given allowlist (case-insensitive).
- */
-function hasAllowedExtension(filePath: string, allowed: string[]): boolean {
-  const dotIndex = filePath.lastIndexOf(".");
-  if (dotIndex === -1 || dotIndex === filePath.length - 1) return false;
-  const ext = filePath.substring(dotIndex).toLowerCase();
-  return allowed.some((e) => ext === e.toLowerCase());
 }
 
 /**
@@ -1150,6 +1158,14 @@ export interface SessionGateContext {
   canWriteAgentWorkspace?: boolean;
   /** This session's allowed write extensions (restricted-mode edit/write gate). */
   allowedWriteExtensions?: string[];
+  /** Deployment-owned trusted skills provenance */
+  trustedSkills?: TrustedSkillsSource;
+  /**
+   * Context registration generation (assigned by ChatbotClient). The client both
+   * increments a per-instance counter and prefixes a per-instance epoch, so a
+   * generation never repeats across client instances.
+   */
+  generation?: string;
 }
 
 export class ChatbotClient implements acp.Client {
@@ -1202,6 +1218,15 @@ export class ChatbotClient implements acp.Client {
    * flags instead of the process-frozen client config.
    */
   private sessionContexts: Map<string, SessionGateContext> = new Map();
+  private contextGenerationCounter: number = 0;
+  /**
+   * Per-client-instance registration epoch. Registration generations are the currency
+   * checked for trusted-provenance admission, so they must never repeat. A reconnect
+   * constructs a fresh client and replays the cached gate contexts onto it; the new
+   * instance carries a new epoch, so a critical reference minted for a previous
+   * instance's epoch is never admitted by the new one.
+   */
+  private readonly contextGenerationEpoch: string = crypto.randomUUID();
 
   constructor(
     skillRegistry: SkillRegistry,
@@ -1246,9 +1271,7 @@ export class ChatbotClient implements acp.Client {
    * so multi-user channels confine each session to its own workspace.
    */
   setSessionCwd(sessionId: string, cwd: string): void {
-    const ctx = this.sessionContexts.get(sessionId) ?? { cwd };
-    ctx.cwd = cwd;
-    this.sessionContexts.set(sessionId, ctx);
+    this.setSessionContext(sessionId, { ...this.sessionContexts.get(sessionId), cwd });
   }
 
   /**
@@ -1259,11 +1282,100 @@ export class ChatbotClient implements acp.Client {
    */
   setSessionContext(sessionId: string, ctx: SessionGateContext): void {
     const existing = this.sessionContexts.get(sessionId);
-    this.sessionContexts.set(sessionId, { ...existing, ...ctx, cwd: ctx.cwd ?? existing!.cwd });
+    // Announced generation: computed before the counter advances, so the value a supplier
+    // mints against `nextRegistrationGeneration()` is exactly the one stored here.
+    const generation = this.nextRegistrationGeneration();
+    this.contextGenerationCounter += 1;
+    this.sessionContexts.set(sessionId, {
+      ...existing,
+      ...ctx,
+      cwd: ctx.cwd ?? existing!.cwd,
+      generation,
+      allowedWriteExtensions: (ctx.allowedWriteExtensions ?? existing?.allowedWriteExtensions)
+        ?.slice(),
+      trustedSkills: ctx.trustedSkills
+        ? {
+          ...ctx.trustedSkills,
+          criticalSkills: ctx.trustedSkills.criticalSkills.map((reference) => ({ ...reference })),
+        }
+        : ctx.trustedSkills,
+    });
+  }
+
+  /**
+   * Registration generation this client assigns on its next `setSessionContext()` call.
+   * A deployment-owned trusted-provenance supplier mints each
+   * `CriticalSkillReference.sessionGenerationId` from this value for the registration it
+   * is about to perform; any other value — a previously assigned generation, or one
+   * obtained from another client instance — is never admitted.
+   */
+  nextRegistrationGeneration(): string {
+    return `${this.contextGenerationEpoch}:gen-${this.contextGenerationCounter + 1}`;
   }
 
   private gateCtx(acpSessionId?: string): SessionGateContext | undefined {
     return acpSessionId ? this.sessionContexts.get(acpSessionId) : undefined;
+  }
+
+  /** Validate owned-root provenance separately from the requested root-scoped read. */
+  private async observeFilesystemRoots(
+    context: SessionContext,
+    trustedSkills?: TrustedSkillsSource,
+  ): Promise<RootPathResult<CanonicalSessionRoots>> {
+    const roots = await canonicalizeSessionRoots(context, trustedSkills);
+    if (!roots.ok || !trustedSkills) return roots;
+    const trustedRoot = roots.value.roots.find((root) => root.role === "trusted-skills");
+    if (
+      !trustedRoot || trustedRoot.canonicalPath !== trustedSkills.canonicalOwnedRootPath ||
+      trustedSkills.criticalSkills.length === 0
+    ) {
+      return {
+        ok: false,
+        reason: "trusted_identity_mismatch",
+        message: "Invalid trusted provenance",
+      };
+    }
+    for (const reference of trustedSkills.criticalSkills) {
+      const path = resolveSessionPath(reference.canonicalInstructionPath, context);
+      if (!path.ok) {
+        return {
+          ok: false,
+          reason: "trusted_identity_mismatch",
+          message: "Invalid trusted provenance",
+        };
+      }
+      const instruction = await resolveFilesystemTarget(
+        path.value,
+        roots.value,
+        "existing-file",
+        reference,
+      );
+      if (!instruction.ok || instruction.value.observedSymlinks.length > 0) {
+        return {
+          ok: false,
+          reason: "trusted_identity_mismatch",
+          message: "Invalid trusted provenance",
+        };
+      }
+    }
+    return roots;
+  }
+
+  private rejectFilesystemRequest(
+    toolName: "readTextFile" | "writeTextFile",
+    path: string,
+    reason: FilesystemDenialReason,
+  ): never {
+    const kind = toolName === "readTextFile" ? "read" : "write";
+    this.recordPermissionRejection(toolName, kind, path, reason);
+    void this.writePermissionAudit(
+      "permission_denied",
+      toolName,
+      kind,
+      sanitizeRejectionField(path),
+      reason,
+    );
+    throw new acp.RequestError(-32600, `Filesystem request denied: ${reason}`);
   }
 
   /** Session-scoped working directory (shared mode) or the process-level fallback. */
@@ -1278,15 +1390,6 @@ export class ChatbotClient implements acp.Client {
 
   private gateYolo(acpSessionId?: string): boolean {
     return this.gateCtx(acpSessionId)?.yolo ?? this.config.yolo ?? false;
-  }
-
-  private gateCanWriteAgentWorkspace(acpSessionId?: string): boolean | undefined {
-    return this.gateCtx(acpSessionId)?.canWriteAgentWorkspace ??
-      this.config.canWriteAgentWorkspace;
-  }
-
-  private gateAllowedWriteExtensions(acpSessionId?: string): string[] | undefined {
-    return this.gateCtx(acpSessionId)?.allowedWriteExtensions ?? this.config.allowedWriteExtensions;
   }
 
   /**
@@ -1460,43 +1563,93 @@ export class ChatbotClient implements acp.Client {
       });
     }
 
-    // Auto-approve read access to skills directories.
-    // External agents need to read SKILL.md files to understand available skills.
-    // OpenCode discovers skills from `~/.agents/skills` (external/installed skills) and the
-    // repo-local `skills/` directory. We approve reads anchored to any of these roots using
-    // boundary-safe matching so a sibling-prefix path cannot slip through.
-    if (params.toolCall.kind === "read" && params.toolCall.locations) {
-      const home = Deno.env.get("HOME") ?? "/home/deno";
-      const skillsRoots = [
-        join(home, ".agents", "skills"),
-        join(Deno.cwd(), "skills"),
-      ];
-      const isReadingSkills = params.toolCall.locations.some((loc) =>
-        loc.path !== undefined &&
-        skillsRoots.some((root) => isWithinDir(loc.path!, root))
+    // Root-scoped read admission requires trusted lifecycle provenance, never HOME discovery.
+    if (
+      params.toolCall.kind === "read" && params.toolCall.locations &&
+      params.toolCall.locations.length > 0
+    ) {
+      const gateCtx = this.gateCtx(params.sessionId);
+      const currentGeneration = gateCtx?.generation ?? "";
+      const builtCtxRes = buildSessionFilesystemContext(
+        params.sessionId,
+        gateCtx,
+        this.config,
+        currentGeneration,
       );
 
-      if (isReadingSkills) {
-        this.logger.info("Auto-approving skills directory read: {path}", {
-          path: params.toolCall.locations.map((l) => l.path).join(", "),
-        });
+      if (builtCtxRes.ok && gateCtx?.trustedSkills) {
+        const sessionContext = builtCtxRes.context;
+        const checkAllLocations = async () => {
+          const rootsRes = await this.observeFilesystemRoots(sessionContext, gateCtx.trustedSkills);
+          if (!rootsRes.ok) return false;
+          const roots = rootsRes.value;
 
-        void this.writePermissionAudit(
-          "permission_approved",
-          title,
-          kind,
-          undefined,
-          "skills_directory_access",
-        );
+          for (const loc of params.toolCall.locations ?? []) {
+            if (!loc.path) return false;
+            const resolvedRes = resolveSessionPath(loc.path, sessionContext);
+            if (!resolvedRes.ok) return false;
+            const targetRes = await resolveFilesystemTarget(
+              resolvedRes.value,
+              roots,
+              "existing-any",
+            );
+            if (!targetRes.ok) return false;
+            const decision = authorizeFilesystemRead({ roots, target: targetRes.value });
+            if (
+              !decision.ok || decision.role !== "trusted-skills" ||
+              targetRes.value.observedSymlinks.length > 0
+            ) return false;
+          }
+          return this.gateCtx(params.sessionId)?.generation === currentGeneration;
+        };
 
-        const allowOption = params.options.find((o) => o.kind === "allow_once") ??
-          params.options[0];
+        return checkAllLocations().then((isApproved) => {
+          if (isApproved) {
+            this.logger.info("Auto-approving trusted skills directory read: {path}", {
+              path: params.toolCall.locations!.map((l) => l.path).join(", "),
+            });
 
-        return Promise.resolve({
-          outcome: {
-            outcome: "selected",
-            optionId: allowOption.optionId,
-          },
+            void this.writePermissionAudit(
+              "permission_approved",
+              title,
+              kind,
+              undefined,
+              "skills_directory_access",
+            );
+
+            const allowOption = params.options.find((o) => o.kind === "allow_once") ??
+              params.options[0];
+
+            return {
+              outcome: {
+                outcome: "selected" as const,
+                optionId: allowOption.optionId,
+              },
+            };
+          }
+
+          // Deny when not approved
+          void this.writePermissionAudit(
+            "permission_denied",
+            title,
+            kind,
+            undefined,
+            "rejected_trusted_skills_identity",
+          );
+          this.recordPermissionRejection(
+            title,
+            kind,
+            params.toolCall.locations!.map((l) => l.path).join(", "),
+            "rejected_trusted_skills_identity",
+          );
+          const rejectOption = params.options.find((o) => o.kind === "reject_once") ??
+            params.options[0];
+          return {
+            outcome: {
+              outcome: "selected" as const,
+              optionId: rejectOption.optionId,
+            },
+          };
         });
       }
     }
@@ -1588,7 +1741,7 @@ export class ChatbotClient implements acp.Client {
       if (
         !toolOutputCovered &&
         (inSharedDataRoot ||
-          this.isWithinTmpDir(toolOutputDir) ||
+          isWithinDir(toolOutputDir, resolve(sessionCwd, "tmp")) ||
           isWithinDir(toolOutputDir, sessionCwd))
       ) {
         allowedDirs.push(toolOutputDir);
@@ -1796,98 +1949,64 @@ export class ChatbotClient implements acp.Client {
         }
       }
 
-      const isAgentWorkspaceWrite = paths.length > 0 &&
-        paths.every((p) => this.isAgentWorkspacePath(p!, params.sessionId));
+      const gateCtx = this.gateCtx(params.sessionId);
+      const currentGeneration = gateCtx?.generation ?? "";
+      const builtCtxRes = buildSessionFilesystemContext(
+        params.sessionId,
+        gateCtx,
+        this.config,
+        currentGeneration,
+      );
 
-      if (isAgentWorkspaceWrite) {
-        // Identify non-TMPDIR agent-workspace paths (i.e. shared workspace writes).
-        const sharedWorkspacePaths = paths.filter((p) =>
-          !this.isWithinTmpDir(p!, params.sessionId)
-        );
-
-        // Write-gating (F3): shared agent-workspace writes require canWriteAgentWorkspace.
-        // Only self-research sessions are authorized to author shared notes. TMPDIR writes
-        // (per-session scratch) are exempt.
-        if (
-          sharedWorkspacePaths.length > 0 &&
-          this.gateCanWriteAgentWorkspace(params.sessionId) !== true
-        ) {
-          this.logger.warn(
-            "Rejecting edit/write to shared agent workspace: session not authorized to write (canWriteAgentWorkspace not set)",
-            { title, kind, paths: sharedWorkspacePaths },
-          );
-
-          void this.writePermissionAudit(
-            "permission_denied",
-            title,
-            kind,
-            undefined,
-            "rejected_agent_workspace_write_unauthorized",
-          );
-
-          this.recordPermissionRejection(
-            title,
-            kind,
-            sharedWorkspacePaths.join(", "),
-            "rejected_agent_workspace_write_unauthorized",
-          );
-
-          const rejectOption = params.options.find((o) => o.kind === "reject_once") ??
-            params.options[0];
-          return Promise.resolve({
-            outcome: { outcome: "selected", optionId: rejectOption.optionId },
-          });
+      const evaluateEditPermission = async (): Promise<
+        { approved: boolean; reason?: string; failingPath?: string }
+      > => {
+        if (!builtCtxRes.ok) {
+          return { approved: false, reason: builtCtxRes.reason, failingPath: paths.join(", ") };
+        }
+        if (paths.length === 0) {
+          return { approved: false, reason: "rejected_edit_write", failingPath: undefined };
         }
 
-        // Check extension restrictions for non-TMPDIR agent workspace paths
-        const disallowedPaths = paths.filter((p) => {
-          return !this.isWithinTmpDir(p!, params.sessionId) &&
-            !this.hasAllowedWriteExtension(p!, params.sessionId);
-        });
+        const sessionContext = builtCtxRes.context;
+        const rootsRes = await this.observeFilesystemRoots(sessionContext, gateCtx?.trustedSkills);
+        if (!rootsRes.ok) {
+          const mapped = mapRootPathFailureToDenial(rootsRes.reason, true);
+          return { approved: false, reason: mapped, failingPath: paths.join(", ") };
+        }
+        const roots = rootsRes.value;
 
-        if (disallowedPaths.length > 0) {
-          this.logger.warn(
-            "Rejecting edit/write due to disallowed file extension: {title}",
-            {
-              title,
-              kind,
-              paths: disallowedPaths,
-              allowedExtensions: this.gateAllowedWriteExtensions(params.sessionId),
-            },
-          );
-
-          void this.writePermissionAudit(
-            "permission_denied",
-            title,
-            kind,
-            undefined,
-            "rejected_write_extension",
-          );
-
-          this.recordPermissionRejection(
-            title,
-            kind,
-            disallowedPaths.join(", "),
-            "rejected_write_extension",
-          );
-
-          // Return reject immediately: falling through would record a second,
-          // contradictory `rejected_edit_write` entry (audit + rejection buffer).
-          const rejectOption = params.options.find((o) => o.kind === "reject_once") ??
-            params.options[0];
-
-          return Promise.resolve({
-            outcome: {
-              outcome: "selected",
-              optionId: rejectOption.optionId,
-            },
+        for (const p of paths) {
+          const resolvedRes = resolveSessionPath(p, sessionContext);
+          if (!resolvedRes.ok) {
+            const mapped = mapRootPathFailureToDenial(resolvedRes.reason, true);
+            return { approved: false, reason: mapped, failingPath: p };
+          }
+          const targetRes = await resolveFilesystemTarget(resolvedRes.value, roots, "file-or-new");
+          if (!targetRes.ok) {
+            const mapped = mapRootPathFailureToDenial(targetRes.reason, true);
+            return { approved: false, reason: mapped, failingPath: p };
+          }
+          const auth = authorizeFilesystemWrite({
+            roots,
+            target: targetRes.value,
+            yolo: false,
+            canWriteAgentWorkspace: gateCtx?.canWriteAgentWorkspace === true,
+            allowedWriteExtensions: gateCtx?.allowedWriteExtensions,
           });
-        } else {
-          this.logger.info(
-            "Auto-approving edit/write to agent workspace: {title}",
-            { title, kind, paths },
-          );
+          if (!auth.ok) {
+            return { approved: false, reason: auth.reason, failingPath: p };
+          }
+        }
+        if (this.gateCtx(params.sessionId)?.generation !== currentGeneration) {
+          return { approved: false, reason: "rejected_filesystem_context" };
+        }
+        return { approved: true };
+      };
 
+      return evaluateEditPermission().then((res) => {
+        if (res.approved) {
+          this.logger.info("Auto-approving edit/write: {title}", { title, kind, paths });
           void this.writePermissionAudit(
             "permission_approved",
             title,
@@ -1895,34 +2014,39 @@ export class ChatbotClient implements acp.Client {
             undefined,
             "agent_workspace_write",
           );
-
           const allowOption = params.options.find((o) => o.kind === "allow_once") ??
             params.options[0];
-
-          return Promise.resolve({
-            outcome: {
-              outcome: "selected",
-              optionId: allowOption.optionId,
-            },
-          });
+          return {
+            outcome: { outcome: "selected" as const, optionId: allowOption.optionId },
+          };
         }
-      }
 
-      this.logger.warn("Rejecting edit/write tool in restricted mode: {title}", {
-        title,
-        kind,
-        paths,
+        const denialReason = res.reason ?? "rejected_edit_write";
+        this.logger.warn("Rejecting edit/write tool in restricted mode: {title}", {
+          title,
+          kind,
+          paths,
+          reason: denialReason,
+        });
+        void this.writePermissionAudit(
+          "permission_denied",
+          title,
+          kind,
+          undefined,
+          denialReason,
+        );
+        this.recordPermissionRejection(
+          title,
+          kind,
+          res.failingPath ?? paths.join(", "),
+          denialReason,
+        );
+        const rejectOption = params.options.find((o) => o.kind === "reject_once") ??
+          params.options[0];
+        return {
+          outcome: { outcome: "selected" as const, optionId: rejectOption.optionId },
+        };
       });
-
-      void this.writePermissionAudit(
-        "permission_denied",
-        title,
-        kind,
-        undefined,
-        "rejected_edit_write",
-      );
-
-      this.recordPermissionRejection(title, kind, paths.join(", "), "rejected_edit_write");
     } else {
       // For unknown tool calls, reject
       this.logger.warn("Rejecting unknown tool call", {
@@ -2106,7 +2230,7 @@ export class ChatbotClient implements acp.Client {
 
   /**
    * Handle file read requests from the Agent
-   * Only allows reading files within the working directory
+   * Authorizes canonical roots and performs protected content IO only.
    */
   async readTextFile(
     params: acp.ReadTextFileRequest,
@@ -2114,49 +2238,86 @@ export class ChatbotClient implements acp.Client {
     this.updateActivity();
     this.logger.debug("Read file requested", { path: params.path });
 
-    // The path that passes validation IS the path that is read: canonicalize
-    // `$TMPDIR`/`$SESSION_ID` tokens first, then validate and read the
-    // expanded path (no literal `$TMPDIR` directory under the bot's cwd).
-    const resolvedPath = this.resolveSessionPath(params.path, params.sessionId);
+    const gateCtx = this.gateCtx(params.sessionId);
+    const currentGeneration = gateCtx?.generation ?? "";
+    const builtCtxRes = buildSessionFilesystemContext(
+      params.sessionId,
+      gateCtx,
+      this.config,
+      currentGeneration,
+    );
 
-    // Validate path is within working directory (boundary-safe)
-    if (!this.isPathAllowed(resolvedPath, params.sessionId)) {
-      throw new acp.RequestError(
-        -32600,
-        "Access denied: path outside working directory",
+    if (!builtCtxRes.ok) {
+      this.rejectFilesystemRequest("readTextFile", params.path, builtCtxRes.reason);
+    }
+
+    const sessionContext = builtCtxRes.context;
+    const resolvedPathRes = resolveSessionPath(params.path, sessionContext);
+    if (!resolvedPathRes.ok) {
+      const denialReason = mapRootPathFailureToDenial(resolvedPathRes.reason, false);
+      this.rejectFilesystemRequest("readTextFile", params.path, denialReason);
+    }
+
+    const rootsRes = await this.observeFilesystemRoots(sessionContext, gateCtx?.trustedSkills);
+    if (!rootsRes.ok) {
+      const denialReason = mapRootPathFailureToDenial(rootsRes.reason, false);
+      this.rejectFilesystemRequest(
+        "readTextFile",
+        resolvedPathRes.value.normalizedPath,
+        denialReason,
       );
     }
 
-    // Read-extension allowlist (F4): only workspace memory (`.jsonl`), markdown (`.md`),
-    // and plain text (`.txt`) may be read. This blocks reads of arbitrary sensitive text
-    // files (e.g. `.json` token/cache files) that could live inside an allowed directory.
-    if (!hasAllowedExtension(resolvedPath, ALLOWED_READ_EXTENSIONS)) {
-      this.logger.warn("Rejecting read due to disallowed file extension: {path}", {
-        path: resolvedPath,
-        allowedExtensions: ALLOWED_READ_EXTENSIONS,
-      });
-      throw new acp.RequestError(
-        -32600,
-        `Access denied: file extension not allowed for reads (permitted: ${
-          ALLOWED_READ_EXTENSIONS.join(", ")
-        })`,
+    const targetRes = await resolveFilesystemTarget(
+      resolvedPathRes.value,
+      rootsRes.value,
+      "existing-file",
+    );
+    if (!targetRes.ok) {
+      const denialReason = mapRootPathFailureToDenial(targetRes.reason, false);
+      this.rejectFilesystemRequest(
+        "readTextFile",
+        resolvedPathRes.value.normalizedPath,
+        denialReason,
       );
     }
 
-    try {
-      const content = await Deno.readTextFile(resolvedPath);
-      return { content };
-    } catch (error) {
-      throw new acp.RequestError(
-        -32600,
-        `Failed to read file: ${error instanceof Error ? error.message : String(error)}`,
+    const authRes = authorizeFilesystemRead({
+      roots: rootsRes.value,
+      target: targetRes.value,
+      allowedReadExtensions: ALLOWED_READ_EXTENSIONS,
+    });
+    if (!authRes.ok) {
+      this.rejectFilesystemRequest("readTextFile", targetRes.value.canonicalTarget, authRes.reason);
+    }
+
+    // Currency check: ensure context generation has not changed
+    if (this.gateCtx(params.sessionId)?.generation !== currentGeneration) {
+      this.rejectFilesystemRequest(
+        "readTextFile",
+        targetRes.value.canonicalTarget,
+        "rejected_trusted_skills_identity",
       );
     }
+
+    const readRes = readCanonicalTextFile({
+      context: sessionContext,
+      roots: rootsRes.value,
+      target: targetRes.value,
+      selectedRole: authRes.role,
+      nativeCalls: this.config.nativeCalls,
+    });
+    if (!readRes.ok) {
+      const denialReason = mapAccessFailureToDenial(readRes.reason, false);
+      this.rejectFilesystemRequest("readTextFile", targetRes.value.canonicalTarget, denialReason);
+    }
+
+    return { content: readRes.value };
   }
 
   /**
    * Handle file write requests from the Agent
-   * Only allows writing files within the working directory
+   * Authorizes writes independently of any preceding permission request.
    */
   async writeTextFile(
     params: acp.WriteTextFileRequest,
@@ -2164,79 +2325,88 @@ export class ChatbotClient implements acp.Client {
     this.updateActivity();
     this.logger.debug("Write file requested", { path: params.path });
 
-    // The path that passes validation IS the path that is written: canonicalize
-    // `$TMPDIR`/`$SESSION_ID` tokens first, then validate and write the
-    // expanded path (no literal `$TMPDIR` directory under the bot's cwd).
-    const resolvedPath = this.resolveSessionPath(params.path, params.sessionId);
+    const gateCtx = this.gateCtx(params.sessionId);
+    const currentGeneration = gateCtx?.generation ?? "";
+    const builtCtxRes = buildSessionFilesystemContext(
+      params.sessionId,
+      gateCtx,
+      this.config,
+      currentGeneration,
+    );
 
-    // Validate path is within working directory
-    if (!this.isPathAllowed(resolvedPath, params.sessionId)) {
-      this.recordPermissionRejection(
+    if (!builtCtxRes.ok) {
+      this.rejectFilesystemRequest("writeTextFile", params.path, builtCtxRes.reason);
+    }
+
+    const sessionContext = builtCtxRes.context;
+    const resolvedPathRes = resolveSessionPath(params.path, sessionContext);
+    if (!resolvedPathRes.ok) {
+      const denialReason = mapRootPathFailureToDenial(resolvedPathRes.reason, true);
+      this.rejectFilesystemRequest("writeTextFile", params.path, denialReason);
+    }
+
+    const rootsRes = await this.observeFilesystemRoots(sessionContext, gateCtx?.trustedSkills);
+    if (!rootsRes.ok) {
+      const denialReason = mapRootPathFailureToDenial(rootsRes.reason, true);
+      this.rejectFilesystemRequest(
         "writeTextFile",
-        "write",
-        resolvedPath,
-        "rejected_write_path_outside_workspace",
-      );
-      throw new acp.RequestError(
-        -32600,
-        "Access denied: path outside working directory",
+        resolvedPathRes.value.normalizedPath,
+        denialReason,
       );
     }
 
-    // Defense-in-depth: gate agent-workspace writes in restricted mode.
-    // This is a SEPARATE sink from requestPermission() (an agent may call writeTextFile
-    // directly), so the same F3 write-gating and F4 extension checks are enforced here too.
-    if (!this.gateYolo(params.sessionId)) {
-      const isSharedWorkspaceWrite = this.config.agentWorkspacePath
-        ? isWithinDir(resolvedPath, this.config.agentWorkspacePath) &&
-          !this.isWithinTmpDir(resolvedPath, params.sessionId)
-        : false;
-
-      if (isSharedWorkspaceWrite) {
-        // Write-gating (F3): shared agent-workspace writes require canWriteAgentWorkspace.
-        if (this.gateCanWriteAgentWorkspace(params.sessionId) !== true) {
-          this.logger.warn(
-            "Rejecting writeTextFile to shared agent workspace: session not authorized (canWriteAgentWorkspace not set)",
-            { path: resolvedPath },
-          );
-          this.recordPermissionRejection(
-            "writeTextFile",
-            "write",
-            resolvedPath,
-            "rejected_agent_workspace_write_unauthorized",
-          );
-          throw new acp.RequestError(
-            -32600,
-            "Access denied: session not authorized to write to the shared agent workspace",
-          );
-        }
-
-        if (!this.hasAllowedWriteExtension(resolvedPath, params.sessionId)) {
-          this.recordPermissionRejection(
-            "writeTextFile",
-            "write",
-            resolvedPath,
-            "rejected_write_extension",
-          );
-          throw new acp.RequestError(
-            -32600,
-            `Access denied: file extension not allowed for agent workspace writes (permitted: ${
-              this.gateAllowedWriteExtensions(params.sessionId)?.join(", ")
-            })`,
-          );
-        }
-      }
-    }
-
-    try {
-      await Deno.writeTextFile(resolvedPath, params.content);
-      return {};
-    } catch (error) {
-      throw new acp.RequestError(
-        -32600,
-        `Failed to write file: ${error instanceof Error ? error.message : String(error)}`,
+    const targetRes = await resolveFilesystemTarget(
+      resolvedPathRes.value,
+      rootsRes.value,
+      "file-or-new",
+    );
+    if (!targetRes.ok) {
+      const denialReason = mapRootPathFailureToDenial(targetRes.reason, true);
+      this.rejectFilesystemRequest(
+        "writeTextFile",
+        resolvedPathRes.value.normalizedPath,
+        denialReason,
       );
     }
+
+    const authRes = authorizeFilesystemWrite({
+      roots: rootsRes.value,
+      target: targetRes.value,
+      yolo: gateCtx?.yolo ?? false,
+      canWriteAgentWorkspace: gateCtx?.canWriteAgentWorkspace === true,
+      allowedWriteExtensions: gateCtx?.allowedWriteExtensions,
+    });
+    if (!authRes.ok) {
+      this.rejectFilesystemRequest(
+        "writeTextFile",
+        targetRes.value.canonicalTarget,
+        authRes.reason,
+      );
+    }
+
+    // Currency check: ensure context generation has not changed
+    if (this.gateCtx(params.sessionId)?.generation !== currentGeneration) {
+      this.rejectFilesystemRequest(
+        "writeTextFile",
+        targetRes.value.canonicalTarget,
+        "rejected_trusted_skills_identity",
+      );
+    }
+
+    const writeRes = writeCanonicalTextFile({
+      context: sessionContext,
+      roots: rootsRes.value,
+      target: targetRes.value,
+      selectedRole: authRes.role,
+      content: params.content,
+      nativeCalls: this.config.nativeCalls,
+    });
+    if (!writeRes.ok) {
+      const denialReason = mapAccessFailureToDenial(writeRes.reason, true);
+      this.rejectFilesystemRequest("writeTextFile", targetRes.value.canonicalTarget, denialReason);
+    }
+
+    return {};
   }
 
   /**
@@ -2257,84 +2427,6 @@ export class ChatbotClient implements acp.Client {
       userId: this.config.userId,
       // Note: workspace and platformAdapter should be added by caller
     };
-  }
-
-  /**
-   * Expand the session-bound path tokens `$TMPDIR`/`${TMPDIR}`, `$SESSION_ID`/`${SESSION_ID}`,
-   * and `$AGENT_WORKSPACE`/`${AGENT_WORKSPACE}` (as the agent types them into its
-   * edit/write/read tools) to the resolved session TMPDIR (`{workingDir}/tmp`), the
-   * session id, and the shared agent workspace path, then return the canonical path.
-   * An absent session id expands to an empty string. Other `$VAR`-style tokens (e.g.
-   * `$TMPDIR2`, `$OTHER`) are left verbatim and will fail containment, mirroring the
-   * home-anchored expansion used for generic command arguments. The bot never executes
-   * the expanded value — it only resolves and compares paths, so no injection is
-   * possible (a path is data).
-   */
-  private resolveSessionPath(path: string, acpSessionId?: string): string {
-    const tmpDir = resolve(this.gateWorkingDir(acpSessionId), "tmp");
-    const sessionId = this.gateSessionId(acpSessionId);
-    const agentWorkspace = this.config.agentWorkspacePath ?? "";
-    let expanded = path;
-    // ${...} exact forms first, then $NAME with a variable-name boundary so
-    // `$TMPDIR2` / `$SESSION_ID2` / `$AGENT_WORKSPACE2` are NOT expanded.
-    expanded = expanded.split("${TMPDIR}").join(tmpDir);
-    expanded = expanded.split("${SESSION_ID}").join(sessionId);
-    expanded = expanded.split("${AGENT_WORKSPACE}").join(agentWorkspace);
-    expanded = expanded.replace(/\$TMPDIR(?![A-Za-z0-9_])/g, tmpDir);
-    expanded = expanded.replace(/\$SESSION_ID(?![A-Za-z0-9_])/g, sessionId);
-    expanded = expanded.replace(/\$AGENT_WORKSPACE(?![A-Za-z0-9_])/g, agentWorkspace);
-    return resolve(expanded);
-  }
-
-  /**
-   * Validate that a path is within the allowed directories
-   * Allows: user workspace OR agent global workspace
-   */
-  private isPathAllowed(path: string, acpSessionId?: string): boolean {
-    try {
-      const expanded = this.resolveSessionPath(path, acpSessionId);
-      if (isWithinDir(expanded, this.gateWorkingDir(acpSessionId))) return true;
-
-      if (this.config.agentWorkspacePath && isWithinDir(expanded, this.config.agentWorkspacePath)) {
-        return true;
-      }
-
-      return false;
-    } catch {
-      return false;
-    }
-  }
-
-  /**
-   * Check if a path is within the agent workspace or workspace TMPDIR.
-   * Used to scope edit/write permissions for self-research.
-   * Equivalent to agent-config/opencode.json: "edit": { "data/agent-workspace/**": "allow", "$TMPDIR/**": "allow" }
-   */
-  private isAgentWorkspacePath(path: string, acpSessionId?: string): boolean {
-    try {
-      const expanded = this.resolveSessionPath(path, acpSessionId);
-      // Check agent workspace path (boundary-safe)
-      if (this.config.agentWorkspacePath && isWithinDir(expanded, this.config.agentWorkspacePath)) {
-        return true;
-      }
-
-      // Check workspace TMPDIR
-      if (this.isWithinTmpDir(expanded, acpSessionId)) return true;
-
-      return false;
-    } catch {
-      return false;
-    }
-  }
-
-  /**
-   * Check if a path is within the workspace TMPDIR (boundary-safe).
-   */
-  private isWithinTmpDir(path: string, acpSessionId?: string): boolean {
-    return isWithinDir(
-      this.resolveSessionPath(path, acpSessionId),
-      resolve(this.gateWorkingDir(acpSessionId), "tmp"),
-    );
   }
 
   /**
@@ -2365,19 +2457,6 @@ export class ChatbotClient implements acp.Client {
     }
 
     return paths;
-  }
-
-  /**
-   * Check if a file path has an allowed write extension for agent workspace writes.
-   * Returns true if no restrictions are configured or if the extension is in the allowed list.
-   */
-  private hasAllowedWriteExtension(filePath: string, acpSessionId?: string): boolean {
-    const extensions = this.gateAllowedWriteExtensions(acpSessionId);
-    if (!extensions || extensions.length === 0) return true;
-    const dotIndex = filePath.lastIndexOf(".");
-    if (dotIndex === -1 || dotIndex === filePath.length - 1) return false;
-    const ext = filePath.substring(dotIndex).toLowerCase();
-    return extensions.some((e) => ext === e.toLowerCase());
   }
 
   /**

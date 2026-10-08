@@ -229,13 +229,13 @@ The method evaluates permission requests in this order:
 
 1. **YOLO check** — If `config.yolo === true`, auto-approve everything immediately.
 
-2. **Skills directory read** — Auto-approve `read` requests where paths start with the skills directory (`~/.agents/skills` / `/home/deno/.agents/skills`). This allows the agent to discover SKILL.md files.
+2. **Trusted skills read**. Approve `read` locations only through canonical observations of the deployment-owned read-only skills root with validated critical-skill references bound to the current registered generation. Keep the `skills_directory_access` audit reason. An unowned HOME-discovered or `npx skills add` copy, a workspace same-name file, an escaping link, stale provenance or missing provenance receives no exception.
 
 3. **Shell command execution** — For `execute` kind requests, evaluate each command SEGMENT-wise (`;`/`&&`/`||` chains are split quote-aware via `splitCommandSegments`): every segment must match the skill auto-approve list using safe token matching (see [Skill Auto-Approve List](#skill-auto-approve-list)) OR pass the generic-command gate (see [Bash Permission (Whitelist)](#bash-permission-whitelist)); the whole invocation is approved only when ALL segments of ALL commands pass, otherwise the FIRST failing segment's cause is reported. The D5 legacy free-text flag check (`--message` / `--content` / `--query` / `--caption`) runs on the FULL original command(s) before any splitting.
 
 4. **Registered skill check** — Extract skill name from `rawInput.skill` or `toolCall.title` and check against the `SkillRegistry`.
 
-5. **Edit/write scoping** — Requests are recognized as edit/write by the ACP tool `kind` (`"edit"` — what OpenCode v1.17.13+ sends for its `write`/`edit`/`apply_patch`/`patch` tools, with `title` = the target file path) or by legacy title values (`"edit"`, `"edit_file"`, `"write"`, `"write_file"`). When `locations[]` is empty, paths are extracted from `rawInput` fields (`path`, `file_path`, `filePath`, `filepath`, `file`, `filename`, `paths`, `files` — covering both the `{filePath, content}` write shape and the `{filepath, diff}` edit shape). For recognized requests, check if **all** target paths are within `config.agentWorkspacePath` or workspace TMPDIR. For agent workspace paths (not TMPDIR), additionally verify that file extensions match `allowedWriteExtensions` (default: `[".md", ".txt"]`). If all checks pass, auto-approve. Otherwise, reject with warning logs. Requests with no resolvable paths are rejected as a safe default (fail closed). Requests matching neither the `kind` nor legacy titles fall through to unknown-tool rejection.
+5. **Edit/write scoping**. The existing `"edit"` kind and legacy title recognition and raw-input path extraction are unchanged. Every extracted target uses the same canonical write decision as the direct callback. Restricted writes permit the session's own physical staging root `{cwd}/tmp/{Skill API session id}` without an extension filter, or a shared Agent workspace target with `canWriteAgentWorkspace` and an allowed extension (default `.md`, `.txt`; an empty list denies all shared writes). Other ordinary user-workspace targets, including `.md` files, are denied. Trusted skills are read-only in every mode. Missing paths/context, failed observations and stale registrations fail closed. Complete destructive intent normalization belongs to `normalize-acp-destructive-targets`.
 
 6. **Default rejection** — All unrecognized tool calls are rejected with `reject_once`.
 
@@ -254,16 +254,17 @@ In restricted mode, the client selects `allow_once` for whitelisted operations a
 
 ## Layer 4 — File Access Boundary
 
-When the external agent uses ACP-level file operations (`readTextFile`, `writeTextFile`), `ChatbotClient` enforces a path boundary:
+Each callback requires the exact ACP session's explicitly registered context, including its owning Skill API session id and client-assigned generation. Unknown sessions never use a process-cwd or first-session fallback. The pipeline expands session-bound tokens through `filesystem-roots.ts`, constructs canonical roots, observes the target, selects one authorized physical role through `filesystem-policy.ts`, then performs content IO exclusively through `readCanonicalTextFile` or `writeCanonicalTextFile`. A failed step never retries a broader role or ordinary path IO.
 
-- Files must be within `config.workingDir` (the user's workspace directory) **or** `config.agentWorkspacePath` (the global agent workspace)
-- Path validation uses `resolve()` + `startsWith()` to prevent directory traversal attacks
-- Requests outside these boundaries are denied with an error
-- For `writeTextFile` in the agent workspace (non-YOLO mode), file extensions are checked against `allowedWriteExtensions` as a defense-in-depth measure (mirroring Layer 3's extension check). TMPDIR writes are exempt from extension filtering.
+Workspace, shared and staging reads retain the case-insensitive `.jsonl`/`.md`/`.txt` allowlist. An optional deployment-owned trusted skills root admits other extensions only after canonical owned-root agreement, critical-skill identity/source/current-generation validation and disjointness from writable roots. It never grants write authority. Lifecycle composition supplies this internal provenance; there is no new operator configuration or environment field. No provenance is synthesized from HOME, filenames or model input. The current composition does not supply cleared native critical-skill evidence, so the trusted exception remains absent there.
 
-This is independent of the agent's own file access — it applies to the ACP protocol's file operation callbacks.
+Registration generations never repeat: each client instance prefixes its own epoch to a monotonic registration counter, a provenance supplier obtains the value announced for the registration it is about to perform, and supplied critical-skill generations are stored verbatim rather than rebound. A re-registration therefore invalidates every reference minted for an earlier registration, and an `AgentConnector` reconnect — which replays the cached session contexts onto a fresh client — cannot restore that invalidated provenance: the replayed references keep the previous instance's generation and the callbacks deny them (`rejected_trusted_skills_identity`, readTextFile or the restricted read classification) without any content IO.
 
-**Reference**: `src/acp/client.ts`, lines 444–496
+Restricted writes independently enforce the Layer 3 decision even without a preceding permission request. YOLO callback writes allow any extension under workspace/shared physical containment without shared authorization or staging-only restrictions. Outside/sibling escapes and trusted-skills writes stay denied. These boundaries apply to ACP-delegated IO only; native execution outside ACP is unconstrained by this policy, including native YOLO execution.
+
+Every sink denial records one sanitized bounded reason in the existing retry buffer and audit mirror and raises a static `acp.RequestError` message. No content or raw platform error is emitted.
+
+**Reference**: `src/acp/client.ts`, `src/acp/filesystem-policy.ts`
 
 ---
 
@@ -275,7 +276,7 @@ To prevent TOCTOU races between path validation and content IO, the secure acces
 - **Descriptor-Bound Mutation & No Namespace Freezing**: Content operations bind to the opened file descriptor and verify exact `statx` type/identity. This guarantees descriptor binding (an opened file cannot be redirected by pathname substitution), not universal namespace freezing (concurrent same-inode edits or background moves outside ACP are not blocked). Existing overwrite checks type and identity before `ftruncate(fd, 0)`. Replacement entries are never truncated.
 - **Exclusive Creation & Existing Parents**: Prospective new files are created exclusively (`O_CREAT | O_EXCL`, mode `0600`). The full path must reside in an already existing parent directory; no recursive `mkdir` is performed (`parent_missing`). Missing or prospective roots return `root_unavailable`.
 - **Partial IO & Cleanup**: IO failures return honest `io_failed` results; partial byte transfers do not promise atomic rollback. All descriptors are guaranteed closed on all paths in `finally`.
-- **Downstream Cutover Status**: Client callbacks in `src/acp/client.ts` (`readTextFile`, `writeTextFile`) remain unchanged at this layer; direct adoption and role selection belong to the downstream consumer change `enforce-acp-filesystem-authorization`. Real agent execution, live container environments, and bubblewrap evidence remain unverified/user-owned.
+- **Callback cutover**: `readTextFile` and `writeTextFile` now select physical roles and use these operations exclusively. Contained symlinks fail with `rejected_filesystem_access`; escaping links fail observation. Unprovisioned staging fails without creating parents. Unsupported kernel/libc/seccomp/FFI capabilities fail closed with `rejected_filesystem_access`, with no portable path-IO fallback.
 
 ---
 
@@ -526,6 +527,16 @@ Each permission audit entry includes:
 | `skills_directory_access`                         | approved | Read access to the skills directory                                       |
 | `skill_whitelist`                                 | approved | Command matched the skill auto-approve list                               |
 | `registered_skill`                                | approved | Tool matched a registered skill name                                      |
+| `rejected_write_path_outside_workspace`            | denied | Physical target is outside writable roots or escapes through a link |
+| `rejected_agent_workspace_write_unauthorized`      | denied | Restricted shared write lacks session authorization |
+| `rejected_write_extension`                        | denied | Restricted shared target extension is not allowed |
+| `rejected_workspace_write_restricted`             | denied | Ordinary restricted user-workspace mutation outside own staging |
+| `rejected_trusted_skills_read_only`               | denied | Trusted skills write attempted in any mode |
+| `rejected_trusted_skills_identity`                | denied | Trusted ownership/source/generation mismatch or writable overlap; stale callback observation |
+| `rejected_filesystem_context`                     | denied | Missing/invalid registered ACP owner or context |
+| `rejected_filesystem_path_unavailable`            | denied | Expansion or canonical root/target observation failed |
+| `rejected_filesystem_access`                      | denied | Protected operation failed, including unavailable staging, symlinks, replacement or unsupported platform |
+| `rejected_read_extension`                        | denied | Workspace/shared/staging extension is outside `.jsonl`, `.md`, `.txt` |
 | `rejected_edit_write`                             | denied   | Edit/write operation rejected in restricted mode                          |
 | `rejected_unknown`                                | denied   | Unknown tool rejected by default-deny policy                              |
 | `rejected_generic_command_out_of_workspace`       | denied   | Generic command path argument resolved outside the allowed dirs           |
@@ -559,6 +570,8 @@ Permission audit phases respect the `audit.includedPhases` configuration. When `
 | Permission bypass undetected            | All permission decisions (approved and denied) are recorded in per-session audit logs with full context               |
 
 ### Known Limitations
+
+The P0 compatibility verdict in `docs/OMP_COMPATIBILITY.md` remains **BLOCKED**, with every `incompatible`/`unresolved` boundary unchanged. Under the user-approved fail-closed application ruling, this cutover ships client decisions without clearing native security consumption. Temporary-filesystem tests with injected native-call models certify client decisions and protected-operation wiring only. They do not certify native OMP delegation, deployment libc/seccomp, architecture images or bwrap. ACP SDK 0.14.1 filesystem callback methods and advertised `fs.readTextFile`/`fs.writeTextFile` capabilities are unchanged; the pinned OMP bridge's native fallback when capability is omitted is not exercised by these tests. The generic-command argument gate and `skills/lib/payload.ts` remain lexical, with their separate owners unchanged.
 
 1. **OpenCode's Layer 2 is only as strong as opencode.json**: If the configuration file is modified, all Layer 2 protections are bypassed. YOLO mode is controlled via ACP `setSessionMode("yolo")`, which switches to the permissive `yolo` agent defined in `opencode.json`.
 
@@ -675,6 +688,7 @@ The `src/acp/filesystem-roots.ts` helper library provides an agent-generic, phys
    - Must be strictly disjoint from all writable roots (fails `root_overlap`).
    - Role `trusted-skills` is explicitly read-only. Skills links escaping the owned root fail trusted membership (`symlink_escape`).
    - Name-only trust (e.g. workspace `SKILL.md`) is rejected (`trusted_identity_mismatch`).
+   - Registration generations are per-client-instance (instance epoch + monotonic registration counter) and never repeat, so a reconnect's replayed contexts or a repeated registration cannot re-admit provenance an earlier registration invalidated.
 
 5. **Symlink Traversal & Role Decoupling**:
    - Equal-or-separator containment is evaluated per candidate root.
