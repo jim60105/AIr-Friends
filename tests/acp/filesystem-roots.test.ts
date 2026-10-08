@@ -228,7 +228,10 @@ Deno.test("Task 3.2: Canonical roots, host-provisioned aliases, and prospective 
     const roots2 = unwrap(rootsRes2);
     const stagingRoot2 = roots2.roots.find((r) => r.role === "staging")!;
     assertEquals(stagingRoot2.isProspective, true);
-    assertEquals(stagingRoot2.prospectiveAncestor, resolve(await Deno.realPath(workspaceReal), "tmp"));
+    assertEquals(
+      stagingRoot2.prospectiveAncestor,
+      resolve(await Deno.realPath(workspaceReal), "tmp"),
+    );
     assertEquals(stagingRoot2.prospectiveMissingSuffix, ["skill-x"]);
 
     // Now create physical staging
@@ -287,8 +290,6 @@ Deno.test("Task 3.2: Internal vs escaping symlinks and boundary-safe containment
     await Deno.mkdir(workspace);
     await Deno.mkdir(siblingDir);
     await Deno.mkdir(externalDir);
-
-    const canonicalWs = await Deno.realPath(workspace);
 
     // 1. In-workspace legitimate file and in-workspace symlink
     const realFile = join(workspace, "real.txt");
@@ -494,9 +495,6 @@ Deno.test("Task 3.3: Critical skills contract validation, disjointness and rejec
     const skillsRoot = join(tempDir, "skills-root");
     await Deno.mkdir(workspace);
     await Deno.mkdir(skillsRoot);
-
-    const canonicalWs = await Deno.realPath(workspace);
-    const canonicalSkills = await Deno.realPath(skillsRoot);
 
     const context: SessionContext = {
       acpSessionId: "session-1",

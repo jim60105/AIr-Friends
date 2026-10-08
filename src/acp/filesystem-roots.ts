@@ -149,7 +149,11 @@ function isValidSessionIdComponent(id: string): boolean {
 
 export function validateSessionContext(context: SessionContext): RootPathResult<void> {
   if (!context || typeof context !== "object") {
-    return { ok: false, reason: "invalid_context", message: "Session context must not be null or undefined" };
+    return {
+      ok: false,
+      reason: "invalid_context",
+      message: "Session context must not be null or undefined",
+    };
   }
 
   if (
@@ -159,7 +163,8 @@ export function validateSessionContext(context: SessionContext): RootPathResult<
     return {
       ok: false,
       reason: "invalid_context",
-      message: `Invalid ACP session ID ('${context.acpSessionId}') or Skill session ID ('${context.skillSessionId}')`,
+      message:
+        `Invalid ACP session ID ('${context.acpSessionId}') or Skill session ID ('${context.skillSessionId}')`,
     };
   }
 
@@ -192,7 +197,8 @@ export function validateSessionContext(context: SessionContext): RootPathResult<
     return {
       ok: false,
       reason: "invalid_context",
-      message: `explicitStagingPath '${context.explicitStagingPath}' does not match expected staging '${expectedStaging}'`,
+      message:
+        `explicitStagingPath '${context.explicitStagingPath}' does not match expected staging '${expectedStaging}'`,
     };
   }
 
@@ -203,7 +209,8 @@ export function validateSessionContext(context: SessionContext): RootPathResult<
     return {
       ok: false,
       reason: "invalid_context",
-      message: `sharedWorkspacePath must be an absolute path when provided: '${context.sharedWorkspacePath}'`,
+      message:
+        `sharedWorkspacePath must be an absolute path when provided: '${context.sharedWorkspacePath}'`,
     };
   }
 
@@ -255,7 +262,11 @@ export function resolveSessionPath(
     rawPath.startsWith("/dev/") ||
     rawPath === "/dev"
   ) {
-    return { ok: false, reason: "invalid_path", message: `Device references are rejected: '${rawPath}'` };
+    return {
+      ok: false,
+      reason: "invalid_path",
+      message: `Device references are rejected: '${rawPath}'`,
+    };
   }
 
   const tmpDir = resolve(context.sessionCwd, "tmp");
@@ -276,7 +287,8 @@ export function resolveSessionPath(
       return {
         ok: false,
         reason: "unresolved_token",
-        message: "${AGENT_WORKSPACE} token used but no sharedWorkspacePath configured in session context",
+        message:
+          "${AGENT_WORKSPACE} token used but no sharedWorkspacePath configured in session context",
       };
     }
     expanded = expanded.split("${AGENT_WORKSPACE}").join(sharedWorkspace);
@@ -299,7 +311,8 @@ export function resolveSessionPath(
       return {
         ok: false,
         reason: "unresolved_token",
-        message: "$AGENT_WORKSPACE token used but no sharedWorkspacePath configured in session context",
+        message:
+          "$AGENT_WORKSPACE token used but no sharedWorkspacePath configured in session context",
       };
     }
     expanded = expanded.replace(/\$AGENT_WORKSPACE(?![A-Za-z0-9_])/g, sharedWorkspace);
@@ -325,11 +338,11 @@ export function resolveSessionPath(
   return {
     ok: true,
     value: {
-    acpSessionId: context.acpSessionId,
-    sessionContextGeneration: context.sessionContextGeneration,
-    rawPath,
-    expandedPath: expanded,
-    normalizedPath: normalized,
+      acpSessionId: context.acpSessionId,
+      sessionContextGeneration: context.sessionContextGeneration,
+      rawPath,
+      expandedPath: expanded,
+      normalizedPath: normalized,
     },
   };
 }
@@ -415,7 +428,8 @@ export async function canonicalizeSessionRoots(
       return {
         ok: false,
         reason: "invalid_root",
-        message: `Physical staging path '${canonicalStaging}' does not match expected canonical staging '${expectedCanonicalStaging}'`,
+        message:
+          `Physical staging path '${canonicalStaging}' does not match expected canonical staging '${expectedCanonicalStaging}'`,
       };
     }
 
@@ -428,9 +442,10 @@ export async function canonicalizeSessionRoots(
     };
   } catch (err) {
     // If not found, staging is prospective
-    const errorKind = (err && typeof err === "object" && "name" in err && typeof err.name === "string")
-      ? err.name
-      : undefined;
+    const errorKind =
+      (err && typeof err === "object" && "name" in err && typeof err.name === "string")
+        ? err.name
+        : undefined;
     const isNotFound = errorKind === "NotFound" ||
       (err instanceof Error && err.message.toLowerCase().includes("no such file"));
     if (!isNotFound) {
@@ -468,7 +483,8 @@ export async function canonicalizeSessionRoots(
         return {
           ok: false,
           reason: "invalid_root",
-          message: `Workspace 'tmp' directory links to '${canonicalTmp}', which diverges from expected '${expectedTmp}'`,
+          message:
+            `Workspace 'tmp' directory links to '${canonicalTmp}', which diverges from expected '${expectedTmp}'`,
         };
       }
       prospectiveAncestor = canonicalTmp;
@@ -570,7 +586,8 @@ export async function canonicalizeSessionRoots(
             return {
               ok: false,
               reason: "root_overlap",
-              message: `Trusted skills root '${canonicalSkills}' overlaps writable root '${r.canonicalPath}' (role: ${r.role})`,
+              message:
+                `Trusted skills root '${canonicalSkills}' overlaps writable root '${r.canonicalPath}' (role: ${r.role})`,
             };
           }
         }
@@ -596,9 +613,9 @@ export async function canonicalizeSessionRoots(
   return {
     ok: true,
     value: {
-    acpSessionId: context.acpSessionId,
-    sessionContextGeneration: context.sessionContextGeneration,
-    roots,
+      acpSessionId: context.acpSessionId,
+      sessionContextGeneration: context.sessionContextGeneration,
+      roots,
     },
   };
 }
@@ -657,9 +674,10 @@ async function tracePathUnderRoot(
     try {
       stat = await reader.lstat(nextPath);
     } catch (err) {
-      const errName = (err && typeof err === "object" && "name" in err && typeof err.name === "string")
-        ? err.name
-        : undefined;
+      const errName =
+        (err && typeof err === "object" && "name" in err && typeof err.name === "string")
+          ? err.name
+          : undefined;
       const isNotFound = errName === "NotFound" ||
         (err instanceof Error && err.message.toLowerCase().includes("no such file"));
       if (isNotFound) {
@@ -689,9 +707,10 @@ async function tracePathUnderRoot(
       try {
         linkTargetCanonical = await reader.realPath(nextPath);
       } catch (err) {
-        const errName = (err && typeof err === "object" && "name" in err && typeof err.name === "string")
-          ? err.name
-          : undefined;
+        const errName =
+          (err && typeof err === "object" && "name" in err && typeof err.name === "string")
+            ? err.name
+            : undefined;
         if (
           errName === "NotFound" ||
           (err instanceof Error && err.message.toLowerCase().includes("no such file"))
@@ -734,7 +753,8 @@ async function tracePathUnderRoot(
           status: "symlink_escape",
           observedSymlinks,
           failureReason: "symlink_escape",
-          failureMessage: `Symlink at '${nextPath}' points to '${linkTargetCanonical}', escaping root '${baseCanonical}'`,
+          failureMessage:
+            `Symlink at '${nextPath}' points to '${linkTargetCanonical}', escaping root '${baseCanonical}'`,
         };
       }
 
@@ -778,7 +798,8 @@ export async function resolveFilesystemTarget(
     return {
       ok: false,
       reason: "invalid_context",
-      message: `Session ID mismatch: resolvedPath is for '${resolvedPath.acpSessionId}', roots are for '${roots.acpSessionId}'`,
+      message:
+        `Session ID mismatch: resolvedPath is for '${resolvedPath.acpSessionId}', roots are for '${roots.acpSessionId}'`,
     };
   }
 
@@ -786,7 +807,8 @@ export async function resolveFilesystemTarget(
     return {
       ok: false,
       reason: "invalid_context",
-      message: `Generation mismatch: resolvedPath has generation '${resolvedPath.sessionContextGeneration}', roots have '${roots.sessionContextGeneration}'`,
+      message:
+        `Generation mismatch: resolvedPath has generation '${resolvedPath.sessionContextGeneration}', roots have '${roots.sessionContextGeneration}'`,
     };
   }
 
@@ -800,7 +822,8 @@ export async function resolveFilesystemTarget(
     return {
       ok: false,
       reason: "outside_roots",
-      message: `Path '${resolvedPath.normalizedPath}' does not fall within any configured session root`,
+      message:
+        `Path '${resolvedPath.normalizedPath}' does not fall within any configured session root`,
     };
   }
 
@@ -860,7 +883,8 @@ export async function resolveFilesystemTarget(
           firstFatalFailure = {
             ok: false,
             reason: "not_found",
-            message: `Path '${resolvedPath.normalizedPath}' does not exist for expectation '${expectation}'`,
+            message:
+              `Path '${resolvedPath.normalizedPath}' does not exist for expectation '${expectation}'`,
           };
         }
         continue;
@@ -897,7 +921,8 @@ export async function resolveFilesystemTarget(
           firstEscapeFailure = {
             ok: false,
             reason: "symlink_escape",
-            message: `Prospective path '${computedCanonicalTarget}' escapes root '${root.canonicalPath}'`,
+            message:
+              `Prospective path '${computedCanonicalTarget}' escapes root '${root.canonicalPath}'`,
           };
         }
         continue;
@@ -940,7 +965,8 @@ export async function resolveFilesystemTarget(
         firstFatalFailure = {
           ok: false,
           reason: "wrong_target_type",
-          message: `Target '${canonicalDest}' is not a regular file as expected by '${expectation}'`,
+          message:
+            `Target '${canonicalDest}' is not a regular file as expected by '${expectation}'`,
         };
         continue;
       }
@@ -998,7 +1024,8 @@ export async function resolveFilesystemTarget(
     return {
       ok: false,
       reason: "outside_roots",
-      message: `Target '${resolvedPath.normalizedPath}' failed containment under all candidate roots`,
+      message:
+        `Target '${resolvedPath.normalizedPath}' failed containment under all candidate roots`,
     };
   }
 
@@ -1008,7 +1035,8 @@ export async function resolveFilesystemTarget(
       return {
         ok: false,
         reason: "trusted_identity_mismatch",
-        message: `Critical skill session generation mismatch: candidate has '${criticalRef.sessionGenerationId}', session has '${roots.sessionContextGeneration}'`,
+        message:
+          `Critical skill session generation mismatch: candidate has '${criticalRef.sessionGenerationId}', session has '${roots.sessionContextGeneration}'`,
       };
     }
 
@@ -1017,7 +1045,8 @@ export async function resolveFilesystemTarget(
       return {
         ok: false,
         reason: "trusted_identity_mismatch",
-        message: `No trusted-skills root configured for session, cannot validate critical skill '${criticalRef.skillId}'`,
+        message:
+          `No trusted-skills root configured for session, cannot validate critical skill '${criticalRef.skillId}'`,
       };
     }
 
@@ -1025,7 +1054,9 @@ export async function resolveFilesystemTarget(
       return {
         ok: false,
         reason: "trusted_identity_mismatch",
-        message: `Target '${primarySuccess!.canonicalTarget}' does not possess 'trusted-skills' role`,
+        message: `Target '${
+          primarySuccess!.canonicalTarget
+        }' does not possess 'trusted-skills' role`,
       };
     }
 
@@ -1057,7 +1088,9 @@ export async function resolveFilesystemTarget(
       return {
         ok: false,
         reason: "trusted_identity_mismatch",
-        message: `Canonical target '${primarySuccess!.canonicalTarget}' does not match expected instruction path '${criticalRef.canonicalInstructionPath}'`,
+        message: `Canonical target '${
+          primarySuccess!.canonicalTarget
+        }' does not match expected instruction path '${criticalRef.canonicalInstructionPath}'`,
       };
     }
   }
@@ -1065,18 +1098,18 @@ export async function resolveFilesystemTarget(
   return {
     ok: true,
     value: {
-    acpSessionId: roots.acpSessionId,
-    sessionContextGeneration: roots.sessionContextGeneration,
-    roles: admittedRoles,
-    rootIdentities: admittedRootInfos,
-    normalizedInput: resolvedPath.normalizedPath,
-    canonicalTarget: primarySuccess!.canonicalTarget,
-    rootRelativePath: primarySuccess!.rootRelativePath,
-    targetType: primarySuccess!.targetType,
-    targetIdentity: primarySuccess!.targetIdentity,
-    prospectiveAncestor: primarySuccess!.prospectiveAncestor,
-    prospectiveMissingSuffix: primarySuccess!.prospectiveMissingSuffix,
-    observedSymlinks: primarySuccess!.observedSymlinks,
+      acpSessionId: roots.acpSessionId,
+      sessionContextGeneration: roots.sessionContextGeneration,
+      roles: admittedRoles,
+      rootIdentities: admittedRootInfos,
+      normalizedInput: resolvedPath.normalizedPath,
+      canonicalTarget: primarySuccess!.canonicalTarget,
+      rootRelativePath: primarySuccess!.rootRelativePath,
+      targetType: primarySuccess!.targetType,
+      targetIdentity: primarySuccess!.targetIdentity,
+      prospectiveAncestor: primarySuccess!.prospectiveAncestor,
+      prospectiveMissingSuffix: primarySuccess!.prospectiveMissingSuffix,
+      observedSymlinks: primarySuccess!.observedSymlinks,
     },
   };
 }
