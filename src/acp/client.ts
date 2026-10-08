@@ -1160,7 +1160,11 @@ export interface SessionGateContext {
   allowedWriteExtensions?: string[];
   /** Deployment-owned trusted skills provenance */
   trustedSkills?: TrustedSkillsSource;
-  /** Context registration generation (assigned monotonically by ChatbotClient) */
+  /**
+   * Context registration generation (assigned by ChatbotClient). The client both
+   * increments a per-instance counter and prefixes a per-instance epoch, so a
+   * generation never repeats across client instances.
+   */
   generation?: string;
 }
 
@@ -1215,6 +1219,14 @@ export class ChatbotClient implements acp.Client {
    */
   private sessionContexts: Map<string, SessionGateContext> = new Map();
   private contextGenerationCounter: number = 0;
+  /**
+   * Per-client-instance registration epoch. Registration generations are the currency
+   * checked for trusted-provenance admission, so they must never repeat. A reconnect
+   * constructs a fresh client and replays the cached gate contexts onto it; the new
+   * instance carries a new epoch, so a critical reference minted for a previous
+   * instance's epoch is never admitted by the new one.
+   */
+  private readonly contextGenerationEpoch: string = crypto.randomUUID();
 
   constructor(
     skillRegistry: SkillRegistry,
@@ -1270,8 +1282,10 @@ export class ChatbotClient implements acp.Client {
    */
   setSessionContext(sessionId: string, ctx: SessionGateContext): void {
     const existing = this.sessionContexts.get(sessionId);
+    // Announced generation: computed before the counter advances, so the value a supplier
+    // mints against `nextRegistrationGeneration()` is exactly the one stored here.
+    const generation = this.nextRegistrationGeneration();
     this.contextGenerationCounter += 1;
-    const generation = `gen-${this.contextGenerationCounter}`;
     this.sessionContexts.set(sessionId, {
       ...existing,
       ...ctx,
@@ -1286,6 +1300,17 @@ export class ChatbotClient implements acp.Client {
         }
         : ctx.trustedSkills,
     });
+  }
+
+  /**
+   * Registration generation this client assigns on its next `setSessionContext()` call.
+   * A deployment-owned trusted-provenance supplier mints each
+   * `CriticalSkillReference.sessionGenerationId` from this value for the registration it
+   * is about to perform; any other value — a previously assigned generation, or one
+   * obtained from another client instance — is never admitted.
+   */
+  nextRegistrationGeneration(): string {
+    return `${this.contextGenerationEpoch}:gen-${this.contextGenerationCounter + 1}`;
   }
 
   private gateCtx(acpSessionId?: string): SessionGateContext | undefined {

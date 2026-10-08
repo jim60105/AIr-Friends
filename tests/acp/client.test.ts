@@ -69,6 +69,8 @@ function createOwnedSkillsClient(
   Deno.mkdirSync(join(skills, "send-reply"), { recursive: true });
   Deno.writeTextFileSync(instruction, "owned");
   const client = new ChatbotClient(registry, logger, { ...config, workingDir: workspace });
+  // The provenance producer mints against the generation the client assigns at registration.
+  const generation = client.nextRegistrationGeneration();
   client.setSessionContext(sessionId, {
     cwd: workspace,
     shellSessionId: "skill-session",
@@ -80,7 +82,7 @@ function createOwnedSkillsClient(
         skillId: "send-reply",
         canonicalInstructionPath: instruction,
         source: "deployment_owned",
-        sessionGenerationId: "gen-1",
+        sessionGenerationId: generation,
       }],
     },
   });

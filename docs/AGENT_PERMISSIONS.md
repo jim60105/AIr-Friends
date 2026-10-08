@@ -258,6 +258,8 @@ Each callback requires the exact ACP session's explicitly registered context, in
 
 Workspace, shared and staging reads retain the case-insensitive `.jsonl`/`.md`/`.txt` allowlist. An optional deployment-owned trusted skills root admits other extensions only after canonical owned-root agreement, critical-skill identity/source/current-generation validation and disjointness from writable roots. It never grants write authority. Lifecycle composition supplies this internal provenance; there is no new operator configuration or environment field. No provenance is synthesized from HOME, filenames or model input. The current composition does not supply cleared native critical-skill evidence, so the trusted exception remains absent there.
 
+Registration generations never repeat: each client instance prefixes its own epoch to a monotonic registration counter, a provenance supplier obtains the value announced for the registration it is about to perform, and supplied critical-skill generations are stored verbatim rather than rebound. A re-registration therefore invalidates every reference minted for an earlier registration, and an `AgentConnector` reconnect — which replays the cached session contexts onto a fresh client — cannot restore that invalidated provenance: the replayed references keep the previous instance's generation and the callbacks deny them (`rejected_trusted_skills_identity`, readTextFile or the restricted read classification) without any content IO.
+
 Restricted writes independently enforce the Layer 3 decision even without a preceding permission request. YOLO callback writes allow any extension under workspace/shared physical containment without shared authorization or staging-only restrictions. Outside/sibling escapes and trusted-skills writes stay denied. These boundaries apply to ACP-delegated IO only; native execution outside ACP is unconstrained by this policy, including native YOLO execution.
 
 Every sink denial records one sanitized bounded reason in the existing retry buffer and audit mirror and raises a static `acp.RequestError` message. No content or raw platform error is emitted.
@@ -686,6 +688,7 @@ The `src/acp/filesystem-roots.ts` helper library provides an agent-generic, phys
    - Must be strictly disjoint from all writable roots (fails `root_overlap`).
    - Role `trusted-skills` is explicitly read-only. Skills links escaping the owned root fail trusted membership (`symlink_escape`).
    - Name-only trust (e.g. workspace `SKILL.md`) is rejected (`trusted_identity_mismatch`).
+   - Registration generations are per-client-instance (instance epoch + monotonic registration counter) and never repeat, so a reconnect's replayed contexts or a repeated registration cannot re-admit provenance an earlier registration invalidated.
 
 5. **Symlink Traversal & Role Decoupling**:
    - Equal-or-separator containment is evaluated per candidate root.

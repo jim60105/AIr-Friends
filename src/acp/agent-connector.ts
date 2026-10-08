@@ -189,9 +189,7 @@ export class AgentConnector {
     });
 
     // Replay cached per-session gate contexts onto the fresh client (reconnect).
-    for (const [sid, ctx] of this.sessionGateContexts) {
-      this.client.setSessionContext(sid, ctx);
-    }
+    this.replaySessionGateContexts();
 
     // Create ClientSideConnection with proper stream order
     const stream = acp.ndJsonStream(output, input);
@@ -804,6 +802,18 @@ export class AgentConnector {
     };
     this.sessionGateContexts.set(acpSessionId, merged);
     this.client?.setSessionContext(acpSessionId, merged);
+  }
+
+  /**
+   * Replay the cached per-session gate contexts onto the current client. The client is
+   * fresh after a respawn and assigns fresh registration generations, so replayed
+   * critical-skill references — which keep the previous instance's generation verbatim —
+   * stay denied. The replay restores context identity, never trust.
+   */
+  private replaySessionGateContexts(): void {
+    for (const [sid, ctx] of this.sessionGateContexts) {
+      this.client?.setSessionContext(sid, ctx);
+    }
   }
 
   /**
