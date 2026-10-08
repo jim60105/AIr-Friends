@@ -8,7 +8,7 @@ Defines the interactive chat view with ACP agent connection management, message 
 
 ### Requirement: Chat Session Connection
 
-`POST /api/chat/connect` SHALL accept `agentType` and `model` parameters, create a new ACP agent connection, create a session, set the model, and return a `chatSessionId`. The system SHALL load `system_web_chat.md` as the initial system prompt.
+`POST /api/chat/connect` SHALL accept `agentType` and `model`, create a new ACP agent connection, create a session, set the model, and return a `chatSessionId`. `agentType` SHALL default to the deployment default agent type and SHALL be validated against the shared supported-agent-type set used by configuration validation, not a second hard-coded value; a value outside that set SHALL be rejected with HTTP 400. The system SHALL load `system_web_chat.md` as the initial system prompt.
 
 #### Scenario: Successful Connection with Specified Agent and Model
 
@@ -16,6 +16,19 @@ Defines the interactive chat view with ACP agent connection management, message 
 - **WHEN** a `POST /api/chat/connect` request is received with body `{"agentType": "opencode", "model": "claude-opus-4.8"}` and a valid session cookie
 - **THEN** the server SHALL return HTTP 200 with a JSON body containing `chatSessionId`
 - **AND** an ACP agent connection SHALL be established with the specified agent type and model
+
+#### Scenario: Supported OMP Agent Type Passes Input Validation
+
+- **GIVEN** the dashboard server is running and no chat session is active
+- **WHEN** a `POST /api/chat/connect` request is received with body `{"agentType": "omp", "model": "google/gemini-3-pro"}` and a valid session cookie
+- **THEN** the server SHALL NOT return HTTP 400 for the agent-type field
+- **AND** the request SHALL proceed to agent connection establishment (which succeeds only once OMP launch support exists; the validation result alone is not evidence that an OMP chat session works)
+
+#### Scenario: Acceptance is not launch support
+
+- **GIVEN** a supported `agentType` whose launch path is not implemented
+- **WHEN** a `POST /api/chat/connect` request is received naming that type with a valid session cookie
+- **THEN** the request SHALL fail through connection establishment rather than be reported as invalid input
 
 #### Scenario: Rejects When Another Chat Session Is Already Active
 
