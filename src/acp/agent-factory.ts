@@ -5,6 +5,15 @@ import type { Config } from "../types/config.ts";
 import { SandboxManager } from "./sandbox-manager.ts";
 import { getRunningEgressProxyUrl } from "@utils/egress-proxy.ts";
 import { sessionXdgDataHome } from "@utils/opencode-paths.ts";
+import {
+  OMP_TRUSTED_EXTENSION_PATH,
+  ompAgentDir,
+  ompLaunchCwd,
+  ompProcessTmpDir,
+  ompXdgDataHome,
+} from "@utils/omp-paths.ts";
+import { ompSettingsForMode, type OmpPermissionMode } from "./omp-settings.ts";
+import { createLogger } from "@utils/logger.ts";
 import { resolveSkillJwtDir } from "@utils/skill-jwt.ts";
 import { join, resolve } from "@std/path";
 
@@ -191,6 +200,138 @@ function buildBaseAgentConfig(
         command: "opencode",
         args,
         cwd: cwdOverride ?? workingDir,
+        env,
+      };
+    }
+
+    case "omp": {
+      const mode: OmpPermissionMode = yolo ? "native-yolo" : "restricted";
+      const settings = ompSettingsForMode(mode);
+
+      // Observability: warn on unresolved record reset gate
+      if (settings.recordResetGate.status === "unresolved") {
+        const log = createLogger("AgentFactory");
+        log.warn("OMP record-reset gate is unresolved; relying on execution-time default-deny", {
+          mode,
+          operativeBoundary: settings.recordResetGate.operativeSecurityBoundary,
+        });
+      }
+
+      // Disjointness check: native-yolo launch must not contain restricted-only overlays
+      if (mode === "native-yolo") {
+        const restrictedPaths = new Set(ompSettingsForMode("restricted").orderedOverlayPaths);
+        for (const overlayPath of settings.orderedOverlayPaths) {
+          if (restrictedPaths.has(overlayPath)) {
+            throw new Error(`Contamination detected: restricted overlay "${overlayPath}" present in native-yolo launch`);
+          }
+        }
+      }
+
+      // Fail-closed checks on required assets: trusted extension module and overlay files
+      try {
+        Deno.statSync(OMP_TRUSTED_EXTENSION_PATH);
+      } catch {
+        throw new Error(`Missing trusted extension module at "${OMP_TRUSTED_EXTENSION_PATH}"`);
+      }
+      for (const overlayPath of settings.orderedOverlayPaths) {
+        try {
+          Deno.statSync(overlayPath);
+        } catch {
+          throw new Error(`Missing owned overlay configuration file at "${overlayPath}"`);
+        }
+      }
+
+      // Argument assembly: acp, --no-extensions, ordered overlays, --trusted-extension, --system-prompt
+      const args = ["acp", "--no-extensions"];
+      for (const overlayPath of settings.orderedOverlayPaths) {
+        args.push("--config", overlayPath);
+      }
+      args.push("--trusted-extension", OMP_TRUSTED_EXTENSION_PATH);
+      args.push("--system-prompt", settings.systemPromptMapping.sourcePath);
+
+      // Base root resolution and mode-distinct state roots
+      const dataRoot = appConfig.workspace.repoPath;
+      const baseRoot = poolKey ? resolve(join(dataRoot, "omp-pools", poolKey)) : resolve(join(workingDir, "tmp"));
+
+      const agentDir = ompAgentDir(baseRoot, mode);
+      const procTmpDir = ompProcessTmpDir(baseRoot, mode);
+      const launchCwd = ompLaunchCwd(baseRoot, mode);
+      const xdgData = ompXdgDataHome(baseRoot, mode);
+
+      // Ensure state directories exist
+      Deno.mkdirSync(agentDir, { recursive: true });
+      Deno.mkdirSync(procTmpDir, { recursive: true });
+      Deno.mkdirSync(launchCwd, { recursive: true });
+      Deno.mkdirSync(xdgData, { recursive: true });
+
+      const env: Record<string, string> = {};
+
+      // Provider credentials: GEMINI_API_KEY, OPENROUTER_API_KEY only
+      const geminiApiKey = appConfig.agent.geminiApiKey ?? Deno.env.get("GEMINI_API_KEY");
+      if (geminiApiKey) {
+        env["GEMINI_API_KEY"] = geminiApiKey;
+      }
+      const openRouterApiKey = appConfig.agent.openRouterApiKey ?? Deno.env.get("OPENROUTER_API_KEY");
+      if (openRouterApiKey) {
+        env["OPENROUTER_API_KEY"] = openRouterApiKey;
+      }
+
+      // System essentials inheritance
+      const inheritVars = ["PATH", "HOME", "DENO_DIR", "LANG", "LC_ALL", "USER"];
+      for (const varName of inheritVars) {
+        const value = Deno.env.get(varName);
+        if (value !== undefined) {
+          env[varName] = value;
+        }
+      }
+
+      if (agentWorkspacePath) {
+        env["AGENT_WORKSPACE"] = agentWorkspacePath;
+      }
+
+      env["SKILL_JWT_DIR"] = resolveSkillJwtDir(appConfig.agent.sharedProcess?.jwtDir);
+
+      // State & temporary roots
+      env["PI_CODING_AGENT_DIR"] = agentDir;
+      env["TMPDIR"] = procTmpDir;
+      env["XDG_DATA_HOME"] = xdgData;
+
+      if (poolKey) {
+        env["SKILL_SHARED_PROCESS"] = "1";
+      } else if (sessionId) {
+        env["SESSION_ID"] = sessionId;
+      }
+
+      // Browser binary
+      let browserPath = Deno.env.get("AGENT_BROWSER_EXECUTABLE_PATH");
+      if (browserPath === undefined) {
+        browserPath = detectPlaywrightBinarySync();
+      }
+      if (browserPath !== undefined) {
+        env["AGENT_BROWSER_EXECUTABLE_PATH"] = browserPath;
+      }
+
+      // Egress proxy
+      const sandbox = appConfig.agent.sandbox;
+      if (sandbox?.egressProxy && !sandbox.unrestrictedEgress) {
+        const proxyUrl = getRunningEgressProxyUrl();
+        if (proxyUrl) {
+          env["HTTP_PROXY"] = proxyUrl;
+          env["HTTPS_PROXY"] = proxyUrl;
+          env["http_proxy"] = proxyUrl;
+          env["https_proxy"] = proxyUrl;
+          const allowHosts = (sandbox.egressAllowHosts ?? [])
+            .map((h) => h.trim())
+            .filter((h) => h.length > 0);
+          env["NO_PROXY"] = ["localhost", "127.0.0.1", "::1", ...allowHosts].join(",");
+          env["no_proxy"] = env["NO_PROXY"];
+        }
+      }
+
+      return {
+        command: "omp",
+        args,
+        cwd: launchCwd,
         env,
       };
     }
