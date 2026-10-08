@@ -3,7 +3,7 @@
 import { ChannelConnection, type Channels, type entities } from "misskey-js";
 import { createLogger } from "@utils/logger.ts";
 import { PlatformAdapter } from "@platforms/platform-adapter.ts";
-import type { Platform, PlatformMessage } from "../../types/events.ts";
+import type { NormalizedEvent, Platform, PlatformMessage, QuotedNote } from "../../types/events.ts";
 import type { Config } from "../../types/config.ts";
 import { parseChannelId } from "../../types/config.ts";
 import type { SpontaneousTarget } from "../../core/spontaneous-target.ts";
@@ -38,6 +38,7 @@ import {
   removeBotMention,
   shouldRespondToChatMessage,
   shouldRespondToNote,
+  toAvailableQuotedNote,
 } from "./misskey-utils.ts";
 
 const logger = createLogger("MisskeyAdapter");
@@ -48,6 +49,22 @@ const logger = createLogger("MisskeyAdapter");
  */
 const MISSKEY_MIN_LIMIT = 1;
 const MISSKEY_MAX_LIMIT = 100;
+
+/**
+ * The cumulative budget for additional quoted-source resolution within one
+ * event or one history/search invocation. A source lookup can never fail the
+ * session, so this bounds only the extra work a quote can add.
+ */
+const QUOTE_ENRICHMENT_DEADLINE_MS = 5_000;
+
+/**
+ * One invocation's quote-enrichment state: the shared deadline and the
+ * success/failure memo, so a source id is requested at most once per invocation.
+ */
+interface QuoteEnrichmentState {
+  readonly deadline: number;
+  readonly memo: Map<string, QuotedNote>;
+}
 
 export class MisskeyAdapter extends PlatformAdapter {
   readonly platform: Platform = "misskey";
@@ -80,6 +97,162 @@ export class MisskeyAdapter extends PlatformAdapter {
     } as Required<MisskeyAdapterConfig>;
 
     this.client = new MisskeyClient(this.config);
+  }
+
+  /**
+   * The configured instance origin, used to derive a quoted source's URL when
+   * the platform supplies neither a remote URI nor a Web URL for it.
+   */
+  private get instanceOrigin(): string {
+    return `${this.config.secure ? "https" : "http"}://${this.config.host}`;
+  }
+
+  /**
+   * A reference is eligible for the bounded lookup only when an authoritative
+   * source id is known and no embedded source could be used. Any other
+   * unavailable reason is final and causes no request.
+   */
+  private isLookupEligible(ref: QuotedNote | undefined): boolean {
+    return ref !== undefined && ref.status === "unavailable" && ref.reason === "not_loaded";
+  }
+
+  private createQuoteEnrichmentState(): QuoteEnrichmentState {
+    return { deadline: Date.now() + QUOTE_ENRICHMENT_DEADLINE_MS, memo: new Map() };
+  }
+
+  /**
+   * Resolve one eligible reference, never throwing: an optional source lookup
+   * failure leaves the outer message, its attachments and every other
+   * successfully resolved reference intact.
+   */
+  private async safeResolveQuotedNote(
+    ref: QuotedNote,
+    state: QuoteEnrichmentState,
+  ): Promise<QuotedNote> {
+    try {
+      return await this.resolveQuotedNote(ref, state);
+    } catch (error) {
+      logger.warn("Quoted-source resolution failed; keeping the reference unavailable", {
+        sourceNoteId: ref.noteId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return { status: "unavailable", noteId: ref.noteId, reason: "lookup_failed" };
+    }
+  }
+
+  /**
+   * Materialize one quoted reference through the configured Misskey instance.
+   *
+   * Embedded data is preferred and costs nothing; only a missing source with an
+   * authoritative id issues a single `notes/show` against that instance. The
+   * invocation deadline, the per-source memo and the absence of retries are
+   * enforced here; nothing ever requests the source's own URL.
+   */
+  private async resolveQuotedNote(
+    ref: QuotedNote,
+    state: QuoteEnrichmentState,
+  ): Promise<QuotedNote> {
+    if (ref.status === "available" || !this.isLookupEligible(ref)) return ref;
+
+    const memoized = state.memo.get(ref.noteId);
+    if (memoized) return memoized;
+
+    const remaining = state.deadline - Date.now();
+    if (remaining <= 0) {
+      return this.rememberQuotedNote(state, {
+        status: "unavailable",
+        noteId: ref.noteId,
+        reason: "budget_exhausted",
+      });
+    }
+
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), remaining);
+    let resolved: QuotedNote;
+
+    try {
+      const fetched: unknown = await this.client.request(
+        "notes/show",
+        { noteId: ref.noteId },
+        { signal: controller.signal },
+      );
+      resolved = this.quotedNoteFromLookup(ref.noteId, fetched);
+    } catch (error) {
+      resolved = {
+        status: "unavailable",
+        noteId: ref.noteId,
+        reason: controller.signal.aborted ? "timeout" : "lookup_failed",
+      };
+
+      if (!controller.signal.aborted) {
+        logger.warn("Failed to resolve the quoted source note", {
+          sourceNoteId: ref.noteId,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    } finally {
+      clearTimeout(timer);
+    }
+
+    return this.rememberQuotedNote(state, resolved);
+  }
+
+  /**
+   * Validate a lookup response before it can become source content. A response
+   * that is not a note with the authoritative id and a usable author is
+   * `invalid_source`; a transport failure is `lookup_failed` and never reaches
+   * this method.
+   */
+  private quotedNoteFromLookup(noteId: string, fetched: unknown): QuotedNote {
+    const invalid = (): QuotedNote => ({
+      status: "unavailable",
+      noteId,
+      reason: "invalid_source",
+    });
+
+    if (typeof fetched !== "object" || fetched === null) return invalid();
+    const note = fetched as MisskeyNote;
+    if (note.id !== noteId) return invalid();
+
+    return toAvailableQuotedNote(note, this.instanceOrigin) ?? invalid();
+  }
+
+  private rememberQuotedNote(state: QuoteEnrichmentState, note: QuotedNote): QuotedNote {
+    state.memo.set(note.noteId, note);
+    return note;
+  }
+
+  /**
+   * Enrich the retained `PlatformMessage`s of one history or search invocation
+   * under a single deadline, in order. Ordering, deduplication and limit
+   * selection are the caller's and stay untouched.
+   */
+  private async enrichQuotedNotes(messages: PlatformMessage[]): Promise<PlatformMessage[]> {
+    let state: QuoteEnrichmentState | undefined;
+
+    for (const message of messages) {
+      const ref = message.quotedNote;
+      if (!this.isLookupEligible(ref)) continue;
+
+      state ??= this.createQuoteEnrichmentState();
+      message.quotedNote = await this.safeResolveQuotedNote(ref!, state);
+    }
+
+    return messages;
+  }
+
+  /**
+   * Enrich one trigger event under its own deadline. Runs after the response
+   * filter, so a note the adapter does not answer causes no source lookup.
+   */
+  private async enrichEventQuotedNote(event: NormalizedEvent): Promise<void> {
+    const ref = event.quotedNote;
+    if (!this.isLookupEligible(ref)) return;
+
+    event.quotedNote = await this.safeResolveQuotedNote(
+      ref!,
+      this.createQuoteEnrichmentState(),
+    );
   }
 
   /**
@@ -177,13 +350,17 @@ export class MisskeyAdapter extends PlatformAdapter {
     });
 
     // Normalize event
-    const normalizedEvent = normalizeMisskeyNote(note, this.botId, isDm);
+    const normalizedEvent = normalizeMisskeyNote(note, this.botId, isDm, this.instanceOrigin);
 
     // Clean up content (remove bot mention if present)
     normalizedEvent.content = removeBotMention(
       normalizedEvent.content,
       this.botUsername,
     );
+
+    // Quoted-source enrichment runs after the response filter above, so a note
+    // the adapter does not answer never causes an extra lookup.
+    await this.enrichEventQuotedNote(normalizedEvent);
 
     await this.emitEvent(normalizedEvent);
   }
@@ -468,7 +645,9 @@ export class MisskeyAdapter extends PlatformAdapter {
           },
         );
 
-        return notes.map((note) => noteToPlatformMessage(note, this.botId!));
+        return await this.enrichQuotedNotes(
+          notes.map((note) => noteToPlatformMessage(note, this.botId!, this.instanceOrigin)),
+        );
       }
 
       // For chat:userId, fetch chat message timeline with that user
@@ -531,7 +710,11 @@ export class MisskeyAdapter extends PlatformAdapter {
           (a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime(),
         );
 
-        return merged.slice(-limit).map((note) => noteToPlatformMessage(note, this.botId!));
+        return await this.enrichQuotedNotes(
+          merged.slice(-limit).map((note) =>
+            noteToPlatformMessage(note, this.botId!, this.instanceOrigin)
+          ),
+        );
       }
 
       // For note:xxx, fetch the full conversation thread (ancestors + current + replies)
@@ -587,7 +770,11 @@ export class MisskeyAdapter extends PlatformAdapter {
           totalUnique: unique.length,
         });
 
-        return unique.slice(-limit).map((note) => noteToPlatformMessage(note, this.botId!));
+        return await this.enrichQuotedNotes(
+          unique.slice(-limit).map((note) =>
+            noteToPlatformMessage(note, this.botId!, this.instanceOrigin)
+          ),
+        );
       }
 
       return [];
@@ -738,7 +925,9 @@ export class MisskeyAdapter extends PlatformAdapter {
         { query, limit },
       );
 
-      return notes.map((note) => noteToPlatformMessage(note, this.botId!));
+      return await this.enrichQuotedNotes(
+        notes.map((note) => noteToPlatformMessage(note, this.botId!, this.instanceOrigin)),
+      );
     } catch (error) {
       logger.warn("Failed to search notes", {
         query,
@@ -1332,7 +1521,7 @@ export class MisskeyAdapter extends PlatformAdapter {
         "notes/show",
         { noteId: messageId },
       );
-      return noteToPlatformMessage(note, this.botId!);
+      return noteToPlatformMessage(note, this.botId!, this.instanceOrigin);
     } catch (error) {
       logger.warn("Failed to fetch message {messageId}", {
         messageId,

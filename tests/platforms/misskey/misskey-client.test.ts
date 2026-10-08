@@ -192,3 +192,110 @@ Deno.test("MisskeyClient.request - rejects an unknown request field at compile t
   // (and therefore type-checked) instead of leaving it commented out.
   assertEquals(typeof requestWithMisspelledUsersNotesField, "function");
 });
+
+/** The private client fields the transport tests observe. */
+interface ClientInternals {
+  api: { fetch: unknown };
+}
+
+/**
+ * The shared SDK client the unsignaled path must keep using. A narrow
+ * structural view avoids widening the production class for tests.
+ */
+function sharedApiOf(client: MisskeyClient): ClientInternals {
+  // The SDK client is private; this view is the only shape these tests read.
+  return client as unknown as ClientInternals;
+}
+
+Deno.test("MisskeyClient.request - a signaled call applies the signal to the transport fetch", async () => {
+  const originalFetch = globalThis.fetch;
+  const controller = new AbortController();
+  let seenSignal: AbortSignal | null | undefined;
+  let seenBody: string | undefined;
+
+  globalThis.fetch = (_input: string | URL | Request, init?: RequestInit) => {
+    seenSignal = init?.signal;
+    seenBody = typeof init?.body === "string" ? init.body : undefined;
+    return Promise.reject(new DOMException("The operation was aborted.", "AbortError"));
+  };
+
+  try {
+    const client = new MisskeyClient(createTestConfig());
+
+    await assertRejects(
+      () => client.request("notes/show", { noteId: "n1" }, { signal: controller.signal }),
+      DOMException,
+    );
+
+    assertEquals(seenSignal, controller.signal);
+    // The signal is transport state, never part of the endpoint JSON payload.
+    assertEquals(seenBody, JSON.stringify({ noteId: "n1", i: "test-token" }));
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+Deno.test("MisskeyClient.request - aborting the signal cancels the pending response body read", async () => {
+  const originalFetch = globalThis.fetch;
+  const controller = new AbortController();
+
+  globalThis.fetch = (_input: string | URL | Request, init?: RequestInit) => {
+    const json = Promise.withResolvers<unknown>();
+    init?.signal?.addEventListener(
+      "abort",
+      () => json.reject(new DOMException("The operation was aborted.", "AbortError")),
+    );
+    // Headers have arrived and the SDK is still reading the body: only `status`
+    // and `json()` are part of the transport contract the SDK reads.
+    return Promise.resolve({ status: 200, json: () => json.promise } as unknown as Response);
+  };
+
+  try {
+    const client = new MisskeyClient(createTestConfig());
+    const pending = client.request("notes/show", { noteId: "n1" }, { signal: controller.signal });
+    controller.abort();
+
+    await assertRejects(() => pending, DOMException);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+Deno.test("MisskeyClient.request - a signaled call leaves the shared SDK client untouched", async () => {
+  const originalFetch = globalThis.fetch;
+  let transports = 0;
+
+  globalThis.fetch = () => {
+    transports++;
+    return Promise.resolve(Response.json({ id: "note1" }));
+  };
+
+  try {
+    const client = new MisskeyClient(createTestConfig());
+    const sharedFetch = sharedApiOf(client).api.fetch;
+    const controller = new AbortController();
+
+    await client.request("notes/show", { noteId: "n1" }, { signal: controller.signal });
+    assertEquals(sharedApiOf(client).api.fetch, sharedFetch);
+
+    // The unsignaled path still runs through the shared client.
+    await client.request("notes/show", { noteId: "n2" });
+    assertEquals(transports, 2);
+    assertEquals(sharedApiOf(client).api.fetch, sharedFetch);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+/**
+ * Compile-time guard: an abort signal is request options, not an endpoint
+ * parameter, so it can never travel inside the endpoint JSON.
+ */
+const requestWithSignalParameter: (client: MisskeyClient) => Promise<unknown> = (client) => {
+  // @ts-expect-error - `signal` is not a `notes/show` parameter
+  return client.request("notes/show", { noteId: "n1", signal: new AbortController().signal });
+};
+
+Deno.test("MisskeyClient.request - rejects a signal inside the endpoint parameters at compile time", () => {
+  assertEquals(typeof requestWithSignalParameter, "function");
+});

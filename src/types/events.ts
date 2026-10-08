@@ -79,9 +79,91 @@ export interface NormalizedEvent {
   /** Attachments (images, files, stickers) associated with this message */
   attachments?: Attachment[];
 
+  /**
+   * The immediately quoted source note, when this message quotes one.
+   * Third-party reference data: it never replaces the outer content, author,
+   * identity or attachments described above.
+   */
+  quotedNote?: QuotedNote;
+
   /** Raw platform-specific data for reference */
   raw?: unknown;
 }
+
+/**
+ * Original author of a quoted source note.
+ */
+export interface QuotedNoteAuthor {
+  /** Author's user id on the configured instance */
+  userId: string;
+
+  /** Author's username (without the leading `@`) */
+  username: string;
+
+  /** Remote instance host, when the author is not local to the configured instance */
+  host?: string;
+
+  /** Author's display name, when the platform supplies one */
+  displayName?: string;
+}
+
+/**
+ * Why a quoted source note could not be materialized.
+ *
+ * - `not_loaded`: only the source id is known and no resolution was attempted yet
+ * - `lookup_failed`: the source lookup failed (missing, inaccessible, rate-limited, 5xx)
+ * - `timeout`: the source lookup exceeded the enrichment deadline and was aborted
+ * - `budget_exhausted`: the enrichment deadline had already expired before this source
+ * - `invalid_source`: the available source data was unusable or conflicted with the known id
+ */
+export type QuotedNoteUnavailableReason =
+  | "not_loaded"
+  | "lookup_failed"
+  | "timeout"
+  | "budget_exhausted"
+  | "invalid_source";
+
+/**
+ * A materialized quoted source note.
+ */
+export interface AvailableQuotedNote {
+  status: "available";
+
+  /** Source note id on the configured instance */
+  noteId: string;
+
+  /** Validated HTTP(S) source URL, when the platform supplies or implies one */
+  sourceUrl?: string;
+
+  /** Original author of the source note */
+  author: QuotedNoteAuthor;
+
+  /** Source text; empty for an attachment-only or empty source note */
+  content: string;
+
+  /** Source attachments, kept separate from the outer message's attachments */
+  attachments?: Attachment[];
+}
+
+/**
+ * A quoted source note whose content is not available. Carries no fabricated
+ * author, text or attachments.
+ */
+export interface UnavailableQuotedNote {
+  status: "unavailable";
+
+  /** Known source note id */
+  noteId: string;
+
+  /** Why the source content is unavailable */
+  reason: QuotedNoteUnavailableReason;
+}
+
+/**
+ * The immediately quoted source of a message, as typed third-party reference
+ * data. Exactly one hop deep: a source's own quote is never represented.
+ */
+export type QuotedNote = AvailableQuotedNote | UnavailableQuotedNote;
 
 /**
  * Message from platform history
@@ -96,6 +178,12 @@ export interface PlatformMessage {
 
   /** Attachments (images, files, stickers) associated with this message */
   attachments?: Attachment[];
+
+  /**
+   * The immediately quoted source note, when this message quotes one. Same
+   * typed contract as `NormalizedEvent.quotedNote`.
+   */
+  quotedNote?: QuotedNote;
 }
 
 /**

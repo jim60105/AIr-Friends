@@ -1,8 +1,11 @@
 // tests/platforms/misskey/misskey-adapter.test.ts
 
 import { assertEquals, assertRejects } from "@std/assert";
+import { FakeTime } from "@std/testing/time";
+import type { entities } from "misskey-js";
 import { MisskeyAdapter } from "@platforms/misskey/misskey-adapter.ts";
 import { PlatformError } from "../../../src/types/errors.ts";
+import type { AvailableQuotedNote, NormalizedEvent } from "../../../src/types/events.ts";
 import {
   buildReplyParams,
   ChatMessageLite,
@@ -493,7 +496,11 @@ const SERVER_ERROR: MockApiError = {
  * the request handler.
  */
 function createAdapterWithMockClient(
-  requestHandler: (endpoint: string, params: Record<string, unknown>) => unknown,
+  requestHandler: (
+    endpoint: string,
+    params: Record<string, unknown>,
+    options?: { signal?: AbortSignal },
+  ) => unknown,
   options: { conversationError?: "missing" | "transient" | "none" } = {},
 ): MisskeyAdapter {
   const conversationError = options.conversationError ?? "missing";
@@ -509,12 +516,16 @@ function createAdapterWithMockClient(
   // Replace the client.request method with our mock
   // deno-lint-ignore no-explicit-any
   const client = (adapter as any).client;
-  client.request = (endpoint: string, params: Record<string, unknown> = {}) => {
+  client.request = (
+    endpoint: string,
+    params: Record<string, unknown> = {},
+    requestOptions?: { signal?: AbortSignal },
+  ) => {
     if (endpoint === "notes/conversation") {
       if (conversationError === "missing") return Promise.reject(ENDPOINT_MISSING);
       if (conversationError === "transient") return Promise.reject(RATE_LIMITED);
     }
-    return Promise.resolve(requestHandler(endpoint, params));
+    return Promise.resolve(requestHandler(endpoint, params, requestOptions));
   };
 
   return adapter;
@@ -1005,7 +1016,11 @@ Deno.test("fetchRecentMessages - note: ancestors still work when reply endpoints
  * Use for tests that specifically test the notes/conversation path.
  */
 function createAdapterWithFullMockClient(
-  requestHandler: (endpoint: string, params: Record<string, unknown>) => unknown,
+  requestHandler: (
+    endpoint: string,
+    params: Record<string, unknown>,
+    options?: { signal?: AbortSignal },
+  ) => unknown,
 ): MisskeyAdapter {
   const adapter = new MisskeyAdapter({
     host: "misskey.test",
@@ -1015,8 +1030,12 @@ function createAdapterWithFullMockClient(
   (adapter as any).botId = "bot123";
   // deno-lint-ignore no-explicit-any
   const client = (adapter as any).client;
-  client.request = (endpoint: string, params: Record<string, unknown> = {}) => {
-    return Promise.resolve(requestHandler(endpoint, params));
+  client.request = (
+    endpoint: string,
+    params: Record<string, unknown> = {},
+    requestOptions?: { signal?: AbortSignal },
+  ) => {
+    return Promise.resolve(requestHandler(endpoint, params, requestOptions));
   };
   return adapter;
 }
@@ -2578,4 +2597,705 @@ Deno.test("MisskeyAdapter.fetchEmojis - preserves reaction-availability metadata
   assertEquals(find("open_roles")?.roleIdsThatCanBeUsedThisEmojiAsReaction, []);
   assertEquals(find("plain")?.isSensitive, undefined);
   assertEquals(find("plain")?.useAsReaction, ":plain:");
+});
+
+// ==================== Quoted-note (quote renote) Tests ====================
+
+/** The quoted source note a Misskey quote-renote embeds. */
+function createMockSourceNote(overrides: Partial<MisskeyNote> = {}): MisskeyNote {
+  return createMockNote({
+    id: "src1",
+    text: "Quoted source body",
+    userId: "author1",
+    user: {
+      ...createMockNote().user,
+      id: "author1",
+      name: "Source Author",
+      username: "sourceauthor",
+      host: "remote.example",
+    },
+    ...overrides,
+  });
+}
+
+/** A quote-renote: an outer note with its own text and an embedded source. */
+function createMockQuoteNote(overrides: Partial<MisskeyNote> = {}): MisskeyNote {
+  return createMockNote({
+    id: "outer1",
+    text: "Does my area have anything like this?",
+    renoteId: "src1",
+    renote: createMockSourceNote(),
+    ...overrides,
+  });
+}
+
+/** A quote-renote that knows only its source id, so a lookup is required. */
+function createMockSourceIdOnlyNote(
+  id: string,
+  sourceId: string,
+  createdAt: string,
+): MisskeyNote {
+  return createMockNote({ id, text: `comment ${id}`, createdAt, renoteId: sourceId, renote: null });
+}
+
+/** One Drive file as it reaches the attachment mapper. */
+function createMockDriveFile(): entities.DriveFile {
+  // Only the fields the attachment mapper reads are supplied; Misskey's
+  // DriveFile carries many more the adapter never touches.
+  return {
+    id: "qfile1",
+    url: "https://example.com/quoted.png",
+    type: "image/png",
+    name: "quoted.png",
+    size: 2048,
+    properties: { width: 640, height: 480 },
+  } as unknown as entities.DriveFile;
+}
+
+/** The private adapter entry points the quote tests drive. */
+interface QuoteTestAdapterView {
+  botUsername: string | null;
+  handleNote(note: MisskeyNote, isDm: boolean): Promise<void>;
+}
+
+/**
+ * The private surface the quote tests drive. A narrow structural view keeps the
+ * production class free of test-only public members.
+ */
+function quoteTestView(adapter: MisskeyAdapter): QuoteTestAdapterView {
+  // The quote paths are private; this view is the only shape these tests read.
+  return adapter as unknown as QuoteTestAdapterView;
+}
+
+const SOURCE_AUTHOR = {
+  userId: "author1",
+  username: "sourceauthor",
+  host: "remote.example",
+  displayName: "Source Author",
+};
+
+Deno.test("normalizeMisskeyNote - an embedded quoted source needs no request", () => {
+  const source = createMockSourceNote({
+    text: "Guardian article on unexploded WWII ordnance: https://www.theguardian.com/world/example",
+    uri: "https://remote.example/notes/src1",
+    user: {
+      ...createMockNote().user,
+      id: "author1",
+      name: "Ryan He",
+      username: "ryanhe",
+      host: "remote.example",
+    },
+  });
+
+  const event = normalizeMisskeyNote(
+    createMockQuoteNote({ renote: source }),
+    "bot123",
+    false,
+    "https://misskey.test",
+  );
+
+  assertEquals(event.quotedNote, {
+    status: "available",
+    noteId: "src1",
+    sourceUrl: "https://remote.example/notes/src1",
+    author: {
+      userId: "author1",
+      username: "ryanhe",
+      host: "remote.example",
+      displayName: "Ryan He",
+    },
+    content:
+      "Guardian article on unexploded WWII ordnance: https://www.theguardian.com/world/example",
+  });
+  // The outer message keeps its own identity, content and (absent) attachments.
+  assertEquals(event.content, "Does my area have anything like this?");
+  assertEquals(event.userId, "user123");
+  assertEquals(event.messageId, "outer1");
+  assertEquals(event.attachments, undefined);
+});
+
+Deno.test("normalizeMisskeyNote - remote provenance stays distinct from the local source id", () => {
+  const event = normalizeMisskeyNote(
+    createMockQuoteNote({
+      renote: createMockSourceNote({
+        uri: "https://remote.example/notes/abc",
+        url: "https://misskey.test/notes/src1",
+      }),
+    }),
+    "bot123",
+    false,
+    "https://misskey.test",
+  );
+
+  const quoted = event.quotedNote as AvailableQuotedNote;
+  assertEquals(quoted.noteId, "src1");
+  assertEquals(quoted.sourceUrl, "https://remote.example/notes/abc");
+  assertEquals(quoted.author.host, "remote.example");
+});
+
+Deno.test("normalizeMisskeyNote - non-HTTP source URLs are omitted in favour of the derived one", () => {
+  const source = createMockSourceNote({
+    uri: "javascript:alert(1)",
+    url: "ftp://remote.example/notes/src1",
+  });
+
+  const derived = normalizeMisskeyNote(
+    createMockQuoteNote({ renote: source }),
+    "bot123",
+    false,
+    "https://misskey.test",
+  );
+  assertEquals(
+    (derived.quotedNote as AvailableQuotedNote).sourceUrl,
+    "https://misskey.test/notes/src1",
+  );
+
+  // A pure converter has no origin, so no URL can be derived.
+  const withoutOrigin = normalizeMisskeyNote(
+    createMockQuoteNote({ renote: source }),
+    "bot123",
+    false,
+  );
+  assertEquals("sourceUrl" in (withoutOrigin.quotedNote as AvailableQuotedNote), false);
+});
+
+Deno.test("normalizeMisskeyNote - a valid URL wins over a malformed candidate", () => {
+  const event = normalizeMisskeyNote(
+    createMockQuoteNote({
+      renote: createMockSourceNote({ uri: "https://", url: "https://misskey.test/notes/src1" }),
+    }),
+    "bot123",
+    false,
+  );
+
+  assertEquals(
+    (event.quotedNote as AvailableQuotedNote).sourceUrl,
+    "https://misskey.test/notes/src1",
+  );
+});
+
+Deno.test("normalizeMisskeyNote - a nested quote is not expanded", () => {
+  const nested = createMockSourceNote({ id: "nested1", text: "Nested body" });
+  const source = createMockSourceNote({ id: "src1", renoteId: "nested1", renote: nested });
+
+  const event = normalizeMisskeyNote(
+    createMockQuoteNote({ renote: source }),
+    "bot123",
+    false,
+    "https://misskey.test",
+  );
+
+  const quoted = event.quotedNote as AvailableQuotedNote;
+  assertEquals(quoted.noteId, "src1");
+  assertEquals(quoted.content, "Quoted source body");
+  assertEquals(quoted.attachments, undefined);
+  assertEquals(JSON.stringify(quoted).includes("nested1"), false);
+});
+
+Deno.test("normalizeMisskeyNote - an empty source is available, not unavailable", () => {
+  const event = normalizeMisskeyNote(
+    createMockQuoteNote({ renote: createMockSourceNote({ text: null }) }),
+    "bot123",
+    false,
+    "https://misskey.test",
+  );
+
+  assertEquals(event.quotedNote, {
+    status: "available",
+    noteId: "src1",
+    sourceUrl: "https://misskey.test/notes/src1",
+    author: SOURCE_AUTHOR,
+    content: "",
+  });
+});
+
+Deno.test("normalizeMisskeyNote - an attachment-only source keeps its files", () => {
+  const event = normalizeMisskeyNote(
+    createMockQuoteNote({
+      renote: createMockSourceNote({
+        text: null,
+        files: [createMockDriveFile()],
+        fileIds: ["qfile1"],
+      }),
+    }),
+    "bot123",
+    false,
+    "https://misskey.test",
+  );
+
+  const quoted = event.quotedNote as AvailableQuotedNote;
+  assertEquals(quoted.content, "");
+  assertEquals(quoted.attachments, [{
+    id: "qfile1",
+    url: "https://example.com/quoted.png",
+    mimeType: "image/png",
+    filename: "quoted.png",
+    size: 2048,
+    width: 640,
+    height: 480,
+    isImage: true,
+  }]);
+});
+
+Deno.test("normalizeMisskeyNote - a conflicting embedded id never becomes source content", () => {
+  const event = normalizeMisskeyNote(
+    createMockQuoteNote({
+      renoteId: "authoritative1",
+      renote: createMockSourceNote({ id: "other1" }),
+    }),
+    "bot123",
+    false,
+  );
+
+  // The authoritative id is known, so this stays lookup-eligible.
+  assertEquals(event.quotedNote, {
+    status: "unavailable",
+    noteId: "authoritative1",
+    reason: "not_loaded",
+  });
+});
+
+Deno.test("normalizeMisskeyNote - unusable embedded data without an authoritative id is final", () => {
+  const broken = createMockSourceNote({
+    id: "src1",
+    user: { ...createMockNote().user, id: "", username: "who" },
+  });
+
+  const event = normalizeMisskeyNote(
+    createMockNote({ text: "a question", renoteId: null, renote: broken }),
+    "bot123",
+    false,
+  );
+
+  assertEquals(event.quotedNote, {
+    status: "unavailable",
+    noteId: "src1",
+    reason: "invalid_source",
+  });
+});
+
+Deno.test("normalizeMisskeyNote - malformed quoted files never discard the outer note", () => {
+  // Missing the URL and MIME type the attachment mapper reads.
+  const brokenFile = { id: "broken", name: "broken.png" } as unknown as entities.DriveFile;
+  const withBrokenFile = normalizeMisskeyNote(
+    createMockQuoteNote({ renote: createMockSourceNote({ files: [brokenFile] }) }),
+    "bot123",
+    false,
+  );
+
+  assertEquals(withBrokenFile.content, "Does my area have anything like this?");
+  const quoted = withBrokenFile.quotedNote as AvailableQuotedNote;
+  assertEquals(quoted.status, "available");
+  assertEquals(quoted.attachments?.[0].mimeType, "");
+  assertEquals(quoted.attachments?.[0].isImage, false);
+
+  const notAList = "not-a-list" as unknown as entities.DriveFile[];
+  const withNonListFiles = normalizeMisskeyNote(
+    createMockQuoteNote({ renote: createMockSourceNote({ files: notAList }) }),
+    "bot123",
+    false,
+  );
+  assertEquals((withNonListFiles.quotedNote as AvailableQuotedNote).attachments, undefined);
+});
+
+Deno.test("normalizeMisskeyNote - a pure renote keeps its previous behavior", () => {
+  const pureRenote = createMockNote({
+    id: "pure1",
+    text: null,
+    files: [],
+    renoteId: "src1",
+    renote: createMockSourceNote(),
+  });
+
+  const event = normalizeMisskeyNote(pureRenote, "bot123", false, "https://misskey.test");
+
+  assertEquals("quotedNote" in event, false);
+  // No source-driven trigger eligibility.
+  assertEquals(
+    shouldRespondToNote(pureRenote, "bot123", "testbot", {
+      allowDm: true,
+      respondToMention: true,
+    }),
+    false,
+  );
+});
+
+Deno.test("normalizeMisskeyNote - ordinary notes and chat messages carry no quote field", () => {
+  assertEquals("quotedNote" in normalizeMisskeyNote(createMockNote(), "bot123", false), false);
+  assertEquals(
+    "quotedNote" in normalizeMisskeyChatMessage(createMockChatMessage(), "bot123"),
+    false,
+  );
+  assertEquals("quotedNote" in noteToPlatformMessage(createMockNote(), "bot123"), false);
+});
+
+Deno.test("noteToPlatformMessage - the quote stays separate from the outer bot status", () => {
+  const message = noteToPlatformMessage(
+    createMockBotNote({
+      id: "bot-out",
+      text: "my own comment",
+      renoteId: "src1",
+      renote: createMockSourceNote(),
+    }),
+    "bot123",
+    "https://misskey.test",
+  );
+
+  assertEquals(message.isBot, true);
+  assertEquals(message.content, "my own comment");
+  assertEquals((message.quotedNote as AvailableQuotedNote).content, "Quoted source body");
+  assertEquals(message.attachments, undefined);
+});
+
+Deno.test("MisskeyAdapter.handleNote - a quote trigger reaches the event without extra requests", async () => {
+  const requests: string[] = [];
+  const adapter = createAdapterWithFullMockClient((endpoint) => {
+    requests.push(endpoint);
+    return [];
+  });
+  quoteTestView(adapter).botUsername = "testbot";
+
+  const received: NormalizedEvent[] = [];
+  adapter.onEvent((event) => {
+    received.push(event);
+    return Promise.resolve();
+  });
+
+  const note = createMockNote({
+    id: "outer1",
+    text: "Hey @testbot is this real?",
+    renoteId: "src1",
+    renote: createMockSourceNote({ text: "source keeps its @testbot mention" }),
+  });
+  await quoteTestView(adapter).handleNote(note, false);
+
+  assertEquals(requests, []);
+  assertEquals(received.length, 1);
+  // Bot-mention removal applies to the outer content only.
+  assertEquals(received[0].content, "Hey is this real?");
+  assertEquals(
+    (received[0].quotedNote as AvailableQuotedNote).content,
+    "source keeps its @testbot mention",
+  );
+});
+
+Deno.test("MisskeyAdapter.handleNote - a source-id-only quote issues one instance lookup", async () => {
+  const calls: Array<{ endpoint: string; params: Record<string, unknown> }> = [];
+  const adapter = createAdapterWithFullMockClient((endpoint, params) => {
+    calls.push({ endpoint, params });
+    return createMockSourceNote({
+      id: "src-remote",
+      text: "hydrated source body",
+      uri: "https://remote.example/notes/as2egxpx2l6w01a0",
+    });
+  });
+  quoteTestView(adapter).botUsername = "testbot";
+
+  const received: NormalizedEvent[] = [];
+  adapter.onEvent((event) => {
+    received.push(event);
+    return Promise.resolve();
+  });
+
+  const note = createMockNote({ id: "outer1", text: "Hey @testbot", renoteId: "src-remote" });
+  await quoteTestView(adapter).handleNote(note, false);
+
+  // Only the configured instance is asked, by source id — never the source URL.
+  assertEquals(calls, [{ endpoint: "notes/show", params: { noteId: "src-remote" } }]);
+  assertEquals(
+    (received[0].quotedNote as AvailableQuotedNote).content,
+    "hydrated source body",
+  );
+});
+
+Deno.test("MisskeyAdapter.handleNote - a filtered-out note causes no source lookup", async () => {
+  const requests: string[] = [];
+  const adapter = createAdapterWithFullMockClient((endpoint) => {
+    requests.push(endpoint);
+    return [];
+  });
+  quoteTestView(adapter).botUsername = "testbot";
+
+  const received: NormalizedEvent[] = [];
+  adapter.onEvent((event) => {
+    received.push(event);
+    return Promise.resolve();
+  });
+
+  const note = createMockNote({ id: "outer1", text: "no mention here", renoteId: "src1" });
+  await quoteTestView(adapter).handleNote(note, false);
+
+  assertEquals(requests, []);
+  assertEquals(received.length, 0);
+});
+
+Deno.test("fetchRecentMessages - note: channel enriches retained quotes once per source", async () => {
+  const sourceLookups: string[] = [];
+  const adapter = createAdapterWithFullMockClient((endpoint, params) => {
+    const noteId = typeof params.noteId === "string" ? params.noteId : "";
+    if (endpoint === "notes/conversation") throw ENDPOINT_MISSING;
+    if (endpoint === "notes/show" && noteId === "cur") {
+      return createMockSourceIdOnlyNote("cur", "src-shared", "2024-01-01T01:00:00.000Z");
+    }
+    if (endpoint === "notes/replies") {
+      return [
+        createMockSourceIdOnlyNote("rep1", "src-shared", "2024-01-01T02:00:00.000Z"),
+        createMockSourceIdOnlyNote("rep2", "src-other", "2024-01-01T03:00:00.000Z"),
+      ];
+    }
+    if (endpoint === "notes/show" && noteId.startsWith("src-")) {
+      sourceLookups.push(noteId);
+      return createMockSourceNote({ id: noteId, text: `body of ${noteId}` });
+    }
+    return [];
+  });
+
+  const messages = await adapter.fetchRecentMessages("note:cur", 10);
+
+  // Order, deduplication and limit selection are untouched, and the source
+  // never becomes an ancestor or a history entry of its own.
+  assertEquals(messages.map((m) => m.messageId), ["cur", "rep1", "rep2"]);
+  assertEquals(sourceLookups, ["src-shared", "src-other"]);
+  assertEquals(
+    messages.map((m) => (m.quotedNote as AvailableQuotedNote).content),
+    ["body of src-shared", "body of src-shared", "body of src-other"],
+  );
+});
+
+Deno.test("fetchRecentMessages - notes excluded by the limit cause no source lookups", async () => {
+  const sourceLookups: string[] = [];
+  const adapter = createAdapterWithFullMockClient((endpoint, params) => {
+    const noteId = typeof params.noteId === "string" ? params.noteId : "";
+    if (endpoint === "notes/conversation") throw ENDPOINT_MISSING;
+    if (endpoint === "notes/show" && noteId === "cur") {
+      return createMockSourceIdOnlyNote("cur", "src-old", "2024-01-01T01:00:00.000Z");
+    }
+    if (endpoint === "notes/replies") {
+      return [createMockSourceIdOnlyNote("rep1", "src-new", "2024-01-01T02:00:00.000Z")];
+    }
+    if (endpoint === "notes/show" && noteId.startsWith("src-")) {
+      sourceLookups.push(noteId);
+      return createMockSourceNote({ id: noteId });
+    }
+    return [];
+  });
+
+  const messages = await adapter.fetchRecentMessages("note:cur", 1);
+
+  assertEquals(messages.map((m) => m.messageId), ["rep1"]);
+  assertEquals(sourceLookups, ["src-new"]);
+});
+
+Deno.test("fetchRecentMessages - a failed source lookup is nonfatal and attempted once", async () => {
+  const sourceLookups: string[] = [];
+  const adapter = createAdapterWithFullMockClient((endpoint, params) => {
+    const noteId = typeof params.noteId === "string" ? params.noteId : "";
+    if (endpoint === "notes/conversation") throw ENDPOINT_MISSING;
+    if (endpoint === "notes/show" && noteId === "cur") {
+      return createMockSourceIdOnlyNote("cur", "src-missing", "2024-01-01T01:00:00.000Z");
+    }
+    if (endpoint === "notes/replies") {
+      return [
+        createMockSourceIdOnlyNote("rep1", "src-missing", "2024-01-01T02:00:00.000Z"),
+        createMockSourceIdOnlyNote("rep2", "src-missing", "2024-01-01T03:00:00.000Z"),
+      ];
+    }
+    if (endpoint === "notes/show" && noteId === "src-missing") {
+      sourceLookups.push(noteId);
+      throw { code: "NO_SUCH_NOTE", message: "No such note.", id: "err1", kind: "client" };
+    }
+    return [];
+  });
+
+  const messages = await adapter.fetchRecentMessages("note:cur", 10);
+
+  assertEquals(sourceLookups, ["src-missing"]);
+  assertEquals(
+    messages.map((m) => m.quotedNote),
+    [
+      { status: "unavailable", noteId: "src-missing", reason: "lookup_failed" },
+      { status: "unavailable", noteId: "src-missing", reason: "lookup_failed" },
+      { status: "unavailable", noteId: "src-missing", reason: "lookup_failed" },
+    ],
+  );
+  // The outer messages survive the optional failure.
+  assertEquals(messages.map((m) => m.content), ["comment cur", "comment rep1", "comment rep2"]);
+});
+
+Deno.test("fetchRecentMessages - an unusable lookup response is invalid_source", async () => {
+  const responses: Array<[string, unknown]> = [
+    ["a mismatched source id", createMockSourceNote({ id: "someone-else" })],
+    ["a null response", null],
+  ];
+
+  for (const [label, response] of responses) {
+    const adapter = createAdapterWithFullMockClient((endpoint, params) => {
+      const noteId = typeof params.noteId === "string" ? params.noteId : "";
+      if (endpoint === "notes/conversation") throw ENDPOINT_MISSING;
+      if (endpoint === "notes/show" && noteId === "cur") {
+        return createMockSourceIdOnlyNote("cur", "src-bad", "2024-01-01T01:00:00.000Z");
+      }
+      if (endpoint === "notes/replies") return [];
+      if (endpoint === "notes/show" && noteId === "src-bad") return response;
+      return [];
+    });
+
+    const messages = await adapter.fetchRecentMessages("note:cur", 10);
+    assertEquals(
+      messages[0].quotedNote,
+      { status: "unavailable", noteId: "src-bad", reason: "invalid_source" },
+      `${label} should be invalid_source`,
+    );
+    assertEquals(messages[0].content, "comment cur");
+  }
+});
+
+Deno.test("fetchRecentMessages - the quote deadline is cumulative and aborts the pending lookup", async () => {
+  using clock = new FakeTime("2026-01-01T00:00:00.000Z");
+  const sourceLookups: string[] = [];
+
+  const adapter = createAdapterWithFullMockClient((endpoint, params, options) => {
+    const noteId = typeof params.noteId === "string" ? params.noteId : "";
+    if (endpoint === "notes/conversation") throw ENDPOINT_MISSING;
+    if (endpoint === "notes/show" && noteId === "cur") {
+      return createMockSourceIdOnlyNote("cur", "src-fast", "2024-01-01T01:00:00.000Z");
+    }
+    if (endpoint === "notes/replies") {
+      return [
+        createMockSourceIdOnlyNote("rep1", "src-fast", "2024-01-01T02:00:00.000Z"),
+        createMockSourceIdOnlyNote("rep2", "src-slow", "2024-01-01T03:00:00.000Z"),
+        createMockSourceIdOnlyNote("rep3", "src-later", "2024-01-01T04:00:00.000Z"),
+        createMockNote({
+          id: "rep4",
+          text: "comment rep4",
+          createdAt: "2024-01-01T05:00:00.000Z",
+          renoteId: "src-embedded",
+          renote: createMockSourceNote({ id: "src-embedded", text: "embedded body" }),
+        }),
+      ];
+    }
+    if (endpoint === "notes/show" && noteId.startsWith("src-")) sourceLookups.push(noteId);
+    if (endpoint === "notes/show" && noteId === "src-fast") {
+      // Consumes two of the five budgeted seconds, deterministically: the fake
+      // clock is the only time source in this test.
+      clock.tick(2_000);
+      return createMockSourceNote({ id: "src-fast" });
+    }
+    if (endpoint === "notes/show" && noteId === "src-slow") {
+      const { promise, reject } = Promise.withResolvers<MisskeyNote>();
+      options?.signal?.addEventListener(
+        "abort",
+        () => reject(new DOMException("The operation was aborted.", "AbortError")),
+      );
+      return promise;
+    }
+    return [];
+  });
+
+  const pending = adapter.fetchRecentMessages("note:cur", 10);
+  // The first lookup settles and consumes two seconds of the budget.
+  await clock.tickAsync(0);
+  // The cumulative deadline — not a fresh five seconds — bounds the next lookup.
+  await clock.tickAsync(3_000);
+  const messages = await pending;
+
+  assertEquals(sourceLookups, ["src-fast", "src-slow"]);
+  assertEquals(
+    messages.map((m) => m.messageId),
+    ["cur", "rep1", "rep2", "rep3", "rep4"],
+  );
+  assertEquals((messages[0].quotedNote as AvailableQuotedNote).content, "Quoted source body");
+  assertEquals(messages[2].quotedNote, {
+    status: "unavailable",
+    noteId: "src-slow",
+    reason: "timeout",
+  });
+  assertEquals(messages[3].quotedNote, {
+    status: "unavailable",
+    noteId: "src-later",
+    reason: "budget_exhausted",
+  });
+  // An embedded source is unaffected by the exhausted budget.
+  assertEquals((messages[4].quotedNote as AvailableQuotedNote).content, "embedded body");
+  // Every owned deadline timer is cleared, so nothing is still scheduled.
+  assertEquals(clock.next(), false);
+});
+
+Deno.test("fetchRecentMessages - timeline:self enriches the bot's own retained quotes", async () => {
+  const adapter = createAdapterWithFullMockClient((endpoint, params) => {
+    const noteId = typeof params.noteId === "string" ? params.noteId : "";
+    if (endpoint === "users/notes") {
+      return [
+        createMockBotNote({
+          id: "own1",
+          text: "my own comment",
+          renoteId: "src-own",
+          renote: null,
+        }),
+      ];
+    }
+    if (endpoint === "notes/show" && noteId === "src-own") {
+      return createMockSourceNote({ id: "src-own", text: "own source" });
+    }
+    return [];
+  });
+
+  const messages = await adapter.fetchRecentMessages("timeline:self", 10);
+
+  assertEquals(messages.length, 1);
+  assertEquals((messages[0].quotedNote as AvailableQuotedNote).content, "own source");
+});
+
+Deno.test("fetchRecentMessages - dm: channel enriches incoming quotes", async () => {
+  const adapter = createAdapterWithFullMockClient((endpoint, params) => {
+    const noteId = typeof params.noteId === "string" ? params.noteId : "";
+    if (endpoint === "notes/mentions") {
+      return [createMockNote({ id: "inc1", userId: "user9", text: "hi", renoteId: "src-dm" })];
+    }
+    if (endpoint === "users/notes") return [];
+    if (endpoint === "notes/show" && noteId === "src-dm") {
+      return createMockSourceNote({ id: "src-dm", text: "dm source" });
+    }
+    return [];
+  });
+
+  const messages = await adapter.fetchRecentMessages("dm:user9", 10);
+
+  assertEquals(messages.length, 1);
+  assertEquals(messages[0].isBot, false);
+  assertEquals((messages[0].quotedNote as AvailableQuotedNote).content, "dm source");
+});
+
+Deno.test("searchRelatedMessages - enriches retained quotes and keeps the result order", async () => {
+  const adapter = createAdapterWithFullMockClient((endpoint, params) => {
+    const noteId = typeof params.noteId === "string" ? params.noteId : "";
+    if (endpoint === "notes/search") {
+      return [
+        createMockNote({ id: "s1", text: "hit one", renoteId: "src-s" }),
+        createMockNote({ id: "s2", text: "hit two" }),
+      ];
+    }
+    if (endpoint === "notes/show" && noteId === "src-s") {
+      return createMockSourceNote({ id: "src-s", text: "searched source" });
+    }
+    return [];
+  });
+
+  const messages = await adapter.searchRelatedMessages("", "note:chan", "query", 10);
+
+  assertEquals(messages.map((m) => m.messageId), ["s1", "s2"]);
+  assertEquals((messages[0].quotedNote as AvailableQuotedNote).content, "searched source");
+  assertEquals("quotedNote" in messages[1], false);
+});
+
+Deno.test("fetchRecentMessages - chat messages never gain a quote field", async () => {
+  const adapter = createAdapterWithFullMockClient((endpoint) => {
+    if (endpoint === "chat/messages/user-timeline") return [createMockChatMessage({ id: "c1" })];
+    return [];
+  });
+
+  const messages = await adapter.fetchRecentMessages("chat:user9", 10);
+
+  assertEquals(messages.length, 1);
+  assertEquals("quotedNote" in messages[0], false);
 });
