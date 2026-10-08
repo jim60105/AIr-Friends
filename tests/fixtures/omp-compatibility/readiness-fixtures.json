@@ -1,0 +1,110 @@
+{
+  "provenance": {
+    "source": "readiness_channel_audit",
+    "description": "Readiness contexts and assertions covering valid process/session binding, mismatches, stale epochs, and lifecycle failures"
+  },
+  "currentContext": {
+    "processInstanceId": "proc-omp-1001",
+    "acpSessionId": "session-acp-user42",
+    "restrictedMode": true,
+    "challenge": "challenge-token-abc-987",
+    "policyRevision": 3,
+    "registryEpoch": 1
+  },
+  "validAssertion": {
+    "processInstanceId": "proc-omp-1001",
+    "acpSessionId": "session-acp-user42",
+    "restrictedMode": true,
+    "challenge": "challenge-token-abc-987",
+    "policyRevision": 3,
+    "registryEpoch": 1,
+    "channelOrigin": "supported_control_channel",
+    "credentialOrigin": "process_scoped_token",
+    "initializationStatus": "completed",
+    "lifecycleState": "ready"
+  },
+  "staleEpochAssertion": {
+    "processInstanceId": "proc-omp-1001",
+    "acpSessionId": "session-acp-user42",
+    "restrictedMode": true,
+    "challenge": "challenge-token-abc-987",
+    "policyRevision": 3,
+    "registryEpoch": 0,
+    "channelOrigin": "supported_control_channel",
+    "credentialOrigin": "process_scoped_token",
+    "initializationStatus": "completed",
+    "lifecycleState": "ready"
+  },
+  "processMismatchAssertion": {
+    "processInstanceId": "proc-omp-9999",
+    "acpSessionId": "session-acp-user42",
+    "restrictedMode": true,
+    "challenge": "challenge-token-abc-987",
+    "policyRevision": 3,
+    "registryEpoch": 1,
+    "channelOrigin": "supported_control_channel",
+    "credentialOrigin": "process_scoped_token",
+    "initializationStatus": "completed",
+    "lifecycleState": "ready"
+  },
+  "sessionMismatchAssertion": {
+    "processInstanceId": "proc-omp-1001",
+    "acpSessionId": "session-acp-other-user",
+    "restrictedMode": true,
+    "challenge": "challenge-token-abc-987",
+    "policyRevision": 3,
+    "registryEpoch": 1,
+    "channelOrigin": "supported_control_channel",
+    "credentialOrigin": "process_scoped_token",
+    "initializationStatus": "completed",
+    "lifecycleState": "ready"
+  },
+  "chatContextProvenanceAssertion": {
+    "processInstanceId": "proc-omp-1001",
+    "acpSessionId": "session-acp-user42",
+    "restrictedMode": true,
+    "challenge": "challenge-token-abc-987",
+    "policyRevision": 3,
+    "registryEpoch": 1,
+    "channelOrigin": "chat_context",
+    "credentialOrigin": "process_scoped_token",
+    "initializationStatus": "completed",
+    "lifecycleState": "ready"
+  },
+  "platformSecretCredentialAssertion": {
+    "processInstanceId": "proc-omp-1001",
+    "acpSessionId": "session-acp-user42",
+    "restrictedMode": true,
+    "challenge": "challenge-token-abc-987",
+    "policyRevision": 3,
+    "registryEpoch": 1,
+    "channelOrigin": "supported_control_channel",
+    "credentialOrigin": "platform_secret",
+    "initializationStatus": "completed",
+    "lifecycleState": "ready"
+  },
+  "timedOutInitializationAssertion": {
+    "processInstanceId": "proc-omp-1001",
+    "acpSessionId": "session-acp-user42",
+    "restrictedMode": true,
+    "challenge": "challenge-token-abc-987",
+    "policyRevision": 3,
+    "registryEpoch": 1,
+    "channelOrigin": "supported_control_channel",
+    "credentialOrigin": "process_scoped_token",
+    "initializationStatus": "timed_out",
+    "lifecycleState": "ready"
+  },
+  "newTransitionStateAssertion": {
+    "processInstanceId": "proc-omp-1001",
+    "acpSessionId": "session-acp-user42",
+    "restrictedMode": true,
+    "challenge": "challenge-token-abc-987",
+    "policyRevision": 3,
+    "registryEpoch": 1,
+    "channelOrigin": "supported_control_channel",
+    "credentialOrigin": "process_scoped_token",
+    "initializationStatus": "completed",
+    "lifecycleState": "new"
+  }
+}

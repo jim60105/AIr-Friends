@@ -1,0 +1,146 @@
+{
+  "provenance": {
+    "source": "discovery_skills_transport_lsp_audit",
+    "description": "Fixtures for discovery candidates, critical skills, transport routes, and agent LSP profiles"
+  },
+  "discovery": {
+    "trustedRoots": [
+      "/opt/air/omp/trusted-modules",
+      "/app/skills"
+    ],
+    "ownedTrustedModule": {
+      "path": "/opt/air/omp/trusted-modules/gate.js",
+      "canonicalPath": "/opt/air/omp/trusted-modules/gate.js",
+      "source": "owned_trusted",
+      "isSymlink": false
+    },
+    "unownedCustomTool": {
+      "path": "/workspace/.omp/tools/host-exec.js",
+      "canonicalPath": "/workspace/.omp/tools/host-exec.js",
+      "source": "custom_tool",
+      "isSymlink": false
+    },
+    "unownedPlugin": {
+      "path": "/workspace/.omp/plugins/shell-plugin.js",
+      "canonicalPath": "/workspace/.omp/plugins/shell-plugin.js",
+      "source": "plugin",
+      "isSymlink": false
+    },
+    "configuredModuleEscape": {
+      "path": "/tmp/evil/configured.js",
+      "canonicalPath": "/tmp/evil/configured.js",
+      "source": "configured_root",
+      "isSymlink": false
+    },
+    "escapingSymlink": {
+      "path": "/app/skills/evil.js",
+      "canonicalPath": "/etc/passwd",
+      "source": "owned_trusted",
+      "isSymlink": true,
+      "symlinkTarget": "/etc/passwd"
+    }
+  },
+  "criticalSkills": {
+    "ownedRoot": "/app/skills",
+    "currentSessionGeneration": "gen-session-20261008-01",
+    "staleSessionGeneration": "gen-session-20261007-99",
+    "canonicalOwnedCandidate": {
+      "skillId": "memory-save",
+      "resolvedPath": "/app/skills/memory-save/SKILL.md",
+      "canonicalPath": "/app/skills/memory-save/SKILL.md",
+      "source": "deployment_owned",
+      "sessionGenerationId": "gen-session-20261008-01"
+    },
+    "collidingWorkspaceCandidate": {
+      "skillId": "memory-save",
+      "resolvedPath": "/workspace/skills/memory-save/SKILL.md",
+      "canonicalPath": "/workspace/skills/memory-save/SKILL.md",
+      "source": "workspace_project",
+      "sessionGenerationId": "gen-session-20261008-01"
+    },
+    "symlinkEscapeCandidate": {
+      "skillId": "memory-save",
+      "resolvedPath": "/app/skills/memory-save/SKILL.md",
+      "canonicalPath": "/workspace/evil/SKILL.md",
+      "source": "deployment_owned",
+      "sessionGenerationId": "gen-session-20261008-01"
+    },
+    "staleGenerationCandidate": {
+      "skillId": "memory-save",
+      "resolvedPath": "/app/skills/memory-save/SKILL.md",
+      "canonicalPath": "/app/skills/memory-save/SKILL.md",
+      "source": "deployment_owned",
+      "sessionGenerationId": "gen-session-20261007-99"
+    }
+  },
+  "transport": {
+    "operatorAllowlist": [
+      "api.github.com",
+      "raw.githubusercontent.com"
+    ],
+    "publicTextHop": {
+      "url": "https://api.github.com/repos/can1357/oh-my-pi/releases",
+      "hopType": "initial_text",
+      "resolvedAddress": "140.82.121.4",
+      "isPrivateAddress": false
+    },
+    "publicBinaryHop": {
+      "url": "https://raw.githubusercontent.com/can1357/oh-my-pi/main/asset.bin",
+      "hopType": "initial_binary",
+      "resolvedAddress": "185.199.108.133",
+      "isPrivateAddress": false
+    },
+    "privateRedirectHop": {
+      "url": "http://169.254.169.254/latest/meta-data/",
+      "hopType": "redirect",
+      "resolvedAddress": "169.254.169.254",
+      "isPrivateAddress": true
+    },
+    "privateSecondaryScraperHop": {
+      "url": "http://127.0.0.1:8080/internal-status",
+      "hopType": "secondary_scraper",
+      "resolvedAddress": "127.0.0.1",
+      "isPrivateAddress": true
+    },
+    "searchProviderHop": {
+      "url": "https://api.exa.ai/search",
+      "hopType": "search_provider",
+      "resolvedAddress": "104.18.2.1",
+      "isPrivateAddress": false
+    }
+  },
+  "lspProfiles": {
+    "ompRestrictedValid": {
+      "agent": "omp",
+      "mode": "restricted",
+      "explicitToolAvailable": false,
+      "implicitStartupOnRead": false,
+      "implicitStartupOnEditWrite": false,
+      "backgroundWarmupEnabled": false
+    },
+    "ompYoloValid": {
+      "agent": "omp",
+      "mode": "yolo",
+      "explicitToolAvailable": true,
+      "implicitStartupOnRead": true,
+      "implicitStartupOnEditWrite": true,
+      "backgroundWarmupEnabled": true
+    },
+    "ompRestrictedWithColdStartLeak": {
+      "agent": "omp",
+      "mode": "restricted",
+      "explicitToolAvailable": false,
+      "implicitStartupOnRead": false,
+      "implicitStartupOnEditWrite": true,
+      "backgroundWarmupEnabled": false
+    },
+    "opencodeYoloClamped": {
+      "agent": "opencode",
+      "mode": "yolo",
+      "explicitToolAvailable": false,
+      "implicitStartupOnRead": false,
+      "implicitStartupOnEditWrite": false,
+      "backgroundWarmupEnabled": false
+    }
+  }
+}
