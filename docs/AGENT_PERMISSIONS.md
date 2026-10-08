@@ -633,6 +633,49 @@ The `agent-config/opencode.json` file configures OpenCode agent permissions, def
 
 ---
 
+## Canonical ACP Filesystem Roots Contract (OMP Integration Row 2 / P1a)
+
+The `src/acp/filesystem-roots.ts` helper library provides an agent-generic, physically grounded root and target decision contract for ACP sessions.
+
+### Key Architectural Invariants
+
+1. **Operation-Neutral Observations**:
+   - All functions in `src/acp/filesystem-roots.ts` return immutable observations (`CanonicalTarget`, `CanonicalSessionRoots`), **never** permission grants (`authorized: true`) or reusable capability tokens.
+   - The helper performs zero protected file IO (no file reads/writes, no directory creation, no mutations).
+   - Prechecks are advisory observations. They are **not race-proof** against subsequent file replacement or symlink retargeting during actual IO. Row 3 (`secure-acp-filesystem-access`) owns preserving containment across real operations.
+
+2. **Contextual Token Expansion & Relative Anchoring**:
+   - Supported tokens expand strictly against explicit `SessionContext`:
+     - `$TMPDIR` / `${TMPDIR}` expands to `{sessionCwd}/tmp`.
+     - `$SESSION_ID` / `${SESSION_ID}` expands to the active `skillSessionId`.
+     - `$AGENT_WORKSPACE` / `${AGENT_WORKSPACE}` expands to `sharedWorkspacePath` if configured; fails with `unresolved_token` if absent.
+   - Unknown tokens (e.g. `$TMPDIR2`, `$HOME`, `$OTHER`) or unbraced boundary collisions fail closed (`unresolved_token`).
+   - Relative paths anchor strictly against `context.sessionCwd`, **never** the daemon process working directory `Deno.cwd()`.
+   - Shell syntax, null bytes, device paths (`\\.\`, `/dev/`), and URI schemes (`http:`, `skill:`, `file:`) are rejected (`invalid_path`).
+
+3. **Canonical Staging Identity vs Process State**:
+   - Canonical staging is strictly `{canonical workspace}/tmp/{active Skill API ID}`.
+   - A staging path linking to another session's staging, an ordinary workspace folder, or process temporary state fails with `invalid_root`.
+   - For lazily missing staging or `tmp/`, prospective staging is anchored to the nearest existing canonical ancestor directory under the workspace, with missing components captured in `prospectiveMissingSuffix` (without calling `mkdir`).
+
+4. **Trusted Read-Only Skills Root**:
+   - Consumes deployment-owned root provenance and critical skill references from predecessor contract `establish-omp-compatibility-contracts`.
+   - Must be strictly disjoint from all writable roots (fails `root_overlap`).
+   - Role `trusted-skills` is explicitly read-only. Skills links escaping the owned root fail trusted membership (`symlink_escape`).
+   - Name-only trust (e.g. workspace `SKILL.md`) is rejected (`trusted_identity_mismatch`).
+
+5. **Symlink Traversal & Role Decoupling**:
+   - Equal-or-separator containment is evaluated per candidate root.
+   - Contained symlinks return canonical destination and symlink evidence.
+   - Escaping symlinks (parent or final leaf) fail with `symlink_escape`.
+   - Narrow staging child links targeting ordinary workspace locations retain broad `workspace` membership but lose the `staging` role.
+
+6. **Handoff to Rows 3 and 4**:
+   - **Row 3 (`secure-acp-filesystem-access`)**: consumes `CanonicalTarget` observations to perform race-safe, root-relative no-follow filesystem IO.
+   - **Row 4 (`enforce-acp-filesystem-authorization`)**: adapts session contexts into ACP client callbacks and replaces obsolete client-local path logic. Native YOLO paths retain broad workspace/shared containment without restricted tool clamps.
+
+---
+
 ## Related Documentation
 
 - [OpenCode Permissions](https://opencode.ai/docs/permissions/) — OpenCode's permission system documentation
