@@ -19,6 +19,62 @@ All downstream implementation changes (`canonicalize-acp-filesystem-roots`, `sec
 
 ---
 
+## 1a. User Decision Register (2026-10-09)
+
+The application-gate verdict and its "MUST REMAIN BLOCKED" invariant in section 1 are superseded
+by the explicit user decisions recorded below. No downstream change is held back by that verdict
+any longer, and the remaining batch changes implement the single posture recorded here.
+
+The section 3 ledger is unchanged and remains the authoritative record of what the pinned OMP
+`v18.6.1` does and does not support. The pinned binary still provides none of the mechanisms the
+user's dispositions work around; no ledger row, status, citation, or evidence limit is relabeled or
+relaxed. Each decision below is the user's chosen disposition of a recorded gap, taken under
+deployment ownership rather than as a claim of native support.
+
+1. **Pre-import executable discovery exclusion** — disposition of section 3 boundary 1 (recorded
+   `incompatible`). The boundary is carried by deployment control: the image and deployment keep
+   executable custom tools and plugin entry points out of the workspace, the owned extension is
+   loaded only from the image path with `--no-extensions` keeping ambient discovery off, and a
+   startup check rejects the session when it finds an executable module in the workspace. The
+   fail-closed session rejection the guard already ships remains the fallback. Carried by
+   `guard-omp-executable-discovery`.
+2. **Authenticated policy readiness** — disposition of section 3 boundary 2 (recorded
+   `unresolved`). The requirement for a client-observable, authenticated readiness handshake is
+   cancelled. Restricted OMP relies on the extension's synchronously installed `tool_call`
+   enforcement handler plus the client's ACP permission policy as the only boundary. The residual
+   risk is recorded and accepted: `runner.emit` only logs lifecycle-hook errors and does not fail
+   session startup, so an extension that fails to load leaves the session running without the
+   restricted capability set and no client-observable signal exists. No readiness claim is made.
+   Carried by `gate-omp-policy-readiness`.
+3. **Authoritative approval-record reset** — disposition of section 3 boundary 3 (recorded
+   `incompatible`). Settings discovery paths are controlled instead of the reset overlay: only the
+   owned `--config` overlays are visible, with HOME, XDG and project settings sources filtered out,
+   so no hostile lower layer exists to inherit from. The restricted runtime default-deny stays as
+   the second boundary. Carried by `translate-omp-owned-settings`.
+4. **Complete destructive intent** — disposition of section 3 boundary 4 (recorded `incompatible`).
+   The ACP-mediated destructive path is kept with complete location lists, and native shapes
+   (multi-file patches and first-operation-only lists) are denied fail-closed. Carried by
+   `normalize-acp-destructive-targets`.
+5. **Restricted-only LSP** — disposition of section 3 boundaries 5a and 5b (recorded `unresolved`
+   and `incompatible`). LSP is disabled entirely, in both restricted and YOLO modes. This
+   supersedes design decision D6's "YOLO has no added LSP/tool denials", and YOLO parity with
+   `agent-config/opencode.json` (which keeps LSP for `build` and `yolo`) is intentionally dropped.
+   Carried by `disable-restricted-agent-lsp`.
+6. **Native transport adaptation** — disposition of section 3 boundary 6 (recorded `incompatible`).
+   The trusted-extension replacement tool covers the approved routes (URL read, web search, public
+   code search) through the controlled transport, while the bypass routes (`fetchBinary` and
+   scraper redirects that follow redirects automatically on global fetch) stay blocked. `HTTP_PROXY`
+   alone does not establish enforcement. Carried by `control-omp-url-fetch-transport`.
+7. **Critical skill canonical ownership** — disposition of section 3 boundary 7 (recorded
+   `incompatible`). Skill roots come from deployment-owned settings: only owned paths are declared,
+   workspace skill discovery is excluded, and name-only critical-skill resolution is denied. Carried
+   by `guard-omp-executable-discovery` and `make-skill-staging-agent-portable`.
+
+The evidence claim is unchanged: unit and mock tests certify this repository's decisions only, and
+the design section 15 runtime checklist remains user-owned and unverified.
+
+---
+
 ## 2. Fixed Upstream Pins and Reference Authority
 
 | Component          | Fixed Release / Distribution      | Resolved Source Revision / Commit / Tree                                                                                               | Specification / Architecture Scope     |

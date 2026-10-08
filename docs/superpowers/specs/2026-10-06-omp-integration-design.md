@@ -49,6 +49,63 @@ required boundary. Section 15 assigns real-runtime verification to the user expl
 These decisions supersede conflicting instructions in the input handoffs. In particular, D6 and D7
 must not be replaced with client-only emulated YOLO in a mixed-mode OMP process.
 
+## 2a. Decision amendments (2026-10-09)
+
+The user determined the seven prerequisite security boundaries that section 7 left open. The design
+rows and section 7 above are unchanged as the approved record; the amendments below supersede only
+the named statements. The pinned OMP `v18.6.1` still does not provide these mechanisms, so each
+amendment is a deployment-owned disposition of a recorded gap, not a supported-mechanism claim.
+
+1. **Pre-import executable discovery exclusion.** Supersedes section 7 "Before executable discovery"
+   where it requires the integration itself to "establish a pre-import exclusion boundary" and to
+   "reject session setup if the required exclusion cannot be established" natively. The boundary is
+   carried by deployment control: executable custom tools and plugin entry points stay out of the
+   workspace, the owned extension is loaded only from the image path with `--no-extensions` keeping
+   ambient discovery off, and a startup check rejects the session on finding an executable module in
+   the workspace. The fail-closed session rejection the guard already ships remains the fallback.
+   Carried by `guard-omp-executable-discovery`.
+2. **Authenticated policy readiness.** Supersedes section 7 "Readiness and registry changes" where
+   it requires exposing "a client-observable readiness result for the exact current ACP session and
+   process instance before allowing its first normal prompt", section 10 step 5 ("Establish
+   restricted policy readiness before normal prompting"), and the readiness-failure denial in
+   section 13. The requirement is cancelled: restricted OMP relies on the synchronously installed
+   `tool_call` enforcement handler plus the client's ACP permission policy as the only boundary.
+   Residual risk recorded: `runner.emit` logs lifecycle-hook errors without failing session startup,
+   so a failed extension leaves the session running without the restricted capability set and no
+   client-observable signal exists. No readiness claim is made. Carried by
+   `gate-omp-policy-readiness`.
+3. **Authoritative approval-record reset.** Supersedes section 7 "Authoritative settings" where it
+   selects "an owned reset overlay followed by the owned mode overlay" as the record-reset strategy
+   and requires verifying the `approval: null` barrier. Control moves to settings discovery paths:
+   only the owned `--config` overlays are visible, with HOME, XDG and project settings sources
+   filtered out, so no hostile lower layer exists to inherit from. The restricted runtime
+   default-deny stays the second boundary. Carried by `translate-omp-owned-settings`.
+4. **Complete destructive intent.** Confirms section 8 "Destructive operations" (complete target-set
+   normalization and rejection of unparseable or incomplete sets) and adds that native shapes —
+   multi-file patches and first-operation-only lists — are denied fail-closed while the ACP-mediated
+   destructive path keeps complete location lists. Carried by `normalize-acp-destructive-targets`.
+5. **Restricted-only LSP.** Supersedes D5 ("Remove LSP from both restricted modes"), D6 ("YOLO is
+   native and maximally permissive. Do not add an explicit LSP denial..."), section 1 ("LSP removed
+   from both agents' restricted modes. YOLO uses each agent's native permissive mode, without
+   inheriting restricted tool-denial rules"), section 5 "Native YOLO" ("do not add a special LSP
+   denial"), and section 6 ("Do not use a global disable that also removes YOLO LSP"). LSP is
+   disabled entirely, in both restricted and YOLO modes, for both agents; YOLO parity with
+   `agent-config/opencode.json` (which keeps LSP for `build` and `yolo`) is intentionally dropped.
+   Carried by `disable-restricted-agent-lsp`.
+6. **Native transport adaptation.** Confirms section 9's controlled-transport requirement and
+   supersedes the `blocked_pending_adapter` status of the bypass routes: the trusted-extension
+   replacement tool covers the approved routes (URL read, web search, public code search) through
+   the controlled transport, while `fetchBinary` and scraper redirects that follow redirects
+   automatically on global fetch stay blocked. `HTTP_PROXY` alone does not establish enforcement.
+   Carried by `control-omp-url-fetch-transport`.
+7. **Critical skill canonical ownership.** Confirms section 7 "Authoritative settings" on canonical
+   skill paths and adds that skill roots come from deployment-owned settings: only owned paths are
+   declared, workspace skill discovery is excluded, and name-only critical-skill resolution is
+   denied. Carried by `guard-omp-executable-discovery` and `make-skill-staging-agent-portable`.
+
+Sections 14 and 15 are unchanged: unit and mock tests certify this repository's decisions only, and
+the section 15 runtime checklist remains user-owned.
+
 ## 3. Scope and non-goals
 
 ### In scope
