@@ -121,12 +121,16 @@ export class SkillSessionUnresolvedError extends Error {
  * Resolve the owning shell session ID:
  * - Shared-process mode: read the `active.json` pointer (written by the pool
  *   while the session holds the execution lease). The pointer is the SOLE
- *   identity source here — the process `$SESSION_ID` is frozen at spawn time
- *   in this mode and must NOT be trusted, so a missing/unreadable/malformed
+ *   identity source here — a pooled process carries NO spawn-time session
+ *   identity at all (the prompt renders the literal id per session; the
+ *   environment must not be depended on), so a missing/unreadable/malformed
  *   pointer fails loud with `SKILL_SESSION_UNRESOLVED` instead of
  *   misattributing.
  * - Per-spawn mode: the `$SESSION_ID` env var is authoritative (a stale
  *   pointer file from a crashed run must never hijack the identity).
+ *   In BOTH shapes the agent is instructed to pass the LITERAL session id
+ *   rendered in its prompt — resolution here is the compat/enforcement layer,
+ *   never a prompt surface.
  * The result is snapshotted once per script invocation, so a later session
  * overwriting the pointer mid-script cannot change this script's identity.
  */
@@ -230,9 +234,10 @@ export async function callSkillApi(
   // short-lived per-session JWT file — never the deployment secret.
   // The request body's sessionId MUST equal the JWT `sub` (the pointer-resolved
   // owning session): under shared-process mode the `--session-id` CLI value the
-  // agent passes can be the stale spawn-time `$SESSION_ID`, while the pool-issued
-  // JWT belongs to the CURRENT session. The library substitutes the resolved
-  // owner so the agent command line never needs extra params.
+  // agent passes may name any session (the prompts render literals, but a
+  // mismatched value is never honored), while the pool-issued JWT belongs to
+  // the CURRENT session. The library substitutes the resolved owner so the
+  // agent command line never needs extra params.
   let effectiveSessionId = sessionId;
   const jwtDir = Deno.env.get("SKILL_JWT_DIR");
   if (jwtDir) {

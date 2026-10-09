@@ -31,15 +31,15 @@ The summary text must NOT appear on the command line. Two-step flow:
 1. Write the summary text to a payload file using your edit/write tool:
 
    ```
-   {{ tmpDir || "$TMPDIR/$SESSION_ID" }}/summary.md
+   {{ tmpDir }}/summary.md
    ```
 
 2. Invoke the script with the payload file path:
 
 ```bash
 ${HOME}/.agents/skills/memory-save/scripts/memory-save.ts \
-  --session-id {{ sessionId || "$SESSION_ID" }} \
-  --content-file "{{ tmpDir || "$TMPDIR/$SESSION_ID" }}/summary.md" \
+  --session-id {{ sessionId }} \
+  --content-file "{{ tmpDir }}/summary.md" \
   --importance normal \
   --tier working \
   --category summary \
@@ -48,15 +48,16 @@ ${HOME}/.agents/skills/memory-save/scripts/memory-save.ts \
 
 ## Parameters
 
-- Use `--session-id {{ sessionId || "$SESSION_ID" }}` when calling skills (in per-spawn deployments the `$SESSION_ID` environment variable names this session).
+- Use `--session-id {{ sessionId }}` when calling skills — the literal session id rendered here is authoritative in every deployment shape; the skill library resolves the owning session automatically.
 
 {{ if tmpDir -}}
 
-Your payload staging directory for this session is `{{ tmpDir }}`. Write skill payload
-files (reply text, memory content, search queries, captions) under this directory as
-`{name}.md` (e.g. `reply.md`), then pass the file path via the skill's payload-file
-flag (e.g. `--message-file`, `--content-file`). The process-level `$TMPDIR` env var is
-NOT your staging area — the per-session directory above is.
+Your payload staging directory for this session is the absolute path `{{ tmpDir }}`. Write skill
+payload files (reply text, memory content, search queries, captions) under this directory as
+`{name}.md` (e.g. `reply.md`) with your edit/write tool, then pass that absolute path via the
+skill's payload-file flag (e.g. `--message-file`, `--content-file`). Use the literal directory
+above — do not build staging paths from environment variables: a process-level temporary-directory
+variable is not this session's staging area.
 {{- /if }}
 
 - `--content-file`: (Required) Path of the payload file containing the memory content. Log what you learned and what you feel. You don't need to stick only to objective descriptions. Write in a relaxed way, using YOUR character's perspective and subjective descriptions.

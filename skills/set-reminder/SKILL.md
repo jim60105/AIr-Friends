@@ -22,33 +22,33 @@ Set a one-time reminder that will be delivered to the user via **direct message 
 1. Write the reminder text to a payload file under the session staging directory using your **edit/write tool**:
 
    ```
-   $TMPDIR/$SESSION_ID/reminder.md
+   <absolute staging directory rendered in your system prompt>/reminder.md
    ```
 
-   The `$TMPDIR` / `$SESSION_ID` tokens in that path are expanded by the ACP path boundary, so the write is approved and the text bytes are preserved **verbatim** (no shell expansion). `$TMPDIR/$SESSION_ID/` is the per-spawn form of the staging directory; in shared-process deployments the staging directory is shown in your system prompt and the script resolves it automatically.
+   Use the **absolute staging directory your system prompt renders** verbatim — never build the path from environment variables. The write goes through the ACP filesystem interface, so the text bytes are preserved **verbatim** (no shell expansion), and the script resolves the owning session automatically in every deployment shape.
 
 2. Invoke the script with the payload file path:
 
    ```bash
    ${HOME}/.agents/skills/set-reminder/scripts/set-reminder.ts \
-     --session-id "$SESSION_ID" \
+     --session-id "<session id rendered in your system prompt>" \
      --scheduled-at "2025-01-15T10:00:00Z" \
-     --message-file "$TMPDIR/$SESSION_ID/reminder.md"
+     --message-file "<absolute staging directory rendered in your system prompt>/reminder.md"
    ```
 
 **WARNING**: Never put message content on the command line. The legacy `--message "..."` / `--message=...` flags are REMOVED: the shell expands `$VAR` in them, which corrupts the stored reminder text.
 
 ## Parameters
 
-| Parameter        | Required | Description                                                                                                                                                                                                                                      |
-| ---------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `--session-id`   | Yes      | Use the session id rendered in your system prompt. `$SESSION_ID` works only in per-spawn deployments; in shared-process mode it is not set and the skill library resolves the owning session automatically — a mismatched value is never honored |
-| `--scheduled-at` | Yes      | ISO 8601 UTC timestamp for when the reminder should fire                                                                                                                                                                                         |
-| `--message-file` | Yes      | Path of the payload file containing the reminder text (must be under `$TMPDIR/$SESSION_ID/`)                                                                                                                                                     |
+| Parameter        | Required | Description                                                                                                                                                                                               |
+| ---------------- | -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--session-id`   | Yes      | Pass the literal session id rendered in your system prompt — authoritative in every deployment shape; the skill library resolves the owning session automatically and a mismatched value is never honored |
+| `--scheduled-at` | Yes      | ISO 8601 UTC timestamp for when the reminder should fire                                                                                                                                                  |
+| `--message-file` | Yes      | Path of the payload file containing the reminder text (must be under `<absolute staging directory rendered in your system prompt>/`)                                                                      |
 
 ## Error Codes
 
-If the script fails, read the JSON error on stderr. It contains the fix. Common codes: `SKILL_LEGACY_FLAG` (you used the removed `--message` flag — stage the text in `$TMPDIR/$SESSION_ID/reminder.md` and use `--message-file`), `SKILL_MISSING_PAYLOAD` (no `--message-file` given), `SKILL_PAYLOAD_OUT_OF_BOUNDS` (payload path outside `$TMPDIR/$SESSION_ID/`), `SKILL_PAYLOAD_NOT_FOUND` (payload file not written yet — write it first with the edit/write tool).
+If the script fails, read the JSON error on stderr. It contains the fix. Common codes: `SKILL_LEGACY_FLAG` (you used the removed `--message` flag — stage the text in `<absolute staging directory rendered in your system prompt>/reminder.md` and use `--message-file`), `SKILL_MISSING_PAYLOAD` (no `--message-file` given), `SKILL_PAYLOAD_OUT_OF_BOUNDS` (payload path outside `<absolute staging directory rendered in your system prompt>/`), `SKILL_PAYLOAD_NOT_FOUND` (payload file not written yet — write it first with the edit/write tool).
 
 ## Rules
 

@@ -61,15 +61,16 @@ This is a one-on-one private conversation. The following rules apply:
 
 # Session Information
 
-Use `--session-id {{ sessionId || "$SESSION_ID" }}` when calling skills. The rendered session id is authoritative: in per-spawn deployments the `$SESSION_ID` environment variable names this session; in shared-process mode `$SESSION_ID` is NOT set (a spawn-time value would name an unrelated session) and the skill library resolves the owning session automatically — a mismatched `--session-id` value is never honored.
+Use `--session-id {{ sessionId }}` when calling skills. The session id rendered here is the literal active session id and is authoritative in every deployment shape: the agent environment may carry no session identity at all (shared agent processes have none), the skill library resolves the owning session automatically, and a mismatched `--session-id` value is never honored.
 {{ if tmpDir -}}
 
-Your payload staging directory for this session is `{{ tmpDir }}`.
+Your payload staging directory for this session is the absolute path `{{ tmpDir }}`.
 Write skill payload files (reply text, memory content, search queries, captions)
-under this directory as `{name}.md` (e.g. `reply.md`), then pass the file path
-via the skill's payload-file flag (e.g. `--message-file`). In shared-process mode
-the process-level `$TMPDIR` env var is channel-scoped and is NOT your staging
-area — the per-session directory above is.
+under this directory as `{name}.md` (e.g. `reply.md`) with your edit/write tool,
+then pass that absolute path via the skill's payload-file flag (e.g.
+`--message-file`). Use the literal directory above — do not build staging paths
+from environment variables: a process-level temporary-directory variable is not
+this session's staging area.
 {{- /if }}
 
 {{ if userContextMessage -}}

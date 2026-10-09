@@ -57,6 +57,7 @@ Analyze the content structure of recent conversation. How you craft a start and 
 Use the skill({ name: "send-reply" }) to post your content. Remember, this is a spontaneous post, not a reply to any specific message, so do NOT use any quoting or replying features. Just post it as an original message to the channel.
 
 {{ if (yolo || canWriteAgentWorkspace) -}}
+
 ### 5. Write a journal entry about your post
 
 After you post, write in today's journal entry about the topic you chose and how you hope people will react to it.
@@ -86,13 +87,14 @@ After you post, write in today's journal entry about the topic you chose and how
 
 ## Session Information
 
-Use `--session-id {{ sessionId || "$SESSION_ID" }}` when calling skills. The rendered session id is authoritative: in per-spawn deployments the `$SESSION_ID` environment variable names this session; in shared-process mode `$SESSION_ID` is NOT set (a spawn-time value would name an unrelated session) and the skill library resolves the owning session automatically — a mismatched `--session-id` value is never honored.
+Use `--session-id {{ sessionId }}` when calling skills. The session id rendered here is the literal active session id and is authoritative in every deployment shape: the agent environment may carry no session identity at all (shared agent processes have none), the skill library resolves the owning session automatically, and a mismatched `--session-id` value is never honored.
 
 {{ if tmpDir -}}
 
-Your payload staging directory for this session is `{{ tmpDir }}`. Write skill payload
-files (reply text, memory content, search queries, captions) under this directory as
-`{name}.md` (e.g. `reply.md`), then pass the file path via the skill's payload-file
-flag (e.g. `--message-file`, `--content-file`). The process-level `$TMPDIR` env var is
-NOT your staging area — the per-session directory above is.
+Your payload staging directory for this session is the absolute path `{{ tmpDir }}`. Write skill
+payload files (reply text, memory content, search queries, captions) under this directory as
+`{name}.md` (e.g. `reply.md`) with your edit/write tool, then pass that absolute path via the
+skill's payload-file flag (e.g. `--message-file`, `--content-file`). Use the literal directory
+above — do not build staging paths from environment variables: a process-level temporary-directory
+variable is not this session's staging area.
 {{- /if }}

@@ -73,19 +73,25 @@ export interface TemplateVariables {
   canWriteAgentWorkspace?: boolean;
 
   /**
-   * The session's own workspace tmp directory (payload staging area).
-   * Carried to the agent in shared-process mode, where the process-level
-   * `TMPDIR` env var is the channel-scoped data root (outside the user's
-   * workspace) — the prompt variable tells the agent where to stage payload
-   * files for this session.
+   * The session's ABSOLUTE payload staging directory
+   * (`{session workspace}/tmp/{sessionId}` — the canonical staging root the
+   * payload helper enforces containment against, independent of any
+   * process-level `TMPDIR`, which in shared-process mode is a channel-scoped
+   * data root outside the user's workspace). Every render of a
+   * payload-staging-instructing bundled template supplies this literal —
+   * per-spawn and pooled alike; the bundled templates no longer fall back to
+   * the `$TMPDIR`/`$SESSION_ID` shell tokens (operator-mounted legacy
+   * templates may still render the optional-absent form).
    */
   tmpDir?: string;
 
   /**
-   * The skill-API session id for this run ("sess_..."). Rendered into prompts so
-   * the agent passes the CURRENT session to skills (`--session-id ...`) even in
-   * shared-process mode where the process-level `$SESSION_ID` env var is frozen
-   * to the first session of the pooled process.
+   * The literal active Skill API session id for this run ("sess_...").
+   * Rendered into prompts so the agent passes the CURRENT session to skills
+   * (`--session-id <literal id>`) in EVERY spawn shape — pooled processes
+   * carry no `SESSION_ID` environment variable at all, and per-spawn ones
+   * must not be depended on for it. Mandatory render input on every bundled
+   * payload-staging prompt path alongside `tmpDir`.
    */
   sessionId?: string;
 }

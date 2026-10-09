@@ -29,7 +29,7 @@ async function main() {
             `--file-paths flag, because the skill now supports sending multiple files in one ` +
             `invocation. Use --file-paths once per file, for example:\n` +
             `${Deno.env.get("HOME") ?? "~"}/.agents/skills/send-file/scripts/send-file.ts ` +
-            `--session-id "$SESSION_ID" --file-paths "exports/report.pdf" ` +
+            `--session-id "<session id rendered in your system prompt>" --file-paths "exports/report.pdf" ` +
             `--file-paths "exports/chart.png"`,
           "SKILL_SINGLE_FILE_FLAG",
         );
@@ -50,9 +50,9 @@ async function main() {
       required: false,
       fileName: "caption.md",
       example: `${Deno.env.get("HOME") ?? "~"}/.agents/skills/send-file/scripts/send-file.ts ` +
-        `--session-id "$SESSION_ID" --file-paths "exports/report.pdf" ` +
+        `--session-id "<session id rendered in your system prompt>" --file-paths "exports/report.pdf" ` +
         `--file-paths "exports/chart.png" ` +
-        `--caption-file "$TMPDIR/$SESSION_ID/caption.md"`,
+        `--caption-file "<absolute staging directory rendered in your system prompt>/caption.md"`,
     });
 
     const result = await callSkillApi(apiUrl, "send-file", sessionId, {

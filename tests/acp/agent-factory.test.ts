@@ -19,6 +19,15 @@ import { isAbsolute, join, resolve } from "@std/path";
 import { DEFAULT_SKILL_JWT_DIR } from "../../src/utils/skill-jwt.ts";
 import type { Config } from "../../src/types/config.ts";
 
+// Mandatory literal-first retry context used by the strategy tests: the
+// caller always supplies the literal Skill API session id + absolute staging
+// dir (the values the session's system prompt renders), in both spawn shapes.
+const TEST_RETRY_CTX = {
+  sharedProcess: false,
+  sessionId: "sess_test",
+  stagingDir: "/data/workspaces/discord/123/tmp/sess_test",
+} as const;
+
 // Create a minimal test config
 const createTestConfig = (overrides: Partial<Config> = {}): Config => {
   return {
@@ -367,7 +376,7 @@ Deno.test("createAgentConfig - does not add OPENCODE_YOLO env var when yolo is f
 });
 
 Deno.test("getRetryPromptStrategy - returns strategy for opencode", () => {
-  const strategy = getRetryPromptStrategy("opencode");
+  const strategy = getRetryPromptStrategy("opencode", TEST_RETRY_CTX, undefined);
   assertEquals(strategy.maxRetries, 1);
   assertStringIncludes(strategy.retryPromptMessage, "send-reply");
   assertStringIncludes(strategy.retryPromptMessage, "react-message");
@@ -376,14 +385,14 @@ Deno.test("getRetryPromptStrategy - returns strategy for opencode", () => {
 
 Deno.test("getRetryPromptStrategy - throws for unknown agent type", () => {
   assertThrows(
-    () => getRetryPromptStrategy("unknown" as never),
+    () => getRetryPromptStrategy("unknown" as never, TEST_RETRY_CTX),
     Error,
     "Unknown agent type",
   );
 });
 
 Deno.test("getRetryPromptStrategy - retryPromptMessage starts with system message intro", () => {
-  const strategy = getRetryPromptStrategy("opencode");
+  const strategy = getRetryPromptStrategy("opencode", TEST_RETRY_CTX, undefined);
   assertStringIncludes(strategy.retryPromptMessage, "System message:");
   assertStringIncludes(
     strategy.retryPromptMessage,
@@ -397,14 +406,14 @@ Deno.test("getRetryPromptStrategy - retryPromptMessage starts with system messag
 });
 
 Deno.test("getRetryPromptStrategy - retryPromptMessage contains section separators", () => {
-  const strategy = getRetryPromptStrategy("opencode");
+  const strategy = getRetryPromptStrategy("opencode", TEST_RETRY_CTX, undefined);
   // Should have at least two --- separators between the three sections
   const separatorCount = (strategy.retryPromptMessage.match(/\n---\n/g) ?? []).length;
   assertEquals(separatorCount >= 2, true, "Should contain at least 2 --- separators");
 });
 
 Deno.test("getRetryPromptStrategy - retryPromptMessage includes send-reply SKILL.md content", () => {
-  const strategy = getRetryPromptStrategy("opencode");
+  const strategy = getRetryPromptStrategy("opencode", TEST_RETRY_CTX, undefined);
   // Content loaded from skills/send-reply/SKILL.md
   assertStringIncludes(strategy.retryPromptMessage, "# Send Reply Skill");
   assertStringIncludes(
@@ -414,14 +423,14 @@ Deno.test("getRetryPromptStrategy - retryPromptMessage includes send-reply SKILL
 });
 
 Deno.test("getRetryPromptStrategy - retryPromptMessage includes react-message SKILL.md content", () => {
-  const strategy = getRetryPromptStrategy("opencode");
+  const strategy = getRetryPromptStrategy("opencode", TEST_RETRY_CTX, undefined);
   // Content loaded from skills/react-message/SKILL.md
   assertStringIncludes(strategy.retryPromptMessage, "# React Message Skill");
   assertStringIncludes(strategy.retryPromptMessage, "Use appropriate emoji");
 });
 
 Deno.test("getRetryPromptStrategy - retryPromptMessage includes send-file SKILL.md content", () => {
-  const strategy = getRetryPromptStrategy("opencode");
+  const strategy = getRetryPromptStrategy("opencode", TEST_RETRY_CTX, undefined);
   // Content loaded from skills/send-file/SKILL.md
   assertStringIncludes(strategy.retryPromptMessage, "# Send File Skill");
   assertStringIncludes(strategy.retryPromptMessage, "--file-paths");
@@ -430,9 +439,10 @@ Deno.test("getRetryPromptStrategy - retryPromptMessage includes send-file SKILL.
 // ============ Retry prompt rejection enrichment (task 5.4) ============
 
 Deno.test("getRetryPromptStrategy - byte-identical to no-rejections when rejections empty", () => {
-  const without = getRetryPromptStrategy("opencode").retryPromptMessage;
-  const withEmpty = getRetryPromptStrategy("opencode", []).retryPromptMessage;
-  const withUndefined = getRetryPromptStrategy("opencode", undefined).retryPromptMessage;
+  const without = getRetryPromptStrategy("opencode", TEST_RETRY_CTX, undefined).retryPromptMessage;
+  const withEmpty = getRetryPromptStrategy("opencode", TEST_RETRY_CTX, []).retryPromptMessage;
+  const withUndefined =
+    getRetryPromptStrategy("opencode", TEST_RETRY_CTX, undefined).retryPromptMessage;
   assertEquals(withEmpty, without);
   assertEquals(withUndefined, without);
   assertFalse(without.includes("Recent permission rejections"));
@@ -455,7 +465,7 @@ Deno.test("getRetryPromptStrategy - includes rejection section when rejections p
       ts: "2026-08-14T00:00:00.001Z",
     },
   ];
-  const message = getRetryPromptStrategy("opencode", rejections).retryPromptMessage;
+  const message = getRetryPromptStrategy("opencode", TEST_RETRY_CTX, rejections).retryPromptMessage;
   assertStringIncludes(message, "Recent permission rejections in this session");
   assertStringIncludes(
     message,
@@ -1005,7 +1015,7 @@ Deno.test({
 });
 
 Deno.test("getRetryPromptStrategy - retry prompt is instructive (causes + payload-file example + SKILL.md)", () => {
-  const strategy = getRetryPromptStrategy("opencode");
+  const strategy = getRetryPromptStrategy("opencode", TEST_RETRY_CTX, undefined);
   const msg = strategy.retryPromptMessage;
 
   // States the turn ended without a reply/reaction/file.
@@ -1015,14 +1025,24 @@ Deno.test("getRetryPromptStrategy - retry prompt is instructive (causes + payloa
   assertStringIncludes(msg, "removed legacy flag");
   assertStringIncludes(msg, "--message for send-reply");
   assertStringIncludes(msg, "payload file was never written");
-  assertStringIncludes(msg, "$TMPDIR/$SESSION_ID/");
+  assertStringIncludes(msg, "staged outside /data/workspaces/discord/123/tmp/sess_test/");
   assertStringIncludes(msg, "read that error's output");
   // send-file causes: removed singular flag and caption legacy flag
   assertStringIncludes(msg, "--file-path");
 
-  // Correct two-step example invocation with the payload-file flag.
-  assertStringIncludes(msg, 'send-reply.ts --session-id "$SESSION_ID"');
-  assertStringIncludes(msg, '--message-file "$TMPDIR/$SESSION_ID/reply.md"');
+  // Correct two-step example invocation with the payload-file flag, naming the
+  // ctx's LITERAL session id + absolute staging dir (no shell tokens).
+  assertStringIncludes(msg, 'send-reply.ts --session-id "sess_test"');
+  assertStringIncludes(msg, '--message-file "/data/workspaces/discord/123/tmp/sess_test/reply.md"');
+  assertStringIncludes(
+    msg,
+    "Write the reply text to /data/workspaces/discord/123/tmp/sess_test/reply.md",
+  );
+
+  // The guidance section carries no unexpanded $TMPDIR/$SESSION_ID tokens.
+  const guidance = msg.split("\n---\n")[0];
+  assertFalse(guidance.includes("$SESSION_ID"));
+  assertFalse(guidance.includes("$TMPDIR"));
 
   // Embedded SKILL.md content.
   assertStringIncludes(msg, "# Send Reply Skill");
@@ -1030,46 +1050,47 @@ Deno.test("getRetryPromptStrategy - retry prompt is instructive (causes + payloa
   assertStringIncludes(msg, "# Send File Skill");
 });
 
-// ============ Shared-process retry prompt (authoritative-session-id-in-shared-mode) ============
+// ============ Literal-first retry prompt (make-skill-staging-agent-portable) ============
 
-Deno.test("getRetryPromptStrategy - shared-process ctx names literal session id + staging dir, no shell tokens", () => {
+Deno.test("getRetryPromptStrategy - pooled ctx names literal session id + staging dir, no shell tokens", () => {
   const stagingDir = "/data/workspaces/discord/123/tmp/sess_abc";
-  const strategy = getRetryPromptStrategy("opencode", undefined, {
+  const strategy = getRetryPromptStrategy("opencode", {
     sharedProcess: true,
     sessionId: "sess_abc",
     stagingDir,
   });
   const msg = strategy.retryPromptMessage;
 
-  // The shared-mode variant MUST name the literal ids/paths (the permission
-  // gate expands $TMPDIR/$SESSION_ID from its own per-session context, but
-  // bash interpolation on a pooled process sees stale/absent values).
+  // The pooled variant names the literal ids/paths.
   assertStringIncludes(msg, `Write the reply text to ${stagingDir}/reply.md`);
   assertStringIncludes(msg, `--session-id "sess_abc"`);
   assertStringIncludes(msg, `--message-file "${stagingDir}/reply.md"`);
-  // The guidance section (before the embedded SKILL.md docs, which keep the
-  // per-spawn token examples) must not reference the shell tokens at all.
+  // The guidance section must not reference the shell tokens at all.
   const guidance = msg.split("\n---\n")[0];
   assertFalse(guidance.includes("$SESSION_ID"));
   assertFalse(guidance.includes("$TMPDIR"));
-  // The note explains that the env var is absent on a shared process.
-  assertStringIncludes(msg, "SESSION_ID environment variable is not set");
+  // The spawn-shape-neutral note: the rendered literals are authoritative and
+  // the environment may carry no session identity at all.
+  assertStringIncludes(msg, "literals rendered in your system prompt");
+  assertStringIncludes(msg, "may carry NO session identity");
+  assertStringIncludes(msg, "never honored");
 });
 
-Deno.test("getRetryPromptStrategy - per-spawn retry template stays byte-identical", () => {
-  const without = getRetryPromptStrategy("opencode").retryPromptMessage;
-  // A ctx with sharedProcess=false (or no ctx at all) keeps the per-spawn
-  // $TMPDIR/$SESSION_ID template verbatim.
-  const withCtx = getRetryPromptStrategy("opencode", undefined, {
+Deno.test("getRetryPromptStrategy - per-spawn ctx names the same literals (no token template exists)", () => {
+  // Literal-first in BOTH spawn shapes: for the same session the guidance
+  // section is identical whether or not the run is pooled.
+  const perSpawn = getRetryPromptStrategy("opencode", {
     sharedProcess: false,
     sessionId: "sess_abc",
-    stagingDir: "/tmp/ignored",
+    stagingDir: "/data/workspaces/discord/123/tmp/sess_abc",
   }).retryPromptMessage;
-  const withEmptyCtx = getRetryPromptStrategy("opencode", undefined, {
+  const pooled = getRetryPromptStrategy("opencode", {
     sharedProcess: true,
+    sessionId: "sess_abc",
+    stagingDir: "/data/workspaces/discord/123/tmp/sess_abc",
   }).retryPromptMessage;
-  assertEquals(withCtx, without);
-  // Shared mode without concrete values degrades to the token template
-  // (matches the rendered `{{ sessionId || "$SESSION_ID" }}` fallback).
-  assertEquals(withEmptyCtx, without);
+  assertEquals(perSpawn, pooled);
+  assertStringIncludes(perSpawn, `--session-id "sess_abc"`);
+  assertFalse(perSpawn.split("\n---\n")[0].includes("$SESSION_ID"));
+  assertFalse(perSpawn.split("\n---\n")[0].includes("$TMPDIR"));
 });

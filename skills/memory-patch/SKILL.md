@@ -13,50 +13,50 @@ Modify metadata of existing memories without changing content.
 ```bash
 # Disable a memory
 ${HOME}/.agents/skills/memory-patch/scripts/memory-patch.ts \
-  --session-id "$SESSION_ID" \
+  --session-id "<session id rendered in your system prompt>" \
   --memory-id "mem_abc123" \
   --disabled
 
 # Change importance
 ${HOME}/.agents/skills/memory-patch/scripts/memory-patch.ts \
-  --session-id "$SESSION_ID" \
+  --session-id "<session id rendered in your system prompt>" \
   --memory-id "mem_abc123" \
   --importance high
 
 # Mark a memory as superseding others (maintenance lineage)
 ${HOME}/.agents/skills/memory-patch/scripts/memory-patch.ts \
-  --session-id "$SESSION_ID" \
+  --session-id "<session id rendered in your system prompt>" \
   --memory-id "mem_new_summary" \
   --supersedes "mem_old1,mem_old2,mem_old3"
 
 # Add related memory links
 ${HOME}/.agents/skills/memory-patch/scripts/memory-patch.ts \
-  --session-id "$SESSION_ID" \
+  --session-id "<session id rendered in your system prompt>" \
   --memory-id "mem_abc123" \
   --related-to "mem_def456,mem_ghi789"
 
 # Change tier and category
 ${HOME}/.agents/skills/memory-patch/scripts/memory-patch.ts \
-  --session-id "$SESSION_ID" \
+  --session-id "<session id rendered in your system prompt>" \
   --memory-id "mem_abc123" \
   --tier core \
   --category preference
 
 # Adjust decay value
 ${HOME}/.agents/skills/memory-patch/scripts/memory-patch.ts \
-  --session-id "$SESSION_ID" \
+  --session-id "<session id rendered in your system prompt>" \
   --memory-id "mem_abc123" \
   --decay 0.9
 
 # Adjust decay on a channel-scoped memory (requires channel write authorization)
 ${HOME}/.agents/skills/memory-patch/scripts/memory-patch.ts \
-  --session-id "$SESSION_ID" \
+  --session-id "<session id rendered in your system prompt>" \
   --memory-id "mem_channel_123" \
   --scope channel \
   --decay 0.4
 ```
 
-**`--session-id`**: Use the session id rendered in your system prompt. `$SESSION_ID` works only in per-spawn deployments; in shared-process mode it is not set and the skill library resolves the owning session automatically — a mismatched value is never honored.
+**`--session-id`**: Pass the literal session id rendered in your system prompt. The rendered id is authoritative in every deployment shape: the agent environment may carry no session identity at all (shared agent processes have none), the skill library resolves the owning session automatically, and a mismatched value is never honored.
 
 **`--scope`**: (Optional) `user` (default) or `channel`. Set to `channel` to patch a channel-scoped memory (as labeled in `memory-search` results). Patching channel memories requires a session authorized for channel writes.
 

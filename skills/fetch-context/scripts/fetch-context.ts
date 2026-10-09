@@ -37,8 +37,8 @@ async function main() {
       fileName: "query.md",
       example:
         `${Deno.env.get("HOME") ?? "~"}/.agents/skills/fetch-context/scripts/fetch-context.ts ` +
-        `--session-id "$SESSION_ID" --type search_messages ` +
-        `--query-file "$TMPDIR/$SESSION_ID/query.md"`,
+        `--session-id "<session id rendered in your system prompt>" --type search_messages ` +
+        `--query-file "<absolute staging directory rendered in your system prompt>/query.md"`,
     });
 
     const params: Record<string, unknown> = { type };

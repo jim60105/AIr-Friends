@@ -11,8 +11,10 @@ import {
   resolvePayloadPath,
 } from "../../skills/lib/payload.ts";
 
-const EXAMPLE =
-  'send-reply.ts --session-id "$SESSION_ID" --message-file "$TMPDIR/$SESSION_ID/reply.md"';
+// Literal-first example (mirrors the real send-reply script's example string):
+// the guidance the script emits must never instruct a shell token.
+const EXAMPLE = 'send-reply.ts --session-id "<session id rendered in your system prompt>" ' +
+  '--message-file "<absolute staging directory rendered in your system prompt>/reply.md"';
 
 interface PayloadOpts {
   sessionId: string;
@@ -279,7 +281,7 @@ Deno.test("resolvePayloadPath - workspace-root file rejected", async () => {
       await expectPayloadError(
         () => resolvePayloadPath(payload, ws, "sess_own", RESOLVE_OPTS),
         "SKILL_PAYLOAD_OUT_OF_BOUNDS",
-        "$TMPDIR/$SESSION_ID",
+        "absolute staging directory rendered in your system prompt",
         "--message-file",
       );
     }
@@ -478,7 +480,8 @@ Deno.test("readPayloadArg - missing required flag names it and shows the flow", 
       () => readPayloadArg(["--session-id", "sess_own"], "message", opts(ws)),
       "SKILL_MISSING_PAYLOAD",
       "--message-file",
-      "$TMPDIR/$SESSION_ID",
+      "staging directory rendered in your system prompt",
+      "session id rendered in your system prompt",
       EXAMPLE,
     );
   } finally {

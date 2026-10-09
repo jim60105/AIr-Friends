@@ -32,55 +32,55 @@ The caption is OPTIONAL. When present, it MUST NOT appear on the command line �
 1. (Optional) Write the caption text to a payload file under the session staging directory using your **edit/write tool**:
 
    ```
-   $TMPDIR/$SESSION_ID/caption.md
+   <absolute staging directory rendered in your system prompt>/caption.md
    ```
 
-   The `$TMPDIR` / `$SESSION_ID` tokens in that path are expanded by the ACP path boundary, so the write is approved and the text bytes are preserved **verbatim** (no shell expansion). `$TMPDIR/$SESSION_ID/` is the per-spawn form of the staging directory; in shared-process deployments the staging directory is shown in your system prompt and the script resolves it automatically.
+   Use the **absolute staging directory your system prompt renders** verbatim — never build the path from environment variables. The write goes through the ACP filesystem interface, so the text bytes are preserved **verbatim** (no shell expansion), and the script resolves the owning session automatically in every deployment shape.
 
 2. Invoke the script with the payload file path:
 
    ```
    ${HOME}/.agents/skills/send-file/scripts/send-file.ts \
-     --session-id "$SESSION_ID" \
+     --session-id "<session id rendered in your system prompt>" \
      --file-paths "relative/path/to/file.png" \
      --file-paths "relative/path/to/second.pdf" \
-     --caption-file "$TMPDIR/$SESSION_ID/caption.md"
+     --caption-file "<absolute staging directory rendered in your system prompt>/caption.md"
    ```
 
 **WARNING**: Never put caption text on the command line. The legacy `--caption "..."` / `--caption=...` flag is REMOVED: the shell expands `$VAR` in it, which corrupts the caption and can leak environment variables to the user. The singular `--file-path` flag is also REMOVED — it is rejected with code `SKILL_SINGLE_FILE_FLAG`; use the repeatable `--file-paths` flag instead.
 
 ### Parameters
 
-| Parameter        | Required | Description                                                                                                                                                                                                                                      |
-| ---------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `--session-id`   | Yes      | Use the session id rendered in your system prompt. `$SESSION_ID` works only in per-spawn deployments; in shared-process mode it is not set and the skill library resolves the owning session automatically — a mismatched value is never honored |
-| `--file-paths`   | Yes      | Repeatable file path (relative to the workspace root); one occurrence per file, at least 1                                                                                                                                                       |
-| `-f`             | No       | Short alias for `--file-paths`                                                                                                                                                                                                                   |
-| `--caption-file` | No       | Path of the payload file containing the caption text (must be under `$TMPDIR/$SESSION_ID/`)                                                                                                                                                      |
+| Parameter        | Required | Description                                                                                                                                                                                               |
+| ---------------- | -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--session-id`   | Yes      | Pass the literal session id rendered in your system prompt — authoritative in every deployment shape; the skill library resolves the owning session automatically and a mismatched value is never honored |
+| `--file-paths`   | Yes      | Repeatable file path (relative to the workspace root); one occurrence per file, at least 1                                                                                                                |
+| `-f`             | No       | Short alias for `--file-paths`                                                                                                                                                                            |
+| `--caption-file` | No       | Path of the payload file containing the caption text (must be under `<absolute staging directory rendered in your system prompt>/`)                                                                       |
 
 ### Example
 
 ```
 # Send an image
 ${HOME}/.agents/skills/send-file/scripts/send-file.ts \
-  --session-id "$SESSION_ID" \
+  --session-id "<session id rendered in your system prompt>" \
   --file-paths "output/chart.png"
 
 # Send multiple files in one message
 ${HOME}/.agents/skills/send-file/scripts/send-file.ts \
-  --session-id "$SESSION_ID" \
+  --session-id "<session id rendered in your system prompt>" \
   --file-paths "exports/report.pdf" \
   --file-paths "exports/chart.png" \
   --file-paths "exports/data.json"
 
 # Send multiple files with a description
 ${HOME}/.agents/skills/send-file/scripts/send-file.ts \
-  --session-id "$SESSION_ID" \
+  --session-id "<session id rendered in your system prompt>" \
   --file-paths "exports/report.pdf" \
   --file-paths "exports/chart.png" \
-  --caption-file "$TMPDIR/$SESSION_ID/caption.md"
+  --caption-file "<absolute staging directory rendered in your system prompt>/caption.md"
 ```
 
 ## Error Codes
 
-If the script fails, read the JSON error on stderr. It contains the fix. Common codes: `SKILL_SINGLE_FILE_FLAG` (you used the removed singular `--file-path` flag — use repeatable `--file-paths`), `SKILL_LEGACY_FLAG` (you used the removed `--caption` flag — stage the text in `$TMPDIR/$SESSION_ID/caption.md` and use `--caption-file`), `SKILL_PAYLOAD_OUT_OF_BOUNDS` (payload path outside `$TMPDIR/$SESSION_ID/`), `SKILL_PAYLOAD_NOT_FOUND` (payload file not written yet — write it first with the edit/write tool).
+If the script fails, read the JSON error on stderr. It contains the fix. Common codes: `SKILL_SINGLE_FILE_FLAG` (you used the removed singular `--file-path` flag — use repeatable `--file-paths`), `SKILL_LEGACY_FLAG` (you used the removed `--caption` flag — stage the text in `<absolute staging directory rendered in your system prompt>/caption.md` and use `--caption-file`), `SKILL_PAYLOAD_OUT_OF_BOUNDS` (payload path outside `<absolute staging directory rendered in your system prompt>/`), `SKILL_PAYLOAD_NOT_FOUND` (payload file not written yet — write it first with the edit/write tool).

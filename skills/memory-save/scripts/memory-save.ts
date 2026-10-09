@@ -34,8 +34,8 @@ async function main() {
       alias: "c",
       fileName: "content.md",
       example: `${Deno.env.get("HOME") ?? "~"}/.agents/skills/memory-save/scripts/memory-save.ts ` +
-        `--session-id "$SESSION_ID" --importance normal ` +
-        `--content-file "$TMPDIR/$SESSION_ID/content.md"`,
+        `--session-id "<session id rendered in your system prompt>" --importance normal ` +
+        `--content-file "<absolute staging directory rendered in your system prompt>/content.md"`,
     });
 
     const importance = args.importance ?? "normal";

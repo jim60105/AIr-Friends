@@ -26,7 +26,7 @@ async function main() {
       fileName: "query.md",
       example:
         `${Deno.env.get("HOME") ?? "~"}/.agents/skills/memory-search/scripts/memory-search.ts ` +
-        `--session-id "$SESSION_ID" --limit 10 --query-file "$TMPDIR/$SESSION_ID/query.md"`,
+        `--session-id "<session id rendered in your system prompt>" --limit 10 --query-file "<absolute staging directory rendered in your system prompt>/query.md"`,
     });
 
     const limit = Number(args.limit) || 10;

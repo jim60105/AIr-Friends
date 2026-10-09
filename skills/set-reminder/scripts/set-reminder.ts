@@ -29,8 +29,8 @@ async function main() {
       fileName: "reminder.md",
       example:
         `${Deno.env.get("HOME") ?? "~"}/.agents/skills/set-reminder/scripts/set-reminder.ts ` +
-        `--session-id "$SESSION_ID" --scheduled-at "2025-01-15T10:00:00Z" ` +
-        `--message-file "$TMPDIR/$SESSION_ID/reminder.md"`,
+        `--session-id "<session id rendered in your system prompt>" --scheduled-at "2025-01-15T10:00:00Z" ` +
+        `--message-file "<absolute staging directory rendered in your system prompt>/reminder.md"`,
     });
 
     const result = await callSkillApi(apiUrl, "set-reminder", sessionId, {
