@@ -241,8 +241,13 @@ function buildBaseAgentConfig(
         }
       }
 
-      // Argument assembly: acp, --no-extensions, ordered overlays, --trusted-extension, --system-prompt
-      const args = ["acp", "--no-extensions"];
+      // Argument assembly: acp, --no-extensions, --no-lsp, ordered overlays, --trusted-extension, --system-prompt
+      // Decision 5 (docs/OMP_COMPATIBILITY.md §1a): `--no-lsp` is carried unconditionally in BOTH
+      // modes — restricted (which also keeps the row-8 `restricted.yml` lsp.enabled: false pin) and
+      // native-YOLO (whose mandatory settings pin arrives later with row 25
+      // `pin-omp-yolo-lsp-settings`; this flag is the row-17 carrier, independent of it). The flag
+      // appears exactly once per launch and no restricted tool policy crosses into YOLO.
+      const args = ["acp", "--no-extensions", "--no-lsp"];
       for (const overlayPath of settings.orderedOverlayPaths) {
         args.push("--config", overlayPath);
       }
