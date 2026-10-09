@@ -1129,3 +1129,528 @@ Deno.test("AgentConnector - createSession clears rejection records, prompt() doe
     Deno.removeSync(tempDir, { recursive: true });
   }
 });
+
+// ============================================================================
+// Row 11 (restore-mode-owned-acp-sessions): recovery-ownership verification,
+// gate-context restore, and the named post-restore hook. Consumer-visible
+// decisions against the mock connection: verify-before-teardown ordering,
+// both cross-mode rejection directions with ZERO connector side effects,
+// OMP fail-closed `unverified`, row-6 config consumption, correct-session-bound
+// full gate restore, unknown-session fail closed, hook positioning, and the
+// OpenCode golden path with no recovery options.
+// ============================================================================
+
+import { GateContextRestoreError, RecoveryHookError } from "@acp/agent-connector.ts";
+import { RecoveryOwnershipError } from "@acp/recovery-ownership.ts";
+
+type RecoveryHarness = {
+  connector: AgentConnector;
+  /** Connector interactions observable by callers: teardown/spawn/load/gate. */
+  interactions: string[];
+  /** setSessionContext calls recorded on the injected mock client. */
+  gateMutations: { sessionId: string; ctx: Record<string, unknown> }[];
+  /** RPC order against the mock connection. */
+  rpc: string[];
+};
+
+const OMP_YOLO_NS = "/data/omp-pools/discord:c1/omp-agent/native-yolo";
+const OMP_RESTRICTED_NS = "/data/omp-pools/discord:c1/omp-agent/restricted";
+const OC_DATA_HOME = "/data/opencode-data/discord:c1";
+
+function createRecoveryHarness(params: {
+  agentType?: string;
+  env?: Record<string, string>;
+  cachedGateContexts?: Record<string, Record<string, unknown>>;
+  /** Namespace the (mock) respawn leaves in agentConfig.env — mutate to simulate drift. */
+}): RecoveryHarness {
+  const interactions: string[] = [];
+  const gateMutations: { sessionId: string; ctx: Record<string, unknown> }[] = [];
+  const rpc: string[] = [];
+  const connector = new AgentConnector({
+    agentConfig: { command: "mock-agent", args: [], cwd: "/tmp", env: params.env },
+    clientConfig: {
+      workingDir: "/tmp/workspace",
+      platform: "test",
+      userId: "user1",
+      channelId: "channel1",
+      isDM: false,
+      sessionId: "shell_frozen",
+      yolo: false,
+    },
+    skillRegistry: null,
+    logger: { debug: () => {}, info: () => {}, warn: () => {}, error: () => {} },
+    agentType: params.agentType,
+  });
+  connector["capabilities"] = { loadSession: true } as typeof connector["capabilities"];
+  connector["client"] = {
+    setSessionContext: (sessionId: string, ctx: Record<string, unknown>) => {
+      gateMutations.push({ sessionId, ctx });
+    },
+  } as unknown as typeof connector["client"];
+  for (const [sid, ctx] of Object.entries(params.cachedGateContexts ?? {})) {
+    (connector["sessionGateContexts"] as Map<string, unknown>).set(sid, ctx);
+  }
+  connector.disconnect = () => {
+    interactions.push("disconnect");
+    return Promise.resolve();
+  };
+  connector.connect = () => {
+    interactions.push("connect");
+    connector["connection"] = {
+      loadSession: () => {
+        rpc.push("loadSession");
+        interactions.push("loadSession");
+        return Promise.resolve({ configOptions: [] });
+      },
+    } as unknown as typeof connector["connection"];
+    return Promise.resolve();
+  };
+  return { connector, interactions, gateMutations, rpc };
+}
+
+Deno.test("reconnectAndResumeSession - same-mode OMP recovery respawns, loads, restores, returns true", async () => {
+  const h = createRecoveryHarness({
+    agentType: "omp",
+    env: { PI_CODING_AGENT_DIR: OMP_YOLO_NS, TMPDIR: `${OMP_YOLO_NS}/tmp` },
+  });
+
+  const success = await h.connector.reconnectAndResumeSession("sess_a", "/workspace", [], {
+    ownership: { agentType: "omp", permissionMode: "native-yolo", processNamespace: OMP_YOLO_NS },
+    gateContext: { cwd: "/workspace", shellSessionId: "shell_a", yolo: true },
+  });
+
+  assertEquals(success, true);
+  assertEquals(h.interactions, ["disconnect", "connect", "loadSession"]);
+  assertEquals(h.gateMutations.length, 1);
+  assertEquals(h.gateMutations[0].sessionId, "sess_a");
+  assertEquals(h.gateMutations[0].ctx.shellSessionId, "shell_a");
+  assertEquals(h.gateMutations[0].ctx.yolo, true);
+});
+
+Deno.test("reconnectAndResumeSession - restricted recovery context CANNOT load a native-YOLO-owned session (zero side effects)", async () => {
+  const h = createRecoveryHarness({
+    agentType: "omp",
+    env: { PI_CODING_AGENT_DIR: OMP_RESTRICTED_NS, TMPDIR: `${OMP_RESTRICTED_NS}/tmp` },
+  });
+
+  await assertRejects(
+    () =>
+      h.connector.reconnectAndResumeSession("sess_yolo", "/workspace", [], {
+        ownership: {
+          agentType: "omp",
+          permissionMode: "native-yolo",
+          processNamespace: OMP_YOLO_NS,
+        },
+        gateContext: { cwd: "/workspace", shellSessionId: "shell_yolo", yolo: true },
+      }),
+    RecoveryOwnershipError,
+    "ownership_violation",
+  );
+  assertEquals(h.interactions, []);
+  assertEquals(h.rpc, []);
+  assertEquals(h.gateMutations, []);
+});
+
+Deno.test("reconnectAndResumeSession - native-YOLO recovery context CANNOT load a restricted-owned session (zero side effects)", async () => {
+  const h = createRecoveryHarness({
+    agentType: "omp",
+    env: { PI_CODING_AGENT_DIR: OMP_YOLO_NS, TMPDIR: `${OMP_YOLO_NS}/tmp` },
+  });
+
+  await assertRejects(
+    () =>
+      h.connector.reconnectAndResumeSession("sess_restricted", "/workspace", [], {
+        ownership: {
+          agentType: "omp",
+          permissionMode: "restricted",
+          processNamespace: OMP_RESTRICTED_NS,
+        },
+        gateContext: { cwd: "/workspace", shellSessionId: "shell_r", yolo: false },
+      }),
+    RecoveryOwnershipError,
+    "ownership_violation",
+  );
+  assertEquals(h.interactions, []);
+  assertEquals(h.rpc, []);
+  assertEquals(h.gateMutations, []);
+});
+
+Deno.test("reconnectAndResumeSession - namespace-only drift is namespace_mismatch with zero side effects", async () => {
+  const h = createRecoveryHarness({
+    agentType: "omp",
+    env: { PI_CODING_AGENT_DIR: OMP_YOLO_NS, TMPDIR: `${OMP_YOLO_NS}/tmp` },
+  });
+
+  await assertRejects(
+    () =>
+      h.connector.reconnectAndResumeSession("sess_a", "/workspace", [], {
+        ownership: {
+          agentType: "omp",
+          permissionMode: "native-yolo",
+          processNamespace: "/data/omp-pools/other:c2/omp-agent/native-yolo",
+        },
+        gateContext: { cwd: "/workspace" },
+      }),
+    RecoveryOwnershipError,
+    "namespace_mismatch",
+  );
+  assertEquals(h.interactions, []);
+});
+
+Deno.test("reconnectAndResumeSession - OMP recovery without provenance fails closed unverified (no spawn, no load)", async () => {
+  const h = createRecoveryHarness({
+    agentType: "omp",
+    env: { PI_CODING_AGENT_DIR: OMP_YOLO_NS, TMPDIR: `${OMP_YOLO_NS}/tmp` },
+  });
+
+  await assertRejects(
+    () =>
+      h.connector.reconnectAndResumeSession("sess_a", "/workspace", [], {
+        gateContext: { cwd: "/workspace" },
+      }),
+    RecoveryOwnershipError,
+    "ownership_unverified",
+  );
+  assertEquals(h.interactions, []);
+  assertEquals(h.gateMutations, []);
+});
+
+Deno.test("reconnectAndResumeSession - post-connect namespace drift aborts before session/load", async () => {
+  const h = createRecoveryHarness({
+    agentType: "omp",
+    env: { PI_CODING_AGENT_DIR: OMP_YOLO_NS, TMPDIR: `${OMP_YOLO_NS}/tmp` },
+  });
+  // Simulate a spawn whose env drifted between the two reads.
+  const originalConnect = h.connector.connect;
+  h.connector.connect = () => {
+    (h.connector["options"].agentConfig.env as Record<string, string>)["PI_CODING_AGENT_DIR"] =
+      "/data/omp-pools/other:c2/omp-agent/native-yolo";
+    return originalConnect();
+  };
+
+  await assertRejects(
+    () =>
+      h.connector.reconnectAndResumeSession("sess_a", "/workspace", [], {
+        ownership: {
+          agentType: "omp",
+          permissionMode: "native-yolo",
+          processNamespace: OMP_YOLO_NS,
+        },
+        gateContext: { cwd: "/workspace" },
+      }),
+    RecoveryOwnershipError,
+    "namespace_mismatch",
+  );
+  // The respawn itself is connect()'s own teardown/respawn; the abort must come
+  // strictly BEFORE any session/load, and no gate mutation may have happened.
+  assertEquals(h.rpc, []);
+  assertEquals(h.gateMutations, []);
+});
+
+Deno.test("reconnectAndResumeSession - matched recovery consumes row 6: cache + stable-first model + supplied reasoning", async () => {
+  const h = createRecoveryHarness({
+    agentType: "omp",
+    env: { PI_CODING_AGENT_DIR: OMP_YOLO_NS, TMPDIR: `${OMP_YOLO_NS}/tmp` },
+  });
+  (h.connector["sessionModelIds"] as Map<string, string>).set("sess_restore", "provider/target");
+  h.connector.connect = () => {
+    h.interactions.push("connect");
+    h.connector["connection"] = {
+      loadSession: () => {
+        h.rpc.push("loadSession");
+        return Promise.resolve({
+          configOptions: [
+            {
+              id: "cfg_model",
+              category: "model",
+              name: "Model",
+              type: "select",
+              currentValue: "initial",
+              options: [{ value: "provider/Target", name: "Target" }],
+            },
+            {
+              id: "thought_level",
+              category: "thought_level",
+              name: "Thought",
+              type: "select",
+              currentValue: "low",
+              options: [{ value: "high", name: "High" }],
+            },
+          ],
+        });
+      },
+      setSessionConfigOption: (params: { configId: string; value: string }) => {
+        h.rpc.push(`set_config_option:${params.configId}:${params.value}`);
+        return Promise.resolve({
+          configOptions: [
+            { id: "cfg_model", category: "model", name: "Model", currentValue: params.value },
+            { id: "thought_level", category: "thought_level", options: [{ value: "high" }] },
+          ],
+        });
+      },
+    } as unknown as typeof h.connector["connection"];
+    return Promise.resolve();
+  };
+
+  const success = await h.connector.reconnectAndResumeSession("sess_restore", "/workspace", [], {
+    reasoningEffort: "high",
+    ownership: { agentType: "omp", permissionMode: "native-yolo", processNamespace: OMP_YOLO_NS },
+    gateContext: { cwd: "/workspace", shellSessionId: "shell_r" },
+  });
+
+  assertEquals(success, true);
+  assertEquals(h.rpc, [
+    "loadSession",
+    "set_config_option:cfg_model:provider/Target",
+    "set_config_option:thought_level:high",
+  ]);
+  assertEquals(
+    (h.connector["sessionModelIds"] as Map<string, string>).get("sess_restore"),
+    "provider/Target",
+  );
+});
+
+Deno.test("reconnectAndResumeSession - post-load catalog miss propagates in isolation with the recovery context supplied", async () => {
+  const h = createRecoveryHarness({
+    agentType: "omp",
+    env: { PI_CODING_AGENT_DIR: OMP_YOLO_NS, TMPDIR: `${OMP_YOLO_NS}/tmp` },
+  });
+  (h.connector["sessionModelIds"] as Map<string, string>).set("sess_miss", "gone-model");
+  h.connector.connect = () => {
+    h.connector["connection"] = {
+      loadSession: () => {
+        h.rpc.push("loadSession");
+        return Promise.resolve({
+          configOptions: [
+            { id: "cfg_model", category: "model", options: [{ value: "other-model" }] },
+          ],
+        });
+      },
+    } as unknown as typeof h.connector["connection"];
+    return Promise.resolve();
+  };
+
+  await assertRejects(
+    () =>
+      h.connector.reconnectAndResumeSession("sess_miss", "/workspace", [], {
+        reasoningEffort: "high",
+        ownership: {
+          agentType: "omp",
+          permissionMode: "native-yolo",
+          processNamespace: OMP_YOLO_NS,
+        },
+        gateContext: { cwd: "/workspace" },
+      }),
+    Error,
+    "Requested model 'gone-model' is not offered in advertised catalog",
+  );
+  assertEquals(h.rpc, ["loadSession"]);
+  // The failed session's gate context was never registered (isolation), and no
+  // sibling context was substituted.
+  assertEquals(h.gateMutations, []);
+});
+
+Deno.test("reconnectAndResumeSession - full gate context restored for the recovered id on a FRESH connector", async () => {
+  const h = createRecoveryHarness({
+    agentType: "omp",
+    env: { PI_CODING_AGENT_DIR: OMP_YOLO_NS, TMPDIR: `${OMP_YOLO_NS}/tmp` },
+  });
+  const full = {
+    cwd: "/workspace/a",
+    shellSessionId: "shell_a",
+    yolo: true,
+    canWriteAgentWorkspace: true,
+    allowedWriteExtensions: [".md"],
+  };
+
+  const success = await h.connector.reconnectAndResumeSession("sess_a", "/workspace/a", [], {
+    ownership: { agentType: "omp", permissionMode: "native-yolo", processNamespace: OMP_YOLO_NS },
+    gateContext: full,
+  });
+
+  assertEquals(success, true);
+  assertEquals(h.gateMutations.length, 1);
+  assertEquals(h.gateMutations[0].sessionId, "sess_a");
+  assertEquals(h.gateMutations[0].ctx.cwd, "/workspace/a");
+  assertEquals(h.gateMutations[0].ctx.shellSessionId, "shell_a");
+  assertEquals(h.gateMutations[0].ctx.yolo, true);
+  assertEquals(h.gateMutations[0].ctx.canWriteAgentWorkspace, true);
+  assertEquals(h.gateMutations[0].ctx.allowedWriteExtensions, [".md"]);
+  // The restored context is cached so a later connect() replay re-registers it.
+  assertEquals(
+    (h.connector["sessionGateContexts"] as Map<string, unknown>).get("sess_a") !== undefined,
+    true,
+  );
+});
+
+Deno.test("reconnectAndResumeSession - unknown session without a context fails closed; sibling context stays registered", async () => {
+  const siblingCtx = { cwd: "/workspace/b", shellSessionId: "shell_b", yolo: false };
+  const h = createRecoveryHarness({
+    agentType: "omp",
+    env: { PI_CODING_AGENT_DIR: OMP_YOLO_NS, TMPDIR: `${OMP_YOLO_NS}/tmp` },
+    cachedGateContexts: { sess_b: siblingCtx },
+  });
+
+  await assertRejects(
+    () =>
+      h.connector.reconnectAndResumeSession("sess_unknown", "/workspace/a", [], {
+        ownership: {
+          agentType: "omp",
+          permissionMode: "native-yolo",
+          processNamespace: OMP_YOLO_NS,
+        },
+      }),
+    GateContextRestoreError,
+    "no gate context supplied or cached",
+  );
+  // The load happened (restore is post-load per the ordering contract), but the
+  // sibling's cached context is untouched and was never rebound to the recovered id.
+  assertEquals(
+    (h.connector["sessionGateContexts"] as Map<string, unknown>).get("sess_b"),
+    siblingCtx,
+  );
+  assertEquals(h.gateMutations, []);
+});
+
+Deno.test("reconnectAndResumeSession - supplied gate context disagreeing with the recovery cwd fails closed", async () => {
+  const h = createRecoveryHarness({
+    agentType: "omp",
+    env: { PI_CODING_AGENT_DIR: OMP_YOLO_NS, TMPDIR: `${OMP_YOLO_NS}/tmp` },
+  });
+
+  await assertRejects(
+    () =>
+      h.connector.reconnectAndResumeSession("sess_a", "/workspace/a", [], {
+        ownership: {
+          agentType: "omp",
+          permissionMode: "native-yolo",
+          processNamespace: OMP_YOLO_NS,
+        },
+        gateContext: { cwd: "/workspace/OTHER", shellSessionId: "shell_a" },
+      }),
+    GateContextRestoreError,
+    "disagrees with recovery cwd",
+  );
+  assertEquals(h.gateMutations, []);
+});
+
+Deno.test("reconnectAndResumeSession - hook runs exactly once after restore, before success", async () => {
+  const h = createRecoveryHarness({
+    agentType: "omp",
+    env: { PI_CODING_AGENT_DIR: OMP_YOLO_NS, TMPDIR: `${OMP_YOLO_NS}/tmp` },
+  });
+  const hookSessions: string[] = [];
+  let mutationsAtHookTime = -1;
+
+  const success = await h.connector.reconnectAndResumeSession("sess_a", "/workspace", [], {
+    ownership: { agentType: "omp", permissionMode: "native-yolo", processNamespace: OMP_YOLO_NS },
+    gateContext: { cwd: "/workspace", shellSessionId: "shell_a" },
+    onGateContextRestored: (sessionId) => {
+      hookSessions.push(sessionId);
+      mutationsAtHookTime = h.gateMutations.length;
+    },
+  });
+
+  assertEquals(success, true);
+  assertEquals(hookSessions, ["sess_a"]);
+  assertEquals(mutationsAtHookTime, 1, "gate context restored strictly before the hook");
+});
+
+Deno.test("reconnectAndResumeSession - rejecting hook fails only this session as RecoveryHookError", async () => {
+  const h = createRecoveryHarness({
+    agentType: "omp",
+    env: { PI_CODING_AGENT_DIR: OMP_YOLO_NS, TMPDIR: `${OMP_YOLO_NS}/tmp` },
+  });
+
+  await assertRejects(
+    () =>
+      h.connector.reconnectAndResumeSession("sess_a", "/workspace", [], {
+        ownership: {
+          agentType: "omp",
+          permissionMode: "native-yolo",
+          processNamespace: OMP_YOLO_NS,
+        },
+        gateContext: { cwd: "/workspace" },
+        onGateContextRestored: () => Promise.reject(new Error("hook exploded")),
+      }),
+    RecoveryHookError,
+    "recovery hook failed",
+  );
+  // Restore itself completed; only this session's recovery failed.
+  assertEquals(h.gateMutations.length, 1);
+});
+
+Deno.test("reconnectAndResumeSession - OpenCode golden path: no options keeps the pre-change sequence", async () => {
+  const h = createRecoveryHarness({
+    agentType: "opencode",
+    env: { XDG_DATA_HOME: OC_DATA_HOME, TMPDIR: "/data/channel-tmp/discord:c1" },
+  });
+
+  const success = await h.connector.reconnectAndResumeSession("sess_oc", "/workspace/oc");
+
+  assertEquals(success, true);
+  assertEquals(h.interactions, ["disconnect", "connect", "loadSession"]);
+  // cwd-only registration with process-frozen clientConfig fallbacks — exactly
+  // the pre-change shape.
+  assertEquals(h.gateMutations.length, 1);
+  assertEquals(h.gateMutations[0].sessionId, "sess_oc");
+  assertEquals(h.gateMutations[0].ctx.cwd, "/workspace/oc");
+  assertEquals(h.gateMutations[0].ctx.shellSessionId, "shell_frozen");
+  assertEquals(h.gateMutations[0].ctx.yolo, false);
+});
+
+Deno.test("reconnectAndResumeSession - OpenCode yolo-switch record + pool data root matches by construction", async () => {
+  const h = createRecoveryHarness({
+    agentType: "opencode",
+    env: { XDG_DATA_HOME: OC_DATA_HOME },
+  });
+
+  const success = await h.connector.reconnectAndResumeSession("sess_oc", "/workspace/oc", [], {
+    ownership: {
+      agentType: "opencode",
+      permissionMode: "yolo-switch",
+      processNamespace: OC_DATA_HOME,
+    },
+    gateContext: { cwd: "/workspace/oc", shellSessionId: "shell_oc", yolo: false },
+  });
+
+  assertEquals(success, true);
+  assertEquals(h.interactions, ["disconnect", "connect", "loadSession"]);
+  assertEquals(h.gateMutations[0].ctx.shellSessionId, "shell_oc");
+});
+
+Deno.test("reconnectAndResumeSession - OpenCode recovery against a foreign data root is namespace_mismatch with zero side effects", async () => {
+  const h = createRecoveryHarness({ agentType: "opencode", env: { XDG_DATA_HOME: OC_DATA_HOME } });
+
+  await assertRejects(
+    () =>
+      h.connector.reconnectAndResumeSession("sess_oc", "/workspace/oc", [], {
+        ownership: {
+          agentType: "opencode",
+          permissionMode: "yolo-switch",
+          processNamespace: "/data/opencode-data/other:key",
+        },
+        gateContext: { cwd: "/workspace/oc" },
+      }),
+    RecoveryOwnershipError,
+    "namespace_mismatch",
+  );
+  assertEquals(h.interactions, []);
+});
+
+Deno.test("reconnectAndResumeSession - capability absence still returns false with a recovery context (never an ownership error)", async () => {
+  const h = createRecoveryHarness({
+    agentType: "omp",
+    env: { PI_CODING_AGENT_DIR: OMP_YOLO_NS, TMPDIR: `${OMP_YOLO_NS}/tmp` },
+  });
+  h.connector["capabilities"] = { loadSession: false } as typeof h.connector["capabilities"];
+
+  const resumed = await h.connector.reconnectAndResumeSession("sess_a", "/workspace", [], {
+    ownership: { agentType: "omp", permissionMode: "native-yolo", processNamespace: OMP_YOLO_NS },
+    gateContext: { cwd: "/workspace" },
+  });
+
+  assertEquals(resumed, false);
+  assertEquals(h.interactions, ["disconnect", "connect", "disconnect"]);
+  assertEquals(h.gateMutations, []);
+});

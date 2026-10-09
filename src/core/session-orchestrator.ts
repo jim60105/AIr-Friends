@@ -2,7 +2,13 @@
 
 import { createLogger } from "@utils/logger.ts";
 import type { ReplyPolicyEvaluator, YoloDecision } from "./reply-policy.ts";
-import { AgentConnector } from "@acp/agent-connector.ts";
+import {
+  AgentConnector,
+  GateContextRestoreError,
+  RecoveryHookError,
+} from "@acp/agent-connector.ts";
+import type { SessionGateContext } from "@acp/client.ts";
+import { RecoveryOwnershipError, type SessionRecoveryOwnership } from "@acp/recovery-ownership.ts";
 import { AgentProcessPool } from "./agent-process-pool.ts";
 import type { PoolPermissionMode, PoolRunOptions } from "./agent-process-pool.ts";
 import * as acp from "@agentclientprotocol/sdk";
@@ -64,6 +70,14 @@ import {
 } from "./research-output.ts";
 
 const logger = createLogger("SessionOrchestrator");
+
+/** Bounded machine-readable reason vocabulary for a row-11 recovery abort. */
+type RecoveryAbortReason =
+  | "ownership_violation"
+  | "ownership_unverified"
+  | "namespace_mismatch"
+  | "gate_context_restore_failed"
+  | "post_restore_hook_failed";
 
 /**
  * Format fetched RSS items for the self-research prompt as explicitly
@@ -807,6 +821,23 @@ export class SessionOrchestrator {
               workspace.path,
               this.getMCPServers(),
               shellSessionId,
+              // Row-11 recovery context: exactly the registry-recorded ownership
+              // (read-only), this session's own gate fields, resolved reasoning,
+              // own cwd (passed positionally), and operator MCP servers. Never
+              // re-resolved or inferred at recovery time.
+              {
+                ownership: this.recoveryOwnershipFromRegistry(shellSessionId, agentType),
+                gateContext: {
+                  cwd: options.sessionCwd,
+                  shellSessionId: options.shellSessionId ?? undefined,
+                  yolo: yoloDecision.enabled,
+                  canWriteAgentWorkspace: false,
+                  allowedWriteExtensions: this.config.agent.sandbox?.allowedWriteExtensions,
+                  trustedSkills: clientConfig.trustedSkills,
+                },
+                reasoningEffort: resolvedReasoningEffort,
+                onGateContextRestored: this.recoveryPostRestoreHook(),
+              },
             );
             if (response === null) {
               sl2.warn("Session {sessionId} ended without agent response after reconnect", {
@@ -883,20 +914,30 @@ export class SessionOrchestrator {
 
         if (typingInterval) clearInterval(typingInterval);
 
+        // Row-11: single post-lease session_end writer stamps this session's
+        // recovery-abort reason (when the runner ended the session on one)
+        // instead of the generic no-reply error. Consumed exactly once here so
+        // no outcome path can leave a stale reason behind.
+        const recoveryAbort = this.takeRecoveryAbortReason(shellSessionId);
+
         if (poolResult.cancelledByDeadline) {
           await auditWriter?.write("session_end", {
             success: false,
             replySent: false,
             fileSent: false,
             durationMs: Date.now() - sessionStartTime,
-            error: "Cancelled by queue deadline",
+            error: recoveryAbort
+              ? `session_recovery_failed: ${recoveryAbort}`
+              : "Cancelled by queue deadline",
             ...auditWriter?.getSummaryCounters(),
           });
           result = {
             success: false,
             replySent: false,
             fileSent: false,
-            error: "Cancelled by queue deadline",
+            error: recoveryAbort
+              ? `session_recovery_failed: ${recoveryAbort}`
+              : "Cancelled by queue deadline",
           };
           return result;
         }
@@ -941,14 +982,18 @@ export class SessionOrchestrator {
           replySent: false,
           fileSent: false,
           durationMs: Date.now() - sessionStartTime,
-          error: "Agent did not generate a reply",
+          error: recoveryAbort
+            ? `session_recovery_failed: ${recoveryAbort}`
+            : "Agent did not generate a reply",
           ...auditWriter?.getSummaryCounters(),
         });
         result = {
           success: false,
           replySent: false,
           fileSent: false,
-          error: "Agent did not generate a reply",
+          error: recoveryAbort
+            ? `session_recovery_failed: ${recoveryAbort}`
+            : "Agent did not generate a reply",
         };
         return result;
       }
@@ -3800,6 +3845,23 @@ export class SessionOrchestrator {
           sessionCwd,
           this.getMCPServers(),
           shellSessionId,
+          // Row-11 recovery context (shared helper runner): same contract as the
+          // inline pooled runner — registry-recorded ownership read-only, own
+          // gate fields exactly as registered at setup, resolved reasoning,
+          // own cwd, operator MCP servers.
+          {
+            ownership: this.recoveryOwnershipFromRegistry(shellSessionId, agentType),
+            gateContext: {
+              cwd: sessionCwd,
+              shellSessionId: this.skillSessionId(shellSessionId),
+              yolo: yoloEnabled,
+              canWriteAgentWorkspace: connectorOptions.clientConfig?.canWriteAgentWorkspace,
+              allowedWriteExtensions: this.config.agent.sandbox?.allowedWriteExtensions,
+              trustedSkills: connectorOptions.clientConfig?.trustedSkills,
+            },
+            reasoningEffort: resolvedReasoningEffort,
+            onGateContextRestored: this.recoveryPostRestoreHook(),
+          },
         );
         if (response === null) {
           sl.warn("Session {sessionId} ended without agent response after reconnect", {
@@ -3875,20 +3937,29 @@ export class SessionOrchestrator {
       },
     );
 
+    // Row-11: same single post-lease session_end writer contract as the inline
+    // pooled runner — the pending recovery-abort reason (consumed exactly once)
+    // replaces the generic error string for THIS session's bounded loss.
+    const recoveryAbort = this.takeRecoveryAbortReason(shellSessionId);
+
     if (poolResult.cancelledByDeadline) {
       await auditWriter?.write("session_end", {
         success: false,
         replySent: false,
         fileSent: false,
         durationMs: Date.now() - sessionStartTime,
-        error: "Cancelled by queue deadline",
+        error: recoveryAbort
+          ? `session_recovery_failed: ${recoveryAbort}`
+          : "Cancelled by queue deadline",
         ...auditWriter?.getSummaryCounters(),
       });
       return {
         success: false,
         replySent: false,
         fileSent: false,
-        error: "Cancelled by queue deadline",
+        error: recoveryAbort
+          ? `session_recovery_failed: ${recoveryAbort}`
+          : "Cancelled by queue deadline",
       };
     }
 
@@ -3916,14 +3987,18 @@ export class SessionOrchestrator {
       replySent: false,
       fileSent: false,
       durationMs: Date.now() - sessionStartTime,
-      error: "Agent did not generate a reply",
+      error: recoveryAbort
+        ? `session_recovery_failed: ${recoveryAbort}`
+        : "Agent did not generate a reply",
       ...auditWriter?.getSummaryCounters(),
     });
     return {
       success: false,
       replySent: false,
       fileSent: false,
-      error: "Agent did not generate a reply",
+      error: recoveryAbort
+        ? `session_recovery_failed: ${recoveryAbort}`
+        : "Agent did not generate a reply",
     };
   }
 
@@ -3964,6 +4039,18 @@ export class SessionOrchestrator {
    * 1. Attempts to reconnect and resume the SAME session (not a new one)
    * 2. If session resumed and agent is still working → wait for completion
    * 3. If session cannot be resumed (loadSession unsupported) → throw error
+   *
+   * Row 11 (restore-mode-owned-acp-sessions): pooled call sites pass the
+   * session's OWN recovery context — the registry-recorded mode/namespace
+   * (read-only), its full gate-context fields, its resolved reasoning effort,
+   * and its own cwd — which the connector verifies BEFORE any teardown. A
+   * recovery failure classified as ownership violation / unverified provenance
+   * / namespace mismatch / gate-context restore failure / post-restore hook
+   * failure ends ONLY this session: a bounded reason-coded `session_end` audit,
+   * an end-without-response result, and NEVER the respond-gated re-prompt path
+   * nor a `disconnect()`/`cancel()` from the recovery path. Those classes stay
+   * distinct from the capability-absence "Session lost" outcome. Load failures
+   * and post-load catalog misses keep their existing isolated throw path.
    */
   private async promptWithIdleTimeoutHandling(
     connector: AgentConnector,
@@ -3972,6 +4059,18 @@ export class SessionOrchestrator {
     sessionCwd: string,
     mcpServers: MCPServerConfig[],
     shellSessionId: string | null,
+    recovery?: {
+      ownership?: SessionRecoveryOwnership;
+      gateContext?: SessionGateContext;
+      reasoningEffort?: string;
+      /** Named post-restore recovery hook: called by the connector exactly
+       * once after gate-context restoration and before success/resumed
+       * prompting. Gates nothing — no readiness assertion, request, channel,
+       * or prompt gate (docs/OMP_RECOVERY.md names it as the attach point).
+       * Production pooled recovery passes no hook (the documented no-op);
+       * the seam remains so the position is observable and extendable. */
+      onGateContextRestored?: (sessionId: string) => void | Promise<void>;
+    },
   ): Promise<acp.PromptResponse | null> {
     try {
       return await connector.prompt(sessionId, content);
@@ -3997,7 +4096,26 @@ export class SessionOrchestrator {
         { sessionId },
       );
 
-      const resumed = await connector.reconnectAndResumeSession(sessionId, sessionCwd, mcpServers);
+      let resumed: boolean;
+      try {
+        resumed = recovery
+          ? await connector.reconnectAndResumeSession(sessionId, sessionCwd, mcpServers, {
+            reasoningEffort: recovery.reasoningEffort,
+            ownership: recovery.ownership,
+            gateContext: recovery.gateContext,
+            onGateContextRestored: recovery.onGateContextRestored,
+          })
+          : await connector.reconnectAndResumeSession(sessionId, sessionCwd, mcpServers);
+      } catch (recoveryError) {
+        // Row-11 recovery-abort classes end ONLY this session (design §13).
+        const reason = this.classifyRecoveryFailure(recoveryError);
+        if (reason !== null) {
+          return this.endSessionOnRecoveryAbort(sessionId, shellSessionId, reason, error);
+        }
+        // Genuine load failures and post-load catalog misses keep the existing
+        // isolated throw path (row 6 / §13) — never "resume anyway".
+        throw recoveryError;
+      }
 
       if (!resumed) {
         logger.error(
@@ -4105,6 +4223,74 @@ export class SessionOrchestrator {
   }
 
   /**
+   * Bounded machine-readable reason for a row-11 recovery abort (design §13/D7).
+   * `null` means the error is NOT a recovery-abort class — genuine load
+   * failures and post-load catalog misses keep their existing isolated throw.
+   */
+  private classifyRecoveryFailure(
+    error: unknown,
+  ): RecoveryAbortReason | null {
+    if (error instanceof RecoveryOwnershipError) return error.reason;
+    if (error instanceof GateContextRestoreError) return "gate_context_restore_failed";
+    if (error instanceof RecoveryHookError) return "post_restore_hook_failed";
+    return null;
+  }
+
+  /**
+   * A row-11 recovery-abort classification.
+   */
+  private recoveryAbortReasons = new Map<string, RecoveryAbortReason>();
+
+  /**
+   * End ONE session on a row-11 recovery abort: log the bounded reason, record
+   * it for the pooled post-lease `session_end` writer, and return `null`
+   * (ended-without-response) — the classification NEVER enters the respond-gated
+   * re-prompt branch and never calls `disconnect()`/`cancel()` from the recovery
+   * path, so the failed session's gate context is not dropped and other
+   * sessions' gate contexts, replays, processes, the execution lease, and the
+   * pool's JWT/pointer release stay untouched. Returning instead of throwing is
+   * deliberate: a throw would ride the pool's runner-failure path and relabel
+   * this session's bounded outcome as a queue-deadline cancellation.
+   */
+  private endSessionOnRecoveryAbort(
+    sessionId: string,
+    shellSessionId: string | null,
+    reason: RecoveryAbortReason,
+    triggerError: unknown,
+  ): null {
+    logger.error(
+      "Session {sessionId} recovery aborted ({reason}); ending this session only",
+      {
+        sessionId,
+        shellSessionId,
+        reason,
+        trigger: triggerError instanceof Error ? triggerError.message : String(triggerError),
+      },
+    );
+    // Only pooled sessions (which hold a shell session id) consume the recorded
+    // reason at their post-lease `session_end` writer; with no shell session id
+    // there is no consumer, so nothing is stored — the map stays bounded.
+    if (shellSessionId) {
+      this.recoveryAbortReasons.set(shellSessionId, reason);
+    }
+    return null;
+  }
+
+  /**
+   * Consume the pending row-11 recovery-abort reason for a pooled session (the
+   * single post-lease `session_end` writer stamps its bounded reason code —
+   * distinct from the capability-absence "loadSession not supported … Session
+   * lost" string and from the generic no-reply error). Always consumed so a
+   * completed lease never carries a stale reason.
+   */
+  private takeRecoveryAbortReason(shellSessionId: string | null): RecoveryAbortReason | null {
+    if (!shellSessionId) return null;
+    const reason = this.recoveryAbortReasons.get(shellSessionId);
+    this.recoveryAbortReasons.delete(shellSessionId);
+    return reason ?? null;
+  }
+
+  /**
    * Build a short diagnostic note listing the session's already-executed skill
    * operations (memory-save calls, reply attempts, file sends) so a resumed agent
    * knows what has already happened and avoids re-doing side effects.
@@ -4156,6 +4342,41 @@ export class SessionOrchestrator {
   /** Internal ownership is not an external skill identity when the API is disabled. */
   private skillSessionId(registrySessionId: string | null): string | undefined {
     return this.config.skillApi?.enabled ? registrySessionId ?? undefined : undefined;
+  }
+
+  /**
+   * The named post-restore recovery hook handed to pooled recovery (row 11, D6).
+   * Production is the documented no-op: it asserts no readiness, requests
+   * nothing, gates no prompt or handshake. The seam exists so the attach point
+   * (after gate-context restoration, before success/resumed prompting) is
+   * explicit and observable, and a future integration can bind a real action
+   * without reopening this contract.
+   */
+  protected recoveryPostRestoreHook(): ((sessionId: string) => void | Promise<void>) | undefined {
+    return undefined;
+  }
+
+  /**
+   * Build the recovery-ownership context from the registry's acquisition record
+   * (row 10), consumed READ-ONLY: recovery never re-resolves the mode, rewrites
+   * the fields, or re-derives the namespace. An OMP session whose record is
+   * missing/incomplete yields `undefined`, which the connector fails closed on
+   * (`ownership_unverified`); an OpenCode pooled record carries the fixed
+   * `yolo-switch` identity and matches by construction. `agentType` is the
+   * deployment type fixed at acquisition (connector options never change for a
+   * registry session's lifetime).
+   */
+  private recoveryOwnershipFromRegistry(
+    shellSessionId: string | null,
+    agentType: AgentType,
+  ): SessionRecoveryOwnership | undefined {
+    const session = shellSessionId ? this.sessionRegistry.get(shellSessionId) : undefined;
+    if (!session?.permissionMode || !session.processNamespace) return undefined;
+    return {
+      agentType,
+      permissionMode: session.permissionMode,
+      processNamespace: session.processNamespace,
+    };
   }
 
   /**

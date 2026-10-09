@@ -12,6 +12,7 @@ import { MemoryStore } from "@core/memory-store.ts";
 import { SkillRegistry } from "@skills/registry.ts";
 import { combinedTokenCount } from "@utils/token-counter.ts";
 import { SessionRegistry } from "../../src/skill-api/session-registry.ts";
+import type { ActiveSession } from "../../src/skill-api/session-registry.ts";
 import type { Config } from "../../src/types/config.ts";
 import type { NormalizedEvent, PlatformMessage, QuotedNote } from "../../src/types/events.ts";
 import type { PlatformAdapter } from "@platforms/platform-adapter.ts";
@@ -20,6 +21,8 @@ import type { AgentConnectorOptions } from "../../src/acp/types.ts";
 import type { ClientConfig } from "../../src/acp/types.ts";
 import type { PermissionRejection } from "../../src/acp/types.ts";
 import type { AgentConnector } from "../../src/acp/agent-connector.ts";
+import { GateContextRestoreError, RecoveryHookError } from "../../src/acp/agent-connector.ts";
+import { RecoveryOwnershipError } from "../../src/acp/recovery-ownership.ts";
 import type { PromptResponse } from "npm:@agentclientprotocol/sdk@^0.14.1";
 import { dirname, join } from "@std/path";
 
@@ -516,8 +519,12 @@ class MockAgentConnector {
 
   async disconnect(): Promise<void> {
     this.disconnected = true;
+    this.disconnectCalls++;
     await Promise.resolve();
   }
+
+  /** Disconnects observed so far (proves the recovery path never tears down). */
+  disconnectCalls = 0;
 
   // --- Shared-process (pooled) runner stubs ---
 
@@ -537,11 +544,38 @@ class MockAgentConnector {
   }
 
   reconnectResult = false;
+  /** Every recovery call with its trailing options (row 11 capture seam). */
+  reconnectCalls: { sessionId: string; cwd: string; mcpServers: unknown[]; opts: unknown }[] = [];
+  /** When set, reconnectAndResumeSession throws it (recovery-abort stubs). */
+  reconnectError: Error | null = null;
+  /** disconnectCalls observed when reconnectError was thrown (must stay 0-added). */
+  disconnectCallsAtReconnectThrow = -1;
   reconnectAndResumeSession(
-    _sessionId: string,
-    _sessionCwd: string,
-    _mcpServers: unknown[],
+    sessionId: string,
+    sessionCwd: string,
+    mcpServers: unknown[],
+    opts?: { onGateContextRestored?: (sessionId: string) => void | Promise<void> } | undefined,
   ): Promise<boolean> {
+    this.reconnectCalls.push({
+      sessionId,
+      cwd: sessionCwd,
+      mcpServers,
+      opts: opts === undefined ? undefined : { ...opts },
+    });
+    if (this.reconnectError) {
+      this.disconnectCallsAtReconnectThrow = this.disconnectCalls;
+      return Promise.reject(this.reconnectError);
+    }
+    // Mirror the real connector's hook position: strictly after restoration,
+    // before success is reported to the caller.
+    if (opts?.onGateContextRestored) {
+      return Promise.resolve(opts.onGateContextRestored(sessionId))
+        .then(() => this.reconnectResult)
+        // Mirror the real connector's wrap of a rejecting hook.
+        .catch((cause: unknown) => {
+          throw new RecoveryHookError(sessionId, cause);
+        });
+    }
     return Promise.resolve(this.reconnectResult);
   }
 }
@@ -552,6 +586,8 @@ class MockAgentConnector {
 class TestableSessionOrchestrator extends SessionOrchestrator {
   mockConnector: MockAgentConnector | null = null;
   private connectorSetup?: (connector: MockAgentConnector) => void;
+  /** Row-11: injectable post-restore hook stub (production returns undefined). */
+  recoveryHookStub?: (sessionId: string) => void | Promise<void>;
   /**
    * When true, attachment image fetches bypass the SSRF guard and use plain fetch,
    * allowing tests to serve images from a loopback test server. The production SSRF
@@ -563,6 +599,12 @@ class TestableSessionOrchestrator extends SessionOrchestrator {
 
   setConnectorSetup(setup: (connector: MockAgentConnector) => void): void {
     this.connectorSetup = setup;
+  }
+
+  protected override recoveryPostRestoreHook():
+    | ((sessionId: string) => void | Promise<void>)
+    | undefined {
+    return this.recoveryHookStub;
   }
 
   protected override createConnector(
@@ -4920,6 +4962,423 @@ Deno.test({
       }
     } finally {
       await server.shutdown();
+      await Deno.remove(tempDir, { recursive: true });
+    }
+  },
+});
+
+// === Row 11 (restore-mode-owned-acp-sessions): pooled recovery-context threading,
+// recovery-abort classification, isolation, and hook positioning (task 5.2) ===
+
+/** Trailing recovery options the orchestrator passes to reconnectAndResumeSession. */
+interface RecordedRecoveryOpts {
+  ownership?: { agentType: string; permissionMode: string; processNamespace: string };
+  gateContext?: { cwd: string; yolo?: boolean; canWriteAgentWorkspace?: boolean };
+  reasoningEffort?: string;
+  onGateContextRestored?: unknown;
+}
+
+async function readAuditSessionEnds(tempDir: string): Promise<Record<string, unknown>[]> {
+  const ends: Record<string, unknown>[] = [];
+  try {
+    for await (const platEntry of Deno.readDir(join(tempDir, "audit"))) {
+      if (!platEntry.isDirectory) continue;
+      for await (const userEntry of Deno.readDir(join(tempDir, "audit", platEntry.name))) {
+        if (!userEntry.isDirectory) continue;
+        for await (
+          const file of Deno.readDir(join(tempDir, "audit", platEntry.name, userEntry.name))
+        ) {
+          const text = await Deno.readTextFile(
+            join(tempDir, "audit", platEntry.name, userEntry.name, file.name),
+          );
+          for (const line of text.trim().split("\n")) {
+            const entry = JSON.parse(line) as { phase: string; data: Record<string, unknown> };
+            if (entry.phase === "session_end") ends.push(entry.data);
+          }
+        }
+      }
+    }
+  } catch {
+    // No audit dir => no session_end entries.
+  }
+  return ends;
+}
+
+function enableAudit(config: Config): void {
+  config.audit = {
+    enabled: true,
+    retentionDays: 7,
+    hashContent: false,
+    includedPhases: [],
+  };
+}
+
+function markReplySent(skillRegistry: SkillRegistry, workspaceKey: string, channelId: string) {
+  const replyHandler = skillRegistry.getReplyHandler();
+  // Test-only reach into the reply handler's sent-map (the same seam the
+  // existing pooled tests use), typed narrowly instead of `any`.
+  const sentMap = (replyHandler as unknown as {
+    replySentMap: Map<string, boolean>;
+  }).replySentMap;
+  sentMap.set(`${workspaceKey}:${channelId}`, true);
+}
+
+Deno.test({
+  name:
+    "SessionOrchestrator - pooled recovery passes the session's OWN context (ownership + gate + reasoning + cwd + MCP servers)",
+  async fn() {
+    const tempDir = await Deno.makeTempDir();
+    try {
+      const fakeConnector = new MockAgentConnector({} as unknown as AgentConnectorOptions);
+      const { orchestrator, sessionRegistry, config } = await createTestableOrchestrator(
+        tempDir,
+        { processPool: createStubProcessPool(fakeConnector) },
+      );
+      config.agent.idleTimeout = { enabled: false, timeoutMs: 300000, checkIntervalMs: 30000 };
+      fakeConnector.reconnectResult = true;
+      // First prompt dies on the idle-timeout signal; the recovery re-issue
+      // answers end_turn.
+      // The registry record observed at recovery time (the session is
+      // unregistered once it ends, so capture it while the first prompt runs).
+      const registryAtRecovery: ActiveSession[] = [];
+      fakeConnector.prompt = (_sessionId: string, text: string) => {
+        fakeConnector.lastPromptText = text;
+        fakeConnector.promptCallCount++;
+        if (fakeConnector.promptCallCount === 1) {
+          registryAtRecovery.push(...sessionRegistry.getAll());
+          return Promise.reject(new Error("ACP connection dead"));
+        }
+        return Promise.resolve({ stopReason: "end_turn" } as PromptResponse);
+      };
+
+      const event = createTestEvent();
+      const platformAdapter = new MockPlatformAdapter() as unknown as PlatformAdapter;
+      await orchestrator.processMessage(event, platformAdapter);
+
+      assertEquals(fakeConnector.reconnectCalls.length, 1, "recovery attempted exactly once");
+      const call = fakeConnector.reconnectCalls[0];
+      // The connector stub received the orchestrator-threaded trailing object.
+      const opts = call.opts as RecordedRecoveryOpts | undefined;
+      assertExists(opts, "pooled recovery must supply a recovery-options object");
+      // The row-10 registry record is passed through READ-ONLY: the ownership
+      // must equal what acquisition recorded for this session.
+      assertEquals(registryAtRecovery.length, 1);
+      const record = registryAtRecovery[0];
+      assertExists(opts.ownership, "pooled recovery must supply ownership provenance");
+      assertEquals(opts.ownership.agentType, "opencode");
+      assertEquals(opts.ownership.permissionMode, record.permissionMode);
+      assertEquals(opts.ownership.permissionMode, "yolo-switch");
+      assertEquals(opts.ownership.processNamespace, record.processNamespace);
+      // Own cwd is passed positionally; gate context carries the session's own
+      // registration fields; operator MCP servers are passed through.
+      assertExists(opts.gateContext);
+      assertEquals(opts.gateContext.cwd, call.cwd);
+      assertEquals(Array.isArray(call.mcpServers), true);
+      // Row-6 reasoning key present in the trailing options object.
+      assertEquals("reasoningEffort" in opts, true);
+      // The hook seam is threaded (production no-op: no function unless a stub
+      // injected one).
+      assertEquals(opts.onGateContextRestored, undefined);
+      // Ownership fields were NOT rewritten by recovery (read-only consumption).
+      assertEquals(record.permissionMode, "yolo-switch");
+
+      sessionRegistry.stop();
+    } finally {
+      await Deno.remove(tempDir, { recursive: true });
+    }
+  },
+});
+
+for (
+  const scenario of [
+    {
+      name: "ownership_violation",
+      make: () =>
+        new RecoveryOwnershipError({
+          sessionId: "ses_fake",
+          expectedMode: "native-yolo",
+          expectedNamespace: "/root/omp-agent/native-yolo",
+          actualMode: "restricted",
+          actualNamespace: "/root/omp-agent/restricted",
+          reason: "ownership_violation",
+        }),
+    },
+    {
+      name: "ownership_unverified",
+      make: () =>
+        new RecoveryOwnershipError({
+          sessionId: "ses_fake",
+          expectedMode: undefined,
+          expectedNamespace: undefined,
+          actualMode: "restricted",
+          actualNamespace: "/root/omp-agent/restricted",
+          reason: "ownership_unverified",
+        }),
+    },
+    {
+      name: "namespace_mismatch",
+      make: () =>
+        new RecoveryOwnershipError({
+          sessionId: "ses_fake",
+          expectedMode: "restricted",
+          expectedNamespace: "/root-a/omp-agent/restricted",
+          actualMode: "restricted",
+          actualNamespace: "/root-b/omp-agent/restricted",
+          reason: "namespace_mismatch",
+        }),
+    },
+    {
+      name: "gate_context_restore_failed",
+      make: () => new GateContextRestoreError("ses_fake", "no gate context supplied or cached"),
+    },
+    {
+      name: "post_restore_hook_failed",
+      make: () => new RecoveryHookError("ses_fake", new Error("hook exploded")),
+    },
+  ] as const
+) {
+  Deno.test({
+    name:
+      `SessionOrchestrator - pooled recovery abort (${scenario.name}) ends ONLY this session with a reason-coded session_end`,
+    async fn() {
+      const tempDir = await Deno.makeTempDir();
+      try {
+        const fakeConnector = new MockAgentConnector({} as unknown as AgentConnectorOptions);
+        const { orchestrator, sessionRegistry, config } = await createTestableOrchestrator(
+          tempDir,
+          { processPool: createStubProcessPool(fakeConnector) },
+        );
+        enableAudit(config);
+        config.agent.idleTimeout = { enabled: false, timeoutMs: 300000, checkIntervalMs: 30000 };
+        fakeConnector.reconnectError = scenario.make();
+        fakeConnector.prompt = () => Promise.reject(new Error("ACP connection dead"));
+
+        const event = createTestEvent();
+        const platformAdapter = new MockPlatformAdapter() as unknown as PlatformAdapter;
+        const response = await orchestrator.processMessage(event, platformAdapter);
+
+        // The session ends failed — never resumed, never respond-gated re-prompted.
+        assertEquals(response.success, false);
+        assertEquals(response.error, `session_recovery_failed: ${scenario.name}`);
+        assertEquals(
+          response.error?.includes("Session lost"),
+          false,
+          "recovery-abort classes stay distinct from capability-absence session loss",
+        );
+        assertEquals(fakeConnector.reconnectCalls.length, 1);
+        // NO re-prompt and NO disconnect/cancel from the recovery path.
+        assertEquals(fakeConnector.promptCallCount, 0, "no re-prompting after an abort");
+        assertEquals(fakeConnector.cancelCalls.length, 0);
+        assertEquals(
+          fakeConnector.disconnectCalls,
+          fakeConnector.disconnectCallsAtReconnectThrow,
+          "the recovery path added no disconnect",
+        );
+
+        // Exactly ONE session_end, carrying the bounded reason code.
+        const ends = await readAuditSessionEnds(tempDir);
+        assertEquals(ends.length, 1, `exactly one session_end, got ${ends.length}`);
+        assertEquals(ends[0].success, false);
+        assertEquals(ends[0].error, `session_recovery_failed: ${scenario.name}`);
+
+        sessionRegistry.stop();
+      } finally {
+        await Deno.remove(tempDir, { recursive: true });
+      }
+    },
+  });
+}
+
+Deno.test({
+  name:
+    "SessionOrchestrator - recovery abort isolation: sibling session on the same pool completes normally",
+  async fn() {
+    const tempDir = await Deno.makeTempDir();
+    try {
+      // One shared stub pool hands the SAME fake connector to every runner call,
+      // mirroring one pooled process: the first turn aborts on an ownership
+      // violation, the sibling turn must be unaffected.
+      const fakeConnector = new MockAgentConnector({} as unknown as AgentConnectorOptions);
+      const { orchestrator, sessionRegistry, config, skillRegistry, workspaceManager } =
+        await createTestableOrchestrator(
+          tempDir,
+          { processPool: createStubProcessPool(fakeConnector) },
+        );
+      config.agent.idleTimeout = { enabled: false, timeoutMs: 300000, checkIntervalMs: 30000 };
+      fakeConnector.reconnectError = new RecoveryOwnershipError({
+        sessionId: "ses_fake",
+        expectedMode: "native-yolo",
+        expectedNamespace: "/root/omp-agent/native-yolo",
+        actualMode: "restricted",
+        actualNamespace: "/root/omp-agent/restricted",
+        reason: "ownership_violation",
+      });
+      const event1 = createTestEvent();
+      const event2 = { ...createTestEvent(), messageId: "test_msg_2" };
+      const platformAdapter = new MockPlatformAdapter() as unknown as PlatformAdapter;
+
+      // First turn: the prompt dies and the recovery aborts.
+      fakeConnector.prompt = () => Promise.reject(new Error("ACP connection dead"));
+      const first = await orchestrator.processMessage(event1, platformAdapter);
+      assertEquals(first.success, false);
+      assertEquals(first.error, "session_recovery_failed: ownership_violation");
+
+      // Sibling turn: the dead prompt recovers cleanly (reconnectError cleared)
+      // and the reply lands -> success. The aborted session's gate context was
+      // never dropped and no connector-level state was torn down for it.
+      fakeConnector.reconnectError = null;
+      fakeConnector.reconnectResult = true;
+      const workspace2 = workspaceManager.getWorkspaceKeyFromEvent(event2);
+      fakeConnector.prompt = (_sessionId: string, text: string) => {
+        fakeConnector.lastPromptText = text;
+        fakeConnector.promptCallCount++;
+        if (fakeConnector.promptCallCount === 1) {
+          return Promise.reject(new Error("ACP connection dead"));
+        }
+        if (fakeConnector.promptCallCount === 2) {
+          markReplySent(skillRegistry, workspace2, event2.channelId);
+        }
+        return Promise.resolve({ stopReason: "end_turn" } as PromptResponse);
+      };
+      const second = await orchestrator.processMessage(event2, platformAdapter);
+      assertEquals(second.success, true, "sibling session is unaffected by the abort");
+      // The pooled runner re-registers gate contexts per session; the abort never
+      // removed any (the mock's recorded contexts were only ever appended to).
+      assertEquals(fakeConnector.sessionGateContexts.length >= 2, true);
+
+      sessionRegistry.stop();
+    } finally {
+      await Deno.remove(tempDir, { recursive: true });
+    }
+  },
+});
+
+Deno.test({
+  name:
+    "SessionOrchestrator - post-restore hook stub runs exactly once between restoration and resumed prompting",
+  async fn() {
+    const tempDir = await Deno.makeTempDir();
+    try {
+      const fakeConnector = new MockAgentConnector({} as unknown as AgentConnectorOptions);
+      const { orchestrator, sessionRegistry, config } = await createTestableOrchestrator(
+        tempDir,
+        { processPool: createStubProcessPool(fakeConnector) },
+      );
+      config.agent.idleTimeout = { enabled: false, timeoutMs: 300000, checkIntervalMs: 30000 };
+      fakeConnector.reconnectResult = true;
+      fakeConnector.prompt = () => {
+        fakeConnector.promptCallCount++;
+        if (fakeConnector.promptCallCount === 1) {
+          return Promise.reject(new Error("ACP connection dead"));
+        }
+        return Promise.resolve({ stopReason: "end_turn" } as PromptResponse);
+      };
+
+      const hookCalls: { sessionId: string; promptCallsAtHookTime: number }[] = [];
+      orchestrator.recoveryHookStub = (sessionId: string) => {
+        hookCalls.push({
+          sessionId,
+          promptCallsAtHookTime: fakeConnector.promptCallCount,
+        });
+      };
+
+      const event = createTestEvent();
+      const platformAdapter = new MockPlatformAdapter() as unknown as PlatformAdapter;
+      await orchestrator.processMessage(event, platformAdapter);
+
+      // Called exactly once, strictly after restoration and BEFORE the resumed
+      // re-prompt (the dead first prompt is call #1; the hook must see no
+      // re-prompt yet).
+      assertEquals(hookCalls.length, 1);
+      assertEquals(hookCalls[0].sessionId, fakeConnector.reconnectCalls[0].sessionId);
+      assertEquals(hookCalls[0].promptCallsAtHookTime, 1);
+      assertEquals(fakeConnector.promptCallCount >= 2, true, "resumed prompting ran");
+
+      sessionRegistry.stop();
+    } finally {
+      await Deno.remove(tempDir, { recursive: true });
+    }
+  },
+});
+
+Deno.test({
+  name: "SessionOrchestrator - missing recovery hook resumes normally",
+  async fn() {
+    const tempDir = await Deno.makeTempDir();
+    try {
+      const fakeConnector = new MockAgentConnector({} as unknown as AgentConnectorOptions);
+      const { orchestrator, sessionRegistry, config } = await createTestableOrchestrator(
+        tempDir,
+        { processPool: createStubProcessPool(fakeConnector) },
+      );
+      config.agent.idleTimeout = { enabled: false, timeoutMs: 300000, checkIntervalMs: 30000 };
+      fakeConnector.reconnectResult = true;
+      fakeConnector.prompt = () => {
+        fakeConnector.promptCallCount++;
+        if (fakeConnector.promptCallCount === 1) {
+          return Promise.reject(new Error("ACP connection dead"));
+        }
+        return Promise.resolve({ stopReason: "end_turn" } as PromptResponse);
+      };
+
+      const event = createTestEvent();
+      const platformAdapter = new MockPlatformAdapter() as unknown as PlatformAdapter;
+      const response = await orchestrator.processMessage(event, platformAdapter);
+
+      // No hook injected (production): recovery proceeds and resumes prompting.
+      assertEquals(fakeConnector.reconnectCalls.length, 1);
+      const opts = fakeConnector.reconnectCalls[0].opts as RecordedRecoveryOpts | undefined;
+      assertExists(opts);
+      assertEquals(opts.onGateContextRestored, undefined);
+      assertEquals(fakeConnector.promptCallCount >= 2, true);
+      assertEquals(response.success, false); // no reply sent in this stub
+      assertEquals(response.error, "Agent did not generate a reply");
+
+      sessionRegistry.stop();
+    } finally {
+      await Deno.remove(tempDir, { recursive: true });
+    }
+  },
+});
+
+Deno.test({
+  name:
+    "SessionOrchestrator - rejecting recovery hook fails only its session as post_restore_hook_failed",
+  async fn() {
+    const tempDir = await Deno.makeTempDir();
+    try {
+      const fakeConnector = new MockAgentConnector({} as unknown as AgentConnectorOptions);
+      const { orchestrator, sessionRegistry, config } = await createTestableOrchestrator(
+        tempDir,
+        { processPool: createStubProcessPool(fakeConnector) },
+      );
+      enableAudit(config);
+      config.agent.idleTimeout = { enabled: false, timeoutMs: 300000, checkIntervalMs: 30000 };
+      fakeConnector.reconnectResult = true;
+      fakeConnector.prompt = () => {
+        fakeConnector.promptCallCount++;
+        if (fakeConnector.promptCallCount === 1) {
+          return Promise.reject(new Error("ACP connection dead"));
+        }
+        return Promise.resolve({ stopReason: "end_turn" } as PromptResponse);
+      };
+      orchestrator.recoveryHookStub = () => Promise.reject(new Error("hook exploded"));
+
+      const event = createTestEvent();
+      const platformAdapter = new MockPlatformAdapter() as unknown as PlatformAdapter;
+      const response = await orchestrator.processMessage(event, platformAdapter);
+
+      assertEquals(response.success, false);
+      assertEquals(response.error, "session_recovery_failed: post_restore_hook_failed");
+      // The hook ran once, its rejection wrapped by the connector and classified;
+      // no resumed re-prompt happened afterwards.
+      assertEquals(fakeConnector.promptCallCount, 1);
+      const ends = await readAuditSessionEnds(tempDir);
+      assertEquals(ends.length, 1);
+      assertEquals(ends[0].error, "session_recovery_failed: post_restore_hook_failed");
+
+      sessionRegistry.stop();
+    } finally {
       await Deno.remove(tempDir, { recursive: true });
     }
   },

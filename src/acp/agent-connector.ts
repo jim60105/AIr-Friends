@@ -3,9 +3,22 @@
 import * as acp from "@agentclientprotocol/sdk";
 import { join } from "@std/path";
 import { buildSkillAutoApproveList, ChatbotClient, type SessionGateContext } from "./client.ts";
-import type { AgentCapabilities, AgentConnectorOptions, MCPServerConfig } from "./types.ts";
+import {
+  type AgentCapabilities,
+  type AgentConnectorOptions,
+  type AgentType,
+  isSupportedAgentType,
+  type MCPServerConfig,
+} from "./types.ts";
 import type { SkillRegistry } from "@skills/registry.ts";
 import type { Logger } from "@utils/logger.ts";
+import {
+  deriveActualRecoveryTarget,
+  mapOwnershipVerdictToReason,
+  RecoveryOwnershipError,
+  type SessionRecoveryOwnership,
+  verifyRecoveryOwnership,
+} from "./recovery-ownership.ts";
 import {
   collectOptionValues,
   findOptionByCategory,
@@ -48,6 +61,44 @@ const CONNECT_TIMEOUT_MS = 30 * 1000;
 
 /** Fraction of connectTimeoutMs elapsed before an early advance-warning WARN is logged. */
 const CONNECT_TIMEOUT_WARN_FRACTION = 0.8;
+
+/**
+ * Gate-context restore failure (restore-mode-owned-acp-sessions): the recovered
+ * session's own gate context could not be established — either the caller-supplied
+ * context disagrees with the recovery cwd, or no context exists at all for a
+ * recovery that supplied a recovery context. Fail closed for THIS session only;
+ * other sessions' cached contexts stay registered and replayed unchanged.
+ * Bounded single-line message: session id + cwd detail, no secrets.
+ */
+export class GateContextRestoreError extends Error {
+  readonly sessionId: string;
+
+  constructor(sessionId: string, detail: string) {
+    super(`Gate-context restore failed for session ${sessionId}: ${detail}`);
+    this.name = "GateContextRestoreError";
+    this.sessionId = sessionId;
+  }
+}
+
+/**
+ * The named post-restore recovery hook rejected. Wraps the hook's own error so the
+ * orchestrator can classify it as `post_restore_hook_failed` and fail ONLY this
+ * session. The hook exists solely as the post-restore attach point — it asserts no
+ * readiness, gates no prompt, and promises no later handshake.
+ */
+export class RecoveryHookError extends Error {
+  readonly sessionId: string;
+
+  constructor(sessionId: string, cause: unknown) {
+    super(
+      `Post-restore recovery hook failed for session ${sessionId}: ${
+        cause instanceof Error ? cause.message : String(cause)
+      }`,
+    );
+    this.name = "RecoveryHookError";
+    this.sessionId = sessionId;
+  }
+}
 
 /**
  * Outcome of a reasoning-effort application attempt.
@@ -1011,20 +1062,56 @@ export class AgentConnector {
    * recovery: the prompt is re-issued ONLY if no response has been recorded
    * for the session (the caller decides via `hasResponded`).
    *
+   * Row-11 recovery context (restore-mode-owned-acp-sessions): when the caller
+   * supplies a recovery context (`ownership` and/or `gateContext`), the recorded
+   * acquisition mode/namespace is verified against this connector's own recovery
+   * target BEFORE any teardown — a mismatch or missing provenance throws
+   * {@link RecoveryOwnershipError} with zero disconnect/spawn/load/gate side
+   * effects — and after the load the recovered id's OWN full gate context is
+   * restored (never another session's cached context, never the process-frozen
+   * client fallback) before the named post-restore hook runs and success is
+   * reported. Callers with no recovery context keep the pre-change behavior
+   * byte-identically, including the capability-absence `false` return.
+   *
    * @param sessionId the ACP session to resume
    * @param cwd the session's working directory (required by `session/load`)
    * @param mcpServers the session's MCP servers (required by `session/load`)
-   * @param opts optional configuration including reasoningEffort to reapply
+   * @param opts optional recovery options: `reasoningEffort` (row 6, consumed
+   *   unchanged), `ownership` (recorded acquisition context, verified
+   *   read-only), `gateContext` (the session's full gate context to restore),
+   *   `onGateContextRestored` (named post-restore hook — no readiness assertion)
    * @returns true if reconnection succeeded and the session was loaded.
+   * @throws RecoveryOwnershipError on an ownership violation (pre-teardown, zero side effects)
+   * @throws GateContextRestoreError when the recovered session's own gate context cannot be established
+   * @throws RecoveryHookError when the post-restore hook rejects
    * @throws Error if model re-establishment fails against the post-load catalog
    */
   async reconnectAndResumeSession(
     sessionId: string,
     cwd: string,
     mcpServers: MCPServerConfig[] = [],
-    opts?: { reasoningEffort?: string },
+    opts?: {
+      reasoningEffort?: string;
+      ownership?: SessionRecoveryOwnership;
+      gateContext?: SessionGateContext;
+      onGateContextRestored?: (sessionId: string) => void | Promise<void>;
+    },
   ): Promise<boolean> {
     const logger = this.options.logger as Logger;
+
+    // ── Ownership verification BEFORE any teardown (row 11, D2) ──────────────
+    // The FIRST statement, ahead of `disconnect()`: a violation cannot kill the
+    // opposite mode's live process, drop the session's gate context, or reach
+    // the respond-gated re-prompt path. The trigger is the supplied recovery
+    // context (`ownership` and/or `gateContext`) — a pure no-context call keeps
+    // the legacy path regardless of agent type (per-spawn callers and OpenCode
+    // unaware call sites). The recorded values are the TARGET: never re-resolved
+    // from configuration, never mutated.
+    const recoveryContextSupplied = opts?.ownership !== undefined ||
+      opts?.gateContext !== undefined;
+    if (recoveryContextSupplied) {
+      this.verifyRecoveryOwnership(sessionId, opts?.ownership);
+    }
 
     logger.info("Attempting to reconnect and resume session {sessionId}", { sessionId });
 
@@ -1035,6 +1122,18 @@ export class AgentConnector {
 
     // Spawn new process and initialize
     await this.connect();
+
+    // Same-mode respawn re-check (row 11, D3): `connect()` respawns from this
+    // connector's own options, so the freshly spawned env namespace must still
+    // equal the recorded one. Today `agentConfig.env` is the same immutable
+    // object the pre-teardown check read — this is an invariant ASSERTION, the
+    // documented hook point for a future connect() that rebuilds env. Drift
+    // aborts here, strictly BEFORE any `session/load` is issued; the process
+    // already respawned in the drifted env is torn down by the pool's release
+    // path (the recovery path itself never calls disconnect for these classes).
+    if (opts?.ownership) {
+      this.verifyRecoveryOwnership(sessionId, opts.ownership);
+    }
 
     // Check if agent supports loading previous sessions
     if (!this.supportsLoadSession()) {
@@ -1060,20 +1159,30 @@ export class AgentConnector {
       cwd,
       mcpServers: supportedServers.map((server) => this.convertMCPServerConfig(server)),
     }));
+    // Config restoration = pure row-6 consumption (never forked): restore the
+    // cache from the load response, reapply the prior model through the same
+    // stable-first selection (a catalog miss throws, isolated to this session),
+    // then best-effort reasoning from the supplied `opts.reasoningEffort`.
     this.refreshFromConfigOptionResponse(sessionId, loadResponse);
-    this.setSessionGateContext(sessionId, {
-      cwd,
-      shellSessionId: this.sessionGateContexts.get(sessionId)?.shellSessionId ??
-        this.options.clientConfig?.sessionId,
-      yolo: this.sessionGateContexts.get(sessionId)?.yolo ?? this.options.clientConfig?.yolo,
-      canWriteAgentWorkspace: this.sessionGateContexts.get(sessionId)?.canWriteAgentWorkspace ??
-        this.options.clientConfig?.canWriteAgentWorkspace,
-      allowedWriteExtensions: this.sessionGateContexts.get(sessionId)?.allowedWriteExtensions ??
-        this.options.clientConfig?.allowedWriteExtensions,
-      trustedSkills: this.options.clientConfig?.trustedSkills,
-    });
 
-    // Re-establish the session's prior model through stable-first selection
+    // Legacy cwd-only restore for callers WITHOUT a recovery context (per-spawn
+    // and OpenCode-unaware sites): kept in master's exact position — immediately
+    // after the cache refresh, before model reapplication — so the legacy
+    // sequence is strictly byte-identical even on a post-load catalog miss.
+    if (!recoveryContextSupplied && !opts?.gateContext) {
+      this.setSessionGateContext(sessionId, {
+        cwd,
+        shellSessionId: this.sessionGateContexts.get(sessionId)?.shellSessionId ??
+          this.options.clientConfig?.sessionId,
+        yolo: this.sessionGateContexts.get(sessionId)?.yolo ?? this.options.clientConfig?.yolo,
+        canWriteAgentWorkspace: this.sessionGateContexts.get(sessionId)?.canWriteAgentWorkspace ??
+          this.options.clientConfig?.canWriteAgentWorkspace,
+        allowedWriteExtensions: this.sessionGateContexts.get(sessionId)?.allowedWriteExtensions ??
+          this.options.clientConfig?.allowedWriteExtensions,
+        trustedSkills: this.options.clientConfig?.trustedSkills,
+      });
+    }
+
     if (priorModelId !== undefined) {
       await this.setSessionModel(sessionId, priorModelId);
     }
@@ -1091,8 +1200,81 @@ export class AgentConnector {
       );
     }
 
+    // ── Gate-context restore (row 11, D5) ────────────────────────────────────
+    // Ordering: load → cache/model/reasoning → gate restore → hook → true.
+    // The recovered id's OWN context is re-registered via the existing merge
+    // path (so it also survives later `connect()` replays). Other sessions'
+    // cached contexts are never substituted for it and replay unchanged.
+    if (opts?.gateContext) {
+      // A supplied context that disagrees with the recovery cwd is a restore
+      // failure for this session — never a silent overwrite of either value.
+      if (opts.gateContext.cwd !== cwd) {
+        throw new GateContextRestoreError(
+          sessionId,
+          `supplied context cwd "${opts.gateContext.cwd}" disagrees with recovery cwd "${cwd}"`,
+        );
+      }
+      this.setSessionGateContext(sessionId, opts.gateContext);
+    } else if (recoveryContextSupplied && !this.sessionGateContexts.has(sessionId)) {
+      // No context supplied AND none cached for the recovered id (fresh
+      // connector): fail closed instead of resuming on the process-frozen
+      // client fallback — that would be another session's default context.
+      throw new GateContextRestoreError(
+        sessionId,
+        "no gate context supplied or cached for the recovered session id; refusing the process-frozen fallback",
+      );
+    }
+
+    // Named post-restore recovery hook (row 11, D6): exists with NO readiness
+    // assertion, request, channel, or prompt gate. A rejecting hook fails only
+    // this session (wrapped for the orchestrator's `post_restore_hook_failed`
+    // classification).
+    if (opts?.onGateContextRestored) {
+      try {
+        await opts.onGateContextRestored(sessionId);
+      } catch (cause) {
+        throw new RecoveryHookError(sessionId, cause);
+      }
+    }
+
     logger.info("Session {sessionId} resumed via session/load", { sessionId });
     return true;
+  }
+
+  /**
+   * Verify a session's recorded acquisition ownership against this connector's
+   * own recovery target — the mode-scoped namespace its spawn configuration
+   * carries, read from the factory-produced `agentConfig.env` (the single
+   * namespace formula row 10 recorded from; never recomputed, never re-resolved).
+   * Throws {@link RecoveryOwnershipError} on any non-`match` verdict. Pure with
+   * respect to the connection: performs no disconnect, spawn, load, or gate
+   * mutation, and consumes the recorded fields read-only.
+   */
+  private verifyRecoveryOwnership(
+    sessionId: string,
+    ownership: SessionRecoveryOwnership | undefined,
+  ): void {
+    const configuredAgentType: AgentType | undefined =
+      isSupportedAgentType(this.options.agentType ?? "")
+        ? this.options.agentType as AgentType
+        : undefined;
+    const agentType: AgentType | undefined = ownership?.agentType ?? configuredAgentType;
+    // An unknown deployment agent type cannot prove same-mode recovery: model it
+    // as an underivable OMP-style target so the verdict fails closed.
+    const actual = agentType === undefined
+      ? { agentType: "omp" as const, permissionMode: "", processNamespace: "" }
+      : deriveActualRecoveryTarget(agentType, this.options.agentConfig?.env);
+    const verdict = verifyRecoveryOwnership(ownership, actual);
+    if (verdict !== "match") {
+      throw new RecoveryOwnershipError({
+        sessionId,
+        expectedMode: ownership?.permissionMode,
+        expectedNamespace: ownership?.processNamespace,
+        actualMode: actual.permissionMode,
+        actualNamespace: actual.processNamespace,
+        reason: mapOwnershipVerdictToReason(verdict),
+      });
+    }
   }
 
   private get idleTimeoutMs(): number {
