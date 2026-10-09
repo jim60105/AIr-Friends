@@ -1164,6 +1164,25 @@ export class AgentConnector {
     // stable-first selection (a catalog miss throws, isolated to this session),
     // then best-effort reasoning from the supplied `opts.reasoningEffort`.
     this.refreshFromConfigOptionResponse(sessionId, loadResponse);
+
+    // Legacy cwd-only restore for callers WITHOUT a recovery context (per-spawn
+    // and OpenCode-unaware sites): kept in master's exact position — immediately
+    // after the cache refresh, before model reapplication — so the legacy
+    // sequence is strictly byte-identical even on a post-load catalog miss.
+    if (!recoveryContextSupplied && !opts?.gateContext) {
+      this.setSessionGateContext(sessionId, {
+        cwd,
+        shellSessionId: this.sessionGateContexts.get(sessionId)?.shellSessionId ??
+          this.options.clientConfig?.sessionId,
+        yolo: this.sessionGateContexts.get(sessionId)?.yolo ?? this.options.clientConfig?.yolo,
+        canWriteAgentWorkspace: this.sessionGateContexts.get(sessionId)?.canWriteAgentWorkspace ??
+          this.options.clientConfig?.canWriteAgentWorkspace,
+        allowedWriteExtensions: this.sessionGateContexts.get(sessionId)?.allowedWriteExtensions ??
+          this.options.clientConfig?.allowedWriteExtensions,
+        trustedSkills: this.options.clientConfig?.trustedSkills,
+      });
+    }
+
     if (priorModelId !== undefined) {
       await this.setSessionModel(sessionId, priorModelId);
     }
@@ -1204,20 +1223,6 @@ export class AgentConnector {
         sessionId,
         "no gate context supplied or cached for the recovered session id; refusing the process-frozen fallback",
       );
-    } else {
-      // Legacy cwd-only restore (unchanged behavior for callers without a
-      // recovery context and for records without a supplied full context).
-      this.setSessionGateContext(sessionId, {
-        cwd,
-        shellSessionId: this.sessionGateContexts.get(sessionId)?.shellSessionId ??
-          this.options.clientConfig?.sessionId,
-        yolo: this.sessionGateContexts.get(sessionId)?.yolo ?? this.options.clientConfig?.yolo,
-        canWriteAgentWorkspace: this.sessionGateContexts.get(sessionId)?.canWriteAgentWorkspace ??
-          this.options.clientConfig?.canWriteAgentWorkspace,
-        allowedWriteExtensions: this.sessionGateContexts.get(sessionId)?.allowedWriteExtensions ??
-          this.options.clientConfig?.allowedWriteExtensions,
-        trustedSkills: this.options.clientConfig?.trustedSkills,
-      });
     }
 
     // Named post-restore recovery hook (row 11, D6): exists with NO readiness

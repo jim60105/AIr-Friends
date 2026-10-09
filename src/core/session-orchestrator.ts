@@ -4267,7 +4267,12 @@ export class SessionOrchestrator {
         trigger: triggerError instanceof Error ? triggerError.message : String(triggerError),
       },
     );
-    this.recoveryAbortReasons.set(shellSessionId ?? `acp:${sessionId}`, reason);
+    // Only pooled sessions (which hold a shell session id) consume the recorded
+    // reason at their post-lease `session_end` writer; with no shell session id
+    // there is no consumer, so nothing is stored — the map stays bounded.
+    if (shellSessionId) {
+      this.recoveryAbortReasons.set(shellSessionId, reason);
+    }
     return null;
   }
 
