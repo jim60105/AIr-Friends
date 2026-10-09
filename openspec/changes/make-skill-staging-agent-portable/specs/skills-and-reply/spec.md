@@ -130,7 +130,7 @@ Skill scripts that carry free-text content SHALL accept that content exclusively
 #### Scenario: Payload staged and written verbatim
 - **GIVEN** a payload file staged in the session-scoped TMPDIR
 - **WHEN** the agent writes it
-- **THEN** it SHALL be written through the ACP filesystem interface (edit/write tool or `writeTextFile`) using the `$TMPDIR/$SESSION_ID`-anchored path in per-spawn mode, or the prompt-rendered staging directory in shared-process mode
+- **THEN** it SHALL be written through the ACP filesystem interface (edit/write tool or `writeTextFile`) using the absolute staging directory literal rendered into the agent's prompt, in per-spawn and shared-process mode alike
 - **AND** its bytes SHALL be preserved verbatim with no shell interpretation
 
 #### Scenario: Session staging directory pre-created at setup
@@ -201,12 +201,12 @@ The system SHALL automatically retry when an ACP Agent completes a prompt turn (
 - **GIVEN** an agent ends its turn without a reply, reaction, or file send
 - **WHEN** the retry prompt is sent
 - **THEN** it SHALL state that the turn ended without a reply, reaction, or file send
-- **AND** it SHALL list the likely causes of a failed `send-reply`/`send-file` under the payload-file contract: legacy `--message`/`--caption` used and rejected, payload file never written, payload staged outside `$TMPDIR/$SESSION_ID/`, or a previous skill call that errored (with an instruction to read that error's output)
+- **AND** it SHALL list the likely causes of a failed `send-reply`/`send-file` under the payload-file contract: legacy `--message`/`--caption` used and rejected, payload file never written, payload staged outside the session's absolute staging directory named in the prompt, or a previous skill call that errored (with an instruction to read that error's output)
 
 #### Scenario: Retry prompt gives the correct two-step example
 - **GIVEN** an agent whose reply or file send failed under the payload-file contract
 - **WHEN** the retry prompt is sent
-- **THEN** it SHALL give the correct two-step example: write the payload to `$TMPDIR/$SESSION_ID/...` with the edit/write tool, then invoke the script with the payload-file flag
+- **THEN** it SHALL give the correct two-step example: write the payload under the literal absolute staging directory rendered in the prompt, then invoke the script with the payload-file flag pointing at that absolute path
 
 ### Requirement: Instructive Skill Error Messages
 
