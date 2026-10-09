@@ -28,6 +28,11 @@
 import { bootstrapDiscoveryGuard } from "./bootstrap.ts";
 import { formatDiscoverySessionError } from "../discovery-guard.ts";
 import { attachEnforcementAtLoad, getLoadTimeEnforcementRegistration } from "./enforcement.ts";
+import {
+  attachReadReplacementAtLoad,
+  registerLoadTimeReadReplacement,
+  type ReadToolRegistrar,
+} from "./read-replacement.ts";
 
 // Execute load-time pre-import discovery bootstrap sequence immediately upon import
 export const loadTimeDiscoveryDecision = bootstrapDiscoveryGuard();
@@ -43,6 +48,17 @@ if (loadTimeDiscoveryDecision.blockers.length > 0) {
 export const loadTimeEnforcementRegistration = attachEnforcementAtLoad({
   observedCwd: safeCwd(),
   resourceGeneration: () => loadTimeDiscoveryDecision.resourceGeneration,
+});
+
+// Row 19 load sequence: the URL-fetch transport adapter's `read` name
+// replacement attaches AFTER the enforcement sibling, SYNCHRONOUSLY, under
+// the same restricted-launch-identity gate (native YOLO registers no
+// replacement — 14b posture). The replacement adds no second decision
+// path: the 14b handler still gates every call before it executes, and the
+// observed binary invoking the replacement at all stays design §15
+// user-owned verification — nothing claimed here.
+export const loadTimeReadReplacementRegistration = attachReadReplacementAtLoad({
+  observedCwd: safeCwd(),
 });
 
 function safeCwd(): string {
@@ -67,5 +83,12 @@ export default function trustedExtensionFactory() {
     // Attached only in the restricted branch; the factory field is the
     // synchronous attachment point, not an invocation claim.
     ...(registration.handler ? { restrictedToolCallHandler: registration.handler } : {}),
+    // Row 19: the synchronous `registerTool` attachment point for the
+    // restricted `read` replacement (S7/S8 last-extension-wins). Same
+    // honesty posture as the handler slot: a host surface receiving this
+    // function gets the SAME registered definition, and no field here
+    // claims the official binary ever calls it.
+    registerTools: (registrar: ReadToolRegistrar) =>
+      registerLoadTimeReadReplacement(registrar),
   };
 }
