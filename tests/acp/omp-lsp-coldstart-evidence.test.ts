@@ -193,3 +193,40 @@ Deno.test("Residual record: lsp-validator decision-6 posture remains orphaned an
   assertEquals(factory.includes("validateRestrictedLspContract"), false);
   assertEquals(server.includes("validateRestrictedLspContract"), false);
 });
+
+// -----------------------------------------------------------------------------
+// Honest docs: the LSP disposition records both evidence limits distinctly and
+// keeps all four agent/mode native observations unverified.
+// -----------------------------------------------------------------------------
+
+Deno.test("Docs: LSP disposition records evidence limits and UNVERIFIED observations", async () => {
+  const permissions = await Deno.readTextFile("docs/AGENT_PERMISSIONS.md");
+  const compatibility = await Deno.readTextFile("docs/OMP_COMPATIBILITY.md");
+  assert(permissions.includes("--no-lsp"), "AGENT_PERMISSIONS names the OMP carriers");
+  assert(
+    permissions.includes("Explicit tool denial ≠ implicit-startup suppression"),
+    "explicit-denial evidence limit recorded",
+  );
+  assert(
+    permissions.includes("Carrier wiring ≠ native server suppression proof"),
+    "native-suppression evidence limit recorded distinctly",
+  );
+  assert(compatibility.includes("UNVERIFIED (LSP disabled: all-off, row 17)"));
+  assert(compatibility.includes("explicit denial therefore does not clear implicit startup"));
+});
+
+Deno.test("Docs: changelog entry carries the denial with no global-clamp or native-suppression claim", async () => {
+  const changelog = await Deno.readTextFile("CHANGELOG.md");
+  const entry = changelog.split("\n").find((line) =>
+    line.includes("Disabled the LSP capability in every agent and mode")
+  );
+  assert(entry, "row-17 changelog entry exists");
+  // The entry must state the no-global-clamp exclusion and both evidence
+  // limits, and must never claim native suppression as achieved.
+  assert(entry.includes("Deliberately absent"), "global-clamp exclusion recorded");
+  assert(entry.includes("UNVERIFIED"), "runtime observations stay unverified");
+  assert(
+    entry.includes("proves no native language-server suppression"),
+    "no native-suppression claim",
+  );
+});
