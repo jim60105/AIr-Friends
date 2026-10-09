@@ -74,9 +74,31 @@ In restricted mode, the session runs as the default `build` agent. All permissio
 
 ### YOLO Mode (`yolo` agent)
 
-In YOLO mode, the system switches to the `yolo` agent via ACP `setSessionMode("yolo")`. This agent has `"*": "allow"` permissions, so every tool is available and all actions are auto-approved internally.
+In YOLO mode, the system switches to the `yolo` agent via ACP `setSessionMode("yolo")`. This agent has `"*": "allow"` permissions, so every tool is available and all actions are auto-approved internally — with one explicit per-agent exception: `"lsp": "deny"` (decision 5, row 17; see [LSP Disabled: All-Off](#lsp-disabled-all-off-decision-5-row-17)).
 
 **Reference**: `src/acp/agent-factory.ts`
+
+---
+
+## LSP Disabled: All-Off (Decision 5, Row 17)
+
+Per the approved-design decision 5 (row 17, `disable-restricted-agent-lsp`), the LSP capability is **disabled entirely — both agents, both modes** — and the change deliberately records what its carriers do and do not prove.
+
+| Carrier | Where | What it denies |
+| ------- | ----- | -------------- |
+| `--no-lsp` launch flag | OMP factory, **both** modes (`src/acp/agent-factory.ts`, exactly once per launch) | Native `enableLsp: false` for the session: no `lsp` tool registration, no LSP writethrough/format/diagnostics on edit/write, no startup server discovery |
+| `lsp.enabled: false` settings pin | `agent-config/omp/restricted.yml` (row-8 owned, unchanged by row 17) | Restricted-mode settings-level LSP posture beneath the flag |
+| `"lsp": "deny"` per-agent permission | `agent-config/opencode.json` — **build and yolo both**, explicitly | OpenCode's `lsp` tool through each agent's permission map |
+| `deny-lsp` / `deny-lsp-config` + `lsp-adjacent` route pairs | Restricted tool inventory (`src/acp/omp/tool-inventory.ts`, row 14; unchanged by row 17) | Restricted-session decision-layer admission of the `lsp` name and any shape-keyed LSP-adjacent route |
+
+Deliberate exclusions: **no top-level/global OpenCode LSP clamp** (a global setting would also clamp yolo, which decision 5 rejects), **no OpenCode version bump** (1.18.21 stays), and the native-YOLO settings-level pin is owned by row 25 (`pin-omp-yolo-lsp-settings`) — row 17 does not touch `agent-config/omp/native-yolo.yml`.
+
+**Evidence limits (honest record, both limits distinct):**
+
+1. **Explicit tool denial ≠ implicit-startup suppression.** The per-agent OpenCode `"lsp": "deny"` stops the `lsp` **tool's** permission ask. It does not establish that OpenCode's automatic diagnostics machinery (server boot keyed by the global-only `lsp` config and per-file `touchFile` paths) never starts a language server: at the pinned 1.18.21 tree that mechanism is global-only and cannot scope startup to a named agent, so boundary 5b stays recorded `incompatible`. On OMP, boundary 5a stays `unresolved`: `--no-lsp` disables background discovery and the consultable cold-start routes, but the audit cannot rule out every lazy path from static wiring.
+2. **Carrier wiring ≠ native server suppression proof.** All of the above is configuration/wiring evidence. Whether any language-server process actually starts on a real host in each of the four agent/mode combinations (OpenCode build, OpenCode yolo, OMP restricted, OMP native-YOLO) remains **user runtime-observed and UNVERIFIED** (see `docs/OMP_COMPATIBILITY.md` runtime checklist). No mock or unit test in this repo certifies native suppression.
+
+The native-internal OMP hardcoded LSP sessions recorded by the audit (`cleanse/agent.ts`, `security/coordinator.ts`) construct their own `enableLsp: true` sessions and are reachable only through surfaces with no consultable restricted-session tool name, so they stay deny-by-absence at the decision layer rather than becoming new inventory rows; the decision-5 disposition is independent of whether native support exists at all.
 
 ---
 
@@ -127,7 +149,8 @@ The `agent-config/opencode.json` in the project configures permissions for the `
 | Category                                                    | Permission        | Rationale                                          |
 | ----------------------------------------------------------- | ----------------- | -------------------------------------------------- |
 | **Default (`*`)**                                           | `deny`            | Non-interactive system rejects unknowns            |
-| **Read-only tools** (`read`, `list`, `glob`, `grep`, `lsp`) | `allow`           | Safe exploration — no side effects                 |
+| **Read-only tools** (`read`, `list`, `glob`, `grep`)        | `allow`           | Safe exploration — no side effects                 |
+| **LSP tool** (`lsp`)                                        | `deny` (explicit) | LSP disabled in all agents/modes (decision 5, row 17; see [LSP Disabled: All-Off](#lsp-disabled-all-off-decision-5-row-17)) |
 | **Session management** (`todoread`, `todowrite`)            | `allow`           | Internal agent organization tools                  |
 | **Sub-task spawning** (`task`)                              | `deny`            | Non-interactive system — no sub-agent coordination |
 | **Skills** (`skill`)                                        | `allow`           | Core SKILL.md discovery and loading                |
@@ -724,7 +747,7 @@ The `src/acp/filesystem-roots.ts` helper library provides an agent-generic, phys
 
 ## Restricted OMP Tool-Decision Layer (OMP Integration Row 14a / P5c-i)
 
-Pure restricted-mode tool-decision modules were defined by `define-omp-restricted-tool-decisions` (`src/acp/omp/tool-inventory.ts`, `src/acp/omp/tool-provenance.ts`, `src/acp/omp/approval-records.ts`, `src/acp/omp/destructive-decision.ts`). They are consulted **only in restricted OMP sessions** — native-YOLO sessions receive none of these clamps (their LSP disablement is owned separately, row 15) and every OpenCode flow in Layers 1–5 above is untouched. The layers above remain the operative runtime enforcement; these decisions are consulted per restricted `tool_call` by the trusted-extension enforcement wiring (row 16 below; see [docs/OMP_ENFORCEMENT.md](OMP_ENFORCEMENT.md)), and 14c owns generic-command canonicalization. See [docs/OMP_TOOL_POLICY.md](OMP_TOOL_POLICY.md) for the inventory table, alternate-route pair table, provenance admission, record-interpretation rules, MCP mechanism tiers, and the preserved pinned verdicts (record-reset INCOMPATIBLE, destructive-intent UNRESOLVED) with their DECIDED dispositions. No runtime enforcement, record reset, or complete native destructive decoding is claimed by this layer's tests.
+Pure restricted-mode tool-decision modules were defined by `define-omp-restricted-tool-decisions` (`src/acp/omp/tool-inventory.ts`, `src/acp/omp/tool-provenance.ts`, `src/acp/omp/approval-records.ts`, `src/acp/omp/destructive-decision.ts`). They are consulted **only in restricted OMP sessions** — native-YOLO sessions receive none of these clamps (its LSP disablement rides the both-mode `--no-lsp` carrier of decision 5 / row 17, with its settings-level pin owned by row 25) and every OpenCode flow in Layers 1–5 above is untouched. The layers above remain the operative runtime enforcement; these decisions are consulted per restricted `tool_call` by the trusted-extension enforcement wiring (row 16 below; see [docs/OMP_ENFORCEMENT.md](OMP_ENFORCEMENT.md)), and 14c owns generic-command canonicalization. See [docs/OMP_TOOL_POLICY.md](OMP_TOOL_POLICY.md) for the inventory table, alternate-route pair table, provenance admission, record-interpretation rules, MCP mechanism tiers, and the preserved pinned verdicts (record-reset INCOMPATIBLE, destructive-intent UNRESOLVED) with their DECIDED dispositions. No runtime enforcement, record reset, or complete native destructive decoding is claimed by this layer's tests.
 
 ---
 
