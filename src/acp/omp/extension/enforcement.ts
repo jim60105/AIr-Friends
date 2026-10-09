@@ -46,7 +46,12 @@ import {
   type RestrictedToolDecisionRequest,
 } from "./_daemon/mod.ts";
 import { interpretApprovalRecords, restrictedDenialWithRecordNaming } from "./_daemon/mod.ts";
-import { decideDestructiveIntent } from "./_daemon/mod.ts";
+import {
+  decideDestructiveIntent,
+  type McpAdmissionDecision,
+  RESTRICTED_DENIAL_VOCABULARY,
+  type RestrictedDenialReason,
+} from "./_daemon/mod.ts";
 import type { CanonicalTarget, FilesystemAuthorizationResult } from "./_daemon/mod.ts";
 import {
   type DestructiveTargetAudit,
@@ -253,7 +258,9 @@ const loadSequenceRegistrar = Object.freeze<ToolCallSlotRegistrar>({
 
 /** The current load-time registration record (both branches). */
 export function getLoadTimeEnforcementRegistration(): EnforcementRegistrationResult {
-  return loadTimeEnforcementRegistration;
+  // Frozen copy: consumers (entrypoint, row-21 regression checks) can never
+  // observe or hold a mutated view of the module-global record.
+  return Object.freeze({ ...loadTimeEnforcementRegistration });
 }
 
 // ---------------------------------------------------------------------------
@@ -269,6 +276,12 @@ export function getLoadTimeEnforcementRegistration(): EnforcementRegistrationRes
  * invalidate: per-call freshness lives in the fresh observation itself, so a
  * post-start MCP registration/refresh needs no ack, no reset, and no
  * readiness signal — the next call simply reads the advanced epoch.
+ *
+ * Stamping domain: recorded `registryEpochObserved` values reaching the
+ * provenance decision MUST be stamped from THIS observation domain (the
+ * production metadata-surface adapter in the docs checklist). The epoch
+ * never retracts, so a record stamped from a different domain denies
+ * re-observe fail-closed — never admit.
  */
 export class RegistryEpochObserver {
   #epoch = 0;
@@ -422,6 +435,19 @@ function blocked(
   return destructiveTargets ? { block: true, error, destructiveTargets } : { block: true, error };
 }
 
+/**
+ * Fail-closed narrowing of row 5's bounded destructive reason into the
+ * finite vocabulary: an unrecognized future reason is NEVER cast into a
+ * client-visible code — it throws, and the handler's seam catch converts it
+ * to the `rejected_enforcement_seam` block.
+ */
+function destructiveSharedCode(sharedReason: string): RestrictedDenialReason {
+  if ((RESTRICTED_DENIAL_VOCABULARY as readonly string[]).includes(sharedReason)) {
+    return sharedReason as RestrictedDenialReason;
+  }
+  throw new Error("unrecognized shared destructive denial reason");
+}
+
 /** Step 4: destructive-shaped calls run 14a's row-5 consumer verbatim. */
 function decideDestructive(observation: ToolCallObservation): EnforcementOutcome {
   const payload = observation.destructive;
@@ -456,7 +482,7 @@ function decideDestructive(observation: ToolCallObservation): EnforcementOutcome
       if (decision.stage === "completeness") {
         // Verbatim shared row-5 bounded reason (incomplete / binding).
         return blocked({
-          code: decision.sharedReason as EnforcementError["code"],
+          code: destructiveSharedCode(decision.sharedReason),
           seam: "destructive-intent",
           capability: "destructive-mutation",
         });
@@ -570,28 +596,43 @@ export function composeRestrictedToolCall(
     if (admission.admit) {
       return { proceed: true, completingAuthority: "mcp-client-ownership", mcpAdmitted: true };
     }
-    if (admission.pending === "re-observe") {
-      return blocked({
-        code: "rejected_stale_observation",
-        staleElement: "registry-epoch",
-        originCategory,
-        seam: "mcp-admission-basis",
-      });
-    }
-    return blocked({
-      code: admission.reason,
-      originCategory,
-      seam: "mcp-admission-basis",
-      ...(admission.blockedPair
-        ? { capability: admission.blockedPair.capability, route: admission.blockedPair.route }
-        : {}),
-      ...(admission.tableRowId !== undefined ? { tableRowId: admission.tableRowId } : {}),
-    });
+    return blocked(mcpAdmissionDenialBlock(originCategory, admission));
   }
 
   // allow-gated / routed-filesystem-sink / in-session-state-only: proceed to
   // the NAMED completing authority only; the handler asserts no authorization.
   return { proceed: true, completingAuthority: decision.completingAuthority };
+}
+
+/**
+ * The routed-provenance denial mapping (wiring shape over 14a's admission
+ * verdict, `seam=mcp-admission-basis`). Exported so consumers/tests can pin
+ * the block shape for every admission-denial variant — including the
+ * defensive re-observe and fallthrough shapes that the live entry decision
+ * cannot currently produce (14a replays the SAME decision, so compose only
+ * reaches them as fail-closed defense in depth).
+ */
+export function mcpAdmissionDenialBlock(
+  originCategory: ProvenanceRecord["origin"],
+  admission: McpAdmissionDecision & { admit: false },
+): EnforcementError {
+  if (admission.pending === "re-observe") {
+    return {
+      code: "rejected_stale_observation",
+      staleElement: "registry-epoch",
+      originCategory,
+      seam: "mcp-admission-basis",
+    };
+  }
+  return {
+    code: admission.reason,
+    originCategory,
+    seam: "mcp-admission-basis",
+    ...(admission.blockedPair
+      ? { capability: admission.blockedPair.capability, route: admission.blockedPair.route }
+      : {}),
+    ...(admission.tableRowId !== undefined ? { tableRowId: admission.tableRowId } : {}),
+  };
 }
 
 /**

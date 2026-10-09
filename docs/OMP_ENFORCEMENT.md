@@ -21,6 +21,15 @@ user-owned checklist at the bottom.
 | `src/acp/omp/tool-enforcement-wiring.ts`     | Composition point: seam table, pinned mechanism evidence, honesty gates             |
 | `src/acp/omp/extension/index.ts`             | Entrypoint: pre-import gate, then the load-time attach call                         |
 
+**Current-pin reality:** the shipped row-12 gate always yields blockers
+(native-custom-tool-discovery and plugin-entry-points are P0-unresolved and
+pushed unconditionally), so the entrypoint throws BEFORE the attach call
+completes and the slot is unregistered in every environment today. Load-time
+registration becomes operative only if the pinned pre-import-exclusion
+verdicts ever pass — this is a stronger residual than "extension load might
+fail" (checklist item 4) and no wiring test can or does certify a registered
+handler in a real process.
+
 ## Composition order (fixed data; `ENFORCEMENT_COMPOSITION`)
 
 | # | Step                      | Decision source                                    | Notes                                                   |
@@ -67,7 +76,10 @@ Finite field set `ENFORCEMENT_ERROR_FIELDS`: `code`, `capability`, `route`,
 table row ids only. No payload, path content, model text, secret, or token
 field is representable. Codes = 14a's `RESTRICTED_DENIAL_VOCABULARY` plus the
 wiring codes `rejected_enforcement_seam`, `rejected_stale_observation`,
-`rejected_pending_adapter`, `rejected_destructive_authorization`. Blocks
+`rejected_pending_adapter`, `rejected_destructive_authorization` (the last
+covered by the proposal's `rejected_destructive_*` wildcard — it names the
+row-4 authorization-stage denial distinct from 14a's completeness-stage
+`rejected_destructive_incomplete`/`rejected_destructive_binding`). Blocks
 surface through the pinned tool-call error path (row 12's bounded ACP error
 posture) — never `requestPermission()`, never elicitation, never the
 retry-permission-rejection buffer (which lives daemon-side in ChatbotClient,
@@ -126,7 +138,13 @@ install (row 20):
 3. **Live provenance** — does the `getAllTools`-class metadata surface expose
    recorded origins per tool such that origin/epoch observation matches the
    live registry (production observer adapter wiring is part of this
-   checklist; unattached, every restricted call denies fail-closed)?
+   checklist; unattached, every restricted call denies fail-closed)? Recorded
+   `registryEpochObserved` stamps must come from the wiring's own observation
+   domain — the epoch never retracts, so a foreign stamp denies re-observe
+   fail-closed, never admit. Sibling item: the production decoder/assembler
+   that delivers `RestrictedToolCallInput` (input-shape decode, destructive
+   payload with canonical observations, folded row-8 record evaluation) is
+   user/downstream-owned — until it exists, no real call reaches the handler.
 4. **Extension-load failure** — `runner.emit` only logs lifecycle-hook errors
    and does NOT fail session startup: an extension that fails to load leaves
    the session without the restricted capability set (accepted residual

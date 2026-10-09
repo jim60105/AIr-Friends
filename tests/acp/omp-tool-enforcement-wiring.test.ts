@@ -24,6 +24,7 @@ import {
   type EnforcementError,
   type EnforcementOutcome,
   enforcementWiringGates,
+  mcpAdmissionDenialBlock,
   observeCall,
   observeLaunchMode,
   PINNED_MECHANISM_EVIDENCE,
@@ -36,6 +37,13 @@ import {
 } from "@acp/omp/tool-enforcement-wiring.ts";
 import { ALTERNATE_ROUTE_BLOCKING_TABLE } from "@acp/omp/tool-inventory.ts";
 import { DESTRUCTIVE_CONFORMANCE_FIXTURES } from "@acp/destructive-policy.ts";
+import { AUDITED_PINNED_LEDGER } from "@acp/omp/compatibility-contracts.ts";
+import type {
+  CanonicalSessionRoots,
+  CanonicalTarget,
+  RootPathResult,
+} from "@acp/filesystem-roots.ts";
+import type { AuthorizeWriteParams } from "@acp/filesystem-policy.ts";
 import type { ProvenanceRecord } from "@acp/omp/tool-provenance.ts";
 import { evaluateApprovalRecordAuthority } from "@acp/omp/record-evaluator.ts";
 import { createAgentConfig } from "@acp/agent-factory.ts";
@@ -93,6 +101,50 @@ const mcpStale: ProvenanceRecord = {
 };
 
 const hostBash: ProvenanceRecord = { origin: "host", presentedName: "bash" };
+
+// Pure-data canonical-observation adapter at 14b's collection seam — the
+// same bounded classification row 5's conformance tests use: in-workspace
+// fixture paths observe as staging files; any escaping spelling observes as
+// an outside-roots failure. Synthetic staging roots; zero filesystem IO.
+const syntheticRoots: CanonicalSessionRoots = {
+  acpSessionId: "s1",
+  sessionContextGeneration: "g1",
+  roots: [{
+    role: "staging",
+    configuredPath: "/session/staging",
+    canonicalPath: "/session/staging",
+    readOnly: false,
+  }],
+};
+
+function syntheticTarget(path: string): CanonicalTarget {
+  return {
+    acpSessionId: "s1",
+    sessionContextGeneration: "g1",
+    roles: ["staging"],
+    rootIdentities: syntheticRoots.roots,
+    normalizedInput: path,
+    canonicalTarget: `/session/staging/${path}`,
+    rootRelativePath: path,
+    targetType: "file",
+    observedSymlinks: [],
+  };
+}
+
+function syntheticObservations(
+  paths: readonly string[],
+): readonly RootPathResult<CanonicalTarget>[] {
+  return paths.map((path) =>
+    path.includes("..")
+      ? { ok: false, reason: "outside_roots", message: `synthetic escape: ${path}` }
+      : { ok: true, value: syntheticTarget(path) }
+  );
+}
+
+const syntheticAuthParams: Omit<AuthorizeWriteParams, "target"> = {
+  roots: syntheticRoots,
+  yolo: false,
+};
 
 const NO_RECORDS: EffectiveRecordEvaluation = evaluateApprovalRecordAuthority(
   { lowerLayer: { approval: {} } },
@@ -301,6 +353,40 @@ Deno.test("Wiring: every bounded error carries ONLY finite enumerated fields (no
         obs("delete", "path-target", owned, { destructive: undefined, toolKey: "delete" }),
       ),
     ).error,
+    // Survivor-renamed denial (widest naming surface).
+    blockedOutcome(
+      composeRestrictedToolCall(
+        obs("unknown_tool", "opaque", owned, { recordEvaluation: p0SurvivorRecords }),
+      ),
+    ).error,
+    // MCP-admission-basis denial shapes (widest seam-marked surface): the
+    // re-observe and fallthrough variants pinned through the wiring mapper
+    // (the live entry decision replays the SAME 14a decision, so compose
+    // reaches the fallthrough shape only as fail-closed defense in depth).
+    mcpAdmissionDenialBlock("operator-mcp", {
+      admit: false,
+      reason: "rejected_tool_provenance",
+      pending: "re-observe",
+    }),
+    mcpAdmissionDenialBlock("workspace", {
+      admit: false,
+      reason: "rejected_tool_provenance",
+      tableRowId: "operator-mcp",
+    }),
+    // Destructive-authorization denial with the bounded per-target audit.
+    blockedOutcome(
+      composeRestrictedToolCall(
+        obs("delete", "path-target", owned, {
+          destructive: {
+            intent: DESTRUCTIVE_CONFORMANCE_FIXTURES[4].input, // later-escape
+            expandedTargets: ["a.md", "../../../../external.md"],
+            expandedLocations: ["a.md", "../../../../external.md"],
+            observations: syntheticObservations(["a.md", "../../../../external.md"]),
+            authorizationParams: syntheticAuthParams,
+          },
+        }),
+      ),
+    ).error,
   ];
   for (const error of errors) {
     for (const field of Object.keys(error)) {
@@ -318,6 +404,78 @@ Deno.test("Wiring: every bounded error carries ONLY finite enumerated fields (no
   assertEquals(pending.error.code, "rejected_pending_adapter");
   assertEquals(pending.error.seam, "pending-adapter");
   assertEquals(pending.error.tableRowId, "web-fetch");
+});
+
+Deno.test("Wiring destructive step-4: authorization denial emits bounded code + confined per-target audit; all-authorized proceeds ONLY to the named authority", () => {
+  // Later-escape fixture: first target staging-authorized, second escapes.
+  const denied = blockedOutcome(
+    composeRestrictedToolCall(
+      obs("delete", "path-target", owned, {
+        destructive: {
+          intent: DESTRUCTIVE_CONFORMANCE_FIXTURES[4].input,
+          expandedTargets: ["a.md", "../../../../external.md"],
+          expandedLocations: ["a.md", "../../../../external.md"],
+          observations: syntheticObservations(["a.md", "../../../../external.md"]),
+          authorizationParams: syntheticAuthParams,
+        },
+      }),
+    ),
+  );
+  assertEquals(denied.error.code, "rejected_destructive_authorization");
+  assertEquals(denied.error.seam, "destructive-intent");
+  assert(denied.destructiveTargets !== undefined);
+  assertEquals(denied.destructiveTargets.length, 2);
+  for (const audit of denied.destructiveTargets) {
+    // Audit confined to index/boolean/finite-reason/role — row 4's free-text
+    // message never rides, no path content in the audit entries.
+    for (const field of Object.keys(audit)) {
+      assert(["index", "authorized", "reason", "role"].includes(field), `audit field: ${field}`);
+    }
+    const rendered = JSON.stringify(audit);
+    assert(!rendered.includes("external.md"));
+    assert(!rendered.includes("/session/staging"));
+  }
+  assertEquals(denied.destructiveTargets[0].authorized, true);
+  assertEquals(denied.destructiveTargets[1].authorized, false);
+  // Row 5's shared bounded reason for the escaping target (observation
+  // outside_roots classified into the finite row-4 vocabulary).
+  assertEquals(
+    denied.destructiveTargets[1].reason,
+    "rejected_write_path_outside_workspace",
+  );
+
+  // All-authorized multi-delete: proceed names the completing authority and
+  // asserts no authorization; zero mutation is representable in the shape.
+  const approved = composeRestrictedToolCall(
+    obs("delete", "path-target", owned, {
+      destructive: {
+        intent: DESTRUCTIVE_CONFORMANCE_FIXTURES[2].input, // multi-delete
+        expandedTargets: ["a.md", "b.md"],
+        expandedLocations: ["a.md", "b.md"],
+        observations: syntheticObservations(["a.md", "b.md"]),
+        authorizationParams: syntheticAuthParams,
+      },
+    }),
+  );
+  assertEquals(approved, {
+    proceed: true,
+    completingAuthority: "row5-destructive-all-target-policy",
+  });
+
+  // Completeness-stage denial carries the verbatim shared bounded reason.
+  const binding = blockedOutcome(
+    composeRestrictedToolCall(
+      obs("delete", "path-target", owned, {
+        destructive: {
+          intent: DESTRUCTIVE_CONFORMANCE_FIXTURES[8].input, // binding-mismatch
+          expandedTargets: ["a.md"],
+          expandedLocations: ["a.md"],
+        },
+      }),
+    ),
+  );
+  assertEquals(binding.error.code, "rejected_destructive_binding");
+  assertEquals(binding.error.seam, "destructive-intent");
 });
 
 // ---------------------------------------------------------------------------
@@ -587,7 +745,13 @@ Deno.test("Wiring gates: inherited verdicts preserved with DECIDED dispositions;
   assertEquals(enforcementWiringGates.posture.oneShotAcknowledgement, "not-representable");
   assertEquals(enforcementWiringGates.posture.readinessChannel, "cancelled-not-consumed");
   assertEquals(enforcementWiringGates.posture.elicitation, "explicitly-absent");
-  assertEquals(PINNED_MECHANISM_EVIDENCE.downstreamOwner !== undefined, true);
+  // Quoted, never restated: the evidence row equals the ledger source.
+  const ledgerPolicyRow = AUDITED_PINNED_LEDGER.find((entry) =>
+    entry.boundary === "policy_readiness"
+  )!;
+  assertEquals(PINNED_MECHANISM_EVIDENCE.downstreamOwner, ledgerPolicyRow.downstreamOwner);
+  assertEquals(PINNED_MECHANISM_EVIDENCE.status, ledgerPolicyRow.status);
+  assertEquals(PINNED_MECHANISM_EVIDENCE.citation, ledgerPolicyRow.sourceCitation);
   for (const seam of enforcementWiringGates.seams) {
     assertEquals(seam.userDisposition, "DECIDED", seam.id);
     assert(seam.source.status.length > 0, seam.id);

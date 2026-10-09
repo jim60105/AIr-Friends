@@ -83,6 +83,7 @@ export {
   type EnforcementRegistrationResult,
   getLoadTimeEnforcementRegistration,
   type LiveToolRegistrySurface,
+  mcpAdmissionDenialBlock,
   observeCall,
   observeLaunchMode,
   ownedProvenanceFrom,
