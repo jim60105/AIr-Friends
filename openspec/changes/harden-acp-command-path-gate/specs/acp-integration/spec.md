@@ -169,6 +169,17 @@ Filesystem path checks used by the scoped edit/write approval and the file callb
 - **THEN** it SHALL reject the request with the specific restricted in-workspace reason
 - **AND** the same target SHALL be rejected by the independent write sink even if the permission request were approved by another rule
 
+#### Scenario: Destructive-shaped request is not approved from its location list
+- **GIVEN** a restricted delete or move permission request whose locations name only an authorized staging path while the bound raw input also carries an outside-root operation
+- **WHEN** `requestPermission()` evaluates the request
+- **THEN** it SHALL reject with the bounded incomplete-intent or disallowed-target reason and attempt no mutation
+- **AND** the request SHALL NOT be decided by the ordinary edit/write location-list approval
+
+#### Scenario: Destructive denial records one bounded reason
+- **WHEN** each destructive denial path is exercised once
+- **THEN** exactly one bounded, sanitized rejection record SHALL be produced through the existing rejection buffer and audit mirroring, with a static callback error message carrying no file content or raw platform error text
+- **AND** the previously documented reasons SHALL retain their meanings
+
 #### Scenario: Edit/write with $TMPDIR/$SESSION_ID tokens approved
 - **GIVEN** a session with Skill API id `sess_own` whose staging root is `{session cwd}/tmp/sess_own`
 - **WHEN** an edit/write permission request or `writeTextFile` call uses the literal path `$TMPDIR/$SESSION_ID/reply.md` or `${TMPDIR}/${SESSION_ID}/reply.md`
@@ -224,3 +235,40 @@ Filesystem path checks used by the scoped edit/write approval and the file callb
 - **WHEN** the gate expands `$SESSION_ID` in a path argument
 - **THEN** the client config's `sessionId` SHALL be set to the shell session id so expansion matches the script-side `--session-id`
 - **AND** flows without a shell session SHALL leave `sessionId` unset, so expansion yields an empty string matching the script-side `{workspace}/tmp` fallback
+
+#### Scenario: Destructive-shaped requests route before location-list approval
+- **GIVEN** a destructive-shaped request (ACP `delete`/`move` kinds, native delete/move titles, or a multi-operation patch shape)
+- **WHEN** the gate evaluates the request
+- **THEN** it SHALL route the request through complete destructive-intent normalization and the all-target destructive decision BEFORE the ordinary edit/write location-list approval, and the ordinary location-list approval SHALL NOT be used to decide a destructive-shaped request: a request whose decoded operation set is incomplete or inconsistent with its locations SHALL be denied rather than approved from its first or partial target list
+
+#### Scenario: Restricted gate anchors whitelist, workspace writes, and physical containment
+- **WHEN** the restricted gate evaluates command whitelist matches, agent-workspace writes, and file-path containment for the filesystem sinks, the scoped edit/write approval and the destructive decision
+- **THEN** command whitelist matching SHALL be anchored to the invocation entrypoint, agent-workspace writes SHALL be gated by the session's `canWriteAgentWorkspace` flag, and file-path containment decisions SHALL be made against canonical physical root membership for the requesting session rather than lexical string containment
+
+#### Scenario: Command-argument lexical check is command policy unchanged by destructive normalization
+- **WHEN** the gate's generic-command path-argument check evaluates a command because filesystem-touching bash tools are routed to this gate (configured `"ask"` rather than `"allow"`)
+- **THEN** `requestPermission()` SHALL remain the authoritative decision point for those commands, and a generic allow-listed command SHALL be approved only when every path argument — input and output — resolves inside the session workspace/TMPDIR, and `referencesOutOfWorkspacePath` SHALL treat a filesystem-reaching URI-scheme token (e.g. `file://`, and other non-network schemes such as `ftp://`/`gopher://`) as referencing a path outside the workspace
+- **AND** network URL schemes (`http://`/`https://`) SHALL NOT be treated as filesystem paths — `agent-browser` navigates to them legitimately and their egress is mediated separately (F14)
+- **AND** this command-argument lexical check is a command-policy decision of its own and SHALL NOT be represented as physical containment of command execution; its argument policy is unchanged by destructive normalization
+
+#### Scenario: Filesystem path checks expand session tokens before containment
+- **GIVEN** a scoped edit/write approval, a destructive target decision, or a file callback whose path checks reference session-bound tokens
+- **WHEN** the checks evaluate the path
+- **THEN** they SHALL expand `$TMPDIR`, `${TMPDIR}`, `$SESSION_ID`, `${SESSION_ID}` and `$AGENT_WORKSPACE`/`${AGENT_WORKSPACE}` against the requesting session's own authoritative context — to the session TMPDIR (`{session cwd}/tmp`), the active Skill API session id, and the configured shared Agent workspace — through the shared contextual path-resolution contract before any containment decision, so a literal `$TMPDIR/$SESSION_ID/...` path resolves and is approved exactly like the expanded absolute path
+- **AND** an unbraced token SHALL require a variable-name boundary, so `$TMPDIR2`, `$SESSION_ID2`, `$AGENT_WORKSPACE2`, `$OTHER` or `${OTHER}` remain unexpanded and fail
+- **AND** relative paths SHALL be anchored to the session cwd, never the daemon cwd, and an unavailable referenced token value SHALL fail rather than expand to an empty string
+
+#### Scenario: Canonical resolved target is the only path handed to protected file IO
+- **GIVEN** a file callback approved by the restricted gate
+- **WHEN** the content step runs
+- **THEN** the canonical resolved target SHALL be the only path handed to protected file IO: `readTextFile()` and `writeTextFile()` SHALL operate on the observed canonical target under an authorized root role, not on the raw request path
+
+#### Scenario: Skill command auto-approval rejects legacy free-text argument flags
+- **GIVEN** a skill command matching the auto-approve list (whitelisted script-path or command-prefix match)
+- **WHEN** the gate evaluates its whitespace-delimited tokens
+- **THEN** the gate SHALL reject — instead of approve — any command whose tokens include a legacy free-text skill argument flag in either invocation form (`--message`, `--message=value`, `--content`, `--content=value`, `--query`, `--query=value`, `--caption`, `--caption=value`; distinct tokens such as `--message-id`, `--message-file`, `--content-file`, `--query-file`, `--caption-file` SHALL NOT trigger the rejection), so free-text content can never be smuggled through a shell command line that reaches the gate
+
+#### Scenario: Edit/write requests recognized by tool kind or legacy title
+- **GIVEN** a permission request for a file-modifying tool
+- **WHEN** the gate classifies the request
+- **THEN** it SHALL recognize it as an edit/write request by the ACP tool `kind` (`"edit"` — the kind OpenCode v1.17.13+ sends for its `write`, `edit`, `apply_patch`, and `patch` tools, whose `title` is the target file path) or by legacy title values (`"edit"`, `"edit_file"`, `"write"`, `"write_file"`)

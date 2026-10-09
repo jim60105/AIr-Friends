@@ -207,7 +207,7 @@ The `ChatbotClient` SHALL accumulate text from `agent_thought_chunk` session upd
 
 ### Requirement: Permission Handling — Restricted Mode
 
-In restricted (non-YOLO) mode, `requestPermission()` SHALL selectively approve or deny permission requests based on whitelists and path validation, deciding file-path containment on canonical physical root membership rather than lexical string containment. Its command-argument lexical check is a command-policy decision of its own, never a claim of physical containment of command execution, and classifies any filesystem-reaching URI-scheme token as outside the workspace.
+In restricted (non-YOLO) mode, the system SHALL selectively approve or deny permission requests based on whitelists and path validation, so scoped path validation always runs for file-modifying tools instead of falling through to unknown-tool rejection.
 
 #### Scenario: Registered skill auto-approval
 - **GIVEN** a permission request for a registered skill
@@ -243,7 +243,7 @@ In restricted (non-YOLO) mode, `requestPermission()` SHALL selectively approve o
 
 #### Scenario: Command laundering via trailing whitelisted path rejected
 - **GIVEN** a permission request whose first token is an arbitrary binary and whose trailing argument is a whitelisted script path
-- **WHEN** `requestPermission()` evaluates the request
+- **WHEN** `requestPermission()` evaluates the command tokens
 - **THEN** it SHALL NOT auto-approve the request
 
 #### Scenario: Shell operator rejection
@@ -260,6 +260,7 @@ In restricted (non-YOLO) mode, `requestPermission()` SHALL selectively approve o
 - **GIVEN** a permission request whose `toolCall` has `kind: "edit"` and `title` set to the target file path (the shape OpenCode v1.17.13+ sends for `write`/`edit`/`apply_patch`/`patch`), e.g. `title: "$TMPDIR/$SESSION_ID/reply.md"` with `rawInput: { filePath: "$TMPDIR/$SESSION_ID/reply.md", content: "..." }`
 - **WHEN** `requestPermission()` evaluates the request
 - **THEN** it SHALL treat it as a scoped edit/write request and apply the session-root authorization checks instead of rejecting it as an unknown tool call
+- **AND** a request of that shape carrying delete/move or multi-operation mutation semantics SHALL be routed through destructive normalization instead of the location-list approval
 
 #### Scenario: Edit/write request with legacy title shape recognized
 - **GIVEN** a permission request whose `toolCall` has `title: "edit"`, `title: "edit_file"`, `title: "write"`, or `title: "write_file"` (the shapes older OpenCode versions and other ACP agents may send)
@@ -281,6 +282,17 @@ In restricted (non-YOLO) mode, `requestPermission()` SHALL selectively approve o
 - **WHEN** `requestPermission()` evaluates the request
 - **THEN** it SHALL reject the request with the specific restricted in-workspace reason
 - **AND** the same target SHALL be rejected by the independent write sink even if the permission request were approved by another rule
+
+#### Scenario: Destructive-shaped request is not approved from its location list
+- **GIVEN** a restricted delete or move permission request whose locations name only an authorized staging path while the bound raw input also carries an outside-root operation
+- **WHEN** `requestPermission()` evaluates the request
+- **THEN** it SHALL reject with the bounded incomplete-intent or disallowed-target reason and attempt no mutation
+- **AND** the request SHALL NOT be decided by the ordinary edit/write location-list approval
+
+#### Scenario: Destructive denial records one bounded reason
+- **WHEN** each destructive denial path is exercised once
+- **THEN** exactly one bounded, sanitized rejection record SHALL be produced through the existing rejection buffer and audit mirroring, with a static callback error message carrying no file content or raw platform error text
+- **AND** the previously documented reasons SHALL retain their meanings
 
 #### Scenario: Edit/write with $TMPDIR/$SESSION_ID tokens approved
 - **GIVEN** a session with Skill API id `sess_own` whose staging root is `{session cwd}/tmp/sess_own`
@@ -338,14 +350,52 @@ In restricted (non-YOLO) mode, `requestPermission()` SHALL selectively approve o
 - **THEN** the client config's `sessionId` SHALL be set to the shell session id so expansion matches the script-side `--session-id`
 - **AND** flows without a shell session SHALL leave `sessionId` unset, so expansion yields an empty string matching the script-side `{workspace}/tmp` fallback
 
+#### Scenario: Destructive-shaped requests route before location-list approval
+- **GIVEN** a destructive-shaped request (ACP `delete`/`move` kinds, native delete/move titles, or a multi-operation patch shape)
+- **WHEN** the gate evaluates the request
+- **THEN** it SHALL route the request through complete destructive-intent normalization and the all-target destructive decision BEFORE the ordinary edit/write location-list approval, and the ordinary location-list approval SHALL NOT be used to decide a destructive-shaped request: a request whose decoded operation set is incomplete or inconsistent with its locations SHALL be denied rather than approved from its first or partial target list
+
+#### Scenario: Restricted gate anchors whitelist, workspace writes, and physical containment
+- **WHEN** the restricted gate evaluates command whitelist matches, agent-workspace writes, and file-path containment for the filesystem sinks, the scoped edit/write approval and the destructive decision
+- **THEN** command whitelist matching SHALL be anchored to the invocation entrypoint, agent-workspace writes SHALL be gated by the session's `canWriteAgentWorkspace` flag, and file-path containment decisions SHALL be made against canonical physical root membership for the requesting session rather than lexical string containment
+
+#### Scenario: Command-argument lexical check is command policy unchanged by destructive normalization
+- **WHEN** the gate's generic-command path-argument check evaluates a command because filesystem-touching bash tools are routed to this gate (configured `"ask"` rather than `"allow"`)
+- **THEN** `requestPermission()` SHALL remain the authoritative decision point for those commands, and a generic allow-listed command SHALL be approved only when every path argument — input and output — resolves inside the session workspace/TMPDIR, and `referencesOutOfWorkspacePath` SHALL treat a filesystem-reaching URI-scheme token (e.g. `file://`, and other non-network schemes such as `ftp://`/`gopher://`) as referencing a path outside the workspace
+- **AND** network URL schemes (`http://`/`https://`) SHALL NOT be treated as filesystem paths — `agent-browser` navigates to them legitimately and their egress is mediated separately (F14)
+- **AND** this command-argument lexical check is a command-policy decision of its own and SHALL NOT be represented as physical containment of command execution; its argument policy is unchanged by destructive normalization
+
+#### Scenario: Filesystem path checks expand session tokens before containment
+- **GIVEN** a scoped edit/write approval, a destructive target decision, or a file callback whose path checks reference session-bound tokens
+- **WHEN** the checks evaluate the path
+- **THEN** they SHALL expand `$TMPDIR`, `${TMPDIR}`, `$SESSION_ID`, `${SESSION_ID}` and `$AGENT_WORKSPACE`/`${AGENT_WORKSPACE}` against the requesting session's own authoritative context — to the session TMPDIR (`{session cwd}/tmp`), the active Skill API session id, and the configured shared Agent workspace — through the shared contextual path-resolution contract before any containment decision, so a literal `$TMPDIR/$SESSION_ID/...` path resolves and is approved exactly like the expanded absolute path
+- **AND** an unbraced token SHALL require a variable-name boundary, so `$TMPDIR2`, `$SESSION_ID2`, `$AGENT_WORKSPACE2`, `$OTHER` or `${OTHER}` remain unexpanded and fail
+- **AND** relative paths SHALL be anchored to the session cwd, never the daemon cwd, and an unavailable referenced token value SHALL fail rather than expand to an empty string
+
+#### Scenario: Canonical resolved target is the only path handed to protected file IO
+- **GIVEN** a file callback approved by the restricted gate
+- **WHEN** the content step runs
+- **THEN** the canonical resolved target SHALL be the only path handed to protected file IO: `readTextFile()` and `writeTextFile()` SHALL operate on the observed canonical target under an authorized root role, not on the raw request path
+
+#### Scenario: Skill command auto-approval rejects legacy free-text argument flags
+- **GIVEN** a skill command matching the auto-approve list (whitelisted script-path or command-prefix match)
+- **WHEN** the gate evaluates its whitespace-delimited tokens
+- **THEN** the gate SHALL reject — instead of approve — any command whose tokens include a legacy free-text skill argument flag in either invocation form (`--message`, `--message=value`, `--content`, `--content=value`, `--query`, `--query=value`, `--caption`, `--caption=value`; distinct tokens such as `--message-id`, `--message-file`, `--content-file`, `--query-file`, `--caption-file` SHALL NOT trigger the rejection), so free-text content can never be smuggled through a shell command line that reaches the gate
+
+#### Scenario: Edit/write requests recognized by tool kind or legacy title
+- **GIVEN** a permission request for a file-modifying tool
+- **WHEN** the gate classifies the request
+- **THEN** it SHALL recognize it as an edit/write request by the ACP tool `kind` (`"edit"` — the kind OpenCode v1.17.13+ sends for its `write`, `edit`, `apply_patch`, and `patch` tools, whose `title` is the target file path) or by legacy title values (`"edit"`, `"edit_file"`, `"write"`, `"write_file"`)
+
 ### Requirement: Permission Handling — YOLO Mode
 
-In YOLO mode (global `--yolo` flag or per-channel `yolo: true`), the system SHALL auto-approve ALL permission requests. YOLO SHALL additionally authorize ACP filesystem callbacks by broad physical containment only: a target holding the requesting session's user-workspace or the shared Agent workspace role SHALL be authorized with no staging-only restriction, no write-extension filter, no `canWriteAgentWorkspace` requirement and no restricted tool/LSP/command clamp.
+In YOLO mode (global `--yolo` flag or per-channel `yolo: true`), the system SHALL auto-approve ALL permission requests, including destructive-shaped requests; destructive normalization SHALL NOT introduce a restricted tool, extension, staging-only or target-count clamp into YOLO approval.
 
 #### Scenario: YOLO auto-approve
 - **GIVEN** YOLO mode is enabled (globally or per-channel)
-- **WHEN** any permission request is received
+- **WHEN** any permission request is received, including a delete, move or multi-operation patch request
 - **THEN** it SHALL be auto-approved with reason `"yolo_mode"`
+- **AND** no restricted destructive completeness or target-scope denial SHALL be substituted for that approval
 
 #### Scenario: YOLO filesystem callback keeps broad containment without restricted clamps
 - **GIVEN** a YOLO session
@@ -355,13 +405,22 @@ In YOLO mode (global `--yolo` flag or per-channel `yolo: true`), the system SHAL
 
 #### Scenario: YOLO does not relax escape or read-only-root denial
 - **GIVEN** a YOLO session
-- **WHEN** it requests a write to an external or sibling-workspace target, a path whose containment observation escapes, or any path inside the trusted read-only skills root
-- **THEN** the write SHALL be denied with the mapped bounded reason and no content IO
+- **WHEN** it requests a write, a deletion or a move whose source or destination is external or sibling-workspace, whose containment observation escapes, or which lies inside the trusted read-only skills root
+- **THEN** the operation SHALL be denied with the mapped bounded reason and no content IO
 
 #### Scenario: YOLO behavior is identical for both agents
 - **GIVEN** an OpenCode and an OMP session in YOLO mode
-- **WHEN** the same filesystem callback target is presented to each
+- **WHEN** the same filesystem callback or destructive target is presented to each
 - **THEN** both SHALL receive the same authorization outcome, with no restricted-mode policy copied into YOLO
+
+#### Scenario: YOLO callback authorization is broad physical containment including destructive targets
+- **WHEN** YOLO authorizes an ACP filesystem callback
+- **THEN** it SHALL authorize by broad physical containment only: a target holding the requesting session's user-workspace or the shared Agent workspace role SHALL be authorized with no staging-only restriction, no write-extension filter, no `canWriteAgentWorkspace` requirement and no restricted tool/LSP/command clamp, while targets outside those roots, replaced or escaping paths, and the read-only trusted skills root SHALL still be denied — a rule that applies to destructive sources and destinations as well as ordinary writes
+
+#### Scenario: YOLO boundary constrains only ACP-delegated file operations
+- **GIVEN** a YOLO session
+- **WHEN** the authorization boundary is documented or tested
+- **THEN** it SHALL apply to ACP-delegated file operations only and SHALL NOT be documented or tested as constraining native execution paths that do not use ACP callbacks, nor as denying a state file already inside the permitted broad workspace
 
 ### Requirement: Permission Audit Logging
 
@@ -2072,6 +2131,7 @@ The integration SHALL record two named application gates carrying the pinned ver
 - **WHEN** that evidence is offered in support of either gate
 - **THEN** the evidence SHALL validate decision logic only — which roots, paths, and names would be excluded, and the fail-closed error shape
 - **AND** SHALL NOT be presented as evidence that the official executable enforces the exclusion or canonical selection
+
 ### Requirement: Per-Spawn OMP Mode Distinctness And Shared-Process Skill Identity Invariants
 
 Per-spawn (non-pool) agent spawns SHALL pass the session's resolved effective permission mode into the agent configuration exactly as the pooled paths do, so that a restricted per-spawn OMP process and a native-YOLO per-spawn OMP process never share a process state root.
@@ -2139,6 +2199,7 @@ At the moment a session acquires or spawns its agent process — pooled or per-s
 - **GIVEN** the write side of the ownership interface established here
 - **WHEN** reconnect/`session/load` verification, gate-context restoration, or rejection of opposite-mode loads runs (owned by `restore-mode-owned-acp-sessions`, row 11)
 - **THEN** that owner SHALL consume, never redefine, the recorded fields
+
 ### Requirement: Independent Restricted ACP Filesystem Write Authorization
 
 The ACP file-write sink SHALL authorize an ordinary restricted-mode write from the requesting session's authoritative context and the target's canonical physical role, WITHOUT requiring any preceding permission request: it SHALL allow the session's own staging root and, with agent-workspace write authorization and an allowed extension, a shared Agent workspace target; it SHALL deny every other user-workspace target and any target whose only role is read-only trusted skills.
@@ -2280,3 +2341,120 @@ Each filesystem-sink denial SHALL record exactly one bounded, machine-readable r
 - **WHEN** a filesystem denial is recorded and its callback error is raised
 - **THEN** recorded fields SHALL remain sanitized and length-bounded
 - **AND** the callback error SHALL be a static message exposing no file content, secret, or unbounded agent- or platform-supplied text
+
+### Requirement: Complete Destructive Operation Normalization
+
+The permission gate SHALL normalize every destructive-shaped request (ACP `delete`/`move` tool kinds, native delete/move titles, and multi-operation patch shapes) into an ordered, complete operation set before any authorization decision, using the P0 destructive-intent contract's trustworthy operation input, parser/edit-syntax provenance, and binding to the input that will execute.
+
+#### Scenario: Complete native-shaped delete and move decode every target
+- **GIVEN** a restricted session and a supported-parser delete fixture with several targets and a complete move fixture
+- **WHEN** the permission gate normalizes each request
+- **THEN** it SHALL enumerate every delete target and both endpoints of the move as separately decisioned targets bound to the executing input
+- **AND** it SHALL make no authorization decision from the request title alone
+
+#### Scenario: First-target-only location list cannot authorize a larger patch
+- **GIVEN** a destructive patch fixture whose permission-location list carries only the first operation while the raw input contains a later delete or move
+- **WHEN** the gate normalizes the request
+- **THEN** it SHALL reject the request as an incomplete intent rather than approving the decoded-superset operation set
+- **AND** it SHALL attempt zero mutations
+
+#### Scenario: Incomplete or unparseable intent fails closed
+- **GIVEN** a fixture with a missing move destination, an unknown/incompatible edit syntax, unparseable patch content, or a raw-input/execution binding mismatch
+- **WHEN** the gate normalizes the request
+- **THEN** it SHALL return one bounded incomplete/intent failure with a named reason
+- **AND** no target SHALL be authorized, no content IO or mutation SHALL be attempted, and the request SHALL NOT fall through to generic unknown-tool handling as though unclassified
+
+#### Scenario: Location list disagreement is a mismatch, not a narrowing
+- **GIVEN** a destructive request whose location list names a target absent from the decoded operations, or whose decoded operations name a target absent from the list
+- **WHEN** the gate compares the two
+- **THEN** it SHALL reject with the bounded intent-mismatch/incomplete reason
+- **AND** it SHALL NOT approve the intersection of the two sets
+#### Scenario: Title, location list or first operation cannot stand in for the decoded set
+- **GIVEN** a destructive-shaped request whose title, permission-location list, or first operation is narrower than its decoded operation set
+- **WHEN** the gate decides authorization
+- **THEN** the title, the permission-location list, or the first operation SHALL NEVER stand in for the decoded set; an arbitrary title string SHALL NOT be approved as a destructive permission request
+
+#### Scenario: Normalization is a pure, parser-bounded decision
+- **WHEN** the permission gate normalizes a destructive request
+- **THEN** normalization SHALL be a pure decision that creates, modifies, deletes or moves nothing
+- **AND** it SHALL NOT implement a speculative native edit syntax beyond the supported parsers established by the P0 destructive-intent contract
+
+### Requirement: All-Target Destructive Authorization Under The Common Policy
+
+For a normalized destructive request, the gate SHALL authorize each target through the same session-scoped filesystem decision used by the ordinary write sink — with no parallel destructive rule — and SHALL approve only when every target is authorized, so a single unauthorized target SHALL deny the whole request.
+
+#### Scenario: Later escaping target denies the whole patch
+- **GIVEN** a restricted session, and a patch fixture whose first delete is inside the session staging root and whose second delete resolves outside the authorized roots
+- **WHEN** the gate evaluates every target
+- **THEN** it SHALL deny the request with the bounded reason identifying the disallowed target
+- **AND** it SHALL attempt no mutation of the permitted first target
+
+#### Scenario: Move requires both endpoints
+- **GIVEN** a restricted session whose staging root contains a source file and a second destination path outside the authorized roots
+- **WHEN** the gate evaluates the move
+- **THEN** it SHALL deny with the destination-specific bounded reason and move nothing
+- **AND** the same move with a destination inside the requesting session's own staging root SHALL be approved
+
+#### Scenario: Delete and move sources must exist
+- **GIVEN** a destructive fixture naming a source or deletion target that is absent
+- **WHEN** the target is observed
+- **THEN** the decision SHALL be a denial with the mapped missing-object/filesystem reason rather than prospective new-file success
+- **AND** no directory or parent SHALL be created to make it eligible
+
+#### Scenario: Read-only trusted-skills targets are denied destructively
+- **GIVEN** a destructive fixture whose source or destination resolves to the deployment-owned read-only skills role
+- **WHEN** the gate evaluates that target
+- **THEN** the target SHALL be denied with the read-only-target reason in restricted and YOLO modes alike
+- **AND** no other target decision SHALL convert it into a writable role
+
+#### Scenario: YOLO destructive callbacks keep broad containment without restricted clamps
+- **GIVEN** a YOLO session
+- **WHEN** a destructive target is physically inside its user workspace or the shared Agent workspace
+- **THEN** the target SHALL be authorized by broad containment with no staging-only rule, no write-extension filter and no `canWriteAgentWorkspace` requirement
+- **AND** escaping, sibling and read-only-skills targets SHALL still be denied, with the documented limitation that non-ACP native execution is unconstrained
+#### Scenario: Delete and move sources require existence plus delete authority
+- **GIVEN** a normalized destructive request naming a deletion target or a move source
+- **WHEN** the gate decides that target
+- **THEN** the target SHALL require an existing-target observation plus delete authority
+
+#### Scenario: Destinations and patch mutation targets require create/overwrite authority
+- **GIVEN** a normalized destructive request naming a move destination or a patch mutation target
+- **WHEN** the gate decides that target
+- **THEN** it SHALL require create/overwrite authority
+
+#### Scenario: Target decisions use canonical physical observations
+- **WHEN** the gate decides any destructive target
+- **THEN** it SHALL use canonical physical observations, including token expansion and escaping-symlink rejection
+
+#### Scenario: Ordinary write rules decide destructive targets without extra YOLO clamps
+- **WHEN** an existing restricted staging/shared-write rule or a native YOLO broad-containment rule decides a destructive target
+- **THEN** it SHALL decide the target exactly as it decides an ordinary write, with no additional restricted clamp applied to YOLO
+
+### Requirement: Shared Client And Extension Destructive Decision Surface
+
+The destructive normalization and all-target decision logic SHALL be one reusable module consumed by the ACP permission gate and, when its owner wires the handler, by the deployment-owned OMP restricted-tool adapter, so the extension path and the client path evaluate the identical operation set and completeness verdict.
+
+#### Scenario: Both surfaces agree on one fixture
+- **GIVEN** the client permission gate and a mock extension-side adapter invoking the same shared module on one destructive fixture
+- **WHEN** both evaluate it
+- **THEN** they SHALL return the same completeness verdict, the same enumerated target set and the same bounded outcome reason
+
+#### Scenario: Extension-side incompleteness cannot be reconciled by the client
+- **GIVEN** an adapter fixture reporting fewer operations than the bound execution input contains
+- **WHEN** either surface evaluates it
+- **THEN** both SHALL report the incomplete-intent denial and authorize zero mutation attempts
+- **AND** no surface SHALL widen the decoded set from titles or presentation text
+
+#### Scenario: Shared module performs no IO
+- **WHEN** the shared normalization and decision logic is exercised across its fixtures
+- **THEN** it SHALL consult only the observations and context supplied by its consumer
+- **AND** it SHALL create, modify, delete or move nothing itself
+#### Scenario: Neither surface keeps a private duplicate of decision logic
+- **WHEN** the ACP permission gate or the OMP restricted-tool adapter evaluates a destructive request
+- **THEN** neither surface SHALL maintain a private duplicate of the target-completeness rules, the reason vocabulary, or the authorization table
+
+#### Scenario: Incomplete native location list never authorizes a larger patch
+- **GIVEN** a client-side destructive request whose native location list names fewer operations than the bound input contains
+- **WHEN** either surface evaluates it
+- **THEN** the incomplete native location list SHALL NOT authorize a larger patch on either surface
+- **AND** both surfaces SHALL report the incomplete-intent denial
