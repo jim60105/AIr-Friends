@@ -11,6 +11,12 @@ import { WorkspaceManager } from "@core/workspace-manager.ts";
 import { SessionAuditWriter } from "@core/audit-logger.ts";
 import { Logger, LogLevel } from "@utils/logger.ts";
 import { createFilesystemTestCalls } from "./filesystem-test-calls.ts";
+import {
+  decodeDestructiveIntent,
+  DESTRUCTIVE_CONFORMANCE_FIXTURES,
+  destructiveDenialReason,
+  normalizeDestructiveIntent,
+} from "@acp/destructive-policy.ts";
 
 interface FilesystemFixture {
   base: string;
@@ -124,6 +130,236 @@ function permission(path: string, kind: "edit" | "read" = "edit"): acp.RequestPe
     ],
   };
 }
+
+Deno.test("Destructive permission routing: complete ACP endpoints only; native patches fail closed", async () => {
+  const f = fixture();
+  try {
+    f.register();
+    const source = join(f.staging, "a.md");
+    const destination = join(f.staging, "b.md");
+    const outside = join(f.sibling, "outside.md");
+    for (const path of [source, destination, outside]) Deno.writeTextFileSync(path, "sentinel");
+    const request = async (
+      kind: "delete" | "move" | "edit",
+      rawInput: Record<string, unknown> | undefined,
+      paths: string[],
+      expectedReason?: string,
+      title: string = source,
+    ) => {
+      f.client.clearPermissionRejections();
+      const response = await f.client.requestPermission({
+        ...permission(source),
+        toolCall: {
+          toolCallId: "destructive",
+          title,
+          kind,
+          rawInput,
+          locations: paths.map((path) => ({ path })),
+        },
+      });
+      assertEquals(response.outcome, {
+        outcome: "selected",
+        optionId: expectedReason ? "reject" : "allow",
+      });
+      assertEquals(
+        f.client.getRecentPermissionRejections().map((item) => item.reason),
+        expectedReason ? [expectedReason] : [],
+      );
+      for (const path of [source, destination, outside]) {
+        assertEquals(Deno.readTextFileSync(path), "sentinel");
+      }
+      assertEquals(f.contentCalls, []);
+    };
+    await request("delete", { path: source }, [source]);
+    await request("move", { source, destination }, [source, destination]);
+    await request(
+      "move",
+      { source, destination: outside },
+      [source, outside],
+      "rejected_write_path_outside_workspace",
+    );
+    assertEquals(
+      f.client.getRecentPermissionRejections()[0].commandOrPath?.startsWith("target[1]:"),
+      true,
+    );
+    await request(
+      "delete",
+      { path: source, operations: [{ path: outside }] },
+      [source],
+      "rejected_destructive_incomplete",
+    );
+    await request(
+      "edit",
+      { operations: [{ kind: "delete", path: source }, { kind: "delete", path: outside }] },
+      [source],
+      "rejected_destructive_incomplete",
+    );
+    await request(
+      "edit",
+      { edits: [{ path: source }, { path: outside }] },
+      [source],
+      "rejected_destructive_incomplete",
+    );
+    await request(
+      "edit",
+      { patch: "*** Begin Patch\n*** Delete File: " + source },
+      [source],
+      "rejected_destructive_incomplete",
+    );
+    await request("delete", undefined, [source], "rejected_destructive_incomplete");
+    await request("delete", { path: source }, [], "rejected_destructive_incomplete");
+    await request("delete", { path: source }, [source, outside], "rejected_destructive_binding");
+    await request("move", { source }, [source], "rejected_destructive_incomplete");
+    await request("delete", { path: join(f.staging, "missing", "a.md") }, [
+      join(f.staging, "missing", "a.md"),
+    ], "rejected_filesystem_path_unavailable");
+    await request("move", { source: join(f.staging, "missing", "a.md"), destination }, [
+      join(f.staging, "missing", "a.md"),
+      destination,
+    ], "rejected_filesystem_path_unavailable");
+    assertEquals([...Deno.readDirSync(f.staging)].map((entry) => entry.name).sort(), [
+      "a.md",
+      "b.md",
+    ]);
+    await request("edit", { path: source, content: "ordinary" }, [source]);
+    await request(
+      "edit",
+      undefined,
+      [source],
+      "rejected_destructive_incomplete",
+      "Delete allowed-looking title",
+    );
+    f.register({ yolo: true });
+    await request("delete", { path: outside }, [outside]);
+    await request("edit", { edits: [] }, [source]);
+    f.mint();
+    f.register({ yolo: true, trustedSkills: f.trusted });
+    await denied(
+      f,
+      "rejected_write_path_outside_workspace",
+      () => f.client.writeTextFile({ sessionId: "acp-1", path: outside, content: "mutated" }),
+    );
+    await denied(
+      f,
+      "rejected_trusted_skills_read_only",
+      () => f.client.writeTextFile({ sessionId: "acp-1", path: f.instruction, content: "mutated" }),
+    );
+    assertEquals(Deno.readTextFileSync(f.instruction), "owned instruction");
+  } finally {
+    Deno.removeSync(f.base, { recursive: true });
+  }
+});
+
+Deno.test("Destructive ACP and mock adapter conformance: same actual callback provenance", async () => {
+  const f = fixture();
+  try {
+    f.register();
+    for (const name of ["a.md", "b.md"]) Deno.writeTextFileSync(join(f.staging, name), "sentinel");
+    for (const fixture of DESTRUCTIVE_CONFORMANCE_FIXTURES) {
+      // Synthetic fixture provenance is NOT conveyed by ACP. Both wire consumers must
+      // reject it, rather than trusting metadata supplied by an agent.
+      const nativeTool = fixture.input.nativeTool;
+      let raw: unknown;
+      try {
+        raw = JSON.parse(fixture.input.rawInput);
+      } catch {
+        raw = fixture.input.rawInput;
+      }
+      if (raw && typeof raw === "object") {
+        const record = raw as Record<string, unknown>;
+        for (const key of ["path", "source", "destination"]) {
+          if (typeof record[key] === "string") record[key] = join(f.staging, record[key]);
+        }
+      }
+      const snapshot = typeof raw === "string" ? raw : JSON.stringify(raw);
+      const input = {
+        nativeTool,
+        rawInput: snapshot,
+        executionInputBinding: snapshot,
+        parserProvenance: nativeTool === "edit" || nativeTool === "apply_patch"
+          ? "unknown" as const
+          : "supported_full_parser" as const,
+      };
+      const decoded = decodeDestructiveIntent(input);
+      const locations = fixture.locations.map((path) => join(f.staging, path));
+      const normalized = normalizeDestructiveIntent(
+        input,
+        decoded.targets.map((target) => target.path),
+        locations,
+      );
+      f.client.clearPermissionRejections();
+      const response = await f.client.requestPermission({
+        ...permission(f.staging),
+        toolCall: {
+          toolCallId: fixture.id,
+          title: "native fixture",
+          kind: nativeTool === "apply_patch" ? "edit" : nativeTool,
+          rawInput: raw as Record<string, unknown>,
+          locations: locations.map((path) => ({ path })),
+        },
+      });
+      assertEquals(response.outcome, {
+        outcome: "selected",
+        optionId: normalized.ok ? "allow" : "reject",
+      }, fixture.id);
+      assertEquals(
+        f.client.getRecentPermissionRejections().map((item) => item.reason),
+        normalized.ok ? [] : [destructiveDenialReason(normalized.reason)],
+        fixture.id,
+      );
+      for (const name of ["a.md", "b.md"]) {
+        assertEquals(Deno.readTextFileSync(join(f.staging, name)), "sentinel");
+      }
+    }
+  } finally {
+    Deno.removeSync(f.base, { recursive: true });
+  }
+});
+
+Deno.test("Destructive denials: one sanitized bounded audit and retry record per request", async () => {
+  const f = fixture();
+  try {
+    f.register();
+    const path = join(f.staging, "a.md");
+    Deno.writeTextFileSync(path, "sentinel");
+    const writer = new SessionAuditWriter(f.base, "discord", "u", "destructive-audit", {
+      enabled: true,
+      retentionDays: 1,
+      hashContent: false,
+      includedPhases: ["permission_denied"],
+    });
+    f.client.setAuditWriter(writer);
+    const entries: Record<string, unknown>[] = [];
+    writer.write = (_phase, data) => {
+      entries.push(data as Record<string, unknown>);
+      return Promise.resolve();
+    };
+    for (const locations of [[], [{ path }, { path: join(f.sibling, "outside") }]]) {
+      f.client.clearPermissionRejections();
+      const before = entries.length;
+      await f.client.requestPermission({
+        ...permission(path),
+        toolCall: {
+          toolCallId: "audit",
+          title: "delete\n" + "x".repeat(500),
+          kind: "delete",
+          rawInput: { path },
+          locations,
+        },
+      });
+      const records = f.client.getRecentPermissionRejections();
+      assertEquals(records.length, 1);
+      assertEquals(entries.length, before + 1);
+      assertEquals(entries[before].toolName, records[0].toolName);
+      assertEquals(entries[before].reason, records[0].reason);
+      assertEquals(records[0].toolName.length <= 200, true);
+      assertEquals(records[0].toolName.includes("\n"), false);
+      assertEquals(Deno.readTextFileSync(path), "sentinel");
+    }
+  } finally {
+    Deno.removeSync(f.base, { recursive: true });
+  }
+});
 
 async function denied(
   f: FilesystemFixture,

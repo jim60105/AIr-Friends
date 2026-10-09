@@ -23,6 +23,14 @@ import {
 } from "./filesystem-roots.ts";
 import { readCanonicalTextFile, writeCanonicalTextFile } from "./filesystem-access.ts";
 import {
+  authorizeDestructiveTargets,
+  decodeDestructiveIntent,
+  destructiveDenialReason,
+  isDestructiveRequest,
+  normalizeDestructiveIntent,
+} from "./destructive-policy.ts";
+import type { DestructiveIntentInput } from "./omp/compatibility-contracts.ts";
+import {
   authorizeFilesystemRead,
   authorizeFilesystemWrite,
   buildSessionFilesystemContext,
@@ -1494,6 +1502,122 @@ export class ChatbotClient implements acp.Client {
    * Auto-approves our registered skills and access to skills directory
    * In YOLO mode, auto-approves ALL permission requests
    */
+  private async requestDestructivePermission(
+    params: acp.RequestPermissionRequest,
+  ): Promise<acp.RequestPermissionResponse> {
+    const title = params.toolCall.title ?? "";
+    const kind = params.toolCall.kind ?? "unknown";
+    const gateCtx = this.gateCtx(params.sessionId);
+    const generation = gateCtx?.generation ?? "";
+    const built = buildSessionFilesystemContext(params.sessionId, gateCtx, this.config, generation);
+    let reason: string | undefined;
+    let failingPath: string | undefined;
+    // Snapshot only the actual callback input. No request-supplied provenance is trusted.
+    // Pinned session-tools.ts sends execution args as rawInput and preserves acpApprovedArgs;
+    // this is snapshot consistency, not attestation of native completeness.
+    const rawInput = typeof params.toolCall.rawInput === "string"
+      ? params.toolCall.rawInput
+      : JSON.stringify(params.toolCall.rawInput);
+    const nativeTool = kind === "delete" ? "delete" : kind === "move" ? "move" : "edit";
+    const input: DestructiveIntentInput | undefined = rawInput === undefined ? undefined : {
+      nativeTool,
+      rawInput,
+      executionInputBinding: rawInput,
+      parserProvenance: nativeTool === "edit" ? "unknown" : "supported_full_parser",
+    };
+    const decoded = input ? decodeDestructiveIntent(input) : undefined;
+    if (!decoded?.ok) {
+      reason = destructiveDenialReason(
+        decoded && !decoded.ok ? decoded.reason : "title_only_intent",
+      );
+    } else if (!built.ok) {
+      reason = built.reason;
+    } else {
+      const resolvedTargets = decoded.targets.map((target) =>
+        resolveSessionPath(target.path, built.context)
+      );
+      const resolvedLocations = (params.toolCall.locations ?? []).map((location) =>
+        resolveSessionPath(location.path, built.context)
+      );
+      const failure = [...resolvedTargets, ...resolvedLocations].find((resolved) => !resolved.ok);
+      if (failure && !failure.ok) {
+        reason = mapRootPathFailureToDenial(failure.reason, true);
+      } else {
+        const normalized = normalizeDestructiveIntent(
+          input,
+          resolvedTargets.flatMap((resolved) => resolved.ok ? [resolved.value.normalizedPath] : []),
+          resolvedLocations.flatMap((resolved) =>
+            resolved.ok ? [resolved.value.normalizedPath] : []
+          ),
+        );
+        if (!normalized.ok) {
+          reason = destructiveDenialReason(normalized.reason);
+        } else {
+          const roots = await this.observeFilesystemRoots(built.context, gateCtx?.trustedSkills);
+          if (!roots.ok) {
+            reason = mapRootPathFailureToDenial(roots.reason, true);
+          } else {
+            const observations = await Promise.all(
+              resolvedTargets.map((resolved, index) =>
+                resolved.ok
+                  ? resolveFilesystemTarget(
+                    resolved.value,
+                    roots.value,
+                    normalized.targets[index].intent === "delete" ? "existing-any" : "file-or-new",
+                  )
+                  : Promise.resolve(resolved)
+              ),
+            );
+            const decision = authorizeDestructiveTargets(normalized, observations, {
+              roots: roots.value,
+              yolo: false,
+              canWriteAgentWorkspace: gateCtx?.canWriteAgentWorkspace,
+              allowedWriteExtensions: gateCtx?.allowedWriteExtensions,
+            });
+            if (!decision.ok) {
+              const index = decision.firstDeniedIndex!;
+              const denial = decision.decisions[index];
+              reason = !denial.ok ? denial.reason : "rejected_destructive_target";
+              failingPath = `target[${index}]: ${normalized.targets[index].path}`;
+            }
+          }
+        }
+      }
+    }
+    if (!reason && this.gateCtx(params.sessionId)?.generation !== generation) {
+      reason = "rejected_filesystem_context";
+    }
+    if (reason) {
+      this.recordPermissionRejection(title, kind, failingPath, reason);
+      void this.writePermissionAudit(
+        "permission_denied",
+        sanitizeRejectionField(title) ?? "",
+        sanitizeRejectionField(kind) ?? "",
+        sanitizeRejectionField(failingPath),
+        reason,
+      );
+    } else {
+      void this.writePermissionAudit(
+        "permission_approved",
+        title,
+        kind,
+        undefined,
+        "destructive_authorized",
+      );
+      this.logger.info("Auto-approving destructive operation for {title}", {
+        title,
+        kind,
+      });
+    }
+    const option = params.options.find((option) =>
+      option.kind === (reason ? "reject_once" : "allow_once")
+    );
+    // Never use an arbitrary first option to answer a destructive request.
+    return option
+      ? { outcome: { outcome: "selected", optionId: option.optionId } }
+      : { outcome: { outcome: "cancelled" } };
+  }
+
   requestPermission(
     params: acp.RequestPermissionRequest,
   ): Promise<acp.RequestPermissionResponse> {
@@ -1561,6 +1685,11 @@ export class ChatbotClient implements acp.Client {
           optionId: allowOption.optionId,
         },
       });
+    }
+
+    // Destructive routing precedes skill/title and ordinary location-list approvals.
+    if (isDestructiveRequest(title, kind, params.toolCall.rawInput)) {
+      return this.requestDestructivePermission(params);
     }
 
     // Root-scoped read admission requires trusted lifecycle provenance, never HOME discovery.
