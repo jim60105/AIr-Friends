@@ -572,8 +572,10 @@ Deno.test("loadSystemPrompt - should handle prompt with no placeholders", async 
   );
 });
 
-// The conversation-summary prompt's Usage example must render the session id
-// (and staging dir) when available — a pooled run cannot rely on $SESSION_ID.
+// The conversation-summary prompt's Usage example must render the LITERAL
+// session id + staging dir it is given — and NEVER fall back to shell tokens:
+// every bundled payload-staging render supplies both values in both spawn
+// shapes, and an operator-mounted template must not resurrect the tokens.
 // Renders the REAL prompts/system_summary.md so the example stays copy-pasteable.
 Deno.test("loadSystemPrompt - system_summary Usage example renders the literal session id + tmpDir", async () => {
   const promptPath = join(import.meta.dirname ?? ".", "..", "..", "prompts", "system_summary.md");
@@ -594,9 +596,12 @@ Deno.test("loadSystemPrompt - system_summary Usage example renders the literal s
   );
   assertEquals(withSession.includes('"$SESSION_ID"'), false);
 
-  // Without a session id the example falls back to the per-spawn token form.
+  // Even WITHOUT the values the template no longer emits shell tokens — the
+  // `|| "$SESSION_ID"` fallbacks are gone (an absent id renders empty rather
+  // than a token the agent cannot act on).
   const noSession = await loadSystemPrompt(promptPath, defaultVars);
-  assertEquals(noSession.includes("--session-id $SESSION_ID"), true);
+  assertEquals(noSession.includes("$SESSION_ID"), false);
+  assertEquals(noSession.includes("$TMPDIR"), false);
 });
 
 // --- accessControl configuration tests ---

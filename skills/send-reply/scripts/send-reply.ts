@@ -18,7 +18,7 @@ async function main() {
       alias: "m",
       fileName: "reply.md",
       example: `${Deno.env.get("HOME") ?? "~"}/.agents/skills/send-reply/scripts/send-reply.ts ` +
-        `--session-id "$SESSION_ID" --message-file "$TMPDIR/$SESSION_ID/reply.md"`,
+        `--session-id "<session id rendered in your system prompt>" --message-file "<absolute staging directory rendered in your system prompt>/reply.md"`,
     });
 
     // Call API

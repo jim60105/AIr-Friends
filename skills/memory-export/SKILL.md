@@ -21,11 +21,11 @@ Export the current user's memories as a file attachment, sent via DM.
 
 ```
 ${HOME}/.agents/skills/memory-export/scripts/memory-export.ts \
-  --session-id "$SESSION_ID" \
+  --session-id "<session id rendered in your system prompt>" \
   --format markdown
 ```
 
-**`--session-id`**: Use the session id rendered in your system prompt. `$SESSION_ID` works only in per-spawn deployments; in shared-process mode it is not set and the skill library resolves the owning session automatically — a mismatched value is never honored.
+**`--session-id`**: Pass the literal session id rendered in your system prompt. The rendered id is authoritative in every deployment shape: the agent environment may carry no session identity at all (shared agent processes have none), the skill library resolves the owning session automatically, and a mismatched value is never honored.
 
 ## Parameters
 

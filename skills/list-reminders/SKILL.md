@@ -16,14 +16,14 @@ List all active (pending) reminders for the current user.
 
 ```bash
 ${HOME}/.agents/skills/list-reminders/scripts/list-reminders.ts \
-  --session-id "$SESSION_ID"
+  --session-id "<session id rendered in your system prompt>"
 ```
 
 ## Parameters
 
-| Parameter      | Required | Description                                                                                                                                                                                                                                      |
-| -------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `--session-id` | Yes      | Use the session id rendered in your system prompt. `$SESSION_ID` works only in per-spawn deployments; in shared-process mode it is not set and the skill library resolves the owning session automatically — a mismatched value is never honored |
+| Parameter      | Required | Description                                                                                                                                                                                               |
+| -------------- | -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--session-id` | Yes      | Pass the literal session id rendered in your system prompt — authoritative in every deployment shape; the skill library resolves the owning session automatically and a mismatched value is never honored |
 
 ## Example Response
 

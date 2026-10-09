@@ -15,25 +15,25 @@ The `search_messages` query is OPTIONAL per type. When present, it MUST NOT appe
 1. Write the query text to a payload file under the session staging directory using your **edit/write tool**:
 
    ```
-   $TMPDIR/$SESSION_ID/query.md
+   <absolute staging directory rendered in your system prompt>/query.md
    ```
 
-   The `$TMPDIR` / `$SESSION_ID` tokens in that path are expanded by the ACP path boundary, so the write is approved and the text bytes are preserved **verbatim** (no shell expansion). `$TMPDIR/$SESSION_ID/` is the per-spawn form of the staging directory; in shared-process deployments the staging directory is shown in your system prompt and the script resolves it automatically.
+   Use the **absolute staging directory your system prompt renders** verbatim — never build the path from environment variables. The write goes through the ACP filesystem interface, so the text bytes are preserved **verbatim** (no shell expansion), and the script resolves the owning session automatically in every deployment shape.
 
 2. Invoke the script with the payload file path:
 
    ```bash
    # Get recent messages
    ${HOME}/.agents/skills/fetch-context/scripts/fetch-context.ts \
-     --session-id "$SESSION_ID" \
+     --session-id "<session id rendered in your system prompt>" \
      --type recent_messages \
      --limit 20
 
    # Search messages
    ${HOME}/.agents/skills/fetch-context/scripts/fetch-context.ts \
-     --session-id "$SESSION_ID" \
+     --session-id "<session id rendered in your system prompt>" \
      --type search_messages \
-     --query-file "$TMPDIR/$SESSION_ID/query.md" \
+     --query-file "<absolute staging directory rendered in your system prompt>/query.md" \
      --limit 10
    ```
 
@@ -68,7 +68,7 @@ attachments are metadata and URLs only; the daemon never downloads them.
 
 ## Error Codes
 
-If the script fails, read the JSON error on stderr. It contains the fix. Common codes: `SKILL_LEGACY_FLAG` (you used the removed `--query` flag — stage the text in `$TMPDIR/$SESSION_ID/query.md` and use `--query-file`), `SKILL_PAYLOAD_OUT_OF_BOUNDS` (payload path outside `$TMPDIR/$SESSION_ID/`), `SKILL_PAYLOAD_NOT_FOUND` (payload file not written yet — write it first with the edit/write tool).
+If the script fails, read the JSON error on stderr. It contains the fix. Common codes: `SKILL_LEGACY_FLAG` (you used the removed `--query` flag — stage the text in `<absolute staging directory rendered in your system prompt>/query.md` and use `--query-file`), `SKILL_PAYLOAD_OUT_OF_BOUNDS` (payload path outside `<absolute staging directory rendered in your system prompt>/`), `SKILL_PAYLOAD_NOT_FOUND` (payload file not written yet — write it first with the edit/write tool).
 
 ## Critical Rules
 

@@ -29,8 +29,8 @@ async function main() {
       alias: "m",
       fileName: "reply.md",
       example: `${Deno.env.get("HOME") ?? "~"}/.agents/skills/edit-reply/scripts/edit-reply.ts ` +
-        `--session-id "$SESSION_ID" --message-id "$MESSAGE_ID" ` +
-        `--message-file "$TMPDIR/$SESSION_ID/reply.md"`,
+        `--session-id "<session id rendered in your system prompt>" --message-id "$MESSAGE_ID" ` +
+        `--message-file "<absolute staging directory rendered in your system prompt>/reply.md"`,
     });
 
     const result = await callSkillApi(apiUrl, "edit-reply", sessionId, {

@@ -9,7 +9,7 @@
 //   - payloads outside the session staging dir are rejected with
 //     SKILL_PAYLOAD_OUT_OF_BOUNDS
 
-import { assertEquals, assertStringIncludes } from "@std/assert";
+import { assertEquals, assertFalse, assertStringIncludes } from "@std/assert";
 import { join, resolve } from "@std/path";
 
 const REPO_ROOT = resolve(import.meta.dirname ?? ".", "..", "..");
@@ -448,7 +448,12 @@ Deno.test("scripts - legacy --message flag rejected in both forms, API never hit
       const message = String(err.error ?? "");
       assertStringIncludes(message, "expanded by the shell");
       assertStringIncludes(message, "--message-file");
-      assertStringIncludes(message, "$TMPDIR/$SESSION_ID");
+      // Literal-first guidance: the correction names the prompt-rendered
+      // staging directory, never a shell token.
+      assertStringIncludes(message, "staging directory rendered in your system prompt");
+      assertStringIncludes(message, "session id rendered in your system prompt");
+      assertFalse(message.includes("$TMPDIR"));
+      assertFalse(message.includes("$SESSION_ID"));
     }
     assertEquals(api.requests.length, 0);
   } finally {

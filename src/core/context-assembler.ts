@@ -5,6 +5,7 @@ import { combinedTokenCount, estimateTokens } from "@utils/token-counter.ts";
 import { MemoryStore } from "./memory-store.ts";
 import { WorkspaceManager } from "./workspace-manager.ts";
 import { loadSystemPrompt } from "./config-loader.ts";
+import { sessionStagingDir } from "./session-staging.ts";
 import { DEFAULT_RECALL_CONFIG } from "./memory-recall/recall-config.ts";
 import { renderFixedMemoryLine, selectFixedMemories } from "./memory-recall/fixed-selection.ts";
 import { renderFastRecallSection, renderNoteEntry } from "./memory-recall/fast-recall.ts";
@@ -131,7 +132,7 @@ export class ContextAssembler {
       // enforces containment against (`{workspace}/tmp/{sessionId}`). In
       // shared-process mode the process-level TMPDIR is a channel-scoped dir
       // that is NEVER a staging area.
-      tmpDir: workspace && sessionId ? `${workspace.tmpPath}/${sessionId}` : workspace?.tmpPath,
+      tmpDir: workspace ? sessionStagingDir(workspace, sessionId) : undefined,
       // Current skill-API session id (shared mode: NOT the frozen $SESSION_ID).
       sessionId,
     };
@@ -159,7 +160,7 @@ export class ContextAssembler {
     event: NormalizedEvent,
     workspace: WorkspaceInfo,
     messageFetcher: MessageFetcher,
-    _sessionId?: string,
+    sessionId?: string,
     model?: string,
     yolo?: boolean,
     agentWorkspacePath?: string,
@@ -179,6 +180,13 @@ export class ContextAssembler {
       agentType: this.config.agentType,
       model,
       yolo,
+      // Payload-staging prompt contract: every render of a staging-instructing
+      // template supplies the literal Skill API session id + absolute staging
+      // dir (the message flow's delivered prompt is renderFullPrompt below;
+      // this render must carry the identical pair so no template path can
+      // fall back to shell tokens).
+      sessionId,
+      tmpDir: sessionStagingDir(workspace, sessionId),
     };
 
     // Load system prompt
@@ -990,7 +998,7 @@ export class ContextAssembler {
     workspace: WorkspaceInfo,
     messageFetcher: MessageFetcher,
     options: { fetchRecentMessages: boolean },
-    _sessionId?: string,
+    sessionId?: string,
     model?: string,
     yolo?: boolean,
   ): Promise<AssembledSpontaneousContext> {
@@ -1009,6 +1017,11 @@ export class ContextAssembler {
       agentType: this.config.agentType,
       model,
       yolo,
+      // Literal id + absolute staging dir on every payload-staging render
+      // (see assembleContext; the delivered spontaneous prompt is re-rendered
+      // by the orchestrator with the same values).
+      sessionId,
+      tmpDir: sessionStagingDir(workspace, sessionId),
     };
 
     const systemPrompt = await this.getSystemPrompt(templateVars);

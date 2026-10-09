@@ -16,16 +16,16 @@ Cancel a previously set reminder. The reminder must belong to the current user.
 
 ```bash
 ${HOME}/.agents/skills/cancel-reminder/scripts/cancel-reminder.ts \
-  --session-id "$SESSION_ID" \
+  --session-id "<session id rendered in your system prompt>" \
   --reminder-id "rem_1705312800000_a1b2c3d4"
 ```
 
 ## Parameters
 
-| Parameter       | Required | Description                                                                                                                                                                                                                                      |
-| --------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `--session-id`  | Yes      | Use the session id rendered in your system prompt. `$SESSION_ID` works only in per-spawn deployments; in shared-process mode it is not set and the skill library resolves the owning session automatically — a mismatched value is never honored |
-| `--reminder-id` | Yes      | The ID of the reminder to cancel (returned by `set-reminder`)                                                                                                                                                                                    |
+| Parameter       | Required | Description                                                                                                                                                                                               |
+| --------------- | -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--session-id`  | Yes      | Pass the literal session id rendered in your system prompt — authoritative in every deployment shape; the skill library resolves the owning session automatically and a mismatched value is never honored |
+| `--reminder-id` | Yes      | The ID of the reminder to cancel (returned by `set-reminder`)                                                                                                                                             |
 
 ## Example Response
 

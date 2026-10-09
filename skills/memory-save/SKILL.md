@@ -15,17 +15,17 @@ Save important information that should persist across conversations.
 1. Write the memory content to a payload file under the session staging directory using your **edit/write tool**:
 
    ```
-   $TMPDIR/$SESSION_ID/content.md
+   <absolute staging directory rendered in your system prompt>/content.md
    ```
 
-   The `$TMPDIR` / `$SESSION_ID` tokens in that path are expanded by the ACP path boundary, so the write is approved and the text bytes are preserved **verbatim** (no shell expansion). `$TMPDIR/$SESSION_ID/` is the per-spawn form of the staging directory; in shared-process deployments the staging directory is shown in your system prompt and the script resolves it automatically.
+   Use the **absolute staging directory your system prompt renders** verbatim — never build the path from environment variables. The write goes through the ACP filesystem interface, so the text bytes are preserved **verbatim** (no shell expansion), and the script resolves the owning session automatically in every deployment shape.
 
 2. Invoke the script with the payload file path:
 
    ```bash
    ${HOME}/.agents/skills/memory-save/scripts/memory-save.ts \
-     --session-id "$SESSION_ID" \
-     --content-file "$TMPDIR/$SESSION_ID/content.md" \
+     --session-id "<session id rendered in your system prompt>" \
+     --content-file "<absolute staging directory rendered in your system prompt>/content.md" \
      --importance high
    ```
 
@@ -44,7 +44,7 @@ Save important information that should persist across conversations.
 
 ## Error Codes
 
-If the script fails, read the JSON error on stderr. It contains the fix. Common codes: `SKILL_LEGACY_FLAG` (you used the removed `--content` flag — stage the text in `$TMPDIR/$SESSION_ID/content.md` and use `--content-file`), `SKILL_MISSING_PAYLOAD` (no `--content-file` given), `SKILL_PAYLOAD_OUT_OF_BOUNDS` (payload path outside `$TMPDIR/$SESSION_ID/`), `SKILL_PAYLOAD_NOT_FOUND` (payload file not written yet — write it first with the edit/write tool).
+If the script fails, read the JSON error on stderr. It contains the fix. Common codes: `SKILL_LEGACY_FLAG` (you used the removed `--content` flag — stage the text in `<absolute staging directory rendered in your system prompt>/content.md` and use `--content-file`), `SKILL_MISSING_PAYLOAD` (no `--content-file` given), `SKILL_PAYLOAD_OUT_OF_BOUNDS` (payload path outside `<absolute staging directory rendered in your system prompt>/`), `SKILL_PAYLOAD_NOT_FOUND` (payload file not written yet — write it first with the edit/write tool).
 
 ## Notes
 

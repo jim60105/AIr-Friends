@@ -4,8 +4,19 @@
 // never appear on a shell command line: bash expands `$VAR` in double-quoted
 // arguments before the script runs, corrupting content and leaking subprocess
 // environment variables into external channels. Instead, the agent stages the
-// text in a payload file under the session-scoped TMPDIR via the ACP filesystem
-// interface (edit/write tool), and the script reads it back verbatim.
+// text in a payload file under its session staging directory — the ABSOLUTE
+// path rendered into the agent's system prompt, which every bundled prompt and
+// retry message supplies as a literal in both spawn shapes — via the ACP
+// filesystem interface (edit/write tool), and the script reads it back verbatim.
+//
+// Legacy compatibility (pinned by tests): older OpenCode sessions and any
+// operator-mounted prompt that still instructs the token form keep working
+// unchanged — bash expands `"$TMPDIR/$SESSION_ID/x.md"` (per-spawn) and the ACP
+// path boundary expands structured-tool token paths from its own per-session
+// context, so a token-path payload arrives here as an ordinary expanded path
+// and resolves exactly as the literal form does. Nothing in this file reads
+// `$TMPDIR`/`$SESSION_ID` itself; the resolution below consumes only the
+// pointer, the CLI argument, and the script cwd.
 
 import { isAbsolute, resolve, SEPARATOR } from "jsr:@std/path@^1.0.0";
 import { SKILL_SESSION_UNRESOLVED, unresolvedSessionPointerMessage } from "./client.ts";
@@ -51,22 +62,27 @@ export function isWithinDir(path: string, base: string): boolean {
  * Resolve the session staging base directory.
  *
  * The staging area is the session's own workspace tmp dir (`{workspace}/tmp/
- * {sessionId}`), which is what the prompt renders as `{{ tmpDir }}` and what
- * the ACP path boundary expands `$TMPDIR` to for the agent's edit/write tools.
+ * {sessionId}`), which is the absolute path every bundled prompt renders as
+ * `{{ tmpDir }}` and hands the agent as a LITERAL (the ACP path boundary
+ * additionally still expands the legacy `$TMPDIR` token form for
+ * edit/write-tool paths — a compat route, not the instructed one).
  * Resolution order:
  *  1. Shared-process mode (`SKILL_SHARED_PROCESS=1`): the current-session
  *    pointer (`{SKILL_JWT_DIR}/active.json`) is the ONLY source — it carries
  *    the owning session's staging root written by the process pool at lease
- *    acquisition, plus the CURRENT session id (the process `$SESSION_ID` and
- *    hence the CLI `--session-id` may be a stale spawn-time value there). A
+ *    acquisition, plus the CURRENT session id (the pooled process carries no
+ *    spawn-time session identity, so the CLI `--session-id` may name anything
+ *    there — including an id this process never owned). A
  *    missing, unreadable, or malformed pointer throws `SKILL_SESSION_UNRESOLVED`
  *    BEFORE any payload file is read or deleted — there is NO CLI-argument
  *    fallback, because a backgrounded/late-running pooled script could name a
  *    sibling session's id (same workspace) and read plus delete that session's
  *    staged content; the later JWT check gates the API call, not the file I/O.
  *  2. Per-spawn mode / pointer unavailable: `{cwd}/tmp/{sessionId}`, where the
- *    script's cwd is the session workspace and `sessionId` is the CLI arg
- *    (`$SESSION_ID` is authoritative there). The pointer is honored only when
+ *    script's cwd is the session workspace and `sessionId` is the CLI arg (in
+ *    the per-spawn shape that argument is the literal id rendered in the
+ *    prompt — the same value `$SESSION_ID` names there). The pointer is
+ *    honored only when
  *    it names this exact session, so a stale pointer left by a crashed pool
  *    run cannot hijack the staging boundary.
  *
@@ -255,7 +271,7 @@ export async function readPayloadArg(
 function twoStepGuidance(flagName: string, options: { fileName: string; example: string }): string {
   return (
     `1. Write the text to the session staging directory shown in your system prompt ` +
-    `(\`$TMPDIR/$SESSION_ID/${options.fileName}\` in per-session mode) using your edit/write tool. ` +
+    `(the absolute path rendered there; the payload file is ${options.fileName} inside it) using your edit/write tool. ` +
     `2. Invoke the script with --${flagName}-file pointing at that file. ` +
     `Example: ${options.example}`
   );
@@ -290,8 +306,7 @@ function outOfBoundsMessage(
 ): string {
   return (
     `The payload file "${value}" is outside the session staging directory ` +
-    `"${base}" (\`$TMPDIR/$SESSION_ID\` in per-session mode; in shared-process mode the staging ` +
-    `directory shown in your system prompt). The script only reads payload files from its own ` +
+    `"${base}" — the absolute staging directory rendered in your system prompt. The script only reads payload files from its own ` +
     `session's staging directory — this prevents sending the content of arbitrary files (workspace ` +
     `memory, notes, ~/.git-credentials, another session's directory, or a symlink escaping the ` +
     `staging directory). ${twoStepGuidance(options.flagName, options)}`
@@ -304,7 +319,7 @@ function notFoundMessage(
 ): string {
   return (
     `The payload file "${value}" does not exist or cannot be read. The script reads content from a ` +
-    `file staged in $TMPDIR/$SESSION_ID/, so the file must be written FIRST with your edit/write ` +
+    `file staged inside the absolute session staging directory rendered in your system prompt, so the file must be written FIRST with your edit/write ` +
     `tool before invoking the script. ${twoStepGuidance(options.flagName, options)}`
   );
 }

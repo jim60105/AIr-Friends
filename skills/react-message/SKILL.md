@@ -21,11 +21,11 @@ Add an emoji reaction to the message that triggered this conversation.
 
 ```
 ${HOME}/.agents/skills/react-message/scripts/react-message.ts \
-  --session-id "$SESSION_ID" \
+  --session-id "<session id rendered in your system prompt>" \
   --emoji "👍"
 ```
 
-**`--session-id`**: Use the session id rendered in your system prompt. `$SESSION_ID` works only in per-spawn deployments; in shared-process mode it is not set and the skill library resolves the owning session automatically — a mismatched value is never honored.
+**`--session-id`**: Pass the literal session id rendered in your system prompt. The rendered id is authoritative in every deployment shape: the agent environment may carry no session identity at all (shared agent processes have none), the skill library resolves the owning session automatically, and a mismatched value is never honored.
 
 ### Examples
 
@@ -33,7 +33,7 @@ React with a Unicode emoji:
 
 ```
 ${HOME}/.agents/skills/react-message/scripts/react-message.ts \
-  --session-id "$SESSION_ID" \
+  --session-id "<session id rendered in your system prompt>" \
   --emoji "❤️"
 ```
 
@@ -41,6 +41,6 @@ React with a custom platform emoji (use the `useAsReaction` format from the emoj
 
 ```
 ${HOME}/.agents/skills/react-message/scripts/react-message.ts \
-  --session-id "$SESSION_ID" \
+  --session-id "<session id rendered in your system prompt>" \
   --emoji ":custom_emoji_name:"
 ```

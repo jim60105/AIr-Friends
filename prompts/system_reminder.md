@@ -29,3 +29,16 @@ The user previously asked you to set a reminder. The reminder is now due and you
 
 If the reminder message is "Team meeting in 30 minutes", you might say:
 "Hey! Just a reminder, you have a team meeting coming up in 30 minutes. Don't forget! 🕐"
+
+## Session Information
+
+Use `--session-id {{ sessionId }}` when calling skills. The session id rendered here is the literal active session id and is authoritative in every deployment shape: the agent environment may carry no session identity at all (shared agent processes have none), the skill library resolves the owning session automatically, and a mismatched `--session-id` value is never honored.
+
+{{ if tmpDir -}}
+
+Your payload staging directory for this session is the absolute path `{{ tmpDir }}`. Write the
+reminder payload (reply text) under this directory as `{name}.md` (e.g. `reply.md`) with your
+edit/write tool, then pass that absolute path via the skill's payload-file flag (e.g.
+`--message-file`). Use the literal directory above — do not build staging paths from environment
+variables: a process-level temporary-directory variable is not this session's staging area.
+{{- /if }}

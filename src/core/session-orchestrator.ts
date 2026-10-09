@@ -21,6 +21,7 @@ import {
   type RetryPromptContext,
 } from "@acp/agent-factory.ts";
 import { ContextAssembler } from "./context-assembler.ts";
+import { sessionStagingDir } from "./session-staging.ts";
 import { WorkspaceManager } from "./workspace-manager.ts";
 import { MemoryStore } from "./memory-store.ts";
 import { convertUserMCPServerConfigs } from "./config-loader.ts";
@@ -294,10 +295,10 @@ export class SessionOrchestrator {
     sessionId: string,
     agentType: AgentType,
     sessionLogger: ReturnType<typeof createLogger>,
-    retryCtx?: RetryPromptContext,
+    retryCtx: RetryPromptContext,
   ): Promise<acp.PromptResponse> {
     const rejections = connector.getClient()?.getRecentPermissionRejections() ?? [];
-    const retryStrategy = getRetryPromptStrategy(agentType, rejections, retryCtx);
+    const retryStrategy = getRetryPromptStrategy(agentType, retryCtx, rejections);
     sessionLogger.info("Sending retry prompt for session {sessionId}", { sessionId });
     return await connector.prompt(sessionId, retryStrategy.retryPromptMessage);
   }
@@ -858,17 +859,12 @@ export class SessionOrchestrator {
               : false;
             let hasResponded = replySent || reactionSent || fileSent;
             if (!hasResponded && response.stopReason === "end_turn") {
-              // Shared-process retry guidance: name the literal session id and
-              // the rendered staging dir (`$TMPDIR/$SESSION_ID` shell tokens
-              // are stale/absent on a pooled process).
-              const retryCtx: RetryPromptContext = {
-                sharedProcess: true,
-                sessionId: options.shellSessionId ?? undefined,
-                stagingDir: options.shellSessionId
-                  ? `${workspace.tmpPath}/${options.shellSessionId}`
-                  : workspace.tmpPath,
-              };
-              const retryStrategy = getRetryPromptStrategy(agentType, undefined, retryCtx);
+              // Retry guidance is literal-first in both spawn shapes: name the
+              // literal Skill API session id and the rendered staging dir
+              // (`$TMPDIR/$SESSION_ID` shell tokens are stale/absent on a
+              // pooled process and must not be depended on per-spawn either).
+              const retryCtx = this.retryPromptContext(workspace, options.shellSessionId, true);
+              const retryStrategy = getRetryPromptStrategy(agentType, retryCtx);
               for (let attempt = 0; attempt < retryStrategy.maxRetries; attempt++) {
                 replyHandler.clearReplyState(workspace.key, event.channelId);
                 const retryResponse = await this.sendRetryPrompt(
@@ -1209,13 +1205,8 @@ export class SessionOrchestrator {
             "Agent completed without sending reply, reaction, or file, retrying with special prompt",
           );
 
-          const retryStrategy = getRetryPromptStrategy(agentType, undefined, {
-            sharedProcess: !!this.processPool,
-            sessionId: this.skillSessionId(shellSessionId),
-            stagingDir: this.skillSessionId(shellSessionId)
-              ? `${workspace.tmpPath}/${shellSessionId}`
-              : workspace.tmpPath,
-          });
+          const retryCtx = this.retryPromptContext(workspace, shellSessionId, !!this.processPool);
+          const retryStrategy = getRetryPromptStrategy(agentType, retryCtx);
 
           for (let attempt = 0; attempt < retryStrategy.maxRetries; attempt++) {
             // Audit: retry_triggered
@@ -1235,13 +1226,7 @@ export class SessionOrchestrator {
               sessionId,
               agentType,
               sessionLogger,
-              {
-                sharedProcess: !!this.processPool,
-                sessionId: this.skillSessionId(shellSessionId),
-                stagingDir: this.skillSessionId(shellSessionId)
-                  ? `${workspace.tmpPath}/${shellSessionId}`
-                  : workspace.tmpPath,
-              },
+              retryCtx,
             );
 
             sessionLogger.info("Retry prompt completed", {
@@ -1569,9 +1554,7 @@ export class SessionOrchestrator {
         this.skillSessionId(shellSessionId) ?? null,
         resolvedModel,
         yoloDecision.enabled,
-        this.skillSessionId(shellSessionId)
-          ? `${workspace.tmpPath}/${shellSessionId}`
-          : workspace.tmpPath,
+        this.stagingDirFor(workspace, shellSessionId),
       );
 
       sessionLogger.debug("Spontaneous prompt built", {
@@ -1817,13 +1800,8 @@ export class SessionOrchestrator {
         if (!replySent && response.stopReason === "end_turn") {
           sessionLogger.warn("Agent completed without reply, retrying");
 
-          const retryStrategy = getRetryPromptStrategy(agentType, undefined, {
-            sharedProcess: !!this.processPool,
-            sessionId: this.skillSessionId(shellSessionId),
-            stagingDir: this.skillSessionId(shellSessionId)
-              ? `${workspace.tmpPath}/${shellSessionId}`
-              : workspace.tmpPath,
-          });
+          const retryCtx = this.retryPromptContext(workspace, shellSessionId, !!this.processPool);
+          const retryStrategy = getRetryPromptStrategy(agentType, retryCtx);
           for (let attempt = 0; attempt < retryStrategy.maxRetries; attempt++) {
             // Audit: retry_triggered
             await auditWriter?.write("retry_triggered", {
@@ -1839,13 +1817,7 @@ export class SessionOrchestrator {
               sessionId,
               agentType,
               sessionLogger,
-              {
-                sharedProcess: !!this.processPool,
-                sessionId: this.skillSessionId(shellSessionId),
-                stagingDir: this.skillSessionId(shellSessionId)
-                  ? `${workspace.tmpPath}/${shellSessionId}`
-                  : workspace.tmpPath,
-              },
+              retryCtx,
             );
 
             replySent = replyHandler.hasReplySent(workspace.key, channelId);
@@ -2038,6 +2010,7 @@ export class SessionOrchestrator {
         this.skillSessionId(shellSessionId) ?? null,
         resolvedModel,
         this.yolo,
+        this.stagingDirFor(workspace, shellSessionId),
       );
 
       sessionLogger.debug("Self-research prompt built");
@@ -3001,6 +2974,11 @@ export class SessionOrchestrator {
         workspaceKey: `channel:${channelKey}`,
         memoriesDump,
         minMemoryCount: memoryMaintenanceConfig.minMemoryCount,
+        // Channel-memory-maintenance renders the same staging-instructing
+        // template: supply the literal pair like every other payload-staging
+        // render (staging is provisioned under this synthetic workspace).
+        sessionId: this.skillSessionId(shellSessionId),
+        tmpDir: this.stagingDirFor(workspace, shellSessionId),
       };
 
       const fullPrompt = await renderTemplate(
@@ -3392,6 +3370,7 @@ export class SessionOrchestrator {
         this.skillSessionId(shellSessionId) ?? null,
         resolvedModel,
         yoloDecision.enabled,
+        this.stagingDirFor(workspace, shellSessionId),
       );
 
       // === DRY RUN CHECK ===
@@ -3575,13 +3554,8 @@ export class SessionOrchestrator {
         if (!replySent && response.stopReason === "end_turn") {
           sessionLogger.warn("Agent completed without reply, retrying");
 
-          const retryStrategy = getRetryPromptStrategy(agentType, undefined, {
-            sharedProcess: !!this.processPool,
-            sessionId: this.skillSessionId(shellSessionId),
-            stagingDir: this.skillSessionId(shellSessionId)
-              ? `${workspace.tmpPath}/${shellSessionId}`
-              : workspace.tmpPath,
-          });
+          const retryCtx = this.retryPromptContext(workspace, shellSessionId, !!this.processPool);
+          const retryStrategy = getRetryPromptStrategy(agentType, retryCtx);
           for (let attempt = 0; attempt < retryStrategy.maxRetries; attempt++) {
             // Audit: retry_triggered
             await auditWriter?.write("retry_triggered", {
@@ -3597,13 +3571,7 @@ export class SessionOrchestrator {
               sessionId,
               agentType,
               sessionLogger,
-              {
-                sharedProcess: !!this.processPool,
-                sessionId: this.skillSessionId(shellSessionId),
-                stagingDir: this.skillSessionId(shellSessionId)
-                  ? `${workspace.tmpPath}/${shellSessionId}`
-                  : workspace.tmpPath,
-              },
+              retryCtx,
             );
 
             replySent = replyHandler.hasReplySent(workspace.key, dmChannelId);
@@ -3883,14 +3851,8 @@ export class SessionOrchestrator {
 
         if (!hasResponded && response.stopReason === "end_turn") {
           // Shared-process retry guidance: literal session id + staging dir.
-          const retryCtx: RetryPromptContext = {
-            sharedProcess: true,
-            sessionId: this.skillSessionId(shellSessionId),
-            stagingDir: this.skillSessionId(shellSessionId)
-              ? `${workspace.tmpPath}/${shellSessionId}`
-              : workspace.tmpPath,
-          };
-          const retryStrategy = getRetryPromptStrategy(agentType, undefined, retryCtx);
+          const retryCtx = this.retryPromptContext(workspace, shellSessionId, true);
+          const retryStrategy = getRetryPromptStrategy(agentType, retryCtx);
           for (let attempt = 0; attempt < retryStrategy.maxRetries; attempt++) {
             await auditWriter?.write("retry_triggered", {
               retryCount: attempt + 1,
@@ -4345,6 +4307,35 @@ export class SessionOrchestrator {
   }
 
   /**
+   * The canonical ABSOLUTE payload staging dir for one session: keyed on the
+   * LITERAL Skill API session id (never the raw internal registry id), so an
+   * id-keyed path appears only where the Skill API — and its provisioned
+   * `{workspace}/tmp/{sessionId}` staging dir — exists. Skill-API-disabled
+   * sessions keep the `{workspace}/tmp` fallback the payload helper documents.
+   */
+  private stagingDirFor(workspace: { tmpPath: string }, registrySessionId: string | null): string {
+    return sessionStagingDir(workspace, this.skillSessionId(registrySessionId));
+  }
+
+  /**
+   * The mandatory literal-first retry-prompt context: every missing-reply
+   * retry names the same literal Skill API session id and absolute staging
+   * directory the session's system prompt rendered (per-spawn and pooled
+   * alike — there is no token-shaped retry text anymore).
+   */
+  private retryPromptContext(
+    workspace: { tmpPath: string },
+    registrySessionId: string | null,
+    sharedProcess: boolean,
+  ): RetryPromptContext {
+    return {
+      sharedProcess,
+      sessionId: this.skillSessionId(registrySessionId) ?? "",
+      stagingDir: this.stagingDirFor(workspace, registrySessionId),
+    };
+  }
+
+  /**
    * The named post-restore recovery hook handed to pooled recovery (row 11, D6).
    * Production is the documented no-op: it asserts no readiness, requests
    * nothing, gates no prompt or handshake. The seam exists so the attach point
@@ -4752,6 +4743,7 @@ export class SessionOrchestrator {
     sessionId: string | null,
     model?: string,
     yolo?: boolean,
+    tmpDir?: string,
   ): Promise<string> {
     const promptDir = dirname(this.config.agent.systemPromptPath);
     const instructionsPath = join(promptDir, "system_self_research.md");
@@ -4772,6 +4764,7 @@ export class SessionOrchestrator {
       canWriteAgentWorkspace: true,
       rssItems: rssBlock,
       sessionId: sessionId ?? undefined,
+      tmpDir,
     };
 
     return await renderTemplate(
@@ -4812,7 +4805,7 @@ export class SessionOrchestrator {
       memoriesDump,
       minMemoryCount,
       sessionId: sessionId ?? undefined,
-      tmpDir: sessionId ? `${workspace.tmpPath}/${sessionId}` : workspace.tmpPath,
+      tmpDir: sessionStagingDir(workspace, sessionId),
     };
 
     return await renderTemplate(
@@ -4901,9 +4894,10 @@ export class SessionOrchestrator {
    */
   private async buildReminderPrompt(
     reminder: ResolvedReminder,
-    _sessionId: string | null,
+    sessionId: string | null,
     model?: string,
     yolo?: boolean,
+    tmpDir?: string,
   ): Promise<string> {
     const promptDir = dirname(this.config.agent.systemPromptPath);
     const instructionsPath = join(promptDir, "system_reminder.md");
@@ -4921,6 +4915,11 @@ export class SessionOrchestrator {
       reminderMessage: reminder.message,
       reminderCreatedAt: reminder.createdAt,
       reminderScheduledAt: reminder.scheduledAt,
+      // Reminder delivery instructs the send-reply payload-file flow: the
+      // rendered reminder prompt supplies the literal session id and the
+      // absolute staging directory like every other payload-staging prompt.
+      sessionId: sessionId ?? undefined,
+      tmpDir,
     };
 
     return await renderTemplate(
@@ -5008,9 +5007,7 @@ export class SessionOrchestrator {
         const env = createTemplateEngine(promptDir);
         const summaryPrompt = await renderTemplate(env, summaryPromptPath, {
           sessionId: this.skillSessionId(shellSessionId),
-          tmpDir: this.skillSessionId(shellSessionId)
-            ? `${workspace.tmpPath}/${shellSessionId}`
-            : workspace.tmpPath,
+          tmpDir: this.stagingDirFor(workspace, shellSessionId),
         });
 
         sessionLogger.info("Generating conversation summary");
