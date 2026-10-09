@@ -30,8 +30,8 @@ import { formatDiscoverySessionError } from "../discovery-guard.ts";
 import { attachEnforcementAtLoad, getLoadTimeEnforcementRegistration } from "./enforcement.ts";
 import {
   attachReadReplacementAtLoad,
-  registerLoadTimeReadReplacement,
   type ReadToolRegistrar,
+  registerLoadTimeReadReplacement,
 } from "./read-replacement.ts";
 
 // Execute load-time pre-import discovery bootstrap sequence immediately upon import
@@ -88,7 +88,6 @@ export default function trustedExtensionFactory() {
     // honesty posture as the handler slot: a host surface receiving this
     // function gets the SAME registered definition, and no field here
     // claims the official binary ever calls it.
-    registerTools: (registrar: ReadToolRegistrar) =>
-      registerLoadTimeReadReplacement(registrar),
+    registerTools: (registrar: ReadToolRegistrar) => registerLoadTimeReadReplacement(registrar),
   };
 }

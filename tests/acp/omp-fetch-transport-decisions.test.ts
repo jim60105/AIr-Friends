@@ -14,13 +14,13 @@ import { isDisallowedAddress } from "@utils/ssrf.ts";
 import {
   decideFetchHop,
   deriveFetchEgressPolicy,
+  type FetchDecisionRecord,
+  type FetchEgressPolicy,
   fetchEgressPolicyFromAgentEnv,
+  type FetchTransportFn,
   MAX_REDIRECT_HOPS,
   runFetchChain,
   runSecondaryFetch,
-  type FetchDecisionRecord,
-  type FetchEgressPolicy,
-  type FetchTransportFn,
 } from "@acp/omp/fetch-transport.ts";
 
 // Zero-network guarantee: nothing below reaches a socket.
@@ -37,14 +37,14 @@ const UNRESTRICTED: FetchEgressPolicy = { posture: "unrestricted" };
 
 /** Mocked DNS: hostname → answers; unknown hosts resolve to TEST-NET-3. */
 function mockDns(table: Record<string, string[]> = {}) {
-  return async (host: string): Promise<string[]> => {
+  return (host: string): Promise<string[]> => {
     if (host in table) {
       const answers = table[host];
-      if (answers.length === 0) throw new Error(`no records for ${host}`);
-      return answers;
+      if (answers.length === 0) return Promise.reject(new Error(`no records for ${host}`));
+      return Promise.resolve(answers);
     }
-    if (/^\d+/.test(host) || host.includes(":")) return [host];
-    return ["203.0.113." + (1 + (host.length % 200))];
+    if (/^\d+/.test(host) || host.includes(":")) return Promise.resolve([host]);
+    return Promise.resolve(["203.0.113." + (1 + (host.length % 200))]);
   };
 }
 
@@ -59,9 +59,9 @@ function mockTransport(
   const requests: Array<{ url: string; init?: RequestInit }> = [];
   return {
     requests,
-    fetchImpl: async (url, init) => {
+    fetchImpl: (url, init) => {
       requests.push({ url, init });
-      return responder(url, requests.length - 1);
+      return Promise.resolve(responder(url, requests.length - 1));
     },
   };
 }
@@ -125,7 +125,10 @@ Deno.test("Posture (env read): loopback proxy URL = enforcing; absent = unrestri
     { posture: "enforcing", proxyEndpoint: "http://127.0.0.1:9099" },
   );
   assertEquals(fetchEgressPolicyFromAgentEnv({}), { posture: "unrestricted" });
-  assertEquals(fetchEgressPolicyFromAgentEnv({ HTTP_PROXY: "http://evil.example:1" }).posture, "unresolved");
+  assertEquals(
+    fetchEgressPolicyFromAgentEnv({ HTTP_PROXY: "http://evil.example:1" }).posture,
+    "unresolved",
+  );
 });
 
 // ---------------------------------------------------------------------------
@@ -182,7 +185,10 @@ for (const [host, address, addressClass] of BLOCKED_TARGETS) {
     );
     assertEquals(decision.decision, "block");
     if (decision.decision === "block") {
-      assertEquals(decision.reason, addressClass === "cloud-metadata" ? "cloud-metadata" : "disallowed-address");
+      assertEquals(
+        decision.reason,
+        addressClass === "cloud-metadata" ? "cloud-metadata" : "disallowed-address",
+      );
       assertEquals(decision.addressClass, addressClass);
     }
   });
@@ -229,7 +235,14 @@ Deno.test("Divergence: nothing ssrf.ts rejects is ever allowed by the adapter", 
 // Schemes.
 // ---------------------------------------------------------------------------
 
-for (const schemeUrl of ["pi-internal://device/x", "file:///etc/passwd", "ftp://example/x", "gopher://x"]) {
+for (
+  const schemeUrl of [
+    "pi-internal://device/x",
+    "file:///etc/passwd",
+    "ftp://example/x",
+    "gopher://x",
+  ]
+) {
   Deno.test(`Non-http scheme blocked and never proxied: ${schemeUrl}`, async () => {
     const transport = mockTransport(() => textResponse());
     const decision = await decideFetchHop(
@@ -244,7 +257,11 @@ for (const schemeUrl of ["pi-internal://device/x", "file:///etc/passwd", "ftp://
       fetchImpl: transport.fetchImpl,
     });
     assertEquals(chain.ok, false);
-    assertEquals(transport.requests.length, 0, "a blocked scheme is never issued, let alone proxied");
+    assertEquals(
+      transport.requests.length,
+      0,
+      "a blocked scheme is never issued, let alone proxied",
+    );
   });
 }
 
@@ -279,7 +296,7 @@ Deno.test("Six-hop chain blocks with hop-limit after at most five followed hops"
 });
 
 Deno.test("Native redirect:follow shape is never emitted on any issued hop", async () => {
-  const transport = mockTransport((url, seen) =>
+  const transport = mockTransport((_url, seen) =>
     seen === 0 ? redirectResponse("https://final.example/page") : textResponse("final")
   );
   const chain = await runFetchChain("https://start.example/page", {
@@ -290,7 +307,7 @@ Deno.test("Native redirect:follow shape is never emitted on any issued hop", asy
   assertEquals(chain.ok, true);
   assertEquals(transport.requests.length, 2);
   for (const request of transport.requests) {
-    assertEquals((request.init?.redirect ?? "manual"), "manual");
+    assertEquals(request.init?.redirect ?? "manual", "manual");
     assertNotEquals(request.init?.redirect, "follow");
   }
 });
@@ -331,7 +348,12 @@ Deno.test("Public → private Location blocks AT the hop; the private request is
 });
 
 Deno.test("Hop to link-local/ULA/metadata after a public hop blocks at that hop", async () => {
-  for (const [addr, addressClass] of [["169.254.5.5", "link-local"], ["fd00::9", "unique-local"], ["169.254.169.254", "cloud-metadata"]] as const) {
+  for (
+    const [addr, addressClass] of [["169.254.5.5", "link-local"], ["fd00::9", "unique-local"], [
+      "169.254.169.254",
+      "cloud-metadata",
+    ]] as const
+  ) {
     const transport = mockTransport(() => redirectResponse("https://late.example/x"));
     const chain = await runFetchChain("https://public.example/page", {
       resolveHost: mockDns({ "public.example": ["203.0.113.7"], "late.example": [addr] }),
@@ -467,7 +489,7 @@ Deno.test("HTTP_PROXY presence is non-enforcement: the verdict is env-independen
 Deno.test("Resolver answering with non-address strings fails closed", async () => {
   const decision = await decideFetchHop(
     { url: "https://weird.example/", hopType: "initial", hopsFollowed: 0 },
-    { resolveHost: async () => ["not-an-ip.example"], policy: UNRESTRICTED },
+    { resolveHost: () => Promise.resolve(["not-an-ip.example"]), policy: UNRESTRICTED },
   );
   assertEquals(decision.decision, "block");
   if (decision.decision === "block") assertEquals(decision.reason, "dns-invalid-answer");

@@ -45,91 +45,93 @@ export interface FetchRouteCitation {
 const PIN = { ompVersion: PINNED_OMP_VERSION, ompCommit: PINNED_OMP_COMMIT } as const;
 
 /** The frozen S1-S9 citation set (re-verified at the pin; zero drift). */
-export const FETCH_ROUTE_CITATIONS: readonly FetchRouteCitation[] = Object.freeze([
-  {
-    id: "S1",
-    ...PIN,
-    location: "packages/coding-agent/src/tools/index.ts (ToolSession.fetch, field + doc comment)",
-    fact: "ToolSession carries an optional `fetch?: FetchImpl` documented as \"injected into the " +
-      "URL read pipeline (tests, proxies). Defaults to global fetch.\"",
-  },
-  {
-    id: "S2",
-    ...PIN,
-    location:
-      "packages/coding-agent/src/tools/fetch.ts (renderUrl signature forwards session.fetch; " +
-      "renderHtmlToText `const fetchImpl = fetchOverride ?? fetch`)",
-    fact: "The URL-read pipeline accepts the override ONLY in enrichment: renderUrl forwards " +
-      "session.fetch solely into renderHtmlToText, whose fetchImpl covers the reader-provider " +
-      "enrichment runners (native/trafilatura/lynx/parallel/firecrawl/jina).",
-  },
-  {
-    id: "S3",
-    ...PIN,
-    location: "packages/coding-agent/src/web/scrapers/types.ts (loadPage)",
-    fact: "The primary page fetch bypasses the override: loadPage calls global fetch with " +
-      "redirect: \"follow\".",
-  },
-  {
-    id: "S4",
-    ...PIN,
-    location: "packages/coding-agent/src/web/scrapers/utils.ts (fetchBinary)",
-    fact: "The binary fetch bypasses it too: fetchBinary calls global fetch with redirect: " +
-      "\"follow\".",
-  },
-  {
-    id: "S5",
-    ...PIN,
-    location:
-      "packages/coding-agent/src/tools/fetch.ts (tryMdSuffix, tryLlmEndpoints, markdown/feed " +
-      "alternates, doc-link retry — all via loadPage/fetchBinary)",
-    fact: "Secondary scraper URLs (markdown alternate, feed alternate, document-link retry, " +
-      "llms.txt/.md probes) are fetched through loadPage/fetchBinary and inherit the S3/S4 " +
-      "automatic-redirect bypass.",
-  },
-  {
-    id: "S6",
-    ...PIN,
-    location:
-      "packages/coding-agent/src/tools/read.ts (ReadTool name = \"read\"; parseReadUrlTarget → " +
-      "fetchReadUrl/executeReadUrl) + packages/coding-agent/src/tools/fetch.ts (fetchReadUrl, " +
-      "materializeReadUrlToFile, executeReadUrl)",
-    fact: "The model's URL read enters via the read tool's URL branch: parseReadUrlTarget " +
-      "matches dispatch to executeReadUrl → fetchReadUrl → renderUrl; the file-shaped consumer " +
-      "is materializeReadUrlToFile.",
-  },
-  {
-    id: "S7",
-    ...PIN,
-    location:
-      "packages/coding-agent/src/extensibility/extensions/types.ts (registerTool(tool: " +
-      "ToolDefinition); ToolDefinition.execute; ctx.invokeTool on the delegation context)",
-    fact: "The extension API exposes registerTool(tool: ToolDefinition); ToolDefinition carries " +
-      "name, parameters, execute(...), onSession, and the native-delegation context.",
-  },
-  {
-    id: "S8",
-    ...PIN,
-    location:
-      "packages/coding-agent/src/sdk.ts (nativeToolsByName captured before the extension-tools-" +
-      "over-registry loop; setNativeToolResolver) + extensibility/extensions/runner.ts " +
-      "(getRegisteredTool, documented last-extension-wins)",
-    fact: "Session construction captures the native built-ins BEFORE applying registered " +
-      "extension tools over the registry (toolRegistry.set(tool.name, tool)), natives retained " +
-      "in nativeToolsByName; getRegisteredTool is last-extension-wins and setNativeToolResolver " +
-      "exposes the unwrapped native to same-tool ctx.invokeTool.",
-  },
-  {
-    id: "S9",
-    ...PIN,
-    location:
-      "packages/coding-agent/src/main.ts (createAcpSessionFactory; no fetch-transport " +
-      "injection) + packages/coding-agent/src/sdk.ts (toolSession literal sets no fetch field)",
-    fact: "No ACP-bootstrapped injection point populates ToolSession.fetch at the pin: the ACP " +
-      "entry path contains no fetch-transport injection and the constructed toolSession literal " +
-      "does not set fetch.",
-  },
-] as const);
+export const FETCH_ROUTE_CITATIONS: readonly FetchRouteCitation[] = Object.freeze(
+  [
+    {
+      id: "S1",
+      ...PIN,
+      location: "packages/coding-agent/src/tools/index.ts (ToolSession.fetch, field + doc comment)",
+      fact:
+        'ToolSession carries an optional `fetch?: FetchImpl` documented as "injected into the ' +
+        'URL read pipeline (tests, proxies). Defaults to global fetch."',
+    },
+    {
+      id: "S2",
+      ...PIN,
+      location:
+        "packages/coding-agent/src/tools/fetch.ts (renderUrl signature forwards session.fetch; " +
+        "renderHtmlToText `const fetchImpl = fetchOverride ?? fetch`)",
+      fact: "The URL-read pipeline accepts the override ONLY in enrichment: renderUrl forwards " +
+        "session.fetch solely into renderHtmlToText, whose fetchImpl covers the reader-provider " +
+        "enrichment runners (native/trafilatura/lynx/parallel/firecrawl/jina).",
+    },
+    {
+      id: "S3",
+      ...PIN,
+      location: "packages/coding-agent/src/web/scrapers/types.ts (loadPage)",
+      fact: "The primary page fetch bypasses the override: loadPage calls global fetch with " +
+        'redirect: "follow".',
+    },
+    {
+      id: "S4",
+      ...PIN,
+      location: "packages/coding-agent/src/web/scrapers/utils.ts (fetchBinary)",
+      fact: "The binary fetch bypasses it too: fetchBinary calls global fetch with redirect: " +
+        '"follow".',
+    },
+    {
+      id: "S5",
+      ...PIN,
+      location:
+        "packages/coding-agent/src/tools/fetch.ts (tryMdSuffix, tryLlmEndpoints, markdown/feed " +
+        "alternates, doc-link retry — all via loadPage/fetchBinary)",
+      fact: "Secondary scraper URLs (markdown alternate, feed alternate, document-link retry, " +
+        "llms.txt/.md probes) are fetched through loadPage/fetchBinary and inherit the S3/S4 " +
+        "automatic-redirect bypass.",
+    },
+    {
+      id: "S6",
+      ...PIN,
+      location:
+        'packages/coding-agent/src/tools/read.ts (ReadTool name = "read"; parseReadUrlTarget → ' +
+        "fetchReadUrl/executeReadUrl) + packages/coding-agent/src/tools/fetch.ts (fetchReadUrl, " +
+        "materializeReadUrlToFile, executeReadUrl)",
+      fact: "The model's URL read enters via the read tool's URL branch: parseReadUrlTarget " +
+        "matches dispatch to executeReadUrl → fetchReadUrl → renderUrl; the file-shaped consumer " +
+        "is materializeReadUrlToFile.",
+    },
+    {
+      id: "S7",
+      ...PIN,
+      location: "packages/coding-agent/src/extensibility/extensions/types.ts (registerTool(tool: " +
+        "ToolDefinition); ToolDefinition.execute; ctx.invokeTool on the delegation context)",
+      fact:
+        "The extension API exposes registerTool(tool: ToolDefinition); ToolDefinition carries " +
+        "name, parameters, execute(...), onSession, and the native-delegation context.",
+    },
+    {
+      id: "S8",
+      ...PIN,
+      location:
+        "packages/coding-agent/src/sdk.ts (nativeToolsByName captured before the extension-tools-" +
+        "over-registry loop; setNativeToolResolver) + extensibility/extensions/runner.ts " +
+        "(getRegisteredTool, documented last-extension-wins)",
+      fact: "Session construction captures the native built-ins BEFORE applying registered " +
+        "extension tools over the registry (toolRegistry.set(tool.name, tool)), natives retained " +
+        "in nativeToolsByName; getRegisteredTool is last-extension-wins and setNativeToolResolver " +
+        "exposes the unwrapped native to same-tool ctx.invokeTool.",
+    },
+    {
+      id: "S9",
+      ...PIN,
+      location: "packages/coding-agent/src/main.ts (createAcpSessionFactory; no fetch-transport " +
+        "injection) + packages/coding-agent/src/sdk.ts (toolSession literal sets no fetch field)",
+      fact: "No ACP-bootstrapped injection point populates ToolSession.fetch at the pin: the ACP " +
+        "entry path contains no fetch-transport injection and the constructed toolSession literal " +
+        "does not set fetch.",
+    },
+  ] as const,
+);
 
 /** Machine-readable route row per design D3 / tasks 3.1. */
 export interface FetchRouteRow {
@@ -154,115 +156,118 @@ const replacementMechanism = FETCH_COMPLETING_MECHANISM;
  * direct native loadPage/fetchBinary route stays blocked with
  * `userDecisionRequired`. No mock result clears any blocked row.
  */
-export const FETCH_ROUTE_TABLE: readonly FetchRouteRow[] = Object.freeze([
-  {
-    routeId: "read.url-branch.text",
-    mechanism: replacementMechanism,
-    status: "completed-by-adapter",
-    citations: citation("S6", "S7", "S8"),
-    notes: "Page/markdown reads served by the adapter text route (manual per-hop validation, " +
-      "MAX_OUTPUT_CHARS bound); native loadPage never invoked on this path. Mock-only " +
-      "certification; native invocation stays on the section-15 checklist.",
-  },
-  {
-    routeId: "read.url-branch.binary",
-    mechanism: replacementMechanism,
-    status: "completed-by-adapter",
-    citations: citation("S6", "S7", "S8"),
-    notes: "Image/convertible/archive reads served by the adapter binary route (content-length " +
-      "pre-check + streaming cap + disposition/extension hints mirroring native fetchBinary " +
-      "semantics); native fetchBinary never invoked on this path.",
-  },
-  {
-    routeId: "read.url-branch.secondary-hops",
-    mechanism: replacementMechanism,
-    status: "completed-by-adapter",
-    citations: citation("S5", "S6", "S7", "S8"),
-    notes: "Scraper-derived secondary URLs (markdown/feed alternates, document-link retries, " +
-      ".md/llms.txt probes) re-enter the SAME per-hop decision with the shared hop budget, " +
-      "replacing the S5 loadPage/fetchBinary inheritance of automatic redirect following.",
-  },
-  {
-    routeId: "read.url-branch.materialization-consumers",
-    mechanism: replacementMechanism,
-    status: "completed-by-adapter",
-    citations: citation("S6", "S7", "S8"),
-    notes: "File-shaped consumers of the URL branch (fetchReadUrl ensureArtifact / " +
-      "materializeReadUrlToFile-equivalent) are served from adapter-fetched bodies; the " +
-      "replacement asserts no new sink behavior — writes land on the unchanged row-4 sinks.",
-  },
-  {
-    routeId: "enrichment.reader-providers",
-    mechanism:
-      "native ToolSession.fetch/fetchOverride seam (exists per S1/S2, enrichment reach only)",
-    status: "partial-seam-not-selected",
-    citations: citation("S1", "S2", "S9"),
-    notes: "The seam exists but no supported ACP-bootstrapped injection point sets it (S9), so " +
-      "it cannot complete URL reads on its own and is NOT the selected mechanism; reach is " +
-      "reader-provider enrichment only. Promotion to a supported route requires a P0 revision.",
-  },
-  {
-    routeId: "native.loadPage.direct",
-    mechanism: "none — global fetch with redirect: \"follow\" (P0-recorded bypass)",
-    status: "blocked-pending-adapter",
-    citations: citation("S3"),
-    userDecisionRequired: true,
-    notes: "For any caller outside the replacement, the primary page load keeps the P0 bypass " +
-      "record permanently; this change's mocks can never clear it. Inside the replacement the " +
-      "function is not invoked at all.",
-  },
-  {
-    routeId: "native.fetchBinary.direct",
-    mechanism: "none — global fetch with redirect: \"follow\" (P0-recorded bypass)",
-    status: "blocked-pending-adapter",
-    citations: citation("S4"),
-    userDecisionRequired: true,
-    notes: "fetchBinary stays blocked permanently for callers outside the replacement " +
-      "(DECIDED disposition); inside the replacement it is replaced by the adapter binary route.",
-  },
-  {
-    routeId: "native.loadPage.direct",
-    mechanism: "none — global fetch with redirect: \"follow\" (P0-recorded bypass)",
-    status: "blocked-pending-adapter",
-    citations: citation("S3"),
-    userDecisionRequired: true,
-    notes: "For any caller outside the replacement, the primary page load keeps the P0 bypass " +
-      "record permanently; this change's mocks can never clear it. Inside the replacement the " +
-      "function is not invoked at all.",
-  },
-  {
-    routeId: "native.fetchBinary.direct",
-    mechanism: "none — global fetch with redirect: \"follow\" (P0-recorded bypass)",
-    status: "blocked-pending-adapter",
-    citations: citation("S4"),
-    userDecisionRequired: true,
-    notes: "fetchBinary stays blocked permanently for callers outside the replacement " +
-      "(DECIDED disposition); inside the replacement it is replaced by the adapter binary route.",
-  },
-  {
-    routeId: "search-provider.subrequests",
-    mechanism: "none — provider subrequests outside the replaced read tool",
-    status: "blocked-pending-adapter",
-    citations: citation("S2", "S5"),
-    userDecisionRequired: true,
-    notes: "Owned by the batch's row 20 (adapt-omp-web-search); keeps the 14a " +
-      "allow-gated-pending-adapter outcome and the 14b rejected_pending_adapter block until that " +
-      "adapter lands reusing this decision core and table.",
-  },
-  {
-    routeId: "code-search.subrequests",
-    mechanism: "none — code/docs search backends outside the replaced read tool",
-    status: "blocked-pending-adapter",
-    citations: citation("S2", "S5"),
-    userDecisionRequired: true,
-    notes: "Owned by the batch's row 21 (adapt-omp-public-code-search); blocked with " +
-      "userDecisionRequired exactly as the web-search route.",
-  },
-] as const);
+export const FETCH_ROUTE_TABLE: readonly FetchRouteRow[] = Object.freeze(
+  [
+    {
+      routeId: "read.url-branch.text",
+      mechanism: replacementMechanism,
+      status: "completed-by-adapter",
+      citations: citation("S6", "S7", "S8"),
+      notes: "Page/markdown reads served by the adapter text route (manual per-hop validation, " +
+        "MAX_OUTPUT_CHARS bound); native loadPage never invoked on this path. Mock-only " +
+        "certification; native invocation stays on the section-15 checklist.",
+    },
+    {
+      routeId: "read.url-branch.binary",
+      mechanism: replacementMechanism,
+      status: "completed-by-adapter",
+      citations: citation("S6", "S7", "S8"),
+      notes: "Image/convertible/archive reads served by the adapter binary route (content-length " +
+        "pre-check + streaming cap + disposition/extension hints mirroring native fetchBinary " +
+        "semantics); native fetchBinary never invoked on this path.",
+    },
+    {
+      routeId: "read.url-branch.secondary-hops",
+      mechanism: replacementMechanism,
+      status: "completed-by-adapter",
+      citations: citation("S5", "S6", "S7", "S8"),
+      notes: "Scraper-derived secondary URLs (markdown/feed alternates, document-link retries, " +
+        ".md/llms.txt probes) re-enter the SAME per-hop decision with the shared hop budget, " +
+        "replacing the S5 loadPage/fetchBinary inheritance of automatic redirect following.",
+    },
+    {
+      routeId: "read.url-branch.materialization-consumers",
+      mechanism: replacementMechanism,
+      status: "completed-by-adapter",
+      citations: citation("S6", "S7", "S8"),
+      notes: "File-shaped consumers of the URL branch (fetchReadUrl ensureArtifact / " +
+        "materializeReadUrlToFile-equivalent) are served from adapter-fetched bodies; the " +
+        "replacement asserts no new sink behavior — writes land on the unchanged row-4 sinks.",
+    },
+    {
+      routeId: "enrichment.reader-providers",
+      mechanism:
+        "native ToolSession.fetch/fetchOverride seam (exists per S1/S2, enrichment reach only)",
+      status: "partial-seam-not-selected",
+      citations: citation("S1", "S2", "S9"),
+      notes: "The seam exists but no supported ACP-bootstrapped injection point sets it (S9), so " +
+        "it cannot complete URL reads on its own and is NOT the selected mechanism; reach is " +
+        "reader-provider enrichment only. Promotion to a supported route requires a P0 revision.",
+    },
+    {
+      routeId: "native.loadPage.direct",
+      mechanism: 'none — global fetch with redirect: "follow" (P0-recorded bypass)',
+      status: "blocked-pending-adapter",
+      citations: citation("S3"),
+      userDecisionRequired: true,
+      notes: "For any caller outside the replacement, the primary page load keeps the P0 bypass " +
+        "record permanently; this change's mocks can never clear it. Inside the replacement the " +
+        "function is not invoked at all.",
+    },
+    {
+      routeId: "native.fetchBinary.direct",
+      mechanism: 'none — global fetch with redirect: "follow" (P0-recorded bypass)',
+      status: "blocked-pending-adapter",
+      citations: citation("S4"),
+      userDecisionRequired: true,
+      notes: "fetchBinary stays blocked permanently for callers outside the replacement " +
+        "(DECIDED disposition); inside the replacement it is replaced by the adapter binary route.",
+    },
+    {
+      routeId: "native.loadPage.direct",
+      mechanism: 'none — global fetch with redirect: "follow" (P0-recorded bypass)',
+      status: "blocked-pending-adapter",
+      citations: citation("S3"),
+      userDecisionRequired: true,
+      notes: "For any caller outside the replacement, the primary page load keeps the P0 bypass " +
+        "record permanently; this change's mocks can never clear it. Inside the replacement the " +
+        "function is not invoked at all.",
+    },
+    {
+      routeId: "native.fetchBinary.direct",
+      mechanism: 'none — global fetch with redirect: "follow" (P0-recorded bypass)',
+      status: "blocked-pending-adapter",
+      citations: citation("S4"),
+      userDecisionRequired: true,
+      notes: "fetchBinary stays blocked permanently for callers outside the replacement " +
+        "(DECIDED disposition); inside the replacement it is replaced by the adapter binary route.",
+    },
+    {
+      routeId: "search-provider.subrequests",
+      mechanism: "none — provider subrequests outside the replaced read tool",
+      status: "blocked-pending-adapter",
+      citations: citation("S2", "S5"),
+      userDecisionRequired: true,
+      notes: "Owned by the batch's row 20 (adapt-omp-web-search); keeps the 14a " +
+        "allow-gated-pending-adapter outcome and the 14b rejected_pending_adapter block until that " +
+        "adapter lands reusing this decision core and table.",
+    },
+    {
+      routeId: "code-search.subrequests",
+      mechanism: "none — code/docs search backends outside the replaced read tool",
+      status: "blocked-pending-adapter",
+      citations: citation("S2", "S5"),
+      userDecisionRequired: true,
+      notes: "Owned by the batch's row 21 (adapt-omp-public-code-search); blocked with " +
+        "userDecisionRequired exactly as the web-search route.",
+    },
+  ] as const,
+);
 
 /** True when the route is completed by this change's adapter. */
 export function isRouteCompleted(routeId: string): boolean {
-  return FETCH_ROUTE_TABLE.find((row) => row.routeId === routeId)?.status === "completed-by-adapter";
+  return FETCH_ROUTE_TABLE.find((row) => row.routeId === routeId)?.status ===
+    "completed-by-adapter";
 }
 
 /** The completing-adapter marker text appended to 14a's URL-read row. */

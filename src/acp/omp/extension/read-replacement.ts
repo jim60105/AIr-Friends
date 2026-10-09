@@ -49,18 +49,15 @@
  * model-target decision.
  */
 
+import { type EnforcementLaunchMode, observeLaunchMode } from "./enforcement.ts";
 import {
-  observeLaunchMode,
-  type EnforcementLaunchMode,
-} from "./enforcement.ts";
-import {
-  fetchEgressPolicyFromAgentEnv,
-  fetchShapedRoute,
-  isBinaryContentShape,
-  productionFetchTransport,
   type FetchDecisionRecord,
   type FetchEgressPolicy,
+  fetchEgressPolicyFromAgentEnv,
+  fetchShapedRoute,
   type FetchTransportFn,
+  isBinaryContentShape,
+  productionFetchTransport,
   type ResolveHost,
 } from "./_daemon/mod.ts";
 
@@ -416,8 +413,9 @@ export function createReadReplacementToolDefinition(
 
 /** Runtime DNS seam: Deno resolver when present, else fail-closed throw. */
 async function runtimeResolveHost(host: string): Promise<string[]> {
-  const deno = (globalThis as { Deno?: { resolveDns?: (h: string, t: "A" | "AAAA") => Promise<string[]> } })
-    .Deno;
+  const deno =
+    (globalThis as { Deno?: { resolveDns?: (h: string, t: "A" | "AAAA") => Promise<string[]> } })
+      .Deno;
   if (!deno?.resolveDns) {
     throw new Error(`no DNS resolver surface available for host ${host}`);
   }
@@ -458,7 +456,11 @@ export function registerReadReplacement(
   if (mode !== "restricted") {
     return { registered: false, mode: mode ?? "native-yolo" };
   }
-  return { registered: true, mode: "restricted", definition: createReadReplacementToolDefinition(deps) };
+  return {
+    registered: true,
+    mode: "restricted",
+    definition: createReadReplacementToolDefinition(deps),
+  };
 }
 
 /** Load-time attach options (injection seam for verification). */

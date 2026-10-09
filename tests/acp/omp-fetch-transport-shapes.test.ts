@@ -12,24 +12,24 @@
 import { assert, assertEquals, assertExists } from "@std/assert";
 import {
   extensionHintFor,
-  formatFetchDecisionLog,
+  type FetchEgressPolicy,
   fetchShapedRoute,
+  type FetchTransportFn,
+  formatFetchDecisionLog,
   MAX_BINARY_BYTES,
   MAX_TEXT_OUTPUT_CHARS,
   runSecondaryFetch,
-  type FetchEgressPolicy,
-  type FetchTransportFn,
 } from "@acp/omp/fetch-transport.ts";
 import {
   FETCH_COMPLETING_ADAPTER_MARKER,
   FETCH_ROUTE_TABLE,
   isRouteCompleted,
 } from "@acp/omp/fetch-routes.ts";
+import { decideRestrictedTool, RESTRICTED_TOOL_INVENTORY_TABLE } from "@acp/omp/tool-inventory.ts";
 import {
-  RESTRICTED_TOOL_INVENTORY_TABLE,
-  decideRestrictedTool,
-} from "@acp/omp/tool-inventory.ts";
-import { composeRestrictedToolCall, type ToolCallObservation } from "@acp/omp/tool-enforcement-wiring.ts";
+  composeRestrictedToolCall,
+  type ToolCallObservation,
+} from "@acp/omp/tool-enforcement-wiring.ts";
 import { evaluateApprovalRecordAuthority } from "@acp/omp/record-evaluator.ts";
 import type { ProvenanceRecord } from "@acp/omp/tool-provenance.ts";
 import {
@@ -49,7 +49,10 @@ globalThis.fetch = (() => {
 }) as typeof fetch;
 
 const UNRESTRICTED: FetchEgressPolicy = { posture: "unrestricted" };
-const ENFORCING: FetchEgressPolicy = { posture: "enforcing", proxyEndpoint: "http://127.0.0.1:9099" };
+const ENFORCING: FetchEgressPolicy = {
+  posture: "enforcing",
+  proxyEndpoint: "http://127.0.0.1:9099",
+};
 
 // 14a/14b fixture shapes reused verbatim from the row-14 suites.
 // (14a's suites pass the bare record; 14b's compose adds the observed
@@ -93,16 +96,20 @@ function obs(
     toolKey: toolName,
     toolName,
     decodedInputShape: inputShape,
-    registryObservation: { recordedOrigin: ownedObserved, registryEpoch: 7, resourceGeneration: "gen-0" },
+    registryObservation: {
+      recordedOrigin: ownedObserved,
+      registryEpoch: 7,
+      resourceGeneration: "gen-0",
+    },
     recordEvaluation: NO_RECORDS,
   };
 }
 
 function mockDns(table: Record<string, string[]> = {}) {
-  return async (host: string): Promise<string[]> => {
-    if (host in table) return table[host];
-    if (/^\d+/.test(host) || host.includes(":")) return [host];
-    return ["203.0.113.5"];
+  return (host: string): Promise<string[]> => {
+    if (host in table) return Promise.resolve(table[host]);
+    if (/^\d+/.test(host) || host.includes(":")) return Promise.resolve([host]);
+    return Promise.resolve(["203.0.113.5"]);
   };
 }
 
@@ -118,9 +125,9 @@ function transport(responder: (url: string, seen: number) => Response): {
   const issued: Issued[] = [];
   return {
     issued,
-    fetchImpl: async (url, init) => {
+    fetchImpl: (url, init) => {
       issued.push({ url, init });
-      return responder(url, issued.length - 1);
+      return Promise.resolve(responder(url, issued.length - 1));
     },
   };
 }
@@ -146,7 +153,9 @@ Deno.test("Route table: statuses use P0 tiers, citations carry pinned version+co
   const seenStatuses = new Set(FETCH_ROUTE_TABLE.map((row) => row.status));
   for (const status of seenStatuses) {
     assertEquals(
-      ["completed-by-adapter", "partial-seam-not-selected", "blocked-pending-adapter"].includes(status),
+      ["completed-by-adapter", "partial-seam-not-selected", "blocked-pending-adapter"].includes(
+        status,
+      ),
       true,
       status,
     );
@@ -165,15 +174,23 @@ Deno.test("Route table: statuses use P0 tiers, citations carry pinned version+co
 });
 
 Deno.test("Route table: URL-read routes completed; search + native routes blocked with userDecisionRequired", () => {
-  for (const rowId of [
-    "read.url-branch.text",
-    "read.url-branch.binary",
-    "read.url-branch.secondary-hops",
-    "read.url-branch.materialization-consumers",
-  ]) {
+  for (
+    const rowId of [
+      "read.url-branch.text",
+      "read.url-branch.binary",
+      "read.url-branch.secondary-hops",
+      "read.url-branch.materialization-consumers",
+    ]
+  ) {
     assertEquals(isRouteCompleted(rowId), true, rowId);
   }
-  for (const rowId of ["search-provider.subrequests", "code-search.subrequests", "native.fetchBinary.direct"]) {
+  for (
+    const rowId of [
+      "search-provider.subrequests",
+      "code-search.subrequests",
+      "native.fetchBinary.direct",
+    ]
+  ) {
     const row = FETCH_ROUTE_TABLE.find((r) => r.routeId === rowId);
     assertExists(row, rowId);
     assertEquals(row.status, "blocked-pending-adapter", rowId);
@@ -246,7 +263,8 @@ Deno.test(`Replacement positive fixtures — ${SYNTHETIC_FIXTURE_LABEL}`, async 
     fetchImpl: t.fetchImpl,
   });
   const delegation: ReadDelegationContext = {
-    invokeTool: async (params) => ({ delegatedTo: "captured-native", path: params["path"] }),
+    invokeTool: (params) =>
+      Promise.resolve({ delegatedTo: "captured-native", path: params["path"] }),
   };
 
   const html = await definition.execute(
@@ -255,7 +273,10 @@ Deno.test(`Replacement positive fixtures — ${SYNTHETIC_FIXTURE_LABEL}`, async 
     undefined,
     undefined,
     delegation,
-  ) as { contentBlocks: Array<{ type: string; text?: string }>; details: { adapterCompleted: boolean } };
+  ) as {
+    contentBlocks: Array<{ type: string; text?: string }>;
+    details: { adapterCompleted: boolean };
+  };
   assertEquals(html.details.adapterCompleted, true);
   const htmlText = html.contentBlocks[0]?.text ?? "";
   assertEquals(htmlText.includes("URL: https://public.example/page"), true);
@@ -270,13 +291,16 @@ Deno.test(`Replacement positive fixtures — ${SYNTHETIC_FIXTURE_LABEL}`, async 
     undefined,
     undefined,
     delegation,
-  ) as { contentBlocks: Array<{ type: string }>; details: { adapterCompleted: boolean; method: string } };
+  ) as {
+    contentBlocks: Array<{ type: string }>;
+    details: { adapterCompleted: boolean; method: string };
+  };
   assertEquals(png.details.method, "binary");
   assertEquals(png.contentBlocks.some((b) => b.type === "image"), true);
   // Native loadPage/fetchBinary were never reachable in this environment
   // (globalThis.fetch throws); every issued request carries manual redirect.
   for (const request of t.issued) {
-    assertEquals((request.init?.redirect ?? "manual"), "manual");
+    assertEquals(request.init?.redirect ?? "manual", "manual");
   }
 });
 
@@ -289,23 +313,25 @@ Deno.test("Native delegation is 100% verbatim for every non-URL input", async ()
   });
   const seen: Array<Record<string, unknown>> = [];
   const delegation: ReadDelegationContext = {
-    invokeTool: async (params) => {
+    invokeTool: (params) => {
       seen.push(params);
-      return { ok: true };
+      return Promise.resolve({ ok: true });
     },
   };
-  for (const path of [
-    "src/main.ts",
-    "src/main.ts:12-20",
-    "~/notes.md",
-    "./relative/file.txt",
-    "/absolute/path.txt",
-    "src/main.ts:50-100",
-    "notes.md:raw",
-    "weird:file",
-    "host:8080",
-    "C:\\path\\file.txt",
-  ]) {
+  for (
+    const path of [
+      "src/main.ts",
+      "src/main.ts:12-20",
+      "~/notes.md",
+      "./relative/file.txt",
+      "/absolute/path.txt",
+      "src/main.ts:50-100",
+      "notes.md:raw",
+      "weird:file",
+      "host:8080",
+      "C:\\path\\file.txt",
+    ]
+  ) {
     await definition.execute("tc", { path }, undefined, undefined, delegation);
   }
   assertEquals(seen.length, 10);
@@ -341,7 +367,11 @@ Deno.test("Delegation context missing → fail closed (no silent native bypass)"
 });
 
 Deno.test("URL-shaped 14a decision is never the plain-allow shape and is distinguishable", () => {
-  const urlDecision = decideRestrictedTool({ toolName: "read", provenance: owned, inputShape: "url" });
+  const urlDecision = decideRestrictedTool({
+    toolName: "read",
+    provenance: owned,
+    inputShape: "url",
+  });
   const skillDecision = decideRestrictedTool({
     toolName: "skill",
     provenance: owned,
@@ -358,7 +388,7 @@ Deno.test("Internal/custom schemes are rejected as 14a alternate-route denial, n
     resolveHost: mockDns(),
     fetchImpl: t.fetchImpl,
   });
-  const delegation: ReadDelegationContext = { invokeTool: async () => ({}) };
+  const delegation: ReadDelegationContext = { invokeTool: () => Promise.resolve({}) };
   for (const path of ["pi-internal://device/camera", "skill://air-friends/topic", "device://x"]) {
     let threw = "";
     try {
@@ -428,9 +458,10 @@ Deno.test("Text route caps at MAX_OUTPUT_CHARS with a truncation flag; binary ca
     status: 200,
     headers: { "content-type": "application/pdf", "content-length": String(MAX_BINARY_BYTES + 1) },
   });
-  const refused = await fetchShapedRoute("https://public.example/huge.pdf", deps(
-    async () => declared,
-  ));
+  const refused = await fetchShapedRoute(
+    "https://public.example/huge.pdf",
+    deps(() => Promise.resolve(declared)),
+  );
   assertEquals(refused.route, "failed");
   if (refused.route === "failed") assertEquals(refused.reason, "content-length-limit");
 });
@@ -476,12 +507,15 @@ Deno.test("Decision records and log lines never carry credentials or payload", a
   const t = transport(() =>
     response("<html>" + "secret-payload".repeat(100) + "</html>", "text/html")
   );
-  const shaped = await fetchShapedRoute("https://user:pa5sword@public.example/private/doc?q=token", {
-    resolveHost: mockDns(),
-    policy: ENFORCING,
-    fetchImpl: t.fetchImpl,
-    recordSink: (record) => collected.push(formatFetchDecisionLog(record)),
-  });
+  const shaped = await fetchShapedRoute(
+    "https://user:pa5sword@public.example/private/doc?q=token",
+    {
+      resolveHost: mockDns(),
+      policy: ENFORCING,
+      fetchImpl: t.fetchImpl,
+      recordSink: (record) => collected.push(formatFetchDecisionLog(record)),
+    },
+  );
   assertEquals(shaped.route, "text", "userinfo survives parse; host stays public");
   assertEquals(collected.length > 0, true);
   for (const line of collected) {

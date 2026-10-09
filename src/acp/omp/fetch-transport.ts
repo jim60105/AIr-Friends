@@ -47,11 +47,7 @@
  * record type.
  */
 
-import {
-  isDisallowedAddress,
-  MAX_REDIRECT_HOPS,
-  pinValidatedUrl,
-} from "../../utils/ssrf.ts";
+import { isDisallowedAddress, MAX_REDIRECT_HOPS, pinValidatedUrl } from "../../utils/ssrf.ts";
 
 // The shared bound is re-exported (never copied) so consumers and tests
 // consume the same constant ssrf.ts owns.
@@ -101,8 +97,7 @@ export function deriveFetchEgressPolicy(
   return { posture: "unresolved" };
 }
 
-const LOOPBACK_PROXY_URL =
-  /^http:\/\/(127\.0\.0\.1|\[::1\]|localhost)(:\d{1,5})?$/i;
+const LOOPBACK_PROXY_URL = /^http:\/\/(127\.0\.0\.1|\[::1\]|localhost)(:\d{1,5})?$/i;
 
 /**
  * The agent-process read of the SAME bootstrap facts: the factory writes
@@ -290,7 +285,10 @@ export function disallowedAddressClass(addr: string): string {
     );
   }
   if (head === "fd00:ec2::254" || head.startsWith("fd00:ec2:")) return "cloud-metadata";
-  if (head.startsWith("fe8") || head.startsWith("fe9") || head.startsWith("fea") || head.startsWith("feb")) {
+  if (
+    head.startsWith("fe8") || head.startsWith("fe9") || head.startsWith("fea") ||
+    head.startsWith("feb")
+  ) {
     return "link-local";
   }
   if (head.startsWith("fc") || head.startsWith("fd")) return "unique-local";
@@ -438,7 +436,13 @@ export const MAX_TEXT_OUTPUT_CHARS = 500_000;
 /** Binary-route byte cap, pinned-source value at 2a2c6dc `MAX_BYTES`. */
 export const MAX_BINARY_BYTES = 50 * 1024 * 1024;
 
-const IS_REDIRECT_STATUS: Record<number, true> = { 301: true, 302: true, 303: true, 307: true, 308: true };
+const IS_REDIRECT_STATUS: Record<number, true> = {
+  301: true,
+  302: true,
+  303: true,
+  307: true,
+  308: true,
+};
 
 /** Injected transport seam (tests always inject; production defaults below). */
 export type FetchTransportFn = (url: string, init?: RequestInit) => Promise<Response>;
@@ -493,7 +497,11 @@ export async function issueValidatedHop(
 
 /** Terminal result of a manual hop chain. */
 export type FetchChainResult =
-  | { readonly ok: true; readonly response: Response; readonly records: readonly FetchDecisionRecord[] }
+  | {
+    readonly ok: true;
+    readonly response: Response;
+    readonly records: readonly FetchDecisionRecord[];
+  }
   | {
     readonly ok: false;
     readonly block: Extract<FetchHopDecision, { decision: "block" }>;
