@@ -1,5 +1,25 @@
 ## Context
 
+### Implementing reconciliation (2026-10-09)
+
+The user decision register §1a decision 4 supersedes historical application-gate
+language in this artifact. The pinned destructive verdict stays `incompatible`.
+Consume the real `DestructiveIntentInput` type. Complete ACP JSON delete/move
+requests remain supported; native multi-file patches and first-operation-only
+lists fail closed. Ordered patch/multi-delete fixtures are explicitly synthetic
+adapter inputs, not a native parser.
+
+The pinned `session/session-tools.ts` (revision
+`2a2c6dcbbb558c0f8145f67f28b3370984f2bf60`, lines 934–1004) clones approved arguments,
+sends those arguments as permission `rawInput`, then passes them to execution.
+The client snapshots that callback input once: equality checks establish snapshot
+consistency, not independent authentication or native completeness. No parser
+provenance supplied in ACP arguments is trusted.
+
+The predecessor authorizer exposes write authority (`overwrite`/`create`), not a
+delete parameter. Source intent is represented by an existing-only observation
+plus that unchanged write decision. No predecessor API is redefined.
+
 See `proposal.md` — Why. Design §8 ("Destructive operations") and the capability matrix row for delete/move/destructive patch are the approved requirements; design §7 keeps the native ACP bash/destructive permission path active. Dependencies: `canonicalize-acp-filesystem-roots` (row 2, observation API), `enforce-acp-filesystem-authorization` (row 4, sink decision + `SessionGateContext`), with `establish-omp-compatibility-contracts` (row 1, P0) as data contract and application gate.
 
 Current-state constraints that shape the approach:

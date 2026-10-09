@@ -229,17 +229,25 @@ The method evaluates permission requests in this order:
 
 1. **YOLO check** — If `config.yolo === true`, auto-approve everything immediately.
 
+1a. **Destructive routing**. Before any title, skill or edit/write location approval, route ACP `delete`/`move` kinds, destructive identities and patch-shaped input through `destructive-policy.ts`. Complete ACP JSON delete (`path`) and move (`source`, `destination`) inputs require matching complete location sets. Native multi-file patches, first-operation-only lists, unknown syntax and missing endpoints fail closed. Titles can trigger this denial route but never supply operation targets.
+
 2. **Trusted skills read**. Approve `read` locations only through canonical observations of the deployment-owned read-only skills root with validated critical-skill references bound to the current registered generation. Keep the `skills_directory_access` audit reason. An unowned HOME-discovered or `npx skills add` copy, a workspace same-name file, an escaping link, stale provenance or missing provenance receives no exception.
 
 3. **Shell command execution** — For `execute` kind requests, evaluate each command SEGMENT-wise (`;`/`&&`/`||` chains are split quote-aware via `splitCommandSegments`): every segment must match the skill auto-approve list using safe token matching (see [Skill Auto-Approve List](#skill-auto-approve-list)) OR pass the generic-command gate (see [Bash Permission (Whitelist)](#bash-permission-whitelist)); the whole invocation is approved only when ALL segments of ALL commands pass, otherwise the FIRST failing segment's cause is reported. The D5 legacy free-text flag check (`--message` / `--content` / `--query` / `--caption`) runs on the FULL original command(s) before any splitting.
 
 4. **Registered skill check** — Extract skill name from `rawInput.skill` or `toolCall.title` and check against the `SkillRegistry`.
 
-5. **Edit/write scoping**. The existing `"edit"` kind and legacy title recognition and raw-input path extraction are unchanged. Every extracted target uses the same canonical write decision as the direct callback. Restricted writes permit the session's own physical staging root `{cwd}/tmp/{Skill API session id}` without an extension filter, or a shared Agent workspace target with `canWriteAgentWorkspace` and an allowed extension (default `.md`, `.txt`; an empty list denies all shared writes). Other ordinary user-workspace targets, including `.md` files, are denied. Trusted skills are read-only in every mode. Missing paths/context, failed observations and stale registrations fail closed. Complete destructive intent normalization belongs to `normalize-acp-destructive-targets`.
+5. **Edit/write scoping**. Ordinary `"edit"` kind and legacy title recognition and raw-input path extraction remain unchanged after destructive routing. Every extracted target uses the same canonical write decision as the direct callback. Restricted writes permit the session's own physical staging root `{cwd}/tmp/{Skill API session id}` without an extension filter, or a shared Agent workspace target with `canWriteAgentWorkspace` and an allowed extension (default `.md`, `.txt`; an empty list denies all shared writes). Other ordinary user-workspace targets, including `.md` files, are denied. Trusted skills are read-only in every mode. Missing paths/context, failed observations and stale registrations fail closed.
 
 6. **Default rejection** — All unrecognized tool calls are rejected with `reject_once`.
 
 ### Permission Response Options
+
+Destructive approval is all-or-nothing. Every delete target and move source uses an existing-only canonical observation plus the unchanged filesystem write authority. Move destinations and patch mutations in trusted adapter contracts use create/overwrite authority. Every target is evaluated, and the first denied target index identifies the bounded rejection. The normalizer and authorization exports perform no IO and introduce no delete/rename primitive. Missing sources never create parents.
+
+YOLO destructive permission requests retain `yolo_mode` approval. Shared destructive callback policy retains broad physical workspace/shared containment and denies external, sibling, escaping and trusted read-only skills targets in both modes. ACP-mediated decisions do not constrain non-ACP native execution. The generic-command lexical argument gate, dangerous flags and fd-redirect tolerance are unchanged.
+
+The actual P0 type is `DestructiveIntentInput`, including native tool identity, raw input, parser provenance, ordered adapter operations and execution-input binding. Client snapshot consistency relies on the pinned `session/session-tools.ts` permission wrapper sending execution arguments as `rawInput` and preserving `acpApprovedArgs`. Synthetic adapter provenance is never accepted from ACP arguments. Unit/mock/temp-filesystem evidence does not establish native OMP enforcement. User decision register §1a decision 4 permits this fail-closed application while section 3's destructive `incompatible` verdict remains unchanged; runtime acceptance is user-owned. No configuration or environment field changes.
 
 The ACP protocol provides these response options:
 
@@ -538,6 +546,10 @@ Each permission audit entry includes:
 | `rejected_filesystem_access`                      | denied | Protected operation failed, including unavailable staging, symlinks, replacement or unsupported platform |
 | `rejected_read_extension`                        | denied | Workspace/shared/staging extension is outside `.jsonl`, `.md`, `.txt` |
 | `rejected_edit_write`                             | denied   | Edit/write operation rejected in restricted mode                          |
+| `destructive_authorized`                         | approved | Complete ACP destructive input and every target authorized |
+| `rejected_destructive_incomplete`                | denied | Incomplete, unsupported, unparseable or title-only destructive intent |
+| `rejected_destructive_binding`                   | denied | Bound decode or complete location set disagrees |
+| `rejected_destructive_target`                    | denied | Target denial fallback; existing filesystem reasons retain their meaning |
 | `rejected_unknown`                                | denied   | Unknown tool rejected by default-deny policy                              |
 | `rejected_generic_command_out_of_workspace`       | denied   | Generic command path argument resolved outside the allowed dirs           |
 | `rejected_generic_command_shell_operator`         | denied   | Generic command contained a non-tolerated shell operator / file redirect  |
