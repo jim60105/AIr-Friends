@@ -12,7 +12,7 @@ import {
   ompProcessTmpDir,
   ompXdgDataHome,
 } from "@utils/omp-paths.ts";
-import { ompSettingsForMode, type OmpPermissionMode } from "./omp-settings.ts";
+import { type OmpPermissionMode, ompSettingsForMode } from "./omp-settings.ts";
 import { createLogger } from "@utils/logger.ts";
 import { resolveSkillJwtDir } from "@utils/skill-jwt.ts";
 import { join, resolve } from "@std/path";
@@ -222,7 +222,9 @@ function buildBaseAgentConfig(
         const restrictedPaths = new Set(ompSettingsForMode("restricted").orderedOverlayPaths);
         for (const overlayPath of settings.orderedOverlayPaths) {
           if (restrictedPaths.has(overlayPath)) {
-            throw new Error(`Contamination detected: restricted overlay "${overlayPath}" present in native-yolo launch`);
+            throw new Error(
+              `Contamination detected: restricted overlay "${overlayPath}" present in native-yolo launch`,
+            );
           }
         }
       }
@@ -256,7 +258,9 @@ function buildBaseAgentConfig(
 
       // Base root resolution and mode-distinct state roots
       const dataRoot = appConfig.workspace.repoPath;
-      const baseRoot = poolKey ? resolve(join(dataRoot, "omp-pools", poolKey)) : resolve(join(workingDir, "tmp"));
+      const baseRoot = poolKey
+        ? resolve(join(dataRoot, "omp-pools", poolKey))
+        : resolve(join(workingDir, "tmp"));
 
       const agentDir = ompAgentDir(baseRoot, mode);
       const procTmpDir = ompProcessTmpDir(baseRoot, mode);
@@ -276,7 +280,8 @@ function buildBaseAgentConfig(
       if (geminiApiKey) {
         env["GEMINI_API_KEY"] = geminiApiKey;
       }
-      const openRouterApiKey = appConfig.agent.openRouterApiKey ?? Deno.env.get("OPENROUTER_API_KEY");
+      const openRouterApiKey = appConfig.agent.openRouterApiKey ??
+        Deno.env.get("OPENROUTER_API_KEY");
       if (openRouterApiKey) {
         env["OPENROUTER_API_KEY"] = openRouterApiKey;
       }

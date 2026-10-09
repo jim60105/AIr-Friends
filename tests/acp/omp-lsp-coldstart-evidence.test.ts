@@ -47,8 +47,10 @@ function originProvenance(origin: (typeof origins)[number], toolName: string): P
 // -----------------------------------------------------------------------------
 
 Deno.test("LSP boundary 5a (OMP): ledger stays unresolved with its cold-start reason", () => {
-  const entry = AUDITED_PINNED_LEDGER.find((e) => e.boundary === "restricted_lsp" &&
-    e.subcase === "omp");
+  const entry = AUDITED_PINNED_LEDGER.find((e) =>
+    e.boundary === "restricted_lsp" &&
+    e.subcase === "omp"
+  );
   assert(entry, "restricted_lsp/omp ledger entry exists");
   assertEquals(entry.status, "unresolved");
   assertEquals(
@@ -59,8 +61,10 @@ Deno.test("LSP boundary 5a (OMP): ledger stays unresolved with its cold-start re
 });
 
 Deno.test("LSP boundary 5b (OpenCode): ledger stays incompatible, global-only scoping", () => {
-  const entry = AUDITED_PINNED_LEDGER.find((e) => e.boundary === "restricted_lsp" &&
-    e.subcase === "opencode");
+  const entry = AUDITED_PINNED_LEDGER.find((e) =>
+    e.boundary === "restricted_lsp" &&
+    e.subcase === "opencode"
+  );
   assert(entry, "restricted_lsp/opencode ledger entry exists");
   assertEquals(entry.status, "incompatible");
   assertEquals(
