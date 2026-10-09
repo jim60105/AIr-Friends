@@ -198,4 +198,5 @@ tests clear neither verdict; unit/mock evidence validates decision logic only.
 
 - [docs/AGENT_PERMISSIONS.md](AGENT_PERMISSIONS.md) — runtime permission layers
 - [docs/OMP_SETTINGS.md](OMP_SETTINGS.md) — settings-layer contracts (row 8)
+- [docs/OMP_ENFORCEMENT.md](OMP_ENFORCEMENT.md) — handler wiring, composition/freshness/refresh/error tables, and the user-owned runtime checklist (row 16)
 - [openspec/specs/acp-integration/spec.md](../openspec/specs/acp-integration/spec.md)
