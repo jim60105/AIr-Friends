@@ -19,7 +19,7 @@ Deno.test("sessionStagingDir - falls back to the workspace tmp root without an i
   assertEquals(sessionStagingDir({ tmpPath: "/ws/tmp" }, ""), "/ws/tmp");
 });
 
-Deno.test("sessionStagingDir - pure composition: no resolution, no env reads", async () => {
+Deno.test("sessionStagingDir - pure composition: no resolution, no env reads", () => {
   const envBefore = {
     TMPDIR: Deno.env.get("TMPDIR"),
     SESSION_ID: Deno.env.get("SESSION_ID"),

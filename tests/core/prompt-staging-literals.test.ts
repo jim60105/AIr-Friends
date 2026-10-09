@@ -8,7 +8,7 @@
 // absolute staging directory, with NO unexpanded $TMPDIR/$SESSION_ID token
 // anywhere in the staging/session-id instruction surface.
 
-import { assertEquals, assertFalse, assertStringIncludes } from "@std/assert";
+import { assertFalse, assertStringIncludes } from "@std/assert";
 import { join } from "@std/path";
 import { createTemplateEngine, renderTemplate } from "@core/template-renderer.ts";
 
