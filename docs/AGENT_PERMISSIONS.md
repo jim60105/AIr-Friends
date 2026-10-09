@@ -721,6 +721,7 @@ The `src/acp/filesystem-roots.ts` helper library provides an agent-generic, phys
    - Unknown tokens (e.g. `$TMPDIR2`, `$HOME`, `$OTHER`) or unbraced boundary collisions fail closed (`unresolved_token`).
    - Relative paths anchor strictly against `context.sessionCwd`, **never** the daemon process working directory `Deno.cwd()`.
    - Shell syntax, null bytes, device paths (`\\.\`, `/dev/`), and URI schemes (`http:`, `skill:`, `file:`) are rejected (`invalid_path`).
+  - **Legacy compat only**: token-form staging paths (`$TMPDIR/$SESSION_ID/...`) are retained purely so older OpenCode callers whose prompts still name the tokens keep working — the expansion above resolves them to the same canonical staging root that current prompts now render as absolute literals. Prompts and `SKILL.md` docs no longer instruct the token form.
 
 3. **Canonical Staging Identity vs Process State**:
    - Canonical staging is strictly `{canonical workspace}/tmp/{active Skill API ID}`.
