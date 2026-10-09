@@ -36,7 +36,7 @@
         "list": "allow",
         "glob": "allow",
         "grep": "allow",
-        "lsp": "allow",
+        "lsp": "deny",
         "todoread": "allow",
         "todowrite": "allow",
         "skill": "allow",
@@ -106,7 +106,8 @@
       "mode": "primary",
       "prompt": "{file:/app/prompts/system_prompt_override.md}",
       "permission": {
-        "*": "allow"
+        "*": "allow",
+        "lsp": "deny"
       }
     }
   }
