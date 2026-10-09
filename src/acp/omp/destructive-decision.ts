@@ -190,7 +190,9 @@ export function replayConformanceFixtures(
       intent: fixture.input,
       // Same client-surface inputs as row 5's own conformance tests: expanded
       // targets come from the decode, locations from the wire presentation.
-      expandedTargets: decoded.ok ? decoded.targets.map((target) => target.path) : fixture.locations,
+      expandedTargets: decoded.ok
+        ? decoded.targets.map((target) => target.path)
+        : fixture.locations,
       expandedLocations: fixture.locations,
       ...(observations ? { observations } : {}),
       ...(observations ? { authorizationParams: adapter.authorizationParams() } : {}),

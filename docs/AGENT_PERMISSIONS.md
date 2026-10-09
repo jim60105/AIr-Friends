@@ -722,6 +722,12 @@ The `src/acp/filesystem-roots.ts` helper library provides an agent-generic, phys
 
 ---
 
+## Restricted OMP Tool-Decision Layer (OMP Integration Row 14a / P5c-i)
+
+Pure restricted-mode tool-decision modules were defined by `define-omp-restricted-tool-decisions` (`src/acp/omp/tool-inventory.ts`, `src/acp/omp/tool-provenance.ts`, `src/acp/omp/approval-records.ts`, `src/acp/omp/destructive-decision.ts`). They are consulted **only in restricted OMP sessions** — native-YOLO sessions receive none of these clamps (their LSP disablement is owned separately, row 15) and every OpenCode flow in Layers 1–5 above is untouched. The layers above remain the operative runtime enforcement; this layer is decision data awaiting its handler: 14b (`wire-omp-restricted-tool-enforcement`) wires the trusted-extension `tool_call` consultation, and 14c owns generic-command canonicalization. See [docs/OMP_TOOL_POLICY.md](OMP_TOOL_POLICY.md) for the inventory table, alternate-route pair table, provenance admission, record-interpretation rules, MCP mechanism tiers, and the preserved pinned verdicts (record-reset INCOMPATIBLE, destructive-intent UNRESOLVED) with their DECIDED dispositions. No runtime enforcement, record reset, or complete native destructive decoding is claimed by this layer's tests.
+
+---
+
 ## Related Documentation
 
 - [OpenCode Permissions](https://opencode.ai/docs/permissions/) — OpenCode's permission system documentation
