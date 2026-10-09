@@ -233,8 +233,8 @@ In restricted (non-YOLO) mode, the system SHALL selectively approve or deny perm
 
 #### Scenario: Generic command approved only when all path args are in-workspace
 - **GIVEN** a permission request to execute a generic command whose first token is on the allow-list (the safe path-arg readers, e.g. `head`, `cat`, `rg`, `jq`, `pdftotext`)
-- **WHEN** every path-like argument — read input and write/output target — resolves inside the session workspace or TMPDIR, and no code-execution / arbitrary-target flag is present
-- **THEN** it SHALL auto-approve the request; and when any path-like argument (input or output) resolves outside those boundaries — or a tool with a file-reading argument DSL/indirection is used, or a flag such as `-exec`/`-delete`/`--pre` is present — it SHALL reject the request with logging
+- **WHEN** every path-like argument — read input and write/output target — canonically resolves to physical membership in an enumerated command-gate root role for the requesting session, and no code-execution / arbitrary-target flag is present
+- **THEN** it SHALL auto-approve the request; and when any path-like argument (input or output) canonically resolves outside those roles — including through a parent-directory or final-file symlink escape, a sibling workspace, or another session's data area — or a tool with a file-reading argument DSL/indirection is used, or a flag such as `-exec`/`-delete`/`--pre` is present, it SHALL reject the request with logging
 
 #### Scenario: Filesystem URI-scheme path argument rejected, network URL allowed
 - **GIVEN** a permission request whose argument is a filesystem URI-scheme token such as `file:///etc/passwd` (for example `agent-browser open file:///etc/passwd`)
@@ -359,11 +359,11 @@ In restricted (non-YOLO) mode, the system SHALL selectively approve or deny perm
 - **WHEN** the restricted gate evaluates command whitelist matches, agent-workspace writes, and file-path containment for the filesystem sinks, the scoped edit/write approval and the destructive decision
 - **THEN** command whitelist matching SHALL be anchored to the invocation entrypoint, agent-workspace writes SHALL be gated by the session's `canWriteAgentWorkspace` flag, and file-path containment decisions SHALL be made against canonical physical root membership for the requesting session rather than lexical string containment
 
-#### Scenario: Command-argument lexical check is command policy unchanged by destructive normalization
+#### Scenario: Command-argument canonical check is command policy unchanged by destructive normalization
 - **WHEN** the gate's generic-command path-argument check evaluates a command because filesystem-touching bash tools are routed to this gate (configured `"ask"` rather than `"allow"`)
-- **THEN** `requestPermission()` SHALL remain the authoritative decision point for those commands, and a generic allow-listed command SHALL be approved only when every path argument — input and output — resolves inside the session workspace/TMPDIR, and `referencesOutOfWorkspacePath` SHALL treat a filesystem-reaching URI-scheme token (e.g. `file://`, and other non-network schemes such as `ftp://`/`gopher://`) as referencing a path outside the workspace
+- **THEN** `requestPermission()` SHALL remain the authoritative decision point for those commands, and a generic allow-listed command SHALL be approved only when every path argument — input and output — holds canonical physical membership in an enumerated command-gate root role for the requesting session, and `referencesOutOfWorkspacePath` SHALL treat a filesystem-reaching URI-scheme token (e.g. `file://`, and other non-network schemes such as `ftp://`/`gopher://`) as referencing a path outside the workspace
 - **AND** network URL schemes (`http://`/`https://`) SHALL NOT be treated as filesystem paths — `agent-browser` navigates to them legitimately and their egress is mediated separately (F14)
-- **AND** this command-argument lexical check is a command-policy decision of its own and SHALL NOT be represented as physical containment of command execution; its argument policy is unchanged by destructive normalization
+- **AND** this command-argument decision is a command-policy decision of its own and its canonical observation SHALL NOT be represented as race-proof physical containment of the command's native execution; its argument policy is unchanged by destructive normalization
 
 #### Scenario: Filesystem path checks expand session tokens before containment
 - **GIVEN** a scoped edit/write approval, a destructive target decision, or a file callback whose path checks reference session-bound tokens
@@ -2458,3 +2458,91 @@ The destructive normalization and all-target decision logic SHALL be one reusabl
 - **WHEN** either surface evaluates it
 - **THEN** the incomplete native location list SHALL NOT authorize a larger patch on either surface
 - **AND** both surfaces SHALL report the incomplete-intent denial
+
+### Requirement: Canonical Generic-Command Path Argument Decision
+
+The generic-command gate SHALL decide every path argument of an allow-listed command — read input and write/output target — on the requesting session's canonical physical root membership rather than lexical string containment, and SHALL deny any argument whose canonical observation fails, never falling back to a lexical decision; it SHALL apply exactly where today's generic-command allow-list applies, restricted mode only, adding no clamp to native YOLO.
+
+#### Scenario: Symlink escape inside the workspace is denied
+
+- **GIVEN** a file inside the session workspace whose parent-directory or final-link traversal reaches an external file or another session's workspace
+- **WHEN** the generic-command gate evaluates `cat` (or any allow-listed tool) on that path
+- **THEN** it SHALL reject the command with the existing `path_outside_boundary` reason and record the predecessor observation failure as the logged cause
+- **AND** the lexical spelling, which resolves inside the workspace, SHALL NOT grant approval
+
+#### Scenario: Contained symlink is approved on its canonical destination
+
+- **GIVEN** a link whose every observed traversal stays inside one granted command-gate root
+- **WHEN** the gate evaluates a path argument through it
+- **THEN** the decision SHALL use the canonical destination and approve when that destination holds the granted role
+- **AND** the approval SHALL be documented as a decision-time containment proof, not race-proof protection of the command's own native IO
+
+#### Scenario: Process-temp and tool-output roles admit only their enumerated roots
+
+- **GIVEN** shared-process mode with a channel-scoped process temporary directory and a pool-key-scoped OpenCode tool-output directory, and per-spawn mode with a session-local tool-output directory under the session workspace
+- **WHEN** path arguments target those directories or their children
+- **THEN** the decisions SHALL match the current lexical gate exactly for these roots
+- **AND** a tool-output resolution outside the session workspace/TMPDIR (per-spawn) or outside the pool-key data root (shared) — including the shared home-rooted OpenCode tool-output directory — SHALL receive no role and SHALL be denied fail-closed
+
+#### Scenario: Cross-session data area denied on canonical identity
+
+- **GIVEN** a sibling or previous session's data home, or the OpenCode data-area root listing itself, physically inside the same data root as the requesting session's own data home
+- **WHEN** a path argument canonically resolves there
+- **THEN** the gate SHALL deny it, and arguments inside the requesting session's own data home SHALL remain approved
+
+#### Scenario: Canonical identity unavailable fails closed
+
+- **WHEN** the requesting session's context, a required root, or a token expansion cannot produce a complete canonical decision
+- **THEN** the gate SHALL deny the argument with the existing `path_outside_boundary` cause vocabulary
+- **AND** it SHALL NOT approve on the basis of the raw or lexical spelling
+
+#### Scenario: Enumerated root-role set scoped to the session
+
+- **GIVEN** an allow-listed command whose path arguments target the requesting session's canonical workspace, the shared Agent workspace when configured, the shared-process-mode process temporary directory when set, the session's OpenCode tool-output directory, or the OpenCode data root
+- **WHEN** the canonical gate decides each path argument
+- **THEN** it SHALL grant roles only from its own enumerated root-role set, treating the OpenCode data root solely as a cross-session isolation boundary
+- **AND** an argument that holds no granted role SHALL be denied
+
+#### Scenario: Token expansion precedes canonical decision
+
+- **GIVEN** a path argument containing a known session or harness token — `~`, `~/...`, `$HOME`, `${HOME}`, `$XDG_DATA_HOME`, `${XDG_DATA_HOME}`, `$TMPDIR`, `${TMPDIR}`, `$AGENT_WORKSPACE`, `${AGENT_WORKSPACE}`, `$SESSION_ID`, `${SESSION_ID}`
+- **WHEN** the canonical gate evaluates the argument
+- **THEN** it SHALL expand the token against the requesting session's authoritative values before the canonical decision
+- **AND** unexpandable home-anchored forms and known variables without a runtime value SHALL remain rejected without observation
+
+#### Scenario: Broken or unstable canonical observation denied
+
+- **GIVEN** a path argument whose canonical observation encounters a symlink loop, dangling link, unresolvable or unavailable root, or a path that changed between observation and decision
+- **WHEN** the canonical gate evaluates the argument
+- **THEN** it SHALL deny the argument with the existing `path_outside_boundary` cause vocabulary
+- **AND** it SHALL NOT fall back to a lexical decision
+
+### Requirement: Generic-Command Policy Parity Under Canonicalization
+
+Canonicalizing the path-argument decision SHALL be a representation change only: the allow-listed tool set, dangerous-flag set, shell-operator and fd-redirect rules, per-segment chain evaluation rule, attached-option and URI-scheme rejections, unexpandable-token rejections, and every existing allow/deny case SHALL keep identical verdicts, so no OpenCode command routed to this gate gains or loses approval status incidentally.
+
+#### Scenario: Inherited allow/deny cases keep their verdicts
+
+- **GIVEN** the full existing generic-command allow/deny corpus (in-workspace and relative reads, output targets, `$HOME`/`~` expansions, attached option absolutes and traversals such as `-f../sibling/file` and `-o../x`, `~otheruser` and unexpandable forms, URI schemes, dangerous flags, shell operators, and `;`/`&&`/`||` chains evaluated per segment)
+- **WHEN** the canonicalized gate evaluates each case
+- **THEN** each verdict SHALL equal its pre-hardening verdict
+- **AND** the allow-list and dangerous-flag sets SHALL be unchanged
+
+#### Scenario: Restricted-only posture preserved
+
+- **GIVEN** the same command evaluated under a YOLO session and a restricted session
+- **WHEN** `requestPermission()` evaluates both
+- **THEN** the YOLO session SHALL auto-approve before the generic-command gate as today
+- **AND** only the restricted session SHALL receive the canonicalized decision, with no new clamp added to either mode's approval surface
+
+#### Scenario: Restricted decisions re-expressed canonically
+
+- **GIVEN** a restricted-mode OpenCode command routed to the canonicalized generic-command gate
+- **WHEN** the gate evaluates the command
+- **THEN** the decision SHALL be re-expressed canonically and SHALL preserve OpenCode regression behavior
+
+#### Scenario: Non-verdict surfaces untouched
+
+- **GIVEN** the canonicalized generic-command gate in a restricted OpenCode session
+- **WHEN** the gate runs on an allow-listed command
+- **THEN** it SHALL NOT modify the restricted tool inventory, provenance, and MCP admission decisions, nor the trusted-extension handler wiring
