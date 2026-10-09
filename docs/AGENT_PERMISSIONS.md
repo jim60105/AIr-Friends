@@ -55,7 +55,7 @@ AIr-Friends is a **non-interactive** system — there is no human operator to ap
 
 When the external Agent requests any action, it must pass **all applicable layers**. A denial at any layer blocks the operation.
 
-> **Important — how Layer 2 and Layer 3 interact (F12).** Layer 2 is evaluated *first*, and an `"allow"` verdict there is **self-authorizing**: OpenCode executes the tool and returns *without* ever sending a `session/request_permission` to the ACP client, so **Layer 3 never runs for an `"allow"`ed tool**. Only a `"deny"` (blocks) or an `"ask"` (forwards to Layer 3) leaves the final decision to this repo's gate. Consequently, any filesystem-touching bash tool must be configured `"ask"`, not `"allow"` — otherwise the Layer-3 boundary is dead code for it and an attacker-controlled command such as `head /proc/1/environ` would self-authorize at Layer 2. All such tools are `"ask"` (see [Bash Permission](#bash-permission-whitelist) below).
+> **Important — how Layer 2 and Layer 3 interact (F12).** Layer 2 is evaluated _first_, and an `"allow"` verdict there is **self-authorizing**: OpenCode executes the tool and returns _without_ ever sending a `session/request_permission` to the ACP client, so **Layer 3 never runs for an `"allow"`ed tool**. Only a `"deny"` (blocks) or an `"ask"` (forwards to Layer 3) leaves the final decision to this repo's gate. Consequently, any filesystem-touching bash tool must be configured `"ask"`, not `"allow"` — otherwise the Layer-3 boundary is dead code for it and an attacker-controlled command such as `head /proc/1/environ` would self-authorize at Layer 2. All such tools are `"ask"` (see [Bash Permission](#bash-permission-whitelist) below).
 
 ---
 
@@ -74,9 +74,31 @@ In restricted mode, the session runs as the default `build` agent. All permissio
 
 ### YOLO Mode (`yolo` agent)
 
-In YOLO mode, the system switches to the `yolo` agent via ACP `setSessionMode("yolo")`. This agent has `"*": "allow"` permissions, so every tool is available and all actions are auto-approved internally.
+In YOLO mode, the system switches to the `yolo` agent via ACP `setSessionMode("yolo")`. This agent has `"*": "allow"` permissions, so every tool is available and all actions are auto-approved internally — with one explicit per-agent exception: `"lsp": "deny"` (decision 5, row 17; see [LSP Disabled: All-Off](#lsp-disabled-all-off-decision-5-row-17)).
 
 **Reference**: `src/acp/agent-factory.ts`
+
+---
+
+## LSP Disabled: All-Off (Decision 5, Row 17)
+
+Per the approved-design decision 5 (row 17, `disable-restricted-agent-lsp`), the LSP capability is **disabled entirely — both agents, both modes** — and the change deliberately records what its carriers do and do not prove.
+
+| Carrier                                                     | Where                                                                                    | What it denies                                                                                                                                           |
+| ----------------------------------------------------------- | ---------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--no-lsp` launch flag                                      | OMP factory, **both** modes (`src/acp/agent-factory.ts`, exactly once per launch)        | Native `enableLsp: false` for the session: no `lsp` tool registration, no LSP writethrough/format/diagnostics on edit/write, no startup server discovery |
+| `lsp.enabled: false` settings pin                           | `agent-config/omp/restricted.yml` (row-8 owned, unchanged by row 17)                     | Restricted-mode settings-level LSP posture beneath the flag                                                                                              |
+| `"lsp": "deny"` per-agent permission                        | `agent-config/opencode.json` — **build and yolo both**, explicitly                       | OpenCode's `lsp` tool through each agent's permission map                                                                                                |
+| `deny-lsp` / `deny-lsp-config` + `lsp-adjacent` route pairs | Restricted tool inventory (`src/acp/omp/tool-inventory.ts`, row 14; unchanged by row 17) | Restricted-session decision-layer admission of the `lsp` name and any shape-keyed LSP-adjacent route                                                     |
+
+Deliberate exclusions: **no top-level/global OpenCode LSP clamp** (a global setting would also clamp yolo, which decision 5 rejects), **no OpenCode version bump** (1.18.21 stays), and the native-YOLO settings-level pin is owned by row 25 (`pin-omp-yolo-lsp-settings`) — row 17 does not touch `agent-config/omp/native-yolo.yml`.
+
+**Evidence limits (honest record, both limits distinct):**
+
+1. **Explicit tool denial ≠ implicit-startup suppression.** The per-agent OpenCode `"lsp": "deny"` stops the `lsp` **tool's** permission ask. It does not establish that OpenCode's automatic diagnostics machinery (server boot keyed by the global-only `lsp` config and per-file `touchFile` paths) never starts a language server: at the pinned 1.18.21 tree that mechanism is global-only and cannot scope startup to a named agent, so boundary 5b stays recorded `incompatible`. On OMP, boundary 5a stays `unresolved`: `--no-lsp` disables background discovery and the consultable cold-start routes, but the audit cannot rule out every lazy path from static wiring.
+2. **Carrier wiring ≠ native server suppression proof.** All of the above is configuration/wiring evidence. Whether any language-server process actually starts on a real host in each of the four agent/mode combinations (OpenCode build, OpenCode yolo, OMP restricted, OMP native-YOLO) remains **user runtime-observed and UNVERIFIED** (see `docs/OMP_COMPATIBILITY.md` runtime checklist). No mock or unit test in this repo certifies native suppression.
+
+The native-internal OMP hardcoded LSP sessions recorded by the audit (`cleanse/agent.ts`, `security/coordinator.ts`) construct their own `enableLsp: true` sessions and are reachable only through surfaces with no consultable restricted-session tool name, so they stay deny-by-absence at the decision layer rather than becoming new inventory rows; the decision-5 disposition is independent of whether native support exists at all.
 
 ---
 
@@ -124,19 +146,20 @@ This behavior is specific to the `edit` permission — other permissions (e.g., 
 
 The `agent-config/opencode.json` in the project configures permissions for the `build` agent (OpenCode's primary agent):
 
-| Category                                                    | Permission        | Rationale                                          |
-| ----------------------------------------------------------- | ----------------- | -------------------------------------------------- |
-| **Default (`*`)**                                           | `deny`            | Non-interactive system rejects unknowns            |
-| **Read-only tools** (`read`, `list`, `glob`, `grep`, `lsp`) | `allow`           | Safe exploration — no side effects                 |
-| **Session management** (`todoread`, `todowrite`)            | `allow`           | Internal agent organization tools                  |
-| **Sub-task spawning** (`task`)                              | `deny`            | Non-interactive system — no sub-agent coordination |
-| **Skills** (`skill`)                                        | `allow`           | Core SKILL.md discovery and loading                |
-| **Web access** (`webfetch`, `websearch`, `codesearch`)      | `allow`           | Research and information gathering                 |
-| **Interactive** (`question`)                                | `deny`            | No human operator to answer questions              |
-| **Loop protection** (`doom_loop`)                           | `deny`            | Prevent infinite retry loops                       |
-| **File editing** (`edit`)                                   | `ask` (delegated) | Delegated to Layer 3 via `"ask"` (see below)       |
-| **Shell commands** (`bash`)                                 | Whitelist         | Specific patterns only (see below)                 |
-| **External directories**                                    | Restricted        | Skills and agent workspace only                    |
+| Category                                               | Permission        | Rationale                                                                                                                   |
+| ------------------------------------------------------ | ----------------- | --------------------------------------------------------------------------------------------------------------------------- |
+| **Default (`*`)**                                      | `deny`            | Non-interactive system rejects unknowns                                                                                     |
+| **Read-only tools** (`read`, `list`, `glob`, `grep`)   | `allow`           | Safe exploration — no side effects                                                                                          |
+| **LSP tool** (`lsp`)                                   | `deny` (explicit) | LSP disabled in all agents/modes (decision 5, row 17; see [LSP Disabled: All-Off](#lsp-disabled-all-off-decision-5-row-17)) |
+| **Session management** (`todoread`, `todowrite`)       | `allow`           | Internal agent organization tools                                                                                           |
+| **Sub-task spawning** (`task`)                         | `deny`            | Non-interactive system — no sub-agent coordination                                                                          |
+| **Skills** (`skill`)                                   | `allow`           | Core SKILL.md discovery and loading                                                                                         |
+| **Web access** (`webfetch`, `websearch`, `codesearch`) | `allow`           | Research and information gathering                                                                                          |
+| **Interactive** (`question`)                           | `deny`            | No human operator to answer questions                                                                                       |
+| **Loop protection** (`doom_loop`)                      | `deny`            | Prevent infinite retry loops                                                                                                |
+| **File editing** (`edit`)                              | `ask` (delegated) | Delegated to Layer 3 via `"ask"` (see below)                                                                                |
+| **Shell commands** (`bash`)                            | Whitelist         | Specific patterns only (see below)                                                                                          |
+| **External directories**                               | Restricted        | Skills and agent workspace only                                                                                             |
 
 ### Edit Permission (Delegated via `"ask"`)
 
@@ -160,15 +183,15 @@ The `write`, `patch`, and `multiedit` tools all use `permission: "edit"`, so thi
 
 Shell commands use default-deny. Skill-invocation patterns are `"allow"` (Layer 3 matches them by entrypoint). **Every filesystem-touching utility is `"ask"`, not `"allow"`** (F12 D1), so its execution is forwarded to the Layer-3 gate rather than self-authorized at Layer 2:
 
-| Pattern                                                                                              | Verdict           | Purpose / rationale                                                                                   |
-| --------------------------------------------------------------------------------------------------- | ----------------- | ---------------------------------------------------------------------------------------------------- |
-| `deno run *skills/*/scripts/*.ts*`, `*/skills/*/scripts/*.ts*`                                       | `allow`           | Skill scripts; Layer 3 verifies the invocation entrypoint                                             |
-| `rg`, `cat`, `head`, `tail`, `ls`, `find`, `wc`, `file`, `tree`, `jq`                                | `ask`             | Search/read utilities — routed to the Layer-3 generic-command gate                                    |
-| `pdftotext`, `pdfinfo`, `pdfimages`, `pandoc`, `exiftool`, `ffprobe`                                 | `ask`             | Document/metadata readers — routed to the Layer-3 gate                                                |
-| `ffmpeg`, `magick`, `convert`, `identify`, `mogrify`, `pdftoppm`, `unzip`, `zip`, `7zz`              | `ask`             | Media/archive tools that also **write** — routed to the gate (output paths confined too)              |
-| `agent-browser *`                                                                                    | `ask`             | Browser automation — `file://` args rejected by the gate (D3); network egress mediated by F14         |
-| `bc`, `zola`                                                                                         | `deny`            | Dropped — not needed by the agent (a calculator / static-site generator)                              |
-| `git`, `python`, `echo`, `mkdir`, `rm`, `mv`, `dd`, `chmod`, `strace`, `gcc`, `make`                | `deny`            | Interpreters / mutating system tools — never routed to the generic allow-list                         |
+| Pattern                                                                                 | Verdict | Purpose / rationale                                                                           |
+| --------------------------------------------------------------------------------------- | ------- | --------------------------------------------------------------------------------------------- |
+| `deno run *skills/*/scripts/*.ts*`, `*/skills/*/scripts/*.ts*`                          | `allow` | Skill scripts; Layer 3 verifies the invocation entrypoint                                     |
+| `rg`, `cat`, `head`, `tail`, `ls`, `find`, `wc`, `file`, `tree`, `jq`                   | `ask`   | Search/read utilities — routed to the Layer-3 generic-command gate                            |
+| `pdftotext`, `pdfinfo`, `pdfimages`, `pandoc`, `exiftool`, `ffprobe`                    | `ask`   | Document/metadata readers — routed to the Layer-3 gate                                        |
+| `ffmpeg`, `magick`, `convert`, `identify`, `mogrify`, `pdftoppm`, `unzip`, `zip`, `7zz` | `ask`   | Media/archive tools that also **write** — routed to the gate (output paths confined too)      |
+| `agent-browser *`                                                                       | `ask`   | Browser automation — `file://` args rejected by the gate (D3); network egress mediated by F14 |
+| `bc`, `zola`                                                                            | `deny`  | Dropped — not needed by the agent (a calculator / static-site generator)                      |
+| `git`, `python`, `echo`, `mkdir`, `rm`, `mv`, `dd`, `chmod`, `strace`, `gcc`, `make`    | `deny`  | Interpreters / mutating system tools — never routed to the generic allow-list                 |
 
 **Layer-3 generic-command gate (F12 D2).** Utilities configured `"ask"` reach `requestPermission()`. The restricted gate in `src/acp/command-path-policy.ts` requires an entrypoint on `GENERIC_COMMAND_ALLOWLIST` and canonical physical membership for every argument, including read inputs and prospective output targets. Known tokens expand before metadata observation; new targets use their canonical existing ancestor. Parent-directory and final-file links to external files or sibling workspaces are denied. Contained links can be approved on their canonical destinations.
 
@@ -207,7 +230,7 @@ The real command still executes with the redirection (OpenCode runs the original
 
 - **Session-local tool-output boundary**: canonical observation grants the existing directory only inside the session workspace in per-spawn mode or the pool-key data home in shared mode, as enumerated above. Home-rooted or foreign resolutions receive no role.
 - **Cross-session exclusion**: canonical membership in the data-area boundary requires membership in this session's own data home. This applies to aliases and root listings as well as literal paths, overriding broader workspace membership.
-- **Harness-set variable expansion**: argument tokens are expanded *after* quote stripping and `--flag=value` splitting — leading `~`/`~/`, and `$HOME`/`${HOME}`/`$XDG_DATA_HOME`/`${XDG_DATA_HOME}`/`$TMPDIR`/`${TMPDIR}`/`$AGENT_WORKSPACE`/`${AGENT_WORKSPACE}`/`$SESSION_ID`/`${SESSION_ID}` anywhere in the token (values from the caller-provided runtime context) — then containment-checked. `$XDG_DATA_HOME/opencode/tool-output/tool_x` and `$AGENT_WORKSPACE/notes/_index.md` therefore resolve inside the session boundary and are approved, while `~/.ssh/id_rsa`, `$HOME/.git-credentials`, `-o$HOME/...` (attached option values become attached absolute paths and are rejected), attached short-option traversal (`-f../sibling/file`, `-o../x`), unexpandable forms like `~otheruser/...`, unknown unquoted `$VAR` references, and unquoted brace tokens all remain denied.
+- **Harness-set variable expansion**: argument tokens are expanded _after_ quote stripping and `--flag=value` splitting — leading `~`/`~/`, and `$HOME`/`${HOME}`/`$XDG_DATA_HOME`/`${XDG_DATA_HOME}`/`$TMPDIR`/`${TMPDIR}`/`$AGENT_WORKSPACE`/`${AGENT_WORKSPACE}`/`$SESSION_ID`/`${SESSION_ID}` anywhere in the token (values from the caller-provided runtime context) — then containment-checked. `$XDG_DATA_HOME/opencode/tool-output/tool_x` and `$AGENT_WORKSPACE/notes/_index.md` therefore resolve inside the session boundary and are approved, while `~/.ssh/id_rsa`, `$HOME/.git-credentials`, `-o$HOME/...` (attached option values become attached absolute paths and are rejected), attached short-option traversal (`-f../sibling/file`, `-o../x`), unexpandable forms like `~otheruser/...`, unknown unquoted `$VAR` references, and unquoted brace tokens all remain denied.
 
 ### External Directory Permission
 
@@ -287,6 +310,7 @@ Every sink denial records one sanitized bounded reason in the existing retry buf
 ### Secure Canonical Access Primitives (`secure-acp-filesystem-access`)
 
 To prevent TOCTOU races between path validation and content IO, the secure access modules (`src/acp/filesystem-access.ts` and `src/acp/filesystem-access-linux.ts`) provide descriptor-bound UTF-8 read, existing-file overwrite, and exclusive new-file creation:
+
 - **Supported Platform & Architecture**: Linux little-endian x86_64 and aarch64 with GNU glibc (>=2.28), kernel >=5.6 supplying working `openat2` and descriptor `statx`, and Deno FFI permission (`--allow-ffi`). Direct owned system libc locations are used (`/lib/x86_64-linux-gnu/libc.so.6`, `/lib/aarch64-linux-gnu/libc.so.6`); no third-party native package or build step is introduced. Other operating systems or libc layouts fail closed with `unsupported_platform` or `secure_access_unavailable`.
 - **Constrained Resolution & Symlinks**: Files are opened beneath the identity-checked canonical root descriptor using `openat2` with `RESOLVE_BENEATH | RESOLVE_NO_SYMLINKS | RESOLVE_NO_MAGICLINKS` and `O_NOFOLLOW`. Request-time parent or final symlinks, including contained symlinks, are strictly rejected (`unsafe_traversal`).
 - **Descriptor-Bound Mutation & No Namespace Freezing**: Content operations bind to the opened file descriptor and verify exact `statx` type/identity. This guarantees descriptor binding (an opened file cannot be redirected by pathname substitution), not universal namespace freezing (concurrent same-inode edits or background moves outside ACP are not blocked). Existing overwrite checks type and identity before `ftruncate(fd, 0)`. Replacement entries are never truncated.
@@ -306,20 +330,20 @@ When `sandbox.filterEnv` is `true` (default), the agent subprocess only receives
 
 **Base allowed:**
 
-| Variable                                | Purpose                         |
-| --------------------------------------- | ------------------------------- |
-| `PATH`, `HOME`, `USER`, `SHELL`, `TERM` | System essentials               |
-| `LANG`, `LC_ALL`                        | Locale                          |
-| `DENO_DIR`, `DENO_NO_UPDATE_CHECK`      | Deno runtime                    |
-| `SKILL_API_PORT`, `SESSION_ID`          | Skill API communication         |
-| `AGENT_WORKSPACE`                       | Agent workspace path            |
-| `TMPDIR`                                | Workspace-scoped temp directory |
+| Variable                                | Purpose                                                            |
+| --------------------------------------- | ------------------------------------------------------------------ |
+| `PATH`, `HOME`, `USER`, `SHELL`, `TERM` | System essentials                                                  |
+| `LANG`, `LC_ALL`                        | Locale                                                             |
+| `DENO_DIR`, `DENO_NO_UPDATE_CHECK`      | Deno runtime                                                       |
+| `SKILL_API_PORT`, `SESSION_ID`          | Skill API communication                                            |
+| `AGENT_WORKSPACE`                       | Agent workspace path                                               |
+| `TMPDIR`                                | Workspace-scoped temp directory                                    |
 | `XDG_DATA_HOME`                         | Session-scoped OpenCode data dir (`{workspace}/tmp/opencode-data`) |
 
 **OpenCode provider keys:**
 
-| Variable                                                                                                    | Purpose                            |
-| ------------------------------------------------------------------------------------------------------------ | ----------------------------------- |
+| Variable                                                                                   | Purpose                            |
+| ------------------------------------------------------------------------------------------ | ---------------------------------- |
 | `OPENROUTER_API_KEY`, `OPENCODE_API_KEY`, `GEMINI_API_KEY`, `GOOGLE_GENERATIVE_AI_API_KEY` | Provider API keys for OpenCode CLI |
 
 Additional env vars can be added via `sandbox.allowedEnvVars` config array.
@@ -332,7 +356,7 @@ When `sandbox.filesystemConfinement` is `true` (**opt-in; default off**), the ag
 - binds **only this session's own** workspace + TMPDIR (and, for self-research, the shared agent workspace) read-write; sibling users' workspaces are never bound, so they are absent from the namespace and unreadable;
 - binds the runtime (interpreters, `opencode`/`agent-browser`, caches, CA certs) read-only. The shared home-rooted OpenCode data dir (`~/.local/share/opencode`) is **not bound at all** — the agent's data dir lives under its session-scoped `XDG_DATA_HOME` (inside the workspace), so the shared dir is never written or visible to the confined process.
 
-This holds **independent of the permission layers** — a permissive or misconfigured `opencode.json` cannot re-expose the daemon environ or cross-user data, removing the single-point-of-failure property of the permission gate. It is **opt-in and runtime-dependent**: the fresh-`/proc` mount cannot be established inside a *doubly-nested* user namespace (e.g. **rootless podman**, where `bwrap --proc` fails with "Can't mount proc … Permission denied" regardless of added capabilities), so it must be verified against the real deployment runtime with `scripts/probe-sandbox-caps.sh` before enabling. **When enabled but the runtime cannot establish the confinement, the daemon fails closed at startup** with an actionable error rather than running the agent unconfined. The authoritative permission gate (D1–D3 above) is the primary protection and is always on, independent of this defense-in-depth layer.
+This holds **independent of the permission layers** — a permissive or misconfigured `opencode.json` cannot re-expose the daemon environ or cross-user data, removing the single-point-of-failure property of the permission gate. It is **opt-in and runtime-dependent**: the fresh-`/proc` mount cannot be established inside a _doubly-nested_ user namespace (e.g. **rootless podman**, where `bwrap --proc` fails with "Can't mount proc … Permission denied" regardless of added capabilities), so it must be verified against the real deployment runtime with `scripts/probe-sandbox-caps.sh` before enabling. **When enabled but the runtime cannot establish the confinement, the daemon fails closed at startup** with an actionable error rather than running the agent unconfined. The authoritative permission gate (D1–D3 above) is the primary protection and is always on, independent of this defense-in-depth layer.
 
 On **Kubernetes**, the full chain of requirements was established empirically (2026-07, Talos 1.7.2 / K8s 1.30 / containerd 1.7):
 
@@ -381,13 +405,13 @@ The allowlist defaults to empty (posture identical to the above) and is sourced 
 
 YOLO mode bypasses permission restrictions at multiple layers simultaneously:
 
-| Layer                   | YOLO Behavior                                                                             |
-| ----------------------- | ----------------------------------------------------------------------------------------- |
+| Layer                   | YOLO Behavior                                                                                  |
+| ----------------------- | ---------------------------------------------------------------------------------------------- |
 | Layer 1 (Agent Mode)    | OpenCode switches from the `build` agent to the `yolo` agent via ACP `setSessionMode("yolo")`. |
-| Layer 2 (opencode.json) | The `yolo` agent's permissions are all `allow`.                                           |
-| Layer 3 (ACP Client)    | `requestPermission()` auto-approves every request.                                                                          |
-| Layer 4 (File Boundary) | Unchanged — path boundaries still enforced.                                                                                 |
-| Layer 5 (Sandbox)       | Unchanged — env filtering and network isolation still apply.                                                                |
+| Layer 2 (opencode.json) | The `yolo` agent's permissions are all `allow`.                                                |
+| Layer 3 (ACP Client)    | `requestPermission()` auto-approves every request.                                             |
+| Layer 4 (File Boundary) | Unchanged — path boundaries still enforced.                                                    |
+| Layer 5 (Sandbox)       | Unchanged — env filtering and network isolation still apply.                                   |
 
 ### YOLO Resolution
 
@@ -442,13 +466,13 @@ These sessions use synthetic identifiers (e.g., platform=`"discord"`, userId=`"s
 
 OpenCode uses Layer 2 (`opencode.json`) for most permissions, but delegates edit/write decisions to Layer 3 via `"ask"`. This is because OpenCode's edit/write tools convert file paths to relative paths before evaluating Layer 2 patterns, making absolute path patterns unreliable (see [Path Resolution in Permission Patterns](#path-resolution-in-permission-patterns)). The `build` agent enforces the restricted-mode whitelist; the `yolo` agent (selected via ACP `setSessionMode("yolo")`) grants all permissions.
 
-| Aspect                          | Value                        |
-| ------------------------------- | ---------------------------- |
-| **Binary**                      | `opencode`                   |
-| **ACP invocation**              | `acp` (subcommand)           |
+| Aspect                          | Value                              |
+| ------------------------------- | ---------------------------------- |
+| **Binary**                      | `opencode`                         |
+| **ACP invocation**              | `acp` (subcommand)                 |
 | **Restricted agent** (non-YOLO) | `build` (`opencode.json`, Layer 2) |
-| **YOLO switch**                 | ACP `setSessionMode("yolo")` |
-| **Config-based permissions**    | ✅ `opencode.json`           |
+| **YOLO switch**                 | ACP `setSessionMode("yolo")`       |
+| **Config-based permissions**    | ✅ `opencode.json`                 |
 
 **Reference**: `src/acp/agent-factory.ts`
 
@@ -537,32 +561,32 @@ Each permission audit entry includes:
 
 ### Decision Reasons
 
-| Reason                                            | Decision | Description                                                              |
-| ------------------------------------------------- | -------- | ------------------------------------------------------------------------ |
-| `yolo_mode`                                       | approved | YOLO mode auto-approved the request                                       |
-| `skills_directory_access`                         | approved | Read access to the skills directory                                       |
-| `skill_whitelist`                                 | approved | Command matched the skill auto-approve list                               |
-| `registered_skill`                                | approved | Tool matched a registered skill name                                      |
-| `rejected_write_path_outside_workspace`            | denied | Physical target is outside writable roots or escapes through a link |
-| `rejected_agent_workspace_write_unauthorized`      | denied | Restricted shared write lacks session authorization |
-| `rejected_write_extension`                        | denied | Restricted shared target extension is not allowed |
-| `rejected_workspace_write_restricted`             | denied | Ordinary restricted user-workspace mutation outside own staging |
-| `rejected_trusted_skills_read_only`               | denied | Trusted skills write attempted in any mode |
-| `rejected_trusted_skills_identity`                | denied | Trusted ownership/source/generation mismatch or writable overlap; stale callback observation |
-| `rejected_filesystem_context`                     | denied | Missing/invalid registered ACP owner or context |
-| `rejected_filesystem_path_unavailable`            | denied | Expansion or canonical root/target observation failed |
-| `rejected_filesystem_access`                      | denied | Protected operation failed, including unavailable staging, symlinks, replacement or unsupported platform |
-| `rejected_read_extension`                        | denied | Workspace/shared/staging extension is outside `.jsonl`, `.md`, `.txt` |
-| `rejected_edit_write`                             | denied   | Edit/write operation rejected in restricted mode                          |
-| `destructive_authorized`                         | approved | Complete ACP destructive input and every target authorized |
-| `rejected_destructive_incomplete`                | denied | Incomplete, unsupported, unparseable or title-only destructive intent |
-| `rejected_destructive_binding`                   | denied | Bound decode or complete location set disagrees |
-| `rejected_destructive_target`                    | denied | Target denial fallback; existing filesystem reasons retain their meaning |
-| `rejected_unknown`                                | denied   | Unknown tool rejected by default-deny policy                              |
-| `rejected_generic_command_out_of_workspace`       | denied   | Generic command path argument resolved outside the allowed dirs           |
-| `rejected_generic_command_shell_operator`         | denied   | Generic command contained a non-tolerated shell operator / file redirect  |
-| `rejected_generic_command_first_token_not_allowed` | denied  | Generic command first token was not on the allow-list                     |
-| `rejected_generic_command_dangerous_flag`         | denied   | Generic command used a code-exec / arbitrary-target flag (e.g. `find -exec`) |
+| Reason                                             | Decision | Description                                                                                              |
+| -------------------------------------------------- | -------- | -------------------------------------------------------------------------------------------------------- |
+| `yolo_mode`                                        | approved | YOLO mode auto-approved the request                                                                      |
+| `skills_directory_access`                          | approved | Read access to the skills directory                                                                      |
+| `skill_whitelist`                                  | approved | Command matched the skill auto-approve list                                                              |
+| `registered_skill`                                 | approved | Tool matched a registered skill name                                                                     |
+| `rejected_write_path_outside_workspace`            | denied   | Physical target is outside writable roots or escapes through a link                                      |
+| `rejected_agent_workspace_write_unauthorized`      | denied   | Restricted shared write lacks session authorization                                                      |
+| `rejected_write_extension`                         | denied   | Restricted shared target extension is not allowed                                                        |
+| `rejected_workspace_write_restricted`              | denied   | Ordinary restricted user-workspace mutation outside own staging                                          |
+| `rejected_trusted_skills_read_only`                | denied   | Trusted skills write attempted in any mode                                                               |
+| `rejected_trusted_skills_identity`                 | denied   | Trusted ownership/source/generation mismatch or writable overlap; stale callback observation             |
+| `rejected_filesystem_context`                      | denied   | Missing/invalid registered ACP owner or context                                                          |
+| `rejected_filesystem_path_unavailable`             | denied   | Expansion or canonical root/target observation failed                                                    |
+| `rejected_filesystem_access`                       | denied   | Protected operation failed, including unavailable staging, symlinks, replacement or unsupported platform |
+| `rejected_read_extension`                          | denied   | Workspace/shared/staging extension is outside `.jsonl`, `.md`, `.txt`                                    |
+| `rejected_edit_write`                              | denied   | Edit/write operation rejected in restricted mode                                                         |
+| `destructive_authorized`                           | approved | Complete ACP destructive input and every target authorized                                               |
+| `rejected_destructive_incomplete`                  | denied   | Incomplete, unsupported, unparseable or title-only destructive intent                                    |
+| `rejected_destructive_binding`                     | denied   | Bound decode or complete location set disagrees                                                          |
+| `rejected_destructive_target`                      | denied   | Target denial fallback; existing filesystem reasons retain their meaning                                 |
+| `rejected_unknown`                                 | denied   | Unknown tool rejected by default-deny policy                                                             |
+| `rejected_generic_command_out_of_workspace`        | denied   | Generic command path argument resolved outside the allowed dirs                                          |
+| `rejected_generic_command_shell_operator`          | denied   | Generic command contained a non-tolerated shell operator / file redirect                                 |
+| `rejected_generic_command_first_token_not_allowed` | denied   | Generic command first token was not on the allow-list                                                    |
+| `rejected_generic_command_dangerous_flag`          | denied   | Generic command used a code-exec / arbitrary-target flag (e.g. `find -exec`)                             |
 
 ### Content Hashing
 
@@ -578,16 +602,16 @@ Permission audit phases respect the `audit.includedPhases` configuration. When `
 
 ### What Each Layer Prevents
 
-| Threat                                  | Prevented by                                                                                                            |
-| --------------------------------------- | --------------------------------------------------------------------------------------------------------------------- |
-| Agent modifying source code             | Layer 2 (`"edit": "ask"` delegates to Layer 3), Layer 3 (edit/write scoped to agent workspace only)                    |
-| Agent running arbitrary commands        | Layer 2 (bash whitelist), Layer 3 (skill auto-approve list)                                                            |
-| Agent accessing other users' data       | Layer 4 (file access boundary — workspace isolation)                                                                   |
-| Agent exfiltrating secrets via env vars | Layer 5 (env var filtering)                                                                                            |
-| Agent making unauthorized network calls | Layer 5 (optional network isolation)                                                                                   |
-| Agent committing/pushing to git         | Layer 2 (`"git *": "deny"`), Layer 3 (not in skill list)                                                               |
-| Agent writing non-allowed file types    | Layer 2 (`"edit": "ask"` delegates to Layer 3), Layer 3 (extension check), Layer 4 (writeTextFile check)              |
-| Permission bypass undetected            | All permission decisions (approved and denied) are recorded in per-session audit logs with full context               |
+| Threat                                  | Prevented by                                                                                             |
+| --------------------------------------- | -------------------------------------------------------------------------------------------------------- |
+| Agent modifying source code             | Layer 2 (`"edit": "ask"` delegates to Layer 3), Layer 3 (edit/write scoped to agent workspace only)      |
+| Agent running arbitrary commands        | Layer 2 (bash whitelist), Layer 3 (skill auto-approve list)                                              |
+| Agent accessing other users' data       | Layer 4 (file access boundary — workspace isolation)                                                     |
+| Agent exfiltrating secrets via env vars | Layer 5 (env var filtering)                                                                              |
+| Agent making unauthorized network calls | Layer 5 (optional network isolation)                                                                     |
+| Agent committing/pushing to git         | Layer 2 (`"git *": "deny"`), Layer 3 (not in skill list)                                                 |
+| Agent writing non-allowed file types    | Layer 2 (`"edit": "ask"` delegates to Layer 3), Layer 3 (extension check), Layer 4 (writeTextFile check) |
+| Permission bypass undetected            | All permission decisions (approved and denied) are recorded in per-session audit logs with full context  |
 
 ### Known Limitations
 
@@ -648,13 +672,13 @@ audit:
 
 ### Environment Variables
 
-| Variable                                 | Config Path                            | Description          |
-| ---------------------------------------- | -------------------------------------- | -------------------- |
-| `AGENT_SANDBOX_FILTER_ENV`               | `agent.sandbox.filterEnv`              | `"true"` / `"false"` |
-| `AGENT_SANDBOX_NETWORK_ISOLATION`        | `agent.sandbox.networkIsolation`       | `"true"` / `"false"` |
-| `AGENT_SANDBOX_ALLOWED_ENV_VARS`         | `agent.sandbox.allowedEnvVars`         | Comma-separated list |
-| `AGENT_SANDBOX_ALLOWED_WRITE_EXTENSIONS` | `agent.sandbox.allowedWriteExtensions` | Comma-separated list |
-| `AGENT_AUTO_APPROVE_SKILLS`              | `agent.autoApproveSkills`              | Comma-separated list |
+| Variable                                 | Config Path                            | Description                                                          |
+| ---------------------------------------- | -------------------------------------- | -------------------------------------------------------------------- |
+| `AGENT_SANDBOX_FILTER_ENV`               | `agent.sandbox.filterEnv`              | `"true"` / `"false"`                                                 |
+| `AGENT_SANDBOX_NETWORK_ISOLATION`        | `agent.sandbox.networkIsolation`       | `"true"` / `"false"`                                                 |
+| `AGENT_SANDBOX_ALLOWED_ENV_VARS`         | `agent.sandbox.allowedEnvVars`         | Comma-separated list                                                 |
+| `AGENT_SANDBOX_ALLOWED_WRITE_EXTENSIONS` | `agent.sandbox.allowedWriteExtensions` | Comma-separated list                                                 |
+| `AGENT_AUTO_APPROVE_SKILLS`              | `agent.autoApproveSkills`              | Comma-separated list                                                 |
 | `AGENT_OPENCODE_MIN_VERSION`             | — (observability only)                 | Minimum OpenCode version for the bootstrap check (default `1.17.13`) |
 
 ### Permission Rejection Feedback (Retry Prompt)
@@ -724,7 +748,7 @@ The `src/acp/filesystem-roots.ts` helper library provides an agent-generic, phys
 
 ## Restricted OMP Tool-Decision Layer (OMP Integration Row 14a / P5c-i)
 
-Pure restricted-mode tool-decision modules were defined by `define-omp-restricted-tool-decisions` (`src/acp/omp/tool-inventory.ts`, `src/acp/omp/tool-provenance.ts`, `src/acp/omp/approval-records.ts`, `src/acp/omp/destructive-decision.ts`). They are consulted **only in restricted OMP sessions** — native-YOLO sessions receive none of these clamps (their LSP disablement is owned separately, row 15) and every OpenCode flow in Layers 1–5 above is untouched. The layers above remain the operative runtime enforcement; these decisions are consulted per restricted `tool_call` by the trusted-extension enforcement wiring (row 16 below; see [docs/OMP_ENFORCEMENT.md](OMP_ENFORCEMENT.md)), and 14c owns generic-command canonicalization. See [docs/OMP_TOOL_POLICY.md](OMP_TOOL_POLICY.md) for the inventory table, alternate-route pair table, provenance admission, record-interpretation rules, MCP mechanism tiers, and the preserved pinned verdicts (record-reset INCOMPATIBLE, destructive-intent UNRESOLVED) with their DECIDED dispositions. No runtime enforcement, record reset, or complete native destructive decoding is claimed by this layer's tests.
+Pure restricted-mode tool-decision modules were defined by `define-omp-restricted-tool-decisions` (`src/acp/omp/tool-inventory.ts`, `src/acp/omp/tool-provenance.ts`, `src/acp/omp/approval-records.ts`, `src/acp/omp/destructive-decision.ts`). They are consulted **only in restricted OMP sessions** — native-YOLO sessions receive none of these clamps (its LSP disablement rides the both-mode `--no-lsp` carrier of decision 5 / row 17, with its settings-level pin owned by row 25) and every OpenCode flow in Layers 1–5 above is untouched. The layers above remain the operative runtime enforcement; these decisions are consulted per restricted `tool_call` by the trusted-extension enforcement wiring (row 16 below; see [docs/OMP_ENFORCEMENT.md](OMP_ENFORCEMENT.md)), and 14c owns generic-command canonicalization. See [docs/OMP_TOOL_POLICY.md](OMP_TOOL_POLICY.md) for the inventory table, alternate-route pair table, provenance admission, record-interpretation rules, MCP mechanism tiers, and the preserved pinned verdicts (record-reset INCOMPATIBLE, destructive-intent UNRESOLVED) with their DECIDED dispositions. No runtime enforcement, record reset, or complete native destructive decoding is claimed by this layer's tests.
 
 ---
 

@@ -63,7 +63,9 @@ origin rescues a named execution surface, and an MCP tool merely wearing such a
 name is not an approved client capability.
 
 The `lsp` deny is a decision-layer deny, **not** disablement evidence; native
-disablement incl. implicit startup is owned by row 15.
+disablement carriers (both-mode `--no-lsp`, per-agent OpenCode denials) land in
+LSP row 17 and still prove neither native server suppression nor implicit-
+startup suppression (decision-5 evidence limits; `docs/AGENT_PERMISSIONS.md`).
 
 ## Alternate-route pair blocking
 
