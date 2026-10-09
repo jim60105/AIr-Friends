@@ -18,12 +18,12 @@ flows are byte-unchanged — this change has no runtime consumer yet.
 
 ## Modules
 
-| Module | Role |
-| --- | --- |
-| `src/acp/omp/tool-inventory.ts` | Entry decision over (tool name, recorded provenance, decoded input shape); machine-readable inventory table + alternate-route pair table + honesty gates |
-| `src/acp/omp/tool-provenance.ts` | Live-provenance admission (owned-extension canonical ownership, operator-MCP ownership + epoch freshness) and the MCP mechanism-status table |
-| `src/acp/omp/approval-records.ts` | Exact-key native approval-record interpretation under the surviving-lower-record reality |
-| `src/acp/omp/destructive-decision.ts` | Thin consumer of the shared row-5 destructive policy; replays its conformance table |
+| Module                                | Role                                                                                                                                                     |
+| ------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `src/acp/omp/tool-inventory.ts`       | Entry decision over (tool name, recorded provenance, decoded input shape); machine-readable inventory table + alternate-route pair table + honesty gates |
+| `src/acp/omp/tool-provenance.ts`      | Live-provenance admission (owned-extension canonical ownership, operator-MCP ownership + epoch freshness) and the MCP mechanism-status table             |
+| `src/acp/omp/approval-records.ts`     | Exact-key native approval-record interpretation under the surviving-lower-record reality                                                                 |
+| `src/acp/omp/destructive-decision.ts` | Thin consumer of the shared row-5 destructive policy; replays its conformance table                                                                      |
 
 `allow` never means "authorized": every non-deny outcome names the completing
 authority (row 4 sink policy, the existing common command policy, the row 5
@@ -40,17 +40,17 @@ alternate-route pair screening (decoded shape only, rename-invariant) →
 structural default-deny by name → provenance admission → the row's delegating
 outcome.
 
-| Entry | Decision | Completing authority |
-| --- | --- | --- |
-| `read`, `list`, `glob`, `grep`, `search`/`find` | allow gated | Row 4 boundaries + authorized shared/read-only roots + trusted-skills read root. Pinned note: some native search implementations do not automatically invoke ACP callbacks — the decision binds at the handler (14b), never by assumed callback coverage |
-| native `read` URL branch; `webfetch`, `websearch`, `codesearch` | `allow-gated-pending-adapter` (distinct from allow) | Rows 17–19 transport adapters once they exist; until then 14b fails them closed rather than letting native unadapted transport run. Capability parity preserved, never deny-parity |
-| `write` / `edit` (ordinary) | routed to sinks | Row 4 `filesystem-policy.ts` via the row-8 sink contract |
-| todo-shaped write (`todoread`/`todowrite` and a `todo`-shaped `write`/`edit`) | in-session state only | Session planning state; the outcome carries `filesystemMutationRoute: false` — a todo-shaped write never opens a filesystem mutation route |
-| `bash` | allow gated | The EXISTING common command policy (lexical path gate unchanged; 14c owns canonical hardening); the extra native ACP bash permission path stays active |
-| `delete`, `move`, `apply_patch` | routed to row 5 | Shared destructive all-target policy (below) |
-| operator/client-owned MCP tools (origin-keyed) | routed to provenance | Provenance decision + client MCP ownership; MCP is never host-owned |
-| `skill` (owned critical skills, `skill://`-style reads) | allow gated | Row 4 trusted-skills read root with row 12 canonical provenance |
-| every unlisted name | **default-deny by absence** | Structural: `denyByAbsence` — audit omissions fail closed, never open |
+| Entry                                                                         | Decision                                            | Completing authority                                                                                                                                                                                                                                     |
+| ----------------------------------------------------------------------------- | --------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `read`, `list`, `glob`, `grep`, `search`/`find`                               | allow gated                                         | Row 4 boundaries + authorized shared/read-only roots + trusted-skills read root. Pinned note: some native search implementations do not automatically invoke ACP callbacks — the decision binds at the handler (14b), never by assumed callback coverage |
+| native `read` URL branch; `webfetch`, `websearch`, `codesearch`               | `allow-gated-pending-adapter` (distinct from allow) | Rows 17–19 transport adapters once they exist; until then 14b fails them closed rather than letting native unadapted transport run. Capability parity preserved, never deny-parity                                                                       |
+| `write` / `edit` (ordinary)                                                   | routed to sinks                                     | Row 4 `filesystem-policy.ts` via the row-8 sink contract                                                                                                                                                                                                 |
+| todo-shaped write (`todoread`/`todowrite` and a `todo`-shaped `write`/`edit`) | in-session state only                               | Session planning state; the outcome carries `filesystemMutationRoute: false` — a todo-shaped write never opens a filesystem mutation route                                                                                                               |
+| `bash`                                                                        | allow gated                                         | The EXISTING common command policy (lexical path gate unchanged; 14c owns canonical hardening); the extra native ACP bash permission path stays active                                                                                                   |
+| `delete`, `move`, `apply_patch`                                               | routed to row 5                                     | Shared destructive all-target policy (below)                                                                                                                                                                                                             |
+| operator/client-owned MCP tools (origin-keyed)                                | routed to provenance                                | Provenance decision + client MCP ownership; MCP is never host-owned                                                                                                                                                                                      |
+| `skill` (owned critical skills, `skill://`-style reads)                       | allow gated                                         | Row 4 trusted-skills read root with row 12 canonical provenance                                                                                                                                                                                          |
+| every unlisted name                                                           | **default-deny by absence**                         | Structural: `denyByAbsence` — audit omissions fail closed, never open                                                                                                                                                                                    |
 
 Default-deny rows enumerate the named OMP-only execution surfaces outside the
 approved capability set with design-§6 citations (never inferred from the
@@ -84,15 +84,21 @@ presented pair.
 
 `evaluateToolProvenance` (names are structurally insufficient):
 
-| Origin | Admission |
-| --- | --- |
-| `owned-extension` | Admits allow-table names only with exact contracted module ownership (row 12 canonical evidence required; lexical path alone never carries the tier) and current resource-generation observation |
-| `operator-mcp` | Admits iff the recorded origin is the ACP client's MCP ownership **and** the registry observation is current to `registryEpoch`. Post-start registration/refresh ADMITS on a fresh observation — no exclusion, no elicitation. Stale or incoherent observations deny with `pending: "re-observe"` |
-| `host`, `workspace`, `unowned-discovery` | Deny structurally **even on allow-table names** (the name-match insufficiency made executable) |
+| Origin                                   | Admission                                                                                                                                                                                                                                                                                         |
+| ---------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `owned-extension`                        | Admits allow-table names only with exact contracted module ownership (row 12 canonical evidence required; lexical path alone never carries the tier) and current resource-generation observation                                                                                                  |
+| `operator-mcp`                           | Admits iff the recorded origin is the ACP client's MCP ownership **and** the registry observation is current to `registryEpoch`. Post-start registration/refresh ADMITS on a fresh observation — no exclusion, no elicitation. Stale or incoherent observations deny with `pending: "re-observe"` |
+| `host`, `workspace`, `unowned-discovery` | Deny structurally **even on allow-table names** (the name-match insufficiency made executable)                                                                                                                                                                                                    |
 
 Epoch/generation values are consumed freshness inputs; the modules define no
 counter and touch no registry plumbing (14b owns live `registryEpoch`
 observation).
+
+Generation observations follow a BOTH-or-NEITHER contract: `14b` supplies
+`observedResourceGeneration` and `currentResourceGeneration` together from one
+observation pair, or omits both (the explicit untracked-generation case).
+Disagreement or exactly-one-present denies pending re-observation, so a rotated
+`resourceGeneration` can never be admitted by omitting a field.
 
 ## Approval-record interpretation
 
@@ -150,10 +156,10 @@ register labels from the user decision register (§3 of
 `docs/superpowers/specs/2026-10-06-omp-proposal-batch-index.md`); a test
 asserts equality so no restatement can drift:
 
-| Verdict | Pinned | Register label | User disposition |
-| --- | --- | --- | --- |
-| Authoritative approval-record reset | ledger status `incompatible` | INCOMPATIBLE | DECIDED — settings discovery paths are controlled instead of the reset overlay (only owned `--config` overlays visible; HOME/XDG/project sources filtered), so no hostile lower layer exists to inherit from; restricted default-deny remains the second boundary |
-| Complete destructive-intent decoding | ledger status `incompatible` | UNRESOLVED | DECIDED — keep the ACP-mediated destructive path with complete location lists; deny native shapes (multi-file patches, first-operation-only lists) fail-closed |
+| Verdict                              | Pinned                       | Register label | User disposition                                                                                                                                                                                                                                                  |
+| ------------------------------------ | ---------------------------- | -------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Authoritative approval-record reset  | ledger status `incompatible` | INCOMPATIBLE   | DECIDED — settings discovery paths are controlled instead of the reset overlay (only owned `--config` overlays visible; HOME/XDG/project sources filtered), so no hostile lower layer exists to inherit from; restricted default-deny remains the second boundary |
+| Complete destructive-intent decoding | ledger status `incompatible` | UNRESOLVED     | DECIDED — keep the ACP-mediated destructive path with complete location lists; deny native shapes (multi-file patches, first-operation-only lists) fail-closed                                                                                                    |
 
 The register labels and the ledger statuses are different tokens from different
 sources and are kept apart so neither relabels the other. Passing decision-table
@@ -163,11 +169,18 @@ tests clear neither verdict; unit/mock evidence validates decision logic only.
 
 - **14b** (`wire-omp-restricted-tool-enforcement`): trusted-extension
   `tool_call` handler wiring — decodes native arguments into `InputShape`
-  (including device/config surface detection and `decodedCapability`), observes
+  (including device/config surface detection and `decodedCapability`;
+  `deviceSurface` may only REFINE a non-ordinary shape — never downgrade a
+  `config-write`/`device-route` shape to the ordinary route), observes
   live `registryEpoch`, supplies canonical observations for the destructive
   all-target pass, and fails `allow-gated-pending-adapter` calls closed until
-  rows 17–19 land. The modules import cleanly as a self-contained tree for the
-  image extension's `_daemon/` install (row 22).
+  rows 17–19 land. MCP admission is read from the entry decision's
+  `routed-provenance` outcome (or the `decideMcpAdmission` re-expression
+  view); there is no second admission path. Note that MCP-origin `url`/`todo`
+  shapes are origin-keyed client capability calls, not native transport/todo
+  routes — they are not pending-adapter or session-state coverage. The modules
+  import cleanly as a self-contained tree for the image extension's `_daemon/`
+  install (row 22).
 - **14c** (`harden-acp-command-path-gate`): lexical→canonical hardening of the
   `bash` completing authority.
 - **Row 21**: inherits the MCP tiers and honesty gates as exported data.

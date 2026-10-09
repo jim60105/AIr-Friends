@@ -17,6 +17,7 @@ import {
   RESTRICTED_TOOL_INVENTORY_TABLE,
   type RestrictedToolDecisionRequest,
   restrictedToolPolicyGates,
+  type RouteSurface,
   SECURITY_RELEVANT_SETTING_KEYS,
 } from "@acp/omp/tool-inventory.ts";
 import {
@@ -365,6 +366,34 @@ Deno.test("Alternate routes: an unenumerated non-ordinary pair still denies fail
   }
 });
 
+Deno.test("Alternate routes: decoder metadata can never downgrade a non-ordinary shape to the ordinary route", () => {
+  // Post-review clamp: `deviceSurface` refines, never downgrades. A mislabeled
+  // `ordinary-tool` surface on a config-write or device-route shape still
+  // denies on the shape-derived route (type-level Exclude plus runtime clamp).
+  const postureFlip = decideRestrictedTool(
+    req("write", owned, "config-write", {
+      deviceSurface: "ordinary-tool" as unknown as Exclude<RouteSurface, "ordinary-tool">,
+      decodedCapability: "approval-posture",
+    }),
+  );
+  assertEquals(postureFlip.outcome, "deny");
+  if (postureFlip.outcome === "deny") {
+    assertEquals(postureFlip.reason, "rejected_alternate_route");
+    assertEquals(postureFlip.blockedPair?.route, "config-device");
+  }
+  const deviceSmuggle = decideRestrictedTool(
+    req("bash", owned, "device-route", {
+      deviceSurface: "ordinary-tool" as unknown as Exclude<RouteSurface, "ordinary-tool">,
+      decodedCapability: "execution",
+    }),
+  );
+  assertEquals(deviceSmuggle.outcome, "deny");
+  if (deviceSmuggle.outcome === "deny") {
+    assertEquals(deviceSmuggle.reason, "rejected_alternate_route");
+    assertEquals(deviceSmuggle.blockedPair?.route, "internal-uri-scheme");
+  }
+});
+
 Deno.test("Inventory: deny reasons always lie in the bounded vocabulary", () => {
   const probes: RestrictedToolDecisionRequest[] = [
     req("mystery", owned, "opaque"),
@@ -514,6 +543,34 @@ Deno.test("Provenance: stale generation observation denies re-observe for owned 
   }
 });
 
+Deno.test("Provenance: a half-supplied generation observation denies re-observe", () => {
+  // Post-review clamp: 14b supplies BOTH generations or NEITHER. Only one
+  // present is an incomplete observation, never a freshness-check bypass.
+  const halfObserved: ProvenanceRecord = { ...owned, observedResourceGeneration: "gen-1" };
+  const deniedObservedOnly = evaluateToolProvenance("read", halfObserved, {
+    nameOnAllowTable: true,
+  });
+  assertEquals(deniedObservedOnly.admit, false);
+  if (!deniedObservedOnly.admit) {
+    assertEquals(deniedObservedOnly.reason, "stale_observation");
+    assertEquals(deniedObservedOnly.pending, "re-observe");
+  }
+  const halfCurrent: ProvenanceRecord = { ...owned, currentResourceGeneration: "gen-1" };
+  assertEquals(
+    evaluateToolProvenance("read", halfCurrent, { nameOnAllowTable: true }).admit,
+    false,
+  );
+  // Both supplied and agreeing admits.
+  assertEquals(
+    evaluateToolProvenance(
+      "read",
+      { ...owned, observedResourceGeneration: "gen-3", currentResourceGeneration: "gen-3" },
+      { nameOnAllowTable: true },
+    ).admit,
+    true,
+  );
+});
+
 Deno.test("MCP admission: client-owned fresh tool admitted without human interaction", () => {
   const decision = decideMcpAdmission({
     toolName: "operator_server/tool",
@@ -523,6 +580,8 @@ Deno.test("MCP admission: client-owned fresh tool admitted without human interac
   assertEquals(decision.admit, true);
   if (decision.admit) {
     assertEquals(decision.gatedBy, "mcp-client-ownership");
+    // The view is tied to the single inventory table as decision source.
+    assertEquals(decision.tableRowId, "operator-mcp");
     // Honest basis: never `supported`.
     assertEquals(decision.basisStatus, "needs-mechanism-audit");
   }
@@ -536,6 +595,32 @@ Deno.test("MCP admission: client-owned fresh tool admitted without human interac
   if (!routeScreened.admit) {
     assertEquals(routeScreened.reason, "rejected_alternate_route");
     assertEquals(routeScreened.blockedPair?.capability, "execution");
+  }
+});
+
+Deno.test("MCP admission view is a re-expression of the entry decision, not a second allow path", () => {
+  // Non-MCP provenance through the admission view must fail closed with the
+  // entry decision's own bounded reason (no parallel ownership bypass).
+  const ownedCall = decideMcpAdmission({
+    toolName: "read",
+    provenance: owned,
+    inputShape: "path-target",
+  });
+  assertEquals(ownedCall.admit, false);
+  if (!ownedCall.admit) {
+    // owned-extension origin does not produce a routed-provenance outcome.
+    assertEquals(ownedCall.reason, "rejected_tool_provenance");
+  }
+  const staleCall = decideMcpAdmission({
+    toolName: "operator_server/tool",
+    provenance: mcpStale,
+    inputShape: "query",
+  });
+  assertEquals(staleCall.admit, false);
+  if (!staleCall.admit) {
+    assertEquals(staleCall.reason, "rejected_tool_provenance");
+    assertEquals(staleCall.pending, "re-observe");
+    assertEquals(staleCall.tableRowId, "operator-mcp");
   }
 });
 

@@ -431,7 +431,11 @@ export const RESTRICTED_TOOL_INVENTORY_TABLE: readonly InventoryRow[] = Object.f
  * restricted session (design §7: inventory and constrain security-relevant keys).
  * Exported as data: config-write shapes deny unconditionally through route
  * screening, so this list can never be the cause of an under-detection; it names
- * the posture keys the DECIDED settings-discovery-path control protects.
+ * the posture keys the DECIDED settings-discovery-path control protects. The
+ * complete registered settings-key surface is single-sourced from row 8's
+ * `PINNED_REGISTERED_SETTINGS_KEYS` validator in `src/acp/omp-settings.ts`;
+ * this list is the security-relevant subset for audit naming, not a second
+ * schema.
  */
 export const SECURITY_RELEVANT_SETTING_KEYS: readonly string[] = Object.freeze(
   [
@@ -456,7 +460,8 @@ export const SECURITY_RELEVANT_SETTING_KEYS: readonly string[] = Object.freeze(
 /** One (capability, route-surface) blocking pair (design D4). */
 export interface AlternateRoutePair {
   readonly capability: string;
-  readonly route: RouteSurface;
+  /** Alternate routes only: the ordinary-tool surface is never a blocked pair. */
+  readonly route: Exclude<RouteSurface, "ordinary-tool">;
   readonly designCitation: string;
   readonly notes: string;
 }
@@ -626,8 +631,12 @@ export interface RestrictedToolDecisionRequest {
    * Device identity carried by a `device-route`/`config-write` shape when the
    * decoder can name it ("debug-device", "ast-device", "ssh-device",
    * "lsp-adjacent"); absent ⇒ the generic internal-scheme surface is assumed.
+   * `ordinary-tool` is EXCLUDED by type: this field may only REFINE a
+   * non-ordinary surface, and a shape whose classification is non-ordinary can
+   * never be downgraded to the ordinary route by decoder-supplied metadata
+   * (design D4 makes the shape classification the ground truth).
    */
-  readonly deviceSurface?: RouteSurface;
+  readonly deviceSurface?: Exclude<RouteSurface, "ordinary-tool">;
   /**
    * Capability the decoded shape carries, when richer than the shape default
    * (e.g. a device-route payload that is clearly a read). Must be one of the
@@ -657,7 +666,15 @@ export function decideRestrictedTool(
   const { toolName, provenance, inputShape } = request;
 
   // Stage 1: (capability, route) pair screening from the decoded shape only.
-  const route: RouteSurface = request.deviceSurface ?? classifyRouteSurface(inputShape);
+  // `deviceSurface` can only refine a non-ordinary classification, never
+  // downgrade one: a config-write/device-route shape stays on a non-ordinary
+  // route whatever the decoder claims (runtime clamp behind the type), so
+  // route screening can never be skipped by mislabeling.
+  const shapeRoute = classifyRouteSurface(inputShape);
+  const refine = request.deviceSurface ?? shapeRoute;
+  const route: RouteSurface = shapeRoute === "ordinary-tool"
+    ? refine
+    : (refine === "ordinary-tool" ? shapeRoute : refine);
   if (route !== "ordinary-tool") {
     const capability = request.decodedCapability ??
       INPUT_SHAPE_CAPABILITIES[inputShape] ??
@@ -778,7 +795,7 @@ export interface McpAdmissionRequest {
   readonly toolName: string;
   readonly provenance: ProvenanceRecord;
   readonly inputShape: InputShape;
-  readonly deviceSurface?: RouteSurface;
+  readonly deviceSurface?: Exclude<RouteSurface, "ordinary-tool">;
   readonly decodedCapability?: string;
 }
 
@@ -786,43 +803,48 @@ export type McpAdmissionDecision =
   | {
     readonly admit: true;
     readonly gatedBy: "mcp-client-ownership";
+    readonly tableRowId: string;
     readonly basisStatus: "needs-mechanism-audit";
   }
   | {
     readonly admit: false;
     readonly reason: RestrictedDenialReason;
+    readonly tableRowId?: string;
     readonly pending?: "re-observe";
     readonly blockedPair?: { capability: string; route: RouteSurface };
   };
 
 /**
- * MCP admission decision: client ownership + live-epoch freshness +
- * alternate-route screening, with no generic human elicitation anywhere.
+ * MCP admission view. This is a pure RE-EXPRESSION of the single inventory
+ * entry decision's `routed-provenance` outcome — NOT a second admission path:
+ * it delegates to `decideRestrictedTool` so the machine-readable table remains
+ * the one decision source (route screening, named-surface deny, and
+ * provenance admission all run through the same composition), and merely
+ * labels the honest mechanism basis for consumers. No generic human
+ * elicitation exists anywhere in the path.
  */
 export function decideMcpAdmission(request: McpAdmissionRequest): McpAdmissionDecision {
-  const route: RouteSurface = request.deviceSurface ?? classifyRouteSurface(request.inputShape);
-  if (route !== "ordinary-tool") {
+  const decision = decideRestrictedTool(request);
+  if (decision.outcome === "routed-provenance" && decision.provenance.admit) {
     return {
-      admit: false,
-      reason: "rejected_alternate_route",
-      blockedPair: {
-        capability: request.decodedCapability ??
-          INPUT_SHAPE_CAPABILITIES[request.inputShape] ?? "opaque",
-        route,
-      },
+      admit: true,
+      gatedBy: "mcp-client-ownership",
+      tableRowId: decision.tableRowId,
+      basisStatus: "needs-mechanism-audit",
     };
   }
-  const provenance = evaluateToolProvenance(request.toolName, request.provenance, {
-    nameOnAllowTable: true,
-  });
-  if (!provenance.admit) {
+  if (decision.outcome === "deny") {
     return {
       admit: false,
-      reason: "rejected_tool_provenance",
-      ...(provenance.pending === "re-observe" ? { pending: "re-observe" as const } : {}),
+      reason: decision.reason,
+      ...(decision.tableRowId !== undefined ? { tableRowId: decision.tableRowId } : {}),
+      ...(decision.pending !== undefined ? { pending: decision.pending } : {}),
+      ...(decision.blockedPair !== undefined ? { blockedPair: decision.blockedPair } : {}),
     };
   }
-  return { admit: true, gatedBy: "mcp-client-ownership", basisStatus: "needs-mechanism-audit" };
+  // Any other outcome means the request was not an MCP-origin admission call:
+  // fail closed rather than re-deciding on a parallel path.
+  return { admit: false, reason: "rejected_tool_provenance" };
 }
 
 // -----------------------------------------------------------------------------

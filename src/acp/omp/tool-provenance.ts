@@ -43,7 +43,12 @@ export interface OwnedExtensionProvenance {
   readonly canonicalTarget?: CanonicalTarget;
   /** Mode-scoped ownership evaluation (row 12 contract). */
   readonly mode?: "restricted" | "native-yolo";
-  /** Row 12 generation observation for this session, if tracked. */
+  /**
+   * Row 12 generation observation for this session. 14b's contract: BOTH
+   * fields are supplied together from one observation pair, or both are
+   * absent (the explicit untracked-generation case). Exactly one present is
+   * an incomplete observation and denies re-observe; disagreement denies too.
+   */
   readonly observedResourceGeneration?: string;
   readonly currentResourceGeneration?: string;
 }
@@ -140,12 +145,12 @@ export function evaluateToolProvenance(
     }
 
     case "owned-extension": {
-      // Row 12 generation freshness, consumed as pure input.
-      if (
-        provenance.observedResourceGeneration !== undefined &&
-        provenance.currentResourceGeneration !== undefined &&
-        provenance.observedResourceGeneration !== provenance.currentResourceGeneration
-      ) {
+      // Row 12 generation freshness, consumed as pure input: disagreement or
+      // an observation half missing both deny pending re-observation, so a
+      // rotated resourceGeneration can never be admitted by omitting a field.
+      const observed = provenance.observedResourceGeneration;
+      const current = provenance.currentResourceGeneration;
+      if ((observed === undefined) !== (current === undefined) || observed !== current) {
         return { admit: false, reason: "stale_observation", pending: "re-observe" };
       }
       if (!options.nameOnAllowTable) {
