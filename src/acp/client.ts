@@ -163,6 +163,8 @@ export const ALLOWED_READ_EXTENSIONS = [".jsonl", ".md", ".txt"];
  * rejects sibling-prefix escapes such as `/data/workspaces/discord/1234` matching
  * base `/data/workspaces/discord/123` — a real risk because Discord snowflake IDs
  * are variable-length, so a naive `startsWith` could leak a sibling user's files.
+ * Note: retained for skill-matching and unit test parity; Layer-3 generic-command path
+ * decisions use canonical physical containment in command-path-policy.ts.
  */
 export function isWithinDir(path: string, base: string): boolean {
   try {
@@ -1065,7 +1067,8 @@ export class ChatbotClient implements acp.Client {
       // single-command round trips that cause coding models to batch and surrender.
       // Shared-process mode: use the session-scoped working directory registered by
       // `setSessionCwd` (each user's workspace as the ACP `newSession.cwd`). Falls
-      // back to the process-level workingDir (per-spawn mode or unregistered session).
+      // back to the process-level workingDir (per-spawn mode). Note: restricted generic commands
+      // require an authoritative registered session context and fail closed if unregistered.
       const sessionCwd = this.gateWorkingDir(params.sessionId);
       const registered = this.gateCtx(params.sessionId);
       const commandContext: CommandGateContext = {

@@ -32,9 +32,8 @@ import {
  * utilities the restricted profile exposes. Because `agent-config/opencode.json` routes
  * these tools to `"ask"` (not `"allow"`), OpenCode forwards their execution to this ACP
  * gate; without an explicit allow-list they would hit default-deny and break every
- * legitimate in-workspace use. `agent-browser` is deliberately NOT here — its `file://`
- * argument is rejected by `referencesOutOfWorkspacePath` (D3) and its network behavior is
- * F14's concern. Interpreters and mutating system tools (`python`, `git`, `rm`, `mv`, `dd`,
+ * legitimate in-workspace use. Excluded tools such as `agent-browser` (file:// args rejected,
+ * network egress mediated by F14) or mutating/interpreting system tools (`python`, `git`, `rm`,
  * `chmod`, `mkdir`, ...) are NOT here and remain default-deny.
  */
 export const GENERIC_COMMAND_ALLOWLIST: ReadonlySet<string> = new Set([
