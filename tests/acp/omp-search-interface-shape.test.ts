@@ -31,9 +31,9 @@ import {
   type SearchCredentialPresence,
   type SearchDecisionRecord,
   searchFailureEnvelope,
-  type SearchResponse,
   searchNoModelConfiguredEnvelope,
   searchNoSourcesFailure,
+  type SearchResponse,
   type SearchRouteResult,
   type SearchToolEnvelope,
 } from "@acp/omp/search-transport.ts";
@@ -150,7 +150,11 @@ function transport(responder: (url: string, seen: number) => Response): {
   };
 }
 
-function geminiBody(answer = "Grounded answer.", uri = "https://one.example/a", title = "One"): string {
+function geminiBody(
+  answer = "Grounded answer.",
+  uri = "https://one.example/a",
+  title = "One",
+): string {
   return `data: ${
     JSON.stringify({
       candidates: [{
@@ -174,7 +178,10 @@ function openRouterBody(answer = "Grounded answer.", url = "https://one.example/
     choices: [{
       message: {
         content: answer,
-        annotations: [{ type: "url_citation", url_citation: { url, title: "One", content: "cited text" } }],
+        annotations: [{
+          type: "url_citation",
+          url_citation: { url, title: "One", content: "cited text" },
+        }],
       },
     }],
     usage: { prompt_tokens: 3, completion_tokens: 4, total_tokens: 7 },
@@ -222,7 +229,12 @@ Deno.test("Layout: formatForLLM pinned layout (answer, ## Sources count, [i] tit
   const response: SearchResponse = {
     provider: "gemini",
     answer: "Grounded answer.",
-    sources: [{ title: "One", url: "https://one.example/a", snippet: "s".repeat(300), ageSeconds: 90_000 }],
+    sources: [{
+      title: "One",
+      url: "https://one.example/a",
+      snippet: "s".repeat(300),
+      ageSeconds: 90_000,
+    }],
     citations: [{ url: "https://one.example/a", title: "One", citedText: "support text" }],
     searchQueries: ["grounded query"],
   };
@@ -236,7 +248,9 @@ Deno.test("Layout: formatForLLM pinned layout (answer, ## Sources count, [i] tit
       "Search queries: 1\n- grounded query",
   );
   assertEquals(
-    formatSearchForLLM({ provider: "gemini", answer: "note answer", sources: [] }, ["provider hint"]),
+    formatSearchForLLM({ provider: "gemini", answer: "note answer", sources: [] }, [
+      "provider hint",
+    ]),
     "Note: provider hint\nnote answer",
   );
   assertEquals(hasRenderableSearchContent({ provider: "gemini", answer: " ", sources: [] }), false);
@@ -299,12 +313,20 @@ Deno.test("Request construction mirrors the pinned observable request shape (W4/
 
 Deno.test("Success envelope: pinned { content:[{type:text}], details.response } shape (Gemini SSE parse)", async () => {
   const t = transport(() => new Response(geminiBody(), { status: 200 }));
-  const result = await run(buildGeminiSearchRequest({ query: "q" }, "SECRET-CRED-1234"), GEMINI, t.fetchImpl);
+  const result = await run(
+    buildGeminiSearchRequest({ query: "q" }, "SECRET-CRED-1234"),
+    GEMINI,
+    t.fetchImpl,
+  );
   assert(result.ok);
   assertEquals(result.response.provider, "gemini");
   assertEquals(result.response.answer, "Grounded answer.");
   assertEquals(result.response.sources, [{ title: "One", url: "https://one.example/a" }]);
-  assertEquals(result.response.citations, [{ url: "https://one.example/a", title: "One", citedText: "support text" }]);
+  assertEquals(result.response.citations, [{
+    url: "https://one.example/a",
+    title: "One",
+    citedText: "support text",
+  }]);
   assertEquals(result.response.searchQueries, ["grounded query"]);
   assertEquals(result.response.usage, { inputTokens: 5, outputTokens: 7, totalTokens: 12 });
   assertEquals(result.response.model, "gemini-test-1");
@@ -312,17 +334,28 @@ Deno.test("Success envelope: pinned { content:[{type:text}], details.response } 
 
 Deno.test("Success envelope: OpenRouter chat-completion parse maps citations to sources", async () => {
   const t = transport(() => new Response(openRouterBody(), { status: 200 }));
-  const result = await run(buildOpenRouterSearchRequest({ query: "q" }, "SECRET-CRED-1234"), BOTH, t.fetchImpl);
+  const result = await run(
+    buildOpenRouterSearchRequest({ query: "q" }, "SECRET-CRED-1234"),
+    BOTH,
+    t.fetchImpl,
+  );
   assert(result.ok);
   assertEquals(result.response.provider, "openrouter");
-  assertEquals(result.response.sources, [{ title: "One", url: "https://one.example/a", snippet: "cited text" }]);
+  assertEquals(result.response.sources, [{
+    title: "One",
+    url: "https://one.example/a",
+    snippet: "cited text",
+  }]);
   assertEquals(result.response.usage, { inputTokens: 3, outputTokens: 4, totalTokens: 7 });
 });
 
 Deno.test("Empty-vs-error: zero-credential is the no-configured-model branch, provider failures are errors", () => {
   const empty = searchNoModelConfiguredEnvelope();
   assertEquals(empty.content, [{ type: "text", text: "Error: No web search model configured." }]);
-  assertEquals(empty.details, { response: { provider: "none", sources: [] }, error: "No web search model configured." });
+  assertEquals(empty.details, {
+    response: { provider: "none", sources: [] },
+    error: "No web search model configured.",
+  });
   // Distinguishable from an adapter completion: no adapterCompleted, provider
   // "none", and the message the pinned zero-available branch emits.
   assertEquals("adapterCompleted" in empty.details, false);
@@ -427,13 +460,23 @@ Deno.test("Records/log/envelope scan: credentials, headers, userinfo, query stri
   if (!result.ok && result.failure.kind === "provider") {
     const envelope = JSON.stringify(searchFailureEnvelope("gemini", result.failure.error));
     const recordDump = JSON.stringify(records);
-    for (const forbidden of ["SECRET-CRED-1234", "x-goog-api-key", "?token=", "authorization", "contents"]) {
+    for (
+      const forbidden of [
+        "SECRET-CRED-1234",
+        "x-goog-api-key",
+        "?token=",
+        "authorization",
+        "contents",
+      ]
+    ) {
       assertEquals(recordDump.includes(forbidden), false, `record:${forbidden}`);
     }
     // The envelope may carry the pinned honest failure TEXT (e.g. the 401
     // "authorization failed" line) but never credential material, header
     // names, raw query strings, or request payload fields.
-    for (const forbidden of ["SECRET-CRED-1234", "x-goog-api-key", "?token=", "Bearer ", "contents"]) {
+    for (
+      const forbidden of ["SECRET-CRED-1234", "x-goog-api-key", "?token=", "Bearer ", "contents"]
+    ) {
       assertEquals(envelope.includes(forbidden), false, `envelope:${forbidden}`);
     }
     // The error body itself never carries the credential or a raw URL query.
@@ -450,7 +493,12 @@ Deno.test("Records/log/envelope scan: credentials, headers, userinfo, query stri
 Deno.test("Route table: statuses use the frozen tiers; citations carry the pinned version+commit", () => {
   for (const row of SEARCH_ROUTE_TABLE) {
     assertEquals(
-      ["completed-by-adapter", "candidate-to-verify", "no-supported-mechanism", "blocked-pending-adapter"]
+      [
+        "completed-by-adapter",
+        "candidate-to-verify",
+        "no-supported-mechanism",
+        "blocked-pending-adapter",
+      ]
         .includes(row.status),
       true,
       `${row.routeId}:${row.status}`,
@@ -482,10 +530,14 @@ Deno.test("Route table: frozen tiering — grounded pair completed; scraping can
   const scraping = SEARCH_ROUTE_TABLE.find((r) => r.routeId === "web_search.scraping-engines");
   assertExists(scraping);
   assertEquals(scraping.status, "candidate-to-verify");
-  const secret = SEARCH_ROUTE_TABLE.find((r) => r.routeId === "web_search.unsupported-credential-set.backends");
+  const secret = SEARCH_ROUTE_TABLE.find((r) =>
+    r.routeId === "web_search.unsupported-credential-set.backends"
+  );
   assertExists(secret);
   assertEquals(secret.status, "no-supported-mechanism");
-  const nativePath = SEARCH_ROUTE_TABLE.find((r) => r.routeId === "web_search.native.global-fetch-provider-path");
+  const nativePath = SEARCH_ROUTE_TABLE.find((r) =>
+    r.routeId === "web_search.native.global-fetch-provider-path"
+  );
   assertExists(nativePath);
   assertEquals(nativePath.status, "blocked-pending-adapter");
   assertEquals(isSearchRouteCompleted("web_search.native.global-fetch-provider-path"), false);
@@ -506,7 +558,11 @@ Deno.test("Marker ≠ allow: the additive 14a delta keeps the pending-adapter ou
     ),
   );
   // 14a still yields the pending-adapter outcome (distinct from allow).
-  const decision = decideRestrictedTool({ toolName: "websearch", provenance: owned, inputShape: "query" });
+  const decision = decideRestrictedTool({
+    toolName: "websearch",
+    provenance: owned,
+    inputShape: "query",
+  });
   assertEquals(decision.outcome, "allow-gated-pending-adapter");
   // 14b still blocks at the composition seam with rejected_pending_adapter.
   const composed = composeRestrictedToolCall(obs("websearch", "query"));
@@ -518,7 +574,10 @@ Deno.test("Marker ≠ allow: the additive 14a delta keeps the pending-adapter ou
 });
 
 Deno.test("Credential-absent keeps the seam pending; supported presence gates the marker active", () => {
-  assertEquals(webSearchSeamState(NEITHER), { state: "pending-blocked", reason: "no-supported-credential" });
+  assertEquals(webSearchSeamState(NEITHER), {
+    state: "pending-blocked",
+    reason: "no-supported-credential",
+  });
   assertEquals(webSearchSeamState({ geminiKey: false, openrouterKey: true }), {
     state: "adapter-completing",
     backend: "openrouter",
@@ -562,7 +621,9 @@ Deno.test("Cross-table agreement: fetch-routes search-provider row never cited p
   // native global-fetch search traffic (no table claims the other's route
   // completed); the completed rows here are mechanism-scoped to the web_search
   // name replacement only.
-  const nativeRow = SEARCH_ROUTE_TABLE.find((r) => r.routeId === "web_search.native.global-fetch-provider-path");
+  const nativeRow = SEARCH_ROUTE_TABLE.find((r) =>
+    r.routeId === "web_search.native.global-fetch-provider-path"
+  );
   assertExists(nativeRow);
   assertEquals(nativeRow.status, "blocked-pending-adapter");
   for (const row of SEARCH_ROUTE_TABLE.filter((r) => r.status === "completed-by-adapter")) {
@@ -572,7 +633,9 @@ Deno.test("Cross-table agreement: fetch-routes search-provider row never cited p
   }
   // The fetch table's completed URL-read set is untouched (row 17 rows only).
   assertEquals(
-    FETCH_ROUTE_TABLE.filter((r) => r.status === "completed-by-adapter").map((r) => r.routeId).join("|"),
+    FETCH_ROUTE_TABLE.filter((r) => r.status === "completed-by-adapter").map((r) => r.routeId).join(
+      "|",
+    ),
     "read.url-branch.text|read.url-branch.binary|read.url-branch.secondary-hops|read.url-branch.materialization-consumers",
   );
 });
@@ -594,14 +657,23 @@ Deno.test("Positive replacement-mechanism fixture (SYNTHETIC, P0 fixture rule): 
   });
   assertEquals(definition.name, "web_search");
   assertEquals(definition.approval, "read");
-  const result = await definition.execute("tc-1", { query: "deno runtime" }, undefined, undefined, {});
+  const result = await definition.execute(
+    "tc-1",
+    { query: "deno runtime" },
+    undefined,
+    undefined,
+    {},
+  );
   const envelope = result as SearchToolEnvelope;
   assertEquals(envelope.details.response.provider, "gemini");
   assertEquals(envelope.details.adapterCompleted, true);
   assert(envelope.content[0]?.text.includes("Grounded answer."));
   assertEquals(t.issued.length, 1);
   assertEquals(t.issued[0]?.init?.redirect as RequestRedirect, "manual");
-  assertEquals((t.issued[0]?.init as RequestInit & { proxy?: string }).proxy, "http://127.0.0.1:9099");
+  assertEquals(
+    (t.issued[0]?.init as RequestInit & { proxy?: string }).proxy,
+    "http://127.0.0.1:9099",
+  );
   // Credential-free record posture (records never carry the value).
   assertEquals(JSON.stringify(records).includes("SECRET-REPL-9"), false);
 });
@@ -628,7 +700,13 @@ Deno.test("Replacement honesty fixtures (SYNTHETIC): credential-absent fail-clos
     credentialPresence: GEMINI,
     credentialValue: () => "k",
   });
-  const switched = await selected.execute("tc-1", { query: "q", provider: "openai" }, undefined, undefined, {});
+  const switched = await selected.execute(
+    "tc-1",
+    { query: "q", provider: "openai" },
+    undefined,
+    undefined,
+    {},
+  );
   assertEquals(t2.issued.length, 0, "an out-of-set provider request never reaches transport");
   const switchedEnvelope = switched as SearchToolEnvelope;
   assert(switchedEnvelope.content[0]?.text.includes("outside the supported configured set"));
