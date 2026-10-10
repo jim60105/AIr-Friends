@@ -250,6 +250,20 @@ present, restricted `web_search` fails closed to the native-shaped
 `Error: No web search model configured.` with zero transport and the
 credential-scope block record; the route stays `blocked-pending-adapter` /
 `userDecisionRequired` — a documented gap, not an invented mechanism.
+**Interim posture even with credentials present:** 14b's composition still
+blocks the `allow-gated-pending-adapter` outcome at
+`rejected_pending_adapter` — the completed-route distinction is not wired
+into the handler by this change (14b is owned elsewhere), so the reachable
+capability turns on only once that composition-side step lands or the §15
+observation confirms the replacement path; until then the adapter serves
+decision data and the registered replacement, not the gated handler.
+**Batch ownership gap (recorded for routing):** the required completion
+step — the 14b gated handler honoring completed web-search routes via
+`webSearchSeamState`/credential-presence input instead of blocking every
+`allow-gated-pending-adapter` outcome — has no owner in this change (the
+spec forbids row 20 from touching `enforcement.ts`); it needs a later
+batch row or an explicit follow-up, or live web-search capability stays
+dark even with `GEMINI_API_KEY`/`OPENROUTER_API_KEY` present.
 **Native YOLO sessions** keep native search with no adapter clamp (14b
 posture, D6): the replacement registers restricted-sessions-only and
 delegates nothing in YOLO because it never registers there.

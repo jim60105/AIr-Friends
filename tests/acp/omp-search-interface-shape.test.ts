@@ -475,7 +475,13 @@ Deno.test("Records/log/envelope scan: credentials, headers, userinfo, query stri
     // "authorization failed" line) but never credential material, header
     // names, raw query strings, or request payload fields.
     for (
-      const forbidden of ["SECRET-CRED-1234", "x-goog-api-key", "?token=", "Bearer ", "contents"]
+      const forbidden of [
+        "SECRET-CRED-1234",
+        "x-goog-api-key",
+        "?token=",
+        "Bearer ",
+        "contents",
+      ]
     ) {
       assertEquals(envelope.includes(forbidden), false, `envelope:${forbidden}`);
     }
@@ -484,6 +490,33 @@ Deno.test("Records/log/envelope scan: credentials, headers, userinfo, query stri
     assertEquals(message.includes("SECRET-CRED-1234"), false);
     assertEquals(message.includes("?token=abc"), false);
   }
+});
+
+Deno.test("Cross-origin redirect hops never carry the credential header (same-origin keeps it)", async () => {
+  // The pinned endpoint answers with a redirect to a DIFFERENT public host;
+  // the manual hop loop must strip the credential header for that follow-up
+  // (standard fetch strips `authorization` cross-origin; the loop opts in).
+  const t = transport((url, seen) =>
+    seen === 0
+      ? new Response(null, {
+        status: 302,
+        headers: { location: "https://cdn-redirect.example/tok" },
+      })
+      : new Response(geminiBody(), { status: 200 })
+  );
+  const result = await run(
+    buildGeminiSearchRequest({ query: "q" }, "SECRET-CRED-1234"),
+    GEMINI,
+    t.fetchImpl,
+  );
+  assert(result.ok);
+  assertEquals(t.issued.length, 2);
+  const first = new Headers(t.issued[0]?.init?.headers);
+  const second = new Headers(t.issued[1]?.init?.headers);
+  assertEquals(first.get("x-goog-api-key"), "SECRET-CRED-1234");
+  assertEquals(second.get("x-goog-api-key"), null, "cross-origin follow-up carries no key");
+  assertEquals(JSON.stringify([...second]).includes("SECRET-CRED-1234"), false);
+  assertEquals(t.issued[1]?.url, "https://cdn-redirect.example/tok");
 });
 
 // ---------------------------------------------------------------------------

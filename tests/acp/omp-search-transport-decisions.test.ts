@@ -188,16 +188,6 @@ Deno.test("runSearchRoute with neither credential: blocked, zero issued requests
 
 Deno.test("Explicit backend outside the supported set: blocked, never adopted, zero transport", async () => {
   for (const presence of [BOTH, GEMINI_ONLY, OPENROUTER_ONLY]) {
-    const transport = mockTransport(() => new Response("never", { status: 200 }));
-    const result = await runSearchRoute(
-      buildOpenRouterSearchRequest({ query: "q" }, "key"),
-      {
-        ...decisionDeps(presence, UNRESTRICTED),
-        fetchImpl: transport.fetchImpl,
-        credential: "key",
-      },
-    );
-    // Control: without the flag the same hop is decided by row 17's core.
     const flagged = await decideSearchRoute(
       {
         url: `${OPENROUTER_ENDPOINT}/chat/completions`,
@@ -213,7 +203,16 @@ Deno.test("Explicit backend outside the supported set: blocked, never adopted, z
       assertEquals("userDecisionRequired" in flagged && flagged.userDecisionRequired, true);
       assertEquals(Object.keys(flagged.record).sort(), ["decision", "hopIndex", "reason"]);
     }
-    void result;
+    // Control: WITHOUT the flag the same hop is decided allow by row 17's
+    // core — the block is the flag alone, not a softened/degraded rule.
+    const control = await decideSearchRoute(
+      { url: `${OPENROUTER_ENDPOINT}/chat/completions`, hopKind: "provider-endpoint", hopsFollowed: 0 },
+      decisionDeps(presence, UNRESTRICTED),
+    );
+    assertEquals(control.decision, "allow-direct");
+    // Adoption-blocking end-to-end (params.provider -> zero issued) is the
+    // replacement-level suite's positive-fixture territory
+    // (omp-search-interface-shape.test.ts), not this decision leg.
   }
 });
 

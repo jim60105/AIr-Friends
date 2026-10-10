@@ -1030,6 +1030,20 @@ export type SearchRouteResult =
  * - Redirects follow ONLY via the manual per-hop loop mirroring row 17:
  *   each hop decided BEFORE issue, `redirect: "manual"` at every issue, hop
  *   bound `MAX_REDIRECT_HOPS`, private-target `Location`s blocked at the hop.
+ * - Credential headers (`x-goog-api-key` / `authorization`) are sent to the
+ *   PINNED endpoint origin only: a redirect hop on a DIFFERENT origin is
+ *   issued without them (standard fetch strips `authorization` on
+ *   cross-origin redirects; the manual loop opts into that behavior
+ *   explicitly — a misconfigured/compromised cross-origin redirect can never
+ *   carry the API key onward).
+ * - Pinning note (recorded divergence from the proposal's wholesale-reuse
+ *   wording): the loop delegates row 17's `decideFetchHop` per hop WITHOUT
+ *   `planFetchRoute`'s resolved-address `pinValidatedUrl` handoff, mirroring
+ *   row 17's own rule that HTTPS hostname hosts are left unpinned — the two
+ *   endpoints are fixed HTTPS hostnames and the enforcing posture re-
+ *   validates at the validating proxy; the residual DNS-rebinding window is
+ *   limited to http/IP-literal redirect landings under the operator
+ *   unrestricted posture only.
  * - Enrichment (`gemini` grounding-redirect URLs in the parsed payload) re-
  *   enters as secondary hops within the shared budget and caps.
  * - Honest branches mirror the pinned parsers: an empty grounded Gemini
@@ -1052,6 +1066,8 @@ export async function runSearchRoute(
   let currentUrl = request.url;
   let hopsFollowed = 0;
   let response: Response | undefined;
+  const pinnedOrigin = new URL(request.url).origin;
+  const credentialHeader = request.backend === "gemini" ? "x-goog-api-key" : "authorization";
   for (;;) {
     const hopDecision = await decideSearchRoute(
       { url: currentUrl, hopKind: "provider-endpoint", hopsFollowed },
@@ -1062,9 +1078,11 @@ export async function runSearchRoute(
       return { ok: false, failure: { kind: "blocked", record: hopDecision.record } };
     }
     deps.recordSink?.(hopDecision.record);
+    const headers = new Headers(request.init.headers);
+    if (new URL(currentUrl).origin !== pinnedOrigin) headers.delete(credentialHeader);
     const init: Record<string, unknown> = {
       method: request.init.method,
-      headers: new Headers(request.init.headers),
+      headers,
       body: request.init.body,
       redirect: "manual",
       ...(deps.signal ? { signal: deps.signal } : {}),
