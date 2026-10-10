@@ -22,6 +22,7 @@ import {
   runFetchChain,
   runSecondaryFetch,
 } from "@acp/omp/fetch-transport.ts";
+import { runtimeResolveHost } from "@acp/omp/extension/read-replacement.ts";
 
 // Zero-network guarantee: nothing below reaches a socket.
 const realFetch = globalThis.fetch;
@@ -270,8 +271,9 @@ for (
 // ---------------------------------------------------------------------------
 
 Deno.test("Six-hop chain blocks with hop-limit after at most five followed hops", async () => {
-  // Six redirecting public hops (h1..h6 redirect; the chain must stop before
-  // issuing the request after five followed hops).
+  // Six redirecting public hops (h1..h6 all respond redirect; the chain must
+  // stop before ISSUING the request whose hop index would be 6 — h6's
+  // Location decision blocks, so hop7 is never even requested).
   const hopUrl = (n: number) => `https://hop${n}.example/r`;
   const table: Record<string, string[]> = {};
   for (let n = 1; n <= 7; n++) table[`hop${n}.example`] = ["203.0.113.5"];
@@ -288,11 +290,42 @@ Deno.test("Six-hop chain blocks with hop-limit after at most five followed hops"
     assertEquals(chain.block.reason, "hop-limit-exceeded");
   }
   assertEquals(MAX_REDIRECT_HOPS, 5);
-  // Requests issued: initial + five followed redirects = 6 max; the 7th
-  // (sixth followed hop) is never issued.
+  // Requests issued: initial + five followed redirects = 6 max; h7's
+  // request (the sixth followed hop) is never issued.
   assertEquals(transport.requests.length, 6);
+  assertEquals(transport.requests[transport.requests.length - 1]?.url, hopUrl(6));
   const limitRecords = records.filter((r) => r.reason === "hop-limit-exceeded");
   assertEquals(limitRecords.length, 1);
+});
+
+Deno.test("Production resolver shape: literal-IP hosts pass through to the classifier (B1)", async () => {
+  // The replacement's runtimeResolveHost mirrors ssrf.ts's literal
+  // short-circuit; literals must reach the SHARED classifier instead of
+  // failing as dns-unresolved (parity + honest block classes). Static
+  // import: the production DNS seam ships inside the replacement module.
+  const metadata = await decideFetchHop(
+    { url: "http://169.254.169.254/latest", hopType: "initial", hopsFollowed: 0 },
+    { resolveHost: runtimeResolveHost, policy: UNRESTRICTED },
+  );
+  assertEquals(metadata.decision, "block");
+  if (metadata.decision === "block") {
+    assertEquals(metadata.reason, "cloud-metadata");
+    assertEquals(metadata.addressClass, "cloud-metadata");
+  }
+  const loopback6 = await decideFetchHop(
+    { url: "http://[::1]:80/x", hopType: "initial", hopsFollowed: 0 },
+    { resolveHost: runtimeResolveHost, policy: UNRESTRICTED },
+  );
+  assertEquals(loopback6.decision, "block");
+  if (loopback6.decision === "block") {
+    assertEquals(loopback6.reason, "disallowed-address");
+    assertEquals(loopback6.addressClass, "loopback");
+  }
+  const publicLiteral = await decideFetchHop(
+    { url: "https://93.184.216.34/spec", hopType: "initial", hopsFollowed: 0 },
+    { resolveHost: runtimeResolveHost, policy: UNRESTRICTED },
+  );
+  assertEquals(publicLiteral.decision, "allow-direct");
 });
 
 Deno.test("Native redirect:follow shape is never emitted on any issued hop", async () => {

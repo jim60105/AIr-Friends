@@ -186,7 +186,10 @@ function selectorFromTokens(tokens: readonly string[]): ReadSelector {
 /** Apply a parsed selector to a fetched body (native selector semantics). */
 export function applyReadSelector(content: string, selector: ReadSelector): string {
   if (selector.kind === "raw" || selector.kind === "none") return content;
-  const lines = content.split("\n");
+  // Trailing-newline normalization mirrors the repo's read-selector
+  // convention (`split("\n").slice(0, -1)` on newline-terminated bodies):
+  // a trailing `\n` never counts as an extra line for tail/line selectors.
+  const lines = content.endsWith("\n") ? content.slice(0, -1).split("\n") : content.split("\n");
   if (selector.kind === "tail") {
     return lines.slice(Math.max(lines.length - selector.count, 0)).join("\n");
   }
@@ -411,8 +414,17 @@ export function createReadReplacementToolDefinition(
   };
 }
 
-/** Runtime DNS seam: Deno resolver when present, else fail-closed throw. */
-async function runtimeResolveHost(host: string): Promise<string[]> {
+/**
+ * Runtime DNS seam: Deno resolver when present, else fail-closed throw.
+ * Literal IPs pass through untouched — the same transport-plumbing
+ * short-circuit `ssrf.ts`'s own `resolveHostAddresses` performs (literal
+ * IPv4 / colon-bearing IPv6 returned as-is), NOT a rule fork: literals are
+ * still classified by the shared `isDisallowedAddress` downstream, so a
+ * literal metadata/private IP blocks with its true class instead of a
+ * misleading `dns-unresolved`.
+ */
+export async function runtimeResolveHost(host: string): Promise<string[]> {
+  if (/^(\d{1,3}\.){3}\d{1,3}$/.test(host) || host.includes(":")) return [host];
   const deno =
     (globalThis as { Deno?: { resolveDns?: (h: string, t: "A" | "AAAA") => Promise<string[]> } })
       .Deno;
