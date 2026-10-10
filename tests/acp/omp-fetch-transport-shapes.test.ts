@@ -228,11 +228,15 @@ Deno.test("Seam marker: URL-read rows name this change + route table and stay di
   }
 });
 
-// Row 20 (`adapt-omp-web-search`) deliberately supersedes this row-17 pin
-// for the WEB-SEARCH row only: that row now carries ITS OWN additive
+// Row 20 (`adapt-omp-web-search`) deliberately superseded this row-17 pin
+// for the WEB-SEARCH row: that row carries ITS OWN additive
 // completing-adapter marker (the URL-fetch marker stays excluded from both
-// rows). The PUBLIC-CODE-SEARCH row remains byte-identical pending.
-Deno.test("Seam marker: web-search carries row 20's own marker; code-search stays byte-identical pending", () => {
+// rows). Row 21 (`adapt-omp-public-code-search`) supersedes it once more
+// for the PUBLIC-CODE-SEARCH row: that row now carries ITS OWN credential-
+// gated marker too. The pins below keep the durable part of the row-17
+// guarantee — the URL-fetch marker never leaks onto these rows and the
+// pending-vs-allow outcome never softens (kind + 14a/14b outcome unchanged).
+Deno.test("Seam marker: web-search carries row 20's marker; code-search carries row 21's gate-off marker", () => {
   for (const gateId of ["web-search", "code-search"]) {
     const gate = RESTRICTED_TOOL_INVENTORY_TABLE.find((g) => g.id === gateId);
     assertExists(gate, gateId);
@@ -245,7 +249,36 @@ Deno.test("Seam marker: web-search carries row 20's own marker; code-search stay
   assertEquals(webSearch.notes.includes("COMPLETING-ADAPTER: adapt-omp-web-search"), true);
   const codeSearch = RESTRICTED_TOOL_INVENTORY_TABLE.find((g) => g.id === "code-search");
   assertExists(codeSearch);
-  assertEquals(codeSearch.notes.includes("COMPLETING-ADAPTER"), false);
+  // Row 21's additive marker names its OWN change; the URL-read and
+  // web-search markers never leak onto it, and the row-19 prefix sentence
+  // stays byte-identical (additive append only).
+  assertEquals(codeSearch.notes.includes("COMPLETING-ADAPTER: adapt-omp-public-code-search"), true);
+  assertEquals(
+    codeSearch.notes.includes("COMPLETING-ADAPTER: control-omp-url-fetch-transport"),
+    false,
+  );
+  assertEquals(codeSearch.notes.includes("COMPLETING-ADAPTER: adapt-omp-web-search"), false);
+  assertEquals(
+    codeSearch.notes.startsWith(
+      "Public code/documentation search preserved (row 19) without adding LSP or arbitrary " +
+        "execution. Local text search stays on the read-class row. ",
+    ),
+    true,
+  );
+  // The marker is NOT a plain allow: 14a still yields the pending-adapter
+  // outcome and 14b still blocks at the composition seam.
+  const decision = decideRestrictedTool({
+    toolName: "codesearch",
+    provenance: owned,
+    inputShape: "query",
+  });
+  assertEquals(decision.outcome, "allow-gated-pending-adapter");
+  const composed = composeRestrictedToolCall(obs("codesearch", "query"));
+  assert("block" in composed && composed.block, "14b still blocks the pending-adapter outcome");
+  if ("block" in composed && composed.block) {
+    assertEquals(composed.error.code, "rejected_pending_adapter");
+    assertEquals(composed.error.tableRowId, "code-search");
+  }
 });
 
 Deno.test("Barrel closure: fetch surfaces reachable through the declared list only", () => {
