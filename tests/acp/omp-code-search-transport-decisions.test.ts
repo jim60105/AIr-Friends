@@ -27,6 +27,7 @@ import {
 } from "@acp/omp/code-search-transport.ts";
 
 // Zero-network guarantee: nothing below reaches a socket.
+const realFetch = globalThis.fetch;
 globalThis.fetch = (() => {
   throw new Error("network contact forbidden in mock-only suites");
 }) as typeof fetch;
@@ -369,3 +370,6 @@ Deno.test("Cross-origin redirect strips the credential header (single controlled
   const first = t.issued[0]?.init?.headers as Headers | undefined;
   assertEquals(first?.get("authorization"), "Bearer SECRET-VALUE-6");
 });
+
+// Restore fetch for any later importer (each suite file runs isolated here).
+globalThis.fetch = realFetch;

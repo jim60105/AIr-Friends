@@ -27,6 +27,7 @@ import { SEARCH_ROUTE_TABLE } from "@acp/omp/search-routes.ts";
 import {
   buildCodeSearchRequest,
   classifyCodeSearchHttpError,
+  CODE_SEARCH_ENRICHMENT_TIMEOUT_MS,
   CODE_SEARCH_LIMIT_DEFAULT,
   CODE_SEARCH_LIMIT_MAX,
   CODE_SEARCH_PREVIEW_LIMIT,
@@ -40,6 +41,7 @@ import {
   formatCodeSearchDecisionLog,
   formatCodeSearchForLLM,
   formatCodeSearchProviderFailure,
+  MAX_CODE_SEARCH_ENRICHMENT_SUBREQUESTS,
   MAX_CODE_SEARCH_RESULT_CHARS,
   parseCodeSearchInput,
   parseCodeSearchResponse,
@@ -68,6 +70,7 @@ import {
 } from "@acp/omp/extension/_daemon/mod.ts";
 
 // Zero-network guarantee: nothing below reaches a socket.
+const realFetch = globalThis.fetch;
 globalThis.fetch = (() => {
   throw new Error("network contact forbidden in mock-only suites");
 }) as typeof fetch;
@@ -673,3 +676,13 @@ Deno.test("SYNTHETIC executor fixture (credential present): serving path pins th
   );
   assertEquals(JSON.stringify(records).includes("ghp_SECRET_MATERIAL_123"), false);
 });
+
+Deno.test("Reserved enrichment budget constants are pinned, not prose (tasks 4.1)", () => {
+  // The reserved sibling's enrichment posture is part of the pinned contract:
+  // bounded secondaries sharing row 17's budget, never unbounded fan-out.
+  assertEquals(MAX_CODE_SEARCH_ENRICHMENT_SUBREQUESTS, 10);
+  assertEquals(CODE_SEARCH_ENRICHMENT_TIMEOUT_MS, 5_000);
+});
+
+// Restore fetch for any later importer (each suite file runs isolated here).
+globalThis.fetch = realFetch;

@@ -307,17 +307,17 @@ scraping (DECIDED disposition).
 
 ### Pinned-source citation table (re-verified at OpenCode tag `v1.18.21` / tree `826d9ad46a22bef0294998e08daa3c4904fea28f` and OMP `2a2c6dcbbb558c0f8145f67f28b3370984f2bf60` / v18.6.1 — static reads, never executed native behavior)
 
-| ID | Location (file + symbol) | Frozen fact |
-| --- | --- | --- |
-| C1 | OpenCode tag tree (no `tool/codesearch.ts`; 404) + commits API for that path | The parity tool is **removed upstream before the pin**: last commit touching it is `2481dde36d9aeb48de9fb21ffd2cfdc1d42804f1` — "chore: remove codesearch tool (#27019)", 2026-05-12 |
-| C2 | `tool/registry.ts` + `agent-config/opencode.json` | The `codesearch: "allow"` rule is **inert** — ids build from instantiated tools only; no `codesearch` id exists to match |
-| C3 | `tool/mcp-websearch.ts`, `tool/websearch.ts` | What OpenCode retains is webfetch reads + Exa/Parallel hosted-MCP websearch — neither is a code-index backend |
-| C4 | repo audit (`skills/`, repo-wide `grep_app`/`gh_grep`/`GREP_APP_API_TOKEN` zero hits; `git-backup-service.ts`/`git-credential-setup.ts` are GITHUB_TOKEN's only consumers) | No code-search skill ships; no code-search token exists anywhere; the batch's external-skill premise is false at the pins |
-| C5 | `skill-installer.ts` + `sandbox-manager.ts` (`AGENT_TYPE_ENV` sets, `NEVER_PASS_ENV`) | External skills carry no per-skill token plumbing; neither agent credential set carries a GitHub credential; `GITHUB_TOKEN` is NEVER_PASS |
-| C6 | OMP `tools/builtin-names.ts`, `tools/index.ts`, `web/search/provider.ts` | Pinned OMP has no code-search tool and no code-index provider; the only surface is the `github` tool's `search_code` |
-| C7 | `tools/gh-search.ts` (`executeSearchCode`), `utils/github.ts` (`GH_NON_INTERACTIVE_ENV`, gh-auth-store failure text), `Containerfile` | `search_code` spawns the external `gh` binary with gh's own auth store; subprocess HTTP is invisible to any fetch-level decision core; the image installs no `gh` |
-| C8 | `web/scrapers/index.ts` (`specialHandlers`), `searchcode.ts`, `sourcegraph.ts`, `tools/fetch.ts` | Keyless code/docs scraping exists ONLY as fetch-pipeline special handlers (URL → provider-API secondary) — the secondary class row 17 already controls |
-| C9 | `tools/gh-search.ts` (`SEARCH_LIMIT_DEFAULT = 10`, `SEARCH_LIMIT_MAX = 50`, `FILE_PREVIEW_LIMIT = 50`, `apiCodeToSearchResult`/`formatSearchCodeResults`), `utils/github.ts` (8 MiB cap) | The pinned observable bounds and attribution shape the interface-parity contract documents |
+| ID | Location (file + symbol)                                                                                                                                                                 | Frozen fact                                                                                                                                                                          |
+| -- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| C1 | OpenCode tag tree (no `tool/codesearch.ts`; 404) + commits API for that path                                                                                                             | The parity tool is **removed upstream before the pin**: last commit touching it is `2481dde36d9aeb48de9fb21ffd2cfdc1d42804f1` — "chore: remove codesearch tool (#27019)", 2026-05-12 |
+| C2 | `tool/registry.ts` + `agent-config/opencode.json`                                                                                                                                        | The `codesearch: "allow"` rule is **inert** — ids build from instantiated tools only; no `codesearch` id exists to match                                                             |
+| C3 | `tool/mcp-websearch.ts`, `tool/websearch.ts`                                                                                                                                             | What OpenCode retains is webfetch reads + Exa/Parallel hosted-MCP websearch — neither is a code-index backend                                                                        |
+| C4 | repo audit (`skills/`, repo-wide `grep_app`/`gh_grep`/`GREP_APP_API_TOKEN` zero hits; `git-backup-service.ts`/`git-credential-setup.ts` are GITHUB_TOKEN's only consumers)               | No code-search skill ships; no code-search token exists anywhere; the batch's external-skill premise is false at the pins                                                            |
+| C5 | `skill-installer.ts` + `sandbox-manager.ts` (`AGENT_TYPE_ENV` sets, `NEVER_PASS_ENV`)                                                                                                    | External skills carry no per-skill token plumbing; neither agent credential set carries a GitHub credential; `GITHUB_TOKEN` is NEVER_PASS                                            |
+| C6 | OMP `tools/builtin-names.ts`, `tools/index.ts`, `web/search/provider.ts`                                                                                                                 | Pinned OMP has no code-search tool and no code-index provider; the only surface is the `github` tool's `search_code`                                                                 |
+| C7 | `tools/gh-search.ts` (`executeSearchCode`), `utils/github.ts` (`GH_NON_INTERACTIVE_ENV`, gh-auth-store failure text), `Containerfile`                                                    | `search_code` spawns the external `gh` binary with gh's own auth store; subprocess HTTP is invisible to any fetch-level decision core; the image installs no `gh`                    |
+| C8 | `web/scrapers/index.ts` (`specialHandlers`), `searchcode.ts`, `sourcegraph.ts`, `tools/fetch.ts`                                                                                         | Keyless code/docs scraping exists ONLY as fetch-pipeline special handlers (URL → provider-API secondary) — the secondary class row 17 already controls                               |
+| C9 | `tools/gh-search.ts` (`SEARCH_LIMIT_DEFAULT = 10`, `SEARCH_LIMIT_MAX = 50`, `FILE_PREVIEW_LIMIT = 50`, `apiCodeToSearchResult`/`formatSearchCodeResults`), `utils/github.ts` (8 MiB cap) | The pinned observable bounds and attribution shape the interface-parity contract documents                                                                                           |
 
 ### Route tiering (frozen machine-readable table)
 
@@ -401,7 +401,8 @@ composition:** 14b's gated handler blocks every `allow-gated-pending-adapter`
 outcome at `rejected_pending_adapter` without consulting completed-route
 seam state, so a live code-search route needs THREE things: the credential
 provisioning above, the composition-side seam-state step (the same
-**Batch ownership gap** below, now covering the code-search route as well:
+**Batch ownership gap** recorded in the web-search section above, now
+covering the code-search route as well:
 the 14b gated handler honoring `webSearchSeamState`/`codeSearchSeamState` +
 credential-presence input instead of blocking every pending-adapter outcome
 — no owner in this change, which forbids touching `enforcement.ts`; needs a
@@ -415,11 +416,11 @@ target with no exemption.
 
 ### Honesty (code-search addendum to the D1 table)
 
-| Claim | Status |
-| --- | --- |
+| Claim                                                                                                                                                                | Status                                                                                                                                                                                                |
+| -------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Adapter decisions + interface shape under both postures, credential-presence matrix, fail-closed gap with zero issued requests, record hygiene, route-table verdicts | **Certified** by the mock-only suites (`tests/acp/omp-code-search-transport-decisions.test.ts`, `tests/acp/omp-code-search-interface-shape.test.ts`; zero-network sentinel, zero live GitHub traffic) |
-| A supported public-code-search backend exists at these pins | **No** — the D4 premise-false finding stands (parity tool removed upstream; no OMP backend under the approved credential set); no mock or marker clears it |
-| The compiled OMP binary would invoke the reserved registerTool completion | **UNVERIFIED, user-owned** — no tool is registered in this state; synthetic executor fixtures are labeled P0 fixtures and certify adapter decisions ONLY |
+| A supported public-code-search backend exists at these pins                                                                                                          | **No** — the D4 premise-false finding stands (parity tool removed upstream; no OMP backend under the approved credential set); no mock or marker clears it                                            |
+| The compiled OMP binary would invoke the reserved registerTool completion                                                                                            | **UNVERIFIED, user-owned** — no tool is registered in this state; synthetic executor fixtures are labeled P0 fixtures and certify adapter decisions ONLY                                              |
 
 Section 15 checklist additions (user-owned, real deployment):
 
