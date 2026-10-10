@@ -34,4 +34,4 @@
 
 - [x] 6.1 `docs/OMP_NETWORK.md` search section (extend row 17's file, do not rewrite its fetch section): the W1–W10 citation table, the supported/candidate-to-verify/no-supported-mechanism backend tiering keyed to the row-7 credential set with the explicit design-§9 no-unrelated-vendor-secret statement, the controlled-transport routing of provider + enrichment requests, native-shape interface and honesty rules (fabrication/retry/agent-switch prohibitions, empty-vs-error), the credential-absent capability gap with its user decision, the YOLO native-search posture, and the explicit statement that mock suites certify adapter decisions only while native use of the replacement/adapter stays on the design section-15 user checklist unverified.
 
-- [ ] 6.2 One `CHANGELOG.md` entry, then run the applicable focused type/unit checks plus `openspec validate adapt-omp-web-search --strict`; no live agents, no real or paid search requests, no builds.
+- [x] 6.2 One `CHANGELOG.md` entry, then run the applicable focused type/unit checks plus `openspec validate adapt-omp-web-search --strict`; no live agents, no real or paid search requests, no builds.
