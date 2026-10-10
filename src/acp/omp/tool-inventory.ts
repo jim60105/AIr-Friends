@@ -27,6 +27,7 @@ import {
   PINNED_OMP_VERSION,
 } from "./compatibility-contracts.ts";
 import { FETCH_COMPLETING_ADAPTER_MARKER } from "./fetch-routes.ts";
+import { SEARCH_COMPLETING_ADAPTER_MARKER } from "./search-routes.ts";
 import { ompSettingsForMode } from "../omp-settings.ts";
 import {
   evaluateToolProvenance,
@@ -226,7 +227,8 @@ export const RESTRICTED_TOOL_INVENTORY_TABLE: readonly InventoryRow[] = Object.f
       completingAuthority: "rows-17-19-transport-adapter",
       designCitation: D6,
       notes:
-        "Live search preserved through supported configured provider credentials and controlled transport (row 18).",
+        "Live search preserved through supported configured provider credentials and controlled transport (row 18). " +
+        SEARCH_COMPLETING_ADAPTER_MARKER,
     },
     {
       id: "code-search",

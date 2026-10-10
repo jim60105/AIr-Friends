@@ -33,6 +33,11 @@ import {
   type ReadToolRegistrar,
   registerLoadTimeReadReplacement,
 } from "./read-replacement.ts";
+import {
+  attachSearchReplacementAtLoad,
+  registerLoadTimeSearchReplacement,
+  type SearchToolRegistrar,
+} from "./search-replacement.ts";
 
 // Execute load-time pre-import discovery bootstrap sequence immediately upon import
 export const loadTimeDiscoveryDecision = bootstrapDiscoveryGuard();
@@ -58,6 +63,18 @@ export const loadTimeEnforcementRegistration = attachEnforcementAtLoad({
 // observed binary invoking the replacement at all stays design §15
 // user-owned verification — nothing claimed here.
 export const loadTimeReadReplacementRegistration = attachReadReplacementAtLoad({
+  observedCwd: safeCwd(),
+});
+
+// Row 20 load sequence: the web-search transport adapter's `web_search`
+// name replacement attaches AFTER the read sibling, SYNCHRONOUSLY, under
+// the same restricted-launch-identity gate (native YOLO registers no
+// replacement — 14b posture, D6 leaves native search unclamped there). The
+// replacement adds no second decision path: the 14b handler still gates
+// every call before it executes, and the observed binary invoking the
+// replacement at all stays design §15 user-owned verification — nothing
+// claimed here.
+export const loadTimeSearchReplacementRegistration = attachSearchReplacementAtLoad({
   observedCwd: safeCwd(),
 });
 
@@ -88,6 +105,14 @@ export default function trustedExtensionFactory() {
     // honesty posture as the handler slot: a host surface receiving this
     // function gets the SAME registered definition, and no field here
     // claims the official binary ever calls it.
-    registerTools: (registrar: ReadToolRegistrar) => registerLoadTimeReadReplacement(registrar),
+    // Row 20 composes the `web_search` replacement into the same
+    // attachment point: the host's registerTool surface receives each
+    // restricted definition that exists; neither field claims the binary
+    // ever calls the tools.
+    registerTools: (registrar: ReadToolRegistrar & SearchToolRegistrar) =>
+      [registerLoadTimeReadReplacement(registrar), registerLoadTimeSearchReplacement(registrar)]
+        .every(
+          Boolean,
+        ),
   };
 }
