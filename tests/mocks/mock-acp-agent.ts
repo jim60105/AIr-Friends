@@ -190,6 +190,8 @@ function buildOmpCatalog(kind: OmpCatalogKind, state: MockState): Record<string,
 }
 
 let rpcRecordSeq = 0;
+/** Monotonic per-process session counter (independent of RPC recording). */
+let sessionSeq = 0;
 
 function recordRpc(method: string, params: unknown): void {
   const target = Deno.env.get("MOCK_OMP_RECORD_RPC");
@@ -371,8 +373,11 @@ async function main(): Promise<void> {
         break;
       case "session/new": {
         const catalogKind = ompCatalogKind();
+        sessionSeq += 1;
         result = {
-          sessionId: `mock-ses-${Date.now().toString(36)}`,
+          // Unique per newSession so two sessions on one pooled process get
+          // distinct ids (Date.now() alone could collide within one ms).
+          sessionId: `mock-ses-${MOCK_CONNECTION_GEN.slice(4, 12)}-${sessionSeq}`,
           configOptions: catalogKind ? buildOmpCatalog(catalogKind, loadState()) : [],
         };
         break;
