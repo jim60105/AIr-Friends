@@ -135,9 +135,7 @@ type OmpCatalogKind = "grouped" | "flat" | "miss" | "none";
 
 function ompCatalogKind(): OmpCatalogKind | undefined {
   const raw = Deno.env.get("MOCK_OMP_CONFIG_CATALOG");
-  return raw === "grouped" || raw === "flat" || raw === "miss" || raw === "none"
-    ? raw
-    : undefined;
+  return raw === "grouped" || raw === "flat" || raw === "miss" || raw === "none" ? raw : undefined;
 }
 
 function ompLoadCatalogKind(): OmpCatalogKind | undefined {
@@ -172,18 +170,37 @@ function buildOmpCatalog(kind: OmpCatalogKind, state: MockState): Record<string,
   const modelValue = state.modelValue ?? "mock-model-canonical";
   switch (kind) {
     case "grouped":
+      // Grouped OPTION lists inside the category-carrying selects: this is
+      // the shape findOptionByCategory + collectOptionValues flatten (row-6
+      // suite fixtures pin it); a top-level group wrapper would be invisible
+      // to the shipped selection code.
       return [{
-        type: "group",
-        id: "model_group",
-        name: "Model",
-        children: [modelSelect(modelValue, ["mock-model-canonical", "mock-model-other"])],
-      }, thoughtLevelSelect("off")];
+        ...modelSelect(modelValue, ["mock-model-canonical", "mock-model-other"]),
+        category: "model",
+        options: [{
+          group: "mock-group",
+          name: "Mock group",
+          options: ["mock-model-canonical", "mock-model-other"].map((v) => ({
+            value: v,
+            name: v,
+          })),
+        }],
+      }, { ...thoughtLevelSelect("off"), category: "thought_level" }];
     case "flat":
-      return [modelSelect(modelValue, ["mock-model-canonical", "mock-model-other"]), thoughtLevelSelect("off")];
+      return [
+        {
+          ...modelSelect(modelValue, ["mock-model-canonical", "mock-model-other"]),
+          category: "model",
+        },
+        { ...thoughtLevelSelect("off"), category: "thought_level" },
+      ];
     case "miss":
       // Catalog that does NOT contain the canonical model — post-load
       // catalog-miss fixtures drive the stable-first throw.
-      return [modelSelect("mock-model-unrelated", ["mock-model-unrelated"]), thoughtLevelSelect("off")];
+      return [
+        { ...modelSelect("mock-model-unrelated", ["mock-model-unrelated"]), category: "model" },
+        { ...thoughtLevelSelect("off"), category: "thought_level" },
+      ];
     case "none":
       return [];
   }
@@ -303,11 +320,6 @@ async function handlePrompt(
     const refreshed = buildOmpCatalog(catalogKind, state).map((option) => {
       const record: Record<string, unknown> = structuredClone(option);
       if (record["id"] === "thought_level") record["currentValue"] = "low";
-      if (record["id"] === "model_group" && Array.isArray(record["children"])) {
-        record["children"] = (record["children"] as Record<string, unknown>[]).map((child) =>
-          child["id"] === "thought_level" ? { ...child, currentValue: "low" } : child
-        );
-      }
       return record;
     });
     emitConfigOptionUpdate(refreshed, acpSessionId);

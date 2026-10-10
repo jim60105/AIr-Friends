@@ -31,8 +31,8 @@ import type { AgentConfig, ClientConfig } from "../../src/acp/types.ts";
 import type { Config } from "../../src/types/config.ts";
 import {
   createMockAcpConnection,
-  type MockAcpConnectionScript,
   type MockAcpConnection,
+  type MockAcpConnectionScript,
 } from "./mock-acp-connection.ts";
 
 export type OmpPermissionMode = "restricted" | "native-yolo";
@@ -51,7 +51,19 @@ export interface SyntheticPositive {
 }
 
 export class SyntheticPositiveLedger {
+  static #all: SyntheticPositiveLedger[] = [];
   #entries: SyntheticPositive[] = [];
+
+  constructor() {
+    // Suite-level honesty guard (5.2) scans every ledger created anywhere in
+    // the process at runtime — no source-text snapshots.
+    SyntheticPositiveLedger.#all.push(this);
+  }
+
+  /** Every synthetic positive registered across all ledgers so far. */
+  static allEntries(): readonly SyntheticPositive[] {
+    return SyntheticPositiveLedger.#all.flatMap((ledger) => ledger.entries());
+  }
 
   register(id: string, label: string, detail: string): SyntheticPositive {
     if (this.#entries.some((entry) => entry.id === id)) {
@@ -324,42 +336,32 @@ export function buildOmpMockSession(input: OmpMockSessionInput): OmpMockSession 
   };
 }
 
-/** Bounded kill -0 liveness probe with an explicit failure message (no sleeps
- * beyond a fixed small retry cap; Linux-only like the pool's /proc assumptions). */
-export async function expectProcessGone(
-  pid: number,
-  what: string,
-  attempts = 40,
-): Promise<void> {
-  for (let attempt = 0; attempt < attempts; attempt++) {
-    try {
-      Deno.kill(pid, "SIGKILL");
-      // Signal delivered to a live process: not gone yet (SIGKILL to a
-      // zombie/none would have thrown ESRCH first time or after reap).
-    } catch (error) {
-      const name = error instanceof Error ? error.name : "";
-      if (name === "NoSuchProcess" || name === "Os") {
-        return;
-      }
-      throw error;
-    }
-    await new Promise((resolve) => setTimeout(resolve, 25));
-  }
-  throw new Error(
-    `${what} (pid ${pid}) still live after ${attempts * 25}ms of bounded observation; ` +
-      "kill -0 dependence: pgrep/kill availability is part of the subprocess-tier guard",
-  );
-}
-
-/** True while `pid` answers kill -0 (ESRHCH => dead). */
+/** True while `pid` answers `kill -0` (ESRCH => dead; EPERM => alive-but-foreign). */
 export function processAlive(pid: number): boolean {
   try {
     Deno.kill(pid, 0);
     return true;
   } catch (error) {
-    const name = error instanceof Error ? error.name : "";
-    if (name === "NoSuchProcess" || name === "Os") return false;
-    // EPERM would mean alive-but-foreign; nothing foreign here.
+    // Deno maps ESRCH to Deno.errors.NotFound and EPERM to PermissionDenied.
+    if (error instanceof Deno.errors.NotFound) return false;
+    if (error instanceof Deno.errors.PermissionDenied) return true;
     throw error;
   }
+}
+
+/**
+ * Bounded `kill -0` liveness probe (polls an observable fact; no fixed sleep
+ * used to await state) with an explicit failure message naming the
+ * kill/ESRCH dependence as part of the subprocess-tier guard.
+ */
+export async function expectProcessGone(
+  pid: number,
+  what: string,
+  attempts = 120,
+): Promise<void> {
+  for (let attempt = 0; attempt < attempts; attempt++) {
+    if (!processAlive(pid)) return;
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  throw new Error(`${what} (pid ${pid}) still live after bounded kill -0 observation`);
 }
