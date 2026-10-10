@@ -140,7 +140,7 @@ The restricted tool-inventory seam SHALL be updated additively: the public code/
 
 #### Scenario: Predecessor seam tests stay green
 - **WHEN** the pending-versus-allow and completed-versus-pending assertions from the predecessor decisions and wiring are re-run against the updated data
-- **THEN** they SHALL pass unchanged
+- **THEN** they SHALL pass unchanged for every outcome they pin (row kinds, pending-versus-allow decisions, and the 14b completed-versus-pending block); the two predecessor assertions that freeze the code-search row's PRE-marker bytes are superseded for that one row by this change's additive marker — recorded with the marker's own gate-off pin — exactly as the web-search row's supersession was, and every other row's byte-identity assertion SHALL keep passing verbatim
 
 #### Scenario: Marker leaves enforcement wiring untouched
 - **WHEN** the updated seam and the enforcement wiring are compared

@@ -223,10 +223,11 @@ are credential-scope only: `no-supported-credential`,
 marker naming this change and the table — backend-gated and route-scoped: it
 is NOT a plain allow (kind unchanged; with no supported credential 14b still
 fails closed at `rejected_pending_adapter`). The `url-read`/`web-fetch`
-rows, the `code-search` row, and row 17's `fetch-routes.ts` are byte-
-identical; the cross-table test pins that `search-provider.subrequests`
-stays `blocked-pending-adapter` there and never gets cited pending against a
-completed contract here.
+rows, the `code-search` row (until row 21's own additive credential-gated
+marker — see the code-search section below), and row 17's `fetch-routes.ts`
+are byte-identical; the cross-table test pins that `search-provider.
+subrequests` stays `blocked-pending-adapter` there and never gets cited
+pending against a completed contract here.
 
 ### Controlled routing and interface honesty
 
@@ -289,3 +290,148 @@ Section 15 checklist additions (user-owned, real deployment):
    CONNECT (and the grounding-redirect HEAD), and that a synthetic
    grounding-redirect `Location` pointing at a private address is never
    issued.
+
+## Public-code-search adapter contract (row 21 — `adapt-omp-public-code-search`)
+
+This section extends (does not rewrite) the fetch and search sections above.
+Its honest verdict is stronger than a mechanism gap: **the design §6/D4
+parity premise is false at the pins, and no supported public-code-search
+backend exists under the approved credential set.** OpenCode REMOVED its
+`codesearch` tool upstream before the packaging pin, and pinned OMP has no
+code-search tool. Public code/docs **content** remains reachable through the
+completed URL-read route (rows 17/18, incl. the C8 special handlers as
+validated secondary hops); a dedicated code-**search** backend stays blocked
+with a documented capability gap and an explicit user decision — never a
+fabricated fallback, never a NEVER_PASS secret promotion, never keyless
+scraping (DECIDED disposition).
+
+### Pinned-source citation table (re-verified at OpenCode tag `v1.18.21` / tree `826d9ad46a22bef0294998e08daa3c4904fea28f` and OMP `2a2c6dcbbb558c0f8145f67f28b3370984f2bf60` / v18.6.1 — static reads, never executed native behavior)
+
+| ID | Location (file + symbol)                                                                                                                                                                 | Frozen fact                                                                                                                                                                          |
+| -- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| C1 | OpenCode tag tree (no `tool/codesearch.ts`; 404) + commits API for that path                                                                                                             | The parity tool is **removed upstream before the pin**: last commit touching it is `2481dde36d9aeb48de9fb21ffd2cfdc1d42804f1` — "chore: remove codesearch tool (#27019)", 2026-05-12 |
+| C2 | `tool/registry.ts` + `agent-config/opencode.json`                                                                                                                                        | The `codesearch: "allow"` rule is **inert** — ids build from instantiated tools only; no `codesearch` id exists to match                                                             |
+| C3 | `tool/mcp-websearch.ts`, `tool/websearch.ts`                                                                                                                                             | What OpenCode retains is webfetch reads + Exa/Parallel hosted-MCP websearch — neither is a code-index backend                                                                        |
+| C4 | repo audit (`skills/`, repo-wide `grep_app`/`gh_grep`/`GREP_APP_API_TOKEN` zero hits; `git-backup-service.ts`/`git-credential-setup.ts` are GITHUB_TOKEN's only consumers)               | No code-search skill ships; no code-search token exists anywhere; the batch's external-skill premise is false at the pins                                                            |
+| C5 | `skill-installer.ts` + `sandbox-manager.ts` (`AGENT_TYPE_ENV` sets, `NEVER_PASS_ENV`)                                                                                                    | External skills carry no per-skill token plumbing; neither agent credential set carries a GitHub credential; `GITHUB_TOKEN` is NEVER_PASS                                            |
+| C6 | OMP `tools/builtin-names.ts`, `tools/index.ts`, `web/search/provider.ts`                                                                                                                 | Pinned OMP has no code-search tool and no code-index provider; the only surface is the `github` tool's `search_code`                                                                 |
+| C7 | `tools/gh-search.ts` (`executeSearchCode`), `utils/github.ts` (`GH_NON_INTERACTIVE_ENV`, gh-auth-store failure text), `Containerfile`                                                    | `search_code` spawns the external `gh` binary with gh's own auth store; subprocess HTTP is invisible to any fetch-level decision core; the image installs no `gh`                    |
+| C8 | `web/scrapers/index.ts` (`specialHandlers`), `searchcode.ts`, `sourcegraph.ts`, `tools/fetch.ts`                                                                                         | Keyless code/docs scraping exists ONLY as fetch-pipeline special handlers (URL → provider-API secondary) — the secondary class row 17 already controls                               |
+| C9 | `tools/gh-search.ts` (`SEARCH_LIMIT_DEFAULT = 10`, `SEARCH_LIMIT_MAX = 50`, `FILE_PREVIEW_LIMIT = 50`, `apiCodeToSearchResult`/`formatSearchCodeResults`), `utils/github.ts` (8 MiB cap) | The pinned observable bounds and attribution shape the interface-parity contract documents                                                                                           |
+
+### Route tiering (frozen machine-readable table)
+
+[`src/acp/omp/code-search-routes.ts`](../src/acp/omp/code-search-routes.ts)
+`CODE_SEARCH_ROUTE_TABLE`:
+
+- `no-supported-mechanism` (`userDecisionRequired`):
+  `code_search.github-api` — the GitHub Code Search API route the **reserved**
+  trusted-extension `registerTool` completion would serve, gated on a
+  supported read-only code-search credential the approved path does not
+  register (C4/C5). Keyed to row 7's credential path: **design §9 — no
+  unrelated vendor secret is required or promoted merely to select a
+  backend.** `GITHUB_TOKEN` is registered for git backup/credential-store,
+  sits in `NEVER_PASS_ENV`, and using it as a code-search credential would
+  expand a repo-write-capable secret into the restricted agent (design D2)
+  — this change never softens that rule and never promotes the name. Also
+  `no-supported-mechanism`: `code_search.native.github-cli-search-code` —
+  absent `gh` binary, gh's own auth store, subprocess transport outside the
+  decision core (C6/C7).
+- `candidate-to-verify` (`userDecisionRequired`, **not selected**):
+  `code_search.scraping-handlers` — keyless searchcode/Sourcegraph handlers
+  exist only inside row 17's completed URL-read route as validated secondary
+  hops (C8); admitting a dedicated scraping tool would add arbitrary-provider
+  config, which this change never does. "No scraping tool" ≠ "can't read
+  those public sites": URL reads of them stay available through the
+  controlled transport.
+- `completed-by-adapter` (reference row, never claimed here):
+  `code_search.url-read-content-path` — public code/docs content via rows
+  17/18's completed routes. The design §6 parity decomposition (local text
+  search native + URL-read content + provider-grounded web search + this
+  honest gap) is machine-readable through this row.
+
+### Controlled hop delegation and interface-parity contract
+
+[`src/acp/omp/code-search-transport.ts`](../src/acp/omp/code-search-transport.ts)
+`decideCodeSearchRoute` is pure over the injected
+`{ resolveHost, credentialPresence, posture }` and delegates EVERY hop —
+search endpoint and result-enrichment subrequest alike — to row 17's
+`decideFetchHop` verbatim: same `ssrf.ts` single classifier, same
+enforcing/unrestricted postures (the operator unrestricted posture adds no
+new denial), `MAX_REDIRECT_HOPS = 5` manual per-hop revalidation,
+credential-free `{ host, hopIndex, decision, reason }` records. The single
+code-search-only reason addition is the credential-scope
+`no-supported-credential`. No second stack, no new posture value, no
+unguarded retry (one controlled attempt per decision; the executor strips
+the credential header on any cross-origin redirect hop).
+
+The interface-parity contract (spec-locked for the future sibling; C9
+bounds): query-parameter pass-through; per-item **excerpt** (preview bound
+50), **source attribution** (source URL), repository identity
+(`nameWithOwner`-style), file path, language metadata; documented size
+bounds (limit default 10 / max 50, total-rendered bound). Honesty rules are
+row 18's verbatim: auth/rate/HTTP/malformed failures surface as honest
+native-shape tool errors naming the provider — **never** fabricated
+results, **never** an unguarded retry, **never** a backend or agent switch;
+zero matches is an honest empty naming the query, distinct from every error
+shape. Records/logs never carry credentials, headers, query strings, or
+payload bytes.
+
+### Capability gap and the user decision (credential absent — today's state)
+
+With no supported code-search credential the decision is
+`blocked_pending_adapter` + `userDecisionRequired` with ZERO transport (the
+route stays `allow-gated-pending-adapter` at 14a /
+`rejected_pending_adapter` at 14b). Both user decision options:
+
+1. **Provision a separate read-only code-search credential** through row 7's
+   approved config path (never a re-pointed `GITHUB_TOKEN`) — this flips
+   the route table's credential predicate (exported data:
+   `CODE_SEARCH_SUPPORTED_CREDENTIAL_NAME`), after which the reserved
+   `registerTool` completion (the 6th serial sibling of the
+   12→13→14b→17→18 tree) lands against this change's pinned contract.
+   Unauthenticated GitHub Code Search is unusable (rate-capped and
+   auth-required), so a token is genuinely load-bearing, not ceremonial.
+2. **Accept the gap**: local text search stays native (14a read-class),
+   public code/docs content stays reachable through the completed URL-read
+   route; no dedicated code-index search backend ships.
+
+**The reserved mechanism is additionally unconsumable by the current
+composition:** 14b's gated handler blocks every `allow-gated-pending-adapter`
+outcome at `rejected_pending_adapter` without consulting completed-route
+seam state, so a live code-search route needs THREE things: the credential
+provisioning above, the composition-side seam-state step (the same
+**Batch ownership gap** recorded in the web-search section above, now
+covering the code-search route as well:
+the 14b gated handler honoring `webSearchSeamState`/`codeSearchSeamState` +
+credential-presence input instead of blocking every pending-adapter outcome
+— no owner in this change, which forbids touching `enforcement.ts`; needs a
+later batch row or explicit follow-up, or live web-search AND code-search
+capability stay dark even with credentials present), and the section-15
+native-observation below. A test pins that 14b still blocks even with a
+synthetic activated marker. `HTTP_PROXY` alone remains non-enforcement
+(unchanged honesty table); the Skill API loopback and proxy endpoint stay
+out of every decision input; search endpoint hosts are validated like every
+target with no exemption.
+
+### Honesty (code-search addendum to the D1 table)
+
+| Claim                                                                                                                                                                | Status                                                                                                                                                                                                |
+| -------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Adapter decisions + interface shape under both postures, credential-presence matrix, fail-closed gap with zero issued requests, record hygiene, route-table verdicts | **Certified** by the mock-only suites (`tests/acp/omp-code-search-transport-decisions.test.ts`, `tests/acp/omp-code-search-interface-shape.test.ts`; zero-network sentinel, zero live GitHub traffic) |
+| A supported public-code-search backend exists at these pins                                                                                                          | **No** — the D4 premise-false finding stands (parity tool removed upstream; no OMP backend under the approved credential set); no mock or marker clears it                                            |
+| The compiled OMP binary would invoke the reserved registerTool completion                                                                                            | **UNVERIFIED, user-owned** — no tool is registered in this state; synthetic executor fixtures are labeled P0 fixtures and certify adapter decisions ONLY                                              |
+
+Section 15 checklist additions (user-owned, real deployment):
+
+8. Confirm the external-CLI native surface is unreachable in restricted
+   mode: a `github` `search_code` call is denied by 14a's default-deny and
+   no `gh` binary exists in the image.
+9. IF (and only if) the credential-provisioning decision lands and the
+   reserved sibling registers: run a code-search query in a restricted
+   session and confirm the adapter-shaped result plus the
+   `[air-codesearch-adapter]` decision-record log line — the replacement is
+   being invoked at all.
+10. Under the enforcing posture, confirm the proxy observes the
+    `api.github.com` CONNECT and that a synthetic redirect `Location`
+    pointing at a private address is never issued.
