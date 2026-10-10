@@ -197,6 +197,9 @@ See [Design Document](docs/DESIGN.md) for detailed architecture.
 The official container image includes:
 
 - Pre-installed AI agent binary (OpenCode CLI)
+- Pre-installed OMP CLI (`omp`), pinned by exact tag + per-arch SHA-256 checksums
+  (`Containerfile` `OMP_VERSION`); packaging only — OMP runtime enforcement is gated
+  by the earlier OMP rows. See [OMP Packaging](docs/OMP_PACKAGING.md).
 - Auto-approval mode enabled for isolated execution
 - Health check endpoint on port 8080
 - Default prompts at `/app/prompts` (can be overridden)

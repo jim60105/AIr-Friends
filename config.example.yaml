@@ -81,6 +81,16 @@ agent:
   # NOT a functional gate. The container image pins the version via
   # Containerfile OPENCODE_VERSION + per-arch SHA-256 checksums.
 
+  # Bootstrap OMP version check (observability only, never blocks startup; runs
+  # only when defaultAgentType is "omp"): the system warns when the installed omp
+  # CLI reports a version below the known-good minimum (default 18.6.1, the pinned
+  # release whose ACP contract shape the trusted extension and adapters consume).
+  # Override the minimum with env AGENT_OMP_MIN_VERSION.
+  # This only affects the bootstrap WARN marker (OMP version check:
+  # OK/BELOW_MINIMUM/UNKNOWN) — it is NOT a functional gate. The container image
+  # pins the version via Containerfile OMP_VERSION + per-arch SHA-256 checksums
+  # (see docs/OMP_PACKAGING.md).
+
   # External skills to install at startup (optional)
   # Each entry specifies a GitHub repo and skill name to install via `npx --yes --package=skills skills add`
   # externalSkills:
