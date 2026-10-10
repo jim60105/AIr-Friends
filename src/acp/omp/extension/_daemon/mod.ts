@@ -147,3 +147,82 @@ export {
   type FetchRouteStatus,
   isRouteCompleted,
 } from "../../fetch-routes.ts";
+
+// Row 20 (`adapt-omp-web-search`) extends the declared closure with the
+// web-search transport adapter's pure modules. CLOSURE NOTE FOR ROW 22'S
+// DIGEST CUT: `src/acp/omp/search-transport.ts` imports ONLY
+// `./fetch-transport.ts` (row 17's decision core, already in the closure)
+// and `src/acp/omp/search-routes.ts` imports only
+// `./compatibility-contracts.ts` (pin constants, type-only import of
+// search-transport presence) — both already covered; the new installed
+// INPUTS this row adds to the PACKAGE-MANIFEST recut are
+// `search-transport.ts`, `search-routes.ts`, and
+// `extension/search-replacement.ts` (plus the modified `tool-inventory.ts`,
+// `extension/index.ts`, and this barrel). The imported surface performs no
+// DNS/env/network side effect at module load (credentials/env are read
+// only inside called functions), so the barrel stays load-safe.
+export {
+  buildGeminiSearchRequest,
+  buildOpenRouterSearchRequest,
+  type BuiltSearchRequest,
+  type SearchBlockReason,
+  type SearchCredentialBlock,
+  type SearchCredentialBlockReason,
+  credentialPresenceFromEnv,
+  type SearchCredentialPresence,
+  type SearchDecisionDeps,
+  type SearchDecisionRecord,
+  decideSearchRoute,
+  ENRICHMENT_TIMEOUT_MS,
+  formatSearchCount,
+  formatSearchAge,
+  formatSearchDecisionLog,
+  formatSearchForLLM,
+  formatSearchProviderFailure,
+  formatSearchTruncate,
+  hasRenderableSearchContent,
+  isGroundingRedirectUrl,
+  MAX_ENRICHMENT_SUBREQUESTS,
+  MAX_ERROR_BODY_CHARS,
+  MAX_SEARCH_QUERY_CHARS,
+  MAX_SEARCH_RESPONSE_BYTES,
+  MAX_SEARCH_RESULTS_CAP,
+  parseGeminiSearchStreamText,
+  parseOpenRouterSearchResponse,
+  parseSearchToolInput,
+  PINNED_SEARCH_ENDPOINTS,
+  resolveGroundingRedirectThroughTransport,
+  runSearchRoute,
+  SEARCH_BACKEND_LABELS,
+  searchFailureEnvelope,
+  searchNoModelConfiguredEnvelope,
+  searchNoSourcesFailure,
+  SearchProviderFailure,
+  searchSuccessEnvelope,
+  selectSearchBackend,
+  SUPPORTED_SEARCH_CREDENTIAL_ENV,
+  type SearchRouteInput,
+  type SearchRouteDecision,
+  type SearchRouteResult,
+  type SearchToolEnvelope,
+  type SearchToolQuery,
+  type SearchTransportDeps,
+  type SearchUsage,
+  type SearchSource,
+  type SearchCitation,
+  type SearchResponse,
+  type SupportedSearchBackend,
+} from "../../search-transport.ts";
+
+export {
+  SEARCH_COMPLETING_ADAPTER_MARKER,
+  SEARCH_COMPLETING_MECHANISM,
+  SEARCH_ROUTE_CITATIONS,
+  SEARCH_ROUTE_TABLE,
+  type SearchRouteCitation,
+  type SearchRouteRow,
+  type SearchRouteStatus,
+  isSearchRouteCompleted,
+  webSearchSeamState,
+  type WebSearchSeamState,
+} from "../../search-routes.ts";

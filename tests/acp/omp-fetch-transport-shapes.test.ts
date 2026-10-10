@@ -228,14 +228,24 @@ Deno.test("Seam marker: URL-read rows name this change + route table and stay di
   }
 });
 
-Deno.test("Seam marker: web-search and code-search rows carry no marker (byte-identical pending rows)", () => {
+// Row 20 (`adapt-omp-web-search`) deliberately supersedes this row-17 pin
+// for the WEB-SEARCH row only: that row now carries ITS OWN additive
+// completing-adapter marker (the URL-fetch marker stays excluded from both
+// rows). The PUBLIC-CODE-SEARCH row remains byte-identical pending.
+Deno.test("Seam marker: web-search carries row 20's own marker; code-search stays byte-identical pending", () => {
   for (const gateId of ["web-search", "code-search"]) {
     const gate = RESTRICTED_TOOL_INVENTORY_TABLE.find((g) => g.id === gateId);
     assertExists(gate, gateId);
     assertEquals(gate.kind, "allow-gated-pending-adapter");
+    // Neither row is ever touched by row 17's URL-fetch marker.
     assertEquals(gate.notes.includes("control-omp-url-fetch-transport"), false, gateId);
-    assertEquals(gate.notes.includes("COMPLETING-ADAPTER"), false, gateId);
   }
+  const webSearch = RESTRICTED_TOOL_INVENTORY_TABLE.find((g) => g.id === "web-search");
+  assertExists(webSearch);
+  assertEquals(webSearch.notes.includes("COMPLETING-ADAPTER: adapt-omp-web-search"), true);
+  const codeSearch = RESTRICTED_TOOL_INVENTORY_TABLE.find((g) => g.id === "code-search");
+  assertExists(codeSearch);
+  assertEquals(codeSearch.notes.includes("COMPLETING-ADAPTER"), false);
 });
 
 Deno.test("Barrel closure: fetch surfaces reachable through the declared list only", () => {
