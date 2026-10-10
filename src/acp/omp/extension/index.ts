@@ -35,8 +35,8 @@ import {
 } from "./read-replacement.ts";
 import {
   attachSearchReplacementAtLoad,
-  type SearchToolRegistrar,
   registerLoadTimeSearchReplacement,
+  type SearchToolRegistrar,
 } from "./search-replacement.ts";
 
 // Execute load-time pre-import discovery bootstrap sequence immediately upon import
@@ -110,8 +110,9 @@ export default function trustedExtensionFactory() {
     // restricted definition that exists; neither field claims the binary
     // ever calls the tools.
     registerTools: (registrar: ReadToolRegistrar & SearchToolRegistrar) =>
-      [registerLoadTimeReadReplacement(registrar), registerLoadTimeSearchReplacement(registrar)].every(
-        Boolean,
-      ),
+      [registerLoadTimeReadReplacement(registrar), registerLoadTimeSearchReplacement(registrar)]
+        .every(
+          Boolean,
+        ),
   };
 }

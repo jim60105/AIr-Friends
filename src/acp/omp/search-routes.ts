@@ -105,7 +105,7 @@ export const SEARCH_ROUTE_CITATIONS: readonly SearchRouteCitation[] = Object.fre
         "packages/coding-agent/src/web/search/providers/gemini.ts (callGeminiDeveloperSearch: " +
         "`${endpoint.url}/models/${model}:streamGenerateContent?alt=sse`, `x-goog-api-key` header via " +
         "modelRegistry.resolver + withAuth; GeminiProvider.isAvailable: authStorage.keys.source(" +
-        "\"google\") for api `google-generative-ai`) + docs/providers.md env table (`google` -> " +
+        '"google") for api `google-generative-ai`) + docs/providers.md env table (`google` -> ' +
         "GEMINI_API_KEY) + packages/ai/src/providers/google.ts (`requires an API key (GEMINI_API_KEY " +
         "or options.apiKey)`)",
       fact:
@@ -116,11 +116,10 @@ export const SEARCH_ROUTE_CITATIONS: readonly SearchRouteCitation[] = Object.fre
     {
       id: "W5",
       ...PIN,
-      location:
-        "packages/coding-agent/src/web/search/providers/openrouter.ts (POST " +
-        "`${model.baseUrl}/chat/completions` with `plugins: [{ id: \"web\", max_results }]`, " +
+      location: "packages/coding-agent/src/web/search/providers/openrouter.ts (POST " +
+        '`${model.baseUrl}/chat/completions` with `plugins: [{ id: "web", max_results }]`, ' +
         "`authorization: Bearer`; OpenRouterGroundedProvider.isAvailable: " +
-        "authStorage.keys.source(model?.provider ?? \"openrouter\")) + docs/providers.md env table " +
+        'authStorage.keys.source(model?.provider ?? "openrouter")) + docs/providers.md env table ' +
         "(`openrouter` -> OPENROUTER_API_KEY)",
       fact:
         "The OpenRouter web-plugin grounding path runs on the `openrouter` provider whose API-key env " +
@@ -148,7 +147,7 @@ export const SEARCH_ROUTE_CITATIONS: readonly SearchRouteCitation[] = Object.fre
       location:
         "packages/coding-agent/src/web/search/providers/gemini.ts (fetchWithRetry MAX_RETRIES=3 " +
         "exponential backoff; finalizeGeminiSearchResult + resolveGroundingRedirect HEAD " +
-        "redirect:\"manual\" 5 s timeout via (fetchImpl ?? fetch); isGroundingRedirectUrl matches " +
+        'redirect:"manual" 5 s timeout via (fetchImpl ?? fetch); isGroundingRedirectUrl matches ' +
         "vertexaisearch.cloud.google.com /grounding-api-redirect) + providers/utils.ts " +
         "(classifyProviderHttpError: credits pattern, 402, 401, 403)",
       fact:
@@ -166,7 +165,7 @@ export const SEARCH_ROUTE_CITATIONS: readonly SearchRouteCitation[] = Object.fre
         "queries:` echo; hasRenderableSearchContent; zero-available branch " +
         "`No web search model configured.`; all-failed branch " +
         "`Error: <formatSearchProviderFailure>` / `All web search providers failed: ...`; the " +
-        "no-sources SearchProviderError 204 throw; envelope { content: [{ type: \"text\" }], " +
+        'no-sources SearchProviderError 204 throw; envelope { content: [{ type: "text" }], ' +
         "details: { response, error? } }) + packages/utils/src/format.ts (truncate/formatCount/" +
         "formatAge)",
       fact:
@@ -216,7 +215,8 @@ function citation(...ids: readonly SearchRouteCitation["id"][]): readonly Search
 }
 
 const supportedMechanism = SEARCH_COMPLETING_MECHANISM;
-const noNativeMechanism = 'none — provider requests leave on global fetch with redirect: "follow" ' +
+const noNativeMechanism =
+  'none — provider requests leave on global fetch with redirect: "follow" ' +
   "and fetchWithRetry retries (P0-recorded bypass)";
 
 /**
@@ -245,8 +245,7 @@ export const SEARCH_ROUTE_TABLE: readonly SearchRouteRow[] = Object.freeze(
       mechanism: supportedMechanism,
       status: "completed-by-adapter",
       citations: citation("W2", "W5", "W6", "W10"),
-      notes:
-        "OpenRouter web-plugin grounding (`/chat/completions`, `openrouter` provider -> " +
+      notes: "OpenRouter web-plugin grounding (`/chat/completions`, `openrouter` provider -> " +
         "OPENROUTER_API_KEY from row 7's set) is served by the same adapter endpoint route. Active " +
         "exactly where OPENROUTER_API_KEY is present (webSearchSeamState). Mock-only " +
         "certification; native invocation user-owned (§15).",
@@ -281,8 +280,7 @@ export const SEARCH_ROUTE_TABLE: readonly SearchRouteRow[] = Object.freeze(
       status: "candidate-to-verify",
       userDecisionRequired: true,
       citations: citation("W3"),
-      notes:
-        "duckduckgo/mojeek/ecosia/startpage/public/scraping-google need no secret but are " +
+      notes: "duckduckgo/mojeek/ecosia/startpage/public/scraping-google need no secret but are " +
         "operator-unconfigured scraping backends; admitting them would add arbitrary-provider " +
         "config, which this change never does (DECIDED disposition: scraper redirect-following " +
         "bypass routes stay blocked). Candidate-to-verify, not selected.",
@@ -305,7 +303,8 @@ export const SEARCH_ROUTE_TABLE: readonly SearchRouteRow[] = Object.freeze(
 
 /** True when the route is completed by this change's adapter. */
 export function isSearchRouteCompleted(routeId: string): boolean {
-  return SEARCH_ROUTE_TABLE.find((row) => row.routeId === routeId)?.status === "completed-by-adapter";
+  return SEARCH_ROUTE_TABLE.find((row) => row.routeId === routeId)?.status ===
+    "completed-by-adapter";
 }
 
 /** The completing-adapter marker text appended to 14a's web-search row. */

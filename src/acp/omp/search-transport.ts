@@ -59,8 +59,8 @@ import {
   type FetchDecisionRecord,
   type FetchEgressPolicy,
   type FetchHopDecision,
-  formatFetchDecisionLog,
   type FetchTransportFn,
+  formatFetchDecisionLog,
   MAX_REDIRECT_HOPS,
   type ResolveHost,
 } from "./fetch-transport.ts";
@@ -74,10 +74,11 @@ export { MAX_REDIRECT_HOPS };
 // ---------------------------------------------------------------------------
 
 /** The row-7 supported search credential keys, exactly (nothing else). */
-export const SUPPORTED_SEARCH_CREDENTIAL_ENV: Record<SupportedSearchBackend, string> = Object.freeze({
-  gemini: "GEMINI_API_KEY",
-  openrouter: "OPENROUTER_API_KEY",
-});
+export const SUPPORTED_SEARCH_CREDENTIAL_ENV: Record<SupportedSearchBackend, string> = Object
+  .freeze({
+    gemini: "GEMINI_API_KEY",
+    openrouter: "OPENROUTER_API_KEY",
+  });
 
 /** Credential-presence input: presence booleans ONLY, never values. */
 export interface SearchCredentialPresence {
@@ -132,7 +133,9 @@ export type SearchBlockReason =
   | "explicit-model-outside-supported-set";
 
 /** The two sanctioned search-only credential-scope reason codes. */
-export type SearchCredentialBlockReason = "no-supported-credential" | "explicit-model-outside-supported-set";
+export type SearchCredentialBlockReason =
+  | "no-supported-credential"
+  | "explicit-model-outside-supported-set";
 
 /** Hop kinds mirror row 17: provider endpoint and enrichment secondary. */
 export type SearchHopKind = "provider-endpoint" | "enrichment";
@@ -207,7 +210,9 @@ export function formatSearchDecisionLog(record: SearchDecisionRecord): string {
  * ever). Failure of a selected backend NEVER falls through to the other
  * (spec: no silent different-backend fallback on a served request).
  */
-export function selectSearchBackend(presence: SearchCredentialPresence): SupportedSearchBackend | null {
+export function selectSearchBackend(
+  presence: SearchCredentialPresence,
+): SupportedSearchBackend | null {
   if (presence.geminiKey) return "gemini";
   if (presence.openrouterKey) return "openrouter";
   return null;
@@ -232,7 +237,9 @@ export async function decideSearchRoute(
       decision: "block",
       reason: "no-supported-credential",
       userDecisionRequired: true,
-      record: Object.freeze({ hopIndex: 0, decision: "block", reason: "no-supported-credential" } as const),
+      record: Object.freeze(
+        { hopIndex: 0, decision: "block", reason: "no-supported-credential" } as const,
+      ),
     };
   }
   if (input.requestedUnsupportedBackend === true) {
@@ -240,11 +247,13 @@ export async function decideSearchRoute(
       decision: "block",
       reason: "explicit-model-outside-supported-set",
       userDecisionRequired: true,
-      record: Object.freeze({
-        hopIndex: 0,
-        decision: "block",
-        reason: "explicit-model-outside-supported-set",
-      } as const),
+      record: Object.freeze(
+        {
+          hopIndex: 0,
+          decision: "block",
+          reason: "explicit-model-outside-supported-set",
+        } as const,
+      ),
     };
   }
   // Every transport hop is row 17's decision, verbatim (import-only reuse;
@@ -292,13 +301,19 @@ export const MAX_SEARCH_RESULTS_CAP = 20;
  */
 export function parseSearchToolInput(
   params: Record<string, unknown>,
-): { readonly ok: true; readonly query: SearchToolQuery } | { readonly ok: false; readonly error: string } {
+): { readonly ok: true; readonly query: SearchToolQuery } | {
+  readonly ok: false;
+  readonly error: string;
+} {
   const rawQuery = params["query"];
   if (typeof rawQuery !== "string" || rawQuery.length === 0) {
     return { ok: false, error: "web_search: `query` must be a non-empty string" };
   }
   if (rawQuery.length > MAX_SEARCH_QUERY_CHARS) {
-    return { ok: false, error: `web_search: \`query\` exceeds the ${MAX_SEARCH_QUERY_CHARS}-character bound` };
+    return {
+      ok: false,
+      error: `web_search: \`query\` exceeds the ${MAX_SEARCH_QUERY_CHARS}-character bound`,
+    };
   }
   const recency = params["recency"];
   if (recency !== undefined && !["day", "week", "month", "year"].includes(String(recency))) {
@@ -496,7 +511,10 @@ export function formatSearchAge(ageSeconds: number | null | undefined): string {
  *  leading `Note:` lines, optional answer, `## Sources`
  *  `[i] title (age) / url / snippet(240)`, `## Citations`,
  *  search-query echo. */
-export function formatSearchForLLM(response: SearchResponse, notes: readonly string[] = []): string {
+export function formatSearchForLLM(
+  response: SearchResponse,
+  notes: readonly string[] = [],
+): string {
   const parts: string[] = [];
   for (const note of notes) parts.push(`Note: ${note}`);
   if (response.answer) {
@@ -523,7 +541,9 @@ export function formatSearchForLLM(response: SearchResponse, notes: readonly str
   }
   if (response.searchQueries && response.searchQueries.length > 0) {
     parts.push(`Search queries: ${response.searchQueries.length}`);
-    for (const q of response.searchQueries.slice(0, 3)) parts.push(`- ${formatSearchTruncate(q, 120)}`);
+    for (const q of response.searchQueries.slice(0, 3)) {
+      parts.push(`- ${formatSearchTruncate(q, 120)}`);
+    }
   }
   return parts.join("\n");
 }
@@ -589,18 +609,29 @@ export function classifySearchProviderHttpError(
   if (/credits?\s*(?:exhausted|exceeded)|quota|insufficient/i.test(sanitized)) {
     return new SearchProviderFailure(backend, `${backend}: credits exhausted`, status);
   }
-  if (status === 402) return new SearchProviderFailure(backend, `${backend}: 402 credits exhausted`, status);
-  if (status === 401) return new SearchProviderFailure(backend, `${backend}: 401 unauthorized`, status);
-  if (status === 403) return new SearchProviderFailure(backend, `${backend}: 403 forbidden`, status);
+  if (status === 402) {
+    return new SearchProviderFailure(backend, `${backend}: 402 credits exhausted`, status);
+  }
+  if (status === 401) {
+    return new SearchProviderFailure(backend, `${backend}: 401 unauthorized`, status);
+  }
+  if (status === 403) {
+    return new SearchProviderFailure(backend, `${backend}: 403 forbidden`, status);
+  }
   const surface = backend === "gemini" ? "Gemini Developer API" : "OpenRouter web search";
   return new SearchProviderFailure(backend, `${surface} error (${status}): ${sanitized}`, status);
 }
 
 /** Mirror of pinned `formatSearchProviderFailure` (web/search/provider.ts). */
-export function formatSearchProviderFailure(failure: unknown, backend: SupportedSearchBackend): string {
+export function formatSearchProviderFailure(
+  failure: unknown,
+  backend: SupportedSearchBackend,
+): string {
   if (failure instanceof SearchProviderFailure) {
     if (failure.status === 401 || failure.status === 403) {
-      return `${SEARCH_BACKEND_LABELS[failure.provider]} authorization failed (${failure.status}). Check API key or base URL.`;
+      return `${
+        SEARCH_BACKEND_LABELS[failure.provider]
+      } authorization failed (${failure.status}). Check API key or base URL.`;
     }
     return failure.message;
   }
@@ -637,7 +668,9 @@ export function searchFailureEnvelope(
 export function searchNoSourcesFailure(backend: SupportedSearchBackend): SearchProviderFailure {
   return new SearchProviderFailure(
     backend,
-    `${SEARCH_BACKEND_LABELS[backend]} returned no sources; the selected model may not support hosted web search.`,
+    `${
+      SEARCH_BACKEND_LABELS[backend]
+    } returned no sources; the selected model may not support hosted web search.`,
     204,
   );
 }
@@ -659,7 +692,9 @@ export function searchSuccessEnvelope(
  * native tool uses (text `Error: …` + `details.error`). This is the D4
  * fail-closed result for a credential-absent deployment.
  */
-export function searchNoModelConfiguredEnvelope(message = "No web search model configured."): SearchToolEnvelope {
+export function searchNoModelConfiguredEnvelope(
+  message = "No web search model configured.",
+): SearchToolEnvelope {
   return {
     content: [{ type: "text" as const, text: `Error: ${message}` }],
     details: { response: { provider: "none", sources: [] }, error: message },
@@ -692,13 +727,18 @@ export function parseGeminiSearchStreamText(raw: string, fallbackModel: string):
       continue;
     }
     const responseData = (chunk["response"] ?? chunk) as Record<string, unknown>;
-    const candidate = (responseData["candidates"] as Array<Record<string, unknown>> | undefined)?.[0];
+    const candidate = (responseData["candidates"] as Array<Record<string, unknown>> | undefined)
+      ?.[0];
     const content = candidate?.["content"] as { parts?: Array<{ text?: string }> } | undefined;
-    if (content?.parts) for (const part of content.parts) if (part.text) answerParts.push(part.text);
+    if (content?.parts) {
+      for (const part of content.parts) if (part.text) answerParts.push(part.text);
+    }
     const meta = candidate?.["groundingMetadata"] as
       | {
         groundingChunks?: Array<{ web?: { uri?: string; title?: string } }>;
-        groundingSupports?: Array<{ segment?: { text?: string }; groundingChunkIndices?: number[] }>;
+        groundingSupports?: Array<
+          { segment?: { text?: string }; groundingChunkIndices?: number[] }
+        >;
         webSearchQueries?: string[];
       }
       | undefined;
@@ -716,7 +756,11 @@ export function parseGeminiSearchStreamText(raw: string, fallbackModel: string):
         for (const idx of support.groundingChunkIndices ?? []) {
           const web = meta.groundingChunks[idx]?.web;
           if (web?.uri) {
-            citations.push({ url: web.uri, title: web.title ?? web.uri, citedText: support.segment?.text });
+            citations.push({
+              url: web.uri,
+              title: web.title ?? web.uri,
+              citedText: support.segment?.text,
+            });
           }
         }
       }
@@ -763,9 +807,13 @@ export function parseOpenRouterSearchResponse(
     );
   }
   const response = payload as Record<string, unknown>;
-  const message = ((response["choices"] as Array<Record<string, unknown>> | undefined)?.[0]?.["message"]) as
-    | { content?: string | Array<{ text?: string }>; annotations?: Array<Record<string, unknown>> }
-    | undefined;
+  const message =
+    ((response["choices"] as Array<Record<string, unknown>> | undefined)?.[0]?.["message"]) as
+      | {
+        content?: string | Array<{ text?: string }>;
+        annotations?: Array<Record<string, unknown>>;
+      }
+      | undefined;
   let answer: string | undefined;
   if (typeof message?.content === "string") answer = message.content.trim() || undefined;
   else if (Array.isArray(message?.content)) {
@@ -779,7 +827,11 @@ export function parseOpenRouterSearchResponse(
   const citations: SearchCitation[] = [];
   const seenUrls = new Set<string>();
   for (const annotation of message?.annotations ?? []) {
-    const citation = annotation["url_citation"] as { url?: string; title?: string; content?: string } | undefined;
+    const citation = annotation["url_citation"] as {
+      url?: string;
+      title?: string;
+      content?: string;
+    } | undefined;
     if (!citation) continue;
     const url = citation.url?.trim();
     if (!url || seenUrls.has(url)) continue;
@@ -795,7 +847,9 @@ export function parseOpenRouterSearchResponse(
   const usage: SearchUsage | undefined = usageRaw
     ? {
       inputTokens: typeof usageRaw.prompt_tokens === "number" ? usageRaw.prompt_tokens : undefined,
-      outputTokens: typeof usageRaw.completion_tokens === "number" ? usageRaw.completion_tokens : undefined,
+      outputTokens: typeof usageRaw.completion_tokens === "number"
+        ? usageRaw.completion_tokens
+        : undefined,
       totalTokens: typeof usageRaw.total_tokens === "number" ? usageRaw.total_tokens : undefined,
     }
     : undefined;
@@ -815,7 +869,10 @@ function isOpenRouterResponseLike(value: unknown): boolean {
   if (record["id"] !== undefined && typeof record["id"] !== "string") return false;
   if (record["model"] !== undefined && typeof record["model"] !== "string") return false;
   if (record["choices"] !== undefined && !Array.isArray(record["choices"])) return false;
-  if (record["usage"] !== undefined && (record["usage"] === null || typeof record["usage"] !== "object")) {
+  if (
+    record["usage"] !== undefined &&
+    (record["usage"] === null || typeof record["usage"] !== "object")
+  ) {
     return false;
   }
   return true;
@@ -829,7 +886,8 @@ function isOpenRouterResponseLike(value: unknown): boolean {
 export function isGroundingRedirectUrl(url: string): boolean {
   try {
     const parsed = new URL(url);
-    return parsed.hostname === "vertexaisearch.cloud.google.com" && parsed.pathname.includes("/grounding-api-redirect");
+    return parsed.hostname === "vertexaisearch.cloud.google.com" &&
+      parsed.pathname.includes("/grounding-api-redirect");
   } catch {
     return false;
   }
@@ -936,7 +994,13 @@ export async function resolveGroundingRedirectThroughTransport(
  */
 export const MAX_SEARCH_RESPONSE_BYTES = 2 * 1024 * 1024;
 
-const IS_REDIRECT_STATUS: Record<number, true> = { 301: true, 302: true, 303: true, 307: true, 308: true };
+const IS_REDIRECT_STATUS: Record<number, true> = {
+  301: true,
+  302: true,
+  303: true,
+  307: true,
+  308: true,
+};
 
 /** Transport deps for the executor (tests inject every field). */
 export interface SearchTransportDeps extends SearchDecisionDeps {
@@ -1045,7 +1109,13 @@ export async function runSearchRoute(
   }
   // `break` guarantees assignment above; narrow for the type system.
   if (!response) {
-    return { ok: false, failure: { kind: "provider", error: new SearchProviderFailure(request.backend, "no response", 0) } };
+    return {
+      ok: false,
+      failure: {
+        kind: "provider",
+        error: new SearchProviderFailure(request.backend, "no response", 0),
+      },
+    };
   }
   const bodyText = await readCappedBodyText(response, MAX_SEARCH_RESPONSE_BYTES).catch(() => "");
   if (!response.ok) {
@@ -1053,7 +1123,12 @@ export async function runSearchRoute(
       ok: false,
       failure: {
         kind: "provider",
-        error: classifySearchProviderHttpError(request.backend, response.status, bodyText, deps.credential),
+        error: classifySearchProviderHttpError(
+          request.backend,
+          response.status,
+          bodyText,
+          deps.credential,
+        ),
       },
     };
   }
@@ -1067,14 +1142,21 @@ export async function runSearchRoute(
   // zero sources AND zero citations is the honest 204-style failure — an
   // answer without sources is not a search result (fabrication guard).
   if (searchResponse.sources.length === 0 && !searchResponse.citations?.length) {
-    return { ok: false, failure: { kind: "provider", error: searchNoSourcesFailure(request.backend) } };
+    return {
+      ok: false,
+      failure: { kind: "provider", error: searchNoSourcesFailure(request.backend) },
+    };
   }
   const notes: string[] = [];
   // Gemini enrichment: bounded, budget-shared, failure-keeps-proxy-URL.
   if (request.backend === "gemini") {
     const redirectUrls = new Set<string>();
-    for (const src of searchResponse.sources) if (isGroundingRedirectUrl(src.url)) redirectUrls.add(src.url);
-    for (const cit of searchResponse.citations ?? []) if (isGroundingRedirectUrl(cit.url)) redirectUrls.add(cit.url);
+    for (const src of searchResponse.sources) {
+      if (isGroundingRedirectUrl(src.url)) redirectUrls.add(src.url);
+    }
+    for (const cit of searchResponse.citations ?? []) {
+      if (isGroundingRedirectUrl(cit.url)) redirectUrls.add(cit.url);
+    }
     const targets = [...redirectUrls];
     if (targets.length > MAX_ENRICHMENT_SUBREQUESTS) {
       notes.push(`enrichment capped at ${MAX_ENRICHMENT_SUBREQUESTS} redirect resolutions`);
@@ -1093,12 +1175,20 @@ export async function runSearchRoute(
       resolved.set(url, outcome.resolvedUrl);
       if (outcome.blocked) blockedCount += 1;
     }
-    if (blockedCount > 0) notes.push(`${blockedCount} enrichment redirect(s) blocked; proxy URL kept`);
+    if (blockedCount > 0) {
+      notes.push(`${blockedCount} enrichment redirect(s) blocked; proxy URL kept`);
+    }
     if (resolved.size > 0) {
       searchResponse = {
         ...searchResponse,
-        sources: searchResponse.sources.map((src) => ({ ...src, url: resolved.get(src.url) ?? src.url })),
-        citations: searchResponse.citations?.map((cit) => ({ ...cit, url: resolved.get(cit.url) ?? cit.url })),
+        sources: searchResponse.sources.map((src) => ({
+          ...src,
+          url: resolved.get(src.url) ?? src.url,
+        })),
+        citations: searchResponse.citations?.map((cit) => ({
+          ...cit,
+          url: resolved.get(cit.url) ?? cit.url,
+        })),
       };
     }
   }
@@ -1138,7 +1228,11 @@ function parseProviderResponseBody(
   if (result instanceof SearchProviderFailure) return result;
   if (!result.answer && result.sources.length === 0) {
     // Pinned branch: neither answer nor citations → honest 502 failure.
-    return new SearchProviderFailure("openrouter", "OpenRouter web search returned no answer or citations", 502);
+    return new SearchProviderFailure(
+      "openrouter",
+      "OpenRouter web search returned no answer or citations",
+      502,
+    );
   }
   return result;
 }

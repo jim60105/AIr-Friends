@@ -59,13 +59,13 @@ import {
   type ResolveHost,
   runSearchRoute,
   SEARCH_BACKEND_LABELS,
+  type SearchCredentialPresence,
+  type SearchDecisionRecord,
   searchFailureEnvelope,
   searchNoModelConfiguredEnvelope,
   searchSuccessEnvelope,
-  selectSearchBackend,
-  type SearchCredentialPresence,
-  type SearchDecisionRecord,
   type SearchToolEnvelope,
+  selectSearchBackend,
   webSearchSeamState,
 } from "./_daemon/mod.ts";
 import { runtimeResolveHost } from "./read-replacement.ts";
@@ -159,7 +159,11 @@ export function createSearchReplacementToolDefinition(
       const seam = webSearchSeamState(presence);
       if (seam.state === "pending-blocked") {
         const decision = await decideSearchRoute(
-          { url: PINNED_SEARCH_ENDPOINTS.gemini.baseUrl, hopKind: "provider-endpoint", hopsFollowed: 0 },
+          {
+            url: PINNED_SEARCH_ENDPOINTS.gemini.baseUrl,
+            hopKind: "provider-endpoint",
+            hopsFollowed: 0,
+          },
           { resolveHost, credentialPresence: presence, posture: policy },
         );
         if (decision.decision === "block") deps.recordSink?.(decision.record);
@@ -186,7 +190,9 @@ export function createSearchReplacementToolDefinition(
       // (no adoption, no transport call). The replacement surfaces no
       // provider-selection parameter (the pinned tool takes none), so the
       // flag can only arrive via injected params — defended, not advertised.
-      const requestedProvider = typeof params["provider"] === "string" ? params["provider"] : undefined;
+      const requestedProvider = typeof params["provider"] === "string"
+        ? params["provider"]
+        : undefined;
       if (requestedProvider !== undefined && requestedProvider !== backend) {
         const decision = await decideSearchRoute(
           {
@@ -200,7 +206,9 @@ export function createSearchReplacementToolDefinition(
         if (decision.decision === "block") deps.recordSink?.(decision.record);
         const message =
           `web_search: provider "${requestedProvider}" is outside the supported configured set ` +
-          `(selection is ${SEARCH_BACKEND_LABELS[backend]} via the row-7 credential set; no unrelated vendor secret exists here)`;
+          `(selection is ${
+            SEARCH_BACKEND_LABELS[backend]
+          } via the row-7 credential set; no unrelated vendor secret exists here)`;
         return {
           content: [{ type: "text" as const, text: `Error: ${message}` }],
           details: { response: { provider: backend, sources: [] }, error: message },

@@ -23,11 +23,11 @@ import {
   decideSearchRoute,
   MAX_ENRICHMENT_SUBREQUESTS,
   PINNED_SEARCH_ENDPOINTS,
+  runSearchRoute,
   type SearchCredentialPresence,
   type SearchDecisionRecord,
   selectSearchBackend,
   SUPPORTED_SEARCH_CREDENTIAL_ENV,
-  runSearchRoute,
 } from "@acp/omp/search-transport.ts";
 
 // Zero-network guarantee: nothing below reaches a socket.
@@ -145,14 +145,22 @@ Deno.test("Selection: both keys -> gemini first; gemini-only -> gemini; openrout
 
 Deno.test("Credential-absent: hop blocks with no-supported-credential + userDecisionRequired, credential-free record", async () => {
   const decision = await decideSearchRoute(
-    { url: `${GEMINI_ENDPOINT}/models/x:streamGenerateContent?alt=sse`, hopKind: "provider-endpoint", hopsFollowed: 0 },
+    {
+      url: `${GEMINI_ENDPOINT}/models/x:streamGenerateContent?alt=sse`,
+      hopKind: "provider-endpoint",
+      hopsFollowed: 0,
+    },
     decisionDeps(NEITHER, ENFORCING),
   );
   assertEquals(decision.decision, "block");
   if (decision.decision === "block" && !("host" in decision.record)) {
     assertEquals(decision.reason, "no-supported-credential");
     assertEquals("userDecisionRequired" in decision && decision.userDecisionRequired, true);
-    assertEquals(decision.record, { hopIndex: 0, decision: "block", reason: "no-supported-credential" });
+    assertEquals(decision.record, {
+      hopIndex: 0,
+      decision: "block",
+      reason: "no-supported-credential",
+    });
     // Credential-free record posture: at most { hopIndex, decision, reason }.
     assertEquals(Object.keys(decision.record).sort(), ["decision", "hopIndex", "reason"]);
   } else {
@@ -214,10 +222,12 @@ Deno.test("Explicit backend outside the supported set: blocked, never adopted, z
 // ---------------------------------------------------------------------------
 
 Deno.test("Public provider endpoints allowed under both postures; enforcing names the proxy route", async () => {
-  for (const [label, presence, url] of [
-    ["gemini", GEMINI_ONLY, GEMINI_ENDPOINT],
-    ["openrouter", OPENROUTER_ONLY, OPENROUTER_ENDPOINT],
-  ] as const) {
+  for (
+    const [label, presence, url] of [
+      ["gemini", GEMINI_ONLY, GEMINI_ENDPOINT],
+      ["openrouter", OPENROUTER_ONLY, OPENROUTER_ENDPOINT],
+    ] as const
+  ) {
     for (const posture of [ENFORCING, UNRESTRICTED]) {
       const decision = await decideSearchRoute(
         { url: `${url}/chat/completions`, hopKind: "provider-endpoint", hopsFollowed: 0 },
@@ -225,7 +235,11 @@ Deno.test("Public provider endpoints allowed under both postures; enforcing name
       );
       assertEquals(decision.decision !== "block", true, `${label}/${posture.posture}`);
       if (posture.posture === "enforcing") {
-        assertEquals(decision.decision, "allow-via-proxy", `${label} enforcing must name the proxy route`);
+        assertEquals(
+          decision.decision,
+          "allow-via-proxy",
+          `${label} enforcing must name the proxy route`,
+        );
         if (decision.decision === "allow-via-proxy") {
           assertEquals(decision.proxyEndpoint, "http://127.0.0.1:9099");
         }
@@ -248,7 +262,10 @@ Deno.test("Issued provider request carries redirect:manual + proxy init under en
   assertEquals(result.ok, true);
   assertEquals(transport.requests.length, 1);
   assertEquals(transport.requests[0].init?.redirect as RequestRedirect, "manual");
-  assertEquals((transport.requests[0].init as RequestInit & { proxy?: string }).proxy, "http://127.0.0.1:9099");
+  assertEquals(
+    (transport.requests[0].init as RequestInit & { proxy?: string }).proxy,
+    "http://127.0.0.1:9099",
+  );
 });
 
 const PRIVATE_TARGETS: Array<readonly [string, string]> = [
@@ -288,7 +305,11 @@ Deno.test("runSearchRoute to a metadata endpoint: blocked with reason, zero issu
     const transport = mockTransport(() => new Response("never", { status: 200 }));
     const records: SearchDecisionRecord[] = [];
     const result = await runSearchRoute(
-      { backend: "gemini", url: "http://169.254.169.254/metadata", init: { method: "POST", headers: {}, body: "{}" } },
+      {
+        backend: "gemini",
+        url: "http://169.254.169.254/metadata",
+        init: { method: "POST", headers: {}, body: "{}" },
+      },
       {
         resolveHost: mockDns(),
         credentialPresence: BOTH,
@@ -360,10 +381,16 @@ Deno.test("Enrichment hops re-enter the SAME core as secondary hops: public allo
   );
   assertEquals(allowed.decision !== "block", true);
   assertEquals(allowed.record.hopIndex, 3); // secondary pattern: hopsFollowed + 1
-  if ("host" in allowed.record) assertEquals(allowed.record.host, "vertexaisearch.cloud.google.com");
+  if ("host" in allowed.record) {
+    assertEquals(allowed.record.host, "vertexaisearch.cloud.google.com");
+  }
   for (const posture of [ENFORCING, UNRESTRICTED]) {
     const blocked = await decideSearchRoute(
-      { url: "http://169.254.169.254/grounding-api-redirect/X", hopKind: "enrichment", hopsFollowed: 0 },
+      {
+        url: "http://169.254.169.254/grounding-api-redirect/X",
+        hopKind: "enrichment",
+        hopsFollowed: 0,
+      },
       decisionDeps(GEMINI_ONLY, posture),
     );
     assertEquals(blocked.decision, "block", posture.posture);
@@ -374,9 +401,13 @@ Deno.test("Enrichment hops re-enter the SAME core as secondary hops: public allo
 Deno.test("Enrichment HEAD Location to a private address blocks at the hop; proxy URL kept, never adopted", async () => {
   const fetchImpl: FetchTransportFn = (url, init) => {
     if (init?.method === "HEAD") {
-      return Promise.resolve(new Response(null, { status: 302, headers: { location: "http://169.254.169.254/stolen" } }));
+      return Promise.resolve(
+        new Response(null, { status: 302, headers: { location: "http://169.254.169.254/stolen" } }),
+      );
     }
-    return Promise.resolve(new Response(geminiStreamBody("answer", GROUNDING_PROXY), { status: 200 }));
+    return Promise.resolve(
+      new Response(geminiStreamBody("answer", GROUNDING_PROXY), { status: 200 }),
+    );
   };
   const records: SearchDecisionRecord[] = [];
   const result = await runSearchRoute(
@@ -399,7 +430,13 @@ Deno.test("Enrichment HEAD Location to a private address blocks at the hop; prox
   assertExists(last);
   if ("host" in last) {
     assertEquals(last.reason, "cloud-metadata");
-    assertEquals(Object.keys(last).sort(), ["addressClass", "decision", "hopIndex", "host", "reason"]);
+    assertEquals(Object.keys(last).sort(), [
+      "addressClass",
+      "decision",
+      "hopIndex",
+      "host",
+      "reason",
+    ]);
   } else {
     throw new Error("expected row-17 record for the blocked Location hop");
   }
@@ -408,9 +445,16 @@ Deno.test("Enrichment HEAD Location to a private address blocks at the hop; prox
 Deno.test("Enrichment HEAD public Location resolves and replaces the proxy URL with a hop record", async () => {
   const fetchImpl: FetchTransportFn = (url, init) => {
     if (init?.method === "HEAD") {
-      return Promise.resolve(new Response(null, { status: 302, headers: { location: "https://news.example.com/story" } }));
+      return Promise.resolve(
+        new Response(null, {
+          status: 302,
+          headers: { location: "https://news.example.com/story" },
+        }),
+      );
     }
-    return Promise.resolve(new Response(geminiStreamBody("answer", GROUNDING_PROXY), { status: 200 }));
+    return Promise.resolve(
+      new Response(geminiStreamBody("answer", GROUNDING_PROXY), { status: 200 }),
+    );
   };
   const records: SearchDecisionRecord[] = [];
   const result = await runSearchRoute(
@@ -426,12 +470,17 @@ Deno.test("Enrichment HEAD public Location resolves and replaces the proxy URL w
   if (result.ok) {
     assertEquals(result.response.sources[0]?.url, "https://news.example.com/story");
   }
-  assertEquals(records.some((r) => "host" in r && r.host === "news.example.com/story".split("/")[0]), true);
+  assertEquals(
+    records.some((r) => "host" in r && r.host === "news.example.com/story".split("/")[0]),
+    true,
+  );
 });
 
 Deno.test("Enrichment fan-out is bounded by MAX_ENRICHMENT_SUBREQUESTS", async () => {
-  const uris = Array.from({ length: MAX_ENRICHMENT_SUBREQUESTS + 4 }, (_, i) =>
-    `https://vertexaisearch.cloud.google.com/grounding-api-redirect/R${i}`);
+  const uris = Array.from(
+    { length: MAX_ENRICHMENT_SUBREQUESTS + 4 },
+    (_, i) => `https://vertexaisearch.cloud.google.com/grounding-api-redirect/R${i}`,
+  );
   const chunk = {
     candidates: [{
       content: { parts: [{ text: "answer" }] },
@@ -457,7 +506,10 @@ Deno.test("Enrichment fan-out is bounded by MAX_ENRICHMENT_SUBREQUESTS", async (
   assertEquals(result.ok, true);
   assertEquals(headTargets.length, MAX_ENRICHMENT_SUBREQUESTS);
   if (result.ok) {
-    assertEquals(result.notes.some((note) => note.includes(`capped at ${MAX_ENRICHMENT_SUBREQUESTS}`)), true);
+    assertEquals(
+      result.notes.some((note) => note.includes(`capped at ${MAX_ENRICHMENT_SUBREQUESTS}`)),
+      true,
+    );
   }
 });
 
@@ -471,7 +523,9 @@ Deno.test("Blocked enrichment target keeps the proxy URL and records the block c
     }],
     modelVersion: "gemini-test",
   };
-  const transport = mockTransport(() => new Response(`data: ${JSON.stringify(chunk)}\n\n`, { status: 200 }));
+  const transport = mockTransport(() =>
+    new Response(`data: ${JSON.stringify(chunk)}\n\n`, { status: 200 })
+  );
   const records: SearchDecisionRecord[] = [];
   const result = await runSearchRoute(
     buildGeminiSearchRequest({ query: "q" }, "key"),
@@ -495,7 +549,13 @@ Deno.test("Blocked enrichment target keeps the proxy URL and records the block c
   assertExists(enrichment);
   if ("host" in enrichment) {
     assertEquals(enrichment.reason, "cloud-metadata");
-    assertEquals(Object.keys(enrichment).sort(), ["addressClass", "decision", "hopIndex", "host", "reason"]);
+    assertEquals(Object.keys(enrichment).sort(), [
+      "addressClass",
+      "decision",
+      "hopIndex",
+      "host",
+      "reason",
+    ]);
   } else {
     throw new Error("expected row-17 record shape for enrichment block");
   }
@@ -506,11 +566,13 @@ Deno.test("Blocked enrichment target keeps the proxy URL and records the block c
 // ---------------------------------------------------------------------------
 
 Deno.test("No unguarded retry: every issued attempt has a prior decision record; one attempt per hop incl. 429", async () => {
-  for (const [label, body, status] of [
-    ["success", openRouterBody(), 200],
-    ["429 rate", "slow down", 429],
-    ["500 upstream", "boom", 500],
-  ] as const) {
+  for (
+    const [label, body, status] of [
+      ["success", openRouterBody(), 200],
+      ["429 rate", "slow down", 429],
+      ["500 upstream", "boom", 500],
+    ] as const
+  ) {
     const issuedOrder: string[] = [];
     const transport = mockTransport(() => new Response(body, { status }));
     const fetchImpl: FetchTransportFn = (url, init) => {
