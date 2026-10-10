@@ -36,16 +36,20 @@ const DIGESTS = {
 // --- Containerfile section extraction -------------------------------------
 
 function section(start: string, end: string): string {
-  const a = containerfile.indexOf(start);
-  const b = containerfile.indexOf(end, a);
+  // Anchored on FROM lines (with a leading newline) so no future instruction
+  // placed before the stage comment can silently enter a slice.
+  const a = containerfile.indexOf(`\n${start}`);
+  const b = containerfile.indexOf(`\n${end}`, a);
   assert(a >= 0, `section start not found: ${start}`);
   assert(b > a, `section end not found after start: ${end}`);
   return containerfile.slice(a, b);
 }
 
-const ompStage = section("FROM base AS omp-unpacker", "# Final stage");
+// Stage slices are delimited by the NEXT stage's FROM line:
+// opencode-unpacker -> cache; omp-unpacker -> final.
+const ompStage = section("FROM base AS omp-unpacker", "FROM base AS final");
 const finalStage = containerfile.slice(containerfile.indexOf("FROM base AS final"));
-const opencodeStage = section("FROM base AS opencode-unpacker", "# Cache stage");
+const opencodeStage = section("FROM base AS opencode-unpacker", "FROM base AS cache");
 
 // --- 4.1 Containerfile-parse assertions ------------------------------------
 
@@ -83,6 +87,8 @@ Deno.test("omp packaging - asset allowlist rule: unique match within the exact t
   // ...with zero-or-many matches failing the build naming the count.
   assert(ompStage.includes(`if [ "\${count}" != "1" ]`));
   assert(ompStage.includes("expected exactly 1 asset match, found ${count}"));
+  // Downloads bind to the SAME listing response that enforced uniqueness.
+  assert(ompStage.includes("browser_download_url"));
   // The observed asset name is recorded (stage comment) for the docs table.
   assertStringIncludes(ompStage, "Observed asset name");
   assertStringIncludes(ompStage, "omp-linux-x64");
@@ -569,6 +575,12 @@ Deno.test("extension bundle - load parity: bundle and dev entry fail closed iden
   // the dev entry and the replayed bundle fail closed at load with the same
   // discovery-gate error. Identical failure = byte-identical behavior proof
   // (content-faithfulness), without ever executing `omp`.
+  // REWRITE CONDITION (recut-culture note for successors): when row 12's
+  // pre-import-exclusion blocker is ever resolved, this test's fail-closed
+  // assertions become a hard failure ON PURPOSE — rewrite it in that same
+  // change to assert SUCCESSFUL-load parity (both loads return "loaded") with
+  // the @std closure resolved inside the tree, per docs/OMP_PACKAGING.md §5's
+  // external-trust asymmetry note.
   const target = await Deno.makeTempDir({ prefix: "omp-bundle-" });
   try {
     const command = new Deno.Command(`${repoRoot}/scripts/omp/bundle-omp-extension.sh`, {

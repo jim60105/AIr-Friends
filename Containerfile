@@ -115,7 +115,6 @@ RUN case "${TARGETARCH}" in \
       arm64) OMP_ARCH="arm64"; OMP_SHA256="${OMP_SHA256_ARM64}" ;; \
       *) echo "unsupported architecture: ${TARGETARCH}" && exit 1 ;; \
     esac && \
-    base="https://github.com/can1357/oh-my-pi/releases/download/v${OMP_VERSION}" && \
     mkdir -p /omp/out /omp/licenses && \
     # Asset allowlist WITHIN the exact tag only: select the unique executable
     # asset named exactly `omp-linux-${OMP_ARCH}` or matching
@@ -124,6 +123,9 @@ RUN case "${TARGETARCH}" in \
     # allowlisted (rule above), not pinned; uniqueness + the pinned digest keep
     # any asset-name/content change under the same tag failing closed at the
     # checksum step. Zero matches or >1 match aborts the build naming the count.
+    # Downloads use the SAME API listing's per-asset browser_download_url (not a
+    # re-derived download URL), so uniqueness and the fetched bytes bind to one
+    # listing response; the pinned digests stay the fail-closed content check.
     # Observed asset name (echoed below; also recorded in docs/OMP_PACKAGING.md):
     #   v18.6.1 publishes plain `omp-linux-x64` / `omp-linux-arm64` names.
     listing="$(curl -fsSL "https://api.github.com/repos/can1357/oh-my-pi/releases/tags/v${OMP_VERSION}")" && \
@@ -134,9 +136,12 @@ RUN case "${TARGETARCH}" in \
     fi && \
     asset="$(printf '%s\n' "${sel}" | sed '/^$/d')" && \
     echo "observed OMP executable asset name: ${asset}" && \
-    curl -fsSL "${base}/${asset}" -o /tmp/omp.bin && \
-    curl -fsSL "${base}/LICENSE" -o /tmp/LICENSE && \
-    curl -fsSL "${base}/THIRD-PARTY-NOTICES.txt" -o /tmp/THIRD-PARTY-NOTICES.txt && \
+    asset_url="$(printf '%s' "${listing}" | jq -r --arg n "${asset}" '.assets[] | select(.name==$n) | .browser_download_url')" && \
+    license_url="$(printf '%s' "${listing}" | jq -r '.assets[] | select(.name=="LICENSE") | .browser_download_url')" && \
+    notices_url="$(printf '%s' "${listing}" | jq -r '.assets[] | select(.name=="THIRD-PARTY-NOTICES.txt") | .browser_download_url')" && \
+    curl -fsSL "${asset_url}" -o /tmp/omp.bin && \
+    curl -fsSL "${license_url}" -o /tmp/LICENSE && \
+    curl -fsSL "${notices_url}" -o /tmp/THIRD-PARTY-NOTICES.txt && \
     # Fail closed: every checksum verifies BEFORE any install/COPY consumption.
     echo "${OMP_SHA256}  /tmp/omp.bin" | sha256sum -c - && \
     echo "${OMP_LICENSE_SHA256}  /tmp/LICENSE" | sha256sum -c - && \

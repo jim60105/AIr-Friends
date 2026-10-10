@@ -136,6 +136,19 @@ repo-relative **mirror copy of the value-import closure**, not a fork:
 
 The bundled set is DERIVED from the import walk, never a hand-maintained list.
 
+**External-trust asymmetry (named verification item).** The installed tree is
+byte-complete for every first-party module, but the generated import map pins
+the one external family (`@std/path` + its locked `@std/internal`) to **jsr
+URLs resolved at load time by the agent runtime's module loader** — those bytes
+are version-pinned but NOT covered by `PACKAGE-MANIFEST.sha256` (they are not
+installed files), and load-parity is proven under Deno's resolver only:
+whether OMP's embedded runtime honors the `deno.json` import map at
+trusted-extension load is design §15 user-owned and UNVERIFIED (the same open
+question `docs/OMP_DISCOVERY.md` records for the real trusted-module load).
+The failure mode is fail-closed — the extension errors at load, and the
+factory's presence checks plus row 12's gate stand — but the gap is real and
+is a named item in the §7 checklist.
+
 ## 6. `PACKAGE-MANIFEST.sha256` and the recut invariant
 
 `scripts/omp/generate-omp-manifest.sh` writes the manifest into
@@ -191,6 +204,9 @@ ships explicitly UNVERIFIED:
 - [ ] Container starts with the new stages and installs no additional Bun/JS runtime
 - [ ] Installed binary reports the pin: `omp --version` → `18.6.1`
 - [ ] `/opt/air/omp/PACKAGE-MANIFEST.sha256` verifies in the built image (`sha256sum -c`)
+- [ ] OMP's embedded runtime actually loads the trusted extension through the
+      generated `deno.json` import map (jsr `@std/*` resolution succeeds at
+      extension load — the §5 external-trust asymmetry; fail-closed if it does not)
 
 Until those are observed, this is packaging hygiene backed by mock evidence —
 not clearance. The pin is prevention; the bootstrap version marker (`OMP

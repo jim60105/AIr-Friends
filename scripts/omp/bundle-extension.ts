@@ -64,33 +64,56 @@ interface Dep {
   value: boolean;
 }
 
-/** Static + dynamic import specifiers with value-vs-type-only classification. */
+/**
+ * Static + dynamic import specifiers with value-vs-type-only classification.
+ * Handles double- AND single-quote specifiers (prettier enforces double, but
+ * the walk must not silently miss a hand-edited single-quote edge) and dynamic
+ * `import("...")`. A bare side-effect import (`import "./setup.ts";`) has no
+ * from-clause and is rejected fail-closed below — silently excluding it from
+ * the closure would throw at image load far from its cause.
+ */
 function parseImports(text: string): Dep[] {
   const out: Dep[] = [];
   const re = /\b(import|export)\b([\s\S]*?)from\s+"([^"]+)"/g;
-  const dyn = /(?:await\s+)?import\(\s*"([^"]+)"\s*\)/g;
+  const reQ = /\b(import|export)\b([\s\S]*?)from\s+'([^']+)'/g;
+  const dyn = /(?:await\s+)?import\(\s*["']([^"']+)["']\s*\)/g;
+  // Fail closed on bare side-effect imports: they carry values but no
+  // from-clause this parser classifies.
+  if (/^\s*import\s+["'][^"']+["']\s*;?\s*$/m.test(text)) {
+    console.error(
+      "bare side-effect import is outside the bundler's classifier; refactor to a named import",
+    );
+    Deno.exit(1);
+  }
   let m: RegExpExecArray | null;
   while ((m = re.exec(text))) {
-    const [, kw, clause, spec] = m;
-    const b = clause.trim();
-    const symHasValue = (inner: string) =>
-      inner.split(/[,\n]/).map((s) => s.trim()).filter(Boolean).some((s) => !s.startsWith("type "));
-    let value: boolean;
-    if (kw === "export") {
-      if (b.startsWith("type ")) value = false;
-      else if (b.startsWith("*")) value = true;
-      else value = symHasValue(b.replace(/^\{/, "").replace(/\}[\s\S]*$/, ""));
-    } else if (b.startsWith("type ")) {
-      value = false;
-    } else if (b === "" || b.startsWith("*") || /^[A-Za-z_$]/.test(b)) {
-      value = true;
-    } else {
-      value = symHasValue(b.replace(/^\{/, "").replace(/\}[\s\S]*$/, ""));
-    }
-    out.push({ ref: spec, value });
+    out.push(classify(m));
+  }
+  while ((m = reQ.exec(text))) {
+    out.push(classify(m));
   }
   for (const d of text.matchAll(dyn)) out.push({ ref: d[1], value: true });
   return out;
+}
+
+function classify(m: RegExpExecArray): Dep {
+  const [, kw, clause, spec] = m;
+  const b = clause.trim();
+  const symHasValue = (inner: string) =>
+    inner.split(/[,\n]/).map((s) => s.trim()).filter(Boolean).some((s) => !s.startsWith("type "));
+  let value: boolean;
+  if (kw === "export") {
+    if (b.startsWith("type ")) value = false;
+    else if (b.startsWith("*")) value = true;
+    else value = symHasValue(b.replace(/^\{/, "").replace(/\}[\s\S]*$/, ""));
+  } else if (b.startsWith("type ")) {
+    value = false;
+  } else if (b === "" || b.startsWith("*") || /^[A-Za-z_$]/.test(b)) {
+    value = true;
+  } else {
+    value = symHasValue(b.replace(/^\{/, "").replace(/\}[\s\S]*$/, ""));
+  }
+  return { ref: spec, value };
 }
 
 /** Resolve a relative specifier; null for bare/absolute refs. */
@@ -136,10 +159,17 @@ while (frontier.length) {
   for (const f of frontier) {
     for (const d of await importsOf(f)) {
       if (!d.value) continue;
-      const r = resolveRef(f, d.ref);
+      let r = resolveRef(f, d.ref);
       if (r === null || closure.has(r)) continue;
+      // Directory-valued relative import resolves to its index.ts (matching
+      // the loader and importsOf); copying a directory path would crash below.
       try {
-        await Deno.stat(`${src}/${r}`);
+        const st = await Deno.stat(`${src}/${r}`);
+        if (st.isDirectory) {
+          const viaIndex = `${r}/index.ts`;
+          await Deno.stat(`${src}/${viaIndex}`);
+          r = viaIndex;
+        }
       } catch {
         console.error(`value import edge resolves to a missing module: ${f} -> ${d.ref}`);
         Deno.exit(1);
@@ -214,7 +244,11 @@ for (const pkg of [...externals].sort()) {
   // lock resolves today.
   const candidates = Object.entries(specifiers)
     .filter(([k, v]) => k.startsWith(`jsr:${pkg}@`) && typeof v === "string")
-    .map(([, v]) => v as string);
+    .map(([, v]) => v as string)
+    // Only plain x.y.z versions participate in the highest-of-candidates
+    // sort: a prerelease suffix maps to NaN components and would make the
+    // pin order implementation-defined. Fail closed rather than guess.
+    .filter((v) => /^\d+\.\d+\.\d+$/.test(v));
   const ver = candidates.sort((a, b) => {
     const pa = a.split(".").map(Number);
     const pb = b.split(".").map(Number);
