@@ -399,7 +399,7 @@ Deno.test("Enrichment hops re-enter the SAME core as secondary hops: public allo
 });
 
 Deno.test("Enrichment HEAD Location to a private address blocks at the hop; proxy URL kept, never adopted", async () => {
-  const fetchImpl: FetchTransportFn = (url, init) => {
+  const fetchImpl: FetchTransportFn = (_url, init) => {
     if (init?.method === "HEAD") {
       return Promise.resolve(
         new Response(null, { status: 302, headers: { location: "http://169.254.169.254/stolen" } }),
@@ -443,7 +443,7 @@ Deno.test("Enrichment HEAD Location to a private address blocks at the hop; prox
 });
 
 Deno.test("Enrichment HEAD public Location resolves and replaces the proxy URL with a hop record", async () => {
-  const fetchImpl: FetchTransportFn = (url, init) => {
+  const fetchImpl: FetchTransportFn = (_url, init) => {
     if (init?.method === "HEAD") {
       return Promise.resolve(
         new Response(null, {
