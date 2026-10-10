@@ -386,6 +386,8 @@ The validating proxy resolves each destination once, validates every resolved ad
 
 Closing both gaps requires the authoritative network-route boundary (a namespace whose only egress is the proxy), which is deferred until the loopback Skill API is bridged into that namespace (UDS or a non-loopback bridge address). Until then, treat the default posture as blocking the trivial external-SSRF cases for proxy-honoring clients, not as a complete egress boundary. Operators who need a hard boundary today can use `networkIsolation: true` (full isolation; disables web tools and skill callbacks) for agents that need no egress.
 
+**OMP URL reads get their own per-hop boundary on top of this posture.** The restricted OMP session's `read`-tool URL branch is served by the controlled fetch-transport adapter (`src/acp/omp/fetch-transport.ts` + the trusted-extension replacement), which re-validates **every hop before it is issued** — including redirect Locations and scraper-derived secondary URLs — with `redirect: "manual"` and the shared `ssrf.ts` rule set, so the env-proxy residual above no longer describes adapted URL reads (native auto-follow routes outside the replacement stay recorded as blocked). The posture semantics, the `HTTP_PROXY`-presence-is-not-enforcement honesty table, the DNS pinning carry-over, and the native-observation checklist live in [OMP_NETWORK.md](OMP_NETWORK.md).
+
 #### Operator-Trusted Egress Destinations (`egressAllowHosts`)
 
 Deployments that legitimately need the agent to reach specific internal services (e.g. a LAN Stable Diffusion WebUI, an in-cluster reverse proxy) can enumerate them in `sandbox.egressAllowHosts` (env: `AGENT_SANDBOX_EGRESS_ALLOW_HOSTS`, comma-separated) instead of abandoning mediation with `unrestrictedEgress`:

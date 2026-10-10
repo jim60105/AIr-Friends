@@ -92,3 +92,58 @@ export type {
   FilesystemDenialReason,
 } from "../../../filesystem-policy.ts";
 export type { ApprovalAction, ApprovalRecord } from "../../compatibility-contracts.ts";
+
+// Row 19 (`control-omp-url-fetch-transport`) extends the declared closure
+// with the URL-fetch transport adapter's pure modules. CLOSURE NOTE FOR ROW
+// 22's DIGEST CUT: `src/acp/omp/fetch-transport.ts` transitively imports
+// `src/utils/ssrf.ts` (the single classifier: isDisallowedAddress,
+// MAX_REDIRECT_HOPS, pinValidatedUrl), so the install copy list MUST carry
+// `ssrf.ts` under its repo-relative basename as well — the import is
+// load-safe precisely because `Deno.resolveDns` sits only in ssrf.ts's
+// NON-imported `resolveHostAddresses`; the imported surface performs no
+// DNS/env/network side effect at module load.
+export {
+  type BinaryFetchResult,
+  decideFetchHop,
+  deriveFetchEgressPolicy,
+  disallowedAddressClass,
+  extensionHintFor,
+  fetchBinaryRoute,
+  type FetchBlockReason,
+  type FetchDecisionDeps,
+  type FetchDecisionRecord,
+  fetchDecisionRecord,
+  type FetchEgressConfigFacts,
+  type FetchEgressPolicy,
+  fetchEgressPolicyFromAgentEnv,
+  type FetchHopDecision,
+  type FetchHopInput,
+  type FetchHopType,
+  type FetchRoutePlan,
+  fetchShapedRoute,
+  fetchTextRoute,
+  type FetchTransportDeps,
+  type FetchTransportFn,
+  formatFetchDecisionLog,
+  isBinaryContentShape,
+  issueValidatedHop,
+  MAX_BINARY_BYTES,
+  MAX_TEXT_OUTPUT_CHARS,
+  planFetchRoute,
+  productionFetchTransport,
+  type ResolveHost,
+  runFetchChain,
+  runSecondaryFetch,
+  type ShapedFetchResult,
+} from "../../fetch-transport.ts";
+
+export {
+  FETCH_COMPLETING_ADAPTER_MARKER,
+  FETCH_COMPLETING_MECHANISM,
+  FETCH_ROUTE_CITATIONS,
+  FETCH_ROUTE_TABLE,
+  type FetchRouteCitation,
+  type FetchRouteRow,
+  type FetchRouteStatus,
+  isRouteCompleted,
+} from "../../fetch-routes.ts";
