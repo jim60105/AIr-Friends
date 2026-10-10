@@ -6,11 +6,13 @@ import { SandboxManager } from "./sandbox-manager.ts";
 import { getRunningEgressProxyUrl } from "@utils/egress-proxy.ts";
 import { sessionXdgDataHome } from "@utils/opencode-paths.ts";
 import {
-  OMP_TRUSTED_EXTENSION_PATH,
   ompAgentDir,
   ompLaunchCwd,
   ompProcessTmpDir,
   ompXdgDataHome,
+  resolveOmpConfigPath,
+  resolveOmpSystemPromptPath,
+  resolveOmpTrustedExtensionPath,
 } from "@utils/omp-paths.ts";
 import { type OmpPermissionMode, ompSettingsForMode } from "./omp-settings.ts";
 import { createLogger } from "@utils/logger.ts";
@@ -230,12 +232,21 @@ function buildBaseAgentConfig(
       }
 
       // Fail-closed checks on required assets: trusted extension module and overlay files
+      // Row-20 dev→image seam (src/utils/omp-paths.ts): the launch assembly
+      // consumes the resolver output VERBATIM — image path when the owned
+      // /opt/air/omp tree exists, byte-identical dev path otherwise. No
+      // second path convention; the fail-closed checks and their errors stay
+      // row 9's.
+      const trustedExtensionPath = resolveOmpTrustedExtensionPath();
       try {
-        Deno.statSync(OMP_TRUSTED_EXTENSION_PATH);
+        Deno.statSync(trustedExtensionPath);
       } catch {
-        throw new Error(`Missing trusted extension module at "${OMP_TRUSTED_EXTENSION_PATH}"`);
+        throw new Error(`Missing trusted extension module at "${trustedExtensionPath}"`);
       }
-      for (const overlayPath of settings.orderedOverlayPaths) {
+      const resolvedOverlayPaths = settings.orderedOverlayPaths.map((overlayPath) =>
+        resolveOmpConfigPath(overlayPath)
+      );
+      for (const overlayPath of resolvedOverlayPaths) {
         try {
           Deno.statSync(overlayPath);
         } catch {
@@ -250,11 +261,11 @@ function buildBaseAgentConfig(
       // `pin-omp-yolo-lsp-settings`; this flag is the row-17 carrier, independent of it). The flag
       // appears exactly once per launch and no restricted tool policy crosses into YOLO.
       const args = ["acp", "--no-extensions", "--no-lsp"];
-      for (const overlayPath of settings.orderedOverlayPaths) {
+      for (const overlayPath of resolvedOverlayPaths) {
         args.push("--config", overlayPath);
       }
-      args.push("--trusted-extension", OMP_TRUSTED_EXTENSION_PATH);
-      args.push("--system-prompt", settings.systemPromptMapping.sourcePath);
+      args.push("--trusted-extension", trustedExtensionPath);
+      args.push("--system-prompt", resolveOmpSystemPromptPath());
 
       // Base root resolution and mode-distinct state roots
       const dataRoot = appConfig.workspace.repoPath;
