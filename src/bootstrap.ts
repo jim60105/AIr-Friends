@@ -4,7 +4,9 @@ import { loadConfig } from "@core/config-loader.ts";
 import type { Config } from "./types/config.ts";
 import { ConfigError, ErrorCode } from "./types/errors.ts";
 import { verifyOpenCodeVersion } from "@utils/opencode-version.ts";
+import { shouldVerifyOmpVersion, verifyOmpVersion } from "@utils/omp-version.ts";
 import { AgentCore } from "@core/agent-core.ts";
+import { getDefaultAgentType } from "@acp/agent-factory.ts";
 import { SpontaneousScheduler } from "@core/spontaneous-scheduler.ts";
 import { ChannelLurkScheduler } from "@core/channel-lurk-scheduler.ts";
 import { extractChannelLurkIds } from "@platforms/discord/index.ts";
@@ -102,6 +104,15 @@ export async function bootstrap(
   // Verify the installed OpenCode CLI version (non-fatal, observable). The container
   // pin (Containerfile OPENCODE_VERSION) is the prevention; this surfaces drift early.
   await verifyOpenCodeVersion();
+
+  // Verify the installed OMP CLI version only when OMP is the resolved agent
+  // type: `omp` is absent-by-design on OpenCode-only installs, so an
+  // unconditional check would log a permanent UNKNOWN warning there. The
+  // container pin (Containerfile OMP_VERSION) is the prevention; this surfaces
+  // drift early and never blocks startup (WARN-only on non-OK).
+  if (shouldVerifyOmpVersion(getDefaultAgentType(config))) {
+    await verifyOmpVersion();
+  }
 
   // Agent sandbox egress + confinement (F12/F14). Start the validating egress proxy once
   // and verify the required namespace capabilities up front, failing closed at startup with

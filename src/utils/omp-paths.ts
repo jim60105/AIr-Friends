@@ -1,13 +1,14 @@
 // src/utils/omp-paths.ts
 //
 // Single source of truth for mode-scoped OMP state, working directory, and
-// process temporary roots, plus the contracted trusted extension path selector.
+// process temporary roots, plus the contracted trusted extension path selector
+// and the row-20 (package-pinned-omp-runtime) dev→image path seam.
 //
 // Mirroring the pure-helper pattern of opencode-paths.ts:
 // All helpers deterministically derive mode-separated paths so restricted and
 // native-yolo OMP processes never share a mutable state root or discoverable cwd.
 
-import { join, resolve } from "@std/path";
+import { basename, join, resolve } from "@std/path";
 import type { OmpPermissionMode } from "../acp/omp-settings.ts";
 
 /**
@@ -16,6 +17,106 @@ import type { OmpPermissionMode } from "../acp/omp-settings.ts";
  * Packaging (row 20) installs this under /opt/air/omp/extension/index.ts.
  */
 export const OMP_TRUSTED_EXTENSION_PATH = "src/acp/omp/extension/index.ts";
+
+/**
+ * Root-owned image tree installed by the OMP packaging steps (design D3/D4:
+ * outside every agent-writable root — never under /app/data, /app/prompts, or
+ * /home/deno). Existence of this root IS the deployment signal; development
+ * checkouts never own /opt/air, so every image-first resolution below keeps
+ * byte-identical dev behavior.
+ */
+export const OMP_IMAGE_ROOT = "/opt/air/omp";
+
+/** Image path of the trusted-extension tree root (D4's contracted constant). */
+export const OMP_IMAGE_EXTENSION_ROOT = `${OMP_IMAGE_ROOT}/extension`;
+
+/** Image path of the owned settings overlays (D3: dirs 0755, files 0644). */
+export const OMP_IMAGE_CONFIG_ROOT = `${OMP_IMAGE_ROOT}/config`;
+
+/** Image path of the owned SYSTEM.md prompt artifact. */
+export const OMP_IMAGE_PROMPT_PATH = `${OMP_IMAGE_ROOT}/prompt/SYSTEM.md`;
+
+/**
+ * Row-8 contracted system-prompt operator-mount path (the mapping the launch
+ * assembly consumes; operator-owned and never relocated by this module).
+ */
+export const OMP_SYSTEM_PROMPT_MOUNT_PATH = "/app/prompts/system_prompt_override.md";
+
+/**
+ * Resolve the contracted trusted-extension entry to its image path when the
+ * installed tree exists, otherwise the pre-existing development-tree path —
+ * the single exported dev→image seam; consumers launch with the resolver's
+ * output verbatim and no second path convention.
+ *
+ * The resolver itself never raises: absence simply selects the dev fallback.
+ * Existence injection keeps unit tests fixture-driven; production callers use
+ * the real filesystem.
+ */
+export function resolveOmpTrustedExtensionPath(options: {
+  /** Injectable existence probe; defaults to the real filesystem. */
+  exists?: (path: string) => boolean;
+  /** Injectable image extension root; defaults to the contracted constant. */
+  imageExtensionRoot?: string;
+} = {}): string {
+  const exists = options.exists ?? defaultExists;
+  const imageEntry = join(options.imageExtensionRoot ?? OMP_IMAGE_EXTENSION_ROOT, "index.ts");
+  return exists(imageEntry) ? imageEntry : OMP_TRUSTED_EXTENSION_PATH;
+}
+
+/**
+ * Resolve a contracted owned-settings dev path (e.g.
+ * `agent-config/omp/restricted.yml`) to its installed overlay when present,
+ * otherwise the pre-existing development-tree path, verbatim.
+ */
+export function resolveOmpConfigPath(
+  devPath: string,
+  options: {
+    /** Injectable existence probe; defaults to the real filesystem. */
+    exists?: (path: string) => boolean;
+    /** Injectable image config root; defaults to the contracted constant. */
+    imageConfigRoot?: string;
+  } = {},
+): string {
+  const exists = options.exists ?? defaultExists;
+  const imagePath = join(options.imageConfigRoot ?? OMP_IMAGE_CONFIG_ROOT, basename(devPath));
+  return exists(imagePath) ? imagePath : devPath;
+}
+
+/**
+ * Resolve the owned SYSTEM.md prompt artifact (row-8 mapping).
+ *
+ * Priority (D4, spec "Operator prompt mount honored"): the row-8 mount path
+ * wins whenever it exists — mounts are operator-owned and never relocated, and
+ * in a stock image that path is populated (bundled default or operator mount),
+ * exactly as row 8 defined. The owned artifact serves installs where the
+ * mount path is absent but the owned tree is present (its digest is covered by
+ * PACKAGE-MANIFEST.sha256 either way); without either, the pre-existing
+ * development path returns unchanged.
+ */
+export function resolveOmpSystemPromptPath(options: {
+  /** Injectable existence probe; defaults to the real filesystem. */
+  exists?: (path: string) => boolean;
+  /** Row-8 dev/mount path; defaults to the contracted constant. */
+  devPath?: string;
+  /** Injectable image prompt path; defaults to the contracted constant. */
+  imagePromptPath?: string;
+} = {}): string {
+  const exists = options.exists ?? defaultExists;
+  const devPath = options.devPath ?? OMP_SYSTEM_PROMPT_MOUNT_PATH;
+  if (exists(devPath)) return devPath;
+  const imagePath = options.imagePromptPath ?? OMP_IMAGE_PROMPT_PATH;
+  return exists(imagePath) ? imagePath : devPath;
+}
+
+/** Real-filesystem existence probe used by the resolvers above. */
+function defaultExists(path: string): boolean {
+  try {
+    const info = Deno.statSync(path);
+    return info.isFile;
+  } catch {
+    return false;
+  }
+}
 
 /**
  * Common parent root for OMP agent state under a given base root.
