@@ -1,19 +1,19 @@
 ## 1. Owned overlay cutover (0.75h)
 
-- [ ] 1.1 Read decision 5 and the archived implementation without editing historical artifacts; consume row-17 both-mode factory flags and OpenCode maps as landed.
-- [ ] 1.2 Add native-yolo asset/composition `lsp.enabled: false`, move it into shared deployment keys and require false in both-mode validation; remove superseded live no-LSP-key assertions while preserving every other YOLO exclusion.
+- [x] 1.1 Read decision 5 and the archived implementation without editing historical artifacts; consume row-17 both-mode factory flags and OpenCode maps as landed.
+- [x] 1.2 Add native-yolo asset/composition `lsp.enabled: false`, move it into shared deployment keys and require false in both-mode validation; remove superseded live no-LSP-key assertions while preserving every other YOLO exclusion.
 
 ## 2. Unit/mock acceptance (0.75h)
 
-- [ ] 2.1 Test parsed real asset versus emitted composition and validator results for false/missing/true/string/unknown LSP fields in both modes.
-- [ ] 2.2 Assert native YOLO approval, no restricted per-tool/reset/provider policy and the row-17 carrier interface without editing factory/OpenCode flags/maps or claiming implicit suppression.
+- [x] 2.1 Test parsed real asset versus emitted composition and validator results for false/missing/true/string/unknown LSP fields in both modes.
+- [x] 2.2 Assert native YOLO approval, no restricted per-tool/reset/provider policy and the row-17 carrier interface without editing factory/OpenCode flags/maps or claiming implicit suppression.
 
 ## 3. Packaging and documentation (0.50h)
 
-- [ ] 3.1 Recut installed-input digest manifest with existing packaging tools for changed asset bytes; retain runtime pins and package closure conventions.
-- [ ] 3.2 Update OMP_SETTINGS.md and focused CHANGELOG entry for decision 5's shared LSP exception; preserve native runtime evidence limits and no new config/env/Helm fields.
+- [x] 3.1 Recut installed-input digest manifest with existing packaging tools for changed asset bytes; retain runtime pins and package closure conventions. Landed per the row-20 build-time convention (the manifest is NOT repo-tracked — verified: no `PACKAGE-MANIFEST.sha256` tracked at master): `scripts/omp/generate-omp-manifest.sh` run in commit 13bf204 over a simulated installed owned root carrying the FINAL `native-yolo.yml` bytes plus the full owned content (restricted.yml, models.yml, SYSTEM.md, complete bundle via `bundle-omp-extension.sh`), version from `deno.json` (`OMP_VERSION` = 18.6.1), full 35-file manifest `sha256sum -c` verified; the changed overlay's new digest `69e108945009462c7f28891cc219342b0a168d21cd34d7b8f35504e1788f3503` (pre-change `ee42cd4b…`) recorded in that commit message. Pins/closure conventions untouched; image builds regenerate the authoritative manifest over final bytes (`docs/OMP_PACKAGING.md` §6).
+- [x] 3.2 Update OMP_SETTINGS.md and focused CHANGELOG entry for decision 5's shared LSP exception; preserve native runtime evidence limits and no new config/env/Helm fields.
 
 ## 4. Verification and handoff (1.00h)
 
-- [ ] 4.1 Run applicable repository format/lint/type and focused unit/mock checks plus strict change validation; never invoke real agents/providers/platform/container/bwrap acceptance.
-- [ ] 4.2 Record changed asset/validator scope, digest recut and observed automated outputs; real both-agent/both-mode implicit startup remains user-owned/unverified. Confirm budget ≤3h and all archive files remain untouched.
+- [x] 4.1 Run applicable repository format/lint/type and focused unit/mock checks plus strict change validation; never invoke real agents/providers/platform/container/bwrap acceptance. Observed: `deno task fmt:check` clean for every touched file (only the untouched master-baseline `tests/acp/omp-search-transport-decisions.test.ts` remains unformatted); `deno task lint` down to the single untouched master-baseline `tests/acp/omp-search-interface-shape.test.ts:500` unused-var (the master-baseline problems in `omp-settings.ts`/`omp-settings.test.ts` fixed by this cutover); `deno task check` clean; unit suite 2712 pass/0 fail; the applicable integration run `deno test -A tests/integration/` 49 pass/1 fail — the known master-reproduced shared-process kill/recovery deadline test; `openspec validate pin-omp-yolo-lsp-settings --strict` valid.
+- [x] 4.2 Record changed asset/validator scope, digest recut and observed automated outputs; real both-agent/both-mode implicit startup remains user-owned/unverified. Confirm budget ≤3h and all archive files remain untouched. Scope: `agent-config/omp/native-yolo.yml` (+2 lines), `src/acp/omp-settings.ts` (shared-key move + validator/assembly cutover), settings tests/fixtures, row-25 tripwires in `agent-factory-omp.test.ts`/`omp-lsp-coldstart-evidence.test.ts`, docs (`OMP_SETTINGS.md`, `AGENT_PERMISSIONS.md` carrier/exclusion wording, checklist D row) and the CHANGELOG entry; digest recut recorded in 3.1. Budget: within 3h. No archive file touched (`git diff master --name-only` contains no `openspec/changes/archive/` path).
