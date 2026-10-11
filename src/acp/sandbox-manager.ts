@@ -126,13 +126,16 @@ const NEVER_PASS_ENV = new Set([
  * trusted assignment (`finalizeOmpSpawnEnvironment`) is the second half —
  * only the exact deployment-owned plan values may (re)appear.
  */
-export function sanitizeOmpDiscoveryEnv(env: Record<string, string>): void {
+// Returns the SAME record it sanitized, so spawn-environment builders can chain
+// the call (in-place mutators such as the factory/child filter ignore it too).
+export function sanitizeOmpDiscoveryEnv(env: Record<string, string>): Record<string, string> {
   for (const selector of OMP_SETTINGS_DISCOVERY_ENV_SELECTORS) {
     delete env[selector];
   }
   for (const selector of OMP_FOREIGN_PROVIDER_ENV_SELECTORS) {
     delete env[selector];
   }
+  return env;
 }
 
 export interface SpawnOptions {

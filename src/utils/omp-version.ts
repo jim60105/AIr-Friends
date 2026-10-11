@@ -12,6 +12,7 @@
 // there would train operators to ignore the marker.
 
 import { createLogger } from "@utils/logger.ts";
+import { sanitizeOmpDiscoveryEnv } from "@acp/sandbox-manager.ts";
 
 /**
  * Known-good OMP version. The image-intended version is exact (the packaging
@@ -98,6 +99,13 @@ export async function detectOmpVersion(
       args: ["--version"],
       stdout: "piped",
       stderr: "piped",
+      // Row 26: the bootstrap probe is an OMP child too — it must not inherit
+      // the daemon's settings-discovery or foreign-provider selectors either.
+      // `clearEnv` alone is not enough: deletions from a MERGED env would still
+      // be inherited from the parent. The child therefore starts solely from
+      // the explicitly sanitized copy (PATH and unrelated vars retained).
+      env: sanitizeOmpDiscoveryEnv(Deno.env.toObject()),
+      clearEnv: true,
     });
     process = command.spawn();
   } catch {

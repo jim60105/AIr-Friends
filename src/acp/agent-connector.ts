@@ -206,7 +206,9 @@ export class AgentConnector {
     const identities = await assertOmpSettingsSourcesVisible(
       plan,
       sessionCwd,
-      this.acceptedOverlayIdentities ? { expectedOverlayIdentities: this.acceptedOverlayIdentities } : {},
+      this.acceptedOverlayIdentities
+        ? { expectedOverlayIdentities: this.acceptedOverlayIdentities }
+        : {},
     );
     this.acceptedOverlayIdentities = identities;
   }
@@ -386,12 +388,6 @@ export class AgentConnector {
 
     const logger = this.options.logger as Logger;
 
-    // Start a fresh rejection record per logical session (Design Decision 2).
-    // Cleared HERE, NOT in `reset()`: `reset()` runs at the start of every prompt
-    // (including the retry prompt) and must not wipe the records the retry prompt
-    // needs. createSession() is the one place that marks a new logical session.
-    this.client?.clearPermissionRejections();
-
     // Filter out MCP servers with unsupported transports (skip + warn)
     const supportedServers = this.filterSupportedMCPServers(mcpServers);
     const sessionCwd = cwd ?? this.options.agentConfig.cwd;
@@ -400,7 +396,16 @@ export class AgentConnector {
     // native `session/new` — the neutral launch cwd never covers it. The
     // previously accepted overlay identities are re-verified here, so an
     // owned-overlay replacement between lifecycle steps fails closed.
+    // This precedes the per-session rejection-record reset below, so a
+    // rejected createSession has zero side effects — a denied-tool record is
+    // never silently dropped by a request that never reached the agent.
     await this.verifyOmpSettingsSourcesBeforeRequest(sessionCwd);
+
+    // Start a fresh rejection record per logical session (Design Decision 2).
+    // Cleared HERE, NOT in `reset()`: `reset()` runs at the start of every prompt
+    // (including the retry prompt) and must not wipe the records the retry prompt
+    // needs. createSession() is the one place that marks a new logical session.
+    this.client?.clearPermissionRejections();
 
     const result = await this.raceAgainstCrash(this.connection.newSession({
       cwd: sessionCwd,
