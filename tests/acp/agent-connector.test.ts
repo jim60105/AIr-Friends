@@ -1160,11 +1160,15 @@ const OC_DATA_HOME = "/data/opencode-data/discord:c1";
 
 // Row 26: OMP connectors now preflight the owned-only settings-source plan
 // before every native request, so OMP harnesses must carry a REAL plan whose
-// authority roots exist. One temp-root fixture serves every OMP recovery test
-// (created lazily, removed by the final OMP recovery test). The env namespaces
-// above stay synthetic — the ownership derivation reads agentConfig.env, while
-// the observer only ever stats the plan's own roots.
-let ompPlanFixture: { plan: OmpSettingsSourcePlan; baseRoot: string } | null = null;
+// authority roots exist. Row 27 additionally observes the ACTUAL recovery
+// workspace for executable discovery shapes, so the same temp root also backs
+// the real (clean, empty) workspaces the OMP recovery tests resume against.
+// One temp-root fixture serves every OMP recovery test (created lazily,
+// removed by the final OMP recovery test). The env namespaces above stay
+// synthetic — the ownership derivation reads agentConfig.env, while the
+// observers only ever stat the plan's roots and these workspaces.
+let ompPlanFixture: { plan: OmpSettingsSourcePlan; baseRoot: string; workspace: string } | null =
+  null;
 function ompRecoveryPlan(): OmpSettingsSourcePlan {
   if (!ompPlanFixture) {
     const baseRoot = Deno.makeTempDirSync({ prefix: "omp-recovery-plan-" });
@@ -1177,9 +1181,19 @@ function ompRecoveryPlan(): OmpSettingsSourcePlan {
     Deno.mkdirSync(plan.ownedHome, { recursive: true });
     Deno.mkdirSync(plan.agentDir, { recursive: true });
     Deno.mkdirSync(plan.launchCwd, { recursive: true });
-    ompPlanFixture = { plan, baseRoot };
+    // Row 27: clean real workspaces the recovery tests resume against.
+    Deno.mkdirSync(`${baseRoot}/workspace`, { recursive: true });
+    Deno.mkdirSync(`${baseRoot}/workspace/a`, { recursive: true });
+    Deno.mkdirSync(`${baseRoot}/workspace/OTHER`, { recursive: true });
+    ompPlanFixture = { plan, baseRoot, workspace: `${baseRoot}/workspace` };
   }
   return ompPlanFixture.plan;
+}
+/** Row 27: the real clean recovery workspace for OMP harnesses (`suffix`
+ * distinguishes the `/a`-style variant the full-gate-context test uses). */
+function ompRecoveryWorkspace(suffix = ""): string {
+  ompRecoveryPlan();
+  return ompPlanFixture!.workspace + suffix;
 }
 function cleanupOmpPlanFixture(): void {
   if (ompPlanFixture) {
@@ -1255,10 +1269,15 @@ Deno.test("reconnectAndResumeSession - same-mode OMP recovery respawns, loads, r
     env: { PI_CODING_AGENT_DIR: OMP_YOLO_NS, TMPDIR: `${OMP_YOLO_NS}/tmp` },
   });
 
-  const success = await h.connector.reconnectAndResumeSession("sess_a", "/workspace", [], {
-    ownership: { agentType: "omp", permissionMode: "native-yolo", processNamespace: OMP_YOLO_NS },
-    gateContext: { cwd: "/workspace", shellSessionId: "shell_a", yolo: true },
-  });
+  const success = await h.connector.reconnectAndResumeSession(
+    "sess_a",
+    ompRecoveryWorkspace(),
+    [],
+    {
+      ownership: { agentType: "omp", permissionMode: "native-yolo", processNamespace: OMP_YOLO_NS },
+      gateContext: { cwd: ompRecoveryWorkspace(), shellSessionId: "shell_a", yolo: true },
+    },
+  );
 
   assertEquals(success, true);
   assertEquals(h.interactions, ["disconnect", "connect", "loadSession"]);
@@ -1276,13 +1295,13 @@ Deno.test("reconnectAndResumeSession - restricted recovery context CANNOT load a
 
   await assertRejects(
     () =>
-      h.connector.reconnectAndResumeSession("sess_yolo", "/workspace", [], {
+      h.connector.reconnectAndResumeSession("sess_yolo", ompRecoveryWorkspace(), [], {
         ownership: {
           agentType: "omp",
           permissionMode: "native-yolo",
           processNamespace: OMP_YOLO_NS,
         },
-        gateContext: { cwd: "/workspace", shellSessionId: "shell_yolo", yolo: true },
+        gateContext: { cwd: ompRecoveryWorkspace(), shellSessionId: "shell_yolo", yolo: true },
       }),
     RecoveryOwnershipError,
     "ownership_violation",
@@ -1300,13 +1319,13 @@ Deno.test("reconnectAndResumeSession - native-YOLO recovery context CANNOT load 
 
   await assertRejects(
     () =>
-      h.connector.reconnectAndResumeSession("sess_restricted", "/workspace", [], {
+      h.connector.reconnectAndResumeSession("sess_restricted", ompRecoveryWorkspace(), [], {
         ownership: {
           agentType: "omp",
           permissionMode: "restricted",
           processNamespace: OMP_RESTRICTED_NS,
         },
-        gateContext: { cwd: "/workspace", shellSessionId: "shell_r", yolo: false },
+        gateContext: { cwd: ompRecoveryWorkspace(), shellSessionId: "shell_r", yolo: false },
       }),
     RecoveryOwnershipError,
     "ownership_violation",
@@ -1324,13 +1343,13 @@ Deno.test("reconnectAndResumeSession - namespace-only drift is namespace_mismatc
 
   await assertRejects(
     () =>
-      h.connector.reconnectAndResumeSession("sess_a", "/workspace", [], {
+      h.connector.reconnectAndResumeSession("sess_a", ompRecoveryWorkspace(), [], {
         ownership: {
           agentType: "omp",
           permissionMode: "native-yolo",
           processNamespace: "/data/omp-pools/other:c2/omp-agent/native-yolo",
         },
-        gateContext: { cwd: "/workspace" },
+        gateContext: { cwd: ompRecoveryWorkspace() },
       }),
     RecoveryOwnershipError,
     "namespace_mismatch",
@@ -1346,8 +1365,8 @@ Deno.test("reconnectAndResumeSession - OMP recovery without provenance fails clo
 
   await assertRejects(
     () =>
-      h.connector.reconnectAndResumeSession("sess_a", "/workspace", [], {
-        gateContext: { cwd: "/workspace" },
+      h.connector.reconnectAndResumeSession("sess_a", ompRecoveryWorkspace(), [], {
+        gateContext: { cwd: ompRecoveryWorkspace() },
       }),
     RecoveryOwnershipError,
     "ownership_unverified",
@@ -1371,13 +1390,13 @@ Deno.test("reconnectAndResumeSession - post-connect namespace drift aborts befor
 
   await assertRejects(
     () =>
-      h.connector.reconnectAndResumeSession("sess_a", "/workspace", [], {
+      h.connector.reconnectAndResumeSession("sess_a", ompRecoveryWorkspace(), [], {
         ownership: {
           agentType: "omp",
           permissionMode: "native-yolo",
           processNamespace: OMP_YOLO_NS,
         },
-        gateContext: { cwd: "/workspace" },
+        gateContext: { cwd: ompRecoveryWorkspace() },
       }),
     RecoveryOwnershipError,
     "namespace_mismatch",
@@ -1433,11 +1452,16 @@ Deno.test("reconnectAndResumeSession - matched recovery consumes row 6: cache + 
     return Promise.resolve();
   };
 
-  const success = await h.connector.reconnectAndResumeSession("sess_restore", "/workspace", [], {
-    reasoningEffort: "high",
-    ownership: { agentType: "omp", permissionMode: "native-yolo", processNamespace: OMP_YOLO_NS },
-    gateContext: { cwd: "/workspace", shellSessionId: "shell_r" },
-  });
+  const success = await h.connector.reconnectAndResumeSession(
+    "sess_restore",
+    ompRecoveryWorkspace(),
+    [],
+    {
+      reasoningEffort: "high",
+      ownership: { agentType: "omp", permissionMode: "native-yolo", processNamespace: OMP_YOLO_NS },
+      gateContext: { cwd: ompRecoveryWorkspace(), shellSessionId: "shell_r" },
+    },
+  );
 
   assertEquals(success, true);
   assertEquals(h.rpc, [
@@ -1473,14 +1497,14 @@ Deno.test("reconnectAndResumeSession - post-load catalog miss propagates in isol
 
   await assertRejects(
     () =>
-      h.connector.reconnectAndResumeSession("sess_miss", "/workspace", [], {
+      h.connector.reconnectAndResumeSession("sess_miss", ompRecoveryWorkspace(), [], {
         reasoningEffort: "high",
         ownership: {
           agentType: "omp",
           permissionMode: "native-yolo",
           processNamespace: OMP_YOLO_NS,
         },
-        gateContext: { cwd: "/workspace" },
+        gateContext: { cwd: ompRecoveryWorkspace() },
       }),
     Error,
     "Requested model 'gone-model' is not offered in advertised catalog",
@@ -1497,22 +1521,27 @@ Deno.test("reconnectAndResumeSession - full gate context restored for the recove
     env: { PI_CODING_AGENT_DIR: OMP_YOLO_NS, TMPDIR: `${OMP_YOLO_NS}/tmp` },
   });
   const full = {
-    cwd: "/workspace/a",
+    cwd: ompRecoveryWorkspace("/a"),
     shellSessionId: "shell_a",
     yolo: true,
     canWriteAgentWorkspace: true,
     allowedWriteExtensions: [".md"],
   };
 
-  const success = await h.connector.reconnectAndResumeSession("sess_a", "/workspace/a", [], {
-    ownership: { agentType: "omp", permissionMode: "native-yolo", processNamespace: OMP_YOLO_NS },
-    gateContext: full,
-  });
+  const success = await h.connector.reconnectAndResumeSession(
+    "sess_a",
+    ompRecoveryWorkspace("/a"),
+    [],
+    {
+      ownership: { agentType: "omp", permissionMode: "native-yolo", processNamespace: OMP_YOLO_NS },
+      gateContext: full,
+    },
+  );
 
   assertEquals(success, true);
   assertEquals(h.gateMutations.length, 1);
   assertEquals(h.gateMutations[0].sessionId, "sess_a");
-  assertEquals(h.gateMutations[0].ctx.cwd, "/workspace/a");
+  assertEquals(h.gateMutations[0].ctx.cwd, ompRecoveryWorkspace("/a"));
   assertEquals(h.gateMutations[0].ctx.shellSessionId, "shell_a");
   assertEquals(h.gateMutations[0].ctx.yolo, true);
   assertEquals(h.gateMutations[0].ctx.canWriteAgentWorkspace, true);
@@ -1534,7 +1563,7 @@ Deno.test("reconnectAndResumeSession - unknown session without a context fails c
 
   await assertRejects(
     () =>
-      h.connector.reconnectAndResumeSession("sess_unknown", "/workspace/a", [], {
+      h.connector.reconnectAndResumeSession("sess_unknown", ompRecoveryWorkspace("/a"), [], {
         ownership: {
           agentType: "omp",
           permissionMode: "native-yolo",
@@ -1561,13 +1590,13 @@ Deno.test("reconnectAndResumeSession - supplied gate context disagreeing with th
 
   await assertRejects(
     () =>
-      h.connector.reconnectAndResumeSession("sess_a", "/workspace/a", [], {
+      h.connector.reconnectAndResumeSession("sess_a", ompRecoveryWorkspace("/a"), [], {
         ownership: {
           agentType: "omp",
           permissionMode: "native-yolo",
           processNamespace: OMP_YOLO_NS,
         },
-        gateContext: { cwd: "/workspace/OTHER", shellSessionId: "shell_a" },
+        gateContext: { cwd: `${ompRecoveryWorkspace()}/OTHER`, shellSessionId: "shell_a" },
       }),
     GateContextRestoreError,
     "disagrees with recovery cwd",
@@ -1583,14 +1612,19 @@ Deno.test("reconnectAndResumeSession - hook runs exactly once after restore, bef
   const hookSessions: string[] = [];
   let mutationsAtHookTime = -1;
 
-  const success = await h.connector.reconnectAndResumeSession("sess_a", "/workspace", [], {
-    ownership: { agentType: "omp", permissionMode: "native-yolo", processNamespace: OMP_YOLO_NS },
-    gateContext: { cwd: "/workspace", shellSessionId: "shell_a" },
-    onGateContextRestored: (sessionId) => {
-      hookSessions.push(sessionId);
-      mutationsAtHookTime = h.gateMutations.length;
+  const success = await h.connector.reconnectAndResumeSession(
+    "sess_a",
+    ompRecoveryWorkspace(),
+    [],
+    {
+      ownership: { agentType: "omp", permissionMode: "native-yolo", processNamespace: OMP_YOLO_NS },
+      gateContext: { cwd: ompRecoveryWorkspace(), shellSessionId: "shell_a" },
+      onGateContextRestored: (sessionId) => {
+        hookSessions.push(sessionId);
+        mutationsAtHookTime = h.gateMutations.length;
+      },
     },
-  });
+  );
 
   assertEquals(success, true);
   assertEquals(hookSessions, ["sess_a"]);
@@ -1605,13 +1639,13 @@ Deno.test("reconnectAndResumeSession - rejecting hook fails only this session as
 
   await assertRejects(
     () =>
-      h.connector.reconnectAndResumeSession("sess_a", "/workspace", [], {
+      h.connector.reconnectAndResumeSession("sess_a", ompRecoveryWorkspace(), [], {
         ownership: {
           agentType: "omp",
           permissionMode: "native-yolo",
           processNamespace: OMP_YOLO_NS,
         },
-        gateContext: { cwd: "/workspace" },
+        gateContext: { cwd: ompRecoveryWorkspace() },
         onGateContextRestored: () => Promise.reject(new Error("hook exploded")),
       }),
     RecoveryHookError,
@@ -1686,10 +1720,15 @@ Deno.test("reconnectAndResumeSession - capability absence still returns false wi
   });
   h.connector["capabilities"] = { loadSession: false } as typeof h.connector["capabilities"];
 
-  const resumed = await h.connector.reconnectAndResumeSession("sess_a", "/workspace", [], {
-    ownership: { agentType: "omp", permissionMode: "native-yolo", processNamespace: OMP_YOLO_NS },
-    gateContext: { cwd: "/workspace" },
-  });
+  const resumed = await h.connector.reconnectAndResumeSession(
+    "sess_a",
+    ompRecoveryWorkspace(),
+    [],
+    {
+      ownership: { agentType: "omp", permissionMode: "native-yolo", processNamespace: OMP_YOLO_NS },
+      gateContext: { cwd: ompRecoveryWorkspace() },
+    },
+  );
 
   assertEquals(resumed, false);
   assertEquals(h.interactions, ["disconnect", "connect", "disconnect"]);
@@ -1710,13 +1749,13 @@ Deno.test("reconnectAndResumeSession - plan-less OMP connector fails the setting
 
     await assertRejects(
       () =>
-        h.connector.reconnectAndResumeSession("sess_a", "/workspace", [], {
+        h.connector.reconnectAndResumeSession("sess_a", ompRecoveryWorkspace(), [], {
           ownership: {
             agentType: "omp",
             permissionMode: "native-yolo",
             processNamespace: OMP_YOLO_NS,
           },
-          gateContext: { cwd: "/workspace" },
+          gateContext: { cwd: ompRecoveryWorkspace() },
         }),
       Error,
       "no settings-source plan",

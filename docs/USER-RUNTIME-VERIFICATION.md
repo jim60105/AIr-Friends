@@ -159,6 +159,24 @@ connector gate — deployment-side control logic only).
 
 ---
 
+## K. Workspace executable-source checks (row 27; `check-omp-workspace-executables`)
+
+Source-audit home: [docs/OMP_DISCOVERY.md](OMP_DISCOVERY.md) (decision-1
+admission) · [docs/OMP_SPAWN.md](OMP_SPAWN.md) (executable lifecycle order) ·
+Unit/mock: `tests/acp/omp-executable-sources.test.ts` (observer shapes,
+connector seam, startup check — deployment-side control logic only).
+
+| Observation | Source audit | Unit/mock | Runtime outcome + user observation |
+| --- | --- | --- | --- |
+| Sustained absence of workspace executable discovery entries between checks is user-owned deployment control: the observation is a per-request startup snapshot, NOT a race-free watcher; mid-process workspace mutation or a native autonomous re-discovery/import can be undetectable | `OMP_SPAWN.md` executable lifecycle order | observer/seam suites certify the deployment-side check only, never what the binary discovers | unverified — |
+| Snapshot and native reload timing limits: the accepted observation binds the workspace identity + generation at check time; whether/when the binary re-scans or reloads native tool/plugin state mid-session (registry transitions, refresh) is not observable from any repository artifact | `OMP_DISCOVERY.md` decision-1 admission | stale/foreign observation never re-admits (mock) | unverified — |
+| Preflight rejection on a workspace holding an executable module is observable fail-closed on a live session (no spawn/session request occurs; `executable_sources_rejected` surfaces on pooled recovery) | `executable-sources.ts` contract | connector gate suite with zero-protected-call counters | unverified — |
+
+No new config field, environment variable, or Helm value: the check rides the
+existing owned settings-source plan and the deployment-set `AGENT_WORKSPACE`.
+
+---
+
 ## Reading the cancelled row
 
 The design §15 readiness observation (authenticated policy-readiness signal,

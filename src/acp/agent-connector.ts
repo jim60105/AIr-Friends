@@ -24,6 +24,10 @@ import {
   assertOmpSettingsSourcesVisible,
 } from "./omp/settings-sources.ts";
 import {
+  type AcceptedExecutableObservation,
+  checkOmpExecutableSources,
+} from "./omp/executable-sources.ts";
+import {
   collectOptionValues,
   findOptionByCategory,
   formatAdvertisedValuesPreview,
@@ -179,6 +183,17 @@ export class AgentConnector {
    */
   private acceptedOverlayIdentities: readonly AcceptedOverlayIdentity[] | null = null;
 
+  /**
+   * Row 27: the most recent ACCEPTED executable-source observation on this
+   * connector. Every later check re-observes the CURRENT actual workspace
+   * afresh, so a workspace replaced or a workspace that grew an executable
+   * discovery entry between checks produces a new identity/generation or a
+   * rejection — a previous clean result is never reused as admission for a
+   * different state. A rejection throws BEFORE this field is written, so a
+   * rejected check has zero connector-side effects.
+   */
+  private acceptedExecutableObservation: AcceptedExecutableObservation | null = null;
+
   constructor(options: AgentConnectorOptions) {
     this.options = options;
   }
@@ -214,6 +229,51 @@ export class AgentConnector {
   }
 
   /**
+   * Row 27 (decision 1 / D3): the pre-native-request executable-source gate.
+   * Runs immediately AFTER `verifyOmpSettingsSourcesBeforeRequest` at every
+   * seam — spawn, `session/new`, recovery `session/load` — for OMP connectors
+   * only (OpenCode never takes this path). The actual session workspace (plus
+   * the deployment-set shared Agent workspace) is observed metadata-only for
+   * executable discovery shapes; a found entry, broken link, missing
+   * authority, or IO failure throws `ExecutableSourceRejectionError` BEFORE
+   * any native request or connector-side mutation. The owned roots ride the
+   * same factory-produced plan the settings check just verified.
+   */
+  private verifyOmpExecutableSourcesBeforeRequest(sessionCwd: string): void {
+    if (this.options.agentType !== "omp") return;
+    const plan = this.options.agentConfig.settingsSourcePlan;
+    if (!plan) {
+      // The settings check above already refused this connector on the same
+      // condition; this stays as an independent fail-closed assertion.
+      throw new Error(
+        "OMP connector refuses the native request: agentConfig carries no settings-source plan, " +
+          "so the owned executable-source authority cannot be verified (fail closed).",
+      );
+    }
+    this.acceptedExecutableObservation = checkOmpExecutableSources({
+      phase: "preflight",
+      sessionCwd,
+      ...(this.options.agentConfig.env?.["AGENT_WORKSPACE"] !== undefined
+        ? { sharedWorkspace: this.options.agentConfig.env["AGENT_WORKSPACE"] }
+        : {}),
+      roots: {
+        ownedHome: plan.ownedHome,
+        agentDir: plan.agentDir,
+        // The plan's neutral launch cwd is the designed spawn-location identity
+        // (inside the mode namespace by row-9 layout); the `connect()` seam
+        // observes exactly it and must not be rejected as owned-state aliasing.
+        launchCwd: plan.launchCwd,
+      },
+      processEnv: this.options.agentConfig.env ?? {},
+    });
+  }
+
+  /** Test seam: the last accepted executable observation (null before any). */
+  get lastExecutableObservation(): AcceptedExecutableObservation | null {
+    return this.acceptedExecutableObservation;
+  }
+
+  /**
    * Connect to an ACP Agent by spawning a subprocess
    */
   async connect(): Promise<void> {
@@ -223,6 +283,9 @@ export class AgentConnector {
     // launch cwd is the plan's own root here; the actual session workspace is
     // re-checked per `createSession`/load below.
     await this.verifyOmpSettingsSourcesBeforeRequest(agentConfig.cwd);
+    // Row 27: executable-source observation rides the same pre-spawn seam,
+    // strictly AFTER the settings check (settings first, executable second).
+    this.verifyOmpExecutableSourcesBeforeRequest(agentConfig.cwd);
 
     (logger as Logger).info("Spawning ACP agent via dumb-init", {
       command: agentConfig.command,
@@ -400,6 +463,11 @@ export class AgentConnector {
     // rejected createSession has zero side effects — a denied-tool record is
     // never silently dropped by a request that never reached the agent.
     await this.verifyOmpSettingsSourcesBeforeRequest(sessionCwd);
+    // Row 27: the ACTUAL session workspace is observed for executable
+    // discovery shapes immediately after the settings recheck and — like the
+    // settings gate — BEFORE the per-session rejection-record reset below, so
+    // a rejected createSession has zero side effects.
+    this.verifyOmpExecutableSourcesBeforeRequest(sessionCwd);
 
     // Start a fresh rejection record per logical session (Design Decision 2).
     // Cleared HERE, NOT in `reset()`: `reset()` runs at the start of every prompt
@@ -1179,6 +1247,9 @@ export class AgentConnector {
     // effects (the same zero-side-effect discipline row 11 established for
     // ownership). The previously accepted overlay identities ride the recheck.
     await this.verifyOmpSettingsSourcesBeforeRequest(cwd);
+    // Row 27: executable observation rides the same pre-teardown position —
+    // a rejection leaves disconnect/respawn/load all untouched.
+    this.verifyOmpExecutableSourcesBeforeRequest(cwd);
 
     logger.info("Attempting to reconnect and resume session {sessionId}", { sessionId });
 

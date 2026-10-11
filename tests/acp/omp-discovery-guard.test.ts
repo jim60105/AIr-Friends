@@ -1,7 +1,9 @@
-import { assertEquals, assertRejects } from "@std/assert";
+import { assert, assertEquals, assertRejects } from "@std/assert";
 import {
   computeDiscoveryDecision,
   criticalSkillSelectionGate,
+  DECISION_1_DEPLOYMENT_ADMISSION,
+  DECISION_7_SKILL_OWNERSHIP_ADMISSION,
   type DiscoveryDecisionInput,
   evaluateCriticalSkillSelection,
   evaluateOwnedModuleOwnership,
@@ -331,18 +333,157 @@ Deno.test("Task 4.4: Fail-closed and honesty gate tests", () => {
     preImportExclusionGate.pinnedVerdict,
     "extension flags alone incompatible and the supported full mechanism unresolved",
   );
-  assertEquals(preImportExclusionGate.userDecisionRequired, true);
+  // 3. Row 27: no stale "another user decision required" blocker remains;
+  // each gate carries its separate DECIDED disposition (the verdict above
+  // stays verbatim; the disposition never relabels it).
+  assertEquals("userDecisionRequired" in preImportExclusionGate, false);
+  assertEquals(preImportExclusionGate.disposition, DECISION_1_DEPLOYMENT_ADMISSION);
+  assertEquals(preImportExclusionGate.disposition.decision, 1);
+  assertEquals(preImportExclusionGate.disposition.status, "DECIDED (2026-10-09)");
+  assertEquals(preImportExclusionGate.disposition.runtimeUnverified, "UNVERIFIED");
+  assert(
+    preImportExclusionGate.disposition.selectedControl.includes(
+      "the fail-closed session rejection stays the fallback",
+    ),
+  );
 
   assertEquals(criticalSkillSelectionGate.status, "unresolved");
   assertEquals(
     criticalSkillSelectionGate.pinnedVerdict,
     "name-only trust incompatible and canonical selection unresolved",
   );
-  assertEquals(criticalSkillSelectionGate.userDecisionRequired, true);
+  assertEquals("userDecisionRequired" in criticalSkillSelectionGate, false);
+  assertEquals(criticalSkillSelectionGate.disposition, DECISION_7_SKILL_OWNERSHIP_ADMISSION);
+  assertEquals(criticalSkillSelectionGate.disposition.decision, 7);
+  assertEquals(criticalSkillSelectionGate.disposition.status, "DECIDED (2026-10-09)");
+  assertEquals(criticalSkillSelectionGate.disposition.runtimeUnverified, "UNVERIFIED");
+  // Row 28 owns the settings skill-root checks; the record says so explicitly.
+  assert(
+    criticalSkillSelectionGate.disposition.selectedControl.includes(
+      "isolate-omp-critical-skill-ownership (row 28) OWNS",
+    ),
+  );
 
   // 3. Synthetic positive fixture cannot clear either gate
   assertEquals(preImportExclusionGate.status, "unresolved");
   assertEquals(criticalSkillSelectionGate.status, "unresolved");
+});
+
+Deno.test("row 27: decision-1 deployment admission with a clean executable observation", () => {
+  const baseRoot = "/opt/air";
+  const mode = "restricted";
+  // Admission binds the observation to the EXACT workspace the decision
+  // evaluates (duck B2): the clean observation must name this decision's own
+  // launch cwd, never a foreign workspace path.
+  const observation = {
+    status: "absent-clean",
+    sessionCwd: ompLaunchCwd(baseRoot, mode),
+    resourceGeneration: "gen-42",
+  } as const;
+
+  // Admission: an exact workspace+generation absent observation replaces the
+  // two unsupported-native-status application blockers...
+  const admitted = computeDiscoveryDecision({
+    baseRoot,
+    mode,
+    observedCwd: ompLaunchCwd(baseRoot, mode),
+    resourceGeneration: "gen-42",
+    executableObservation: observation,
+  });
+  assertEquals(
+    admitted.blockers.some((b) => b.surfaceId === "native-custom-tool-discovery"),
+    false,
+  );
+  assertEquals(admitted.blockers.some((b) => b.surfaceId === "plugin-entry-points"), false);
+  // ...while the frozen surfaces table keeps both pinned verdicts verbatim.
+  const customTool = admitted.surfaces.find((s) => s.id === "native-custom-tool-discovery")!;
+  const plugins = admitted.surfaces.find((s) => s.id === "plugin-entry-points")!;
+  assertEquals(customTool.status, "no-supported-mechanism");
+  assertEquals(plugins.status, "no-supported-mechanism");
+  assertEquals(admitted.executableObservation, observation);
+
+  // Stale/foreign generation NEVER reuses a previous clean result; a missing
+  // observation never manufactures admission; a same-generation observation
+  // for a DIFFERENT workspace never admits (workspace binding, duck B2).
+  for (const stale of ["gen-7", undefined]) {
+    const notAdmitted = computeDiscoveryDecision({
+      baseRoot,
+      mode,
+      observedCwd: ompLaunchCwd(baseRoot, mode),
+      resourceGeneration: "gen-42",
+      ...(stale !== undefined
+        ? { executableObservation: { ...observation, resourceGeneration: stale } }
+        : {}),
+    });
+    assertEquals(
+      notAdmitted.blockers.some((b) => b.surfaceId === "native-custom-tool-discovery"),
+      true,
+      `stale=${stale}`,
+    );
+    assertEquals(
+      notAdmitted.blockers.some((b) => b.surfaceId === "plugin-entry-points"),
+      true,
+      `stale=${stale}`,
+    );
+  }
+  const foreignWorkspace = computeDiscoveryDecision({
+    baseRoot,
+    mode,
+    observedCwd: ompLaunchCwd(baseRoot, mode),
+    resourceGeneration: "gen-42",
+    executableObservation: { ...observation, sessionCwd: "/srv/other-workspace" },
+  });
+  assertEquals(
+    foreignWorkspace.blockers.some((b) => b.surfaceId === "native-custom-tool-discovery"),
+    true,
+  );
+  assertEquals(
+    foreignWorkspace.blockers.some((b) => b.surfaceId === "plugin-entry-points"),
+    true,
+  );
+  // An absent observedCwd fails closed: no workspace identity, no admission.
+  const unbound = computeDiscoveryDecision({
+    baseRoot,
+    mode,
+    resourceGeneration: "gen-42",
+    executableObservation: observation,
+  });
+  assertEquals(
+    unbound.blockers.some((b) => b.surfaceId === "native-custom-tool-discovery"),
+    true,
+  );
+
+  // Deployment authority checks stay unconditional fail-closed even with a
+  // clean observation: cwd drift and module-selector env posture.
+  const drifted = computeDiscoveryDecision({
+    baseRoot,
+    mode,
+    observedCwd: "/workspace/hostile",
+    resourceGeneration: "gen-42",
+    executableObservation: observation,
+  });
+  assertEquals(
+    drifted.blockers.some((b) => b.surfaceId === "workspace-owned-dependencies"),
+    true,
+  );
+  // The drifted decision also loses admission (observation bound elsewhere):
+  // the pinned native blockers stay.
+  assertEquals(
+    drifted.blockers.some((b) => b.surfaceId === "native-custom-tool-discovery"),
+    true,
+  );
+  const polluted = computeDiscoveryDecision({
+    baseRoot,
+    mode,
+    observedCwd: ompLaunchCwd(baseRoot, mode),
+    observedEnv: { OMP_PROFILE: "/workspace/profile" },
+    resourceGeneration: "gen-42",
+    executableObservation: observation,
+  });
+  assertEquals(
+    polluted.blockers.some((b) => b.surfaceId === "configured-module-roots"),
+    true,
+  );
 });
 
 Deno.test("Task 3.2: Module tree load-time throw on blockers", async () => {
