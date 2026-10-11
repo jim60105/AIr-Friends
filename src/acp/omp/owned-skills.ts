@@ -58,7 +58,11 @@ function identity(info: ReturnType<OwnedSkillMetadataReader["lstat"]>): Observed
   return Object.freeze({ dev: info.dev, ino: info.ino });
 }
 
-function observe(path: string, directory: boolean, reader: OwnedSkillMetadataReader): ObservedIdentity {
+function observe(
+  path: string,
+  directory: boolean,
+  reader: OwnedSkillMetadataReader,
+): ObservedIdentity {
   if (!isAbsolute(path) || resolve(path) !== path || reader.realPath(path) !== path) {
     throw new Error("Owned skill path is not canonical");
   }
@@ -132,13 +136,15 @@ export function observeOwnedSkills(
     throw new Error("Owned skill root replaced since the accepted observation");
   }
   const criticalSkills: CriticalSkillReference[] = [];
-  if (!sessionId || !generation) return Object.freeze({
-    ownedRootPath: root,
-    canonicalOwnedRootPath: root,
-    source: "deployment_owned" as const,
-    rootIdentity,
-    criticalSkills: Object.freeze(criticalSkills),
-  });
+  if (!sessionId || !generation) {
+    return Object.freeze({
+      ownedRootPath: root,
+      canonicalOwnedRootPath: root,
+      source: "deployment_owned" as const,
+      rootIdentity,
+      criticalSkills: Object.freeze(criticalSkills),
+    });
+  }
   for (const [skillId, relative] of Object.entries(PINNED_CRITICAL_SKILLS)) {
     const path = join(root, relative);
     try {

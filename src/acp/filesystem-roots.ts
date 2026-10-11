@@ -598,13 +598,15 @@ export async function canonicalizeSessionRoots(
       }
       const canonicalSkills = await reader.realPath(trustedSkills.ownedRootPath);
       const destInfo = await reader.lstat(canonicalSkills);
-      if (trustedSkills.rootIdentity && (
-        lstatSkills.isSymlink || canonicalSkills !== trustedSkills.ownedRootPath ||
-        destInfo.dev !== trustedSkills.rootIdentity.dev ||
-        destInfo.ino !== trustedSkills.rootIdentity.ino ||
-        destInfo.mode === null || (destInfo.mode & 0o022) !== 0 ||
-        ((destInfo.mode & 0o200) !== 0 && destInfo.uid !== 0)
-      )) {
+      if (
+        trustedSkills.rootIdentity && (
+          lstatSkills.isSymlink || canonicalSkills !== trustedSkills.ownedRootPath ||
+          destInfo.dev !== trustedSkills.rootIdentity.dev ||
+          destInfo.ino !== trustedSkills.rootIdentity.ino ||
+          destInfo.mode === null || (destInfo.mode & 0o022) !== 0 ||
+          ((destInfo.mode & 0o200) !== 0 && destInfo.uid !== 0)
+        )
+      ) {
         return {
           ok: false,
           reason: "trusted_identity_mismatch",
@@ -1102,11 +1104,13 @@ export async function resolveFilesystemTarget(
 
   // Handle critical skill reference validation if supplied
   if (criticalRef) {
-    if (criticalRef.instructionIdentity && (
-      criticalRef.sessionId !== roots.acpSessionId ||
-      primarySuccess!.targetIdentity?.dev !== criticalRef.instructionIdentity.dev ||
-      primarySuccess!.targetIdentity?.ino !== criticalRef.instructionIdentity.ino
-    )) {
+    if (
+      criticalRef.instructionIdentity && (
+        criticalRef.sessionId !== roots.acpSessionId ||
+        primarySuccess!.targetIdentity?.dev !== criticalRef.instructionIdentity.dev ||
+        primarySuccess!.targetIdentity?.ino !== criticalRef.instructionIdentity.ino
+      )
+    ) {
       return {
         ok: false,
         reason: "trusted_identity_mismatch",

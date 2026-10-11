@@ -364,148 +364,150 @@ export interface PinnedSettingsSource {
  * table traced at OMP v18.6.1 / 2a2c6dcbbb558c0f8145f67f28b3370984f2bf60, not a
  * general filesystem scan, and none of its rows is a newly fabricated disable key.
  */
-export const PINNED_FORBIDDEN_SETTINGS_SOURCES: readonly PinnedSettingsSource[] = Object.freeze([
-  {
-    id: "native-global-config-yml",
-    layer: "global",
-    relativePath: "config.yml",
-    sourceSymbols: [
-      "config/settings.ts (global agent-dir config.yml read)",
-      "docs/settings.md (global settings discovery)",
-    ],
-  },
-  {
-    id: "native-compat-config-yaml",
-    layer: "global",
-    relativePath: "config.yaml",
-    sourceSymbols: [
-      "config/settings.ts (compatibility config.yaml read)",
-      "docs/settings.md (compat naming)",
-    ],
-  },
-  {
-    id: "native-legacy-settings-json",
-    layer: "global",
-    relativePath: "settings.json",
-    sourceSymbols: [
-      "config/settings.ts (legacy settings.json read)",
-      "docs/settings.md (legacy naming)",
-    ],
-  },
-  {
-    id: "native-project-config-yml",
-    layer: "project",
-    relativePath: ".omp/config.yml",
-    sourceSymbols: [
-      "config/settings.ts (project layer discovered from actual cwd)",
-      "docs/settings.md (project .omp/config.yml)",
-    ],
-  },
-  {
-    id: "native-project-legacy-settings-json",
-    layer: "project",
-    relativePath: ".omp/settings.json",
-    sourceSymbols: [
-      "config/settings.ts (project legacy settings.json)",
-      "docs/settings.md (legacy naming)",
-    ],
-  },
-  // Foreign discovery providers with a `settingsCapability` provider at the
-  // pinned commit (user level = {home}/{userBase}, project level =
-  // {cwd}/{projectDir}). Their selectors (CLAUDE_CONFIG_DIR etc.) are never
-  // passed to a child, so user-level discovery resolves under the owned HOME;
-  // both levels stay on the table fail-safe. The observer additionally walks
-  // bounded ancestors of the ACTUAL session cwd per design D3 (the pinned
-  // providers resolve project paths at cwd only; the ancestor walk is the
-  // deployment posture the design records, never a claim about native
-  // traversal).
-  {
-    id: "foreign-claude-settings",
-    layer: "foreign-global",
-    relativePath: ".claude/settings.json",
-    sourceSymbols: [
-      "discovery/claude.ts (loadSettings user level; resolveClaudePaths honors CLAUDE_CONFIG_DIR)",
-    ],
-  },
-  {
-    id: "foreign-claude-project-settings",
-    layer: "foreign-project",
-    relativePath: ".claude/settings.json",
-    sourceSymbols: ["discovery/claude.ts (loadSettings project level via getProjectClaude)"],
-  },
-  {
-    id: "foreign-codex-config-toml",
-    layer: "foreign-global",
-    relativePath: ".codex/config.toml",
-    sourceSymbols: ["discovery/codex.ts (loadSettings user level via getUserCodexDir)"],
-  },
-  {
-    id: "foreign-codex-project-config-toml",
-    layer: "foreign-project",
-    relativePath: ".codex/config.toml",
-    sourceSymbols: ["discovery/codex.ts (loadSettings project level via getProjectCodexDir)"],
-  },
-  {
-    id: "foreign-cursor-settings",
-    layer: "foreign-global",
-    relativePath: ".cursor/settings.json",
-    sourceSymbols: ["discovery/cursor.ts (loadSettings user level)"],
-  },
-  {
-    id: "foreign-cursor-project-settings",
-    layer: "foreign-project",
-    relativePath: ".cursor/settings.json",
-    sourceSymbols: ["discovery/cursor.ts (loadSettings project level)"],
-  },
-  {
-    id: "foreign-gemini-settings",
-    layer: "foreign-global",
-    relativePath: ".gemini/settings.json",
-    sourceSymbols: ["discovery/gemini.ts (loadSettings user level)"],
-  },
-  {
-    id: "foreign-gemini-project-settings",
-    layer: "foreign-project",
-    relativePath: ".gemini/settings.json",
-    sourceSymbols: ["discovery/gemini.ts (loadSettings project level)"],
-  },
-  {
-    id: "foreign-opencode-user-json",
-    layer: "foreign-global",
-    relativePath: ".config/opencode/opencode.json",
-    sourceSymbols: ["discovery/opencode.ts (getConfigSources user level)"],
-  },
-  {
-    id: "foreign-opencode-user-jsonc",
-    layer: "foreign-global",
-    relativePath: ".config/opencode/opencode.jsonc",
-    sourceSymbols: ["discovery/opencode.ts (getConfigSources user level)"],
-  },
-  {
-    id: "foreign-opencode-project-root-json",
-    layer: "foreign-project",
-    relativePath: "opencode.json",
-    sourceSymbols: ["discovery/opencode.ts (getConfigSources project-root level)"],
-  },
-  {
-    id: "foreign-opencode-project-root-jsonc",
-    layer: "foreign-project",
-    relativePath: "opencode.jsonc",
-    sourceSymbols: ["discovery/opencode.ts (getConfigSources project-root level)"],
-  },
-  {
-    id: "foreign-opencode-project-dir-json",
-    layer: "foreign-project",
-    relativePath: ".opencode/opencode.json",
-    sourceSymbols: ["discovery/opencode.ts (getConfigSources .opencode dir level)"],
-  },
-  {
-    id: "foreign-opencode-project-dir-jsonc",
-    layer: "foreign-project",
-    relativePath: ".opencode/opencode.jsonc",
-    sourceSymbols: ["discovery/opencode.ts (getConfigSources .opencode dir level)"],
-  },
-] as const);
+export const PINNED_FORBIDDEN_SETTINGS_SOURCES: readonly PinnedSettingsSource[] = Object.freeze(
+  [
+    {
+      id: "native-global-config-yml",
+      layer: "global",
+      relativePath: "config.yml",
+      sourceSymbols: [
+        "config/settings.ts (global agent-dir config.yml read)",
+        "docs/settings.md (global settings discovery)",
+      ],
+    },
+    {
+      id: "native-compat-config-yaml",
+      layer: "global",
+      relativePath: "config.yaml",
+      sourceSymbols: [
+        "config/settings.ts (compatibility config.yaml read)",
+        "docs/settings.md (compat naming)",
+      ],
+    },
+    {
+      id: "native-legacy-settings-json",
+      layer: "global",
+      relativePath: "settings.json",
+      sourceSymbols: [
+        "config/settings.ts (legacy settings.json read)",
+        "docs/settings.md (legacy naming)",
+      ],
+    },
+    {
+      id: "native-project-config-yml",
+      layer: "project",
+      relativePath: ".omp/config.yml",
+      sourceSymbols: [
+        "config/settings.ts (project layer discovered from actual cwd)",
+        "docs/settings.md (project .omp/config.yml)",
+      ],
+    },
+    {
+      id: "native-project-legacy-settings-json",
+      layer: "project",
+      relativePath: ".omp/settings.json",
+      sourceSymbols: [
+        "config/settings.ts (project legacy settings.json)",
+        "docs/settings.md (legacy naming)",
+      ],
+    },
+    // Foreign discovery providers with a `settingsCapability` provider at the
+    // pinned commit (user level = {home}/{userBase}, project level =
+    // {cwd}/{projectDir}). Their selectors (CLAUDE_CONFIG_DIR etc.) are never
+    // passed to a child, so user-level discovery resolves under the owned HOME;
+    // both levels stay on the table fail-safe. The observer additionally walks
+    // bounded ancestors of the ACTUAL session cwd per design D3 (the pinned
+    // providers resolve project paths at cwd only; the ancestor walk is the
+    // deployment posture the design records, never a claim about native
+    // traversal).
+    {
+      id: "foreign-claude-settings",
+      layer: "foreign-global",
+      relativePath: ".claude/settings.json",
+      sourceSymbols: [
+        "discovery/claude.ts (loadSettings user level; resolveClaudePaths honors CLAUDE_CONFIG_DIR)",
+      ],
+    },
+    {
+      id: "foreign-claude-project-settings",
+      layer: "foreign-project",
+      relativePath: ".claude/settings.json",
+      sourceSymbols: ["discovery/claude.ts (loadSettings project level via getProjectClaude)"],
+    },
+    {
+      id: "foreign-codex-config-toml",
+      layer: "foreign-global",
+      relativePath: ".codex/config.toml",
+      sourceSymbols: ["discovery/codex.ts (loadSettings user level via getUserCodexDir)"],
+    },
+    {
+      id: "foreign-codex-project-config-toml",
+      layer: "foreign-project",
+      relativePath: ".codex/config.toml",
+      sourceSymbols: ["discovery/codex.ts (loadSettings project level via getProjectCodexDir)"],
+    },
+    {
+      id: "foreign-cursor-settings",
+      layer: "foreign-global",
+      relativePath: ".cursor/settings.json",
+      sourceSymbols: ["discovery/cursor.ts (loadSettings user level)"],
+    },
+    {
+      id: "foreign-cursor-project-settings",
+      layer: "foreign-project",
+      relativePath: ".cursor/settings.json",
+      sourceSymbols: ["discovery/cursor.ts (loadSettings project level)"],
+    },
+    {
+      id: "foreign-gemini-settings",
+      layer: "foreign-global",
+      relativePath: ".gemini/settings.json",
+      sourceSymbols: ["discovery/gemini.ts (loadSettings user level)"],
+    },
+    {
+      id: "foreign-gemini-project-settings",
+      layer: "foreign-project",
+      relativePath: ".gemini/settings.json",
+      sourceSymbols: ["discovery/gemini.ts (loadSettings project level)"],
+    },
+    {
+      id: "foreign-opencode-user-json",
+      layer: "foreign-global",
+      relativePath: ".config/opencode/opencode.json",
+      sourceSymbols: ["discovery/opencode.ts (getConfigSources user level)"],
+    },
+    {
+      id: "foreign-opencode-user-jsonc",
+      layer: "foreign-global",
+      relativePath: ".config/opencode/opencode.jsonc",
+      sourceSymbols: ["discovery/opencode.ts (getConfigSources user level)"],
+    },
+    {
+      id: "foreign-opencode-project-root-json",
+      layer: "foreign-project",
+      relativePath: "opencode.json",
+      sourceSymbols: ["discovery/opencode.ts (getConfigSources project-root level)"],
+    },
+    {
+      id: "foreign-opencode-project-root-jsonc",
+      layer: "foreign-project",
+      relativePath: "opencode.jsonc",
+      sourceSymbols: ["discovery/opencode.ts (getConfigSources project-root level)"],
+    },
+    {
+      id: "foreign-opencode-project-dir-json",
+      layer: "foreign-project",
+      relativePath: ".opencode/opencode.json",
+      sourceSymbols: ["discovery/opencode.ts (getConfigSources .opencode dir level)"],
+    },
+    {
+      id: "foreign-opencode-project-dir-jsonc",
+      layer: "foreign-project",
+      relativePath: ".opencode/opencode.jsonc",
+      sourceSymbols: ["discovery/opencode.ts (getConfigSources .opencode dir level)"],
+    },
+  ] as const,
+);
 
 /**
  * The exact environment selectors the pinned inventory records as settings-source
@@ -515,28 +517,32 @@ export const PINNED_FORBIDDEN_SETTINGS_SOURCES: readonly PinnedSettingsSource[] 
  * The list is OMP-only: OpenCode's existing HOME/XDG_DATA_HOME semantics never
  * consult it.
  */
-export const OMP_SETTINGS_DISCOVERY_ENV_SELECTORS: readonly string[] = Object.freeze([
-  "HOME",
-  "XDG_CONFIG_HOME",
-  "XDG_DATA_HOME",
-  "XDG_STATE_HOME",
-  "XDG_CACHE_HOME",
-  "OMP_PROFILE",
-  "PI_PROFILE",
-  "PI_CONFIG_FILES",
-  "PI_CODING_AGENT_DIR",
-] as const);
+export const OMP_SETTINGS_DISCOVERY_ENV_SELECTORS: readonly string[] = Object.freeze(
+  [
+    "HOME",
+    "XDG_CONFIG_HOME",
+    "XDG_DATA_HOME",
+    "XDG_STATE_HOME",
+    "XDG_CACHE_HOME",
+    "OMP_PROFILE",
+    "PI_PROFILE",
+    "PI_CONFIG_FILES",
+    "PI_CODING_AGENT_DIR",
+  ] as const,
+);
 
 /**
  * Foreign provider config selectors that must never enter an OMP child (they
  * cannot reintroduce a host source). Never allowlisted, never assigned.
  */
-export const OMP_FOREIGN_PROVIDER_ENV_SELECTORS: readonly string[] = Object.freeze([
-  "CLAUDE_CONFIG_DIR",
-  "CURSOR_CONFIG_DIR",
-  "CODEX_HOME",
-  "GEMINI_CONFIG_DIR",
-] as const);
+export const OMP_FOREIGN_PROVIDER_ENV_SELECTORS: readonly string[] = Object.freeze(
+  [
+    "CLAUDE_CONFIG_DIR",
+    "CURSOR_CONFIG_DIR",
+    "CODEX_HOME",
+    "GEMINI_CONFIG_DIR",
+  ] as const,
+);
 
 /**
  * Typed owned settings-source plan (row 26 D1): one deployment-owned plan
@@ -1191,15 +1197,13 @@ export function ompSettingsForMode(
     supportedProviderEnvKeys,
     envPosture,
     recordResetGate,
-    sourcePlan: plan === undefined
-      ? null
-      : ompSettingsSourcePlan(mode, {
-        baseRoot: plan.baseRoot,
-        ownedSkillRoots: plan.ownedSkillRoots,
-        allowedOverlayPaths: plan.allowedOverlayPaths.length > 0
-          ? plan.allowedOverlayPaths
-          : orderedOverlayPaths,
-      }),
+    sourcePlan: plan === undefined ? null : ompSettingsSourcePlan(mode, {
+      baseRoot: plan.baseRoot,
+      ownedSkillRoots: plan.ownedSkillRoots,
+      allowedOverlayPaths: plan.allowedOverlayPaths.length > 0
+        ? plan.allowedOverlayPaths
+        : orderedOverlayPaths,
+    }),
   };
 }
 
