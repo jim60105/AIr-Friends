@@ -126,8 +126,49 @@ function stateFile(): string {
   const override = Deno.env.get("MOCK_STATE_FILE");
   if (override) return override;
   const tmpDir = Deno.env.get("TMPDIR") ?? "/tmp";
-  const sessionId = Deno.env.get("SESSION_ID") ?? "mock";
+  const sessionId = resolveMockSessionId();
   return `${tmpDir}/${sessionId}/mock-state.json`;
+}
+
+/**
+ * Owning skill-session identity, mirroring the production resolution in
+ * skills/lib/client.ts: in shared-process (pool) mode the pool's
+ * current-session pointer (SKILL_JWT_DIR/active.json) is the SOLE identity
+ * source — pooled processes carry no SESSION_ID env at all, so falling back
+ * to the literal "mock" would read a non-existent `mock.jwt`. In per-spawn
+ * mode $SESSION_ID is authoritative, with the pointer as fallback. The
+ * literal "mock" is reserved for non-pool fixtures that carry neither
+ * source; a shared-mode resolution failure throws explicitly instead, so a
+ * broken pooled identity can never silently hijack the mock's state file.
+ */
+function resolveMockSessionId(): string {
+  const jwtDir = Deno.env.get("SKILL_JWT_DIR");
+  const readPointer = (): string | undefined => {
+    if (!jwtDir) return undefined;
+    try {
+      const parsed = JSON.parse(Deno.readTextFileSync(`${jwtDir}/active.json`)) as {
+        sessionId?: unknown;
+      };
+      if (typeof parsed.sessionId === "string" && parsed.sessionId.length > 0) {
+        return parsed.sessionId;
+      }
+    } catch {
+      // Pointer absent/malformed: the lease may have ended.
+    }
+    return undefined;
+  };
+  if (Deno.env.get("SKILL_SHARED_PROCESS") === "1") {
+    const pointer = readPointer();
+    if (pointer === undefined) {
+      throw new Error(
+        `SKILL_SESSION_UNRESOLVED: no current-session pointer at ${
+          jwtDir ? `${jwtDir}/active.json` : "the SKILL_JWT_DIR pointer location"
+        } (mock identity resolution mirrors the shared-process contract)`,
+      );
+    }
+    return pointer;
+  }
+  return Deno.env.get("SESSION_ID") ?? readPointer() ?? "mock";
 }
 
 function stateDir(): string {
@@ -156,7 +197,7 @@ async function callSkillApi(
 ): Promise<unknown> {
   const skillApiUrl = Deno.env.get("SKILL_API_URL") ?? "http://127.0.0.1:3001";
   const skillJwtDir = Deno.env.get("SKILL_JWT_DIR") ?? "data/skill-jwt";
-  const sessionId = Deno.env.get("SESSION_ID") ?? "mock";
+  const sessionId = resolveMockSessionId();
   const jwt = Deno.readTextFileSync(`${skillJwtDir}/${sessionId}.jwt`).trim();
   const res = await fetch(`${skillApiUrl}/api/skill/${endpoint}`, {
     method: "POST",
