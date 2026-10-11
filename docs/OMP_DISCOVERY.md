@@ -78,12 +78,18 @@ Two honesty gates remain open as named data exports in `src/acp/omp/discovery-gu
 ### 1. `preImportExclusionGate`
 - **Status**: `unresolved`
 - **Pinned Verdict**: `"extension flags alone incompatible and the supported full mechanism unresolved"`
-- **User Decision Required**: `true`
+- **Disposition (row 27, DECIDED 2026-10-09)**: `DECISION_1_DEPLOYMENT_ADMISSION` — the selected control is *deployment admission*: the deployment keeps executable custom tools and plugin entry points out of the workspace, loads the owned extension only from the image path (`--no-extensions` keeps ambient discovery off), the pre-native STARTUP CHECK rejects a workspace executable module, and fail-closed session rejection is the fallback. The native unresolved/verbatim verdict stands UNCHANGED alongside the disposition (`runtimeUnverified: UNVERIFIED`); no repository mock clears the native gate, and the disposition claims no supported native mechanism.
 
 ### 2. `criticalSkillSelectionGate`
 - **Status**: `unresolved`
 - **Pinned Verdict**: `"name-only trust incompatible and canonical selection unresolved"`
-- **User Decision Required**: `true`
+- **Disposition (row 27, DECIDED 2026-10-09)**: `DECISION_7_SKILL_OWNERSHIP_ADMISSION` — owned-settings skill-root ownership selection; row 28 (`pin-omp-owned-skill-roots`) OWNS and lands the settings skill-root selection checks, this record is the decided disposition only and the existing canonical critical-skill checks are retained here.
+
+Neither gate carries a pending "another user decision required" blocker anymore (row 27): decisions 1 and 7 pinned their dispositions on 2026-10-09.
+
+### Decision-1 Deployment Admission (row 27)
+
+`computeDiscoveryDecision` accepts an `executableObservation` — the accepted pre-native observation for one exact workspace + resource generation (`src/acp/omp/executable-sources.ts`). ONLY a matching `absent-clean` observation at the decision's own generation admits the two native executable-discovery surfaces under the deployment control instead of the unconditional unsupported-native-status rejection. An absent, stale, or foreign observation never reuses a previous clean result: both `no-supported-mechanism` blockers stay verbatim (fail-closed fallback), the pinned surfaces table never changes, and excluded-root records are still emitted for every configured root. The extension's restricted-identity startup check supplies this observation at production load; development/unidentified loads take no observation and fail closed exactly as before.
 
 ### Operative Security Boundary
 While these gates stand open, discovery-side exclusion is defense in depth. Restricted execution-time default-deny (row 14) and ACP filesystem authorization (rows 2–4) constitute the operative security boundaries.
@@ -94,7 +100,7 @@ Automated unit and mock tests validate **decision logic only** (which roots and 
 
 ## Downstream Handoff
 
-- **Row 13 (`gate-omp-policy-readiness`)**: Consumes the load-time decision and resource generation to establish the authenticated readiness channel.
+- **Row 13 (cancelled readiness gate)**: no readiness channel or acknowledgement exists (cancelled by user decision); the load-time decision and resource generation are consumed read-only by the row-16 enforcement wiring.
 - **Row 14 (`enforce-omp-restricted-tool-policy`)**: Provides execution-time tool inventory default-deny.
 - **Row 20 (`package-pinned-omp-runtime`)**: Packages the module tree authored here at `/opt/air/omp/extension/index.ts` with digest checksums.
 
