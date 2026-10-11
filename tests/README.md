@@ -41,10 +41,14 @@ Never run bare `deno test`; use the tasks above so permission flags match CI.
   from the factory env — never hand-derived), config-catalog shape, handler
   availability (**default absent**), live registry-epoch tool-observation
   fixtures, and destructive-input shapes. Every allow-path fixture must be
-  registered as a labeled synthetic positive in `SyntheticPositiveLedger`;
-  the 5.2 runtime guard scans `SyntheticPositiveLedger.allEntries()` across
-  the whole test process. There is no readiness tuple/channel/surface
-  anywhere on the composed object. The follow-up per-spawn/pool
+  registered as a labeled synthetic positive in `SyntheticPositiveLedger`.
+  The 5.2 runtime guard scans `SyntheticPositiveLedger.allEntries()` — a
+  **per-Deno-process** scan (Deno gives each test file its own process), so
+  the guard verifies every positive registered in its own file, and every
+  other suite verifies its own fixtures locally (each file asserts its own
+  ledger entries carry the label). There is no readiness
+  tuple/channel/surface anywhere on the composed object. The follow-up
+  per-spawn/pool
   skill-handoff regression (row 22) consumes this builder **unchanged**;
   new fields are added only additively in that change.
 
@@ -58,9 +62,11 @@ Never run bare `deno test`; use the tasks above so permission flags match CI.
 
 ## Determinism rules
 
-- **Fake timers** (`@std/testing/time`) are legal at the in-process
-  connection tier only. At the pool/subprocess tier they are BANNED: the
-  pool's liveness/idle math reads `Date.now()` across process boundaries.
+- **Fake timers** (`@std/testing/time`) are legal per-OBJECT, not per-suite:
+  never let FakeTime coexist with a real `AgentProcessPool` or a subprocess
+  connector — their liveness/idle math reads `Date.now()` across process
+  boundaries. (No suite here uses FakeTime at either tier; in-process
+  connection-tier tests may.)
 - Subprocess death/assertions are driven by the mock's **scripted crash
   trigger** (prompt-text-matched, no delay dependency), the connector's own
   crash signal, and the **recorded RPC JSONL** — never by wall-clock sleeps

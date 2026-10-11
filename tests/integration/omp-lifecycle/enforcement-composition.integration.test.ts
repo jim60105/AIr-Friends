@@ -318,5 +318,19 @@ Deno.test({
       !surfaced[0].includes("workspace/"),
       "bounded fields only: no origin path content rides",
     );
+
+    // Local honesty check: the re-admission positive registered here must
+    // carry its composition-boundary label inside THIS Deno process (the
+    // 5.2 guard only scans its own file's process).
+    assert(
+      ledger.entries().some((entry) => entry.id === "42-mcp-re-admission"),
+      "the MCP re-admission positive is registered",
+    );
+    for (const entry of SyntheticPositiveLedger.allEntries()) {
+      assert(
+        entry.label.startsWith("composition-boundary:"),
+        `unlabeled synthetic positive in-process: ${entry.id}`,
+      );
+    }
   },
 });

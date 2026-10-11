@@ -140,6 +140,11 @@ async function teardownHarness(h: Harness, livePids: (number | undefined)[]): Pr
   while (!h.pool.isIdle() && Date.now() < releaseDeadline) {
     await new Promise((resolve) => setTimeout(resolve, 20));
   }
+  // The bounded poll exists because run() resolves before the release drain
+  // clears inFlight — the drain's own budgets are far below 30s, so a pool
+  // that never drains is a real hang and must surface as this failure, not
+  // as a leaked directory or a later unexplained flake.
+  assertEquals(h.pool.isIdle(), true, "release path must drain within the bounded poll");
   for (const connector of h.spawned) {
     try {
       await connector.disconnect();
@@ -350,6 +355,15 @@ Deno.test({
       // directly: the only consumer-visible surface is selection behavior).
       const cache = h.spawned[0]["sessionConfigOptions"].get(result.acpSessionId!);
       assert(cache !== undefined && cache.length > 0, "config-options cache populated");
+      // Local honesty check: this file's process must never see an
+      // unlabeled allow fixture (the 5.2 guard only scans its own
+      // Deno process; each suite checks its own registrations here).
+      for (const entry of SyntheticPositiveLedger.allEntries()) {
+        assert(
+          entry.label.startsWith("composition-boundary:"),
+          `unlabeled synthetic positive in-process: ${entry.id}`,
+        );
+      }
     } finally {
       await teardownHarness(h, livePids);
     }
@@ -540,6 +554,12 @@ Deno.test({
       // its factory-built configuration — the `--no-lsp` carrier, exactly
       // once, is the identical shipped posture before and after the respawn.
       assertEquals(scoped.factoryArgs.filter((a) => a === "--no-lsp").length, 1);
+      for (const entry of SyntheticPositiveLedger.allEntries()) {
+        assert(
+          entry.label.startsWith("composition-boundary:"),
+          `unlabeled synthetic positive in-process: ${entry.id}`,
+        );
+      }
     } finally {
       await teardownHarness(h, livePids);
     }

@@ -1,7 +1,8 @@
 /**
  * Shared OMP mock-session composition surface (mock-acp-lifecycle-coverage).
  *
- * The consume-unchanged builder promised to row 24: one entry point assembles
+ * The consume-unchanged builder promised to row 22 (finish-omp-mocked-skill-
+ * handoff): one entry point assembles
  * the dimensions every OMP lifecycle scenario needs — mode-scoped OMP launch
  * identity ({permissionMode, processNamespace}), OMP-shaped config catalogs,
  * handler-absent posture, registry observations, destructive fixtures — and
@@ -24,10 +25,10 @@
  * or a subprocess connector (their liveness math uses real Date.now).
  */
 
-import { AgentConnector } from "../../src/acp/agent-connector.ts";
-import { createAgentConfig } from "../../src/acp/agent-factory.ts";
-import { ompAgentDir } from "../../src/utils/omp-paths.ts";
-import type { AgentConfig, ClientConfig } from "../../src/acp/types.ts";
+import { AgentConnector } from "@acp/agent-connector.ts";
+import { createAgentConfig } from "@acp/agent-factory.ts";
+import { ompAgentDir } from "@utils/omp-paths.ts";
+import type { AgentConfig, ClientConfig } from "@acp/types.ts";
 import type { Config } from "../../src/types/config.ts";
 import {
   createMockAcpConnection,

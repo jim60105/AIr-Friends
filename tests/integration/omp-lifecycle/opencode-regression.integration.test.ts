@@ -122,7 +122,9 @@ async function removeDirWithRetry(dir: string, attempts = 6): Promise<void> {
  * (tests/integration/shared-process.integration.test.ts `useMockAgent`).
  * The original file stays untouched (row 5.1 runs the SAME shipped arg
  * shape; that suite is the baseline owner); this copy keeps the arg list
- * honest for the harness here.
+ * honest for the harness here. If a later refactor can export the shipped
+ * helper without touching that suite's assertions, import it and delete
+ * this copy — the duplicate exists only to avoid editing the baseline owner.
  */
 function useMockAgentShippedShape(agentConfig: AgentConfig): void {
   const mockAgentScript = join(import.meta.dirname!, "../../mocks/mock-acp-agent.ts");
@@ -516,6 +518,10 @@ Deno.test({
       while (!h.pool.isIdle() && Date.now() < releaseDeadline) {
         await new Promise((resolvePromise) => setTimeout(resolvePromise, 20));
       }
+      // The release drain's own budgets are far below 30s: a pool that
+      // never drains is a real hang and must surface HERE, not as a leaked
+      // temp dir or a later unexplained flake.
+      assertEquals(h.pool.isIdle(), true, "release path must drain within the bounded poll");
       for (const connector of h.spawned) {
         try {
           await connector.disconnect();
