@@ -192,8 +192,17 @@ Deno.test("pool - serializes sessions from different pool keys (global execution
   const registry = new SessionRegistry(1000);
   const running: string[] = [];
   const order: string[] = [];
+  // This test asserts ORDERING only; deadline cancellation has its own test
+  // ("pool - queue deadline cancels still-queued sessions"). The shared 100ms
+  // deadline is tight enough that under CI --parallel load the lease holder's
+  // dispatch/release I/O ages the queued session past the deadline, and it is
+  // cancelled pre-dispatch (observed in CI run 38184832785: order ==
+  // ["A_start", "A_end"] — B never started). A wide margin keeps the ordering
+  // assertion meaningful and makes cancellation impossible here.
+  const config = makeConfig();
+  config.agent.sharedProcess = { ...config.agent.sharedProcess!, queueDeadlineMs: 2000 };
   const pool = new AgentProcessPool(
-    makeConfig(),
+    config,
     registry,
     "test-secret-0123456789abcdef0123456789",
     () => new StubConnector() as unknown as AgentConnector,
@@ -709,8 +718,14 @@ Deno.test("pool - OMP same-mode reuse and cross-mode separation with dual-mode c
 
 Deno.test("pool - OMP lease preservation across mode-split entries", async () => {
   const registry = new SessionRegistry(1000);
+  // Same ordering-only rationale as the serialize test above: the 100ms queue
+  // deadline cancelled the queued yolo session pre-dispatch under CI
+  // --parallel load (run 38184832785: order == ["restricted-start",
+  // "restricted-end"]); deadline cancellation is covered by its own test.
+  const config = makeConfig();
+  config.agent.sharedProcess = { ...config.agent.sharedProcess!, queueDeadlineMs: 2000 };
   const pool = new AgentProcessPool(
-    makeConfig(),
+    config,
     registry,
     "test-secret-0123456789abcdef0123456789",
     () => new StubConnector() as unknown as AgentConnector,
