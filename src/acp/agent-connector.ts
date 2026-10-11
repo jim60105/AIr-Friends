@@ -20,6 +20,10 @@ import {
   verifyRecoveryOwnership,
 } from "./recovery-ownership.ts";
 import {
+  type AcceptedOverlayIdentity,
+  assertOmpSettingsSourcesVisible,
+} from "./omp/settings-sources.ts";
+import {
   collectOptionValues,
   findOptionByCategory,
   formatAdvertisedValuesPreview,
@@ -163,9 +167,48 @@ export class AgentConnector {
    * still in flight must still unstick that prompt.
    */
   private intentionalShutdown = false;
+  /**
+   * Row 26: identities of the owned overlays accepted by the most recent
+   * settings-source check on this connector. Every later check re-verifies
+   * them, so an overlay replaced between checks fails closed
+   * (`overlay_identity_mismatch`) — the repository-triggered rediscovery
+   * recheck the design records. Identity tracking deliberately spans
+   * `disconnect()`/respawn: the accepted deployment posture keeps the owned
+   * overlays stable for the process lifetime, so a replacement across a
+   * restart must also fail closed rather than reset the baseline.
+   */
+  private acceptedOverlayIdentities: readonly AcceptedOverlayIdentity[] | null = null;
 
   constructor(options: AgentConnectorOptions) {
     this.options = options;
+  }
+
+  /**
+   * Row 26 (D3): the pre-native-request settings-source gate. Runs strictly
+   * BEFORE any native protected request — spawn, `session/new`,
+   * `session/load`/recovery, or repository-triggered rediscovery — for OMP
+   * connectors only (OpenCode never consults the plan). The connector's
+   * factory-produced `agentConfig.settingsSourcePlan` is mandatory: an OMP
+   * connector whose config carries no plan cannot prove the owned-only
+   * posture and fails closed with a bounded reason BEFORE any side effect.
+   * A check failure throws `SettingsSourceRejectionError`; no user file is
+   * touched and no native request is sent.
+   */
+  private async verifyOmpSettingsSourcesBeforeRequest(sessionCwd: string): Promise<void> {
+    if (this.options.agentType !== "omp") return;
+    const plan = this.options.agentConfig.settingsSourcePlan;
+    if (!plan) {
+      throw new Error(
+        "OMP connector refuses the native request: agentConfig carries no settings-source plan, " +
+          "so the owned-only settings posture cannot be verified (fail closed).",
+      );
+    }
+    const identities = await assertOmpSettingsSourcesVisible(
+      plan,
+      sessionCwd,
+      this.acceptedOverlayIdentities ? { expectedOverlayIdentities: this.acceptedOverlayIdentities } : {},
+    );
+    this.acceptedOverlayIdentities = identities;
   }
 
   /**
@@ -173,6 +216,11 @@ export class AgentConnector {
    */
   async connect(): Promise<void> {
     const { agentConfig, clientConfig, skillRegistry, logger } = this.options;
+
+    // Row 26 (D3): settings-source preflight BEFORE the spawn — the neutral
+    // launch cwd is the plan's own root here; the actual session workspace is
+    // re-checked per `createSession`/load below.
+    await this.verifyOmpSettingsSourcesBeforeRequest(agentConfig.cwd);
 
     (logger as Logger).info("Spawning ACP agent via dumb-init", {
       command: agentConfig.command,
@@ -347,6 +395,12 @@ export class AgentConnector {
     // Filter out MCP servers with unsupported transports (skip + warn)
     const supportedServers = this.filterSupportedMCPServers(mcpServers);
     const sessionCwd = cwd ?? this.options.agentConfig.cwd;
+
+    // Row 26 (D3): the ACTUAL session workspace is re-checked before the
+    // native `session/new` — the neutral launch cwd never covers it. The
+    // previously accepted overlay identities are re-verified here, so an
+    // owned-overlay replacement between lifecycle steps fails closed.
+    await this.verifyOmpSettingsSourcesBeforeRequest(sessionCwd);
 
     const result = await this.raceAgainstCrash(this.connection.newSession({
       cwd: sessionCwd,
@@ -1112,6 +1166,14 @@ export class AgentConnector {
     if (recoveryContextSupplied) {
       this.verifyRecoveryOwnership(sessionId, opts?.ownership);
     }
+
+    // ── Settings-source recheck BEFORE any teardown (row 26, D3) ────────────
+    // Recovery is a native `session/load`: the owned-only posture is verified
+    // against the ACTUAL recovery cwd ahead of `disconnect()`, the respawn, and
+    // the load itself, so a rejection has zero disconnect/spawn/load side
+    // effects (the same zero-side-effect discipline row 11 established for
+    // ownership). The previously accepted overlay identities ride the recheck.
+    await this.verifyOmpSettingsSourcesBeforeRequest(cwd);
 
     logger.info("Attempting to reconnect and resume session {sessionId}", { sessionId });
 

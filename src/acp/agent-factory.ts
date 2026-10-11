@@ -7,6 +7,7 @@ import { getRunningEgressProxyUrl } from "@utils/egress-proxy.ts";
 import { sessionXdgDataHome } from "@utils/opencode-paths.ts";
 import {
   ompAgentDir,
+  ompOwnedHome,
   ompLaunchCwd,
   ompProcessTmpDir,
   ompXdgDataHome,
@@ -14,7 +15,13 @@ import {
   resolveOmpSystemPromptPath,
   resolveOmpTrustedExtensionPath,
 } from "@utils/omp-paths.ts";
-import { type OmpPermissionMode, ompSettingsForMode } from "./omp-settings.ts";
+import {
+  ompSettingsSourcePlan,
+  type OmpPermissionMode,
+  type OmpSettingsSourcePlan,
+  ompSettingsForMode,
+} from "./omp-settings.ts";
+import { sanitizeOmpDiscoveryEnv } from "./sandbox-manager.ts";
 import { createLogger } from "@utils/logger.ts";
 import { resolveSkillJwtDir } from "@utils/skill-jwt.ts";
 import { join, resolve } from "@std/path";
@@ -54,15 +61,86 @@ export function createAgentConfig(
       baseConfig.env ?? {},
       baseConfig.cwd,
     );
+    if (type === "omp" && baseConfig.settingsSourcePlan) {
+      // Belt-and-braces: mandatory sanitization runs inside buildSpawnOptions;
+      // finalization then (re)assigns the plan values and verifies the FINAL
+      // spawn environment so later sandbox assembly cannot drop or overwrite
+      // a trusted value (row 26, D2).
+      sanitizeOmpDiscoveryEnv(spawnOpts.env);
+      finalizeOmpSpawnEnvironment(spawnOpts.env, baseConfig.settingsSourcePlan);
+    }
     return {
       command: spawnOpts.command,
       args: spawnOpts.args,
       cwd: spawnOpts.cwd,
       env: spawnOpts.env,
+      settingsSourcePlan: baseConfig.settingsSourcePlan,
     };
   }
 
+  if (type === "omp" && baseConfig.settingsSourcePlan) {
+    // Unsandboxed route still gets the mandatory sanitization + trusted plan
+    // assignment and the plan verification (D2 is mandatory, not filterEnv-
+    // conditional; the sandbox branch simply performs it earlier).
+    const env = baseConfig.env ?? {};
+    sanitizeOmpDiscoveryEnv(env);
+    finalizeOmpSpawnEnvironment(env, baseConfig.settingsSourcePlan);
+    baseConfig.env = env;
+  }
   return baseConfig;
+}
+
+/**
+ * Row 26 (D2): trusted post-filter environment finalization for OMP children.
+ *
+ * Runs AFTER ordinary sandbox filtering (and after the mandatory
+ * `sanitizeOmpDiscoveryEnv` removal inside `SandboxManager`), and assigns the
+ * deployment-owned settings-discovery selectors EXCLUSIVELY from the typed
+ * settings-source plan — never from operator passthrough or workspace data.
+ * It then verifies the final spawn environment against the plan so a later
+ * sandbox-assembly bug cannot drop or overwrite a trusted value:
+ *
+ * - `HOME` = plan.ownedHome (explicitly assigned; unset HOME would let the
+ *   native homedir fallback return the daemon home)
+ * - `PI_CODING_AGENT_DIR` = plan.agentDir
+ * - `XDG_DATA_HOME` = plan.xdgDataHome
+ * - `TMPDIR` = plan.tmpDir
+ *
+ * Every other forbidden selector must be ABSENT (e.g. an assembly that forgot
+ * the sanitization step). Throws with a bounded, content-free reason.
+ */
+export function finalizeOmpSpawnEnvironment(
+  env: Record<string, string>,
+  plan: OmpSettingsSourcePlan,
+): void {
+  // Trusted assignment: plan values verbatim, overwriting anything inherited.
+  env["HOME"] = plan.ownedHome;
+  env["PI_CODING_AGENT_DIR"] = plan.agentDir;
+  env["XDG_DATA_HOME"] = plan.xdgDataHome;
+  env["TMPDIR"] = plan.tmpDir;
+
+  // Observation: the final spawn environment must match the plan.
+  const expected: Readonly<Record<string, string>> = {
+    "HOME": plan.ownedHome,
+    "PI_CODING_AGENT_DIR": plan.agentDir,
+    "XDG_DATA_HOME": plan.xdgDataHome,
+    "TMPDIR": plan.tmpDir,
+  };
+  for (const [selector, planValue] of Object.entries(expected)) {
+    if (env[selector] !== planValue) {
+      throw new Error(
+        `OMP spawn environment violates the settings-source plan: ${selector} is not the deployment-owned value`,
+      );
+    }
+  }
+  for (const selector of plan.forbiddenSelectors) {
+    if (selector in expected) continue;
+    if (selector in env) {
+      throw new Error(
+        `OMP spawn environment violates the settings-source plan: ${selector} survived sanitization`,
+      );
+    }
+  }
 }
 
 /**
@@ -208,6 +286,12 @@ function buildBaseAgentConfig(
 
     case "omp": {
       const mode: OmpPermissionMode = yolo ? "native-yolo" : "restricted";
+      const baseRoot = poolKey
+        ? resolve(join(appConfig.workspace.repoPath, "omp-pools", poolKey))
+        : resolve(join(workingDir, "tmp"));
+      // Row 26: the launch composes its settings-source plan over the SAME
+      // mode-scoped base root it spawns with (single formula), below, once the
+      // overlay paths are resolved.
       const settings = ompSettingsForMode(mode);
 
       // Observability: warn on unresolved record reset gate
@@ -267,22 +351,29 @@ function buildBaseAgentConfig(
       args.push("--trusted-extension", trustedExtensionPath);
       args.push("--system-prompt", resolveOmpSystemPromptPath());
 
+      // Row 26: the FINAL settings-source plan carries the RESOLVED owned
+      // overlay paths (dev→image seam), mode document last.
+      const sourcePlan = ompSettingsSourcePlan(mode, {
+        baseRoot,
+        allowedOverlayPaths: resolvedOverlayPaths.map((overlayPath) => resolve(overlayPath)),
+      });
+
       // Base root resolution and mode-distinct state roots
-      const dataRoot = appConfig.workspace.repoPath;
-      const baseRoot = poolKey
-        ? resolve(join(dataRoot, "omp-pools", poolKey))
-        : resolve(join(workingDir, "tmp"));
+      // (baseRoot composed above, ahead of the settings-plan construction.)
 
       const agentDir = ompAgentDir(baseRoot, mode);
       const procTmpDir = ompProcessTmpDir(baseRoot, mode);
       const launchCwd = ompLaunchCwd(baseRoot, mode);
       const xdgData = ompXdgDataHome(baseRoot, mode);
+      // Row 26: deployment-owned HOME replacing the daemon HOME.
+      const ownedHome = ompOwnedHome(baseRoot, mode);
 
       // Ensure state directories exist
       Deno.mkdirSync(agentDir, { recursive: true });
       Deno.mkdirSync(procTmpDir, { recursive: true });
       Deno.mkdirSync(launchCwd, { recursive: true });
       Deno.mkdirSync(xdgData, { recursive: true });
+      Deno.mkdirSync(ownedHome, { recursive: true });
 
       const env: Record<string, string> = {};
 
@@ -297,8 +388,11 @@ function buildBaseAgentConfig(
         env["OPENROUTER_API_KEY"] = openRouterApiKey;
       }
 
-      // System essentials inheritance
-      const inheritVars = ["PATH", "HOME", "DENO_DIR", "LANG", "LC_ALL", "USER"];
+      // System essentials inheritance. Row 26: HOME is deliberately NOT
+      // inherited here — the settings-source plan owns the child HOME and
+      // `finalizeOmpSpawnEnvironment` assigns it after ordinary filtering;
+      // inheriting the daemon HOME would only hand sanitization more work.
+      const inheritVars = ["PATH", "DENO_DIR", "LANG", "LC_ALL", "USER"];
       for (const varName of inheritVars) {
         const value = Deno.env.get(varName);
         if (value !== undefined) {
@@ -354,6 +448,7 @@ function buildBaseAgentConfig(
         args,
         cwd: launchCwd,
         env,
+        settingsSourcePlan: sourcePlan,
       };
     }
 
