@@ -206,7 +206,11 @@ Deno.test("Explicit backend outside the supported set: blocked, never adopted, z
     // Control: WITHOUT the flag the same hop is decided allow by row 17's
     // core — the block is the flag alone, not a softened/degraded rule.
     const control = await decideSearchRoute(
-      { url: `${OPENROUTER_ENDPOINT}/chat/completions`, hopKind: "provider-endpoint", hopsFollowed: 0 },
+      {
+        url: `${OPENROUTER_ENDPOINT}/chat/completions`,
+        hopKind: "provider-endpoint",
+        hopsFollowed: 0,
+      },
       decisionDeps(presence, UNRESTRICTED),
     );
     assertEquals(control.decision, "allow-direct");

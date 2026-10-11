@@ -20,10 +20,7 @@
 
 import { basename, dirname, join, resolve } from "@std/path";
 import { isWithinRoot } from "../filesystem-roots.ts";
-import {
-  type OmpSettingsSourcePlan,
-  type PinnedSettingsSource,
-} from "../omp-settings.ts";
+import { type OmpSettingsSourcePlan, type PinnedSettingsSource } from "../omp-settings.ts";
 
 /** Metadata reader seam (testable; defaults to real filesystem metadata). */
 export interface SourceMetadataReader {
