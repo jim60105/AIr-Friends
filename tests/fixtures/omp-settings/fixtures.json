@@ -26,14 +26,6 @@
       "lsp": { "enabled": false },
       "disabledProviders": []
     },
-    "restrictedKeyInYolo": {
-      "tools": { "approvalMode": "yolo" },
-      "compaction": { "enabled": true },
-      "startup": { "checkUpdate": false },
-      "marketplace": { "autoUpdate": "off" },
-      "update": { "channel": "stable" },
-      "lsp": { "enabled": false }
-    },
     "disabledProvidersInYolo": {
       "tools": { "approvalMode": "yolo" },
       "compaction": { "enabled": true },

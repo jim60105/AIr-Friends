@@ -79,7 +79,7 @@ row-24 `4.1` (launch-posture retention).
 | Observation | Source audit | Unit/mock | Runtime outcome + user observation |
 | --- | --- | --- | --- |
 | OMP restricted: LSP removed, including IMPLICIT startup (no server starts from language detection) | `restricted.yml` pin + `--no-lsp` carrier | settings/factory unit assertions (flags/config only) | unverified — implicit native suppression is exactly the unproven part |
-| OMP native-YOLO: LSP disabled via `native-yolo.yml` and/or the `--no-lsp` launch argument, without adding restricted denials | decision-register §1a decision 5 | factory carries `--no-lsp` in BOTH modes (unit) | unverified — |
+| OMP native-YOLO: LSP disabled via `native-yolo.yml` and/or the `--no-lsp` launch argument, without adding restricted denials | decision-register §1a decision 5 | factory carries `--no-lsp` in BOTH modes AND `native-yolo.yml` pins `lsp.enabled: false` with zero restricted content (settings/factory unit assertions — repo-selected bytes only) | unverified — the settings pin proves repository configuration, not native server suppression or implicit-startup behavior |
 | OpenCode build AND yolo: per-agent explicit `lsp` deny in `agent-config/opencode.json` (no global clamp) | decision-register §1a decision 5 | config-file assertions | unverified — per-agent deny does not establish implicit server suppression; recorded incompatibility verdicts unchanged |
 
 ## E. ACP protocol surfaces (rows 6/10/11; design §15 bullet 5)

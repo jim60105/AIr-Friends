@@ -160,13 +160,13 @@ Deno.test("Cold-start inventory: native-internal LSP carriers stay deny-by-absen
 });
 
 // -----------------------------------------------------------------------------
-// Carrier-file tripwires: factory carries the flag exactly once, the row-25
-// native-yolo lsp settings key stays absent (row 17 must not pre-empt it),
-// and the orphaned decision-6 posture file is recorded, not silently
-// deleted or re-adopted.
+// Carrier-file tripwires: factory carries the flag exactly once, the native-yolo
+// overlay carries the row-25 decision-5 lsp.enabled:false settings pin (row 17
+// never pre-empted it; row 25 landed it), and the orphaned decision-6 posture
+// file is recorded, not silently deleted or re-adopted.
 // -----------------------------------------------------------------------------
 
-Deno.test("Carriers: factory carries --no-lsp exactly once; native-yolo lsp key stays row 25's", async () => {
+Deno.test("Carriers: factory carries --no-lsp exactly once; native-yolo carries the landed row-25 settings pin", async () => {
   const factory = await Deno.readTextFile("src/acp/agent-factory.ts");
   assertEquals(
     factory.split(`"--no-lsp"`).length - 1,
@@ -174,7 +174,10 @@ Deno.test("Carriers: factory carries --no-lsp exactly once; native-yolo lsp key 
     "--no-lsp is a single shared-branch literal covering both modes",
   );
   const yoloSettings = await Deno.readTextFile("agent-config/omp/native-yolo.yml");
-  assertEquals(yoloSettings.includes("lsp"), false, "row 25 owns the native-yolo lsp key");
+  assert(
+    yoloSettings.includes("lsp:\n  enabled: false"),
+    "row 25 landed the decision-5 shared lsp.enabled:false pin in native-yolo",
+  );
   const restricted = await Deno.readTextFile("agent-config/omp/restricted.yml");
   assert(restricted.includes("lsp"), "restricted keeps its row-8 lsp pin");
 });

@@ -13,7 +13,10 @@
  * 2. `lsp.enabled`:
  *    - Pin & Symbol: `v18.6.1` / `docs/settings.md` §Shell/eval/LSP (`lsp.enabled`), default `true`
  *    - Type & Domain: boolean (`true | false`)
- *    - Purpose: pins LSP disabled in restricted overlay; row 15 owns the disable implementation & implicit startup proof.
+ *    - Purpose: decision 5 shared deployment pin — `lsp.enabled: false` in BOTH mode overlays
+ *      (restricted since row 8; native-YOLO added by row 25 `pin-omp-yolo-lsp-settings`) beneath
+ *      the row-17 both-mode `--no-lsp` carrier. Deployment posture only: native server
+ *      suppression and implicit startup remain user-owned and UNVERIFIED.
  *
  * 3. `startup.checkUpdate`:
  *    - Pin & Symbol: `v18.6.1` / `packages/coding-agent/src/modes/settings.ts:1028` (`cfgStartupCheckUpdate`), `main.ts:233-244` (`checkForNewVersion()`)
@@ -58,10 +61,7 @@
  * NO subprocess execution, NO filesystem writes, NO pool/LSP implementation.
  */
 
-import {
-  PINNED_OMP_COMMIT,
-  PINNED_OMP_VERSION,
-} from "./omp/compatibility-contracts.ts";
+import { PINNED_OMP_COMMIT, PINNED_OMP_VERSION } from "./omp/compatibility-contracts.ts";
 
 export type OmpPermissionMode = "restricted" | "native-yolo";
 
@@ -115,7 +115,8 @@ export const PINNED_REGISTERED_SETTINGS_KEYS: Readonly<Record<string, Registered
   "disabledProviders": {
     path: "disabledProviders",
     type: "string[]",
-    description: "Complete-replacement array of disabled model and discovery provider ids (docs/settings.md)",
+    description:
+      "Complete-replacement array of disabled model and discovery provider ids (docs/settings.md)",
   },
 };
 
@@ -211,16 +212,20 @@ export const PINNED_DISABLED_PROVIDERS_CATALOG: readonly string[] = ([
 
 /**
  * Keys permitted strictly in restricted mode and PROHIBITED in native-yolo mode.
+ * (`lsp.enabled` moved to SHARED_DEPLOYMENT_KEYS with decision 5 / row 25: the LSP
+ * disable is now required in BOTH mode documents, not a restricted-only clamp.)
  */
 export const RESTRICTED_ONLY_KEYS: readonly string[] = [
-  "lsp.enabled",
   "disabledProviders",
 ] as const;
 
 /**
  * Keys shared between both restricted and native-yolo deployment configurations.
+ * `lsp.enabled` joined this set with decision 5 (row 25): both documents must pin
+ * boolean false. This is a deployment pin, never a restricted YOLO tool policy.
  */
 export const SHARED_DEPLOYMENT_KEYS: readonly string[] = [
+  "lsp.enabled",
   "startup.checkUpdate",
   "marketplace.autoUpdate",
   "update.channel",
@@ -245,10 +250,13 @@ export interface SystemPromptAssetMapping {
 
 export interface EnvironmentPostureContracts {
   readonly agentDirEnvVar: "PI_CODING_AGENT_DIR";
-  readonly agentDirRequirement: "Must reside under the selected process state root (empty deployment-owned directory)";
-  readonly launchCwdRequirement: "Deployment-owned working directory preventing hostile project .omp/ discovery";
+  readonly agentDirRequirement:
+    "Must reside under the selected process state root (empty deployment-owned directory)";
+  readonly launchCwdRequirement:
+    "Deployment-owned working directory preventing hostile project .omp/ discovery";
   readonly forbiddenInheritance: readonly string[];
-  readonly overlayPathPlacementRequirement: "Owned overlay paths must reside outside agent-writable roots";
+  readonly overlayPathPlacementRequirement:
+    "Owned overlay paths must reside outside agent-writable roots";
 }
 
 export interface RecordResetGateContract {
@@ -273,7 +281,8 @@ export interface OmpModeSettingsComposition {
 /**
  * Pure, deterministic string content of agent-config/omp/restricted.yml
  */
-export const RESTRICTED_YAML_CONTENT = `# Pinned deployment-owned OMP configuration overlay for restricted mode.
+export const RESTRICTED_YAML_CONTENT =
+  `# Pinned deployment-owned OMP configuration overlay for restricted mode.
 # Pinned to official OMP v18.6.1 / 2a2c6dcbbb558c0f8145f67f28b3370984f2bf60.
 tools:
   approvalMode: write
@@ -377,10 +386,13 @@ disabledProviders:
 /**
  * Pure, deterministic string content of agent-config/omp/native-yolo.yml
  */
-export const NATIVE_YOLO_YAML_CONTENT = `# Pinned deployment-owned OMP configuration overlay for native-yolo mode.
+export const NATIVE_YOLO_YAML_CONTENT =
+  `# Pinned deployment-owned OMP configuration overlay for native-yolo mode.
 # Pinned to official OMP v18.6.1 / 2a2c6dcbbb558c0f8145f67f28b3370984f2bf60.
 tools:
   approvalMode: yolo
+lsp:
+  enabled: false
 startup:
   checkUpdate: false
 marketplace:
@@ -413,6 +425,9 @@ providers:
  * - Mode mismatch in tools.approvalMode
  * - Per-tool tools.approval policy records (owned by row 14)
  * - Empty or unexpected object branches
+ * - Missing/disabled-off LSP posture: BOTH modes require the decision-5 shared
+ *   deployment pin `lsp.enabled: false` (boolean only; a true value, a
+ *   non-boolean value, an omission or an unregistered `lsp.*` key all reject)
  */
 export function assertOwnedSettingsDocument(
   doc: Record<string, unknown>,
@@ -465,12 +480,11 @@ export function assertOwnedSettingsDocument(
   // Validate every path
   for (const [path, value] of Object.entries(allPaths)) {
     // If it's a top-level object container (e.g. "tools", "lsp", "startup", "marketplace", "update", "compaction")
-    if (!path.includes(".") && typeof value === "object" && value !== null && !Array.isArray(value)) {
+    if (
+      !path.includes(".") && typeof value === "object" && value !== null && !Array.isArray(value)
+    ) {
       if (!allowedTopLevels.has(path)) {
         throw new Error(`Unregistered namespace "${path}" at pinned OMP ${PINNED_OMP_VERSION}`);
-      }
-      if (mode === "native-yolo" && path === "lsp") {
-        // Continue to let child keys report their restricted error or reject if empty
       }
       continue;
     }
@@ -485,7 +499,10 @@ export function assertOwnedSettingsDocument(
 
     // Check mode restrictions
     if (mode === "native-yolo") {
-      if (RESTRICTED_ONLY_KEYS.includes(path) || path.startsWith("lsp")) {
+      // `lsp.enabled` is no longer restricted-only (decision 5 / row 25): the
+      // shared pin is required in YOLO too. An unregistered `lsp.*` key reaches
+      // the generic Unregistered-settings-key rejection above instead.
+      if (RESTRICTED_ONLY_KEYS.includes(path)) {
         throw new Error(
           `Restricted-only key "${path}" is forbidden in native-yolo settings document (mode non-contamination D6)`,
         );
@@ -507,7 +524,9 @@ export function assertOwnedSettingsDocument(
       }
       if (spec.allowedValues && !spec.allowedValues.includes(value)) {
         throw new Error(
-          `Invalid value "${value}" for key "${path}": must be one of [${spec.allowedValues.join(", ")}]`,
+          `Invalid value "${value}" for key "${path}": must be one of [${
+            spec.allowedValues.join(", ")
+          }]`,
         );
       }
     } else if (spec.type === "string[]") {
@@ -523,12 +542,9 @@ export function assertOwnedSettingsDocument(
   if (mode === "restricted") {
     if (allPaths["tools.approvalMode"] !== "write") {
       throw new Error(
-        `Restricted mode requires explicit tools.approvalMode: "write", got "${allPaths["tools.approvalMode"]}"`,
-      );
-    }
-    if (allPaths["lsp.enabled"] !== false) {
-      throw new Error(
-        `Restricted mode requires lsp.enabled: false`,
+        `Restricted mode requires explicit tools.approvalMode: "write", got "${
+          allPaths["tools.approvalMode"]
+        }"`,
       );
     }
     const dp = allPaths["disabledProviders"];
@@ -540,14 +556,13 @@ export function assertOwnedSettingsDocument(
   } else if (mode === "native-yolo") {
     if (allPaths["tools.approvalMode"] !== "yolo") {
       throw new Error(
-        `Native-yolo mode requires explicit tools.approvalMode: "yolo", got "${allPaths["tools.approvalMode"]}"`,
+        `Native-yolo mode requires explicit tools.approvalMode: "yolo", got "${
+          allPaths["tools.approvalMode"]
+        }"`,
       );
     }
     if ("disabledProviders" in allPaths) {
       throw new Error("disabledProviders is forbidden in native-yolo mode");
-    }
-    if ("lsp" in allPaths || "lsp.enabled" in allPaths) {
-      throw new Error("lsp settings are forbidden in native-yolo mode");
     }
   }
 
@@ -560,6 +575,13 @@ export function assertOwnedSettingsDocument(
     }
     if (sharedKey === "startup.checkUpdate" && allPaths[sharedKey] !== false) {
       throw new Error("startup.checkUpdate must be false");
+    }
+    if (sharedKey === "lsp.enabled" && allPaths[sharedKey] !== false) {
+      throw new Error(
+        `Decision 5 requires the shared deployment pin lsp.enabled: false in ${mode} mode, got ${
+          String(allPaths[sharedKey])
+        }`,
+      );
     }
   }
 }
@@ -584,7 +606,9 @@ export function assertOwnedModelsDocument(doc: Record<string, unknown>): void {
   const allowedProviders = ["openrouter"];
   for (const [providerId, providerConfig] of Object.entries(providers as Record<string, unknown>)) {
     if (!allowedProviders.includes(providerId)) {
-      throw new Error(`Unexpected provider "${providerId}" in models.yml; only supported custom provider headers are permitted`);
+      throw new Error(
+        `Unexpected provider "${providerId}" in models.yml; only supported custom provider headers are permitted`,
+      );
     }
 
     if (!providerConfig || typeof providerConfig !== "object" || Array.isArray(providerConfig)) {
@@ -595,13 +619,19 @@ export function assertOwnedModelsDocument(doc: Record<string, unknown>): void {
 
     // Prohibit models, modelOverrides, apiKey, baseUrl, etc.
     if ("models" in cfg) {
-      throw new Error(`Forbidden 'models' field in models.yml for provider "${providerId}": no model IDs may be hardcoded`);
+      throw new Error(
+        `Forbidden 'models' field in models.yml for provider "${providerId}": no model IDs may be hardcoded`,
+      );
     }
     if ("modelOverrides" in cfg) {
-      throw new Error(`Forbidden 'modelOverrides' field in models.yml for provider "${providerId}"`);
+      throw new Error(
+        `Forbidden 'modelOverrides' field in models.yml for provider "${providerId}"`,
+      );
     }
     if ("apiKey" in cfg) {
-      throw new Error(`Forbidden 'apiKey' in models.yml: credentials must be passed via environment, not asset files`);
+      throw new Error(
+        `Forbidden 'apiKey' in models.yml: credentials must be passed via environment, not asset files`,
+      );
     }
 
     const headers = cfg["headers"];
@@ -635,22 +665,25 @@ export function ompSettingsForMode(
     ? "agent-config/omp/restricted.yml"
     : "agent-config/omp/native-yolo.yml";
 
-  const modeContent = mode === "restricted"
-    ? RESTRICTED_YAML_CONTENT
-    : NATIVE_YOLO_YAML_CONTENT;
+  const modeContent = mode === "restricted" ? RESTRICTED_YAML_CONTENT : NATIVE_YOLO_YAML_CONTENT;
 
   // Assembly-time self validation of emitted documents
   if (mode === "restricted") {
-    if (!modeContent.includes("approvalMode: write") || !modeContent.includes("lsp:\n  enabled: false")) {
+    if (
+      !modeContent.includes("approvalMode: write") ||
+      !modeContent.includes("lsp:\n  enabled: false")
+    ) {
       throw new Error("Assembly validation failed for restricted settings overlay");
     }
   } else {
     if (
       !modeContent.includes("approvalMode: yolo") ||
-      modeContent.includes("lsp:") ||
+      !modeContent.includes("lsp:\n  enabled: false") ||
       modeContent.includes("disabledProviders:")
     ) {
-      throw new Error("Assembly validation failed: non-contamination violated in native-yolo overlay");
+      throw new Error(
+        "Assembly validation failed: native-yolo overlay lost the decision-5 LSP pin or gained a restricted-only key",
+      );
     }
   }
 
@@ -690,8 +723,7 @@ export function ompSettingsForMode(
       "PI_CONFIG_FILES",
       "XDG_CONFIG_HOME",
     ],
-    overlayPathPlacementRequirement:
-      "Owned overlay paths must reside outside agent-writable roots",
+    overlayPathPlacementRequirement: "Owned overlay paths must reside outside agent-writable roots",
   };
 
   const recordResetGate: RecordResetGateContract = {

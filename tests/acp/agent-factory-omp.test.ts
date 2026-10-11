@@ -161,11 +161,12 @@ Deno.test("agent-factory omp - assembles both modes over tracked assets with dis
   );
 
   // Native YOLO keeps its native approval posture with no restricted carrier:
-  // the yolo overlay bytes carry approvalMode yolo and no restricted-only keys,
-  // and no restricted handler/approval-record asset joins the launch.
+  // the yolo overlay bytes carry approvalMode yolo plus the decision-5 shared
+  // lsp.enabled:false settings pin (row 25) and no restricted-only provider
+  // clamp, and no restricted handler/approval-record asset joins the launch.
   const yoloOverlay = Deno.readTextFileSync("agent-config/omp/native-yolo.yml");
   assertEquals(yoloOverlay.includes("approvalMode: yolo"), true);
-  assertEquals(yoloOverlay.includes("lsp"), false);
+  assertEquals(yoloOverlay.includes("lsp:\n  enabled: false"), true);
   assertEquals(yoloOverlay.includes("disabledProviders"), false);
   assertEquals(
     yoloConfig.args.some((arg) => arg.includes("restricted")),
