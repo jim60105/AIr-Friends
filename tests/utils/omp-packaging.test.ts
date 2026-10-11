@@ -464,6 +464,7 @@ const EXPECTED_MIRROR_FILES = [
   "src/acp/omp/destructive-decision.ts",
   "src/acp/omp/destructive-validator.ts",
   "src/acp/omp/discovery-guard.ts",
+  "src/acp/omp/executable-sources.ts",
   "src/acp/omp/extension/_daemon/mod.ts",
   "src/acp/omp/extension/bootstrap.ts",
   "src/acp/omp/extension/enforcement-error.ts",

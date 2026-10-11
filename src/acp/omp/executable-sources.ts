@@ -573,6 +573,7 @@ function deriveWorkspaceAuthority(
   sharedWorkspace: string | undefined,
   reader: ExecutableSourceMetadataReader,
   issues: ExecutableSourceIssue[],
+  phase: "preflight" | "extension_load",
 ): WorkspaceAuthority | null {
   const surface: ExecutableRejectionSurface = "workspace-owned-dependencies";
   const check = (raw: string, label: string): { path: string; identity: string } | null => {
@@ -604,10 +605,19 @@ function deriveWorkspaceAuthority(
       issues.push(issue(surface, "inaccessible_path", `${label} identity`));
       return null;
     }
-    for (const owned of [roots.ownedHome, roots.agentDir]) {
-      if (identity === owned || identity.startsWith(owned.replace(/\/+$/, "") + "/")) {
-        issues.push(issue(surface, "unknown_entry_shape", `${label} inside owned state root`));
-        return null;
+    // Preflight (connector seam): the ACTUAL user workspace must never alias
+    // into the owned settings state — an identity inside an owned root is a
+    // foreign admission attempt. Extension load: the authority IS the owned,
+    // neutral launch cwd (row 9's mode-distinct cwd under the namespace), so
+    // containment in the namespace is the production posture; its executable
+    // discovery shapes are still observed and fail closed below, and the
+    // global routes get their own explicit check.
+    if (phase === "preflight") {
+      for (const owned of [roots.ownedHome, roots.agentDir]) {
+        if (identity === owned || identity.startsWith(owned.replace(/\/+$/, "") + "/")) {
+          issues.push(issue(surface, "unknown_entry_shape", `${label} inside owned state root`));
+          return null;
+        }
       }
     }
     return { path, identity };
@@ -647,6 +657,7 @@ export function checkOmpExecutableSources(params: {
     params.sharedWorkspace,
     reader,
     issues,
+    params.phase,
   );
   observeConfiguredModuleSelectors(params.processEnv, issues);
   if (authority === null) {
@@ -669,7 +680,9 @@ export function checkOmpExecutableSources(params: {
         ["plugins"],
       ] as const
     ) {
-      const observe = components[1] === "plugins" ? observePluginRoot : observeCustomToolRoot;
+      const observe = components[components.length - 1] === "plugins"
+        ? observePluginRoot
+        : observeCustomToolRoot;
       const entry = observe(workspace, components, reader, issues);
       if (entry !== null) entries.push(entry);
     }
