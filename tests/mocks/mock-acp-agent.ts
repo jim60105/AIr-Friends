@@ -52,6 +52,61 @@
 //                                  notification (registry-refresh shape)
 //                                  before end_turn, and advances the recorded
 //                                  catalog state.
+//   MOCK_SKILL_CALLS_FILE        - path to a JSON file holding an ordered array
+//                                  of scripted skill-invocation steps, consumed
+//                                  ONE PER session/prompt (prompt #N consumes
+//                                  step #N; exhausted arrays stay silent):
+//                                    {
+//                                      stagePayload?: { file, content },
+//                                      invocations?: [
+//                                        { script: abs path/URL of the REAL
+//                                          skills/<name>/scripts/<name>.ts,
+//                                          argv?: literal CLI args,
+//                                          cwd?: spawn cwd,
+//                                          env?: per-invocation overrides },
+//                                        ... // run SEQUENTIALLY, one record each
+//                                      ],
+//                                    }
+//                                  Token expansion happens FIRST (fixture
+//                                  placeholders resolved against material the
+//                                  bot process already wrote BEFORE the first
+//                                  prompt — per-spawn: {jwtDir}/{sessionId}.jwt
+//                                  (sub-claimable without verification), or
+//                                  the lease's {jwtDir}/active.json):
+//                                    @SESSION_ID   Skill API session id
+//                                    @STAGING_DIR  pointer staging path, or
+//                                                  the JWT session's workspace
+//                                                  tmp under jwtDir's parent
+//                                  — so argv can carry the LITERAL pair the
+//                                  suite asserts on, with no pre-knowledge of
+//                                  the fresh registration id and no polling.
+//                                  The mock writes the staged payload file at
+//                                  the ABSOLUTE path with its own fs access
+//                                  (standing in for "the agent wrote the file"
+//                                  — the write-authorization decision under
+//                                  test is the client-side gate, never
+//                                  simulated enforcement here), then spawns the
+//                                  REAL skill script(s) via `deno run`, AWAITING
+//                                  each exit (event-signaled, no polling), then
+//                                  emits a `mock_skill_call_done` session/update
+//                                  notification (with every exit code) before
+//                                  end_turn.
+//   MOCK_SKILL_ENV_FILE          - path to a JSON file with the base env for
+//                                  skill-script spawns (SKILL_API_URL,
+//                                  SKILL_JWT_DIR, SESSION_ID /
+//                                  SKILL_SHARED_PROCESS, PATH, HOME); per-step
+//                                  `env` overrides win. Spawned with clearEnv,
+//                                  so ONLY this map (+overrides) reaches the
+//                                  script — never the mock's own full env.
+//   MOCK_SKILL_RECORD_FILE       - path to a JSONL file; every invocation of
+//                                  every consumed step is appended as
+//                                  {gen,seq,script,argv,cwd,code,stdout,stderr}
+//                                  BEFORE the prompt responds,
+//                                  so a resolved processMessage implies the
+//                                  whole skill-call record is flushed.
+//                                  A spawned script's exit code is recorded as
+//                                  data (client-side rejection composition),
+//                                  never swallowed.
 
 const PROMPT_DELAY_MS = parseInt(Deno.env.get("MOCK_PROMPT_DELAY_MS") ?? "12000", 10);
 
@@ -209,6 +264,229 @@ function buildOmpCatalog(kind: OmpCatalogKind, state: MockState): Record<string,
 let rpcRecordSeq = 0;
 /** Monotonic per-process session counter (independent of RPC recording). */
 let sessionSeq = 0;
+/** Number of scripted skill-invocation steps consumed so far (per process). */
+let skillStepSeq = 0;
+
+// ---------------------------------------------------------------------------
+// Scripted skill invocation (finish-omp-mocked-skill-handoff; opt-in via
+// MOCK_SKILL_CALLS_FILE only — the shipped OpenCode behavior above is
+// byte-unchanged when unset). The mock plays the AGENT side: it writes the
+// staged payload at the absolute path with its own fs access (a fixture
+// stand-in for the agent's write — NOT a claim that any client gate or native
+// tool authorized it) and spawns the REAL skill script, awaiting its exit as
+// the completion event (no polling, no sleep).
+// ---------------------------------------------------------------------------
+
+/** One REAL skill-script invocation inside a scripted step. */
+interface MockSkillInvocation {
+  script: string;
+  argv?: string[];
+  cwd?: string;
+  env?: Record<string, string>;
+}
+
+interface MockSkillPayloadFile {
+  file: string;
+  content: string;
+}
+
+interface MockSkillCallStep {
+  /** One payload file, or several (a step whose invocations consume multiple
+   * staged payloads lists them; all land before any invocation spawns). */
+  stagePayload?: MockSkillPayloadFile | MockSkillPayloadFile[];
+  invocations?: MockSkillInvocation[];
+}
+
+/** Fixture identity/staging placeholders + their resolution context. */
+interface SkillFixtureContext {
+  sessionId: string;
+  stagingDir: string;
+}
+
+/**
+ * Resolve @SESSION_ID / @STAGING_DIR from identity material the bot process
+ * writes BEFORE its first session/prompt (documented ordering: per-spawn JWT
+ * issuance and the pool's lease pointer both precede the prompt). READ-ONLY
+ * over production-owned files (never claims or empties them):
+ *  - pooled tier: {SKILL_JWT_DIR}/active.json (sessionId + staging tmp root;
+ *    the staging literal is `{staging}/{sessionId}`, matching the shipped
+ *    payload-base composition);
+ *  - per-spawn tier: the unique {sessionId}.jwt filename (frozen-identity
+ *    shape writes exactly one per harness run); the workspace tmp root comes
+ *    from MOCK_STAGING_BASE when set, else from the spawn cwd (the shipped
+ *    factory launches the agent process AT the session workspace root, so
+ *    `{cwd}/tmp` is the workspace tmp root the prompt renders).
+ * Returns undefined when neither source is available yet — a token-bearing
+ * step then records an explicit failure instead of spawning unexpanded.
+ */
+function resolveSkillFixtureContext(): SkillFixtureContext | undefined {
+  const jwtDir = Deno.env.get("SKILL_JWT_DIR");
+  if (!jwtDir) return undefined;
+  try {
+    const pointer = JSON.parse(Deno.readTextFileSync(`${jwtDir}/active.json`)) as {
+      sessionId?: string;
+      staging?: string;
+    };
+    if (typeof pointer.sessionId === "string" && pointer.sessionId.length > 0) {
+      const root = typeof pointer.staging === "string" && pointer.staging.length > 0
+        ? pointer.staging
+        : Deno.env.get("MOCK_STAGING_BASE");
+      if (root) return { sessionId: pointer.sessionId, stagingDir: `${root}/${pointer.sessionId}` };
+    }
+  } catch {
+    // pointer absent/empty: per-spawn tier below
+  }
+  try {
+    const base = Deno.env.get("MOCK_STAGING_BASE") ?? `${Deno.cwd()}/tmp`;
+    const jwtNames = [...Deno.readDirSync(jwtDir)]
+      .filter((e) => e.name.endsWith(".jwt"))
+      .map((e) => e.name);
+    if (jwtNames.length !== 1) return undefined;
+    const sessionId = jwtNames[0].slice(0, -".jwt".length);
+    return { sessionId, stagingDir: `${base}/${sessionId}` };
+  } catch {
+    return undefined;
+  }
+}
+
+/** Substitute fixture placeholders across every step string field. */
+function expandSkillTokens(value: string, ctx: SkillFixtureContext): string {
+  return value.replaceAll("@SESSION_ID", ctx.sessionId).replaceAll("@STAGING_DIR", ctx.stagingDir);
+}
+
+function appendSkillRecord(target: string, line: Record<string, unknown>): void {
+  Deno.mkdirSync(target.slice(0, target.lastIndexOf("/")), { recursive: true });
+  Deno.writeTextFileSync(target, JSON.stringify(line) + "\n", { create: true, append: true });
+}
+
+/**
+ * Run this prompt's scripted step (if any): stage files, then spawn every
+ * scripted invocation of the step IN ORDER (each awaited to exit, each
+ * recorded to the record file). One completion notification per prompt that
+ * spawned at least one invocation carries the per-invocation exit codes.
+ * Returns the number of invocations spawned (0 when the step is silent or
+ * no step exists for this prompt).
+ */
+async function runSkillCallStep(acpSessionId: string): Promise<number> {
+  const callsTarget = Deno.env.get("MOCK_SKILL_CALLS_FILE");
+  if (!callsTarget) return 0;
+  let steps: MockSkillCallStep[] = [];
+  try {
+    const parsed = JSON.parse(Deno.readTextFileSync(callsTarget));
+    if (Array.isArray(parsed)) steps = parsed as MockSkillCallStep[];
+  } catch {
+    return 0;
+  }
+  const index = skillStepSeq;
+  if (index >= steps.length) return 0;
+  skillStepSeq += 1;
+  let step = steps[index];
+
+  const invocations = step.invocations ?? [];
+  const tokenized = JSON.stringify(step).includes("@SESSION_ID") ||
+    JSON.stringify(step).includes("@STAGING_DIR");
+  if (tokenized) {
+    const ctx = resolveSkillFixtureContext();
+    if (ctx) {
+      step = JSON.parse(expandSkillTokens(JSON.stringify(step), ctx)) as MockSkillCallStep;
+    } else if (invocations.length > 0) {
+      // A token-bearing step cannot run without its identity context: record
+      // the explicit failure instead of spawning with an unexpanded token.
+      const recordTarget = Deno.env.get("MOCK_SKILL_RECORD_FILE");
+      if (recordTarget) {
+        for (const invocation of invocations) {
+          appendSkillRecord(recordTarget, {
+            gen: MOCK_CONNECTION_GEN,
+            seq: index + 1,
+            script: invocation.script,
+            argv: invocation.argv ?? [],
+            cwd: invocation.cwd ?? Deno.cwd(),
+            code: 112,
+            stdout: "",
+            stderr: "skill fixture context unavailable (no JWT/pointer material yet)",
+          });
+        }
+      }
+      return 0;
+    }
+  }
+
+  const staged = step.stagePayload === undefined
+    ? []
+    : Array.isArray(step.stagePayload)
+    ? step.stagePayload
+    : [step.stagePayload];
+  for (const payload of staged) {
+    Deno.mkdirSync(payload.file.slice(0, payload.file.lastIndexOf("/")), { recursive: true });
+    Deno.writeTextFileSync(payload.file, payload.content);
+  }
+
+  const spawn: MockSkillInvocation[] = step.invocations ?? [];
+  if (spawn.length === 0) {
+    // Explicit silent step (or stage-only step): consumed its slot, spawned
+    // nothing, NO completion notification (one exists only for an actual
+    // spawned skill call).
+    return 0;
+  }
+
+  let baseEnv: Record<string, string> = {};
+  const envTarget = Deno.env.get("MOCK_SKILL_ENV_FILE");
+  if (envTarget) {
+    try {
+      baseEnv = JSON.parse(Deno.readTextFileSync(envTarget)) as Record<string, string>;
+    } catch {
+      baseEnv = {};
+    }
+  }
+  const recordTarget = Deno.env.get("MOCK_SKILL_RECORD_FILE");
+  const codes: number[] = [];
+  for (const invocation of spawn) {
+    const env = { ...baseEnv, ...(invocation.env ?? {}) };
+    const run = await new Deno.Command(Deno.execPath(), {
+      args: [
+        "run",
+        "--no-check",
+        "--allow-net",
+        "--allow-env",
+        "--allow-read",
+        "--allow-write",
+        invocation.script,
+        ...(invocation.argv ?? []),
+      ],
+      cwd: invocation.cwd ?? Deno.cwd(),
+      env,
+      clearEnv: true,
+    }).output();
+    codes.push(run.code);
+    if (recordTarget) {
+      appendSkillRecord(recordTarget, {
+        gen: MOCK_CONNECTION_GEN,
+        seq: index + 1,
+        script: invocation.script,
+        argv: invocation.argv ?? [],
+        cwd: invocation.cwd ?? Deno.cwd(),
+        code: run.code,
+        stdout: new TextDecoder().decode(run.stdout),
+        stderr: new TextDecoder().decode(run.stderr),
+      });
+    }
+  }
+
+  const notification = JSON.stringify({
+    jsonrpc: "2.0",
+    method: "session/update",
+    params: {
+      sessionId: acpSessionId,
+      update: {
+        sessionUpdate: "mock_skill_call_done",
+        seq: index + 1,
+        exitCodes: codes,
+      },
+    },
+  }) + "\n";
+  Deno.stdout.writeSync(new TextEncoder().encode(notification));
+  return spawn.length;
+}
 
 function recordRpc(method: string, params: unknown): void {
   const target = Deno.env.get("MOCK_OMP_RECORD_RPC");
@@ -292,6 +570,12 @@ async function handlePrompt(
     // Unreachable: SIGKILL is already queued; the loop dies before responding.
     await new Promise<never>(() => {});
   }
+
+  // Scripted skill invocation (opt-in; silent when MOCK_SKILL_CALLS_FILE is
+  // unset): stage → spawn the REAL skill script → await its exit → record →
+  // notify — all BEFORE this prompt responds, so a resolved processMessage
+  // implies the whole skill-call record is flushed.
+  await runSkillCallStep(acpSessionId);
 
   if (PROMPT_DELAY_MS > 0) {
     await new Promise((resolve) => setTimeout(resolve, PROMPT_DELAY_MS));
