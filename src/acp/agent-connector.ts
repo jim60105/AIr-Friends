@@ -256,7 +256,14 @@ export class AgentConnector {
       ...(this.options.agentConfig.env?.["AGENT_WORKSPACE"] !== undefined
         ? { sharedWorkspace: this.options.agentConfig.env["AGENT_WORKSPACE"] }
         : {}),
-      roots: { ownedHome: plan.ownedHome, agentDir: plan.agentDir },
+      roots: {
+        ownedHome: plan.ownedHome,
+        agentDir: plan.agentDir,
+        // The plan's neutral launch cwd is the designed spawn-location identity
+        // (inside the mode namespace by row-9 layout); the `connect()` seam
+        // observes exactly it and must not be rejected as owned-state aliasing.
+        launchCwd: plan.launchCwd,
+      },
       processEnv: this.options.agentConfig.env ?? {},
     });
   }

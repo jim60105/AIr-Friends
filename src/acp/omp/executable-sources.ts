@@ -557,6 +557,15 @@ function observeConfiguredModuleSelectors(
 export interface ExecutableOwnedRoots {
   readonly ownedHome: string;
   readonly agentDir: string;
+  /**
+   * The plan's neutral, deployment-owned launch cwd (row 9's mode-distinct
+   * cwd). It lives INSIDE the mode namespace BY DESIGN, so `connect()`'s
+   * pre-spawn check (which observes this exact directory) admits it as an
+   * exact identity; its executable discovery shapes are still observed and
+   * fail closed. Any OTHER workspace inside the namespace is aliasing into
+   * owned settings state and stays rejected.
+   */
+  readonly launchCwd?: string;
 }
 
 /** Workspace authority: the actual session workspace (+ optional shared Agent
@@ -607,16 +616,22 @@ function deriveWorkspaceAuthority(
     }
     // Preflight (connector seam): the ACTUAL user workspace must never alias
     // into the owned settings state — an identity inside an owned root is a
-    // foreign admission attempt. Extension load: the authority IS the owned,
-    // neutral launch cwd (row 9's mode-distinct cwd under the namespace), so
-    // containment in the namespace is the production posture; its executable
-    // discovery shapes are still observed and fail closed below, and the
-    // global routes get their own explicit check.
+    // foreign admission attempt — with the sole designed exception of the
+    // plan's OWN neutral launch cwd (the `connect()` seam observes exactly
+    // that directory; its executable shapes are still scanned fail-closed
+    // below). Extension load: the authority IS the owned, neutral launch cwd
+    // (row 9's mode-distinct cwd under the namespace), so containment in the
+    // namespace is the production posture; its executable discovery shapes
+    // are still observed and fail closed below, and the global routes get
+    // their own explicit check.
     if (phase === "preflight") {
-      for (const owned of [roots.ownedHome, roots.agentDir]) {
-        if (identity === owned || identity.startsWith(owned.replace(/\/+$/, "") + "/")) {
-          issues.push(issue(surface, "unknown_entry_shape", `${label} inside owned state root`));
-          return null;
+      const neutral = roots.launchCwd !== undefined ? resolve(roots.launchCwd) : undefined;
+      if (identity !== neutral) {
+        for (const owned of [roots.ownedHome, roots.agentDir]) {
+          if (identity === owned || identity.startsWith(owned.replace(/\/+$/, "") + "/")) {
+            issues.push(issue(surface, "unknown_entry_shape", `${label} inside owned state root`));
+            return null;
+          }
         }
       }
     }
