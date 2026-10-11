@@ -515,10 +515,12 @@ export function getRetryPromptStrategy(
   );
 
   switch (type) {
-    case "opencode": {
+    case "opencode":
+    case "omp": {
       // Append the session's recent permission-rejection reasons (diagnostic data,
       // not instructions) so the Agent can self-correct instead of guessing why its
-      // actions were blocked. Omitted entirely (byte-identical) when none recorded.
+      // actions were blocked. Omitted entirely (byte-identical) when none recorded
+      // — OMP callers pass none today, so its guidance is the plain message.
       const rejectionSection = formatPermissionRejections(rejections ?? []);
       const retryPromptMessage = rejectionSection.length > 0
         ? `${defaultRetryMessage}\n\n` +
