@@ -48,6 +48,17 @@ export const MAX_EXECUTABLE_REJECTION_DETAILS = 8;
 /** Max entries inspected per directory and levels descended before fail-closed. */
 const MAX_ENTRIES_PER_DIRECTORY = 64;
 const MAX_DESCENT_DEPTH = 3;
+/** Byte ceiling for a manifest read before fail-closed (bounded inspection). */
+const MAX_MANIFEST_BYTES = 64 * 1024;
+
+/** Names a bounded manifest read may allocate before failing closed. */
+function boundedManifestText(path: string, reader: ExecutableSourceMetadataReader): string {
+  const text = reader.readFile(path);
+  if (text.length > MAX_MANIFEST_BYTES) {
+    throw new Error(`manifest exceeds ${MAX_MANIFEST_BYTES} bytes`);
+  }
+  return text;
+}
 
 /** Module suffixes the pinned custom-tool loader recognizes as importable. */
 const CUSTOM_TOOL_SUFFIXES = [".ts", ".js", ".mjs", ".cjs"] as const;
@@ -110,8 +121,9 @@ export class ExecutableSourceRejectionError extends Error {
 
 /**
  * Sync metadata reader seam (tests inject failing readers; production uses the
- * synchronous Deno fs APIs). Inspection NEVER follows a link: `kind` lstats and
- * `exists` distinguishes broken links from plain absence via lstat.
+ * host-appropriate synchronous fs APIs). Inspection NEVER follows a link:
+ * `kind` lstats and `exists` distinguishes broken links from plain absence
+ * via lstat.
  */
 export interface ExecutableSourceMetadataReader {
   /** Directory names or null when the directory is absent; throws on IO failure. */
@@ -154,34 +166,120 @@ export interface ExecutableObservationForGuard {
   resourceGeneration: string;
 }
 
+/**
+ * Dual-runtime metadata backend (Duck B4). The packaged extension is loaded
+ * by OMP's EMBEDDED runtime — an open, user-owned UNVERIFIED question
+ * (`docs/OMP_PACKAGING.md` §5: the `deno.json` import-map load path); the
+ * packaging boundary simultaneously allows ONLY `@std/*` externals in the
+ * closure (`scripts/omp/bundle-extension.ts`), so a static `node:fs` import
+ * is build-fail-closed and a Deno-only reader is host-risk. Resolution
+ * therefore rides the same runtime-global dispatch the extension already
+ * uses for env/cwd (`typeof Deno`/`typeof process`, bootstrap.ts): a host
+ * `require` of `node:fs` (Bun and Deno's node-compat both expose one) takes
+ * precedence; the Deno sync namespace is the fallback; a host exposing
+ * NEITHER gets a reader that throws on every call, which the observer
+ * records as `inaccessible_path` — fail-closed, never silently clean. No
+ * new static external enters the closure either way.
+ */
+interface NodeFsSyncModule {
+  lstatSync(path: string): {
+    isSymbolicLink(): boolean;
+    isDirectory(): boolean;
+    isFile(): boolean;
+  };
+  readdirSync(path: string, options: { withFileTypes: true }): { name: string }[];
+  readFileSync(path: string, options: { encoding: "utf8" }): string;
+  realpathSync(path: string): string;
+}
+
+function loadNodeFsSync(): NodeFsSyncModule | null {
+  const req = (globalThis as { require?: (id: string) => unknown }).require;
+  if (typeof req !== "function") return null;
+  try {
+    const mod = req("node:fs") as Partial<NodeFsSyncModule> | null;
+    if (
+      mod !== null && typeof mod.lstatSync === "function" &&
+      typeof mod.readdirSync === "function" && typeof mod.readFileSync === "function" &&
+      typeof mod.realpathSync === "function"
+    ) {
+      return mod as NodeFsSyncModule;
+    }
+  } catch {
+    // Host require exists but cannot resolve node:fs: fall to the Deno face.
+  }
+  return null;
+}
+
 function defaultReader(): ExecutableSourceMetadataReader {
+  const nodeFs = loadNodeFsSync();
+  const denoHost = typeof Deno !== "undefined" && typeof Deno.lstatSync === "function"
+    ? Deno
+    : null;
+  if (nodeFs === null && denoHost === null) {
+    // No synchronous metadata surface in this host: every observation
+    // throws and is recorded fail-closed as inaccessible_path.
+    const unavailable = (): never => {
+      throw new Error("host runtime exposes no synchronous filesystem metadata surface");
+    };
+    return {
+      readDirectory: unavailable,
+      kind: unavailable,
+      readFile: unavailable,
+      identity: unavailable,
+      parentIsCanonical: () => false,
+    };
+  }
   return {
     readDirectory(path) {
+      // Stop after one entry past the cap (Duck non-blocking: never collect a
+      // whole oversized listing before rejecting).
       const names: string[] = [];
-      for (const entry of Deno.readDirSync(path)) names.push(entry.name);
+      if (nodeFs !== null) {
+        for (const entry of nodeFs.readdirSync(path, { withFileTypes: true })) {
+          names.push(entry.name);
+          if (names.length > MAX_ENTRIES_PER_DIRECTORY) return names;
+        }
+      } else {
+        for (const entry of denoHost!.readDirSync(path)) {
+          names.push(entry.name);
+          if (names.length > MAX_ENTRIES_PER_DIRECTORY) return names;
+        }
+      }
       return names.sort();
     },
     kind(path) {
       try {
-        const info = Deno.lstatSync(path);
+        if (nodeFs !== null) {
+          // Node `Stats` shape: lstat never follows the link, so a link
+          // reports isSymbolicLink() whether or not its target exists.
+          const info = nodeFs.lstatSync(path);
+          if (info.isSymbolicLink()) return "link"; // includes broken links
+          if (info.isDirectory()) return "dir";
+          if (info.isFile()) return "file";
+          return "other";
+        }
+        const info = denoHost!.lstatSync(path);
         if (info.isSymlink) return "link"; // includes broken links
         if (info.isDirectory) return "dir";
         if (info.isFile) return "file";
         return "other";
       } catch (error) {
-        if (error instanceof Deno.errors.NotFound) return "missing";
+        const missing = nodeFs !== null
+          ? (error as { code?: string }).code === "ENOENT"
+          : error instanceof Deno.errors.NotFound;
+        if (missing) return "missing";
         throw error;
       }
     },
-    readFile(path) {
-      return Deno.readTextFileSync(path);
-    },
-    identity(path) {
-      return Deno.realPathSync(path);
-    },
+    readFile: (path) =>
+      nodeFs !== null
+        ? nodeFs.readFileSync(path, { encoding: "utf8" })
+        : denoHost!.readTextFileSync(path),
+    identity: (path) => nodeFs !== null ? nodeFs.realpathSync(path) : denoHost!.realPathSync(path),
     parentIsCanonical(parent) {
       try {
-        return Deno.realPathSync(parent) === resolve(parent);
+        const real = nodeFs !== null ? nodeFs.realpathSync(parent) : denoHost!.realPathSync(parent);
+        return real === resolve(parent);
       } catch {
         return false;
       }
@@ -269,8 +367,9 @@ function hasToolSuffix(name: string): boolean {
 }
 
 /**
- * Recursively observe one custom-tool discovery root (`<ws>/.omp/tools` or
- * `<ws>/tools`). The pinned route enumerates these roots (including package/
+ * Recursively observe one custom-tool discovery root (`<ws>/.omp/tools`,
+ * `<ws>/tools`, or the foreign-provider `<ws>/.claude/tools` route). The
+ * pinned route enumerates these roots (including package/
  * index forms) and imports every module found before factory inspection, so
  * any importable suffix, package manifest or unknown shape under the root —
  * at any bounded depth — is fail-closed. Only provably inert non-module files
@@ -306,14 +405,9 @@ function observeToolTree(
       continue;
     }
     if (name === "package.json") {
-      // A custom-tool package form is importable via its declared entry; when
-      // the declaration cannot even be read, importability is unknown.
-      try {
-        JSON.parse(reader.readFile(path));
-      } catch {
-        issues.push(issue(surface, "unreadable_package_manifest", path));
-        continue;
-      }
+      // A custom-tool package form is importable via its declared entry; a
+      // manifest's mere presence inside a tool root determines rejection, so
+      // its content is NEVER read (bounded, content-free contract).
       issues.push(issue(surface, "executable_entry_found", path));
       continue;
     }
@@ -392,6 +486,12 @@ function observePluginRoot(
     const index = CUSTOM_TOOL_SUFFIXES.map((suffix) => `${child}/index${suffix}`)
       .find((candidate) => {
         const candidateKind = kindOf(candidate, surface, reader, issues);
+        if (candidateKind === "other") {
+          // A special file at an index candidate position has unknown
+          // importability (fail-closed): never recorded inert.
+          issues.push(issue(surface, "unknown_entry_shape", candidate));
+          return false;
+        }
         return candidateKind === "file" || candidateKind === "link";
       });
     if (index !== undefined) {
@@ -406,7 +506,7 @@ function observePluginRoot(
     if (manifestKind === "file") {
       let declaresEntry = false;
       try {
-        const manifest = JSON.parse(reader.readFile(`${child}/package.json`)) as {
+        const manifest = JSON.parse(boundedManifestText(`${child}/package.json`, reader)) as {
           main?: unknown;
           module?: unknown;
           exports?: unknown;
@@ -447,10 +547,12 @@ function observeLinkedDependencies(
   const manifestKind = kindOf(manifestPath, surface, reader, issues);
   if (manifestKind === "link") {
     issues.push(issue(surface, "symlinked_discovery_candidate", manifestPath));
+    // Rejection decided; node_modules below cannot add actionable detail.
+    return;
   } else if (manifestKind === "file") {
     let manifest: Record<string, unknown>;
     try {
-      manifest = JSON.parse(reader.readFile(manifestPath)) as Record<string, unknown>;
+      manifest = JSON.parse(boundedManifestText(manifestPath, reader)) as Record<string, unknown>;
     } catch {
       issues.push(issue(surface, "unknown_entry_shape", `${manifestPath} unparsable`));
       return;
@@ -466,13 +568,23 @@ function observeLinkedDependencies(
         }
       }
     }
+  } else if (manifestKind !== null && manifestKind !== "missing") {
+    // A directory or special file occupying the manifest position has unknown
+    // importability semantics (Duck B5): never silently clean.
+    issues.push(issue(surface, "unknown_entry_shape", manifestPath));
   }
   const modulesKind = kindOf(`${workspaceRoot}/node_modules`, surface, reader, issues);
   if (modulesKind === "link") {
     issues.push(issue(surface, "symlinked_discovery_candidate", `${workspaceRoot}/node_modules`));
     return;
   }
-  if (modulesKind !== "dir") return;
+  if (modulesKind === null) return; // IO failure recorded
+  if (modulesKind === "other") {
+    // A special file occupying the node_modules position: unknown importability.
+    issues.push(issue(surface, "unknown_entry_shape", `${workspaceRoot}/node_modules`));
+    return;
+  }
+  if (modulesKind !== "dir") return; // missing or plain file: nothing linked
   const names = listBounded(`${workspaceRoot}/node_modules`, surface, reader, issues);
   if (names === null) return;
   for (const name of names) {
@@ -482,6 +594,10 @@ function observeLinkedDependencies(
     if (childKind === null || childKind === "missing") continue;
     if (childKind === "link") {
       issues.push(issue(surface, "symlinked_discovery_candidate", path));
+      continue;
+    }
+    if (childKind === "other") {
+      issues.push(issue(surface, "unknown_entry_shape", path));
       continue;
     }
     if (name.startsWith("@") && childKind === "dir") {
@@ -494,6 +610,8 @@ function observeLinkedDependencies(
         if (scopedKind === null || scopedKind === "missing") continue;
         if (scopedKind === "link") {
           issues.push(issue(surface, "symlinked_discovery_candidate", scopedPath));
+        } else if (scopedKind === "other") {
+          issues.push(issue(surface, "unknown_entry_shape", scopedPath));
         }
       }
     }
@@ -501,9 +619,13 @@ function observeLinkedDependencies(
 }
 
 /**
- * Observe reachable global discovery routes under the owned state roots
- * (`<ownedHome>/.omp/tools`, `<agentDir>/tools`). The pinned route includes
- * agent-dir/home tools reachable from owned state/HOME, so ANYTHING present
+ * Observe reachable global discovery routes under the owned state roots:
+ * custom-tool routes (`<ownedHome>/.omp/tools`, `<agentDir>/tools`) plus the
+ * plugin routes the pinned plugin loader anchors at the user directory and
+ * the agent/home namespace (`<ownedHome>/.omp/plugins`, `<agentDir>/plugins`)
+ * (Duck B1: a populated global plugin install is an importable global tool
+ * supply even with both tools routes empty). The pinned route includes
+ * agent-dir/home routes reachable from owned state/HOME, so ANYTHING present
  * there — even owned or empty — cannot satisfy deployment exclusion for the
  * ambient/native surface and fails closed. Absent is clean.
  */
@@ -513,16 +635,22 @@ function observeGlobalRoutes(
   issues: ExecutableSourceIssue[],
 ): ExecutableObservationEntry[] {
   const entries: ExecutableObservationEntry[] = [];
-  for (const root of [`${roots.ownedHome}/.omp/tools`, `${roots.agentDir}/tools`]) {
-    const kind = kindOf(root, "native-custom-tool-discovery", reader, issues);
+  const globalRoutes: { root: string; surface: ExecutableRejectionSurface }[] = [
+    { root: `${roots.ownedHome}/.omp/tools`, surface: "native-custom-tool-discovery" },
+    { root: `${roots.agentDir}/tools`, surface: "native-custom-tool-discovery" },
+    { root: `${roots.ownedHome}/.omp/plugins`, surface: "plugin-entry-points" },
+    { root: `${roots.agentDir}/plugins`, surface: "plugin-entry-points" },
+  ];
+  for (const { root, surface } of globalRoutes) {
+    const kind = kindOf(root, surface, reader, issues);
     if (kind === null) continue; // failure already recorded
     if (kind === "missing") {
-      entries.push({ root, surface: "native-custom-tool-discovery", status: "absent" });
+      entries.push({ root, surface, status: "absent" });
       continue;
     }
     issues.push(
       issue(
-        "native-custom-tool-discovery",
+        surface,
         kind === "link" ? "symlinked_discovery_candidate" : "unknown_entry_shape",
         root,
       ),
@@ -666,6 +794,31 @@ export function checkOmpExecutableSources(params: {
 }): AcceptedExecutableObservation {
   const reader = params.reader ?? defaultReader();
   const issues: ExecutableSourceIssue[] = [];
+  // Owned-root authority (Duck B3): discovery-route interpolation of an
+  // empty/relative HOME or agent dir would scan filesystem-root-adjacent
+  // paths (`/.omp/tools`) and admit their absence as clean — a fake
+  // "authority". Both owned roots must be absolute, existing, non-link
+  // directories before any route is observed; otherwise fail closed.
+  for (
+    const [label, root] of [
+      ["owned home root", params.roots.ownedHome],
+      ["agent dir root", params.roots.agentDir],
+    ] as const
+  ) {
+    const surface: ExecutableRejectionSurface = "workspace-owned-dependencies";
+    if (root === "" || !root.startsWith("/")) {
+      issues.push(issue(surface, "missing_workspace_authority", `${label} unset or relative`));
+      continue;
+    }
+    const rootKind = kindOf(resolve(root), surface, reader, issues);
+    if (rootKind === "missing") {
+      issues.push(issue(surface, "missing_workspace_authority", `${label} absent`));
+    } else if (rootKind === "link") {
+      issues.push(issue(surface, "symlinked_discovery_candidate", `${label} is a link`));
+    } else if (rootKind !== "dir") {
+      issues.push(issue(surface, "missing_workspace_authority", `${label} not a directory`));
+    }
+  }
   const authority = deriveWorkspaceAuthority(
     params.roots,
     params.sessionCwd,
@@ -691,6 +844,11 @@ export function checkOmpExecutableSources(params: {
       const components of [
         [".omp", "tools"],
         ["tools"],
+        // Foreign-provider project route at the pin (Duck B1): the Claude
+        // discovery provider enumerates project `.claude/tools/*.ts|js`
+        // independently of the settings files row 26 already gates, so a
+        // clean settings posture cannot imply this route is empty.
+        [".claude", "tools"],
         [".omp", "plugins"],
         ["plugins"],
       ] as const

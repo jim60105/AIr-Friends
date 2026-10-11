@@ -92,9 +92,12 @@ export function bootstrapDiscoveryGuard(
   // Row 27: the pre-native startup check — restricted production identity
   // only (structural gate, row-16 pattern). The owned settings roots derive
   // from the owned launch env (HOME / PI_CODING_AGENT_DIR); the workspace
-  // authority is the launch cwd. A found executable module, broken link,
-  // missing authority, or IO failure throws fail-closed HERE — before the
-  // decision is even computed — and the repository never catches it to
+  // authority is the launch cwd. `checkOmpExecutableSources` validates both
+  // owned roots as absolute, existing, non-link directories first: absent or
+  // relative launch env is a missing authority, NEVER an empty route scanned
+  // under a filesystem-root interpolation. A found executable module, broken
+  // link, missing authority, or IO failure throws fail-closed HERE — before
+  // the decision is even computed — and the repository never catches it to
   // continue. Outside the restricted identity (dev imports, YOLO,
   // unidentified cwd) NO observation is taken: the guard's fail-closed
   // blockers stay, and the dev path's pinned fail-closed load posture is
@@ -104,7 +107,7 @@ export function bootstrapDiscoveryGuard(
     ? checkOmpExecutableSources({
       phase: "extension_load",
       sessionCwd: observedCwd ?? "",
-      roots: deriveOwnedRoots(launchEnv),
+      roots: deriveOwnedRoots(launchEnv, observedCwd),
       processEnv: launchEnv,
     })
     : undefined;
@@ -127,12 +130,20 @@ export function bootstrapDiscoveryGuard(
  * Owned settings-state roots as the extension's OWN process sees them: the
  * factory's child env is the only authority (HOME + exact PI_CODING_AGENT_DIR
  * under the mode namespace, row 26). An unowned/absent value is deliberately
- * kept as-is — the observer then fails closed at the authority check rather
- * than trusting an inferred path.
+ * kept as-is — the observer validates the roots and fails closed at the
+ * authority check rather than trusting an inferred path. The restricted
+ * launch cwd rides along so the observer's neutral-launch-cwd exception and
+ * workspace-authority binding use the plan's own identity (the structural
+ * `observeLaunchMode` gate already guarantees the cwd IS the mode namespace's
+ * `omp-agent/restricted/cwd`).
  */
-function deriveOwnedRoots(env: Record<string, string | undefined>): ExecutableOwnedRoots {
+function deriveOwnedRoots(
+  env: Record<string, string | undefined>,
+  launchCwd?: string,
+): ExecutableOwnedRoots {
   return {
     ownedHome: env.HOME ?? "",
     agentDir: env.PI_CODING_AGENT_DIR ?? "",
+    ...(launchCwd !== undefined ? { launchCwd } : {}),
   };
 }

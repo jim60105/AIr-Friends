@@ -219,9 +219,17 @@ function deepFreeze<T>(obj: T): T {
 export function computeDiscoveryDecision(input: DiscoveryDecisionInput): DiscoveryDecision {
   const blockers: DiscoveryBlocker[] = [];
   const excludedRoots: ExcludedRootRecord[] = [];
+  // Row 27 admission binding (Duck B2): the decision's OWN generation is
+  // resolved first so admission compares against the generation the record
+  // is stamped with — never an absent one. Admission additionally requires
+  // the observation to be bound to the EXACT launch cwd this decision
+  // evaluates: a clean observation for a different (even same-generation)
+  // workspace never admits, and an absent observedCwd fails closed.
+  const resourceGeneration = input.resourceGeneration ?? "gen-0";
   const executableAdmissionClean = input.executableObservation?.status === "absent-clean" &&
-    (input.executableObservation.resourceGeneration === undefined ||
-      input.executableObservation.resourceGeneration === input.resourceGeneration);
+    input.executableObservation.resourceGeneration === resourceGeneration &&
+    input.observedCwd !== undefined &&
+    input.executableObservation.sessionCwd === resolve(input.observedCwd);
 
   const expectedLaunchCwd = ompLaunchCwd(input.baseRoot, input.mode);
   const contractedModulePath = resolve(input.baseRoot, OMP_TRUSTED_EXTENSION_PATH);
@@ -360,7 +368,7 @@ export function computeDiscoveryDecision(input: DiscoveryDecisionInput): Discove
     trustedRoots,
     blockers,
     criticalSkills: input.criticalSkills ?? [],
-    resourceGeneration: input.resourceGeneration ?? "gen-0",
+    resourceGeneration,
     evaluatedAt: new Date().toISOString(),
     ...(input.executableObservation !== undefined
       ? { executableObservation: input.executableObservation }

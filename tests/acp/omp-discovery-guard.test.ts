@@ -372,9 +372,12 @@ Deno.test("Task 4.4: Fail-closed and honesty gate tests", () => {
 Deno.test("row 27: decision-1 deployment admission with a clean executable observation", () => {
   const baseRoot = "/opt/air";
   const mode = "restricted";
+  // Admission binds the observation to the EXACT workspace the decision
+  // evaluates (duck B2): the clean observation must name this decision's own
+  // launch cwd, never a foreign workspace path.
   const observation = {
     status: "absent-clean",
-    sessionCwd: "/tmp/ws",
+    sessionCwd: ompLaunchCwd(baseRoot, mode),
     resourceGeneration: "gen-42",
   } as const;
 
@@ -400,7 +403,8 @@ Deno.test("row 27: decision-1 deployment admission with a clean executable obser
   assertEquals(admitted.executableObservation, observation);
 
   // Stale/foreign generation NEVER reuses a previous clean result; a missing
-  // observation never manufactures admission.
+  // observation never manufactures admission; a same-generation observation
+  // for a DIFFERENT workspace never admits (workspace binding, duck B2).
   for (const stale of ["gen-7", undefined]) {
     const notAdmitted = computeDiscoveryDecision({
       baseRoot,
@@ -422,6 +426,32 @@ Deno.test("row 27: decision-1 deployment admission with a clean executable obser
       `stale=${stale}`,
     );
   }
+  const foreignWorkspace = computeDiscoveryDecision({
+    baseRoot,
+    mode,
+    observedCwd: ompLaunchCwd(baseRoot, mode),
+    resourceGeneration: "gen-42",
+    executableObservation: { ...observation, sessionCwd: "/srv/other-workspace" },
+  });
+  assertEquals(
+    foreignWorkspace.blockers.some((b) => b.surfaceId === "native-custom-tool-discovery"),
+    true,
+  );
+  assertEquals(
+    foreignWorkspace.blockers.some((b) => b.surfaceId === "plugin-entry-points"),
+    true,
+  );
+  // An absent observedCwd fails closed: no workspace identity, no admission.
+  const unbound = computeDiscoveryDecision({
+    baseRoot,
+    mode,
+    resourceGeneration: "gen-42",
+    executableObservation: observation,
+  });
+  assertEquals(
+    unbound.blockers.some((b) => b.surfaceId === "native-custom-tool-discovery"),
+    true,
+  );
 
   // Deployment authority checks stay unconditional fail-closed even with a
   // clean observation: cwd drift and module-selector env posture.
@@ -434,6 +464,12 @@ Deno.test("row 27: decision-1 deployment admission with a clean executable obser
   });
   assertEquals(
     drifted.blockers.some((b) => b.surfaceId === "workspace-owned-dependencies"),
+    true,
+  );
+  // The drifted decision also loses admission (observation bound elsewhere):
+  // the pinned native blockers stay.
+  assertEquals(
+    drifted.blockers.some((b) => b.surfaceId === "native-custom-tool-discovery"),
     true,
   );
   const polluted = computeDiscoveryDecision({

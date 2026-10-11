@@ -73,7 +73,13 @@ function check(
     phase: "preflight",
     sessionCwd: ws,
     ...(extra.sharedWorkspace !== undefined ? { sharedWorkspace: extra.sharedWorkspace } : {}),
-    roots: { ownedHome: plan.ownedHome, agentDir: plan.agentDir },
+    roots: {
+      ownedHome: plan.ownedHome,
+      agentDir: plan.agentDir,
+      // The plan's neutral launch cwd is the designed inside-namespace
+      // identity (row-9 layout); the connect()-seam posture admits exactly it.
+      launchCwd: plan.launchCwd,
+    },
     ...(extra.resourceGeneration !== undefined
       ? { resourceGeneration: extra.resourceGeneration }
       : {}),
@@ -269,6 +275,102 @@ Deno.test("observer - outside (global) discovery routes fail closed when present
   }
 });
 
+Deno.test("observer - global PLUGIN routes fail closed when present, clean when absent (duck B1)", async () => {
+  const f = await ownedFixture("native-yolo");
+  try {
+    check(f.workspace, f.plan); // absent plugin routes are the clean posture
+    await Deno.mkdir(`${f.plan.ownedHome}/.omp/plugins`, { recursive: true });
+    const error = expectRejection(() => check(f.workspace, f.plan));
+    assert(
+      categories(error).includes("plugin-entry-points/unknown_entry_shape"),
+      "a populated global plugin install is importable supply even with tools routes empty",
+    );
+    assertStringIncludes(error.message, `${f.plan.ownedHome}/.omp/plugins`);
+    await Deno.remove(`${f.plan.ownedHome}/.omp/plugins`, { recursive: true });
+    await Deno.mkdir(`${f.plan.agentDir}/plugins`, { recursive: true });
+    assert(
+      categories(expectRejection(() => check(f.workspace, f.plan)))
+        .includes("plugin-entry-points/unknown_entry_shape"),
+      "the agent-namespace plugin route is also observed",
+    );
+  } finally {
+    await f.cleanup();
+  }
+});
+
+Deno.test("observer - foreign-provider project route .claude/tools fails closed (duck B1)", async () => {
+  const f = await ownedFixture("restricted");
+  try {
+    check(f.workspace, f.plan); // absent .claude/tools is the clean posture
+    await Deno.mkdir(`${f.workspace}/.claude/tools`, { recursive: true });
+    await Deno.writeTextFile(`${f.workspace}/.claude/tools/ambient.ts`, "0");
+    const error = expectRejection(() => check(f.workspace, f.plan));
+    assert(
+      categories(error).includes("native-custom-tool-discovery/executable_entry_found"),
+      "project .claude/tools modules are loader-recognized importable entries",
+    );
+    assertStringIncludes(error.message, `${f.workspace}/.claude/tools/ambient.ts`);
+  } finally {
+    await f.cleanup();
+  }
+});
+
+Deno.test("observer - special-file ('other') entry kinds are never silently clean (duck B5)", async () => {
+  const f = await ownedFixture("restricted");
+  try {
+    // node_modules position occupied by a special file: unknown importability.
+    const otherAt = (target: string): ExecutableSourceMetadataReader => ({
+      ...defaultishReader(),
+      kind: (path) => (path === target ? "other" : defaultishReader().kind(path)),
+    });
+    const nodeModules = `${f.workspace}/node_modules`;
+    assert(
+      categories(
+        expectRejection(() => check(f.workspace, f.plan, { reader: otherAt(nodeModules) })),
+      )
+        .includes("workspace-owned-dependencies/unknown_entry_shape"),
+    );
+    // package.json position occupied by a directory: unknown semantics.
+    const manifestPath = `${f.workspace}/package.json`;
+    assert(
+      categories(
+        expectRejection(() => check(f.workspace, f.plan, { reader: otherAt(manifestPath) })),
+      )
+        .includes("workspace-owned-dependencies/unknown_entry_shape"),
+    );
+  } finally {
+    await f.cleanup();
+  }
+});
+
+Deno.test("observer - unset or relative owned roots are missing authority, never empty-route clean (duck B3)", async () => {
+  const f = await ownedFixture("restricted");
+  try {
+    for (
+      const roots of [
+        { ownedHome: "", agentDir: f.plan.agentDir, launchCwd: f.plan.launchCwd },
+        { ownedHome: f.plan.ownedHome, agentDir: "", launchCwd: f.plan.launchCwd },
+        { ownedHome: "relative/home", agentDir: f.plan.agentDir, launchCwd: f.plan.launchCwd },
+      ]
+    ) {
+      const error = expectRejection(() =>
+        checkOmpExecutableSources({
+          phase: "preflight",
+          sessionCwd: f.workspace,
+          roots,
+          processEnv: {},
+        })
+      );
+      assert(
+        categories(error).some((c) => c.endsWith("missing_workspace_authority")),
+        `interpolated filesystem-root routes must never admit: ${JSON.stringify(roots)}`,
+      );
+    }
+  } finally {
+    await f.cleanup();
+  }
+});
+
 Deno.test("observer - symlinked, broken, replaced, and unknown shapes reject", async () => {
   const f = await ownedFixture("restricted");
   try {
@@ -400,7 +502,10 @@ Deno.test("guard - clean observation admits decision 1 in both modes; stale gene
       const decision = computeDiscoveryDecision({
         baseRoot: f.baseRoot,
         mode,
-        observedCwd: f.plan.launchCwd,
+        // Admission binds the observation to the decision's own workspace
+        // (duck B2): this is the connector-seam posture — the decision
+        // evaluates exactly the workspace the observer just observed.
+        observedCwd: f.workspace,
         resourceGeneration: "gen-7",
         executableObservation: executableObservationForGuard(accepted),
       });
@@ -421,7 +526,7 @@ Deno.test("guard - clean observation admits decision 1 in both modes; stale gene
       const stale = computeDiscoveryDecision({
         baseRoot: f.baseRoot,
         mode,
-        observedCwd: f.plan.launchCwd,
+        observedCwd: f.workspace,
         resourceGeneration: "gen-8",
         executableObservation: executableObservationForGuard(accepted),
       });
