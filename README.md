@@ -204,6 +204,29 @@ The official container image includes:
 - Health check endpoint on port 8080
 - Default prompts at `/app/prompts` (can be overridden)
 
+## 🤝 ACP Agent Integration (OpenCode & OMP)
+
+Two agent types are supported: `opencode` (the default when unset) and `omp`.
+Select via `agent.defaultAgentType` in config or `AGENT_DEFAULT_TYPE` (also in
+`helm/values.yaml`); unknown values are rejected at config load. Configuration
+acceptance is distinct from launch availability — see
+[AGENTS.md](AGENTS.md#batch-configuration-documentation-consistency-audit).
+
+OMP runs in two deployment postures: **restricted** (deployment-owned settings
+overlay, trusted enforcement extension, native approval mode) and
+**native-YOLO** (operator-approved; carries the LSP disable without restricted
+denials). LSP is disabled in every agent and mode — OMP restricted and YOLO
+via owned settings + `--no-lsp`, OpenCode build and yolo via per-agent
+explicit denies. Details: [OMP Spawn & Modes](docs/OMP_SPAWN.md),
+[OMP Settings](docs/OMP_SETTINGS.md).
+
+Honest status: the batch proposals are approved and their implementation
+lands through the applied changes; all seven user dispositions are DECIDED.
+Pinned incompatible/unresolved compatibility verdicts are unchanged, and
+automated unit and mock evidence does **not** certify native runtime
+enforcement — runtime verification remains user-owned and unverified in the
+single consolidated checklist [docs/USER-RUNTIME-VERIFICATION.md](docs/USER-RUNTIME-VERIFICATION.md).
+
 ## 🛠️ Development
 
 See [Development Guide](docs/DEVELOPMENT.md) for complete setup instructions.

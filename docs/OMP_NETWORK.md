@@ -435,3 +435,5 @@ Section 15 checklist additions (user-owned, real deployment):
 10. Under the enforcing posture, confirm the proxy observes the
     `api.github.com` CONNECT and that a synthetic redirect `Location`
     pointing at a private address is never issued.
+
+> Runtime verification for this area is consolidated in the single checklist artifact [USER-RUNTIME-VERIFICATION.md](USER-RUNTIME-VERIFICATION.md) (section H: adapter/proxy mediation incl. binary/text fetch, redirects, private-target failures; the F14 residual and per-request-proxy candidate stay open there).

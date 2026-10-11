@@ -206,3 +206,5 @@ The following checklist contains runtime properties of the official compiled bin
       _Current Status:_ **UNVERIFIED**.
 - [ ] **OpenCode Regression:** Confirm existing OpenCode runtime behavior after restricted LSP removal and shared sink changes.\
       _Current Status:_ **UNVERIFIED**.
+
+> Runtime verification for this area is consolidated in the single checklist artifact [USER-RUNTIME-VERIFICATION.md](USER-RUNTIME-VERIFICATION.md) (sections A–I; the §15 checklist rows live there; pinned verdicts above stay unchanged).

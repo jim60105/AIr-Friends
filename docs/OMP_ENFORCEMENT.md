@@ -158,3 +158,5 @@ install (row 20):
 
 Related: [OMP_TOOL_POLICY.md](OMP_TOOL_POLICY.md) ·
 [AGENT_PERMISSIONS.md](AGENT_PERMISSIONS.md)
+
+> Runtime verification for this area is consolidated in the single checklist artifact [USER-RUNTIME-VERIFICATION.md](USER-RUNTIME-VERIFICATION.md) (section B); the numbered items above are expanded there as unverified runtime rows.

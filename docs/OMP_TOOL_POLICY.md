@@ -202,3 +202,5 @@ tests clear neither verdict; unit/mock evidence validates decision logic only.
 - [docs/OMP_SETTINGS.md](OMP_SETTINGS.md) — settings-layer contracts (row 8)
 - [docs/OMP_ENFORCEMENT.md](OMP_ENFORCEMENT.md) — handler wiring, composition/freshness/refresh/error tables, and the user-owned runtime checklist (row 16)
 - [openspec/specs/acp-integration/spec.md](../openspec/specs/acp-integration/spec.md)
+
+> Runtime verification for this area is consolidated in the single checklist artifact [USER-RUNTIME-VERIFICATION.md](USER-RUNTIME-VERIFICATION.md) (sections B/C: live-origin freshness, destructive permission shapes; allow-side mock observations stay synthetic-labeled there).
