@@ -31,6 +31,7 @@ import type { AuditPhase } from "../../src/types/audit.ts";
 import { join } from "@std/path";
 import type { ClientConfig } from "@acp/types.ts";
 import { createFilesystemTestCalls } from "./filesystem-test-calls.ts";
+import { observeOwnedSkills } from "@acp/omp/owned-skills.ts";
 
 function createRegisteredClient(
   registry: SkillRegistry,
@@ -64,32 +65,39 @@ function createOwnedSkillsClient(
   logger: Logger,
   config: ClientConfig,
   sessionId: string,
-): { client: ChatbotClient; instruction: string } {
+): { client: ChatbotClient; instruction: string; unseal: () => void } {
   const workspace = join(config.workingDir, "workspace");
   const skills = join(config.workingDir, "owned-skills");
-  const instruction = join(skills, "send-reply", "SKILL.md");
+  const instruction = join(skills, "review", "SKILL.md");
   Deno.mkdirSync(workspace);
-  Deno.mkdirSync(join(skills, "send-reply"), { recursive: true });
+  Deno.mkdirSync(join(skills, "review"), { recursive: true });
   Deno.writeTextFileSync(instruction, "owned");
+  Deno.chmodSync(instruction, 0o444);
+  // The producer admits only a canonical, link-free, read-only root, so the
+  // packaged owned tree is sealed the way the image ships it.
+  Deno.chmodSync(join(skills, "review"), 0o555);
+  Deno.chmodSync(skills, 0o555);
   const client = new ChatbotClient(registry, logger, { ...config, workingDir: workspace });
   // The provenance producer mints against the generation the client assigns at registration.
-  const generation = client.nextRegistrationGeneration();
+  const trusted = observeOwnedSkills(
+    { ownedSkillRoots: [skills] },
+    sessionId,
+    client.nextRegistrationGeneration(),
+    null,
+  )!;
   client.setSessionContext(sessionId, {
     cwd: workspace,
     shellSessionId: "skill-session",
-    trustedSkills: {
-      ownedRootPath: skills,
-      canonicalOwnedRootPath: skills,
-      source: "deployment_owned",
-      criticalSkills: [{
-        skillId: "send-reply",
-        canonicalInstructionPath: instruction,
-        source: "deployment_owned",
-        sessionGenerationId: generation,
-      }],
-    },
+    trustedSkills: trusted,
   });
-  return { client, instruction };
+  return {
+    client,
+    instruction,
+    unseal: () => {
+      Deno.chmodSync(join(skills, "review"), 0o755);
+      Deno.chmodSync(skills, 0o755);
+    },
+  };
 }
 
 // Create a minimal logger for testing
@@ -238,6 +246,7 @@ Deno.test("ChatbotClient - requestPermission rejects unknown skills", async () =
 
 Deno.test("ChatbotClient - requestPermission auto-approves skills directory read", async () => {
   const tempDir = Deno.makeTempDirSync();
+  let unseal: (() => void) | undefined;
   try {
     const skillRegistry = createTestSkillRegistry();
     const logger = createTestLogger();
@@ -249,12 +258,14 @@ Deno.test("ChatbotClient - requestPermission auto-approves skills directory read
       isDM: false,
     };
 
-    const { client, instruction } = createOwnedSkillsClient(
+    const owned = createOwnedSkillsClient(
       skillRegistry,
       logger,
       config,
       "test-session",
     );
+    const { client, instruction } = owned;
+    unseal = owned.unseal;
     const request: acp.RequestPermissionRequest = {
       sessionId: "test-session",
       toolCall: {
@@ -279,6 +290,8 @@ Deno.test("ChatbotClient - requestPermission auto-approves skills directory read
       assertEquals(response.outcome.optionId, "allow-1");
     }
   } finally {
+    // The owned tree is sealed read-only by the helper; restore writability to remove it.
+    unseal?.();
     Deno.removeSync(tempDir, { recursive: true });
   }
 });
@@ -3121,6 +3134,7 @@ Deno.test("Permission audit - edit/write rejection writes denied entry", async (
 
 Deno.test("Permission audit - skills directory access writes approved entry", async () => {
   const tempDir = Deno.makeTempDirSync();
+  let unseal: (() => void) | undefined;
   try {
     const skillRegistry = createTestSkillRegistry();
     const logger = createTestLogger();
@@ -3132,12 +3146,14 @@ Deno.test("Permission audit - skills directory access writes approved entry", as
       isDM: false,
     };
 
-    const { client, instruction } = createOwnedSkillsClient(
+    const owned = createOwnedSkillsClient(
       skillRegistry,
       logger,
       config,
       "sess-7",
     );
+    const { client, instruction } = owned;
+    unseal = owned.unseal;
     const auditConfig = createTestAuditConfig();
     const writer = new SessionAuditWriter(tempDir, "discord", "123", "sess-7", auditConfig);
     client.setAuditWriter(writer);
@@ -3176,6 +3192,7 @@ Deno.test("Permission audit - skills directory access writes approved entry", as
     assertEquals(entries[0].data.decision, "approved");
     assertEquals(entries[0].data.reason, "skills_directory_access");
   } finally {
+    unseal?.();
     Deno.removeSync(tempDir, { recursive: true });
   }
 });

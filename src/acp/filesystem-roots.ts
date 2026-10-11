@@ -10,11 +10,6 @@
  */
 
 import { isAbsolute, normalize, resolve, SEPARATOR } from "@std/path";
-import {
-  type CriticalSkillDecision,
-  type SkillCandidate,
-  validateCriticalSkillContract,
-} from "./omp/compatibility-contracts.ts";
 
 export type RootRole = "workspace" | "staging" | "shared" | "trusted-skills";
 
@@ -117,6 +112,7 @@ export interface CanonicalTarget {
 export interface TrustedSkillsRootConfig {
   readonly ownedRootPath: string;
   readonly source: "deployment_owned";
+  readonly rootIdentity?: ObservedIdentity;
 }
 
 export interface CriticalSkillReference {
@@ -124,6 +120,8 @@ export interface CriticalSkillReference {
   readonly canonicalInstructionPath: string;
   readonly sessionGenerationId: string;
   readonly source: "deployment_owned" | "workspace_project" | "symlink_escape";
+  readonly sessionId?: string;
+  readonly instructionIdentity?: ObservedIdentity;
 }
 
 export interface MetadataReader {
@@ -595,6 +593,25 @@ export async function canonicalizeSessionRoots(
       }
       const canonicalSkills = await reader.realPath(trustedSkills.ownedRootPath);
       const destInfo = await reader.lstat(canonicalSkills);
+      if (
+        // Row 28 review follow-up: an ABSENT identity proves nothing and is
+        // treated as a mismatch — the hardening is unconditional, matching
+        // the client gate's discipline.
+        !trustedSkills.rootIdentity ||
+        (
+          lstatSkills.isSymlink || canonicalSkills !== trustedSkills.ownedRootPath ||
+          destInfo.dev !== trustedSkills.rootIdentity.dev ||
+          destInfo.ino !== trustedSkills.rootIdentity.ino ||
+          destInfo.mode === null || (destInfo.mode & 0o022) !== 0 ||
+          ((destInfo.mode & 0o200) !== 0 && destInfo.uid !== 0)
+        )
+      ) {
+        return {
+          ok: false,
+          reason: "trusted_identity_mismatch",
+          message: "Owned skill root ownership changed",
+        };
+      }
       if (!destInfo.isDirectory) {
         return {
           ok: false,
@@ -836,7 +853,6 @@ export async function resolveFilesystemTarget(
   resolvedPath: ResolvedSessionPath,
   roots: CanonicalSessionRoots,
   expectation: TargetExpectation,
-  criticalRef?: CriticalSkillReference,
   reader: MetadataReader = defaultMetadataReader,
 ): Promise<RootPathResult<CanonicalTarget>> {
   if (resolvedPath.acpSessionId !== roots.acpSessionId) {
@@ -1082,72 +1098,6 @@ export async function resolveFilesystemTarget(
       message:
         `Target '${resolvedPath.normalizedPath}' failed containment under all candidate roots`,
     };
-  }
-
-  // Handle critical skill reference validation if supplied
-  if (criticalRef) {
-    if (criticalRef.sessionGenerationId !== roots.sessionContextGeneration) {
-      return {
-        ok: false,
-        reason: "trusted_identity_mismatch",
-        message:
-          `Critical skill session generation mismatch: candidate has '${criticalRef.sessionGenerationId}', session has '${roots.sessionContextGeneration}'`,
-      };
-    }
-
-    const skillsRoot = roots.roots.find((r) => r.role === "trusted-skills");
-    if (!skillsRoot) {
-      return {
-        ok: false,
-        reason: "trusted_identity_mismatch",
-        message:
-          `No trusted-skills root configured for session, cannot validate critical skill '${criticalRef.skillId}'`,
-      };
-    }
-
-    if (!admittedRoles.includes("trusted-skills")) {
-      return {
-        ok: false,
-        reason: "trusted_identity_mismatch",
-        message: `Target '${
-          primarySuccess!.canonicalTarget
-        }' does not possess 'trusted-skills' role`,
-      };
-    }
-
-    // Call P0's validateCriticalSkillContract
-    const candidate: SkillCandidate = {
-      skillId: criticalRef.skillId,
-      resolvedPath: resolvedPath.normalizedPath,
-      canonicalPath: primarySuccess!.canonicalTarget,
-      source: criticalRef.source,
-      sessionGenerationId: criticalRef.sessionGenerationId,
-    };
-
-    const decision: CriticalSkillDecision = validateCriticalSkillContract(
-      criticalRef.skillId,
-      candidate,
-      skillsRoot.canonicalPath,
-      roots.sessionContextGeneration,
-    );
-
-    if (!decision.authoritative) {
-      return {
-        ok: false,
-        reason: "trusted_identity_mismatch",
-        message: `Critical skill contract validation rejected: ${decision.reason}`,
-      };
-    }
-
-    if (primarySuccess!.canonicalTarget !== criticalRef.canonicalInstructionPath) {
-      return {
-        ok: false,
-        reason: "trusted_identity_mismatch",
-        message: `Canonical target '${
-          primarySuccess!.canonicalTarget
-        }' does not match expected instruction path '${criticalRef.canonicalInstructionPath}'`,
-      };
-    }
   }
 
   return {

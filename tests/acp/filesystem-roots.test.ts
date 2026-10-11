@@ -6,8 +6,8 @@ import { assertEquals, assertNotEquals } from "@std/assert";
 import { join, resolve } from "@std/path";
 import {
   canonicalizeSessionRoots,
-  type CriticalSkillReference,
   type MetadataReader,
+  type ObservedIdentity,
   resolveFilesystemTarget,
   resolveSessionPath,
   type RootPathResult,
@@ -540,7 +540,6 @@ Deno.test("Task 3.3: Symlink loops, inaccessible metadata and inconsistency", as
     resolvedPath,
     roots,
     "existing-file",
-    undefined,
     loopReader,
   );
   assertEquals(targetRes.ok, false);
@@ -583,7 +582,6 @@ Deno.test("Task 3.3: Symlink loops, inaccessible metadata and inconsistency", as
     resolvedTarget,
     roots2,
     "existing-file",
-    undefined,
     disappearingReader,
   );
   assertEquals(changedRes.ok, false);
@@ -608,91 +606,61 @@ Deno.test("Task 3.3: Critical skills contract validation, disjointness and rejec
       sessionContextGeneration: "gen-1",
     };
 
-    // 1. Root overlap check: if skills root is inside workspace, fail root construction
+    // 1. Root overlap check: if skills root is inside workspace, fail root
+    // construction. Row 28: the identity hardening is unconditional, so the
+    // fixture seals the stand-in owned tree and passes its real identity, the
+    // way the producer always does.
+    const identityOf = (path: string): ObservedIdentity => {
+      const info = Deno.statSync(path);
+      if (info.dev === null || info.ino === null) {
+        throw new Error("fixture identity unavailable");
+      }
+      return { dev: info.dev, ino: info.ino };
+    };
+    Deno.chmodSync(workspace, 0o555);
     const overlappingSkillsConfig: TrustedSkillsRootConfig = {
       ownedRootPath: workspace,
       source: "deployment_owned",
+      rootIdentity: identityOf(workspace),
     };
     const overlapRes = await canonicalizeSessionRoots(context, overlappingSkillsConfig);
+    Deno.chmodSync(workspace, 0o755);
     assertEquals(overlapRes.ok, false);
     if (!overlapRes.ok) {
       assertEquals(overlapRes.reason, "root_overlap");
     }
 
-    // 2. Disjoint trusted skills root succeeds
+    // 2. Disjoint trusted skills root succeeds with an attested identity
+    Deno.chmodSync(skillsRoot, 0o555);
     const trustedConfig: TrustedSkillsRootConfig = {
       ownedRootPath: skillsRoot,
       source: "deployment_owned",
+      rootIdentity: identityOf(skillsRoot),
     };
     const roots = unwrap(await canonicalizeSessionRoots(context, trustedConfig));
     const skillsRootInfo = roots.roots.find((r) => r.role === "trusted-skills")!;
     assertEquals(skillsRootInfo.readOnly, true);
 
-    // Create instruction file
-    const skillInstructionPath = join(skillsRoot, "memory", "SKILL.md");
-    await Deno.mkdir(join(skillsRoot, "memory"));
-    await Deno.writeTextFile(skillInstructionPath, "# Memory Skill");
-    const canonicalInstruction = await Deno.realPath(skillInstructionPath);
-
-    // Also create a same-name file in workspace to attempt workspace spoofing
-    const fakeSkillPath = join(workspace, "SKILL.md");
-    await Deno.writeTextFile(fakeSkillPath, "# Fake Skill");
-
-    // Valid critical reference
-    const validRef: CriticalSkillReference = {
-      skillId: "memory",
-      canonicalInstructionPath: canonicalInstruction,
-      sessionGenerationId: "gen-1",
+    // Row 28 review follow-up: the dead resolveFilesystemTarget criticalRef
+    // ladder is removed; the live client admission gate (identity/source/
+    // session/generation/canonical-path binding and workspace-spoof denial)
+    // is exercised end-to-end in tests/acp/filesystem-authorization.test.ts.
+    // An UNATTESTED root (no rootIdentity) now fails construction outright.
+    const unattestedRes = await canonicalizeSessionRoots(context, {
+      ownedRootPath: skillsRoot,
       source: "deployment_owned",
-    };
-
-    const resolvedInstruction = unwrap(
-      resolveSessionPath(skillInstructionPath, context),
-    );
-    const targetSuccess = unwrap(
-      await resolveFilesystemTarget(
-        resolvedInstruction,
-        roots,
-        "existing-file",
-        validRef,
-      ),
-    );
-    assertEquals(targetSuccess.roles, ["trusted-skills"]);
-    assertEquals(targetSuccess.canonicalTarget, canonicalInstruction);
-
-    // Mismatched generation
-    const staleRef: CriticalSkillReference = {
-      ...validRef,
-      sessionGenerationId: "stale-gen",
-    };
-    const staleRes = await resolveFilesystemTarget(
-      resolvedInstruction,
-      roots,
-      "existing-file",
-      staleRef,
-    );
-    assertEquals(staleRes.ok, false);
-    if (!staleRes.ok) {
-      assertEquals(staleRes.reason, "trusted_identity_mismatch");
-    }
-
-    // Workspace spoofing attempt: same-name file in workspace fails critical skill validation
-    const resolvedFake = unwrap(resolveSessionPath(fakeSkillPath, context));
-    const fakeRef: CriticalSkillReference = {
-      ...validRef,
-      source: "workspace_project",
-    };
-    const fakeRes = await resolveFilesystemTarget(
-      resolvedFake,
-      roots,
-      "existing-file",
-      fakeRef,
-    );
-    assertEquals(fakeRes.ok, false);
-    if (!fakeRes.ok) {
-      assertEquals(fakeRes.reason, "trusted_identity_mismatch");
+    });
+    assertEquals(unattestedRes.ok, false);
+    if (!unattestedRes.ok) {
+      assertEquals(unattestedRes.reason, "trusted_identity_mismatch");
     }
   } finally {
+    try {
+      Deno.chmodSync(join(tempDir, "skills-root"), 0o755);
+      Deno.chmodSync(join(tempDir, "workspace"), 0o755);
+    } catch {
+      // Already unsealed or gone.
+    }
     await Deno.remove(tempDir, { recursive: true });
   }
 });

@@ -188,7 +188,6 @@ export async function buildCommandGateRoots(
       },
       sessionRoots,
       "file-or-new",
-      undefined,
       reader,
     );
     if (!observed.ok) return observed;
@@ -278,7 +277,6 @@ async function argumentAllowed(
     path,
     roots.observationRoots,
     "existing-any",
-    undefined,
     reader,
   );
   if (!observed.ok && observed.reason === "not_found") {
@@ -286,7 +284,6 @@ async function argumentAllowed(
       path,
       roots.observationRoots,
       "file-or-new",
-      undefined,
       reader,
     );
   }

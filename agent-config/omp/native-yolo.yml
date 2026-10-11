@@ -4,6 +4,17 @@ tools:
   approvalMode: yolo
 lsp:
   enabled: false
+skills:
+  enabled: true
+  customDirectories:
+    - /opt/air/skills
+  enableCodexUser: false
+  enableClaudeUser: false
+  enableClaudeProject: false
+  enablePiUser: false
+  enablePiProject: false
+  enableAgentsUser: false
+  enableAgentsProject: false
 startup:
   checkUpdate: false
 marketplace:

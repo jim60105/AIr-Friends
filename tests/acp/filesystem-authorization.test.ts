@@ -5,6 +5,7 @@ import { ChatbotClient, type SessionGateContext } from "@acp/client.ts";
 import { AgentConnector } from "@acp/agent-connector.ts";
 import type { TrustedSkillsSource } from "@acp/filesystem-policy.ts";
 import type { CriticalSkillReference } from "@acp/filesystem-roots.ts";
+import { observeOwnedSkills } from "@acp/omp/owned-skills.ts";
 import { SkillRegistry } from "@skills/registry.ts";
 import { MemoryStore } from "@core/memory-store.ts";
 import { WorkspaceManager } from "@core/workspace-manager.ts";
@@ -28,7 +29,12 @@ interface FilesystemFixture {
   instruction: string;
   client: ChatbotClient;
   register: (context?: Partial<SessionGateContext>) => void;
-  mint: () => void;
+  /** Mint current-generation provenance through the actual row-28 producer. */
+  mint: () => TrustedSkillsSource;
+  /** Restore the sealed packaged-tree posture after tampering. */
+  seal: () => void;
+  /** Make the sealed owned tree writable for tampering or cleanup. */
+  unseal: () => void;
   trusted: TrustedSkillsSource;
   contentCalls: string[];
   reference: { -readonly [K in keyof CriticalSkillReference]: CriticalSkillReference[K] };
@@ -44,8 +50,27 @@ function fixture(beforeOpen?: (path: string) => void): FilesystemFixture {
   for (const path of [workspace, shared, staging, skills, sibling]) {
     Deno.mkdirSync(path, { recursive: true });
   }
-  const instruction = join(skills, "SKILL.md");
+  // The producer admits only a canonical, link-free, read-only root, so the fixture
+  // stands in for the packaged owned tree: the pinned instruction layout, sealed
+  // against the agent, with one ordinary owned helper outside the pinned set.
+  const instruction = join(skills, "review", "SKILL.md");
+  Deno.mkdirSync(join(skills, "review"), { recursive: true });
   Deno.writeTextFileSync(instruction, "owned instruction");
+  const helper = join(skills, "helper.ts");
+  Deno.writeTextFileSync(helper, "owned helper");
+  Deno.chmodSync(instruction, 0o444);
+  Deno.chmodSync(helper, 0o444);
+  // The producer and canonical-root observation reject any owner/group-writable
+  // owned object unless root-owned, so minting seals the packaged tree the way
+  // the image ships it; provenance tests unseal again for cleanup.
+  const seal = () => {
+    Deno.chmodSync(join(skills, "review"), 0o555);
+    Deno.chmodSync(skills, 0o555);
+  };
+  const unseal = () => {
+    Deno.chmodSync(join(skills, "review"), 0o755);
+    Deno.chmodSync(skills, 0o755);
+  };
   const logger = new Logger("test", { level: LogLevel.FATAL });
   const registry = new SkillRegistry(
     new MemoryStore(
@@ -85,23 +110,33 @@ function fixture(beforeOpen?: (path: string) => void): FilesystemFixture {
     client.setSessionContext("acp-1", { cwd: workspace, shellSessionId: "skill-1", ...context });
   };
   const reference: FilesystemFixture["reference"] = {
-    skillId: "send-reply",
-    canonicalInstructionPath: instruction,
+    skillId: "",
+    canonicalInstructionPath: "",
     sessionGenerationId: "",
     source: "deployment_owned",
   };
-  // Stands in for the deployment-owned trusted-provenance producer: binds the critical
-  // reference to the generation the client assigns at the next registration. The value is
-  // obtained from the client (never fabricated), so a fresh client instance — a reconnect —
-  // cannot admit it.
-  const mint = () => {
-    reference.sessionGenerationId = client.nextRegistrationGeneration();
-  };
   const trusted: TrustedSkillsSource = {
-    ownedRootPath: skills,
-    canonicalOwnedRootPath: skills,
+    ownedRootPath: "",
+    canonicalOwnedRootPath: "",
     source: "deployment_owned",
     criticalSkills: [reference],
+  };
+  // Stands in for the connector's registration-time mint: the actual producer observes
+  // the sealed tree and binds references to the generation the client assigns at the
+  // NEXT registration. The value is obtained from the client (never fabricated), so a
+  // fresh client instance — a reconnect — cannot admit it. The shared mutable copies
+  // let tests perturb exactly one provenance field at a time.
+  const mint = (): TrustedSkillsSource => {
+    seal();
+    const fresh = observeOwnedSkills(
+      { ownedSkillRoots: [skills] },
+      "acp-1",
+      client.nextRegistrationGeneration(),
+      null,
+    )!;
+    Object.assign(reference, fresh.criticalSkills[0]);
+    Object.assign(trusted, fresh, { criticalSkills: [reference] });
+    return trusted;
   };
   return {
     base,
@@ -113,6 +148,8 @@ function fixture(beforeOpen?: (path: string) => void): FilesystemFixture {
     instruction,
     client,
     register,
+    unseal,
+    seal,
     mint,
     trusted,
     contentCalls,
@@ -246,6 +283,7 @@ Deno.test("Destructive permission routing: complete ACP endpoints only; native p
     );
     assertEquals(Deno.readTextFileSync(f.instruction), "owned instruction");
   } finally {
+    f.unseal();
     Deno.removeSync(f.base, { recursive: true });
   }
 });
@@ -529,10 +567,8 @@ Deno.test("Trusted skills: root-wide reads require canonical current-generation 
   for (const mode of [false, true]) {
     const f = fixture();
     try {
-      f.mint();
-      f.register({ yolo: mode, trustedSkills: f.trusted });
+      f.register({ yolo: mode, trustedSkills: f.mint() });
       const script = join(f.skills, "helper.ts");
-      Deno.writeTextFileSync(script, "owned helper");
       assertEquals(
         (await f.client.readTextFile({ sessionId: "acp-1", path: script })).content,
         "owned helper",
@@ -557,6 +593,7 @@ Deno.test("Trusted skills: root-wide reads require canonical current-generation 
         () => f.client.readTextFile({ sessionId: "acp-1", path: script }),
       );
     } finally {
+      f.unseal();
       Deno.removeSync(f.base, { recursive: true });
     }
   }
@@ -590,6 +627,7 @@ Deno.test("Trusted skills: root-wide reads require canonical current-generation 
         optionId: "reject",
       });
     } finally {
+      f.unseal();
       Deno.removeSync(f.base, { recursive: true });
     }
   }
@@ -603,7 +641,9 @@ Deno.test("Trusted permission classification denies HOME copies, workspace names
     const copy = join(f.workspace, "SKILL.md");
     Deno.writeTextFileSync(copy, "unowned");
     const escape = join(f.skills, "escape.md");
+    f.unseal();
     Deno.symlinkSync(copy, escape);
+    f.seal();
     for (
       const path of [
         copy,
@@ -622,6 +662,7 @@ Deno.test("Trusted permission classification denies HOME copies, workspace names
       optionId: "reject",
     });
   } finally {
+    f.unseal();
     Deno.removeSync(f.base, { recursive: true });
   }
 });
@@ -662,7 +703,7 @@ Deno.test("Filesystem registration: immutable policy and revocation while observ
       if (withProvenance) f.mint();
       f.register({ trustedSkills: withProvenance ? f.trusted : undefined });
       const path = operation === "permission-read" ? f.instruction : join(f.staging, "file.md");
-      Deno.writeTextFileSync(path, "sentinel");
+      if (!withProvenance) Deno.writeTextFileSync(path, "sentinel");
       let revoked = false;
       Deno.realPath = async (value) => {
         const result = await original(value);
@@ -689,9 +730,13 @@ Deno.test("Filesystem registration: immutable policy and revocation while observ
               : f.client.writeTextFile({ sessionId: "acp-1", path, content: "mutated" }),
         );
       }
-      assertEquals(Deno.readTextFileSync(path), "sentinel");
+      assertEquals(
+        Deno.readTextFileSync(path),
+        withProvenance ? "owned instruction" : "sentinel",
+      );
     } finally {
       Deno.realPath = original;
+      f.unseal();
       Deno.removeSync(f.base, { recursive: true });
     }
   }
@@ -721,6 +766,7 @@ Deno.test("Filesystem registration: immutable policy and revocation while observ
         }),
     );
   } finally {
+    f.unseal();
     Deno.removeSync(f.base, { recursive: true });
   }
 });
@@ -845,7 +891,6 @@ Deno.test("Trusted provenance: generations never repeat across re-registration o
     connector["capabilities"] = { loadSession: true };
 
     const script = join(f.skills, "helper.ts");
-    Deno.writeTextFileSync(script, "owned helper");
 
     // Trusted producer mints the reference for the registration the connector is about to
     // perform; that registration is the only one this generation is admitted by.
@@ -919,6 +964,7 @@ Deno.test("Trusted provenance: generations never repeat across re-registration o
     });
     assertEquals(f.contentCalls.length, replayedContentCalls, "replay must not authorize IO");
   } finally {
+    f.unseal();
     Deno.removeSync(f.base, { recursive: true });
   }
 });

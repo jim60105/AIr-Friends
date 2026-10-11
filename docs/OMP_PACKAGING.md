@@ -71,6 +71,7 @@ is verified with `sha256sum -c -` BEFORE any install/COPY consumption.
 | `/opt/air/omp/prompt/SYSTEM.md`         | `prompts/system_prompt_override.md`          | `0:0`       | 0644                   |
 | `/opt/air/omp/extension/**`             | build-time mirror bundle of committed `src/` | `0:0`       | 0755 dirs / 0644 files |
 | `/opt/air/omp/PACKAGE-MANIFEST.sha256`  | regenerated at every image build             | `0:0`       | 0644                   |
+| `/opt/air/skills/**`                    | `skills/` (row 28 owned skill root)          | `0:0`       | 0755 files             |
 
 Ownership rationale (deliberate divergences from the image's `$UID:0` 775
 pattern, both documented in Containerfile comments):
@@ -83,6 +84,15 @@ pattern, both documented in Containerfile comments):
   user**, and it sits outside every agent-writable root: never under
   `/app/data`, `/app/prompts`, or `/home/deno`. The user-home config-dir
   pattern used for `opencode.json` was rejected for exactly this reason.
+- **`/opt/air/skills` (row 28) is root-owned `0:0` `0755` for the same
+  reason** — it is the skill authority the settings pin declares
+  (`skills.customDirectories: [/opt/air/skills]`, docs/OMP_SETTINGS.md §7), so
+  the agent must not be able to modify the tree it is trusted to read — and,
+  by design, it sits OUTSIDE `/opt/air/omp`: its bytes are deliberately NOT in
+  `PACKAGE-MANIFEST.sha256`'s digest set (the manifest covers the owned
+  runtime tree only). The agent-writable personal tree at
+  `/home/deno/.agents/skills` stays exactly as before and never feeds OMP
+  skill authority (the seven foreign-source toggles are pinned false).
 
 **No-new-Bun rule:** the official executable is self-contained; no OMP step
 installs a JavaScript/Bun runtime or speculative helper packages. The
@@ -119,7 +129,7 @@ owned tree is present; its digest is covered by the manifest either way.
 `/opt/air/omp/extension` from the committed sources at build time — a
 repo-relative **mirror copy of the value-import closure**, not a fork:
 
-- 29 modules are copied VERBATIM under `extension/mirror/<repo-relative-path>`
+- 32 modules are copied VERBATIM under `extension/mirror/<repo-relative-path>`
   (content-faithful: no rewriting, templating, or augmentation; dev and image
   load byte-identical sources — the packaging suite proves load parity).
 - The ONLY generated modules are the entry adapter `extension/index.ts` (a

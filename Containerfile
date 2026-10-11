@@ -244,6 +244,10 @@ COPY --link --chown=$UID:0 --chmod=775 prompts/ /app/prompts/
 # Copy skills to ~/.agents/skills/ for personal skills
 COPY --link --chown=$UID:0 --chmod=775 skills/ /home/deno/.agents/skills/
 
+# OMP skill authority never comes from the agent-writable personal tree.
+# Outside /opt/air/omp's manifest scope; scripts retain executable permissions.
+COPY --link --chown=0:0 --chmod=0755 skills/ /opt/air/skills/
+
 # Deployment-owned OMP artifacts — a NEW root-owned tree at /opt/air/omp,
 # outside every agent-writable root (never under /app/data, /app/prompts, or
 # /home/deno): the row-8 settings overlays, the row-8 SYSTEM.md prompt

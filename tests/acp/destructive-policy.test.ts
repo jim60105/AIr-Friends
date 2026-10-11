@@ -127,9 +127,25 @@ Deno.test("Destructive targets: real observations reuse ordinary write decisions
       ]
     ) Deno.writeTextFileSync(path, "sentinel");
     Deno.symlinkSync(sibling, join(staging, "escape"));
-    const roots = await canonicalizeSessionRoots(rootContext, {
+    // Row 28 review follow-up: root construction requires an attested
+    // rootIdentity unconditionally, and the trusted root must carry the
+    // image's agent-unwritable posture — seal the stand-in owned tree and
+    // pass its real identity, the way the producer always does.
+    Deno.chmodSync(skills, 0o555);
+    let roots = await canonicalizeSessionRoots(rootContext, {
       ownedRootPath: skills,
       source: "deployment_owned",
+      rootIdentity: { dev: 0, ino: 0 },
+    });
+    assertEquals(roots.ok, false); // attested identity must match the tree
+    const skillsInfo = Deno.statSync(skills);
+    if (skillsInfo.dev === null || skillsInfo.ino === null) {
+      throw new Error("fixture identity unavailable");
+    }
+    roots = await canonicalizeSessionRoots(rootContext, {
+      ownedRootPath: skills,
+      source: "deployment_owned",
+      rootIdentity: { dev: skillsInfo.dev, ino: skillsInfo.ino },
     });
     assert(roots.ok);
     for (const yolo of [false, true]) {
@@ -244,6 +260,7 @@ Deno.test("Destructive targets: real observations reuse ordinary write decisions
       }
     }
   } finally {
+    Deno.chmodSync(skills, 0o755);
     Deno.removeSync(base, { recursive: true });
   }
 });

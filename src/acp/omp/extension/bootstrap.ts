@@ -38,6 +38,7 @@ import {
   type ExecutableOwnedRoots,
 } from "../executable-sources.ts";
 import { observeLaunchMode } from "./enforcement.ts";
+import { observeDeclaredSkillRoots } from "./critical-skills.ts";
 
 export interface BootstrapDiscoveryOptions {
   readonly deploymentBaseRoot?: string;
@@ -103,6 +104,9 @@ export function bootstrapDiscoveryGuard(
   // blockers stay, and the dev path's pinned fail-closed load posture is
   // byte-for-byte the pre-row-27 behavior.
   const launchEnv = observedEnv as Record<string, string | undefined>;
+  const ownedSkillRoots = observeLaunchMode(observedCwd) === "restricted"
+    ? observeDeclaredSkillRoots("restricted")
+    : undefined;
   const executableObservation = observeLaunchMode(observedCwd) === "restricted"
     ? checkOmpExecutableSources({
       phase: "extension_load",
@@ -117,6 +121,7 @@ export function bootstrapDiscoveryGuard(
     mode: "restricted",
     observedEnv,
     observedCwd,
+    ownedSkillRoots,
     ...(executableObservation !== undefined
       ? {
         resourceGeneration: executableObservation.resourceGeneration,
