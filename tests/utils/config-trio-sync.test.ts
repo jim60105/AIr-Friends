@@ -204,18 +204,22 @@ Deno.test("config trio audit - defaultAgentType documentation describes both val
     ".env.example": "# Default ACP agent type: opencode (default) | omp",
     "helm/values.yaml": "  # Default ACP agent type: opencode (default) | omp",
   };
+  // The structural floor guards the CONTRACT TEXT itself (opencode carries the
+  // literal `(default)` marker, omp is the alternative): if this fires, the
+  // pin was edited away from the shipped semantics, and the verbatim file
+  // check below then can no longer be trusted to encode them.
+  for (const line of Object.values(PINNED_LINES)) {
+    assert(
+      /opencode"? \(default\).*\bomp\b/i.test(line),
+      `pinned contract text must present opencode as the (default) with omp as an alternative: ${line}`,
+    );
+  }
   for (const file of TRIO_FILES) {
     const text = files[file]!;
     assert(
       text.split("\n").includes(PINNED_LINES[file]),
       `${file}: defaultAgentType doc line drifted from the pinned contract text ` +
         `(expected exactly ${JSON.stringify(PINNED_LINES[file])})`,
-    );
-    // Structural floor independent of the pin: the line must carry the literal
-    // `(default)` marker directly on opencode, plus omp as the alternative.
-    assert(
-      /opencode"? \(default\).*\bomp\b/i.test(PINNED_LINES[file]),
-      `${file}: domain wording must present opencode as the (default) with omp as an alternative`,
     );
   }
 });

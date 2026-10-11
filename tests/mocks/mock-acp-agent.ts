@@ -630,6 +630,7 @@ async function runSkillCallStep(acpSessionId: string): Promise<number> {
       // the explicit failure instead of spawning with an unexpanded token.
       const recordTarget = Deno.env.get("MOCK_SKILL_RECORD_FILE");
       if (recordTarget) {
+        const cause = "skill fixture context unavailable (no JWT/pointer material yet)";
         for (const invocation of invocations) {
           appendSkillRecord(recordTarget, {
             gen: MOCK_CONNECTION_GEN,
@@ -639,7 +640,22 @@ async function runSkillCallStep(acpSessionId: string): Promise<number> {
             cwd: invocation.cwd ?? Deno.cwd(),
             code: 112,
             stdout: "",
-            stderr: "skill fixture context unavailable (no JWT/pointer material yet)",
+            stderr: cause,
+          });
+        }
+        // acpRequests-only steps record nothing per-iteration above, so name
+        // the cause once here: a pointer-material regression then shows up as
+        // this code-112 record, not as a misleading "policy did not deny".
+        if (invocations.length === 0) {
+          appendSkillRecord(recordTarget, {
+            gen: MOCK_CONNECTION_GEN,
+            seq: index + 1,
+            script: "acp-requests",
+            argv: [],
+            cwd: Deno.cwd(),
+            code: 112,
+            stdout: "",
+            stderr: cause,
           });
         }
       }
@@ -918,9 +934,12 @@ async function main(): Promise<void> {
     const { id, method, params } = msg;
     // Response to one of the mock's own outbound requests that settles
     // BETWEEN turns (no in-turn waiter consumed it): settle it against the
-    // scripted expectation so a late answer is never misread as a request.
+    // scripted expectation so a late answer is never misread as a request —
+    // and a mismatched late answer counts as an expectation failure exactly
+    // like the in-turn path, so the anti-silent-drift property is hole-free.
     if (method === undefined && id !== undefined && pendingAcpExpectations.has(id)) {
-      settleAcpResponse(id, msg);
+      lastSettleError = settleErrorText(msg);
+      if (settleAcpResponse(id, msg) === "failed") acpExpectationFailures += 1;
       continue;
     }
     if (method === undefined) continue;

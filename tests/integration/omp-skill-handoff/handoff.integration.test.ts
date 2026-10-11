@@ -302,7 +302,9 @@ class SnapshotRegistry extends SessionRegistry {
  * uses): the offline native-call model the filesystem suites already run on,
  * so the fs/read + fs/write RPC machinery exercises its REAL authorization +
  * access pipeline without libc/openat2 FFI. Policy denials all happen before
- * any native call, so honest-posture denials are untouched by the seam. */
+ * any native call, so honest-posture denials are untouched by the seam;
+ * allow-side content IO is likewise seam-backed — an "allow landed"
+ * observation here is never evidence about the production FFI layer. */
 function applyFilesystemTestSeam(options: AgentConnectorOptions): void {
   options.clientConfig.nativeCalls = createFilesystemTestCalls();
 }
@@ -390,12 +392,16 @@ class MockSwapOrchestrator extends SessionOrchestrator {
   }
 
   /** All bounded permission rejections this harness's REAL clients recorded:
-   * live connector buffers plus anything snapshotted at disconnect. */
+   * disconnect-time snapshots first, then live connector buffers. The merge
+   * never double counts — disconnect() nulls the client, so a reason is only
+   * ever in ONE of the two sources — and a mid-run reconnect that clears a
+   * client buffer (row-11 recovery) still keeps the pre-recovery rejections
+   * in the merged view instead of silently dropping them. */
   observedPermissionRejections(): string[] {
     const live = this.connectors.flatMap(
       (c) => (c.getClient()?.getRecentPermissionRejections() ?? []).map((r) => r.reason),
     );
-    return live.length > 0 ? live : [...this.disconnectedRejections];
+    return [...this.disconnectedRejections, ...live];
   }
 }
 
@@ -1380,8 +1386,10 @@ async function runUnauthorizedAcpMediatedDenial(shape: "per-spawn" | "pooled"): 
               ],
             },
             // A permission denial is a NORMAL selected-reject result on the
-            // ACP wire, never a JSON-RPC error.
-            expect: "result:reject",
+            // ACP wire, never a JSON-RPC error. Pinned to the exact selected
+            // optionId, so an allow-path result (optionId "allow") can never
+            // satisfy it — not just the word "reject" appearing anywhere.
+            expect: 'result:"optionId":"reject"',
           },
         ],
       },
@@ -1437,9 +1445,9 @@ async function runUnauthorizedAcpMediatedDenial(shape: "per-spawn" | "pooled"): 
     // The absent-handler default is the mock's, not the native extension's:
     // label the composition boundary (5.2 guard rejects unregistered ones).
     new SyntheticPositiveLedger().register(
-      "24-acp-mediated-client-policy-deny",
+      `24-acp-mediated-client-policy-deny-${shape}`,
       "composition-boundary: the mock's agent-initiated ACP requests exercise the REAL ChatbotClient gate; the mock never loads the native extension, so these denials are client-policy composition, never native enforcement evidence",
-      "handoff suite ACP-mediated unauthorized denial",
+      `handoff suite ACP-mediated unauthorized denial (${shape})`,
     );
   } finally {
     await teardownHarness(h);
@@ -1476,6 +1484,9 @@ async function runOpenCodeRegression(): Promise<void> {
         acpRequests: [
           {
             method: "fs/read_text_file",
+            // Client-resolver pin: a future tightening of the ALLOWED read
+            // posture lands HERE as a refused delivery turn — that coupling
+            // is intentional, not an OpenCode-launch regression.
             params: {
               sessionId: "@ACP_SESSION_ID",
               path: "$TMPDIR/$SESSION_ID/reply.md",
