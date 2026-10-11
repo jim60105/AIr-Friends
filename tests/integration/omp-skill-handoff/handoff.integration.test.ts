@@ -57,6 +57,7 @@ import type { AgentConfig, AgentConnectorOptions } from "../../../src/acp/types.
 import type { Config } from "../../../src/types/config.ts";
 import { createSkillJwt } from "@utils/skill-jwt.ts";
 import { SyntheticPositiveLedger, useMockOmpAgent } from "../../mocks/omp-mock-session.ts";
+import { createFilesystemTestCalls } from "../../acp/filesystem-test-calls.ts";
 
 // ---------------------------------------------------------------------------
 // Subprocess-tier guard (row-21/23 precedent): dumb-init + deno only. No live
@@ -202,22 +203,19 @@ async function probeEphemeralPort(): Promise<number> {
   return port;
 }
 
-// Integration exception to the no-test-timers guideline (row-16 precedent):
-// awaiting a real OS-level listen cannot be fake-timed, so server readiness
-// polls the real socket. The poll collapses to one immediate success because
-// Deno.serve is listening synchronously by the time start() returns.
-async function waitForServer(port: number, deadlineMs = 5000): Promise<void> {
-  const deadline = Date.now() + deadlineMs;
-  while (Date.now() < deadline) {
-    try {
-      const response = await fetch(`http://127.0.0.1:${port}/api/skill/probe`);
-      await response.body?.cancel();
-      return; // any HTTP answer (even 404) proves the socket is live
-    } catch {
-      await new Promise((resolve) => setTimeout(resolve, 25));
-    }
+// No readiness sleep exists: `Deno.serve` binds its port synchronously by the
+// time `SkillAPIServer.start()` returns (the harness's own port probe above
+// already relies on that contract), so ONE awaited fetch either gets an HTTP
+// answer (any status, even 404, proves the handler loop is live) or the
+// harness is genuinely broken and must surface immediately — no wall-clock
+// retry, no timer to fake-time.
+async function assertServerLive(port: number): Promise<void> {
+  try {
+    const response = await fetch(`http://127.0.0.1:${port}/api/skill/probe`);
+    await response.body?.cancel();
+  } catch (cause) {
+    throw new Error("skill API server not live after synchronous bind", { cause });
   }
-  throw new Error("skill API server did not come up");
 }
 
 // ---------------------------------------------------------------------------
@@ -237,9 +235,27 @@ interface SkillInvocation {
   env?: Record<string, string>;
 }
 
+/** Mirror of the mock's scripted agent->client ACP request (mock-acp-agent
+ * MockAcpRequest): wire methods answered by the REAL ChatbotClient over the
+ * live stdio connection. `expect` settles per the mock's rules — "ok" (success
+ * required), "error:<substring>" (bounded denial error required),
+ * "result:<substring>" (successful result containing the substring —
+ * permission denials are NORMAL selected-reject results, never errors).
+ * `@ACP_SESSION_ID` / `@SESSION_ID` / `@STAGING_DIR` expand inside the mock;
+ * raw `$TMPDIR`/`$SESSION_ID` tokens pass through UNtouched, so a step can
+ * hand the client a legacy shell-token path and exercise the shipped
+ * `resolveSessionPath()` expansion in the client's own resolver. */
+interface AcpRequest {
+  method: "session/request_permission" | "fs/read_text_file" | "fs/write_text_file";
+  params?: Record<string, unknown>;
+  expect?: string;
+  copyResultTo?: string;
+}
+
 interface SkillCallStep {
   stagePayload?: { file: string; content: string } | { file: string; content: string }[];
   invocations?: SkillInvocation[];
+  acpRequests?: AcpRequest[];
 }
 
 // ---------------------------------------------------------------------------
@@ -282,6 +298,15 @@ class SnapshotRegistry extends SessionRegistry {
 // or is needed.
 // ---------------------------------------------------------------------------
 
+/** Shipped test seam (ClientConfig.nativeCalls, as the row-23 lifecycle suite
+ * uses): the offline native-call model the filesystem suites already run on,
+ * so the fs/read + fs/write RPC machinery exercises its REAL authorization +
+ * access pipeline without libc/openat2 FFI. Policy denials all happen before
+ * any native call, so honest-posture denials are untouched by the seam. */
+function applyFilesystemTestSeam(options: AgentConnectorOptions): void {
+  options.clientConfig.nativeCalls = createFilesystemTestCalls();
+}
+
 function applySkillMock(params: {
   agentConfig: AgentConfig;
   stateDir: string;
@@ -319,6 +344,14 @@ class MockSwapOrchestrator extends SessionOrchestrator {
   spawnedConfigs: AgentConfig[] = [];
   /** Every session/prompt text the real prompt path handed its connectors. */
   promptTexts: string[] = [];
+  /** Every connector this harness created (per-spawn hook + pooled factory):
+   * the honest-posture scenarios read the REAL ChatbotClient off the live
+   * connector — the rejection buffer the shipped retry prompt itself consumes. */
+  readonly connectors: AgentConnector[] = [];
+  /** Rejection reasons snapshotted at each connector's disconnect(): the
+   * per-spawn tier disconnects when the run ends, nulling the client before
+   * assertions run, so the buffer must be captured at teardown-entry too. */
+  readonly disconnectedRejections: string[] = [];
 
   protected override createConnector(options: AgentConnectorOptions): AgentConnector {
     // Pre-swap snapshot of the orchestrator-composed (factory) posture: the
@@ -331,10 +364,12 @@ class MockSwapOrchestrator extends SessionOrchestrator {
     if (this.mockParams) {
       applySkillMock({ ...this.mockParams, agentConfig: options.agentConfig });
     }
+    applyFilesystemTestSeam(options);
     return this.wrapPromptRecording(new AgentConnector(options));
   }
 
   wrapPromptRecording(connector: AgentConnector): AgentConnector {
+    this.connectors.push(connector);
     const originalPrompt = connector.prompt.bind(connector);
     connector.prompt = (sessionId, content) => {
       this.promptTexts.push(
@@ -344,7 +379,23 @@ class MockSwapOrchestrator extends SessionOrchestrator {
       );
       return originalPrompt(sessionId, content);
     };
+    const originalDisconnect = connector.disconnect.bind(connector);
+    connector.disconnect = () => {
+      for (const r of connector.getClient()?.getRecentPermissionRejections() ?? []) {
+        this.disconnectedRejections.push(r.reason);
+      }
+      return originalDisconnect();
+    };
     return connector;
+  }
+
+  /** All bounded permission rejections this harness's REAL clients recorded:
+   * live connector buffers plus anything snapshotted at disconnect. */
+  observedPermissionRejections(): string[] {
+    const live = this.connectors.flatMap(
+      (c) => (c.getClient()?.getRecentPermissionRejections() ?? []).map((r) => r.reason),
+    );
+    return live.length > 0 ? live : [...this.disconnectedRejections];
   }
 }
 
@@ -510,7 +561,7 @@ async function createHarness(params: {
     TEST_SKILL_SECRET,
   );
   server.start();
-  await waitForServer(port);
+  await assertServerLive(port);
 
   // One orchestrator; the pooled tier wires the pool through the shipped
   // constructor arg (arg 10). The pool's injectable connectorFactory — the
@@ -534,6 +585,7 @@ async function createHarness(params: {
       if (orchestrator.mockParams) {
         applySkillMock({ ...orchestrator.mockParams, agentConfig: options.agentConfig });
       }
+      applyFilesystemTestSeam(options);
       return orchestrator.wrapPromptRecording(new AgentConnector(options));
     }, 30_000);
   }
@@ -1273,6 +1325,128 @@ async function runHonestPostureDenial(): Promise<void> {
 }
 
 // ---------------------------------------------------------------------------
+// 4.1 (spec scenario "Absent-handler ACP policy denial prevents unauthorized
+// skill effects"): an unauthorized ACP-MEDIATED operation evaluated by client
+// policy over the live stdio connection — the mock sends REAL fs/write_text_file,
+// fs/read_text_file and session/request_permission requests; the REAL
+// ChatbotClient gate denies each with its bounded denial (write error / read
+// error / selected-reject outcome), zero skill invocations and zero platform
+// deliveries follow, and the run fails after exactly one retry. The denial
+// observability is the shipped retry-prompt diagnostic section (the same
+// client rejection buffer the production retry consumes), so the scenario
+// asserts the exact bounded reasons the client recorded. This is client-policy
+// composition only: no readiness handshake of any kind, and never an
+// attribution of the denial to native enforcement.
+// ---------------------------------------------------------------------------
+
+async function runUnauthorizedAcpMediatedDenial(shape: "per-spawn" | "pooled"): Promise<void> {
+  const h = await createHarness({
+    name: `acp-deny-${shape}`,
+    agentType: "omp",
+    shape,
+  });
+  try {
+    const outsideWrite = `$TMPDIR/../escape.md`; // expands CLIENT-side → workspace-root write
+    const outsideRead = `/etc/hostname`; // outside every session root
+    scriptSteps(h, [
+      {
+        acpRequests: [
+          {
+            method: "fs/write_text_file",
+            params: {
+              sessionId: "@ACP_SESSION_ID",
+              path: outsideWrite,
+              content: "unauthorized workspace-root write",
+            },
+            expect: "error:rejected_workspace_write_restricted",
+          },
+          {
+            method: "fs/read_text_file",
+            params: { sessionId: "@ACP_SESSION_ID", path: outsideRead },
+            expect: "error:rejected_filesystem_path_unavailable",
+          },
+          {
+            method: "session/request_permission",
+            params: {
+              sessionId: "@ACP_SESSION_ID",
+              toolCall: {
+                toolCallId: "acp-deny-1",
+                title: "unrecognized-native-tool",
+                kind: "other",
+              },
+              options: [
+                { optionId: "allow", name: "Allow", kind: "allow_once" },
+                { optionId: "reject", name: "Reject", kind: "reject_once" },
+              ],
+            },
+            // A permission denial is a NORMAL selected-reject result on the
+            // ACP wire, never a JSON-RPC error.
+            expect: "result:reject",
+          },
+        ],
+      },
+      {}, // retry turn: silent again → run fails after the single retry
+    ]);
+
+    const result = await h.orchestrator.processMessage(h.event, h.ledger);
+
+    // Denied end to end: zero skill invocations, zero platform deliveries.
+    assertEquals(result.success, false);
+    assertEquals(result.replySent, false);
+    assertEquals(readSkillRecords(h).length, 0, "zero skill-script invocations");
+    assertEquals(h.ledger.calls.length, 0, `trace: ${h.ledger.trace().join(" | ")}`);
+
+    // The bounded client-policy denials are exactly the three expected reasons
+    // (read straight off the REAL client's rejection buffer — the same one the
+    // shipped retry prompt consumes; per-spawn shape reads the disconnect-time
+    // snapshot since the run's finalization already nulled the client), and the
+    // pinned workspace escape file was never created.
+    assertEquals(h.orchestrator.observedPermissionRejections(), [
+      "rejected_workspace_write_restricted",
+      "rejected_filesystem_path_unavailable",
+      "rejected_unknown",
+    ]);
+    let escaped = true;
+    try {
+      await Deno.stat(join(h.workspacePath, "escape.md"));
+    } catch {
+      escaped = false;
+    }
+    assert(!escaped, "restricted client policy must not create the escaped file");
+
+    // Exactly one retry, and it carries the shipped permission-rejection
+    // diagnostic section naming every bounded denial (literal-first posture is
+    // the row's shared contract; the section proves the client evaluated the
+    // operations it refused).
+    const rpc = readRpcEntries(h);
+    assertEquals(rpc.filter((e) => e.method === "session/prompt").length, 2, "one retry only");
+    assertEquals(h.orchestrator.promptTexts.length, 2);
+    const retryText = h.orchestrator.promptTexts[1] ?? "";
+    assertStringIncludes(retryText, "Recent permission rejections in this session");
+    assertStringIncludes(retryText, "rejected_workspace_write_restricted");
+    assertStringIncludes(retryText, "rejected_filesystem_path_unavailable");
+    assertStringIncludes(retryText, "rejected_unknown");
+
+    // No readiness handshake anywhere in the composition (factory-posture
+    // audit like 4.1): no readiness/namespace env reached the spawn.
+    const preSwap = h.orchestrator.spawnedConfigs[0];
+    assert(preSwap, "connector-composed config recorded");
+    for (const key of Object.keys(preSwap.env ?? {})) {
+      assert(!key.startsWith("MOCK_OMP"), `readiness/env leak: ${key}`);
+    }
+    // The absent-handler default is the mock's, not the native extension's:
+    // label the composition boundary (5.2 guard rejects unregistered ones).
+    new SyntheticPositiveLedger().register(
+      "24-acp-mediated-client-policy-deny",
+      "composition-boundary: the mock's agent-initiated ACP requests exercise the REAL ChatbotClient gate; the mock never loads the native extension, so these denials are client-policy composition, never native enforcement evidence",
+      "handoff suite ACP-mediated unauthorized denial",
+    );
+  } finally {
+    await teardownHarness(h);
+  }
+}
+
+// ---------------------------------------------------------------------------
 // 3.6 OpenCode regression flow: per-spawn message flow through the harness —
 // spawn env/command byte-compared against a independently composed shipped
 // createAgentConfig; legacy token-path payload still delivers (row-16 pinned
@@ -1283,16 +1457,32 @@ async function runOpenCodeRegression(): Promise<void> {
   const h = await createHarness({ name: "opencode", agentType: "opencode", shape: "per-spawn" });
   try {
     // Legacy token-path payload: what bash hands the script when an older
-    // OpenCode prompt still instructs `$TMPDIR/$SESSION_ID/x.md` — the
-    // expansion arrives as an ordinary expanded path inside the canonical
-    // staging root and must resolve/read/deliver identically (row-16 pin).
-    // The per-spawn process env carries TMPDIR={workspace}/tmp? Shipped
-    // OpenCode per-spawn inherits TMPDIR from the deployment env, so the
-    // fixture stages at the canonical path and passes it as the expanded
-    // legacy argv value verbatim.
+    // OpenCode prompt still instructs `$TMPDIR/$SESSION_ID/x.md`. The pin is
+    // exercised on BOTH consumers of the legacy contract:
+    //  (a) the shipped CLIENT resolver — the mock sends a REAL
+    //      fs/read_text_file whose path is the LITERAL `$TMPDIR/$SESSION_ID/
+    //      reply.md` token string (the mock expands only its own `@`-tokens,
+    //      never `$` ones), so only ChatbotClient's own
+    //      `resolveSessionPath()` legacy expansion can answer it: the
+    //      expected content coming back PROVES the client expanded the raw
+    //      tokens into the canonical staging path and authorized the read;
+    //  (b) the spawn-argv channel — the fixture stages at the canonical path
+    //      and passes it as the already-expanded legacy argv value (what a
+    //      real shell hands the script), which must resolve/read/deliver
+    //      identically inside the canonical staging root (row-16 pin).
     scriptSteps(h, [
       {
         stagePayload: { file: "@STAGING_DIR/reply.md", content: "legacy token-path delivery" },
+        acpRequests: [
+          {
+            method: "fs/read_text_file",
+            params: {
+              sessionId: "@ACP_SESSION_ID",
+              path: "$TMPDIR/$SESSION_ID/reply.md",
+            },
+            expect: "result:legacy token-path delivery",
+          },
+        ],
         invocations: [
           {
             script: scriptUrl("send-reply"),
@@ -1421,6 +1611,14 @@ const scenarios: Array<{ name: string; fn: () => Promise<void> }> = [
   {
     name: "4.1 honest posture: pinned non-YOLO launch + unauthorized denial zero side effects",
     fn: runHonestPostureDenial,
+  },
+  {
+    name: "4.1 ACP-mediated unauthorized write/read/permission denied by client policy (pooled)",
+    fn: () => runUnauthorizedAcpMediatedDenial("pooled"),
+  },
+  {
+    name: "4.1 ACP-mediated unauthorized write/read/permission denied by client policy (per-spawn)",
+    fn: () => runUnauthorizedAcpMediatedDenial("per-spawn"),
   },
   {
     name: "3.6 OpenCode per-spawn regression byte-identity + legacy payload",
