@@ -41,7 +41,6 @@
 //   runtime observation.
 
 import { dirname, join, resolve } from "@std/path";
-import type { OmpSettingsSourcePlan } from "../omp-settings.ts";
 
 /** Max issues listed in one rejection reason (plus a truncation count). */
 export const MAX_EXECUTABLE_REJECTION_DETAILS = 8;
@@ -509,12 +508,12 @@ function observeLinkedDependencies(
  * ambient/native surface and fails closed. Absent is clean.
  */
 function observeGlobalRoutes(
-  plan: OmpSettingsSourcePlan,
+  roots: ExecutableOwnedRoots,
   reader: ExecutableSourceMetadataReader,
   issues: ExecutableSourceIssue[],
 ): ExecutableObservationEntry[] {
   const entries: ExecutableObservationEntry[] = [];
-  for (const root of [`${plan.ownedHome}/.omp/tools`, `${plan.agentDir}/tools`]) {
+  for (const root of [`${roots.ownedHome}/.omp/tools`, `${roots.agentDir}/tools`]) {
     const kind = kindOf(root, "native-custom-tool-discovery", reader, issues);
     if (kind === null) continue; // failure already recorded
     if (kind === "missing") {
@@ -552,8 +551,16 @@ function observeConfiguredModuleSelectors(
   }
 }
 
+/** Owned settings-state roots the workspace must not alias into: the same
+ * authority the row-26 plan carries. The connector passes them from the plan;
+ * the extension-load fallback derives them from the owned launch env. */
+export interface ExecutableOwnedRoots {
+  readonly ownedHome: string;
+  readonly agentDir: string;
+}
+
 /** Workspace authority: the actual session workspace (+ optional shared Agent
- * workspace) as observed against the owned settings plan. */
+ * workspace) as observed against the owned settings roots. */
 interface WorkspaceAuthority {
   sessionCwd: string;
   sharedWorkspace: string;
@@ -561,7 +568,7 @@ interface WorkspaceAuthority {
 }
 
 function deriveWorkspaceAuthority(
-  plan: OmpSettingsSourcePlan,
+  roots: ExecutableOwnedRoots,
   sessionCwd: string,
   sharedWorkspace: string | undefined,
   reader: ExecutableSourceMetadataReader,
@@ -597,7 +604,7 @@ function deriveWorkspaceAuthority(
       issues.push(issue(surface, "inaccessible_path", `${label} identity`));
       return null;
     }
-    for (const owned of [plan.ownedHome, plan.agentDir]) {
+    for (const owned of [roots.ownedHome, roots.agentDir]) {
       if (identity === owned || identity.startsWith(owned.replace(/\/+$/, "") + "/")) {
         issues.push(issue(surface, "unknown_entry_shape", `${label} inside owned state root`));
         return null;
@@ -626,7 +633,7 @@ export function checkOmpExecutableSources(params: {
   sessionCwd: string;
   /** Actual shared Agent workspace (AGENT_WORKSPACE) when the connector set one. */
   sharedWorkspace?: string;
-  plan: OmpSettingsSourcePlan;
+  roots: ExecutableOwnedRoots;
   resourceGeneration?: string;
   /** Observed process env (production: Deno.env.toObject()). */
   processEnv: Record<string, string | undefined>;
@@ -635,7 +642,7 @@ export function checkOmpExecutableSources(params: {
   const reader = params.reader ?? defaultReader();
   const issues: ExecutableSourceIssue[] = [];
   const authority = deriveWorkspaceAuthority(
-    params.plan,
+    params.roots,
     params.sessionCwd,
     params.sharedWorkspace,
     reader,
@@ -668,7 +675,7 @@ export function checkOmpExecutableSources(params: {
     }
     observeLinkedDependencies(workspace, reader, issues);
   }
-  for (const entry of observeGlobalRoutes(params.plan, reader, issues)) entries.push(entry);
+  for (const entry of observeGlobalRoutes(params.roots, reader, issues)) entries.push(entry);
   if (issues.length > 0) {
     throw new ExecutableSourceRejectionError({
       phase: params.phase,
