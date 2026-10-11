@@ -2,6 +2,8 @@
 # Pinned to official OMP v18.6.1 / 2a2c6dcbbb558c0f8145f67f28b3370984f2bf60.
 tools:
   approvalMode: yolo
+lsp:
+  enabled: false
 startup:
   checkUpdate: false
 marketplace:

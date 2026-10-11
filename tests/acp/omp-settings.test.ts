@@ -1,15 +1,15 @@
-import { assertEquals, assertRejects, assertThrows } from "jsr:@std/assert";
-import { parse as parseYaml } from "jsr:@std/yaml";
+import { assertEquals, assertThrows } from "@std/assert";
+import { parse as parseYaml } from "@std/yaml";
+import { createAgentConfig } from "../../src/acp/agent-factory.ts";
+import type { Config } from "../../src/types/config.ts";
 import {
   assertOwnedModelsDocument,
   assertOwnedSettingsDocument,
-  deepMergeOmpSettings,
   foldCliOverlays,
   MODELS_YAML_CONTENT,
   NATIVE_YOLO_YAML_CONTENT,
   ompSettingsForMode,
   PINNED_DISABLED_PROVIDERS_CATALOG,
-  PINNED_REGISTERED_SETTINGS_KEYS,
   resolveEffectiveSettings,
   RESTRICTED_ONLY_KEYS,
   RESTRICTED_YAML_CONTENT,
@@ -96,8 +96,9 @@ Deno.test("Task 2.2: agent-config/omp/native-yolo.yml non-contamination", async 
   // Contains tools.approvalMode: yolo
   assertEquals(parsed["tools"], { approvalMode: "yolo" });
 
-  // NO lsp, NO disabledProviders, NO per-tool approval, NO reset
-  assertEquals("lsp" in parsed, false);
+  // Decision 5 (row 25): the shared deployment pin lands in YOLO too.
+  assertEquals(parsed["lsp"], { enabled: false });
+  // NO disabledProviders, NO per-tool approval, NO reset
   assertEquals("disabledProviders" in parsed, false);
 
   const toolsObj = parsed["tools"] as Record<string, unknown>;
@@ -128,7 +129,7 @@ Deno.test("Task 2.3: agent-config/omp/models.yml contains only X-Title header, z
   });
 
   // Zero slashes in model IDs or paths in YAML body (excluding comments)
-  const unhintedBody = fileContent.split("\n").filter(l => !l.trim().startsWith("#")).join("\n");
+  const unhintedBody = fileContent.split("\n").filter((l) => !l.trim().startsWith("#")).join("\n");
   assertEquals(unhintedBody.includes("/"), false);
   assertEquals(fileContent.includes("sk-"), false);
   assertEquals(fileContent.includes("apiKey"), false);
@@ -144,14 +145,15 @@ Deno.test("Task 3.1: assertOwnedSettingsDocument rejects invalid schema keys and
 
   // Empty mapping branch in native-yolo (lsp: {})
   assertThrows(
-    () => assertOwnedSettingsDocument({
-      tools: { approvalMode: "yolo" },
-      compaction: { enabled: true },
-      startup: { checkUpdate: false },
-      marketplace: { autoUpdate: "off" },
-      update: { channel: "stable" },
-      lsp: {},
-    }, "native-yolo"),
+    () =>
+      assertOwnedSettingsDocument({
+        tools: { approvalMode: "yolo" },
+        compaction: { enabled: true },
+        startup: { checkUpdate: false },
+        marketplace: { autoUpdate: "off" },
+        update: { channel: "stable" },
+        lsp: {},
+      }, "native-yolo"),
     Error,
     "Forbidden empty object",
   );
@@ -160,26 +162,24 @@ Deno.test("Task 3.1: assertOwnedSettingsDocument rejects invalid schema keys and
   assertThrows(
     () => assertOwnedSettingsDocument(fixtures.invalidOverlays.caseMismatchedEnum, "restricted"),
     Error,
-    "Invalid value \"Write\" for key \"tools.approvalMode\"",
-  );
-
-  // Restricted key in YOLO (lsp.enabled)
-  assertThrows(
-    () => assertOwnedSettingsDocument({ tools: { approvalMode: "yolo" }, compaction: { enabled: true }, startup: { checkUpdate: false }, marketplace: { autoUpdate: "off" }, update: { channel: "stable" }, lsp: { enabled: false } }, "native-yolo"),
-    Error,
-    "Restricted-only key \"lsp.enabled\" is forbidden in native-yolo",
+    'Invalid value "Write" for key "tools.approvalMode"',
   );
 
   // Restricted key in YOLO (disabledProviders)
   assertThrows(
-    () => assertOwnedSettingsDocument(fixtures.invalidOverlays.disabledProvidersInYolo, "native-yolo"),
+    () =>
+      assertOwnedSettingsDocument(fixtures.invalidOverlays.disabledProvidersInYolo, "native-yolo"),
     Error,
-    "Restricted-only key \"disabledProviders\" is forbidden in native-yolo",
+    'Restricted-only key "disabledProviders" is forbidden in native-yolo',
   );
 
   // Per-tool approval in restricted
   assertThrows(
-    () => assertOwnedSettingsDocument(fixtures.invalidOverlays.perToolApprovalInRestricted, "restricted"),
+    () =>
+      assertOwnedSettingsDocument(
+        fixtures.invalidOverlays.perToolApprovalInRestricted,
+        "restricted",
+      ),
     Error,
     "per-tool approval records and approval resets must not appear",
   );
@@ -274,7 +274,10 @@ Deno.test("Task 4.1: Precedence, ordered overlay paths, absence of PI_CONFIG_FIL
 
     // Overlay order puts mode document last
     const lastOverlay = comp.orderedOverlayPaths[comp.orderedOverlayPaths.length - 1];
-    assertEquals(lastOverlay, `agent-config/omp/${mode === "restricted" ? "restricted" : "native-yolo"}.yml`);
+    assertEquals(
+      lastOverlay,
+      `agent-config/omp/${mode === "restricted" ? "restricted" : "native-yolo"}.yml`,
+    );
 
     // PI_CONFIG_FILES must never be set/inherited
     assertEquals(comp.envPosture.forbiddenInheritance.includes("PI_CONFIG_FILES"), true);
@@ -304,7 +307,10 @@ Deno.test("Task 4.2: Provider credentials, X-Title preservation, and HTTP-Refere
 
   // X-Title: AIr-Friends in models.yml
   const models = parseYaml(comp.modelsYamlContent) as Record<string, unknown>;
-  const openrouter = (models["providers"] as Record<string, unknown>)["openrouter"] as Record<string, unknown>;
+  const openrouter = (models["providers"] as Record<string, unknown>)["openrouter"] as Record<
+    string,
+    unknown
+  >;
   const headers = openrouter["headers"] as Record<string, unknown>;
   assertEquals(headers["X-Title"], "AIr-Friends");
 
@@ -331,7 +337,10 @@ Deno.test("Task 4.3: Mode non-contamination structural assertions", () => {
   const restrictedComp = ompSettingsForMode("restricted");
   const yoloComp = ompSettingsForMode("native-yolo");
 
-  const restrictedDoc = parseYaml(restrictedComp.overlayFiles[0].content) as Record<string, unknown>;
+  const restrictedDoc = parseYaml(restrictedComp.overlayFiles[0].content) as Record<
+    string,
+    unknown
+  >;
   const yoloDoc = parseYaml(yoloComp.overlayFiles[0].content) as Record<string, unknown>;
 
   // YOLO document contains NO restricted keys
@@ -346,6 +355,14 @@ Deno.test("Task 4.3: Mode non-contamination structural assertions", () => {
   // Restricted document contains ALL restricted keys
   assertEquals("lsp" in restrictedDoc, true);
   assertEquals("disabledProviders" in restrictedDoc, true);
+
+  // Decision 5 (row 25): `lsp.enabled` is no longer restricted-only — BOTH
+  // documents carry the identical shared deployment pin, and YOLO still
+  // carries zero restricted content (the loops above keep disabledProviders
+  // and per-tool approval out).
+  assertEquals((restrictedDoc["lsp"] as Record<string, unknown>)["enabled"], false);
+  assertEquals((yoloDoc["lsp"] as Record<string, unknown>)["enabled"], false);
+  assertEquals("disabledProviders" in yoloDoc, false);
 
   // Both documents share exactly the shared deployment keys plus approvalMode
   for (const sharedKey of SHARED_DEPLOYMENT_KEYS) {
@@ -401,4 +418,154 @@ Deno.test("Task 4.4: Compaction, update posture, and system prompt mapping", () 
     restrictedComp.systemPromptMapping.runtimeApplicationRequiresVerification,
     true,
   );
+});
+
+// -----------------------------------------------------------------------------
+// Row 25 (`pin-omp-yolo-lsp-settings`, decision 5): the LSP disable moved from
+// the restricted-only key set into the shared deployment key set. BOTH mode
+// documents must pin boolean `lsp.enabled: false`; missing/true/non-boolean/
+// unknown-`lsp.*` documents reject in EVERY mode. Parsed real assets are
+// compared against the emitted composition, and the validator is exercised on
+// the actual rejection paths. Carrier wiring only: nothing here certifies
+// native language-server suppression or implicit-startup behavior (user-owned,
+// UNVERIFIED — decision-register §1a decision 5).
+// -----------------------------------------------------------------------------
+
+Deno.test("Task 25-2.1: decision-5 LSP pin — parsed assets match emitted composition and validate in both modes", async () => {
+  for (
+    const [mode, assetPath, constant] of [
+      ["restricted", "../../agent-config/omp/restricted.yml", RESTRICTED_YAML_CONTENT],
+      ["native-yolo", "../../agent-config/omp/native-yolo.yml", NATIVE_YOLO_YAML_CONTENT],
+    ] as const
+  ) {
+    const fileContent = await Deno.readTextFile(new URL(assetPath, import.meta.url).pathname);
+
+    // Real asset bytes equal the pure composition constant (assembly-time pin).
+    assertEquals(fileContent, constant, `${mode}: asset drifted from composition constant`);
+
+    // Parsed real asset equals the emitted composition document.
+    const parsedAsset = parseYaml(fileContent) as Record<string, unknown>;
+    const emitted = parseYaml(ompSettingsForMode(mode).overlayFiles[0].content) as Record<
+      string,
+      unknown
+    >;
+    assertEquals(parsedAsset, emitted, `${mode}: parsed asset drifted from emitted composition`);
+
+    // Both validate, and both carry the shared pin.
+    assertOwnedSettingsDocument(parsedAsset, mode);
+    assertEquals((parsedAsset["lsp"] as Record<string, unknown>)["enabled"], false);
+  }
+});
+
+Deno.test("Task 25-2.1: decision-5 LSP pin — missing/true/string/unknown/empty LSP rejects in BOTH modes", () => {
+  for (const mode of ["restricted", "native-yolo"] as const) {
+    // One fresh parse of the mode's shipped document; each case below fully
+    // replaces the `lsp` branch before asserting, so sequential mutation is
+    // order-independent per case.
+    const baseline = structuredClone(
+      parseYaml(
+        mode === "restricted" ? RESTRICTED_YAML_CONTENT : NATIVE_YOLO_YAML_CONTENT,
+      ) as Record<string, unknown>,
+    );
+
+    // Baseline (with the pin) validates.
+    assertOwnedSettingsDocument(baseline, mode);
+
+    // Missing: the shared-key loop rejects.
+    delete baseline["lsp"];
+    assertThrows(
+      () => assertOwnedSettingsDocument(baseline, mode),
+      Error,
+      `Required shared deployment key "lsp.enabled" missing from ${mode} document`,
+    );
+
+    // Enabled (true): the decision-5 false pin rejects.
+    baseline["lsp"] = { enabled: true };
+    assertThrows(
+      () => assertOwnedSettingsDocument(baseline, mode),
+      Error,
+      "Decision 5 requires the shared deployment pin lsp.enabled: false",
+    );
+
+    // Non-boolean string value: registered boolean-type check rejects.
+    baseline["lsp"] = { enabled: "false" };
+    assertThrows(
+      () => assertOwnedSettingsDocument(baseline, mode),
+      Error,
+      'Invalid type for key "lsp.enabled": expected boolean, got string',
+    );
+
+    // Unknown lsp.* key: unregistered-key rejection (decision 5 permits ONLY
+    // the registered lsp.enabled pin, never an arbitrary LSP setting).
+    baseline["lsp"] = { enabled: false, server: "pyright" };
+    assertThrows(
+      () => assertOwnedSettingsDocument(baseline, mode),
+      Error,
+      'Unregistered settings key "lsp.server"',
+    );
+
+    // Empty lsp mapping branch stays forbidden.
+    baseline["lsp"] = {};
+    assertThrows(
+      () => assertOwnedSettingsDocument(baseline, mode),
+      Error,
+      'Forbidden empty object at path "lsp"',
+    );
+  }
+});
+
+Deno.test("Task 25-2.2: row-17 carrier interface consumed verbatim — native YOLO keeps approval posture with no restricted policy", () => {
+  // This test CONSUMES the row-17 launch result (factory flags) and the landed
+  // OpenCode permission maps without editing them: it asserts the carrier
+  // interface stays intact alongside the row-25 settings pin. It makes NO
+  // native-implicit-suppression claim — that remains user-owned UNVERIFIED.
+  const config = {
+    discord: { token: "", channelIds: [] },
+    agent: {
+      defaultAgentType: "omp",
+      model: "openrouter/auto",
+      systemPromptPath: "./test.md",
+      tokenLimit: 20000,
+      geminiApiKey: "gm_test_key",
+      openRouterApiKey: "or_test_key",
+    },
+    workspace: { repoPath: "./test-repo" },
+  } as unknown as Config;
+
+  for (const yolo of [false, true]) {
+    const assembled = createAgentConfig("omp", "/tmp/ws", config, yolo);
+    assertEquals(
+      assembled.args.filter((arg) => arg === "--no-lsp").length,
+      1,
+      `row-17 carrier: --no-lsp exactly once (yolo=${yolo})`,
+    );
+  }
+
+  const yoloAssembled = createAgentConfig("omp", "/tmp/ws", config, true);
+  assertEquals(yoloAssembled.args.includes("agent-config/omp/native-yolo.yml"), true);
+  assertEquals(yoloAssembled.args.some((arg) => arg.includes("restricted")), false);
+
+  // Native YOLO approval posture plus the row-25 pin, with ZERO restricted
+  // per-tool approval, approval-record reset or provider-disable content.
+  const yoloDoc = parseYaml(NATIVE_YOLO_YAML_CONTENT) as Record<string, unknown>;
+  assertEquals(yoloDoc["tools"], { approvalMode: "yolo" });
+  assertEquals((yoloDoc["lsp"] as Record<string, unknown>)["enabled"], false);
+  assertEquals("disabledProviders" in yoloDoc, false);
+  assertEquals("approval" in (yoloDoc["tools"] as Record<string, unknown>), false);
+
+  // Restricted-only provider clamp stays absent from the YOLO composition.
+  const yoloComp = ompSettingsForMode("native-yolo");
+  for (const file of yoloComp.overlayFiles) {
+    assertEquals(file.content.includes("disabledProviders"), false);
+    assertEquals(file.content.includes("approval:"), false);
+  }
+
+  // OpenCode carrier interface (owned by row 17; consumed, never edited):
+  // the shipped map denies lsp per agent for build and yolo, no global clamp.
+  const openCode = JSON.parse(
+    Deno.readTextFileSync(new URL("../../agent-config/opencode.json", import.meta.url).pathname),
+  ) as { agent?: Record<string, { permission?: Record<string, unknown> }> };
+  assertEquals(openCode.agent?.["build"]?.permission?.["lsp"], "deny");
+  assertEquals(openCode.agent?.["yolo"]?.permission?.["lsp"], "deny");
+  assertEquals("lsp" in openCode, false, "no global clamp — row-17 ownership preserved");
 });
