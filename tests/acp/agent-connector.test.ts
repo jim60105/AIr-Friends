@@ -4,6 +4,7 @@ import { assertEquals, assertRejects } from "@std/assert";
 import * as acp from "@agentclientprotocol/sdk";
 import { AgentConnector } from "@acp/agent-connector.ts";
 import { ChatbotClient } from "@acp/client.ts";
+import { type OmpSettingsSourcePlan, ompSettingsSourcePlan } from "@acp/omp-settings.ts";
 import type {
   AgentCapabilities,
   HTTPMCPServerConfig,
@@ -1157,17 +1158,57 @@ const OMP_YOLO_NS = "/data/omp-pools/discord:c1/omp-agent/native-yolo";
 const OMP_RESTRICTED_NS = "/data/omp-pools/discord:c1/omp-agent/restricted";
 const OC_DATA_HOME = "/data/opencode-data/discord:c1";
 
+// Row 26: OMP connectors now preflight the owned-only settings-source plan
+// before every native request, so OMP harnesses must carry a REAL plan whose
+// authority roots exist. One temp-root fixture serves every OMP recovery test
+// (created lazily, removed by the final OMP recovery test). The env namespaces
+// above stay synthetic — the ownership derivation reads agentConfig.env, while
+// the observer only ever stats the plan's own roots.
+let ompPlanFixture: { plan: OmpSettingsSourcePlan; baseRoot: string } | null = null;
+function ompRecoveryPlan(): OmpSettingsSourcePlan {
+  if (!ompPlanFixture) {
+    const baseRoot = Deno.makeTempDirSync({ prefix: "omp-recovery-plan-" });
+    const overlayPath = `${baseRoot}/native-yolo.yml`;
+    Deno.writeTextFileSync(overlayPath, "# deployment-owned recovery fixture overlay\n");
+    const plan = ompSettingsSourcePlan("native-yolo", {
+      baseRoot,
+      allowedOverlayPaths: [overlayPath],
+    });
+    Deno.mkdirSync(plan.ownedHome, { recursive: true });
+    Deno.mkdirSync(plan.agentDir, { recursive: true });
+    Deno.mkdirSync(plan.launchCwd, { recursive: true });
+    ompPlanFixture = { plan, baseRoot };
+  }
+  return ompPlanFixture.plan;
+}
+function cleanupOmpPlanFixture(): void {
+  if (ompPlanFixture) {
+    Deno.removeSync(ompPlanFixture.baseRoot, { recursive: true });
+    ompPlanFixture = null;
+  }
+}
+
 function createRecoveryHarness(params: {
   agentType?: string;
   env?: Record<string, string>;
   cachedGateContexts?: Record<string, Record<string, unknown>>;
+  /** Row 26: real plan fixture for OMP connectors; `null` keeps a plan-less config. */
+  plan?: OmpSettingsSourcePlan | null;
   /** Namespace the (mock) respawn leaves in agentConfig.env — mutate to simulate drift. */
 }): RecoveryHarness {
   const interactions: string[] = [];
   const gateMutations: { sessionId: string; ctx: Record<string, unknown> }[] = [];
   const rpc: string[] = [];
   const connector = new AgentConnector({
-    agentConfig: { command: "mock-agent", args: [], cwd: "/tmp", env: params.env },
+    agentConfig: {
+      command: "mock-agent",
+      args: [],
+      cwd: "/tmp",
+      env: params.env,
+      ...(params.agentType === "omp" && params.plan !== null
+        ? { settingsSourcePlan: params.plan ?? ompRecoveryPlan() }
+        : {}),
+    },
     clientConfig: {
       workingDir: "/tmp/workspace",
       platform: "test",
@@ -1653,4 +1694,37 @@ Deno.test("reconnectAndResumeSession - capability absence still returns false wi
   assertEquals(resumed, false);
   assertEquals(h.interactions, ["disconnect", "connect", "disconnect"]);
   assertEquals(h.gateMutations, []);
+});
+
+// Row 26 (task 4.2): an OMP connector whose agentConfig carries NO settings-source
+// plan cannot prove the owned-only posture — the preflight fails closed BEFORE any
+// teardown/respawn/load, with zero connector side effects. Deliberate missing-plan
+// scenario; last OMP recovery test, so it also releases the shared plan fixture.
+Deno.test("reconnectAndResumeSession - plan-less OMP connector fails the settings preflight closed with zero side effects", async () => {
+  try {
+    const h = createRecoveryHarness({
+      agentType: "omp",
+      env: { PI_CODING_AGENT_DIR: OMP_YOLO_NS, TMPDIR: `${OMP_YOLO_NS}/tmp` },
+      plan: null,
+    });
+
+    await assertRejects(
+      () =>
+        h.connector.reconnectAndResumeSession("sess_a", "/workspace", [], {
+          ownership: {
+            agentType: "omp",
+            permissionMode: "native-yolo",
+            processNamespace: OMP_YOLO_NS,
+          },
+          gateContext: { cwd: "/workspace" },
+        }),
+      Error,
+      "no settings-source plan",
+    );
+    assertEquals(h.interactions, [], "plan-less rejection precedes disconnect/respawn/load");
+    assertEquals(h.rpc, []);
+    assertEquals(h.gateMutations, []);
+  } finally {
+    cleanupOmpPlanFixture();
+  }
 });

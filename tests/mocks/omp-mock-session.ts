@@ -27,7 +27,8 @@
 
 import { AgentConnector } from "@acp/agent-connector.ts";
 import { createAgentConfig } from "@acp/agent-factory.ts";
-import { ompAgentDir } from "@utils/omp-paths.ts";
+import { ompSettingsForMode, ompSettingsSourcePlan } from "@acp/omp-settings.ts";
+import { ompAgentDir, resolveOmpConfigPath } from "@utils/omp-paths.ts";
 import type { AgentConfig, ClientConfig } from "@acp/types.ts";
 import type { Config } from "../../src/types/config.ts";
 import {
@@ -259,6 +260,18 @@ export function buildOmpMockSession(input: OmpMockSessionInput): OmpMockSession 
       TMPDIR: `${processNamespace}/tmp`,
       XDG_DATA_HOME: `${processNamespace}/xdg`,
     },
+    // Row 26: the real owned-only settings-source plan for this composition's
+    // base root and mode, with the same pinned overlay assets the factory
+    // launches with. Consumers that drive a CONNECTOR seam (createSession /
+    // reconnectAndResumeSession) must first ensure the plan's authority roots
+    // exist (`ownedHome`/`agentDir`/`launchCwd` below `baseRoot`) — with a
+    // synthetic base root the preflight correctly fails closed instead.
+    settingsSourcePlan: ompSettingsSourcePlan(input.mode, {
+      baseRoot: input.baseRoot,
+      allowedOverlayPaths: ompSettingsForMode(input.mode).orderedOverlayPaths.map((overlayPath) =>
+        resolveOmpConfigPath(overlayPath)
+      ),
+    }),
   };
 
   const connector = new AgentConnector({

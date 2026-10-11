@@ -7,8 +7,8 @@ import { getRunningEgressProxyUrl } from "@utils/egress-proxy.ts";
 import { sessionXdgDataHome } from "@utils/opencode-paths.ts";
 import {
   ompAgentDir,
-  ompOwnedHome,
   ompLaunchCwd,
+  ompOwnedHome,
   ompProcessTmpDir,
   ompXdgDataHome,
   resolveOmpConfigPath,
@@ -16,10 +16,11 @@ import {
   resolveOmpTrustedExtensionPath,
 } from "@utils/omp-paths.ts";
 import {
-  ompSettingsSourcePlan,
+  OMP_FOREIGN_PROVIDER_ENV_SELECTORS,
   type OmpPermissionMode,
-  type OmpSettingsSourcePlan,
   ompSettingsForMode,
+  type OmpSettingsSourcePlan,
+  ompSettingsSourcePlan,
 } from "./omp-settings.ts";
 import { sanitizeOmpDiscoveryEnv } from "./sandbox-manager.ts";
 import { createLogger } from "@utils/logger.ts";
@@ -135,6 +136,15 @@ export function finalizeOmpSpawnEnvironment(
   }
   for (const selector of plan.forbiddenSelectors) {
     if (selector in expected) continue;
+    if (selector in env) {
+      throw new Error(
+        `OMP spawn environment violates the settings-source plan: ${selector} survived sanitization`,
+      );
+    }
+  }
+  // Foreign provider selectors are never plan-owned and never permitted in any
+  // form: an assembly that skipped sanitization must fail closed on them too.
+  for (const selector of OMP_FOREIGN_PROVIDER_ENV_SELECTORS) {
     if (selector in env) {
       throw new Error(
         `OMP spawn environment violates the settings-source plan: ${selector} survived sanitization`,
