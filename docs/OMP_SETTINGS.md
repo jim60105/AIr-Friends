@@ -83,3 +83,5 @@ The following areas are explicitly out of scope for this change and belong to do
 - **Row 14 (`define-omp-restricted-tool-decisions` / `wire-omp-restricted-tool-enforcement`)**: Runtime tool inventory, execution-time default-deny policy, and per-tool `tools.approval` records.
 - **LSP row 17 (`disable-restricted-agent-lsp`)**: both-mode `--no-lsp` carriers and per-agent OpenCode LSP denial (wiring only; native cold-start proof remains user runtime-observed). Row 25 (`pin-omp-yolo-lsp-settings`) owns the native-YOLO settings pin.
 - **Row 20 (`package-pinned-omp-runtime`)**: Checksum validation and packaging of `agent-config/omp/*` assets outside agent-writable roots.
+
+> Runtime verification for this area is consolidated in the single checklist artifact [USER-RUNTIME-VERIFICATION.md](USER-RUNTIME-VERIFICATION.md) (section D: LSP off in OMP restricted+YOLO and OpenCode build+yolo; implicit-startup suppression unverified).

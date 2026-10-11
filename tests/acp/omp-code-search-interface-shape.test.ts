@@ -537,7 +537,8 @@ Deno.test("Marker ≠ allow: 14a stays pending and 14b blocks even under an ACTI
   assertEquals(decision.outcome, "allow-gated-pending-adapter");
   // 14b blocks the pending outcome (rejected_pending_adapter) — and would do
   // the same even with a supported credential present: the composition does
-  // not consult seam state (recorded batch ownership gap; rows 23/24 routing).
+  // not consult seam state (batch ownership gap, final disposition: DEFERRED
+  // beyond the batch, user/next-effort owned — see docs/OMP_NETWORK.md).
   const composed = composeRestrictedToolCall(obs("codesearch", "query"));
   assert("block" in composed && composed.block, "14b still blocks the pending-adapter outcome");
   if ("block" in composed && composed.block) {

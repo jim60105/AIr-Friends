@@ -261,10 +261,15 @@ decision data and the registered replacement, not the gated handler.
 **Batch ownership gap (recorded for routing):** the required completion
 step — the 14b gated handler honoring completed web-search routes via
 `webSearchSeamState`/credential-presence input instead of blocking every
-`allow-gated-pending-adapter` outcome — has no owner in this change (the
-spec forbids row 20 from touching `enforcement.ts`); it needs a later
-batch row or an explicit follow-up, or live web-search capability stays
-dark even with `GEMINI_API_KEY`/`OPENROUTER_API_KEY` present.
+`allow-gated-pending-adapter` outcome — is **DEFERRED beyond this batch,
+final disposition**: row 20 was spec-forbidden from touching `enforcement.ts`
+and the batch's closing consumers (rows 23/24, lifecycle and handoff
+regression suites) completed without owning it, so no batch row carries it.
+The step is user/next-effort owned. Until it lands, live web-search stays
+dark behind `rejected_pending_adapter` (fail-closed) even with
+`GEMINI_API_KEY`/`OPENROUTER_API_KEY` present: this is a deferred disposition,
+not a supported capability, and every pinned verdict and evidence limit above
+is unchanged.
 **Native YOLO sessions** keep native search with no adapter clamp (14b
 posture, D6): the replacement registers restricted-sessions-only and
 delegates nothing in YOLO because it never registers there.
@@ -405,9 +410,11 @@ provisioning above, the composition-side seam-state step (the same
 covering the code-search route as well:
 the 14b gated handler honoring `webSearchSeamState`/`codeSearchSeamState` +
 credential-presence input instead of blocking every pending-adapter outcome
-— no owner in this change, which forbids touching `enforcement.ts`; needs a
-later batch row or explicit follow-up, or live web-search AND code-search
-capability stay dark even with credentials present), and the section-15
+— **DEFERRED beyond this batch, final disposition**, user/next-effort owned:
+the batch closed (rows 20–24) without any row owning it, so live web-search
+AND code-search stay dark behind `rejected_pending_adapter` (fail-closed)
+even with credentials present — a deferred disposition, not a supported
+capability), and the section-15
 native-observation below. A test pins that 14b still blocks even with a
 synthetic activated marker. `HTTP_PROXY` alone remains non-enforcement
 (unchanged honesty table); the Skill API loopback and proxy endpoint stay
@@ -435,3 +442,5 @@ Section 15 checklist additions (user-owned, real deployment):
 10. Under the enforcing posture, confirm the proxy observes the
     `api.github.com` CONNECT and that a synthetic redirect `Location`
     pointing at a private address is never issued.
+
+> Runtime verification for this area is consolidated in the single checklist artifact [USER-RUNTIME-VERIFICATION.md](USER-RUNTIME-VERIFICATION.md) (section H: adapter/proxy mediation incl. binary/text fetch, redirects, private-target failures; the F14 residual and per-request-proxy candidate stay open there).

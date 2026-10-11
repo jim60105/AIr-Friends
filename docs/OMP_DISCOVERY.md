@@ -116,3 +116,5 @@ The following items cannot be certified by mock or unit tests and remain unverif
 - [OMP Spawn & Process Scoping (`docs/OMP_SPAWN.md`)](OMP_SPAWN.md)
 - [OMP Settings & Composition (`docs/OMP_SETTINGS.md`)](OMP_SETTINGS.md)
 - [Agent Permissions Specification (`docs/AGENT_PERMISSIONS.md`)](AGENT_PERMISSIONS.md)
+
+> Runtime verification for this area is consolidated in the single checklist artifact [USER-RUNTIME-VERIFICATION.md](USER-RUNTIME-VERIFICATION.md) (section B: trusted-module load, hostile custom-tool top-level code, critical-skill resolution, cancelled readiness handshake with accepted extension-load risk).

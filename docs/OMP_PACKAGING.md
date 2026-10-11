@@ -212,3 +212,5 @@ Until those are observed, this is packaging hygiene backed by mock evidence —
 not clearance. The pin is prevention; the bootstrap version marker (`OMP
 version check: OK|BELOW_MINIMUM|UNKNOWN`, warn-only, never blocks startup) is
 observability only.
+
+> Runtime verification for this area is consolidated in the single checklist artifact [USER-RUNTIME-VERIFICATION.md](USER-RUNTIME-VERIFICATION.md) (section A: installed version, both arches, notices, startup without an added Bun dependency).
