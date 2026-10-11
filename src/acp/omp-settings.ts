@@ -62,6 +62,14 @@
  */
 
 import { PINNED_OMP_COMMIT, PINNED_OMP_VERSION } from "./omp/compatibility-contracts.ts";
+import {
+  ompAgentDir,
+  ompLaunchCwd,
+  ompOwnedHome,
+  ompProcessTmpDir,
+  ompXdgDataHome,
+} from "../utils/omp-paths.ts";
+import { isAbsolute, resolve } from "@std/path";
 
 export type OmpPermissionMode = "restricted" | "native-yolo";
 
@@ -257,6 +265,25 @@ export interface EnvironmentPostureContracts {
   readonly forbiddenInheritance: readonly string[];
   readonly overlayPathPlacementRequirement:
     "Owned overlay paths must reside outside agent-writable roots";
+  /**
+   * Row 26 (decision 3): the selectors whose inherited values are removed from
+   * every OMP child MANDATORILY (regardless of filterEnv/allowedEnvVars); the
+   * only permitted post-sanitization values are the exact deployment-owned
+   * assignments of the settings-source plan (HOME, PI_CODING_AGENT_DIR,
+   * XDG_DATA_HOME). OpenCode's HOME/XDG_DATA_HOME semantics are unaffected.
+   */
+  readonly mandatoryDiscoverySanitization: readonly string[];
+  /**
+   * Foreign provider config selectors that are never permitted in any form
+   * (never allowlisted, never assigned): they cannot reintroduce a host source.
+   */
+  readonly foreignProviderSelectors: readonly string[];
+  /**
+   * HOME is EXPLICITLY assigned to the owned plan HOME: an unset HOME alone is
+   * insufficient because the native homedir fallback can return the daemon home.
+   */
+  readonly homeAssignmentRequirement:
+    "HOME explicitly assigned to the owned plan HOME; never inherited, never unset";
 }
 
 export interface RecordResetGateContract {
@@ -265,6 +292,314 @@ export interface RecordResetGateContract {
   readonly reason: string;
   readonly residualEvidence: string;
   readonly operativeSecurityBoundary: string;
+  /**
+   * Decision 3 (DECIDED 2026-10-09): the application disposition that governs
+   * whether this gate blocks session setup. The pinned native `unresolved` /
+   * `incompatible` verdict above is UNCHANGED; the disposition selects
+   * settings-discovery-path control instead of a native reset verdict.
+   */
+  readonly applicationDisposition: Decision3ApplicationDisposition;
+}
+
+/**
+ * Decision 3 (docs/superpowers/specs/2026-10-06-omp-proposal-batch-index.md §3)
+ * recorded as an application disposition SEPARATE from the pinned native reset
+ * verdict. `isolate-omp-settings-discovery` (row 26) carries it: control moves
+ * to settings discovery paths — only the owned `--config` overlays are visible
+ * (HOME, XDG and project settings sources are filtered out, so no hostile lower
+ * layer exists to inherit from) and restricted runtime default-deny remains the
+ * second boundary. This is a deployment-owned disposition, NOT a supported-
+ * mechanism claim: the pinned binary still does not provide the reset barrier.
+ */
+export interface Decision3ApplicationDisposition {
+  readonly decision: 3;
+  readonly status: "DECIDED (2026-10-09)";
+  readonly control: "settings-discovery-path-control";
+  readonly mechanism: string;
+  readonly secondBoundary: string;
+  readonly nativeVerdictUnchanged: "unresolved/incompatible (recorded verbatim)";
+  readonly residualRisks: readonly string[];
+}
+
+/**
+ * A single pinned forbidden settings-discovery source (bounded path table row).
+ * `layer` records which settings layer the source feeds at the pinned revision.
+ */
+export interface PinnedSettingsSource {
+  readonly id: string;
+  readonly layer: "global" | "project" | "foreign-global" | "foreign-project";
+  /** Path relative to the layer anchor (`{home}`, `{agentDir}`, `{cwd}`). */
+  readonly relativePath: string;
+  /** Exact pinned source symbols documenting the source (no new disable key). */
+  readonly sourceSymbols: readonly string[];
+}
+
+/**
+ * The bounded pinned settings-source inventory (D1). This is an enumerated path
+ * table traced at OMP v18.6.1 / 2a2c6dcbbb558c0f8145f67f28b3370984f2bf60, not a
+ * general filesystem scan, and none of its rows is a newly fabricated disable key.
+ */
+export const PINNED_FORBIDDEN_SETTINGS_SOURCES: readonly PinnedSettingsSource[] = Object.freeze([
+  {
+    id: "native-global-config-yml",
+    layer: "global",
+    relativePath: "config.yml",
+    sourceSymbols: [
+      "config/settings.ts (global agent-dir config.yml read)",
+      "docs/settings.md (global settings discovery)",
+    ],
+  },
+  {
+    id: "native-compat-config-yaml",
+    layer: "global",
+    relativePath: "config.yaml",
+    sourceSymbols: [
+      "config/settings.ts (compatibility config.yaml read)",
+      "docs/settings.md (compat naming)",
+    ],
+  },
+  {
+    id: "native-legacy-settings-json",
+    layer: "global",
+    relativePath: "settings.json",
+    sourceSymbols: [
+      "config/settings.ts (legacy settings.json read)",
+      "docs/settings.md (legacy naming)",
+    ],
+  },
+  {
+    id: "native-project-config-yml",
+    layer: "project",
+    relativePath: ".omp/config.yml",
+    sourceSymbols: [
+      "config/settings.ts (project layer discovered from actual cwd)",
+      "docs/settings.md (project .omp/config.yml)",
+    ],
+  },
+  {
+    id: "native-project-legacy-settings-json",
+    layer: "project",
+    relativePath: ".omp/settings.json",
+    sourceSymbols: [
+      "config/settings.ts (project legacy settings.json)",
+      "docs/settings.md (legacy naming)",
+    ],
+  },
+  // Foreign discovery providers with a `settingsCapability` provider at the
+  // pinned commit (user level = {home}/{userBase}, project level =
+  // {cwd}/{projectDir}). Their selectors (CLAUDE_CONFIG_DIR etc.) are never
+  // passed to a child, so user-level discovery resolves under the owned HOME;
+  // both levels stay on the table fail-safe. The observer additionally walks
+  // bounded ancestors of the ACTUAL session cwd per design D3 (the pinned
+  // providers resolve project paths at cwd only; the ancestor walk is the
+  // deployment posture the design records, never a claim about native
+  // traversal).
+  {
+    id: "foreign-claude-settings",
+    layer: "foreign-global",
+    relativePath: ".claude/settings.json",
+    sourceSymbols: [
+      "discovery/claude.ts (loadSettings user level; resolveClaudePaths honors CLAUDE_CONFIG_DIR)",
+    ],
+  },
+  {
+    id: "foreign-claude-project-settings",
+    layer: "foreign-project",
+    relativePath: ".claude/settings.json",
+    sourceSymbols: ["discovery/claude.ts (loadSettings project level via getProjectClaude)"],
+  },
+  {
+    id: "foreign-codex-config-toml",
+    layer: "foreign-global",
+    relativePath: ".codex/config.toml",
+    sourceSymbols: ["discovery/codex.ts (loadSettings user level via getUserCodexDir)"],
+  },
+  {
+    id: "foreign-codex-project-config-toml",
+    layer: "foreign-project",
+    relativePath: ".codex/config.toml",
+    sourceSymbols: ["discovery/codex.ts (loadSettings project level via getProjectCodexDir)"],
+  },
+  {
+    id: "foreign-cursor-settings",
+    layer: "foreign-global",
+    relativePath: ".cursor/settings.json",
+    sourceSymbols: ["discovery/cursor.ts (loadSettings user level)"],
+  },
+  {
+    id: "foreign-cursor-project-settings",
+    layer: "foreign-project",
+    relativePath: ".cursor/settings.json",
+    sourceSymbols: ["discovery/cursor.ts (loadSettings project level)"],
+  },
+  {
+    id: "foreign-gemini-settings",
+    layer: "foreign-global",
+    relativePath: ".gemini/settings.json",
+    sourceSymbols: ["discovery/gemini.ts (loadSettings user level)"],
+  },
+  {
+    id: "foreign-gemini-project-settings",
+    layer: "foreign-project",
+    relativePath: ".gemini/settings.json",
+    sourceSymbols: ["discovery/gemini.ts (loadSettings project level)"],
+  },
+  {
+    id: "foreign-opencode-user-json",
+    layer: "foreign-global",
+    relativePath: ".config/opencode/opencode.json",
+    sourceSymbols: ["discovery/opencode.ts (getConfigSources user level)"],
+  },
+  {
+    id: "foreign-opencode-user-jsonc",
+    layer: "foreign-global",
+    relativePath: ".config/opencode/opencode.jsonc",
+    sourceSymbols: ["discovery/opencode.ts (getConfigSources user level)"],
+  },
+  {
+    id: "foreign-opencode-project-root-json",
+    layer: "foreign-project",
+    relativePath: "opencode.json",
+    sourceSymbols: ["discovery/opencode.ts (getConfigSources project-root level)"],
+  },
+  {
+    id: "foreign-opencode-project-root-jsonc",
+    layer: "foreign-project",
+    relativePath: "opencode.jsonc",
+    sourceSymbols: ["discovery/opencode.ts (getConfigSources project-root level)"],
+  },
+  {
+    id: "foreign-opencode-project-dir-json",
+    layer: "foreign-project",
+    relativePath: ".opencode/opencode.json",
+    sourceSymbols: ["discovery/opencode.ts (getConfigSources .opencode dir level)"],
+  },
+  {
+    id: "foreign-opencode-project-dir-jsonc",
+    layer: "foreign-project",
+    relativePath: ".opencode/opencode.jsonc",
+    sourceSymbols: ["discovery/opencode.ts (getConfigSources .opencode dir level)"],
+  },
+] as const);
+
+/**
+ * The exact environment selectors the pinned inventory records as settings-source
+ * selectors. Every one of them is removed from an OMP child unconditionally
+ * (mandatory sanitization) and may only reappear with its exact deployment-owned
+ * value assigned by the source plan (HOME, PI_CODING_AGENT_DIR, XDG_DATA_HOME).
+ * The list is OMP-only: OpenCode's existing HOME/XDG_DATA_HOME semantics never
+ * consult it.
+ */
+export const OMP_SETTINGS_DISCOVERY_ENV_SELECTORS: readonly string[] = Object.freeze([
+  "HOME",
+  "XDG_CONFIG_HOME",
+  "XDG_DATA_HOME",
+  "XDG_STATE_HOME",
+  "XDG_CACHE_HOME",
+  "OMP_PROFILE",
+  "PI_PROFILE",
+  "PI_CONFIG_FILES",
+  "PI_CODING_AGENT_DIR",
+] as const);
+
+/**
+ * Foreign provider config selectors that must never enter an OMP child (they
+ * cannot reintroduce a host source). Never allowlisted, never assigned.
+ */
+export const OMP_FOREIGN_PROVIDER_ENV_SELECTORS: readonly string[] = Object.freeze([
+  "CLAUDE_CONFIG_DIR",
+  "CURSOR_CONFIG_DIR",
+  "CODEX_HOME",
+  "GEMINI_CONFIG_DIR",
+] as const);
+
+/**
+ * Typed owned settings-source plan (row 26 D1): one deployment-owned plan
+ * consumed by the OMP factory, the mandatory final child-environment
+ * sanitization, and the pre-native-request settings observer.
+ */
+export interface OmpSettingsSourcePlan {
+  readonly mode: OmpPermissionMode;
+  /** Mode-scoped process state namespace root (existing row-9/10 namespace). */
+  readonly baseRoot: string;
+  /** Deployment-owned HOME generated beneath the mode namespace. */
+  readonly ownedHome: string;
+  /** Exact PI_CODING_AGENT_DIR under the mode namespace. */
+  readonly agentDir: string;
+  /** Neutral deployment-owned process launch cwd. */
+  readonly launchCwd: string;
+  /** Owned mode-scoped XDG_DATA_HOME (retains OpenCode-semantics independence). */
+  readonly xdgDataHome: string;
+  /** Owned mode-scoped TMPDIR (distinct from payload staging). */
+  readonly tmpDir: string;
+  /** Exact owned `--config` overlay paths, mode document last. */
+  readonly allowedOverlayPaths: readonly string[];
+  /** Selector variables removed from any OMP child regardless of filtering. */
+  readonly forbiddenSelectors: readonly string[];
+  /** Bounded forbidden lower-layer source table. */
+  readonly forbiddenSources: readonly PinnedSettingsSource[];
+  /**
+   * Distinctness invariant: owned HOME/agent roots must never coincide with
+   * canonical payload staging.
+   */
+  readonly payloadStagingIndependent: true;
+}
+
+export interface OmpSourcePlanInput {
+  /** Absolute, deployment-owned base root for the mode namespace. */
+  readonly baseRoot: string;
+  /** Resolved owned `--config` overlay paths (mode document last). */
+  readonly allowedOverlayPaths: readonly string[];
+}
+
+/**
+ * Build the typed owned settings-source plan for a mode over the existing
+ * mode-scoped state roots. Pure path composition (no filesystem I/O): owned
+ * HOME/agent/cwd/xdg/tmp paths are derived with the canonical omp-paths
+ * primitives and stay distinct from the `{workspace}/tmp/{sessionId}` payload
+ * staging by construction (they live under `{baseRoot}/omp-agent/{mode}`).
+ */
+export function ompSettingsSourcePlan(
+  mode: OmpPermissionMode,
+  input: OmpSourcePlanInput,
+): OmpSettingsSourcePlan {
+  if (input.baseRoot.length === 0 || input.baseRoot.includes("\0")) {
+    throw new Error("Settings source plan baseRoot is empty or malformed");
+  }
+  const baseRoot = resolve(input.baseRoot);
+  if (!isAbsolute(baseRoot)) {
+    throw new Error("Settings source plan baseRoot must resolve to an absolute path");
+  }
+  // Canonical row-9/10 mode-scoped primitives: the plan's roots are EXACTLY the
+  // roots the factory already spawns with, so the observer and the launch can
+  // never drift onto different formulas.
+  const ownedHome = ompOwnedHome(baseRoot, mode);
+  const agentDir = ompAgentDir(baseRoot, mode);
+  const launchCwd = ompLaunchCwd(baseRoot, mode);
+  const xdgDataHome = ompXdgDataHome(baseRoot, mode);
+  const tmpDir = ompProcessTmpDir(baseRoot, mode);
+  const overlays = [...input.allowedOverlayPaths];
+  if (overlays.length === 0) {
+    throw new Error("Settings source plan requires at least one owned overlay");
+  }
+  for (const overlay of overlays) {
+    if (overlay.length === 0 || overlay.includes("\0") || !isAbsolute(resolve(overlay))) {
+      throw new Error(`Settings source plan owned overlay "${overlay}" is not absolute`);
+    }
+  }
+  return Object.freeze({
+    mode,
+    baseRoot,
+    ownedHome,
+    agentDir,
+    launchCwd,
+    xdgDataHome,
+    tmpDir,
+    allowedOverlayPaths: Object.freeze(overlays),
+    forbiddenSelectors: OMP_SETTINGS_DISCOVERY_ENV_SELECTORS,
+    forbiddenSources: PINNED_FORBIDDEN_SETTINGS_SOURCES,
+    payloadStagingIndependent: true as const,
+  });
 }
 
 export interface OmpModeSettingsComposition {
@@ -276,6 +611,12 @@ export interface OmpModeSettingsComposition {
   readonly supportedProviderEnvKeys: readonly string[];
   readonly envPosture: EnvironmentPostureContracts;
   readonly recordResetGate: RecordResetGateContract;
+  /**
+   * Row 26: the deployment-owned settings-source plan for this composition,
+   * present exactly when the caller supplied the plan input (the factory's
+   * launch assembly). Pure callers keep the pre-row-26 shape with `null`.
+   */
+  readonly sourcePlan: OmpSettingsSourcePlan | null;
 }
 
 /**
@@ -657,9 +998,16 @@ export function assertOwnedModelsDocument(doc: Record<string, unknown>): void {
 /**
  * Pure typed composition returning deployment-owned OMP configuration and asset metadata.
  * Does not read the filesystem or start any child processes.
+ *
+ * Row 26 adds the optional `plan` input: when the launch assembly supplies the
+ * deployment-owned base root and the RESOLVED owned overlay paths, the
+ * composition carries the typed settings-source plan (`sourcePlan`) consumed by
+ * the mandatory environment sanitization and the pre-native-request observer.
+ * Pure content callers (docs/tests) may omit it and keep the pre-row-26 shape.
  */
 export function ompSettingsForMode(
   mode: OmpPermissionMode,
+  plan?: OmpSourcePlanInput,
 ): OmpModeSettingsComposition {
   const modeAssetPath = mode === "restricted"
     ? "agent-config/omp/restricted.yml"
@@ -724,6 +1072,10 @@ export function ompSettingsForMode(
       "XDG_CONFIG_HOME",
     ],
     overlayPathPlacementRequirement: "Owned overlay paths must reside outside agent-writable roots",
+    mandatoryDiscoverySanitization: OMP_SETTINGS_DISCOVERY_ENV_SELECTORS,
+    foreignProviderSelectors: OMP_FOREIGN_PROVIDER_ENV_SELECTORS,
+    homeAssignmentRequirement:
+      "HOME explicitly assigned to the owned plan HOME; never inherited, never unset",
   };
 
   const recordResetGate: RecordResetGateContract = {
@@ -735,6 +1087,21 @@ export function ompSettingsForMode(
       "Tests reproduce lower-only unknown_tool: allow surviving in restricted mode and lower-only prompt/deny surviving in YOLO mode.",
     operativeSecurityBoundary:
       "Restricted execution-time default-deny (row 14) is the operative security boundary while record reset remains an unresolved gate.",
+    applicationDisposition: {
+      decision: 3,
+      status: "DECIDED (2026-10-09)",
+      control: "settings-discovery-path-control",
+      mechanism:
+        "Only the owned --config overlays are visible: inherited HOME/XDG/profile/config selectors are mandatorily sanitized, the child receives a deployment-owned HOME and exact PI_CODING_AGENT_DIR, and lower global/project/legacy/foreign settings sources are verified absent (or rejected fail-closed) before every native session request, so no hostile lower layer exists to inherit from.",
+      secondBoundary:
+        "Restricted execution-time runtime default-deny (row 14) remains the second boundary; YOLO receives no restricted tool policy.",
+      nativeVerdictUnchanged: "unresolved/incompatible (recorded verbatim)",
+      residualRisks: [
+        "The pinned binary still provides no deep-merge reset barrier; this disposition controls WHICH layers exist, not how merge behaves.",
+        "Native autonomous settings reload and undetectable mid-process host mutation remain user-owned runtime evidence and deployment-control responsibility; the preflight is a snapshot decision, not a race-free watcher.",
+        "A populated reused agent directory is rejected, never migrated or merged; the deployment owner must remove hostile settings before launch.",
+      ],
+    },
   };
 
   return {
@@ -746,6 +1113,14 @@ export function ompSettingsForMode(
     supportedProviderEnvKeys,
     envPosture,
     recordResetGate,
+    sourcePlan: plan === undefined
+      ? null
+      : ompSettingsSourcePlan(mode, {
+        baseRoot: plan.baseRoot,
+        allowedOverlayPaths: plan.allowedOverlayPaths.length > 0
+          ? plan.allowedOverlayPaths
+          : orderedOverlayPaths,
+      }),
   };
 }
 

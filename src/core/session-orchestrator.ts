@@ -9,6 +9,7 @@ import {
 } from "@acp/agent-connector.ts";
 import type { SessionGateContext } from "@acp/client.ts";
 import { RecoveryOwnershipError, type SessionRecoveryOwnership } from "@acp/recovery-ownership.ts";
+import { SettingsSourceRejectionError } from "@acp/omp/settings-sources.ts";
 import { AgentProcessPool } from "./agent-process-pool.ts";
 import type { PoolPermissionMode, PoolRunOptions } from "./agent-process-pool.ts";
 import * as acp from "@agentclientprotocol/sdk";
@@ -78,7 +79,10 @@ type RecoveryAbortReason =
   | "ownership_unverified"
   | "namespace_mismatch"
   | "gate_context_restore_failed"
-  | "post_restore_hook_failed";
+  | "post_restore_hook_failed"
+  // Row 26: a recovery refused by the settings-source preflight must surface
+  // its own bounded reason instead of riding the pool's relabels.
+  | "settings_sources_rejected";
 
 /**
  * Format fetched RSS items for the self-research prompt as explicitly
@@ -4195,6 +4199,7 @@ export class SessionOrchestrator {
     if (error instanceof RecoveryOwnershipError) return error.reason;
     if (error instanceof GateContextRestoreError) return "gate_context_restore_failed";
     if (error instanceof RecoveryHookError) return "post_restore_hook_failed";
+    if (error instanceof SettingsSourceRejectionError) return "settings_sources_rejected";
     return null;
   }
 

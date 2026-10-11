@@ -155,3 +155,14 @@ export function ompLaunchCwd(baseRoot: string, mode: OmpPermissionMode): string 
 export function ompXdgDataHome(baseRoot: string, mode: OmpPermissionMode): string {
   return resolve(join(ompAgentDir(baseRoot, mode), "xdg-data"));
 }
+
+/**
+ * Deployment-owned HOME for the OMP child ({baseRoot}/omp-agent/{mode}/home).
+ * Row 26 (`isolate-omp-settings-discovery`): HOME is assigned explicitly to
+ * this owned directory so the native homedir fallback can never return the
+ * daemon home; it stays mode-distinct and separate from payload staging
+ * ({workspace}/tmp/{sessionId}) by construction.
+ */
+export function ompOwnedHome(baseRoot: string, mode: OmpPermissionMode): string {
+  return resolve(join(ompAgentDir(baseRoot, mode), "home"));
+}

@@ -52,6 +52,11 @@ To ensure complete isolation between permission modes:
 3. Working directory (`cwd`) is set to `{baseRoot}/omp-agent/{mode}/cwd`, a deployment-controlled neutral directory with an empty `.omp/` layer. This completely prevents hostile project configuration inheritance from untrusted workspaces.
 4. `XDG_DATA_HOME` is scoped under `{baseRoot}/omp-agent/{mode}/xdg-data`.
 5. Canonical payload staging remains `{workspace}/tmp/{sessionId}`, independent of OMP internal state partitioning.
+6. Row 26 (`isolate-omp-settings-discovery`): `HOME` is EXPLICITLY assigned to the deployment-owned `{baseRoot}/omp-agent/{mode}/home` (never inherited, never unset — the native homedir fallback must not reach the daemon home). Every settings-discovery selector (`HOME`, all XDG selectors, `OMP_PROFILE`, `PI_PROFILE`, `PI_CONFIG_FILES`, `PI_CODING_AGENT_DIR`) and every foreign provider config selector is mandatorily stripped from the OMP child regardless of `filterEnv`/`allowedEnvVars`; only the exact plan values are re-assigned afterwards (`sanitizeOmpDiscoveryEnv` then `finalizeOmpSpawnEnvironment` in `src/acp/agent-factory.ts`). The typed source plan rides `AgentConfig.settingsSourcePlan`.
+
+### Settings-source lifecycle order (row 26)
+
+The metadata-only settings-source preflight (`src/acp/omp/settings-sources.ts`) runs strictly BEFORE every native protected request, on both modes and both deployment routes: (1) before the subprocess spawn in `connect()`; (2) before native `session/new` in `createSession()`, against the ACTUAL session cwd; (3) before teardown/respawn/`session/load` in `reconnectAndResumeSession()`, against the recovery cwd, so a rejection has zero side effects. The first check is never after a native `newSession`. A rejection (`SettingsSourceRejectionError`) performs no spawn, no session request, and no mutation of user files; the pool/connector surfaces it fail-closed. See `docs/OMP_SETTINGS.md` section 6.
 
 ---
 
@@ -60,5 +65,5 @@ To ensure complete isolation between permission modes:
 Unit and mock tests in AIr-Friends verify configuration assembly and argument construction decisions only. Full runtime execution remains gated by:
 
 1. P0 compatibility contracts (`docs/OMP_COMPATIBILITY.md`).
-2. Row 8 authoritative record-reset application gate (`docs/OMP_SETTINGS.md`).
+2. Row 8 authoritative record-reset application gate (`docs/OMP_SETTINGS.md`) — the pinned `unresolved` merge verdict stands verbatim. Decision 3's application no longer waits on it or on a separate user decision: it is DECIDED via settings-discovery-path control (row 26, `docs/OMP_SETTINGS.md` sections 2 and 6), with restricted execution-time default-deny as the second boundary.
 3. Downstream packaging and binary installation (row 20).

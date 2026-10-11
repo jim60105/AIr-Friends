@@ -3,6 +3,7 @@
 import type { IdleTimeoutConfig } from "../types/config.ts";
 import type { TrustedSkillsSource } from "./filesystem-policy.ts";
 import type { LinuxNativeCalls } from "./filesystem-access-linux.ts";
+import type { OmpSettingsSourcePlan } from "./omp-settings.ts";
 
 /**
  * Configuration for ACP Client
@@ -100,6 +101,17 @@ export interface AgentConfig {
 
   /** Environment variables */
   env?: Record<string, string>;
+
+  /**
+   * Row 26 (`isolate-omp-settings-discovery`): deployment-owned settings-source
+   * plan for OMP launches. The factory composes it from `ompSettingsForMode`
+   * over the same mode-scoped roots it spawns with. The connector consumes it
+   * for the mandatory PRE-native-request settings-source preflight (spawn,
+   * session/new, session/load, same-mode recovery, rediscovery). An OMP launch
+   * without a plan fails the preflight closed — the field is the seam's
+   * transport, not an optional hint.
+   */
+  settingsSourcePlan?: OmpSettingsSourcePlan;
 }
 
 /**

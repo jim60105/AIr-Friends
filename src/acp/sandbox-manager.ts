@@ -4,6 +4,10 @@ import { createLogger } from "@utils/logger.ts";
 import type { SandboxConfig } from "../types/config.ts";
 import { canConfineFilesystem, canIsolateNetwork } from "./sandbox-capabilities.ts";
 import { buildBwrapConfinement } from "./filesystem-confinement.ts";
+import {
+  OMP_FOREIGN_PROVIDER_ENV_SELECTORS,
+  OMP_SETTINGS_DISCOVERY_ENV_SELECTORS,
+} from "./omp-settings.ts";
 
 const logger = createLogger("SandboxManager");
 
@@ -101,7 +105,38 @@ const NEVER_PASS_ENV = new Set([
   "OMP_PROFILE",
   "PI_PROFILE",
   "PI_CODING_AGENT_DIR",
+  // Row 26: pinned settings/config-source override selector (never reaches any agent)
+  "PI_CONFIG_FILES",
+  // Row 26: foreign provider config selectors — never permitted in any form;
+  // they could reintroduce a host settings source and are never plan-owned.
+  ...OMP_FOREIGN_PROVIDER_ENV_SELECTORS,
 ]);
+
+/**
+ * Mandatory OMP-only settings-discovery sanitization (row 26, D2).
+ *
+ * Removes every inherited OMP settings-discovery selector (HOME, all XDG
+ * selectors including XDG_DATA_HOME, OMP_PROFILE, PI_PROFILE, PI_CONFIG_FILES,
+ * PI_CODING_AGENT_DIR) and every foreign provider config selector from an OMP
+ * child environment REGARDLESS of `filterEnv` or `allowedEnvVars`. This is
+ * OMP-only: OpenCode's existing HOME/XDG_DATA_HOME allowlist semantics are
+ * untouched (the OpenCode branch never calls this).
+ *
+ * Removal is the FIRST half of the control; the OMP factory's post-filter
+ * trusted assignment (`finalizeOmpSpawnEnvironment`) is the second half —
+ * only the exact deployment-owned plan values may (re)appear.
+ */
+// Returns the SAME record it sanitized, so spawn-environment builders can chain
+// the call (in-place mutators such as the factory/child filter ignore it too).
+export function sanitizeOmpDiscoveryEnv(env: Record<string, string>): Record<string, string> {
+  for (const selector of OMP_SETTINGS_DISCOVERY_ENV_SELECTORS) {
+    delete env[selector];
+  }
+  for (const selector of OMP_FOREIGN_PROVIDER_ENV_SELECTORS) {
+    delete env[selector];
+  }
+  return env;
+}
 
 export interface SpawnOptions {
   command: string;
@@ -129,6 +164,12 @@ export class SandboxManager {
     cwd: string,
   ): SpawnOptions {
     const env = this.config.filterEnv ? this.buildFilteredEnv(agentType, baseEnv) : baseEnv;
+
+    // Row 26 (D2): OMP settings-discovery sanitization is MANDATORY for both
+    // filterEnv values and cannot be widened back by allowedEnvVars.
+    if (agentType === "omp") {
+      sanitizeOmpDiscoveryEnv(env);
+    }
 
     // Egress posture (F14). Throws if nothing is configured (never silently open).
     const wantsNetworkIsolation = this.resolveWantsNetworkIsolation();
