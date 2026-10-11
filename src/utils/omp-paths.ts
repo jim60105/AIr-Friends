@@ -27,6 +27,22 @@ export const OMP_TRUSTED_EXTENSION_PATH = "src/acp/omp/extension/index.ts";
  */
 export const OMP_IMAGE_ROOT = "/opt/air/omp";
 
+/**
+ * Row-28 owned skill root seam (design D1): the single deployment-owned,
+ * root-owned, content-faithful skills tree, deliberately OUTSIDE the
+ * `/opt/air/omp` manifest scope and every agent-writable root. Consumed
+ * verbatim by the settings declaration, the launch-assembly validation, the
+ * source plan, the connector lifecycle producer, and the trusted read. The
+ * source-owned development equivalent is explicit in the Containerfile: the
+ * image installs the repository `skills/` tree content-faithfully
+ * (`COPY skills/ /opt/air/skills/`, root:root 0755). The declaration NEVER
+ * resolves a workspace, config, model, or CWD-relative location; off-image
+ * hosts deliberately keep the declared root absent, and the lifecycle
+ * producer then observes nothing, mints no critical authority, and adds no
+ * trusted-skills root (fail closed, zero workspace fallback).
+ */
+export const OMP_IMAGE_SKILLS_ROOT = "/opt/air/skills";
+
 /** Image path of the trusted-extension tree root (D4's contracted constant). */
 export const OMP_IMAGE_EXTENSION_ROOT = `${OMP_IMAGE_ROOT}/extension`;
 

@@ -153,6 +153,7 @@ export interface ExcludedRootRecord {
  * Output of the load-time discovery bootstrap. Deeply frozen.
  */
 export interface DiscoveryDecision {
+  readonly ownedSkillRoots: readonly string[];
   readonly surfaces: readonly DiscoverySurfaceRecord[];
   readonly excludedRoots: readonly ExcludedRootRecord[];
   readonly trustedRoots: readonly string[];
@@ -168,6 +169,7 @@ export interface DiscoveryDecision {
  * Input for pure discovery decision computation.
  */
 export interface DiscoveryDecisionInput {
+  readonly ownedSkillRoots?: readonly string[];
   readonly baseRoot: string;
   readonly mode: OmpPermissionMode;
   readonly observedEnv?: Record<string, string | undefined>;
@@ -363,6 +365,7 @@ export function computeDiscoveryDecision(input: DiscoveryDecisionInput): Discove
   }
 
   const decision: DiscoveryDecision = {
+    ownedSkillRoots: Object.freeze([...(input.ownedSkillRoots ?? [])]),
     surfaces: AUDITED_DISCOVERY_SURFACES,
     excludedRoots,
     trustedRoots,
@@ -550,6 +553,7 @@ export interface CriticalSkillSelectionRecord {
 
 export interface EvaluateCriticalSkillOptions {
   readonly ownedSkillRoot: string;
+  readonly ownedSkillRoots?: readonly string[];
   readonly currentSessionGenerationId: string;
   readonly currentSessionId: string;
   readonly candidateSessionId?: string;
@@ -584,6 +588,21 @@ export function evaluateCriticalSkillSelection(
   candidate: SkillCandidate,
   options: EvaluateCriticalSkillOptions,
 ): CriticalSkillSelectionRecord {
+  if (
+    options.ownedSkillRoots?.length !== 1 ||
+    options.ownedSkillRoots[0] !== options.ownedSkillRoot ||
+    candidate.resolvedPath !== candidate.canonicalPath ||
+    !PINNED_CRITICAL_SKILLS[skillId]
+  ) {
+    return {
+      skillId,
+      canonicalInstructionPath: candidate.canonicalPath,
+      ownedSkillRoot: options.ownedSkillRoot,
+      sessionGenerationId: candidate.sessionGenerationId,
+      authoritative: false,
+      reason: "Missing owned-settings declaration or exact canonical critical instruction",
+    };
+  }
   // Candidate session ID must be present and match current session
   if (
     options.candidateSessionId === undefined ||
@@ -680,23 +699,22 @@ export function evaluateCriticalSkillSelection(
 export function transitionSkillLifecycleState(
   sessionId: string,
   event: "session_new" | "session_load" | "session_refresh",
-  priorState?: SessionSkillLifecycleState,
-  candidates: readonly SkillCandidate[] = [],
-  ownedSkillRoot = "/opt/air/skills",
+  candidates: readonly SkillCandidate[],
+  evidence: EvaluateCriticalSkillOptions,
 ): SessionSkillLifecycleState {
-  const nextGenNumber = priorState
-    ? (parseInt(priorState.resourceGeneration.replace(/^gen-/, ""), 10) || 0) + 1
-    : 1;
-  const currentGen = `gen-${nextGenNumber}`;
+  // Generation comes from the authoritative registration/resource consumer.
+  // A cached state or process-global native snapshot cannot mint freshness.
+  const currentGen = evidence.currentSessionGenerationId;
 
   const activeSkills: CriticalSkillSelectionRecord[] = [];
   for (const cand of candidates) {
     const sel = evaluateCriticalSkillSelection(cand.skillId, cand, {
-      ownedSkillRoot,
+      ownedSkillRoot: evidence.ownedSkillRoot,
+      ownedSkillRoots: evidence.ownedSkillRoots,
       currentSessionGenerationId: currentGen,
       currentSessionId: sessionId,
-      candidateSessionId: sessionId,
-      isReadOnlyRoot: true,
+      candidateSessionId: evidence.candidateSessionId,
+      isReadOnlyRoot: evidence.isReadOnlyRoot,
     });
     activeSkills.push(sel);
   }

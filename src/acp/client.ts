@@ -2,6 +2,7 @@
 
 import * as acp from "@agentclientprotocol/sdk";
 import { join, resolve, SEPARATOR } from "@std/path";
+import { PINNED_CRITICAL_SKILLS } from "./omp/discovery-guard.ts";
 import type { SkillRegistry } from "@skills/registry.ts";
 import type { Logger } from "@utils/logger.ts";
 import type { ClientConfig, PermissionRejection } from "./types.ts";
@@ -561,36 +562,42 @@ export class ChatbotClient implements acp.Client {
     const trustedRoot = roots.value.roots.find((root) => root.role === "trusted-skills");
     if (
       !trustedRoot || trustedRoot.canonicalPath !== trustedSkills.canonicalOwnedRootPath ||
-      trustedSkills.criticalSkills.length === 0
+      // D3 (plan duck B5): a supplied identity must match the CURRENTly
+      // canonicalized root; an absent identity proves nothing and is never
+      // admitted.
+      trustedSkills.rootIdentity === undefined ||
+      trustedSkills.rootIdentity.dev !== trustedRoot.identity?.dev ||
+      trustedSkills.rootIdentity.ino !== trustedRoot.identity?.ino ||
+      // D4: every supplied reference must name a pinned identifier and
+      // resolve to the exact current canonical instruction under the owned
+      // root. An unresolvable selector denies that reference, never falls
+      // back to a workspace or same-name skill.
+      trustedSkills.criticalSkills.some((reference) => {
+        const expected = PINNED_CRITICAL_SKILLS[reference.skillId];
+        // D4 (plan duck B5): an unregistered name-only selector is DENIED —
+        // never treated as an owned skill merely because its name matches.
+        if (expected === undefined) return true;
+        // Only deployment-owned provenance is authority; a workspace- or
+        // link-attributed reference never authorizes anything.
+        if (reference.source !== "deployment_owned") return true;
+        // D3: the reference's recorded session and registration generation
+        // must belong to THIS registration context.
+        if (
+          reference.sessionId !== context.acpSessionId ||
+          reference.sessionGenerationId !== context.sessionContextGeneration
+        ) return true;
+        const path = resolveSessionPath(
+          join(trustedRoot.canonicalPath, expected),
+          context,
+        );
+        return !path.ok || path.value.normalizedPath !== reference.canonicalInstructionPath;
+      })
     ) {
       return {
         ok: false,
         reason: "trusted_identity_mismatch",
         message: "Invalid trusted provenance",
       };
-    }
-    for (const reference of trustedSkills.criticalSkills) {
-      const path = resolveSessionPath(reference.canonicalInstructionPath, context);
-      if (!path.ok) {
-        return {
-          ok: false,
-          reason: "trusted_identity_mismatch",
-          message: "Invalid trusted provenance",
-        };
-      }
-      const instruction = await resolveFilesystemTarget(
-        path.value,
-        roots.value,
-        "existing-file",
-        reference,
-      );
-      if (!instruction.ok || instruction.value.observedSymlinks.length > 0) {
-        return {
-          ok: false,
-          reason: "trusted_identity_mismatch",
-          message: "Invalid trusted provenance",
-        };
-      }
     }
     return roots;
   }

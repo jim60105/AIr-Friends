@@ -27,6 +27,8 @@ import {
   type AcceptedExecutableObservation,
   checkOmpExecutableSources,
 } from "./omp/executable-sources.ts";
+import { observeOwnedSkills } from "./omp/owned-skills.ts";
+import type { TrustedSkillsSource } from "./filesystem-policy.ts";
 import {
   collectOptionValues,
   findOptionByCategory,
@@ -182,6 +184,16 @@ export class AgentConnector {
    * restart must also fail closed rather than reset the baseline.
    */
   private acceptedOverlayIdentities: readonly AcceptedOverlayIdentity[] | null = null;
+  /**
+   * Row 28 (D2/D3): the last ACCEPTED owned-skill observation. The first OMP
+   * context registration mints it from the factory-produced settings plan;
+   * every later registration (pooled second session, deliberate recovery
+   * restore) reobserves the CURRENT tree against it, so a root replaced
+   * between registrations fails closed instead of carrying old trust.
+   * Absent/unavailable authority is the same fail-closed denial, never a
+   * fallback root.
+   */
+  private ownedSkillsBaseline: TrustedSkillsSource | null = null;
 
   /**
    * Row 27: the most recent ACCEPTED executable-source observation on this
@@ -966,19 +978,42 @@ export class AgentConnector {
    */
   setSessionGateContext(acpSessionId: string, ctx: SessionGateContext): void {
     const existing = this.sessionGateContexts.get(acpSessionId);
+    // Row 28 (D2/D3, plan duck B4): production owned-skill provenance is
+    // minted HERE, at the actual client's next registration generation —
+    // exactly the generation `setSessionContext` assigns — from the factory
+    // settings plan's validated declaration, never from a workspace/config/
+    // model selector. The declaration or an unavailable owned root yields a
+    // frozen empty-selection source: the root-scoped read path stays intact
+    // while every critical-skill reference stays unattested (fail closed,
+    // no workspace fallback, no global disablement). A reobservation that
+    // contradicts the accepted baseline throws BEFORE any state mutates.
+    // Passive reconnect replay never routes through here, so replayed
+    // references keep the previous client's generation and stay denied.
+    const declaredRoots = this.options.agentConfig.settingsSourcePlan?.ownedSkillRoots;
+    const trustedSkills = this.options.agentType === "omp" && declaredRoots
+      ? observeOwnedSkills(
+        { ownedSkillRoots: declaredRoots },
+        acpSessionId,
+        this.client?.nextRegistrationGeneration?.() ?? "",
+        this.ownedSkillsBaseline,
+      )
+      : ctx.trustedSkills;
     const merged: SessionGateContext = {
       ...existing,
       ...ctx,
       allowedWriteExtensions: (ctx.allowedWriteExtensions ?? existing?.allowedWriteExtensions)
         ?.slice(),
-      trustedSkills: ctx.trustedSkills
+      trustedSkills: trustedSkills
         ? {
-          ...ctx.trustedSkills,
-          criticalSkills: ctx.trustedSkills.criticalSkills.map((reference) => ({ ...reference })),
+          ...trustedSkills,
+          criticalSkills: trustedSkills.criticalSkills.map((reference) => ({ ...reference })),
         }
-        : ctx.trustedSkills,
+        : undefined,
     };
     this.sessionGateContexts.set(acpSessionId, merged);
+    if (this.options.agentType === "omp" && declaredRoots && trustedSkills) {
+      this.ownedSkillsBaseline = trustedSkills;
+    }
     this.client?.setSessionContext(acpSessionId, merged);
   }
 

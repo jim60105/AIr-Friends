@@ -226,6 +226,7 @@ Deno.test("Task 4.3: Critical-skill ownership decision-table and lifecycle tests
   };
   const ownedSelection = evaluateCriticalSkillSelection("review", ownedCandidate, {
     ownedSkillRoot,
+    ownedSkillRoots: [ownedSkillRoot],
     currentSessionGenerationId,
     currentSessionId,
     candidateSessionId: currentSessionId,
@@ -242,6 +243,7 @@ Deno.test("Task 4.3: Critical-skill ownership decision-table and lifecycle tests
   };
   const workspaceSelection = evaluateCriticalSkillSelection("review", workspaceCandidate, {
     ownedSkillRoot,
+    ownedSkillRoots: [ownedSkillRoot],
     currentSessionGenerationId,
     currentSessionId,
     candidateSessionId: currentSessionId,
@@ -259,6 +261,7 @@ Deno.test("Task 4.3: Critical-skill ownership decision-table and lifecycle tests
   };
   const wrongFileSelection = evaluateCriticalSkillSelection("review", wrongFilenameCandidate, {
     ownedSkillRoot,
+    ownedSkillRoots: [ownedSkillRoot],
     currentSessionGenerationId,
     currentSessionId,
     candidateSessionId: currentSessionId,
@@ -269,6 +272,7 @@ Deno.test("Task 4.3: Critical-skill ownership decision-table and lifecycle tests
   // 3. Stale-generation candidate rejects
   const staleSelection = evaluateCriticalSkillSelection("review", ownedCandidate, {
     ownedSkillRoot,
+    ownedSkillRoots: [ownedSkillRoot],
     currentSessionGenerationId: "gen-101",
     currentSessionId,
     candidateSessionId: currentSessionId,
@@ -280,6 +284,7 @@ Deno.test("Task 4.3: Critical-skill ownership decision-table and lifecycle tests
   // 4. Foreign-session snapshot rejects
   const foreignSelection = evaluateCriticalSkillSelection("review", ownedCandidate, {
     ownedSkillRoot,
+    ownedSkillRoots: [ownedSkillRoot],
     currentSessionGenerationId,
     currentSessionId,
     candidateSessionId: "session-beta",
@@ -289,22 +294,30 @@ Deno.test("Task 4.3: Critical-skill ownership decision-table and lifecycle tests
   assertEquals(foreignSelection.reason.includes("Foreign session snapshot rejected"), true);
 
   // 5. Lifecycle state transitions across new, load, and refresh
-  const sNew = transitionSkillLifecycleState(currentSessionId, "session_new", undefined, [
+  const evidence = (generation: string) => ({
+    ownedSkillRoot,
+    ownedSkillRoots: [ownedSkillRoot],
+    currentSessionId,
+    candidateSessionId: currentSessionId,
+    currentSessionGenerationId: generation,
+    isReadOnlyRoot: true,
+  });
+  const sNew = transitionSkillLifecycleState(currentSessionId, "session_new", [
     { ...ownedCandidate, sessionGenerationId: "gen-1" },
-  ]);
+  ], evidence("gen-1"));
   assertEquals(sNew.resourceGeneration, "gen-1");
   assertEquals(sNew.lifecycleEvent, "session_new");
   assertEquals(sNew.activeSkills[0].authoritative, true);
 
-  const sLoad = transitionSkillLifecycleState(currentSessionId, "session_load", sNew, [
+  const sLoad = transitionSkillLifecycleState(currentSessionId, "session_load", [
     { ...ownedCandidate, sessionGenerationId: "gen-2" },
-  ]);
+  ], evidence("gen-2"));
   assertEquals(sLoad.resourceGeneration, "gen-2");
   assertEquals(sLoad.lifecycleEvent, "session_load");
 
-  const sRefresh = transitionSkillLifecycleState(currentSessionId, "session_refresh", sLoad, [
+  const sRefresh = transitionSkillLifecycleState(currentSessionId, "session_refresh", [
     { ...ownedCandidate, sessionGenerationId: "gen-3" },
-  ]);
+  ], evidence("gen-3"));
   assertEquals(sRefresh.resourceGeneration, "gen-3");
   assertEquals(sRefresh.lifecycleEvent, "session_refresh");
 });

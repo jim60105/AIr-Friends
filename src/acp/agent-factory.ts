@@ -6,6 +6,7 @@ import { SandboxManager } from "./sandbox-manager.ts";
 import { getRunningEgressProxyUrl } from "@utils/egress-proxy.ts";
 import { sessionXdgDataHome } from "@utils/opencode-paths.ts";
 import {
+  OMP_IMAGE_SKILLS_ROOT,
   ompAgentDir,
   ompLaunchCwd,
   ompOwnedHome,
@@ -16,6 +17,7 @@ import {
   resolveOmpTrustedExtensionPath,
 } from "@utils/omp-paths.ts";
 import {
+  assertOwnedSettingsDocument,
   OMP_FOREIGN_PROVIDER_ENV_SELECTORS,
   type OmpPermissionMode,
   ompSettingsForMode,
@@ -26,6 +28,7 @@ import { sanitizeOmpDiscoveryEnv } from "./sandbox-manager.ts";
 import { createLogger } from "@utils/logger.ts";
 import { resolveSkillJwtDir } from "@utils/skill-jwt.ts";
 import { join, resolve } from "@std/path";
+import { parse as parseYaml } from "@std/yaml";
 
 /**
  * Create ACP Agent configuration based on agent type.
@@ -346,6 +349,15 @@ function buildBaseAgentConfig(
         } catch {
           throw new Error(`Missing owned overlay configuration file at "${overlayPath}"`);
         }
+        // D1 (decision 7, DECIDED): every actual final `--config` document
+        // must declare EXACTLY the contracted deployment-owned skill root.
+        // The image installs that root content-faithfully (Containerfile COPY
+        // of the repository `skills/` tree, root:root 0755); off-image hosts
+        // keep the same declaration with the tree deliberately absent, so the
+        // lifecycle producer observes nothing and mints no authority (fail
+        // closed — no dev fallback, ever).
+        const document = parseYaml(Deno.readTextFileSync(overlayPath)) as Record<string, unknown>;
+        assertOwnedSettingsDocument(document, mode, [OMP_IMAGE_SKILLS_ROOT]);
       }
 
       // Argument assembly: acp, --no-extensions, --no-lsp, ordered overlays, --trusted-extension, --system-prompt
@@ -366,6 +378,7 @@ function buildBaseAgentConfig(
       const sourcePlan = ompSettingsSourcePlan(mode, {
         baseRoot,
         allowedOverlayPaths: resolvedOverlayPaths.map((overlayPath) => resolve(overlayPath)),
+        ownedSkillRoots: [OMP_IMAGE_SKILLS_ROOT],
       });
 
       // Base root resolution and mode-distinct state roots

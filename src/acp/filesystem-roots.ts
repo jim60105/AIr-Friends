@@ -117,6 +117,7 @@ export interface CanonicalTarget {
 export interface TrustedSkillsRootConfig {
   readonly ownedRootPath: string;
   readonly source: "deployment_owned";
+  readonly rootIdentity?: ObservedIdentity;
 }
 
 export interface CriticalSkillReference {
@@ -124,6 +125,8 @@ export interface CriticalSkillReference {
   readonly canonicalInstructionPath: string;
   readonly sessionGenerationId: string;
   readonly source: "deployment_owned" | "workspace_project" | "symlink_escape";
+  readonly sessionId?: string;
+  readonly instructionIdentity?: ObservedIdentity;
 }
 
 export interface MetadataReader {
@@ -595,6 +598,19 @@ export async function canonicalizeSessionRoots(
       }
       const canonicalSkills = await reader.realPath(trustedSkills.ownedRootPath);
       const destInfo = await reader.lstat(canonicalSkills);
+      if (trustedSkills.rootIdentity && (
+        lstatSkills.isSymlink || canonicalSkills !== trustedSkills.ownedRootPath ||
+        destInfo.dev !== trustedSkills.rootIdentity.dev ||
+        destInfo.ino !== trustedSkills.rootIdentity.ino ||
+        destInfo.mode === null || (destInfo.mode & 0o022) !== 0 ||
+        ((destInfo.mode & 0o200) !== 0 && destInfo.uid !== 0)
+      )) {
+        return {
+          ok: false,
+          reason: "trusted_identity_mismatch",
+          message: "Owned skill root ownership changed",
+        };
+      }
       if (!destInfo.isDirectory) {
         return {
           ok: false,
@@ -1086,6 +1102,17 @@ export async function resolveFilesystemTarget(
 
   // Handle critical skill reference validation if supplied
   if (criticalRef) {
+    if (criticalRef.instructionIdentity && (
+      criticalRef.sessionId !== roots.acpSessionId ||
+      primarySuccess!.targetIdentity?.dev !== criticalRef.instructionIdentity.dev ||
+      primarySuccess!.targetIdentity?.ino !== criticalRef.instructionIdentity.ino
+    )) {
+      return {
+        ok: false,
+        reason: "trusted_identity_mismatch",
+        message: "Owned skill instruction identity or session changed",
+      };
+    }
     if (criticalRef.sessionGenerationId !== roots.sessionContextGeneration) {
       return {
         ok: false,
