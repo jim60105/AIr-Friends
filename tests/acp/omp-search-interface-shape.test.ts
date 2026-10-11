@@ -497,7 +497,7 @@ Deno.test("Cross-origin redirect hops never carry the credential header (same-or
   // The pinned endpoint answers with a redirect to a DIFFERENT public host;
   // the manual hop loop must strip the credential header for that follow-up
   // (standard fetch strips `authorization` cross-origin; the loop opts in).
-  const t = transport((url, seen) =>
+  const t = transport((_url, seen) =>
     seen === 0
       ? new Response(null, {
         status: 302,
