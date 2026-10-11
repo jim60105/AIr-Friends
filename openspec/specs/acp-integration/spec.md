@@ -1995,67 +1995,107 @@ Introducing the OMP launch branch SHALL NOT change the OpenCode launch: command,
 
 ### Requirement: Trusted-Module Pre-Import Discovery Exclusion Bootstrap
 
-The AIr-owned trusted extension module SHALL compute, at load time inside the trusted module and before any untrusted executable tool or plugin module can import, a single frozen pre-import exclusion decision covering every discovery/import surface recorded by the pinned compatibility contract.
+The integration SHALL combine the frozen trusted-module bootstrap decision with fresh metadata-only deployment observations before OMP spawn and native session new/load/recovery or repository-triggered rediscovery. Those observations SHALL cover authoritative workspace and reachable custom-tool/plugin/configured-module/dependency roots before unowned code can import. Native surface verdicts SHALL remain unchanged; decision 1 SHALL be consumed as a separate deployment-control disposition.
 
 #### Scenario: Unowned candidate is excluded without import
-- **GIVEN** a discovery fixture supplies a workspace-owned custom tool root, a plugin entry, a configured module root, a workspace-owned dependency, or a linked root outside the owned root
-- **WHEN** the bootstrap decision is computed
-- **THEN** the candidate SHALL appear as an excluded root with its surface id and pinned status
-- **AND** the fixture importer spy SHALL record zero import attempts for that candidate
+- **GIVEN** an authoritative session workspace contains a loader-recognized custom-tool module or plugin entry point, including a linked package entry
+- **WHEN** setup preflight inspects pinned discovery sources
+- **THEN** it SHALL reject before invoking any native spawn/session/importer operation
+- **AND** no candidate module SHALL be imported to inspect metadata, name or factory
 
-#### Scenario: Extension flag is not claimed as complete exclusion
-- **GIVEN** the launch carries the extension-disable flag and the exact owned trusted-module argument
-- **WHEN** custom-tool or plugin discovery routes remain reachable at the pin with no supported mechanism
-- **THEN** the decision SHALL report those surfaces as blocking with `no-supported-mechanism`
-- **AND** the decision SHALL NOT report a complete-exclusion supported verdict
+#### Scenario: Importable module does not need executable permission bits
+- **GIVEN** a custom-tool/plugin entry is importable at the pin but has no POSIX execute bit
+- **WHEN** workspace preflight evaluates that entry
+- **THEN** it SHALL still reject the executable discovery source
 
-#### Scenario: Decision is frozen per process
-- **WHEN** native state changes after module load, including registry or project-layer transitions
-- **THEN** the pre-import decision SHALL remain the load-time frozen value and SHALL be re-consulted, not reopened, on subsequent session creation or recovery
+#### Scenario: Clean deployment admits without supported-mechanism relabeling
+- **GIVEN** authoritative discovery roots contain no executable custom tools or plugin entries and owned identity/environment checks succeed
+- **WHEN** decision-1 deployment admission is evaluated
+- **THEN** the repository SHALL permit setup under the DECIDED disposition
+- **AND** native custom-tool/plugin surfaces SHALL still report `no-supported-mechanism`, with no complete native exclusion support claim
 
-#### Scenario: Every pinned surface carries its mechanism and status
-- **GIVEN** the pinned compatibility contract records discovery surfaces including native custom-tool discovery roots, plugin entry points, configured module roots, workspace-owned dependencies, symlinked/linked roots, and load/refresh rediscovery
-- **WHEN** the frozen pre-import decision is computed
-- **THEN** each surface SHALL carry both the mechanism this integration applies and a status of exactly `supported`, `candidate-to-verify`, or `no-supported-mechanism` as recorded at the pinned source revision
+#### Scenario: Ordinary workspace source does not imply custom-tool discovery
+- **GIVEN** ordinary source/scripts or owned skill scripts are outside pinned executable discovery sources
+- **WHEN** workspace preflight evaluates the deployment
+- **THEN** those files SHALL NOT alone cause executable-source rejection
 
-#### Scenario: Extension-disability is not generalized to other discovery
-- **GIVEN** the extension-disable flag is present in the launch
-- **WHEN** custom-tool or plugin discovery surfaces are covered by the decision
-- **THEN** the extension-disability surface SHALL NOT be generalized to custom-tool or plugin discovery
+#### Scenario: Roots and observations cannot be omitted to permit setup
+- **WHEN** an authoritative workspace/root observation is absent, unreadable, linked, replaced or has an unknown importable-entry shape
+- **THEN** preflight SHALL reject without a lexical fallback or synthetic empty inventory
+
+#### Scenario: Lifecycle changes receive fresh preflight
+- **WHEN** a pooled/per-spawn session is created, loaded, recovered or explicitly refreshed in either mode with a new workspace or resource generation
+- **THEN** a fresh deployment check SHALL precede the native protected request
+- **AND** the frozen bootstrap's immutable identity/verdict data SHALL remain unchanged without reusing stale or foreign-session admission
+
+#### Scenario: Production extension is image-owned only
+- **WHEN** production OMP launch/setup resolves its trusted extension
+- **THEN** it SHALL accept only the exact packaged image-owned module/closure path with ambient discovery disabled
+- **AND** workspace/HOME/cache copies or development fallback SHALL NOT become trusted
 
 #### Scenario: No import or host guard acts as an import boundary
-- **WHEN** the bootstrap excludes a candidate without inspecting it
-- **THEN** the bootstrap SHALL NOT import the candidate module to inspect its factory, metadata, or name
-- **AND** SHALL NOT treat a host guard, preloaded-path input, post-import tool-name filter, or lifecycle allowlist as an import boundary
+- **WHEN** the pre-import disposition is documented or tested
+- **THEN** extension flags SHALL NOT be generalized to independent custom tools/plugins
+- **AND** host guards, preloaded paths, post-import tool-name filters and lifecycle callbacks SHALL NOT be described as supported native import barriers
+
+#### Scenario: Extension flag is not claimed as complete exclusion
+- **GIVEN** ambient extensions are disabled and the exact owned module is selected
+- **WHEN** custom-tool/plugin routes are assessed at the pin
+- **THEN** their native status SHALL remain `no-supported-mechanism`
+- **AND** deployment-control admission SHALL NOT become a supported native complete-exclusion verdict
+
+#### Scenario: Decision is frozen per process
+- **WHEN** native registry or project-layer state changes after module load
+- **THEN** immutable load-time identity and verdict data SHALL remain frozen and re-consulted
+- **AND** fresh session/workspace deployment observations SHALL be checked before each native protected request
+
+#### Scenario: Every pinned surface carries its mechanism and status
+- **WHEN** the frozen bootstrap decision is produced
+- **THEN** all audited discovery surfaces SHALL retain their pinned source route and `supported`, `candidate-to-verify` or `no-supported-mechanism` status
+- **AND** applied deployment mechanisms SHALL be recorded separately without changing the status
+
+#### Scenario: Extension-disability is not generalized to other discovery
+- **WHEN** custom-tool/plugin surfaces are assessed with ambient extensions disabled
+- **THEN** extension-disability SHALL NOT be generalized into a native guard for those independent routes
 
 ### Requirement: Fail-Closed Session Setup When Exclusion Cannot Be Established
 
-When the required pre-import exclusion cannot be established — a surface with no supported mechanism, a violated owned-module or dependency-closure identity, an owned-root symlink escape, or a contradicted deployment environment posture — trusted-module initialization SHALL fail and the affected session creation or recovery SHALL fail as an ACP request error observable to the client.
+When deployment preflight, executable workspace discovery, owned identity, link escapes, environment consistency or session freshness fail, setup SHALL reject restricted and native-yolo OMP spawn, new/load/recovery and repo-triggered refresh before the protected native operation, bounded fail-closed rejection as fallback. Native `no-supported-mechanism` alone SHALL NOT undo decision 1's deployment disposition, nor extension lifecycle failure establish authenticated client-observable readiness.
 
 #### Scenario: Session creation fails visibly
-- **GIVEN** the bootstrap decision contains an unresolved exclusion blocker
-- **WHEN** a new session is requested
-- **THEN** session creation SHALL reject with an error naming the failing surface id and status
-- **AND** no guarded-session state SHALL be registered for that session
-
-#### Scenario: Recovery fails closed identically
-- **WHEN** session recovery is requested on a process whose exclusion decision is blocked or whose current selection generation is stale
-- **THEN** recovery SHALL fail with the same named-surface error
-- **AND** the session SHALL NOT resume with a previously established guard claim
+- **GIVEN** preflight cannot establish the selected deployment controls
+- **WHEN** session creation or load/recovery is attempted
+- **THEN** the repository SHALL reject before sending the native request and registering guarded session state
+- **AND** the bounded error SHALL name the failing surface/reason using existing verdict vocabulary without credentials or file content
 
 #### Scenario: No silent downgrade path exists
-- **WHEN** trusted-module initialization fails
-- **THEN** the integration SHALL NOT proceed to launch or reuse an agent process without the trusted module
-- **AND** SHALL NOT substitute another agent type or an unguarded fallback
+- **WHEN** deployment observation or trusted identity validation fails
+- **THEN** the integration SHALL NOT retry through an unguarded/extensionless launch or substitute another agent
+
+#### Scenario: Recovery fails closed identically
+- **WHEN** recovery cannot establish deployment controls or carries stale current-selection evidence
+- **THEN** it SHALL reject with the same bounded named-surface error before native load/resumption
+- **AND** a previously accepted guard claim SHALL NOT bypass the fresh check
 
 #### Scenario: Failure message is bounded and credential-free
-- **WHEN** session creation or recovery fails as an ACP request error
-- **THEN** the error SHALL name the failing surface and its status
-- **AND** the message SHALL be bounded and free of credentials or file content
+- **WHEN** session setup or recovery rejects a deployment preflight failure
+- **THEN** its bounded error SHALL name the failing surface/status or deployment-control reason
+- **AND** credentials and file contents SHALL be absent
 
 #### Scenario: No degraded session shape is produced
-- **WHEN** session setup cannot complete under the trusted-module guard
-- **THEN** setup SHALL NOT degrade to a partially guarded session, an extensionless or unguarded process, or a different agent type
+- **WHEN** client/factory preflight cannot establish required deployment controls
+- **THEN** setup SHALL NOT produce partially guarded registered state or an extensionless/unguarded/different-agent fallback
+
+#### Scenario: Extension-load residual risk remains accepted and visible
+- **GIVEN** client preflight succeeded but the synchronous restricted handler fails to install in the native runtime
+- **WHEN** the fallback posture is documented or represented by mocks
+- **THEN** native non-YOLO approval plus ACP client policy SHALL remain the accepted ACP-mediated boundary with client denials fail-closed
+- **AND** missing restricted capabilities, runner.emit logging without startup failure, absence of readiness signal and incomplete default-deny/callback equivalence SHALL remain explicit
+
+#### Scenario: Deployment controls do not add restricted YOLO tool policy
+- **WHEN** native-yolo spawn, new/load/recovery or repository-triggered refresh finds an executable custom-tool/plugin source or cannot establish deployment ownership
+- **THEN** it SHALL reject before the protected native operation under the same deployment source/ownership checks
+- **AND** no restricted capability set or readiness handshake SHALL be added
 
 ### Requirement: Exact Owned-Module Trust Scope
 
@@ -2122,34 +2162,32 @@ Critical skill identifiers SHALL resolve only to canonical instruction paths ins
 
 ### Requirement: Discovery And Critical-Selection Compatibility Gates Remain Blocking
 
-The integration SHALL record two named application gates carrying the pinned verdicts verbatim, and while either gate stands, full security consumption of OMP session setup SHALL remain blocked.
-
-#### Scenario: Passing mocks cannot clear a gate
-- **WHEN** the exclusion, ownership, and critical-skill decision tests all pass
-- **THEN** both gates SHALL still report `unresolved` with their pinned verdict text and a required user decision
-- **AND** no test result, fixture, or synthetic positive SHALL be cited as native support
-
-#### Scenario: Gate resolution requires a user decision
-- **WHEN** an implementer proposes to close either gate
-- **THEN** the change SHALL be blocked until the compatibility contract records a source-backed supported mechanism at the pin and an explicit user decision adopts it
-- **AND** the specification SHALL NOT be rewritten to claim support in advance of that decision
-
-#### Scenario: Operative boundary while gated
-- **GIVEN** either gate stands open
-- **WHEN** restricted execution is assessed
-- **THEN** the restricted execution-time default-deny and filesystem authorization boundaries owned by other changes SHALL be documented as operative
-- **AND** discovery-side exclusion SHALL be documented as defense in depth rather than a substitute
+The two named discovery/critical-selection records SHALL preserve their native unresolved status and pinned verdicts verbatim. Their application dispositions SHALL separately record decisions 1 and 7 as `DECIDED (2026-10-09)`, selecting deployment-owned executable exclusion/startup checks and owned-settings canonical skill roots. Native incompatibility alone SHALL no longer block these decided controls; failed deployment controls SHALL remain fail-closed and no mock SHALL clear a native gate.
 
 #### Scenario: Gate verdicts are recorded verbatim
-- **WHEN** the two application gates are recorded
-- **THEN** the pre-import exclusion gate SHALL carry the pinned verdict "extension flags alone incompatible and the supported full mechanism unresolved"
-- **AND** the critical skill ownership gate SHALL carry the pinned verdict "name-only trust incompatible and canonical selection unresolved"
+- **WHEN** the two gate records are inspected
+- **THEN** pre-import exclusion SHALL retain "extension flags alone incompatible and the supported full mechanism unresolved"
+- **AND** critical-skill selection SHALL retain "name-only trust incompatible and canonical selection unresolved"
+
+#### Scenario: Gate resolution requires a user decision
+- **WHEN** gate dispositions are consumed after the recorded user decisions
+- **THEN** they SHALL identify the decision number and DECIDED date with selected deployment controls and runtime-unverified limits
+- **AND** they SHALL NOT require another user decision or a supported native mechanism as an unconditional application prerequisite
+
+#### Scenario: Passing mocks cannot clear a gate
+- **WHEN** repository exclusion/ownership tests pass
+- **THEN** gate native status and verdicts SHALL remain unresolved/unchanged
+- **AND** synthetic positive fixtures SHALL NOT be cited as native enforcement evidence
+
+#### Scenario: Operative boundary while gated
+- **WHEN** selected deployment controls fail or restricted execution is assessed
+- **THEN** failed controls SHALL invoke the existing fail-closed boundary, while installed restricted runtime default-deny and filesystem authorization SHALL remain separate operative boundaries
+- **AND** the accepted handler-installation fallback risk SHALL NOT be rewritten as authenticated readiness or equivalent full default-deny
 
 #### Scenario: Automated evidence validates decision logic only
-- **GIVEN** automated unit and mock evidence is produced for this change
-- **WHEN** that evidence is offered in support of either gate
-- **THEN** the evidence SHALL validate decision logic only — which roots, paths, and names would be excluded, and the fail-closed error shape
-- **AND** SHALL NOT be presented as evidence that the official executable enforces the exclusion or canonical selection
+- **WHEN** automated unit/mock evidence is offered for these controls
+- **THEN** it SHALL certify repository observation/admission/denial decisions only
+- **AND** native pre-import enforcement and canonical resource selection SHALL remain user-owned and unverified
 
 ### Requirement: Per-Spawn OMP Mode Distinctness And Shared-Process Skill Identity Invariants
 
