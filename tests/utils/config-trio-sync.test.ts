@@ -194,21 +194,28 @@ Deno.test("config trio audit - every audited field is present in all three files
 
 Deno.test("config trio audit - defaultAgentType documentation describes both values with opencode default", () => {
   const files = readTrio();
+  // Pinned verbatim per file (row 24's shared-contract lines): the trio docs
+  // must say EXACTLY this — opencode is the shipped default (getDefaultAgentType
+  // falls back to "opencode"; config.example additionally warns that unknown
+  // values fail startup). A doc drift here is a contract drift, not style.
+  const PINNED_LINES: Record<TrioFile, string> = {
+    "config.example.yaml":
+      '  defaultAgentType: "${AGENT_DEFAULT_TYPE}" # Default ACP agent: "opencode" (default) | "omp" (env: AGENT_DEFAULT_TYPE; unknown values fail startup). Note: the variable must be set or this line removed.',
+    ".env.example": "# Default ACP agent type: opencode (default) | omp",
+    "helm/values.yaml": "  # Default ACP agent type: opencode (default) | omp",
+  };
   for (const file of TRIO_FILES) {
     const text = files[file]!;
-    // The agent-type documentation line must name both values and mark
-    // opencode the default.
-    const line = text
-      .split("\n")
-      .find(
-        (l) =>
-          /AGENT_DEFAULT_TYPE|defaultAgentType|agent type/i.test(l) && /\bomp\b/i.test(l) &&
-          /opencode/.test(l),
-      );
-    assert(line !== undefined, `${file}: no defaultAgentType doc line naming opencode|omp`);
     assert(
-      /opencode.*default.*omp|omp.*opencode/i.test(line),
-      `${file}: domain wording must present opencode as the default: ${line}`,
+      text.split("\n").includes(PINNED_LINES[file]),
+      `${file}: defaultAgentType doc line drifted from the pinned contract text ` +
+        `(expected exactly ${JSON.stringify(PINNED_LINES[file])})`,
+    );
+    // Structural floor independent of the pin: the line must carry the literal
+    // `(default)` marker directly on opencode, plus omp as the alternative.
+    assert(
+      /opencode"? \(default\).*\bomp\b/i.test(PINNED_LINES[file]),
+      `${file}: domain wording must present opencode as the (default) with omp as an alternative`,
     );
   }
 });
