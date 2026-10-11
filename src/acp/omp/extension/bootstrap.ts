@@ -105,7 +105,7 @@ export function bootstrapDiscoveryGuard(
   // byte-for-byte the pre-row-27 behavior.
   const launchEnv = observedEnv as Record<string, string | undefined>;
   const ownedSkillRoots = observeLaunchMode(observedCwd) === "restricted"
-    ? observeDeclaredSkillRoots("restricted", baseRoot)
+    ? observeDeclaredSkillRoots("restricted")
     : undefined;
   const executableObservation = observeLaunchMode(observedCwd) === "restricted"
     ? checkOmpExecutableSources({

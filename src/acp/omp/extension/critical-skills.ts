@@ -20,39 +20,34 @@ import { OMP_IMAGE_SKILLS_ROOT } from "../../../utils/omp-paths.ts";
 import { assertOwnedSettingsDocument, type OmpPermissionMode } from "../../omp-settings.ts";
 import { observeOwnedSkills } from "../owned-skills.ts";
 
-/** Consume the same actual mode document passed by the owned launch assembly. */
+/**
+ * Consume the same actual mode document passed by the owned launch assembly.
+ *
+ * Row 28 review follow-up: the installed `/opt/air/omp/config` document is the
+ * ONLY contracted source — there is no dev/`owned-config` fallback, so both
+ * backends deny identically off-image (frozen [] = zero critical authority)
+ * and no undocumented third path exists.
+ */
 export function observeDeclaredSkillRoots(
   mode: OmpPermissionMode,
-  baseRoot: string,
 ): readonly string[] {
   const imagePath = `/opt/air/omp/config/${mode}.yml`;
-  const sourcePath = `${baseRoot}/owned-config/${mode}.yml`;
   let content: string;
   if (typeof Deno !== "undefined") {
-    const path = (() => {
-      try {
-        Deno.lstatSync(imagePath);
-        return imagePath;
-      } catch (error) {
-        if (!(error instanceof Deno.errors.NotFound)) throw error;
-        try {
-          Deno.lstatSync(sourcePath);
-          return sourcePath;
-        } catch (fallback) {
-          // The frozen settings-source contract (row 26) owns overlay
-          // availability. Absence here denies critical authority without
-          // switching to another source; it never crashes discovery.
-          if (!(fallback instanceof Deno.errors.NotFound)) throw fallback;
-          return undefined;
-        }
-      }
-    })();
-    if (path === undefined) return Object.freeze([]);
-    const info = Deno.lstatSync(path);
+    let info: Deno.FileInfo;
+    try {
+      info = Deno.lstatSync(imagePath);
+    } catch (error) {
+      // The frozen settings-source contract (row 26) owns overlay
+      // availability. Absence here denies critical authority without
+      // switching to another source; it never crashes discovery.
+      if (error instanceof Deno.errors.NotFound) return Object.freeze([]);
+      throw error;
+    }
     if (!info.isFile || info.isSymlink || info.size > 64 * 1024) {
       throw new Error("Invalid owned skill settings source");
     }
-    content = Deno.readTextFileSync(path);
+    content = Deno.readTextFileSync(imagePath);
   } else {
     const require = (globalThis as { require?: (id: string) => unknown }).require;
     if (!require) throw new Error("Owned skill settings backend unavailable");
