@@ -467,6 +467,50 @@ function defaultishReader(): ExecutableSourceMetadataReader {
   };
 }
 
+Deno.test("observer - manifest byte cap fails closed on overflow and multibyte UTF-8 (duck fold2)", async () => {
+  const f = await ownedFixture("restricted");
+  try {
+    // > 64 KiB bytes: rejected WITHOUT being decoded/parsed by the backend.
+    await Deno.writeTextFile(`${f.workspace}/package.json`, `{"pad":"${"a".repeat(70 * 1024)}"}`);
+    assert(
+      categories(expectRejection(() => check(f.workspace, f.plan)))
+        .some((c) => c.startsWith("workspace-owned-dependencies/")),
+      "an over-cap manifest is never admitted",
+    );
+    await Deno.remove(`${f.workspace}/package.json`);
+    // 40,000 three-byte chars: 40,000 UTF-16 units (UNDER a naive length
+    // check) but 120,000 UTF-8 BYTES over the cap — the backend byte bound
+    // must catch what a text-length check would miss.
+    await Deno.writeTextFile(`${f.workspace}/package.json`, `{"pad":"${"あ".repeat(40_000)}"}`);
+    assert(
+      categories(expectRejection(() => check(f.workspace, f.plan)))
+        .some((c) => c.startsWith("workspace-owned-dependencies/")),
+      "multibyte UTF-8 is capped in BYTES, not UTF-16 units",
+    );
+    await Deno.remove(`${f.workspace}/package.json`);
+    // A small multibyte manifest stays parseable-clean (no linked deps).
+    await Deno.writeTextFile(`${f.workspace}/package.json`, `{"name":"あいう"}`);
+    check(f.workspace, f.plan);
+    // Injected-reader seam belt: an over-cap string from the seam is
+    // rejected without admission.
+    const oversizedReader: ExecutableSourceMetadataReader = {
+      ...defaultishReader(),
+      readFile: (path) =>
+        path.endsWith("package.json")
+          ? `{"pad":"${"a".repeat(70 * 1024)}"}`
+          : defaultishReader().readFile(path),
+    };
+    assert(
+      categories(
+        expectRejection(() => check(f.workspace, f.plan, { reader: oversizedReader })),
+      ).some((c) => c.startsWith("workspace-owned-dependencies/")),
+      "an injected over-cap manifest text fails closed at the seam",
+    );
+  } finally {
+    await f.cleanup();
+  }
+});
+
 Deno.test("observer - rejection reason is bounded (≤8 issues), content-free, no capability claim", async () => {
   const f = await ownedFixture("restricted");
   try {

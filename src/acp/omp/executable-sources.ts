@@ -51,7 +51,16 @@ const MAX_DESCENT_DEPTH = 3;
 /** Byte ceiling for a manifest read before fail-closed (bounded inspection). */
 const MAX_MANIFEST_BYTES = 64 * 1024;
 
-/** Names a bounded manifest read may allocate before failing closed. */
+/**
+ * Seam check for injected readers: the interface contract is "bounded
+ * manifest text", so an over-cap string (or a throw) fails closed through
+ * the caller's unparsable-manifest path. The DEFAULT backends enforce the
+ * cap at the fd level in BYTES (Duck fold2 blocking): they never read or
+ * decode more than MAX_MANIFEST_BYTES+1 bytes, so no arbitrarily large
+ * manifest can be materialized — the `text.length` check here is the
+ * injected-reader belt, not the byte bound (UTF-16 units are not UTF-8
+ * bytes; multibyte manifests are byte-capped by the backends).
+ */
 function boundedManifestText(path: string, reader: ExecutableSourceMetadataReader): string {
   const text = reader.readFile(path);
   if (text.length > MAX_MANIFEST_BYTES) {
@@ -187,8 +196,16 @@ interface NodeFsSyncModule {
     isDirectory(): boolean;
     isFile(): boolean;
   };
-  readdirSync(path: string, options: { withFileTypes: true }): { name: string }[];
-  readFileSync(path: string, options: { encoding: "utf8" }): string;
+  opendirSync(path: string): { readSync(): { name: string } | null; close(): void };
+  openSync(path: string): number;
+  readSync(
+    fd: number,
+    buffer: Uint8Array,
+    offset: number,
+    length: number,
+    position: null,
+  ): number;
+  closeSync(fd: number): void;
   realpathSync(path: string): string;
 }
 
@@ -199,7 +216,8 @@ function loadNodeFsSync(): NodeFsSyncModule | null {
     const mod = req("node:fs") as Partial<NodeFsSyncModule> | null;
     if (
       mod !== null && typeof mod.lstatSync === "function" &&
-      typeof mod.readdirSync === "function" && typeof mod.readFileSync === "function" &&
+      typeof mod.opendirSync === "function" && typeof mod.openSync === "function" &&
+      typeof mod.readSync === "function" && typeof mod.closeSync === "function" &&
       typeof mod.realpathSync === "function"
     ) {
       return mod as NodeFsSyncModule;
@@ -208,6 +226,23 @@ function loadNodeFsSync(): NodeFsSyncModule | null {
     // Host require exists but cannot resolve node:fs: fall to the Deno face.
   }
   return null;
+}
+
+const manifestDecoder = new TextDecoder("utf-8", { fatal: false });
+
+/** Fill `buffer` from `pull` up to one byte over the manifest cap; the pull
+ * stops at EOF (n <= 0) and the caller rejects any overflow un-decoded. */
+function fillBoundedManifest(
+  buffer: Uint8Array,
+  pull: (into: Uint8Array) => number,
+): number {
+  let filled = 0;
+  while (filled < buffer.length) {
+    const n = pull(buffer.subarray(filled));
+    if (n <= 0) break; // EOF (or empty read; never spin)
+    filled += n;
+  }
+  return filled;
 }
 
 function defaultReader(): ExecutableSourceMetadataReader {
@@ -231,13 +266,22 @@ function defaultReader(): ExecutableSourceMetadataReader {
   }
   return {
     readDirectory(path) {
-      // Stop after one entry past the cap (Duck non-blocking: never collect a
-      // whole oversized listing before rejecting).
+      // Stop after one entry past the cap on BOTH faces (Duck fold2
+      // non-blocking): the Deno iterator is lazy and the node face uses
+      // opendirSync/readSync, so an oversized directory is never fully
+      // enumerated or materialized before the fail-closed overflow.
       const names: string[] = [];
       if (nodeFs !== null) {
-        for (const entry of nodeFs.readdirSync(path, { withFileTypes: true })) {
-          names.push(entry.name);
-          if (names.length > MAX_ENTRIES_PER_DIRECTORY) return names;
+        const dir = nodeFs.opendirSync(path);
+        try {
+          for (;;) {
+            const entry = dir.readSync();
+            if (entry === null) break;
+            names.push(entry.name);
+            if (names.length > MAX_ENTRIES_PER_DIRECTORY) return names;
+          }
+        } finally {
+          dir.close();
         }
       } else {
         for (const entry of denoHost!.readDirSync(path)) {
@@ -271,10 +315,38 @@ function defaultReader(): ExecutableSourceMetadataReader {
         throw error;
       }
     },
-    readFile: (path) =>
-      nodeFs !== null
-        ? nodeFs.readFileSync(path, { encoding: "utf8" })
-        : denoHost!.readTextFileSync(path),
+    readFile(path) {
+      // Genuinely bounded read (Duck fold2 blocking): open + read at most
+      // MAX_MANIFEST_BYTES+1 BYTES, reject the overflow BEFORE decoding or
+      // parsing, and close the handle in finally. Neither face ever
+      // materializes an arbitrarily large manifest.
+      const buffer = new Uint8Array(MAX_MANIFEST_BYTES + 1);
+      if (nodeFs !== null) {
+        const fd = nodeFs.openSync(path);
+        try {
+          const filled = fillBoundedManifest(
+            buffer,
+            (into) => nodeFs.readSync(fd, into, 0, into.length, null),
+          );
+          if (filled > MAX_MANIFEST_BYTES) {
+            throw new Error(`manifest exceeds ${MAX_MANIFEST_BYTES} bytes`);
+          }
+          return manifestDecoder.decode(buffer.subarray(0, filled));
+        } finally {
+          nodeFs.closeSync(fd);
+        }
+      }
+      const file = denoHost!.openSync(path);
+      try {
+        const filled = fillBoundedManifest(buffer, (into) => file.readSync(into) ?? 0);
+        if (filled > MAX_MANIFEST_BYTES) {
+          throw new Error(`manifest exceeds ${MAX_MANIFEST_BYTES} bytes`);
+        }
+        return manifestDecoder.decode(buffer.subarray(0, filled));
+      } finally {
+        file.close();
+      }
+    },
     identity: (path) => nodeFs !== null ? nodeFs.realpathSync(path) : denoHost!.realPathSync(path),
     parentIsCanonical(parent) {
       try {
