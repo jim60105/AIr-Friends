@@ -38,6 +38,26 @@ Native process-global snapshots and providers beyond the seven switches remain u
 
 Cut over existing composition and critical-selection callers to one owned settings declaration. Rebuild packaged assets/closure with recut manifest. No user-data migration, path alias, compatibility layer or archived artifact amendment.
 
+### Authorized deployment prerequisite
+
+The plan review found that the existing image installs skills only into the
+agent-writable `/home/deno/.agents/skills` tree, and `/opt/air/skills` is only a
+selector default, not an installed tree. On 2026-10-12 the controller authorized
+the minimal prerequisite: install a content-faithful root-owned, agent-nonwritable
+tree at `/opt/air/skills`, add its production resolver, and supply production
+trusted-skill provenance at actual context-registration boundaries. No public
+config, environment or Helm field is added. `/opt/air/skills` is outside the
+`/opt/air/omp` manifest boundary; changed OMP overlays and extension closure
+inputs still require their same-commit manifest recut. Real installation and
+native lifecycle observations remain user-owned and UNVERIFIED.
+
+Root observation must be independent of missing critical instructions: missing
+pinned instructions deny only the affected critical authority, not ordinary
+owned-root reads or unrelated workspace operations. Accepted root/instruction
+identities must survive reobservation to detect replacement. Context provenance
+uses the client's actual registration generation, not a synthetic `gen-N`
+counter; passive reconnect replay does not mint authority.
+
 ## Verification and Handoff
 
 Test parsed actual overlays and composed settings, registered types, source-toggle values, array replacement and rejection of ambient/relative/writable/extra roots. Test owned versus same-name/same-content workspace candidates, aliases/custom-priority/managed sources, name-only requests, missing instructions, link escapes and replaced read-only roots. New/load/refresh mocks verify fresh session/generation selection and preserved ordinary owned skills plus trusted reads. Acceptance certifies these repository decisions only; native resource resolution/extension loading remain user-owned and unverified.
