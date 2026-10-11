@@ -21,6 +21,7 @@ import {
 } from "../filesystem-roots.ts";
 import { OMP_TRUSTED_EXTENSION_PATH, ompLaunchCwd } from "../../utils/omp-paths.ts";
 import type { OmpPermissionMode } from "../omp-settings.ts";
+import type { ExecutableObservationForGuard } from "./executable-sources.ts";
 
 /**
  * Surface identifiers audited in P0 ledger and design §2.
@@ -159,6 +160,8 @@ export interface DiscoveryDecision {
   readonly criticalSkills: readonly CriticalSkillSelectionRecord[];
   readonly resourceGeneration: string;
   readonly evaluatedAt: string;
+  /** Row 27: the accepted observation this decision's admission is bound to. */
+  readonly executableObservation?: ExecutableObservationForGuard;
 }
 
 /**
@@ -178,6 +181,15 @@ export interface DiscoveryDecisionInput {
   readonly closureRoots?: readonly string[];
   readonly criticalSkills?: readonly CriticalSkillSelectionRecord[];
   readonly resourceGeneration?: string;
+  /**
+   * Row 27 (check-omp-workspace-executables): the accepted pre-native
+   * executable-source observation for this exact workspace + resource
+   * generation. Deployment admission under DECIDED decision 1 replaces the
+   * unconditional unsupported-native-status application rejection ONLY for a
+   * matching generation; an absent or stale/foreign observation never reuses a
+   * previous clean result and the fail-closed blockers stay.
+   */
+  readonly executableObservation?: ExecutableObservationForGuard;
 }
 
 /**
@@ -207,6 +219,9 @@ function deepFreeze<T>(obj: T): T {
 export function computeDiscoveryDecision(input: DiscoveryDecisionInput): DiscoveryDecision {
   const blockers: DiscoveryBlocker[] = [];
   const excludedRoots: ExcludedRootRecord[] = [];
+  const executableAdmissionClean = input.executableObservation?.status === "absent-clean" &&
+    (input.executableObservation.resourceGeneration === undefined ||
+      input.executableObservation.resourceGeneration === input.resourceGeneration);
 
   const expectedLaunchCwd = ompLaunchCwd(input.baseRoot, input.mode);
   const contractedModulePath = resolve(input.baseRoot, OMP_TRUSTED_EXTENSION_PATH);
@@ -237,13 +252,19 @@ export function computeDiscoveryDecision(input: DiscoveryDecisionInput): Discove
     });
   }
 
-  // 2. Native custom-tool discovery: P0 unresolved -> ALWAYS a blocker
-  blockers.push({
-    surfaceId: "native-custom-tool-discovery",
-    status: "no-supported-mechanism",
-    message:
-      "pre-import exclusion not established: native-custom-tool-discovery (no-supported-mechanism)",
-  });
+  // 2. Native custom-tool discovery: pinned no-supported-mechanism verdict.
+  // Row 27 (DECIDED decision 1): the verdict and the blocker stay fail-closed
+  // by default; ONLY a verified absent executable-source observation for this
+  // exact workspace + generation admits the session under the deployment
+  // control instead of the unconditional unsupported-native rejection.
+  if (!executableAdmissionClean) {
+    blockers.push({
+      surfaceId: "native-custom-tool-discovery",
+      status: "no-supported-mechanism",
+      message:
+        "pre-import exclusion not established: native-custom-tool-discovery (no-supported-mechanism)",
+    });
+  }
   for (const root of input.customToolRoots ?? ["./.omp/tools", "./tools"]) {
     excludedRoots.push({
       path: root,
@@ -252,12 +273,15 @@ export function computeDiscoveryDecision(input: DiscoveryDecisionInput): Discove
     });
   }
 
-  // 3. Plugin entry points: P0 unresolved -> ALWAYS a blocker
-  blockers.push({
-    surfaceId: "plugin-entry-points",
-    status: "no-supported-mechanism",
-    message: "pre-import exclusion not established: plugin-entry-points (no-supported-mechanism)",
-  });
+  // 3. Plugin entry points: pinned no-supported-mechanism verdict; same
+  // row-27 DECIDED decision-1 admission rule as custom tools.
+  if (!executableAdmissionClean) {
+    blockers.push({
+      surfaceId: "plugin-entry-points",
+      status: "no-supported-mechanism",
+      message: "pre-import exclusion not established: plugin-entry-points (no-supported-mechanism)",
+    });
+  }
   for (const root of input.pluginRoots ?? ["./.omp/plugins", "./plugins"]) {
     excludedRoots.push({
       path: root,
@@ -338,6 +362,9 @@ export function computeDiscoveryDecision(input: DiscoveryDecisionInput): Discove
     criticalSkills: input.criticalSkills ?? [],
     resourceGeneration: input.resourceGeneration ?? "gen-0",
     evaluatedAt: new Date().toISOString(),
+    ...(input.executableObservation !== undefined
+      ? { executableObservation: input.executableObservation }
+      : {}),
   };
 
   return deepFreeze(decision);
@@ -688,11 +715,50 @@ export function formatDiscoverySessionError(decision: DiscoveryDecision): string
 /**
  * Honesty gate contract shape matching row 8 recordResetGate posture.
  */
+/**
+ * Separate DECIDED disposition carried by a native-unresolved honesty gate
+ * (row 27). The native unresolved/verbatim verdict record on the gate is
+ * unchanged; the disposition is distinct evidence of the selected deployment
+ * control, and no repository mock can clear the native gate.
+ */
+export interface DiscoveryGateDisposition {
+  readonly decision: 1 | 7;
+  readonly status: "DECIDED (2026-10-09)";
+  readonly selectedControl: string;
+  /** Row 15 runtime-evidence status: the pinned native evidence stays UNVERIFIED. */
+  readonly runtimeUnverified: "UNVERIFIED";
+}
+
+/** Row-27 decision-1 disposition: the pre-import exclusion gate. */
+export const DECISION_1_DEPLOYMENT_ADMISSION: DiscoveryGateDisposition = Object.freeze({
+  decision: 1,
+  status: "DECIDED (2026-10-09)",
+  selectedControl:
+    "deployment-owned executable exclusion + pre-native startup check: the image/deployment keeps executable custom tools and plugin entry points out of the workspace, the owned extension loads only from the image path, --no-extensions keeps ambient discovery off, and the startup check rejects an executable module found in the workspace; the fail-closed session rejection stays the fallback",
+  runtimeUnverified: "UNVERIFIED",
+});
+
+/** Row-27 decision-7 disposition: the critical skill selection gate. */
+export const DECISION_7_SKILL_OWNERSHIP_ADMISSION: DiscoveryGateDisposition = Object.freeze({
+  decision: 7,
+  status: "DECIDED (2026-10-09)",
+  selectedControl:
+    "owned-settings skill-root ownership selection — isolate-omp-critical-skill-ownership (row 28) OWNS and lands the settings skill-root selection checks; this row records only the decided disposition and retains the existing canonical critical-skill checks",
+  runtimeUnverified: "UNVERIFIED",
+});
+
+/**
+ * Honesty gate contract shape matching row 8 recordResetGate posture.
+ * Row 27 (DECIDED 2026-10-09): the stale "another user decision required"
+ * blocker is removed — decisions 1 and 7 pin the dispositions, so no pending
+ * user decision remains; the DECIDED disposition record is separate from the
+ * unchanged native unresolved/verbatim verdict.
+ */
 export interface DiscoveryHonestyGate {
   readonly status: "unresolved";
   readonly boundary: string;
   readonly pinnedVerdict: string;
-  readonly userDecisionRequired: true;
+  readonly disposition: DiscoveryGateDisposition;
   readonly affectedSurfaces?: readonly DiscoverySurfaceId[];
   readonly affectedEvents?: readonly string[];
   readonly residualRisk: string;
@@ -706,7 +772,7 @@ export const preImportExclusionGate: DiscoveryHonestyGate = Object.freeze({
   status: "unresolved",
   boundary: "pre-import exclusion",
   pinnedVerdict: "extension flags alone incompatible and the supported full mechanism unresolved",
-  userDecisionRequired: true,
+  disposition: DECISION_1_DEPLOYMENT_ADMISSION,
   affectedSurfaces: Object.freeze([
     "native-custom-tool-discovery",
     "plugin-entry-points",
@@ -724,7 +790,7 @@ export const criticalSkillSelectionGate: DiscoveryHonestyGate = Object.freeze({
   status: "unresolved",
   boundary: "critical skill ownership",
   pinnedVerdict: "name-only trust incompatible and canonical selection unresolved",
-  userDecisionRequired: true,
+  disposition: DECISION_7_SKILL_OWNERSHIP_ADMISSION,
   affectedEvents: Object.freeze(["new", "load", "refresh"]),
   residualRisk:
     "Official OMP v18.6.1 resolveCollision allows custom directories to shadow provider skills, and setActiveSkills is process-global.",
