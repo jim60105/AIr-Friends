@@ -1236,7 +1236,11 @@ async function runHonestPostureDenial(): Promise<void> {
     assertEquals(subject.replySent, false);
 
     const records = readSkillRecords(h);
-    assertEquals(records.length, 2, `records: ${JSON.stringify(records.map((r) => [r.script, r.code]))}`);
+    assertEquals(
+      records.length,
+      2,
+      `records: ${JSON.stringify(records.map((r) => [r.script, r.code]))}`,
+    );
     assert(records[1].code !== 0, "unauthorized call exits nonzero");
     assertStringIncludes(records[1].stdout + records[1].stderr, "JWT verification failed");
 
