@@ -103,13 +103,13 @@ deno run --allow-net --allow-read --allow-write --allow-env --allow-run --allow-
 
 **Never use `--allow-all`**. Required permissions:
 
-| Permission      | Purpose                                           |
-| --------------- | ------------------------------------------------- |
-| `--allow-net`   | Discord API, Misskey API, external connections    |
-| `--allow-read`  | Configuration files, workspace files, memory logs |
-| `--allow-write` | Memory log files in workspace directories         |
-| `--allow-env`   | Environment variables (tokens, configuration)     |
-| `--allow-run`   | Spawning ACP agent subprocesses and skill scripts |
+| Permission      | Purpose                                                    |
+| --------------- | ---------------------------------------------------------- |
+| `--allow-net`   | Discord API, Misskey API, external connections             |
+| `--allow-read`  | Configuration files, workspace files, memory logs          |
+| `--allow-write` | Memory log files in workspace directories                  |
+| `--allow-env`   | Environment variables (tokens, configuration)              |
+| `--allow-run`   | Spawning ACP agent subprocesses and skill scripts          |
 | `--allow-ffi`   | Loading the jieba native binding (memory recall tokenizer) |
 
 #### YOLO Mode
@@ -271,8 +271,8 @@ Initial context comprises:
 | ----------------------- | ---------------------------------------------------------------------------------- |
 | Core-tier memories      | Within `memory.recall.coreMaxTokens` (default 512), user then channel              |
 | Working-tier memories   | Newest `memory.recall.workingMaxItems` (default 4) within `workingMaxTokens` (384) |
-| Fast Recall memories    | Top 2 within `memory.recall.fastRecallMaxTokens` (default 192)                      |
-| Fast Recall notes       | Top 2 within `memory.recall.fastRecallNoteMaxTokens` (default 256)                  |
+| Fast Recall memories    | Top 2 within `memory.recall.fastRecallMaxTokens` (default 192)                     |
+| Fast Recall notes       | Top 2 within `memory.recall.fastRecallNoteMaxTokens` (default 256)                 |
 | Recent channel messages | 20 messages (fixed)                                                                |
 | Guild-related context   | Configurable                                                                       |
 
@@ -308,11 +308,11 @@ The command only affects recent channel messages, not memories or guild-related 
 
 Memories are organized into three tiers:
 
-| Tier      | Purpose                            | Decay Default | Working Limit      |
-| --------- | ---------------------------------- | ------------- | ------------------ |
-| `core`    | Persistent identity facts          | 1.0 (no decay)| N/A                |
-| `working` | Active, recent conversation context| 0.8           | Configurable (default: 20) |
-| `archive` | Long-term storage                  | 0.5           | N/A                |
+| Tier      | Purpose                             | Decay Default  | Working Limit              |
+| --------- | ----------------------------------- | -------------- | -------------------------- |
+| `core`    | Persistent identity facts           | 1.0 (no decay) | N/A                        |
+| `working` | Active, recent conversation context | 0.8            | Configurable (default: 20) |
+| `archive` | Long-term storage                   | 0.5            | N/A                        |
 
 When the working tier exceeds `memory.workingTierLimit`, the oldest working memories are automatically demoted to archive tier.
 
@@ -325,13 +325,13 @@ When the working tier exceeds `memory.workingTierLimit`, the oldest working memo
 
 Each memory has a category for classification:
 
-| Category       | Description                                      |
-| -------------- | ------------------------------------------------ |
-| `fact`         | Objective information (default)                  |
-| `preference`   | User preferences and likes/dislikes              |
-| `episode`      | Specific conversation events or experiences      |
-| `summary`      | Conversation summaries (auto-generated or manual)|
-| `relationship` | Relationship information between people          |
+| Category       | Description                                       |
+| -------------- | ------------------------------------------------- |
+| `fact`         | Objective information (default)                   |
+| `preference`   | User preferences and likes/dislikes               |
+| `episode`      | Specific conversation events or experiences       |
+| `summary`      | Conversation summaries (auto-generated or manual) |
+| `relationship` | Relationship information between people           |
 
 #### Conversation Summaries
 
@@ -389,11 +389,11 @@ interface PatchEvent {
 ```yaml
 memory:
   recentMessageLimit: 20
-  workingTierLimit: 20  # Max working-tier memories before demotion to archive
+  workingTierLimit: 20 # Max working-tier memories before demotion to archive
 
 conversationSummary:
-  enabled: true          # Auto-generate conversation summaries (default: true)
-  model: ""              # Model for summaries (defaults to agent.model)
+  enabled: true # Auto-generate conversation summaries (default: true)
+  model: "" # Model for summaries (defaults to agent.model)
 ```
 
 **Environment Variable Overrides:**
@@ -417,16 +417,16 @@ conversationSummary:
 
 **Available Skills**:
 
-| Skill           | Purpose                      | HTTP Endpoint                 |
-| --------------- | ---------------------------- | ----------------------------- |
-| `memory-save`   | Save new memory              | POST /api/skill/memory-save   |
-| `memory-search` | Search existing memories     | POST /api/skill/memory-search |
-| `memory-patch`  | Update memory attributes     | POST /api/skill/memory-patch  |
-| `memory-stats`  | Get memory statistics        | POST /api/skill/memory-stats  |
-| `fetch-context` | Get additional platform data | POST /api/skill/fetch-context |
-| `send-reply`    | Send final reply (max 1)     | POST /api/skill/send-reply    |
-| `edit-reply`    | Edit last sent reply         | POST /api/skill/edit-reply    |
-| `send-file`     | Send 1+ workspace files (max 1 call/session) | POST /api/skill/send-file |
+| Skill           | Purpose                                      | HTTP Endpoint                 |
+| --------------- | -------------------------------------------- | ----------------------------- |
+| `memory-save`   | Save new memory                              | POST /api/skill/memory-save   |
+| `memory-search` | Search existing memories                     | POST /api/skill/memory-search |
+| `memory-patch`  | Update memory attributes                     | POST /api/skill/memory-patch  |
+| `memory-stats`  | Get memory statistics                        | POST /api/skill/memory-stats  |
+| `fetch-context` | Get additional platform data                 | POST /api/skill/fetch-context |
+| `send-reply`    | Send final reply (max 1)                     | POST /api/skill/send-reply    |
+| `edit-reply`    | Edit last sent reply                         | POST /api/skill/edit-reply    |
+| `send-file`     | Send 1+ workspace files (max 1 call/session) | POST /api/skill/send-file     |
 
 **Reply Rule**:
 
@@ -569,6 +569,7 @@ await connector.disconnect();
 **Session Model Selection (Stable-First)**:
 
 `AgentConnector.setSessionModel()` follows a stable-first selection policy:
+
 - **Stable Option Discovery**: Inspects the session's latest cached config options (`sessionConfigOptions`) for a `category: "model"` option. Grouped option lists (`SessionConfigSelectGroup`) and flat lists are flattened for matching.
 - **Canonical Value Resolution**: The requested model ID is matched case-insensitively against the agent's advertised model catalog. On match, the canonical advertised value (in the agent's advertised casing; first advertised on case-only ties) is sent via `session/set_config_option`, and the cache is refreshed from the response. The canonical value actually sent is recorded in `sessionModelIds`.
 - **Explicit Catalog Miss**: If the agent advertises a `category: "model"` option but the requested model is not found under any casing (including empty advertised catalogs), `setSessionModel()` throws an explicit error naming the requested model, the agent type, and a length-bounded preview of available models. It **never** falls back to unstable model-setting upon a catalog miss and never invents model IDs.
@@ -590,11 +591,11 @@ the model is set. It is resolved **per session** through a chain parallel to mod
 to the section/global value (it does NOT continue to later rules). This lets a rule route the model
 and the effort independently while keeping them tied to the same matched rule.
 
-| Value | Meaning |
-| ----- | ------- |
-| `"none"` / `"low"` / `"medium"` / `"high"` / `"xhigh"` / `"max"` | Normalized effort levels |
-| `"default"` (or empty/unset global) | Do not configure — let the agent/model decide |
-| any other token | Agent-specific passthrough (sent as-is, warned at load) |
+| Value                                                            | Meaning                                                 |
+| ---------------------------------------------------------------- | ------------------------------------------------------- |
+| `"none"` / `"low"` / `"medium"` / `"high"` / `"xhigh"` / `"max"` | Normalized effort levels                                |
+| `"default"` (or empty/unset global)                              | Do not configure — let the agent/model decide           |
+| any other token                                                  | Agent-specific passthrough (sent as-is, warned at load) |
 
 **Behavior**:
 
@@ -1170,26 +1171,26 @@ Per-session JSONL audit trail for replay and debugging. Each session writes time
 
 **Audit Phases:**
 
-| Phase                    | Description                          |
-| ------------------------ | ------------------------------------ |
-| `trigger_received`       | Incoming trigger event recorded      |
-| `session_start`          | Session registered and configured    |
-| `rate_limit_checked`     | Rate limit evaluation result         |
-| `context_assembly`       | Context assembly completed           |
-| `yolo_resolution`        | YOLO mode resolution                 |
-| `agent_connect`          | Agent subprocess connected           |
-| `prompt_sent`            | Prompt sent to agent                 |
-| `agent_message`          | Full prompt/context sent to agent    |
-| `skill_call`             | Skill API invoked                    |
-| `memory_operation`       | Memory skill operation               |
-| `agent_response`         | Agent response received              |
-| `agent_complete_message` | Agent complete buffered response     |
-| `reply_sent`             | Reply sent to platform               |
-| `reply_edited`           | Reply edited on platform             |
-| `retry_triggered`        | Missing-reply retry activated        |
-| `session_end`            | Session lifecycle completed          |
-| `permission_approved`    | Permission request approved          |
-| `permission_denied`      | Permission request denied            |
+| Phase                    | Description                       |
+| ------------------------ | --------------------------------- |
+| `trigger_received`       | Incoming trigger event recorded   |
+| `session_start`          | Session registered and configured |
+| `rate_limit_checked`     | Rate limit evaluation result      |
+| `context_assembly`       | Context assembly completed        |
+| `yolo_resolution`        | YOLO mode resolution              |
+| `agent_connect`          | Agent subprocess connected        |
+| `prompt_sent`            | Prompt sent to agent              |
+| `agent_message`          | Full prompt/context sent to agent |
+| `skill_call`             | Skill API invoked                 |
+| `memory_operation`       | Memory skill operation            |
+| `agent_response`         | Agent response received           |
+| `agent_complete_message` | Agent complete buffered response  |
+| `reply_sent`             | Reply sent to platform            |
+| `reply_edited`           | Reply edited on platform          |
+| `retry_triggered`        | Missing-reply retry activated     |
+| `session_end`            | Session lifecycle completed       |
+| `permission_approved`    | Permission request approved       |
+| `permission_denied`      | Permission request denied         |
 
 **Configuration:**
 
@@ -1305,7 +1306,7 @@ You are Yuna. This is a private chat.
 | `guildId`                | `string`  | Server/guild ID (empty string if N/A)                            |
 | `sessionId`              | `string`  | Current skill API session ID                                     |
 | `agentType`              | `string`  | ACP agent type (`"opencode"`)                                    |
-| `model`                  | `string`  | Model identifier (e.g., `"openrouter/deepseek/deepseek-v4-pro"`)   |
+| `model`                  | `string`  | Model identifier (e.g., `"openrouter/deepseek/deepseek-v4-pro"`) |
 | `rssItems`               | `string`  | RSS items (self-research prompt only)                            |
 | `workspaceKey`           | `string`  | Workspace key (memory maintenance prompt only)                   |
 | `memoriesDump`           | `string`  | Memory JSON dump (memory maintenance only)                       |
@@ -1446,9 +1447,9 @@ log line per token. Buffering is unaffected: chunks still accumulate in
 `thoughtBuffer`/`messageBuffer` and flush as the INFO `Agent complete thought` /
 `Agent complete message` summaries. Enable the flag only when debugging the live stream.
 
-| Environment Variable            | Config Path                  | Type                 |
-| ------------------------------- | ---------------------------- | -------------------- |
-| `LOGGING_AGENT_STREAM_CHUNKS`   | `logging.agentStreamChunks`  | `"true"` / `"false"` |
+| Environment Variable          | Config Path                 | Type                 |
+| ----------------------------- | --------------------------- | -------------------- |
+| `LOGGING_AGENT_STREAM_CHUNKS` | `logging.agentStreamChunks` | `"true"` / `"false"` |
 
 ## Testing
 
@@ -1512,15 +1513,36 @@ channels:
 dashboard:
   enabled: false
   port: 8090
-  host: "127.0.0.1"        # Bind host; default localhost. Set "0.0.0.0" to expose on all interfaces (DASHBOARD_HOST)
-  passphrase: ""            # Required when enabled; minimum 16 characters (DASHBOARD_PASSPHRASE)
-  behindHttpsProxy: false   # Enables the Secure cookie flag; NOT derived from X-Forwarded-Proto (DASHBOARD_BEHIND_HTTPS_PROXY)
-  trustedProxies: []        # Real connection addresses whose X-Forwarded-For is trusted for login rate-limit keying (DASHBOARD_TRUSTED_PROXIES)
+  host: "127.0.0.1" # Bind host; default localhost. Set "0.0.0.0" to expose on all interfaces (DASHBOARD_HOST)
+  passphrase: "" # Required when enabled; minimum 16 characters (DASHBOARD_PASSPHRASE)
+  behindHttpsProxy: false # Enables the Secure cookie flag; NOT derived from X-Forwarded-Proto (DASHBOARD_BEHIND_HTTPS_PROXY)
+  trustedProxies: [] # Real connection addresses whose X-Forwarded-For is trusted for login rate-limit keying (DASHBOARD_TRUSTED_PROXIES)
 ```
 
 **Dashboard security defaults:** the dashboard binds to `127.0.0.1` by default and requires an explicit `0.0.0.0` to expose on all interfaces. The login rate limit keys on the real connection address (not the spoofable `X-Forwarded-For`) unless the peer is in `trustedProxies`, with an additional global backoff. A minimum 16-character passphrase is enforced at config load when the dashboard is enabled. The session cookie's `Secure` flag is driven by `behindHttpsProxy`, never by request headers.
 
 Environment variables override config file values.
+
+### Batch Configuration-Documentation Consistency Audit
+
+Every configuration or environment field introduced or widened by any change
+in the OMP integration batch (design rows P0–22), audited for presence and
+terminology across `config.example.yaml`, `.env.example`, and
+`helm/values.yaml`. This table is the single source read by
+`tests/utils/config-trio-sync.test.ts`: an OMP-related name newly appearing in
+one of the three files without a row here fails that test (fail-closed).
+
+| Field                                           | Owning row                                       | Present in all three                                                                                                 | Drift notes                                                                                              |
+| ----------------------------------------------- | ------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
+| `agent.defaultAgentType` / `AGENT_DEFAULT_TYPE` | row 7 (`add-omp-agent-configuration`)            | yes — `config.example.yaml` (config key + `${AGENT_DEFAULT_TYPE}` reference), `.env.example`, `helm/values.yaml`     | none — all three state the `opencode` (default) / `omp` domain and load-time rejection of unknown values |
+| `AGENT_OMP_MIN_VERSION`                         | row 20 (`package-pinned-omp-runtime`)            | yes — commented-out with default `18.6.1` in all three, mirroring the `AGENT_OPENCODE_MIN_VERSION` sibling treatment | none — WARN-only observability wording consistent across the trio                                        |
+| `OMP_VERSION`                                   | row 20 (consumed reference, not a runtime field) | yes — cited in trio comments as the `Containerfile` build arg owning the pin                                         | none — never a runtime config/env input; documented solely as the packaging pin the comments point at    |
+
+Zero-new-field claims audited (each verified by trio grep: the owning change
+added no field to any of the three files): rows 8, 10, 12, 14a/14b, 15, 16,
+17, 18, 19, 21, 22. Outcome: clean — no reconciliation edits were required
+beyond recording this table; no source, Helm template, or runtime behavior was
+modified by the audit.
 
 ## File Layout Quick Reference
 
