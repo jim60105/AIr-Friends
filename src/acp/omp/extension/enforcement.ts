@@ -206,7 +206,10 @@ export function observeLaunchMode(cwd: string = ""): EnforcementLaunchMode | und
 export class RegistryEpochObserver {
   #epoch = 0;
   #lastKey: string;
-  #current: Record<string, ProvenanceRecord>;
+  // Map (never a plain object): a tool named `constructor`/`__proto__`
+  // must never read an INHERITED Object.prototype member where a
+  // ProvenanceRecord is expected.
+  #current: Map<string, ProvenanceRecord>;
 
   constructor(private readonly surface: LiveToolRegistrySurface) {
     const initial = surface.snapshot();
@@ -229,7 +232,10 @@ export class RegistryEpochObserver {
   /** Fresh origin read for one tool; an unregistered name reads unowned. */
   observeOrigin(toolName: string): ProvenanceRecord {
     this.sync();
-    return this.#current[toolName] ?? { origin: "unowned-discovery", presentedName: toolName };
+    return this.#current.get(toolName) ?? {
+      origin: "unowned-discovery",
+      presentedName: toolName,
+    };
   }
 
   /** Fresh epoch read (the observation is re-taken, never remembered). */
@@ -258,9 +264,9 @@ function snapshotKey(snapshot: readonly ToolMetadataSnapshot[]): string {
 
 function snapshotRecord(
   snapshot: readonly ToolMetadataSnapshot[],
-): Record<string, ProvenanceRecord> {
-  const record: Record<string, ProvenanceRecord> = {};
-  for (const entry of snapshot) record[entry.toolName] = entry.origin;
+): Map<string, ProvenanceRecord> {
+  const record = new Map<string, ProvenanceRecord>();
+  for (const entry of snapshot) record.set(entry.toolName, entry.origin);
   return record;
 }
 

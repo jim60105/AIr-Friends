@@ -219,19 +219,26 @@ function destructiveTargetsFromInput(
  * acquired-session context exists. Without that context the observations
  * are ABSENT — exactly the fail-closed posture the composition already
  * implements — never model-supplied and never fabricated.
+ *
+ * `null` is a distinct outcome: the arguments could not be serialized at
+ * all, so the call is an unrepresentable event (decode-seam failure),
+ * NEVER a silently "not destructive" shape claim.
  */
 export function decodeNativeDestructivePayload(
   toolName: string,
   input: Record<string, unknown>,
   sessionContext: NativeSessionContext | undefined,
-): DestructiveCallPayload | undefined {
+): DestructiveCallPayload | null | undefined {
   if (!isDestructiveNativeTool(toolName)) return undefined;
   const nativeTool = toolName as DestructiveIntentInput["nativeTool"];
   let rawInput: string;
   try {
     rawInput = JSON.stringify(input);
   } catch {
-    return undefined;
+    // Unserializable arguments (BigInt, exotic objects): the event is
+    // unrepresentable, so it decodes to the seam — it must never be
+    // handed to the policy as a payload-less "non-destructive" call.
+    return null;
   }
   const intentInput: DestructiveIntentInput = {
     nativeTool,
@@ -303,6 +310,7 @@ export function decodeNativeToolCallEvent(
   }
   const input: Record<string, unknown> = rawInput ?? {};
   const destructive = decodeNativeDestructivePayload(toolName, input, sessionContext);
+  if (destructive === null) return failure();
   return {
     ok: true,
     input: {

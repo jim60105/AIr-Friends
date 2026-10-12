@@ -261,6 +261,25 @@ Deno.test("Native provenance: missing, duplicate, and unreadable rosters deny ev
     ]).run({ toolCallId: "m2", toolName: "read", input: { path: "x" } }),
     "rejected_tool_provenance",
   );
+  // Prototype-key names must not defeat the duplicate guard through an
+  // inherited Object.prototype member (`constructor`), nor silently drop
+  // the count (`__proto__` bracket writes never create own properties).
+  // These names are also table-foreign, so the inventory absence-deny may
+  // fire first — the discriminating invariant is that the record reads
+  // UNOWNED: a defeated guard would translate the first (owned-path)
+  // spelling and the block would name the owned origin instead.
+  for (const poisoned of ["constructor", "__proto__"]) {
+    const outcome = harness([
+      { name: poisoned, sourceInfo: OWN_SOURCE },
+      { name: poisoned, sourceInfo: { path: "/home/attacker/tool.js", source: "extension" } },
+    ]).run({ toolCallId: "m4", toolName: poisoned, input: { path: "x" } });
+    assert(outcome.blocked, `duplicate ${poisoned} must block before dispatch`);
+    assert(
+      outcome.reason?.includes("origin=unowned-discovery"),
+      `duplicate ${poisoned} must read unowned, never first-wins: ${outcome.reason ?? ""}`,
+    );
+    assertEquals(outcome.dispatched, false);
+  }
   // No getAllTools on ctx at all: an unavailable roster reads unowned.
   const h = createFakeApi([]);
   const noCtxApi: NativeExtensionApi = { on: h.api.on, registerTool: h.api.registerTool };
@@ -329,10 +348,18 @@ Deno.test("Native decode: unrepresentable events block at the decode seam, never
       { toolCallId: "b1", input: { path: "x" } }, // no toolName
       { toolCallId: "b2", toolName: "read", input: "not-an-object" },
       { type: "session_updated", toolCallId: "b3", toolName: "read", input: {} },
+      // Unserializable destructive arguments NEVER become a payload-less
+      // "non-destructive" shape claim: they fail at the decode seam.
+      { toolCallId: "b4", toolName: "delete", input: { path: 42n as unknown as string } },
     ]
   ) {
     const outcome = run(bad as NativeToolCallEvent);
-    assert(outcome.blocked, `unrepresentable event must block: ${JSON.stringify(bad)}`);
+    assert(
+      outcome.blocked,
+      `unrepresentable event must block: ${
+        JSON.stringify(bad, (_k, v) => typeof v === "bigint" ? "<bigint>" : v)
+      }`,
+    );
     assert(outcome.reason?.includes("rejected_enforcement_seam"));
     assert(outcome.reason?.includes("native-event-decode"));
     assertEquals(outcome.dispatched, false);

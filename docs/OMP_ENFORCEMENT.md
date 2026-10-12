@@ -86,11 +86,17 @@ No step is short-circuitable by later input. `proceed: true` never means
 
 ## Freshness (per call; nothing cached)
 
-| Input                | Read fresh from                                                                                                                                    | Staleness result                                                                          |
-| -------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
-| recorded origin      | live `getAllTools`-class tool-metadata surface (`RegistryEpochObserver`)                                                                           | wrong origin → `rejected_tool_provenance`                                                 |
-| `registryEpoch`      | wiring-owned observer; advances ONLY on a full-origin snapshot diff (never chat content, never name-only diff, never an event with no observation) | recorded < current (or future) → `rejected_stale_observation` with `stale=registry-epoch` |
-| `resourceGeneration` | row 12's frozen session counter (read-only consumer)                                                                                               | observed ≠ current or one-sided → `stale=resource-generation`                             |
+| Input                | Read fresh from                                                                                                                                                                                                                                                                                   | Staleness result                                                                          |
+| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
+| recorded origin      | live `getAllTools()` roster translation (`createNativeRegistrySurface`/`createNativeLiveObserver`; fixture suites may instead inject the `RegistryEpochObserver` fixture domain)                                                                                                                  | wrong origin → `rejected_tool_provenance`                                                 |
+| `registryEpoch`      | the observation domain's own movement counter — production: the roster surface advances it ONLY when the fresh name+sourceInfo roster key moves; the fixture observer advances ONLY on a full-origin snapshot diff (never chat content, never name-only diff, never an event with no observation) | recorded < current (or future) → `rejected_stale_observation` with `stale=registry-epoch` |
+| `resourceGeneration` | row 12's frozen session counter (read-only consumer)                                                                                                                                                                                                                                              | observed ≠ current or one-sided → `stale=resource-generation`                             |
+
+Stamping discipline: recorded freshness halves MUST come from the same
+observation domain the current halves read from — production stamps are the
+roster surface's first-sighting captures, and a cross-domain stamp (e.g.
+fixture-epoch bytes in a production record) denies re-observe fail-closed,
+never admits.
 
 There is no cache to invalidate and no admitted set is ever frozen: a
 post-start MCP registration/refresh needs no ack, no reset, and no readiness

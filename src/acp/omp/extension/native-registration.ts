@@ -316,16 +316,22 @@ export function createNativeRegistrySurface(
       );
       if (lastRosterKey !== undefined && rosterKey !== lastRosterKey) epoch += 1;
       lastRosterKey = rosterKey;
-      const counts: Record<string, number> = {};
+      // Map (never a plain object): a roster name like `constructor` or
+      // `__proto__` must NOT read/write through Object.prototype — an
+      // inherited member silently defeats the duplicate-name guard and
+      // degrades ambiguity to first-wins guessing.
+      const counts = new Map<string, number>();
       for (const tool of roster) {
-        if (typeof tool?.name === "string") counts[tool.name] = (counts[tool.name] ?? 0) + 1;
+        if (typeof tool?.name === "string") {
+          counts.set(tool.name, (counts.get(tool.name) ?? 0) + 1);
+        }
       }
       const snapshots: ToolMetadataSnapshot[] = [];
       for (const tool of roster) {
         const name = tool?.name;
         if (typeof name !== "string" || name === "") continue;
         const spellingKey = JSON.stringify(tool.sourceInfo ?? null);
-        const origin: ProvenanceRecord = (counts[name] ?? 0) > 1
+        const origin: ProvenanceRecord = (counts.get(name) ?? 0) > 1
           ? { origin: "unowned-discovery", presentedName: name }
           : translateNativeSourceInfo(name, tool.sourceInfo, owned, captureFor(name, spellingKey));
         snapshots.push({ toolName: name, origin });
