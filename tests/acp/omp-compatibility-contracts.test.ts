@@ -50,9 +50,11 @@ Deno.test("Compatibility Assessment: audited pinned ledger is BLOCKED with hones
 
   assertEquals(result.permitted, false);
   assertEquals(result.blockers.length > 0, true);
-  assertEquals(result.ledgerSummary.total, 11);
+  // 10 after `remove-omp-public-code-search` removed the pinned
+  // native_transport:public_code_search entry (was 11 with it incompatible).
+  assertEquals(result.ledgerSummary.total, 10);
   assertEquals(result.ledgerSummary.supported, 1);
-  assertEquals(result.ledgerSummary.incompatible >= 7, true);
+  assertEquals(result.ledgerSummary.incompatible >= 6, true);
   assertEquals(result.ledgerSummary.unresolved >= 3, true);
 
   // Verify all required inventory subcases are evaluated
