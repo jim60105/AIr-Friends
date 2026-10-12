@@ -38,6 +38,7 @@ import { evaluateApprovalRecordAuthority } from "@acp/omp/record-evaluator.ts";
 import type { ProvenanceRecord } from "@acp/omp/tool-provenance.ts";
 import {
   createReadReplacementToolDefinition,
+  formatNativeBytes,
   formatNativeShapedUrlRead,
   parseReadUrlBranch,
   READ_REPLACEMENT_PARAMETERS,
@@ -430,7 +431,45 @@ Deno.test("Empty-MIME binary keeps the octet-stream fallback honestly (no image 
   assertEquals(out.details.binaryData?.byteLength, 4);
 });
 
+Deno.test("Binary past the base64 chunk boundary round-trips byte-exactly through execute (0x8000+1)", async () => {
+  // The chunked encoder exists so a 50 MiB body never exceeds the
+  // spread-argument limit; an off-by-one at the boundary would corrupt or
+  // crash at runtime, so cross it at 0x8000+1 and recover via atob.
+  const BIG = new Uint8Array(0x8001);
+  for (let i = 0; i < BIG.length; i++) BIG[i] = (i * 7 + 13) % 256;
+  const t = transport(() => response(BIG, "application/zip"));
+  const definition = createReadReplacementToolDefinition({
+    policy: UNRESTRICTED,
+    resolveHost: mockDns(),
+    fetchImpl: t.fetchImpl,
+  });
+  const out = await definition.execute(
+    "tc-1",
+    { path: "https://public.example/big.zip" },
+    undefined,
+    undefined,
+    { invokeTool: () => Promise.resolve({}) },
+  ) as {
+    content: Array<{ type: string; text?: string }>;
+    details: { binaryData?: { data: string; byteLength: number } };
+  };
+  assertEquals(out.details.binaryData?.byteLength, BIG.byteLength);
+  assertEquals(out.content[0]?.text?.includes("[Binary content: application/zip, 32.0KB]"), true);
+  assertEquals(
+    Uint8Array.from(atob(out.details.binaryData?.data ?? ""), (c) => c.charCodeAt(0)),
+    BIG,
+  );
+});
+
 Deno.test("read parameters schema gates inputs before dispatch (behavioral, not schema-copy)", () => {
+  // The pinned descriptors and the chunked encoder get direct edges here;
+  // the executor paths above consume the same exported functions.
+  assertEquals(formatNativeBytes(1023), "1023B");
+  assertEquals(formatNativeBytes(1024), "1.0KB");
+  // toFixed(1) rounding, per the pinned renderer: 1048575/1024 renders 1024.0KB.
+  assertEquals(formatNativeBytes(1048575), "1024.0KB");
+  assertEquals(formatNativeBytes(1048576), "1.0MB");
+  assertEquals(formatNativeBytes(1073741824), "1.0GB");
   // The host validates against definition.parameters BEFORE execute; these
   // scenarios pin the gate's vocabulary against the pinned readSchema
   // behavior. Value is imported from the builder's value subpath — a

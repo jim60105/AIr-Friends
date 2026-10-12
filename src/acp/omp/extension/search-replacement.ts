@@ -105,6 +105,10 @@ export interface SearchReplacementDeps {
  * Numeric fields stay plain optional numbers: the parser owns the adapter
  * caps (finite check, `num_search_results` clamp), so the gate and parser
  * cannot drift.
+ * The query bound is calibration-shared: JSON Schema `maxLength` and the
+ * parser's `query.length` BOTH count UTF-16 code units, so the two
+ * 4096-unit bounds agree today — a future surrogate-aware rewrite of
+ * either side must keep that agreement or the gate and parser desync.
  */
 export const SEARCH_REPLACEMENT_PARAMETERS = Type.Object(
   {

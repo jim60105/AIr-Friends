@@ -376,22 +376,21 @@ export function buildBinaryNotice(finalUrl: string, mime: string, byteLength: nu
  * Runtime-portable base64 (the pinned host's `Buffer.toBase64()` equivalent;
  * no new external and no `Deno.*` surface in the mirror closure). Chunked so
  * large payloads never exceed the spread-argument limit of the host runtime.
+ * `btoa` is present on every host runtime that can load this closure (Deno,
+ * Bun, Node); anything without it fails closed rather than emitting bytes
+ * labelled base64 that were never base64-encoded.
  */
 export function encodeBase64(bytes: Uint8Array): string {
   const b = globalThis as { btoa?: (data: string) => string };
-  if (typeof b.btoa === "function") {
-    const CHUNK = 0x8000;
-    let out = "";
-    for (let i = 0; i < bytes.length; i += CHUNK) {
-      out += String.fromCharCode(...bytes.subarray(i, i + CHUNK));
-    }
-    return b.btoa(out);
+  if (typeof b.btoa !== "function") {
+    throw new Error("read replacement: no base64 surface available in the host runtime");
   }
-  const bun = (globalThis as { Bun?: { toBinary?: (b: Uint8Array) => ArrayBuffer } }).Bun;
-  if (typeof bun?.toBinary === "function") {
-    return new TextDecoder().decode(new Uint8Array(bun.toBinary(bytes)));
+  const CHUNK = 0x8000;
+  let out = "";
+  for (let i = 0; i < bytes.length; i += CHUNK) {
+    out += String.fromCharCode(...bytes.subarray(i, i + CHUNK));
   }
-  throw new Error("read replacement: no base64 surface available in the host runtime");
+  return b.btoa(out);
 }
 
 /**
@@ -418,6 +417,10 @@ export function createReadReplacementToolDefinition(
     async execute(toolCallId, params, signal, _onUpdate, ctx) {
       void toolCallId;
       const rawPath: unknown = params["path"];
+      // Shape is the host gate's job (`parameters` declares a required
+      // string, so a non-string never reaches execute through the host);
+      // this executor-side coercion stays as the independent second layer,
+      // keeping pre-gate executor behavior byte-for-byte unchanged.
       const readPath = typeof rawPath === "string" ? rawPath : "";
       const branch = parseReadUrlBranch(readPath);
       if (branch.kind === "native") {
