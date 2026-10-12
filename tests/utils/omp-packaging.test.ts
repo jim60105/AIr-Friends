@@ -378,7 +378,9 @@ Deno.test("manifest generator - per-file lines, header facts, recut invariant", 
     // Header facts: version, serial composition, reserved 6th slot, recut invariant.
     assertStringIncludes(manifest, `OMP_VERSION=${PIN}`);
     assertStringIncludes(manifest, "12 -> 13 -> 14b -> 17 -> 18");
-    assertStringIncludes(manifest, "RESERVED-BUT-UNCONSUMED");
+    // `remove-omp-public-code-search` removed the reserved slot; the header
+    // records the composition without any reserved-slot claim.
+    assert(!manifest.includes("RESERVED-BUT-UNCONSUMED"), "manifest header carries no reserved-slot claim");
     // The recut-invariant statement inside the manifest itself.
     assertStringIncludes(manifest, "RECUT INVARIANT");
 
@@ -400,7 +402,7 @@ Deno.test("docs/OMP_PACKAGING.md - recut invariant and digest table present", as
   const doc = await Deno.readTextFile(`${repoRoot}/docs/OMP_PACKAGING.md`);
   assertStringIncludes(doc, "task-failure condition");
   assertStringIncludes(doc, "12 → 13 → 14b → 17 → 18");
-  assertStringIncludes(doc, "reserved-but-unconsumed");
+  assert(!doc.includes("reserved-but-unconsumed"), "no reserved-slot claim remains in the doc");
   // Digest table byte-identical to the design table values.
   for (const digest of Object.values(DIGESTS)) {
     assertStringIncludes(doc, digest);

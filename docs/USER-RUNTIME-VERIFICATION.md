@@ -118,14 +118,14 @@ Unit/mock: row-23 lifecycle suite (`tests/integration/omp-lifecycle/`).
 | Crash/restart and history restoration behave under the official binary | `OMP_RECOVERY.md`                | mock crash markers                            | unverified —                       |
 | Cross-mode ownership rejection denies before any spawn                 | `recovery-ownership.ts` contract | recovery-ownership unit/lifecycle             | unverified —                       |
 
-## H. Network: fetch / search / code search (rows 17–19; design §15 bullet 8)
+## H. Network: fetch / search (rows 17–19; design §15 bullet 8)
 
 Source-audit home: [docs/OMP_NETWORK.md](OMP_NETWORK.md) (honesty tables) ·
-Unit/mock: fetch/search/code-search transport suites (adapter decisions only).
+Unit/mock: fetch/search transport suites (adapter decisions only).
 
 | Observation                                                                                                                                     | Source audit                                                 | Unit/mock                                                                   | Runtime outcome + user observation |
 | ----------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------ | --------------------------------------------------------------------------- | ---------------------------------- |
-| Actual native fetch/search/code-search traffic passes through the configured adapter/proxy (mediation observed, not inferred from env presence) | `OMP_NETWORK.md` F14 residual stated openly                  | adapter decision tables; mock suites certify decisions only, never the wire | unverified —                       |
+| Actual native fetch/search traffic passes through the configured adapter/proxy (mediation observed, not inferred from env presence) | `OMP_NETWORK.md` F14 residual stated openly                  | adapter decision tables; mock suites certify decisions only, never the wire | unverified —                       |
 | Binary fetch and text fetch both mediate; redirects revalidated per hop                                                                         | `OMP_NETWORK.md`                                             | redirect-loop unit suites                                                   | unverified —                       |
 | Private/loopback targets fail closed under the enforcing posture                                                                                | `ssrf.ts` classifier contract                                | classifier unit suites                                                      | unverified —                       |
 | Whether the compiled-binary runtime honors a per-request proxy option at all                                                                    | `OMP_NETWORK.md` §15 checklist entry (`candidate-to-verify`) | n/a                                                                         | unverified —                       |

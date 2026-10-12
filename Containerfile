@@ -252,9 +252,9 @@ COPY --link --chown=0:0 --chmod=0755 skills/ /opt/air/skills/
 # outside every agent-writable root (never under /app/data, /app/prompts, or
 # /home/deno): the row-8 settings overlays, the row-8 SYSTEM.md prompt
 # artifact, and the FINAL trusted-extension tree (serial composition
-# 12 -> 13 -> 14b -> 17 -> 18; the 6th serial slot reserved-but-unconsumed by
-# 19/21). Directories 0755, files 0644, owner root: the agent process cannot
-# modify the owned tree it is governed by. Content-faithful install: content
+# 12 -> 13 -> 14b -> 17 -> 18). Directories 0755, files 0644, owner root: the
+# agent process cannot modify the owned tree it is governed by.
+# Content-faithful install: content
 # lands byte-identical from these authored paths (the extension-tree step
 # below is a VERBATIM mirror copy, no rewriting/templating/augmentation).
 RUN install -d -m 755 -o 0 -g 0 /opt/air/omp && \

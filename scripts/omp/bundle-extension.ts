@@ -28,9 +28,8 @@
 //
 // Bundled set = the VALUE-import closure walked from the entry (runtime
 // surfaces; the loader fully erases `import type` declarations and type-only
-// specifier clauses, so TYPE-only-only daemon modules — e.g.
-// code-search-transport.ts, whose own closure note pins it OUT of the
-// installed set, and the /app daemon surface behind client.ts types — are
+// specifier clauses, so TYPE-only-only daemon modules — e.g. the /app daemon
+// surface behind client.ts types — are
 // deliberately NOT installed). Every VALUE edge must resolve INSIDE the
 // installed tree (fail closed otherwise), and any external bare VALUE
 // specifier outside the @std/* family fails the build — the boundary is
@@ -40,8 +39,8 @@
 // change (recut invariant D5).
 //
 // Serial-composition fact (recorded in the manifest header; recut invariant):
-// serial composition 12 -> 13 -> 14b -> 17 -> 18 landed; the 6th serial slot
-// is reserved-but-unconsumed (the public-code-search row lands no sibling).
+// serial composition 12 -> 13 -> 14b -> 17 -> 18 landed; no reserved
+// public-code-search slot remains (removed by remove-omp-public-code-search).
 //
 // Usage (via scripts/omp/bundle-omp-extension.sh):
 //   deno run --allow-read --allow-write bundle-extension.ts \
