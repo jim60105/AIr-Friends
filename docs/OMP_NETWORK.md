@@ -133,9 +133,15 @@ tiers; citations re-verified at pin `2a2c6dc` / v18.6.1):
 
 14a's `url-read`/`web-fetch` inventory rows carry an additive
 completing-adapter marker naming this change and the table; the
-`web-search` row is untouched, and until the native
-invocation below is observed, 14b still blocks both URL-shaped outcomes at
-`rejected_pending_adapter` — the marker is never a plain allow.
+`web-search` row is untouched by the marker. Since
+`admit-completed-omp-network-adapters`, the 14b clamp consumes the route
+owner's typed completion: a URL-shaped call on the registered owned `read`
+replacement proceeds to the NAMED completing boundary (the completed route
+set is recorded on the proceed); every other URL-shaped case — the `webfetch`
+surface, an unregistered or shadowed name — still blocks at
+`rejected_pending_adapter`. The marker is never a plain allow either way,
+and the compiled-binary invocation claim below stays user-owned: completion
+is composition evidence, not native observation.
 
 ## Honesty table (D1) — what the suites do and cannot certify
 
@@ -220,9 +226,15 @@ are credential-scope only: `no-supported-credential`,
 
 14a's `web-search` inventory row carries the additive completing-adapter
 marker naming this change and the table — backend-gated and route-scoped: it
-is NOT a plain allow (kind unchanged; with no supported credential 14b still
-fails closed at `rejected_pending_adapter`). The `url-read`/`web-fetch`
-rows and row 17's `fetch-routes.ts` are byte-identical; the cross-table test
+is NOT a plain allow (kind unchanged). Since
+`admit-completed-omp-network-adapters` the row also carries the native
+replacement name `web_search` (never deny-by-absence), and 14b consumes the
+backend-gated decision per call: registered owned replacement + a supported
+backend's EXACT completed grounding route proceeds to the named boundary;
+with no supported credential — or no registered owned replacement — it still
+fails closed at `rejected_pending_adapter` with zero endpoint requests. The
+`url-read`/`web-fetch` rows and row 17's `fetch-routes.ts` completed set are
+byte-identical; the cross-table test
 pins that `search-provider.
 subrequests` stays `blocked-pending-adapter` there and never gets cited
 pending against a completed contract here.
@@ -249,25 +261,15 @@ present, restricted `web_search` fails closed to the native-shaped
 `Error: No web search model configured.` with zero transport and the
 credential-scope block record; the route stays `blocked-pending-adapter` /
 `userDecisionRequired` — a documented gap, not an invented mechanism.
-**Interim posture even with credentials present:** 14b's composition still
-blocks the `allow-gated-pending-adapter` outcome at
-`rejected_pending_adapter` — the completed-route distinction is not wired
-into the handler by this change (14b is owned elsewhere), so the reachable
-capability turns on only once that composition-side step lands or the §15
-observation confirms the replacement path; until then the adapter serves
-decision data and the registered replacement, not the gated handler.
-**Batch ownership gap (recorded for routing):** the required completion
-step — the 14b gated handler honoring completed web-search routes via
-`webSearchSeamState`/credential-presence input instead of blocking every
-`allow-gated-pending-adapter` outcome — is **DEFERRED beyond this batch,
-final disposition**: row 20 was spec-forbidden from touching `enforcement.ts`
-and the batch's closing consumers (rows 23/24, lifecycle and handoff
-regression suites) completed without owning it, so no batch row carries it.
-The step is user/next-effort owned. Until it lands, live web-search stays
-dark behind `rejected_pending_adapter` (fail-closed) even with
-`GEMINI_API_KEY`/`OPENROUTER_API_KEY` present: this is a deferred disposition,
-not a supported capability, and every pinned verdict and evidence limit above
-is unchanged.
+**Seam posture with credentials present (`admit-completed-omp-network-adapters`):**
+the composition-side consumption step formerly deferred here has landed: the
+14b clamp honors the route owner's typed decision — the registered owned
+`web_search` replacement plus a CURRENT supported backend's completed
+grounding route proceeds to the NAMED completing boundary (credential
+presence read fresh per call, presence booleans only). This changes no
+evidence limit: the proceed is composition-evidence-only, the per-hop
+transport policy inside the replacement is untouched, and every pinned
+verdict and evidence limit above is unchanged.
 **Native YOLO sessions** keep native search with no adapter clamp (14b
 posture, D6): the replacement registers restricted-sessions-only and
 delegates nothing in YOLO because it never registers there.

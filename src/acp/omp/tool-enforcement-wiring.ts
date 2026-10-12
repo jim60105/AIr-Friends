@@ -221,13 +221,14 @@ export const ENFORCEMENT_SEAMS: readonly EnforcementSeam[] = Object.freeze(
           ", ",
         ),
         citation: transportLedgerEntries.map((entry) => entry.sourceCitation).join(" | "),
-        notes: "Rows 17-19 adapters have not landed.",
+        notes:
+          "Rows 17-19 adapters landed; the ledger statuses above are unchanged (static-audit verdicts), and the seam consumes typed completion without inflating any of them.",
       },
       userDisposition: "DECIDED",
       dispositionText:
         "the trusted-extension replacement tool covers the approved routes (URL read and web search) through the controlled transport; fetchBinary and scraper redirect-following bypass routes stay blocked permanently.",
       handlerBehavior:
-        "14a's allow-gated-pending-adapter outcome blocks at the call with rejected_pending_adapter (seam pending-adapter) — fail closed, never a silent native transport allow.",
+        "14a's allow-gated-pending-adapter outcome consults the route owner's typed completion at the clamp: a completed controlled route plus the registered owned replacement proceeds to the NAMED replacement boundary (C5); every other case blocks at the call with rejected_pending_adapter (seam pending-adapter) — fail closed, never a silent native transport allow.",
       blockMarker: "pending-adapter",
     },
     {

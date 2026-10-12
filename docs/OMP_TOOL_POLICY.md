@@ -43,7 +43,7 @@ outcome.
 | Entry                                                                         | Decision                                            | Completing authority                                                                                                                                                                                                                                     |
 | ----------------------------------------------------------------------------- | --------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `read`, `list`, `glob`, `grep`, `search`/`find`                               | allow gated                                         | Row 4 boundaries + authorized shared/read-only roots + trusted-skills read root. Pinned note: some native search implementations do not automatically invoke ACP callbacks — the decision binds at the handler (14b), never by assumed callback coverage |
-| native `read` URL branch; `webfetch`, `websearch`                             | `allow-gated-pending-adapter` (distinct from allow) | Rows 17–18 transport adapters once they exist; until then 14b fails them closed rather than letting native unadapted transport run. Capability parity preserved, never deny-parity                                                                       |
+| native `read` URL branch; `webfetch`, `websearch`, `web_search`               | `allow-gated-pending-adapter` (distinct from allow) | Rows 17–18 adapters landed; since C5 (`admit-completed-omp-network-adapters`) 14b consumes the route owner's typed completion — the registered owned replacement on a completed route (search: a supported backend's exact grounding route) proceeds to the NAMED controlled boundary; every other case (incl. `webfetch`, credential-absent) stays failed closed, never letting native unadapted transport run. Capability parity preserved, never deny-parity                                                                       |
 | `write` / `edit` (ordinary)                                                   | routed to sinks                                     | Row 4 `filesystem-policy.ts` via the row-8 sink contract                                                                                                                                                                                                 |
 | todo-shaped write (`todoread`/`todowrite` and a `todo`-shaped `write`/`edit`) | in-session state only                               | Session planning state; the outcome carries `filesystemMutationRoute: false` — a todo-shaped write never opens a filesystem mutation route                                                                                                               |
 | `bash`                                                                        | allow gated                                         | The EXISTING common command policy (lexical path gate unchanged; 14c owns canonical hardening); the extra native ACP bash permission path stays active                                                                                                   |
@@ -175,8 +175,10 @@ tests clear neither verdict; unit/mock evidence validates decision logic only.
   `deviceSurface` may only REFINE a non-ordinary shape — never downgrade a
   `config-write`/`device-route` shape to the ordinary route), observes
   live `registryEpoch`, supplies canonical observations for the destructive
-  all-target pass, and fails `allow-gated-pending-adapter` calls closed until
-  rows 17–18 land. MCP admission is read from the entry decision's
+  all-target pass; `allow-gated-pending-adapter` calls consult the route
+  owners' typed completion at the clamp (C5) and stay failed closed whenever
+  the completed route or registered owned replacement is absent. MCP
+  admission is read from the entry decision's
   `routed-provenance` outcome (or the `decideMcpAdmission` re-expression
   view); there is no second admission path. Note that MCP-origin `url`/`todo`
   shapes are origin-keyed client capability calls, not native transport/todo
