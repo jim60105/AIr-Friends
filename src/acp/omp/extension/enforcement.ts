@@ -1,10 +1,15 @@
 /**
- * Restricted `tool_call` Enforcement: handler body + synchronous slot
- * registration/attachment (trusted-extension tree).
+ * Restricted `tool_call` Enforcement: handler body + synchronous
+ * registration machinery (trusted-extension tree).
  *
  * Implements OpenSpec change `wire-omp-restricted-tool-enforcement` (row 16 /
- * P5c-ii). This sibling owns the SYNCHRONOUS handler-slot registration and
- * the attached policy body. The body composes ONLY 14a's pure decisions
+ * P5c-ii), extended by `wire-omp-native-extension-api` (C4): this sibling
+ * owns the handler body and the registration machinery; the production
+ * REGISTRATION SITE moved to the native-API adapter
+ * (`./native-registration.ts`) — the former load-time attach, the
+ * module-global private slot, and the EMPTY_METADATA_SURFACE production
+ * default are removed, since the pinned loader discards any factory return
+ * value and the native roster surface fails closed on its own. The body composes ONLY 14a's pure decisions
  * (`tool-inventory`, `tool-provenance`, `destructive-decision`,
  * `approval-records`) against the fresh per-call observation; it holds zero
  * decision tables — ordering, freshness rules, and the error vocabulary are
@@ -154,11 +159,16 @@ export function registerNativeYoloNoop(
 }
 
 // ---------------------------------------------------------------------------
-// Load-time attach (called by the trusted-module entrypoint after its
-// pre-import gate; lives in this sibling because the entrypoint itself is
-// fail-closed and refuses to finish loading under the pinned unresolved
-// pre-import-exclusion verdicts — the attach mechanics must remain
-// inspectable and testable without loading the entrypoint).
+// Launch-identity observation. C4 (`wire-omp-native-extension-api`)
+// removed the load-time attach, the module-global private registration
+// slot, and the EMPTY_METADATA_SURFACE production default: the only
+// production registration site is now the native-API adapter
+// (`./native-registration.ts`), whose roster surface fails closed by
+// itself — with no native `getAllTools()` roster every tool reads unowned
+// and every restricted call denies, so no empty-registry admit exists to
+// default into. The machinery below (identity observation, epoch
+// observation, live observer, composition) is consumed by that adapter
+// directly.
 // ---------------------------------------------------------------------------
 
 /**
@@ -171,105 +181,6 @@ export function registerNativeYoloNoop(
 export function observeLaunchMode(cwd: string = ""): EnforcementLaunchMode | undefined {
   const match = /\/omp-agent\/(restricted|native-yolo)\/cwd\/?$/.exec(cwd);
   return match?.[1] as EnforcementLaunchMode | undefined;
-}
-
-/**
- * An empty live-metadata surface reads every tool unowned, so with no
- * native `getAllTools`-class surface attached every restricted call denies
- * fail-closed — startup/name-only snapshots never authorize, and an
- * unavailable surface cannot accidentally admit.
- */
-export const EMPTY_METADATA_SURFACE: LiveToolRegistrySurface = Object.freeze({
-  snapshot: () => [],
-});
-
-/** Load-time attach options (injection seam for verification; defaults are production). */
-export interface EnforcementLoadOptions {
-  /** The synchronous registration slot (default: the module's own attachment point). */
-  readonly registrar?: ToolCallSlotRegistrar;
-  /** The native `getAllTools`-class metadata surface (unattached ⇒ fail closed). */
-  readonly metadataSurface?: LiveToolRegistrySurface;
-  /** Observed launch cwd for the self-identity branch. */
-  readonly observedCwd?: string;
-  /** Row 12's session resource generation getter. */
-  readonly resourceGeneration?: () => string;
-  /** Bounded diagnostic sink (default: a host-side bounded error log). */
-  readonly surfaceError?: (message: string) => void;
-}
-
-/**
- * The synchronous load-time enforcement registration: identity branch →
- * slot registration → body attach. Carries NO readiness signal — nothing
- * here may be read as a client-observable readiness assertion.
- */
-export function attachEnforcementAtLoad(
-  options: EnforcementLoadOptions = {},
-): EnforcementRegistrationResult {
-  const mode = observeLaunchMode(options.observedCwd);
-  if (mode !== "restricted") {
-    // Structural exemption: YOLO (and unidentified) processes register and
-    // load NOTHING restricted.
-    return registerNativeYoloNoop(mode ?? "native-yolo");
-  }
-  const surface = options.metadataSurface ?? EMPTY_METADATA_SURFACE;
-  const generation = options.resourceGeneration ?? (() => "gen-0");
-  const observedCwd = options.observedCwd ?? "";
-  const { observer } = createLiveObserver(
-    surface,
-    generation,
-    () => ({
-      // C3 (package-bun-compatible-omp-extension D2): the owning-module
-      // observation names the ACTUAL loaded module instance — in production
-      // that is the single generated bundle file itself (<root>/index.js or
-      // build/omp-extension/index.js), so C4 admits the real native
-      // artifact's provenance. The former `new URL("./index.ts", ...)`
-      // adjacent-source claim would name a file that does not sit beside
-      // the bundle and contradicted the generated-entry contract; the
-      // canonical SOURCE origin stays single-owned via
-      // OMP_TRUSTED_EXTENSION_PATH, which this observation never claims.
-      modulePath: import.meta.url,
-      baseRoot: observedCwd.includes("/omp-agent/")
-        ? observedCwd.replace(/\/omp-agent\/[^/]+\/cwd\/?$/, "")
-        : observedCwd,
-      resourceGeneration: generation(),
-    }),
-  );
-  const deps: EnforcementDeps = {
-    selfIdentity: { mode: "restricted" },
-    observer,
-    surfaceError: options.surfaceError ??
-      // Bounded diagnostic posture (row 12's ACP error surface): the
-      // handler only calls this with `formatEnforcementError` output —
-      // enumerated fields, never payload, path content, model text,
-      // secret, or token material.
-      ((message: string) => console.error(`[air-friends-trusted-extension] ${message}`)),
-  };
-  return registerRestrictedEnforcement(options.registrar ?? loadSequenceRegistrar, deps);
-}
-
-/**
- * The module's own synchronous load-time attachment point: registering into
- * this record IS the synchronous slot registration of the load sequence.
- * The pinned host-side surface name remains candidate-to-verify (design
- * §15); the entrypoint exposes the handler synchronously so a host surface
- * receives the SAME registered instance, never a re-registration.
- */
-let loadTimeEnforcementRegistration: EnforcementRegistrationResult = {
-  registered: false,
-  mode: "native-yolo",
-};
-
-const loadSequenceRegistrar = Object.freeze<ToolCallSlotRegistrar>({
-  registerRestrictedToolCall: (handler: RestrictedToolCallHandler) => {
-    loadTimeEnforcementRegistration = { registered: true, mode: "restricted", handler };
-  },
-});
-
-/** The current load-time registration record (both branches). */
-export function getLoadTimeEnforcementRegistration(): EnforcementRegistrationResult {
-  // Frozen copy: consumers (entrypoint, row-21 regression checks) can never
-  // observe or hold a mutated view of the module-global record.
-  return Object.freeze({ ...loadTimeEnforcementRegistration });
 }
 
 // ---------------------------------------------------------------------------

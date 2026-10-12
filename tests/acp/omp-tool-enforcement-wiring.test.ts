@@ -13,11 +13,9 @@
 
 import { assert, assertEquals } from "@std/assert";
 import {
-  attachEnforcementAtLoad,
   composeRestrictedToolCall,
   createLiveObserver,
   createRestrictedToolCallHandler,
-  EMPTY_METADATA_SURFACE,
   ENFORCEMENT_COMPOSITION,
   ENFORCEMENT_ERROR_FIELDS,
   type EnforcementDeps,
@@ -614,44 +612,27 @@ Deno.test("Wiring: observeCall re-reads origin/epoch/generation freshly on every
   assertEquals(reads, 2); // one live origin read per call — no cache.
 });
 
-Deno.test("Wiring registration: YOLO registers no handler; restricted identity attaches synchronously; entry fails closed", () => {
+Deno.test("Wiring registration: YOLO/unidentified identities register nothing; identity observation unchanged", () => {
+  // C4 cutover: the load-time attach and its private slot are GONE (the
+  // production registration site is the native-API adapter, covered by
+  // tests/acp/omp-native-registration.test.ts). What stays pinned here is
+  // the branch machinery the adapter keys on.
   // YOLO branch: nothing registered, no restricted decision/record load path.
   assertEquals(registerNativeYoloNoop(), { registered: false, mode: "native-yolo" });
-  assertEquals(
-    attachEnforcementAtLoad({ observedCwd: "/opt/air/omp-agent/native-yolo/cwd" }),
-    { registered: false, mode: "native-yolo" },
-  );
-  // Unidentified identity registers nothing (accepted absence-of-handler
-  // residual risk; never a guess).
-  assertEquals(
-    attachEnforcementAtLoad({ observedCwd: "/somewhere/else" }),
-    { registered: false, mode: "native-yolo" },
-  );
+  // The adapter maps a YOLO launch cwd and an unidentified cwd to the
+  // SAME noop result — the structural exemption needs no attach function.
+  for (const cwd of ["/opt/air/omp-agent/native-yolo/cwd", "/somewhere/else"]) {
+    assertEquals(
+      observeLaunchMode(cwd) === undefined || observeLaunchMode(cwd) === "native-yolo",
+      true,
+      cwd,
+    );
+    assertEquals(registerNativeYoloNoop(observeLaunchMode(cwd) ?? "native-yolo"), {
+      registered: false,
+      mode: observeLaunchMode(cwd) ?? "native-yolo",
+    });
+  }
   assertEquals(observeLaunchMode("/opt/air/omp-agent/restricted/cwd"), "restricted");
-  // Restricted branch: synchronous slot registration + body attach.
-  let attached: RestrictedToolCallHandler | undefined;
-  const registrar = {
-    registerRestrictedToolCall: (handler: RestrictedToolCallHandler) => attached = handler,
-  };
-  const result = attachEnforcementAtLoad({
-    registrar,
-    metadataSurface: EMPTY_METADATA_SURFACE,
-    observedCwd: "/opt/air/omp-agent/restricted/cwd",
-    resourceGeneration: () => "gen-0",
-  });
-  assertEquals(result.registered, true);
-  assertEquals(result.mode, "restricted");
-  assert(attached !== undefined);
-  // Empty metadata surface reads every tool unowned: fail closed.
-  const denied = blockedOutcome(
-    attached!({
-      toolKey: "read",
-      toolName: "read",
-      decodedInputShape: "path-target",
-      recordEvaluation: NO_RECORDS,
-    }),
-  );
-  assertEquals(denied.error.code, "rejected_tool_provenance");
   // A handler built with a non-restricted identity fails closed at entry.
   const yoloHandler = createRestrictedToolCallHandler({
     selfIdentity: { mode: "native-yolo" },
