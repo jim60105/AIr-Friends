@@ -36,6 +36,10 @@ bower_components
 
 # Compiled binary addons (https://nodejs.org/api/addons.html)
 build/Release
+# Generated trusted-extension development bundle (package-bun-compatible-omp-extension):
+# the single native-loadable artifact emitted by `deno task bundle:omp-extension`.
+# Generated — never hand-edited, never tracked; the image build regenerates it.
+build/omp-extension/
 
 # Dependency directories
 node_modules/

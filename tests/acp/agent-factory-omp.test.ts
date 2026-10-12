@@ -8,9 +8,10 @@
 // language-server suppression in either mode — remains gated by P0, row 8,
 // packaging, and user runtime observation.
 
-import { assertEquals, assertThrows } from "@std/assert";
+import { assert, assertEquals, assertStringIncludes, assertThrows } from "@std/assert";
 import { createAgentConfig, getSessionModeOverride } from "../../src/acp/agent-factory.ts";
 import {
+  OMP_TRUSTED_EXTENSION_BUNDLE_PATH,
   OMP_TRUSTED_EXTENSION_PATH,
   ompAgentDir,
   ompLaunchCwd,
@@ -18,6 +19,26 @@ import {
   ompXdgDataHome,
 } from "../../src/utils/omp-paths.ts";
 import type { Config } from "../../src/types/config.ts";
+
+// The launch face of the trusted extension is the GENERATED bundle (C3):
+// the factory preflight fails closed without it, so this suite builds the
+// canonical development entry once through the same repository command CI
+// and the image build use (frozen lock; locked deps come from the local
+// cache the test process already holds — zero download). The bundle is
+// gitignored generated output, never tracked.
+{
+  const root = new URL("../../", import.meta.url).pathname.replace(/\/$/, "");
+  const built = await new Deno.Command(`${root}/scripts/omp/bundle-omp-extension.sh`, {
+    args: [root, `${root}/build/omp-extension`, `${root}/deno.lock`],
+    stdout: "null",
+    stderr: "piped",
+  }).output();
+  if (built.code !== 0) {
+    throw new Error(
+      `test prerequisite: bundle build failed: ${new TextDecoder().decode(built.stderr)}`,
+    );
+  }
+}
 
 function createTestConfig(overrides: Partial<Config> = {}): Config {
   return {
@@ -89,14 +110,22 @@ Deno.test("getSessionModeOverride - returns null for omp in both yolo states", (
   assertEquals(getSessionModeOverride("opencode", false), null);
 });
 
-Deno.test("agent-factory omp - fails closed when trusted extension module is missing", () => {
+Deno.test("agent-factory omp - fails closed when the generated extension entry is missing", () => {
   const config = createTestConfig();
-  withAssetAbsent(OMP_TRUSTED_EXTENSION_PATH, () => {
-    assertThrows(
-      () => createAgentConfig("omp", "/tmp/ws", config, false),
-      Error,
-      "Missing trusted extension module",
-    );
+  // C3: absence of the GENERATED development entry fails the preflight with
+  // the build remedy — never a silent fallback to the raw Deno-only source
+  // tree (the error text must name the bundling command).
+  withAssetAbsent(OMP_TRUSTED_EXTENSION_BUNDLE_PATH, () => {
+    let thrown: Error | undefined;
+    try {
+      createAgentConfig("omp", "/tmp/ws", config, false);
+    } catch (error) {
+      thrown = error as Error;
+    }
+    assert(thrown !== undefined, "missing generated entry must fail the preflight");
+    assertStringIncludes(thrown!.message, "Missing trusted extension module");
+    assertStringIncludes(thrown!.message, OMP_TRUSTED_EXTENSION_BUNDLE_PATH);
+    assertStringIncludes(thrown!.message, "deno task bundle:omp-extension");
   });
 });
 
@@ -127,7 +156,13 @@ Deno.test("agent-factory omp - assembles both modes over tracked assets with dis
   assertEquals(restrictedConfig.args.includes("acp"), true);
   assertEquals(restrictedConfig.args.includes("--no-extensions"), true);
   assertEquals(restrictedConfig.args.includes("--trusted-extension"), true);
-  assertEquals(restrictedConfig.args.includes(OMP_TRUSTED_EXTENSION_PATH), true);
+  // The launch assembly consumes the resolver output verbatim: the GENERATED
+  // development entry is presented to the host, never the raw source path.
+  assertEquals(
+    restrictedConfig.args[restrictedConfig.args.indexOf("--trusted-extension") + 1],
+    OMP_TRUSTED_EXTENSION_BUNDLE_PATH,
+  );
+  assertEquals(restrictedConfig.args.includes(OMP_TRUSTED_EXTENSION_PATH), false);
   assertEquals(restrictedConfig.args.includes("agent-config/omp/restricted.yml"), true);
   assertEquals(restrictedConfig.args.includes("agent-config/omp/native-yolo.yml"), false);
 
