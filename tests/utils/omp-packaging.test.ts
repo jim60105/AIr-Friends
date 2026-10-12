@@ -459,7 +459,6 @@ const EXPECTED_MIRROR_FILES = [
   "src/acp/filesystem-roots.ts",
   "src/acp/omp-settings.ts",
   "src/acp/omp/approval-records.ts",
-  "src/acp/omp/code-search-routes.ts",
   "src/acp/omp/compatibility-contracts.ts",
   "src/acp/omp/destructive-decision.ts",
   "src/acp/omp/destructive-validator.ts",
@@ -657,7 +656,7 @@ Deno.test("extension bundle - barrel resolves inside the installed tree", async 
     const result = await load.output();
     assertEquals(result.code, 0, new TextDecoder().decode(result.stderr));
     const exports = new TextDecoder().decode(result.stdout).trim().split(",");
-    // Value exports spanning the serial siblings (rows 12/14a/14b/19/20/21
+    // Value exports spanning the serial siblings (rows 12/14a/14b/19/20
     // pure modules behind the barrel) resolve inside the installed tree.
     for (
       const expected of [
@@ -666,7 +665,6 @@ Deno.test("extension bundle - barrel resolves inside the installed tree", async 
         "decideDestructiveIntent",
         "decideFetchHop",
         "buildGeminiSearchRequest",
-        "CODE_SEARCH_ROUTE_TABLE",
       ]
     ) {
       assert(exports.includes(expected), `barrel exports ${expected}: ${exports.join(",")}`);
@@ -677,11 +675,10 @@ Deno.test("extension bundle - barrel resolves inside the installed tree", async 
 });
 
 Deno.test("extension bundle - type-only daemon modules are NOT installed", async () => {
-  // code-search-transport.ts is type-only-referenced (its closure note pins
-  // it out of the installed set); the loader erases type-only imports and the
-  // completeness gate passes without it. The /app daemon surface behind
-  // client.ts TYPES (client.ts, types.ts, filesystem-access.ts) is likewise
-  // never an installed input. Explicit non-installation claim asserted at each
+  // Type-only daemon modules are erased at runtime and the completeness gate
+  // passes without them. The /app daemon surface behind client.ts TYPES
+  // (client.ts, types.ts, filesystem-access.ts) is likewise never an
+  // installed input. Explicit non-installation claim asserted at each
   // module's real repo-relative path under mirror/.
   const target = await Deno.makeTempDir({ prefix: "omp-bundle-" });
   try {
@@ -693,7 +690,6 @@ Deno.test("extension bundle - type-only daemon modules are NOT installed", async
     assertEquals((await command.output()).code, 0);
     for (
       const excluded of [
-        "src/acp/omp/code-search-transport.ts",
         "src/acp/client.ts",
         "src/acp/types.ts",
         "src/acp/filesystem-access.ts",

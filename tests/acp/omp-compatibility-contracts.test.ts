@@ -97,13 +97,15 @@ Deno.test("Compatibility Assessment: synthetic complete positive ledger exercise
 });
 
 Deno.test("Compatibility Assessment: rejects missing subcases, pin mismatches, duplicate entries, and SDK-only claims", () => {
-  // 1. Missing subcase (e.g. native_transport:public_code_search)
-  const incompleteLedger = AUDITED_PINNED_LEDGER.filter((e) => e.subcase !== "public_code_search");
+  // 1. Missing subcase (native_transport:web_search; `remove-omp-public-code-search`
+  // migrated this coverage from the former public_code_search subcase to a
+  // retained capability).
+  const incompleteLedger = AUDITED_PINNED_LEDGER.filter((e) => e.subcase !== "web_search");
   const missingResult = assessCompatibility(incompleteLedger);
   assertEquals(missingResult.permitted, false);
   assertEquals(
     missingResult.blockers.some((b) =>
-      b.subcase === "public_code_search" && b.reason.includes("Missing")
+      b.subcase === "web_search" && b.reason.includes("Missing")
     ),
     true,
   );

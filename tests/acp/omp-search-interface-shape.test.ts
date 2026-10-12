@@ -45,7 +45,6 @@ import {
   SEARCH_ROUTE_TABLE,
   webSearchSeamState,
 } from "@acp/omp/search-routes.ts";
-import { CODE_SEARCH_COMPLETING_ADAPTER_MARKER } from "@acp/omp/code-search-routes.ts";
 import { decideRestrictedTool, RESTRICTED_TOOL_INVENTORY_TABLE } from "@acp/omp/tool-inventory.ts";
 import {
   composeRestrictedToolCall,
@@ -622,55 +621,44 @@ Deno.test("Credential-absent keeps the seam pending; supported presence gates th
   });
 });
 
-// Row 21 (`adapt-omp-public-code-search`) supersedes the byte-identity pin
-// for the CODE-SEARCH row only (row 18 did the same for the web-search row
-// against row 17's pin): the row now carries its OWN credential-gated
-// additive marker. The durable invariants stay pinned here — row 17's
-// markers kept on the URL-read rows, the URL-read and WEB-SEARCH rows
-// byte-identical, and the code-search row's row-19 prefix sentence
-// byte-identical with its pending outcome (kind + 14a + 14b) unchanged.
-Deno.test("URL-read + web-search rows byte-identical; code-search row keeps its prefix and pending outcome", () => {
+// The former CODE-SEARCH row's byte-identity/marker test was removed by
+// `remove-omp-public-code-search` rather than repinned: the row no longer
+// exists, no reserved slot remains, and an absent dedicated search name now
+// denies by structural absence (pinned in
+// tests/acp/omp-restricted-tool-decisions.test.ts). The durable row-17
+// invariants stay pinned here — row 17's markers kept on the URL-read rows
+// and no retained row names the removed change.
+Deno.test("URL-read + web-search rows keep their markers and never name the removed change", () => {
   const urlRead = RESTRICTED_TOOL_INVENTORY_TABLE.find((r) => r.id === "url-read");
   const webFetch = RESTRICTED_TOOL_INVENTORY_TABLE.find((r) => r.id === "web-fetch");
-  const codeSearch = RESTRICTED_TOOL_INVENTORY_TABLE.find((r) => r.id === "code-search");
+  const webSearch = RESTRICTED_TOOL_INVENTORY_TABLE.find((r) => r.id === "web-search");
   assertExists(urlRead);
   assertExists(webFetch);
-  assertExists(codeSearch);
+  assertExists(webSearch);
   assertEquals(urlRead.notes.includes(FETCH_COMPLETING_ADAPTER_MARKER), true);
   assertEquals(webFetch.notes.includes(FETCH_COMPLETING_ADAPTER_MARKER), true);
-  // Row 20 touched neither row's text (the search marker is web-search-only).
+  // Row 20's marker is web-search-only.
   assertEquals(urlRead.notes.includes("adapt-omp-web-search"), false);
   assertEquals(webFetch.notes.includes("adapt-omp-web-search"), false);
-  // Row 21 touched ONLY the code-search row (the URL-read/web-fetch rows
-  // above never name it) and the WEB-SEARCH row is byte-identical to the
-  // state row 18 shipped (its full notes end at its own marker sentence).
-  assertEquals(urlRead.notes.includes("adapt-omp-public-code-search"), false);
-  assertEquals(webFetch.notes.includes("adapt-omp-public-code-search"), false);
-  const webSearch = RESTRICTED_TOOL_INVENTORY_TABLE.find((r) => r.id === "web-search");
-  assertExists(webSearch);
-  assertEquals(webSearch.notes.includes("adapt-omp-public-code-search"), false);
-  // The code-search row is the row-19 pending sentence (byte-identical
-  // prefix) plus row 21's additive marker — never a rewritten row.
-  assertEquals(
-    codeSearch.notes.startsWith(
-      "Public code/documentation search preserved (row 19) without adding LSP or arbitrary " +
-        "execution. Local text search stays on the read-class row. ",
-    ),
-    true,
-  );
-  assertEquals(codeSearch.notes.includes(CODE_SEARCH_COMPLETING_ADAPTER_MARKER), true);
-  assertEquals(codeSearch.kind, "allow-gated-pending-adapter");
+  // No retained row names the removed change, and no code-search row remains.
+  for (const row of RESTRICTED_TOOL_INVENTORY_TABLE) {
+    assertEquals(row.id === "code-search", false);
+    assertEquals(row.notes.includes("adapt-omp-public-code-search"), false, row.id);
+  }
+  // The WEB-SEARCH row keeps its own marker sentence and pending outcome.
+  assertEquals(webSearch.notes.includes("COMPLETING-ADAPTER: adapt-omp-web-search"), true);
+  assertEquals(webSearch.kind, "allow-gated-pending-adapter");
   const decision = decideRestrictedTool({
-    toolName: "codesearch",
+    toolName: "websearch",
     provenance: owned,
     inputShape: "query",
   });
   assertEquals(decision.outcome, "allow-gated-pending-adapter");
-  const composed = composeRestrictedToolCall(obs("codesearch", "query"));
+  const composed = composeRestrictedToolCall(obs("websearch", "query"));
   assert("block" in composed && composed.block, "14b still blocks the pending-adapter outcome");
   if ("block" in composed && composed.block) {
     assertEquals(composed.error.code, "rejected_pending_adapter");
-    assertEquals(composed.error.tableRowId, "code-search");
+    assertEquals(composed.error.tableRowId, "web-search");
   }
 });
 
