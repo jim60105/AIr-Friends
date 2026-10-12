@@ -83,6 +83,16 @@ deployment ownership rather than as a claim of native support. All seven disposi
 The evidence claim is unchanged: unit and mock tests certify this repository's decisions only, and
 the design section 15 runtime checklist remains user-owned and unverified.
 
+Correction-batch row C2 (`align-omp-native-tool-contracts`) aligns the
+`read`/`web_search` replacement definitions with the pinned tool-contract
+surface itself — the pinned `ToolDefinition.parameters` field is mandatory and
+results are native `AgentToolResult.content` arrays (source-verified at the §2
+pin: `extensibility/extensions/types.ts`, `agent/src/types.ts`,
+`tools/fetch.ts`) — so the definitions consume the documented extension API
+instead of a substitute shape. No section-3 ledger row, status, citation, or
+evidence limit changes; whether the compiled binary invokes the aligned
+replacements at all remains user-owned UNVERIFIED.
+
 ---
 
 ## 2. Fixed Upstream Pins and Reference Authority

@@ -295,3 +295,21 @@ Section 15 checklist additions (user-owned, real deployment):
    issued.
 
 > Runtime verification for this area is consolidated in the single checklist artifact [USER-RUNTIME-VERIFICATION.md](USER-RUNTIME-VERIFICATION.md) (section H: adapter/proxy mediation incl. binary/text fetch, redirects, private-target failures; the F14 residual and per-request-proxy candidate stay open there).
+
+## Native tool-contract alignment (correction batch C2 — `align-omp-native-tool-contracts`)
+
+The `read`/`web_search` replacement definitions carry the pinned-mandatory
+`parameters` schema (closed objects; the canonical bare `@sinclair/typebox`
+builder facade the pinned legacy loader host-resolves — see
+[OMP_PACKAGING.md](OMP_PACKAGING.md) §5 for the boundary exception). The
+schemas are the executors' declared input vocabulary 1:1, so the host
+input-gate rejects invalid declared fields (including an undeclared
+`provider` request) BEFORE transport dispatch — the executor-side parsers
+stay as the independent second layer, and every per-hop decision, posture,
+and record stays the adapter's own. URL-read results are native
+`AgentToolResult.content` arrays: a supported inline image becomes one
+base64 `ImageContent`; any other binary is the pinned
+`[Binary content: <mime>, <size>] <url>` text descriptor with the exact
+bytes kept base64 in `details.binaryData` — model-facing content never
+carries arbitrary bytes, and no new filesystem materialization sink exists.
+None of this changes what egress is decided or who decides it.
