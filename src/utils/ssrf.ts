@@ -7,6 +7,8 @@
 // URL, then performs the request with MANUAL redirect handling, re-validating each
 // redirect hop before following it (up to a bounded number of hops).
 
+import * as nodeDns from "node:dns/promises";
+
 /** Maximum number of redirect hops to follow before aborting (F6). */
 export const MAX_REDIRECT_HOPS = 5;
 
@@ -99,10 +101,13 @@ function normalizeHost(hostname: string): string {
 }
 
 /**
- * Resolve a hostname to its IP addresses. Literal IPs are returned as-is. When
- * `Deno.resolveDns` is available and the host is not a literal IP, all A/AAAA
- * records are resolved. On resolution failure, an SsrfValidationError is thrown
- * (fail closed).
+ * Resolve a hostname to its IP addresses through the runtime-compatible Node
+ * DNS interface (`node:dns/promises`, available in the pinned native runtime
+ * and the Deno daemon alike — package-bun-compatible-omp-extension D4).
+ * Literal IPs are returned as-is; all A/AAAA records are collected,
+ * normalized, and deduplicated. A no-record response in ONE family never
+ * discards the other family's valid answers; an empty answer set (nothing
+ * resolved at all) throws an SsrfValidationError (fail closed).
  */
 async function resolveHostAddresses(host: string): Promise<string[]> {
   // Literal IPv4
@@ -110,24 +115,43 @@ async function resolveHostAddresses(host: string): Promise<string[]> {
   // Literal IPv6 (contains a colon)
   if (host.includes(":")) return [host];
 
-  const addresses: string[] = [];
+  const answers = await resolveHostAnswers(host, nodeDns);
+  if (answers.length === 0) {
+    throw new SsrfValidationError(`DNS resolution failed or returned no records for host: ${host}`);
+  }
+  return answers;
+}
+
+/**
+ * The A/AAAA family-collection rule (C3 D4), exported for the shared DNS
+ * fixture seam: both families are attempted through an injectable
+ * `node:dns/promises` face, a failed/no-record response in one family never
+ * discards the other family's answers, and records are normalized
+ * (brackets/zone id stripped) and deduplicated. Every consumer still runs
+ * the collected answers through the SINGLE classifier
+ * ({@link isDisallowedAddress}); this function adds no policy of its own —
+ * empty simply means "nothing resolved" for each caller's fail-closed rule.
+ */
+export async function resolveHostAnswers(
+  host: string,
+  dns: {
+    resolve4(host: string): Promise<string[]>;
+    resolve6(host: string): Promise<string[]>;
+  },
+): Promise<string[]> {
+  const collected: string[] = [];
   try {
-    const a = await Deno.resolveDns(host, "A");
-    addresses.push(...a);
+    collected.push(...await dns.resolve4(host));
   } catch {
     // no A records / lookup failed for this type
   }
   try {
-    const aaaa = await Deno.resolveDns(host, "AAAA");
-    addresses.push(...aaaa);
+    collected.push(...await dns.resolve6(host));
   } catch {
     // no AAAA records / lookup failed for this type
   }
-
-  if (addresses.length === 0) {
-    throw new SsrfValidationError(`DNS resolution failed or returned no records for host: ${host}`);
-  }
-  return addresses;
+  // Normalize (strip IPv6 brackets/zone id) and deduplicate records.
+  return [...new Set(collected.map((addr) => normalizeHost(addr)))];
 }
 
 /**

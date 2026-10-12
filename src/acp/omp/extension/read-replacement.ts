@@ -50,6 +50,8 @@
  */
 
 import { type EnforcementLaunchMode, observeLaunchMode } from "./enforcement.ts";
+import * as nodeDns from "node:dns/promises";
+import { resolveHostAnswers } from "../../../utils/ssrf.ts";
 import { Type } from "@sinclair/typebox";
 import {
   type FetchDecisionRecord,
@@ -564,35 +566,34 @@ export function createReadReplacementToolDefinition(
 }
 
 /**
- * Runtime DNS seam: Deno resolver when present, else fail-closed throw.
- * Literal IPs pass through untouched — the same transport-plumbing
- * short-circuit `ssrf.ts`'s own `resolveHostAddresses` performs (literal
- * IPv4 / colon-bearing IPv6 returned as-is), NOT a rule fork: literals are
- * still classified by the shared `isDisallowedAddress` downstream, so a
- * literal metadata/private IP blocks with its true class instead of a
- * misleading `dns-unresolved`.
+ * Runtime DNS seam: the runtime-compatible Node DNS interface
+ * (`node:dns/promises`), available in the pinned native (Bun-embedded)
+ * runtime and the Deno daemon alike
+ * (`package-bun-compatible-omp-extension` D4) — the absence of a Deno
+ * global never disables otherwise supported public-host resolution, and no
+ * Deno polyfill exists here. Literal IPs pass through untouched — the same
+ * transport-plumbing short-circuit `ssrf.ts`'s own `resolveHostAddresses`
+ * performs (literal IPv4 / colon-bearing IPv6 returned as-is), NOT a rule
+ * fork: literals are still classified by the shared `isDisallowedAddress`
+ * downstream, so a literal metadata/private IP blocks with its true class
+ * instead of a misleading `dns-unresolved`.
+ *
+ * Both families are collected; a no-record/failed response in ONE family
+ * never discards the other family's valid answers, and records are
+ * deduplicated. An empty answer set is NOT fabricated into success: the
+ * shared decision core (which receives these answers through the existing
+ * transport seam) blocks `dns-unresolved` fail-closed, and the same
+ * existing SSRF classifier evaluates every resulting hop. The A/AAAA
+ * collection rule itself is `ssrf.ts`'s exported `resolveHostAnswers`
+ * (single shared seam, never forked here), driven through the injectable
+ * `node:dns/promises` face the DNS fixtures exercise.
  */
 export async function runtimeResolveHost(host: string): Promise<string[]> {
   if (/^(\d{1,3}\.){3}\d{1,3}$/.test(host) || host.includes(":")) return [host];
-  const deno =
-    (globalThis as { Deno?: { resolveDns?: (h: string, t: "A" | "AAAA") => Promise<string[]> } })
-      .Deno;
-  if (!deno?.resolveDns) {
-    throw new Error(`no DNS resolver surface available for host ${host}`);
-  }
-  const answers: string[] = [];
-  try {
-    answers.push(...await deno.resolveDns(host, "A"));
-  } catch {
-    // Lookup failed for this type; the shared fail-closed rule lives in the
-    // decision core (empty answers → dns-unresolved block).
-  }
-  try {
-    answers.push(...await deno.resolveDns(host, "AAAA"));
-  } catch {
-    // ditto
-  }
-  return answers;
+  // The shared collection rule (both families, per-family failure tolerated,
+  // deduplicated) lives in ssrf.ts; the fail-closed empty-answer rule stays
+  // in the decision core (empty answers → dns-unresolved block).
+  return resolveHostAnswers(host, nodeDns);
 }
 
 // ---------------------------------------------------------------------------
