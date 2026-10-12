@@ -17,11 +17,11 @@ Skills SHALL be implemented as Deno TypeScript scripts in `skills/{skill-name}/s
 - **AND** the script SHALL call the Skill API HTTP endpoint to perform the operation
 
 #### Scenario: Skill receives session ID from environment variable (per-spawn mode)
-- **GIVEN** a skill script is executed by the agent (per-spawn mode)
-- **WHEN** the agent builds the bash command
-- **THEN** the agent SHALL use `--session-id "$SESSION_ID"` where `$SESSION_ID` is resolved from the environment variable set in the agent subprocess
-- **AND** the agent SHALL NOT need to know the actual session ID value
-- **AND** in shared-process mode the skill client library resolves the owning session id from the orchestrator-maintained pointer file, so the agent still needs no extra parameters
+- **GIVEN** a legacy per-spawn skill caller using environment-backed session identity
+- **WHEN** it invokes the script with `--session-id "$SESSION_ID"`
+- **THEN** existing per-spawn environment resolution SHALL remain compatible
+- **AND** current bundled recipes SHALL instead pass the literal session id rendered in the prompt
+- **AND** shared-process identity SHALL remain resolved by the authoritative current-session pointer, not a process-frozen environment value
 
 #### Scenario: Shared-mode process environment carries no session identity variable
 - **GIVEN** a shared-process (pool) agent process is spawned while serving session `sess_A`
@@ -1003,7 +1003,7 @@ Message results for `fetch-context` types `recent_messages` and `search_messages
 
 ### Requirement: Agent-Portable Staging And Session Identity
 
-Every prompt surface that instructs skill usage SHALL supply the literal active Skill API session id and the absolute session staging directory (`{session workspace}/tmp/{literalSkillSessionId}`, the canonical payload staging location independent of any process-level `TMPDIR`), and every payload-staging instruction from those prompts and the skill instruction files SHALL direct the agent to those literal absolute paths, never to `$TMPDIR`/`$SESSION_ID` shell tokens.
+Every prompt surface that instructs skill usage SHALL supply the literal active Skill API session id, trusted absolute skill-script root, and the absolute session staging directory (`{session workspace}/tmp/{literalSkillSessionId}`, the canonical payload staging location independent of any process-level `TMPDIR`), and every payload-staging instruction from those prompts and the skill instruction files SHALL direct the agent to those literal absolute paths, never to `$TMPDIR`/`$SESSION_ID` shell tokens.
 
 #### Scenario: Rendered prompts name literal id and absolute staging dir
 - **GIVEN** a session with Skill API id `sess_42` whose staging directory is `/abs/workspaces/discord/123/tmp/sess_42`
@@ -1046,6 +1046,17 @@ Every prompt surface that instructs skill usage SHALL supply the literal active 
 - **THEN** the staging directory itself, its provisioning, and all containment/authorization semantics SHALL be unchanged
 - **AND** this requirement SHALL change only the identity/path FORM of the instructions the agent receives
 
+#### Scenario: Isolated HOME does not change the script root
+- **GIVEN** an OMP child with an isolated HOME and a validated deployment-owned skills root
+- **WHEN** any skill-instructing prompt or retry is rendered and its recipe is followed
+- **THEN** the script SHALL execute at the rendered absolute root, not under child HOME
+- **AND** its existing staged payload and active-session authentication SHALL remain unchanged
+
+#### Scenario: Every secondary prompt supplies the root
+- **WHEN** normal, spontaneous, lurk, research, summary, workspace/channel maintenance, reminder, and retry instructions are rendered
+- **THEN** each SHALL name its trusted absolute script root consistently with its session-id/staging instructions
+- **AND** static skill instructions SHALL direct the agent to that rendered root without a child-HOME fallback
+
 ### Requirement: Combined Mocked Skill-Handoff Regression Suite
 
 The repository SHALL provide a combined deterministic integration suite that drives the real `SessionOrchestrator` delivery path, the real Skill API server, session registry, and reply/file/reaction handlers, with a mock ACP agent composed through the shared OMP mock-session builder consumed unchanged and its mock-agent fixture extended additively, and a mock platform adapter, in both per-spawn and pooled spawn shapes, with no real platform service.
@@ -1071,8 +1082,8 @@ The repository SHALL provide a combined deterministic integration suite that dri
 
 #### Scenario: OpenCode delivery flow remains byte-identical
 - **GIVEN** an OpenCode message session driven through the same harness
-- **WHEN** pool keys, spawn environment, command strings, and a legacy token-path payload invocation are captured
-- **THEN** the captured values SHALL byte-match the current shipped OpenCode values
+- **WHEN** the harness exercises process ownership, the resolved skill command, and a legacy token-path payload invocation
+- **THEN** OpenCode launch/mode and authentication semantics SHALL remain compatible, while skill recipe paths SHALL resolve to its existing trusted installed root
 - **AND** the legacy token-path payload resolution SHALL still deliver the response
 - **AND** no readiness verification or trusted-extension involvement SHALL appear
 
