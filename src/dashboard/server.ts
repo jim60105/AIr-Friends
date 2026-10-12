@@ -673,6 +673,7 @@ export class DashboardServer {
         isDM: true,
         yolo: false,
         autoApproveSkills: this.deps.appConfig.agent.autoApproveSkills,
+        skillsDir: this.deps.appConfig.agent.skillsDir,
         allowedWriteExtensions: this.deps.appConfig.agent.sandbox?.allowedWriteExtensions,
         logAgentStreamChunks: this.deps.appConfig.logging?.agentStreamChunks ?? false,
       };

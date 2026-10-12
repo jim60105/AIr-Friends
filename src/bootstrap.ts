@@ -25,6 +25,7 @@ import { GelfTransport } from "@utils/gelf-transport.ts";
 import { cleanupAuditLogs } from "@core/audit-retention.ts";
 import { AuditRetentionScheduler } from "@core/audit-retention-scheduler.ts";
 import { installExternalSkills } from "@core/skill-installer.ts";
+import { resolveTrustedSkillsRoot } from "@core/skills-root.ts";
 import { SchedulerStateStore } from "@core/scheduler-state-store.ts";
 import { join } from "@std/path";
 import type { Platform } from "./types/events.ts";
@@ -180,9 +181,17 @@ export async function bootstrap(
     });
   }
 
-  // Install external skills before agent core initialization
+  // Install external skills before agent core initialization, into the ONE
+  // explicit OpenCode installed destination (`unify-omp-skill-root-resolution`
+  // D5): the resolver's OpenCode root — the same tree the OpenCode inventory
+  // scans. An unresolvable destination fails startup EXPLICITLY before any
+  // install attempt (never a silent HOME fallback); the awaited completion
+  // guarantees publication strictly BEFORE the first connector inventory is
+  // ever constructed. OMP's inventory stays restricted to its own selected
+  // root regardless of what lands here.
   if (config.agent.externalSkills && config.agent.externalSkills.length > 0) {
-    await installExternalSkills(config.agent.externalSkills);
+    const installDestination = resolveTrustedSkillsRoot("opencode", config.agent.skillsDir);
+    await installExternalSkills(installDestination, config.agent.externalSkills);
   }
 
   if (config.agent.gitCredential?.enabled) {

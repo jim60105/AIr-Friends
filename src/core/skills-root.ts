@@ -24,6 +24,14 @@
 // new environment override, and no subprocess secret is introduced here.
 // An unresolvable root fails EXPLICITLY — never an empty expansion, a
 // token-form path, or another session's or agent type's root.
+//
+// `unify-omp-skill-root-resolution` D1: every returned root carries a
+// canonical PHYSICAL observation (realpath) so each consumer — prompt recipes,
+// script inventory, permission decisions, readiness and read-only mounts —
+// shares the SAME canonical absolute spelling and a root identity an inventory
+// can recheck at decision time. The selection logic below is unchanged:
+// image-first OMP, validated development source, and daemon-side OpenCode
+// configuration; only the OBSERVATION of the selected root was added.
 
 import { isAbsolute, join, resolve } from "@std/path";
 import { OMP_IMAGE_SKILLS_ROOT } from "@utils/omp-paths.ts";
@@ -47,6 +55,50 @@ export interface SkillsRootOptions {
   directoryExists?: (path: string) => boolean;
   /** Working directory OpenCode relative roots resolve against (daemon-side, never child HOME). */
   deploymentCwd?: string;
+  /**
+   * Full physical-observation seam: returns the canonical observation of an
+   * existing directory root, or `null` when it cannot be observed. Defaults to
+   * the real filesystem (`statSync` existence + best-effort `realPathSync`
+   * canonicalization); a test supplying only `directoryExists` keeps its
+   * configured spelling with no recorded identity.
+   */
+  observeDirectory?: (path: string) => SkillsRootObservation | null;
+}
+
+/** Canonical physical observation of a validated deployment skill root. */
+export interface SkillsRootObservation {
+  /** The canonical ABSOLUTE root path (realpath of the validated selection). */
+  readonly root: string;
+  /**
+   * Device/inode identity of the observed root, when the real filesystem
+   * provided one. An absent identity proves nothing: consumers that must
+   * recheck root identity (the script inventory) treat it as a failed
+   * observation and never admit grants from it.
+   */
+  readonly identity?: { dev: number; ino: number };
+}
+
+/** Default physical observation: link-following existence + realpath. */
+function defaultObserveDirectory(
+  directoryExists: (path: string) => boolean,
+): (path: string) => SkillsRootObservation | null {
+  return (path: string) => {
+    if (!directoryExists(path)) return null;
+    // Canonicalize best-effort: an unusual host (or a test probe of a
+    // synthetic path) keeps the configured spelling with NO recorded
+    // identity, which identity-requiring consumers then refuse.
+    try {
+      const stat = Deno.statSync(path);
+      // Some platforms report `null` dev/ino: no identity is then recorded,
+      // which identity-requiring consumers refuse rather than trust.
+      const identity = stat.dev !== null && stat.ino !== null
+        ? { dev: stat.dev, ino: stat.ino }
+        : undefined;
+      return { root: Deno.realPathSync(path), identity };
+    } catch {
+      return { root: path };
+    }
+  };
 }
 
 /**
@@ -55,12 +107,27 @@ export interface SkillsRootOptions {
  * installed-root resolution only). Throws `ConfigError` when no validated
  * root exists — the caller's render/retry then fails explicitly instead of
  * instructing a nonexistent location.
+ * The returned path is the CANONICAL physical spelling of the validated
+ * selection (`observeTrustedSkillsRoot` for the identity as well).
  */
 export function resolveTrustedSkillsRoot(
   agentType: AgentType | string,
   configuredSkillsDir?: string,
   options: SkillsRootOptions = {},
 ): string {
+  return observeTrustedSkillsRoot(agentType, configuredSkillsDir, options).root;
+}
+
+/**
+ * Observe the deployment-owned ABSOLUTE skill-script root (canonical path +
+ * identity) for one agent type. Same selection and explicit failure posture as
+ * {@link resolveTrustedSkillsRoot}.
+ */
+export function observeTrustedSkillsRoot(
+  agentType: AgentType | string,
+  configuredSkillsDir?: string,
+  options: SkillsRootOptions = {},
+): SkillsRootObservation {
   if (!isSupportedAgentType(agentType)) {
     throw new ConfigError(
       ErrorCode.CONFIG_INVALID,
@@ -83,12 +150,24 @@ export function resolveTrustedSkillsRoot(
         return false;
       }
     });
+  const observe = options.observeDirectory ?? defaultObserveDirectory(directoryExists);
+  const validated = (path: string): SkillsRootObservation => {
+    const observation = observe(path);
+    if (observation === null) {
+      throw new ConfigError(
+        ErrorCode.CONFIG_INVALID,
+        `Trusted skill-script root "${path}" failed canonical observation`,
+        { agentType: String(agentType), root: path },
+      );
+    }
+    return observation;
+  };
   if (agentType === "omp") {
     // Image-first, validated dev fallback: the OFFICIAL image always installs
     // the owned root, so development hosts are the only ones reaching the
     // dev branch, and they only when the repository tree really exists.
-    if (directoryExists(OMP_IMAGE_SKILLS_ROOT)) return OMP_IMAGE_SKILLS_ROOT;
-    if (directoryExists(DEV_SOURCE_SKILLS_ROOT)) return DEV_SOURCE_SKILLS_ROOT;
+    if (directoryExists(OMP_IMAGE_SKILLS_ROOT)) return validated(OMP_IMAGE_SKILLS_ROOT);
+    if (directoryExists(DEV_SOURCE_SKILLS_ROOT)) return validated(DEV_SOURCE_SKILLS_ROOT);
     throw new ConfigError(
       ErrorCode.CONFIG_INVALID,
       `No trusted OMP skill-script root: neither the installed owned root ` +
@@ -113,5 +192,5 @@ export function resolveTrustedSkillsRoot(
       { agentType, root },
     );
   }
-  return root;
+  return validated(root);
 }

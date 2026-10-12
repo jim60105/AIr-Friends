@@ -73,6 +73,16 @@ export interface BwrapConfinementOptions {
   /** Read-write runtime paths. Defaults to {@link DEFAULT_CONFINEMENT_WRITABLE_RUNTIME_PATHS}. */
   writableRuntimePaths?: readonly string[];
   /**
+   * The canonical deployment trusted skill-script root for the SELECTED agent
+   * (`unify-omp-skill-root-resolution` D4): mounted read-only at its LITERAL
+   * path — never the agent HOME, never a guessed `/app/skills`, and never an
+   * agent-writable parent mount. When it sits UNDER a mandatory writable mount
+   * (development repository layouts), the read-only child bind is emitted
+   * AFTER that writable parent so the child stays read-only. Absent (undefined)
+   * simply means no extra mount — with no invented fallback root.
+   */
+  skillRoot?: string;
+  /**
    * Whether the confined process keeps the parent's network namespace. F12 is a filesystem
    * confinement and keeps the network shared (`true`) so the agent can still reach the
    * loopback Skill API and any configured egress proxy; F14 owns network isolation.
@@ -92,6 +102,33 @@ export function buildBwrapConfinement(
 ): { command: string; args: string[] } {
   const readOnly = opts.readOnlyPaths ?? DEFAULT_CONFINEMENT_READONLY_PATHS;
   const writableRuntime = opts.writableRuntimePaths ?? DEFAULT_CONFINEMENT_WRITABLE_RUNTIME_PATHS;
+
+  // D4 validation BEFORE the spawn: the selected root may never EQUAL or
+  // CONTAIN a mandatory writable mount (session workspace, session TMPDIR,
+  // shared agent workspace, or any writable runtime path) — an agent-writable
+  // parent or hole inside the mounted skill tree would silently undo the
+  // read-only mount where the permission layer still reports the grant. A root
+  // merely DESCENDING from a writable mount is legitimate (development repo
+  // layouts) and is mounted read-only AFTER that parent below.
+  if (opts.skillRoot !== undefined) {
+    const mandatoryWritables: string[] = [
+      opts.sessionWorkspace,
+      opts.tmpDir,
+      ...writableRuntime,
+    ];
+    if (opts.agentWorkspace) mandatoryWritables.push(opts.agentWorkspace);
+    for (const writable of mandatoryWritables) {
+      // Equal root OR the writable strictly inside the root: either way the
+      // read-only mount would sit over (or be holed by) an agent-writable
+      // tree. A root merely descending from a writable mount is legitimate.
+      if (opts.skillRoot === writable || writable.startsWith(opts.skillRoot + "/")) {
+        throw new Error(
+          `Skill root "${opts.skillRoot}" equals or contains mandatory writable mount ` +
+            `"${writable}" — an agent-writable skill root is refused before spawn`,
+        );
+      }
+    }
+  }
 
   const a: string[] = [
     "--unshare-user",
@@ -123,6 +160,15 @@ export function buildBwrapConfinement(
   a.push("--bind", opts.tmpDir, opts.tmpDir);
   if (opts.agentWorkspace) {
     a.push("--bind", opts.agentWorkspace, opts.agentWorkspace);
+  }
+
+  // D4: the trusted skill root, read-only at its literal path, bound LAST so a
+  // skill tree that descends from a writable parent (development layouts)
+  // remains read-only inside this mount namespace. `--ro-bind-try` tolerates an
+  // absent path (a race-shrunk root simply leaves nothing mounted where the
+  // inventory, rechecking root identity, already denies).
+  if (opts.skillRoot !== undefined) {
+    a.push("--ro-bind-try", opts.skillRoot, opts.skillRoot);
   }
 
   a.push("--", command, ...args);

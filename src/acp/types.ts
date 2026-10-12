@@ -4,6 +4,7 @@ import type { IdleTimeoutConfig } from "../types/config.ts";
 import type { TrustedSkillsSource } from "./filesystem-policy.ts";
 import type { LinuxNativeCalls } from "./filesystem-access-linux.ts";
 import type { OmpSettingsSourcePlan } from "./omp-settings.ts";
+import type { SkillsRootObservation } from "@core/skills-root.ts";
 
 /**
  * Configuration for ACP Client
@@ -47,6 +48,17 @@ export interface ClientConfig {
 
   /** Skill names to auto-approve in restricted (non-YOLO) mode */
   autoApproveSkills?: string[];
+
+  /**
+   * The deployment-configured `agent.skillsDir` value (OpenCode installed-root
+   * selection input; OMP never consumes it). `unify-omp-skill-root-resolution`
+   * D1: when an AgentConfig predates the factory-resolved `skillsRoot` field,
+   * the connector re-observes the root through the SAME resolver using THIS
+   * connector's selected agent type and this configured value — the resolver's
+   * approved daemon-side OpenCode configuration, never a HOME or arbitrary
+   * cwd scan.
+   */
+  skillsDir?: string;
 
   /** Allowed file extensions for agent workspace writes in restricted mode */
   allowedWriteExtensions?: string[];
@@ -112,6 +124,18 @@ export interface AgentConfig {
    * transport, not an optional hint.
    */
   settingsSourcePlan?: OmpSettingsSourcePlan;
+
+  /**
+   * `unify-omp-skill-root-resolution` D1: the canonical physical observation of
+   * the deployment trusted skill-script root for THIS config's SELECTED agent
+   * type, produced once by the factory before subprocess creation. It is the
+   * MANDATORY internal render input every downstream consumer shares — the
+   * connector's script inventory, the bwrap read-only mount, and (identity to
+   * the same resolver) prompt/retry rendering. A launch without it cannot
+   * build a permission inventory; there is no HOME or `Deno.cwd()/skills`
+   * fallback.
+   */
+  skillsRoot?: SkillsRootObservation;
 }
 
 /**
@@ -270,8 +294,14 @@ export interface AgentConnectorOptions {
   skillRegistry: unknown; // SkillRegistry type - using unknown to avoid circular deps
   logger: unknown; // Logger type - using unknown to avoid circular deps
   idleTimeoutConfig?: IdleTimeoutConfig;
-  /** Agent type name (e.g. "opencode"); included in reasoning-effort warning context */
-  agentType?: string;
+  /**
+   * The SELECTED agent type for this connector (`unify-omp-skill-root-resolution`
+   * D1). MANDATORY: the connector resolves the trusted skill-script root and the
+   * agent-type-specific script inventory from it before subprocess creation
+   * (including dashboard-selected overrides and pooled reconnects), and it rides
+   * reasoning-effort warning context.
+   */
+  agentType: AgentType;
   /** Maximum time in milliseconds to wait for the ACP handshake during `connect()` (default: 30000) */
   connectTimeoutMs?: number;
 }

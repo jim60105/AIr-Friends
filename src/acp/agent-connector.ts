@@ -1,8 +1,9 @@
 // src/acp/agent-connector.ts
 
 import * as acp from "@agentclientprotocol/sdk";
-import { join } from "@std/path";
-import { buildSkillAutoApproveList, ChatbotClient, type SessionGateContext } from "./client.ts";
+import { ChatbotClient, type SessionGateContext } from "./client.ts";
+import { buildSkillAutoApproveList } from "./skill-inventory.ts";
+import { observeTrustedSkillsRoot } from "@core/skills-root.ts";
 import {
   type AgentCapabilities,
   type AgentConnectorOptions,
@@ -346,10 +347,21 @@ export class AgentConnector {
     const input = this.process.stdout; // ReadableStream - we receive messages from agent
 
     // Create the Client implementation
-    const autoApproveList = buildSkillAutoApproveList(
-      join(Deno.cwd(), "skills"),
-      clientConfig.autoApproveSkills,
-    );
+    // MANDATORY root-exact inventory (`unify-omp-skill-root-resolution` D1/D3):
+    // the trusted root is the canonical observation the factory resolved for
+    // THIS connector's selected agent type before the spawn. When an
+    // AgentConfig predates the field (hand-built fixtures), the connector
+    // re-observes it from the SAME resolver + selected agent type — never a
+    // `Deno.cwd()/skills` or HOME scan — so the prompt-repo/dev fallback and
+    // the inventory select identically. A failed resolution propagates as a
+    // connect() failure (explicit, before any request).
+    const skillsRoot = this.options.agentConfig.skillsRoot ??
+      observeTrustedSkillsRoot(this.options.agentType, clientConfig.skillsDir);
+    const autoApproveList = buildSkillAutoApproveList({
+      agentType: this.options.agentType,
+      rootObservation: skillsRoot,
+      configuredSkills: clientConfig.autoApproveSkills,
+    });
     this.client = new ChatbotClient(
       skillRegistry as SkillRegistry,
       logger as Logger,

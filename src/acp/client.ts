@@ -48,105 +48,10 @@ import {
   mapRootPathFailureToDenial,
   type TrustedSkillsSource,
 } from "./filesystem-policy.ts";
-
-/**
- * Auto-approved skill lists for restricted (non-YOLO) mode.
- */
-export interface SkillAutoApproveList {
-  /** Script skill path suffixes: "skills/memory-save/scripts/memory-save.ts" */
-  scriptPaths: Set<string>;
-  /** Command skill prefixes: "agent-browser" */
-  commandPrefixes: Set<string>;
-}
-
-/**
- * Build skill auto-approve list.
- * When configuredSkills is provided and non-empty, builds the list from config.
- * Otherwise falls back to scanning the skills directory (backward compatible).
- */
-export function buildSkillAutoApproveList(
-  skillsDir: string,
-  configuredSkills?: string[],
-): SkillAutoApproveList {
-  if (configuredSkills && configuredSkills.length > 0) {
-    return buildFromConfig(skillsDir, configuredSkills);
-  }
-  return buildFromDirectory(skillsDir);
-}
-
-/**
- * Build auto-approve list from configured skill names.
- * Scans both the built-in skills directory and ~/.agents/skills/ for external skills.
- */
-function buildFromConfig(
-  skillsDir: string,
-  configuredSkills: string[],
-): SkillAutoApproveList {
-  const scriptPaths = new Set<string>();
-  const commandPrefixes = new Set<string>();
-
-  const scanDirs = [skillsDir];
-  const homeSkillsDir = join(Deno.env.get("HOME") ?? "/home/deno", ".agents", "skills");
-  try {
-    Deno.statSync(homeSkillsDir);
-    scanDirs.push(homeSkillsDir);
-  } catch {
-    // External skills directory doesn't exist
-  }
-
-  for (const skillName of configuredSkills) {
-    let found = false;
-    for (const dir of scanDirs) {
-      const scriptsPath = join(dir, skillName, "scripts");
-      try {
-        for (const script of Deno.readDirSync(scriptsPath)) {
-          if (script.isFile && script.name.endsWith(".ts")) {
-            scriptPaths.add(`skills/${skillName}/scripts/${script.name}`);
-            found = true;
-          }
-        }
-      } catch {
-        // No scripts dir in this scan path
-      }
-    }
-    if (!found) {
-      // Command-based skill or not yet installed
-      commandPrefixes.add(skillName);
-    }
-  }
-
-  return { scriptPaths, commandPrefixes };
-}
-
-/**
- * Build auto-approve list by scanning the skills directory (fallback).
- */
-function buildFromDirectory(skillsDir: string): SkillAutoApproveList {
-  const scriptPaths = new Set<string>();
-  const commandPrefixes = new Set<string>();
-
-  try {
-    for (const entry of Deno.readDirSync(skillsDir)) {
-      if (!entry.isDirectory || entry.name === "lib") continue;
-
-      const scriptsPath = join(skillsDir, entry.name, "scripts");
-      try {
-        for (const script of Deno.readDirSync(scriptsPath)) {
-          if (script.isFile && script.name.endsWith(".ts")) {
-            scriptPaths.add(`skills/${entry.name}/scripts/${script.name}`);
-          }
-        }
-      } catch {
-        // No scripts dir — this is a command-based skill
-        commandPrefixes.add(entry.name);
-      }
-    }
-  } catch {
-    // Skills directory not found — return empty lists
-  }
-
-  return { scriptPaths, commandPrefixes };
-}
+import {
+  matchesScriptEntrypoint,
+  type SkillAutoApproveList,
+} from "./skill-inventory.ts";
 
 /**
  * Read-extension allowlist for `readTextFile` (F4). Intentionally BROADER than the
@@ -178,9 +83,6 @@ export function isWithinDir(path: string, base: string): boolean {
   }
 }
 
-/** Interpreters that may precede a skill script as the launcher (e.g. `deno run <script>`). */
-const ALLOWED_SCRIPT_INTERPRETERS = new Set(["deno"]);
-
 /**
  * Legacy free-text skill argument flags (D5). A skill command carrying one of
  * these in either form (`--message x` or `--message=x`) is rejected by the gate
@@ -190,75 +92,6 @@ const ALLOWED_SCRIPT_INTERPRETERS = new Set(["deno"]);
  * match and are unaffected.
  */
 export const LEGACY_FREE_TEXT_FLAG_PATTERN = /^--(?:message|content|query|caption)(?:=|$)/;
-
-/**
- * Determine whether a single token equals the whitelisted script path or ends with
- * `/<allowedPath>` (so any absolute rendering of the trusted script root to the
- * same script matches).
- */
-function tokenMatchesAllowedScript(token: string, allowedPath: string): boolean {
-  return token === allowedPath || token.endsWith(`/${allowedPath}`);
-}
-
-/**
- * Resolve the invocation ENTRYPOINT token of a command.
- *
- * Skills are executed either directly via their shebang
- * (the rendered absolute script root, e.g. `/home/deno/.agents/skills/<name>/scripts/<name>.ts <args>`
- * on OpenCode container deployments) — first token is the script — or via an
- * interpreter (`deno run <flags> <script> <args>`) — the script is the first
- * non-flag positional after the `run` subcommand.
- *
- * Returns the entrypoint token, or `undefined` if it cannot be determined.
- */
-function resolveEntrypointToken(tokens: string[]): string | undefined {
-  if (tokens.length === 0) return undefined;
-
-  const first = tokens[0];
-  // Direct shebang execution: the script itself is the entrypoint.
-  if (!ALLOWED_SCRIPT_INTERPRETERS.has(first)) {
-    return first;
-  }
-
-  // Interpreter launch (e.g. `deno run <flags...> <script> <args>`): find the first
-  // non-flag positional token AFTER the `run` subcommand. Flags (leading `-`) and the
-  // `run` subcommand itself are skipped; the next positional is the entrypoint.
-  let sawRun = false;
-  for (let i = 1; i < tokens.length; i++) {
-    const t = tokens[i];
-    if (!sawRun) {
-      if (t === "run") sawRun = true;
-      // Skip interpreter-level flags/subcommands until we see `run`.
-      continue;
-    }
-    if (t.startsWith("-")) continue; // skip `deno run` flags (e.g. --allow-net)
-    return t; // first positional after `run` is the entrypoint script
-  }
-  return undefined;
-}
-
-/**
- * Check whether a command's INVOCATION ENTRYPOINT is an allowed skill script.
- *
- * Security (F2): the whitelisted script path is only accepted when it is the actual
- * invocation entrypoint — either the first token (direct shebang execution) or the
- * first positional after `deno run`. A whitelisted script path appearing merely as a
- * trailing ARGUMENT to some other command (e.g. `cat <secret> <script>`) is NOT approved,
- * closing the "arbitrary first token launders an allowed path" bypass.
- */
-export function matchesScriptPath(cmd: string, allowedPath: string): boolean {
-  if (containsShellOperators(commandWithoutFdRedirects(cmd))) return false;
-  const tokens = tokenizeShellCommand(cmd).filter((t) => t.length > 0);
-  // A tolerated fd-to-fd redirect token must NOT affect entrypoint resolution (it is
-  // not a real argument), so it is skipped when locating the entrypoint. The first-token
-  // allow-list check below still operates on the ORIGINAL token, so a redirect can never
-  // masquerade as the entrypoint.
-  const entrypoint = resolveEntrypointToken(
-    tokens.filter((t) => !FD_REDIRECT_TOKEN_PATTERN.test(t)),
-  );
-  if (entrypoint === undefined) return false;
-  return tokenMatchesAllowedScript(entrypoint, allowedPath);
-}
 
 /**
  * Determine whether an argument token references a path OUTSIDE the workspace.
@@ -469,13 +302,17 @@ export class ChatbotClient implements acp.Client {
     skillRegistry: SkillRegistry,
     logger: Logger,
     config: ClientConfig,
-    skillAutoApproveList?: SkillAutoApproveList,
+    skillAutoApproveList: SkillAutoApproveList,
   ) {
     this.skillRegistry = skillRegistry;
     this.logger = logger;
     this.config = config;
-    this.skillAutoApproveList = skillAutoApproveList ??
-      buildSkillAutoApproveList(join(Deno.cwd(), "skills"));
+    // MANDATORY internal input (`unify-omp-skill-root-resolution` D3): the
+    // connector derives the inventory from the explicit root resolved for the
+    // SELECTED agent type. The historical `Deno.cwd()/skills` constructor
+    // default is removed — a caller can no longer silently authorize a
+    // daemon- or session-relative tree.
+    this.skillAutoApproveList = skillAutoApproveList;
   }
 
   /**
@@ -1070,7 +907,7 @@ export class ChatbotClient implements acp.Client {
       // multi-command bash invocations (`;`/`&&`/`||` chains, F12 D2 chaining rule).
       // A chain is approved ONLY when EVERY segment independently passes the exact
       // gate it would face as its own tool call: the skill-whitelist matchers
-      // (`matchesScriptPath` / `matchesCommandPrefix`) OR the generic gate
+      // (`matchesScriptEntrypoint` / `matchesCommandPrefix`) OR the generic gate
       // (`genericCommandRejectionReason`). This is capability-neutral — each segment
       // could already run as its own gated tool call — it only removes the forced
       // single-command round trips that cause coding models to batch and surrender.
@@ -1120,9 +957,13 @@ export class ChatbotClient implements acp.Client {
             return { approved: false, reason: "shell_operator" };
           }
           // Skill-whitelist matchers (script paths then command prefixes).
-          const isScript = Array.from(this.skillAutoApproveList.scriptPaths).some(
-            (allowedPath) => matchesScriptPath(segment, allowedPath),
-          );
+          // Physical entrypoint decision (`unify-omp-skill-root-resolution` D3):
+          // a relative script spelling anchors ONLY at the requesting REGISTERED
+          // session cwd — an unregistered session gets no session-relative
+          // script authority (never the daemon cwd or `config.workingDir`).
+          const isScript = matchesScriptEntrypoint(segment, this.skillAutoApproveList, {
+            sessionCwd: registered ? sessionCwd : undefined,
+          });
           if (isScript) return { approved: true, viaSkill: true };
           const isCommand = Array.from(this.skillAutoApproveList.commandPrefixes).some(
             (prefix) => matchesCommandPrefix(segment, prefix),
