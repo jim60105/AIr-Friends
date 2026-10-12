@@ -841,9 +841,11 @@ Deno.test({
       headers: { "Content-Type": "application/json", Cookie: cookie },
       body: JSON.stringify({ model: "google/gemini-3-pro" }),
     });
-    // The omitted field resolves to the configured default 'omp', which passes
-    // validation and proceeds to connection establishment (returns 500 here);
-    // a hard-coded or out-of-domain fallback would have returned 400 instead.
+    // The omitted field resolves to the configured default 'omp', passes the
+    // shared-domain validation, and proceeds to connection establishment
+    // (500 here). An out-of-domain fallback would have been rejected with 400
+    // instead; resolving the value to 'omp' SPECIFICALLY is pinned by the
+    // getDefaultAgentType unit tests, not observable from this generic 500.
     assertEquals(res.status, 500);
   } finally {
     await t.cleanup();
