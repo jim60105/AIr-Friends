@@ -25,7 +25,9 @@ import {
   runSecondaryFetch,
 } from "@acp/omp/fetch-transport.ts";
 import {
+  admitReadUrlReplacement,
   FETCH_COMPLETING_ADAPTER_MARKER,
+  FETCH_COMPLETING_MECHANISM,
   FETCH_ROUTE_TABLE,
   isRouteCompleted,
 } from "@acp/omp/fetch-routes.ts";
@@ -108,6 +110,23 @@ function obs(
       resourceGeneration: "gen-0",
     },
     recordEvaluation: NO_RECORDS,
+  };
+}
+
+// C5: the same fixture WITH the dispatcher-assembled network-admission
+// observation (registered evidence for this exact name). Credential presence
+// is irrelevant to the URL branch and stays absent-keyed here.
+function obsAdmitted(
+  toolName: string,
+  inputShape: ToolCallObservation["decodedInputShape"],
+  registeredOwnedReplacement: boolean,
+): ToolCallObservation {
+  return {
+    ...obs(toolName, inputShape),
+    networkAdmission: {
+      registeredOwnedReplacement,
+      searchCredentialPresence: { geminiKey: false, openrouterKey: false },
+    },
   };
 }
 
@@ -276,6 +295,125 @@ Deno.test("Seam marker: web-search carries row 20's marker and never leaks the U
 Deno.test("Barrel closure: fetch surfaces reachable through the declared list only", () => {
   assertEquals(MARKER_VIA_BARREL, FETCH_COMPLETING_ADAPTER_MARKER);
   assertEquals(TABLE_VIA_BARREL.length, FETCH_ROUTE_TABLE.length);
+});
+
+// ---------------------------------------------------------------------------
+// C5 (`admit-completed-omp-network-adapters`): the 14b clamp consumes the
+// route owner's typed completion — admission, absence, and non-admission
+// shapes, all composition-evidence only (the P0 honesty rules above still
+// hold: nothing here proves the compiled binary invokes the replacement).
+// ---------------------------------------------------------------------------
+
+Deno.test("C5 completion: absence fails closed; registered owned read+url proceeds to the named route set", () => {
+  // Absent wiring observation ⇒ the EXISTING bounded pending block, byte-for
+  // -byte the pre-C5 shape (no extra fields).
+  const absent = composeRestrictedToolCall(obs("read", "url"));
+  assert("block" in absent && absent.block);
+  assertEquals(absent.error.code, "rejected_pending_adapter");
+  assertEquals(absent.error.tableRowId, "url-read");
+  // Registered evidence absent ⇒ still pending (a name with no live owned
+  // replacement never completes).
+  const unregistered = composeRestrictedToolCall(obsAdmitted("read", "url", false));
+  assert("block" in unregistered && unregistered.block);
+  assertEquals(unregistered.error.code, "rejected_pending_adapter");
+  // Registered owned replacement on a completed route ⇒ proceed to the NAMED
+  // completing boundary — never the plain allow-completingAuthority shape.
+  const completed = composeRestrictedToolCall(obsAdmitted("read", "url", true));
+  assert("proceed" in completed && completed.proceed, "completed route proceeds");
+  assertEquals(
+    completed.completingAuthority,
+    "rows-17-19-transport-adapter",
+    "the completing boundary is named, not an authorization",
+  );
+  assert(
+    "adapterCompletion" in completed,
+    "the completion boundary record rides the proceed",
+  );
+  const completion = completed.adapterCompletion;
+  assertEquals(completion.tableRowId, "url-read");
+  // The EXACT completed route set from the owner's table — route-set scoped
+  // honestly (entry-route vs hop routing is decided inside the replacement).
+  assertEquals(
+    [...completion.routeIds].sort(),
+    [
+      "read.url-branch.binary",
+      "read.url-branch.materialization-consumers",
+      "read.url-branch.secondary-hops",
+      "read.url-branch.text",
+    ].sort(),
+  );
+  assertEquals(completion.mechanism, FETCH_COMPLETING_MECHANISM);
+});
+
+Deno.test("C5 non-admission: webfetch surface and foreign-name shapes never complete", () => {
+  // The webfetch tool surface has no registered replacement, so its row
+  // never admits — even with registered evidence for its own name.
+  const webFetch = composeRestrictedToolCall(obsAdmitted("webfetch", "url", true));
+  assert("block" in webFetch && webFetch.block);
+  assertEquals(webFetch.error.code, "rejected_pending_adapter");
+  assertEquals(webFetch.error.tableRowId, "web-fetch");
+  // A different tool name reaching the url-read row (URL-shaped input on a
+  // non-replacement name — e.g. `list` re-rowed by the url shape… the row
+  // re-rows only read-class names, so this pins the name gate directly):
+  // admitReadUrlReplacement's name mismatch keeps the pending block.
+  const wrongName = composeRestrictedToolCall({
+    ...obsAdmitted("read", "url", true),
+    toolName: "skill",
+    toolKey: "skill",
+  });
+  // `skill`+url decodes through trusted-skills (allow-gated) — the clamp is
+  // never reached; prove instead via the row shape that the gate is exact:
+  assert("proceed" in wrongName, "skill row is unaffected by adapter completion");
+  // The gate itself, pinned directly on the route owner's decision:
+  const foreignName = admitReadUrlReplacement({
+    toolName: "webfetch",
+    registeredOwnedReplacement: true,
+  });
+  assertEquals(foreignName.admit, false);
+  if (!foreignName.admit) assertEquals(foreignName.reason, "replacement-name-mismatch");
+});
+
+Deno.test("C5 composite: admission proceeds, per-hop transport still owns the private hop", async () => {
+  // Spec scenario "Private secondary hop rejection persists": the seam
+  // proceeds (admission is not a transport decision), while the named
+  // replacement's own per-hop validation still rejects the private address
+  // BEFORE issuing — zero dispatch past the public hop.
+  const t = transport((_url, seen) =>
+    seen === 0
+      ? response("", "text/html", { location: "https://10.0.0.5/private" }, 302)
+      : response("must never be issued", "text/html")
+  );
+  const definition = createReadReplacementToolDefinition({
+    // Enforcing posture: the private redirect target is rejected per-hop.
+    policy: { posture: "enforcing", proxyEndpoint: "http://127.0.0.1:9099" },
+    // mockDns answers public for the first hop; the private literal is
+    // classified by address shape before any lookup matters.
+    resolveHost: mockDns({ "public.example": ["203.0.113.5"] }),
+    fetchImpl: t.fetchImpl,
+  });
+  // (a) The seam-level fact: this call's shape PROCEEDS to the replacement.
+  const composed = composeRestrictedToolCall(obsAdmitted("read", "url", true));
+  assert("proceed" in composed && composed.proceed);
+  // (b) The transport-level fact: inside the named replacement, the private
+  // secondary hop is refused and never issued.
+  let threw = "";
+  try {
+    await definition.execute(
+      "tc-1",
+      { path: "https://public.example/start" },
+      undefined,
+      undefined,
+      { invokeTool: () => Promise.reject(new Error("native must not be invoked")) },
+    );
+  } catch (error) {
+    threw = error instanceof Error ? error.message : String(error);
+  }
+  assert(threw.includes("blocked"), `per-hop rejection surfaces as a block: ${threw}`);
+  assertEquals(
+    t.issued.filter((r) => r.url.startsWith("https://10.0.0.5")).length,
+    0,
+    "the private hop was never issued — admission never overrides egress policy",
+  );
 });
 
 // ---------------------------------------------------------------------------

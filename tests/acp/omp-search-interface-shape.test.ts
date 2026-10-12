@@ -43,8 +43,10 @@ import {
 } from "@acp/omp/search-transport.ts";
 import { runSearchRoute } from "@acp/omp/search-transport.ts";
 import {
+  admitWebSearchBackend,
   isSearchRouteCompleted,
   SEARCH_COMPLETING_ADAPTER_MARKER,
+  SEARCH_COMPLETING_MECHANISM,
   SEARCH_ROUTE_CITATIONS,
   SEARCH_ROUTE_TABLE,
   webSearchSeamState,
@@ -78,6 +80,7 @@ const ENFORCING: FetchEgressPolicy = {
 const GEMINI: SearchCredentialPresence = { geminiKey: true, openrouterKey: false };
 const BOTH: SearchCredentialPresence = { geminiKey: true, openrouterKey: true };
 const NEITHER: SearchCredentialPresence = { geminiKey: false, openrouterKey: false };
+const OPENROUTER: SearchCredentialPresence = { geminiKey: false, openrouterKey: true };
 
 // 14a/14b fixture shapes reused verbatim from the row-14 suites.
 const ownedRecord = {
@@ -124,6 +127,21 @@ function obs(
       resourceGeneration: "gen-0",
     },
     recordEvaluation: NO_RECORDS,
+  };
+}
+
+// C5: the same fixture WITH the dispatcher-assembled network-admission
+// observation — registered evidence for this exact name plus the CURRENT
+// trusted credential PRESENCE (booleans only; values never exist here).
+function obsAdmitted(
+  toolName: string,
+  inputShape: ToolCallObservation["decodedInputShape"],
+  registeredOwnedReplacement: boolean,
+  credentialPresence: SearchCredentialPresence = NEITHER,
+): ToolCallObservation {
+  return {
+    ...obs(toolName, inputShape),
+    networkAdmission: { registeredOwnedReplacement, searchCredentialPresence: credentialPresence },
   };
 }
 
@@ -748,6 +766,84 @@ Deno.test("Cross-table agreement: fetch-routes search-provider row never cited p
   );
 });
 
+// ---------------------------------------------------------------------------
+// C5 (`admit-completed-omp-network-adapters`): the 14b clamp consumes the
+// route owner's typed, backend-gated completion. Composition evidence only
+// (P0 fixture rules unchanged: nothing here proves native invocation).
+// ---------------------------------------------------------------------------
+
+Deno.test("C5 completion: backend-gated admission; credential-absent and unregistered stay pending", () => {
+  // Absent wiring observation ⇒ the EXISTING bounded pending block (also
+  // pinned pre-C5 by the marker tests; re-pinned here for this name).
+  const absent = composeRestrictedToolCall(obs("web_search", "query"));
+  assert("block" in absent && absent.block);
+  assertEquals(absent.error.code, "rejected_pending_adapter");
+  // Registered owned replacement, NO supported backend ⇒ still the bounded
+  // pending block (spec: absent backend + unrestricted egress ⇒ capability
+  // error with zero endpoint requests — no retry path exists at the seam).
+  const noBackend = composeRestrictedToolCall(
+    obsAdmitted("web_search", "query", true, NEITHER),
+  );
+  assert("block" in noBackend && noBackend.block);
+  assertEquals(noBackend.error.code, "rejected_pending_adapter");
+  assertEquals(noBackend.error.tableRowId, "web-search");
+  // Registered evidence absent ⇒ pending even with a supported backend.
+  const unregistered = composeRestrictedToolCall(
+    obsAdmitted("web_search", "query", false, GEMINI),
+  );
+  assert("block" in unregistered && unregistered.block);
+  assertEquals(unregistered.error.code, "rejected_pending_adapter");
+  // Supported backend + registered owned replacement ⇒ proceed to the exact
+  // completed grounding route — never the plain-allow authority shape.
+  for (
+    const [presence, routeId] of [
+      [GEMINI, "web_search.grounding.gemini"],
+      [OPENROUTER, "web_search.grounding.openrouter"],
+      [BOTH, "web_search.grounding.gemini"],
+    ] as const
+  ) {
+    const completed = composeRestrictedToolCall(
+      obsAdmitted("web_search", "query", true, presence),
+    );
+    assert("proceed" in completed && completed.proceed, routeId);
+    assertEquals(completed.completingAuthority, "rows-17-19-transport-adapter");
+    assert("adapterCompletion" in completed);
+    assertEquals(completed.adapterCompletion.tableRowId, "web-search");
+    // The EXACT completed route of the SELECTED backend (gemini-first).
+    assertEquals([...completed.adapterCompletion.routeIds], [routeId]);
+    assertEquals(completed.adapterCompletion.mechanism, SEARCH_COMPLETING_MECHANISM);
+  }
+  // The legacy alias name never completes: only the replacement name does.
+  const alias = composeRestrictedToolCall(obsAdmitted("websearch", "query", true, GEMINI));
+  assert("block" in alias && alias.block);
+  assertEquals(alias.error.code, "rejected_pending_adapter");
+  // The route owner's gate itself, pinned directly: name mismatch first.
+  const mismatch = admitWebSearchBackend({
+    toolName: "websearch",
+    registeredOwnedReplacement: true,
+    credentialPresence: GEMINI,
+  });
+  assertEquals(mismatch.admit, false);
+  if (!mismatch.admit) assertEquals(mismatch.reason, "replacement-name-mismatch");
+});
+
+Deno.test("C5 availability per call: mid-session credential change moves the next call, no cache", () => {
+  // Same observation shape, presence read fresh at each call: availability
+  // appearing permits the next call; disappearing returns the bounded block.
+  const before = composeRestrictedToolCall(
+    obsAdmitted("web_search", "query", true, NEITHER),
+  );
+  assert("block" in before && before.block);
+  const during = composeRestrictedToolCall(
+    obsAdmitted("web_search", "query", true, OPENROUTER),
+  );
+  assert("proceed" in during && during.proceed);
+  const after = composeRestrictedToolCall(
+    obsAdmitted("web_search", "query", true, NEITHER),
+  );
+  assert("block" in after && after.block);
+});
+
 Deno.test("Positive replacement-mechanism fixture (SYNTHETIC, P0 fixture rule): restricted definition serves the adapter", async () => {
   // SYNTHETIC fixture per the P0 fixture rules: a definition built directly
   // over injected seams certifies the adapter's decision path ONLY. It is not
@@ -837,4 +933,52 @@ Deno.test("Restricted-sessions-only registration (14b posture): YOLO/unidentifie
 Deno.test("Barrel closure: search surfaces reachable through the declared list only", () => {
   assertEquals(MARKER_VIA_BARREL, SEARCH_COMPLETING_ADAPTER_MARKER);
   assertEquals(TABLE_VIA_BARREL.length, SEARCH_ROUTE_TABLE.length);
+});
+Deno.test("C5 composite: credential-absent search blocks with ZERO endpoint requests; present backend serves through the named replacement", async () => {
+  // Seam fact + endpoint fact for the same call shapes.
+  const seamBlocked = composeRestrictedToolCall(obsAdmitted("web_search", "query", true, NEITHER));
+  assert("block" in seamBlocked && seamBlocked.block);
+  // Endpoint fact: with no supported credential the named replacement itself
+  // answers with a bounded capability envelope and issues NOTHING (no
+  // native retry path exists at the seam).
+  const t0 = transport(() => new Response("must never be issued", { status: 200 }));
+  const uncredentialed = createSearchReplacementToolDefinition({
+    policy: UNRESTRICTED,
+    resolveHost: mockDns(),
+    fetchImpl: t0.fetchImpl,
+    credentialPresence: NEITHER,
+    credentialValue: () => "",
+  });
+  const absentEnvelope = (await uncredentialed.execute(
+    "tc-0",
+    { query: "q" },
+    undefined,
+    undefined,
+    {},
+  )) as SearchToolEnvelope;
+  assertEquals(t0.issued.length, 0, "zero endpoint requests without a backend");
+  assert(absentEnvelope.content[0]?.text.startsWith("Error:"));
+  // Seam fact: the admitted call proceeds to the named boundary…
+  const seamAdmitted = composeRestrictedToolCall(
+    obsAdmitted("web_search", "query", true, GEMINI),
+  );
+  assert("proceed" in seamAdmitted && seamAdmitted.proceed);
+  // …and the replacement serves it over the controlled transport.
+  const t1 = transport(() => new Response(geminiBody(), { status: 200 }));
+  const definition = createSearchReplacementToolDefinition({
+    policy: UNRESTRICTED,
+    resolveHost: mockDns(),
+    fetchImpl: t1.fetchImpl,
+    credentialPresence: GEMINI,
+    credentialValue: () => "mock-cred",
+  });
+  const result = (await definition.execute(
+    "tc-1",
+    { query: "q" },
+    undefined,
+    undefined,
+    {},
+  )) as SearchToolEnvelope;
+  assert(result.content.length > 0);
+  assertEquals(t1.issued.length, 1, "the named replacement issues exactly one request");
 });

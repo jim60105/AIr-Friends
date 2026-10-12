@@ -307,6 +307,85 @@ export function isSearchRouteCompleted(routeId: string): boolean {
     "completed-by-adapter";
 }
 
+// ---------------------------------------------------------------------------
+// Typed backend-gated completion decision (C5 `admit-completed-omp-network-adapters` D2).
+// ---------------------------------------------------------------------------
+
+/** The controlled replacement tool name completing the grounded pair (C2/C4). */
+export const SEARCH_REPLACEMENT_TOOL = "web_search" as const;
+
+/** Inputs the route owner needs for the typed backend-gated decision. */
+export interface SearchBackendAdmissionInput {
+  /** The EXACT call tool name (route scope is name- plus provenance-keyed). */
+  readonly toolName: string;
+  /**
+   * Fresh observation that a replacement is registered for this name AND its
+   * recorded origin is the owned extension (14a provenance admission already
+   * ran; this is the registration evidence, never a name-only claim).
+   */
+  readonly registeredOwnedReplacement: boolean;
+  /**
+   * CURRENT trusted credential presence (presence booleans only, read fresh
+   * per call — never values, never cached); drives `webSearchSeamState`.
+   */
+  readonly credentialPresence: SearchCredentialPresence;
+}
+
+/** Bounded typed completion verdict — a boundary record, never an allow. */
+export type SearchBackendAdmission =
+  | {
+    readonly admit: true;
+    readonly backend: "gemini" | "openrouter";
+    readonly routeId: string;
+    readonly mechanism: typeof SEARCH_COMPLETING_MECHANISM;
+  }
+  | {
+    readonly admit: false;
+    readonly reason:
+      | "replacement-name-mismatch"
+      | "replacement-not-registered"
+      | "no-supported-backend";
+  };
+
+/**
+ * C5's typed backend-gated completion decision for 14b's composition seam
+ * AFTER 14a's inventory and provenance admission, over this route owner's
+ * data plus the caller-supplied CURRENT credential presence. It reads no
+ * env, no secret values, and authorizes NOTHING itself: admitting means the
+ * selected supported backend's completed controlled route covers this call,
+ * so the existing enforcement outcome may PROCEED TO the named registered
+ * replacement; the request itself — with every per-hop egress decision and
+ * the credential-bearing transport call — stays inside that replacement.
+ * Credential-absent or unsupported-backend states keep the caller's bounded
+ * pending-adapter block with zero endpoint requests.
+ */
+export function admitWebSearchBackend(
+  input: SearchBackendAdmissionInput,
+): SearchBackendAdmission {
+  if (input.toolName !== SEARCH_REPLACEMENT_TOOL) {
+    return { admit: false, reason: "replacement-name-mismatch" };
+  }
+  if (!input.registeredOwnedReplacement) {
+    return { admit: false, reason: "replacement-not-registered" };
+  }
+  const seam = webSearchSeamState(input.credentialPresence);
+  if (seam.state !== "adapter-completing") {
+    return { admit: false, reason: "no-supported-backend" };
+  }
+  const routeId = `web_search.grounding.${seam.backend}`;
+  // The EXACT completed route, consumed from this table (design D1): a
+  // selected backend whose row is not `completed-by-adapter` never admits.
+  if (!isSearchRouteCompleted(routeId)) {
+    return { admit: false, reason: "no-supported-backend" };
+  }
+  return {
+    admit: true,
+    backend: seam.backend,
+    routeId,
+    mechanism: SEARCH_COMPLETING_MECHANISM,
+  };
+}
+
 /** The completing-adapter marker text appended to 14a's web-search row. */
 export const SEARCH_COMPLETING_ADAPTER_MARKER =
   "COMPLETING-ADAPTER: adapt-omp-web-search — the Gemini/OpenRouter grounded backends and their " +
@@ -315,8 +394,8 @@ export const SEARCH_COMPLETING_ADAPTER_MARKER =
   "credential is present (webSearchSeamState). This marker names the completing adapter for those " +
   "routes only; it is NOT a plain allow, never covers the native global-fetch provider path or any " +
   "backend outside the row-7 credential set, and the allow-gated-pending-adapter outcome below " +
-  "still fails closed at 14b while no supported credential is present or until the replacement " +
-  "mechanism's native invocation is user-observed.";
+  "still fails closed at 14b with the bounded pending reason while no supported credential is " +
+  "present or while the registered owned replacement is absent.";
 
 /** The seam state of the web-search row for a given credential presence. */
 export type WebSearchSeamState =

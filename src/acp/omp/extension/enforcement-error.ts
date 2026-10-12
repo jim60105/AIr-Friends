@@ -32,6 +32,7 @@ import type {
   RootPathResult,
   ToolOrigin,
 } from "./_daemon/mod.ts";
+import type { SearchCredentialPresence } from "./_daemon/mod.ts";
 
 // ---------------------------------------------------------------------------
 // Wiring-level error codes added on top of 14a's finite deny vocabulary.
@@ -45,7 +46,9 @@ import type {
  * - `rejected_stale_observation`: a provenance re-observe denial (stale
  *   epoch or stale resource generation); admission possible only fresh.
  * - `rejected_pending_adapter`: 14a's `allow-gated-pending-adapter` clamped
- *   closed by the wiring until rows 17-19 land (never native transport).
+ *   closed by the wiring whenever the completed controlled route or the
+ *   registered owned replacement is absent (C5: a completed route proceeds
+ *   to the NAMED replacement only — never native transport).
  * - `rejected_destructive_authorization`: the row-5 all-target
  *   authorization-stage denial. The row-4 per-target outcome must still
  *   surface on the ACP-mediated path, so the handler reproduces
@@ -154,6 +157,24 @@ export interface DestructiveCallPayload {
 }
 
 /**
+ * Fresh per-call network-adapter completion input (C5
+ * `admit-completed-omp-network-adapters`), assembled by the dispatcher from
+ * wiring-owned observations ONLY — never supplied by a caller (the pinned
+ * native event decoder structurally cannot produce it, mirroring
+ * `registryObservation`). `registeredOwnedReplacement` is the registration
+ * evidence for THIS call's exact name: the LIVE roster carries a replacement
+ * under that name AND its recorded origin is this owned extension (the
+ * provenance half rides `recordedOrigin`; an unregistered name reads
+ * unowned-discovery, so this can never be a name-only claim).
+ * `searchCredentialPresence` is the CURRENT trusted credential-presence read
+ * (presence booleans only — never values, never logged, never cached).
+ */
+export interface NetworkAdmissionObservation {
+  readonly registeredOwnedReplacement: boolean;
+  readonly searchCredentialPresence: SearchCredentialPresence;
+}
+
+/**
  * One restricted `tool_call` observation, assembled fresh per call by the
  * dispatcher. The provenance record's freshness halves carry this call's
  * observation pair:
@@ -178,6 +199,13 @@ export interface ToolCallObservation {
   readonly decodedCapability?: string;
   /** Live registry observation for this call (fresh; never cached). */
   readonly registryObservation: ToolRegistryObservation;
+  /**
+   * Fresh network-adapter completion input for this call (C5). The
+   * dispatcher assembles it from wiring-owned reads; like
+   * `registryObservation`, callers cannot inject it. An absent field keeps
+   * the pending-adapter clamp fail-closed.
+   */
+  readonly networkAdmission?: NetworkAdmissionObservation;
   /** Present only for destructive-shaped calls routed to the 14a consumer. */
   readonly destructive?: DestructiveCallPayload;
   /**
@@ -225,6 +253,24 @@ export type EnforcementProven =
     readonly proceed: true;
     readonly completingAuthority: "mcp-client-ownership";
     readonly mcpAdmitted: true;
+  }
+  /**
+   * C5 route-scoped adapter completion: the wiring's pending-adapter clamp
+   * consumed a typed completion decision from the route owner AFTER 14a's
+   * inventory + provenance admission. `proceed` still asserts no
+   * authorization — it names the registered controlled replacement as the
+   * completing boundary and records which completed routes admitted the
+   * call. The composer itself never dispatches; execution continues in the
+   * named replacement under its unchanged per-hop transport policy.
+   */
+  | {
+    readonly proceed: true;
+    readonly completingAuthority: "rows-17-19-transport-adapter";
+    readonly adapterCompletion: {
+      readonly tableRowId: "url-read" | "web-search";
+      readonly routeIds: readonly string[];
+      readonly mechanism: string;
+    };
   };
 
 export interface EnforcementBlocked {

@@ -3356,8 +3356,8 @@ The change SHALL enumerate, as machine-readable route data with pinned-source ci
 
 #### Scenario: Completed routes are exactly the replaced read URL branch
 - **WHEN** the route table is read
-- **THEN** `completed-by-adapter` SHALL cover only the `read` URL-branch text, binary, and secondary-hop routes and their materialization consumers
-- **AND** every search-provider subrequest route SHALL carry `blocked-pending-adapter` with `userDecisionRequired`
+- **THEN** `completed-by-adapter` SHALL cover the controlled `read` URL-branch text, binary, and secondary-hop routes and their materialization consumers, plus controlled search-provider routes exactly when their backend contract holds
+- **AND** every search-provider route without a supported backend or controlled replacement SHALL carry a bounded blocked disposition
 
 #### Scenario: Recorded bypass is not relabeled by mocks
 - **GIVEN** the pinned-source record that the primary page load and binary fetch follow redirects automatically via global fetch
@@ -3392,6 +3392,16 @@ The restricted tool-inventory seam for network parity capabilities SHALL be upda
 - **THEN** the URL-read row SHALL name the completing adapter and route table
 - **AND** the web-search row SHALL retain its separate backend-gated completion contract
 - **AND** a test SHALL assert the completing marker remains distinguishable from allow
+
+#### Scenario: URL completion is consumed after provenance admission
+- **GIVEN** a registered owned URL-read replacement and a completed controlled route
+- **WHEN** restricted enforcement evaluates that URL call
+- **THEN** it SHALL name the controlled replacement as the completing boundary and permit that replacement to execute
+- **AND** it SHALL NOT block solely because the inventory verdict is network-adapter-gated
+
+#### Scenario: A completion marker cannot admit another route
+- **WHEN** a call uses foreign provenance, an unregistered replacement, or an uncovered native URL route
+- **THEN** the marker SHALL NOT authorize execution and no network request SHALL be dispatched
 
 ### Requirement: Trusted Loopback and Provider Routing Remain Distinct from Model Fetch Targets
 
@@ -3538,7 +3548,25 @@ The restricted tool-inventory seam SHALL be updated additively and backend-gated
 #### Scenario: Completion never alters enforcement-owned wiring
 - **WHEN** the completing-adapter seam update is applied
 - **THEN** the update SHALL complete no table shape, composition order, or error vocabulary owned by the enforcement wiring
-- **AND** the URL-read route set completed by the URL-fetch transport change SHALL remain byte-identical
+- **AND** the URL-read route set completed by the URL-fetch transport change SHALL retain the same authorization behavior
+
+#### Scenario: Supported search completion reaches controlled execution
+- **GIVEN** an owned registered search replacement, a supported configured backend, and a completed controlled route
+- **WHEN** the native restricted callback evaluates a search call
+- **THEN** it SHALL permit only the controlled replacement to complete execution
+- **AND** the result SHALL preserve attribution and the current egress posture
+
+#### Scenario: Absent backend cannot be bypassed by unrestricted egress
+- **GIVEN** no supported configured search backend and explicit unrestricted egress
+- **WHEN** the native restricted callback evaluates a search call
+- **THEN** it SHALL return a bounded capability error with zero endpoint requests
+- **AND** it SHALL NOT retry through native transport or fabricate results
+
+#### Scenario: A private secondary hop remains rejected
+- **GIVEN** enforcing egress and an admitted controlled search call
+- **WHEN** a redirect or secondary request targets a prohibited private address
+- **THEN** the existing transport SHALL reject that hop before dispatch
+- **AND** admission SHALL NOT override per-hop authorization
 
 ### Requirement: Native YOLO Web Search Keeps Native Behavior
 

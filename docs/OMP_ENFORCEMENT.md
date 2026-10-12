@@ -154,7 +154,7 @@ unreachable from this process).
 | readiness-cancellation      | row 13 REMOVED by user decision      | no readiness signal/state/channel/handshake anywhere; `runner.emit` load-failure is an accepted residual risk                                                  |
 | approval-record-reset       | INCOMPATIBLE (ledger `incompatible`) | records advisory at step 5; survivor renames report to `rejected_approval_record_survivor` with `seam=record-reset`, settings-discovery-path control unchanged |
 | destructive-intent-decoding | UNRESOLVED (ledger `incompatible`)   | row-5 consumer verbatim; complete ACP-mediated boundary; observation-absent never proceeds                                                                     |
-| network-parity-adapters     | rows 17–19 not landed                | `allow-gated-pending-adapter` blocks as `rejected_pending_adapter` (`seam=pending-adapter`)                                                                    |
+| network-parity-adapters     | ledger native_transport statuses quoted verbatim (unchanged) | `allow-gated-pending-adapter` consults the route owner's typed completion at the clamp: a completed route + registered owned replacement proceeds to the NAMED replacement boundary (C5); every other case blocks as `rejected_pending_adapter` (`seam=pending-adapter`) |
 | discovery-side-gates        | row 12 gates as shipped              | consumed read-only; no second gate or claim                                                                                                                    |
 
 No status relabel anywhere: every inherited status is quoted from its source
@@ -204,7 +204,9 @@ install (row 20):
    absent, so even owned-name reads deny re-observe
    (`rejected_stale_observation`, `origin=owned-extension`), destructive-
    shaped calls fail closed at the `complete-awaiting-authorization` seam,
-   and URL/search completion stays `rejected_pending_adapter`; approval
+   and URL/search calls never reach the adapter-completion clamp (C5's
+   typed completion consumes only calls that have passed live provenance;
+   where it applies, absence still blocks `rejected_pending_adapter`); approval
    records stay the empty-hierarchy evaluation (the child observes no
    settings layer). Client-owned MCP admission is the one origin class
    that decides fully on native-registry data alone.

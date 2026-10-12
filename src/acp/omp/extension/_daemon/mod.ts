@@ -141,14 +141,19 @@ export {
 } from "../../fetch-transport.ts";
 
 export {
+  admitReadUrlReplacement,
   FETCH_COMPLETING_ADAPTER_MARKER,
   FETCH_COMPLETING_MECHANISM,
   FETCH_ROUTE_CITATIONS,
   FETCH_ROUTE_TABLE,
+  type FetchReplacementAdmission,
+  type FetchReplacementAdmissionInput,
   type FetchRouteCitation,
   type FetchRouteRow,
   type FetchRouteStatus,
   isRouteCompleted,
+  READ_URL_COMPLETED_ROUTES,
+  READ_URL_REPLACEMENT_TOOL,
 } from "../../fetch-routes.ts";
 
 // Row 20 (`adapt-omp-web-search`) extends the declared closure with the
@@ -218,11 +223,15 @@ export {
 } from "../../search-transport.ts";
 
 export {
+  admitWebSearchBackend,
   isSearchRouteCompleted,
   SEARCH_COMPLETING_ADAPTER_MARKER,
   SEARCH_COMPLETING_MECHANISM,
+  SEARCH_REPLACEMENT_TOOL,
   SEARCH_ROUTE_CITATIONS,
   SEARCH_ROUTE_TABLE,
+  type SearchBackendAdmission,
+  type SearchBackendAdmissionInput,
   type SearchRouteCitation,
   type SearchRouteRow,
   type SearchRouteStatus,
