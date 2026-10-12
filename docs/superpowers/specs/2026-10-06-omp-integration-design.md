@@ -36,7 +36,7 @@ required boundary. Section 15 assigns real-runtime verification to the user expl
 | D1       | One overall specification; split implementation into dependent OpenSpec changes.                                                                                                              |
 | D2       | Pin official OMP `v18.6.1` and per-architecture SHA-256, following OpenCode packaging. Do not track moving main or install latest implicitly.                                                 |
 | D3       | Use approach B: an official OMP binary with an explicitly loaded, image-owned trusted extension. Keep ambient extension discovery disabled.                                                   |
-| D4       | Preserve web fetching, web searching, and code-search capability parity. The handoff's first-release native-network disablement is superseded.                                                |
+| D4       | Preserve URL reading, web searching, and local text-search parity with pinned OpenCode. Dedicated public code search is not required; OpenCode removed it upstream.                         |
 | D5       | Remove LSP from both restricted modes, including implicit language-server startup. Do not implement a replacement LSP service.                                                                |
 | D6       | YOLO is native and maximally permissive. Do not add an explicit LSP denial or copy restricted tool policies into YOLO.                                                                        |
 | D7       | Separate OMP restricted and YOLO processes, pools, and persistent state. The handoff's prohibition on native OMP YOLO is superseded for the isolated YOLO process only.                       |
@@ -94,7 +94,7 @@ amendment is a deployment-owned disposition of a recorded gap, not a supported-m
    Carried by `disable-restricted-agent-lsp`.
 6. **Native transport adaptation.** Confirms section 9's controlled-transport requirement and
    supersedes the `blocked_pending_adapter` status of the bypass routes: the trusted-extension
-   replacement tool covers the approved routes (URL read, web search, public code search) through
+   replacement tools cover the approved routes (URL read and web search) through
    the controlled transport, while `fetchBinary` and scraper redirects that follow redirects
    automatically on global fetch stay blocked. `HTTP_PROXY` alone does not establish enforcement.
    Carried by `control-omp-url-fetch-transport`.
@@ -118,7 +118,7 @@ the section 15 runtime checklist remains user-owned.
 - Stable-first model selection and advertised reasoning-value normalization.
 - Independent ACP filesystem authorization, physical path containment, and trusted skill reads.
 - Absolute staging instructions in normal, scheduled, maintenance, and retry prompt paths.
-- Network and code-search compatibility through controlled trusted-extension adaptation.
+- URL-reading and web-search compatibility through controlled trusted-extension adaptation, plus existing local text search.
 - Client-owned MCP, critical skill-source ownership, and bounded rejection diagnostics.
 - Official executable/checksum/notices packaging and warning-only runtime version health checks.
 - Unit/mock integration coverage and complete documentation/configuration synchronization.
@@ -130,6 +130,7 @@ the section 15 runtime checklist remains user-owned.
 - A human form-elicitation UI or additional approval interaction service.
 - An OMP source fork, unpinned runtime, or general MCP tool-replacement service.
 - Additional provider secrets unrelated to supported AIr configuration.
+- Dedicated public code-search tools, backends, credential promotion, and reserved adapter slots.
 - Unrelated permission expansion, retry systems, memory redesign, or global sandbox-default changes.
 - Real-runtime acceptance during assistant implementation work.
 
@@ -224,7 +225,7 @@ OMP must reject it too. Do not widen the command list while translating configur
 | Bash                                      | Existing script/command/argument/path policy, with the native ACP permission gate active.                                                                       |
 | Web fetching                              | Preserve URL-reading capability, including the URL branch of native `read`; controlled transport and per-hop validation.                                        |
 | Web searching                             | Preserve live search capability through supported configured provider credentials and controlled transport.                                                     |
-| Code search                               | Preserve local text search and public code/documentation search without adding LSP or arbitrary execution.                                                      |
+| Local text search                         | Preserve local grep/glob search without adding LSP or arbitrary execution. Public code/documentation remains readable through URL read and general web search. |
 | LSP                                       | Disabled as a tool and as implicit server startup in both restricted agents.                                                                                    |
 | Eval/task/computer/browser/async/launch   | No new unrestricted native execution surface. Disable and reject OMP-only surfaces outside the approved restricted capability set.                              |
 | Debug/AST mutation/configuration devices  | Do not admit a hidden mutation/debug/device route merely because `read` or `write` is allowed.                                                                  |
@@ -351,9 +352,16 @@ execute; an incomplete native location list cannot authorize a larger patch.
 
 ## 9. Network and search compatibility
 
-Preserve the approved web-fetch, web-search, and code-search capabilities through trusted-extension
+Preserve the approved URL-reading and web-search capabilities through trusted-extension
 adaptation. Do not disable them because the original handoff did so, and do not create a general
 MCP replacement service.
+
+Dedicated public code search is outside the parity target. Pinned OpenCode 1.18.21 has no
+`codesearch` tool, following upstream removal in
+[commit 2481dde36d9aeb48de9fb21ffd2cfdc1d42804f1](https://github.com/anomalyco/opencode/commit/2481dde36d9aeb48de9fb21ffd2cfdc1d42804f1)
+on 2026-05-12. Remove the unused OMP executor, route, inventory row, compatibility subcase, and
+reserved packaging slot rather than implementing an extra backend. Retain local text search,
+public URL content reading, and general web search.
 
 The adapter owns the network transport boundary. When the configured egress policy requires the
 AIr validating proxy, route the relevant native URL-read/search transports through an explicitly
@@ -536,7 +544,7 @@ these properties in the official binary.
 - Exercise both per-spawn and pooled skill delivery, with absolute payload paths and no duplicates.
 - Observe real pool reuse, mode separation, crash/restart, history restoration, and cross-mode
   ownership rejection.
-- Observe actual native fetch/search/code-search traffic through the configured adapter/proxy,
+- Observe actual native URL-read/web-search traffic through the configured adapter/proxy,
   including binary/text fetches, redirects, and private-target failures.
 - When configured and supported, verify bwrap sibling-workspace and daemon-environment isolation.
 - Confirm existing OpenCode runtime behavior after restricted LSP removal and shared sink changes.
@@ -562,7 +570,7 @@ the complete behavior assigned here; no package is a placeholder runtime impleme
 | P4: OMP process ownership              | Resolve mode before acquisition, mode-specific pool/state roots, same-namespace recovery, all session entry points.                                              | P2, P3       |
 | P5: trusted restricted enforcement     | Pre-import exclusion, readiness, live registry/provenance, authoritative records, complete destructive-action adaptation, restricted LSP removal in both agents. | P1, P3, P4   |
 | P6: portable skills                    | Absolute staging variables and all skill/system/retry instructions; mocked delivery in per-spawn and pool modes.                                                 | P1, P3, P4   |
-| P7: controlled network/search          | Fetch/URL-read, web search and code-search adaptation; deterministic transport/redirect/proxy tests.                                                             | P3, P5       |
+| P7: controlled network/search          | Fetch/URL-read and web-search adaptation; deterministic transport/redirect/proxy checks. No dedicated public code-search adapter.                               | P3, P5       |
 | P8: official packaging                 | Fixed executable/notices/checksums and owned module/settings installation; version-health logic with mock process results.                                       | P3, P5, P7   |
 | P9: final regression and documentation | Combined mocked ACP/MCP/recovery/skill tests; config/env/Helm/README/AGENTS/OpenSpec/changelog synchronization and user runtime checklist.                       | P1–P8        |
 
@@ -633,3 +641,38 @@ All seven dispositions are DECIDED. The pinned OMP v18.6.1 and OpenCode 1.18.21 
 authoritative and unchanged; source, synthetic mock and user-owned runtime evidence remain
 separate. The historical section 15 readiness observation is cancelled, not verified; residual
 extension-load and both-agent/both-mode implicit LSP observations remain user-owned and unverified.
+
+## Post-implementation parity and wiring correction
+
+This amendment supersedes conflicting public-code-search statements, including section 2a
+decision 6 and the archived `adapt-omp-public-code-search` scope. The user requires alignment
+with pinned OpenCode, not an additional public-code-search capability. Archived artifacts remain
+historical evidence; a new removal change owns the source and main-spec cutover.
+
+The source audit found these integration gaps despite the original batch being applied:
+
+1. The extension factory must accept the pinned native `ExtensionAPI`, call `on("tool_call", ...)`
+   and `registerTool(...)`, and observe `getAllTools().sourceInfo` per call. A returned object or
+   module-local handler slot is not native registration. Missing or ambiguous runtime provenance
+   fails closed. This correction does not restore the cancelled client readiness handshake.
+2. URL-read and web-search completion must be consumed by enforcement. A completion marker alone
+   does not overcome an unconditional pending-adapter block. Admission remains route-scoped,
+   provenance-checked, backend-gated, and subject to the controlled transport's per-hop policy.
+3. Replacement definitions must supply native parameter schemas and return native `content`
+   results. Text, supported image data, and non-image binary results must retain distinct valid
+   representations; no result may manufacture an image from arbitrary bytes.
+4. The installed extension must have a Bun-loadable, locked dependency closure. A Deno import map
+   beside copied `@std/*` imports is insufficient. Reproducible build-time bundling is allowed,
+   with canonical source ownership, no duplicated policy implementation, no runtime dependency
+   download, and no additional installed JavaScript runtime. DNS must use an interface available
+   in the pinned native runtime and keep the existing SSRF classifier and per-hop decisions.
+5. Script invocation must use a trusted, resolved absolute skills root independent of isolated
+   child `HOME`. Every skill-instructing prompt and retry must render that root consistently.
+   Owned `skill://` reads must use the supported native skill-reading contract and canonical
+   ownership checks; unknown URI schemes remain denied. Session staging and identity are unchanged.
+6. Dashboard chat must offer both supported agent types and submit the user's explicit selection.
+   Backend acceptance of `omp` alone does not make it selectable in the UI.
+
+The correction batch, application order, shared-file serialization, and workday budgets are owned
+by `docs/superpowers/specs/2026-10-06-omp-proposal-batch-index.md`. This amendment records source
+findings and planned repairs, not successful native execution or a rerun of the test suite.
