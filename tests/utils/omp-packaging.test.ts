@@ -380,7 +380,10 @@ Deno.test("manifest generator - per-file lines, header facts, recut invariant", 
     assertStringIncludes(manifest, "12 -> 13 -> 14b -> 17 -> 18");
     // `remove-omp-public-code-search` removed the reserved slot; the header
     // records the composition without any reserved-slot claim.
-    assert(!manifest.includes("RESERVED-BUT-UNCONSUMED"), "manifest header carries no reserved-slot claim");
+    assert(
+      !manifest.includes("RESERVED-BUT-UNCONSUMED"),
+      "manifest header carries no reserved-slot claim",
+    );
     // The recut-invariant statement inside the manifest itself.
     assertStringIncludes(manifest, "RECUT INVARIANT");
 

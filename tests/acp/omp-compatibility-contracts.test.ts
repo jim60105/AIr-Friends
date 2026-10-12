@@ -104,9 +104,7 @@ Deno.test("Compatibility Assessment: rejects missing subcases, pin mismatches, d
   const missingResult = assessCompatibility(incompleteLedger);
   assertEquals(missingResult.permitted, false);
   assertEquals(
-    missingResult.blockers.some((b) =>
-      b.subcase === "web_search" && b.reason.includes("Missing")
-    ),
+    missingResult.blockers.some((b) => b.subcase === "web_search" && b.reason.includes("Missing")),
     true,
   );
 
