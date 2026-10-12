@@ -196,23 +196,23 @@ Configuration is loaded from `config.yaml` (YAML format). See [config.example.ya
 
 **Platform & Auth:**
 
-| Variable             | Description                              |
-| -------------------- | ---------------------------------------- |
-| `DISCORD_ENABLED`    | Enable Discord integration (true/false)  |
-| `DISCORD_TOKEN`      | Discord bot token                        |
-| `MISSKEY_ENABLED`    | Enable Misskey integration (true/false)  |
-| `MISSKEY_HOST`       | Misskey instance host                    |
-| `MISSKEY_TOKEN`      | Misskey access token                     |
-| `GEMINI_API_KEY`     | API key for the OpenCode Gemini provider |
-| `OPENCODE_API_KEY`   | OpenCode API key                         |
-| `OPENROUTER_API_KEY` | OpenRouter API key                       |
+| Variable               | Description                                          |
+| ---------------------- | ---------------------------------------------------- |
+| `DISCORD_ENABLED`      | Enable Discord integration (true/false)              |
+| `DISCORD_TOKEN`        | Discord bot token                                    |
+| `MISSKEY_ENABLED`      | Enable Misskey integration (true/false)              |
+| `MISSKEY_HOST`         | Misskey instance host                                |
+| `MISSKEY_TOKEN`        | Misskey access token                                 |
+| `GEMINI_API_KEY`       | API key for the OpenCode Gemini provider             |
+| `OPENCODE_API_KEY`     | OpenCode API key                                     |
+| `OPENROUTER_API_KEY`   | OpenRouter API key                                   |
 
 **Agent & Model:**
 
 | Variable                    | Description                                                                                        |
 | --------------------------- | -------------------------------------------------------------------------------------------------- |
 | `AGENT_MODEL`               | LLM model identifier (e.g., "gpt-5-mini")                                                          |
-| `AGENT_DEFAULT_TYPE`        | Default ACP agent type (`opencode` [default], `omp`; unknown values fail startup)                  |
+| `AGENT_DEFAULT_TYPE`        | Default ACP agent type (`opencode` [default], `omp`; unknown values fail startup)                   |
 | `AGENT_SKILLS_DIR`          | Skills directory path (default: "skills")                                                          |
 | `AGENT_EXTERNAL_SKILLS`     | External skills to install at startup (JSON string, e.g. `[{"repo":"owner/repo","skill":"name"}]`) |
 | `AGENT_AUTO_APPROVE_SKILLS` | Skill names to auto-approve in restricted mode (comma-separated)                                   |
@@ -239,9 +239,9 @@ Configuration is loaded from `config.yaml` (YAML format). See [config.example.ya
 
 **Agent Connect Timeout:**
 
-| Variable                   | Description                                                                                                                                                                                                                                                                                                                                |
-| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `AGENT_CONNECT_TIMEOUT_MS` | Max time to wait for the ACP handshake during `connect()` (default: 30000 = 30s). A `WARN` is logged at 80% elapsed as an early signal before the hard timeout fires. This default is convention-based (matches the idle-timeout default), not measured from production connect latency — revisit once real data accumulates post-rollout. |
+| Variable                    | Description                                                          |
+| --------------------------- | --------------------------------------------------------------------|
+| `AGENT_CONNECT_TIMEOUT_MS`  | Max time to wait for the ACP handshake during `connect()` (default: 30000 = 30s). A `WARN` is logged at 80% elapsed as an early signal before the hard timeout fires. This default is convention-based (matches the idle-timeout default), not measured from production connect latency — revisit once real data accumulates post-rollout. |
 
 **Agent Git Credential Store:**
 
@@ -340,13 +340,13 @@ Configuration is loaded from `config.yaml` (YAML format). See [config.example.ya
 
 **Send File Skill:**
 
-| Variable                                   | Description                                           |
-| ------------------------------------------ | ----------------------------------------------------- |
-| `SKILL_SEND_FILE_ENABLED`                  | Enable send-file skill (true/false, default: false)   |
-| `SKILL_SEND_FILE_MAX_SIZE_MB`              | File size limit in MB (0 = platform default)          |
-| `SKILL_SEND_FILE_ALLOWED_EXTENSIONS`       | Allowed file extensions whitelist (comma-separated)   |
-| `SKILL_SEND_FILE_MAX_FILES_PER_INVOCATION` | Max files per send-file invocation (default: 10)      |
-| `SKILL_SEND_FILE_MAX_TOTAL_SIZE_MB`        | Max aggregate size per invocation in MB (default: 50) |
+| Variable                             | Description                                         |
+| ------------------------------------ | --------------------------------------------------- |
+| `SKILL_SEND_FILE_ENABLED`            | Enable send-file skill (true/false, default: false) |
+| `SKILL_SEND_FILE_MAX_SIZE_MB`        | File size limit in MB (0 = platform default)        |
+| `SKILL_SEND_FILE_ALLOWED_EXTENSIONS` | Allowed file extensions whitelist (comma-separated) |
+| `SKILL_SEND_FILE_MAX_FILES_PER_INVOCATION` | Max files per send-file invocation (default: 10) |
+| `SKILL_SEND_FILE_MAX_TOTAL_SIZE_MB`  | Max aggregate size per invocation in MB (default: 50) |
 
 **Metrics & Health:**
 
@@ -620,18 +620,18 @@ For complete Vento documentation, visit <https://vento.js.org/>
 
 The following variables are available in all prompt templates:
 
-| Variable                 | Type      | Description                                                                               | Example                  |
-| ------------------------ | --------- | ----------------------------------------------------------------------------------------- | ------------------------ |
-| `isDm`                   | `boolean` | Whether this is a direct message conversation                                             | `true`                   |
-| `platform`               | `string`  | Platform name                                                                             | `"discord"`, `"misskey"` |
-| `userId`                 | `string`  | User's platform ID                                                                        | `"560842157351763989"`   |
-| `channelId`              | `string`  | Channel/conversation ID                                                                   | `"873618490202931231"`   |
-| `guildId`                | `string`  | Server/guild ID (empty string if N/A)                                                     | `""`                     |
-| `sessionId`              | `string`  | Current skill API session ID                                                              | `"sess_abc123"`          |
-| `agentType`              | `string`  | ACP agent type (`"opencode"`)                                                             | `"opencode"`             |
-| `model`                  | `string`  | Model identifier for the current session                                                  | `"claude-opus-4.6"`      |
-| `yolo`                   | `boolean` | Whether YOLO mode is enabled (bypasses permission restrictions)                           | `true`                   |
-| `canWriteAgentWorkspace` | `boolean` | Whether this session allows writing to agent workspace                                    | `false`                  |
+| Variable                 | Type      | Description                                                     | Example                  |
+| ------------------------ | --------- | --------------------------------------------------------------- | ------------------------ |
+| `isDm`                   | `boolean` | Whether this is a direct message conversation                   | `true`                   |
+| `platform`               | `string`  | Platform name                                                   | `"discord"`, `"misskey"` |
+| `userId`                 | `string`  | User's platform ID                                              | `"560842157351763989"`   |
+| `channelId`              | `string`  | Channel/conversation ID                                         | `"873618490202931231"`   |
+| `guildId`                | `string`  | Server/guild ID (empty string if N/A)                           | `""`                     |
+| `sessionId`              | `string`  | Current skill API session ID                                    | `"sess_abc123"`          |
+| `agentType`              | `string`  | ACP agent type (`"opencode"`, `"omp"`)                          | `"opencode"`             |
+| `model`                  | `string`  | Model identifier for the current session                        | `"claude-opus-4.6"`      |
+| `yolo`                   | `boolean` | Whether YOLO mode is enabled (bypasses permission restrictions) | `true`                   |
+| `canWriteAgentWorkspace` | `boolean` | Whether this session allows writing to agent workspace          | `false`                  |
 | `skillsDir`              | `string`  | Absolute trusted skill-script root rendered into every script recipe (see the note below) | `"/opt/air/skills"`      |
 
 **Special prompt variables** (only available in specific prompt types):
