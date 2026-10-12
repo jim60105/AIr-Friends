@@ -44,7 +44,7 @@
  * never established mediation (the pre-existing F14 residual is unchanged).
  */
 
-import { type EnforcementLaunchMode, observeLaunchMode } from "./enforcement.ts";
+import type { EnforcementLaunchMode } from "./enforcement.ts";
 import { Type } from "@sinclair/typebox";
 import {
   buildGeminiSearchRequest,
@@ -321,44 +321,10 @@ export function registerSearchReplacement(
   };
 }
 
-/** Load-time attach options (injection seam for verification). */
-export interface SearchReplacementLoadOptions extends SearchReplacementDeps {
-  readonly observedCwd?: string;
-}
-
-let loadTimeSearchReplacementRegistration: SearchReplacementRegistrationResult = {
-  registered: false,
-  mode: "native-yolo",
-};
-
-/**
- * The synchronous load-time attach: identity branch → definition build.
- * Registration into the pinned `registerTool` surface happens through the
- * factory's synchronous attachment point; native invocation of the
- * replacement remains candidate-to-verify (design §15).
- */
-export function attachSearchReplacementAtLoad(
-  options: SearchReplacementLoadOptions = {},
-): SearchReplacementRegistrationResult {
-  const mode = observeLaunchMode(options.observedCwd ?? "");
-  loadTimeSearchReplacementRegistration = registerSearchReplacement(mode, options);
-  return Object.freeze({ ...loadTimeSearchReplacementRegistration });
-}
-
-/** The current load-time registration record (both branches, frozen copy). */
-export function getLoadTimeSearchReplacementRegistration(): SearchReplacementRegistrationResult {
-  return Object.freeze({ ...loadTimeSearchReplacementRegistration });
-}
-
-/**
- * The factory-side synchronous attachment point: the pinned host hands its
- * `registerTool` surface here (last-extension-wins, S8) and the restricted
- * definition is registered. Carries no readiness assertion and makes no
- * claim that the binary will ever call the tool.
- */
-export function registerLoadTimeSearchReplacement(registrar: SearchToolRegistrar): boolean {
-  const definition = loadTimeSearchReplacementRegistration.definition;
-  if (!definition) return false;
-  registrar.registerTool(definition);
-  return true;
-}
+// C4 (`wire-omp-native-extension-api`) removed the load-time attach, the
+// module-global registration record, and the factory-side attachment
+// point: the restricted `web_search` definition reaches the pinned
+// `registerTool` surface ONLY through the native-API adapter
+// (`./native-registration.ts` → the default factory), never through a
+// private slot or a returned field. Native invocation of the replacement
+// remains candidate-to-verify (design §15).

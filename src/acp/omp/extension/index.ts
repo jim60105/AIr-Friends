@@ -8,36 +8,30 @@
  * Executes the pre-import discovery bootstrap sequence at module load time.
  * Throws a fatal initialization error if pre-import exclusion blockers exist.
  *
- * Row 16 (`wire-omp-restricted-tool-enforcement`) extends the synchronous
- * load sequence: after the pre-import gate, the restricted handler slot is
- * registered and the enforcement body attached — SYNCHRONOUSLY, at module
- * load, with no readiness assertion (row 13 cancelled). The registration
- * branch is gated on the module's OWN observed launch identity (row 9's
+ * C4 (`wire-omp-native-extension-api`) replaced the row-16 factory-return/
+ * private-slot convention: the pinned loader AWAITS the default export and
+ * DISCARDS its return value, so enforcement lives ONLY in the native API
+ * registrations the factory makes synchronously during its own evaluation —
+ * `api.on("tool_call", ...)` before execution and `api.registerTool(...)`
+ * for the C2 `read`/`web_search` name replacements. The registration branch
+ * is still gated on the module's OWN observed launch identity (row 9's
  * mode-distinct launch cwd `{baseRoot}/omp-agent/{mode}/cwd`): a
- * native-YOLO or otherwise unidentified process takes the noop branch and
- * registers nothing at all, so the exemption is structural at the
- * registration site and no mode check exists inside the decision path.
+ * native-YOLO or otherwise unidentified process registers nothing at all,
+ * so the exemption stays structural at the registration site and no mode
+ * check exists inside the decision path.
  * Because the pinned pre-import-exclusion verdicts are unresolved (row 12),
- * this entrypoint fail-closes BEFORE the attach under the shipped guard:
- * the load-time registration completes only when the gate passes, and the
- * accepted absence-of-handler residual risk is recorded (design §15) —
- * whether the official binary ever invokes the attached handler remains
- * user-owned runtime verification, never something this module claims.
+ * this entrypoint fail-closes BEFORE the registrations: the factory exists
+ * only when the gate passes. The accepted absence-of-handler residual risk
+ * is unchanged (design §15) — whether the official binary ever evaluates
+ * this factory or invokes the registered callback remains user-owned
+ * runtime verification, never something this module claims, and no
+ * readiness handshake exists or is asserted here.
  */
 
 import { bootstrapDiscoveryGuard } from "./bootstrap.ts";
 import { formatDiscoverySessionError } from "../discovery-guard.ts";
-import { attachEnforcementAtLoad, getLoadTimeEnforcementRegistration } from "./enforcement.ts";
-import {
-  attachReadReplacementAtLoad,
-  type ReadToolRegistrar,
-  registerLoadTimeReadReplacement,
-} from "./read-replacement.ts";
-import {
-  attachSearchReplacementAtLoad,
-  registerLoadTimeSearchReplacement,
-  type SearchToolRegistrar,
-} from "./search-replacement.ts";
+import { createNativeExtensionFactory, nativeReplacementTools } from "./native-registration.ts";
+import { OMP_TRUSTED_EXTENSION_PATH } from "../../../utils/omp-paths.ts";
 
 // Execute load-time pre-import discovery bootstrap sequence immediately upon import
 export const loadTimeDiscoveryDecision = bootstrapDiscoveryGuard();
@@ -46,37 +40,6 @@ export const loadTimeDiscoveryDecision = bootstrapDiscoveryGuard();
 if (loadTimeDiscoveryDecision.blockers.length > 0) {
   throw new Error(formatDiscoverySessionError(loadTimeDiscoveryDecision));
 }
-
-// Row 16 load sequence: synchronous slot registration + body attach, AFTER
-// the pre-import gate, gated on the observed restricted launch identity.
-// No readiness signal is established here or observable from it.
-export const loadTimeEnforcementRegistration = attachEnforcementAtLoad({
-  observedCwd: safeCwd(),
-  resourceGeneration: () => loadTimeDiscoveryDecision.resourceGeneration,
-});
-
-// Row 19 load sequence: the URL-fetch transport adapter's `read` name
-// replacement attaches AFTER the enforcement sibling, SYNCHRONOUSLY, under
-// the same restricted-launch-identity gate (native YOLO registers no
-// replacement — 14b posture). The replacement adds no second decision
-// path: the 14b handler still gates every call before it executes, and the
-// observed binary invoking the replacement at all stays design §15
-// user-owned verification — nothing claimed here.
-export const loadTimeReadReplacementRegistration = attachReadReplacementAtLoad({
-  observedCwd: safeCwd(),
-});
-
-// Row 20 load sequence: the web-search transport adapter's `web_search`
-// name replacement attaches AFTER the read sibling, SYNCHRONOUSLY, under
-// the same restricted-launch-identity gate (native YOLO registers no
-// replacement — 14b posture, D6 leaves native search unclamped there). The
-// replacement adds no second decision path: the 14b handler still gates
-// every call before it executes, and the observed binary invoking the
-// replacement at all stays design §15 user-owned verification — nothing
-// claimed here.
-export const loadTimeSearchReplacementRegistration = attachSearchReplacementAtLoad({
-  observedCwd: safeCwd(),
-});
 
 function safeCwd(): string {
   try {
@@ -89,30 +52,25 @@ function safeCwd(): string {
 }
 
 /**
- * Default extension factory complying with OMP extension contract.
+ * Default extension factory complying with the pinned native extension
+ * contract: the loader evaluates it with the native `ExtensionAPI` and the
+ * registrations happen SYNCHRONOUSLY inside this call — no returned object
+ * carries a handler or a registrar anymore, because the loader discards
+ * the return value entirely. The native-YOLO branch registers nothing
+ * (structural exemption). The return value is a plain status record for
+ * API-shaped consumers/tests, never an attachment point.
+ * The factory object itself is the shared `createNativeExtensionFactory`
+ * product, so API-shaped fixtures exercise the SAME function the pinned
+ * loader would evaluate (fixtures name their injected identity honestly).
  */
-export default function trustedExtensionFactory() {
-  const registration = getLoadTimeEnforcementRegistration();
-  return {
-    name: "air-friends-trusted-extension",
-    version: "1.0.0",
-    decision: loadTimeDiscoveryDecision,
-    // Attached only in the restricted branch; the factory field is the
-    // synchronous attachment point, not an invocation claim.
-    ...(registration.handler ? { restrictedToolCallHandler: registration.handler } : {}),
-    // Row 19: the synchronous `registerTool` attachment point for the
-    // restricted `read` replacement (S7/S8 last-extension-wins). Same
-    // honesty posture as the handler slot: a host surface receiving this
-    // function gets the SAME registered definition, and no field here
-    // claims the official binary ever calls it.
-    // Row 20 composes the `web_search` replacement into the same
-    // attachment point: the host's registerTool surface receives each
-    // restricted definition that exists; neither field claims the binary
-    // ever calls the tools.
-    registerTools: (registrar: ReadToolRegistrar & SearchToolRegistrar) =>
-      [registerLoadTimeReadReplacement(registrar), registerLoadTimeSearchReplacement(registrar)]
-        .every(
-          Boolean,
-        ),
-  };
-}
+export default createNativeExtensionFactory(() => ({
+  observedCwd: safeCwd(),
+  resourceGeneration: () => loadTimeDiscoveryDecision.resourceGeneration,
+  // The pinned host offers NO trusted session-context acquisition into
+  // the extension child today: production wires no session context, so
+  // destructive-shaped calls fail closed on absent canonical
+  // observations — never on model-supplied ones.
+  moduleUrl: import.meta.url,
+  contractedRelative: OMP_TRUSTED_EXTENSION_PATH,
+  replacementTools: nativeReplacementTools(),
+}));

@@ -78,6 +78,7 @@ export type EnforcementSeamMarker =
   | "record-reset"
   | "destructive-intent"
   | "pending-adapter"
+  | "native-event-decode"
   | "seam-table";
 
 /**

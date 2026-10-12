@@ -70,18 +70,14 @@ export {
 } from "./extension/enforcement-error.ts";
 
 export {
-  attachEnforcementAtLoad,
   composeFreshProvenance,
   composeRestrictedToolCall,
   createLiveObserver,
   createRestrictedToolCallHandler,
   destructiveTargetAudit,
-  EMPTY_METADATA_SURFACE,
   type EnforcementDeps,
   type EnforcementLaunchMode,
-  type EnforcementLoadOptions,
   type EnforcementRegistrationResult,
-  getLoadTimeEnforcementRegistration,
   type LiveToolRegistrySurface,
   mcpAdmissionDenialBlock,
   observeCall,
