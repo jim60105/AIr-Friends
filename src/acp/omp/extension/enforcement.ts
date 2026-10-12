@@ -218,7 +218,16 @@ export function attachEnforcementAtLoad(
     surface,
     generation,
     () => ({
-      modulePath: new URL("./index.ts", import.meta.url).href,
+      // C3 (package-bun-compatible-omp-extension D2): the owning-module
+      // observation names the ACTUAL loaded module instance — in production
+      // that is the single generated bundle file itself (<root>/index.js or
+      // build/omp-extension/index.js), so C4 admits the real native
+      // artifact's provenance. The former `new URL("./index.ts", ...)`
+      // adjacent-source claim would name a file that does not sit beside
+      // the bundle and contradicted the generated-entry contract; the
+      // canonical SOURCE origin stays single-owned via
+      // OMP_TRUSTED_EXTENSION_PATH, which this observation never claims.
+      modulePath: import.meta.url,
       baseRoot: observedCwd.includes("/omp-agent/")
         ? observedCwd.replace(/\/omp-agent\/[^/]+\/cwd\/?$/, "")
         : observedCwd,

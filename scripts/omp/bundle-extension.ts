@@ -58,24 +58,11 @@ for (const [name, v] of [["src", src], ["target", target], ["deno.lock", denoLoc
   }
 }
 
-/**
- * The ONE non-builtin external the bundle may reference: the exact BARE
- * schema-builder facade specifier (align-omp-native-tool-contracts D1),
- * emitted in its canonical host-resolved spelling (NEVER `npm:` form — see
- * docs/OMP_PACKAGING.md §5; adding an image-side npm pin here would bypass
- * the documented host remap and add an unowned module to the load-time
- * graph). Subpaths like `@sinclair/typebox/value` are NOT remapped by the
- * host and fail closed below.
- */
-const HOST_FACADE_EXTERNAL = "@sinclair/typebox";
-
-/** Documented native builtins the pinned native runtime provides itself. */
-const NATIVE_BUILTIN_PREFIXES = ["node:", "bun:"];
-
-function isAllowedExternal(spec: string): boolean {
-  if (spec === HOST_FACADE_EXTERNAL) return true;
-  return NATIVE_BUILTIN_PREFIXES.some((p) => spec.startsWith(p));
-}
+// The native-loadability boundary (the ONE host-facade external, documented
+// native builtins, and the emitted-edge audit) lives in bundle-audit.ts
+// beside this script so packaging tests exercise the exact production
+// predicate on synthetic bundle text.
+import { auditEmittedBundle, emittedExternals, HOST_FACADE_EXTERNAL } from "./bundle-audit.ts";
 
 // The bundle is cut from canonical source at <src> with the repo's own deno
 // configuration and committed lock (cwd = <src> so both resolve there). The
@@ -108,48 +95,8 @@ if (bundle.code !== 0) {
 
 const emitted = await Deno.readTextFile(bundlePath);
 
-// Emitted dependency edges: static import/export-from specifiers plus dynamic
-// import() literal specifiers. A generated ESM bundle resolves everything
-// else internally, so anything matched here is a load-time external.
-function emittedExternals(text: string): string[] {
-  const out = new Set<string>();
-  const staticRe = /(?:^|[\s;}])(?:import|export)\b[^;\n]*?\bfrom\s*["']([^"']+)["']/g;
-  const bareImportRe = /(?:^|[\s;}])import\s+["']([^"']+)["']/g;
-  const dynRe = /(?:await\s+)?import\(\s*["']([^"']+)["']\s*\)/g;
-  for (const re of [staticRe, bareImportRe, dynRe]) {
-    for (const m of text.matchAll(re)) out.add(m[1]!);
-  }
-  return [...out].sort();
-}
-
-const problems: string[] = [];
+const problems: string[] = auditEmittedBundle(emitted);
 const externals = emittedExternals(emitted);
-for (const spec of externals) {
-  if (isAllowedExternal(spec)) continue;
-  // Every non-allowlisted edge fails closed, with the specific class named.
-  const cls = spec.startsWith("jsr:") || spec.startsWith("https://") || spec.startsWith("http://")
-    ? "runtime-download edge (JSR/remote URL)"
-    : spec.startsWith("npm:")
-    ? "npm: package edge"
-    : spec.startsWith("@std/") || spec.startsWith("@acp/") || spec.startsWith("@utils/") ||
-        spec.startsWith("@core/") || spec.startsWith("@types/") || spec.startsWith("@skills/") ||
-        spec.startsWith("@platforms/")
-    ? "import-map alias edge"
-    : "unapproved bare package";
-  problems.push(`emitted dependency ${spec} (${cls}) is outside the native-loadable boundary`);
-}
-// A self-contained bundle must carry no relative/absolute edges either: every
-// canonical module is inlined, so a leftover `./`/`/` import proves the
-// closure leaked past the bundler and the native loader would resolve it
-// against the IMAGE tree — fail closed.
-for (const spec of externals) {
-  if (
-    spec.startsWith("./") || spec.startsWith("../") || spec.startsWith("/") ||
-    spec.startsWith("file:")
-  ) {
-    problems.push(`emitted dependency ${spec} (non-inlined path edge)`);
-  }
-}
 
 // Provenance-comment completeness: non-minified deno bundle output names
 // every inlined locked module with a `// deno:<url>` comment; the @std/*
