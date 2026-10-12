@@ -48,7 +48,14 @@ const stagedCanonical = Deno.realPathSync(stagingDir);
 for (const name of catalog) {
   const source = `${sourceRoot}/${name}`;
   try {
-    Deno.lstatSync(source);
+    const stat = Deno.lstatSync(source);
+    if (stat.isSymlink) {
+      console.error(
+        `stage-owned-skills: linked entry refused: ${source} (catalog entries must be ` +
+        `real directories owned by the deployment)`,
+      );
+      Deno.exit(1);
+    }
   } catch {
     console.error(
       `stage-owned-skills: catalog entry "${name}" is missing from ${sourceRoot} ` +

@@ -164,17 +164,27 @@ export function buildSkillAutoApproveList(
     }
     const scriptsDir = `${skillDir}${SEPARATOR}scripts`;
     let scriptsEntries: Deno.DirEntry[] | null;
+    let scriptsDirAbsent = false;
     try {
       scriptsEntries = fs.readDir(scriptsDir);
     } catch {
       scriptsEntries = null;
+      // ABSENT (nothing exists at the path) is a command-based skill shape;
+      // a path that EXISTS but fails enumeration is a script-skill
+      // observation ERROR and never grants a command prefix.
+      try {
+        fs.lstat(scriptsDir);
+        scriptsDirAbsent = false;
+      } catch {
+        scriptsDirAbsent = true;
+      }
     }
     if (scriptsEntries === null) {
       // No scripts-directory observation. Only an ACTUAL command-based skill —
-      // an observed SKILL.md document — may keep a command prefix; an error
-      // reading the scripts directory of a script skill is never reinterpreted
-      // as one.
-      if (hasSkillDocument) commandPrefixes.add(name);
+      // an observed SKILL.md document with an ABSENT scripts directory — may
+      // keep a command prefix; an error reading the scripts directory of a
+      // script skill is never reinterpreted as one.
+      if (hasSkillDocument && scriptsDirAbsent) commandPrefixes.add(name);
       continue;
     }
     for (const script of scriptsEntries) {
