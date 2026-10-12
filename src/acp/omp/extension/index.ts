@@ -30,10 +30,7 @@
 
 import { bootstrapDiscoveryGuard } from "./bootstrap.ts";
 import { formatDiscoverySessionError } from "../discovery-guard.ts";
-import {
-  createNativeExtensionFactory,
-  nativeReplacementTools,
-} from "./native-registration.ts";
+import { createNativeExtensionFactory, nativeReplacementTools } from "./native-registration.ts";
 import { OMP_TRUSTED_EXTENSION_PATH } from "../../../utils/omp-paths.ts";
 
 // Execute load-time pre-import discovery bootstrap sequence immediately upon import

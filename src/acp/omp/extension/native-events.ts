@@ -29,7 +29,7 @@
 import type { RestrictedToolCallInput } from "./enforcement.ts";
 import type { DestructiveCallPayload } from "./enforcement-error.ts";
 import type {
-    AuthorizeWriteParams,
+  AuthorizeWriteParams,
   CanonicalTarget,
   DestructiveIntentInput,
   EffectiveRecordEvaluation,
@@ -124,7 +124,10 @@ export function isUrlLikeString(value: string): boolean {
   return /^https?:\/\//i.test(repaired);
 }
 
-function firstStringField(input: Record<string, unknown>, keys: readonly string[]): string | undefined {
+function firstStringField(
+  input: Record<string, unknown>,
+  keys: readonly string[],
+): string | undefined {
   for (const key of keys) {
     const value = input[key];
     if (typeof value === "string" && value !== "") return value;
@@ -292,8 +295,10 @@ export function decodeNativeToolCallEvent(
   const { toolName, toolCallId: toolKey, input: rawInput } = event;
   if (typeof toolName !== "string" || toolName === "") return failure();
   if (typeof toolKey !== "string" || toolKey === "") return failure();
-  if (rawInput !== undefined && (rawInput === null || typeof rawInput !== "object" ||
-    Array.isArray(rawInput))) {
+  if (
+    rawInput !== undefined && (rawInput === null || typeof rawInput !== "object" ||
+      Array.isArray(rawInput))
+  ) {
     return failure();
   }
   const input: Record<string, unknown> = rawInput ?? {};

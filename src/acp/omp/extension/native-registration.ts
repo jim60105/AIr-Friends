@@ -224,9 +224,7 @@ export function translateNativeSourceInfo(
       if (extensionPath === "") return unowned;
       const ownModulePath = normalizeNativeModulePath(owned.moduleUrl);
       const contractedPath = normalizeNativeModulePath(
-        `${owned.baseRoot.replace(/\/+$/, "")}/${
-          owned.contractedRelative.replace(/^\/+/, "")
-        }`,
+        `${owned.baseRoot.replace(/\/+$/, "")}/${owned.contractedRelative.replace(/^\/+/, "")}`,
       );
       // Positive identity only: the contracted deployment-tree file, or
       // this module's OWN loaded file (the C3 single generated bundle —
@@ -255,9 +253,7 @@ export function translateNativeSourceInfo(
         // session context supplies one: 14a's own verifier re-runs the
         // row-2 check per call, and its ABSENCE (production today) denies
         // admission fail-closed — a lexical path never carries the tier.
-        ...(owned.canonicalTarget !== undefined
-          ? { canonicalTarget: owned.canonicalTarget }
-          : {}),
+        ...(owned.canonicalTarget !== undefined ? { canonicalTarget: owned.canonicalTarget } : {}),
         mode: "restricted",
         observedResourceGeneration: capture.observedGeneration,
         currentResourceGeneration: capture.observedGeneration,
@@ -532,11 +528,14 @@ export function registerNativeEnforcement(
       handler = attached;
     },
   };
-  registerRestrictedEnforcement(localCapture, {
-    selfIdentity: { mode: "restricted" },
-    observer,
-    surfaceError,
-  } satisfies EnforcementDeps);
+  registerRestrictedEnforcement(
+    localCapture,
+    {
+      selfIdentity: { mode: "restricted" },
+      observer,
+      surfaceError,
+    } satisfies EnforcementDeps,
+  );
   if (handler === undefined) {
     throw new Error("native registration: restricted handler was not produced");
   }
