@@ -11,6 +11,7 @@ import {
   isUnderRoot,
   matchesScriptEntrypoint,
   type SkillAutoApproveList,
+  type SkillInventoryFs,
 } from "@acp/skill-inventory.ts";
 import { observeTrustedSkillsRoot } from "@core/skills-root.ts";
 import { BUNDLED_SKILLS } from "@core/bundled-skills.ts";
@@ -306,14 +307,73 @@ Deno.test("matcher - decision-time root/script replacement denies", () => {
   const script = `${root}/memory-save/scripts/memory-save.ts`;
   try {
     assertEquals(matchesScriptEntrypoint(`deno run ${script}`, inv, decisionCtx(cwd)), true);
-    const realIno = Deno.statSync(script).ino;
+    // CI-proven: the runner's filesystem reuses dev/ino verbatim after
+    // delete+recreate, so this real-filesystem replant only denies because
+    // the replacement content differs in SIZE (the clock-independent field).
     Deno.removeSync(root, { recursive: true });
     Deno.mkdirSync(`${root}/memory-save/scripts`, { recursive: true });
     Deno.writeTextFileSync(script, "// replaced");
     assertEquals(matchesScriptEntrypoint(`deno run ${script}`, inv, decisionCtx(cwd)), false);
-    assert(Deno.statSync(script).ino !== realIno || true);
   } finally {
     Deno.removeSync(cwd, { recursive: true });
+  }
+});
+
+Deno.test("matcher - identity-tuple drift denies with dev/ino intact (each field pins)", () => {
+  // The seam-pinned counterpart of the real-filesystem replacement test:
+  // identical dev/ino AND identical size/ctime respectively, so each extended
+  // identity field is proven to participate on its own, deterministically,
+  // without clock or inode-allocation luck.
+  const root = makeRoot(["memory-save"]);
+  const inv = list("opencode", root);
+  const cwd = Deno.realPathSync(Deno.makeTempDirSync({ prefix: "air-cwd-" }));
+  const script = `${root}/memory-save/scripts/memory-save.ts`;
+  const drift = (path: string, over: Partial<Deno.FileInfo>): SkillInventoryFs => ({
+    lstat: (p): Deno.FileInfo => ({ ...Deno.lstatSync(p), ...(p === path ? over : {}) }),
+    readDir: (p): Deno.DirEntry[] => [...Deno.readDirSync(p)],
+    realPath: (p) => Deno.realPathSync(p),
+  });
+  try {
+    // A replant whose dev/ino AND size match the grant: only ctime denies.
+    assertEquals(
+      matchesScriptEntrypoint(`deno run ${script}`, inv, {
+        sessionCwd: cwd,
+        fs: drift(script, { ctime: new Date(Deno.lstatSync(script).ctime!.getTime() + 60_000) }),
+      }),
+      false,
+      "a same-size script replant with drifted ctime must deny",
+    );
+    // A replant whose dev/ino AND ctime match (same coarse clock tick): only
+    // size denies.
+    assertEquals(
+      matchesScriptEntrypoint(`deno run ${script}`, inv, {
+        sessionCwd: cwd,
+        fs: drift(script, { size: Deno.lstatSync(script).size! + 4 }),
+      }),
+      false,
+      "a same-ctime script replant with drifted size must deny",
+    );
+    // The root's extended identity is rechecked too: a same dev/ino root
+    // replant with drifted ctime denies.
+    assertEquals(
+      matchesScriptEntrypoint(`deno run ${script}`, inv, {
+        sessionCwd: cwd,
+        fs: drift(root, { ctime: new Date(Deno.lstatSync(root).ctime!.getTime() + 60_000) }),
+      }),
+      false,
+      "a root replant with drifted ctime must deny",
+    );
+    // Control: the pass-through fake itself never causes the denial.
+    assertEquals(
+      matchesScriptEntrypoint(`deno run ${script}`, inv, {
+        sessionCwd: cwd,
+        fs: drift(script, {}),
+      }),
+      true,
+    );
+  } finally {
+    Deno.removeSync(cwd, { recursive: true });
+    Deno.removeSync(root, { recursive: true });
   }
 });
 

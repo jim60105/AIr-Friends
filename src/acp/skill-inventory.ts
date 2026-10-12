@@ -7,9 +7,13 @@
 // rechecked at every decision:
 //
 // - `scripts` records CANONICAL ABSOLUTE regular-file paths plus their
-//   dev/ino identity and the root observation they were enumerated under. A
-//   suffix spelling is never authority: approval requires the invocation's
-//   actual entrypoint to physically resolve to one exact enumerated file.
+//   full identity tuple (dev, ino, ctime, size) and the root observation they
+//   were enumerated under. ext4 reuses freed inode numbers, so (dev, ino) alone
+//   cannot detect a delete+recreate replant (proven on CI runners: identical
+//   dev/ino before/after replacement); ctime adds the tight-loop discriminator
+//   and size the clock-independent one. A suffix spelling is never authority:
+//   approval requires the invocation's actual entrypoint to physically resolve
+//   to one exact enumerated file.
 // - OpenCode discovers installed entries by scanning the root; OMP admits ONLY
 //   the deployment-controlled bundled catalog names (`BUNDLED_SKILLS`) within
 //   the root, under both empty and explicitly configured approval lists, so a
@@ -25,7 +29,8 @@
 //   anchors it PHYSICALLY at the requesting registered session cwd (no lexical
 //   `..` collapsing before physical observation, no PATH search for a slashless
 //   direct command). Missing registration, failed observation, a replaced root
-//   identity, or a replaced script identity all deny.
+//   identity, or a replaced script identity all deny. Identity-tuple fields are
+//   denial-only: a changed field can never widen authority.
 
 import { SEPARATOR } from "@std/path";
 import {
@@ -42,18 +47,50 @@ import {
   tokenizeShellCommand,
 } from "./command-syntax.ts";
 
+/**
+ * Stat fields beyond (dev, ino) that pin a physical object. `ctimeMs` and
+ * `size` are null-symmetric: platforms that report neither compare
+ * null-equal, so the tuple never tautologically denies; a tuple field that is
+ * PRESENT at build time and differs at decision time always denies.
+ */
+function statTuple(stat: Deno.FileInfo): { ctimeMs: number | null; size: number | null } {
+  return {
+    ctimeMs: stat.ctime === null ? null : stat.ctime.getTime(),
+    size: stat.size === null ? null : stat.size,
+  };
+}
+
 /** A single enumerated canonical script grant with its observed identity. */
 export interface SkillScriptEntry {
   /** Canonical absolute regular-file path (realpath). */
   readonly canonicalPath: string;
   readonly dev: number;
   readonly ino: number;
+  /** Inode change time (ms) at enumeration; null when unobservable. */
+  readonly ctimeMs: number | null;
+  /** Byte size at enumeration: clock-independent replacement discriminator. */
+  readonly size: number | null;
+}
+
+/** Extended identity of the observed root (same null symmetry). */
+export interface SkillRootIdentity {
+  readonly dev: number;
+  readonly ino: number;
+  readonly ctimeMs: number | null;
+  readonly size: number | null;
 }
 
 /** Auto-approved skill lists for restricted (non-YOLO) mode. */
 export interface SkillAutoApproveList {
-  /** The observed root this inventory was built from (canonical + identity). */
-  readonly root: SkillsRootObservation & { canonicalPath: string };
+  /**
+   * The observed root this inventory was built from (canonical + EXTENDED
+   * identity: dev/ino from the resolver observation, ctime/size observed by
+   * the builder on the same physical tree).
+   */
+  readonly root: Omit<SkillsRootObservation, "identity"> & {
+    canonicalPath: string;
+    identity?: SkillRootIdentity;
+  };
   /** Canonical absolute script grants, each carrying its observed identity. */
   readonly scripts: readonly SkillScriptEntry[];
   /** Command skill prefixes from OBSERVED command-based skills: "agent-browser". */
@@ -205,7 +242,12 @@ export function buildSkillAutoApproveList(
         if (canonical !== scriptPath) continue;
         if (!isUnderRoot(canonical, canonicalPath)) continue;
         if (stat.dev === null || stat.ino === null) continue;
-        scripts.push({ canonicalPath: canonical, dev: stat.dev, ino: stat.ino });
+        scripts.push({
+          canonicalPath: canonical,
+          dev: stat.dev,
+          ino: stat.ino,
+          ...statTuple(stat),
+        });
       } catch {
         // Unreadable observation: never a grant.
         continue;
@@ -214,7 +256,13 @@ export function buildSkillAutoApproveList(
   }
 
   return Object.freeze({
-    root: { ...input.rootObservation, canonicalPath },
+    // The extended identity MUST be spliced here: decision time rechecks the
+    // tuple recorded on the returned root, not the raw observation input.
+    root: {
+      root: canonicalPath,
+      canonicalPath,
+      identity: { dev: identity.dev, ino: identity.ino, ...statTuple(rootStat) },
+    },
     scripts: Object.freeze(scripts),
     commandPrefixes,
   });
@@ -469,13 +517,28 @@ export function matchesScriptEntrypoint(
   try {
     const rootStat = fs.lstat(list.root.canonicalPath);
     if (!rootStat.isDirectory) return false;
-    if (rootStat.dev !== list.root.identity?.dev || rootStat.ino !== list.root.identity?.ino) {
+    const rootIdentity = list.root.identity;
+    if (
+      rootStat.dev !== rootIdentity?.dev ||
+      rootStat.ino !== rootIdentity?.ino ||
+      rootIdentity === undefined ||
+      statTuple(rootStat).ctimeMs !== rootIdentity.ctimeMs ||
+      statTuple(rootStat).size !== rootIdentity.size
+    ) {
       return false;
     }
     if (fs.realPath(list.root.canonicalPath) !== list.root.canonicalPath) return false;
     const stat = fs.lstat(entry.canonicalPath);
     if (!stat.isFile) return false;
-    if (stat.dev !== entry.dev || stat.ino !== entry.ino) return false;
+    const tuple = statTuple(stat);
+    if (
+      stat.dev !== entry.dev ||
+      stat.ino !== entry.ino ||
+      tuple.ctimeMs !== entry.ctimeMs ||
+      tuple.size !== entry.size
+    ) {
+      return false;
+    }
     if (fs.realPath(entry.canonicalPath) !== entry.canonicalPath) return false;
   } catch {
     return false;
