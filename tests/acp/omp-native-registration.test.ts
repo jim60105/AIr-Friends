@@ -365,3 +365,80 @@ Deno.test("Native decode: unrepresentable events block at the decode seam, never
     assertEquals(outcome.dispatched, false);
   }
 });
+
+// ---------------------------------------------------------------------------
+// C5 (`admit-completed-omp-network-adapters`, task 2.1): the composed
+// native-callback surface consumes route completion — completion admits ONLY
+// the registered owned replacement on a completed route with a supported
+// backend; absence keeps the bounded pending block with zero dispatch.
+// Synthetic API-shaped fixtures throughout (same honesty rules as above).
+// ---------------------------------------------------------------------------
+
+const NO_BACKEND = { geminiKey: false, openrouterKey: false };
+const GEMINI_BACKEND = { geminiKey: true, openrouterKey: false };
+
+Deno.test("Native C5: registered owned URL read proceeds on the completed route; web_search blocks pending with no backend", () => {
+  const { run } = harness([
+    { name: "read", sourceInfo: CONTRACTED_SOURCE },
+    { name: "web_search", sourceInfo: CONTRACTED_SOURCE },
+  ], { sessionContext: trustedContext(), searchCredentialPresence: () => NO_BACKEND });
+  // URL-shaped read on the registered owned replacement: the completed
+  // controlled route covers it ⇒ continue (undefined return — the named
+  // replacement, not native transport, owns the call).
+  assertEquals(
+    run({ toolCallId: "u1", toolName: "read", input: { path: "https://example.com/page" } })
+      .dispatched,
+    true,
+  );
+  // web_search with NO supported backend: the existing bounded pending
+  // block, zero dispatch (nothing continues into any transport).
+  const blocked = run({ toolCallId: "s1", toolName: "web_search", input: { query: "q" } });
+  assertBoundedBlock(blocked, "rejected_pending_adapter");
+});
+
+Deno.test("Native C5: supported backend continues; presence read per call, mid-session change moves the next call", () => {
+  let presence = NO_BACKEND;
+  const { run } = harness([{ name: "web_search", sourceInfo: CONTRACTED_SOURCE }], {
+    sessionContext: trustedContext(),
+    searchCredentialPresence: () => presence,
+  });
+  assertBoundedBlock(
+    run({ toolCallId: "p1", toolName: "web_search", input: { query: "q" } }),
+    "rejected_pending_adapter",
+  );
+  presence = GEMINI_BACKEND;
+  assertEquals(
+    run({ toolCallId: "p2", toolName: "web_search", input: { query: "q" } }).dispatched,
+    true,
+    "availability appearing moves the NEXT call — never cached",
+  );
+  presence = NO_BACKEND;
+  // Availability disappearing returns the bounded block (read fresh again).
+  assertBoundedBlock(
+    run({ toolCallId: "p3", toolName: "web_search", input: { query: "q" } }),
+    "rejected_pending_adapter",
+  );
+});
+
+Deno.test("Native C5: shadow-same-name registration never completes the URL route", () => {
+  const { h, run } = harness([{ name: "read", sourceInfo: CONTRACTED_SOURCE }], {
+    sessionContext: trustedContext(),
+    searchCredentialPresence: () => NO_BACKEND,
+  });
+  assertEquals(
+    run({ toolCallId: "k1", toolName: "read", input: { path: "https://example.com/a" } })
+      .dispatched,
+    true,
+  );
+  // A foreign same-name extension file takes the slot: the fresh provenance
+  // read re-keys it unowned ⇒ denial BEFORE the clamp — no completion path,
+  // no dispatch.
+  h.tools[0] = {
+    name: "read",
+    sourceInfo: { path: "/home/attacker/tool.js", source: "extension" },
+  };
+  assertBoundedBlock(
+    run({ toolCallId: "k2", toolName: "read", input: { path: "https://example.com/b" } }),
+    "rejected_tool_provenance",
+  );
+});
