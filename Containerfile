@@ -254,9 +254,12 @@ COPY --link --chown=0:0 --chmod=0755 skills/ /opt/air/skills/
 # artifact, and the FINAL trusted-extension tree (serial composition
 # 12 -> 13 -> 14b -> 17 -> 18). Directories 0755, files 0644, owner root: the
 # agent process cannot modify the owned tree it is governed by.
-# Content-faithful install: content
-# lands byte-identical from these authored paths (the extension-tree step
-# below is a VERBATIM mirror copy, no rewriting/templating/augmentation).
+# Content-faithful install: the settings/prompt content lands byte-identical
+# from these authored paths; the extension-tree step below installs the
+# GENERATED native-loadable bundle — a deterministic transformation of
+# canonical source plus frozen-lock dependencies (package-bun-compatible-
+# omp-extension), with the input digest inventory recorded in the bundle
+# header. No independently edited or augmented content exists either way.
 RUN install -d -m 755 -o 0 -g 0 /opt/air/omp && \
     install -d -m 755 -o 0 -g 0 /opt/air/omp/config && \
     install -d -m 755 -o 0 -g 0 /opt/air/omp/prompt && \
@@ -270,15 +273,18 @@ COPY --link --chown=0:0 --chmod=0644 agent-config/omp/models.yml /opt/air/omp/co
 # are never relocated (src/utils/omp-paths.ts resolveOmpSystemPromptPath).
 COPY --link --chown=0:0 --chmod=0644 prompts/system_prompt_override.md /opt/air/omp/prompt/SYSTEM.md
 
-# Trusted-extension tree: mirror-bundle the committed extension sources into
-# the owned tree and cut PACKAGE-MANIFEST.sha256 over FINAL content. Runs as
+# Trusted-extension tree: build the native-loadable ESM bundle (the single
+# generated index.js) from the committed canonical sources and frozen lock,
+# install it into the owned tree, and cut PACKAGE-MANIFEST.sha256 over FINAL
+# content. Runs as
 # ROOT (before USER $UID) reading the root-owned cache-stage copy of the
 # committed sources (/build-src — a bind mount of the cache stage's /app, NOT
 # the agent-writable /app/src 775 copy), so nothing consumed into the owned
 # tree comes from agent-modifiable bytes during the build. Recut
 # invariant (design D5): the manifest is regenerated here over final content
 # on EVERY image build, and any successor change that lands content touching
-# /opt/air/omp inputs must recut it in the same change — a stale manifest
+# /opt/air/omp inputs must recut it in the same change (the bundle is now a
+# manifest-listed input) — a stale manifest
 # after a content change is a task-failure condition (docs/OMP_PACKAGING.md).
 COPY --link --chown=0:0 --chmod=0755 scripts/omp/ /opt/air-build/bin-omp/
 COPY --link --chown=0:0 --chmod=0644 --from=omp-unpacker /omp/out/OMP_VERSION /opt/air-build/OMP_VERSION
