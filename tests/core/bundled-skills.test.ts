@@ -153,3 +153,54 @@ Deno.test("packaging filter - a missing catalog entry fails the build (source mu
     await Deno.remove(base, { recursive: true });
   }
 });
+
+// --- Stock-image declarations (task 1.3): the declared COPY / config /
+// working-directory relationship, proven by Containerfile parse ONLY — no
+// container is built (image build acceptance stays user-owned). ---
+
+Deno.test("Containerfile - owned root installs staged catalog content, never the raw skills tree", () => {
+  const containerfile = Deno.readTextFileSync(
+    new URL("../../Containerfile", import.meta.url).pathname,
+  );
+  // The stager stage runs the application-source packaging seam…
+  assert(
+    containerfile.includes(
+      "RUN deno run --allow-read --allow-write /app/scripts/stage-owned-skills.ts /build-skills/skills /owned-skills",
+    ),
+  );
+  // …and the owned root installs ONLY from that stage's output.
+  assert(
+    /COPY --link --chown=0:0 --chmod=0755 --from=owned-skills-stager \/owned-skills\/ \/opt\/air\/skills\//
+      .test(containerfile),
+    "owned root must come from the stager stage",
+  );
+  // The old broad COPY of the raw (possibly dev-installed) tree is GONE.
+  assert(
+    !/COPY --link --chown=0:0 --chmod=0755 skills\/ \/opt\/air\/skills\//.test(containerfile),
+    "raw skills/ COPY into the owned root must not return",
+  );
+  // The OpenCode personal COPY destination stays the declared installed root.
+  assert(
+    containerfile.includes(
+      "COPY --link --chown=$UID:0 --chmod=775 skills/ /home/deno/.agents/skills/",
+    ),
+  );
+});
+
+Deno.test("Containerfile and Helm declare the same OpenCode installed root; development default stays 'skills'", () => {
+  const containerfile = Deno.readTextFileSync(
+    new URL("../../Containerfile", import.meta.url).pathname,
+  );
+  const helm = Deno.readTextFileSync(
+    new URL("../../helm/values.yaml", import.meta.url).pathname,
+  );
+  const envExample = Deno.readTextFileSync(
+    new URL("../../.env.example", import.meta.url).pathname,
+  );
+  // Stock image declares the SAME tree the COPY installs.
+  assert(containerfile.includes("ENV AGENT_SKILLS_DIR=/home/deno/.agents/skills"));
+  // Helm default matches the stock image (the drift this task removed).
+  assert(/AGENT_SKILLS_DIR: '\/home\/deno\/\.agents\/skills'/.test(helm), helm.slice(0, 400));
+  // Development default (`skills`) is unchanged in the example env.
+  assert(envExample.includes("# AGENT_SKILLS_DIR=skills"));
+});
