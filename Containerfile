@@ -80,6 +80,21 @@ RUN deno cache --lock=deno.lock src/main.ts && \
     deno cache --lock=deno.lock "npm:@node-rs/jieba"
 
 ########################################
+# Owned-skill staging stage
+# `unify-omp-skill-root-resolution` D2/D7: the owned OMP root is packaged from
+# the deployment-controlled bundled catalog + reserved `lib` ONLY, never a broad
+# COPY of whatever a development machine has installed under `skills/`. The
+# stager (daemon application source, run on the cache stage's Deno) copies each
+# catalog directory with identity rechecks (linked/escaping entries fail the
+# build) and logs every excluded non-catalog entry.
+########################################
+FROM cache AS owned-skills-stager
+
+COPY --link skills/ /build-skills/skills/
+COPY --link scripts/stage-owned-skills.ts /app/scripts/stage-owned-skills.ts
+RUN deno run --allow-read --allow-write /app/scripts/stage-owned-skills.ts /build-skills/skills /owned-skills
+
+########################################
 # OMP unpack stage
 # Official `omp` executable + notices, pinned by exact tag + per-arch SHA-256,
 # mirroring the opencode-unpacker pattern (design §12, docs/OMP_PACKAGING.md).
@@ -244,9 +259,13 @@ COPY --link --chown=$UID:0 --chmod=775 prompts/ /app/prompts/
 # Copy skills to ~/.agents/skills/ for personal skills
 COPY --link --chown=$UID:0 --chmod=775 skills/ /home/deno/.agents/skills/
 
-# OMP skill authority never comes from the agent-writable personal tree.
-# Outside /opt/air/omp's manifest scope; scripts retain executable permissions.
-COPY --link --chown=0:0 --chmod=0755 skills/ /opt/air/skills/
+# OMP skill authority never comes from the agent-writable personal tree, and
+# never from the raw source `skills/` tree either (`unify-omp-skill-root-
+# resolution` D7): the owned root installs ONLY the staged catalog content —
+# the authored bundled skills plus reserved `lib` — so a development-installed
+# external addition under `skills/` can never enter an owned image. Root-owned
+# 0755 as before; outside /opt/air/omp's manifest scope.
+COPY --link --chown=0:0 --chmod=0755 --from=owned-skills-stager /owned-skills/ /opt/air/skills/
 
 # Deployment-owned OMP artifacts — a NEW root-owned tree at /opt/air/omp,
 # outside every agent-writable root (never under /app/data, /app/prompts, or
@@ -304,6 +323,13 @@ VOLUME ["/app/prompts"]
 
 # Set HOME environment variable for agent skills discovery
 ENV HOME=/home/deno
+
+# Stock-image OpenCode installed-root declaration (`unify-omp-skill-root-resolution`
+# D1): the shipped config names the SAME tree the COPY above installs and the
+# resolver canonicalizes, so a stock image matches the Helm default instead of
+# silently resolving `skills` against the working directory. Development default
+# (`skills`) stays unchanged.
+ENV AGENT_SKILLS_DIR=/home/deno/.agents/skills
 
 ENV PATH="/home/deno/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 

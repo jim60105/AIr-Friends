@@ -232,7 +232,8 @@ env:
   # AGENT_EXTERNAL_SKILLS: '[{"repo":"jim60105/copilot-prompt","skill":"create-blog-post"}]'
 
   # Skill Auto-Approve List (comma-separated skill names for restricted/non-YOLO mode)
-  # When empty or not set, falls back to scanning the built-in skills directory.
+  # FILTER over skills observed inside the resolved trusted root (never expands
+  # beyond it; absent names grant nothing). Empty/unset = full root enumeration.
   # AGENT_AUTO_APPROVE_SKILLS: "memory-save,memory-search,memory-patch,memory-stats,memory-export,fetch-context,send-reply,edit-reply,send-file,react-message,set-reminder,list-reminders,cancel-reminder,self-research,agent-browser"
 
   # Memory Tiered Architecture
@@ -286,7 +287,9 @@ agentExternalSkills: []
 
 # -- Skill Auto-Approve List (native YAML, easier than comma-separated env var).
 # When agentAutoApproveSkills is non-empty, it takes precedence over
-# AGENT_AUTO_APPROVE_SKILLS env var.
+# AGENT_AUTO_APPROVE_SKILLS env var. The list FILTERS skills observed inside the
+# resolved trusted root: it can only narrow the inventory (OMP never expands
+# beyond the bundled catalog) and never grants skills absent from that root.
 agentAutoApproveSkills: []
   # Example (list all built-in skills + any external skills to auto-approve):
   # - "memory-save"

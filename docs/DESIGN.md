@@ -1167,6 +1167,8 @@ Environment variables: `DISCORD_CHANNEL_LURK_ENABLED`, `DISCORD_CHANNEL_LURK_INT
 
 Enables automatic installation of external Agent Skills at startup via `npx --yes --package=skills skills add`.
 
+Publications go to the explicit deployment-resolved OpenCode install root (`agent.skillsDir`) supplied by bootstrap before `AgentCore` construction — the same tree the OpenCode trusted inventory enumerates. The install command runs in a private temporary HOME (staging is independent of ambient daemon HOME) with `--copy`, and only the validated materialized directory is published: traversal, linked/escaping materialization, bundled-catalog-name collisions and the reserved `lib` entry are refused; refreshing an existing external entry replaces it wholesale; a failed skill publishes nothing. External publications therefore gain OpenCode installed-root authority only — never a second OMP trusted root and never OMP owned/critical-skill authority (see docs/AGENT_PERMISSIONS.md § Skill Auto-Approve List).
+
 **Configuration:**
 
 ```yaml
@@ -1176,7 +1178,7 @@ agent:
       skill: "create-blog-post"
 ```
 
-Skills are installed sequentially during `bootstrap()`. Individual failures are logged but do not block startup.
+Skills are installed sequentially during `bootstrap()`, awaited before `AgentCore` (and therefore the script inventory) is constructed, so a published script is enumerable in the very first session. Individual failures are logged but do not block startup — and publish nothing.
 
 Environment variable: `AGENT_EXTERNAL_SKILLS` (JSON string, e.g. `[{"repo":"owner/repo","skill":"skill-name"}]`).
 

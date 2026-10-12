@@ -3,6 +3,7 @@
 import { assertEquals, assertStringIncludes } from "@std/assert";
 import { HealthCheckServer } from "../src/healthcheck.ts";
 import { metricsRegistry } from "../src/utils/metrics.ts";
+import { DEV_SOURCE_SKILLS_ROOT } from "../src/core/skills-root.ts";
 
 // Helper to find an available port
 function getTestPort(): number {
@@ -164,9 +165,15 @@ Deno.test("HealthCheckServer - skill readiness reports missing script", async ()
   try {
     const server = new HealthCheckServer(9999);
 
+    // The trusted root must exist (an absent root is a separate, explicit
+    // `skill-root` failure); here it resolves and the registered skill's
+    // script is what is missing.
+    const skillsDir = tmpDir + "/skills";
+    await Deno.mkdir(skillsDir, { recursive: true });
+
     const mockContext = {
       config: {
-        agent: { skillsDir: tmpDir + "/nonexistent-skills" },
+        agent: { skillsDir },
         workspace: { repoPath: tmpDir },
         skillApi: undefined,
       },
@@ -187,6 +194,143 @@ Deno.test("HealthCheckServer - skill readiness reports missing script", async ()
     const scriptCheck = result.checks.find((c) => c.name === "scripts:fake-skill");
     assertEquals(scriptCheck?.ready, false);
     assertStringIncludes(scriptCheck?.message ?? "", "not found");
+  } finally {
+    await Deno.remove(tmpDir, { recursive: true });
+  }
+});
+
+// --- Resolver-scoped readiness (`unify-omp-skill-root-resolution` D4 / 4.2) ---
+
+Deno.test("HealthCheckServer - OMP readiness resolves the development owned root, not agent.skillsDir", async () => {
+  // Image/dev parity: for the OMP default agent the readiness root is the
+  // resolver's OWNED selection (here: the validated development source tree),
+  // NOT the OpenCode `agent.skillsDir` value, which points elsewhere.
+  const tmpDir = await Deno.makeTempDir();
+  try {
+    const server = new HealthCheckServer(9999);
+    const mockContext = {
+      config: {
+        agent: { skillsDir: tmpDir + "/elsewhere-skills", defaultAgentType: "omp" },
+        workspace: { repoPath: tmpDir },
+        skillApi: undefined,
+      },
+      agentCore: {
+        getSkillRegistry: () => ({ getAvailableSkills: () => ["memory-save", "fake-skill"] }),
+      },
+      platformRegistry: { isAllConnected: () => true },
+    };
+    // deno-lint-ignore no-explicit-any
+    server.setContext(mockContext as any);
+    const result = await server.checkSkillReadiness();
+
+    // The repository's real bundled script passes at the dev owned root…
+    assertEquals(result.checks.find((c) => c.name === "scripts:memory-save")?.ready, true);
+    const missing = result.checks.find((c) => c.name === "scripts:fake-skill");
+    assertEquals(missing?.ready, false);
+    // …and every script check names the OWNED root path, never skillsDir.
+    assertStringIncludes(missing?.message ?? "", DEV_SOURCE_SKILLS_ROOT);
+    assertEquals((missing?.message ?? "").includes("elsewhere-skills"), false);
+  } finally {
+    await Deno.remove(tmpDir, { recursive: true });
+  }
+});
+
+Deno.test("HealthCheckServer - owned script missing fails despite a personal copy elsewhere", async () => {
+  // Removing an owned registered script fails its readiness check even when a
+  // same-named copy exists in a personal/alternate tree: readiness consults
+  // ONLY the resolved root, and the failure message names that root.
+  const tmpDir = await Deno.makeTempDir();
+  try {
+    const root = tmpDir + "/trusted-skills";
+    await Deno.mkdir(root, { recursive: true });
+    // A personal copy that must NOT satisfy the check:
+    const personal = `${tmpDir}/personal/memory-save/scripts`;
+    await Deno.mkdir(personal, { recursive: true });
+    await Deno.writeTextFile(`${personal}/memory-save.ts`, "// copy\n");
+
+    const server = new HealthCheckServer(9999);
+    const mockContext = {
+      config: {
+        agent: { skillsDir: root },
+        workspace: { repoPath: tmpDir },
+        skillApi: undefined,
+      },
+      agentCore: {
+        getSkillRegistry: () => ({ getAvailableSkills: () => ["memory-save"] }),
+      },
+      platformRegistry: { isAllConnected: () => true },
+    };
+    // deno-lint-ignore no-explicit-any
+    server.setContext(mockContext as any);
+    const result = await server.checkSkillReadiness();
+
+    const check = result.checks.find((c) => c.name === "scripts:memory-save");
+    assertEquals(check?.ready, false);
+    assertStringIncludes(check?.message ?? "", `${root}/memory-save/scripts/memory-save.ts`);
+    assertEquals(result.allReady, false);
+  } finally {
+    await Deno.remove(tmpDir, { recursive: true });
+  }
+});
+
+Deno.test("HealthCheckServer - resolver error yields explicit skill-root failure and Not-checked scripts", async () => {
+  // An unresolvable configured root (missing directory) becomes an explicit
+  // failed `skill-root` entry — never a fallback tree — and the registered
+  // script checks are recorded as honest not-checked failures (HTTP 503 via
+  // allReady in handleReadyz).
+  const tmpDir = await Deno.makeTempDir();
+  try {
+    const server = new HealthCheckServer(9999);
+    const mockContext = {
+      config: {
+        agent: { skillsDir: tmpDir + "/absent-skills" },
+        workspace: { repoPath: tmpDir },
+        skillApi: undefined,
+      },
+      agentCore: {
+        getSkillRegistry: () => ({ getAvailableSkills: () => ["memory-save"] }),
+      },
+      platformRegistry: { isAllConnected: () => true },
+    };
+    // deno-lint-ignore no-explicit-any
+    server.setContext(mockContext as any);
+    const result = await server.checkSkillReadiness();
+
+    const rootCheck = result.checks.find((c) => c.name === "skill-root");
+    assertEquals(rootCheck?.ready, false);
+    assertStringIncludes(rootCheck?.message ?? "", "absent-skills");
+    const scriptCheck = result.checks.find((c) => c.name === "scripts:memory-save");
+    assertEquals(scriptCheck?.ready, false);
+    assertStringIncludes(scriptCheck?.message ?? "", "Not checked");
+    assertEquals(result.allReady, false);
+  } finally {
+    await Deno.remove(tmpDir, { recursive: true });
+  }
+});
+
+Deno.test("HealthCheckServer - readiness cache holds across context changes for the TTL window", async () => {
+  const tmpDir = await Deno.makeTempDir();
+  try {
+    const root = tmpDir + "/skills";
+    await Deno.mkdir(root, { recursive: true });
+    const server = new HealthCheckServer(9999);
+    const mkContext = (skills: string[]) => ({
+      config: { agent: { skillsDir: root }, workspace: { repoPath: tmpDir }, skillApi: undefined },
+      agentCore: {
+        getSkillRegistry: () => ({ getAvailableSkills: () => skills }),
+      },
+      platformRegistry: { isAllConnected: () => true },
+    });
+    // deno-lint-ignore no-explicit-any
+    server.setContext(mkContext(["memory-save"]) as any);
+    const first = await server.checkSkillReadiness();
+    // Replacement context registers a different skill list, but the 30-second
+    // cache must keep serving the previous result unchanged.
+    // deno-lint-ignore no-explicit-any
+    server.setContext(mkContext(["totally-new-skill"]) as any);
+    const second = await server.checkSkillReadiness();
+    assertEquals(second, first);
+    assertEquals(second.checks.some((c) => c.name === "scripts:totally-new-skill"), false);
   } finally {
     await Deno.remove(tmpDir, { recursive: true });
   }

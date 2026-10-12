@@ -108,6 +108,7 @@ function makeConnectorOptions(): AgentConnectorOptions {
     },
     skillRegistry: {},
     logger: {},
+    agentType: "opencode",
   };
 }
 

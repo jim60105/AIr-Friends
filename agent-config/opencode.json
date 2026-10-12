@@ -50,8 +50,6 @@
           "*": "deny",
           "||": "deny",
           "&&": "deny",
-          "deno run *skills/*/scripts/*.ts*": "allow",
-          "*/skills/*/scripts/*.ts*": "allow",
           "agent-browser *": "ask",
           "rg *": "ask",
           "cat *": "ask",
@@ -90,7 +88,9 @@
           "g++ *": "deny",
           "make *": "deny",
           "strace *": "deny",
-          "mkdir *": "deny"
+          "mkdir *": "deny",
+          "deno run *": "ask",
+          "*.ts*": "ask"
         },
         "external_directory": {
           "*": "deny",

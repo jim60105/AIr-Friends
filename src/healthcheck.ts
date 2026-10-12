@@ -4,6 +4,8 @@ import type { AppContext } from "./bootstrap.ts";
 import { createLogger } from "@utils/logger.ts";
 import { metricsRegistry, skillReadinessGauge } from "@utils/metrics.ts";
 import type { MetricsConfig } from "./types/config.ts";
+import { getDefaultAgentType } from "@acp/agent-factory.ts";
+import { resolveTrustedSkillsRoot } from "@core/skills-root.ts";
 
 const logger = createLogger("HealthCheck");
 
@@ -187,19 +189,49 @@ export class HealthCheckServer {
     const checks: SkillReadinessCheck[] = [];
 
     if (this.context) {
-      // 1. Check skill scripts existence
+      // 1. Check skill scripts existence against the DEFAULT selected agent's
+      // trusted root (`unify-omp-skill-root-resolution` D4): the SAME resolver
+      // the connector/factory use — never a daemon-cwd-relative or HOME guess.
+      // A root ConfigError becomes an explicit failed `skill-root` entry
+      // (HTTP 503 through allReady) with no fallback tree.
       const skillNames = this.context.agentCore.getSkillRegistry().getAvailableSkills();
-      const skillsDir = this.context.config.agent.skillsDir ?? "skills";
-      for (const name of skillNames) {
-        const scriptPath = `${skillsDir}/${name}/scripts/${name}.ts`;
-        try {
-          await Deno.stat(scriptPath);
-          checks.push({ name: `scripts:${name}`, ready: true });
-        } catch {
+      let skillsDir: string | undefined;
+      try {
+        skillsDir = resolveTrustedSkillsRoot(
+          getDefaultAgentType(this.context.config),
+          this.context.config.agent.skillsDir,
+        );
+      } catch (error) {
+        checks.push({
+          name: "skill-root",
+          ready: false,
+          message: `Trusted skill root unresolvable: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        });
+      }
+      if (skillsDir !== undefined) {
+        for (const name of skillNames) {
+          const scriptPath = `${skillsDir}/${name}/scripts/${name}.ts`;
+          try {
+            await Deno.stat(scriptPath);
+            checks.push({ name: `scripts:${name}`, ready: true });
+          } catch {
+            checks.push({
+              name: `scripts:${name}`,
+              ready: false,
+              message: `Script not found: ${scriptPath}`,
+            });
+          }
+        }
+      } else {
+        // The root itself failed: registered-script checks cannot be answered
+        // honestly without one, so they are recorded as explicit failures.
+        for (const name of skillNames) {
           checks.push({
             name: `scripts:${name}`,
             ready: false,
-            message: `Script not found: ${scriptPath}`,
+            message: "Not checked: trusted skill root unresolvable (see skill-root)",
           });
         }
       }

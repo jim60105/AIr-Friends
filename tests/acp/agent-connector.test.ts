@@ -667,6 +667,7 @@ function createMockConnectorWithCapabilities(
       isDM: false,
     },
     skillRegistry: null,
+    agentType: "opencode",
     logger: {
       debug: () => {},
       info: () => {},
@@ -1203,7 +1204,7 @@ function cleanupOmpPlanFixture(): void {
 }
 
 function createRecoveryHarness(params: {
-  agentType?: string;
+  agentType: "opencode" | "omp";
   env?: Record<string, string>;
   cachedGateContexts?: Record<string, Record<string, unknown>>;
   /** Row 26: real plan fixture for OMP connectors; `null` keeps a plan-less config. */
@@ -1766,4 +1767,30 @@ Deno.test("reconnectAndResumeSession - plan-less OMP connector fails the setting
   } finally {
     cleanupOmpPlanFixture();
   }
+});
+
+// Post-implementation review B6: the mandatory root-exact inventory is built
+// BEFORE the subprocess exists, and a launch configuration without the
+// selected-agent skills-root observation fails connect() EXPLICITLY — the
+// connector never re-discovers a root and never spawns a child it cannot gate.
+Deno.test("connect - missing mandatory skillsRoot observation throws with ZERO processes spawned (B6)", async () => {
+  const connector = new AgentConnector({
+    agentConfig: { command: "mock-agent", args: [], cwd: "/tmp" }, // skillsRoot deliberately absent
+    clientConfig: {
+      workingDir: "/tmp/workspace",
+      platform: "test",
+      userId: "user1",
+      channelId: "channel1",
+      isDM: false,
+    },
+    skillRegistry: null,
+    agentType: "opencode",
+    logger: { debug: () => {}, info: () => {}, warn: () => {}, error: () => {} },
+  });
+  await assertRejects(
+    () => connector.connect(),
+    Error,
+    "missing the mandatory",
+  );
+  assertEquals(connector["process"], null, "the throw precedes command.spawn()");
 });

@@ -12,6 +12,7 @@ import { WorkspaceManager } from "@core/workspace-manager.ts";
 import { SessionAuditWriter } from "@core/audit-logger.ts";
 import { Logger, LogLevel } from "@utils/logger.ts";
 import { createFilesystemTestCalls } from "./filesystem-test-calls.ts";
+import { emptySkillList } from "./skill-inventory-fixture.ts";
 import {
   decodeDestructiveIntent,
   DESTRUCTIVE_CONFORMANCE_FIXTURES,
@@ -105,7 +106,7 @@ function fixture(beforeOpen?: (path: string) => void): FilesystemFixture {
         return calls.ftruncate(fd, length);
       },
     },
-  });
+  }, emptySkillList());
   const register = (context: Partial<SessionGateContext> = {}) => {
     client.setSessionContext("acp-1", { cwd: workspace, shellSessionId: "skill-1", ...context });
   };
@@ -810,6 +811,7 @@ Deno.test("Filesystem lifecycle: dedicated creation and pooled restore register 
       clientConfig: config,
       skillRegistry: f.client["skillRegistry"],
       logger: f.client["logger"],
+      agentType: "opencode",
     });
     connector["client"] = f.client;
     let nextSession = "acp-1";
@@ -840,7 +842,12 @@ Deno.test("Filesystem lifecycle: dedicated creation and pooled restore register 
     connector.disconnect = () => Promise.resolve();
     let restored: ChatbotClient | undefined;
     connector.connect = () => {
-      restored = new ChatbotClient(f.client["skillRegistry"], f.client["logger"], config);
+      restored = new ChatbotClient(
+        f.client["skillRegistry"],
+        f.client["logger"],
+        config,
+        emptySkillList(),
+      );
       connector["client"] = restored;
       connector["connection"] = connection;
       return Promise.resolve();
@@ -882,6 +889,7 @@ Deno.test("Trusted provenance: generations never repeat across re-registration o
       clientConfig: config,
       skillRegistry: f.client["skillRegistry"],
       logger: f.client["logger"],
+      agentType: "opencode",
     });
     connector["client"] = f.client;
     const connection = {
@@ -933,7 +941,12 @@ Deno.test("Trusted provenance: generations never repeat across re-registration o
     const replayed: { session?: string; reference?: string } = {};
     let restored: ChatbotClient | undefined;
     connector.connect = () => {
-      restored = new ChatbotClient(f.client["skillRegistry"], f.client["logger"], config);
+      restored = new ChatbotClient(
+        f.client["skillRegistry"],
+        f.client["logger"],
+        config,
+        emptySkillList(),
+      );
       connector["client"] = restored;
       connector["connection"] = connection;
       connector["capabilities"] = { loadSession: true };

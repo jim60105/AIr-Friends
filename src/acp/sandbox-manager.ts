@@ -4,6 +4,7 @@ import { createLogger } from "@utils/logger.ts";
 import type { SandboxConfig } from "../types/config.ts";
 import { canConfineFilesystem, canIsolateNetwork } from "./sandbox-capabilities.ts";
 import { buildBwrapConfinement } from "./filesystem-confinement.ts";
+import type { SkillsRootObservation } from "@core/skills-root.ts";
 import {
   OMP_FOREIGN_PROVIDER_ENV_SELECTORS,
   OMP_SETTINGS_DISCOVERY_ENV_SELECTORS,
@@ -162,6 +163,15 @@ export class SandboxManager {
     originalArgs: string[],
     baseEnv: Record<string, string>,
     cwd: string,
+    /**
+     * `unify-omp-skill-root-resolution` D4: the factory's canonical observation
+     * of the deployment trusted skill-script root for the SELECTED agent type.
+     * Filesystem confinement mounts it read-only at its literal path (the
+     * builder validates it against the mandatory writables). Absent only when
+     * the caller has no selected root — confinement then behaves as before,
+     * with no invented fallback root.
+     */
+    skillsRoot?: SkillsRootObservation,
   ): SpawnOptions {
     const env = this.config.filterEnv ? this.buildFilteredEnv(agentType, baseEnv) : baseEnv;
 
@@ -205,6 +215,7 @@ export class SandboxManager {
           sessionWorkspace: cwd,
           tmpDir,
           agentWorkspace,
+          skillRoot: skillsRoot?.root,
           shareNet: !wantsNetworkIsolation,
         },
         command,

@@ -67,6 +67,14 @@ interface ChatSession {
   id: string;
   connector: AgentConnector;
   acpSessionId: string;
+  /**
+   * The agent ACTUALLY selected for this chat (`unify-omp-skill-root-
+   * resolution` D1): the prompt render below resolves the trusted root for
+   * THIS value — never the deployment default — so a dashboard override
+   * cannot make the rendered `skillsDir` diverge from the connector's
+   * inventory root.
+   */
+  agentType: AgentType;
   messageCount: number;
   sseController: ReadableStreamDefaultController<Uint8Array> | null;
   idleTimer: ReturnType<typeof setTimeout> | null;
@@ -673,6 +681,7 @@ export class DashboardServer {
         isDM: true,
         yolo: false,
         autoApproveSkills: this.deps.appConfig.agent.autoApproveSkills,
+        skillsDir: this.deps.appConfig.agent.skillsDir,
         allowedWriteExtensions: this.deps.appConfig.agent.sandbox?.allowedWriteExtensions,
         logAgentStreamChunks: this.deps.appConfig.logging?.agentStreamChunks ?? false,
       };
@@ -713,6 +722,7 @@ export class DashboardServer {
         id: chatSessionId,
         connector,
         acpSessionId,
+        agentType,
         messageCount: 0,
         sseController: null,
         idleTimer: null,
@@ -770,14 +780,16 @@ export class DashboardServer {
 
     // On first message, prepend rendered system prompt
     if (this.chatSession.messageCount === 1) {
-      // Resolve the trusted skill-script root OUTSIDE the prompt-load
-      // fallback: an unresolvable root fails the request explicitly rather
-      // than silently degrading to a skill-less prompt
+      // Resolve the trusted skill-script root for the ACTUALLY SELECTED agent
+      // (`unify-omp-skill-root-resolution` D1: a dashboard override stays
+      // root-identical to the connector's own observation), OUTSIDE the
+      // prompt-load fallback: an unresolvable root fails the request
+      // explicitly rather than silently degrading to a skill-less prompt
       // (`repair-omp-owned-skill-handoff` — no silent fallbacks). The web-chat
       // template itself forbids skill use, but the render contract is
       // uniform: every TemplateVariables carries the resolved root.
       const skillsDir = resolveTrustedSkillsRoot(
-        getDefaultAgentType(this.deps.appConfig),
+        this.chatSession.agentType,
         this.deps.appConfig.agent.skillsDir,
       );
       try {

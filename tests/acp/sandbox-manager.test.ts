@@ -341,3 +341,45 @@ Deno.test("SandboxManager - cwd is passed through", () => {
   const opts = sandbox.buildSpawnOptions("opencode", "opencode", [], {}, "/my/workspace");
   assertEquals(opts.cwd, "/my/workspace");
 });
+
+Deno.test("SandboxManager - confinement mounts the selected skills root read-only", () => {
+  // `unify-omp-skill-root-resolution` D4/4.1: the factory's observation is
+  // threaded to the bwrap builder, which mounts the root at its literal path.
+  withCapabilities(false, true, () => {
+    const sandbox = new SandboxManager(
+      createSandboxConfig({
+        filesystemConfinement: true,
+        egressProxy: false,
+        unrestrictedEgress: true,
+        filterEnv: false,
+      }),
+    );
+    const opts = sandbox.buildSpawnOptions("omp", "omp", ["acp"], {}, "/ws", {
+      root: "/opt/air/skills",
+      identity: { dev: 1, ino: 2 },
+    });
+    assertEquals(opts.command, "bwrap");
+    let found = false;
+    for (let i = 0; i < opts.args.length - 2; i++) {
+      if (opts.args[i] === "--ro-bind-try" && opts.args[i + 1] === "/opt/air/skills") found = true;
+    }
+    assertEquals(found, true, "selected root mounted read-only at its literal path");
+  });
+});
+
+Deno.test("SandboxManager - no skills root invents no fallback mount", () => {
+  withCapabilities(false, true, () => {
+    const sandbox = new SandboxManager(
+      createSandboxConfig({
+        filesystemConfinement: true,
+        egressProxy: false,
+        unrestrictedEgress: true,
+        filterEnv: false,
+      }),
+    );
+    const opts = sandbox.buildSpawnOptions("opencode", "opencode", ["--acp"], {}, "/ws");
+    assertEquals(opts.command, "bwrap");
+    assertEquals(opts.args.join(" ").includes("/opt/air/skills"), false);
+    assertEquals(opts.args.join(" ").includes("/app/skills"), false);
+  });
+});

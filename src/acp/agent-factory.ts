@@ -27,6 +27,7 @@ import {
 import { sanitizeOmpDiscoveryEnv } from "./sandbox-manager.ts";
 import { createLogger } from "@utils/logger.ts";
 import { resolveSkillJwtDir } from "@utils/skill-jwt.ts";
+import { observeTrustedSkillsRoot } from "@core/skills-root.ts";
 import { join, resolve } from "@std/path";
 import { parse as parseYaml } from "@std/yaml";
 
@@ -43,6 +44,16 @@ export function createAgentConfig(
   sessionId?: string,
   poolKey?: string,
 ): AgentConfig {
+  // `unify-omp-skill-root-resolution` D1: the trusted skill-script root for the
+  // SELECTED agent type is observed ONCE here — before subprocess creation — and
+  // rides the AgentConfig as the mandatory internal `skillsDir` render input:
+  // the confinement builder mounts THAT observation read-only and the connector
+  // builds its script inventory from it. No consumer re-derives from HOME or
+  // `Deno.cwd()/skills`, and an unresolvable root fails here explicitly before
+  // the child is ever spawned. Dashboard agent-type overrides flow through this
+  // same call, so the root is always the selected agent's own.
+  const skillsRoot = observeTrustedSkillsRoot(type, appConfig.agent.skillsDir);
+
   // Build the base (unfiltered) config for the agent type
   const baseConfig = buildBaseAgentConfig(
     type,
@@ -64,6 +75,7 @@ export function createAgentConfig(
       baseConfig.args,
       baseConfig.env ?? {},
       baseConfig.cwd,
+      skillsRoot,
     );
     if (type === "omp" && baseConfig.settingsSourcePlan) {
       // Belt-and-braces: mandatory sanitization runs inside buildSpawnOptions;
@@ -79,6 +91,7 @@ export function createAgentConfig(
       cwd: spawnOpts.cwd,
       env: spawnOpts.env,
       settingsSourcePlan: baseConfig.settingsSourcePlan,
+      skillsRoot,
     };
   }
 
@@ -91,7 +104,7 @@ export function createAgentConfig(
     finalizeOmpSpawnEnvironment(env, baseConfig.settingsSourcePlan);
     baseConfig.env = env;
   }
-  return baseConfig;
+  return { ...baseConfig, skillsRoot };
 }
 
 /**
