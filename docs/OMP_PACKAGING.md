@@ -64,18 +64,18 @@ is verified with `sha256sum -c -` BEFORE any install/COPY consumption.
 
 ## 3. Install contract and ownership
 
-| Image path                              | Source                                       | Owner:group | Mode                   |
-| --------------------------------------- | -------------------------------------------- | ----------- | ---------------------- |
-| `/usr/local/bin/omp`                    | `omp-unpacker` stage (checksum-verified)     | `0:0`       | 0755                   |
-| `/licenses/omp/LICENSE`                 | same stage                                   | `0:0`       | 0644                   |
-| `/licenses/omp/THIRD-PARTY-NOTICES.txt` | same stage                                   | `0:0`       | 0644                   |
-| `/opt/air/omp/config/restricted.yml`    | `agent-config/omp/restricted.yml`            | `0:0`       | 0644                   |
-| `/opt/air/omp/config/native-yolo.yml`   | `agent-config/omp/native-yolo.yml`           | `0:0`       | 0644                   |
-| `/opt/air/omp/config/models.yml`        | `agent-config/omp/models.yml`                | `0:0`       | 0644                   |
-| `/opt/air/omp/prompt/SYSTEM.md`         | `prompts/system_prompt_override.md`          | `0:0`       | 0644                   |
-| `/opt/air/omp/extension/index.js`       | build-time generated ESM bundle (C3)         | `0:0`       | 0644                   |
-| `/opt/air/omp/PACKAGE-MANIFEST.sha256`  | regenerated at every image build             | `0:0`       | 0644                   |
-| `/opt/air/skills/**`                    | `skills/` (row 28 owned skill root)          | `0:0`       | 0755 files             |
+| Image path                              | Source                                   | Owner:group | Mode       |
+| --------------------------------------- | ---------------------------------------- | ----------- | ---------- |
+| `/usr/local/bin/omp`                    | `omp-unpacker` stage (checksum-verified) | `0:0`       | 0755       |
+| `/licenses/omp/LICENSE`                 | same stage                               | `0:0`       | 0644       |
+| `/licenses/omp/THIRD-PARTY-NOTICES.txt` | same stage                               | `0:0`       | 0644       |
+| `/opt/air/omp/config/restricted.yml`    | `agent-config/omp/restricted.yml`        | `0:0`       | 0644       |
+| `/opt/air/omp/config/native-yolo.yml`   | `agent-config/omp/native-yolo.yml`       | `0:0`       | 0644       |
+| `/opt/air/omp/config/models.yml`        | `agent-config/omp/models.yml`            | `0:0`       | 0644       |
+| `/opt/air/omp/prompt/SYSTEM.md`         | `prompts/system_prompt_override.md`      | `0:0`       | 0644       |
+| `/opt/air/omp/extension/index.js`       | build-time generated ESM bundle (C3)     | `0:0`       | 0644       |
+| `/opt/air/omp/PACKAGE-MANIFEST.sha256`  | regenerated at every image build         | `0:0`       | 0644       |
+| `/opt/air/skills/**`                    | `skills/` (row 28 owned skill root)      | `0:0`       | 0755 files |
 
 Ownership rationale (deliberate divergences from the image's `$UID:0` 775
 pattern, both documented in Containerfile comments):
@@ -113,12 +113,12 @@ signal and dev behavior is unchanged. The launch assembly
 second path convention — and row 9's fail-closed presence checks (and their
 error messages) stay exactly as shipped.
 
-| Export                             | Image path (when it exists)        | Dev fallback                                                          |
-| ---------------------------------- | ---------------------------------- | --------------------------------------------------------------------- |
-| `OMP_IMAGE_ROOT`                   | `/opt/air/omp`                     | — (constant)                                                          |
-| `resolveOmpTrustedExtensionPath()` | `/opt/air/omp/extension/index.js`  | `build/omp-extension/index.js` (`OMP_TRUSTED_EXTENSION_BUNDLE_PATH` — the GENERATED development bundle; `deno task bundle:omp-extension` cuts it and the launch preflight fails closed with that remedy until it exists) |
-| `resolveOmpConfigPath(devPath)`    | `/opt/air/omp/config/<basename>`   | `devPath` (e.g. `agent-config/omp/restricted.yml`)                    |
-| `resolveOmpSystemPromptPath()`     | `/opt/air/omp/prompt/SYSTEM.md`    | `/app/prompts/system_prompt_override.md`                              |
+| Export                             | Image path (when it exists)       | Dev fallback                                                                                                                                                                                                             |
+| ---------------------------------- | --------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `OMP_IMAGE_ROOT`                   | `/opt/air/omp`                    | — (constant)                                                                                                                                                                                                             |
+| `resolveOmpTrustedExtensionPath()` | `/opt/air/omp/extension/index.js` | `build/omp-extension/index.js` (`OMP_TRUSTED_EXTENSION_BUNDLE_PATH` — the GENERATED development bundle; `deno task bundle:omp-extension` cuts it and the launch preflight fails closed with that remedy until it exists) |
+| `resolveOmpConfigPath(devPath)`    | `/opt/air/omp/config/<basename>`  | `devPath` (e.g. `agent-config/omp/restricted.yml`)                                                                                                                                                                       |
+| `resolveOmpSystemPromptPath()`     | `/opt/air/omp/prompt/SYSTEM.md`   | `/app/prompts/system_prompt_override.md`                                                                                                                                                                                 |
 
 The launch face is NEVER the raw canonical source: `src/acp/omp/extension/`
 (pinned by `OMP_TRUSTED_EXTENSION_PATH`) is the canonical SOURCE origin and
@@ -140,7 +140,9 @@ owned tree is present; its digest is covered by the manifest either way.
 `index.js` installed at `/opt/air/omp/extension/index.js` (and, in dev,
 `build/omp-extension/index.js`, gitignored generated output):
 
-`deno bundle --frozen=true --format esm --keep-names` runs with `cwd=src` on
+`deno bundle --frozen=true --format esm --keep-names` runs with `cwd` set to
+the passed source root (repo root in dev, `/build-src` in the image — where
+`deno.json`/`deno.lock` resolve) on
 the canonical entry `src/acp/omp/extension/index.ts` against the committed
 `deno.lock`. Frozen mode refuses lockfile changes; `--keep-names` preserves
 symbol identity; no minification, so the bundle stays auditable and the

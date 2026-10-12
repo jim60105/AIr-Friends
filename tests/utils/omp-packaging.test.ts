@@ -11,7 +11,11 @@ import { assert, assertEquals, assertStringIncludes } from "@std/assert";
 // The generated-bundle audit predicate is imported from its production
 // module — tests exercise the EXACT function the bundler runs, never a
 // re-typed copy.
-import { auditEmittedBundle, emittedExternals } from "../../scripts/omp/bundle-audit.ts";
+import {
+  auditEmittedBundle,
+  emittedExternals,
+  emittedRequireEdges,
+} from "../../scripts/omp/bundle-audit.ts";
 import {
   OMP_IMAGE_CONFIG_ROOT,
   OMP_IMAGE_EXTENSION_ROOT,
@@ -556,6 +560,21 @@ Deno.test("extension bundle - emitted edges are exactly the host facade and nati
     const externals = emittedExternals(bundle);
     assertEquals(externals, ["@sinclair/typebox", "node:dns/promises"]);
     assertEquals(auditEmittedBundle(bundle), []);
+    // Runtime-require edges are audited too: the Deno-guarded metadata
+    // backends reach node:fs through globalThis.require (bundler-renamed
+    // aliases included) — nothing else may arrive through that door.
+    assertEquals(emittedRequireEdges(bundle), ["node:fs"]);
+    // Cross-line static clauses must not dodge the audit either: the
+    // newline-tolerant window sees no specifier beyond the strict set.
+    const loose = [...bundle.matchAll(
+      /(?:^|[\s;}])(?:import|export)\b[^"']{0,400}?\bfrom\s*["']([^"']+)["']/g,
+    )].map((m) => m[1]!);
+    // The loose scan is per-occurrence; compare unique specifiers.
+    assertEquals(
+      [...new Set(loose)].sort(),
+      externals,
+      "loose cross-line scan agrees with the strict set",
+    );
     // The canonical host-resolved spelling is retained — never npm: form.
     assert(bundle.includes(`from "@sinclair/typebox"`), "bare facade specifier");
     assertEquals(bundle.includes(`from "npm:@sinclair/typebox"`), false, "no npm: pin emitted");
@@ -613,6 +632,39 @@ Deno.test("bundle audit - production predicate fails every edge class outside th
   );
   assertEquals(dyn.length, 1);
   assertStringIncludes(dyn[0]!, "runtime-download edge");
+  // Cross-line static import/export-from clauses fail the audit.
+  const crossLine = auditEmittedBundle(
+    `import {\n  a,\n  b,\n} from "jsr:@std/encoding@1.0.0";\nexport {\n  c,\n} from "left-pad";\nconsole.log(a, b, c);\n`,
+  );
+  assertEquals(crossLine.length, 2);
+  assert(crossLine.some((p) => p.includes("jsr:@std/encoding@1.0.0")), "cross-line import named");
+  assert(crossLine.some((p) => p.includes("left-pad")), "cross-line re-export named");
+  // export-star / re-export forms fail the audit.
+  const reExport = auditEmittedBundle(`export * from "npm:evil@1.0.0";\n`);
+  assertEquals(reExport.length, 1);
+  assertStringIncludes(reExport[0]!, "npm: package edge");
+  // Non-static (template-literal) dynamic import specifiers cannot be
+  // audited and fail closed.
+  const computed = auditEmittedBundle(
+    `const m = await import(\`jsr:@std/${"fs"}@1.0.0\`);\nconsole.log(m);\n`,
+  );
+  assertEquals(computed.length, 1);
+  assertStringIncludes(computed[0]!, "non-static specifier");
+  // Runtime require edges: literal and bundler-aliased globalThis.require
+  // forms; only node:/bun: builtins pass.
+  const reqBad = auditEmittedBundle(
+    `const require2 = globalThis.require;\nconst j = require2("json-nothing");\nconst r = require("npm:evil");\nconsole.log(j, r);\n`,
+  );
+  assertEquals(reqBad.length, 2);
+  assert(reqBad.some((p) => p.includes("json-nothing")), "aliased require named");
+  assert(reqBad.some((p) => p.includes("npm:evil")), "literal require named");
+  assertEquals(
+    auditEmittedBundle(
+      `const req = globalThis.require;\nconst fs = req("node:fs");\nconsole.log(fs);\n`,
+    ),
+    [],
+    "aliased node: require passes clean",
+  );
 });
 
 Deno.test("extension bundle - load parity: generated entry and dev source fail closed identically", async () => {
@@ -755,7 +807,13 @@ console.log(r);
         err.includes("pre-import exclusion not established"),
       `bundle reached the discovery gate without Deno (stdout=${out} stderr=${err})`,
     );
-    assertEquals(err.includes("@sinclair/typebox"), false, "facade never left unresolved");
+    // Resolution failure has its own unmistakable shape; a bare mention of
+    // the specifier inside the discovery-gate stack trace is not one.
+    assertEquals(
+      /Cannot find (package|module)['\s]+["']?@sinclair\/typebox/.test(out + err),
+      false,
+      "facade never left unresolved",
+    );
   } finally {
     await Deno.remove(fixture, { recursive: true });
     await Deno.remove(target, { recursive: true });

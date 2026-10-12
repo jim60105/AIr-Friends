@@ -13,6 +13,7 @@ C2 is a prerequisite; serialize after C1 (C3). Run build/format/lint/affected te
 ## 2. Runtime-compatible resolver boundary
 
 - [x] 2.1 Replace Deno-only native DNS with the Node DNS interface and retain transport injection/literal-IP behavior and the existing SSRF classifier. Verify dual-stack, one-family no-record, empty/all-failure, and private-answer cases produce the existing authorization outcomes.
+  <!-- One-family resolver FAULT (e.g. SERVFAIL) stays indistinguishable from no-records — byte-parity with the superseded Deno.resolveDns path, which swallowed identically; fail-closed empty-set paths and the single classifier verified unchanged. Post-review disposition: recording the swallowed error class for diagnosability is deferred, behavior unchanged. -->
 - [x] 2.2 Audit reachable extension defaults for runtime-only Deno calls and provide narrow supported adapters through existing metadata seams where required, without a Deno polyfill or weakened sink. Update affected behavioral coverage, network docs, changelog, and rebuilt owned digests; verify unsupported required runtime observation still denies rather than silently bypassing policy.
   <!-- Bundle audit: every reachable Deno.* call is typeof-Deno-guarded with node:fs/process fallbacks (bootstrap env/cwd, safeCwd, executable-sources node-fs-first) or sits on Deno-only daemon paths outside the bundle (filesystem-roots/settings-sources tree-shaken out); required-observation denial (executable-sources fail-closed) unchanged. Owned digests rebuild = the manifest recut under 1.3. -->
 

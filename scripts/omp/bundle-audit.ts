@@ -34,16 +34,44 @@ export function isAllowedExternal(spec: string): boolean {
 }
 
 /**
- * Emitted dependency edges: static import/export-from specifiers plus dynamic
- * import() literal specifiers. A generated ESM bundle resolves everything
- * else internally, so anything matched here is a load-time external.
+ * Emitted dependency edges: static import/export-from specifiers (newline-
+ * tolerant between the clause and `from`, quote-barred so the window can
+ * never straddle a string literal) plus dynamic import() literal specifiers.
+ * A generated ESM bundle resolves everything else internally, so anything
+ * matched here is a load-time external.
  */
 export function emittedExternals(text: string): string[] {
   const out = new Set<string>();
   const staticRe = /(?:^|[\s;}])(?:import|export)\b[^;\n]*?\bfrom\s*["']([^"']+)["']/g;
+  // Cross-line form: `import {\n  a,\n} from "spec"` — a future bundler
+  // output shape must not silently dodge the audit. [^"'] cannot cross a
+  // quote, so this window can never stitch two unrelated statements.
+  const multilineStaticRe =
+    /(?:^|[\s;}])(?:import|export)\b[^"']{0,400}?\bfrom\s*["']([^"']+)["']/g;
   const bareImportRe = /(?:^|[\s;}])import\s+["']([^"']+)["']/g;
   const dynRe = /(?:await\s+)?import\(\s*["']([^"']+)["']\s*\)/g;
-  for (const re of [staticRe, bareImportRe, dynRe]) {
+  for (const re of [staticRe, multilineStaticRe, bareImportRe, dynRe]) {
+    for (const m of text.matchAll(re)) out.add(m[1]!);
+  }
+  return [...out].sort();
+}
+
+/**
+ * Runtime `require(...)` edges: literal `require("spec")` calls plus the
+ * aliases `deno bundle` emits when source binds `globalThis.require` to a
+ * local (`const req = globalThis.require; req("node:fs")`). These load at
+ * runtime exactly like static edges, so the every-edge contract covers them;
+ * only documented native builtins may arrive through this door — the host
+ * facade contract is a VALUE IMPORT remap, not a require remap.
+ */
+export function emittedRequireEdges(text: string): string[] {
+  const names = new Set<string>(["require"]);
+  for (
+    const m of text.matchAll(/(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*globalThis\.require\b/g)
+  ) names.add(m[1]!);
+  const out = new Set<string>();
+  for (const name of names) {
+    const re = new RegExp(`(?:^|[^\\w.$])${name}\\s*\\(\\s*["']([^"']+)["']\\s*\\)`, "g");
     for (const m of text.matchAll(re)) out.add(m[1]!);
   }
   return [...out].sort();
@@ -53,10 +81,22 @@ export function emittedExternals(text: string): string[] {
  * The production audit over generated bundle text. Returns one problem line
  * per boundary violation (empty = native-loadable). The `@std/*` provenance
  * check (the inlined locked-closure claim) is bundle-extension.ts's own
- * build step; this function owns the EDGE boundary.
+ * build step; this function owns the EDGE boundary — every static, dynamic,
+ * and runtime-require edge, plus non-static (template-literal) dynamic import
+ * specifiers, which cannot be audited and therefore fail closed.
  */
 export function auditEmittedBundle(text: string): string[] {
   const problems: string[] = [];
+  // A computed import specifier (`import(\`…\`)`) is unauditable — whatever
+  // it resolves to at load never passed this boundary: fail closed.
+  if (/import\(\s*`/.test(text)) {
+    problems.push("emitted dynamic import with a non-static specifier cannot be audited");
+  }
+  for (const spec of emittedRequireEdges(text)) {
+    if (!spec.startsWith("node:") && !spec.startsWith("bun:")) {
+      problems.push(`emitted runtime require edge ${spec} is outside the native-builtin boundary`);
+    }
+  }
   const externals = emittedExternals(text);
   for (const spec of externals) {
     if (isAllowedExternal(spec)) continue;
