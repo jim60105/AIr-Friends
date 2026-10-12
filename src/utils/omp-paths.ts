@@ -12,11 +12,28 @@ import { basename, join, resolve } from "@std/path";
 import type { OmpPermissionMode } from "../acp/omp-settings.ts";
 
 /**
- * Pinned development-tree source path constant for the deployment-owned trusted extension.
- * Shared with downstream rows (12, 13, 14b, 17, 18, 20).
- * Packaging (row 20) installs this under /opt/air/omp/extension/index.ts.
+ * Canonical SOURCE origin of the deployment-owned trusted extension. Shared with
+ * downstream rows (12, 13, 14b, 17, 18, 20).
+ *
+ * `package-bun-compatible-omp-extension` (C3): this is the single-owned canonical
+ * SOURCE, not a loadable entry. The artifact that development launch and image
+ * installation actually consume is the generated native-loadable bundle —
+ * `OMP_TRUSTED_EXTENSION_BUNDLE_PATH` in development,
+ * `<OMP_IMAGE_EXTENSION_ROOT>/index.js` in the image. Canonical extension-root and
+ * source-origin observations of the SELECTED artifact identify that generated file;
+ * nothing launches this raw Deno-only source tree any more.
  */
 export const OMP_TRUSTED_EXTENSION_PATH = "src/acp/omp/extension/index.ts";
+
+/**
+ * Deterministic GENERATED development entry for the trusted extension (C3 D2): the
+ * single ESM bundle `scripts/omp/bundle-omp-extension.sh` emits from canonical
+ * source plus locked dependencies (frozen lock; `deno task bundle:omp-extension`
+ * builds it). Development launch and the image consume the SAME artifact contract;
+ * a missing generated development entry fails the launch preflight with the build
+ * remedy — the resolver NEVER falls back to the raw Deno-only source tree.
+ */
+export const OMP_TRUSTED_EXTENSION_BUNDLE_PATH = "build/omp-extension/index.js";
 
 /**
  * Root-owned image tree installed by the OMP packaging steps (design D3/D4:
@@ -60,11 +77,18 @@ export const OMP_SYSTEM_PROMPT_MOUNT_PATH = "/app/prompts/system_prompt_override
 
 /**
  * Resolve the contracted trusted-extension entry to its image path when the
- * installed tree exists, otherwise the pre-existing development-tree path —
- * the single exported dev→image seam; consumers launch with the resolver's
- * output verbatim and no second path convention.
+ * installed tree exists, otherwise the deterministic GENERATED development
+ * entry (`OMP_TRUSTED_EXTENSION_BUNDLE_PATH`) — the single exported
+ * dev→image seam (image face: `<root>/index.js`, the same generated artifact
+ * contract installed by packaging; development face: the bundle the
+ * repository bundling command emits). The resolver NEVER selects the raw
+ * Deno-only source tree: a missing generated development entry surfaces as
+ * the launch preflight's fail-closed error naming the build remedy, so no
+ * alternative extension-root convention exists to fall back to. Consumers
+ * launch with the resolver's output verbatim and no second path convention.
  *
- * The resolver itself never raises: absence simply selects the dev fallback.
+ * The resolver itself never raises: absence simply selects the generated
+ * development entry (whose absence the preflight then rejects).
  * Existence injection keeps unit tests fixture-driven; production callers use
  * the real filesystem.
  */
@@ -75,8 +99,8 @@ export function resolveOmpTrustedExtensionPath(options: {
   imageExtensionRoot?: string;
 } = {}): string {
   const exists = options.exists ?? defaultExists;
-  const imageEntry = join(options.imageExtensionRoot ?? OMP_IMAGE_EXTENSION_ROOT, "index.ts");
-  return exists(imageEntry) ? imageEntry : OMP_TRUSTED_EXTENSION_PATH;
+  const imageEntry = join(options.imageExtensionRoot ?? OMP_IMAGE_EXTENSION_ROOT, "index.js");
+  return exists(imageEntry) ? imageEntry : OMP_TRUSTED_EXTENSION_BUNDLE_PATH;
 }
 
 /**

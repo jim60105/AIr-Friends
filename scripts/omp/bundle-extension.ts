@@ -1,58 +1,53 @@
 // scripts/omp/bundle-extension.ts — build-time trusted-extension bundler
-// (OpenSpec `package-pinned-omp-runtime`; design D5 extension dependency closure).
+// (OpenSpec `package-pinned-omp-runtime` D5, retargeted by
+// `package-bun-compatible-omp-extension` C3: the pinned OMP executable embeds
+// Bun and its legacy extension loader does NOT consume a sidecar Deno import
+// map, so the mirror-copy + generated deno.json mechanism is replaced by a
+// single reproducible ESM bundle built at packaging time from canonical
+// source and locked dependencies).
 //
-// Assembles the FINAL trusted-extension tree at <target> (the image's
-// /opt/air/omp/extension) from committed sources under <src> (the repo
-// checkout; in the image, the same /app/src the daemon itself consumes).
-// Mechanism: a REPO-RELATIVE MIRROR copy, not a fork.
+// Mechanism: ONE generated artifact.
 //
-//   - Every bundled module is copied VERBATIM at its repo-relative path under
-//     <target>/mirror/ (content-faithful: no rewriting, templating, or
-//     augmentation anywhere — dev and image load byte-identical sources).
-//   - The ONLY generated module is the image-mode entry adapter
-//     <target>/index.ts: it resolves row 9's contracted image path
-//     /opt/air/omp/extension/index.ts and forwards the load (named + default
-//     exports, identical load-time side effects) to the verbatim mirror entry
-//     at mirror/src/acp/omp/extension/index.ts.
-//   - A generated deno.json import map at <target>/deno.json pins the ONE
-//     external specifier family the mirror closure needs (@std/*) to exact
-//     versions from the committed deno.lock, so the installed tree resolves
-//     every import inside itself with no deno.json walk-out and no network at
-//     load time.
+//   - `deno bundle --frozen --format esm` (no minify, names kept) inlines the
+//     canonical `@std/*`/local VALUE closure of the trusted-extension entry
+//     into <target>/index.js — the single file development launch and image
+//     installation both consume (src/utils/omp-paths.ts exports the mapping).
+//     `--frozen` enforces the committed deno.lock: locked dependencies are
+//     checked, never re-resolved, and no runtime download occurs at load.
+//   - The ONE documented external is the exact bare `@sinclair/typebox`
+//     schema-builder facade (align-omp-native-tool-contracts D1): the pinned
+//     legacy loader host-resolves that exact bare value import to the
+//     runtime's own `Type` facade BEFORE any import-map lookup, so the bundle
+//     keeps the canonical host-resolved spelling and the build deliberately
+//     installs NO npm:/jsr: pin for it (a pin would bypass the host facade).
+//     Subpaths of the package are NOT remapped by the host and stay outside
+//     the boundary. Documented native builtins (`node:`/`bun:`) remain
+//     external because the native runtime provides them. Every OTHER emitted
+//     dependency edge — a leftover JSR URL, an import-map alias (@std/*,
+//     @acp/*, @utils/*), an npm: package, or any unapproved bare specifier —
+//     fails the build: the boundary is enforced on the EMITTED bundle, never
+//     trusted from the source walk.
+//   - Auditable provenance is retained: no minification (deno bundle's
+//     `// deno:<locked-url>` provenance comments survive) and the generated
+//     file carries a deterministic source/input digest inventory header — the
+//     canonical entry and every locked external dependency fact this bundle
+//     was cut from, plus the bundle's own byte digest recorded by the
+//     PACKAGE-MANIFEST recut (recut invariant D5 unchanged: installed inputs
+//     changed => manifest recut in the same change).
 //
-// Because the mirror preserves the repo-relative layout, the image-mode face
-// of the re-export barrel (extension/_daemon/mod.ts) IS the committed file —
-// no specifier mapping is required or performed. Dev mode resolves the same
-// committed sources through the barrel's dev specifiers; the copy direction is
-// daemon tree -> installed extension only, never reverse (D5).
-//
-// Bundled set = the VALUE-import closure walked from the entry (runtime
-// surfaces; the loader fully erases `import type` declarations and type-only
-// specifier clauses, so TYPE-only-only daemon modules — e.g. the /app daemon
-// surface behind client.ts types — are
-// deliberately NOT installed). Every VALUE edge must resolve INSIDE the
-// installed tree (fail closed otherwise), and any external bare VALUE
-// specifier outside the @std/* family fails the build — the boundary is
-// enforced, never trusted. The ONE documented exception is the host-facade
-// external below (the exact bare `@sinclair/typebox` specifier,
-// align-omp-native-tool-contracts D1: the pinned legacy loader host-resolves
-// it to the runtime's own schema-builder facade); the rule stays enforced for
-// everything else, INCLUDING subpaths of the facade package, which the
-// pinned loader does NOT remap. The bundled set is DERIVED from the walk,
-// never a hand-maintained list: a successor change that extends the closure
-// changes the derived set AND forces the PACKAGE-MANIFEST.sha256 recut in the
-// same change (recut invariant D5).
-//
-// Serial-composition fact (recorded in the manifest header; recut invariant):
-// serial composition 12 -> 13 -> 14b -> 17 -> 18 landed; no reserved
-// public-code-search slot remains (removed by remove-omp-public-code-search).
+// Canonical source stays single-owned: this script READS the committed tree
+// and writes only the generated bundle; there is no independently edited
+// mirror or augmentation (content-faithfulness now means deterministic
+// transformation of canonical source plus locked dependencies, per the
+// amended container-packaging requirement).
 //
 // Usage (via scripts/omp/bundle-omp-extension.sh):
-//   deno run --allow-read --allow-write bundle-extension.ts \
+//   deno run --allow-read --allow-write --allow-run bundle-extension.ts \
 //     <src-root> <extension-target> <repo-deno-lock>
 
 const [src, target, denoLockPath] = Deno.args;
 const ENTRY = "src/acp/omp/extension/index.ts";
+const BUNDLE_NAME = "index.js";
 
 for (const [name, v] of [["src", src], ["target", target], ["deno.lock", denoLockPath]] as const) {
   if (!v) {
@@ -63,293 +58,96 @@ for (const [name, v] of [["src", src], ["target", target], ["deno.lock", denoLoc
   }
 }
 
-interface Dep {
-  ref: string;
-  value: boolean;
+// The native-loadability boundary (the ONE host-facade external, documented
+// native builtins, and the emitted-edge audit) lives in bundle-audit.ts
+// beside this script so packaging tests exercise the exact production
+// predicate on synthetic bundle text.
+import { auditEmittedBundle, emittedExternals, HOST_FACADE_EXTERNAL } from "./bundle-audit.ts";
+
+// The bundle is cut from canonical source at <src> with the repo's own deno
+// configuration and committed lock (cwd = <src> so both resolve there). The
+// frozen-lock flag makes any drift between deno.json ranges and deno.lock a
+// build failure rather than a silent re-resolution.
+const bundlePath = `${target}/${BUNDLE_NAME}`;
+await Deno.mkdir(target, { recursive: true });
+
+const bundle = await new Deno.Command(Deno.execPath(), {
+  args: [
+    "bundle",
+    "--frozen=true",
+    "--format",
+    "esm",
+    "--keep-names",
+    "--external",
+    HOST_FACADE_EXTERNAL,
+    "--output",
+    bundlePath,
+    ENTRY,
+  ],
+  cwd: src,
+  stdout: "piped",
+  stderr: "piped",
+}).output();
+if (bundle.code !== 0) {
+  console.error(`deno bundle failed:\n${new TextDecoder().decode(bundle.stderr)}`);
+  Deno.exit(1);
 }
 
-/**
- * The ONE non-@std external the trusted-extension closure may reference: the
- * exact BARE schema-builder facade specifier (align-omp-native-tool-contracts
- * D1). The pinned legacy loader host-resolves this exact bare value import to
- * the runtime's own `Type` facade, so the generated import map deliberately
- * does NOT pin it — an installed `npm:`/jsr pin would bypass the documented
- * host remap and add an unowned module to the load-time graph. Subpaths of
- * the package are NOT remapped by the host and therefore stay outside the
- * boundary (checked on the FULL specifier, since package collapsing would
- * otherwise admit `@sinclair/typebox/value`).
- */
-const HOST_FACADE_EXTERNAL = "@sinclair/typebox";
+const emitted = await Deno.readTextFile(bundlePath);
 
-/**
- * Static + dynamic import specifiers with value-vs-type-only classification.
- * Handles double- AND single-quote specifiers (prettier enforces double, but
- * the walk must not silently miss a hand-edited single-quote edge) and dynamic
- * `import("...")`. A bare side-effect import (`import "./setup.ts";`) has no
- * from-clause and is rejected fail-closed below — silently excluding it from
- * the closure would throw at image load far from its cause.
- */
-function parseImports(text: string): Dep[] {
-  const out: Dep[] = [];
-  const re = /\b(import|export)\b([\s\S]*?)from\s+"([^"]+)"/g;
-  const reQ = /\b(import|export)\b([\s\S]*?)from\s+'([^']+)'/g;
-  const dyn = /(?:await\s+)?import\(\s*["']([^"']+)["']\s*\)/g;
-  // Fail closed on bare side-effect imports: they carry values but no
-  // from-clause this parser classifies.
-  if (/^\s*import\s+["'][^"']+["']\s*;?\s*$/m.test(text)) {
-    console.error(
-      "bare side-effect import is outside the bundler's classifier; refactor to a named import",
-    );
-    Deno.exit(1);
-  }
-  let m: RegExpExecArray | null;
-  while ((m = re.exec(text))) {
-    out.push(classify(m));
-  }
-  while ((m = reQ.exec(text))) {
-    out.push(classify(m));
-  }
-  for (const d of text.matchAll(dyn)) out.push({ ref: d[1], value: true });
-  return out;
+const problems: string[] = auditEmittedBundle(emitted);
+const externals = emittedExternals(emitted);
+
+// Provenance-comment completeness: non-minified deno bundle output names
+// every inlined locked module with a `// deno:<url>` comment; the @std/*
+// closure must therefore be INLINED (present as provenance), not left as an
+// alias edge (already covered above) — assert the inlining actually happened.
+const inlinedStd = /\/\/ deno:https:\/\/jsr\.io\/@std\//.test(emitted);
+if (!inlinedStd) {
+  problems.push(
+    "emitted bundle carries no inlined @std/* provenance (bundling did not inline the locked std closure)",
+  );
 }
 
-function classify(m: RegExpExecArray): Dep {
-  const [, kw, clause, spec] = m;
-  const b = clause.trim();
-  const symHasValue = (inner: string) =>
-    inner.split(/[,\n]/).map((s) => s.trim()).filter(Boolean).some((s) => !s.startsWith("type "));
-  let value: boolean;
-  if (kw === "export") {
-    if (b.startsWith("type ")) value = false;
-    else if (b.startsWith("*")) value = true;
-    else value = symHasValue(b.replace(/^\{/, "").replace(/\}[\s\S]*$/, ""));
-  } else if (b.startsWith("type ")) {
-    value = false;
-  } else if (b === "" || b.startsWith("*") || /^[A-Za-z_$]/.test(b)) {
-    value = true;
-  } else {
-    value = symHasValue(b.replace(/^\{/, "").replace(/\}[\s\S]*$/, ""));
-  }
-  return { ref: spec, value };
-}
-
-/** Resolve a relative specifier; null for bare/absolute refs. */
-function resolveRef(from: string, ref: string): string | null {
-  if (!ref.startsWith(".")) return null;
-  const base = from.split("/").slice(0, -1);
-  for (const p of ref.split("/")) {
-    if (p === "." || p === "") continue;
-    if (p === "..") {
-      if (base.length && base[base.length - 1] !== "..") base.pop();
-      else base.push("..");
-    } else base.push(p);
-  }
-  return base.join("/");
-}
-
-const importCache = new Map<string, Dep[]>();
-async function importsOf(rel: string): Promise<Dep[]> {
-  if (importCache.has(rel)) return importCache.get(rel)!;
-  let f = `${src}/${rel}`;
-  try {
-    if ((await Deno.stat(f)).isDirectory) f += "/index.ts";
-  } catch { /* read failure below */ }
-  let text: string;
-  try {
-    text = await Deno.readTextFile(f);
-  } catch {
-    importCache.set(rel, []);
-    return [];
-  }
-  const deps = parseImports(text);
-  importCache.set(rel, deps);
-  return deps;
-}
-
-// VALUE-import closure from the entry: the runtime surfaces of the installed
-// tree. Type-only edges are erased by the loader and carry no installed-input
-// requirement; value edges missing at their target fail the build.
-const closure = new Set<string>([ENTRY]);
-let frontier = [ENTRY];
-while (frontier.length) {
-  const next: string[] = [];
-  for (const f of frontier) {
-    for (const d of await importsOf(f)) {
-      if (!d.value) continue;
-      let r = resolveRef(f, d.ref);
-      if (r === null || closure.has(r)) continue;
-      // Directory-valued relative import resolves to its index.ts (matching
-      // the loader and importsOf); copying a directory path would crash below.
-      try {
-        const st = await Deno.stat(`${src}/${r}`);
-        if (st.isDirectory) {
-          const viaIndex = `${r}/index.ts`;
-          await Deno.stat(`${src}/${viaIndex}`);
-          r = viaIndex;
-        }
-      } catch {
-        console.error(`value import edge resolves to a missing module: ${f} -> ${d.ref}`);
-        Deno.exit(1);
-      }
-      closure.add(r);
-      next.push(r);
-    }
-  }
-  frontier = next;
-}
-
-// External bare specifier families used by VALUE edges of the closure.
-const externals = new Set<string>();
-for (const f of closure) {
-  for (const d of await importsOf(f)) {
-    if (!d.value || d.ref.startsWith(".")) continue;
-    // The documented host-facade external stays OUT of the import-map pin
-    // set on purpose (the host remap owns it); subpaths of the package are
-    // NOT exempt — they collapse to the package family and fail closed.
-    if (d.ref === HOST_FACADE_EXTERNAL) continue;
-    const pkg = d.ref.startsWith("@")
-      ? d.ref.split("/").slice(0, 2).join("/")
-      : d.ref.split("/")[0];
-    externals.add(pkg);
-  }
-}
-// The installed trusted-extension closure may depend on ONLY the std library
-// (mapped through the generated import map) plus the one host-facade external
-// above. Anything else (npm/jsr app runtime deps) means the closure leaked
-// past the boundary — fail closed.
-for (const pkg of externals) {
-  if (!pkg.startsWith("@std/")) {
-    console.error(`trusted-extension closure references unsupported external: ${pkg}`);
-    Deno.exit(1);
-  }
-}
-
-// Copy every closure file verbatim at its repo-relative path under mirror/.
-for (const rel of [...closure].sort()) {
-  const dest = `${target}/mirror/${rel}`;
-  await Deno.mkdir(dest.split("/").slice(0, -1).join("/"), { recursive: true });
-  await Deno.copyFile(`${src}/${rel}`, dest);
-}
-
-// Generated import map: pin every @std/* external (and its transitively
-// locked jsr deps, e.g. @std/internal under @std/path) to the exact versions
-// the committed deno.lock resolves.
-const lock = JSON.parse(await Deno.readTextFile(denoLockPath));
-const specifiers: Record<string, string> = lock.specifiers ?? {};
-const imports: Record<string, string> = {};
-function pin(pkg: string, ver: string): void {
-  if (imports[pkg]) return;
-  imports[`${pkg}/`] = `jsr:${pkg}@${ver}/`;
-  imports[pkg] = `jsr:${pkg}@${ver}`;
-  const queue = [`${pkg}@${ver}`];
-  const seen = new Set<string>();
-  while (queue.length) {
-    const k = queue.shift()!;
-    if (seen.has(k)) continue;
-    seen.add(k);
-    for (const dep of lock.jsr?.[k]?.dependencies ?? []) {
-      const dm = dep.match(/^jsr:([^@]+)@(.+)$/);
-      if (!dm) continue;
-      const depVer = specifiers[dep];
-      if (depVer) {
-        pin(dm[1], depVer);
-        queue.push(`${dm[1]}@${depVer}`);
-      }
-    }
-  }
-}
-for (const pkg of [...externals].sort()) {
-  // The lockfile's specifiers table maps every range form the project uses
-  // (e.g. `jsr:@std/path@1` for the `^1.0.0` import-map range) to the exact
-  // resolved version; resolve to the highest exact version the lock names for
-  // this package, so the generated import map pins exactly what the committed
-  // lock resolves today.
-  const candidates = Object.entries(specifiers)
-    .filter(([k, v]) => k.startsWith(`jsr:${pkg}@`) && typeof v === "string")
-    .map(([, v]) => v as string)
-    // Only plain x.y.z versions participate in the highest-of-candidates
-    // sort: a prerelease suffix maps to NaN components and would make the
-    // pin order implementation-defined. Fail closed rather than guess.
-    .filter((v) => /^\d+\.\d+\.\d+$/.test(v));
-  const ver = candidates.sort((a, b) => {
-    const pa = a.split(".").map(Number);
-    const pb = b.split(".").map(Number);
-    return (pa[0] ?? 0) - (pb[0] ?? 0) || (pa[1] ?? 0) - (pb[1] ?? 0) ||
-      (pa[2] ?? 0) - (pb[2] ?? 0);
-  }).at(-1);
-  if (!ver) {
-    console.error(`cannot pin ${pkg}: deno.lock names no exact version for "jsr:${pkg}@..."`);
-    Deno.exit(1);
-  }
-  pin(pkg, ver);
-}
-await Deno.writeTextFile(`${target}/deno.json`, `${JSON.stringify({ imports }, null, 2)}\n`);
-
-// Generated entry adapter (the ONLY generated module): the contracted image
-// path forwards to the verbatim mirror entry. Named exports via `export *`,
-// the default export explicitly; the load-time side effects (row 12 gate,
-// row 14b/read/search attachments) run exactly once, inside the mirror entry.
-await Deno.writeTextFile(
-  `${target}/index.ts`,
-  [
-    "// Generated by scripts/omp/bundle-extension.ts at image build time",
-    "// (package-pinned-omp-runtime D5). Image-mode entry adapter: resolves the",
-    "// contracted image path /opt/air/omp/extension/index.ts (row 9 seam:",
-    "// src/utils/omp-paths.ts image-first resolution) and forwards the load",
-    "// VERBATIM to the repo-relative mirror copy of the committed trusted-",
-    "// extension entry. Pure re-export: no logic, no policy, no duplication;",
-    "// named + default exports and every load-time side effect are the mirror",
-    "// entry's own. The committed tree under mirror/ is the single authoring",
-    "// location; the copy direction is daemon tree -> installed extension only,",
-    "// never reverse.",
-    `export * from "./mirror/${ENTRY}";`,
-    `export { default } from "./mirror/${ENTRY}";`,
-    "",
-  ].join("\n"),
-);
-
-// Completeness gate: every VALUE relative specifier of every installed file
-// resolves INSIDE the installed tree and exists there; externals are @std/*
-// only (import-mapped above). Type-only edges are erased at load; the
-// packaging suite proves the erasure claim by actually loading the bundle.
-const problems: string[] = [];
-for (const rel of [...closure].sort()) {
-  for (const d of await importsOf(rel)) {
-    if (!d.value) continue;
-    if (d.ref.startsWith(".")) {
-      const r = resolveRef(`mirror/${rel}`, d.ref);
-      if (r === null || !r.startsWith("mirror/")) {
-        problems.push(`mirror/${rel} -> ${d.ref} (ESCAPES installed tree)`);
-        continue;
-      }
-      try {
-        await Deno.stat(`${target}/${r}`);
-      } catch {
-        problems.push(`mirror/${rel} -> ${d.ref} (MISSING at ${r})`);
-      }
-    } else if (!d.ref.startsWith("@std/")) {
-      // The completeness gate speaks the FULL reference, not the collapsed
-      // family: exactly the bare host-facade specifier passes (the pinned
-      // loader remaps it at load), subpaths stay UNMAPPED → fail closed.
-      if (d.ref !== HOST_FACADE_EXTERNAL) {
-        problems.push(`mirror/${rel} -> ${d.ref} (UNMAPPED external)`);
-      }
-    }
-  }
-}
-{
-  const r = resolveRef("index.ts", `./mirror/${ENTRY}`)!;
-  try {
-    await Deno.stat(`${target}/${r}`);
-  } catch {
-    problems.push(`index.ts -> ./mirror/${ENTRY} (MISSING)`);
-  }
-}
 if (problems.length) {
   console.error(
-    `trusted-extension closure incomplete:\n${[...new Set(problems)].sort().join("\n")}`,
+    `generated bundle is not native-loadable:\n${[...new Set(problems)].sort().join("\n")}`,
   );
   Deno.exit(1);
 }
 
-console.log(`bundled ${closure.size} mirror modules + entry adapter under ${target}`);
+// Deterministic source/input digest inventory (auditable provenance header).
+// Computed over the canonical inputs only — never timestamps — so rebuilds
+// from the same checkout produce byte-identical bundle content apart from
+// deno bundle's own deterministic output.
+async function sha256Hex(bytes: Uint8Array): Promise<string> {
+  const digest = await crypto.subtle.digest("SHA-256", bytes as unknown as ArrayBuffer);
+  return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+const lockBytes = new TextEncoder().encode(await Deno.readTextFile(denoLockPath));
+const entryBytes = await Deno.readFile(`${src}/${ENTRY}`);
+const inventory = [
+  `entry sha256 ${await sha256Hex(entryBytes)}  ${ENTRY}`,
+  `lock sha256 ${await sha256Hex(lockBytes)}  ${denoLockPath.replace(`${src}/`, "")}`,
+];
+
+// Prepend the inventory header to the generated bundle (pure comment: the
+// module's behavior is the bundler's ESM output, verbatim below the header).
+const header = [
+  "// Generated by scripts/omp/bundle-extension.ts (package-bun-compatible-omp-extension).",
+  "// DO NOT EDIT — deterministic ESM bundle of the trusted-extension value closure,",
+  "// built from canonical source and frozen-lock dependencies. The only externals",
+  "// are documented native builtins (node:/bun:) and the exact bare",
+  `// ${HOST_FACADE_EXTERNAL} schema-builder host-facade import, which the pinned native`,
+  "// loader host-resolves BEFORE any import-map lookup (no npm: pin is installed",
+  "// for it on purpose — docs/OMP_PACKAGING.md §5).",
+  "// Source/input digest inventory:",
+  ...inventory.map((line) => `//   ${line}`),
+  "",
+].join("\n");
+await Deno.writeTextFile(bundlePath, `${header}${emitted}`);
+
+console.log(
+  `bundled ${ENTRY} -> ${bundlePath} ` +
+    `(${externals.length} external edge(s): ${externals.join(", ") || "none"})`,
+);

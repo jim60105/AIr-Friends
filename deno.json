@@ -43,6 +43,7 @@
     "fmt": "deno fmt src/ tests/",
     "fmt:check": "deno fmt --check src/ tests/",
     "lint": "deno lint src/ tests/",
+    "bundle:omp-extension": "sh scripts/omp/bundle-omp-extension.sh . build/omp-extension deno.lock",
     "check": "deno check src/main.ts"
   },
   "fmt": {

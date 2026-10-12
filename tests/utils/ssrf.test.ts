@@ -8,10 +8,80 @@ import { assertEquals, assertRejects } from "@std/assert";
 import {
   isDisallowedAddress,
   MAX_REDIRECT_HOPS,
+  resolveHostAnswers,
   safeFetch,
   SsrfValidationError,
   validateFetchUrl,
 } from "@utils/ssrf.ts";
+
+// --- C3 D4: the shared A/AAAA collection rule over an injectable
+// node:dns/promises face (fixture DNS only — zero resolver contact). -------
+
+type DnsFace = {
+  resolve4(host: string): Promise<string[]>;
+  resolve6(host: string): Promise<string[]>;
+};
+
+function fixtureDns(v4: string[] | Error, v6: string[] | Error): DnsFace {
+  // Test seam: one fixture face for the injectable node:dns/promises pair.
+  const side = (value: string[] | Error): () => Promise<string[]> => () =>
+    value instanceof Error ? Promise.reject(value) : Promise.resolve(value);
+  return { resolve4: side(v4), resolve6: side(v6) };
+}
+
+const ENOTFOUND = new Error("ENOTFOUND public.example");
+
+Deno.test("resolveHostAnswers - dual-stack keeps both families", async () => {
+  const answers = await resolveHostAnswers(
+    "public.example",
+    fixtureDns(["93.184.216.34"], ["2606:2800:220:1:248:1893:25c8:1942"]),
+  );
+  assertEquals(answers, ["93.184.216.34", "2606:2800:220:1:248:1893:25c8:1942"]);
+});
+
+Deno.test("resolveHostAnswers - one family no-record never discards the other", async () => {
+  // A exists, AAAA has no records: the v4 answer survives (and vice versa).
+  const onlyV4 = await resolveHostAnswers(
+    "v4only.example",
+    fixtureDns(["93.184.216.34"], ENOTFOUND),
+  );
+  assertEquals(onlyV4, ["93.184.216.34"]);
+  const onlyV6 = await resolveHostAnswers("v6only.example", fixtureDns(ENOTFOUND, ["2606::1"]));
+  assertEquals(onlyV6, ["2606::1"]);
+  // An empty (not failed) family response likewise adds nothing.
+  const emptyV6 = await resolveHostAnswers("mixed.example", fixtureDns(["203.0.113.7"], []));
+  assertEquals(emptyV6, ["203.0.113.7"]);
+});
+
+Deno.test("resolveHostAnswers - all-family failure yields the empty set (fail closed)", async () => {
+  const answers = await resolveHostAnswers("dead.example", fixtureDns(ENOTFOUND, ENOTFOUND));
+  // The rule itself fabricates nothing: empty means "nothing resolved" and
+  // each consumer's fail-closed rule (validateFetchUrl throws
+  // SsrfValidationError; the transports block dns-unresolved) fires on it.
+  assertEquals(answers, []);
+});
+
+Deno.test("resolveHostAnswers - records normalize and deduplicate", async () => {
+  const answers = await resolveHostAnswers(
+    "dup.example",
+    fixtureDns(["203.0.113.9", "203.0.113.9"], ["[2606::9%eth0]", "2606::9"]),
+  );
+  // Bracketed/zone-id'd answers normalize to the bare address; duplicates
+  // across and within families collapse.
+  assertEquals(answers, ["203.0.113.9", "2606::9"]);
+});
+
+Deno.test("resolveHostAnswers - collected answers reach the single classifier unchanged", async () => {
+  // Private/loopback answers are NOT filtered here — the SAME
+  // isDisallowedAddress classifies them at every consumer (this function
+  // adds no policy of its own).
+  const answers = await resolveHostAnswers(
+    "private.example",
+    fixtureDns(["10.0.0.5", "169.254.169.254"], []),
+  );
+  assertEquals(answers.length, 2);
+  assertEquals(answers.map((a) => isDisallowedAddress(a)), [true, true]);
+});
 
 Deno.test("validateFetchUrl - rejects loopback literal", async () => {
   await assertRejects(() => validateFetchUrl("http://127.0.0.1/x"), SsrfValidationError);

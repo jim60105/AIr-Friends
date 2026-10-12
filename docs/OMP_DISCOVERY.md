@@ -28,7 +28,7 @@ The `guard-omp-executable-discovery` integration protects restricted OpenCode / 
 
 ## Trusted-Extension Module Bootstrap Sequence
 
-The extension module at `OMP_TRUSTED_EXTENSION_PATH` (`src/acp/omp/extension/index.ts`) loads synchronously at agent startup:
+The extension module — the generated native-loadable bundle cut from canonical source `OMP_TRUSTED_EXTENSION_PATH` (`src/acp/omp/extension/index.ts`); image face `/opt/air/omp/extension/index.js`, development face `build/omp-extension/index.js`, per `docs/OMP_PACKAGING.md` §4–§5 — loads synchronously at agent startup:
 
 1. **Identity Resolution**: Checks process environment variables and launch working directory.
 2. **Dependency-Closure Verification**: Determines the contracted extension module path and valid closure roots.
@@ -108,7 +108,7 @@ Automated unit and mock tests validate **decision logic only** (which roots and 
 
 - **Row 13 (cancelled readiness gate)**: no readiness channel or acknowledgement exists (cancelled by user decision); the load-time decision and resource generation are consumed read-only by the row-16 enforcement wiring.
 - **Row 14 (`enforce-omp-restricted-tool-policy`)**: Provides execution-time tool inventory default-deny.
-- **Row 20 (`package-pinned-omp-runtime`)**: Packages the module tree authored here at `/opt/air/omp/extension/index.ts` with digest checksums.
+- **Row 20 (`package-pinned-omp-runtime`) + `package-bun-compatible-omp-extension` (C3)**: Packages the GENERATED single-artifact bundle of the module tree authored here at `/opt/air/omp/extension/index.js`, digest-covered by `PACKAGE-MANIFEST.sha256`.
 
 ---
 
@@ -116,7 +116,7 @@ Automated unit and mock tests validate **decision logic only** (which roots and 
 
 The following items cannot be certified by mock or unit tests and remain unverified until observed in a real runtime environment:
 
-- [ ] **Real Trusted-Module Load**: Pinned OMP executable loads the module tree at `OMP_TRUSTED_EXTENSION_PATH` via `--trusted-extension`.
+- [ ] **Real Trusted-Module Load**: Pinned OMP executable loads the generated trusted-extension bundle (`/opt/air/omp/extension/index.js`, cut from `OMP_TRUSTED_EXTENSION_PATH` source) via `--trusted-extension` — with no import map and no download (`docs/OMP_PACKAGING.md` §7).
 - [ ] **Hostile Code Suppression**: Hostile custom tools or plugins with executable top-level code do not run during startup.
 - [ ] **Critical Skill Resolution**: Critical skills resolve strictly to canonical owned `SKILL.md` on session `new`, `load`, and `refresh` events.
 

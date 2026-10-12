@@ -110,3 +110,10 @@ supersedes the last claim: `deno.json`/`deno.lock` now carry the exact
 `@sinclair/typebox` import-map pin that lets Deno fixtures resolve the same
 schema-builder facade the pinned host host-resolves for the extension
 closure (`docs/OMP_PACKAGING.md` §5).
+Correction-batch row C3 (`package-bun-compatible-omp-extension`) replaces the
+extension packaging under test: the image-side mirror tree and generated
+`deno.json` import map are gone, replaced by ONE generated native-loadable
+bundle (`deno task bundle:omp-extension` → `index.js`; the packaging suite
+builds it and asserts the emitted-edge audit and digest inventory). The repo
+import-map pin above stays for Deno fixtures — the BUNDLE itself keeps only
+the bare host-facade specifier and installs no npm: pin.

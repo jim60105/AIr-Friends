@@ -97,11 +97,14 @@ export type { ApprovalAction, ApprovalRecord } from "../../compatibility-contrac
 // with the URL-fetch transport adapter's pure modules. CLOSURE NOTE FOR ROW
 // 22's DIGEST CUT: `src/acp/omp/fetch-transport.ts` transitively imports
 // `src/utils/ssrf.ts` (the single classifier: isDisallowedAddress,
-// MAX_REDIRECT_HOPS, pinValidatedUrl), so the install copy list MUST carry
-// `ssrf.ts` under its repo-relative basename as well — the import is
-// load-safe precisely because `Deno.resolveDns` sits only in ssrf.ts's
-// NON-imported `resolveHostAddresses`; the imported surface performs no
-// DNS/env/network side effect at module load.
+// MAX_REDIRECT_HOPS, pinValidatedUrl), so `ssrf.ts` is part of the bundle
+// closure — since `package-bun-compatible-omp-extension` its DNS face is the
+// runtime-compatible `node:dns/promises` interface (a documented native
+// builtin of the pinned native runtime, not a Deno-only surface); the
+// import stays load-safe because the resolver sits only in ssrf.ts's
+// NON-imported `resolveHostAddresses`/`resolveHostAnswers` and the
+// `node:dns/promises` module itself performs no query at module load; the
+// imported surface performs no DNS/env/network side effect at load.
 export {
   type BinaryFetchResult,
   decideFetchHop,

@@ -1,6 +1,10 @@
 # OMP Packaging — pinned `omp` install + owned image tree
 
 OpenSpec change: `package-pinned-omp-runtime` (OMP batch row 20 / P8).
+Packaging of the trusted extension itself (the generated native-loadable
+bundle) is `package-bun-compatible-omp-extension` (C3): the mirror-copy +
+sidecar-import-map scaffolding is REMOVED — one generated `index.js` is the
+installed extension artifact.
 This document is the packaging contract for the official Oh-My-Pi (`omp`) CLI
 and the deployment-owned artifacts under `/opt/air/omp`. It installs bytes and
 records digests; it certifies **nothing** about native enforcement — rows
@@ -60,18 +64,18 @@ is verified with `sha256sum -c -` BEFORE any install/COPY consumption.
 
 ## 3. Install contract and ownership
 
-| Image path                              | Source                                       | Owner:group | Mode                   |
-| --------------------------------------- | -------------------------------------------- | ----------- | ---------------------- |
-| `/usr/local/bin/omp`                    | `omp-unpacker` stage (checksum-verified)     | `0:0`       | 0755                   |
-| `/licenses/omp/LICENSE`                 | same stage                                   | `0:0`       | 0644                   |
-| `/licenses/omp/THIRD-PARTY-NOTICES.txt` | same stage                                   | `0:0`       | 0644                   |
-| `/opt/air/omp/config/restricted.yml`    | `agent-config/omp/restricted.yml`            | `0:0`       | 0644                   |
-| `/opt/air/omp/config/native-yolo.yml`   | `agent-config/omp/native-yolo.yml`           | `0:0`       | 0644                   |
-| `/opt/air/omp/config/models.yml`        | `agent-config/omp/models.yml`                | `0:0`       | 0644                   |
-| `/opt/air/omp/prompt/SYSTEM.md`         | `prompts/system_prompt_override.md`          | `0:0`       | 0644                   |
-| `/opt/air/omp/extension/**`             | build-time mirror bundle of committed `src/` | `0:0`       | 0755 dirs / 0644 files |
-| `/opt/air/omp/PACKAGE-MANIFEST.sha256`  | regenerated at every image build             | `0:0`       | 0644                   |
-| `/opt/air/skills/**`                    | `skills/` (row 28 owned skill root)          | `0:0`       | 0755 files             |
+| Image path                              | Source                                   | Owner:group | Mode       |
+| --------------------------------------- | ---------------------------------------- | ----------- | ---------- |
+| `/usr/local/bin/omp`                    | `omp-unpacker` stage (checksum-verified) | `0:0`       | 0755       |
+| `/licenses/omp/LICENSE`                 | same stage                               | `0:0`       | 0644       |
+| `/licenses/omp/THIRD-PARTY-NOTICES.txt` | same stage                               | `0:0`       | 0644       |
+| `/opt/air/omp/config/restricted.yml`    | `agent-config/omp/restricted.yml`        | `0:0`       | 0644       |
+| `/opt/air/omp/config/native-yolo.yml`   | `agent-config/omp/native-yolo.yml`       | `0:0`       | 0644       |
+| `/opt/air/omp/config/models.yml`        | `agent-config/omp/models.yml`            | `0:0`       | 0644       |
+| `/opt/air/omp/prompt/SYSTEM.md`         | `prompts/system_prompt_override.md`      | `0:0`       | 0644       |
+| `/opt/air/omp/extension/index.js`       | build-time generated ESM bundle (C3)     | `0:0`       | 0644       |
+| `/opt/air/omp/PACKAGE-MANIFEST.sha256`  | regenerated at every image build         | `0:0`       | 0644       |
+| `/opt/air/skills/**`                    | `skills/` (row 28 owned skill root)      | `0:0`       | 0755 files |
 
 Ownership rationale (deliberate divergences from the image's `$UID:0` 775
 pattern, both documented in Containerfile comments):
@@ -109,12 +113,18 @@ signal and dev behavior is unchanged. The launch assembly
 second path convention — and row 9's fail-closed presence checks (and their
 error messages) stay exactly as shipped.
 
-| Export                             | Image path (when it exists)       | Dev fallback                                       |
-| ---------------------------------- | --------------------------------- | -------------------------------------------------- |
-| `OMP_IMAGE_ROOT`                   | `/opt/air/omp`                    | — (constant)                                       |
-| `resolveOmpTrustedExtensionPath()` | `/opt/air/omp/extension/index.ts` | `src/acp/omp/extension/index.ts`                   |
-| `resolveOmpConfigPath(devPath)`    | `/opt/air/omp/config/<basename>`  | `devPath` (e.g. `agent-config/omp/restricted.yml`) |
-| `resolveOmpSystemPromptPath()`     | `/opt/air/omp/prompt/SYSTEM.md`   | `/app/prompts/system_prompt_override.md`           |
+| Export                             | Image path (when it exists)       | Dev fallback                                                                                                                                                                                                             |
+| ---------------------------------- | --------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `OMP_IMAGE_ROOT`                   | `/opt/air/omp`                    | — (constant)                                                                                                                                                                                                             |
+| `resolveOmpTrustedExtensionPath()` | `/opt/air/omp/extension/index.js` | `build/omp-extension/index.js` (`OMP_TRUSTED_EXTENSION_BUNDLE_PATH` — the GENERATED development bundle; `deno task bundle:omp-extension` cuts it and the launch preflight fails closed with that remedy until it exists) |
+| `resolveOmpConfigPath(devPath)`    | `/opt/air/omp/config/<basename>`  | `devPath` (e.g. `agent-config/omp/restricted.yml`)                                                                                                                                                                       |
+| `resolveOmpSystemPromptPath()`     | `/opt/air/omp/prompt/SYSTEM.md`   | `/app/prompts/system_prompt_override.md`                                                                                                                                                                                 |
+
+The launch face is NEVER the raw canonical source: `src/acp/omp/extension/`
+(pinned by `OMP_TRUSTED_EXTENSION_PATH`) is the canonical SOURCE origin and
+the bundler input, not a launch target — the Deno-only source tree cannot
+load under the pinned native host, so presenting it would bake in a dev/image
+behavior split.
 
 Prompt precedence: the row-8 operator mount path
 `/app/prompts/system_prompt_override.md` wins whenever it exists — mounts are
@@ -123,49 +133,68 @@ bundled default or an operator mount, exactly as row 8 defined). The owned
 `SYSTEM.md` artifact serves installs where the mount path is absent but the
 owned tree is present; its digest is covered by the manifest either way.
 
-## 5. Extension tree: mirror bundle
+## 5. Extension artifact: the generated native-loadable bundle
 
-`scripts/omp/bundle-omp-extension.sh` (+ `bundle-extension.ts`) assembles
-`/opt/air/omp/extension` from the committed sources at build time — a
-repo-relative **mirror copy of the value-import closure**, not a fork:
+`scripts/omp/bundle-omp-extension.sh` (+ `bundle-extension.ts`, audit in
+`bundle-audit.ts`) cuts ONE generated ESM bundle — the single
+`index.js` installed at `/opt/air/omp/extension/index.js` (and, in dev,
+`build/omp-extension/index.js`, gitignored generated output):
 
-- 31 modules are copied VERBATIM under `extension/mirror/<repo-relative-path>`
-  (content-faithful: no rewriting, templating, or augmentation; dev and image
-  load byte-identical sources — the packaging suite proves load parity).
-- The ONLY generated modules are the entry adapter `extension/index.ts` (a
-  pure re-export forwarding the contracted image path to the mirror entry) and
-  `extension/deno.json` (an import map pinning the one external specifier
-  family the closure needs — `@std/path` + its locked `@std/internal` — to the
-  exact versions in the committed `deno.lock`).
-- Type-only daemon modules (e.g. the `/app` daemon surface behind
-  `client.ts` types) are NOT installed; the loader erases type-only imports
-  and the suite proves the erasure by loading the bundle. Any external bare
-  VALUE specifier outside `@std/*` fails the build — the boundary is
-  enforced, never trusted. The ONE documented exception is the exact bare
-  `@sinclair/typebox` schema-builder host facade
-  (`align-omp-native-tool-contracts` D1): the pinned legacy loader
-  host-resolves that exact bare value import to the runtime's own `Type`
-  facade, so the generated import map deliberately carries NO entry for it
-  (an installed `npm:`/jsr pin would bypass the documented host remap);
-  subpaths of the package are NOT remapped by the host and therefore stay
-  outside the boundary. The rule stays enforced for everything else.
-- The build consumes the cache stage's root-owned source copy (`/build-src`),
-  never the agent-writable `/app/src` 775 tree.
+`deno bundle --frozen=true --format esm --keep-names` runs with `cwd` set to
+the passed source root (repo root in dev, `/build-src` in the image — where
+`deno.json`/`deno.lock` resolve) on
+the canonical entry `src/acp/omp/extension/index.ts` against the committed
+`deno.lock`. Frozen mode refuses lockfile changes; `--keep-names` preserves
+symbol identity; no minification, so the bundle stays auditable and the
+locked `@std/*` closure survives INLINED with its `// deno:https://jsr.io/…`
+provenance comments (the packaging suite asserts the inlined provenance).
+The deterministic header prepended to the artifact records the input digest
+inventory — `entry sha256 … src/acp/omp/extension/index.ts` and
+`lock sha256 … deno.lock` — so every bundle names the exact source+lock
+bytes it was cut from.
 
-The bundled set is DERIVED from the import walk, never a hand-maintained list.
+**Native-loadable boundary (enforced, never trusted).** After bundling, the
+production audit (`bundle-audit.ts`) enumerates the EMITTED external edges
+(static import/export-from + literal dynamic-import specifiers) and fails
+the build on anything outside: the documented native builtins (`node:`,
+`bun:`) and the ONE host facade — the exact BARE `@sinclair/typebox`
+schema-builder import (`align-omp-native-tool-contracts` D1). The pinned
+legacy loader host-resolves that exact bare value import to the runtime's
+own `Type` facade BEFORE any import-map lookup, which is why the bundle
+keeps the canonical host-resolved spelling and the build deliberately
+installs **no image-side npm: pin** (an npm: pin would bypass the host
+facade and add an unowned module to the load-time graph). Subpaths like
+`@sinclair/typebox/value` are NOT remapped and fail closed. Every leftover
+jsr:/https: download edge, import-map alias (`@std/*` and friends), npm:
+package, unapproved bare specifier, or non-inlined path edge aborts
+packaging BEFORE installation — the sidecar import map the old packaging
+relied on is gone, and native loadability cannot depend on it.
 
-**External-trust asymmetry (named verification item).** The installed tree is
-byte-complete for every first-party module, but the generated import map pins
-the one external family (`@std/path` + its locked `@std/internal`) to **jsr
-URLs resolved at load time by the agent runtime's module loader** — those bytes
-are version-pinned but NOT covered by `PACKAGE-MANIFEST.sha256` (they are not
-installed files), and load-parity is proven under Deno's resolver only:
-whether OMP's embedded runtime honors the `deno.json` import map at
-trusted-extension load is design §15 user-owned and UNVERIFIED (the same open
-question `docs/OMP_DISCOVERY.md` records for the real trusted-module load).
-The failure mode is fail-closed — the extension errors at load, and the
-factory's presence checks plus row 12's gate stand — but the gap is real and
-is a named item in the §7 checklist.
+**Runtime-compatible DNS (D4).** The controlled transports' host-resolution
+face (`read-replacement.ts runtimeResolveHost`) uses `node:dns/promises`
+(native + Deno both provide it) through the shared A/AAAA collection rule
+`resolveHostAnswers` in `src/utils/ssrf.ts`: one family with no records
+never discards the other's answers, answers are normalized and deduped, and
+the fail-closed rule stays in each consumer (empty → the single classifier's
+block class, never an unvalidated-DNS fallback; no `Deno.resolveDns`).
+
+The build consumes the cache stage's root-owned source copy (`/build-src`),
+never the agent-writable `/app/src` 775 tree.
+
+**External-trust asymmetry (named verification item, C3 shape).** No
+runtime-download edge survives the emitted audit — the `@std/*` closure is
+inlined, so the jsr-import-map question the mirror packaging carried is
+CLOSED at the bundle boundary. What remains asymmetry: the bare
+`@sinclair/typebox` edge resolves to whatever facade the real host provides
+at trusted-extension load (the fixture in the packaging suite is a
+stand-in), and whether OMP's embedded runtime reaches the discovery-gate
+import at all stays design §15 user-owned and UNVERIFIED (row 12's
+pre-import-exclusion blocker is unchanged: BOTH the dev bundle and the
+canonical source still fail closed at load with the same discovery-gate
+error — that parity is what the packaging suite proves). When row 12 is
+ever resolved, the packaging suite's fail-closed parity test is designed to
+fail on purpose in that same change, forcing the rewrite to
+successful-load parity.
 
 ## 6. `PACKAGE-MANIFEST.sha256` and the recut invariant
 
@@ -179,24 +208,14 @@ Header facts: `OMP_VERSION` (carried from the unpacker stage, so the manifest
 records the SAME tag the checksums enforced), the trusted-extension serial
 composition **12 → 13 → 14b → 17 → 18**.
 
-Installed inputs covered by the digest (the full list on a fresh build):
+Installed inputs covered by the digest (the full list on a fresh C3 build —
+the extension tree collapsed to its generated single artifact):
 
 - `config/restricted.yml`, `config/native-yolo.yml`, `config/models.yml`
 - `prompt/SYSTEM.md`
-- `extension/index.ts`, `extension/deno.json` (the two generated modules)
-- `extension/mirror/src/acp/`: `destructive-policy.ts`, `filesystem-policy.ts`,
-  `filesystem-roots.ts`, `omp-settings.ts`
-- `extension/mirror/src/acp/omp/`: `approval-records.ts`,
-  `compatibility-contracts.ts`,
-  `destructive-decision.ts`, `destructive-validator.ts`, `discovery-guard.ts`,
-  `fetch-routes.ts`, `fetch-transport.ts`, `inventory-validator.ts`,
-  `lsp-validator.ts`, `record-evaluator.ts`, `search-routes.ts`,
-  `search-transport.ts`, `tool-inventory.ts`, `tool-provenance.ts`,
-  `transport-validator.ts`
-- `extension/mirror/src/acp/omp/extension/`: `_daemon/mod.ts`, `bootstrap.ts`,
-  `enforcement-error.ts`, `enforcement.ts`, `index.ts`, `read-replacement.ts`,
-  `search-replacement.ts`
-- `extension/mirror/src/utils/`: `omp-paths.ts`, `ssrf.ts`
+- `extension/index.js` (the single generated bundle; the manifest digest is
+  cut over its FINAL bytes on every build, and the bundle header records the
+  source+lock digests it was generated from)
 
 **Recut invariant (maintenance rule for successors — rows 21/22+ and any
 insertion):** digests are cut only over FINAL content. The image build
@@ -206,6 +225,11 @@ the same change — **a stale manifest after a content change is a
 task-failure condition.** Because the bundled set is derived from the import
 walk, a successor change that extends the extension's value-import closure
 automatically changes the derived set AND forces the recut.
+
+(C3 note: since the manifest generator derives the covered set from the tree
+itself, a change that alters ANY extension source or `deno.lock` changes the
+generated `index.js` bytes and therefore the recut — mechanically, the same
+invariant, now over one file.)
 
 ## 7. User-owned acceptance (design §15) — NOT verified by CI
 
@@ -220,9 +244,14 @@ ships explicitly UNVERIFIED:
 - [ ] Container starts with the new stages and installs no additional Bun/JS runtime
 - [ ] Installed binary reports the pin: `omp --version` → `18.6.1`
 - [ ] `/opt/air/omp/PACKAGE-MANIFEST.sha256` verifies in the built image (`sha256sum -c`)
-- [ ] OMP's embedded runtime actually loads the trusted extension through the
-      generated `deno.json` import map (jsr `@std/*` resolution succeeds at
-      extension load — the §5 external-trust asymmetry; fail-closed if it does not)
+- [ ] OMP's embedded (Bun-embedded) runtime natively loads
+      `/opt/air/omp/extension/index.js` with NO import map and NO download:
+      the bare `@sinclair/typebox` edge reaches the host's own `Type` facade
+      and the `node:*` builtins resolve (the §5 external-trust asymmetry;
+      fail-closed at the discovery gate if the load never happens)
+- [ ] The controlled transports' `node:dns/promises` resolution face works
+      under the real host for a name with records in exactly one family
+      (§5 D4; fixture-proven in CI, live-resolver behavior user-owned)
 
 Until those are observed, this is packaging hygiene backed by mock evidence —
 not clearance. The pin is prevention; the bootstrap version marker (`OMP
