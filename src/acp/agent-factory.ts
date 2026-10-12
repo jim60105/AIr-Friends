@@ -330,15 +330,22 @@ function buildBaseAgentConfig(
 
       // Fail-closed checks on required assets: trusted extension module and overlay files
       // Row-20 dev→image seam (src/utils/omp-paths.ts): the launch assembly
-      // consumes the resolver output VERBATIM — image path when the owned
-      // /opt/air/omp tree exists, byte-identical dev path otherwise. No
-      // second path convention; the fail-closed checks and their errors stay
-      // row 9's.
+      // consumes the resolver output VERBATIM — the installed generated
+      // bundle when the owned /opt/air/omp tree exists, the deterministic
+      // GENERATED development entry (build/omp-extension/index.js) otherwise.
+      // No second path convention, and the raw Deno-only source tree is NEVER
+      // a fallback: a missing generated development entry fails here naming
+      // the build remedy (package-bun-compatible-omp-extension D2) instead of
+      // presenting a Deno-only import specifier as loadable.
       const trustedExtensionPath = resolveOmpTrustedExtensionPath();
       try {
         Deno.statSync(trustedExtensionPath);
       } catch {
-        throw new Error(`Missing trusted extension module at "${trustedExtensionPath}"`);
+        throw new Error(
+          `Missing trusted extension module at "${trustedExtensionPath}" — ` +
+            `build it first from canonical source and locked dependencies with ` +
+            `deno task bundle:omp-extension`,
+        );
       }
       const resolvedOverlayPaths = settings.orderedOverlayPaths.map((overlayPath) =>
         resolveOmpConfigPath(overlayPath)
