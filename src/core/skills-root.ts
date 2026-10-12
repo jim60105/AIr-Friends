@@ -70,6 +70,13 @@ export function resolveTrustedSkillsRoot(
   }
   const directoryExists = options.directoryExists ??
     ((path: string) => {
+      // Existence probe only — DELIBERATELY link-following (`stat`, not
+      // `lstat`): an installed root may legitimately be a mounted/symlinked
+      // tree, and the render result is an INSTRUCTION string, never
+      // authority. Where authority exists (the OMP skill-URI gate,
+      // `owned-skills.ts`), a linked root is refused outright, so a
+      // symlinked host renders a root its own gate would deny — a
+      // fail-closed confusion, never an escape.
       try {
         return Deno.statSync(path).isDirectory;
       } catch {

@@ -163,6 +163,32 @@ Deno.test("agent-writable or aliased (hard-linked) instruction identities deny",
   }
 });
 
+// The ladder re-checks EVERY directory component, not only the leaf: an
+// attacker plants instructions through a writable ancestor, so a writable
+// directory inside the owned tree denies even for a pristine target file.
+Deno.test("writable ancestor directories deny (planted-file vectors refused)", () => {
+  for (
+    const [dir, knob] of [
+      [`${ROOT}/send-reply`, { uid: 1000, mode: 0o770 }], // agent-writable intermediate
+      [`${ROOT}/send-reply`, { uid: 0, mode: 0o775 }], // group/other-writable intermediate
+      [ROOT, { uid: 1000, mode: 0o770 }], // agent-writable declared root
+      [ROOT, { uid: 0, mode: 0o777 }], // group/other-writable declared root
+    ] as const
+  ) {
+    const nodes: Record<string, FakeNode> = {
+      ...HEALTHY,
+      [dir]: { kind: "dir", ...knob },
+    };
+    const resolution = resolver(nodes, GENERATION).authorize("skill://send-reply/SKILL.md");
+    assertEquals(resolution.ok, false, `${dir} ${JSON.stringify(knob)}`);
+  }
+});
+
+Deno.test("uppercase scheme reaches the branch but the strict shape denies — deny, never bypass", () => {
+  const resolution = resolver(HEALTHY, GENERATION).authorize("SKILL://send-reply/SKILL.md");
+  assertEquals(resolution.ok, false);
+});
+
 Deno.test("directory or missing target denies (instruction file only)", () => {
   const asDir = resolver(HEALTHY, GENERATION).authorize("skill://send-reply");
   assertEquals(asDir.ok, false);

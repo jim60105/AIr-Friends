@@ -227,6 +227,10 @@ export function computeDiscoveryDecision(input: DiscoveryDecisionInput): Discove
   // the observation to be bound to the EXACT launch cwd this decision
   // evaluates: a clean observation for a different (even same-generation)
   // workspace never admits, and an absent observedCwd fails closed.
+  // This generation is ALSO the input to the read replacement's owned
+  // skill-URI gate (`repair-omp-owned-skill-handoff`): a decision only
+  // exists once its blockers passed, so every wired load carries a nonempty
+  // generation and the gate's empty-string refusal guards unwired callers.
   const resourceGeneration = input.resourceGeneration ?? "gen-0";
   const executableAdmissionClean = input.executableObservation?.status === "absent-clean" &&
     input.executableObservation.resourceGeneration === resourceGeneration &&

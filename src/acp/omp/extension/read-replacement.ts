@@ -228,11 +228,14 @@ function skillUriDefaultReader(): SkillUriSourceReader {
  *   host component, and `..`/`.`/absolute segments never resolve;
  * - source: the declared root exists as a real, link-free directory whose
  *   realpath IS the constant (a replaced/symlinked identity is denied —
- *   off-image hosts have NO declared source and deny with no fallback root);
+ *   off-image hosts have NO declared source and deny with no fallback root),
+ *   and it is neither agent-writable nor group/other-writable;
  * - target: canonicalizes INSIDE the owned source (no traversal out), is an
  *   existing regular file, link-free through every component, and carries no
- *   agent-writable or aliased (hard-linked) identity — the same ladder
- *   `owned-skills.ts` observes at registration, re-taken at read time;
+ *   agent-writable or aliased (hard-linked) identity, while every directory
+ *   component between the root and the target is likewise link-free and
+ *   non-writable — the same ladder `owned-skills.ts` observes at
+ *   registration, re-taken at read time;
  * - generation: the caller's live resource-generation observation must be
  *   present (the extension's load-time discovery generation) — an extension
  *   that never established its generation mints no skill authority.
@@ -294,6 +297,12 @@ export function createOwnedSkillUriAuthorization(deps: {
         if (rootInfo.isSymlink || !rootInfo.isDirectory) {
           return { ok: false, reason: "declared skill source is not a plain directory" };
         }
+        if (rootInfo.uid !== 0 && ((rootInfo.mode ?? 0o777) & 0o222) !== 0) {
+          return { ok: false, reason: "declared skill source is agent-writable" };
+        }
+        if (((rootInfo.mode ?? 0o777) & 0o022) !== 0) {
+          return { ok: false, reason: "declared skill source is group/other-writable" };
+        }
         rootReal = reader.realPath(deps.ownedRoot);
       } catch {
         return { ok: false, reason: "declared skill source is not observable (no fallback root)" };
@@ -328,17 +337,34 @@ export function createOwnedSkillUriAuthorization(deps: {
       if (targetReal !== candidate || !targetReal.startsWith(`${rootReal}${pathModule.sep}`)) {
         return { ok: false, reason: "target escapes or aliases the declared owned source" };
       }
-      let component = candidate;
+      // Ladder: every DIRECTORY component between the target and the declared
+      // root (root inclusive) is link-free, a real directory, and carries no
+      // group/other- or agent-writability — a planted instruction file needs
+      // a writable ancestor, and one is refused here, not just at the leaf.
+      let component = pathModule.dirname(candidate);
       for (;;) {
         try {
-          if (reader.lstat(component).isSymlink) {
+          const info = reader.lstat(component);
+          if (info.isSymlink) {
             return { ok: false, reason: "linked path component under the owned source" };
+          }
+          if (!info.isDirectory) {
+            return { ok: false, reason: "path component is not a directory" };
+          }
+          if (info.uid !== 0 && ((info.mode ?? 0o777) & 0o222) !== 0) {
+            return { ok: false, reason: "path component is agent-writable" };
+          }
+          if (((info.mode ?? 0o777) & 0o022) !== 0) {
+            return { ok: false, reason: "path component is group/other-writable" };
           }
         } catch {
           return { ok: false, reason: "path component not observable" };
         }
+        if (component === rootReal) break;
         const parent = pathModule.dirname(component);
-        if (parent === component) break;
+        if (parent === component) {
+          return { ok: false, reason: "target does not chain to the declared source" };
+        }
         component = parent;
       }
       return { ok: true, canonicalPath: targetReal };
