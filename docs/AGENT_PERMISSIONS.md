@@ -154,7 +154,7 @@ The `agent-config/opencode.json` in the project configures permissions for the `
 | **Session management** (`todoread`, `todowrite`)       | `allow`           | Internal agent organization tools                                                                                           |
 | **Sub-task spawning** (`task`)                         | `deny`            | Non-interactive system — no sub-agent coordination                                                                          |
 | **Skills** (`skill`)                                   | `allow`           | Core SKILL.md discovery and loading                                                                                         |
-| **Web access** (`webfetch`, `websearch`, `codesearch`) | `allow`           | Research and information gathering                                                                                          |
+| **Web access** (`webfetch`, `websearch`)               | `allow`           | Research and information gathering                                                                                          |
 | **Interactive** (`question`)                           | `deny`            | No human operator to answer questions                                                                                       |
 | **Loop protection** (`doom_loop`)                      | `deny`            | Prevent infinite retry loops                                                                                                |
 | **File editing** (`edit`)                              | `ask` (delegated) | Delegated to Layer 3 via `"ask"` (see below)                                                                                |

@@ -71,8 +71,8 @@ deployment ownership rather than as a claim of native support. All seven disposi
    native server suppression; runtime observations remain user-owned and unverified.
    Carried by `disable-restricted-agent-lsp`.
 6. **Native transport adaptation** — disposition of section 3 boundary 6 (recorded `incompatible`).
-   The trusted-extension replacement tool covers the approved routes (URL read, web search, public
-   code search) through the controlled transport, while the bypass routes (`fetchBinary` and
+   The trusted-extension replacement tool covers the approved routes (URL read and web search)
+   through the controlled transport, while the bypass routes (`fetchBinary` and
    scraper redirects that follow redirects automatically on global fetch) stay blocked. `HTTP_PROXY`
    alone does not establish enforcement. Carried by `control-omp-url-fetch-transport`.
 7. **Critical skill canonical ownership** — disposition of section 3 boundary 7 (recorded
