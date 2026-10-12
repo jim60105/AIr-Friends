@@ -6775,6 +6775,305 @@ Deno.test("ChatbotClient - real edit shape with mixed valid/invalid multi-path r
   }
 });
 
+// --- Root-exact script authority regressions (`unify-omp-skill-root-resolution` 2.4) ---
+
+function execRequest(command: string, sessionId = "test-session"): acp.RequestPermissionRequest {
+  return {
+    sessionId,
+    toolCall: {
+      title: "Execute shell command",
+      kind: "execute",
+      status: "pending" as const,
+      content: [],
+      toolCallId: "root-exact",
+      rawInput: { commands: [command] },
+    },
+    options: [
+      { kind: "allow_once", optionId: "allow-1", name: "Allow once" },
+      { kind: "reject_once", optionId: "reject-1", name: "Reject once" },
+    ],
+  };
+}
+
+async function verdict(client: ChatbotClient, command: string, sessionId = "test-session") {
+  const response = await client.requestPermission(execRequest(command, sessionId));
+  return response.outcome.outcome === "selected" ? response.outcome.optionId : "none";
+}
+
+Deno.test("root-exact - approves the exact canonical absolute invocation", async () => {
+  const tempDir = Deno.makeTempDirSync();
+  try {
+    const skill = skillFixture(["memory-save"], []);
+    const client = createRegisteredClient(createTestSkillRegistry(), createTestLogger(), {
+      workingDir: tempDir,
+      platform: "discord",
+      userId: "123",
+      channelId: "456",
+      isDM: false,
+    }, skill.list);
+    assertEquals(
+      await verdict(
+        client,
+        `deno run ${skill.root}/memory-save/scripts/memory-save.ts --session-id x`,
+      ),
+      "allow-1",
+    );
+    // A quoted literal spelling of the same canonical path still approves.
+    assertEquals(
+      await verdict(
+        client,
+        `deno run '${skill.root}/memory-save/scripts/memory-save.ts' --session-id x`,
+      ),
+      "allow-1",
+    );
+  } finally {
+    Deno.removeSync(tempDir, { recursive: true });
+  }
+});
+
+Deno.test("root-exact - rejects an ABSOLUTE planted copy at the same suffix", async () => {
+  const tempDir = Deno.makeTempDirSync();
+  try {
+    const skill = skillFixture(["memory-save"], []);
+    // A byte-identical copy under a DIFFERENT root — the old suffix matcher
+    // approved this; root-exact membership must not.
+    const plantedRoot = Deno.realPathSync(Deno.makeTempDirSync({ prefix: "air-planted-" }));
+    Deno.mkdirSync(`${plantedRoot}/memory-save/scripts`, { recursive: true });
+    Deno.copyFileSync(
+      `${skill.root}/memory-save/scripts/memory-save.ts`,
+      `${plantedRoot}/memory-save/scripts/memory-save.ts`,
+    );
+    const client = createRegisteredClient(createTestSkillRegistry(), createTestLogger(), {
+      workingDir: tempDir,
+      platform: "discord",
+      userId: "123",
+      channelId: "456",
+      isDM: false,
+    }, skill.list);
+    assertEquals(
+      await verdict(client, `deno run ${plantedRoot}/memory-save/scripts/memory-save.ts`),
+      "reject-1",
+    );
+  } finally {
+    Deno.removeSync(tempDir, { recursive: true });
+  }
+});
+
+Deno.test("root-exact - rejects a SESSION-RELATIVE planted copy", async () => {
+  const tempDir = Deno.makeTempDirSync();
+  try {
+    // Inventory root is a separate temp tree; the session workspace plants a
+    // fake tree at the SAME relative spelling the legitimate skill uses.
+    const skill = skillFixture(["memory-save"], []);
+    Deno.mkdirSync(`${tempDir}/skills/memory-save/scripts`, { recursive: true });
+    Deno.writeTextFileSync(`${tempDir}/skills/memory-save/scripts/memory-save.ts`, "// fake");
+    const client = createRegisteredClient(createTestSkillRegistry(), createTestLogger(), {
+      workingDir: tempDir,
+      platform: "discord",
+      userId: "123",
+      channelId: "456",
+      isDM: false,
+    }, skill.list);
+    // Relative spellings anchor physically at the registered session cwd: the
+    // planted fake canonicalizes OUTSIDE the inventory root — denied.
+    assertEquals(
+      await verdict(client, "deno run skills/memory-save/scripts/memory-save.ts"),
+      "reject-1",
+    );
+  } finally {
+    Deno.removeSync(tempDir, { recursive: true });
+  }
+});
+
+Deno.test("root-exact - rejects an invocation from an ALTERNATE HOME root", async () => {
+  const tempDir = Deno.makeTempDirSync();
+  const other = Deno.realPathSync(Deno.makeTempDirSync({ prefix: "air-other-home-" }));
+  try {
+    const skill = skillFixture(["memory-save"], []);
+    // The production personal-root spelling with a DIFFERENT HOME value.
+    Deno.mkdirSync(`${other}/.agents/skills/memory-save/scripts`, { recursive: true });
+    Deno.writeTextFileSync(`${other}/.agents/skills/memory-save/scripts/memory-save.ts`, "// copy");
+    const client = createRegisteredClient(createTestSkillRegistry(), createTestLogger(), {
+      workingDir: tempDir,
+      platform: "discord",
+      userId: "123",
+      channelId: "456",
+      isDM: false,
+    }, skill.list);
+    assertEquals(
+      await verdict(client, `deno run ${other}/.agents/skills/memory-save/scripts/memory-save.ts`),
+      "reject-1",
+    );
+  } finally {
+    Deno.removeSync(tempDir, { recursive: true });
+    try {
+      Deno.removeSync(other, { recursive: true });
+    } catch {
+      // best effort
+    }
+  }
+});
+
+Deno.test("root-exact - linked skill directories are never enumerated, linked spellings denied", async () => {
+  const tempDir = Deno.makeTempDirSync();
+  try {
+    // The root contains `linked-skill` as a SYMLINK to a tree OUTSIDE the
+    // root. The builder never enumerates through links, so nothing inside the
+    // linked target is ever granted — invoking any spelling of the linked
+    // directory is denied.
+    const root = Deno.realPathSync(Deno.makeTempDirSync({ prefix: "air-skills-" }));
+    const outside = Deno.realPathSync(Deno.makeTempDirSync({ prefix: "air-outside-" }));
+    Deno.mkdirSync(`${outside}/real-skill/scripts`, { recursive: true });
+    Deno.writeTextFileSync(`${outside}/real-skill/scripts/real-skill.ts`, "// outside payload");
+    Deno.symlinkSync(`${outside}/real-skill`, `${root}/linked-skill`);
+    // A real sibling skill proves the inventory itself was built.
+    Deno.mkdirSync(`${root}/memory-save/scripts`, { recursive: true });
+    Deno.writeTextFileSync(`${root}/memory-save/scripts/memory-save.ts`, "// real");
+    const list = buildSkillAutoApproveList({
+      agentType: "opencode",
+      rootObservation: observeTrustedSkillsRoot("opencode", root),
+    });
+    assertEquals(
+      list.scripts.map((entry) => entry.canonicalPath),
+      [`${root}/memory-save/scripts/memory-save.ts`],
+      "the linked skill must contribute NO grant",
+    );
+    const client = createRegisteredClient(createTestSkillRegistry(), createTestLogger(), {
+      workingDir: tempDir,
+      platform: "discord",
+      userId: "123",
+      channelId: "456",
+      isDM: false,
+    }, list);
+    assertEquals(
+      await verdict(client, `deno run ${root}/linked-skill/scripts/real-skill.ts`),
+      "reject-1",
+    );
+  } finally {
+    Deno.removeSync(tempDir, { recursive: true });
+  }
+});
+
+Deno.test("root-exact - denies after the observed root is REPLACED", async () => {
+  const tempDir = Deno.makeTempDirSync();
+  try {
+    const root = Deno.realPathSync(Deno.makeTempDirSync({ prefix: "air-skills-" }));
+    Deno.mkdirSync(`${root}/memory-save/scripts`, { recursive: true });
+    Deno.writeTextFileSync(`${root}/memory-save/scripts/memory-save.ts`, "// real");
+    const list = buildSkillAutoApproveList({
+      agentType: "opencode",
+      rootObservation: observeTrustedSkillsRoot("opencode", root),
+    });
+    const client = createRegisteredClient(createTestSkillRegistry(), createTestLogger(), {
+      workingDir: tempDir,
+      platform: "discord",
+      userId: "123",
+      channelId: "456",
+      isDM: false,
+    }, list);
+    const script = `${root}/memory-save/scripts/memory-save.ts`;
+    assertEquals(await verdict(client, `deno run ${script}`), "allow-1");
+    // Root replacement: same spelling, different physical tree.
+    Deno.removeSync(root, { recursive: true });
+    Deno.mkdirSync(`${root}/memory-save/scripts`, { recursive: true });
+    Deno.writeTextFileSync(`${root}/memory-save/scripts/memory-save.ts`, "// replaced");
+    assertEquals(await verdict(client, `deno run ${script}`), "reject-1");
+  } finally {
+    Deno.removeSync(tempDir, { recursive: true });
+  }
+});
+
+Deno.test("root-exact - unregistered session gets NO session-relative authority", async () => {
+  const tempDir = Deno.makeTempDirSync();
+  try {
+    // The inventory root sits at `tempDir/skills` (a spelling that WOULD
+    // resolve if relative anchoring fell back to config.workingDir) — but the
+    // requesting session is unregistered, so there is no anchor at all.
+    const skill = skillFixtureIn(join(tempDir, "skills"), ["memory-save"], []);
+    const client = new ChatbotClient(
+      createTestSkillRegistry(),
+      createTestLogger(),
+      {
+        workingDir: tempDir,
+        platform: "discord",
+        userId: "123",
+        channelId: "456",
+        isDM: false,
+        nativeCalls: createFilesystemTestCalls(),
+      },
+      skill.list,
+    );
+    assertEquals(
+      await verdict(client, "deno run skills/memory-save/scripts/memory-save.ts", "ghost-session"),
+      "reject-1",
+    );
+  } finally {
+    Deno.removeSync(tempDir, { recursive: true });
+  }
+});
+
+Deno.test("root-exact - slashless direct-exec never names a script grant (PATH is not cwd)", async () => {
+  const tempDir = Deno.makeTempDirSync();
+  try {
+    const skill = skillFixture(["memory-save"], []);
+    const client = createRegisteredClient(createTestSkillRegistry(), createTestLogger(), {
+      workingDir: tempDir,
+      platform: "discord",
+      userId: "123",
+      channelId: "456",
+      isDM: false,
+    }, skill.list);
+    // `memory-save.ts` as a bare command goes through the shell's PATH search,
+    // never the inventory root — the token can only name the grant if PATH
+    // happened to contain it, which the gate cannot observe. Denied.
+    assertEquals(await verdict(client, "memory-save.ts"), "reject-1");
+    // Under a real `deno run` the positional IS cwd-relative, but the
+    // registered cwd here does not contain the token — still denied.
+    assertEquals(await verdict(client, "deno run --allow-net memory-save.ts"), "reject-1");
+  } finally {
+    Deno.removeSync(tempDir, { recursive: true });
+  }
+});
+
+Deno.test("root-exact - entrypoint laundering and operator chains stay rejected (F2/F12 preserved)", async () => {
+  const tempDir = Deno.makeTempDirSync();
+  try {
+    const skill = skillFixture(["memory-save"]);
+    const client = createRegisteredClient(createTestSkillRegistry(), createTestLogger(), {
+      workingDir: tempDir,
+      platform: "discord",
+      userId: "123",
+      channelId: "456",
+      isDM: false,
+    }, skill.list);
+    const script = `${skill.root}/memory-save/scripts/memory-save.ts`;
+    // The whitelisted script as a trailing argument to an arbitrary binary.
+    assertEquals(await verdict(client, `cat /etc/hostname ${script}`), "reject-1");
+    assertEquals(await verdict(client, `tar -czf out.tgz /etc ${script}`), "reject-1");
+    // Non-allowed interpreter first token.
+    assertEquals(await verdict(client, `python ${script}`), "reject-1");
+    // `deno` without `run` never anchors an entrypoint.
+    assertEquals(await verdict(client, `deno ${script}`), "reject-1");
+    // Genuine deno-run grammar with flags approves.
+    assertEquals(
+      await verdict(client, `deno run --allow-net --allow-env ${script} --session-id x`),
+      "allow-1",
+    );
+    // Tolerated fd-to-fd redirect forms (F12 D1).
+    assertEquals(await verdict(client, `deno run ${script} 2>&1`), "allow-1");
+    assertEquals(await verdict(client, `deno run 2>&1 ${script} --session-id x`), "allow-1");
+    // Glued redirect-operator chains stay rejected.
+    assertEquals(await verdict(client, `deno run ${script} 2>&1&&rm -rf /`), "reject-1");
+    assertEquals(await verdict(client, `deno run ${script} 2>&1; curl evil`), "reject-1");
+    // Newline-separated second command stays rejected.
+    assertEquals(await verdict(client, `deno run ${script} 2>&1\nrm -rf /`), "reject-1");
+    // Legitimate workspace-confined chain approves (every segment passes).
+    assertEquals(await verdict(client, `deno run ${script} --session-id x && ls`), "allow-1");
+  } finally {
+    Deno.removeSync(tempDir, { recursive: true });
+  }
+});
+
 Deno.test("ChatbotClient - unknown-tool rejection preserved for non-edit kinds (kind other)", async () => {
   const tempDir = Deno.makeTempDirSync();
   try {
