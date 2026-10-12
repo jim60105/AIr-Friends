@@ -10,7 +10,7 @@
  */
 
 import { assertEquals, assertExists, assertNotEquals } from "@std/assert";
-import { isDisallowedAddress } from "@utils/ssrf.ts";
+import { isDisallowedAddress, resolveHostAnswers } from "@utils/ssrf.ts";
 import {
   decideFetchHop,
   deriveFetchEgressPolicy,
@@ -538,6 +538,57 @@ Deno.test("Unresolved posture blocks every hop with egress-policy-unresolved", a
   assertEquals(chain.ok, false);
   if (!chain.ok) assertEquals(chain.block.reason, "egress-policy-unresolved");
   assertEquals(transport.requests.length, 0);
+});
+
+// --- C3 D4: the shared collection rule (resolveHostAnswers) drives the
+// adapter seam exactly like the production runtime face — fixture
+// node:dns/promises pairs only, no Deno global involved. ------------------
+
+Deno.test("Collection rule at the seam: one family no-record keeps the other's answer", async () => {
+  const face = {
+    resolve4: () => Promise.resolve(["93.184.216.34"]),
+    resolve6: () => Promise.reject(new Error("ENOTFOUND")),
+  };
+  const decision = await decideFetchHop(
+    { url: "https://v4only.example/page", hopType: "initial", hopsFollowed: 0 },
+    { resolveHost: (host) => resolveHostAnswers(host, face), policy: UNRESTRICTED },
+  );
+  // The no-record family never discards the valid family: the hop decides
+  // on the surviving public answer, not dns-unresolved.
+  assertEquals(decision.decision, "allow-direct");
+});
+
+Deno.test("Collection rule at the seam: all-family failure blocks dns-unresolved with zero dispatch", async () => {
+  const face = {
+    resolve4: () => Promise.reject(new Error("ENOTFOUND")),
+    resolve6: () => Promise.reject(new Error("ENOTFOUND")),
+  };
+  const transport = mockTransport(() => textResponse());
+  const chain = await runFetchChain("https://dead.example/", {
+    resolveHost: (host) => resolveHostAnswers(host, face),
+    policy: UNRESTRICTED,
+    fetchImpl: transport.fetchImpl,
+  });
+  assertEquals(chain.ok, false);
+  if (!chain.ok) assertEquals(chain.block.reason, "dns-unresolved");
+  // No unvalidated-DNS fallback and no endpoint dispatch on empty answers.
+  assertEquals(transport.requests.length, 0);
+});
+
+Deno.test("Collection rule at the seam: private answers keep their true class denial", async () => {
+  const face = {
+    resolve4: () => Promise.resolve(["10.0.0.5"]),
+    resolve6: () => Promise.resolve([]),
+  };
+  const decision = await decideFetchHop(
+    { url: "https://private.example/", hopType: "initial", hopsFollowed: 0 },
+    { resolveHost: (host) => resolveHostAnswers(host, face), policy: UNRESTRICTED },
+  );
+  assertEquals(decision.decision, "block");
+  if (decision.decision === "block") {
+    assertEquals(decision.reason, "disallowed-address");
+    assertEquals(decision.addressClass, "rfc1918");
+  }
 });
 
 // Restore fetch for any later importer (each suite file runs isolated here).
