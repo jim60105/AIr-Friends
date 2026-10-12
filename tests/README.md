@@ -102,7 +102,11 @@ failing startup, and no client-observable readiness assertion compensates.
 
 ## Deliberately untouched files
 
-This suite is test-only: `CHANGELOG.md` is intentionally untouched (the
-batch changelog sync is owned by the final docs row), and
+The original (P0–P9) suite was test-only: `CHANGELOG.md` was intentionally
+untouched (the batch changelog sync is owned by the final docs row), and
 `config.example.yaml`, `.env.example`, `helm/values.yaml`, and `deno.json`
-carry no changes.
+carried no changes. Correction-batch row C2 (`align-omp-native-tool-contracts`)
+supersedes the last claim: `deno.json`/`deno.lock` now carry the exact
+`@sinclair/typebox` import-map pin that lets Deno fixtures resolve the same
+schema-builder facade the pinned host host-resolves for the extension
+closure (`docs/OMP_PACKAGING.md` §5).

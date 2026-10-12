@@ -33,10 +33,15 @@
 // deliberately NOT installed). Every VALUE edge must resolve INSIDE the
 // installed tree (fail closed otherwise), and any external bare VALUE
 // specifier outside the @std/* family fails the build — the boundary is
-// enforced, never trusted. The bundled set is DERIVED from the walk, never a
-// hand-maintained list: a successor change that extends the closure changes
-// the derived set AND forces the PACKAGE-MANIFEST.sha256 recut in the same
-// change (recut invariant D5).
+// enforced, never trusted. The ONE documented exception is the host-facade
+// external below (the exact bare `@sinclair/typebox` specifier,
+// align-omp-native-tool-contracts D1: the pinned legacy loader host-resolves
+// it to the runtime's own schema-builder facade); the rule stays enforced for
+// everything else, INCLUDING subpaths of the facade package, which the
+// pinned loader does NOT remap. The bundled set is DERIVED from the walk,
+// never a hand-maintained list: a successor change that extends the closure
+// changes the derived set AND forces the PACKAGE-MANIFEST.sha256 recut in the
+// same change (recut invariant D5).
 //
 // Serial-composition fact (recorded in the manifest header; recut invariant):
 // serial composition 12 -> 13 -> 14b -> 17 -> 18 landed; no reserved
@@ -62,6 +67,19 @@ interface Dep {
   ref: string;
   value: boolean;
 }
+
+/**
+ * The ONE non-@std external the trusted-extension closure may reference: the
+ * exact BARE schema-builder facade specifier (align-omp-native-tool-contracts
+ * D1). The pinned legacy loader host-resolves this exact bare value import to
+ * the runtime's own `Type` facade, so the generated import map deliberately
+ * does NOT pin it — an installed `npm:`/jsr pin would bypass the documented
+ * host remap and add an unowned module to the load-time graph. Subpaths of
+ * the package are NOT remapped by the host and therefore stay outside the
+ * boundary (checked on the FULL specifier, since package collapsing would
+ * otherwise admit `@sinclair/typebox/value`).
+ */
+const HOST_FACADE_EXTERNAL = "@sinclair/typebox";
 
 /**
  * Static + dynamic import specifiers with value-vs-type-only classification.
@@ -185,6 +203,10 @@ const externals = new Set<string>();
 for (const f of closure) {
   for (const d of await importsOf(f)) {
     if (!d.value || d.ref.startsWith(".")) continue;
+    // The documented host-facade external stays OUT of the import-map pin
+    // set on purpose (the host remap owns it); subpaths of the package are
+    // NOT exempt — they collapse to the package family and fail closed.
+    if (d.ref === HOST_FACADE_EXTERNAL) continue;
     const pkg = d.ref.startsWith("@")
       ? d.ref.split("/").slice(0, 2).join("/")
       : d.ref.split("/")[0];
@@ -192,8 +214,9 @@ for (const f of closure) {
   }
 }
 // The installed trusted-extension closure may depend on ONLY the std library
-// (mapped through the generated import map). Anything else (npm/jsr app
-// runtime deps) means the closure leaked past the boundary — fail closed.
+// (mapped through the generated import map) plus the one host-facade external
+// above. Anything else (npm/jsr app runtime deps) means the closure leaked
+// past the boundary — fail closed.
 for (const pkg of externals) {
   if (!pkg.startsWith("@std/")) {
     console.error(`trusted-extension closure references unsupported external: ${pkg}`);
@@ -305,7 +328,12 @@ for (const rel of [...closure].sort()) {
         problems.push(`mirror/${rel} -> ${d.ref} (MISSING at ${r})`);
       }
     } else if (!d.ref.startsWith("@std/")) {
-      problems.push(`mirror/${rel} -> ${d.ref} (UNMAPPED external)`);
+      // The completeness gate speaks the FULL reference, not the collapsed
+      // family: exactly the bare host-facade specifier passes (the pinned
+      // loader remaps it at load), subpaths stay UNMAPPED → fail closed.
+      if (d.ref !== HOST_FACADE_EXTERNAL) {
+        problems.push(`mirror/${rel} -> ${d.ref} (UNMAPPED external)`);
+      }
     }
   }
 }

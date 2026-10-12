@@ -10,6 +10,10 @@
  */
 
 import { assert, assertEquals, assertExists } from "@std/assert";
+// Test-side schema verifier: the builder's VALUE subpath. NEVER imported by
+// the mirror closure (the bundler rejects the subpath; the pinned host
+// remaps only the exact bare package specifier).
+import { Value } from "@sinclair/typebox/value";
 import {
   extensionHintFor,
   type FetchEgressPolicy,
@@ -34,8 +38,10 @@ import { evaluateApprovalRecordAuthority } from "@acp/omp/record-evaluator.ts";
 import type { ProvenanceRecord } from "@acp/omp/tool-provenance.ts";
 import {
   createReadReplacementToolDefinition,
+  formatNativeBytes,
   formatNativeShapedUrlRead,
   parseReadUrlBranch,
+  READ_REPLACEMENT_PARAMETERS,
   type ReadDelegationContext,
 } from "@acp/omp/extension/read-replacement.ts";
 import {
@@ -281,9 +287,10 @@ const SYNTHETIC_FIXTURE_LABEL =
   "never native-binary invocation";
 
 Deno.test(`Replacement positive fixtures — ${SYNTHETIC_FIXTURE_LABEL}`, async () => {
+  const PNG_FIXTURE = new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10]);
   const t = transport((url) =>
     url.endsWith(".png")
-      ? response(new Uint8Array([137, 80, 78, 71]), "image/png")
+      ? response(PNG_FIXTURE, "image/png")
       : response("<html>public page</html>", "text/html")
   );
   const definition = createReadReplacementToolDefinition({
@@ -303,11 +310,14 @@ Deno.test(`Replacement positive fixtures — ${SYNTHETIC_FIXTURE_LABEL}`, async 
     undefined,
     delegation,
   ) as {
-    contentBlocks: Array<{ type: string; text?: string }>;
+    content: Array<{ type: string; text?: string }>;
     details: { adapterCompleted: boolean };
   };
   assertEquals(html.details.adapterCompleted, true);
-  const htmlText = html.contentBlocks[0]?.text ?? "";
+  // Native AgentToolResult.content: text reads are a single TextContent.
+  assertEquals(html.content.length, 1);
+  assertEquals(html.content[0]?.type, "text");
+  const htmlText = html.content[0]?.text ?? "";
   assertEquals(htmlText.includes("URL: https://public.example/page"), true);
   assertEquals(htmlText.includes("Content-Type: text/html"), true);
   assertEquals(htmlText.includes("Method: fetch"), true);
@@ -321,16 +331,176 @@ Deno.test(`Replacement positive fixtures — ${SYNTHETIC_FIXTURE_LABEL}`, async 
     undefined,
     delegation,
   ) as {
-    contentBlocks: Array<{ type: string }>;
-    details: { adapterCompleted: boolean; method: string };
+    content: Array<{ type: string; data?: string; mimeType?: string }>;
+    details: { adapterCompleted: boolean; method: string; binaryData?: unknown };
   };
   assertEquals(png.details.method, "binary");
-  assertEquals(png.contentBlocks.some((b) => b.type === "image"), true);
+  // Supported image MIME → native ImageContent: base64 STRING + mimeType,
+  // and a native-compatible consumer recovers the EXACT fixture bytes.
+  const imageBlock = png.content.find((b) => b.type === "image");
+  assertExists(imageBlock, "supported PNG produces an ImageContent block");
+  assertEquals(imageBlock.mimeType, "image/png");
+  assertEquals(typeof imageBlock.data, "string", "image data is base64 text");
+  assertEquals(Uint8Array.from(atob(imageBlock.data ?? ""), (c) => c.charCodeAt(0)), PNG_FIXTURE);
+  assertEquals(png.details.binaryData, undefined, "inline images carry no extra details payload");
   // Native loadPage/fetchBinary were never reachable in this environment
   // (globalThis.fetch throws); every issued request carries manual redirect.
   for (const request of t.issued) {
     assertEquals(request.init?.redirect ?? "manual", "manual");
   }
+});
+
+Deno.test("Non-image binary is never an image block — text descriptor + details.binaryData (native representation)", async () => {
+  // image/svg+xml is routed binary by the shape classifier but is NOT in
+  // the pinned inline-image set: the closest "could be mistaken for an
+  // image" shape must still produce ZERO image content blocks.
+  const SVG_FIXTURE = new TextEncoder().encode("<svg xmlns='http://www.w3.org/2000/svg'/>");
+  const t = transport(() =>
+    response(SVG_FIXTURE, "image/svg+xml", {
+      "content-disposition": 'attachment; filename="logo.svg"',
+    })
+  );
+  const definition = createReadReplacementToolDefinition({
+    policy: UNRESTRICTED,
+    resolveHost: mockDns(),
+    fetchImpl: t.fetchImpl,
+  });
+  const out = await definition.execute(
+    "tc-1",
+    { path: "https://public.example/logo.svg" },
+    undefined,
+    undefined,
+    { invokeTool: () => Promise.resolve({}) },
+  ) as {
+    content: Array<{ type: string; text?: string }>;
+    details: {
+      method: string;
+      binaryData?: {
+        encoding: string;
+        data: string;
+        mimeType: string;
+        byteLength: number;
+        contentDisposition?: string;
+      };
+    };
+  };
+  assertEquals(out.details.method, "binary");
+  assertEquals(out.content.every((b) => b.type === "text"), true, "no image block for SVG");
+  // Native non-image binary descriptor (pinned fetch.ts buildBinaryNotice).
+  assertEquals(
+    out.content[0]?.text?.includes(`[Binary content: image/svg+xml, ${SVG_FIXTURE.byteLength}B]`),
+    true,
+    out.content[0]?.text,
+  );
+  const binary = out.details.binaryData;
+  assertExists(binary, "exact bytes kept in details.binaryData");
+  assertEquals(binary.encoding, "base64");
+  assertEquals(binary.mimeType, "image/svg+xml");
+  assertEquals(binary.byteLength, SVG_FIXTURE.byteLength);
+  // The content-disposition hint survives the migration off the deleted
+  // non-native `note` field (the fixture filename names itself in the hint).
+  assertEquals(binary.contentDisposition, 'attachment; filename="logo.svg"');
+  assertEquals(
+    Uint8Array.from(atob(binary.data), (c) => c.charCodeAt(0)),
+    SVG_FIXTURE,
+  );
+});
+
+Deno.test("Empty-MIME binary keeps the octet-stream fallback honestly (no image label)", async () => {
+  const t = transport(() => response(new Uint8Array([0, 1, 2, 3]), ""));
+  const definition = createReadReplacementToolDefinition({
+    policy: UNRESTRICTED,
+    resolveHost: mockDns(),
+    // A `.zip` URL with NO content-type header: empty MIME + binary
+    // extension hint is the shape that routes binary while the fallback
+    // mimeType stays the honest octet-stream default.
+    fetchImpl: t.fetchImpl,
+  });
+  const out = await definition.execute(
+    "tc-1",
+    { path: "https://public.example/blob.zip" },
+    undefined,
+    undefined,
+    { invokeTool: () => Promise.resolve({}) },
+  ) as {
+    content: Array<{ type: string }>;
+    details: { binaryData?: { mimeType: string; byteLength: number } };
+  };
+  assertEquals(out.content.every((b) => b.type === "text"), true);
+  assertEquals(out.details.binaryData?.mimeType, "application/octet-stream");
+  assertEquals(out.details.binaryData?.byteLength, 4);
+});
+
+Deno.test("Binary past the base64 chunk boundary round-trips byte-exactly through execute (0x8000+1)", async () => {
+  // The chunked encoder exists so a 50 MiB body never exceeds the
+  // spread-argument limit; an off-by-one at the boundary would corrupt or
+  // crash at runtime, so cross it at 0x8000+1 and recover via atob.
+  const BIG = new Uint8Array(0x8001);
+  for (let i = 0; i < BIG.length; i++) BIG[i] = (i * 7 + 13) % 256;
+  const t = transport(() => response(BIG, "application/zip"));
+  const definition = createReadReplacementToolDefinition({
+    policy: UNRESTRICTED,
+    resolveHost: mockDns(),
+    fetchImpl: t.fetchImpl,
+  });
+  const out = await definition.execute(
+    "tc-1",
+    { path: "https://public.example/big.zip" },
+    undefined,
+    undefined,
+    { invokeTool: () => Promise.resolve({}) },
+  ) as {
+    content: Array<{ type: string; text?: string }>;
+    details: { binaryData?: { data: string; byteLength: number } };
+  };
+  assertEquals(out.details.binaryData?.byteLength, BIG.byteLength);
+  assertEquals(out.content[0]?.text?.includes("[Binary content: application/zip, 32.0KB]"), true);
+  assertEquals(
+    Uint8Array.from(atob(out.details.binaryData?.data ?? ""), (c) => c.charCodeAt(0)),
+    BIG,
+  );
+});
+
+Deno.test("read parameters schema gates inputs before dispatch (behavioral, not schema-copy)", () => {
+  // The pinned descriptors and the chunked encoder get direct edges here;
+  // the executor paths above consume the same exported functions.
+  assertEquals(formatNativeBytes(1023), "1023B");
+  assertEquals(formatNativeBytes(1024), "1.0KB");
+  // toFixed(1) rounding, per the pinned renderer: 1048575/1024 renders 1024.0KB.
+  assertEquals(formatNativeBytes(1048575), "1024.0KB");
+  assertEquals(formatNativeBytes(1048576), "1.0MB");
+  assertEquals(formatNativeBytes(1073741824), "1.0GB");
+  // The host validates against definition.parameters BEFORE execute; these
+  // scenarios pin the gate's vocabulary against the pinned readSchema
+  // behavior. Value is imported from the builder's value subpath — a
+  // test-side verifier only; the mirror closure NEVER imports subpaths.
+  const definition = createReadReplacementToolDefinition({
+    policy: UNRESTRICTED,
+    resolveHost: mockDns(),
+    fetchImpl: transport(() => response("x", "text/html")).fetchImpl,
+  });
+  assertEquals(definition.parameters.type, "object");
+  assertEquals(definition.parameters.additionalProperties, false);
+  assert(Object.hasOwn(definition.parameters.properties ?? {}, "path"), "declares `path`");
+  assertEquals(definition.parameters.required, ["path"]);
+  // The definition carries the exported schema object verbatim.
+  assertEquals(definition.parameters, READ_REPLACEMENT_PARAMETERS);
+  // Valid native read inputs pass the gate.
+  assertEquals(Value.Check(READ_REPLACEMENT_PARAMETERS, { path: "src/main.ts" }), true);
+  assertEquals(
+    Value.Check(READ_REPLACEMENT_PARAMETERS, { path: "https://example.com/x:50" }),
+    true,
+  );
+  assertEquals(
+    Value.Check(READ_REPLACEMENT_PARAMETERS, { path: "" }),
+    true,
+    "native read accepts it",
+  );
+  // Invalid declared fields fail BEFORE dispatch (host gate; executor never
+  // sees them — the executor's own parser still rejects independently).
+  assertEquals(Value.Check(READ_REPLACEMENT_PARAMETERS, { path: 42 }), false);
+  assertEquals(Value.Check(READ_REPLACEMENT_PARAMETERS, {}), false);
+  assertEquals(Value.Check(READ_REPLACEMENT_PARAMETERS, { path: "p", extra: 1 }), false);
 });
 
 Deno.test("Native delegation is 100% verbatim for every non-URL input", async () => {

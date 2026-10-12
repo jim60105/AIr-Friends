@@ -316,7 +316,13 @@ export function parseSearchToolInput(
     };
   }
   const recency = params["recency"];
-  if (recency !== undefined && !["day", "week", "month", "year"].includes(String(recency))) {
+  // Type-checked (not String()-coerced): an array like ["day"] used to pass
+  // via String coercion, which the host schema gate (a Type.Union literal
+  // enum) would reject — schema and executor must accept the SAME vocabulary.
+  if (
+    recency !== undefined &&
+    (typeof recency !== "string" || !["day", "week", "month", "year"].includes(recency))
+  ) {
     return { ok: false, error: "web_search: `recency` must be day | week | month | year" };
   }
   const numeric: Record<string, number | undefined> = {};

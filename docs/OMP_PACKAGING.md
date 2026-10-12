@@ -141,7 +141,14 @@ repo-relative **mirror copy of the value-import closure**, not a fork:
   `client.ts` types) are NOT installed; the loader erases type-only imports
   and the suite proves the erasure by loading the bundle. Any external bare
   VALUE specifier outside `@std/*` fails the build — the boundary is
-  enforced, never trusted.
+  enforced, never trusted. The ONE documented exception is the exact bare
+  `@sinclair/typebox` schema-builder host facade
+  (`align-omp-native-tool-contracts` D1): the pinned legacy loader
+  host-resolves that exact bare value import to the runtime's own `Type`
+  facade, so the generated import map deliberately carries NO entry for it
+  (an installed `npm:`/jsr pin would bypass the documented host remap);
+  subpaths of the package are NOT remapped by the host and therefore stay
+  outside the boundary. The rule stays enforced for everything else.
 - The build consumes the cache stage's root-owned source copy (`/build-src`),
   never the agent-writable `/app/src` 775 tree.
 

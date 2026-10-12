@@ -50,6 +50,7 @@
  */
 
 import { type EnforcementLaunchMode, observeLaunchMode } from "./enforcement.ts";
+import { Type } from "@sinclair/typebox";
 import {
   type FetchDecisionRecord,
   type FetchEgressPolicy,
@@ -204,16 +205,36 @@ export function applyReadSelector(content: string, selector: ReadSelector): stri
 // The replacement definition.
 // ---------------------------------------------------------------------------
 
-/** Native-shaped URL-read result the replacement returns. */
+/**
+ * The pinned source's `ToolDefinition.parameters` field is NOT optional:
+ * the host validates tool input against it BEFORE `execute` runs
+ * (packages/coding-agent/src/extensibility/extensions/types.ts at the pin).
+ * A structurally compatible schema-builder facade (the canonical bare
+ * `@sinclair/typebox` import the pinned legacy loader host-resolves) builds
+ * both replacement schemas; the adapter keeps the declared vocabulary of the
+ * executors' own input parsers 1:1 so the host gate and the executor can
+ * never disagree, and locks each object closed (`additionalProperties:
+ * false`) so the gate never admits a field the executor would silently
+ * ignore. The pinned image read also emits the host shim's exact field
+ * spellings.
+ */
+
+/** The native `TextContent` block (`{ type: "text", text }`). */
+export interface ReadReplacementTextContent {
+  readonly type: "text";
+  readonly text: string;
+}
+
+/** The native `ImageContent` block: base64 STRING data + `mimeType`. */
+export interface ReadReplacementImageContent {
+  readonly type: "image";
+  readonly data: string;
+  readonly mimeType: string;
+}
+
+/** Native-shaped URL-read result the replacement returns (`AgentToolResult`). */
 export interface ReadReplacementResult {
-  readonly contentBlocks: ReadonlyArray<
-    { readonly type: "text"; readonly text: string } | {
-      readonly type: "image";
-      readonly data: Uint8Array;
-      readonly mimeType: string;
-      readonly note: string;
-    }
-  >;
+  readonly content: ReadonlyArray<ReadReplacementTextContent | ReadReplacementImageContent>;
   readonly details: {
     readonly kind: "url";
     readonly finalUrl: string;
@@ -222,7 +243,46 @@ export interface ReadReplacementResult {
     readonly truncated: boolean;
     readonly notes: readonly string[];
     readonly adapterCompleted: true;
+    /**
+     * Non-image binary payloads the native renderer has no text/inline-image
+     * representation for. The native pin answers them with a text descriptor
+     * (`[Binary content: <mime>, <size>] <url>`) only — never raw bytes to
+     * the model — so the adapter keeps the EXACT bytes honest, base64-encoded
+     * in `details` (the native `AgentToolResult.details` position), NOT in a
+     * fabricated content block. `data` is base64 of the fetched bytes.
+     */
+    readonly binaryData?: {
+      readonly encoding: "base64";
+      readonly data: string;
+      readonly mimeType: string;
+      readonly byteLength: number;
+      readonly contentDisposition?: string;
+    };
   };
+}
+
+/** The `read` parameter vocabulary: the native read schema is `{ path }`. */
+export const READ_REPLACEMENT_PARAMETERS = Type.Object(
+  { path: Type.String() },
+  { additionalProperties: false },
+);
+
+/**
+ * The pinned `ToolDefinition.parameters` shape the schema must satisfy: a
+ * JSON-Schema object type. The concrete schemas are BUILDER objects (the
+ * exported `READ_REPLACEMENT_PARAMETERS`/`SEARCH_REPLACEMENT_PARAMETERS`,
+ * full `TObject` typing — the host gate and a fixture's `Value.Check`
+ * consume the real builder schema, never a substitute); the definition
+ * surface widens to this structural JSON-Schema view so BOTH object shapes
+ * stay assignable without a second schema system.
+ */
+export interface NativeToolParameterSchema {
+  readonly type?: string;
+  readonly properties?: Record<string, unknown>;
+  readonly required?: readonly string[];
+  /** JSON Schema allows a boolean or a subschema here; both adapters accept
+   *  the literal `false` the replacement schemas pass. */
+  readonly additionalProperties?: boolean | Record<string, unknown>;
 }
 
 /** Fail-closed replacement error (bounded fields; 14b vocabulary named). */
@@ -244,6 +304,7 @@ export interface ReadReplacementDefinition {
   readonly label: string;
   readonly description: string;
   readonly approval: "read";
+  readonly parameters: NativeToolParameterSchema;
   execute(
     toolCallId: string,
     params: Record<string, unknown>,
@@ -284,6 +345,55 @@ export function formatNativeShapedUrlRead(read: {
 }
 
 /**
+ * The pinned renderer's inline-serializable image set (fetch.ts
+ * `SUPPORTED_INLINE_IMAGE_MIME_TYPES` at the pin): ONLY these binaries may
+ * become native `ImageContent` blocks. Every other binary keeps the text
+ * descriptor + `details.binaryData` representation.
+ */
+const SUPPORTED_INLINE_IMAGE_MIME_TYPES: Record<string, true> = {
+  "image/png": true,
+  "image/jpeg": true,
+  "image/gif": true,
+  "image/webp": true,
+};
+
+/** The pinned `formatBytes` rendering (pi-utils format.ts at the pin). */
+export function formatNativeBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes}B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)}KB`;
+  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)}MB`;
+  return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)}GB`;
+}
+
+/** The pinned non-image binary descriptor (fetch.ts `buildBinaryNotice`). */
+export function buildBinaryNotice(finalUrl: string, mime: string, byteLength: number): string {
+  return `[Binary content: ${mime || "application/octet-stream"}, ${
+    formatNativeBytes(byteLength)
+  }] ${finalUrl}`;
+}
+
+/**
+ * Runtime-portable base64 (the pinned host's `Buffer.toBase64()` equivalent;
+ * no new external and no `Deno.*` surface in the mirror closure). Chunked so
+ * large payloads never exceed the spread-argument limit of the host runtime.
+ * `btoa` is present on every host runtime that can load this closure (Deno,
+ * Bun, Node); anything without it fails closed rather than emitting bytes
+ * labelled base64 that were never base64-encoded.
+ */
+export function encodeBase64(bytes: Uint8Array): string {
+  const b = globalThis as { btoa?: (data: string) => string };
+  if (typeof b.btoa !== "function") {
+    throw new Error("read replacement: no base64 surface available in the host runtime");
+  }
+  const CHUNK = 0x8000;
+  let out = "";
+  for (let i = 0; i < bytes.length; i += CHUNK) {
+    out += String.fromCharCode(...bytes.subarray(i, i + CHUNK));
+  }
+  return b.btoa(out);
+}
+
+/**
  * Build the `read` replacement ToolDefinition over the adapter. `deps` are
  * the consumed transport facts + injected seams; with no injected
  * `resolveHost`, resolution uses the runtime's own resolver and FAILS
@@ -303,9 +413,14 @@ export function createReadReplacementToolDefinition(
       "Read files, URIs, and skill paths. URL reads are served through the AIr controlled " +
       "fetch transport with per-hop validation.",
     approval: "read",
+    parameters: READ_REPLACEMENT_PARAMETERS,
     async execute(toolCallId, params, signal, _onUpdate, ctx) {
       void toolCallId;
       const rawPath: unknown = params["path"];
+      // Shape is the host gate's job (`parameters` declares a required
+      // string, so a non-string never reaches execute through the host);
+      // this executor-side coercion stays as the independent second layer,
+      // keeping pre-gate executor behavior byte-for-byte unchanged.
       const readPath = typeof rawPath === "string" ? rawPath : "";
       const branch = parseReadUrlBranch(readPath);
       if (branch.kind === "native") {
@@ -351,34 +466,68 @@ export function createReadReplacementToolDefinition(
       }
 
       if (shaped.route === "binary") {
+        // Valid binary representation per the pinned renderer (fetch.ts):
+        // images whose MIME the host can serialize inline become a native
+        // `ImageContent` block (base64 STRING + mimeType); every other
+        // binary answers with the native text descriptor
+        // `[Binary content: <mime>, <size>] <url>` and keeps the exact
+        // bytes in `details.binaryData` — never fabricated content blocks,
+        // never raw bytes smuggled into model-facing content.
         const notes = [
           `binary body served by the adapter (${shaped.bytes.byteLength} bytes)`,
           `materialized hint: ${shaped.extensionHint || "unknown"} via controlled transport`,
         ];
+        const mime = shaped.contentType || "application/octet-stream";
+        const details = {
+          kind: "url" as const,
+          finalUrl: shaped.finalUrl,
+          contentType: shaped.contentType,
+          method: "binary",
+          truncated: false,
+          notes,
+          adapterCompleted: true as const,
+        };
+        if (SUPPORTED_INLINE_IMAGE_MIME_TYPES[shaped.contentType] === true) {
+          return {
+            content: [{
+              type: "text" as const,
+              text: formatNativeShapedUrlRead({
+                finalUrl: shaped.finalUrl,
+                contentType: shaped.contentType,
+                method: "binary",
+                notes,
+                content: `Fetched image content (${mime}).`,
+              }),
+            }, {
+              type: "image" as const,
+              data: encodeBase64(shaped.bytes),
+              mimeType: mime,
+            }],
+            details,
+          };
+        }
         return {
-          contentBlocks: [{
+          content: [{
             type: "text" as const,
             text: formatNativeShapedUrlRead({
               finalUrl: shaped.finalUrl,
               contentType: shaped.contentType,
               method: "binary",
               notes,
-              content: "",
+              content: buildBinaryNotice(shaped.finalUrl, mime, shaped.bytes.byteLength),
             }),
-          }, {
-            type: "image" as const,
-            data: shaped.bytes,
-            mimeType: shaped.contentType || "application/octet-stream",
-            note: `content-disposition=${shaped.contentDisposition ?? "none"}`,
           }],
           details: {
-            kind: "url" as const,
-            finalUrl: shaped.finalUrl,
-            contentType: shaped.contentType,
-            method: "binary",
-            truncated: false,
-            notes,
-            adapterCompleted: true as const,
+            ...details,
+            binaryData: {
+              encoding: "base64" as const,
+              data: encodeBase64(shaped.bytes),
+              mimeType: mime,
+              byteLength: shaped.bytes.byteLength,
+              ...(shaped.contentDisposition !== undefined
+                ? { contentDisposition: shaped.contentDisposition }
+                : {}),
+            },
           },
         };
       }
@@ -390,7 +539,7 @@ export function createReadReplacementToolDefinition(
       }
       const method = shaped.contentType === "text/markdown" ? "markdown" : "fetch";
       return {
-        contentBlocks: [{
+        content: [{
           type: "text" as const,
           text: formatNativeShapedUrlRead({
             finalUrl: shaped.finalUrl,
