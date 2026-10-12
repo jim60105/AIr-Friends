@@ -826,6 +826,31 @@ Deno.test({
 });
 
 Deno.test({
+  name:
+    "DashboardServer - POST /api/chat/connect with omitted agentType uses the configured default (fails at connection)",
+  sanitizeResources: false,
+  sanitizeOps: false,
+}, async () => {
+  const config = createMinimalConfig();
+  config.agent.defaultAgentType = "omp";
+  const t = await createTestServer({ appConfig: config });
+  try {
+    const cookie = await loginAndGetCookie(t.baseUrl);
+    const res = await fetch(`${t.baseUrl}/api/chat/connect`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Cookie: cookie },
+      body: JSON.stringify({ model: "google/gemini-3-pro" }),
+    });
+    // The omitted field resolves to the configured default 'omp', which passes
+    // validation and proceeds to connection establishment (returns 500 here);
+    // a hard-coded or out-of-domain fallback would have returned 400 instead.
+    assertEquals(res.status, 500);
+  } finally {
+    await t.cleanup();
+  }
+});
+
+Deno.test({
   name: "DashboardServer - POST /api/chat/disconnect without auth returns 401",
   sanitizeResources: false,
   sanitizeOps: false,

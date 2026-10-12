@@ -212,6 +212,10 @@ Select via `agent.defaultAgentType` in config or `AGENT_DEFAULT_TYPE` (also in
 acceptance is distinct from launch availability — see
 [AGENTS.md](AGENTS.md#batch-configuration-documentation-consistency-audit).
 
+The dashboard chat (Interactive Terminal tab) offers both supported types in
+its Agent Protocol selector and submits the selected one with each connection;
+the configured default applies only when a request omits the agent type.
+
 OMP runs in two deployment postures: **restricted** (deployment-owned settings
 overlay, trusted enforcement extension, native approval mode) and
 **native-YOLO** (operator-approved; carries the LSP disable without restricted
