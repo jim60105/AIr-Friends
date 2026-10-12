@@ -14,8 +14,10 @@ List all active (pending) reminders for the current user.
 
 ## Usage
 
+> The placeholder `<skill root rendered in your system prompt>` is the absolute skill-script root rendered in your system prompt: substitute that literal root before invoking — never run this command with the placeholder, a `$HOME` expression, or any other root.
+
 ```bash
-${HOME}/.agents/skills/list-reminders/scripts/list-reminders.ts \
+<skill root rendered in your system prompt>/list-reminders/scripts/list-reminders.ts \
   --session-id "<session id rendered in your system prompt>"
 ```
 

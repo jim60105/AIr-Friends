@@ -28,7 +28,7 @@ async function main() {
       sessionId,
       fileName: "reminder.md",
       example:
-        `${Deno.env.get("HOME") ?? "~"}/.agents/skills/set-reminder/scripts/set-reminder.ts ` +
+        `Use the literal skill-script root rendered in your system prompt (never a $HOME expression): <skill root rendered in your system prompt>/set-reminder/scripts/set-reminder.ts ` +
         `--session-id "<session id rendered in your system prompt>" --scheduled-at "2025-01-15T10:00:00Z" ` +
         `--message-file "<absolute staging directory rendered in your system prompt>/reminder.md"`,
     });

@@ -14,13 +14,15 @@ Retrieve the content and metadata of a message by its ID. Useful for checking th
 
 ## Usage
 
+> The placeholder `<skill root rendered in your system prompt>` is the absolute skill-script root rendered in your system prompt: substitute that literal root before invoking — never run this command with the placeholder, a `$HOME` expression, or any other root.
+
 ```bash
-${HOME}/.agents/skills/get-message/scripts/get-message.ts \
+<skill root rendered in your system prompt>/get-message/scripts/get-message.ts \
   --session-id "<session id rendered in your system prompt>" \
   --message-id "<messageId from send-reply>"
 
 # Or without --message-id to get the last sent message:
-${HOME}/.agents/skills/get-message/scripts/get-message.ts \
+<skill root rendered in your system prompt>/get-message/scripts/get-message.ts \
   --session-id "<session id rendered in your system prompt>"
 ```
 

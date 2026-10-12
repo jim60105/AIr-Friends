@@ -25,7 +25,7 @@ async function main() {
       alias: "q",
       fileName: "query.md",
       example:
-        `${Deno.env.get("HOME") ?? "~"}/.agents/skills/memory-search/scripts/memory-search.ts ` +
+        `Use the literal skill-script root rendered in your system prompt (never a $HOME expression): <skill root rendered in your system prompt>/memory-search/scripts/memory-search.ts ` +
         `--session-id "<session id rendered in your system prompt>" --limit 10 --query-file "<absolute staging directory rendered in your system prompt>/query.md"`,
     });
 

@@ -39,8 +39,10 @@ The caption is OPTIONAL. When present, it MUST NOT appear on the command line â€
 
 2. Invoke the script with the payload file path:
 
+> The placeholder `<skill root rendered in your system prompt>` is the absolute skill-script root rendered in your system prompt: substitute that literal root before invoking â€” never run this command with the placeholder, a `$HOME` expression, or any other root.
+
    ```
-   ${HOME}/.agents/skills/send-file/scripts/send-file.ts \
+   <skill root rendered in your system prompt>/send-file/scripts/send-file.ts \
      --session-id "<session id rendered in your system prompt>" \
      --file-paths "relative/path/to/file.png" \
      --file-paths "relative/path/to/second.pdf" \
@@ -62,19 +64,19 @@ The caption is OPTIONAL. When present, it MUST NOT appear on the command line â€
 
 ```
 # Send an image
-${HOME}/.agents/skills/send-file/scripts/send-file.ts \
+<skill root rendered in your system prompt>/send-file/scripts/send-file.ts \
   --session-id "<session id rendered in your system prompt>" \
   --file-paths "output/chart.png"
 
 # Send multiple files in one message
-${HOME}/.agents/skills/send-file/scripts/send-file.ts \
+<skill root rendered in your system prompt>/send-file/scripts/send-file.ts \
   --session-id "<session id rendered in your system prompt>" \
   --file-paths "exports/report.pdf" \
   --file-paths "exports/chart.png" \
   --file-paths "exports/data.json"
 
 # Send multiple files with a description
-${HOME}/.agents/skills/send-file/scripts/send-file.ts \
+<skill root rendered in your system prompt>/send-file/scripts/send-file.ts \
   --session-id "<session id rendered in your system prompt>" \
   --file-paths "exports/report.pdf" \
   --file-paths "exports/chart.png" \

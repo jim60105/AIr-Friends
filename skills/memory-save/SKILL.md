@@ -22,8 +22,10 @@ Save important information that should persist across conversations.
 
 2. Invoke the script with the payload file path:
 
+> The placeholder `<skill root rendered in your system prompt>` is the absolute skill-script root rendered in your system prompt: substitute that literal root before invoking — never run this command with the placeholder, a `$HOME` expression, or any other root.
+
    ```bash
-   ${HOME}/.agents/skills/memory-save/scripts/memory-save.ts \
+   <skill root rendered in your system prompt>/memory-save/scripts/memory-save.ts \
      --session-id "<session id rendered in your system prompt>" \
      --content-file "<absolute staging directory rendered in your system prompt>/content.md" \
      --importance high

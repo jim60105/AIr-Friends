@@ -14,8 +14,10 @@ Cancel a previously set reminder. The reminder must belong to the current user.
 
 ## Usage
 
+> The placeholder `<skill root rendered in your system prompt>` is the absolute skill-script root rendered in your system prompt: substitute that literal root before invoking — never run this command with the placeholder, a `$HOME` expression, or any other root.
+
 ```bash
-${HOME}/.agents/skills/cancel-reminder/scripts/cancel-reminder.ts \
+<skill root rendered in your system prompt>/cancel-reminder/scripts/cancel-reminder.ts \
   --session-id "<session id rendered in your system prompt>" \
   --reminder-id "rem_1705312800000_a1b2c3d4"
 ```

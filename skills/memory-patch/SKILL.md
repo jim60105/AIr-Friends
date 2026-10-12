@@ -10,46 +10,48 @@ Modify metadata of existing memories without changing content.
 
 ## Usage
 
+> The placeholder `<skill root rendered in your system prompt>` is the absolute skill-script root rendered in your system prompt: substitute that literal root before invoking — never run this command with the placeholder, a `$HOME` expression, or any other root.
+
 ```bash
 # Disable a memory
-${HOME}/.agents/skills/memory-patch/scripts/memory-patch.ts \
+<skill root rendered in your system prompt>/memory-patch/scripts/memory-patch.ts \
   --session-id "<session id rendered in your system prompt>" \
   --memory-id "mem_abc123" \
   --disabled
 
 # Change importance
-${HOME}/.agents/skills/memory-patch/scripts/memory-patch.ts \
+<skill root rendered in your system prompt>/memory-patch/scripts/memory-patch.ts \
   --session-id "<session id rendered in your system prompt>" \
   --memory-id "mem_abc123" \
   --importance high
 
 # Mark a memory as superseding others (maintenance lineage)
-${HOME}/.agents/skills/memory-patch/scripts/memory-patch.ts \
+<skill root rendered in your system prompt>/memory-patch/scripts/memory-patch.ts \
   --session-id "<session id rendered in your system prompt>" \
   --memory-id "mem_new_summary" \
   --supersedes "mem_old1,mem_old2,mem_old3"
 
 # Add related memory links
-${HOME}/.agents/skills/memory-patch/scripts/memory-patch.ts \
+<skill root rendered in your system prompt>/memory-patch/scripts/memory-patch.ts \
   --session-id "<session id rendered in your system prompt>" \
   --memory-id "mem_abc123" \
   --related-to "mem_def456,mem_ghi789"
 
 # Change tier and category
-${HOME}/.agents/skills/memory-patch/scripts/memory-patch.ts \
+<skill root rendered in your system prompt>/memory-patch/scripts/memory-patch.ts \
   --session-id "<session id rendered in your system prompt>" \
   --memory-id "mem_abc123" \
   --tier core \
   --category preference
 
 # Adjust decay value
-${HOME}/.agents/skills/memory-patch/scripts/memory-patch.ts \
+<skill root rendered in your system prompt>/memory-patch/scripts/memory-patch.ts \
   --session-id "<session id rendered in your system prompt>" \
   --memory-id "mem_abc123" \
   --decay 0.9
 
 # Adjust decay on a channel-scoped memory (requires channel write authorization)
-${HOME}/.agents/skills/memory-patch/scripts/memory-patch.ts \
+<skill root rendered in your system prompt>/memory-patch/scripts/memory-patch.ts \
   --session-id "<session id rendered in your system prompt>" \
   --memory-id "mem_channel_123" \
   --scope channel \
