@@ -166,3 +166,19 @@ Deno.test("observation fails explicitly when canonical observation returns null"
   assertEquals(error.code, ErrorCode.CONFIG_INVALID);
   assertEquals(error.message.includes("failed canonical observation"), true);
 });
+
+Deno.test("a canonical observation that lands on the filesystem root is refused (B3)", () => {
+  // A configured root that realpaths to "/" can never be a read-only skill
+  // tree — it contains every agent-writable mount by construction. The
+  // resolver refuses it centrally so readiness, inventory and the mount all
+  // share one posture instead of only confinement failing at spawn.
+  const error = assertThrows(
+    () =>
+      observeTrustedSkillsRoot("opencode", "/some/prefix", {
+        directoryExists: () => true,
+        observeDirectory: () => ({ root: "/" }),
+      }),
+  ) as ConfigError;
+  assertEquals(error.code, ErrorCode.CONFIG_INVALID);
+  assertEquals(error.message.includes('cannot be the filesystem root "/"'), true);
+});
