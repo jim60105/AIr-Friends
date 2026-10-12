@@ -4,19 +4,26 @@
 
 ### Requirement: Skill Auto-Approve List Construction
 
-The system SHALL construct script auto-approval inventory exclusively from the selected agent's explicit deployment-resolved skill-script root. Stored script entries SHALL identify canonical absolute regular files physically contained in that root. A nonempty configured skill-name list SHALL filter observed entries within that root; omitted or empty configuration SHALL scan that root. The system SHALL NOT scan an ambient HOME-global tree or infer a command-prefix grant from a missing, inaccessible or uninstalled skill. An observed command-based skill with its instruction file and no scripts directory MAY retain its existing exact command-prefix grant.
+Script inventory SHALL use the selected explicit root and canonical absolute contained files. OpenCode SHALL discover installed entries; OMP SHALL admit only deployment-cataloged bundled names. Configured names SHALL filter eligible entries. HOME scanning or missing-skill command grants SHALL NOT occur. Observed command skills with instruction files and no scripts directory MAY retain exact prefixes.
 
 #### Scenario: Configured skills list
 - **GIVEN** `autoApproveSkills` is provided in client config
 - **WHEN** the skill inventory is constructed
 - **THEN** it SHALL include only observed configured skills inside the selected explicit root
 - **AND** a script's entry SHALL be its canonical absolute path
+- **AND** configured OMP names SHALL NOT expand eligibility beyond the deployment-controlled bundled catalog
 
 #### Scenario: Directory-scanned skills list
 - **GIVEN** no `autoApproveSkills` configuration or an empty list
 - **WHEN** the skill inventory is constructed with the resolved root
-- **THEN** it SHALL scan that directory for skill scripts and observed command-based skills
+- **THEN** OpenCode SHALL scan that directory for installed skills, and OMP SHALL inspect only bundled catalog names within it
 - **AND** it SHALL NOT supplement the inventory from a HOME-derived tree
+
+#### Scenario: Shared development root does not grant external OMP execution
+- **GIVEN** both agent types resolve to the repository skills tree and external publication adds a non-bundled script there
+- **WHEN** inventories are constructed with empty approval lists or with that external name explicitly configured
+- **THEN** OpenCode SHALL admit the contained installed script
+- **AND** OMP SHALL deny it because root membership and a configured name cannot expand the bundled catalog
 
 #### Scenario: Missing configured external skill yields no executable grant
 - **GIVEN** a configured external script skill failed installation or its directory is absent when the connector is constructed

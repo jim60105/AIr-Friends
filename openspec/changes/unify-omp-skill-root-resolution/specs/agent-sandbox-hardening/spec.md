@@ -56,3 +56,14 @@ Filesystem confinement SHALL expose the selected agent's resolved skill tree at 
 - **WHEN** confinement arguments are constructed
 - **THEN** that exact resolved directory SHALL be exposed read-only
 - **AND** writable workspace/runtime grants SHALL remain unchanged and SHALL NOT override the skill tree's read-only visibility
+
+#### Scenario: Equal or enclosing skill root cannot replace mandatory writable grants
+- **GIVEN** the canonical skill root equals or contains a mandatory writable workspace, TMPDIR, shared workspace or runtime mount
+- **WHEN** confinement is prepared
+- **THEN** preparation SHALL fail before spawn instead of making skills writable or silently making mandatory runtime state read-only
+
+#### Scenario: Child skill tree is mounted after a writable parent
+- **GIVEN** the skill tree is a child of a writable mounted parent and contains no mandatory writable descendants
+- **WHEN** confinement arguments are constructed
+- **THEN** its read-only bind SHALL occur after that parent bind
+- **AND** the parent outside the skill tree SHALL retain its existing writable grant
