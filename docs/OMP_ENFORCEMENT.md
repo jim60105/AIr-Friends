@@ -1,10 +1,12 @@
-# OMP Restricted `tool_call` Enforcement Wiring (row 16)
+# OMP Restricted `tool_call` Enforcement Wiring (row 16 + C4)
 
-Implements OpenSpec change `wire-omp-restricted-tool-enforcement`. Pinned to
-official OMP v18.6.1 / commit 2a2c6dcbbb558c0f8145f67f28b3370984f2bf60.
+Implements OpenSpec changes `wire-omp-restricted-tool-enforcement` and
+`wire-omp-native-extension-api` (C4). Pinned to official OMP v18.6.1 /
+commit 2a2c6dcbbb558c0f8145f67f28b3370984f2bf60.
 
-This document describes the WIRING: how the trusted extension attaches a
-`tool_call` handler and composes the row-14a pure decisions per call. It adds
+This document describes the WIRING: how the trusted extension registers a
+`tool_call` handler through the pinned native `ExtensionAPI` and composes the
+row-14a pure decisions per call. It adds
 no decision logic of its own — the tables and verdicts live in
 [OMP_TOOL_POLICY.md](OMP_TOOL_POLICY.md) (row 14a) and the permission model in
 [AGENT_PERMISSIONS.md](AGENT_PERMISSIONS.md). Nothing here demonstrates that
@@ -13,22 +15,61 @@ user-owned checklist at the bottom.
 
 ## Modules
 
-| Module                                       | Role                                                                                |
-| -------------------------------------------- | ----------------------------------------------------------------------------------- |
-| `src/acp/omp/extension/enforcement.ts`       | Synchronous slot registration + attached handler body + live epoch observer         |
-| `src/acp/omp/extension/enforcement-error.ts` | Bounded error shapes, observation shapes, composition-order data                    |
-| `src/acp/omp/extension/_daemon/mod.ts`       | Image-mapped re-export barrel (row 20 D5) — the extension's ONLY 14a import surface |
-| `src/acp/omp/tool-enforcement-wiring.ts`     | Composition point: seam table, pinned mechanism evidence, honesty gates             |
-| `src/acp/omp/extension/index.ts`             | Entrypoint: pre-import gate, then the load-time attach call                         |
+| Module                                         | Role                                                                                                                                                                                     |
+| ---------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `src/acp/omp/extension/enforcement.ts`         | Synchronous slot registration + attached handler body + live epoch observer                                                                                                              |
+| `src/acp/omp/extension/enforcement-error.ts`   | Bounded error shapes, observation shapes, composition-order data                                                                                                                         |
+| `src/acp/omp/extension/_daemon/mod.ts`         | Image-mapped re-export barrel (row 20 D5) — the extension's ONLY 14a import surface                                                                                                      |
+| `src/acp/omp/tool-enforcement-wiring.ts`       | Composition point: seam table, pinned mechanism evidence, honesty gates                                                                                                                  |
+| `src/acp/omp/extension/native-registration.ts` | C4 native adapter: `api.on("tool_call")` + `api.registerTool(...)` at factory evaluation; fresh `getAllTools()` sourceInfo → canonical provenance with first-sighting freshness captures |
+| `src/acp/omp/extension/native-events.ts`       | C4 decoder: pinned `ToolCallEvent` → restricted input (shape selection, destructive payload, empty-hierarchy record evaluation); model-forged authority fields are never read            |
+| `src/acp/omp/extension/index.ts`               | Entrypoint: pre-import gate, then the default factory that performs the native registrations                                                                                             |
 
 **Current-pin reality:** the shipped row-12 gate always yields blockers
 (native-custom-tool-discovery and plugin-entry-points are P0-unresolved and
-pushed unconditionally), so the entrypoint throws BEFORE the attach call
-completes and the slot is unregistered in every environment today. Load-time
-registration becomes operative only if the pinned pre-import-exclusion
+pushed unconditionally), so the entrypoint throws BEFORE the default factory
+is ever exported in every environment today — the native registrations below
+become operative only if the pinned pre-import-exclusion
 verdicts ever pass — this is a stronger residual than "extension load might
 fail" (checklist item 4) and no wiring test can or does certify a registered
 handler in a real process.
+
+## Native registration (C4 correction)
+
+C4 replaced the earlier factory-return/private-slot convention with the real
+pinned contract: the loader evaluates the module's default export as a
+factory, awaits it, and DISCARDS its return value — the only enforcement
+surface the binary honors is what the factory registers synchronously during
+its own evaluation through the native `ExtensionAPI`:
+
+- `api.on("tool_call", callback)` — the callback decodes the pinned event
+  (`{toolCallId, toolName, input}`) into the restricted input shape, runs
+  the same composition, and returns the bounded `{block:true, reason}` on
+  denial (preventing dispatch) or `undefined` to continue toward the NAMED
+  completing boundary. There is no silently-allow path: an unrepresentable
+  event or an internal throw blocks with the `native-event-decode` seam
+  marker.
+- `api.registerTool(definition)` — the C2 `read` and `web_search`
+  replacement definitions, restricted branch only. Native-YOLO and
+  unidentified launches register NOTHING (structural exemption).
+
+Production provenance is a fresh `ctx.getAllTools()`-shaped roster
+translation (per observation): `extension`-sourced entries are owned only
+when their recorded file is the contracted deployment path or this module's
+own loaded (C3 single-bundle) file inside the observed base root;
+`mcp__`-prefixed `mcp` sources record operator-MCP on the shared epoch
+domain; `builtin`/`sdk` record host (never admitted); missing, duplicate
+(ambiguous), or unrecognized source data records unowned-discovery and
+denies before dispatch. The former empty-registry PRODUCTION default is
+removed — an unavailable roster reads every tool unowned and fails closed.
+Recorded freshness halves come from the surface's FIRST sighting of each
+(name, sourceInfo) spelling; the composition recomputes the current halves
+live, so a mid-session same-name foreign replacement or generation bump
+reads stale and denies. A trusted acquired-session context (canonical
+target resolution + row-4 write-authorization parameters) is injectable
+only — the pinned host offers none into the extension child today, so
+production destructive-shaped calls fail closed on absent canonical
+observations rather than trusting anything the model serialized.
 
 ## Composition order (fixed data; `ENFORCEMENT_COMPOSITION`)
 
@@ -87,11 +128,12 @@ unreachable from this process).
 
 ## Restricted-only posture
 
-- Registration happens in the trusted-extension load sequence gated on the
-  module's OWN launch identity (`{baseRoot}/omp-agent/restricted/cwd`). The
-  native-YOLO and unidentified branches call `registerNativeYoloNoop`, which
-  registers NOTHING and loads no restricted approval records — the exemption
-  is structural at the registration site.
+- Registration happens in the default factory (native `ExtensionAPI`) gated
+  on the module's OWN launch identity
+  (`{baseRoot}/omp-agent/restricted/cwd`). The native-YOLO and
+  unidentified branches call `registerNativeYoloNoop`, which registers
+  NOTHING and loads no restricted approval records — the exemption is
+  structural at the registration site.
 - The handler entry re-verifies its observed process identity as its first
   statement and fails closed (`rejected_enforcement_seam`, `seam=seam-table`).
 - OpenCode flows: the agent factory assembles no `--trusted-extension`
@@ -129,22 +171,37 @@ install (row 20):
    `tool_call` events to the trusted extension's registered handler (pinned
    `extensions/runner.ts` `emitToolCall` / `extensions/types.ts` synchronous
    registration; the exact host-side surface name is candidate-to-verify)?
-   `loadTimeEnforcementRegistration` / the factory's
-   `restrictedToolCallHandler` field is the synchronous attachment point;
-   observe a real blocked call to prove invocation.
+   Since C4 there is no module-local attachment point to inspect: the
+   factory's `api.on("tool_call", ...)` call IS the registration; observe
+   a real blocked call to prove invocation. Load evidence for the factory
+   itself remains limited: the row-12 gate currently throws at module load
+   in every environment, and `runner.emit` only logs lifecycle-hook errors,
+   so neither tests nor docs here certify that the binary ever evaluated
+   the factory.
 2. **Real block behavior** — does a blocked call fail closed natively
    (handler error/timeout blocks per `emitToolCall`), with no retry or
    continue?
 3. **Live provenance** — does the `getAllTools`-class metadata surface expose
    recorded origins per tool such that origin/epoch observation matches the
-   live registry (production observer adapter wiring is part of this
-   checklist; unattached, every restricted call denies fail-closed)? Recorded
+   live registry (since C4 the production observer adapter is the
+   `native-registration.ts` roster translation; an unavailable roster makes
+   every restricted call deny fail-closed)? Recorded
    `registryEpochObserved` stamps must come from the wiring's own observation
    domain — the epoch never retracts, so a foreign stamp denies re-observe
    fail-closed, never admit. Sibling item: the production decoder/assembler
-   that delivers `RestrictedToolCallInput` (input-shape decode, destructive
-   payload with canonical observations, folded row-8 record evaluation) is
-   user/downstream-owned — until it exists, no real call reaches the handler.
+   that delivers `RestrictedToolCallInput` is, since C4, the
+   `native-events.ts` decoder: input-shape decode and the destructive
+   payload build run natively, but canonical observations and row-4 write
+   authorization require the trusted acquired-session context the pinned
+   host does NOT acquire into the extension child — until that acquisition
+   exists, the owned-extension tier's REQUIRED canonical evidence is
+   absent, so even owned-name reads deny re-observe
+   (`rejected_stale_observation`, `origin=owned-extension`), destructive-
+   shaped calls fail closed at the `complete-awaiting-authorization` seam,
+   and URL/search completion stays `rejected_pending_adapter`; approval
+   records stay the empty-hierarchy evaluation (the child observes no
+   settings layer). Client-owned MCP admission is the one origin class
+   that decides fully on native-registry data alone.
 4. **Extension-load failure** — `runner.emit` only logs lifecycle-hook errors
    and does NOT fail session startup: an extension that fails to load leaves
    the session without the restricted capability set (accepted residual

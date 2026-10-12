@@ -236,17 +236,19 @@ export function decodeNativeDestructivePayload(
     executionInputBinding: rawInput,
     // This decoder is exactly what that vocabulary names: a best-effort
     // adapter-side decode. `supported_full_parser` is NEVER claimed here —
-    // the shared stage-1 decode either confirms a complete operation set
-    // (delete/move JSON shapes) or the shared completeness denial fires
-    // before dispatch (edit/apply_patch bodies this decoder cannot parse).
+    // the shared binding rule requires operations to travel INSIDE the
+    // bound raw input, so only a call whose serialized arguments carry an
+    // explicit operations list can ever reach the shared all-target stage;
+    // every other native shape (bare delete/move JSON, edit/apply_patch
+    // bodies) stays incomplete and the shared completeness denial fires
+    // before dispatch. No operation is ever guessed or side-listed.
     parserProvenance: "synthetic_adapter_decoder",
+    ...(Array.isArray(input["operations"])
+      ? { operations: input["operations"] as NonNullable<DestructiveIntentInput["operations"]> }
+      : {}),
   };
-  // Shared stage-1 decode: only positively decoded operations are attached;
-  // an un-decodable body stays an incomplete payload the policy denies.
+  // Shared stage-1 decode decides completeness over the bound input only.
   const decoded = decodeDestructiveIntent(intentInput);
-  const intent: DestructiveIntentInput = decoded.ok
-    ? { ...intentInput, operations: decoded.operations }
-    : intentInput;
   const expandedTargets = destructiveTargetsFromInput(toolName, input) ??
     (decoded.ok ? decoded.targets.map((target) => target.path) : []);
   // Trusted canonical observations ONLY: an UNREPRESENTABLE target
@@ -255,7 +257,7 @@ export function decodeNativeDestructivePayload(
   // model-supplied observation. No trusted context ⇒ no observations.
   const observations = sessionContext?.resolveCanonicalTargets([...expandedTargets]);
   return {
-    intent,
+    intent: intentInput,
     expandedTargets,
     expandedLocations: [...expandedTargets],
     ...(observations !== undefined && observations.length > 0 ? { observations } : {}),

@@ -251,6 +251,13 @@ export function translateNativeSourceInfo(
         origin: "owned-extension",
         modulePath: extensionPath,
         baseRoot: owned.baseRoot,
+        // Canonical evidence rides the record when the trusted acquired
+        // session context supplies one: 14a's own verifier re-runs the
+        // row-2 check per call, and its ABSENCE (production today) denies
+        // admission fail-closed — a lexical path never carries the tier.
+        ...(owned.canonicalTarget !== undefined
+          ? { canonicalTarget: owned.canonicalTarget }
+          : {}),
         mode: "restricted",
         observedResourceGeneration: capture.observedGeneration,
         currentResourceGeneration: capture.observedGeneration,
