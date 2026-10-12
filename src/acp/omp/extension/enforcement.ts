@@ -58,12 +58,18 @@ import {
   type RestrictedDenialReason,
 } from "./_daemon/mod.ts";
 import type { CanonicalTarget, FilesystemAuthorizationResult } from "./_daemon/mod.ts";
+// C5 (`admit-completed-omp-network-adapters`): the typed completion
+// decisions live with the ROUTE OWNERS — this wiring consults them and
+// holds no route table of its own.
+import { admitReadUrlReplacement, type FetchReplacementAdmission } from "./_daemon/mod.ts";
+import { admitWebSearchBackend, type SearchBackendAdmission } from "./_daemon/mod.ts";
 import {
   type DestructiveTargetAudit,
   type EnforcementError,
   type EnforcementOutcome,
   formatEnforcementError,
   type LiveToolMetadataObserver,
+  type NetworkAdmissionObservation,
   type OwningModuleObservation,
   type ToolCallObservation,
 } from "./enforcement-error.ts";
@@ -97,9 +103,14 @@ export interface ToolCallSlotRegistrar {
  * What the pinned seam can hand the handler: everything decodable from the
  * call itself. The wiring-owned fresh registry observation is NOT accepted
  * as caller input — the handler re-reads it from the live observer on every
- * invocation, so no caller (native or test) can inject or replay one.
+ * invocation, so no caller (native or test) can inject or replay one. The
+ * C5 network-admission observation rides the same structural exclusion: the
+ * dispatcher fills it, callers cannot.
  */
-export type RestrictedToolCallInput = Omit<ToolCallObservation, "registryObservation">;
+export type RestrictedToolCallInput = Omit<
+  ToolCallObservation,
+  "registryObservation" | "networkAdmission"
+>;
 
 /** The attached handler: decides one call, fresh, synchronously. */
 export type RestrictedToolCallHandler = (
@@ -112,6 +123,17 @@ export interface EnforcementDeps {
   readonly selfIdentity: { readonly mode: EnforcementLaunchMode };
   /** Live tool-metadata observation seam (fresh reads; never cached). */
   readonly observer: LiveToolMetadataObserver;
+  /**
+   * C5 network-adapter completion seam: the registration site supplies the
+   * fresh per-call observation (live-roster registration evidence + CURRENT
+   * trusted credential presence — presence booleans only). Invoked on EVERY
+   * call with NO caching, the same posture as the registry observer; an
+   * absent seam (or a seam returning nothing) keeps the pending-adapter
+   * clamp fail-closed.
+   */
+  readonly networkAdmission?: (
+    toolName: string,
+  ) => NetworkAdmissionObservation | undefined;
   /**
    * The bounded diagnostic sink mirroring the pinned tool-call error path
    * (row 12's bounded ACP error posture). The wiring calls it with
@@ -301,6 +323,10 @@ export function observeCall(
   deps: EnforcementDeps,
   input: Omit<ToolCallObservation, "registryObservation">,
 ): ToolCallObservation {
+  // C5: the network-admission observation is read on EVERY call — the
+  // registration evidence and credential presence are re-consulted at this
+  // instant (exactly once per call), never remembered from an earlier call.
+  const networkAdmission = deps.networkAdmission?.(input.toolName);
   return {
     ...input,
     registryObservation: {
@@ -308,6 +334,7 @@ export function observeCall(
       registryEpoch: deps.observer.observeRegistryEpoch(),
       resourceGeneration: deps.observer.observeResourceGeneration(),
     },
+    ...(networkAdmission !== undefined ? { networkAdmission } : {}),
   };
 }
 
@@ -456,8 +483,11 @@ function finalizeDenialError(
 /**
  * The composition proper (steps 1-5 in `ENFORCEMENT_COMPOSITION` order).
  * Steps 1-3 delegate to 14a's single entry decision; the wiring only
- * assembles the fresh observation, clamps pending-adapter outcomes, routes
- * destructive-shaped calls to step 4, and runs the advisory record
+ * assembles the fresh observation, consumes route-owner completion at the
+ * pending-adapter clamp (C5; see `consumeNetworkAdapterCompletion` — NOT a
+ * composition step of its own: it happens AT the clamp, between steps 3 and
+ * 4, and consults no policy table the route owners do not already own),
+ * routes destructive-shaped calls to step 4, and runs the advisory record
  * interpretation LAST (step 5) — records can rename a denial's report, never
  * move its outcome.
  */
@@ -500,7 +530,16 @@ export function composeRestrictedToolCall(
   }
 
   if (decision.outcome === "allow-gated-pending-adapter") {
-    // Wiring clamp: pending transport adapters NEVER reach native transport.
+    // C5: consult the route owner's typed completion decision FIRST. It runs
+    // strictly after steps 1-3 (name/inventory, live provenance, pair
+    // screening), so completion can never precede or soften them: only a
+    // completed controlled route AND a registered owned replacement for THIS
+    // exact name proceed — and then only to the NAMED replacement boundary
+    // (the composer dispatches nothing itself; every per-hop transport
+    // decision stays inside that replacement). Everything else keeps the
+    // wiring clamp: pending transport adapters NEVER reach native transport.
+    const completion = consumeNetworkAdapterCompletion(decision, observation);
+    if (completion !== null) return completion;
     return blocked({
       code: "rejected_pending_adapter",
       seam: "pending-adapter",
@@ -559,6 +598,72 @@ export function mcpAdmissionDenialBlock(
       : {}),
     ...(admission.tableRowId !== undefined ? { tableRowId: admission.tableRowId } : {}),
   };
+}
+
+/**
+ * C5 (`admit-completed-omp-network-adapters`): the pending-adapter clamp's
+ * typed completion consumption. `null` means NO completion — the caller
+ * keeps the EXISTING bounded `rejected_pending_adapter` block, byte-for-byte
+ * the pre-C5 shape. Completion requires, for THIS call's fresh observation:
+ *   - the live recorded origin is `owned-extension` (the same origin 14a's
+ *     provenance stage admitted at step 2 — a foreign or shadow-same-name
+ *     registration never reaches here owned, and could not be admitted);
+ *   - the wiring's registration-evidence half says a replacement is live
+ *     under this exact name (an unregistered name reads unowned-discovery);
+ *   - the route owner's own decision admits: the URL branch over the
+ *     completed `read` URL-branch route set, web search over the exact
+ *     completed grounding route of the CURRENT trusted backend
+ *     (credential-presence booleans only — values never travel here).
+ * The `web-fetch` row has no registered replacement, hence no route-owner
+ * decision: it never completes, on any origin. A proceed outcome names the
+ * registered replacement as the completing boundary and records the
+ * admitted route ids; it is never a plain allow, and it authorizes no
+ * dispatch by the composer.
+ */
+export function consumeNetworkAdapterCompletion(
+  decision: Extract<RestrictedToolDecision, { outcome: "allow-gated-pending-adapter" }>,
+  observation: ToolCallObservation,
+): EnforcementOutcome | null {
+  const admission = observation.networkAdmission;
+  // Absent wiring observation ⇒ fail closed to the existing pending block.
+  if (admission === undefined) return null;
+  const ownedOrigin = observation.registryObservation.recordedOrigin.origin === "owned-extension";
+  const registeredOwned = ownedOrigin && admission.registeredOwnedReplacement;
+  if (decision.tableRowId === "url-read") {
+    const verdict: FetchReplacementAdmission = admitReadUrlReplacement({
+      toolName: observation.toolName,
+      registeredOwnedReplacement: registeredOwned,
+    });
+    if (!verdict.admit) return null;
+    return {
+      proceed: true,
+      completingAuthority: "rows-17-19-transport-adapter",
+      adapterCompletion: {
+        tableRowId: "url-read",
+        routeIds: verdict.routeIds,
+        mechanism: verdict.mechanism,
+      },
+    };
+  }
+  if (decision.tableRowId === "web-search") {
+    const verdict: SearchBackendAdmission = admitWebSearchBackend({
+      toolName: observation.toolName,
+      registeredOwnedReplacement: registeredOwned,
+      credentialPresence: admission.searchCredentialPresence,
+    });
+    if (!verdict.admit) return null;
+    return {
+      proceed: true,
+      completingAuthority: "rows-17-19-transport-adapter",
+      adapterCompletion: {
+        tableRowId: "web-search",
+        routeIds: [verdict.routeId],
+        mechanism: verdict.mechanism,
+      },
+    };
+  }
+  // `web-fetch` (and any future pending row): no route owner, no completion.
+  return null;
 }
 
 /**

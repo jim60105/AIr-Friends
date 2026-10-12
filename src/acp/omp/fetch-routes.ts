@@ -224,33 +224,16 @@ export const FETCH_ROUTE_TABLE: readonly FetchRouteRow[] = Object.freeze(
         "(DECIDED disposition); inside the replacement it is replaced by the adapter binary route.",
     },
     {
-      routeId: "native.loadPage.direct",
-      mechanism: 'none — global fetch with redirect: "follow" (P0-recorded bypass)',
-      status: "blocked-pending-adapter",
-      citations: citation("S3"),
-      userDecisionRequired: true,
-      notes: "For any caller outside the replacement, the primary page load keeps the P0 bypass " +
-        "record permanently; this change's mocks can never clear it. Inside the replacement the " +
-        "function is not invoked at all.",
-    },
-    {
-      routeId: "native.fetchBinary.direct",
-      mechanism: 'none — global fetch with redirect: "follow" (P0-recorded bypass)',
-      status: "blocked-pending-adapter",
-      citations: citation("S4"),
-      userDecisionRequired: true,
-      notes: "fetchBinary stays blocked permanently for callers outside the replacement " +
-        "(DECIDED disposition); inside the replacement it is replaced by the adapter binary route.",
-    },
-    {
       routeId: "search-provider.subrequests",
       mechanism: "none — provider subrequests outside the replaced read tool",
       status: "blocked-pending-adapter",
       citations: citation("S2", "S5"),
       userDecisionRequired: true,
-      notes: "Owned by the batch's row 20 (adapt-omp-web-search); keeps the 14a " +
-        "allow-gated-pending-adapter outcome and the 14b rejected_pending_adapter block until that " +
-        "adapter lands reusing this decision core and table.",
+      notes: "Owned by the batch's row 20 (adapt-omp-web-search); for any caller outside the " +
+        "replacement this row keeps the 14a allow-gated-pending-adapter outcome and the 14b " +
+        "rejected_pending_adapter block permanently — the search adapter completes only the " +
+        "registered owned web_search replacement's routes (row 20's table), never native " +
+        "global-fetch provider traffic reaching this route.",
     },
   ] as const,
 );
@@ -261,11 +244,86 @@ export function isRouteCompleted(routeId: string): boolean {
     "completed-by-adapter";
 }
 
+// ---------------------------------------------------------------------------
+// Typed completion decision (C5 `admit-completed-omp-network-adapters` D1).
+// ---------------------------------------------------------------------------
+
+/** The controlled replacement tool name completing the URL branch (C2/C4). */
+export const READ_URL_REPLACEMENT_TOOL = "read" as const;
+
+/**
+ * The completed read URL-branch route set. The seam decision consumes the
+ * ROUTE SET: whether one call lands on the text or binary entry route is
+ * content-decided inside the replacement, and every secondary hop re-enters
+ * the same per-hop decision — hop-granular attribution lives in the
+ * replacement's decision records, never in an admission result.
+ */
+export const READ_URL_COMPLETED_ROUTES: readonly string[] = Object.freeze([
+  "read.url-branch.text",
+  "read.url-branch.binary",
+  "read.url-branch.secondary-hops",
+  "read.url-branch.materialization-consumers",
+]);
+
+/** Inputs the route owner needs for the typed completion decision. */
+export interface FetchReplacementAdmissionInput {
+  /** The EXACT call tool name (route scope is name- plus provenance-keyed). */
+  readonly toolName: string;
+  /**
+   * Fresh observation that a replacement is registered for this name AND its
+   * recorded origin is the owned extension (14a provenance admission already
+   * ran; this is the registration evidence, never a name-only claim).
+   */
+  readonly registeredOwnedReplacement: boolean;
+}
+
+/** Bounded typed completion verdict — a boundary record, never an allow. */
+export type FetchReplacementAdmission =
+  | {
+    readonly admit: true;
+    readonly routeIds: readonly string[];
+    readonly mechanism: typeof FETCH_COMPLETING_MECHANISM;
+  }
+  | {
+    readonly admit: false;
+    readonly reason:
+      | "replacement-name-mismatch"
+      | "replacement-not-registered"
+      | "route-not-completed";
+  };
+
+/**
+ * C5's typed URL-read completion decision over this route owner's data, for
+ * 14b's composition seam AFTER 14a's inventory and provenance admission. It
+ * authorizes NOTHING itself: admitting means the completed controlled route
+ * set covers this call's name, so the existing enforcement outcome may
+ * PROCEED TO the named registered replacement; execution and every per-hop
+ * transport decision stay inside that replacement. Absent or foreign names
+ * keep the caller's bounded pending-adapter block.
+ */
+export function admitReadUrlReplacement(
+  input: FetchReplacementAdmissionInput,
+): FetchReplacementAdmission {
+  if (input.toolName !== READ_URL_REPLACEMENT_TOOL) {
+    return { admit: false, reason: "replacement-name-mismatch" };
+  }
+  if (!input.registeredOwnedReplacement) {
+    return { admit: false, reason: "replacement-not-registered" };
+  }
+  // The EXACT completed routes, consumed from this table (design D1): a
+  // route that stopped being `completed-by-adapter` never admits.
+  const completed = READ_URL_COMPLETED_ROUTES.filter(isRouteCompleted);
+  if (completed.length === 0) {
+    return { admit: false, reason: "route-not-completed" };
+  }
+  return { admit: true, routeIds: completed, mechanism: FETCH_COMPLETING_MECHANISM };
+}
+
 /** The completing-adapter marker text appended to 14a's URL-read row. */
 export const FETCH_COMPLETING_ADAPTER_MARKER =
   "COMPLETING-ADAPTER: control-omp-url-fetch-transport — read URL-branch routes (text, binary, " +
   "secondary hops, materialization consumers) completed via src/acp/omp/fetch-routes.ts " +
   "FETCH_ROUTE_TABLE. This marker names the completing adapter for those routes only; it is NOT " +
   "a plain allow, never covers the webfetch tool surface or search routes, and the " +
-  "allow-gated-pending-adapter outcome below still fails closed at 14b until the replacement " +
-  "mechanism's native invocation is user-observed.";
+  "allow-gated-pending-adapter outcome below still fails closed at 14b with the bounded pending " +
+  "reason whenever the registered owned replacement or a completed controlled route is absent.";

@@ -207,7 +207,7 @@ export const RESTRICTED_TOOL_INVENTORY_TABLE: readonly InventoryRow[] = Object.f
       completingAuthority: "rows-17-19-transport-adapter",
       designCitation: `${D6}; URL branch of native read`,
       notes:
-        "URL-read parity preserved (never deny-parity); rows 17–18 complete the controlled transport. Distinct from plain allow until their adapter lands. " +
+        "URL-read parity preserved (never deny-parity); rows 17–18 complete the controlled transport. This outcome stays distinct from plain allow: C5 consumes the route owner's typed completion only for the registered owned replacement on a completed route, and every other case keeps the bounded pending block. " +
         FETCH_COMPLETING_ADAPTER_MARKER,
     },
     {
@@ -222,7 +222,13 @@ export const RESTRICTED_TOOL_INVENTORY_TABLE: readonly InventoryRow[] = Object.f
     },
     {
       id: "web-search",
-      toolNames: ["websearch"],
+      // C5: the native replacement name `web_search` (the registered owned
+      // controlled replacement's identity) joins the row, so it receives the
+      // row's pending/gated outcome from 14a and the route owner's typed
+      // backend-gated completion at the 14b clamp — never deny-by-absence,
+      // and never a plain allow. A same-name tool under foreign provenance
+      // denies at stage 3 (rejected_tool_provenance), not by absence.
+      toolNames: ["websearch", "web_search"],
       kind: "allow-gated-pending-adapter",
       completingAuthority: "rows-17-19-transport-adapter",
       designCitation: D6,

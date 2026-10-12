@@ -47,6 +47,7 @@ import {
   type EnforcementOutcome,
   formatEnforcementError,
   type LiveToolMetadataObserver,
+  type NetworkAdmissionObservation,
   type OwningModuleObservation,
 } from "./enforcement-error.ts";
 import {
@@ -60,7 +61,12 @@ import {
   type ToolMetadataSnapshot,
 } from "./enforcement.ts";
 import { evaluateOwnedModuleOwnership } from "./ownership.ts";
-import type { CanonicalTarget, ProvenanceRecord } from "./_daemon/mod.ts";
+import {
+  type CanonicalTarget,
+  credentialPresenceFromEnv,
+  type ProvenanceRecord,
+  type SearchCredentialPresence,
+} from "./_daemon/mod.ts";
 import { createReadReplacementToolDefinition } from "./read-replacement.ts";
 import { createSearchReplacementToolDefinition } from "./search-replacement.ts";
 import {
@@ -464,6 +470,12 @@ export interface NativeRegistrationDeps {
   readonly contractedRelative: string;
   /** Controlled replacement definitions (C2 read + web_search); restricted branch only. */
   readonly replacementTools: readonly NativeToolDefinitionLike[];
+  /**
+   * C5 trusted credential-presence reader (presence booleans ONLY, never
+   * values). Invoked per call through the enforcement deps seam — never
+   * snapshotted at registration; production default reads the current env.
+   */
+  readonly searchCredentialPresence?: () => SearchCredentialPresence;
   /** Bounded diagnostic sink (row 12 posture). */
   readonly surfaceError?: (message: string) => void;
 }
@@ -534,11 +546,26 @@ export function registerNativeEnforcement(
       handler = attached;
     },
   };
+  // C5: the network-admission seam, read FRESH on every call (no cache):
+  //   - registration evidence = the LIVE roster currently carries THIS exact
+  //     name (the owned half rides the fresh provenance record the handler
+  //     composes from the same surface, so a shadowed or unregistered name
+  //     never reads owned);
+  //   - credential presence = the CURRENT trusted presence read (booleans
+  //     only — values never enter the observation and are never logged).
+  // Availability changing mid-session moves the next call's decision exactly
+  // like a roster change moves the epoch: no freeze, no ack, no reset.
+  const credentialPresence = deps.searchCredentialPresence ?? credentialPresenceFromEnv;
+  const networkAdmission = (toolName: string): NetworkAdmissionObservation => ({
+    registeredOwnedReplacement: surface.snapshot().some((entry) => entry.toolName === toolName),
+    searchCredentialPresence: credentialPresence(),
+  });
   registerRestrictedEnforcement(
     localCapture,
     {
       selfIdentity: { mode: "restricted" },
       observer,
+      networkAdmission,
       surfaceError,
     } satisfies EnforcementDeps,
   );
