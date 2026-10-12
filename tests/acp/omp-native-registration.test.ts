@@ -27,6 +27,7 @@ import {
   type NativeToolInfo,
 } from "@acp/omp/extension/native-registration.ts";
 import { OMP_TRUSTED_EXTENSION_PATH } from "@utils/omp-paths.ts";
+import { decodeNativeToolCallEvent } from "@acp/omp/extension/native-events.ts";
 
 const RESTRICTED_CWD = "/opt/air/omp-agent/restricted/cwd";
 const OWN_BUNDLE_PATH = "/opt/air/omp/extension/index.js";
@@ -441,4 +442,65 @@ Deno.test("Native C5: shadow-same-name registration never completes the URL rout
     run({ toolCallId: "k2", toolName: "read", input: { path: "https://example.com/b" } }),
     "rejected_tool_provenance",
   );
+});
+
+// ---------------------------------------------------------------------------
+// C6 (`repair-omp-owned-skill-handoff` task 2.1): the decoder must classify
+// a `skill://` read as the EXISTING trusted-skills path-target route — never
+// a url, never a downgrade to an arbitrary device/opaque shape — and the
+// registered read must carry the pinned skill-reading capability backed by
+// an owned-seam authorization over the DECLARED root (never a fallback).
+// ---------------------------------------------------------------------------
+
+Deno.test("Native C6: skill:// decodes as path-target, never url/device", () => {
+  for (
+    const path of [
+      "skill://send-reply/SKILL.md",
+      "skill:/send-reply/SKILL.md",
+      "skill://nested/dir/SKILL.md",
+    ]
+  ) {
+    const decoded = decodeNativeToolCallEvent({ toolCallId: "c1", toolName: "read", input: { path } });
+    assertEquals(decoded.ok, true, path);
+    if (decoded.ok) {
+      assertEquals(decoded.input.decodedInputShape, "path-target", path);
+    }
+  }
+  // The http(s) shapes stay url-classified: the skill branch did not widen
+  // URL decoding.
+  const url = decodeNativeToolCallEvent({
+    toolCallId: "c2",
+    toolName: "read",
+    input: { path: "https://example.com/x" },
+  });
+  assertEquals(url.ok && url.input.decodedInputShape, "url");
+});
+
+Deno.test("Native C6: the registered read declares readsSkillUris and denies skill URIs off-image", async () => {
+  const tools = nativeReplacementTools(() => "gen-7");
+  const read = tools.find((tool) => tool.name === "read");
+  assert(read !== undefined);
+  // The pinned capability the native host keys skill admission on.
+  assertEquals(read.readsSkillUris, true);
+  // The search replacement makes no skill claim.
+  assertEquals(tools.find((tool) => tool.name === "search")?.readsSkillUris, undefined);
+  // Off-image host (this test machine has no /opt/air/skills): the declared
+  // root is not observable, so a skill URI DENIES before any delegation and
+  // no fallback root is consulted — and an absent generation changes nothing
+  // about that story.
+  const deny = async (generation: string) => {
+    const seam = nativeReplacementTools(() => generation).find((tool) => tool.name === "read");
+    assert(seam?.execute !== undefined);
+    try {
+      await seam.execute("t1", { path: "skill://send-reply/SKILL.md" }, undefined, undefined, {
+        invokeTool: () => Promise.reject(new Error("must never delegate")),
+      });
+      throw new Error("skill:// off-image must deny");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      assert(message.includes("skill_uri_denied"), message);
+    }
+  };
+  await deny("gen-7");
+  await deny("");
 });

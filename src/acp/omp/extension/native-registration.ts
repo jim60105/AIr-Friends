@@ -67,7 +67,11 @@ import {
   type ProvenanceRecord,
   type SearchCredentialPresence,
 } from "./_daemon/mod.ts";
-import { createReadReplacementToolDefinition } from "./read-replacement.ts";
+import {
+  createOwnedSkillUriAuthorization,
+  createReadReplacementToolDefinition,
+} from "./read-replacement.ts";
+import { OMP_IMAGE_SKILLS_ROOT } from "../../../utils/omp-paths.ts";
 import { createSearchReplacementToolDefinition } from "./search-replacement.ts";
 import {
   decodeNativeToolCallEvent,
@@ -101,6 +105,32 @@ export interface NativeToolDefinitionLike {
   readonly label: string;
   readonly description: string;
   readonly parameters: unknown;
+  /**
+   * The pinned native skill-reading capability flag
+   * (`repair-omp-owned-skill-handoff` D3): the host grants skill-URI reads
+   * to a registered tool only when its definition declares it. The `read`
+   * replacement declares it so the owned `skill://` branch it authorizes
+   * reaches the same tool at all; other replacements stay undeclared.
+   */
+  readonly readsSkillUris?: boolean;
+  /**
+   * The pinned S7 execute signature. The host calls a registered tool's
+   * `execute`; the `read` replacement reaches its authorized skill branch
+   * through the same-tool `invokeTool` delegation context, so the contract
+   * declares that much of the host `ctx` (extra fields are the host's).
+   */
+  execute?(
+    toolCallId: string,
+    params: Record<string, unknown>,
+    signal: AbortSignal | undefined,
+    onUpdate?: unknown,
+    ctx?: {
+      invokeTool?(
+        params: Record<string, unknown>,
+        options?: { readonly signal?: AbortSignal },
+      ): Promise<unknown>;
+    },
+  ): Promise<unknown>;
 }
 
 /** The pinned `ctx` surface exposing the fresh configured-tool roster. */
@@ -588,9 +618,27 @@ export function registerNativeEnforcement(
   return { registered: true, mode: "restricted", callback, replacementNames };
 }
 
-/** The C2 controlled replacement definitions, built for native registration. */
-export function nativeReplacementTools(): readonly NativeToolDefinitionLike[] {
-  return [createReadReplacementToolDefinition(), createSearchReplacementToolDefinition()];
+/**
+ * The C2 controlled replacement definitions, built for native registration.
+ * `resourceGeneration` (C6): the read replacement's owned skill-URI
+ * authorization is wired against the single DECLARED owned source constant
+ * (`OMP_IMAGE_SKILLS_ROOT` — never a workspace/HOME/CWD candidate) and the
+ * live discovery generation, so a `skill://` read authorizes only against
+ * the current declared identity and an off-image host (root absent) simply
+ * denies with no fallback root. The search replacement is unchanged.
+ */
+export function nativeReplacementTools(
+  resourceGeneration?: () => string,
+): readonly NativeToolDefinitionLike[] {
+  return [
+    createReadReplacementToolDefinition({
+      skillUriAuthorization: createOwnedSkillUriAuthorization({
+        ownedRoot: OMP_IMAGE_SKILLS_ROOT,
+        resourceGeneration: resourceGeneration ?? (() => ""),
+      }),
+    }),
+    createSearchReplacementToolDefinition(),
+  ];
 }
 
 /**
