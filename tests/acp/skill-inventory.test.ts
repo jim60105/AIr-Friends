@@ -336,3 +336,176 @@ Deno.test("isUnderRoot - boundary-safe containment", () => {
   assertEquals(isUnderRoot("/ab", "/a"), false);
   assertEquals(isUnderRoot("/a/b", "/a/b/c"), false);
 });
+
+// --- Post-implementation review fold-in (B1/B2/N1) ---
+
+Deno.test("matcher - unflagged and allow-listed-flag deno run spellings still approve", () => {
+  const root = makeRoot(["memory-save"]);
+  const inv = list("opencode", root);
+  const cwd = Deno.realPathSync(Deno.makeTempDirSync({ prefix: "air-cwd-" }));
+  const script = `${root}/memory-save/scripts/memory-save.ts`;
+  try {
+    // The ordinary unflagged posture (production's dominant shape) is
+    // unaffected by the flag allow-list…
+    assertEquals(matchesScriptEntrypoint(`deno run ${script}`, inv, decisionCtx(cwd)), true);
+    // …and value-less permission flags from the allow-list skip harmlessly.
+    assertEquals(
+      matchesScriptEntrypoint(`deno run --allow-read --no-check ${script}`, inv, decisionCtx(cwd)),
+      true,
+    );
+    assertEquals(
+      matchesScriptEntrypoint(`deno run -A --quiet ${script}`, inv, decisionCtx(cwd)),
+      true,
+    );
+  } finally {
+    Deno.removeSync(cwd, { recursive: true });
+  }
+});
+
+Deno.test("matcher - module-affecting deno run flags deny fail-closed (B2)", () => {
+  const root = makeRoot(["memory-save"]);
+  const inv = list("opencode", root);
+  const cwd = Deno.realPathSync(Deno.makeTempDirSync({ prefix: "air-cwd-" }));
+  const script = `${root}/memory-save/scripts/memory-save.ts`;
+  // A trusted grant used as the (perceived) entrypoint while a PRELOAD module
+  // actually executes: `--preload <trusted> <planted>` — the old skip-all-flags
+  // grammar read <trusted> as the entrypoint and approved while Deno executed
+  // an unapproved main.
+  Deno.mkdirSync(`${cwd}/evil`, { recursive: true });
+  Deno.writeTextFileSync(`${cwd}/evil/main.ts`, "import { grant } from '...';");
+  try {
+    assertEquals(
+      matchesScriptEntrypoint(
+        `deno run --preload ${script} ${cwd}/evil/main.ts`,
+        inv,
+        decisionCtx(cwd),
+      ),
+      false,
+    );
+    assertEquals(
+      matchesScriptEntrypoint(
+        `deno run --import ${script} ${cwd}/evil/main.ts`,
+        inv,
+        decisionCtx(cwd),
+      ),
+      false,
+    );
+    // Arity-guessable flags never fall through to the next token either.
+    assertEquals(
+      matchesScriptEntrypoint(
+        `deno run --config ${script} ${cwd}/evil/main.ts`,
+        inv,
+        decisionCtx(cwd),
+      ),
+      false,
+    );
+    assertEquals(
+      matchesScriptEntrypoint(
+        `deno run --allow-read=${script} ${cwd}/evil/main.ts`,
+        inv,
+        decisionCtx(cwd),
+      ),
+      false,
+    );
+    assertEquals(matchesScriptEntrypoint(`deno run -- ${script}`, inv, decisionCtx(cwd)), false);
+    assertEquals(
+      matchesScriptEntrypoint(
+        `deno run --v8-flags=--experimental ${script}`,
+        inv,
+        decisionCtx(cwd),
+      ),
+      false,
+    );
+  } finally {
+    Deno.removeSync(cwd, { recursive: true });
+  }
+});
+
+Deno.test("matcher - .. spellings crossing a symlinked directory deny (B1)", async () => {
+  const root = makeRoot(["memory-save"]);
+  const inv = list("opencode", root);
+  // Session cwd W: a symlink `jump` INTO the grant's skill directory, plus a
+  // planted regular file at the cwd-relative lexical landing point. Deno's
+  // loader lexicalizes `jump/../memory-save/scripts/...` to the PLANTED file,
+  // while the kernel physically traverses the link to the real grant — the
+  // old physical-only matcher approved while the wrong module executed.
+  const cwd = Deno.realPathSync(Deno.makeTempDirSync({ prefix: "air-cwd-" }));
+  Deno.symlinkSync(`${root}/memory-save`, `${cwd}/jump`);
+  Deno.mkdirSync(`${cwd}/memory-save/scripts`, { recursive: true });
+  Deno.writeTextFileSync(
+    `${cwd}/memory-save/scripts/memory-save.ts`,
+    'console.log("LOADED: planted")',
+  );
+  try {
+    // Loader ground truth: `deno run` of this relative spelling EXECUTES the
+    // planted file (lexical landing), never the physically-traversed grant —
+    // so the divergence is real and the ambiguous spelling must deny.
+    const loaderProbe = await new Deno.Command(Deno.execPath(), {
+      args: ["run", "jump/../memory-save/scripts/memory-save.ts"],
+      cwd,
+      stdout: "piped",
+      stderr: "piped",
+    }).output();
+    assertEquals(new TextDecoder().decode(loaderProbe.stdout).trim(), "LOADED: planted");
+    assertEquals(
+      matchesScriptEntrypoint(
+        "deno run jump/../memory-save/scripts/memory-save.ts",
+        inv,
+        decisionCtx(cwd),
+      ),
+      false,
+    );
+    // The planted lexical target itself stays denied on its own spelling too.
+    assertEquals(
+      matchesScriptEntrypoint("deno run memory-save/scripts/memory-save.ts", inv, decisionCtx(cwd)),
+      false,
+    );
+    // The symlinked spelling WITHOUT `..` stays approved: lexical and physical
+    // agree, so the guard is inactive.
+    assertEquals(
+      matchesScriptEntrypoint("deno run jump/scripts/memory-save.ts", inv, decisionCtx(cwd)),
+      true,
+    );
+  } finally {
+    Deno.removeSync(cwd, { recursive: true });
+  }
+});
+
+Deno.test("inventory - unobservable scripts path never promotes a command prefix (N1)", () => {
+  const root = makeRoot(["agent-browser"]);
+  const stat = Deno.statSync(root);
+  const rootObservation = { root, identity: { dev: stat.dev!, ino: stat.ino! } };
+  // scripts readDir fails AND lstat fails with a non-NotFound error: absence
+  // is NOT provable, so no command prefix may be granted.
+  const fs = {
+    lstat: (path: string): Deno.FileInfo => {
+      if (path.endsWith("/scripts")) throw new Deno.errors.PermissionDenied("unreadable");
+      return Deno.lstatSync(path);
+    },
+    readDir: (path: string): Deno.DirEntry[] => {
+      if (path.endsWith("/scripts")) throw new Deno.errors.PermissionDenied("unreadable");
+      return [...Deno.readDirSync(path)];
+    },
+    realPath: (path: string) => Deno.realPathSync(path),
+  };
+  const inv = buildSkillAutoApproveList({ agentType: "opencode", rootObservation, fs });
+  assertEquals(inv.commandPrefixes.size, 0);
+  // NotFound on the lstat — genuine absence — still promotes the prefix.
+  const absentFs = {
+    lstat: (path: string): Deno.FileInfo => {
+      if (path.endsWith("/scripts")) throw new Deno.errors.NotFound("absent");
+      return Deno.lstatSync(path);
+    },
+    readDir: (path: string): Deno.DirEntry[] => {
+      if (path.endsWith("/scripts")) throw new Deno.errors.NotFound("absent");
+      return [...Deno.readDirSync(path)];
+    },
+    realPath: (path: string) => Deno.realPathSync(path),
+  };
+  const promoted = buildSkillAutoApproveList({
+    agentType: "opencode",
+    rootObservation,
+    fs: absentFs,
+  });
+  assert(promoted.commandPrefixes.has("agent-browser"));
+});

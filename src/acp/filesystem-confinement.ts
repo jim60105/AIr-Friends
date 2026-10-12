@@ -90,6 +90,27 @@ export interface BwrapConfinementOptions {
   shareNet: boolean;
 }
 
+/** Root-aware containment: handles `/` (everything below root) and the
+ * boundary-safe separator rule for every other root. */
+function containsPath(root: string, path: string): boolean {
+  if (path === root) return true;
+  if (root === "/") return path.startsWith("/");
+  return path.startsWith(root + "/");
+}
+
+/** Best-effort canonical view of an existing bind source (post-duck B3): a
+ * mandatory writable that is a SYMLINK to the skill root is the same physical
+ * tree even though its spellings differ — the overlap check must observe
+ * physically. A source that does not (yet) exist keeps its literal spelling:
+ * bwrap `--bind-try` would create/mount it at that path. */
+function canonicalSource(path: string): string {
+  try {
+    return Deno.realPathSync(path);
+  } catch {
+    return path;
+  }
+}
+
 /**
  * Build the `bwrap` argv that runs `command args...` inside the confinement.
  *
@@ -118,13 +139,20 @@ export function buildBwrapConfinement(
     ];
     if (opts.agentWorkspace) mandatoryWritables.push(opts.agentWorkspace);
     for (const writable of mandatoryWritables) {
-      // Equal root OR the writable strictly inside the root: either way the
-      // read-only mount would sit over (or be holed by) an agent-writable
-      // tree. A root merely descending from a writable mount is legitimate.
-      if (opts.skillRoot === writable || writable.startsWith(opts.skillRoot + "/")) {
+      // Equal root OR the writable (physically) inside the root — compared on
+      // BOTH spellings so a symlinked writable alias to the skill tree cannot
+      // escape the refusal (B3) — or a filesystem-root skill selection, which
+      // contains every mandatory writable by construction.
+      const canonicalWritable = canonicalSource(writable);
+      if (
+        opts.skillRoot === "/" ||
+        containsPath(opts.skillRoot, writable) ||
+        containsPath(opts.skillRoot, canonicalWritable)
+      ) {
         throw new Error(
           `Skill root "${opts.skillRoot}" equals or contains mandatory writable mount ` +
-            `"${writable}" — an agent-writable skill root is refused before spawn`,
+            `"${writable}" (canonical: "${canonicalWritable}") — an agent-writable skill ` +
+            "root is refused before spawn",
         );
       }
     }

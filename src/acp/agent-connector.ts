@@ -3,7 +3,6 @@
 import * as acp from "@agentclientprotocol/sdk";
 import { ChatbotClient, type SessionGateContext } from "./client.ts";
 import { buildSkillAutoApproveList } from "./skill-inventory.ts";
-import { observeTrustedSkillsRoot } from "@core/skills-root.ts";
 import {
   type AgentCapabilities,
   type AgentConnectorOptions,
@@ -300,6 +299,28 @@ export class AgentConnector {
     // strictly AFTER the settings check (settings first, executable second).
     this.verifyOmpExecutableSourcesBeforeRequest(agentConfig.cwd);
 
+    // MANDATORY root-exact inventory (`unify-omp-skill-root-resolution` D1/D3,
+    // post-implementation review B6): built BEFORE the subprocess exists. The
+    // trusted root is the canonical observation the factory resolved for THIS
+    // connector's selected agent type; a launch without it — or whose root
+    // cannot be enumerated — fails connect() explicitly with ZERO processes
+    // spawned, and no observation between spawn and the initialization
+    // try/catch can orphan a child. The connector NEVER re-discovers a root
+    // (no HOME, no `Deno.cwd()/skills`, no alternate observation).
+    const skillsRoot = agentConfig.skillsRoot;
+    if (skillsRoot === undefined) {
+      throw new Error(
+        `AgentConfig for agent type "${this.options.agentType}" is missing the mandatory ` +
+          "selected-agent skills-root observation — preparation fails explicitly " +
+          "instead of discovering another root",
+      );
+    }
+    const autoApproveList = buildSkillAutoApproveList({
+      agentType: this.options.agentType,
+      rootObservation: skillsRoot,
+      configuredSkills: clientConfig.autoApproveSkills,
+    });
+
     (logger as Logger).info("Spawning ACP agent via dumb-init", {
       command: agentConfig.command,
       args: agentConfig.args,
@@ -347,21 +368,8 @@ export class AgentConnector {
     const input = this.process.stdout; // ReadableStream - we receive messages from agent
 
     // Create the Client implementation
-    // MANDATORY root-exact inventory (`unify-omp-skill-root-resolution` D1/D3):
-    // the trusted root is the canonical observation the factory resolved for
-    // THIS connector's selected agent type before the spawn. When an
-    // AgentConfig predates the field (hand-built fixtures), the connector
-    // re-observes it from the SAME resolver + selected agent type — never a
-    // `Deno.cwd()/skills` or HOME scan — so the prompt-repo/dev fallback and
-    // the inventory select identically. A failed resolution propagates as a
-    // connect() failure (explicit, before any request).
-    const skillsRoot = this.options.agentConfig.skillsRoot ??
-      observeTrustedSkillsRoot(this.options.agentType, clientConfig.skillsDir);
-    const autoApproveList = buildSkillAutoApproveList({
-      agentType: this.options.agentType,
-      rootObservation: skillsRoot,
-      configuredSkills: clientConfig.autoApproveSkills,
-    });
+    // (inventory built pre-spawn above; the client receives it as the
+    // mandatory fourth argument — there is no implicit scan default)
     this.client = new ChatbotClient(
       skillRegistry as SkillRegistry,
       logger as Logger,

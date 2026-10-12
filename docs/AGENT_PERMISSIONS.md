@@ -84,12 +84,12 @@ In YOLO mode, the system switches to the `yolo` agent via ACP `setSessionMode("y
 
 Per the approved-design decision 5 (row 17, `disable-restricted-agent-lsp`), the LSP capability is **disabled entirely — both agents, both modes** — and the change deliberately records what its carriers do and do not prove.
 
-| Carrier                                                     | Where                                                                                    | What it denies                                                                                                                                           |
-| ----------------------------------------------------------- | ---------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `--no-lsp` launch flag                                      | OMP factory, **both** modes (`src/acp/agent-factory.ts`, exactly once per launch)        | Native `enableLsp: false` for the session: no `lsp` tool registration, no LSP writethrough/format/diagnostics on edit/write, no startup server discovery |
-| `lsp.enabled: false` settings pin                           | `agent-config/omp/restricted.yml` (row-8 owned) **and** `agent-config/omp/native-yolo.yml` (pinned by row 25)                     | Settings-level LSP posture beneath the flag in BOTH OMP modes — a shared deployment pin, never a restricted YOLO tool policy                              |
-| `"lsp": "deny"` per-agent permission                        | `agent-config/opencode.json` — **build and yolo both**, explicitly                       | OpenCode's `lsp` tool through each agent's permission map                                                                                                |
-| `deny-lsp` / `deny-lsp-config` + `lsp-adjacent` route pairs | Restricted tool inventory (`src/acp/omp/tool-inventory.ts`, row 14; unchanged by row 17) | Restricted-session decision-layer admission of the `lsp` name and any shape-keyed LSP-adjacent route                                                     |
+| Carrier                                                     | Where                                                                                                         | What it denies                                                                                                                                           |
+| ----------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--no-lsp` launch flag                                      | OMP factory, **both** modes (`src/acp/agent-factory.ts`, exactly once per launch)                             | Native `enableLsp: false` for the session: no `lsp` tool registration, no LSP writethrough/format/diagnostics on edit/write, no startup server discovery |
+| `lsp.enabled: false` settings pin                           | `agent-config/omp/restricted.yml` (row-8 owned) **and** `agent-config/omp/native-yolo.yml` (pinned by row 25) | Settings-level LSP posture beneath the flag in BOTH OMP modes — a shared deployment pin, never a restricted YOLO tool policy                             |
+| `"lsp": "deny"` per-agent permission                        | `agent-config/opencode.json` — **build and yolo both**, explicitly                                            | OpenCode's `lsp` tool through each agent's permission map                                                                                                |
+| `deny-lsp` / `deny-lsp-config` + `lsp-adjacent` route pairs | Restricted tool inventory (`src/acp/omp/tool-inventory.ts`, row 14; unchanged by row 17)                      | Restricted-session decision-layer admission of the `lsp` name and any shape-keyed LSP-adjacent route                                                     |
 
 Deliberate exclusions: **no top-level/global OpenCode LSP clamp** (a global setting would also clamp yolo, which decision 5 rejects) and **no OpenCode version bump** (1.18.21 stays). The native-YOLO settings-level pin — `lsp.enabled: false` in `agent-config/omp/native-yolo.yml` — landed separately with row 25 (`pin-omp-yolo-lsp-settings`); row 17 never touched that overlay.
 
@@ -146,20 +146,20 @@ This behavior is specific to the `edit` permission — other permissions (e.g., 
 
 The `agent-config/opencode.json` in the project configures permissions for the `build` agent (OpenCode's primary agent):
 
-| Category                                               | Permission        | Rationale                                                                                                                   |
-| ------------------------------------------------------ | ----------------- | --------------------------------------------------------------------------------------------------------------------------- |
-| **Default (`*`)**                                      | `deny`            | Non-interactive system rejects unknowns                                                                                     |
-| **Read-only tools** (`read`, `list`, `glob`, `grep`)   | `allow`           | Safe exploration — no side effects                                                                                          |
-| **LSP tool** (`lsp`)                                   | `deny` (explicit) | LSP disabled in all agents/modes (decision 5, row 17; see [LSP Disabled: All-Off](#lsp-disabled-all-off-decision-5-row-17)) |
-| **Session management** (`todoread`, `todowrite`)       | `allow`           | Internal agent organization tools                                                                                           |
-| **Sub-task spawning** (`task`)                         | `deny`            | Non-interactive system — no sub-agent coordination                                                                          |
-| **Skills** (`skill`)                                   | `allow`           | Core SKILL.md discovery and loading                                                                                         |
-| **Web access** (`webfetch`, `websearch`)               | `allow`           | Research and information gathering                                                                                          |
-| **Interactive** (`question`)                           | `deny`            | No human operator to answer questions                                                                                       |
-| **Loop protection** (`doom_loop`)                      | `deny`            | Prevent infinite retry loops                                                                                                |
-| **File editing** (`edit`)                              | `ask` (delegated) | Delegated to Layer 3 via `"ask"` (see below)                                                                                |
-| **Shell commands** (`bash`)                            | Whitelist         | Specific patterns only (see below)                                                                                          |
-| **External directories**                               | Restricted        | Skills and agent workspace only                                                                                             |
+| Category                                             | Permission        | Rationale                                                                                                                   |
+| ---------------------------------------------------- | ----------------- | --------------------------------------------------------------------------------------------------------------------------- |
+| **Default (`*`)**                                    | `deny`            | Non-interactive system rejects unknowns                                                                                     |
+| **Read-only tools** (`read`, `list`, `glob`, `grep`) | `allow`           | Safe exploration — no side effects                                                                                          |
+| **LSP tool** (`lsp`)                                 | `deny` (explicit) | LSP disabled in all agents/modes (decision 5, row 17; see [LSP Disabled: All-Off](#lsp-disabled-all-off-decision-5-row-17)) |
+| **Session management** (`todoread`, `todowrite`)     | `allow`           | Internal agent organization tools                                                                                           |
+| **Sub-task spawning** (`task`)                       | `deny`            | Non-interactive system — no sub-agent coordination                                                                          |
+| **Skills** (`skill`)                                 | `allow`           | Core SKILL.md discovery and loading                                                                                         |
+| **Web access** (`webfetch`, `websearch`)             | `allow`           | Research and information gathering                                                                                          |
+| **Interactive** (`question`)                         | `deny`            | No human operator to answer questions                                                                                       |
+| **Loop protection** (`doom_loop`)                    | `deny`            | Prevent infinite retry loops                                                                                                |
+| **File editing** (`edit`)                            | `ask` (delegated) | Delegated to Layer 3 via `"ask"` (see below)                                                                                |
+| **Shell commands** (`bash`)                          | Whitelist         | Specific patterns only (see below)                                                                                          |
+| **External directories**                             | Restricted        | Skills and agent workspace only                                                                                             |
 
 ### Edit Permission (Delegated via `"ask"`)
 
@@ -488,10 +488,10 @@ The skill auto-approve list determines which bash commands are automatically app
 
 ### Trusted Root Matrix
 
-| Deployment shape   | OMP root                                                            | OpenCode root                                                            |
-| ------------------ | ------------------------------------------------------------------- | ------------------------------------------------------------------------ |
-| Container image    | `/opt/air/skills` (root-owned, staged from the bundled catalog only) | `agent.skillsDir` — stock image/Helm: `/home/deno/.agents/skills`         |
-| Development        | the repository's own `skills/` tree (validated source root)          | `agent.skillsDir` relative to the daemon/deployment working directory (default `skills`) |
+| Deployment shape | OMP root                                                             | OpenCode root                                                                            |
+| ---------------- | -------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
+| Container image  | `/opt/air/skills` (root-owned, staged from the bundled catalog only) | `agent.skillsDir` — stock image/Helm: `/home/deno/.agents/skills`                        |
+| Development      | the repository's own `skills/` tree (validated source root)          | `agent.skillsDir` relative to the daemon/deployment working directory (default `skills`) |
 
 The root comes from `observeTrustedSkillsRoot()` (`src/core/skills-root.ts`): the CANONICAL (realpath) spelling of the validated selection plus its `dev`/`ino` identity, resolved once by the actual selected agent before subprocess creation and carried as the mandatory internal `skillsDir` through connector/client, factory/sandbox mounts, prompt rendering and readiness. The agent child's HOME is NEVER consulted and an absent/unobservable root is an explicit `ConfigError`, never a fallback tree. The same observation feeds the render identity: prompt/retry `skillsDir`, the connector inventory root, the read-only skill mount and the readiness root are the SAME path.
 
@@ -504,13 +504,13 @@ Each grant is the **canonical absolute regular-file path** of an enumerated `scr
 
 `agent.autoApproveSkills` / `AGENT_AUTO_APPROVE_SKILLS`, when nonempty, FILTERS observed skill names within that root; a configured name that is not physically present there grants NOTHING (the old absent-skill-to-command-prefix promotion is removed). An invalid skill-name component (traversal, separator, empty) is rejected at configuration time.
 
-A command is approved when the segment's actual entrypoint — located through the safe shell tokenizer, after the `deno run`/interpreter flags, quoted literals decoded fail-closed — canonically resolves (relative spellings ONLY against the requesting registered session cwd; an unregistered session has no relative anchor) to EXACTLY one enumerated grant, with decision-time rechecks:
+A command is approved when the segment's actual entrypoint — located through the safe shell tokenizer, after the `deno run`/interpreter flags (ONLY permission/quality flags from a safety allow-list — `--allow-*`, `-A`, `--quiet`, `--no-check`, `--no-lock`, `-r` — are skipped; ANY other flag, e.g. `--preload`, `--import`, `--config`, `--v8-flags`, denies fail-closed, because such a flag can change WHICH module executes while the grant token still looks like the entrypoint), quoted literals decoded fail-closed — canonically resolves (relative spellings ONLY against the requesting registered session cwd; an unregistered session has no relative anchor) to EXACTLY one enumerated grant, with decision-time rechecks:
 
 - the recorded root still exists with its recorded identity (a REPLACED root — remove-and-recreate — denies every grant),
 - the resolved target is physically contained in that root (boundary-safe prefix; a sibling-prefix root like `/opt/air/skills-evil/...` denies), and
 - the target identity matches the enumerated entry.
 
-Consequences that the old suffix matcher allowed and these checks deny: same-suffix planted copies at any absolute or session-relative spelling, alternate-HOME or other-agent roots, trailing-content variants, and slashless direct-exec aliases. Physical `..` spellings that a kernel would resolve INTO a real grant still approve (the OS resolves them before execution); laundering via interpreter tricks (`cat grant`, `python grant`) and non-`deno run` subcommands (`deno task run`, `deno eval`) deny.
+Consequences that the old suffix matcher allowed and these checks deny: same-suffix planted copies at any absolute or session-relative spelling, alternate-HOME or other-agent roots, trailing-content variants, slashless direct-exec aliases, and module-changing `deno run` flags. Physical `..` spellings that resolve INTO a real grant approve ONLY when the path's lexical normalization lands on the same file — a `..` spelling whose lexical and physical targets diverge (e.g. `jump/../skill/scripts/x.ts` where `jump` is a symlink INTO the grant and a planted regular file sits at the lexical landing point) denies fail-closed, because Deno's module loader executes the LEXICAL target while only the kernel follows the physical path. Laundering via interpreter tricks (`cat grant`, `python grant`) and non-`deno run` subcommands (`deno task run`, `deno eval`) deny.
 
 **Decision-time limit:** this is decision-time containment, not race-proofing — the command still performs native IO, so a script replaced AFTER approval is not prevented (same residual as the generic gate; bwrap read-only mounts bound the blast radius). A linked skill directory inside the root is never enumerated at all.
 
@@ -689,15 +689,15 @@ audit:
 
 ### Environment Variables
 
-| Variable                                 | Config Path                            | Description                                                          |
-| ---------------------------------------- | -------------------------------------- | -------------------------------------------------------------------- |
-| `AGENT_SANDBOX_FILTER_ENV`               | `agent.sandbox.filterEnv`              | `"true"` / `"false"`                                                 |
-| `AGENT_SANDBOX_NETWORK_ISOLATION`        | `agent.sandbox.networkIsolation`       | `"true"` / `"false"`                                                 |
-| `AGENT_SANDBOX_ALLOWED_ENV_VARS`         | `agent.sandbox.allowedEnvVars`         | Comma-separated list                                                 |
-| `AGENT_SANDBOX_ALLOWED_WRITE_EXTENSIONS` | `agent.sandbox.allowedWriteExtensions` | Comma-separated list                                                 |
-| `AGENT_AUTO_APPROVE_SKILLS`              | `agent.autoApproveSkills`              | Comma-separated name FILTER over the resolved root                   |
+| Variable                                 | Config Path                            | Description                                                                                                                                         |
+| ---------------------------------------- | -------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `AGENT_SANDBOX_FILTER_ENV`               | `agent.sandbox.filterEnv`              | `"true"` / `"false"`                                                                                                                                |
+| `AGENT_SANDBOX_NETWORK_ISOLATION`        | `agent.sandbox.networkIsolation`       | `"true"` / `"false"`                                                                                                                                |
+| `AGENT_SANDBOX_ALLOWED_ENV_VARS`         | `agent.sandbox.allowedEnvVars`         | Comma-separated list                                                                                                                                |
+| `AGENT_SANDBOX_ALLOWED_WRITE_EXTENSIONS` | `agent.sandbox.allowedWriteExtensions` | Comma-separated list                                                                                                                                |
+| `AGENT_AUTO_APPROVE_SKILLS`              | `agent.autoApproveSkills`              | Comma-separated name FILTER over the resolved root                                                                                                  |
 | `AGENT_SKILLS_DIR`                       | `agent.skillsDir`                      | OpenCode installed-root declaration (container: `/home/deno/.agents/skills`); relative values anchor at the deployment cwd; never consulted for OMP |
-| `AGENT_OPENCODE_MIN_VERSION`             | — (observability only)                 | Minimum OpenCode version for the bootstrap check (default `1.17.13`) |
+| `AGENT_OPENCODE_MIN_VERSION`             | — (observability only)                 | Minimum OpenCode version for the bootstrap check (default `1.17.13`)                                                                                |
 
 ### Permission Rejection Feedback (Retry Prompt)
 
@@ -739,7 +739,8 @@ The `src/acp/filesystem-roots.ts` helper library provides an agent-generic, phys
    - Unknown tokens (e.g. `$TMPDIR2`, `$HOME`, `$OTHER`) or unbraced boundary collisions fail closed (`unresolved_token`).
    - Relative paths anchor strictly against `context.sessionCwd`, **never** the daemon process working directory `Deno.cwd()`.
    - Shell syntax, null bytes, device paths (`\\.\`, `/dev/`), and URI schemes (`http:`, `skill:`, `file:`) are rejected (`invalid_path`).
-  - **Legacy compat only**: token-form staging paths (`$TMPDIR/$SESSION_ID/...`) are retained purely so older OpenCode callers whose prompts still name the tokens keep working — the expansion above resolves them to the same canonical staging root that current prompts now render as absolute literals. Prompts and `SKILL.md` docs no longer instruct the token form.
+
+- **Legacy compat only**: token-form staging paths (`$TMPDIR/$SESSION_ID/...`) are retained purely so older OpenCode callers whose prompts still name the tokens keep working — the expansion above resolves them to the same canonical staging root that current prompts now render as absolute literals. Prompts and `SKILL.md` docs no longer instruct the token form.
 
 3. **Canonical Staging Identity vs Process State**:
    - Canonical staging is strictly `{canonical workspace}/tmp/{active Skill API ID}`.

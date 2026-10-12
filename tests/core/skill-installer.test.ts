@@ -6,7 +6,7 @@
 // reach the CLI, per-entry failures stay isolated, and publication validates
 // linked/escaping materialization.
 
-import { assert, assertEquals, assertNotEquals } from "@std/assert";
+import { assert, assertEquals } from "@std/assert";
 import {
   buildSkillInstallCommand,
   installExternalSkills,
@@ -260,7 +260,7 @@ Deno.test("installExternalSkills - a successful exit with no materialized direct
   }
 });
 
-Deno.test("installExternalSkills - linked materialization inside the tree is refused", async () => {
+Deno.test("installExternalSkills - linked materialization inside the tree is refused ATOMICALLY (B4)", async () => {
   const { executor } = materializingExecutor(() => "linked");
   const destination = await Deno.makeTempDir();
   try {
@@ -269,31 +269,90 @@ Deno.test("installExternalSkills - linked materialization inside the tree is ref
       [{ repo: "owner/repo-a", skill: "skill-a" }],
       executor,
     );
-    // The partial copy attempt must never leave an escaping link published.
-    let escaped = false;
+    // FULL validation runs BEFORE the destination is touched: a rejection at
+    // scripts/linked.ts publishes NOTHING — the destination entry never even
+    // exists (no partial grant, no half-tree).
+    let absent = false;
     try {
-      const stat = await Deno.lstat(`${destination}/skill-a/scripts/linked.ts`);
-      escaped = stat.isSymlink;
+      await Deno.stat(`${destination}/skill-a`);
     } catch {
-      // absent — refused before the link copied
+      absent = true;
     }
-    assert(!escaped, "publication must refuse linked entries");
-    // A refused entry may leave a partial directory; it must be inside the
-    // destination and contain no links anywhere.
-    const walk = (dir: string): void => {
-      for (const entry of Deno.readDirSync(dir)) {
-        const full = `${dir}/${entry.name}`;
-        assert(!entry.isSymlink, `no published symlink may survive: ${full}`);
-        if (entry.isDirectory) walk(full);
-      }
-    };
-    try {
-      walk(`${destination}`);
-    } catch {
-      // destination vanished entirely — also acceptable (refusal)
-    }
-    assertNotEquals(0, 1);
+    assert(absent, "a refused publication must leave no destination entry at all");
   } finally {
     await Deno.remove(destination, { recursive: true });
+  }
+});
+
+Deno.test("installExternalSkills - failed refresh PRESERVES the previous external entry (B4)", async () => {
+  // Install skill-a successfully, then a refresh whose materialization is
+  // hostile (deep link): the previous COMPLETE entry must survive intact and
+  // no partial content may be left at the final path.
+  let hostile = false;
+  const { executor } = materializingExecutor(() => (hostile ? "linked" : "ok"));
+  const destination = await Deno.makeTempDir();
+  try {
+    await installExternalSkills(
+      destination,
+      [{ repo: "owner/repo-a", skill: "skill-a" }],
+      executor,
+    );
+    await Deno.writeTextFile(`${destination}/skill-a/KEEP.txt`, "previous");
+    hostile = true;
+    await installExternalSkills(
+      destination,
+      [{ repo: "owner/repo-a", skill: "skill-a" }],
+      executor,
+    );
+    // Previous content intact…
+    assertEquals(await Deno.readTextFile(`${destination}/skill-a/KEEP.txt`), "previous");
+    await Deno.stat(`${destination}/skill-a/scripts/skill-a.ts`);
+    // …no partial tree, no backup leftovers inside the published entry.
+    assertEquals(
+      [...Deno.readDirSync(`${destination}/skill-a`)].some((e) => e.name.includes("air-refresh")),
+      false,
+    );
+  } finally {
+    await Deno.remove(destination, { recursive: true });
+  }
+});
+
+Deno.test("installExternalSkills - linked .agents ancestor is refused (B5)", async () => {
+  // The installer previously followed a symlinked `<stagingHome>/.agents`
+  // ancestor through realPathSync: the foreign tree's REGULAR files would
+  // publish through it. The chain from the private HOME down must be link-free.
+  const foreign = await Deno.makeTempDir();
+  await Deno.mkdir(`${foreign}/.agents-elsewhere/skills/skill-a/scripts`, { recursive: true });
+  await Deno.writeTextFile(`${foreign}/.agents-elsewhere/skills/skill-a/SKILL.md`, "# foreign");
+  await Deno.writeTextFile(
+    `${foreign}/.agents-elsewhere/skills/skill-a/scripts/skill-a.ts`,
+    "// foreign",
+  );
+  const executor: SkillInstallExecutor = {
+    async run(_cmd, _args, options) {
+      const home = options?.env?.HOME!;
+      // Hostile staging: `.agents` is a LINK to a foreign tree carrying the
+      // skill as regular files.
+      await Deno.symlink(`${foreign}/.agents-elsewhere`, `${home}/.agents`);
+      return { code: 0, stdout: new Uint8Array(), stderr: new Uint8Array() };
+    },
+  };
+  const destination = await Deno.makeTempDir();
+  try {
+    await installExternalSkills(
+      destination,
+      [{ repo: "owner/repo-a", skill: "skill-a" }],
+      executor,
+    );
+    let published = true;
+    try {
+      await Deno.stat(`${destination}/skill-a`);
+    } catch {
+      published = false;
+    }
+    assert(!published, "a linked staging ancestor must never publish foreign content");
+  } finally {
+    await Deno.remove(destination, { recursive: true });
+    await Deno.remove(foreign, { recursive: true });
   }
 });

@@ -94,16 +94,79 @@ function copyValidatedTree(source: string, target: string): void {
 }
 
 /**
+ * Assert every directory ANCESTOR of the materialized path inside the private
+ * staging HOME is a real directory, not a symlink (post-duck B5):
+ * `realPathSync` FOLLOWS an ancestor link, so `<stagingHome>/.agents` being a
+ * link to a foreign tree would otherwise publish that foreign tree's regular
+ * contents. `realPathSync(<path>) === <path>` proves the full chain from the
+ * (freshly created, non-linked) temp root down to the path is link-free,
+ * because the canonical spelling can only equal the literal spelling when
+ * nothing on the route was rewritten.
+ */
+function assertStagingChainLinkFree(stagingHome: string, skill: string): void {
+  const canonicalHome = Deno.realPathSync(stagingHome);
+  const stagingSkillDir = `${stagingHome}/.agents/skills/${skill}`;
+  const expected = `${canonicalHome}/.agents/skills/${skill}`;
+  let canonical: string;
+  try {
+    canonical = Deno.realPathSync(stagingSkillDir);
+  } catch (error) {
+    throw new SkillPublicationError(
+      `Materialized skill path "${stagingSkillDir}" could not be observed (${
+        error instanceof Error ? error.message : String(error)
+      }) — publication refused`,
+    );
+  }
+  if (canonical !== expected) {
+    throw new SkillPublicationError(
+      `Materialized skill path resolves to "${canonical}" outside the exact private staging chain ` +
+        `"${expected}" (linked .agents/skills ancestor or linked entry) — publication refused`,
+    );
+  }
+}
+
+/**
+ * Pass 1 of publication (post-duck B4): walk the ENTIRE materialized tree and
+ * refuse any link BEFORE the destination is touched, so a rejection at
+ * `scripts/evil.ts` can never leave a half-published grant or destroy a
+ * previously installed entry.
+ */
+function validateMaterializedTree(source: string): void {
+  const stat = Deno.lstatSync(source);
+  if (stat.isSymlink) {
+    throw new SkillPublicationError(
+      `Materialized entry "${source}" is a symlink — publication refused`,
+    );
+  }
+  if (stat.isDirectory) {
+    for (const entry of Deno.readDirSync(source)) {
+      validateMaterializedTree(`${source}/${entry.name}`);
+    }
+  }
+}
+
+/**
  * Publish one validated materialized skill directory from the private staging
  * HOME into `destination/<skill>`:
  * - the source must exist as a real directory whose canonical path stays inside
- *   the staging tree (linked/escaping materialization refused);
+ *   the EXACT private staging chain — the requested path and the `.agents`,
+ *   `.agents/skills` ancestors must all be link-free real directories
+ *   (post-duck B5: `realPathSync` follows ancestor links, so the chain is
+ *   proven by canonical-equals-literal, not by following);
  * - the name must be a single component and never collide with bundled content
  *   (`lib` or a cataloged skill) — owned content is never overwritten;
  * - an existing destination entry may be REFRESHED only when it is itself a
- *   real external directory inside the destination (never a symlink escape).
+ *   real external directory inside the destination (never a symlink escape),
+ *   and a FAILED publication restores it (post-duck B4: the tree is fully
+ *   validated before the destination is touched, the previous entry is moved
+ *   aside and renamed back on any copy failure, and no partial content is
+ *   ever left at the final path).
  */
-function publishSkillDirectory(stagingSkillDir: string, destination: string, skill: string): void {
+function publishSkillDirectory(
+  stagingHome: string,
+  destination: string,
+  skill: string,
+): void {
   if (!isValidSkillNameComponent(skill)) {
     throw new SkillPublicationError(
       `External skill name "${skill}" is not a single path component — refused`,
@@ -114,7 +177,10 @@ function publishSkillDirectory(stagingSkillDir: string, destination: string, ski
       `External skill "${skill}" collides with bundled/reserved content — refused`,
     );
   }
-  const canonicalStaging = Deno.realPathSync(stagingSkillDir);
+  // B5: the whole private staging chain down to the requested directory must
+  // be link-free BEFORE anything is observed through it.
+  assertStagingChainLinkFree(stagingHome, skill);
+  const canonicalStaging = `${Deno.realPathSync(stagingHome)}/.agents/skills/${skill}`;
   const sourceStat = Deno.lstatSync(canonicalStaging);
   if (!sourceStat.isDirectory) {
     throw new SkillPublicationError(
@@ -122,10 +188,8 @@ function publishSkillDirectory(stagingSkillDir: string, destination: string, ski
     );
   }
   const canonicalDestination = Deno.realPathSync(destination);
-  // The private staging HOME is a fresh temporary directory OUTSIDE the
-  // destination; `realPathSync` above already refuses a symlinked staging
-  // spelling. Publishing a source that physically resolves INTO the
-  // destination tree would be a self-publication loop — refused.
+  // Publishing a source that physically resolves INTO the destination tree
+  // would be a self-publication loop — refused.
   if (
     canonicalStaging === canonicalDestination ||
     canonicalStaging.startsWith(canonicalDestination + "/")
@@ -158,14 +222,44 @@ function publishSkillDirectory(stagingSkillDir: string, destination: string, ski
       );
     }
   }
-  // Refresh semantics: replace the existing external entry atomically enough
-  // for daemon-startup serialization (remove, then copy a validated tree).
+  // B4: FULL validation before the destination is touched at all.
+  validateMaterializedTree(canonicalStaging);
+  // Refresh semantics with failure preservation: move the previous external
+  // entry aside (same filesystem, atomic rename), copy the fully validated
+  // tree to the final path, and on ANY failure remove the partial output and
+  // restore the previous entry — a failed skill publishes nothing.
+  const backup = `${target}.air-refresh-${crypto.randomUUID()}`;
+  let hadPrevious = false;
   try {
-    Deno.removeSync(target, { recursive: true });
+    Deno.renameSync(target, backup);
+    hadPrevious = true;
   } catch (error) {
     if (!(error instanceof Deno.errors.NotFound)) throw error;
   }
-  copyValidatedTree(canonicalStaging, target);
+  try {
+    copyValidatedTree(canonicalStaging, target);
+  } catch (error) {
+    try {
+      Deno.removeSync(target, { recursive: true });
+    } catch {
+      // Best-effort removal of the partial output; the restore below still runs.
+    }
+    if (hadPrevious) {
+      try {
+        Deno.renameSync(backup, target);
+      } catch {
+        logger.error(`Failed to restore previous external skill entry at "${target}"`, {});
+      }
+    }
+    throw error;
+  }
+  if (hadPrevious) {
+    try {
+      Deno.removeSync(backup, { recursive: true });
+    } catch {
+      // Best-effort: a leftover backup is outside the published entry.
+    }
+  }
 }
 
 /**
@@ -241,7 +335,7 @@ export async function installExternalSkills(
         );
       }
       await Deno.mkdir(destination, { recursive: true });
-      publishSkillDirectory(stagingSkillDir, destination, skill.skill);
+      publishSkillDirectory(stagingHome, destination, skill.skill);
       logger.info("Published skill {skill} from {repo} to {destination}", {
         skill: skill.skill,
         repo: skill.repo,

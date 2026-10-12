@@ -160,6 +160,17 @@ export function observeTrustedSkillsRoot(
         { agentType: String(agentType), root: path },
       );
     }
+    // A filesystem-root selection can never be a trusted skill tree: it
+    // contains every mandatory writable mount by construction (post-review
+    // B3 — confinement would refuse it at spawn anyway; failing it HERE keeps
+    // every consumer — readiness, inventory, mount — on the same posture).
+    if (observation.root === "/") {
+      throw new ConfigError(
+        ErrorCode.CONFIG_INVALID,
+        'Trusted skill-script root cannot be the filesystem root "/" — it contains every agent-writable mount and can never be a read-only skill tree',
+        { agentType: String(agentType), root: path },
+      );
+    }
     return observation;
   };
   if (agentType === "omp") {

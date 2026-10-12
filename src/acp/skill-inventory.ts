@@ -173,14 +173,16 @@ export function buildSkillAutoApproveList(
       scriptsEntries = fs.readDir(scriptsDir);
     } catch {
       scriptsEntries = null;
-      // ABSENT (nothing exists at the path) is a command-based skill shape;
-      // a path that EXISTS but fails enumeration is a script-skill
-      // observation ERROR and never grants a command prefix.
+      // ABSENT (nothing exists at the path — Deno.errors.NotFound ONLY) is a
+      // command-based skill shape; a path that EXISTS but fails enumeration,
+      // or whose metadata cannot be OBSERVED at all (permission/IO errors —
+      // post-duck N1: an unobservable path is not proof of absence), never
+      // grants a command prefix.
       try {
         fs.lstat(scriptsDir);
         scriptsDirAbsent = false;
-      } catch {
-        scriptsDirAbsent = true;
+      } catch (error) {
+        scriptsDirAbsent = error instanceof Deno.errors.NotFound;
       }
     }
     if (scriptsEntries === null) {
@@ -232,6 +234,19 @@ export function isUnderRoot(path: string, root: string): boolean {
 const ALLOWED_SCRIPT_INTERPRETERS = new Set(["deno"]);
 
 /**
+ * Flags the `deno [flags] run [flags] <script>` grammar may carry without
+ * ever introducing or affecting an executable module (post-duck B2: skipping
+ * every dash token allowed `--preload <trusted> <evil>` to launder the
+ * trusted token as the "entrypoint" while Deno executes the preload module
+ * and an unapproved main). ONLY these value-less / value-inconsequential
+ * permission-and-noise flags are skipped; anything else — `--preload`/
+ * `--import`, `--import-map`, `--inspect`, `--v8-flags`, `--config`, `--env`,
+ * `--` and any unknown flag — denies fail-closed rather than guessing arity.
+ */
+const DENO_RUN_SAFE_FLAGS =
+  /^(-A|--allow-all|--allow-(net|read|write|env|run|ffi|hrtime|sys|import)(=\S+)?|--no-check|-r|--quiet|-q|--no-lock)$/;
+
+/**
  * Locate the invocation ENTRYPOINT and its class.
  *
  * Direct shebang execution: the first token is the entrypoint — but ONLY when
@@ -240,7 +255,9 @@ const ALLOWED_SCRIPT_INTERPRETERS = new Set(["deno"]);
  * non-flag token after `deno` must be exactly the `run` subcommand (so
  * `deno task run <script>` — where `run` merely launches a workspace task and
  * the path is its ARGUMENT — is never an interpreter entrypoint), and the
- * entrypoint is the first positional after `run`.
+ * entrypoint is the first positional after `run`. Flags after `run` are
+ * restricted to {@link DENO_RUN_SAFE_FLAGS}: a flag that can introduce an
+ * executable module or take an arity-guessable value aborts the match.
  */
 function resolveScriptEntrypoint(
   tokens: string[],
@@ -257,6 +274,7 @@ function resolveScriptEntrypoint(
     const token = decodeLiteralToken(tokens[position]);
     if (token === undefined) return undefined;
     if (token.startsWith("-")) {
+      if (!DENO_RUN_SAFE_FLAGS.test(token)) return undefined;
       position++;
       continue;
     }
@@ -270,6 +288,7 @@ function resolveScriptEntrypoint(
     const token = decodeLiteralToken(tokens[position]);
     if (token === undefined) return undefined;
     if (token.startsWith("-")) {
+      if (!DENO_RUN_SAFE_FLAGS.test(token)) return undefined;
       position++;
       continue;
     }
@@ -349,17 +368,46 @@ export interface ScriptEntrypointDecisionContext {
 }
 
 /**
+ * Lexical (no-symlink-traversal) normalization, matching how Deno turns a
+ * module argument into a URL (`deno_path_util::normalize_path` collapses
+ * `.`/`..` components WITHOUT resolving symlinks). Used ONLY as a disagreement
+ * guard for spellings containing a `..` component (post-duck B1): when a `..`
+ * follows a symlinked directory, the kernel traversal the matcher observes and
+ * the loader's lexical target DIFFER (`W/jump/../scripts/x.ts` physically
+ * reaches the root grant while Deno lexically lands on `W/scripts/x.ts` — a
+ * planted file). Such ambiguous spellings deny; ordinary `..` spellings on
+ * symlink-free paths still approve because lexical and physical agree.
+ */
+function lexicallyNormalize(path: string): string {
+  const absolute = path.startsWith(SEPARATOR);
+  const out: string[] = [];
+  for (const part of path.split(SEPARATOR)) {
+    if (part === "" || part === ".") continue;
+    if (part === "..") {
+      // Absolute paths cannot ascend above `/`; relative ones are already
+      // anchored at a cwd, so a leading `..` there is also a no-op.
+      if (out.length > 0 && out[out.length - 1] !== "..") out.pop();
+      else if (!absolute) out.push("..");
+      continue;
+    }
+    out.push(part);
+  }
+  return (absolute ? SEPARATOR : "") + out.join(SEPARATOR);
+}
+
+/**
  * Whether a command segment's ENTRYPOINT is exactly one of the inventory's
  * enumerated canonical scripts under the still-intact observed root.
  *
  * Physical, not lexical: a relative spelling is anchored at the registered
  * session cwd by RAW component concatenation and handed to `realPath`, so a
- * path like `link/../good.ts` resolves through the link (what the kernel
- * execs) rather than through a lexical `..` collapse. Absolute spellings are
- * observed as written. A slashless direct-exec token is PATH-resolved by the
- * shell — never cwd — so it can never name a script grant here; a slashless
- * positional after a genuine `deno run` IS cwd-relative to Deno and remains
- * eligible.
+ * symlink-free `..` spelling resolves exactly as the loader would. Exception
+ * (post-duck B1): when the spelling contains a `..`, lexical and physical
+ * resolution must AGREE — an ambiguous `link/../…` spelling whose loader-side
+ * lexical target differs from the kernel traversal denies. A slashless
+ * direct-exec token is PATH-resolved by the shell — never cwd — so it can
+ * never name a script grant here; a slashless positional after a genuine
+ * `deno run` IS cwd-relative to Deno and remains eligible.
  */
 export function matchesScriptEntrypoint(
   segment: string,
@@ -401,6 +449,13 @@ export function matchesScriptEntrypoint(
   try {
     canonical = fs.realPath(candidate);
   } catch {
+    return false;
+  }
+
+  // Ambiguity guard (B1): a `..` spelling whose lexical normalization differs
+  // from the physical traversal crosses a symlinked directory — the interpreter
+  // would lexically load a DIFFERENT file than the one observed here. Deny.
+  if (spelling.split(SEPARATOR).includes("..") && lexicallyNormalize(candidate) !== canonical) {
     return false;
   }
 
