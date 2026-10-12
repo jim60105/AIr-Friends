@@ -229,7 +229,7 @@ export const ENFORCEMENT_SEAMS: readonly EnforcementSeam[] = Object.freeze(
       },
       userDisposition: "DECIDED",
       dispositionText:
-        "the trusted-extension replacement tool covers the approved routes (URL read, web search, public code search) through the controlled transport; fetchBinary and scraper redirect-following bypass routes stay blocked permanently.",
+        "the trusted-extension replacement tool covers the approved routes (URL read and web search) through the controlled transport; fetchBinary and scraper redirect-following bypass routes stay blocked permanently.",
       handlerBehavior:
         "14a's allow-gated-pending-adapter outcome blocks at the call with rejected_pending_adapter (seam pending-adapter) — fail closed, never a silent native transport allow.",
       blockMarker: "pending-adapter",

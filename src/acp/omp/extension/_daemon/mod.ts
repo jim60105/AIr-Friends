@@ -227,32 +227,8 @@ export {
   webSearchSeamState,
 } from "../../search-routes.ts";
 
-// Row 21 (`adapt-omp-public-code-search`) extends the declared closure with
-// the public-code-search route table's pure DATA module. CLOSURE NOTE FOR
-// ROW 22'S DIGEST CUT: `tool-inventory.ts` (already in the closure) now
-// imports `src/acp/omp/code-search-routes.ts` for the additive
-// completing-adapter marker, so `code-search-routes.ts` is a NEW installed
-// INPUT for the PACKAGE-MANIFEST recut — the install copy list MUST carry
-// it under its repo-relative basename or the barrel's `tool-inventory.ts`
-// import throws at load (fail-open of the whole 14b layer). It imports
-// ONLY `./compatibility-contracts.ts` (pin constants, already covered) plus
-// a TYPE-ONLY import from `./code-search-transport.ts` (erased at runtime,
-// same shape as row 18's `search-routes.ts` note), does zero env/DNS/
-// network work at module load, and — deliberately — no code-search tool is
-// registered: NO trusted-extension attachment and NO export of
-// `code-search-transport.ts` happen here (the reserved 6th serial slot is
-// unconsumed; the executor is pinned by tests only and stays OUT of the
-// installed closure).
-export {
-  CODE_SEARCH_COMPLETING_ADAPTER_MARKER,
-  CODE_SEARCH_RESERVED_MECHANISM,
-  CODE_SEARCH_ROUTE_CITATIONS,
-  CODE_SEARCH_ROUTE_TABLE,
-  CODE_SEARCH_SUPPORTED_CREDENTIAL_NAME,
-  type CodeSearchRouteCitation,
-  type CodeSearchRouteRow,
-  type CodeSearchRouteStatus,
-  type CodeSearchSeamState,
-  codeSearchSeamState,
-  isCodeSearchRouteCompleted,
-} from "../../code-search-routes.ts";
+// Row 21 (`adapt-omp-public-code-search`) was removed by
+// `remove-omp-public-code-search`: the public-code-search route table is no
+// longer an installed input and no reserved 6th serial slot exists, so the
+// declared closure stays the 12 -> 13 -> 14b -> 17 -> 18 composition and the
+// PACKAGE-MANIFEST digest set covers exactly that tree.

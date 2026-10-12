@@ -28,7 +28,6 @@ import {
 } from "./compatibility-contracts.ts";
 import { FETCH_COMPLETING_ADAPTER_MARKER } from "./fetch-routes.ts";
 import { SEARCH_COMPLETING_ADAPTER_MARKER } from "./search-routes.ts";
-import { CODE_SEARCH_COMPLETING_ADAPTER_MARKER } from "./code-search-routes.ts";
 import { ompSettingsForMode } from "../omp-settings.ts";
 import {
   evaluateToolProvenance,
@@ -230,16 +229,6 @@ export const RESTRICTED_TOOL_INVENTORY_TABLE: readonly InventoryRow[] = Object.f
       notes:
         "Live search preserved through supported configured provider credentials and controlled transport (row 18). " +
         SEARCH_COMPLETING_ADAPTER_MARKER,
-    },
-    {
-      id: "code-search",
-      toolNames: ["codesearch"],
-      kind: "allow-gated-pending-adapter",
-      completingAuthority: "rows-17-19-transport-adapter",
-      designCitation: D6,
-      notes:
-        "Public code/documentation search preserved (row 19) without adding LSP or arbitrary execution. Local text search stays on the read-class row. " +
-        CODE_SEARCH_COMPLETING_ADAPTER_MARKER,
     },
     {
       id: "write-edit-ordinary",

@@ -17,7 +17,6 @@ export const REQUIRED_INVENTORY: ReadonlyArray<{
   { boundary: "native_transport", subcase: "text_fetch" },
   { boundary: "native_transport", subcase: "binary_fetch" },
   { boundary: "native_transport", subcase: "web_search" },
-  { boundary: "native_transport", subcase: "public_code_search" },
   { boundary: "critical_skills" },
 ] as const;
 

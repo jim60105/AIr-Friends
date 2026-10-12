@@ -263,26 +263,6 @@ export const AUDITED_PINNED_LEDGER: readonly LedgerEntry[] = [
     notes: "Supported provider credentials and proxy transport require live adapter verification.",
   },
   {
-    boundary: "native_transport",
-    subcase: "public_code_search",
-    ompVersion: PINNED_OMP_VERSION,
-    ompCommit: PINNED_OMP_COMMIT,
-    opencodeVersion: PINNED_OPENCODE_VERSION,
-    opencodeTree: PINNED_OPENCODE_TREE,
-    acpSdkVersion: PINNED_ACP_SDK_VERSION,
-    acpTerminalCapability: PINNED_ACP_TERMINAL_CAPABILITY,
-    sourceCitation:
-      "sst/opencode tag v1.18.21 commit 2481dde36d9; packages/coding-agent/src/tools/gh-search.ts",
-    reachability: "GitHub Code Search API route",
-    newLoadRefreshScope: "Per-request",
-    downstreamOwner: "adapt-omp-public-code-search",
-    selectedMechanism: "Controlled code search endpoint via GITHUB_TOKEN and validating proxy",
-    status: "incompatible",
-    evidenceClassification: "static_audit",
-    notes:
-      "OpenCode removed codesearch upstream before 1.18.21; OMP requires dedicated search token not provisioned.",
-  },
-  {
     boundary: "critical_skills",
     ompVersion: PINNED_OMP_VERSION,
     ompCommit: PINNED_OMP_COMMIT,
