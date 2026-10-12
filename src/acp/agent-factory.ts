@@ -551,6 +551,14 @@ export interface RetryPromptContext {
   sessionId: string;
   /** The session's ABSOLUTE payload staging directory (`{workspace}/tmp/{sessionId}`). */
   stagingDir: string;
+  /**
+   * The ABSOLUTE trusted skill-script root resolved for this deployment's
+   * agent type (`repair-omp-owned-skill-handoff` D1): the retry's SKILL.md
+   * documents are read from it and the recipe it quotes names it literally —
+   * never a `${HOME}` expression, which on an OMP child names the isolated
+   * sandbox HOME, not the installed skills.
+   */
+  skillsDir: string;
 }
 
 /**
@@ -563,6 +571,7 @@ export interface RetryPromptContext {
 function buildDefaultRetryMessage(
   stagingDir: string,
   sessionId: string,
+  skillsDir: string,
   sendReplyContent: string,
   reactMessageContent: string,
   sendFileContent: string,
@@ -583,11 +592,11 @@ function buildDefaultRetryMessage(
     `- A previous send-reply/send-file call errored — read that error's output; it contains the exact fix.\n\n` +
     `Correct pattern (two steps):\n` +
     `1. Write the reply text to ${stagingDir}/reply.md with your edit/write tool.\n` +
-    `2. Invoke: \${HOME}/.agents/skills/send-reply/scripts/send-reply.ts --session-id "${sessionId}" ` +
+    `2. Invoke: ${skillsDir}/send-reply/scripts/send-reply.ts --session-id "${sessionId}" ` +
     `--message-file "${stagingDir}/reply.md"\n\n` +
-    `The session id and staging directory above are the literals rendered in your system prompt and ` +
-    `are authoritative in every deployment shape: the agent environment may carry NO session identity ` +
-    `at all, the skill library resolves the owning session automatically, and a mismatched ` +
+    `The skill-script root, session id and staging directory above are the literals rendered in your ` +
+    `system prompt and are authoritative in every deployment shape: the agent environment may carry NO ` +
+    `session identity at all, the skill library resolves the owning session automatically, and a mismatched ` +
     `--session-id value is never honored.\n\n` +
     `---\n\n${sendReplyContent}\n\n---\n\n${reactMessageContent}\n\n---\n\n${sendFileContent}`
   );
@@ -605,35 +614,36 @@ export function getRetryPromptStrategy(
   ctx: RetryPromptContext,
   rejections?: PermissionRejection[],
 ): RetryPromptStrategy {
-  const skillsDir = `${import.meta.dirname}/../../skills`;
-
-  let sendReplyContent: string;
-  try {
-    sendReplyContent = Deno.readTextFileSync(`${skillsDir}/send-reply/SKILL.md`);
-  } catch {
-    sendReplyContent = "# Send Reply Skill\n\nUse send-reply to send a message to the user.";
-  }
-
-  let reactMessageContent: string;
-  try {
-    reactMessageContent = Deno.readTextFileSync(`${skillsDir}/react-message/SKILL.md`);
-  } catch {
-    reactMessageContent =
-      "# React Message Skill\n\nUse react-message to add an emoji reaction to the trigger message.";
-  }
-
-  let sendFileContent: string;
-  try {
-    sendFileContent = Deno.readTextFileSync(`${skillsDir}/send-file/SKILL.md`);
-  } catch {
-    sendFileContent = "# Send File Skill\n\nUse send-file to send a file from the workspace.";
-  }
+  // The retry documents are the TRUSTED root's own SKILL.md files
+  // (`repair-omp-owned-skill-handoff` task 3.3): reading them is part of the
+  // handoff contract, so a missing document fails the retry EXPLICITLY — the
+  // session-scoped catch of the caller records it as a session error — rather
+  // than sending fabricated stub instructions that point at nothing. The
+  // previous `${import.meta.dirname}/../../skills` anchor and silent stubs
+  // made an installed image (or any relocated tree) read the wrong tree.
+  const readSkillDocument = (skill: string): string => {
+    try {
+      return Deno.readTextFileSync(join(ctx.skillsDir, skill, "SKILL.md"));
+    } catch (error) {
+      throw new Error(
+        `Retry prompt cannot read the trusted skill document ` +
+          `"${join(ctx.skillsDir, skill, "SKILL.md")}" for agent type "${type}" ` +
+          `(root resolved from the deployment, never the agent child HOME): ` +
+          `${error instanceof Error ? error.message : String(error)}`,
+        { cause: error },
+      );
+    }
+  };
+  const sendReplyContent = readSkillDocument("send-reply");
+  const reactMessageContent = readSkillDocument("react-message");
+  const sendFileContent = readSkillDocument("send-file");
 
   // Literal-first in BOTH spawn shapes: name the session's own literal id and
   // absolute staging directory (the values its system prompt rendered).
   const defaultRetryMessage = buildDefaultRetryMessage(
     ctx.stagingDir,
     ctx.sessionId,
+    ctx.skillsDir,
     sendReplyContent,
     reactMessageContent,
     sendFileContent,

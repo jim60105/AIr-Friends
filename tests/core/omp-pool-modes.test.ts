@@ -128,6 +128,7 @@ Deno.test("OMP acquisition matrix: entry points, resolved modes, ownership, audi
                     const skills = new SkillRegistry(memory);
                     const assembler = new ContextAssembler(memory, {
                       systemPromptPath: config.agent.systemPromptPath,
+                      skillsDir: "/opt/air/skills", // trusted skill-script root (required render input)
                       recentMessageLimit: 10,
                       tokenLimit: 20000,
                     });

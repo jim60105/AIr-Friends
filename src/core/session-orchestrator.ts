@@ -24,6 +24,7 @@ import {
 } from "@acp/agent-factory.ts";
 import { ContextAssembler } from "./context-assembler.ts";
 import { sessionStagingDir } from "./session-staging.ts";
+import { resolveTrustedSkillsRoot } from "./skills-root.ts";
 import { WorkspaceManager } from "./workspace-manager.ts";
 import { MemoryStore } from "./memory-store.ts";
 import { convertUserMCPServerConfigs } from "./config-loader.ts";
@@ -170,6 +171,16 @@ export class SessionOrchestrator {
    * every session spawns a fresh agent subprocess.
    */
   private processPool: AgentProcessPool | null;
+  /**
+   * The daemon-owned trusted skill-script root (`repair-omp-owned-skill-handoff`
+   * D1), resolved once against the deployment's agent identity ( omp image root
+   * when present, otherwise the configured OpenCode `skillsDir`) and reused by
+   * every skill-instructing render and the retry builder. Resolution happens
+   * lazily inside the session-scoped try/catch of each caller, so an
+   * unresolvable root surfaces as an explicit session error — never a
+   * child-HOME fallback.
+   */
+  private trustedSkillsDirCache: string | null = null;
 
   constructor(
     workspaceManager: WorkspaceManager,
@@ -193,6 +204,17 @@ export class SessionOrchestrator {
     this.replyPolicy = replyPolicy;
     this.skillApiSecret = skillApiSecret;
     this.processPool = processPool;
+  }
+
+  /** Resolved trusted skill-script root; throws ConfigError when absent. */
+  private trustedSkillsDir(): string {
+    if (this.trustedSkillsDirCache === null) {
+      this.trustedSkillsDirCache = resolveTrustedSkillsRoot(
+        getDefaultAgentType(this.config),
+        this.config.agent.skillsDir,
+      );
+    }
+    return this.trustedSkillsDirCache;
   }
 
   /**
@@ -2977,6 +2999,7 @@ export class SessionOrchestrator {
         channelId: channelWorkspace.channelId,
         guildId: "",
         agentType: getDefaultAgentType(this.config),
+        skillsDir: this.trustedSkillsDir(),
         model: resolvedModel,
         yolo: this.yolo,
         workspaceKey: `channel:${channelKey}`,
@@ -4342,6 +4365,11 @@ export class SessionOrchestrator {
       sharedProcess,
       sessionId: this.skillSessionId(registrySessionId) ?? "",
       stagingDir: this.stagingDirFor(workspace, registrySessionId),
+      // The retry SKILL.md the builder reads, and the literal script
+      // instructions it quotes, both come from the trusted root — never a
+      // HOME expression or the untrusted CWD (`repair-omp-owned-skill-handoff`
+      // task 3.3).
+      skillsDir: this.trustedSkillsDir(),
     };
   }
 
@@ -4728,6 +4756,7 @@ export class SessionOrchestrator {
       channelId: "",
       guildId: "",
       agentType: getDefaultAgentType(this.config),
+      skillsDir: this.trustedSkillsDir(),
       model,
       yolo,
       recentMessagesFetched: context.recentMessagesFetched,
@@ -4769,6 +4798,7 @@ export class SessionOrchestrator {
       channelId: "",
       guildId: "",
       agentType: getDefaultAgentType(this.config),
+      skillsDir: this.trustedSkillsDir(),
       model,
       yolo,
       canWriteAgentWorkspace: true,
@@ -4809,6 +4839,7 @@ export class SessionOrchestrator {
       channelId: "",
       guildId: "",
       agentType: getDefaultAgentType(this.config),
+      skillsDir: this.trustedSkillsDir(),
       model,
       yolo,
       workspaceKey,
@@ -4920,6 +4951,7 @@ export class SessionOrchestrator {
       channelId: "",
       guildId: "",
       agentType: getDefaultAgentType(this.config),
+      skillsDir: this.trustedSkillsDir(),
       model,
       yolo,
       reminderMessage: reminder.message,
@@ -5015,10 +5047,25 @@ export class SessionOrchestrator {
         const promptDir = dirname(this.config.agent.systemPromptPath);
         const summaryPromptPath = join(promptDir, "system_summary.md");
         const env = createTemplateEngine(promptDir);
-        const summaryPrompt = await renderTemplate(env, summaryPromptPath, {
+        // The summary reuses the live session: type the vars and supply the
+        // same trusted skill-script root as every other render
+        // (`repair-omp-owned-skill-handoff` D2).
+        const summaryVars: TemplateVariables = {
+          isDm: true,
+          platform: "discord",
+          userId: "",
+          channelId: "",
+          guildId: "",
+          agentType: getDefaultAgentType(this.config),
+          skillsDir: this.trustedSkillsDir(),
           sessionId: this.skillSessionId(shellSessionId),
           tmpDir: this.stagingDirFor(workspace, shellSessionId),
-        });
+        };
+        const summaryPrompt = await renderTemplate(
+          env,
+          summaryPromptPath,
+          summaryVars as unknown as Record<string, unknown>,
+        );
 
         sessionLogger.info("Generating conversation summary");
         await connector.prompt(sessionId, summaryPrompt);

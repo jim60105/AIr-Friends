@@ -14,6 +14,9 @@ const defaultVars: TemplateVariables = {
   userId: "user123",
   channelId: "channel456",
   guildId: "guild789",
+  // Trusted skill-script root is a mandatory render input
+  // (`repair-omp-owned-skill-handoff`); tests use a fixed absolute root.
+  skillsDir: "/opt/air/skills",
 };
 
 // Test with a temporary directory containing test config files

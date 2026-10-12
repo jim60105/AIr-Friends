@@ -37,7 +37,7 @@ The summary text must NOT appear on the command line. Two-step flow:
 2. Invoke the script with the payload file path:
 
 ```bash
-${HOME}/.agents/skills/memory-save/scripts/memory-save.ts \
+{{ skillsDir }}/memory-save/scripts/memory-save.ts \
   --session-id {{ sessionId }} \
   --content-file "{{ tmpDir }}/summary.md" \
   --importance normal \

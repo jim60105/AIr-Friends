@@ -103,6 +103,7 @@ async function withTestContextAssembler(
         recentMessageLimit: 20,
         tokenLimit: 20000,
         systemPromptPath: `${tempDir}/prompts/system_reply.md`,
+        skillsDir: "/opt/air/skills", // trusted skill-script root (required render input)
         ...(overrides.recall !== undefined ? { recall: overrides.recall } : {}),
       },
       manager,
@@ -376,6 +377,7 @@ Deno.test("ContextAssembler - should remove oldest messages when exceeding token
       recentMessageLimit: 20,
       tokenLimit: 500, // Very small limit to trigger truncation
       systemPromptPath: `${tempDir}/prompts/system_reply.md`,
+      skillsDir: "/opt/air/skills", // trusted skill-script root (required render input)
     });
 
     const event = createTestEvent();
@@ -996,6 +998,7 @@ Deno.test("F15 - channel memories render as attributed, untrusted notes (not Cha
     recentMessageLimit: 20,
     tokenLimit: 20000,
     systemPromptPath: "/tmp/does-not-exist.md",
+    skillsDir: "/opt/air/skills", // trusted skill-script root (required render input)
   });
 
   // deno-lint-ignore no-explicit-any
@@ -1874,6 +1877,7 @@ async function withLimitedAssembler(
       recentMessageLimit: 20,
       tokenLimit,
       systemPromptPath: `${tempDir}/prompts/system_reply.md`,
+      skillsDir: "/opt/air/skills", // trusted skill-script root (required render input)
     });
     await fn(assembler, manager);
   } finally {

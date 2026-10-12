@@ -22,6 +22,7 @@ import { AgentConnector } from "@acp/agent-connector.ts";
 import { createAgentConfig, getDefaultAgentType } from "@acp/agent-factory.ts";
 import type { AgentConnectorOptions, ClientConfig } from "@acp/types.ts";
 import { loadSystemPrompt } from "@core/config-loader.ts";
+import { resolveTrustedSkillsRoot } from "@core/skills-root.ts";
 import type { TemplateVariables } from "../types/template.ts";
 import type { SkillRegistry } from "@skills/registry.ts";
 import type { MemoryStore } from "@core/memory-store.ts";
@@ -769,6 +770,16 @@ export class DashboardServer {
 
     // On first message, prepend rendered system prompt
     if (this.chatSession.messageCount === 1) {
+      // Resolve the trusted skill-script root OUTSIDE the prompt-load
+      // fallback: an unresolvable root fails the request explicitly rather
+      // than silently degrading to a skill-less prompt
+      // (`repair-omp-owned-skill-handoff` — no silent fallbacks). The web-chat
+      // template itself forbids skill use, but the render contract is
+      // uniform: every TemplateVariables carries the resolved root.
+      const skillsDir = resolveTrustedSkillsRoot(
+        getDefaultAgentType(this.deps.appConfig),
+        this.deps.appConfig.agent.skillsDir,
+      );
       try {
         const promptFile = join(Deno.cwd(), "prompts", "system_web_chat.md");
         const variables: TemplateVariables = {
@@ -777,6 +788,7 @@ export class DashboardServer {
           userId: "dashboard",
           channelId: "web-chat",
           guildId: "",
+          skillsDir,
           yolo: false,
           canWriteAgentWorkspace: false,
         };

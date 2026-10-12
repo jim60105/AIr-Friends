@@ -186,6 +186,7 @@ async function createOrchestrator(tempDir: string, dryRunEnabled = true, sendFil
 
   const contextAssembler = new ContextAssembler(memoryStore, {
     systemPromptPath: `${tempDir}/prompts/system_reply.md`,
+    skillsDir: "/opt/air/skills", // trusted skill-script root (required render input)
     recentMessageLimit: 20,
     tokenLimit: 20000,
   });
