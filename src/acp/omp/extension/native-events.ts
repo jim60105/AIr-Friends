@@ -26,7 +26,8 @@
  * input, the shared binding-integrity posture.
  */
 
-import type { DestructiveCallPayload, RestrictedToolCallInput } from "./enforcement.ts";
+import type { RestrictedToolCallInput } from "./enforcement.ts";
+import type { DestructiveCallPayload } from "./enforcement-error.ts";
 import type {
     AuthorizeWriteParams,
   CanonicalTarget,
@@ -93,7 +94,8 @@ export interface NativeSessionContext {
   resolveCanonicalTargets(
     targets: readonly string[],
   ): readonly RootPathResult<CanonicalTarget>[];
-  readonly authorizationParams?: AuthorizeWriteParams;
+  /** Row-4 write-authorization parameters (the per-target `target` field is the policy's own). */
+  readonly authorizationParams?: Omit<AuthorizeWriteParams, "target">;
   /** Trusted canonical identity of the acquired session, when one exists. */
   readonly canonicalTarget?: CanonicalTarget;
 }

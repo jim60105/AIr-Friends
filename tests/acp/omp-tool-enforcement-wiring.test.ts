@@ -28,7 +28,6 @@ import {
   PINNED_MECHANISM_EVIDENCE,
   registerNativeYoloNoop,
   RegistryEpochObserver,
-  type RestrictedToolCallHandler,
   type RestrictedToolCallInput,
   type ToolCallObservation,
   type ToolMetadataSnapshot,

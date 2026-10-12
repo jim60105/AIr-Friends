@@ -49,7 +49,7 @@
  * model-target decision.
  */
 
-import { type EnforcementLaunchMode, observeLaunchMode } from "./enforcement.ts";
+import type { EnforcementLaunchMode } from "./enforcement.ts";
 import * as nodeDns from "node:dns/promises";
 import { resolveHostAnswers } from "../../../utils/ssrf.ts";
 import { Type } from "@sinclair/typebox";

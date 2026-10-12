@@ -44,7 +44,7 @@
  * never established mediation (the pre-existing F14 residual is unchanged).
  */
 
-import { type EnforcementLaunchMode, observeLaunchMode } from "./enforcement.ts";
+import type { EnforcementLaunchMode } from "./enforcement.ts";
 import { Type } from "@sinclair/typebox";
 import {
   buildGeminiSearchRequest,

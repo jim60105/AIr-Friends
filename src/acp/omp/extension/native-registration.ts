@@ -78,7 +78,7 @@ import {
 /** The pinned tool-source classification (`sourceInfo` at the pin). */
 export interface NativeToolSourceInfo {
   readonly path?: string;
-  readonly source?: "builtin" | "mcp" | "sdk" | "extension" | (string & {});
+  readonly source?: string;
   readonly scope?: string;
   readonly origin?: string;
 }
@@ -169,20 +169,31 @@ function withinBaseRoot(path: string, baseRoot: string): boolean {
 /** The pinned `mcp__` client-tool name prefix (tools/builtin-names.ts at the pin). */
 export const MCP_TOOL_NAME_PREFIX = "mcp__";
 
+/** Per-name first-observation capture the recorded freshness halves ride. */
+interface NativeObservationCapture {
+  /** JSON of the sourceInfo spelling this capture was taken for. */
+  readonly key: string;
+  readonly observedEpoch: number;
+  readonly observedGeneration: string;
+}
+
 /**
  * Translate one fresh configured-tool entry into the RECORDED provenance
  * side of the wiring observation. Fail-closed by construction: anything the
  * host metadata cannot positively classify records unowned-discovery, and
- * 14a's inventory/provenance steps deny before dispatch. The operator-MCP
- * epoch halves are both stamped from the surface's OWN observation domain
- * and are recomputed fresh by the composition on every call — the stamp
- * records WHEN the surface saw the tool, never a durable admission.
+ * 14a's inventory/provenance steps deny before dispatch. The recorded
+ * freshness halves ride the surface's first-observation CAPTURE for this
+ * exact sourceInfo spelling — the composition recomputes the CURRENT half
+ * live per call (`composeFreshProvenance`), so a resource-generation bump
+ * or registry movement since the tool was first seen reads stale and
+ * denies before dispatch. The stamp records WHEN the surface saw the tool,
+ * never a durable admission.
  */
 export function translateNativeSourceInfo(
   name: string,
   sourceInfo: NativeToolSourceInfo | null | undefined,
   owned: NativeOwnedIdentity,
-  registryEpoch: number,
+  capture: NativeObservationCapture,
 ): ProvenanceRecord {
   const unowned: ProvenanceRecord = { origin: "unowned-discovery", presentedName: name };
   if (sourceInfo === null || sourceInfo === undefined || typeof sourceInfo !== "object") {
@@ -204,8 +215,8 @@ export function translateNativeSourceInfo(
       return {
         origin: "operator-mcp",
         clientMcpOwnership: true,
-        registryEpochObserved: registryEpoch,
-        currentRegistryEpoch: registryEpoch,
+        registryEpochObserved: capture.observedEpoch,
+        currentRegistryEpoch: capture.observedEpoch,
       };
     }
     case "extension": {
@@ -236,18 +247,13 @@ export function translateNativeSourceInfo(
         });
         if (!ownership.trusted) return unowned;
       }
-      // Owned extension module: its ACTUAL owned-extension origin. BOTH
-      // freshness halves are stamped from row 12's live generation getter
-      // — the composition recomputes the current half per call, so
-      // admission still rejects on staleness and never rests here.
-      const generation = owned.resourceGeneration();
       return {
         origin: "owned-extension",
         modulePath: extensionPath,
         baseRoot: owned.baseRoot,
         mode: "restricted",
-        observedResourceGeneration: generation,
-        currentResourceGeneration: generation,
+        observedResourceGeneration: capture.observedGeneration,
+        currentResourceGeneration: capture.observedGeneration,
       };
     }
     default:
@@ -266,6 +272,14 @@ export function translateNativeSourceInfo(
  * there is no empty-registry admit anywhere. Duplicate same-name entries
  * are ambiguous registrations: recorded unowned, never first-wins or
  * last-wins guessing.
+ *
+ * Freshness capture: each distinct (name, sourceInfo spelling) records the
+ * epoch/generation captured when the surface FIRST saw that spelling; the
+ * composition recomputes both CURRENT halves live per call, so a
+ * resource-generation bump or any roster movement after the entry was
+ * first observed reads stale and denies before dispatch. Movement never
+ * silently re-freshens an older observation — re-observation is the
+ * next session's job, not a mid-session relabel.
  */
 export function createNativeRegistrySurface(
   getAllTools: () => NativeToolInfo[] | undefined,
@@ -273,6 +287,18 @@ export function createNativeRegistrySurface(
 ): { snapshot(): readonly ToolMetadataSnapshot[]; epoch(): number } {
   let epoch = 0;
   let lastRosterKey: string | undefined;
+  const captures = new Map<string, NativeObservationCapture>();
+  const captureFor = (key: string, spellingKey: string): NativeObservationCapture => {
+    const existing = captures.get(key);
+    if (existing !== undefined && existing.key === spellingKey) return existing;
+    const fresh: NativeObservationCapture = {
+      key: spellingKey,
+      observedEpoch: epoch,
+      observedGeneration: owned.resourceGeneration(),
+    };
+    captures.set(key, fresh);
+    return fresh;
+  };
   return {
     snapshot() {
       let tools: NativeToolInfo[] | undefined;
@@ -295,9 +321,10 @@ export function createNativeRegistrySurface(
       for (const tool of roster) {
         const name = tool?.name;
         if (typeof name !== "string" || name === "") continue;
+        const spellingKey = JSON.stringify(tool.sourceInfo ?? null);
         const origin: ProvenanceRecord = (counts[name] ?? 0) > 1
           ? { origin: "unowned-discovery", presentedName: name }
-          : translateNativeSourceInfo(name, tool.sourceInfo, owned, epoch);
+          : translateNativeSourceInfo(name, tool.sourceInfo, owned, captureFor(name, spellingKey));
         snapshots.push({ toolName: name, origin });
       }
       return snapshots;
@@ -525,4 +552,20 @@ export function registerNativeEnforcement(
 /** The C2 controlled replacement definitions, built for native registration. */
 export function nativeReplacementTools(): readonly NativeToolDefinitionLike[] {
   return [createReadReplacementToolDefinition(), createSearchReplacementToolDefinition()];
+}
+
+/**
+ * The single default-factory implementation: the entrypoint's default
+ * export and the API-shaped harness fixtures are the SAME function object
+ * bound to different dependency sources (the real load-time decision vs.
+ * a fixture decision), so fixtures exercise the actual registration path
+ * the pinned loader would evaluate, not a lookalike. The entrypoint keeps
+ * its fail-closed pre-import gate: the factory only exists behind the
+ * module-load throw (row 12), and fixtures name their injected identity
+ * honestly — harness evidence is not native executable evidence.
+ */
+export function createNativeExtensionFactory(
+  deps: () => NativeRegistrationDeps,
+): (api: NativeExtensionApi) => NativeRegistrationResult {
+  return (api: NativeExtensionApi) => registerNativeEnforcement(api, deps());
 }

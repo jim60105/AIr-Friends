@@ -31,10 +31,8 @@
 import { bootstrapDiscoveryGuard } from "./bootstrap.ts";
 import { formatDiscoverySessionError } from "../discovery-guard.ts";
 import {
+  createNativeExtensionFactory,
   nativeReplacementTools,
-  type NativeExtensionApi,
-  registerNativeEnforcement,
-  type NativeRegistrationResult,
 } from "./native-registration.ts";
 import { OMP_TRUSTED_EXTENSION_PATH } from "../../../utils/omp-paths.ts";
 
@@ -64,19 +62,18 @@ function safeCwd(): string {
  * the return value entirely. The native-YOLO branch registers nothing
  * (structural exemption). The return value is a plain status record for
  * API-shaped consumers/tests, never an attachment point.
+ * The factory object itself is the shared `createNativeExtensionFactory`
+ * product, so API-shaped fixtures exercise the SAME function the pinned
+ * loader would evaluate (fixtures name their injected identity honestly).
  */
-export default function trustedExtensionFactory(
-  api: NativeExtensionApi,
-): NativeRegistrationResult {
-  return registerNativeEnforcement(api, {
-    observedCwd: safeCwd(),
-    resourceGeneration: () => loadTimeDiscoveryDecision.resourceGeneration,
-    // The pinned host offers NO trusted session-context acquisition into
-    // the extension child today: production wires `undefined`, so
-    // destructive-shaped calls fail closed on absent canonical
-    // observations — never on model-supplied ones.
-    moduleUrl: import.meta.url,
-    contractedRelative: OMP_TRUSTED_EXTENSION_PATH,
-    replacementTools: nativeReplacementTools(),
-  });
-}
+export default createNativeExtensionFactory(() => ({
+  observedCwd: safeCwd(),
+  resourceGeneration: () => loadTimeDiscoveryDecision.resourceGeneration,
+  // The pinned host offers NO trusted session-context acquisition into
+  // the extension child today: production wires no session context, so
+  // destructive-shaped calls fail closed on absent canonical
+  // observations — never on model-supplied ones.
+  moduleUrl: import.meta.url,
+  contractedRelative: OMP_TRUSTED_EXTENSION_PATH,
+  replacementTools: nativeReplacementTools(),
+}));
