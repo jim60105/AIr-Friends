@@ -593,7 +593,7 @@ export async function runtimeResolveHost(host: string): Promise<string[]> {
   // The shared collection rule (both families, per-family failure tolerated,
   // deduplicated) lives in ssrf.ts; the fail-closed empty-answer rule stays
   // in the decision core (empty answers → dns-unresolved block).
-  return resolveHostAnswers(host, nodeDns);
+  return await resolveHostAnswers(host, nodeDns);
 }
 
 // ---------------------------------------------------------------------------
