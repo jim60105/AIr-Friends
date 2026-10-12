@@ -128,6 +128,9 @@ export class ContextAssembler {
       model,
       yolo,
       userContextMessage,
+      // Trusted skill-script root: the resolved absolute root the deployment
+      // owns for THIS agent type (never a child-HOME token form).
+      skillsDir: this.config.skillsDir,
       // Session payload staging dir: the per-session subdir the payload helper
       // enforces containment against (`{workspace}/tmp/{sessionId}`). In
       // shared-process mode the process-level TMPDIR is a channel-scoped dir
@@ -180,6 +183,7 @@ export class ContextAssembler {
       agentType: this.config.agentType,
       model,
       yolo,
+      skillsDir: this.config.skillsDir,
       // Payload-staging prompt contract: every render of a staging-instructing
       // template supplies the literal Skill API session id + absolute staging
       // dir (the message flow's delivered prompt is renderFullPrompt below;
@@ -1017,6 +1021,7 @@ export class ContextAssembler {
       agentType: this.config.agentType,
       model,
       yolo,
+      skillsDir: this.config.skillsDir,
       // Literal id + absolute staging dir on every payload-staging render
       // (see assembleContext; the delivered spontaneous prompt is re-rendered
       // by the orchestrator with the same values).

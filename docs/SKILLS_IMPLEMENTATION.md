@@ -198,6 +198,10 @@ Located in `skills/{name}/SKILL.md`, these files follow the [Agent Skills Standa
   - `messageId`: The ID of the message to fetch. If omitted, falls back to the session's last `send-reply`/`edit-reply` message, then to the last `send-file`-delivered message.
 - **Returns**: Message content, userId, username, timestamp, and isBot flag
 
+## Script Root Convention
+
+Every `SKILL.md` invocation recipe names the script path under the literal placeholder `<skill root rendered in your system prompt>` — the absolute trusted skill-script root the daemon renders into every prompt as the internal `skillsDir` template variable (`resolveTrustedSkillsRoot`, `src/core/skills-root.ts`; see `docs/DEVELOPMENT.md` §Available Template Variables). Recipes NEVER use a `$HOME`/`${HOME}` expression: for OMP the rendered root is the declared owned tree (`/opt/air/skills` in the image; the repository's own `skills/` tree in development) and the agent child's isolated HOME can only ever name an empty sandbox directory, while OpenCode keeps its existing installed-root behavior (`agent.skillsDir`, container: `/home/deno/.agents/skills`).
+
 ## Payload-File Argument Contract
 
 Skill scripts NEVER accept free-text content as CLI argument values. Free-text arguments (`--message`, `--content`, `--query`, `--caption`) were removed because skill scripts are executed via the Bash tool: the shell expands `$VAR` in double-quoted arguments before the script runs, corrupting content (`$0.435` became `/usr/bin/bash.435` in production) and leaking subprocess environment variables (e.g. `$OPENROUTER_API_KEY`) into external channels. Since `agent-config/opencode.json` grants skill-invocation bash patterns `"allow"`, the script itself is the authoritative enforcement point.

@@ -123,6 +123,21 @@ tiers; citations re-verified at pin `2a2c6dc` / v18.6.1):
   trusted extension's `registerTool` name-replacement of `read`
   (last-extension-wins, natives captured, same-tool `ctx.invokeTool`
   delegation for non-URL inputs).
+- Owned skill-URI reads (`repair-omp-owned-skill-handoff`): the same `read`
+  replacement declares the pinned native `readsSkillUris` capability and
+  classifies `skill://` inputs on their OWN branch — distinct from HTTP(S),
+  local paths, and the blanket rejected-scheme denial. An owned
+  `SkillUriAuthorization` seam resolves the URI ONLY against the declared
+  canonical owned source (`OMP_IMAGE_SKILLS_ROOT`), gated on the live
+  discovery generation and per-call link-free identity/writability/containment
+  checks of the target. Authorized reads delegate the ORIGINAL URI once
+  through `ctx.invokeTool` to the captured native skill reader (zero network
+  dispatch; the canonical path is authorization evidence only, never a
+  rewritten native argument); unwired seams, foreign same-name shadows,
+  symlink-replaced identities, traversal spellings, stale/absent generations,
+  and off-image roots deny BEFORE delegation with no fallback root. Network
+  completion grants nothing here: the URL-route completion above and the
+  skill-URI admission are independent decisions.
 - `partial-seam-not-selected`: the native `ToolSession.fetch` seam —
   exists, enrichment reach only, and **no** supported ACP-bootstrapped
   injection point sets it; promotion would require a P0 revision.

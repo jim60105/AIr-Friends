@@ -33,7 +33,7 @@ async function main() {
       sessionId,
       alias: "c",
       fileName: "content.md",
-      example: `${Deno.env.get("HOME") ?? "~"}/.agents/skills/memory-save/scripts/memory-save.ts ` +
+      example: `Use the literal skill-script root rendered in your system prompt (never a $HOME expression): <skill root rendered in your system prompt>/memory-save/scripts/memory-save.ts ` +
         `--session-id "<session id rendered in your system prompt>" --importance normal ` +
         `--content-file "<absolute staging directory rendered in your system prompt>/content.md"`,
     });

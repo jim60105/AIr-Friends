@@ -22,14 +22,16 @@ Search through saved memories to retrieve relevant information.
 
 2. Invoke the script with the payload file path:
 
+> The placeholder `<skill root rendered in your system prompt>` is the absolute skill-script root rendered in your system prompt: substitute that literal root before invoking — never run this command with the placeholder, a `$HOME` expression, or any other root.
+
    ```bash
-   ${HOME}/.agents/skills/memory-search/scripts/memory-search.ts \
+   <skill root rendered in your system prompt>/memory-search/scripts/memory-search.ts \
      --session-id "<session id rendered in your system prompt>" \
      --query-file "<absolute staging directory rendered in your system prompt>/query.md" \
      --limit 10
 
    # Filter by category and scope
-   ${HOME}/.agents/skills/memory-search/scripts/memory-search.ts \
+   <skill root rendered in your system prompt>/memory-search/scripts/memory-search.ts \
      --session-id "<session id rendered in your system prompt>" \
      --query-file "<absolute staging directory rendered in your system prompt>/query.md" \
      --category preference \

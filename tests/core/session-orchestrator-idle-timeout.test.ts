@@ -97,6 +97,7 @@ function createTestOrchestrator(): { orchestrator: TestableOrchestrator; cleanup
   const skillRegistry = new SkillRegistry(memoryStore);
   const contextAssembler = new ContextAssembler(memoryStore, {
     systemPromptPath: config.agent.systemPromptPath,
+    skillsDir: "/opt/air/skills", // trusted skill-script root (required render input)
     recentMessageLimit: config.memory.recentMessageLimit,
     tokenLimit: config.agent.tokenLimit,
   });

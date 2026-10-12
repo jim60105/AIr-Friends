@@ -541,6 +541,7 @@ async function createHarness(params: {
   const sessionRegistry = new SnapshotRegistry();
   const contextAssembler = new ContextAssembler(memoryStore, {
     systemPromptPath: config.agent.systemPromptPath,
+    skillsDir: "/opt/air/skills", // trusted skill-script root (required render input)
     recentMessageLimit: 20,
     tokenLimit: 20000,
   });

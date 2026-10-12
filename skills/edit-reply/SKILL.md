@@ -35,8 +35,10 @@ Edit the previously sent reply message. Use this when you need to correct errors
 
 2. Invoke the script with the payload file path:
 
+> The placeholder `<skill root rendered in your system prompt>` is the absolute skill-script root rendered in your system prompt: substitute that literal root before invoking — never run this command with the placeholder, a `$HOME` expression, or any other root.
+
    ```bash
-   ${HOME}/.agents/skills/edit-reply/scripts/edit-reply.ts \
+   <skill root rendered in your system prompt>/edit-reply/scripts/edit-reply.ts \
      --session-id "<session id rendered in your system prompt>" \
      --message-id "<messageId from send-reply>" \
      --message-file "<absolute staging directory rendered in your system prompt>/reply.md"

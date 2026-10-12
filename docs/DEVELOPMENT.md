@@ -628,10 +628,11 @@ The following variables are available in all prompt templates:
 | `channelId`              | `string`  | Channel/conversation ID                                         | `"873618490202931231"`   |
 | `guildId`                | `string`  | Server/guild ID (empty string if N/A)                           | `""`                     |
 | `sessionId`              | `string`  | Current skill API session ID                                    | `"sess_abc123"`          |
-| `agentType`              | `string`  | ACP agent type (`"opencode"`)                                   | `"opencode"`             |
+| `agentType`              | `string`  | ACP agent type (`"opencode"`, `"omp"`)                          | `"opencode"`             |
 | `model`                  | `string`  | Model identifier for the current session                        | `"claude-opus-4.6"`      |
 | `yolo`                   | `boolean` | Whether YOLO mode is enabled (bypasses permission restrictions) | `true`                   |
 | `canWriteAgentWorkspace` | `boolean` | Whether this session allows writing to agent workspace          | `false`                  |
+| `skillsDir`              | `string`  | Absolute trusted skill-script root rendered into every script recipe (see the note below) | `"/opt/air/skills"`      |
 
 **Special prompt variables** (only available in specific prompt types):
 
@@ -649,6 +650,8 @@ The following variables are available in all prompt templates:
 | `reminderMessage`       | `system_reminder.md`           | Reminder message content                       |
 | `reminderCreatedAt`     | `system_reminder.md`           | Reminder creation timestamp                    |
 | `reminderScheduledAt`   | `system_reminder.md`           | Reminder scheduled timestamp                   |
+
+> **`skillsDir` is required** (`repair-omp-owned-skill-handoff`): every render caller — normal, spontaneous, self-research, both maintenance forms, reminder, summary, web-chat, and the retry prompt builder — must supply it, and a missing root fails the request explicitly instead of rendering a skill-less prompt. The value comes from `resolveTrustedSkillsRoot()` (`src/core/skills-root.ts`): for OMP it is the declared owned root `/opt/air/skills` (development: the repository's own `skills/` tree); for OpenCode it is the existing installed-root resolution (`agent.skillsDir`, container: `/home/deno/.agents/skills`, relative values resolved against the daemon/deployment working directory). The agent child's HOME is NEVER consulted — an isolated OMP HOME cannot redirect script invocation — and `skillsDir` is an internal render input, not new public configuration. Prompts and `SKILL.md` files name script paths as `{{ skillsDir }}/<skill>/scripts/<script>.ts` (rendered) / `<skill root rendered in your system prompt>/<skill>/scripts/<script>.ts` (instruction text) and never a `$HOME`/`${HOME}` recipe.
 
 #### Examples
 

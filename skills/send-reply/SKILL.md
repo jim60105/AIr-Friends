@@ -32,8 +32,10 @@ Send your final response to the user. This is the gateway to external communicat
 
 2. Invoke the script with the payload file path:
 
+> The placeholder `<skill root rendered in your system prompt>` is the absolute skill-script root rendered in your system prompt: substitute that literal root before invoking — never run this command with the placeholder, a `$HOME` expression, or any other root.
+
    ```bash
-   ${HOME}/.agents/skills/send-reply/scripts/send-reply.ts \
+   <skill root rendered in your system prompt>/send-reply/scripts/send-reply.ts \
      --session-id "<session id rendered in your system prompt>" \
      --message-file "<absolute staging directory rendered in your system prompt>/reply.md"
    ```

@@ -10,8 +10,10 @@ Get statistics about saved memories in the current workspace.
 
 ## Usage
 
+> The placeholder `<skill root rendered in your system prompt>` is the absolute skill-script root rendered in your system prompt: substitute that literal root before invoking — never run this command with the placeholder, a `$HOME` expression, or any other root.
+
 ```bash
-${HOME}/.agents/skills/memory-stats/scripts/memory-stats.ts \
+<skill root rendered in your system prompt>/memory-stats/scripts/memory-stats.ts \
   --session-id "<session id rendered in your system prompt>"
 ```
 

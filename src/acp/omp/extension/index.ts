@@ -72,5 +72,8 @@ export default createNativeExtensionFactory(() => ({
   // observations — never on model-supplied ones.
   moduleUrl: import.meta.url,
   contractedRelative: OMP_TRUSTED_EXTENSION_PATH,
-  replacementTools: nativeReplacementTools(),
+  // C6: the read replacement's owned skill-URI authorization rides the SAME
+  // live discovery generation the enforcement observer consumes — an absent
+  // generation mints no skill authority.
+  replacementTools: nativeReplacementTools(() => loadTimeDiscoveryDecision.resourceGeneration),
 }));

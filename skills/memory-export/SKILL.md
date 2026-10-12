@@ -19,8 +19,10 @@ Export the current user's memories as a file attachment, sent via DM.
 
 ## Usage
 
+> The placeholder `<skill root rendered in your system prompt>` is the absolute skill-script root rendered in your system prompt: substitute that literal root before invoking — never run this command with the placeholder, a `$HOME` expression, or any other root.
+
 ```
-${HOME}/.agents/skills/memory-export/scripts/memory-export.ts \
+<skill root rendered in your system prompt>/memory-export/scripts/memory-export.ts \
   --session-id "<session id rendered in your system prompt>" \
   --format markdown
 ```

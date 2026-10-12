@@ -36,7 +36,7 @@ async function main() {
       required: false,
       fileName: "query.md",
       example:
-        `${Deno.env.get("HOME") ?? "~"}/.agents/skills/fetch-context/scripts/fetch-context.ts ` +
+        `Use the literal skill-script root rendered in your system prompt (never a $HOME expression): <skill root rendered in your system prompt>/fetch-context/scripts/fetch-context.ts ` +
         `--session-id "<session id rendered in your system prompt>" --type search_messages ` +
         `--query-file "<absolute staging directory rendered in your system prompt>/query.md"`,
     });

@@ -726,7 +726,7 @@ Deno.test("Internal/custom schemes are rejected as 14a alternate-route denial, n
     fetchImpl: t.fetchImpl,
   });
   const delegation: ReadDelegationContext = { invokeTool: () => Promise.resolve({}) };
-  for (const path of ["pi-internal://device/camera", "skill://air-friends/topic", "device://x"]) {
+  for (const path of ["pi-internal://device/camera", "device://x"]) {
     let threw = "";
     try {
       await definition.execute("tc", { path }, undefined, undefined, delegation);
@@ -740,8 +740,120 @@ Deno.test("Internal/custom schemes are rejected as 14a alternate-route denial, n
   assertEquals(t.issued.length, 0, "a rejected scheme is never proxied or issued");
 });
 
+// `repair-omp-owned-skill-handoff` task 2.1: `skill://` moved OUT of the
+// blanket alternate-route denial onto its own branch — unauthorized it still
+// fails closed (unwired seam = no skill authority), authorized it delegates
+// the ORIGINAL URI once to the captured native, and no denial ever reaches
+// the native or the transport.
+
+Deno.test("skill:// without a wired authorization seam fails closed without delegation", async () => {
+  const t = transport(() => response("must never run", "text/html"));
+  const definition = createReadReplacementToolDefinition({
+    policy: ENFORCING,
+    resolveHost: mockDns(),
+    fetchImpl: t.fetchImpl,
+  });
+  let delegated = 0;
+  const delegation: ReadDelegationContext = {
+    invokeTool: () => {
+      delegated++;
+      return Promise.resolve({});
+    },
+  };
+  let threw = "";
+  try {
+    await definition.execute(
+      "tc",
+      { path: "skill://send-reply/SKILL.md" },
+      undefined,
+      undefined,
+      delegation,
+    );
+  } catch (error) {
+    threw = error instanceof Error ? error.message : String(error);
+  }
+  assertEquals(threw.includes("skill_uri_denied"), true);
+  assertEquals(threw.includes("no skill-URI authorization is wired"), true);
+  assertEquals(delegated, 0, "an unauthorized skill URI never reaches the native reader");
+  assertEquals(t.issued.length, 0, "a skill URI is never proxied");
+});
+
+Deno.test("skill:// authorized by the seam delegates the ORIGINAL URI once to native", async () => {
+  const t = transport(() => response("must never run", "text/html"));
+  const authorizedPath = "/opt/air/skills/send-reply/SKILL.md";
+  const definition = createReadReplacementToolDefinition({
+    policy: ENFORCING,
+    resolveHost: mockDns(),
+    fetchImpl: t.fetchImpl,
+    skillUriAuthorization: {
+      authorize: (uri) =>
+        uri === "skill://send-reply/SKILL.md"
+          ? { ok: true, canonicalPath: authorizedPath }
+          : { ok: false, reason: "not owned" },
+    },
+  });
+  const seen: Array<Record<string, unknown>> = [];
+  const delegation: ReadDelegationContext = {
+    invokeTool: (params) => {
+      seen.push(params);
+      return Promise.resolve({ content: "native instruction result" });
+    },
+  };
+  const result = await definition.execute(
+    "tc",
+    { path: "skill://send-reply/SKILL.md" },
+    undefined,
+    undefined,
+    delegation,
+  );
+  assertEquals(seen.length, 1, "exactly one same-tool native delegation");
+  // The ORIGINAL URI travels verbatim — the canonical owned path is
+  // authorization evidence only, never a rewritten native argument.
+  assertEquals(seen[0]!["path"], "skill://send-reply/SKILL.md");
+  assertEquals(result, { content: "native instruction result" });
+  assertEquals(t.issued.length, 0, "skill reads never dispatch through the network transport");
+  // The replacement declares the pinned skill-reading capability.
+  assertEquals(definition.readsSkillUris, true);
+});
+
+Deno.test("skill:// denied by the seam never delegates and stays bounded", async () => {
+  const definition = createReadReplacementToolDefinition({
+    policy: ENFORCING,
+    resolveHost: mockDns(),
+    fetchImpl: () => Promise.reject(new Error("must never run")),
+    skillUriAuthorization: {
+      authorize: () => ({ ok: false, reason: "declared skill source is not observable" }),
+    },
+  });
+  let delegated = 0;
+  const delegation: ReadDelegationContext = {
+    invokeTool: () => {
+      delegated++;
+      return Promise.resolve({});
+    },
+  };
+  let threw = "";
+  try {
+    await definition.execute(
+      "tc",
+      { path: "skill://shadowed-skill/SKILL.md" },
+      undefined,
+      undefined,
+      delegation,
+    );
+  } catch (error) {
+    threw = error instanceof Error ? error.message : String(error);
+  }
+  assertEquals(threw.includes("skill_uri_denied: declared skill source is not observable"), true);
+  assertEquals(delegated, 0);
+});
+
 Deno.test("URL-branch parsing: http(s) with selectors routes URL; collapsed-scheme repaired", () => {
   assertEquals(parseReadUrlBranch("https://example.com/x").kind, "url");
+  // C6 D3: skill:// has its own distinct classification (never URL, never a
+  // blanket rejected-scheme, never a plain path).
+  assertEquals(parseReadUrlBranch("skill://send-reply/SKILL.md").kind, "skill-uri");
+  assertEquals(parseReadUrlBranch("skill:/send-reply/SKILL.md").kind, "skill-uri"); // collapsed repair
   assertEquals(parseReadUrlBranch("http:/example.com/x").kind, "url"); // collapsed repair
   const selected = parseReadUrlBranch("https://example.com/x:50-100");
   assertEquals(selected.kind, "url");

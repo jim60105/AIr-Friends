@@ -21,11 +21,15 @@ import type { Config } from "../../src/types/config.ts";
 
 // Mandatory literal-first retry context used by the strategy tests: the
 // caller always supplies the literal Skill API session id + absolute staging
-// dir (the values the session's system prompt renders), in both spawn shapes.
+// dir (the values the session's system prompt renders), in both spawn shapes,
+// plus the ABSOLUTE trusted skill-script root the retry documents are read
+// from (`repair-omp-owned-skill-handoff`): the repository `skills/` tree here,
+// never the old `${import.meta.dirname}` anchor or a HOME expression.
 const TEST_RETRY_CTX = {
   sharedProcess: false,
   sessionId: "sess_test",
   stagingDir: "/data/workspaces/discord/123/tmp/sess_test",
+  skillsDir: resolve(import.meta.dirname ?? ".", "../../skills"),
 } as const;
 
 // Create a minimal test config
@@ -1058,6 +1062,7 @@ Deno.test("getRetryPromptStrategy - pooled ctx names literal session id + stagin
     sharedProcess: true,
     sessionId: "sess_abc",
     stagingDir,
+    skillsDir: TEST_RETRY_CTX.skillsDir,
   });
   const msg = strategy.retryPromptMessage;
 
@@ -1083,11 +1088,13 @@ Deno.test("getRetryPromptStrategy - per-spawn ctx names the same literals (no to
     sharedProcess: false,
     sessionId: "sess_abc",
     stagingDir: "/data/workspaces/discord/123/tmp/sess_abc",
+    skillsDir: TEST_RETRY_CTX.skillsDir,
   }).retryPromptMessage;
   const pooled = getRetryPromptStrategy("opencode", {
     sharedProcess: true,
     sessionId: "sess_abc",
     stagingDir: "/data/workspaces/discord/123/tmp/sess_abc",
+    skillsDir: TEST_RETRY_CTX.skillsDir,
   }).retryPromptMessage;
   assertEquals(perSpawn, pooled);
   assertStringIncludes(perSpawn, `--session-id "sess_abc"`);

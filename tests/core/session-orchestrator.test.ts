@@ -152,6 +152,7 @@ Deno.test("SessionOrchestrator - constructs successfully", async () => {
     const skillRegistry = new SkillRegistry(memoryStore);
     const contextAssembler = new ContextAssembler(memoryStore, {
       systemPromptPath: config.agent.systemPromptPath,
+      skillsDir: "/opt/air/skills", // trusted skill-script root (required render input)
       recentMessageLimit: config.memory.recentMessageLimit,
       tokenLimit: config.agent.tokenLimit,
     });
@@ -195,6 +196,7 @@ Deno.test("SessionOrchestrator - processMessage creates workspace", async () => 
 
     const contextAssembler = new ContextAssembler(memoryStore, {
       systemPromptPath: `${tempDir}/prompts/system_reply.md`,
+      skillsDir: "/opt/air/skills", // trusted skill-script root (required render input)
       recentMessageLimit: config.memory.recentMessageLimit,
       tokenLimit: config.agent.tokenLimit,
     });
@@ -256,6 +258,7 @@ Deno.test("SessionOrchestrator - skips agent execution for /clear command", asyn
 
     const contextAssembler = new ContextAssembler(memoryStore, {
       systemPromptPath: `${tempDir}/prompts/system_reply.md`,
+      skillsDir: "/opt/air/skills", // trusted skill-script root (required render input)
       recentMessageLimit: config.memory.recentMessageLimit,
       tokenLimit: config.agent.tokenLimit,
     });
@@ -315,6 +318,7 @@ Deno.test("SessionOrchestrator - handles /clear with leading whitespace", async 
 
     const contextAssembler = new ContextAssembler(memoryStore, {
       systemPromptPath: `${tempDir}/prompts/system_reply.md`,
+      skillsDir: "/opt/air/skills", // trusted skill-script root (required render input)
       recentMessageLimit: config.memory.recentMessageLimit,
       tokenLimit: config.agent.tokenLimit,
     });
@@ -365,6 +369,7 @@ Deno.test("SessionOrchestrator - processMessage handles agent failure gracefully
 
     const contextAssembler = new ContextAssembler(memoryStore, {
       systemPromptPath: `${tempDir}/prompts/system_reply.md`,
+      skillsDir: "/opt/air/skills", // trusted skill-script root (required render input)
       recentMessageLimit: config.memory.recentMessageLimit,
       tokenLimit: config.agent.tokenLimit,
     });
@@ -713,6 +718,7 @@ Use this session ID when calling skills that require --session-id parameter.
 
   const contextAssembler = new ContextAssembler(memoryStore, {
     systemPromptPath: `${tempDir}/prompts/system_reply.md`,
+    skillsDir: "/opt/air/skills", // trusted skill-script root (required render input)
     recentMessageLimit: config.memory.recentMessageLimit,
     tokenLimit: config.agent.tokenLimit,
   });
@@ -1435,6 +1441,7 @@ Deno.test("SessionOrchestrator - processSpontaneousPost with skillApi disabled",
 
     const contextAssembler = new ContextAssembler(memoryStore, {
       systemPromptPath: `${tempDir}/prompts/system_reply.md`,
+      skillsDir: "/opt/air/skills", // trusted skill-script root (required render input)
       recentMessageLimit: config.memory.recentMessageLimit,
       tokenLimit: config.agent.tokenLimit,
     });
@@ -1690,6 +1697,7 @@ Deno.test("SessionOrchestrator - processSelfResearch handles agent connection fa
 
     const contextAssembler = new ContextAssembler(memoryStore, {
       systemPromptPath: `${tempDir}/prompts/system_reply.md`,
+      skillsDir: "/opt/air/skills", // trusted skill-script root (required render input)
       recentMessageLimit: config.memory.recentMessageLimit,
       tokenLimit: config.agent.tokenLimit,
     });
@@ -2305,6 +2313,7 @@ Deno.test("SessionOrchestrator - processMemoryMaintenance handles agent connecti
 
     const contextAssembler = new ContextAssembler(memoryStore, {
       systemPromptPath: `${tempDir}/prompts/system_reply.md`,
+      skillsDir: "/opt/air/skills", // trusted skill-script root (required render input)
       recentMessageLimit: config.memory.recentMessageLimit,
       tokenLimit: config.agent.tokenLimit,
     });

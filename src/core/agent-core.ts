@@ -6,6 +6,7 @@ import { MessageHandler } from "./message-handler.ts";
 import { ReplyDispatcher } from "./reply-dispatcher.ts";
 import { WorkspaceManager } from "./workspace-manager.ts";
 import { ContextAssembler } from "./context-assembler.ts";
+import { resolveTrustedSkillsRoot } from "./skills-root.ts";
 import { MemoryStore } from "./memory-store.ts";
 import { ReminderStore } from "./reminder-store.ts";
 import { ReplyPolicyEvaluator } from "./reply-policy.ts";
@@ -113,6 +114,13 @@ export class AgentCore {
         recentMessageLimit: config.memory.recentMessageLimit,
         tokenLimit: config.agent.tokenLimit,
         agentType: config.agent.defaultAgentType,
+        // Trusted skill-script root (repair-omp-owned-skill-handoff D1):
+        // resolved once at assembly construction — an unresolvable root fails
+        // startup explicitly, never a child-HOME/token fallback.
+        skillsDir: resolveTrustedSkillsRoot(
+          config.agent.defaultAgentType ?? "opencode",
+          config.agent.skillsDir,
+        ),
         recall: config.memory.recall,
       },
       this.workspaceManager,

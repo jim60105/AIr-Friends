@@ -27,6 +27,19 @@ export interface TemplateVariables {
   /** The agent type used for this session (e.g. "opencode") */
   agentType?: string;
 
+  /**
+   * The deployment-owned ABSOLUTE skill-script root rendered literally into
+   * every skill-instructing prompt (`repair-omp-owned-skill-handoff` D1).
+   * Internal render input — never public configuration: the render layer
+   * resolves it per agent type through `core/skills-root.ts` (omp: the
+   * installed owned root the settings overlays declare, validated-dev
+   * fallback; opencode: the existing installed-root resolution), NEVER from
+   * the agent child's isolated HOME. A prompt template may render skill
+   * script recipes ONLY from this literal; an unresolved root is a render
+   * failure, never an empty expansion.
+   */
+  skillsDir: string;
+
   /** RSS items formatted block (for self-research prompt) */
   rssItems?: string;
 

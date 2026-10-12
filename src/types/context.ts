@@ -115,6 +115,15 @@ export interface ContextAssemblyConfig {
   agentType?: string;
 
   /**
+   * The resolved absolute trusted skill-script root (`repair-omp-owned-skill-
+   * handoff` D1): the internal `skillsDir` render value every skill-instructing
+   * render supplies. Mandatory — the assembly layer resolves it once through
+   * `core/skills-root.ts` (never a child-HOME expression) and construction
+   * fails explicitly when no validated root exists.
+   */
+  skillsDir: string;
+
+  /**
    * Memory Recall configuration (`memory.recall`), which supplies the fixed
    * memory budgets. Optional so hand-built configs fall back to the defaults.
    */

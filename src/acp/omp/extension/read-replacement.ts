@@ -79,6 +79,12 @@ export interface ReadReplacementDeps {
   readonly fetchImpl?: FetchTransportFn;
   /** Credential-free decision-record sink. */
   readonly recordSink?: (record: FetchDecisionRecord) => void;
+  /**
+   * Owned skill-URI authorization seam (`repair-omp-owned-skill-handoff`
+   * D3). ABSENT means NO skill authority exists — the `skill://` branch then
+   * fails closed; the replacement never improvises a resolver or a root.
+   */
+  readonly skillUriAuthorization?: SkillUriAuthorization;
 }
 
 /** One parsed read selector (native selector vocabulary, adapter form). */
@@ -91,6 +97,7 @@ export type ReadSelector =
 /** Classification of a `read` tool input path. */
 export type ReadInputBranch =
   | { readonly kind: "url"; readonly url: string; readonly selector: ReadSelector }
+  | { readonly kind: "skill-uri"; readonly uri: string }
   | { readonly kind: "rejected-scheme"; readonly scheme: string }
   | { readonly kind: "native" };
 
@@ -99,22 +106,270 @@ export type ReadInputBranch =
  * http(s) branch including line selectors, with the collapsed-scheme repair
  * the native form applies. Deliberately conservative: an input only leaves
  * the native branch when it is UNAMBIGUOUSLY a URL; anything else (relative
- * paths, `host:port` look-alikes, `skill://`-shaped native URI reads) stays
- * on the native delegation path.
+ * paths, `host:port` look-alikes) stays on the native delegation path.
+ * `skill://` is the ONE non-HTTP scheme given a distinct branch
+ * (`repair-omp-owned-skill-handoff` D3): the owned-skill URI the replacement
+ * authorizes against the declared owned source before delegating; every
+ * OTHER scheme keeps 14a's alternate-route denial verbatim.
  */
 export function parseReadUrlBranch(readPath: string): ReadInputBranch {
   const repaired = readPath.replace(/^([a-zA-Z][a-zA-Z0-9+.-]*):\/(?!\/)/, "$1://");
   const schemeMatch = /^([a-zA-Z][a-zA-Z0-9+.-]*):\/\//.exec(repaired);
   if (!schemeMatch) return { kind: "native" };
   const scheme = schemeMatch[1].toLowerCase();
+  if (scheme === "skill") {
+    return { kind: "skill-uri", uri: repaired };
+  }
   if (scheme !== "http" && scheme !== "https") {
-    // `skill://` and internal/device custom schemes reach the URL branch
+    // Internal/device custom schemes reach the URL branch
     // only as the alternate-route surface 14a already denies: reject, never
     // proxy. (Plain paths have no `://` and stay on `native`.)
     return { kind: "rejected-scheme", scheme };
   }
   const { path, selector } = extractReadSelector(repaired);
   return { kind: "url", url: path, selector };
+}
+
+// ---------------------------------------------------------------------------
+// Owned skill URI authorization (`repair-omp-owned-skill-handoff` D3).
+// ---------------------------------------------------------------------------
+
+/**
+ * The injectable skill-URI authorization seam. A resolution names the
+ * CANONICAL owned instruction path the current process has verified as
+ * belonging to the declared deployment-owned skill source RIGHT NOW; a
+ * denial is bounded (reason only, never payload). Production wires the
+ * declared-root resolver; tests inject fixed outcomes.
+ */
+export interface SkillUriAuthorization {
+  authorize(uri: string): { readonly ok: true; readonly canonicalPath: string } | {
+    readonly ok: false;
+    readonly reason: string;
+  };
+}
+
+/** Metadata-only filesystem observation the production resolver consumes. */
+export interface SkillUriSourceReader {
+  lstat(
+    path: string,
+  ): Pick<Deno.FileInfo, "isDirectory" | "isFile" | "isSymlink" | "mode" | "uid" | "nlink">;
+  realPath(path: string): string;
+}
+
+/**
+ * The bounded denial thrown when a `skill://` read is not authorized. The
+ * reason names the failing check; the URI is echoed only in its sanitized
+ * (no query/fragment) form, mirroring the adapter's credential-free posture.
+ */
+export class SkillUriDenial extends Error {
+  constructor(uri: string, reason: string) {
+    super(`skill_uri_denied: ${reason} (uri=${uri.replace(/[?#].*$/, "")})`);
+    this.name = "SkillUriDenial";
+  }
+}
+
+/** The node:fs metadata surface the bun-host reader consumes (named contract). */
+interface SkillUriNodeFs {
+  lstatSync(path: string): {
+    isDirectory(): boolean;
+    isFile(): boolean;
+    isSymbolicLink(): boolean;
+    mode: number;
+    uid: number;
+    nlink: number;
+  };
+  realpathSync(path: string): string;
+}
+
+/** Host require bridge for the pinned bun runtime (same shape as owned-skills). */
+function requireSkillUriNodeFs(): SkillUriNodeFs | undefined {
+  const require = (globalThis as { require?: (id: string) => unknown }).require;
+  if (typeof require !== "function") return undefined;
+  // The host `require` is untyped by nature; the interface above IS the
+  // checked boundary every field access goes through.
+  return require("node:fs") as SkillUriNodeFs;
+}
+
+/** The runtime-portable metadata reader (mirror of owned-skills.ts posture). */
+function skillUriDefaultReader(): SkillUriSourceReader {
+  return {
+    lstat: (path) => {
+      if (typeof Deno !== "undefined") return Deno.lstatSync(path);
+      const fs = requireSkillUriNodeFs();
+      if (!fs) throw new Error("skill-URI metadata backend unavailable");
+      const info = fs.lstatSync(path);
+      return {
+        isDirectory: info.isDirectory(),
+        isFile: info.isFile(),
+        isSymlink: info.isSymbolicLink(),
+        mode: info.mode,
+        uid: info.uid,
+        nlink: info.nlink,
+      };
+    },
+    realPath: (path) => {
+      if (typeof Deno !== "undefined") return Deno.realPathSync(path);
+      const fs = requireSkillUriNodeFs();
+      if (!fs) throw new Error("skill-URI metadata backend unavailable");
+      return fs.realpathSync(path);
+    },
+  };
+}
+
+/**
+ * The production resolver: authorize a `skill://` URI against the DECLARED
+ * canonical deployment-owned skill source only — the constant
+ * `OMP_IMAGE_SKILLS_ROOT` the settings contract freezes as the single owned
+ * root (never a model-named root, workspace, HOME, or CWD candidate). Every
+ * check is re-observed per call (the freshness posture shared with the
+ * enforcement observer — a stale generation is a MOVED identity, and a moved
+ * identity fails the identity/containment checks at this instant):
+ * - shape: `skill://<relative-instruction-path>`; the authority carries no
+ *   host component, and `..`/`.`/absolute segments never resolve;
+ * - source: the declared root exists as a real, link-free directory whose
+ *   realpath IS the constant (a replaced/symlinked identity is denied —
+ *   off-image hosts have NO declared source and deny with no fallback root),
+ *   and it is neither agent-writable nor group/other-writable;
+ * - target: canonicalizes INSIDE the owned source (no traversal out), is an
+ *   existing regular file, link-free through every component, and carries no
+ *   agent-writable or aliased (hard-linked) identity, while every directory
+ *   component between the root and the target is likewise link-free and
+ *   non-writable — the same ladder `owned-skills.ts` observes at
+ *   registration, re-taken at read time;
+ * - generation: the caller's live resource-generation observation must be
+ *   present (the extension's load-time discovery generation) — an extension
+ *   that never established its generation mints no skill authority.
+ * A name alone NEVER authorizes anything: foreign same-name skills are
+ * unreachable because only the declared root is consulted, network-adapter
+ * completion grants nothing here, and what native delegation receives is the
+ * ORIGINAL URI, unchanged — the canonical path never re-enters the input.
+ */
+export function createOwnedSkillUriAuthorization(deps: {
+  /** The declared canonical owned source (production: the constant). */
+  readonly ownedRoot: string;
+  /** Live resource-generation observation; absent/empty ⇒ no authority. */
+  readonly resourceGeneration: () => string;
+  readonly reader?: SkillUriSourceReader;
+  readonly pathModule?: {
+    readonly isAbsolute: (p: string) => boolean;
+    readonly join: (...parts: string[]) => string;
+    readonly dirname: (p: string) => string;
+    readonly sep: string;
+  };
+}): SkillUriAuthorization {
+  // Runtime-portable metadata observation (the owned-skills.ts mirror): the
+  // bundle loads under Deno AND the pinned bun host, so each call picks the
+  // present runtime's own surface — never a `Deno.*` reference that would
+  // ReferenceError under the other host.
+  const reader = deps.reader ?? skillUriDefaultReader();
+  const pathModule = deps.pathModule ?? {
+    isAbsolute: (p) => p.startsWith("/"),
+    join: (...parts) => parts.join("/").replace(/\/{2,}/g, "/"),
+    dirname: (p) => {
+      const cut = p.lastIndexOf("/");
+      return cut <= 0 ? "/" : p.slice(0, cut);
+    },
+    sep: "/",
+  };
+  return {
+    authorize(uri: string) {
+      if (deps.resourceGeneration() === "") {
+        return { ok: false, reason: "no live resource generation — skill authority unavailable" };
+      }
+      // Shape: strict `skill://` + safe relative instruction path.
+      if (!/^skill:\/\/[^?#]+$/.test(uri)) {
+        return { ok: false, reason: "uri is not a skill instruction reference" };
+      }
+      const relative = uri.slice("skill://".length);
+      if (
+        pathModule.isAbsolute(relative) ||
+        relative.split("/").some((segment) =>
+          segment === "" || segment === "." ||
+          segment === ".."
+        )
+      ) {
+        return { ok: false, reason: "uri path is not a safe relative instruction path" };
+      }
+      // Source: the declared root's CURRENT identity (never a candidate list).
+      let rootReal: string;
+      try {
+        const rootInfo = reader.lstat(deps.ownedRoot);
+        if (rootInfo.isSymlink || !rootInfo.isDirectory) {
+          return { ok: false, reason: "declared skill source is not a plain directory" };
+        }
+        if (rootInfo.uid !== 0 && ((rootInfo.mode ?? 0o777) & 0o222) !== 0) {
+          return { ok: false, reason: "declared skill source is agent-writable" };
+        }
+        if (((rootInfo.mode ?? 0o777) & 0o022) !== 0) {
+          return { ok: false, reason: "declared skill source is group/other-writable" };
+        }
+        rootReal = reader.realPath(deps.ownedRoot);
+      } catch {
+        return { ok: false, reason: "declared skill source is not observable (no fallback root)" };
+      }
+      if (rootReal !== deps.ownedRoot) {
+        return { ok: false, reason: "declared skill source identity replaced" };
+      }
+      // Target: inside the source, link-free ladder, regular file.
+      const candidate = pathModule.join(rootReal, relative);
+      let targetReal: string;
+      try {
+        const info = reader.lstat(candidate);
+        if (info.isSymlink || !info.isFile) {
+          return { ok: false, reason: "target is not a regular owned file" };
+        }
+        if (info.uid !== 0 && ((info.mode ?? 0o777) & 0o222) !== 0) {
+          return { ok: false, reason: "target is agent-writable" };
+        }
+        if (((info.mode ?? 0o777) & 0o022) !== 0) {
+          return { ok: false, reason: "target is group/other-writable" };
+        }
+        if (info.nlink !== 1) {
+          return { ok: false, reason: "target is aliased (hard-linked)" };
+        }
+        targetReal = reader.realPath(candidate);
+      } catch {
+        return { ok: false, reason: "target is not observable under the owned source" };
+      }
+      // Containment: the REAL target stays inside the declared root (catches
+      // every traversal/aliased-device attempt regardless of spelling), and
+      // no component of the candidate path is a link.
+      if (targetReal !== candidate || !targetReal.startsWith(`${rootReal}${pathModule.sep}`)) {
+        return { ok: false, reason: "target escapes or aliases the declared owned source" };
+      }
+      // Ladder: every DIRECTORY component between the target and the declared
+      // root (root inclusive) is link-free, a real directory, and carries no
+      // group/other- or agent-writability — a planted instruction file needs
+      // a writable ancestor, and one is refused here, not just at the leaf.
+      let component = pathModule.dirname(candidate);
+      for (;;) {
+        try {
+          const info = reader.lstat(component);
+          if (info.isSymlink) {
+            return { ok: false, reason: "linked path component under the owned source" };
+          }
+          if (!info.isDirectory) {
+            return { ok: false, reason: "path component is not a directory" };
+          }
+          if (info.uid !== 0 && ((info.mode ?? 0o777) & 0o222) !== 0) {
+            return { ok: false, reason: "path component is agent-writable" };
+          }
+          if (((info.mode ?? 0o777) & 0o022) !== 0) {
+            return { ok: false, reason: "path component is group/other-writable" };
+          }
+        } catch {
+          return { ok: false, reason: "path component not observable" };
+        }
+        if (component === rootReal) break;
+        const parent = pathModule.dirname(component);
+        if (parent === component) {
+          return { ok: false, reason: "target does not chain to the declared source" };
+        }
+        component = parent;
+      }
+      return { ok: true, canonicalPath: targetReal };
+    },
+  };
 }
 
 /**
@@ -307,6 +562,14 @@ export interface ReadReplacementDefinition {
   readonly description: string;
   readonly approval: "read";
   readonly parameters: NativeToolParameterSchema;
+  /**
+   * The pinned native skill-reading capability declaration: the host grants
+   * skill-URI reads to a registered tool only when its definition asks for
+   * them. The owned-skill branch below authorizes every such read BEFORE
+   * same-tool native delegation; nothing about this flag admits a URI on its
+   * own.
+   */
+  readonly readsSkillUris: true;
   execute(
     toolCallId: string,
     params: Record<string, unknown>,
@@ -416,6 +679,7 @@ export function createReadReplacementToolDefinition(
       "fetch transport with per-hop validation.",
     approval: "read",
     parameters: READ_REPLACEMENT_PARAMETERS,
+    readsSkillUris: true,
     async execute(toolCallId, params, signal, _onUpdate, ctx) {
       void toolCallId;
       const rawPath: unknown = params["path"];
@@ -442,6 +706,30 @@ export function createReadReplacementToolDefinition(
           capability: "network-read",
           route: "internal-uri-scheme",
         });
+      }
+      if (branch.kind === "skill-uri") {
+        // Owned-skill URI: authorize FIRST, delegate once on success. An
+        // unwired seam fails closed (no resolver improvisation); a denial
+        // never reaches the native tool; an authorized read hands the
+        // ORIGINAL URI verbatim to the captured native through the same
+        // supported same-tool context — native instruction handling and
+        // bookkeeping stay native, and the canonical owned path is evidence
+        // of authorization only, never a rewritten argument.
+        const authorization = deps.skillUriAuthorization;
+        if (!authorization) {
+          throw new SkillUriDenial(branch.uri, "no skill-URI authorization is wired");
+        }
+        const resolution = authorization.authorize(branch.uri);
+        if (!resolution.ok) {
+          throw new SkillUriDenial(branch.uri, resolution.reason);
+        }
+        if (typeof ctx?.invokeTool !== "function") {
+          throw new Error(
+            "read replacement: no same-tool native delegation context — failing closed " +
+              "(authorized skill reads delegate to the captured native skill reader)",
+          );
+        }
+        return ctx.invokeTool(params, signal ? { signal } : undefined);
       }
 
       const transportDeps = { resolveHost, policy, fetchImpl, recordSink: deps.recordSink };

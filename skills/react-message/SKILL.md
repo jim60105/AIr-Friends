@@ -19,8 +19,10 @@ Add an emoji reaction to the message that triggered this conversation.
 
 ## Usage
 
+> The placeholder `<skill root rendered in your system prompt>` is the absolute skill-script root rendered in your system prompt: substitute that literal root before invoking — never run this command with the placeholder, a `$HOME` expression, or any other root.
+
 ```
-${HOME}/.agents/skills/react-message/scripts/react-message.ts \
+<skill root rendered in your system prompt>/react-message/scripts/react-message.ts \
   --session-id "<session id rendered in your system prompt>" \
   --emoji "👍"
 ```
@@ -32,7 +34,7 @@ ${HOME}/.agents/skills/react-message/scripts/react-message.ts \
 React with a Unicode emoji:
 
 ```
-${HOME}/.agents/skills/react-message/scripts/react-message.ts \
+<skill root rendered in your system prompt>/react-message/scripts/react-message.ts \
   --session-id "<session id rendered in your system prompt>" \
   --emoji "❤️"
 ```
@@ -40,7 +42,7 @@ ${HOME}/.agents/skills/react-message/scripts/react-message.ts \
 React with a custom platform emoji (use the `useAsReaction` format from the emoji list):
 
 ```
-${HOME}/.agents/skills/react-message/scripts/react-message.ts \
+<skill root rendered in your system prompt>/react-message/scripts/react-message.ts \
   --session-id "<session id rendered in your system prompt>" \
   --emoji ":custom_emoji_name:"
 ```

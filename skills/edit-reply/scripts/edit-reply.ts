@@ -28,7 +28,7 @@ async function main() {
       sessionId,
       alias: "m",
       fileName: "reply.md",
-      example: `${Deno.env.get("HOME") ?? "~"}/.agents/skills/edit-reply/scripts/edit-reply.ts ` +
+      example: `Use the literal skill-script root rendered in your system prompt (never a $HOME expression): <skill root rendered in your system prompt>/edit-reply/scripts/edit-reply.ts ` +
         `--session-id "<session id rendered in your system prompt>" --message-id "$MESSAGE_ID" ` +
         `--message-file "<absolute staging directory rendered in your system prompt>/reply.md"`,
     });
