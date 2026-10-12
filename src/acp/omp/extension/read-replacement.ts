@@ -280,8 +280,10 @@ export function createOwnedSkillUriAuthorization(deps: {
       const relative = uri.slice("skill://".length);
       if (
         pathModule.isAbsolute(relative) ||
-        relative.split("/").some((segment) => segment === "" || segment === "." ||
-          segment === "..")
+        relative.split("/").some((segment) =>
+          segment === "" || segment === "." ||
+          segment === ".."
+        )
       ) {
         return { ok: false, reason: "uri path is not a safe relative instruction path" };
       }

@@ -762,7 +762,13 @@ Deno.test("skill:// without a wired authorization seam fails closed without dele
   };
   let threw = "";
   try {
-    await definition.execute("tc", { path: "skill://send-reply/SKILL.md" }, undefined, undefined, delegation);
+    await definition.execute(
+      "tc",
+      { path: "skill://send-reply/SKILL.md" },
+      undefined,
+      undefined,
+      delegation,
+    );
   } catch (error) {
     threw = error instanceof Error ? error.message : String(error);
   }
@@ -828,7 +834,13 @@ Deno.test("skill:// denied by the seam never delegates and stays bounded", async
   };
   let threw = "";
   try {
-    await definition.execute("tc", { path: "skill://shadowed-skill/SKILL.md" }, undefined, undefined, delegation);
+    await definition.execute(
+      "tc",
+      { path: "skill://shadowed-skill/SKILL.md" },
+      undefined,
+      undefined,
+      delegation,
+    );
   } catch (error) {
     threw = error instanceof Error ? error.message : String(error);
   }

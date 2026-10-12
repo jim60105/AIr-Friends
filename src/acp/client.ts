@@ -193,7 +193,8 @@ export const LEGACY_FREE_TEXT_FLAG_PATTERN = /^--(?:message|content|query|captio
 
 /**
  * Determine whether a single token equals the whitelisted script path or ends with
- * `/<allowedPath>` (so an absolute/`$HOME`-anchored path to the same script matches).
+ * `/<allowedPath>` (so any absolute rendering of the trusted script root to the
+ * same script matches).
  */
 function tokenMatchesAllowedScript(token: string, allowedPath: string): boolean {
   return token === allowedPath || token.endsWith(`/${allowedPath}`);
@@ -203,9 +204,10 @@ function tokenMatchesAllowedScript(token: string, allowedPath: string): boolean 
  * Resolve the invocation ENTRYPOINT token of a command.
  *
  * Skills are executed either directly via their shebang
- * (`${HOME}/.agents/skills/<name>/scripts/<name>.ts <args>`) — first token is the
- * script — or via an interpreter (`deno run <flags> <script> <args>`) — the script
- * is the first non-flag positional after the `run` subcommand.
+ * (the rendered absolute script root, e.g. `/home/deno/.agents/skills/<name>/scripts/<name>.ts <args>`
+ * on OpenCode container deployments) — first token is the script — or via an
+ * interpreter (`deno run <flags> <script> <args>`) — the script is the first
+ * non-flag positional after the `run` subcommand.
  *
  * Returns the entrypoint token, or `undefined` if it cannot be determined.
  */

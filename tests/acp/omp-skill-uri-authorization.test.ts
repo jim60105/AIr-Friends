@@ -186,7 +186,9 @@ Deno.test("root identity drift (realpath mismatch) denies as replaced identity",
     resourceGeneration: () => GENERATION,
     reader: {
       lstat: fixtureReader(nodes).lstat,
-      realPath: (path) => (path === ROOT ? "/replaced/identity" : fixtureReader(nodes).realPath(path)),
+      realPath: (
+        path,
+      ) => (path === ROOT ? "/replaced/identity" : fixtureReader(nodes).realPath(path)),
     },
   });
   const resolution = drifting.authorize("skill://send-reply/SKILL.md");

@@ -92,8 +92,12 @@ export function resolveTrustedSkillsRoot(
   }
   // opencode: the existing installed-root resolution (agent.skillsDir, default
   // "skills"), relative roots anchored at the daemon-side working directory.
-  const configured = configuredSkillsDir && configuredSkillsDir !== "" ? configuredSkillsDir : "skills";
-  const root = isAbsolute(configured) ? configured : resolve(options.deploymentCwd ?? Deno.cwd(), configured);
+  const configured = configuredSkillsDir && configuredSkillsDir !== ""
+    ? configuredSkillsDir
+    : "skills";
+  const root = isAbsolute(configured)
+    ? configured
+    : resolve(options.deploymentCwd ?? Deno.cwd(), configured);
   if (!directoryExists(root)) {
     throw new ConfigError(
       ErrorCode.CONFIG_INVALID,

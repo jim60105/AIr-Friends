@@ -460,7 +460,11 @@ Deno.test("Native C6: skill:// decodes as path-target, never url/device", () => 
       "skill://nested/dir/SKILL.md",
     ]
   ) {
-    const decoded = decodeNativeToolCallEvent({ toolCallId: "c1", toolName: "read", input: { path } });
+    const decoded = decodeNativeToolCallEvent({
+      toolCallId: "c1",
+      toolName: "read",
+      input: { path },
+    });
     assertEquals(decoded.ok, true, path);
     if (decoded.ok) {
       assertEquals(decoded.input.decodedInputShape, "path-target", path);
