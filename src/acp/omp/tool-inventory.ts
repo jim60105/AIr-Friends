@@ -207,7 +207,7 @@ export const RESTRICTED_TOOL_INVENTORY_TABLE: readonly InventoryRow[] = Object.f
       completingAuthority: "rows-17-19-transport-adapter",
       designCitation: `${D6}; URL branch of native read`,
       notes:
-        "URL-read parity preserved (never deny-parity); rows 17–19 complete the controlled transport. Distinct from plain allow until their adapter lands. " +
+        "URL-read parity preserved (never deny-parity); rows 17–18 complete the controlled transport. Distinct from plain allow until their adapter lands. " +
         FETCH_COMPLETING_ADAPTER_MARKER,
     },
     {
@@ -217,7 +217,7 @@ export const RESTRICTED_TOOL_INVENTORY_TABLE: readonly InventoryRow[] = Object.f
       completingAuthority: "rows-17-19-transport-adapter",
       designCitation: D6,
       notes:
-        "Preserve URL-reading capability with controlled transport and per-hop validation (rows 17–19). `allow-gated-pending-adapter` is not a plain allow and never will be conflated with one. " +
+        "Preserve URL-reading capability with controlled transport and per-hop validation (rows 17–18). `allow-gated-pending-adapter` is not a plain allow and never will be conflated with one. " +
         FETCH_COMPLETING_ADAPTER_MARKER,
     },
     {

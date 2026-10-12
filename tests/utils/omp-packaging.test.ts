@@ -375,7 +375,8 @@ Deno.test("manifest generator - per-file lines, header facts, recut invariant", 
       ["config/restricted.yml", "extension.txt", "prompt/SYSTEM.md"],
     );
     assertEquals(manifest.includes("PACKAGE-MANIFEST.sha256"), true, "header names the file");
-    // Header facts: version, serial composition, reserved 6th slot, recut invariant.
+    // Header facts: version, serial composition, recut invariant (the former
+    // reserved-slot fact is asserted ABSENT below post-removal).
     assertStringIncludes(manifest, `OMP_VERSION=${PIN}`);
     assertStringIncludes(manifest, "12 -> 13 -> 14b -> 17 -> 18");
     // `remove-omp-public-code-search` removed the reserved slot; the header
