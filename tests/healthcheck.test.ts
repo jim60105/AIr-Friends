@@ -164,9 +164,15 @@ Deno.test("HealthCheckServer - skill readiness reports missing script", async ()
   try {
     const server = new HealthCheckServer(9999);
 
+    // The trusted root must exist (an absent root is a separate, explicit
+    // `skill-root` failure); here it resolves and the registered skill's
+    // script is what is missing.
+    const skillsDir = tmpDir + "/skills";
+    await Deno.mkdir(skillsDir, { recursive: true });
+
     const mockContext = {
       config: {
-        agent: { skillsDir: tmpDir + "/nonexistent-skills" },
+        agent: { skillsDir },
         workspace: { repoPath: tmpDir },
         skillApi: undefined,
       },

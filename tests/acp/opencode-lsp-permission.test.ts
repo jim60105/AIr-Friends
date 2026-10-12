@@ -34,6 +34,14 @@ async function loadConfig(): Promise<OpenCodeConfigShape> {
  * shared file. Row 17 intentionally changes ONLY the `lsp` entry (allow →
  * deny) in this map; every other entry is pinned here so a later edit that
  * silently relaxes or tightens a predecessor grant fails this suite.
+ *
+ * `unify-omp-skill-root-resolution` D6 intentionally rewrites the `bash` map's
+ * skill-script entries: the two `*skills/*/scripts/*.ts*`-style `allow` routes
+ * (which let the native agent run skill scripts WITHOUT the ACP permission
+ * layer) are removed, replaced by the routing-only `deno run *` / `*.ts*`
+ * `ask` entries that carry every script invocation — including custom
+ * deployment roots — into the ACP gate. That landed revision of the `bash`
+ * map below is the new pinned posture.
  */
 const ROW15_LANDED_BUILD_PERMISSIONS_EXCEPT_LSP: Record<string, unknown> = {
   "*": "deny",
@@ -54,8 +62,6 @@ const ROW15_LANDED_BUILD_PERMISSIONS_EXCEPT_LSP: Record<string, unknown> = {
     "*": "deny",
     "||": "deny",
     "&&": "deny",
-    "deno run *skills/*/scripts/*.ts*": "allow",
-    "*/skills/*/scripts/*.ts*": "allow",
     "agent-browser *": "ask",
     "rg *": "ask",
     "cat *": "ask",
@@ -95,6 +101,8 @@ const ROW15_LANDED_BUILD_PERMISSIONS_EXCEPT_LSP: Record<string, unknown> = {
     "make *": "deny",
     "strace *": "deny",
     "mkdir *": "deny",
+    "deno run *": "ask",
+    "*.ts*": "ask"
   },
   external_directory: {
     "*": "deny",
