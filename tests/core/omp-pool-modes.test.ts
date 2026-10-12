@@ -537,6 +537,7 @@ Deno.test("Factory-backed pooled namespaces, skill identity and same-mode reuse"
               },
               skillRegistry: {},
               logger: {},
+              agentType,
             },
           }, (connector) => {
             identities.push(connector);

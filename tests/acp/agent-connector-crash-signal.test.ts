@@ -64,6 +64,7 @@ function createConnector(
     },
     skillRegistry: null,
     logger,
+    agentType: "opencode",
     idleTimeoutConfig: opts?.idleTimeoutConfig,
     connectTimeoutMs: opts?.connectTimeoutMs,
   });

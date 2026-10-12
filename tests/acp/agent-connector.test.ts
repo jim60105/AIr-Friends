@@ -667,6 +667,7 @@ function createMockConnectorWithCapabilities(
       isDM: false,
     },
     skillRegistry: null,
+    agentType: "opencode",
     logger: {
       debug: () => {},
       info: () => {},
@@ -1203,7 +1204,7 @@ function cleanupOmpPlanFixture(): void {
 }
 
 function createRecoveryHarness(params: {
-  agentType?: string;
+  agentType: "opencode" | "omp";
   env?: Record<string, string>;
   cachedGateContexts?: Record<string, Record<string, unknown>>;
   /** Row 26: real plan fixture for OMP connectors; `null` keeps a plan-less config. */

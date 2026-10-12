@@ -8,6 +8,7 @@ import { MemoryStore } from "@core/memory-store.ts";
 import { WorkspaceManager } from "@core/workspace-manager.ts";
 import type { IdleTimeoutConfig } from "../../src/types/config.ts";
 import { createFilesystemTestCalls } from "./filesystem-test-calls.ts";
+import { emptySkillList } from "./skill-inventory-fixture.ts";
 
 const createTestLogger = (): Logger => {
   return new Logger("test", { level: LogLevel.FATAL });
@@ -32,7 +33,7 @@ Deno.test("ChatbotClient - getLastActivityTimestamp returns current time after c
       userId: "123",
       channelId: "456",
       isDM: false,
-    });
+    }, emptySkillList());
 
     const now = Date.now();
     const ts = client.getLastActivityTimestamp();
@@ -52,7 +53,7 @@ Deno.test("ChatbotClient - touchActivity updates timestamp without resetting rep
       userId: "123",
       channelId: "456",
       isDM: false,
-    });
+    }, emptySkillList());
 
     client.markReplySent();
     assertEquals(client.hasReplySent(), true);
@@ -77,7 +78,7 @@ Deno.test("ChatbotClient - reset resets both reply state and activity timestamp"
       userId: "123",
       channelId: "456",
       isDM: false,
-    });
+    }, emptySkillList());
 
     client.markReplySent();
     assertEquals(client.hasReplySent(), true);
@@ -100,7 +101,7 @@ Deno.test("ChatbotClient - sessionUpdate updates activity timestamp", async () =
       userId: "123",
       channelId: "456",
       isDM: false,
-    });
+    }, emptySkillList());
 
     // Wait a bit to ensure timestamp difference
     await new Promise((r) => setTimeout(r, 10));
@@ -146,7 +147,7 @@ Deno.test("ChatbotClient - requestPermission updates activity timestamp", async 
       userId: "123",
       channelId: "456",
       isDM: false,
-    });
+    }, emptySkillList());
 
     await new Promise((r) => setTimeout(r, 20));
     const before = client.getLastActivityTimestamp();
@@ -185,7 +186,7 @@ Deno.test("ChatbotClient - readTextFile updates activity timestamp", async () =>
       channelId: "456",
       isDM: false,
       nativeCalls: createFilesystemTestCalls(),
-    });
+    }, emptySkillList());
 
     const testFile = `${tempDir}/test.txt`;
     client.setSessionContext("test-session", { cwd: tempDir, shellSessionId: "skill-session" });
@@ -214,7 +215,7 @@ Deno.test("ChatbotClient - writeTextFile updates activity timestamp", async () =
       channelId: "456",
       isDM: false,
       nativeCalls: createFilesystemTestCalls(),
-    });
+    }, emptySkillList());
     client.setSessionContext("test-session", { cwd: tempDir, shellSessionId: "skill-session" });
     await Deno.mkdir(`${tempDir}/tmp/skill-session`, { recursive: true });
 

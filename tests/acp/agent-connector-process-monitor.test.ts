@@ -54,6 +54,7 @@ function createConnector(
     },
     skillRegistry: null,
     logger,
+    agentType: "opencode",
     idleTimeoutConfig,
   });
 }

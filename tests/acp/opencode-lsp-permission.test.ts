@@ -36,12 +36,12 @@ async function loadConfig(): Promise<OpenCodeConfigShape> {
  * silently relaxes or tightens a predecessor grant fails this suite.
  *
  * `unify-omp-skill-root-resolution` D6 intentionally rewrites the `bash` map's
- * skill-script entries: the two `*skills/*/scripts/*.ts*`-style `allow` routes
- * (which let the native agent run skill scripts WITHOUT the ACP permission
- * layer) are removed, replaced by the routing-only `deno run *` / `*.ts*`
- * `ask` entries that carry every script invocation — including custom
- * deployment roots — into the ACP gate. That landed revision of the `bash`
- * map below is the new pinned posture.
+ * skill-script entries: the two skills-scripts wildcard `allow` routes (which
+ * let the native agent run skill scripts WITHOUT the ACP permission layer)
+ * are removed, replaced by the routing-only `deno run *` / `*.ts*` `ask`
+ * entries that carry every script invocation — including custom deployment
+ * roots — into the ACP gate. That landed revision of the `bash` map below is
+ * the new pinned posture.
  */
 const ROW15_LANDED_BUILD_PERMISSIONS_EXCEPT_LSP: Record<string, unknown> = {
   "*": "deny",
