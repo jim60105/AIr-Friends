@@ -45,6 +45,7 @@
  */
 
 import { type EnforcementLaunchMode, observeLaunchMode } from "./enforcement.ts";
+import { Type } from "@sinclair/typebox";
 import {
   buildGeminiSearchRequest,
   buildOpenRouterSearchRequest,
@@ -53,6 +54,7 @@ import {
   type FetchEgressPolicy,
   fetchEgressPolicyFromAgentEnv,
   type FetchTransportFn,
+  MAX_SEARCH_QUERY_CHARS,
   parseSearchToolInput,
   PINNED_SEARCH_ENDPOINTS,
   productionFetchTransport,
@@ -68,7 +70,7 @@ import {
   selectSearchBackend,
   webSearchSeamState,
 } from "./_daemon/mod.ts";
-import { runtimeResolveHost } from "./read-replacement.ts";
+import { type NativeToolParameterSchema, runtimeResolveHost } from "./read-replacement.ts";
 
 /** The pinned `registerTool` surface seam (row-22 closure note applies). */
 export interface SearchToolRegistrar {
@@ -92,12 +94,44 @@ export interface SearchReplacementDeps {
   readonly credentialValue?: (backend: "gemini" | "openrouter") => string;
 }
 
+/**
+ * The pinned `ToolDefinition.parameters` field is NOT optional (host
+ * input-gate; see the read sibling's note). This schema is the executor
+ * parser's (`parseSearchToolInput`) declared vocabulary 1:1 — the pinned
+ * `webSearchSchema` field names — locked closed so the host gate and the
+ * executor can never disagree. `provider` is deliberately NOT a declared
+ * field (the pinned tool takes none): a provider request is defended at the
+ * executor and, with this gate, rejected by the host before dispatch.
+ * Numeric fields stay plain optional numbers: the parser owns the adapter
+ * caps (finite check, `num_search_results` clamp), so the gate and parser
+ * cannot drift.
+ */
+export const SEARCH_REPLACEMENT_PARAMETERS = Type.Object(
+  {
+    query: Type.String({ minLength: 1, maxLength: MAX_SEARCH_QUERY_CHARS }),
+    recency: Type.Optional(
+      Type.Union([
+        Type.Literal("day"),
+        Type.Literal("week"),
+        Type.Literal("month"),
+        Type.Literal("year"),
+      ]),
+    ),
+    limit: Type.Optional(Type.Number()),
+    max_tokens: Type.Optional(Type.Number()),
+    temperature: Type.Optional(Type.Number()),
+    num_search_results: Type.Optional(Type.Number()),
+  },
+  { additionalProperties: false },
+);
+
 /** The pinned ToolDefinition-shaped replacement (execute signature per S7). */
 export interface SearchReplacementDefinition {
   readonly name: "web_search";
   readonly label: string;
   readonly description: string;
   readonly approval: "read";
+  readonly parameters: NativeToolParameterSchema;
   execute(
     toolCallId: string,
     params: Record<string, unknown>,
@@ -148,6 +182,7 @@ export function createSearchReplacementToolDefinition(
       "Search the web for up-to-date information. Search requests are served through the AIr " +
       "controlled search transport with per-hop validation (supported configured providers only).",
     approval: "read",
+    parameters: SEARCH_REPLACEMENT_PARAMETERS,
     async execute(toolCallId, params, signal, _onUpdate, _ctx) {
       void toolCallId;
       const presence = deps.credentialPresence ?? credentialPresenceFromEnv();

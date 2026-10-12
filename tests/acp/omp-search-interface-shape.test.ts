@@ -16,6 +16,10 @@
  */
 
 import { assert, assertEquals, assertExists } from "@std/assert";
+// Test-side schema verifier (builder value subpath; NEVER in the mirror
+// closure — the bundler rejects subpaths and the host remaps only the bare
+// package specifier).
+import { Value } from "@sinclair/typebox/value";
 import { type FetchEgressPolicy, type FetchTransportFn } from "@acp/omp/fetch-transport.ts";
 import { FETCH_COMPLETING_ADAPTER_MARKER, FETCH_ROUTE_TABLE } from "@acp/omp/fetch-routes.ts";
 import {
@@ -55,6 +59,7 @@ import type { ProvenanceRecord } from "@acp/omp/tool-provenance.ts";
 import {
   createSearchReplacementToolDefinition,
   registerSearchReplacement,
+  SEARCH_REPLACEMENT_PARAMETERS,
 } from "@acp/omp/extension/search-replacement.ts";
 import {
   SEARCH_COMPLETING_ADAPTER_MARKER as MARKER_VIA_BARREL,
@@ -286,6 +291,56 @@ Deno.test("Query interface: pinned field names pass through; bounds clamp model-
   assert(!parseSearchToolInput({ query: "q", recency: "hour" }).ok);
   assert(!parseSearchToolInput({ query: "q", limit: Number.NaN }).ok);
   assert(!parseSearchToolInput({ query: "x".repeat(5_000) }).ok);
+});
+
+Deno.test("web_search parameters schema gates inputs before dispatch — parser vocabulary 1:1 (behavioral, not schema-copy)", () => {
+  // The host validates against definition.parameters BEFORE execute. The
+  // gate and the executor parser must accept the SAME declared vocabulary:
+  // adapter caps stay parser-owned (clamp/finite), the gate owns the shape.
+  const definition = createSearchReplacementToolDefinition({
+    policy: { posture: "unrestricted" },
+    resolveHost: mockDns(),
+    fetchImpl: () => Promise.resolve(new Response("never")),
+    credentialPresence: { geminiKey: true, openrouterKey: false },
+    credentialValue: () => "k",
+  });
+  assertEquals(definition.parameters.type, "object");
+  assertEquals(definition.parameters.additionalProperties, false);
+  assert(
+    Object.hasOwn(definition.parameters.properties ?? {}, "num_search_results"),
+    "declares the pinned webSearchSchema vocabulary",
+  );
+  assertEquals(definition.parameters.required, ["query"]);
+  // The definition carries the exported schema object verbatim.
+  assertEquals(definition.parameters, SEARCH_REPLACEMENT_PARAMETERS);
+  // Valid pinned-schema inputs pass the gate (the adapter caps the value
+  // later; the gate never rejects what the parser accepts).
+  assertEquals(Value.Check(SEARCH_REPLACEMENT_PARAMETERS, { query: "q" }), true);
+  assertEquals(Value.Check(SEARCH_REPLACEMENT_PARAMETERS, { query: "q", recency: "week" }), true);
+  assertEquals(
+    Value.Check(SEARCH_REPLACEMENT_PARAMETERS, { query: "q", num_search_results: 999 }),
+    true,
+  );
+  assertEquals(Value.Check(SEARCH_REPLACEMENT_PARAMETERS, { query: "q", temperature: 2.5 }), true);
+  // Invalid declared fields fail BEFORE transport dispatch — none of these
+  // ever reach the executor, so zero dispatch is structural here.
+  assertEquals(Value.Check(SEARCH_REPLACEMENT_PARAMETERS, { query: "" }), false);
+  assertEquals(Value.Check(SEARCH_REPLACEMENT_PARAMETERS, { query: "x".repeat(4097) }), false);
+  assertEquals(
+    Value.Check(SEARCH_REPLACEMENT_PARAMETERS, { query: "q", recency: "decade" }),
+    false,
+  );
+  assertEquals(Value.Check(SEARCH_REPLACEMENT_PARAMETERS, { query: "q", recency: ["day"] }), false);
+  assertEquals(
+    Value.Check(SEARCH_REPLACEMENT_PARAMETERS, { query: "q", limit: Number.POSITIVE_INFINITY }),
+    false,
+  );
+  // Undeclared `provider` is host-rejected pre-dispatch; the executor-side
+  // honest-block guard (below) stays as defense-in-depth, not advertisement.
+  assertEquals(
+    Value.Check(SEARCH_REPLACEMENT_PARAMETERS, { query: "q", provider: "openai" }),
+    false,
+  );
 });
 
 Deno.test("Request construction mirrors the pinned observable request shape (W4/W5)", () => {
