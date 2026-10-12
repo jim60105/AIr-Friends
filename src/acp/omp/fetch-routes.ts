@@ -152,8 +152,8 @@ const replacementMechanism = FETCH_COMPLETING_MECHANISM;
 /**
  * The frozen route table. `completed-by-adapter` covers EXACTLY the read
  * URL-branch routes (text, binary, secondary hops, materialization
- * consumers); every search-provider/code-search subrequest route and every
- * direct native loadPage/fetchBinary route stays blocked with
+ * consumers); every search-provider subrequest route and every direct native
+ * loadPage/fetchBinary route stays blocked with
  * `userDecisionRequired`. No mock result clears any blocked row.
  */
 export const FETCH_ROUTE_TABLE: readonly FetchRouteRow[] = Object.freeze(
@@ -251,15 +251,6 @@ export const FETCH_ROUTE_TABLE: readonly FetchRouteRow[] = Object.freeze(
       notes: "Owned by the batch's row 20 (adapt-omp-web-search); keeps the 14a " +
         "allow-gated-pending-adapter outcome and the 14b rejected_pending_adapter block until that " +
         "adapter lands reusing this decision core and table.",
-    },
-    {
-      routeId: "code-search.subrequests",
-      mechanism: "none — code/docs search backends outside the replaced read tool",
-      status: "blocked-pending-adapter",
-      citations: citation("S2", "S5"),
-      userDecisionRequired: true,
-      notes: "Owned by the batch's row 21 (adapt-omp-public-code-search); blocked with " +
-        "userDecisionRequired exactly as the web-search route.",
     },
   ] as const,
 );

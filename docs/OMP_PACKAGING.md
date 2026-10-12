@@ -129,7 +129,7 @@ owned tree is present; its digest is covered by the manifest either way.
 `/opt/air/omp/extension` from the committed sources at build time — a
 repo-relative **mirror copy of the value-import closure**, not a fork:
 
-- 32 modules are copied VERBATIM under `extension/mirror/<repo-relative-path>`
+- 31 modules are copied VERBATIM under `extension/mirror/<repo-relative-path>`
   (content-faithful: no rewriting, templating, or augmentation; dev and image
   load byte-identical sources — the packaging suite proves load parity).
 - The ONLY generated modules are the entry adapter `extension/index.ts` (a
@@ -137,10 +137,11 @@ repo-relative **mirror copy of the value-import closure**, not a fork:
   `extension/deno.json` (an import map pinning the one external specifier
   family the closure needs — `@std/path` + its locked `@std/internal` — to the
   exact versions in the committed `deno.lock`).
-- Type-only daemon modules (e.g. `code-search-transport.ts`) are NOT installed;
-  the loader erases type-only imports and the suite proves the erasure by
-  loading the bundle. Any external bare VALUE specifier outside `@std/*` fails
-  the build — the boundary is enforced, never trusted.
+- Type-only daemon modules (e.g. the `/app` daemon surface behind
+  `client.ts` types) are NOT installed; the loader erases type-only imports
+  and the suite proves the erasure by loading the bundle. Any external bare
+  VALUE specifier outside `@std/*` fails the build — the boundary is
+  enforced, never trusted.
 - The build consumes the cache stage's root-owned source copy (`/build-src`),
   never the agent-writable `/app/src` 775 tree.
 
@@ -169,9 +170,7 @@ only excluded file), root-owned 0644. The covered set is DERIVED from the tree
 
 Header facts: `OMP_VERSION` (carried from the unpacker stage, so the manifest
 records the SAME tag the checksums enforced), the trusted-extension serial
-composition **12 → 13 → 14b → 17 → 18**, and the row-19 fact that the 6th
-serial slot is **reserved-but-unconsumed** (the public-code-search row lands no
-extension sibling).
+composition **12 → 13 → 14b → 17 → 18**.
 
 Installed inputs covered by the digest (the full list on a fresh build):
 
@@ -181,7 +180,7 @@ Installed inputs covered by the digest (the full list on a fresh build):
 - `extension/mirror/src/acp/`: `destructive-policy.ts`, `filesystem-policy.ts`,
   `filesystem-roots.ts`, `omp-settings.ts`
 - `extension/mirror/src/acp/omp/`: `approval-records.ts`,
-  `code-search-routes.ts`, `compatibility-contracts.ts`,
+  `compatibility-contracts.ts`,
   `destructive-decision.ts`, `destructive-validator.ts`, `discovery-guard.ts`,
   `fetch-routes.ts`, `fetch-transport.ts`, `inventory-validator.ts`,
   `lsp-validator.ts`, `record-evaluator.ts`, `search-routes.ts`,

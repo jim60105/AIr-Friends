@@ -46,7 +46,6 @@ const ROW15_LANDED_BUILD_PERMISSIONS_EXCEPT_LSP: Record<string, unknown> = {
   skill: "allow",
   webfetch: "allow",
   websearch: "allow",
-  codesearch: "allow",
   task: "deny",
   doom_loop: "deny",
   question: "deny",

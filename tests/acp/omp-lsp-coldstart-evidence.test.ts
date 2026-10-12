@@ -150,9 +150,10 @@ Deno.test("Cold-start inventory: native-internal LSP carriers stay deny-by-absen
       assertEquals(decision.tableRowId, `default-deny-by-absence:${absent}`, absent);
     }
   }
-  // Table drift tripwires: 29 rows total, 18 default-deny rows, exactly two
+  // Table drift tripwires: 28 rows total (29 minus the code-search row cut
+  // by `remove-omp-public-code-search`), 18 default-deny rows, exactly two
   // LSP name rows — as row 14 landed them and as row 17 left them.
-  assertEquals(RESTRICTED_TOOL_INVENTORY_TABLE.length, 29);
+  assertEquals(RESTRICTED_TOOL_INVENTORY_TABLE.length, 28);
   assertEquals(
     RESTRICTED_TOOL_INVENTORY_TABLE.filter((row) => row.kind === "default-deny").length,
     18,

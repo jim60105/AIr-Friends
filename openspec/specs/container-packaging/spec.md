@@ -78,7 +78,7 @@ The container image SHALL install the deployment-owned OMP artifacts — the own
 
 ### Requirement: Auditable Digest Manifest With Recut Invariant
 
-The image build SHALL record a SHA-256 digest manifest covering every installed owned file — the extension tree, settings overlays, and prompt artifact — in a root-owned, agent-non-writable manifest file, and SHALL record the pinned version and the trusted-extension serial composition fact, including the reserved-but-unconsumed extension slot whose eventual consumption would change the digest set.
+The image build SHALL record a SHA-256 digest manifest covering every installed owned file (the extension tree, settings overlays, and prompt artifact) in a root-owned, agent-non-writable manifest file, and SHALL record the pinned version and the trusted-extension serial composition fact; no reserved dedicated public-code-search slot SHALL be required.
 
 #### Scenario: Manifest covers every installed owned file
 - **WHEN** the digest manifest is produced for a fixture owned tree

@@ -375,10 +375,16 @@ Deno.test("manifest generator - per-file lines, header facts, recut invariant", 
       ["config/restricted.yml", "extension.txt", "prompt/SYSTEM.md"],
     );
     assertEquals(manifest.includes("PACKAGE-MANIFEST.sha256"), true, "header names the file");
-    // Header facts: version, serial composition, reserved 6th slot, recut invariant.
+    // Header facts: version, serial composition, recut invariant (the former
+    // reserved-slot fact is asserted ABSENT below post-removal).
     assertStringIncludes(manifest, `OMP_VERSION=${PIN}`);
     assertStringIncludes(manifest, "12 -> 13 -> 14b -> 17 -> 18");
-    assertStringIncludes(manifest, "RESERVED-BUT-UNCONSUMED");
+    // `remove-omp-public-code-search` removed the reserved slot; the header
+    // records the composition without any reserved-slot claim.
+    assert(
+      !manifest.includes("RESERVED-BUT-UNCONSUMED"),
+      "manifest header carries no reserved-slot claim",
+    );
     // The recut-invariant statement inside the manifest itself.
     assertStringIncludes(manifest, "RECUT INVARIANT");
 
@@ -400,7 +406,7 @@ Deno.test("docs/OMP_PACKAGING.md - recut invariant and digest table present", as
   const doc = await Deno.readTextFile(`${repoRoot}/docs/OMP_PACKAGING.md`);
   assertStringIncludes(doc, "task-failure condition");
   assertStringIncludes(doc, "12 → 13 → 14b → 17 → 18");
-  assertStringIncludes(doc, "reserved-but-unconsumed");
+  assert(!doc.includes("reserved-but-unconsumed"), "no reserved-slot claim remains in the doc");
   // Digest table byte-identical to the design table values.
   for (const digest of Object.values(DIGESTS)) {
     assertStringIncludes(doc, digest);
@@ -459,7 +465,6 @@ const EXPECTED_MIRROR_FILES = [
   "src/acp/filesystem-roots.ts",
   "src/acp/omp-settings.ts",
   "src/acp/omp/approval-records.ts",
-  "src/acp/omp/code-search-routes.ts",
   "src/acp/omp/compatibility-contracts.ts",
   "src/acp/omp/destructive-decision.ts",
   "src/acp/omp/destructive-validator.ts",
@@ -657,7 +662,7 @@ Deno.test("extension bundle - barrel resolves inside the installed tree", async 
     const result = await load.output();
     assertEquals(result.code, 0, new TextDecoder().decode(result.stderr));
     const exports = new TextDecoder().decode(result.stdout).trim().split(",");
-    // Value exports spanning the serial siblings (rows 12/14a/14b/19/20/21
+    // Value exports spanning the serial siblings (rows 12/14a/14b/19/20
     // pure modules behind the barrel) resolve inside the installed tree.
     for (
       const expected of [
@@ -666,7 +671,6 @@ Deno.test("extension bundle - barrel resolves inside the installed tree", async 
         "decideDestructiveIntent",
         "decideFetchHop",
         "buildGeminiSearchRequest",
-        "CODE_SEARCH_ROUTE_TABLE",
       ]
     ) {
       assert(exports.includes(expected), `barrel exports ${expected}: ${exports.join(",")}`);
@@ -677,11 +681,10 @@ Deno.test("extension bundle - barrel resolves inside the installed tree", async 
 });
 
 Deno.test("extension bundle - type-only daemon modules are NOT installed", async () => {
-  // code-search-transport.ts is type-only-referenced (its closure note pins
-  // it out of the installed set); the loader erases type-only imports and the
-  // completeness gate passes without it. The /app daemon surface behind
-  // client.ts TYPES (client.ts, types.ts, filesystem-access.ts) is likewise
-  // never an installed input. Explicit non-installation claim asserted at each
+  // Type-only daemon modules are erased at runtime and the completeness gate
+  // passes without them. The /app daemon surface behind client.ts TYPES
+  // (client.ts, types.ts, filesystem-access.ts) is likewise never an
+  // installed input. Explicit non-installation claim asserted at each
   // module's real repo-relative path under mirror/.
   const target = await Deno.makeTempDir({ prefix: "omp-bundle-" });
   try {
@@ -693,7 +696,6 @@ Deno.test("extension bundle - type-only daemon modules are NOT installed", async
     assertEquals((await command.output()).code, 0);
     for (
       const excluded of [
-        "src/acp/omp/code-search-transport.ts",
         "src/acp/client.ts",
         "src/acp/types.ts",
         "src/acp/filesystem-access.ts",

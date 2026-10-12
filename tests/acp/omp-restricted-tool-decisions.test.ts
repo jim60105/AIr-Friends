@@ -102,7 +102,6 @@ Deno.test("Inventory: every allow-gated/routed row yields its delegating outcome
     ["apply_patch", "opaque", "routed-destructive", "delete-move-patch"],
     ["webfetch", "url", "allow-gated-pending-adapter", "web-fetch"],
     ["websearch", "query", "allow-gated-pending-adapter", "web-search"],
-    ["codesearch", "query", "allow-gated-pending-adapter", "code-search"],
   ];
   for (const [toolName, shape, outcome, tableRowId] of expectations) {
     const decision = decideRestrictedTool(req(toolName, owned, shape));
@@ -219,14 +218,19 @@ Deno.test("Inventory: unknown/unlisted tool denies under every provenance and sh
 });
 
 Deno.test("Inventory: a surface omitted from the table lands in default-deny structurally", () => {
-  // Deliberately not a table row: any surface the audit cannot enumerate
-  // denies by absence, not by audit completeness.
-  const decision = decideRestrictedTool(req("some_future_omp_tool", owned, "opaque"));
-  assertEquals(decision.outcome, "deny");
-  if (decision.outcome === "deny") {
-    assertEquals(decision.reason, "rejected_tool_inventory");
-    assertEquals(decision.denyByAbsence, true);
-    assertEquals(decision.tableRowId, "default-deny-by-absence:some_future_omp_tool");
+  // Deliberately not table rows: any surface the audit cannot enumerate
+  // denies by absence, not by audit completeness. `codesearch` migrated here
+  // from the pending-adapter row that `remove-omp-public-code-search` cut —
+  // dedicated public code search is outside the pinned OpenCode parity
+  // target, so an unlisted dedicated search name must deny by absence.
+  for (const name of ["some_future_omp_tool", "codesearch"]) {
+    const decision = decideRestrictedTool(req(name, owned, "opaque"));
+    assertEquals(decision.outcome, "deny", name);
+    if (decision.outcome === "deny") {
+      assertEquals(decision.reason, "rejected_tool_inventory", name);
+      assertEquals(decision.denyByAbsence, true, name);
+      assertEquals(decision.tableRowId, `default-deny-by-absence:${name}`, name);
+    }
   }
 });
 

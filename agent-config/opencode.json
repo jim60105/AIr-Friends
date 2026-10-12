@@ -42,7 +42,6 @@
         "skill": "allow",
         "webfetch": "allow",
         "websearch": "allow",
-        "codesearch": "allow",
         "task": "deny",
         "doom_loop": "deny",
         "question": "deny",
