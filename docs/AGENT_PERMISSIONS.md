@@ -13,7 +13,7 @@ This document describes AIr-Friends' multi-layer permission model for controllin
 - [Layer 5 — Sandbox Isolation](#layer-5--sandbox-isolation)
 - [YOLO Mode](#yolo-mode)
 - [Per-Session-Type Permission Behavior](#per-session-type-permission-behavior)
-- [Skill Auto-Approve List](#skill-auto-approve-list)
+- [Skill Auto-Approve List (Root-Exact Inventory)](#skill-auto-approve-list-root-exact-inventory)
 - [Permission Audit Logging](#permission-audit-logging)
 - [Security Considerations](#security-considerations)
 - [Configuration Reference](#configuration-reference)
@@ -181,11 +181,11 @@ The `write`, `patch`, and `multiedit` tools all use `permission: "edit"`, so thi
 
 ### Bash Permission (Whitelist)
 
-Shell commands use default-deny. Skill-invocation patterns are `"allow"` (Layer 3 matches them by entrypoint). **Every filesystem-touching utility is `"ask"`, not `"allow"`** (F12 D1), so its execution is forwarded to the Layer-3 gate rather than self-authorized at Layer 2:
+Shell commands use default-deny. **Every command that can reach skill scripts — or any filesystem path — is `"ask"`, not `"allow"`** (F12 D1), so its execution is forwarded to the Layer-3 gate rather than self-authorized at Layer 2. `unify-omp-skill-root-resolution` removed the last two script-glob `"allow"` bypasses (the `deno run` skills-scripts glob and the leading-wildcard skills-scripts glob): every script invocation, including from a custom non-`skills` deployment root, now routes through the ACP gate, where the root-exact inventory decides:
 
 | Pattern                                                                                 | Verdict | Purpose / rationale                                                                           |
 | --------------------------------------------------------------------------------------- | ------- | --------------------------------------------------------------------------------------------- |
-| `deno run *skills/*/scripts/*.ts*`, `*/skills/*/scripts/*.ts*`                          | `allow` | Skill scripts; Layer 3 verifies the invocation entrypoint                                     |
+| `deno run *`, `*.ts*`                                                                   | `ask`   | Routing-only: every interpreter/script invocation reaches the Layer-3 root-exact inventory    |
 | `rg`, `cat`, `head`, `tail`, `ls`, `find`, `wc`, `file`, `tree`, `jq`                   | `ask`   | Search/read utilities — routed to the Layer-3 generic-command gate                            |
 | `pdftotext`, `pdfinfo`, `pdfimages`, `pandoc`, `exiftool`, `ffprobe`                    | `ask`   | Document/metadata readers — routed to the Layer-3 gate                                        |
 | `ffmpeg`, `magick`, `convert`, `identify`, `mogrify`, `pdftoppm`, `unzip`, `zip`, `7zz` | `ask`   | Media/archive tools that also **write** — routed to the gate (output paths confined too)      |
@@ -203,7 +203,7 @@ Missing authoritative session context, unavailable required root identity, escap
 
 This is decision-time containment. The command still performs native IO, so replacement after approval is not prevented; command-execution confinement remains F12 D4 bwrap scope. Unit/mock acceptance proves permission decisions only, with real-runtime acceptance remaining user-owned. Tool inventory/provenance/MCP decisions (14a), trusted handler wiring (14b), and OMP launch/process state (row 9) are unchanged. Numbered row 15 precedes LSP row 17 on `agent-config/opencode.json`; this change leaves its build permissions and yolo bytes untouched. The successor's build+yolo LSP denies intentionally end local yolo-byte equality, and final regression baselines use the post-row-17 file.
 
-**fd-to-fd redirection tolerance (F12 D1).** A whitespace-delimited argument token that is **exactly** `N>&M` with the source descriptor `M` restricted to a standard stream (`1` or `2`; e.g. `2>&1`, `1>&2`, `3>&1`) is tolerated by the generic gate **and** the skill-whitelist matchers (`matchesScriptPath` / `matchesCommandPrefix`): it duplicates an already-open standard output/error capture pipe and references no path on disk, so it is removed from the shell-operator check and skipped in the path-argument scan. Coding models habitually append `2>&1`, so `ls -la {WS}/tmp/ 2>&1` is approved instead of being misrejected as an out-of-workspace escape. The tolerance is intentionally maximally narrow and provably cannot grant filesystem access:
+**fd-to-fd redirection tolerance (F12 D1).** A whitespace-delimited argument token that is **exactly** `N>&M` with the source descriptor `M` restricted to a standard stream (`1` or `2`; e.g. `2>&1`, `1>&2`, `3>&1`) is tolerated by the generic gate **and** the skill-inventory matchers (`matchesScriptEntrypoint` / `matchesCommandPrefix`): it duplicates an already-open standard output/error capture pipe and references no path on disk, so it is removed from the shell-operator check and skipped in the path-argument scan. Coding models habitually append `2>&1`, so `ls -la {WS}/tmp/ 2>&1` is approved instead of being misrejected as an out-of-workspace escape. The tolerance is intentionally maximally narrow and provably cannot grant filesystem access:
 
 - File-referencing redirects remain denied: `2>/dev/null`, `2>/tmp/x`, `> file`, `>&word` with a non-numeric `word`, and digit-prefixed filenames a shell opens for writing (`2>&1/tmp/x`, `2>&1x`) are NOT exact `N>&[12]` tokens and still trip the operator check.
 - Non-standard source descriptors remain denied: `1>&3`, `2>&3`, `9>&99` could reference a harness-inherited descriptor the gate cannot see.
@@ -213,7 +213,7 @@ This is decision-time containment. The command still performs native IO, so repl
 
 The real command still executes with the redirection (OpenCode runs the original) — this only relaxes the permission decision for tokens that duplicate an already-open standard stream. When a generic command IS rejected, the WARN and the `permission_denied` audit reason now report the ACTUAL cause — `shell_operator` / `first_token_not_allowed` / `dangerous_flag` / `path_outside_boundary` — instead of always claiming a path escape. The path-outside case keeps the historical audit code `rejected_generic_command_out_of_workspace`; the new causes use `rejected_generic_command_shell_operator`, `rejected_generic_command_first_token_not_allowed`, and `rejected_generic_command_dangerous_flag`. For a multi-command permission request, the FIRST failing command, its index, and its reason are recorded.
 
-**Multi-command `;`/`&&`/`||` chaining (F12 D2).** Coding models habitually batch commands with `;`, `&&`, or `||` to save tool calls. OpenCode's own permission layer already splits such invocations into per-command patterns and routes all-ask chains to this gate as ONE request with the raw command. The gate therefore approves a multi-command invocation **only when EVERY segment independently passes the exact gate it would face as its own tool call** — the skill-whitelist matchers (`matchesScriptPath` / `matchesCommandPrefix`) OR the generic-command gate. This is capability-neutral: each segment could already be run as its own gated tool call, so chaining only removes forced single-command round trips, never grants new capability (shell-state-carrying commands like `cd`/`export`/`eval`/`source`/`exec` fail the first-token allow-list, so a chain cannot smuggle state into later segments).
+**Multi-command `;`/`&&`/`||` chaining (F12 D2).** Coding models habitually batch commands with `;`, `&&`, or `||` to save tool calls. OpenCode's own permission layer already splits such invocations into per-command patterns and routes all-ask chains to this gate as ONE request with the raw command. The gate therefore approves a multi-command invocation **only when EVERY segment independently passes the exact gate it would face as its own tool call** — the skill-inventory matchers (`matchesScriptEntrypoint` / `matchesCommandPrefix`) OR the generic-command gate. This is capability-neutral: each segment could already be run as its own gated tool call, so chaining only removes forced single-command round trips, never grants new capability (shell-state-carrying commands like `cd`/`export`/`eval`/`source`/`exec` fail the first-token allow-list, so a chain cannot smuggle state into later segments).
 
 - **Quote-aware splitting** (`splitCommandSegments`): separators are recognized only OUTSIDE single or double quotes (with shell-correct backslash escapes inside double quotes). An unbalanced quote disables splitting so the whole command is evaluated as one segment (a mis-split can only over-reject, never under-reject, because every segment still passes the full single-command gate). Empty segments are dropped; a command with no separator is evaluated byte-identically to today.
 - **Redirect-only segments are operator artifacts**: a segment consisting ONLY of tolerated fd-redirect tokens (e.g. the `2>&1` in a glued `2>&1&&cat ...`) is rejected as `shell_operator`, never skipped — preserving the existing glued-operator rejection semantics.
@@ -264,7 +264,7 @@ The method evaluates permission requests in this order:
 
 2. **Trusted skills read**. Approve `read` locations only through canonical observations of the deployment-owned read-only skills root with validated critical-skill references bound to the current registered generation. Keep the `skills_directory_access` audit reason. An unowned HOME-discovered or `npx skills add` copy, a workspace same-name file, an escaping link, stale provenance or missing provenance receives no exception.
 
-3. **Shell command execution** — For `execute` kind requests, evaluate each command SEGMENT-wise (`;`/`&&`/`||` chains are split quote-aware via `splitCommandSegments`): every segment must match the skill auto-approve list using safe token matching (see [Skill Auto-Approve List](#skill-auto-approve-list)) OR pass the generic-command gate (see [Bash Permission (Whitelist)](#bash-permission-whitelist)); the whole invocation is approved only when ALL segments of ALL commands pass, otherwise the FIRST failing segment's cause is reported. The D5 legacy free-text flag check (`--message` / `--content` / `--query` / `--caption`) runs on the FULL original command(s) before any splitting.
+3. **Shell command execution** — For `execute` kind requests, evaluate each command SEGMENT-wise (`;`/`&&`/`||` chains are split quote-aware via `splitCommandSegments`): every segment must match the root-exact skill inventory (see [Skill Auto-Approve List (Root-Exact Inventory)](#skill-auto-approve-list-root-exact-inventory)) OR pass the generic-command gate (see [Bash Permission (Whitelist)](#bash-permission-whitelist)); the whole invocation is approved only when ALL segments of ALL commands pass, otherwise the FIRST failing segment's cause is reported. The D5 legacy free-text flag check (`--message` / `--content` / `--query` / `--caption`) runs on the FULL original command(s) before any splitting.
 
 4. **Registered skill check** — Extract skill name from `rawInput.skill` or `toolCall.title` and check against the `SkillRegistry`.
 
@@ -482,33 +482,45 @@ OpenCode uses Layer 2 (`opencode.json`) for most permissions, but delegates edit
 
 ---
 
-## Skill Auto-Approve List
+## Skill Auto-Approve List (Root-Exact Inventory)
 
-The skill auto-approve list determines which bash commands are automatically approved at Layer 3 in restricted mode. It contains two categories:
+The skill auto-approve list determines which bash commands are automatically approved at Layer 3 in restricted mode. Since `unify-omp-skill-root-resolution` it is a **root-exact physical inventory** (`SkillAutoApproveList`, `src/acp/skill-inventory.ts`) built over ONE observed trusted skill-script root per agent — never a set of path suffixes, never a HOME-global or daemon-cwd scan. It contains two categories:
 
-### Script-Based Skills
+### Trusted Root Matrix
 
-Skills with a `scripts/` directory containing `.ts` files. The auto-approve list stores **path suffixes** like `skills/memory-save/scripts/memory-save.ts`. During permission evaluation, the command is split into whitespace-delimited tokens and approved if any token **exactly equals** or **ends with `/{allowedPath}`** for any of these path suffixes. This prevents substring matches where a whitelisted path appears embedded inside a longer malicious token.
+| Deployment shape   | OMP root                                                            | OpenCode root                                                            |
+| ------------------ | ------------------------------------------------------------------- | ------------------------------------------------------------------------ |
+| Container image    | `/opt/air/skills` (root-owned, staged from the bundled catalog only) | `agent.skillsDir` — stock image/Helm: `/home/deno/.agents/skills`         |
+| Development        | the repository's own `skills/` tree (validated source root)          | `agent.skillsDir` relative to the daemon/deployment working directory (default `skills`) |
 
-Current script-based skills:
-`cancel-reminder`, `edit-reply`, `fetch-context`, `get-message`, `list-reminders`, `memory-export`, `memory-patch`, `memory-save`, `memory-search`, `memory-stats`, `react-message`, `send-file`, `send-reply`, `set-reminder`
+The root comes from `observeTrustedSkillsRoot()` (`src/core/skills-root.ts`): the CANONICAL (realpath) spelling of the validated selection plus its `dev`/`ino` identity, resolved once by the actual selected agent before subprocess creation and carried as the mandatory internal `skillsDir` through connector/client, factory/sandbox mounts, prompt rendering and readiness. The agent child's HOME is NEVER consulted and an absent/unobservable root is an explicit `ConfigError`, never a fallback tree. The same observation feeds the render identity: prompt/retry `skillsDir`, the connector inventory root, the read-only skill mount and the readiness root are the SAME path.
 
-### Command-Based Skills
+### Script Grants
 
-Skills without a `scripts/` directory (e.g., `agent-browser`). The auto-approve list stores **command prefixes**. During permission evaluation, the **first whitespace-delimited token** is extracted and approved if it **exactly equals** any of these prefixes. This prevents prefix matches where a whitelisted command name is a prefix of a longer, unrelated command.
+Each grant is the **canonical absolute regular-file path** of an enumerated `scripts/*.ts` inside that root, recorded with its `dev`/`ino` identity. Enumeration scans ONLY the explicit root:
 
-Current command-based skills: `agent-browser`, `self-research`
+- **OpenCode**: installed-root discovery — every well-formed skill directory under the resolved root (built-ins and explicitly published external installations share the tree).
+- **OMP**: the bundled skill catalog (`BUNDLED_SKILLS` in `src/core/bundled-skills.ts`) INSIDE the resolved root only. A skill name outside the catalog — including one physically installed in the tree — is never enumerated, and the configured list can only filter the catalog, never expand it. The reserved `lib` entry is never scannable as a skill.
 
-### Building the List
+`agent.autoApproveSkills` / `AGENT_AUTO_APPROVE_SKILLS`, when nonempty, FILTERS observed skill names within that root; a configured name that is not physically present there grants NOTHING (the old absent-skill-to-command-prefix promotion is removed). An invalid skill-name component (traversal, separator, empty) is rejected at configuration time.
 
-The `buildSkillAutoApproveList()` function scans two directories:
+A command is approved when the segment's actual entrypoint — located through the safe shell tokenizer, after the `deno run`/interpreter flags, quoted literals decoded fail-closed — canonically resolves (relative spellings ONLY against the requesting registered session cwd; an unregistered session has no relative anchor) to EXACTLY one enumerated grant, with decision-time rechecks:
 
-1. Built-in: `skills/` (project root)
-2. External: `~/.agents/skills/` (installed external skills)
+- the recorded root still exists with its recorded identity (a REPLACED root — remove-and-recreate — denies every grant),
+- the resolved target is physically contained in that root (boundary-safe prefix; a sibling-prefix root like `/opt/air/skills-evil/...` denies), and
+- the target identity matches the enumerated entry.
 
-It can be configured explicitly via `agent.autoApproveSkills` in config or `AGENT_AUTO_APPROVE_SKILLS` env var. When not configured, it falls back to scanning the built-in `skills/` directory.
+Consequences that the old suffix matcher allowed and these checks deny: same-suffix planted copies at any absolute or session-relative spelling, alternate-HOME or other-agent roots, trailing-content variants, and slashless direct-exec aliases. Physical `..` spellings that a kernel would resolve INTO a real grant still approve (the OS resolves them before execution); laundering via interpreter tricks (`cat grant`, `python grant`) and non-`deno run` subcommands (`deno task run`, `deno eval`) deny.
 
-**Reference**: `src/acp/client.ts`, lines 25–107
+**Decision-time limit:** this is decision-time containment, not race-proofing — the command still performs native IO, so a script replaced AFTER approval is not prevented (same residual as the generic gate; bwrap read-only mounts bound the blast radius). A linked skill directory inside the root is never enumerated at all.
+
+### Command Prefixes
+
+Observed command-based skills — those WITHOUT a `scripts/` directory (e.g., `agent-browser`, `self-research`) that are present as well-formed `SKILL.md` entries in the same root — contribute exact first-token command prefixes. A prefix is promoted ONLY when the skill dir's `scripts` path is ABSENT (an existing-but-broken/unreadable `scripts` entry is an enumeration error, never a prefix grant). During evaluation the first whitespace-delimited token must EXACTLY equal a stored prefix (no prefix-of-longer-command matches).
+
+The ChatbotClient takes the inventory as a MANDATORY constructor argument; there is no implicit `Deno.cwd()/skills` default anymore — direct callers/tests must build one explicitly.
+
+**Reference**: `src/acp/skill-inventory.ts` (`buildSkillAutoApproveList`, `matchesScriptEntrypoint`), `src/core/skills-root.ts`, `src/core/bundled-skills.ts`, `src/acp/client.ts`
 
 ### Shell Injection Protection
 
@@ -536,7 +548,7 @@ Additionally, path matching uses strict token validation:
 - **Script paths** must appear as a complete whitespace-delimited token (not embedded in a substring)
 - **Command prefixes** must be the exact first token (not a prefix of a longer command name)
 
-**Reference**: `src/acp/client.ts`, `containsShellOperators()`, `matchesScriptPath()`, `matchesCommandPrefix()`
+**Reference**: `src/acp/command-syntax.ts` (`containsShellOperators()`, `FD_REDIRECT_TOKEN_PATTERN`), `src/acp/skill-inventory.ts` (`matchesScriptEntrypoint`), `src/acp/client.ts` (`matchesCommandPrefix`)
 
 ---
 
@@ -609,7 +621,7 @@ Permission audit phases respect the `audit.includedPhases` configuration. When `
 | Threat                                  | Prevented by                                                                                             |
 | --------------------------------------- | -------------------------------------------------------------------------------------------------------- |
 | Agent modifying source code             | Layer 2 (`"edit": "ask"` delegates to Layer 3), Layer 3 (edit/write scoped to agent workspace only)      |
-| Agent running arbitrary commands        | Layer 2 (bash whitelist), Layer 3 (skill auto-approve list)                                              |
+| Agent running arbitrary commands        | Layer 2 (bash whitelist — script globs route to the gate), Layer 3 (root-exact skill inventory)          |
 | Agent accessing other users' data       | Layer 4 (file access boundary — workspace isolation)                                                     |
 | Agent exfiltrating secrets via env vars | Layer 5 (env var filtering)                                                                              |
 | Agent making unauthorized network calls | Layer 5 (optional network isolation)                                                                     |
@@ -649,7 +661,8 @@ agent:
       ".txt",
     ] # Allowed file extensions for agent workspace writes in restricted mode
 
-  # Skill auto-approve list (optional — falls back to scanning skills/ dir)
+  # Skill auto-approve list (optional — FILTERS observed skills inside the
+  # resolved trusted root; never expands beyond it, never grants absent names)
   autoApproveSkills:
     - "memory-save"
     - "memory-search"
@@ -682,7 +695,8 @@ audit:
 | `AGENT_SANDBOX_NETWORK_ISOLATION`        | `agent.sandbox.networkIsolation`       | `"true"` / `"false"`                                                 |
 | `AGENT_SANDBOX_ALLOWED_ENV_VARS`         | `agent.sandbox.allowedEnvVars`         | Comma-separated list                                                 |
 | `AGENT_SANDBOX_ALLOWED_WRITE_EXTENSIONS` | `agent.sandbox.allowedWriteExtensions` | Comma-separated list                                                 |
-| `AGENT_AUTO_APPROVE_SKILLS`              | `agent.autoApproveSkills`              | Comma-separated list                                                 |
+| `AGENT_AUTO_APPROVE_SKILLS`              | `agent.autoApproveSkills`              | Comma-separated name FILTER over the resolved root                   |
+| `AGENT_SKILLS_DIR`                       | `agent.skillsDir`                      | OpenCode installed-root declaration (container: `/home/deno/.agents/skills`); relative values anchor at the deployment cwd; never consulted for OMP |
 | `AGENT_OPENCODE_MIN_VERSION`             | — (observability only)                 | Minimum OpenCode version for the bootstrap check (default `1.17.13`) |
 
 ### Permission Rejection Feedback (Retry Prompt)

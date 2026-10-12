@@ -9,10 +9,7 @@ import {
   MAX_PERMISSION_REJECTION_FIELD_LENGTH,
   sanitizeRejectionField,
 } from "@acp/client.ts";
-import {
-  buildSkillAutoApproveList,
-  type SkillAutoApproveList,
-} from "@acp/skill-inventory.ts";
+import { buildSkillAutoApproveList, type SkillAutoApproveList } from "@acp/skill-inventory.ts";
 import { observeTrustedSkillsRoot } from "@core/skills-root.ts";
 import {
   commandWithoutFdRedirects,
@@ -1898,7 +1895,12 @@ Deno.test("canonical generic permission gate approves own file, rejects escapes 
       isDM: false,
       sessionId: "sess_own",
     };
-    const client = createRegisteredClient(createTestSkillRegistry(), createTestLogger(), config, emptySkillList());
+    const client = createRegisteredClient(
+      createTestSkillRegistry(),
+      createTestLogger(),
+      config,
+      emptySkillList(),
+    );
     const request = (command: string): acp.RequestPermissionRequest => ({
       sessionId: "sess_own",
       toolCall: {

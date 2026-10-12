@@ -20,25 +20,27 @@
 // authored `skills/` directories.
 
 /** The authored bundled skill names (excludes the reserved `lib` content). */
-export const BUNDLED_SKILLS: readonly string[] = Object.freeze([
-  "agent-browser",
-  "cancel-reminder",
-  "chinese-content-writing-guideline",
-  "edit-reply",
-  "fetch-context",
-  "get-message",
-  "list-reminders",
-  "memory-export",
-  "memory-patch",
-  "memory-save",
-  "memory-search",
-  "memory-stats",
-  "react-message",
-  "self-research",
-  "send-file",
-  "send-reply",
-  "set-reminder",
-] as const);
+export const BUNDLED_SKILLS: readonly string[] = Object.freeze(
+  [
+    "agent-browser",
+    "cancel-reminder",
+    "chinese-content-writing-guideline",
+    "edit-reply",
+    "fetch-context",
+    "get-message",
+    "list-reminders",
+    "memory-export",
+    "memory-patch",
+    "memory-save",
+    "memory-search",
+    "memory-stats",
+    "react-message",
+    "self-research",
+    "send-file",
+    "send-reply",
+    "set-reminder",
+  ] as const,
+);
 
 /** Reserved shared library entry: never an external skill name, never scannable as a skill. */
 export const RESERVED_SKILL_ENTRIES: readonly string[] = Object.freeze(["lib"] as const);

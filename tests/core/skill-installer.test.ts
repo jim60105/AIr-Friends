@@ -16,7 +16,7 @@ import type { ExternalSkillConfig } from "../../src/types/config.ts";
 
 /**
  * Mock executor that emulates the `skills` CLI posture: writes the skill tree
-* into `${HOME}/.agents/skills/<skill>` INSIDE the private staging HOME the
+ * into `${HOME}/.agents/skills/<skill>` INSIDE the private staging HOME the
  * installer supplies (never the ambient HOME). Records every call including
  * the env it was invoked with.
  */

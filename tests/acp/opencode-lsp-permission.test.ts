@@ -102,7 +102,7 @@ const ROW15_LANDED_BUILD_PERMISSIONS_EXCEPT_LSP: Record<string, unknown> = {
     "strace *": "deny",
     "mkdir *": "deny",
     "deno run *": "ask",
-    "*.ts*": "ask"
+    "*.ts*": "ask",
   },
   external_directory: {
     "*": "deny",

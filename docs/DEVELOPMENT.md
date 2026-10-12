@@ -213,9 +213,9 @@ Configuration is loaded from `config.yaml` (YAML format). See [config.example.ya
 | --------------------------- | -------------------------------------------------------------------------------------------------- |
 | `AGENT_MODEL`               | LLM model identifier (e.g., "gpt-5-mini")                                                          |
 | `AGENT_DEFAULT_TYPE`        | Default ACP agent type (`opencode` [default], `omp`; unknown values fail startup)                   |
-| `AGENT_SKILLS_DIR`          | Skills directory path (default: "skills")                                                          |
+| `AGENT_SKILLS_DIR`          | OpenCode installed-root declaration (default: "skills"; container: "/home/deno/.agents/skills"; relative values anchor at the deployment cwd; never consulted for OMP) |
 | `AGENT_EXTERNAL_SKILLS`     | External skills to install at startup (JSON string, e.g. `[{"repo":"owner/repo","skill":"name"}]`) |
-| `AGENT_AUTO_APPROVE_SKILLS` | Skill names to auto-approve in restricted mode (comma-separated)                                   |
+| `AGENT_AUTO_APPROVE_SKILLS` | Skill-name FILTER over skills observed inside the resolved trusted root (comma-separated; never expands beyond it) |
 | `AGENT_MCP_SERVERS`         | External MCP servers (JSON string array)                                                           |
 | `MODEL_ROUTING_ENABLED`     | Enable model routing (true/false, default: false)                                                  |
 | `MODEL_ROUTING_RULES`       | Model routing rules as JSON string                                                                 |
@@ -652,6 +652,8 @@ The following variables are available in all prompt templates:
 | `reminderScheduledAt`   | `system_reminder.md`           | Reminder scheduled timestamp                   |
 
 > **`skillsDir` is required** (`repair-omp-owned-skill-handoff`): every render caller — normal, spontaneous, self-research, both maintenance forms, reminder, summary, web-chat, and the retry prompt builder — must supply it, and a missing root fails the request explicitly instead of rendering a skill-less prompt. The value comes from `resolveTrustedSkillsRoot()` (`src/core/skills-root.ts`): for OMP it is the declared owned root `/opt/air/skills` (development: the repository's own `skills/` tree); for OpenCode it is the existing installed-root resolution (`agent.skillsDir`, container: `/home/deno/.agents/skills`, relative values resolved against the daemon/deployment working directory). The agent child's HOME is NEVER consulted — an isolated OMP HOME cannot redirect script invocation — and `skillsDir` is an internal render input, not new public configuration. Prompts and `SKILL.md` files name script paths as `{{ skillsDir }}/<skill>/scripts/<script>.ts` (rendered) / `<skill root rendered in your system prompt>/<skill>/scripts/<script>.ts` (instruction text) and never a `$HOME`/`${HOME}` recipe.
+>
+> **Same physical root everywhere** (`unify-omp-skill-root-resolution`): the resolved value is the CANONICAL realpath of the validated selection (`observeTrustedSkillsRoot()` also records its `dev`/`ino` identity), and the identical root — prompt/retry `skillsDir`, the ACP client's mandatory root-exact script inventory (`src/acp/skill-inventory.ts`), the read-only bwrap skill mount and the healthcheck readiness root — is resolved ONCE per selected agent before subprocess creation, including dashboard agent overrides and pooled reconnects. An unresolvable root fails explicitly everywhere; there is no per-consumer fallback spelling.
 
 #### Examples
 

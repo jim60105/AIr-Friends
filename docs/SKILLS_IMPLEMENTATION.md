@@ -419,20 +419,22 @@ identity OS-enforced rather than token-asserted.
 
 ## Skill Permissions
 
-Skill permissions are enforced through a whitelist mechanism managed by `SkillAutoApproveList` in `src/acp/client.ts`. In restricted (non-YOLO) mode, only whitelisted skill commands are auto-approved; all other execution requests are rejected.
+Skill permissions are enforced through the root-exact inventory `SkillAutoApproveList` (`src/acp/skill-inventory.ts`), passed to `ChatbotClient` as a MANDATORY construction argument — there is no implicit directory-scanning default. In restricted (non-YOLO) mode, only inventory-matched skill commands are auto-approved; all other execution requests are rejected.
 
-### Whitelist Matching
+### Root-Exact Matching
 
-The auto-approve list uses two matching methods:
+The inventory is built over ONE observed trusted skill-script root per selected agent — the canonical (realpath) `observeTrustedSkillsRoot()` result (`src/core/skills-root.ts`; the same root that renders into prompts, mounts read-only into the sandbox, and drives readiness). It never scans a HOME-global tree or the daemon cwd. Two matching methods:
 
-- **Script path matching** (`scriptPaths`): For skills with a `scripts/` directory, path suffixes like `skills/memory-save/scripts/memory-save.ts` are stored. A command is approved if any whitespace-delimited token exactly equals or ends with a stored path suffix.
-- **Command prefix matching** (`commandPrefixes`): For command-based skills without a `scripts/` directory (e.g., `agent-browser`), the first whitespace-delimited token is checked for an exact match against stored prefixes.
+- **Script entrypoint matching** (`matchesScriptEntrypoint`): grants are the canonical ABSOLUTE paths (with `dev`/`ino` identity) of `scripts/*.ts` regular files enumerated inside that root. A command segment's located entrypoint must canonically resolve — relative spellings only against the requesting registered session cwd — to exactly one recorded grant, rechecked at decision time (root still carries its recorded identity, target physically contained, identity matches). Suffix matching is GONE: a same-suffix planted copy anywhere — absolute, session-relative, or under an alternate HOME — is denied, as is a root replaced after inventory construction.
+- **Command prefix matching** (`commandPrefixes`): observed command-based skills without a `scripts/` directory (e.g., `agent-browser`) contribute exact first-token matches. Promotion requires an ABSENT `scripts` path (a broken-but-existing `scripts` entry grants nothing).
+
+OMP enumeration is restricted to the authored bundled catalog (`BUNDLED_SKILLS`, `src/core/bundled-skills.ts`) inside the resolved root — external installations sharing the physical tree never gain OMP authority — while OpenCode enumerates every well-formed installed skill directory there (built-ins plus explicitly published external installations).
 
 ### Configuration
 
-The list can be configured explicitly via `agent.autoApproveSkills` in `config.yaml` or the `AGENT_AUTO_APPROVE_SKILLS` environment variable (comma-separated). When neither is configured, the system falls back to scanning the built-in `skills/` directory automatically.
+`agent.autoApproveSkills` / `AGENT_AUTO_APPROVE_SKILLS` is a FILTER over skill names observed inside the resolved root: a nonempty list can only narrow the inventory (and for OMP never beyond the bundled catalog); a configured name that is not physically present grants nothing. When unset or empty, enumeration of the resolved root stands.
 
-For detailed documentation on permission layers and shell injection protection, see [Skill Auto-Approve List in AGENT_PERMISSIONS.md](AGENT_PERMISSIONS.md#skill-auto-approve-list).
+For detailed documentation on permission layers and shell injection protection, see [Skill Auto-Approve List (Root-Exact Inventory) in AGENT_PERMISSIONS.md](AGENT_PERMISSIONS.md#skill-auto-approve-list-root-exact-inventory).
 
 ## Future Enhancements
 

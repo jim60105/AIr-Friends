@@ -106,9 +106,7 @@ function fixture(beforeOpen?: (path: string) => void): FilesystemFixture {
         return calls.ftruncate(fd, length);
       },
     },
-  },
-    emptySkillList(),
-  );
+  }, emptySkillList());
   const register = (context: Partial<SessionGateContext> = {}) => {
     client.setSessionContext("acp-1", { cwd: workspace, shellSessionId: "skill-1", ...context });
   };
@@ -844,7 +842,12 @@ Deno.test("Filesystem lifecycle: dedicated creation and pooled restore register 
     connector.disconnect = () => Promise.resolve();
     let restored: ChatbotClient | undefined;
     connector.connect = () => {
-      restored = new ChatbotClient(f.client["skillRegistry"], f.client["logger"], config, emptySkillList());
+      restored = new ChatbotClient(
+        f.client["skillRegistry"],
+        f.client["logger"],
+        config,
+        emptySkillList(),
+      );
       connector["client"] = restored;
       connector["connection"] = connection;
       return Promise.resolve();
@@ -938,7 +941,12 @@ Deno.test("Trusted provenance: generations never repeat across re-registration o
     const replayed: { session?: string; reference?: string } = {};
     let restored: ChatbotClient | undefined;
     connector.connect = () => {
-      restored = new ChatbotClient(f.client["skillRegistry"], f.client["logger"], config, emptySkillList());
+      restored = new ChatbotClient(
+        f.client["skillRegistry"],
+        f.client["logger"],
+        config,
+        emptySkillList(),
+      );
       connector["client"] = restored;
       connector["connection"] = connection;
       connector["capabilities"] = { loadSession: true };

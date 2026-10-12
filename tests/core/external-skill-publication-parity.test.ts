@@ -42,7 +42,10 @@ Deno.test("parity - startup-installed external skill is visible to the OpenCode 
     // the SAME observation. The awaited install has completed, so the entry is
     // enumerated with root-exact canonical identity.
     const observation = observeTrustedSkillsRoot("opencode", destination);
-    const opencode = buildSkillAutoApproveList({ agentType: "opencode", rootObservation: observation });
+    const opencode = buildSkillAutoApproveList({
+      agentType: "opencode",
+      rootObservation: observation,
+    });
     assertEquals(
       opencode.scripts.map((s) => s.canonicalPath),
       [`${destination}/create-blog-post/scripts/create-blog-post.ts`],

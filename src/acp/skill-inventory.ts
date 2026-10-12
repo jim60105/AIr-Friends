@@ -28,7 +28,11 @@
 //   identity, or a replaced script identity all deny.
 
 import { SEPARATOR } from "@std/path";
-import { BUNDLED_SKILLS, isValidSkillNameComponent, RESERVED_SKILL_ENTRIES } from "@core/bundled-skills.ts";
+import {
+  BUNDLED_SKILLS,
+  isValidSkillNameComponent,
+  RESERVED_SKILL_ENTRIES,
+} from "@core/bundled-skills.ts";
 import type { SkillsRootObservation } from "@core/skills-root.ts";
 import {
   commandWithoutFdRedirects,
@@ -290,7 +294,8 @@ export function decodeLiteralToken(token: string): string | undefined {
   if (token.length === 0) return undefined;
   const first = token[0];
   const last = token[token.length - 1];
-  const isQuoted = (token.length >= 2) && ((first === "'" && last === "'") || (first === '"' && last === '"'));
+  const isQuoted = (token.length >= 2) &&
+    ((first === "'" && last === "'") || (first === '"' && last === '"'));
   if (isQuoted) {
     const inner = token.slice(1, -1);
     if (first === "'") {

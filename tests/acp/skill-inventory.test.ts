@@ -164,7 +164,7 @@ function decisionCtx(sessionCwd: string | undefined) {
   return { sessionCwd };
 }
 
-Deno.test("matcher - absolute canonical approval; suffix and prefix tricks denied", async () => {
+Deno.test("matcher - absolute canonical approval; suffix and prefix tricks denied", () => {
   const root = makeRoot(["memory-save"]);
   const inv = list("opencode", root);
   const cwd = Deno.realPathSync(Deno.makeTempDirSync({ prefix: "air-cwd-" }));
@@ -226,12 +226,8 @@ Deno.test("matcher - relative anchors ONLY at the registered session cwd", () =>
   Deno.symlinkSync(root, `${cwd}/skills/linked-root`);
   const inv = list("opencode", root);
   try {
-    // Legitimate session-relative invocation (registered cwd inside the tree):
-    // root at cwd itself.
-    const invHere = list("opencode", cwd);
-    // A real relative grant:
+    // A real relative grant anchored at the registered session cwd:
     Deno.mkdirSync(`${cwd}/localskill/scripts`, { recursive: true });
-    Deno.writeTextFileSync(`${cwd}/localskill/localskill`, "");
     Deno.writeTextFileSync(`${cwd}/localskill/scripts/localskill.ts`, "// real");
     const invLocal = list("opencode", cwd);
     assertEquals(

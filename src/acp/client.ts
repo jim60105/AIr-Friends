@@ -48,10 +48,7 @@ import {
   mapRootPathFailureToDenial,
   type TrustedSkillsSource,
 } from "./filesystem-policy.ts";
-import {
-  matchesScriptEntrypoint,
-  type SkillAutoApproveList,
-} from "./skill-inventory.ts";
+import { matchesScriptEntrypoint, type SkillAutoApproveList } from "./skill-inventory.ts";
 
 /**
  * Read-extension allowlist for `readTextFile` (F4). Intentionally BROADER than the
