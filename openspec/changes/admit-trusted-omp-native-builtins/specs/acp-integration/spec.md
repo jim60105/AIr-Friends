@@ -81,7 +81,7 @@ The integration SHALL provide a pure restricted-mode tool decision from tool nam
 - **THEN** authenticated local native read/search SHALL follow native activation/approval and the process's ambient OS permissions under the user's accepted native posture
 - **AND** that native IO SHALL NOT be claimed confined to daemon session/shared/trusted-skills roots or protected by ACP read denial
 - **AND** bash SHALL retain the common command policy and active native permission path
-- **AND** ordinary write/edit SHALL retain restricted ACP filesystem sinks where invoked, with todo state in-session and no new direct mutation authority
+- **AND** ordinary write/edit SHALL dispatch only with its actual restricted ACP sink route established, with todo state in-session and no new direct mutation authority
 
 #### Scenario: Non-table capabilities route to completing decisions
 - **WHEN** delete, move or multi-file patch is presented with compliant provenance
@@ -144,6 +144,16 @@ Every native read/search root constituent SHALL be screened for alternate, remot
 - **WHEN** authentic native bash, ordinary write/edit or destructive input is evaluated
 - **THEN** common-command, restricted sink and complete-destructive authorities SHALL remain unchanged
 - **AND** uncertain targets, device/config writes or alternate bypass shapes SHALL remain fail-closed
+
+#### Scenario: Native sink exemptions cannot gain mutation authority
+- **WHEN** an ordinary-looking absolute path resolves to a native session sandbox/plan exemption, or the native bridge/capability is unavailable
+- **THEN** the mutation SHALL deny before native dispatch unless an authorized completing sink route is established
+- **AND** internal-URI screening alone SHALL NOT prove that route
+
+#### Scenario: Unsupported mutation-route evidence fails closed
+- **WHEN** the supported native extension surface cannot establish full resolved-target sink routing and no direct-mutation fallback
+- **THEN** ordinary mutation SHALL deny with zero native mutation
+- **AND** the proposal/application status SHALL report the concrete unsupported producer, not claim completed write capability from a synthetic fixture
 
 ### Requirement: Native Registry Observation Uses the Supported Runtime Surface
 

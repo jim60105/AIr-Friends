@@ -1,6 +1,6 @@
 # Tasks
 
-Maximum implementation budget: 8h. User decision accepts native local read/search under approval and ambient OS permissions; there is no protected-IO broker prerequisite or denied-only substitute. Keep deployment18.6.1; inspected18.10.3 supplies no fix. Apply before the module-evidence writer for shared registration/provenance serialization.
+Maximum implementation budget: 8h after its supported mutation-route prerequisite is supplied. User decision accepts native local read/search under approval and ambient OS permissions; there is no protected-read broker prerequisite or denied-only substitute. Full ordinary mutation restoration is application-BLOCKED as specified in proposal/design, not silently narrowed to denial. Keep deployment18.6.1 absent a separately justified selected interface/version. Apply before the module-evidence writer for shared registration/provenance serialization.
 
 ## 1. Authentic live builtin source admission (2h)
 
@@ -12,7 +12,7 @@ Maximum implementation budget: 8h. User decision accepts native local read/searc
 
 - [ ] 2.1 Change read/search-class inventory completion to truthful native-local activation/approval/ambient OS authority while leaving protected ACP callbacks and command/write/destructive policies unchanged; verify authentic local grep/glob/available-find dispatch and no fabricated session canonicalTarget or confinement promise.
 - [ ] 2.2 Decode every real read/grep/glob/find path/root-list constituent, native default/selector form and collapsed/internal scheme before local dispatch; verify mixed local/HTTP(S)/SSH/xd/device/alternate roots deny as a whole before scan/materialization, while valid local patterns containing URI-like text remain usable.
-- [ ] 2.3 Preserve completing ACP bash and ordinary write/edit route checks plus destructive completeness denial; verify full command reaches common policy, ordinary sink denials do not gain a new bypass and unrepresentable destructive/alternate targets deny; document native local versus ACP callback-only authority in OMP_TOOL_POLICY.
+- [ ] 2.3 Consume the application prerequisite's actual supported mutation-route producer and require complete resolved-target sink-required dispatch; verify absolute native sandbox/plan targets, canonical aliases, missing bridge and stale/unrepresentable evidence deny with zero native mutation, while valid ordinary ACP write and sink denial exercise the real supported producer without fallback; preserve full-command common policy and destructive denial, documenting the native-local/ACP split in OMP_TOOL_POLICY.
 
 ## 3. Supported owned settings (1h)
 
@@ -21,7 +21,7 @@ Maximum implementation budget: 8h. User decision accepts native local read/searc
 
 ## 4. Focused production-shaped admission coverage (2h)
 
-- [ ] 4.1 Extend native registration/composition fixtures with pinned producer metadata and real native inputs for local builtin search, ACP command/write paths, source replacement and complete multi-root screening; verify no synthetic API/canonical session grants or blanket SDK allow.
+- [ ] 4.1 Extend native registration/composition fixtures with pinned producer metadata and real native inputs for local builtin search, ACP command paths, source replacement and complete multi-root screening; add absolute native sandbox/missing-bridge mutation denial and successful ordinary write only against the supplied supported route contract, verifying no invented API/canonical session grants or blanket SDK allow.
 - [ ] 4.2 Add cases for direct native read fallback as accepted local behavior rather than protected callback evidence, and owned local read's unchanged same-tool delegation once the successor supplies physical module admission; verify remote read/search and native network fallback remain blocked, with all real runtime results UNVERIFIED.
 - [ ] 4.3 Run focused provenance/inventory/native-registration/settings/alternate-route tests once after all implementation edits land; verify YOLO no registration, OpenCode unchanged, cancelled readiness, LSP scope and existing sandbox/egress assertions without official runtime/container/provider acceptance.
 
