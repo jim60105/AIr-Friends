@@ -2,6 +2,7 @@
 
 import { assertEquals, assertStringIncludes } from "@std/assert";
 import { FakeTime } from "@std/testing/time";
+import { resolve } from "@std/path";
 import { ContextAssembler } from "../../src/core/context-assembler.ts";
 import { MemoryStore } from "../../src/core/memory-store.ts";
 import { WorkspaceManager } from "../../src/core/workspace-manager.ts";
@@ -25,6 +26,16 @@ import type {
 import type { MemoryTier } from "../../src/types/memory.ts";
 import type { PlatformEmoji } from "../../src/types/platform.ts";
 import type { WorkspaceInfo } from "../../src/types/workspace.ts";
+
+/**
+ * The ONE deployment-resolved skill-script root
+ * (`unify-skill-root-and-inventory`): the repository `skills/` tree, i.e. what
+ * `agent.skillsDir` (default `"skills"`) resolves to for BOTH agent types. It
+ * is the required `skillsDir` render input these fixtures supply.
+ */
+const RESOLVED_SKILLS_ROOT = Deno.realPathSync(
+  resolve(import.meta.dirname ?? ".", "../../skills"),
+);
 
 function createTestMessage(overrides: Partial<PlatformMessage> = {}): PlatformMessage {
   return {
@@ -103,7 +114,7 @@ async function withTestContextAssembler(
         recentMessageLimit: 20,
         tokenLimit: 20000,
         systemPromptPath: `${tempDir}/prompts/system_reply.md`,
-        skillsDir: "/opt/air/skills", // trusted skill-script root (required render input)
+        skillsDir: RESOLVED_SKILLS_ROOT, // trusted skill-script root (required render input)
         ...(overrides.recall !== undefined ? { recall: overrides.recall } : {}),
       },
       manager,
@@ -377,7 +388,7 @@ Deno.test("ContextAssembler - should remove oldest messages when exceeding token
       recentMessageLimit: 20,
       tokenLimit: 500, // Very small limit to trigger truncation
       systemPromptPath: `${tempDir}/prompts/system_reply.md`,
-      skillsDir: "/opt/air/skills", // trusted skill-script root (required render input)
+      skillsDir: RESOLVED_SKILLS_ROOT, // trusted skill-script root (required render input)
     });
 
     const event = createTestEvent();
@@ -998,7 +1009,7 @@ Deno.test("F15 - channel memories render as attributed, untrusted notes (not Cha
     recentMessageLimit: 20,
     tokenLimit: 20000,
     systemPromptPath: "/tmp/does-not-exist.md",
-    skillsDir: "/opt/air/skills", // trusted skill-script root (required render input)
+    skillsDir: RESOLVED_SKILLS_ROOT, // trusted skill-script root (required render input)
   });
 
   // deno-lint-ignore no-explicit-any
@@ -1877,7 +1888,7 @@ async function withLimitedAssembler(
       recentMessageLimit: 20,
       tokenLimit,
       systemPromptPath: `${tempDir}/prompts/system_reply.md`,
-      skillsDir: "/opt/air/skills", // trusted skill-script root (required render input)
+      skillsDir: RESOLVED_SKILLS_ROOT, // trusted skill-script root (required render input)
     });
     await fn(assembler, manager);
   } finally {

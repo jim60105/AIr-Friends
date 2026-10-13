@@ -299,14 +299,16 @@ export class AgentConnector {
     // strictly AFTER the settings check (settings first, executable second).
     this.verifyOmpExecutableSourcesBeforeRequest(agentConfig.cwd);
 
-    // MANDATORY root-exact inventory (`unify-omp-skill-root-resolution` D1/D3,
-    // post-implementation review B6): built BEFORE the subprocess exists. The
-    // trusted root is the canonical observation the factory resolved for THIS
-    // connector's selected agent type; a launch without it — or whose root
-    // cannot be enumerated — fails connect() explicitly with ZERO processes
-    // spawned, and no observation between spawn and the initialization
-    // try/catch can orphan a child. The connector NEVER re-discovers a root
-    // (no HOME, no `Deno.cwd()/skills`, no alternate observation).
+    // MANDATORY root-exact inventory (`unify-skill-root-and-inventory` D2/D4,
+    // generalizing `unify-omp-skill-root-resolution` D1/D3, post-implementation
+    // review B6): built BEFORE the subprocess exists. The trusted root is the
+    // canonical observation the factory resolved for the deployment — the SAME
+    // one both agent types resolve — and the inventory carries no agent-type
+    // selector. A launch without it — or whose root cannot be enumerated —
+    // fails connect() explicitly with ZERO processes spawned, and no
+    // observation between spawn and the initialization try/catch can orphan a
+    // child. The connector NEVER re-discovers a root (no HOME, no
+    // `Deno.cwd()/skills`, no alternate observation).
     const skillsRoot = agentConfig.skillsRoot;
     if (skillsRoot === undefined) {
       throw new Error(
@@ -316,7 +318,6 @@ export class AgentConnector {
       );
     }
     const autoApproveList = buildSkillAutoApproveList({
-      agentType: this.options.agentType,
       rootObservation: skillsRoot,
       configuredSkills: clientConfig.autoApproveSkills,
     });

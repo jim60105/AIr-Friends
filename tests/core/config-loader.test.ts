@@ -6,7 +6,7 @@ import { ConfigError } from "../../src/types/errors.ts";
 import { ErrorCode } from "../../src/types/errors.ts";
 import { getDefaultAgentType } from "../../src/acp/agent-factory.ts";
 import type { TemplateVariables } from "../../src/types/template.ts";
-import { join } from "@std/path";
+import { join, resolve } from "@std/path";
 
 const defaultVars: TemplateVariables = {
   isDm: false,
@@ -14,9 +14,10 @@ const defaultVars: TemplateVariables = {
   userId: "user123",
   channelId: "channel456",
   guildId: "guild789",
-  // Trusted skill-script root is a mandatory render input
-  // (`repair-omp-owned-skill-handoff`); tests use a fixed absolute root.
-  skillsDir: "/opt/air/skills",
+  // Trusted skill-script root is a mandatory render input; the fixture is the
+  // ONE deployment-resolved root (`unify-skill-root-and-inventory`) — the
+  // repository `skills/` tree that the default `"skills"` value resolves to.
+  skillsDir: Deno.realPathSync(resolve(import.meta.dirname ?? ".", "../../skills")),
 };
 
 // Test with a temporary directory containing test config files

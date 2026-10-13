@@ -5,9 +5,6 @@
 // discovered from an installed (agent-writable) tree, and it is the single list
 // consumed by:
 //
-// - OMP script-inventory selection (an OMP inventory never admits a name the
-//   catalog does not carry, regardless of what is physically present under the
-//   selected root — a shared development root cannot expand OMP eligibility);
 // - external-skill installation collision protection (a published external
 //   skill may never take the name of a bundled skill or the reserved shared
 //   `lib` content);
@@ -17,7 +14,10 @@
 //
 // Runtime-added/installed names NEVER amend this catalog; a source parity
 // fixture (`tests/core/bundled-skills.test.ts`) keeps it aligned with the
-// authored `skills/` directories.
+// authored `skills/` directories. The catalog no longer bounds script
+// auto-approval (`unify-skill-root-and-inventory`): BOTH agent types enumerate
+// the one resolved skill root by observation, so a runtime-installed external
+// skill is eligible for either of them.
 
 /** The authored bundled skill names (excludes the reserved `lib` content). */
 export const BUNDLED_SKILLS: readonly string[] = Object.freeze(

@@ -484,30 +484,32 @@ OpenCode uses Layer 2 (`opencode.json`) for most permissions, but delegates edit
 
 ## Skill Auto-Approve List (Root-Exact Inventory)
 
-The skill auto-approve list determines which bash commands are automatically approved at Layer 3 in restricted mode. Since `unify-omp-skill-root-resolution` it is a **root-exact physical inventory** (`SkillAutoApproveList`, `src/acp/skill-inventory.ts`) built over ONE observed trusted skill-script root per agent — never a set of path suffixes, never a HOME-global or daemon-cwd scan. It contains two categories:
+The skill auto-approve list determines which bash commands are automatically approved at Layer 3 in restricted mode. Since `unify-omp-skill-root-resolution` it is a **root-exact physical inventory** (`SkillAutoApproveList`, `src/acp/skill-inventory.ts`) built over the ONE observed trusted skill-script root shared by BOTH agent types (`unify-skill-root-and-inventory`) — never a set of path suffixes, never a HOME-global or daemon-cwd scan, and never a per-agent tree. It contains two categories:
 
 ### Trusted Root Matrix
 
-| Deployment shape | OMP root                                                             | OpenCode root                                                                            |
-| ---------------- | -------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
-| Container image  | `/opt/air/skills` (root-owned, staged from the bundled catalog only) | `agent.skillsDir` — stock image/Helm: `/home/deno/.agents/skills`                        |
-| Development      | the repository's own `skills/` tree (validated source root)          | `agent.skillsDir` relative to the daemon/deployment working directory (default `skills`) |
+| Deployment shape | Resolved root (`agent.skillsDir` / `AGENT_SKILLS_DIR`) — BOTH agent types     |
+| ---------------- | ---------------------------------------------------------------------------- |
+| Container image  | `/home/deno/.agents/skills` (the stock image and Helm declaration)            |
+| Development      | the repository's own `skills/` tree (`skills` relative to the deployment cwd) |
+| Custom           | the configured absolute directory, used exactly as given                      |
 
-The root comes from `observeTrustedSkillsRoot()` (`src/core/skills-root.ts`): the CANONICAL (realpath) spelling of the validated selection plus its `dev`/`ino` identity, resolved once by the actual selected agent before subprocess creation and carried as the mandatory internal `skillsDir` through connector/client, factory/sandbox mounts, prompt rendering and readiness. The agent child's HOME is NEVER consulted and an absent/unobservable root is an explicit `ConfigError`, never a fallback tree. The same observation feeds the render identity: prompt/retry `skillsDir`, the connector inventory root, the read-only skill mount and the readiness root are the SAME path.
+`agentType` never selects the root (`unify-skill-root-and-inventory`): there is no image-first OMP branch, no validated development fallback for one agent alone, and no second tree. `/opt/air/skills` remains only the OMP owned-settings *declaration* (see `docs/OMP_SETTINGS.md`), not this script root.
+
+The root comes from `observeTrustedSkillsRoot()` (`src/core/skills-root.ts`): the CANONICAL (realpath) spelling of the validated selection plus its `dev`/`ino` identity, resolved once per connector before subprocess creation and carried as the mandatory internal `skillsDir` through connector/client, factory/sandbox mounts, prompt rendering and readiness. The agent child's HOME is NEVER consulted and an absent/unobservable root is an explicit `ConfigError`, never a fallback tree. The same observation feeds the render identity: prompt/retry `skillsDir`, the connector inventory root, the read-only skill mount and the readiness root are the SAME path.
 
 ### Script Grants
 
 Each grant is the **canonical absolute regular-file path** of an enumerated `scripts/*.ts` inside that root, recorded with its `dev`/`ino` identity. Enumeration scans ONLY the explicit root:
 
-- **OpenCode**: installed-root discovery — every well-formed skill directory under the resolved root (built-ins and explicitly published external installations share the tree).
-- **OMP**: the bundled skill catalog (`BUNDLED_SKILLS` in `src/core/bundled-skills.ts`) INSIDE the resolved root only. A skill name outside the catalog — including one physically installed in the tree — is never enumerated, and the configured list can only filter the catalog, never expand it. The reserved `lib` entry is never scannable as a skill.
+- **Both agent types**: installed-root discovery — every well-formed skill directory under the resolved root (built-ins and explicitly published external installations share the tree). Neither agent type restricts eligibility to an authored name catalog, and the configured list can only filter observed entries, never expand them. The reserved `lib` entry is never scannable as a skill, and enumeration remains limited to `scripts/*.ts` with `deno` as the sole allowlisted interpreter.
 
 `agent.autoApproveSkills` / `AGENT_AUTO_APPROVE_SKILLS`, when nonempty, FILTERS observed skill names within that root; a configured name that is not physically present there grants NOTHING (the old absent-skill-to-command-prefix promotion is removed). An invalid skill-name component (traversal, separator, empty) is rejected at configuration time.
 
 A command is approved when the segment's actual entrypoint — located through the safe shell tokenizer, after the `deno run`/interpreter flags (ONLY permission/quality flags from a safety allow-list — `--allow-*`, `-A`, `--quiet`, `--no-check`, `--no-lock`, `-r` — are skipped; ANY other flag, e.g. `--preload`, `--import`, `--config`, `--v8-flags`, denies fail-closed, because such a flag can change WHICH module executes while the grant token still looks like the entrypoint), quoted literals decoded fail-closed — canonically resolves (relative spellings ONLY against the requesting registered session cwd; an unregistered session has no relative anchor) to EXACTLY one enumerated grant, with decision-time rechecks:
 
 - the recorded root still exists with its recorded identity (a REPLACED root — remove-and-recreate — denies every grant),
-- the resolved target is physically contained in that root (boundary-safe prefix; a sibling-prefix root like `/opt/air/skills-evil/...` denies), and
+- the resolved target is physically contained in that root (boundary-safe prefix; a sibling-prefix root like `/srv/deploy/skills-evil/...` denies), and
 - the target identity matches the enumerated entry.
 
 Consequences that the old suffix matcher allowed and these checks deny: same-suffix planted copies at any absolute or session-relative spelling, alternate-HOME or other-agent roots, trailing-content variants, slashless direct-exec aliases, and module-changing `deno run` flags. Physical `..` spellings that resolve INTO a real grant approve ONLY when the path's lexical normalization lands on the same file — a `..` spelling whose lexical and physical targets diverge (e.g. `jump/../skill/scripts/x.ts` where `jump` is a symlink INTO the grant and a planted regular file sits at the lexical landing point) denies fail-closed, because Deno's module loader executes the LEXICAL target while only the kernel follows the physical path. Laundering via interpreter tricks (`cat grant`, `python grant`) and non-`deno run` subcommands (`deno task run`, `deno eval`) deny.
@@ -520,7 +522,7 @@ Observed command-based skills — those WITHOUT a `scripts/` directory (e.g., `a
 
 The ChatbotClient takes the inventory as a MANDATORY constructor argument; there is no implicit `Deno.cwd()/skills` default anymore — direct callers/tests must build one explicitly.
 
-**Reference**: `src/acp/skill-inventory.ts` (`buildSkillAutoApproveList`, `matchesScriptEntrypoint`), `src/core/skills-root.ts`, `src/core/bundled-skills.ts`, `src/acp/client.ts`
+**Reference**: `src/acp/skill-inventory.ts` (`buildSkillAutoApproveList`, `matchesScriptEntrypoint`), `src/core/skills-root.ts`, `src/acp/client.ts`
 
 ### Shell Injection Protection
 
@@ -696,7 +698,7 @@ audit:
 | `AGENT_SANDBOX_ALLOWED_ENV_VARS`         | `agent.sandbox.allowedEnvVars`         | Comma-separated list                                                                                                                                |
 | `AGENT_SANDBOX_ALLOWED_WRITE_EXTENSIONS` | `agent.sandbox.allowedWriteExtensions` | Comma-separated list                                                                                                                                |
 | `AGENT_AUTO_APPROVE_SKILLS`              | `agent.autoApproveSkills`              | Comma-separated name FILTER over the resolved root                                                                                                  |
-| `AGENT_SKILLS_DIR`                       | `agent.skillsDir`                      | OpenCode installed-root declaration (container: `/home/deno/.agents/skills`); relative values anchor at the deployment cwd; never consulted for OMP |
+| `AGENT_SKILLS_DIR`                       | `agent.skillsDir`                      | The ONE shared trusted skill-script root and external-install destination for BOTH agent types (container/Helm: `/home/deno/.agents/skills`; default `skills`); relative values anchor at the deployment cwd |
 | `AGENT_OPENCODE_MIN_VERSION`             | — (observability only)                 | Minimum OpenCode version for the bootstrap check (default `1.17.13`)                                                                                |
 
 ### Permission Rejection Feedback (Retry Prompt)

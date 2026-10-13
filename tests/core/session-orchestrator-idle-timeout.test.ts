@@ -11,6 +11,16 @@ import { SkillRegistry } from "@skills/registry.ts";
 import { SessionRegistry } from "../../src/skill-api/session-registry.ts";
 import type { Config } from "../../src/types/config.ts";
 import type { AgentConnectorOptions } from "@acp/types.ts";
+import { resolve } from "@std/path";
+
+/**
+ * The ONE deployment-resolved skill-script root
+ * (`unify-skill-root-and-inventory`): the repository `skills/` tree — what
+ * `agent.skillsDir` (default `"skills"`) resolves to for BOTH agent types.
+ */
+const RESOLVED_SKILLS_ROOT = Deno.realPathSync(
+  resolve(import.meta.dirname ?? ".", "../../skills"),
+);
 
 /**
  * Test suite for SessionOrchestrator.promptWithIdleTimeoutHandling()
@@ -97,7 +107,7 @@ function createTestOrchestrator(): { orchestrator: TestableOrchestrator; cleanup
   const skillRegistry = new SkillRegistry(memoryStore);
   const contextAssembler = new ContextAssembler(memoryStore, {
     systemPromptPath: config.agent.systemPromptPath,
-    skillsDir: "/opt/air/skills", // trusted skill-script root (required render input)
+    skillsDir: RESOLVED_SKILLS_ROOT, // trusted skill-script root (required render input)
     recentMessageLimit: config.memory.recentMessageLimit,
     tokenLimit: config.agent.tokenLimit,
   });

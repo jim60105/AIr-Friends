@@ -182,15 +182,18 @@ export async function bootstrap(
   }
 
   // Install external skills before agent core initialization, into the ONE
-  // explicit OpenCode installed destination (`unify-omp-skill-root-resolution`
-  // D5): the resolver's OpenCode root — the same tree the OpenCode inventory
-  // scans. An unresolvable destination fails startup EXPLICITLY before any
-  // install attempt (never a silent HOME fallback); the awaited completion
-  // guarantees publication strictly BEFORE the first connector inventory is
-  // ever constructed. OMP's inventory stays restricted to its own selected
-  // root regardless of what lands here.
+  // deployment-resolved skill root (`unify-skill-root-and-inventory` D3): the
+  // same root BOTH agent types resolve, so built-ins, runtime-installed
+  // external skills and either agent type share one tree and one inventory.
+  // An unresolvable destination fails startup EXPLICITLY before any install
+  // attempt (never a silent HOME fallback); the awaited completion guarantees
+  // publication strictly BEFORE the first connector inventory is ever
+  // constructed.
   if (config.agent.externalSkills && config.agent.externalSkills.length > 0) {
-    const installDestination = resolveTrustedSkillsRoot("opencode", config.agent.skillsDir);
+    const installDestination = resolveTrustedSkillsRoot(
+      getDefaultAgentType(config),
+      config.agent.skillsDir,
+    );
     await installExternalSkills(installDestination, config.agent.externalSkills);
   }
 

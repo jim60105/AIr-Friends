@@ -70,7 +70,6 @@ function createRegisteredClient(
 function emptySkillList(): SkillAutoApproveList {
   const root = Deno.makeTempDirSync({ prefix: "air-empty-skills-" });
   return buildSkillAutoApproveList({
-    agentType: "opencode",
     rootObservation: observeTrustedSkillsRoot("opencode", root),
   });
 }
@@ -83,7 +82,6 @@ function prefixSkillList(prefixes: string[]): SkillAutoApproveList {
     Deno.writeTextFileSync(`${root}/${prefix}/SKILL.md`, "# command skill");
   }
   return buildSkillAutoApproveList({
-    agentType: "opencode",
     rootObservation: observeTrustedSkillsRoot("opencode", root),
   });
 }
@@ -122,7 +120,6 @@ function skillFixtureIn(
   return {
     root,
     list: buildSkillAutoApproveList({
-      agentType: "opencode",
       rootObservation: observeTrustedSkillsRoot("opencode", root),
     }),
   };
@@ -6932,7 +6929,6 @@ Deno.test("root-exact - linked skill directories are never enumerated, linked sp
     Deno.mkdirSync(`${root}/memory-save/scripts`, { recursive: true });
     Deno.writeTextFileSync(`${root}/memory-save/scripts/memory-save.ts`, "// real");
     const list = buildSkillAutoApproveList({
-      agentType: "opencode",
       rootObservation: observeTrustedSkillsRoot("opencode", root),
     });
     assertEquals(
@@ -6963,7 +6959,6 @@ Deno.test("root-exact - denies after the observed root is REPLACED", async () =>
     Deno.mkdirSync(`${root}/memory-save/scripts`, { recursive: true });
     Deno.writeTextFileSync(`${root}/memory-save/scripts/memory-save.ts`, "// real");
     const list = buildSkillAutoApproveList({
-      agentType: "opencode",
       rootObservation: observeTrustedSkillsRoot("opencode", root),
     });
     const client = createRegisteredClient(createTestSkillRegistry(), createTestLogger(), {

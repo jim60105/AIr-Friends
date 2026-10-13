@@ -211,13 +211,13 @@ export class SessionOrchestrator {
    */
   private processPool: AgentProcessPool | null;
   /**
-   * The daemon-owned trusted skill-script root (`repair-omp-owned-skill-handoff`
-   * D1), resolved once against the deployment's agent identity ( omp image root
-   * when present, otherwise the configured OpenCode `skillsDir`) and reused by
-   * every skill-instructing render and the retry builder. Resolution happens
+   * The daemon-owned trusted skill-script root
+   * (`unify-skill-root-and-inventory` D1), resolved once from the deployment's
+   * single configured `agent.skillsDir` value for BOTH agent types and reused
+   * by every skill-instructing render and the retry builder. Resolution happens
    * lazily inside the session-scoped try/catch of each caller, so an
    * unresolvable root surfaces as an explicit session error — never a
-   * child-HOME fallback.
+   * child-HOME or image-tree fallback.
    */
   private trustedSkillsDirCache: string | null = null;
 

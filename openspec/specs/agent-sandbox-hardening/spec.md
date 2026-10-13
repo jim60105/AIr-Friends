@@ -569,34 +569,39 @@ When filesystem confinement is enabled (`sandbox.filesystemConfinement`), the ag
 - **THEN** the operator SHALL follow the chain documented in `docs/AGENT_PERMISSIONS.md` and `helm/values.yaml` (established empirically on Talos 1.7.2 / K8s 1.30 / containerd 1.7)
 - **AND** clusters that cannot satisfy the chain SHALL keep `filesystemConfinement` disabled and rely on the always-on protections
 
-### Requirement: Resolved Skill Tree Has Read-Only Runtime Visibility
+### Requirement: Shared Resolved Skill Tree Has Read-Only Runtime Visibility
 
-Filesystem confinement SHALL expose the selected agent's resolved skill tree at that same absolute path as a read-only runtime mount. Skill mounting SHALL consume the explicit deployment input rather than rediscover a tree from HOME or session cwd. Legitimate OpenCode container access under `/home/deno/.agents` SHALL remain read-only. A mount SHALL NOT grant script auto-approval, OMP owned provenance or workspace write permission.
+Filesystem confinement SHALL expose the single resolved skill tree at that same absolute path as a read-only runtime mount for either agent type. Skill mounting SHALL consume the explicit deployment input rather than rediscover a tree from HOME or session cwd. Legitimate container access under `/home/deno/.agents` SHALL remain read-only. A mount SHALL NOT grant script auto-approval, owned provenance or workspace write permission.
 
 #### Scenario: OpenCode container personal installation remains accessible
-- **GIVEN** OpenCode's resolved install root is `/home/deno/.agents/skills`
-- **WHEN** its confinement arguments are constructed
+
+- **GIVEN** the resolved install root is `/home/deno/.agents/skills`
+- **WHEN** confinement arguments are constructed
 - **THEN** the existing legitimate `/home/deno/.agents` read-only visibility SHALL remain available
 - **AND** the installed skill tree SHALL appear at its exact resolved path without a writable mount
 
-#### Scenario: OMP owned root is exposed without trusting personal skills
-- **GIVEN** OMP's resolved root is `/opt/air/skills`
-- **WHEN** its confinement arguments are constructed
-- **THEN** that tree SHALL be mounted read-only
-- **AND** personal-tree presence SHALL NOT add an OMP script grant
+#### Scenario: The single resolved root is exposed for either agent type
+
+- **GIVEN** the deployment resolved one skill root
+- **WHEN** confinement arguments are constructed for an `opencode` session and for an `omp` session
+- **THEN** both SHALL expose that same root read-only at its literal path
+- **AND** no separately packaged skill tree SHALL be mounted or privileged for either agent type
 
 #### Scenario: Development and custom install roots are exposed literally
+
 - **GIVEN** the selected root is the repository development tree or an explicitly configured custom directory
 - **WHEN** confinement arguments are constructed
 - **THEN** that exact resolved directory SHALL be exposed read-only
 - **AND** writable workspace/runtime grants SHALL remain unchanged and SHALL NOT override the skill tree's read-only visibility
 
 #### Scenario: Equal or enclosing skill root cannot replace mandatory writable grants
+
 - **GIVEN** the canonical skill root equals or contains a mandatory writable workspace, TMPDIR, shared workspace or runtime mount
 - **WHEN** confinement is prepared
 - **THEN** preparation SHALL fail before spawn instead of making skills writable or silently making mandatory runtime state read-only
 
 #### Scenario: Child skill tree is mounted after a writable parent
+
 - **GIVEN** the skill tree is a child of a writable mounted parent and contains no mandatory writable descendants
 - **WHEN** confinement arguments are constructed
 - **THEN** its read-only bind SHALL occur after that parent bind

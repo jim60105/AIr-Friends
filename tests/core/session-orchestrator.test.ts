@@ -24,7 +24,18 @@ import type { AgentConnector } from "../../src/acp/agent-connector.ts";
 import { GateContextRestoreError, RecoveryHookError } from "../../src/acp/agent-connector.ts";
 import { RecoveryOwnershipError } from "../../src/acp/recovery-ownership.ts";
 import type { PromptResponse } from "npm:@agentclientprotocol/sdk@^0.14.1";
-import { dirname, join } from "@std/path";
+import { dirname, join, resolve } from "@std/path";
+
+/**
+ * The ONE deployment-resolved skill-script root
+ * (`unify-skill-root-and-inventory`): the repository `skills/` tree, i.e. what
+ * `agent.skillsDir` (default `"skills"`) resolves to for BOTH agent types — the
+ * same tree the orchestrator's own `trustedSkillsDir()` resolves and mounts, so
+ * the rendered root and the mounted tree are one value.
+ */
+const RESOLVED_SKILLS_ROOT = Deno.realPathSync(
+  resolve(import.meta.dirname ?? ".", "../../skills"),
+);
 
 // Mock PlatformAdapter
 class MockPlatformAdapter implements Partial<PlatformAdapter> {
@@ -152,7 +163,7 @@ Deno.test("SessionOrchestrator - constructs successfully", async () => {
     const skillRegistry = new SkillRegistry(memoryStore);
     const contextAssembler = new ContextAssembler(memoryStore, {
       systemPromptPath: config.agent.systemPromptPath,
-      skillsDir: "/opt/air/skills", // trusted skill-script root (required render input)
+      skillsDir: RESOLVED_SKILLS_ROOT, // trusted skill-script root (required render input)
       recentMessageLimit: config.memory.recentMessageLimit,
       tokenLimit: config.agent.tokenLimit,
     });
@@ -196,7 +207,7 @@ Deno.test("SessionOrchestrator - processMessage creates workspace", async () => 
 
     const contextAssembler = new ContextAssembler(memoryStore, {
       systemPromptPath: `${tempDir}/prompts/system_reply.md`,
-      skillsDir: "/opt/air/skills", // trusted skill-script root (required render input)
+      skillsDir: RESOLVED_SKILLS_ROOT, // trusted skill-script root (required render input)
       recentMessageLimit: config.memory.recentMessageLimit,
       tokenLimit: config.agent.tokenLimit,
     });
@@ -260,7 +271,7 @@ Deno.test("SessionOrchestrator - a mounted classified template without the root 
     assertEquals(response.success, false);
     assertExists(response.error);
     assertStringIncludes(response.error, "skill-script root");
-    assertStringIncludes(response.error, "/opt/air/skills");
+    assertStringIncludes(response.error, RESOLVED_SKILLS_ROOT);
     // The fail-closed boundary sits BEFORE connector creation: nothing was
     // prompted and no delivery attempt was made.
     assertEquals(orchestrator.mockConnector, null);
@@ -345,7 +356,7 @@ Deno.test("SessionOrchestrator - skips agent execution for /clear command", asyn
 
     const contextAssembler = new ContextAssembler(memoryStore, {
       systemPromptPath: `${tempDir}/prompts/system_reply.md`,
-      skillsDir: "/opt/air/skills", // trusted skill-script root (required render input)
+      skillsDir: RESOLVED_SKILLS_ROOT, // trusted skill-script root (required render input)
       recentMessageLimit: config.memory.recentMessageLimit,
       tokenLimit: config.agent.tokenLimit,
     });
@@ -405,7 +416,7 @@ Deno.test("SessionOrchestrator - handles /clear with leading whitespace", async 
 
     const contextAssembler = new ContextAssembler(memoryStore, {
       systemPromptPath: `${tempDir}/prompts/system_reply.md`,
-      skillsDir: "/opt/air/skills", // trusted skill-script root (required render input)
+      skillsDir: RESOLVED_SKILLS_ROOT, // trusted skill-script root (required render input)
       recentMessageLimit: config.memory.recentMessageLimit,
       tokenLimit: config.agent.tokenLimit,
     });
@@ -456,7 +467,7 @@ Deno.test("SessionOrchestrator - processMessage handles agent failure gracefully
 
     const contextAssembler = new ContextAssembler(memoryStore, {
       systemPromptPath: `${tempDir}/prompts/system_reply.md`,
-      skillsDir: "/opt/air/skills", // trusted skill-script root (required render input)
+      skillsDir: RESOLVED_SKILLS_ROOT, // trusted skill-script root (required render input)
       recentMessageLimit: config.memory.recentMessageLimit,
       tokenLimit: config.agent.tokenLimit,
     });
@@ -809,7 +820,7 @@ Skill root: {{ skillsDir }}`,
 
   const contextAssembler = new ContextAssembler(memoryStore, {
     systemPromptPath: `${tempDir}/prompts/system_reply.md`,
-    skillsDir: "/opt/air/skills", // trusted skill-script root (required render input)
+    skillsDir: RESOLVED_SKILLS_ROOT, // trusted skill-script root (required render input)
     recentMessageLimit: config.memory.recentMessageLimit,
     tokenLimit: config.agent.tokenLimit,
   });
@@ -1532,7 +1543,7 @@ Deno.test("SessionOrchestrator - processSpontaneousPost with skillApi disabled",
 
     const contextAssembler = new ContextAssembler(memoryStore, {
       systemPromptPath: `${tempDir}/prompts/system_reply.md`,
-      skillsDir: "/opt/air/skills", // trusted skill-script root (required render input)
+      skillsDir: RESOLVED_SKILLS_ROOT, // trusted skill-script root (required render input)
       recentMessageLimit: config.memory.recentMessageLimit,
       tokenLimit: config.agent.tokenLimit,
     });
@@ -1788,7 +1799,7 @@ Deno.test("SessionOrchestrator - processSelfResearch handles agent connection fa
 
     const contextAssembler = new ContextAssembler(memoryStore, {
       systemPromptPath: `${tempDir}/prompts/system_reply.md`,
-      skillsDir: "/opt/air/skills", // trusted skill-script root (required render input)
+      skillsDir: RESOLVED_SKILLS_ROOT, // trusted skill-script root (required render input)
       recentMessageLimit: config.memory.recentMessageLimit,
       tokenLimit: config.agent.tokenLimit,
     });
@@ -2404,7 +2415,7 @@ Deno.test("SessionOrchestrator - processMemoryMaintenance handles agent connecti
 
     const contextAssembler = new ContextAssembler(memoryStore, {
       systemPromptPath: `${tempDir}/prompts/system_reply.md`,
-      skillsDir: "/opt/air/skills", // trusted skill-script root (required render input)
+      skillsDir: RESOLVED_SKILLS_ROOT, // trusted skill-script root (required render input)
       recentMessageLimit: config.memory.recentMessageLimit,
       tokenLimit: config.agent.tokenLimit,
     });

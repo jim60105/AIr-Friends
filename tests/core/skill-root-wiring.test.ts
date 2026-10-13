@@ -5,23 +5,21 @@
 // == skill mount == readiness root, for the repository-development shape
 // (real filesystem, real factory/connector/sandbox/healthcheck code paths).
 //
-// The container shapes (OMP image `/opt/air/skills`, OpenCode image
-// `/home/deno/.agents/skills`) are covered by the resolver suite
-// (`tests/core/skills-root.test.ts` — image-first selection + canonical
-// observation through its injectable seams), the confinement suite
-// (literal-path ro mounts for both image roots) and the packaging suite;
-// a real container/bwrap acceptance run remains USER-OWNED and UNVERIFIED.
-// The synthetic positives below are honestly labeled: they capture that the
-// REAL consumers compose the SAME observation, not that a container exists.
+// The container shape (the stock image's configured
+// `/home/deno/.agents/skills`, shared by BOTH agent types since
+// `unify-skill-root-and-inventory`) is covered by the resolver suite
+// (`tests/core/skills-root.test.ts` — the one configured-root selection +
+// canonical observation through its injectable seams), the confinement suite
+// (literal-path ro mounts) and the packaging suite; a real container/bwrap
+// acceptance run remains USER-OWNED and UNVERIFIED. The synthetic positives
+// below are honestly labeled: they capture that the REAL consumers compose the
+// SAME observation, not that a container exists.
 
 import { assertEquals } from "@std/assert";
 import { createAgentConfig, getDefaultAgentType } from "@acp/agent-factory.ts";
 import { buildSkillAutoApproveList, matchesScriptEntrypoint } from "@acp/skill-inventory.ts";
-import {
-  DEV_SOURCE_SKILLS_ROOT,
-  observeTrustedSkillsRoot,
-  resolveTrustedSkillsRoot,
-} from "@core/skills-root.ts";
+import { observeTrustedSkillsRoot, resolveTrustedSkillsRoot } from "@core/skills-root.ts";
+import { resolve } from "@std/path";
 import { SandboxManager } from "../../src/acp/sandbox-manager.ts";
 import { HealthCheckServer } from "../../src/healthcheck.ts";
 import type { Config } from "../../src/types/config.ts";
@@ -29,6 +27,14 @@ import {
   resetSandboxCapabilityCache,
   setSandboxCapabilityCacheForTest,
 } from "../../src/acp/sandbox-capabilities.ts";
+
+/**
+ * The ONE deployment-resolved root in the repository-development shape
+ * (`unify-skill-root-and-inventory`): the repository's own `skills/` tree, i.e.
+ * what `agent.skillsDir` (default `"skills"`) resolves to from the repository
+ * working directory for BOTH agent types.
+ */
+const REPO_SKILLS_ROOT = Deno.realPathSync(resolve(import.meta.dirname ?? ".", "../../skills"));
 
 function makeConfig(overrides: Partial<Config["agent"]> = {}): Config {
   return {
@@ -67,7 +73,6 @@ Deno.test("wiring identity - repository development: every consumer carries ONE 
   const agentConfig = createAgentConfig("opencode", "/tmp/test/workspace", config);
   assertEquals(agentConfig.skillsRoot?.root, resolver.root);
   const inventory = buildSkillAutoApproveList({
-    agentType,
     rootObservation: agentConfig.skillsRoot!,
   });
   assertEquals(inventory.root.canonicalPath, resolver.root);
@@ -78,7 +83,7 @@ Deno.test("wiring identity - repository development: every consumer carries ONE 
   //    consume the resolver's string spelling of the SAME observation.
   const renderedSkillsDir = resolveTrustedSkillsRoot(agentType, config.agent.skillsDir);
   assertEquals(renderedSkillsDir, resolver.root);
-  assertEquals(resolver.root, DEV_SOURCE_SKILLS_ROOT);
+  assertEquals(resolver.root, REPO_SKILLS_ROOT);
 
   // 4. Skill mount: the sandbox threads the factory observation to bwrap,
   //    which mounts the SAME literal path read-only.
@@ -134,18 +139,82 @@ Deno.test("wiring identity - repository development: every consumer carries ONE 
   assertEquals(resolveTrustedSkillsRoot(agentType, config.agent.skillsDir), resolver.root);
 });
 
-Deno.test("wiring identity - dashboard agent override stays root-identical (dev tree)", () => {
-  // Dashboard override (5.1): selecting the OTHER agent type must not create
-  // a second root spelling. In the repository-development shape both agents
-  // legitimately resolve to the same physical tree (OMP's validated dev
-  // source root IS the repository `skills/` the OpenCode default resolves);
-  // in the image shapes the two roots are distinct and each consumer resolves
-  // per the SELECTED agent (dashboard now renders `chatSession.agentType`).
+Deno.test("wiring identity - a dashboard agent-type override cannot change the root", () => {
+  // Dashboard override: selecting the OTHER agent type must not create a
+  // second root spelling. Since `unify-skill-root-and-inventory` the resolver
+  // has no agent-type selection at all, so both agent types (and every
+  // dashboard `chatSession.agentType`) land on the one configured root — here
+  // the repository `skills/` tree the default `"skills"` value resolves to.
   const config = makeConfig({ defaultAgentType: "omp" });
   const overridden = observeTrustedSkillsRoot("opencode", config.agent.skillsDir);
   const factory = createAgentConfig("opencode", "/tmp/test/workspace", config);
   assertEquals(factory.skillsRoot?.root, overridden.root);
-  assertEquals(overridden.root, DEV_SOURCE_SKILLS_ROOT);
+  assertEquals(overridden.root, REPO_SKILLS_ROOT);
+});
+
+Deno.test("wiring identity - both agent types resolve a byte-identical canonical root in every deployment shape", () => {
+  // Stock-image shape: the trio's declared container value, observed through
+  // the injectable seam. The seam FABRICATES the identity, so this case proves
+  // the SELECTION is that one configured value for both agent types (a
+  // spelling-level proof, not an image evidence claim).
+  const stock = "/home/deno/.agents/skills";
+  const seamOptions = {
+    directoryExists: (path: string) => path === stock,
+    observeDirectory: (path: string) => ({ root: path, identity: { dev: 7, ino: 11 } }),
+  };
+  assertEquals(
+    resolveTrustedSkillsRoot("opencode", stock, seamOptions),
+    resolveTrustedSkillsRoot("omp", stock, seamOptions),
+  );
+
+  // Development shape (real filesystem): the repository tree the default
+  // `skills` value resolves to, observed for BOTH agent types.
+  const opencodeDev = observeTrustedSkillsRoot("opencode", undefined);
+  const ompDev = observeTrustedSkillsRoot("omp", undefined);
+  assertEquals(opencodeDev.root, REPO_SKILLS_ROOT);
+  assertEquals(ompDev.root, REPO_SKILLS_ROOT);
+  assertEquals(opencodeDev.identity, ompDev.identity);
+
+  // Custom absolute root (real filesystem): a deployment-specific directory.
+  const custom = Deno.realPathSync(Deno.makeTempDirSync({ prefix: "air-custom-skills-" }));
+  try {
+    const opencodeCustom = observeTrustedSkillsRoot("opencode", custom);
+    const ompCustom = observeTrustedSkillsRoot("omp", custom);
+    assertEquals(opencodeCustom.root, custom);
+    assertEquals(ompCustom.root, custom);
+    assertEquals(opencodeCustom.identity, ompCustom.identity);
+  } finally {
+    Deno.removeSync(custom, { recursive: true });
+  }
+});
+
+Deno.test("wiring identity - per-spawn and pooled connectors resolve the identical root without SESSION_ID", () => {
+  // One deployment configuration used by a per-spawn connector and by a pooled
+  // connector must yield a byte-identical root for either agent type, and the
+  // resolution must not read a per-session value to select one.
+  const config = makeConfig({ skillsDir: REPO_SKILLS_ROOT });
+  const original = Deno.env.get("SESSION_ID");
+  Deno.env.set("SESSION_ID", "sess_must_not_select_a_root");
+  try {
+    for (const agentType of ["opencode", "omp"] as const) {
+      const perSpawn = createAgentConfig(agentType, "/tmp/test/workspace", config);
+      const pooled = createAgentConfig(
+        agentType,
+        "/tmp/test/workspace",
+        config,
+        false,
+        undefined,
+        "sess_pooled",
+        "pool-key",
+      );
+      assertEquals(perSpawn.skillsRoot?.root, REPO_SKILLS_ROOT, agentType);
+      assertEquals(pooled.skillsRoot?.root, REPO_SKILLS_ROOT, agentType);
+      assertEquals(perSpawn.skillsRoot?.identity, pooled.skillsRoot?.identity, agentType);
+    }
+  } finally {
+    if (original === undefined) Deno.env.delete("SESSION_ID");
+    else Deno.env.set("SESSION_ID", original);
+  }
 });
 
 Deno.test("wiring identity - pooled reconnect re-observation is deterministic", () => {
@@ -164,12 +233,13 @@ Deno.test("wiring identity - pooled reconnect re-observation is deterministic", 
   assertEquals(first.identity?.ino, second.identity?.ino);
 });
 
-Deno.test("external publication - OpenCode approves, OMP denies (empty AND filtered lists)", async () => {
-  // Publish an external script into the SHARED development root layout (a
-  // temp tree standing in for it), then decide for both agent types with an
-  // EMPTY and an EXPLICIT approval list (task 5.1's publication proof at the
-  // decision boundary; bootstrap ordering itself is pinned in
-  // external-skill-publication-parity.test.ts).
+Deno.test("external publication - the shared root admits the installed script for either agent type", async () => {
+  // Publish an external script into the ONE resolved root layout (a temp tree
+  // standing in for it), then decide for both agent types with an EMPTY and an
+  // EXPLICIT approval list (`unify-skill-root-and-inventory`: the shared root
+  // grants either agent type the installed script and neither needs a catalog
+  // entry for it). Bootstrap ordering itself is pinned in
+  // external-skill-publication-parity.test.ts.
   const root = Deno.realPathSync(Deno.makeTempDirSync({ prefix: "air-shared-" }));
   try {
     const skillDir = `${root}/installed-external/scripts`;
@@ -181,55 +251,41 @@ Deno.test("external publication - OpenCode approves, OMP denies (empty AND filte
     await Deno.writeTextFile(`${root}/memory-save/SKILL.md`, "# bundled");
     await Deno.writeTextFile(`${bundled}/memory-save.ts`, "// bundled grant");
 
-    const observation = observeTrustedSkillsRoot("opencode", root);
     const scriptPath = `${root}/installed-external/scripts/installed-external.ts`;
 
-    for (const configured of [undefined, ["installed-external", "memory-save"]]) {
-      // Empty list = full enumeration; explicit list = FILTER that still
-      // observes the physically present external entry (OpenCode authority).
-      const opencode = buildSkillAutoApproveList({
-        agentType: "opencode",
-        rootObservation: observation,
-        configuredSkills: configured,
-      });
-      assertEquals(
-        opencode.scripts.some((s) => s.canonicalPath === scriptPath),
-        true,
-        `opencode admits the external script (configured=${String(configured)})`,
-      );
-      assertEquals(
-        matchesScriptEntrypoint(`deno run ${scriptPath}`, opencode, { sessionCwd: undefined }),
-        true,
-        "OpenCode decision approves the exact canonical invocation",
-      );
+    for (const agentType of ["opencode", "omp"] as const) {
+      // The production seam for that agent type: the factory observes the one
+      // configured root and the connector builds its inventory from it.
+      const observation = observeTrustedSkillsRoot(agentType, root);
+      for (const configured of [undefined, ["installed-external", "memory-save"]]) {
+        // Empty list = full enumeration; explicit list = FILTER that still
+        // observes the physically present external entry.
+        const inventory = buildSkillAutoApproveList({
+          rootObservation: observation,
+          configuredSkills: configured,
+        });
+        assertEquals(
+          inventory.scripts.some((s) => s.canonicalPath === scriptPath),
+          true,
+          `${agentType} admits the external script (configured=${String(configured)})`,
+        );
+        assertEquals(
+          matchesScriptEntrypoint(`deno run ${scriptPath}`, inventory, {
+            sessionCwd: undefined,
+          }),
+          true,
+          `${agentType} approves the exact canonical invocation`,
+        );
+      }
 
-      // OMP over the SAME physical tree: catalog names only; the external
-      // directory never enters the inventory nor the decision.
-      const omp = buildSkillAutoApproveList({
-        agentType: "omp",
+      // A configured name absent from the root grants nothing for either type:
+      const filtered = buildSkillAutoApproveList({
         rootObservation: observation,
-        configuredSkills: configured,
+        configuredSkills: ["ghost-skill"],
       });
-      assertEquals(
-        omp.scripts.some((s) => s.canonicalPath === scriptPath),
-        false,
-        `OMP denies the external script (configured=${String(configured)})`,
-      );
-      assertEquals(
-        matchesScriptEntrypoint(`deno run ${scriptPath}`, omp, { sessionCwd: undefined }),
-        false,
-        "OMP decision denies the external invocation",
-      );
+      assertEquals(filtered.scripts.length, 0, agentType);
+      assertEquals(filtered.commandPrefixes.size, 0, agentType);
     }
-
-    // A configured name absent from the root grants nothing for either type:
-    const filtered = buildSkillAutoApproveList({
-      agentType: "opencode",
-      rootObservation: observation,
-      configuredSkills: ["ghost-skill"],
-    });
-    assertEquals(filtered.scripts.length, 0);
-    assertEquals(filtered.commandPrefixes.size, 0);
   } finally {
     await Deno.remove(root, { recursive: true });
   }

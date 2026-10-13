@@ -1,9 +1,10 @@
 // src/acp/skill-inventory.ts
 //
-// Root-exact skill script auto-approve inventory (`unify-omp-skill-root-resolution`
-// D3). One EXPLICIT deployment-resolved absolute root (the output of
-// `resolveTrustedSkillsRoot` for the SELECTED agent — never a HOME scan, never a
-// `Deno.cwd()/skills` constructor default) is observed once at construction and
+// Root-exact skill script auto-approve inventory (`unify-skill-root-and-inventory`
+// D2, generalizing `unify-omp-skill-root-resolution` D3). One EXPLICIT
+// deployment-resolved absolute root — the output of `resolveTrustedSkillsRoot`,
+// the SAME root for BOTH agent types, never a HOME scan and never a
+// `Deno.cwd()/skills` constructor default — is observed once at construction and
 // rechecked at every decision:
 //
 // - `scripts` records CANONICAL ABSOLUTE regular-file paths plus their
@@ -14,10 +15,12 @@
 //   and size the clock-independent one. A suffix spelling is never authority:
 //   approval requires the invocation's actual entrypoint to physically resolve
 //   to one exact enumerated file.
-// - OpenCode discovers installed entries by scanning the root; OMP admits ONLY
-//   the deployment-controlled bundled catalog names (`BUNDLED_SKILLS`) within
-//   the root, under both empty and explicitly configured approval lists, so a
-//   shared development root can never expand OMP eligibility.
+// - BOTH agent types discover installed entries by scanning that root; neither
+//   restricts eligibility to an authored name catalog, so an external skill
+//   published into the root is eligible for either agent type. The retained
+//   bounding rules are the `scripts/*.ts`-only enumeration, the `deno`-only
+//   interpreter allowlist, the reserved-entry exclusion and the decision-time
+//   identity rechecks below.
 // - A configured name filters observed entries inside the root and contributes
 //   NOTHING for a missing/inaccessible skill: the old absent-skill → command-
 //   prefix promotion is removed. Only an OBSERVED command-based skill (a real
@@ -33,11 +36,7 @@
 //   denial-only: a changed field can never widen authority.
 
 import { SEPARATOR } from "@std/path";
-import {
-  BUNDLED_SKILLS,
-  isValidSkillNameComponent,
-  RESERVED_SKILL_ENTRIES,
-} from "@core/bundled-skills.ts";
+import { isValidSkillNameComponent, RESERVED_SKILL_ENTRIES } from "@core/bundled-skills.ts";
 import type { SkillsRootObservation } from "@core/skills-root.ts";
 import {
   commandWithoutFdRedirects,
@@ -111,10 +110,9 @@ const realFs: SkillInventoryFs = {
 };
 
 export interface BuildSkillAutoApproveListInput {
-  /** The selected agent type; decides scan vs bundled-catalog enumeration. */
-  agentType: "opencode" | "omp";
   /**
-   * The resolver's observation for the selected agent (`observeTrustedSkillsRoot`).
+   * The resolver's observation of the deployment's one shared root
+   * (`observeTrustedSkillsRoot`).
    * An observation without a recorded identity cannot anchor identity-stable
    * grants and fails construction explicitly — never a silently uncheckable
    * inventory.
@@ -127,13 +125,12 @@ export interface BuildSkillAutoApproveListInput {
 }
 
 /**
- * Build the root-exact auto-approve inventory.
+ * Build the root-exact auto-approve inventory for BOTH agent types.
  *
- * `configuredSkills` semantics: empty/absent → OpenCode scans the root, OMP
- * enumerates the bundled catalog names within the root. Nonempty → observed
- * configured names within the root are admitted, and for OMP the intersection
- * with the bundled catalog (a configured name never expands OMP beyond the
- * catalog). Names that are not single components contribute nothing.
+ * `configuredSkills` semantics: empty/absent → the observed root is scanned for
+ * installed skills. Nonempty → only observed configured names within the root
+ * are admitted (a configured name never expands eligibility beyond the root's
+ * contents). Names that are not single components contribute nothing.
  */
 export function buildSkillAutoApproveList(
   input: BuildSkillAutoApproveListInput,
@@ -159,25 +156,14 @@ export function buildSkillAutoApproveList(
   const configuredSet = new Set(configured.filter(isValidSkillNameComponent));
   const explicitFilter = configured.length > 0;
 
-  // Candidate skill names: OpenCode observes the directory; OMP inspects ONLY
-  // the deployment-controlled catalog names inside the root.
+  // Candidate skill names: the ONE observed root is scanned for installed
+  // entries, exactly as before — with no agent-type (or catalog) restriction.
   const candidateNames: string[] = [];
-  if (input.agentType === "omp") {
-    for (const name of BUNDLED_SKILLS) {
-      if (explicitFilter && !configuredSet.has(name)) continue;
-      candidateNames.push(name);
-    }
-  } else {
-    const observed: string[] = [];
-    for (const entry of fs.readDir(canonicalPath)) {
-      if (!entry.isDirectory) continue;
-      if (RESERVED_SKILL_ENTRIES.includes(entry.name)) continue;
-      observed.push(entry.name);
-    }
-    for (const name of observed) {
-      if (explicitFilter && !configuredSet.has(name)) continue;
-      candidateNames.push(name);
-    }
+  for (const entry of fs.readDir(canonicalPath)) {
+    if (!entry.isDirectory) continue;
+    if (RESERVED_SKILL_ENTRIES.includes(entry.name)) continue;
+    if (explicitFilter && !configuredSet.has(entry.name)) continue;
+    candidateNames.push(entry.name);
   }
 
   const scripts: SkillScriptEntry[] = [];

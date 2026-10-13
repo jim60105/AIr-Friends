@@ -15,7 +15,16 @@ import type { PromptResponse } from "npm:@agentclientprotocol/sdk@^0.14.1";
 import type { ResolvedReminder } from "../../src/types/reminder.ts";
 import type { ReminderStore } from "@core/reminder-store.ts";
 import { exists } from "@std/fs";
-import { join } from "@std/path";
+import { join, resolve } from "@std/path";
+
+/**
+ * The ONE deployment-resolved skill-script root
+ * (`unify-skill-root-and-inventory`): the repository `skills/` tree — what
+ * `agent.skillsDir` (default `"skills"`) resolves to for BOTH agent types.
+ */
+const RESOLVED_SKILLS_ROOT = Deno.realPathSync(
+  resolve(import.meta.dirname ?? ".", "../../skills"),
+);
 
 class MockAgentConnector {
   connected = false;
@@ -188,7 +197,7 @@ async function createOrchestrator(tempDir: string, dryRunEnabled = true, sendFil
 
   const contextAssembler = new ContextAssembler(memoryStore, {
     systemPromptPath: `${tempDir}/prompts/system_reply.md`,
-    skillsDir: "/opt/air/skills", // trusted skill-script root (required render input)
+    skillsDir: RESOLVED_SKILLS_ROOT, // trusted skill-script root (required render input)
     recentMessageLimit: 20,
     tokenLimit: 20000,
   });

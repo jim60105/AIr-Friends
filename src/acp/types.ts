@@ -50,13 +50,12 @@ export interface ClientConfig {
   autoApproveSkills?: string[];
 
   /**
-   * The deployment-configured `agent.skillsDir` value (OpenCode installed-root
-   * selection input; OMP never consumes it). `unify-omp-skill-root-resolution`
-   * D1: when an AgentConfig predates the factory-resolved `skillsRoot` field,
-   * the connector re-observes the root through the SAME resolver using THIS
-   * connector's selected agent type and this configured value — the resolver's
-   * approved daemon-side OpenCode configuration, never a HOME or arbitrary
-   * cwd scan.
+   * The deployment-configured `agent.skillsDir` value the trusted-root resolver
+   * is called with (`unify-skill-root-and-inventory`): the ONE skill-root input
+   * for BOTH agent types — never a HOME or arbitrary cwd scan, and never a
+   * per-agent alternate tree. The resolved root itself rides the
+   * factory-produced `skillsRoot` observation on the AgentConfig; this field
+   * carries the configured spelling it came from.
    */
   skillsDir?: string;
 
@@ -295,11 +294,12 @@ export interface AgentConnectorOptions {
   logger: unknown; // Logger type - using unknown to avoid circular deps
   idleTimeoutConfig?: IdleTimeoutConfig;
   /**
-   * The SELECTED agent type for this connector (`unify-omp-skill-root-resolution`
-   * D1). MANDATORY: the connector resolves the trusted skill-script root and the
-   * agent-type-specific script inventory from it before subprocess creation
-   * (including dashboard-selected overrides and pooled reconnects), and it rides
-   * reasoning-effort warning context.
+   * The SELECTED agent type for this connector — what the child process is
+   * launched as, and the context reasoning-effort warnings name. It does NOT
+   * select a skill root or shape the script inventory
+   * (`unify-skill-root-and-inventory` D1/D2): the connector consumes the
+   * factory-resolved `AgentConfig.skillsRoot` observation, which is the
+   * deployment's one root for both agent types.
    */
   agentType: AgentType;
   /** Maximum time in milliseconds to wait for the ACP handshake during `connect()` (default: 30000) */

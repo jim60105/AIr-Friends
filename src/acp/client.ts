@@ -304,11 +304,11 @@ export class ChatbotClient implements acp.Client {
     this.skillRegistry = skillRegistry;
     this.logger = logger;
     this.config = config;
-    // MANDATORY internal input (`unify-omp-skill-root-resolution` D3): the
-    // connector derives the inventory from the explicit root resolved for the
-    // SELECTED agent type. The historical `Deno.cwd()/skills` constructor
-    // default is removed — a caller can no longer silently authorize a
-    // daemon- or session-relative tree.
+    // MANDATORY internal input (`unify-skill-root-and-inventory` D2): the
+    // connector derives the inventory from the deployment's ONE explicitly
+    // resolved trusted root, shared by BOTH agent types. The historical
+    // `Deno.cwd()/skills` constructor default is removed — a caller can no
+    // longer silently authorize a daemon- or session-relative tree.
     this.skillAutoApproveList = skillAutoApproveList;
   }
 
