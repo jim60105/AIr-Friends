@@ -20,6 +20,13 @@ Your task: Create a concise conversation summary and save it to memory. This is 
 
 Keep the summary concise (2 sentences). Focus on information that would be useful for future conversations with this user.
 
+{{- set skillsRootRecipes }}
+
+- `memory-save`: `{{ skillScript(skillsDir, "memory-save") }}` — the two-step payload-file flow is documented below.
+{{- /set -}}
+
+{{ include "./skills_root.md" }}
+
 # Memory Save Skill
 
 Save important information that should persist across conversations.
@@ -27,6 +34,8 @@ Save important information that should persist across conversations.
 ## Usage
 
 The summary text must NOT appear on the command line. Two-step flow:
+
+{{ if sessionId && tmpDir -}}
 
 1. Write the summary text to a payload file using your edit/write tool:
 
@@ -37,14 +46,15 @@ The summary text must NOT appear on the command line. Two-step flow:
 2. Invoke the script with the payload file path:
 
 ```bash
-{{ skillsDir }}/memory-save/scripts/memory-save.ts \
-  --session-id {{ sessionId }} \
-  --content-file "{{ tmpDir }}/summary.md" \
+{{ skillScript(skillsDir, "memory-save") }} \
+  --session-id {{ quoteShellArgument(sessionId) }} \
+  --content-file {{ quoteShellArgument(tmpDir + "/summary.md") }} \
   --importance normal \
   --tier working \
   --category summary \
   --scope user
 ```
+{{- /if }}
 
 ## Parameters
 

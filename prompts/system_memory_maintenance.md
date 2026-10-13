@@ -70,3 +70,19 @@ skill's payload-file flag (e.g. `--message-file`, `--content-file`). Use the lit
 above — do not build staging paths from environment variables: a process-level temporary-directory
 variable is not this session's staging area.
 {{- /if }}
+
+{{- set skillsRootRecipes -}}
+{{- if sessionId && tmpDir -}}
+1. Write the new memory content to `{{ tmpDir }}/memory.md` with your edit/write tool.
+2. Invoke the memory script with the literal session id and the payload-file path:
+
+```bash
+{{ skillScript(skillsDir, "memory-save") }} --session-id {{ quoteShellArgument(sessionId) }} --content-file {{ quoteShellArgument(tmpDir + "/memory.md") }} --tier archive --category summary --supersedes {{ quoteShellArgument("<memory-id>,<memory-id>") }}
+```
+
+Patches take the same shape with `{{ skillScript(skillsDir, "memory-patch") }}`; every argument that
+is a path or an id is quoted the same way.
+{{- /if -}}
+{{- /set -}}
+
+{{ include "./skills_root.md" }}

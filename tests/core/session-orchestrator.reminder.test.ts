@@ -140,11 +140,13 @@ async function createReminderTestOrchestrator(tempDir: string) {
   await Deno.mkdir(`${tempDir}/prompts`, { recursive: true });
   await Deno.writeTextFile(
     `${tempDir}/prompts/system_reply.md`,
-    "You are a helper.\n{{ if sessionId }}\nSession: {{ sessionId }}\n{{ /if }}",
+    "You are a helper.\n{{ if sessionId }}\nSession: {{ sessionId }}\n{{ /if }}\n" +
+      "Skill root: {{ skillsDir }}",
   );
   await Deno.writeTextFile(
     `${tempDir}/prompts/system_reminder.md`,
-    "Reminder: {{ reminderMessage }}\nCreated: {{ reminderCreatedAt }}\nScheduled: {{ reminderScheduledAt }}\nPlatform: {{ platform }}\nUser: {{ userId }}\nChannel: {{ channelId }}",
+    "Reminder: {{ reminderMessage }}\nCreated: {{ reminderCreatedAt }}\nScheduled: {{ reminderScheduledAt }}\nPlatform: {{ platform }}\nUser: {{ userId }}\nChannel: {{ channelId }}\n" +
+      "Skill root: {{ skillsDir }}",
   );
 
   const contextAssembler = new ContextAssembler(memoryStore, {

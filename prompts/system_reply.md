@@ -73,6 +73,23 @@ from environment variables: a process-level temporary-directory variable is not
 this session's staging area.
 {{- /if }}
 
+{{- set skillsRootRecipes -}}
+{{- if sessionId && tmpDir -}}
+1. Write the reply text to `{{ tmpDir }}/reply.md` with your edit/write tool.
+2. Invoke the reply script with the literal session id and the payload-file path:
+
+```bash
+{{ skillScript(skillsDir, "send-reply") }} --session-id {{ quoteShellArgument(sessionId) }} --message-file {{ quoteShellArgument(tmpDir + "/reply.md") }}
+```
+
+`edit-reply` and the memory skills use the same form: the complete quoted script path under
+`{{ skillsDir }}` (`{{ skillScript(skillsDir, "edit-reply") }}`,
+`{{ skillScript(skillsDir, "memory-save") }}`, ...) followed by quoted path or id arguments.
+{{- /if -}}
+{{- /set -}}
+
+{{ include "./skills_root.md" }}
+
 {{ if userContextMessage -}}
 
 # Context and Message

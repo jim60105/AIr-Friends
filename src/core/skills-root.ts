@@ -205,3 +205,98 @@ export function observeTrustedSkillsRoot(
   }
   return validated(root);
 }
+
+// ---------------------------------------------------------------------------
+// Delivery-boundary contract (`render-delivered-skill-root-contract`)
+//
+// The three helpers below are the CLASSIFIED render/delivery contract every
+// skill-instructing path shares: validate the root a boundary is ABOUT to
+// render, quote a complete recipe argument the way a POSIX shell reads it, and
+// refuse to deliver a classified prompt that renders without the literal root.
+// They add no second root convention, no configuration field and no process
+// environment input — the value is always the selected agent's resolved root.
+// ---------------------------------------------------------------------------
+
+/**
+ * Require the trusted skill-script root a CLASSIFIED boundary is about to
+ * render: a nonempty ABSOLUTE path, on the same `ConfigError` failure posture
+ * the resolver already uses, so an empty or relative value never renders a
+ * skill-less, token-shaped or child-HOME instruction.
+ *
+ * Defence in depth rather than the mounted-template guard: in production the
+ * value comes from {@link resolveTrustedSkillsRoot}, which already fails when
+ * no validated root exists, and this re-checks exactly the string a boundary
+ * hands to a renderer or to the retry builder. The scenario the spec names for
+ * a *mounted* template that renders without any root at all is covered by
+ * {@link assertSkillsRootDelivered}, which inspects the rendered result.
+ */
+export function requireTrustedSkillsRoot(
+  root: string | undefined | null,
+  boundary: string,
+): string {
+  if (typeof root !== "string" || root.length === 0) {
+    throw new ConfigError(
+      ErrorCode.CONFIG_INVALID,
+      `Missing required trusted skill-script root at ${boundary}: an absent or empty root is never rendered`,
+      { boundary, root: root === undefined || root === null ? String(root) : root },
+    );
+  }
+  if (!isAbsolute(root)) {
+    throw new ConfigError(
+      ErrorCode.CONFIG_INVALID,
+      `Relative trusted skill-script root "${root}" at ${boundary}: skill recipes need the ` +
+        `deployment-owned ABSOLUTE root, never a working-directory-relative or child-HOME spelling`,
+      { boundary, root },
+    );
+  }
+  return root;
+}
+
+/**
+ * POSIX single-quote one complete recipe argument.
+ *
+ * Single quotes make every character literal — spaces, `$`, backticks and
+ * quotes included — so the value reaches the script byte-for-byte. An embedded
+ * apostrophe is escaped as the quote-close / escaped-quote / reopen sequence
+ * `'\''`, which is the only form POSIX sh accepts inside single quotes. The
+ * value is the WHOLE argument (root-plus-script path, id or payload path),
+ * never a prefix: quoting the root alone would leave the rest of the path
+ * unquoted.
+ */
+export function quoteShellArgument(value: string): string {
+  return `'${value.replaceAll("'", "'\\''")}'`;
+}
+
+/**
+ * The complete, shell-quoted ABSOLUTE path of one bundled skill script under a
+ * trusted root (`{root}/{skill}/scripts/{skill}.ts`, the layout the readiness
+ * probe and the retry document reader already use).
+ */
+export function skillScriptPath(root: string, skill: string): string {
+  return quoteShellArgument(`${root}/${skill}/scripts/${skill}.ts`);
+}
+
+/**
+ * Refuse to deliver a CLASSIFIED prompt whose final text does not carry the
+ * literal trusted root.
+ *
+ * This is the mounted-template guard the spec requires: an operator template
+ * that never interpolates the root renders a rootless prompt, and the boundary
+ * fails explicitly ALREADY BEFORE delivery instead of sending blank or
+ * alternate-root skill instructions. Literal presence proves the root was
+ * rendered; it grants no executable authorization and no read parity.
+ */
+export function assertSkillsRootDelivered(
+  rendered: string,
+  root: string,
+  boundary: string,
+): void {
+  if (!rendered.includes(root)) {
+    throw new ConfigError(
+      ErrorCode.CONFIG_INVALID,
+      `Classified prompt from ${boundary} omitted the required literal trusted skill-script root ` +
+        `"${root}": refusing to deliver incomplete skill instructions`,
+      { boundary, root },
+    );
+  }
+}

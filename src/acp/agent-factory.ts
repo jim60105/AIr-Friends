@@ -27,7 +27,12 @@ import {
 import { sanitizeOmpDiscoveryEnv } from "./sandbox-manager.ts";
 import { createLogger } from "@utils/logger.ts";
 import { resolveSkillJwtDir } from "@utils/skill-jwt.ts";
-import { observeTrustedSkillsRoot } from "@core/skills-root.ts";
+import {
+  observeTrustedSkillsRoot,
+  quoteShellArgument,
+  requireTrustedSkillsRoot,
+  skillScriptPath,
+} from "@core/skills-root.ts";
 import { join, resolve } from "@std/path";
 import { parse as parseYaml } from "@std/yaml";
 
@@ -605,8 +610,9 @@ function buildDefaultRetryMessage(
     `- A previous send-reply/send-file call errored — read that error's output; it contains the exact fix.\n\n` +
     `Correct pattern (two steps):\n` +
     `1. Write the reply text to ${stagingDir}/reply.md with your edit/write tool.\n` +
-    `2. Invoke: ${skillsDir}/send-reply/scripts/send-reply.ts --session-id "${sessionId}" ` +
-    `--message-file "${stagingDir}/reply.md"\n\n` +
+    `2. Invoke: ${skillScriptPath(skillsDir, "send-reply")} ` +
+    `--session-id ${quoteShellArgument(sessionId)} ` +
+    `--message-file ${quoteShellArgument(`${stagingDir}/reply.md`)}\n\n` +
     `The skill-script root, session id and staging directory above are the literals rendered in your ` +
     `system prompt and are authoritative in every deployment shape: the agent environment may carry NO ` +
     `session identity at all, the skill library resolves the owning session automatically, and a mismatched ` +
@@ -627,6 +633,10 @@ export function getRetryPromptStrategy(
   ctx: RetryPromptContext,
   rejections?: PermissionRejection[],
 ): RetryPromptStrategy {
+  // Classified retry boundary (`render-delivered-skill-root-contract`): the
+  // mandatory context's trusted root is validated before it is read from the
+  // filesystem or rendered into a recipe — never a child-HOME or token form.
+  requireTrustedSkillsRoot(ctx.skillsDir, "missing-response retry prompt render");
   // The retry documents are the TRUSTED root's own SKILL.md files
   // (`repair-omp-owned-skill-handoff` task 3.3): reading them is part of the
   // handoff contract, so a missing document fails the retry EXPLICITLY — the

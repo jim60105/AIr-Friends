@@ -35,6 +35,7 @@ import { AgentConnector } from "@acp/agent-connector.ts";
 import { AgentProcessPool } from "@core/agent-process-pool.ts";
 import { ConnectionState } from "../../../src/types/platform.ts";
 import { ContextAssembler } from "@core/context-assembler.ts";
+import { resolveTrustedSkillsRoot } from "@core/skills-root.ts";
 import { MemoryStore } from "@core/memory-store.ts";
 import { SessionOrchestrator } from "@core/session-orchestrator.ts";
 import { WorkspaceManager } from "@core/workspace-manager.ts";
@@ -491,16 +492,22 @@ async function createHarness(params: {
   Deno.mkdirSync(promptsDir, { recursive: true });
   // Harness templates render the literal pair the shipped system_reply.md
   // renders (Session Information section): literal `{{ sessionId }}` + the
-  // absolute `{{ tmpDir }}` staging dir — the payload-file contract.
+  // absolute `{{ tmpDir }}` staging dir — the payload-file contract — plus the
+  // literal trusted skill-script root every classified render must carry
+  // (`render-delivered-skill-root-contract`).
   Deno.writeTextFileSync(
     join(promptsDir, "system_reply.md"),
     "Reply as the mock assistant.\n" +
       "Use `--session-id {{ sessionId }}` when calling skills.\n" +
       "{{ if tmpDir -}}\n" +
       "Your payload staging directory is `{{ tmpDir }}`.\n" +
-      "{{- /if }}\n",
+      "{{- /if }}\n" +
+      "Skill root: {{ skillsDir }}\n",
   );
-  Deno.writeTextFileSync(join(promptsDir, "system_summary.md"), "Summarize this conversation.");
+  Deno.writeTextFileSync(
+    join(promptsDir, "system_summary.md"),
+    "Summarize this conversation.\nSkill root: {{ skillsDir }}",
+  );
 
   const config = buildHarnessConfig({
     tempDir,
@@ -722,9 +729,22 @@ function assertLiteralArgv(record: SkillRecord, sessionId: string): void {
   assert(!argv.includes("$SESSION_ID"), "argv must not carry an unexpanded $SESSION_ID");
 }
 
-const literalRetryAssertions = (text: string, sessionId: string, stagingDir: string): void => {
-  assertStringIncludes(text, `--session-id "${sessionId}"`);
-  assertStringIncludes(text, stagingDir);
+/**
+ * Classified retry contract (`render-delivered-skill-root-contract`): the
+ * delivered retry guidance quotes the COMPLETE executable path and its
+ * payload/id arguments with the same POSIX formatter the templates use,
+ * names the session's literal root and staging directory, and never carries
+ * an unexpanded shell token.
+ */
+const literalRetryAssertions = (
+  text: string,
+  sessionId: string,
+  stagingDir: string,
+  skillsRoot: string,
+): void => {
+  assertStringIncludes(text, `'${skillsRoot}/send-reply/scripts/send-reply.ts'`);
+  assertStringIncludes(text, `--session-id '${sessionId}'`);
+  assertStringIncludes(text, `--message-file '${stagingDir}/reply.md'`);
   assert(!text.includes("$TMPDIR"), "retry guidance must not carry an unexpanded $TMPDIR token");
   assert(!text.includes("$SESSION_ID"), "retry guidance must not carry an unexpanded $SESSION_ID");
 };
@@ -791,6 +811,9 @@ async function runHappyPath(shape: "per-spawn" | "pooled"): Promise<void> {
     assert(sessionId, "session registered");
     const promptText = h.orchestrator.promptTexts[0] ?? "";
     assertStringIncludes(promptText, `--session-id ${sessionId}`);
+    // The delivered reply prompt carries the literal trusted skill-script root
+    // the assembler was configured with.
+    assertStringIncludes(promptText, "/opt/air/skills");
     const stagingDir = `${h.workspacePath}/tmp/${sessionId}`;
     assertStringIncludes(promptText, stagingDir);
 
@@ -867,7 +890,15 @@ async function runRetryOnce(
     const rpc = readRpcEntries(h);
     const prompts = rpc.filter((e) => e.method === "session/prompt");
     assertEquals(prompts.length, 2, "exactly one retry prompt after the silent turn");
-    literalRetryAssertions(h.orchestrator.promptTexts[1] ?? "", sessionId, stagingDir);
+    literalRetryAssertions(
+      h.orchestrator.promptTexts[1] ?? "",
+      sessionId,
+      stagingDir,
+      resolveTrustedSkillsRoot(
+        h.config.agent.defaultAgentType ?? "opencode",
+        h.config.agent.skillsDir,
+      ),
+    );
 
     if (secondTurnDelivers) {
       assertEquals(result.success, true);

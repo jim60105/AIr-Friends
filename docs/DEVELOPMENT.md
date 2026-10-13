@@ -655,6 +655,47 @@ The following variables are available in all prompt templates:
 >
 > **Same physical root everywhere** (`unify-omp-skill-root-resolution`): the resolved value is the CANONICAL realpath of the validated selection (`observeTrustedSkillsRoot()` also records its `dev`/`ino` identity), and the identical root — prompt/retry `skillsDir`, the ACP client's mandatory root-exact script inventory (`src/acp/skill-inventory.ts`), the read-only bwrap skill mount and the healthcheck readiness root — is resolved ONCE per selected agent before subprocess creation, including dashboard agent overrides and pooled reconnects. An unresolvable root fails explicitly everywhere; there is no per-consumer fallback spelling.
 
+##### Delivered skills-root contract
+
+The root is not merely available to a classified render — it is a delivered
+requirement (`render-delivered-skill-root-contract`):
+
+- **Classified renders** are the session paths that instruct skills: normal
+  context assembly (`assembleContext`, `assembleSpontaneousContext`) and the
+  delivered prompts of `renderFullPrompt`, spontaneous, self-research, user and
+  channel memory maintenance, summary and reminder, plus the missing-response
+  retry and the self-research correction retry. Each validates its
+  `skillsDir` **before** rendering and the delivered prompt is asserted to
+  carry that literal root **before** it is sent. A missing, empty or relative
+  root, or an operator-mounted template that renders without the literal root,
+  raises an explicit `ConfigError` instead of delivering rootless skill
+  instructions (`requireTrustedSkillsRoot` / `assertSkillsRootDelivered`,
+  `src/core/skills-root.ts`).
+- **Generic and dashboard renders are unclassified** and acquire nothing:
+  `renderTemplateString` and `system_web_chat.md` keep their previous behavior,
+  including web-chat's skill prohibition.
+- **One shared fragment** (`prompts/skills_root.md`) states the literal root,
+  the never-derive-from-`$HOME` rule and the recipe-quoting rule, and renders a
+  per-session recipe block from the `skillsRootRecipes` variable the including
+  template sets before `{{ include "./skills_root.md" }}`.
+
+##### Trusted template helpers
+
+Two pure formatters are injected into every render's variable context
+(`src/core/template-renderer.ts`) so a template can emit shell-safe recipes
+without re-implementing quoting:
+
+| Helper | Example | Result |
+| ------ | ------- | ------ |
+| `quoteShellArgument(value)` | `{{ quoteShellArgument(tmpDir + "/reply.md") }}` | `'/data/.../reply.md'` |
+| `skillScript(root, skill)` | `{{ skillScript(skillsDir, "send-reply") }}` | `'/opt/air/skills/send-reply/scripts/send-reply.ts'` |
+
+Both POSIX single-quote the **complete** argument (an embedded apostrophe
+becomes the quote-close / escaped-quote / reopen triple), so a root or staging
+directory containing spaces, `$`, backticks or apostrophes stays one literal
+argument. The retry builder uses the same formatters, so template and retry
+recipes agree byte-for-byte on spelling.
+
 #### Examples
 
 **DM-specific instructions:**

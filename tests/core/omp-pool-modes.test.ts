@@ -1,10 +1,11 @@
 import { assert, assertEquals, assertExists } from "@std/assert";
-import { join } from "@std/path";
+import { isAbsolute, join } from "@std/path";
 import { SessionOrchestrator } from "@core/session-orchestrator.ts";
 import { AgentProcessPool, type PoolRunOptions } from "@core/agent-process-pool.ts";
 import { WorkspaceManager } from "@core/workspace-manager.ts";
 import { MemoryStore } from "@core/memory-store.ts";
 import { ContextAssembler } from "@core/context-assembler.ts";
+import { resolveTrustedSkillsRoot } from "@core/skills-root.ts";
 import { ReplyPolicyEvaluator } from "@core/reply-policy.ts";
 import { ReminderStore } from "@core/reminder-store.ts";
 import { SkillRegistry } from "@skills/registry.ts";
@@ -82,7 +83,7 @@ Deno.test("OMP acquisition matrix: entry points, resolved modes, ownership, audi
                         join(promptDir, `system_${name}.md`),
                         `${
                           name === "summary" ? "SUMMARY" : "TURN {{ yolo }}"
-                        }\nID={{ sessionId }}\nTMP={{ tmpDir }}`,
+                        }\nID={{ sessionId }}\nTMP={{ tmpDir }}\nROOT={{ skillsDir }}`,
                       );
                     }
                     const config: Config = {
@@ -126,9 +127,16 @@ Deno.test("OMP acquisition matrix: entry points, resolved modes, ownership, audi
                     const wm = new WorkspaceManager(config.workspace);
                     const memory = new MemoryStore(wm, {});
                     const skills = new SkillRegistry(memory);
+                    // ONE resolved root for the whole deployment shape — the
+                    // same value the orchestrator renders
+                    // (`unify-omp-skill-root-resolution` wiring identity).
+                    const trustedSkillsRoot = resolveTrustedSkillsRoot(
+                      agentType,
+                      config.agent.skillsDir,
+                    );
                     const assembler = new ContextAssembler(memory, {
                       systemPromptPath: config.agent.systemPromptPath,
-                      skillsDir: "/opt/air/skills", // trusted skill-script root (required render input)
+                      skillsDir: trustedSkillsRoot, // trusted skill-script root (required render input)
                       recentMessageLimit: 10,
                       tokenLimit: 20000,
                     });
@@ -233,6 +241,22 @@ Deno.test("OMP acquisition matrix: entry points, resolved modes, ownership, audi
                             );
                             if (!skillEnabled) assertEquals(staging, session.workspace.tmpPath);
                           }
+                          // Classified delivery contract
+                          // (`render-delivered-skill-root-contract`): every
+                          // delivered classified prompt carries the SELECTED
+                          // agent's literal, absolute trusted skill-script root
+                          // — the same value the resolver produces for that
+                          // agent in this deployment shape.
+                          const deliveredRoot = text.match(/^ROOT=(.+)$/m)?.[1];
+                          assertEquals(
+                            deliveredRoot,
+                            trustedSkillsRoot,
+                            "delivered prompt carries the selected agent's literal root",
+                          );
+                          assert(
+                            deliveredRoot !== undefined && isAbsolute(deliveredRoot),
+                            "delivered skill-script root is an absolute path",
+                          );
                           prompts++;
                           if (text.startsWith("SUMMARY")) {
                             assertEquals(creates, 1);
