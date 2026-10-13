@@ -171,20 +171,28 @@ export function assertOpencodeSkillRootIsDeclarable(root: string, home?: string)
 
 /**
  * The canonical directory one declaration ENTRY names, or `undefined` when the
- * entry can never name the resolved root: a `~user` form the pinned loader
- * does not expand, or a relative entry, which that loader resolves against the
- * SESSION's working directory rather than the configuration file's own
- * directory. Resolving canonically is what makes a `~/…` spelling equivalent
- * to the absolute path it stands for.
+ * entry can never name the resolved root: a `~user` or `${HOME}` form the
+ * pinned engine does not expand, or a relative entry, which the loader
+ * resolves against the SESSION's working directory rather than the
+ * configuration file's own directory.
+ *
+ * The two expanded spellings are the home-anchored ones the pinned pattern
+ * engine documents (`~` and `$HOME`, never `${HOME}`), and they are accepted
+ * only in an already-canonical form: that engine turns a pattern into a
+ * regular expression WITHOUT normalizing `..` or `.` segments, so a spelling
+ * such as `/srv/other/../skills/**` matches no real path and must never be
+ * mistaken for the resolved root.
  */
 function declaredDirectory(entry: string, home: string | undefined): string | undefined {
-  if (entry === "~") return home;
-  if (entry.startsWith("~/")) {
-    return home === undefined ? undefined : resolve(join(home, entry.slice(2)));
+  if (entry === "~" || entry === "$HOME") return home;
+  if (entry.startsWith("~/") || entry.startsWith("$HOME/")) {
+    if (home === undefined) return undefined;
+    const expanded = join(home, entry.slice(entry.indexOf("/") + 1));
+    return expanded === resolve(expanded) ? expanded : undefined;
   }
   if (entry.startsWith("~")) return undefined;
   if (!isAbsolute(entry)) return undefined;
-  return resolve(entry);
+  return entry === resolve(entry) ? entry : undefined;
 }
 
 /** Parse the deployed document, requiring a JSON object at the top level. */
