@@ -1,8 +1,9 @@
 // tests/acp/skill-inventory.test.ts
 //
-// Root-exact inventory unit regressions (`unify-omp-skill-root-resolution`
-// 2.1/2.2): OMP catalog restriction, explicit-root-only scanning, invalid
-// names, absent-skill non-promotion, and physical decision-time matching.
+// Root-exact inventory unit regressions (`unify-skill-root-and-inventory` 3.1,
+// generalizing `unify-omp-skill-root-resolution` 2.1/2.2): one eligibility rule
+// for BOTH agent types, explicit-root-only scanning, invalid names,
+// absent-skill non-promotion, and physical decision-time matching.
 
 import { assert, assertEquals, assertThrows } from "@std/assert";
 import {
@@ -14,23 +15,23 @@ import {
   type SkillInventoryFs,
 } from "@acp/skill-inventory.ts";
 import { observeTrustedSkillsRoot } from "@core/skills-root.ts";
-import { BUNDLED_SKILLS } from "@core/bundled-skills.ts";
+
+/** The supported agent types; both construct the identical inventory. */
+const AGENT_TYPES = ["opencode", "omp"] as const;
 
 function list(
-  agentType: "opencode" | "omp",
+  agentType: (typeof AGENT_TYPES)[number],
   root: string,
   configuredSkills?: string[],
 ): SkillAutoApproveList {
-  // For OMP the resolver is deliberately image-first/dev-validated (a temp
-  // root never passes its selection), so fixtures carry an observation of the
-  // EXPLICIT root directly — exactly what production threads from the one
-  // resolver call for the selected agent.
-  const stat = Deno.statSync(root);
-  const rootObservation = agentType === "opencode" ? observeTrustedSkillsRoot("opencode", root) : {
-    root,
-    identity: stat.dev !== null && stat.ino !== null ? { dev: stat.dev, ino: stat.ino } : undefined,
-  };
-  return buildSkillAutoApproveList({ agentType, rootObservation, configuredSkills });
+  // The production seam for the selected agent: the factory observes the ONE
+  // configured root for THAT agent type and the connector builds the inventory
+  // from it. Since `unify-skill-root-and-inventory` the input carries no
+  // agent-type selector, so both agent types construct the identical inventory.
+  return buildSkillAutoApproveList({
+    rootObservation: observeTrustedSkillsRoot(agentType, root),
+    configuredSkills,
+  });
 }
 
 function makeRoot(scriptSkills: string[], commandSkills: string[] = []): string {
@@ -47,36 +48,92 @@ function makeRoot(scriptSkills: string[], commandSkills: string[] = []): string 
   return root;
 }
 
-Deno.test("inventory - OpenCode scans the explicit root only; lib reserved excluded", () => {
+Deno.test("inventory - the explicit root is scanned for either agent type; lib reserved excluded", () => {
   const root = makeRoot(["memory-save", "send-reply"], ["agent-browser"]);
   Deno.mkdirSync(`${root}/lib`, { recursive: true });
   Deno.writeTextFileSync(`${root}/lib/client.ts`, "// shared library");
-  const inv = list("opencode", root);
-  assertEquals(
-    inv.scripts.map((s) => s.canonicalPath).sort(),
-    [
-      `${root}/memory-save/scripts/memory-save.ts`,
-      `${root}/send-reply/scripts/send-reply.ts`,
-    ],
-  );
-  assert(inv.commandPrefixes.has("agent-browser"));
-  assertEquals([...inv.commandPrefixes].includes("lib"), false);
-  assertEquals(inv.root.canonicalPath, root);
+  for (const agentType of AGENT_TYPES) {
+    const inv = list(agentType, root);
+    assertEquals(
+      inv.scripts.map((s) => s.canonicalPath).sort(),
+      [
+        `${root}/memory-save/scripts/memory-save.ts`,
+        `${root}/send-reply/scripts/send-reply.ts`,
+      ],
+      agentType,
+    );
+    assert(inv.commandPrefixes.has("agent-browser"), agentType);
+    assertEquals([...inv.commandPrefixes].includes("lib"), false, agentType);
+    assertEquals(inv.root.canonicalPath, root, agentType);
+  }
 });
 
-Deno.test("inventory - OMP admits ONLY bundled-catalog names from a shared root", () => {
-  // A development root shared with OpenCode contains an external addition
-  // (`create-blog-post`) plus catalog members; OMP must see only catalog.
-  const catalogName = BUNDLED_SKILLS[0]!;
-  const root = makeRoot([catalogName, "create-blog-post"], ["agent-browser"]);
-  const inv = list("omp", root);
-  assertEquals(
-    inv.scripts.map((s) => s.canonicalPath),
-    [`${root}/${catalogName}/scripts/${catalogName}.ts`],
-  );
-  // The external tree grants OpenCode a command prefix — never OMP.
-  assertEquals([...inv.commandPrefixes].includes("agent-browser"), false);
-  assertEquals([...inv.commandPrefixes].includes("create-blog-post"), false);
+Deno.test("inventory - a non-bundled installed .ts script is eligible for BOTH agent types", () => {
+  // A runtime-installed external addition that is not in the authored catalog
+  // shares the one resolved root: no catalog entry is required for either agent
+  // type, under an empty AND an explicitly configured approval list.
+  const root = makeRoot(["create-blog-post", "memory-save"]);
+  const scriptPath = `${root}/create-blog-post/scripts/create-blog-post.ts`;
+  for (const agentType of AGENT_TYPES) {
+    // Empty list: the whole root is enumerated, so the external script is among
+    // the grants…
+    for (const configured of [undefined, ["create-blog-post", "memory-save"]]) {
+      const inv = list(agentType, root, configured);
+      assertEquals(
+        inv.scripts.some((s) => s.canonicalPath === scriptPath),
+        true,
+        `${agentType}: ${String(configured)}`,
+      );
+      assertEquals(
+        matchesScriptEntrypoint(`deno run ${scriptPath}`, inv, { sessionCwd: undefined }),
+        true,
+        `${agentType}: ${String(configured)}`,
+      );
+    }
+    // …and an explicit list naming only the external skill yields exactly it.
+    const filtered = list(agentType, root, ["create-blog-post"]);
+    assertEquals(filtered.scripts.map((s) => s.canonicalPath), [scriptPath], agentType);
+  }
+});
+
+Deno.test("inventory - a non-.ts script is eligible for neither agent type", () => {
+  // `scripts/*.ts` with `deno` as the sole allowlisted interpreter stays the
+  // only enumerable form: a `.py` or shell script grants nothing anywhere.
+  const root = makeRoot(["memory-save"]);
+  for (
+    const [name, file] of [["py-skill", "py-skill.py"], ["shell-skill", "shell-skill.sh"]] as const
+  ) {
+    Deno.mkdirSync(`${root}/${name}/scripts`, { recursive: true });
+    Deno.writeTextFileSync(`${root}/${name}/SKILL.md`, `# ${name}`);
+    Deno.writeTextFileSync(`${root}/${name}/scripts/${file}`, "// never executable");
+  }
+  for (const agentType of AGENT_TYPES) {
+    const inv = list(agentType, root);
+    assertEquals(
+      inv.scripts.map((s) => s.canonicalPath),
+      [`${root}/memory-save/scripts/memory-save.ts`],
+      agentType,
+    );
+    for (
+      const path of [
+        `${root}/py-skill/scripts/py-skill.py`,
+        `${root}/shell-skill/scripts/shell-skill.sh`,
+      ]
+    ) {
+      assertEquals(
+        matchesScriptEntrypoint(`deno run ${path}`, inv, { sessionCwd: undefined }),
+        false,
+        `${agentType}: deno run ${path}`,
+      );
+      assertEquals(
+        matchesScriptEntrypoint(path, inv, { sessionCwd: undefined }),
+        false,
+        `${agentType}: direct ${path}`,
+      );
+    }
+    // A scripts directory exists for both, so neither becomes a command prefix.
+    assertEquals(inv.commandPrefixes.size, 0, agentType);
+  }
 });
 
 Deno.test("inventory - configured names filter observed entries; absent skills grant nothing", () => {
@@ -97,22 +154,21 @@ Deno.test("inventory - configured names filter observed entries; absent skills g
   assertEquals(absent.commandPrefixes.size, 0);
 });
 
-Deno.test("inventory - OMP configured list can never expand beyond the catalog", () => {
-  const catalogName = BUNDLED_SKILLS[0]!;
-  const root = makeRoot(["create-blog-post"], ["create-blog-post"]);
-  // Explicitly configuring an external name for OMP: no grants at all.
-  const inv = list("omp", root, ["create-blog-post"]);
-  assertEquals(inv.scripts.length, 0);
-  assertEquals(inv.commandPrefixes.size, 0);
-  // A configured catalog member present in the root IS admitted.
-  Deno.mkdirSync(`${root}/${catalogName}/scripts`, { recursive: true });
-  Deno.writeTextFileSync(`${root}/${catalogName}/SKILL.md`, "# owned");
-  Deno.writeTextFileSync(`${root}/${catalogName}/scripts/${catalogName}.ts`, "// real");
-  const inv2 = list("omp", root, [catalogName, "create-blog-post"]);
-  assertEquals(
-    inv2.scripts.map((s) => s.canonicalPath),
-    [`${root}/${catalogName}/scripts/${catalogName}.ts`],
-  );
+Deno.test("inventory - no catalog bounds or expands the configured list for either agent type", () => {
+  const root = makeRoot(["memory-save", "create-blog-post"], ["agent-browser"]);
+  for (const agentType of AGENT_TYPES) {
+    // An explicitly configured external name that IS present is admitted…
+    const externalOnly = list(agentType, root, ["create-blog-post"]);
+    assertEquals(
+      externalOnly.scripts.map((s) => s.canonicalPath),
+      [`${root}/create-blog-post/scripts/create-blog-post.ts`],
+      agentType,
+    );
+    // …and one that is NOT present grants nothing of any kind.
+    const ghost = list(agentType, root, ["ghost-skill"]);
+    assertEquals(ghost.scripts.length, 0, agentType);
+    assertEquals(ghost.commandPrefixes.size, 0, agentType);
+  }
 });
 
 Deno.test("inventory - invalid skill names contribute nothing", () => {
@@ -153,7 +209,6 @@ Deno.test("inventory - requires an identity-bearing observation and a canonical 
   // A root observation without a recorded identity cannot anchor rechecks.
   assertThrows(() =>
     buildSkillAutoApproveList({
-      agentType: "opencode",
       rootObservation: { root: makeRoot([]), identity: undefined },
     })
   );
@@ -548,7 +603,7 @@ Deno.test("inventory - unobservable scripts path never promotes a command prefix
     },
     realPath: (path: string) => Deno.realPathSync(path),
   };
-  const inv = buildSkillAutoApproveList({ agentType: "opencode", rootObservation, fs });
+  const inv = buildSkillAutoApproveList({ rootObservation, fs });
   assertEquals(inv.commandPrefixes.size, 0);
   // NotFound on the lstat — genuine absence — still promotes the prefix.
   const absentFs = {
@@ -563,7 +618,6 @@ Deno.test("inventory - unobservable scripts path never promotes a command prefix
     realPath: (path: string) => Deno.realPathSync(path),
   };
   const promoted = buildSkillAutoApproveList({
-    agentType: "opencode",
     rootObservation,
     fs: absentFs,
   });

@@ -187,7 +187,7 @@ Deno.test("Containerfile - owned root installs staged catalog content, never the
   );
 });
 
-Deno.test("Containerfile and Helm declare the same OpenCode installed root; development default stays 'skills'", () => {
+Deno.test("Containerfile and Helm declare the same shared installed root; development default stays 'skills'", () => {
   const containerfile = Deno.readTextFileSync(
     new URL("../../Containerfile", import.meta.url).pathname,
   );

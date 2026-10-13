@@ -73,7 +73,6 @@ Deno.test("wiring identity - repository development: every consumer carries ONE 
   const agentConfig = createAgentConfig("opencode", "/tmp/test/workspace", config);
   assertEquals(agentConfig.skillsRoot?.root, resolver.root);
   const inventory = buildSkillAutoApproveList({
-    agentType,
     rootObservation: agentConfig.skillsRoot!,
   });
   assertEquals(inventory.root.canonicalPath, resolver.root);
@@ -169,12 +168,13 @@ Deno.test("wiring identity - pooled reconnect re-observation is deterministic", 
   assertEquals(first.identity?.ino, second.identity?.ino);
 });
 
-Deno.test("external publication - OpenCode approves, OMP denies (empty AND filtered lists)", async () => {
-  // Publish an external script into the SHARED development root layout (a
-  // temp tree standing in for it), then decide for both agent types with an
-  // EMPTY and an EXPLICIT approval list (task 5.1's publication proof at the
-  // decision boundary; bootstrap ordering itself is pinned in
-  // external-skill-publication-parity.test.ts).
+Deno.test("external publication - the shared root admits the installed script for either agent type", async () => {
+  // Publish an external script into the ONE resolved root layout (a temp tree
+  // standing in for it), then decide for both agent types with an EMPTY and an
+  // EXPLICIT approval list (`unify-skill-root-and-inventory`: the shared root
+  // grants either agent type the installed script and neither needs a catalog
+  // entry for it). Bootstrap ordering itself is pinned in
+  // external-skill-publication-parity.test.ts.
   const root = Deno.realPathSync(Deno.makeTempDirSync({ prefix: "air-shared-" }));
   try {
     const skillDir = `${root}/installed-external/scripts`;
@@ -186,55 +186,41 @@ Deno.test("external publication - OpenCode approves, OMP denies (empty AND filte
     await Deno.writeTextFile(`${root}/memory-save/SKILL.md`, "# bundled");
     await Deno.writeTextFile(`${bundled}/memory-save.ts`, "// bundled grant");
 
-    const observation = observeTrustedSkillsRoot("opencode", root);
     const scriptPath = `${root}/installed-external/scripts/installed-external.ts`;
 
-    for (const configured of [undefined, ["installed-external", "memory-save"]]) {
-      // Empty list = full enumeration; explicit list = FILTER that still
-      // observes the physically present external entry (OpenCode authority).
-      const opencode = buildSkillAutoApproveList({
-        agentType: "opencode",
-        rootObservation: observation,
-        configuredSkills: configured,
-      });
-      assertEquals(
-        opencode.scripts.some((s) => s.canonicalPath === scriptPath),
-        true,
-        `opencode admits the external script (configured=${String(configured)})`,
-      );
-      assertEquals(
-        matchesScriptEntrypoint(`deno run ${scriptPath}`, opencode, { sessionCwd: undefined }),
-        true,
-        "OpenCode decision approves the exact canonical invocation",
-      );
+    for (const agentType of ["opencode", "omp"] as const) {
+      // The production seam for that agent type: the factory observes the one
+      // configured root and the connector builds its inventory from it.
+      const observation = observeTrustedSkillsRoot(agentType, root);
+      for (const configured of [undefined, ["installed-external", "memory-save"]]) {
+        // Empty list = full enumeration; explicit list = FILTER that still
+        // observes the physically present external entry.
+        const inventory = buildSkillAutoApproveList({
+          rootObservation: observation,
+          configuredSkills: configured,
+        });
+        assertEquals(
+          inventory.scripts.some((s) => s.canonicalPath === scriptPath),
+          true,
+          `${agentType} admits the external script (configured=${String(configured)})`,
+        );
+        assertEquals(
+          matchesScriptEntrypoint(`deno run ${scriptPath}`, inventory, {
+            sessionCwd: undefined,
+          }),
+          true,
+          `${agentType} approves the exact canonical invocation`,
+        );
+      }
 
-      // OMP over the SAME physical tree: catalog names only; the external
-      // directory never enters the inventory nor the decision.
-      const omp = buildSkillAutoApproveList({
-        agentType: "omp",
+      // A configured name absent from the root grants nothing for either type:
+      const filtered = buildSkillAutoApproveList({
         rootObservation: observation,
-        configuredSkills: configured,
+        configuredSkills: ["ghost-skill"],
       });
-      assertEquals(
-        omp.scripts.some((s) => s.canonicalPath === scriptPath),
-        false,
-        `OMP denies the external script (configured=${String(configured)})`,
-      );
-      assertEquals(
-        matchesScriptEntrypoint(`deno run ${scriptPath}`, omp, { sessionCwd: undefined }),
-        false,
-        "OMP decision denies the external invocation",
-      );
+      assertEquals(filtered.scripts.length, 0, agentType);
+      assertEquals(filtered.commandPrefixes.size, 0, agentType);
     }
-
-    // A configured name absent from the root grants nothing for either type:
-    const filtered = buildSkillAutoApproveList({
-      agentType: "opencode",
-      rootObservation: observation,
-      configuredSkills: ["ghost-skill"],
-    });
-    assertEquals(filtered.scripts.length, 0);
-    assertEquals(filtered.commandPrefixes.size, 0);
   } finally {
     await Deno.remove(root, { recursive: true });
   }

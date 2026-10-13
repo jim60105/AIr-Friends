@@ -11,7 +11,6 @@ import { observeTrustedSkillsRoot } from "@core/skills-root.ts";
 export function emptySkillList(): SkillAutoApproveList {
   const root = Deno.makeTempDirSync({ prefix: "air-empty-skills-" });
   return buildSkillAutoApproveList({
-    agentType: "opencode",
     rootObservation: observeTrustedSkillsRoot("opencode", root),
   });
 }
@@ -37,7 +36,6 @@ export function skillInventoryAt(
     Deno.writeTextFileSync(`${canonical}/${name}/SKILL.md`, `# ${name}`);
   }
   return buildSkillAutoApproveList({
-    agentType: "opencode",
     rootObservation: observeTrustedSkillsRoot("opencode", canonical),
   });
 }
