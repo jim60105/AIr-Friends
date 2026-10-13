@@ -562,6 +562,9 @@ Deno.test("OMP recovery-context matrix: all nine helper callers thread their own
                       model: "test",
                       tokenLimit: 20000,
                       reasoningEffort: "high",
+                      // Non-empty operator MCP definitions: recovery must carry
+                      // exactly the definitions the acquisition supplied.
+                      mcpServers: [{ name: "matrix-server", command: "echo", args: ["hello"] }],
                       systemPromptPath: join(promptDir, "system_reply.md"),
                       idleTimeout: { enabled: false, timeoutMs: 300000, checkIntervalMs: 30000 },
                       sharedProcess: {
@@ -599,6 +602,7 @@ Deno.test("OMP recovery-context matrix: all nine helper callers thread their own
                     return sessionId;
                   };
                   let acquiredOptions: AgentConnectorOptions | undefined;
+                  let acquiredMcpServers: unknown[] | undefined;
                   let sessionCwd: string | undefined;
                   let ownershipAtRecovery:
                     | { permissionMode: string | undefined; processNamespace: string | undefined }
@@ -622,6 +626,7 @@ Deno.test("OMP recovery-context matrix: all nine helper callers thread their own
                       // Real createSession shape: ACP cwd = override ?? agentConfig.cwd,
                       // initial gate registered from clientConfig for that id.
                       createSession: (_servers?: unknown[], cwdOverride?: string) => {
+                        acquiredMcpServers = _servers ?? [];
                         sessionCwd = cwdOverride ?? options.agentConfig.cwd;
                         registeredGate = {
                           cwd: sessionCwd,
@@ -822,6 +827,10 @@ Deno.test("OMP recovery-context matrix: all nine helper callers thread their own
                   assertEquals(call.sessionId, "acp-id");
                   // The session's OWN ACP cwd — what createSession used.
                   assertEquals(call.cwd, sessionCwd);
+                  // The operator MCP definitions reach the respawn unchanged.
+                  assertExists(acquiredMcpServers);
+                  assertEquals(acquiredMcpServers.length > 0, true, "non-empty MCP fixture");
+                  assertEquals(call.mcpServers, acquiredMcpServers);
                   // Per-spawn acquisitions pass no cwd override, so that IS the
                   // factory-produced agent cwd; pooled runners pass the pool
                   // session's cwd positionally.
@@ -878,7 +887,6 @@ Deno.test("OMP recovery-context matrix: all nine helper callers thread their own
                     assertEquals(opts.reasoningEffort, "high");
                     // The production no-op attach seam.
                     assertEquals(opts.onGateContextRestored, undefined);
-                    assertEquals(Array.isArray(call.mcpServers), true);
                   }
                 } finally {
                   if (pool) {

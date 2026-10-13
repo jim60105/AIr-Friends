@@ -115,6 +115,20 @@ interface RecoveryContext {
 }
 
 /**
+ * The OMP shape of {@link RecoveryContext}: the owning gate context is
+ * mandatory, and `ownership` carries the registry record read back read-only —
+ * `undefined` when the acquisition left no complete record, which the connector
+ * fails closed on (`ownership_unverified`) instead of substituting an inferred
+ * mode or namespace. `perSpawnRecoveryContext` returns this for OMP
+ * acquisitions and `undefined` for OpenCode's context-free legacy shape, so an
+ * OMP caller cannot compile a context without an owning gate context.
+ */
+interface OmpRecoveryContext extends RecoveryContext {
+  ownership: SessionRecoveryOwnership | undefined;
+  gateContext: SessionGateContext;
+}
+
+/**
  * Format fetched RSS items for the self-research prompt as explicitly
  * untrusted, third-party content (F16).
  *
@@ -2951,7 +2965,7 @@ export class SessionOrchestrator {
             success: false,
             replySent: false,
             fileSent: false,
-            error: "Session lost due to idle timeout",
+            error,
           };
           return result;
         }
@@ -3339,7 +3353,7 @@ export class SessionOrchestrator {
             success: false,
             replySent: false,
             fileSent: false,
-            error: "Session lost due to idle timeout",
+            error,
           };
           return result;
         }
@@ -4626,7 +4640,7 @@ export class SessionOrchestrator {
     sessionCwd: string;
     clientConfig: ClientConfig;
     resolvedReasoningEffort: string;
-  }): RecoveryContext | undefined {
+  }): OmpRecoveryContext | undefined {
     if (params.agentType !== "omp") return undefined;
     return {
       ownership: this.recoveryOwnershipFromRegistry(params.shellSessionId, params.agentType),

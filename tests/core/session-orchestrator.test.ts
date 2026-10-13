@@ -5502,6 +5502,7 @@ Deno.test({
       // OMP per-spawn: the context is mandatory, and the corrective retry must
       // reuse the initial acquisition's captured value (never a re-inference).
       config.agent.defaultAgentType = "omp";
+      config.agent.mcpServers = [{ name: "identity-server", command: "echo", args: ["hello"] }];
       await Deno.writeTextFile(
         `${tempDir}/prompts/system_self_research.md`,
         "Research instructions\n{{ rssItems }}\nROOT={{ skillsDir }}",
@@ -5544,6 +5545,7 @@ Deno.test({
       const correctionOpts = correction.opts as RecordedRecoveryOpts | undefined;
       // Identity equality: the SAME captured acquisition context, values included.
       assertEquals(correctionOpts, initialOpts);
+      assertEquals(initial.mcpServers.length > 0, true, "non-empty operator MCP definitions");
       assertExists(initialOpts);
       assertExists(initialOpts.ownership);
       assertEquals(initialOpts.ownership.agentType, "omp");
@@ -5590,53 +5592,75 @@ for (
     },
   ] as const
 ) {
-  Deno.test({
-    name:
-      `SessionOrchestrator - per-spawn recovery abort (${scenario.name}) ends ONLY its session with a reason-coded error and audit`,
-    async fn() {
-      const tempDir = await Deno.makeTempDir();
-      try {
-        const { orchestrator, sessionRegistry, config } = await createTestableOrchestrator(tempDir);
-        config.agent.defaultAgentType = "omp";
-        enableAudit(config);
-        orchestrator.setConnectorSetup((connector) => {
-          connector.reconnectError = scenario.make();
-          connector.prompt = () => {
-            connector.promptCallCount++;
-            return Promise.reject(new Error("ACP connection dead"));
+  for (const entry of ["message", "memory", "channel-memory"] as const) {
+    Deno.test({
+      name:
+        `SessionOrchestrator - per-spawn recovery abort (${scenario.name}, ${entry}) ends ONLY its session with a reason-coded error and audit`,
+      async fn() {
+        const tempDir = await Deno.makeTempDir();
+        try {
+          const { orchestrator, sessionRegistry, config, workspaceManager } =
+            await createTestableOrchestrator(tempDir);
+          config.agent.defaultAgentType = "omp";
+          enableAudit(config);
+          orchestrator.setConnectorSetup((connector) => {
+            connector.reconnectError = scenario.make();
+            connector.prompt = () => {
+              connector.promptCallCount++;
+              return Promise.reject(new Error("ACP connection dead"));
+            };
+          });
+
+          const maintenance = {
+            enabled: true,
+            model: "test",
+            minMemoryCount: 1,
+            intervalMs: 1000,
           };
-        });
+          const response = entry === "message"
+            ? await orchestrator.processMessage(
+              createTestEvent(),
+              new MockPlatformAdapter() as unknown as PlatformAdapter,
+            )
+            : entry === "memory"
+            ? await orchestrator.processMemoryMaintenance("discord/user", maintenance)
+            : await orchestrator.processChannelMemoryMaintenance(
+              "discord/channel",
+              await workspaceManager.getOrCreateChannelWorkspace("discord", "channel"),
+              maintenance,
+            );
+          const connector = orchestrator.mockConnector!;
 
-        const event = createTestEvent();
-        const platformAdapter = new MockPlatformAdapter() as unknown as PlatformAdapter;
-        const response = await orchestrator.processMessage(event, platformAdapter);
-        const connector = orchestrator.mockConnector!;
+          assertEquals(response.success, false);
+          assertEquals(response.error, `session_recovery_failed: ${scenario.name}`);
+          assertEquals(
+            response.error?.includes("Session lost"),
+            false,
+            "recovery aborts stay distinct from the capability-absence session-loss text",
+          );
+          // No re-prompt after the abort, and no teardown from the recovery path
+          // itself (the per-spawn owned-process cleanup still disconnects once).
+          assertEquals(connector.promptCallCount, 1);
+          assertEquals(connector.disconnectCallsAtReconnectThrow, 0);
+          assertEquals(
+            connector.disconnectCalls - connector.disconnectCallsAtReconnectThrow,
+            1,
+            "only the owned per-spawn cleanup disconnects",
+          );
+          // The bounded reason was consumed exactly once (no stale entry left).
+          const reasonView = orchestrator as unknown as RecoveryAbortReasonMapView;
+          assertEquals(reasonView.recoveryAbortReasons.size, 0);
+          const ends = await readAuditSessionEnds(tempDir);
+          assertEquals(ends.length, 1, "exactly one session_end");
+          assertEquals(ends[0].error, `session_recovery_failed: ${scenario.name}`);
 
-        assertEquals(response.success, false);
-        assertEquals(response.error, `session_recovery_failed: ${scenario.name}`);
-        assertEquals(
-          response.error?.includes("Session lost"),
-          false,
-          "recovery aborts stay distinct from the capability-absence session-loss text",
-        );
-        // No re-prompt after the abort, and no teardown from the recovery path
-        // itself (the per-spawn owned-process cleanup still disconnects once).
-        assertEquals(connector.promptCallCount, 1);
-        assertEquals(connector.disconnectCallsAtReconnectThrow, 0);
-        assertEquals(connector.disconnectCalls, 1, "only the owned per-spawn cleanup");
-        // The bounded reason was consumed exactly once (no stale entry left).
-        const reasonView = orchestrator as unknown as RecoveryAbortReasonMapView;
-        assertEquals(reasonView.recoveryAbortReasons.size, 0);
-        const ends = await readAuditSessionEnds(tempDir);
-        assertEquals(ends.length, 1, "exactly one session_end");
-        assertEquals(ends[0].error, `session_recovery_failed: ${scenario.name}`);
-
-        sessionRegistry.stop();
-      } finally {
-        await Deno.remove(tempDir, { recursive: true });
-      }
-    },
-  });
+          sessionRegistry.stop();
+        } finally {
+          await Deno.remove(tempDir, { recursive: true });
+        }
+      },
+    });
+  }
 }
 
 Deno.test({
