@@ -1244,24 +1244,32 @@ export class AgentConnector {
    * recovery: the prompt is re-issued ONLY if no response has been recorded
    * for the session (the caller decides via `hasResponded`).
    *
-   * Row-11 recovery context (restore-mode-owned-acp-sessions): when the caller
-   * supplies a recovery context (`ownership` and/or `gateContext`), the recorded
+   * Row-11 recovery context (restore-mode-owned-acp-sessions): the recorded
    * acquisition mode/namespace is verified against this connector's own recovery
    * target BEFORE any teardown — a mismatch or missing provenance throws
    * {@link RecoveryOwnershipError} with zero disconnect/spawn/load/gate side
-   * effects — and after the load the recovered id's OWN full gate context is
-   * restored (never another session's cached context, never the process-frozen
-   * client fallback) before the named post-restore hook runs and success is
-   * reported. Callers with no recovery context keep the pre-change behavior
-   * byte-identically, including the capability-absence `false` return.
+   * effects. For the OMP deployment agent that verification is MANDATORY,
+   * independent of whether options were supplied, and the recovered id's own
+   * complete gate context is likewise mandatory and prevalidated against the
+   * recovery cwd and this connector's registration for that id BEFORE any
+   * teardown ({@link GateContextRestoreError} otherwise) — OMP has no
+   * context-free legacy path. After the load the recovered id's OWN full gate
+   * context is restored (never another session's cached context, never the
+   * process-frozen client fallback) before the named post-restore hook runs and
+   * success is reported. OpenCode callers keep the pre-change behavior
+   * byte-identically — optional context, cwd-only restore without options, and
+   * the capability-absence `false` return.
    *
    * @param sessionId the ACP session to resume
-   * @param cwd the session's working directory (required by `session/load`)
+   * @param cwd the session's working directory (required by `session/load`); an
+   *   OMP `gateContext.cwd` must agree with it
    * @param mcpServers the session's MCP servers (required by `session/load`)
-   * @param opts optional recovery options: `reasoningEffort` (row 6, consumed
-   *   unchanged), `ownership` (recorded acquisition context, verified
-   *   read-only), `gateContext` (the session's full gate context to restore),
-   *   `onGateContextRestored` (named post-restore hook — no readiness assertion)
+   * @param opts recovery options: `reasoningEffort` (row 6, consumed unchanged),
+   *   `ownership` (recorded acquisition context, verified read-only),
+   *   `gateContext` (the session's full gate context to restore),
+   *   `onGateContextRestored` (named post-restore hook — no readiness assertion).
+   *   Mandatory for OMP (`ownership` and `gateContext`); optional for OpenCode,
+   *   whose context-free legacy path is preserved.
    * @returns true if reconnection succeeded and the session was loaded.
    * @throws RecoveryOwnershipError on an ownership violation (pre-teardown, zero side effects)
    * @throws GateContextRestoreError when the recovered session's own gate context cannot be established
@@ -1284,15 +1292,29 @@ export class AgentConnector {
     // ── Ownership verification BEFORE any teardown (row 11, D2) ──────────────
     // The FIRST statement, ahead of `disconnect()`: a violation cannot kill the
     // opposite mode's live process, drop the session's gate context, or reach
-    // the respond-gated re-prompt path. The trigger is the supplied recovery
-    // context (`ownership` and/or `gateContext`) — a pure no-context call keeps
-    // the legacy path regardless of agent type (per-spawn callers and OpenCode
-    // unaware call sites). The recorded values are the TARGET: never re-resolved
-    // from configuration, never mutated.
+    // the respond-gated re-prompt path. The recorded values are the TARGET:
+    // never re-resolved from configuration, never mutated.
+    //
+    // The trigger is the configured deployment agent type for OMP — every OMP
+    // recovery requires recorded ownership INDEPENDENT of whether optional
+    // arguments were supplied, so an OMP call can never fall through to the
+    // context-free legacy restore. OpenCode keeps the pre-change trigger (a
+    // supplied recovery context) and therefore its context-free recovery.
+    const ompRecovery = this.options.agentType === "omp";
     const recoveryContextSupplied = opts?.ownership !== undefined ||
       opts?.gateContext !== undefined;
-    if (recoveryContextSupplied) {
+    if (ompRecovery || recoveryContextSupplied) {
       this.verifyRecoveryOwnership(sessionId, opts?.ownership);
+    }
+
+    // ── OMP owning gate-context prevalidation BEFORE any teardown ───────────
+    // OMP has no context-free legacy path: the recovered session's OWN complete
+    // gate context is mandatory and must agree with the recovery cwd and with
+    // the context this connector registered for that id. A missing or
+    // disagreeing gate is a bounded gate-context restore failure here, before
+    // settings/executable preflight, `disconnect()`, spawn or `session/load`.
+    if (ompRecovery) {
+      this.prevalidateOmpRecoveryGateContext(sessionId, cwd, opts?.gateContext);
     }
 
     // ── Settings-source recheck BEFORE any teardown (row 26, D3) ────────────
@@ -1358,10 +1380,12 @@ export class AgentConnector {
     // then best-effort reasoning from the supplied `opts.reasoningEffort`.
     this.refreshFromConfigOptionResponse(sessionId, loadResponse);
 
-    // Legacy cwd-only restore for callers WITHOUT a recovery context (per-spawn
+    // Legacy cwd-only restore for callers WITHOUT a recovery context (OpenCode
     // and OpenCode-unaware sites): kept in master's exact position — immediately
     // after the cache refresh, before model reapplication — so the legacy
-    // sequence is strictly byte-identical even on a post-load catalog miss.
+    // sequence is strictly byte-identical even on a post-load catalog miss. An
+    // OMP call can never reach it (its gate context is mandatory and already
+    // prevalidated before teardown), so no OMP recovery falls back to cwd-only.
     if (!recoveryContextSupplied && !opts?.gateContext) {
       this.setSessionGateContext(sessionId, {
         cwd,
@@ -1401,6 +1425,8 @@ export class AgentConnector {
     if (opts?.gateContext) {
       // A supplied context that disagrees with the recovery cwd is a restore
       // failure for this session — never a silent overwrite of either value.
+      // OMP already rejected this before teardown; for OpenCode with optional
+      // context this stays in its pre-change post-load position.
       if (opts.gateContext.cwd !== cwd) {
         throw new GateContextRestoreError(
           sessionId,
@@ -1412,6 +1438,7 @@ export class AgentConnector {
       // No context supplied AND none cached for the recovered id (fresh
       // connector): fail closed instead of resuming on the process-frozen
       // client fallback — that would be another session's default context.
+      // OpenCode-only: OMP never gets here (mandatory prevalidated gate).
       throw new GateContextRestoreError(
         sessionId,
         "no gate context supplied or cached for the recovered session id; refusing the process-frozen fallback",
@@ -1435,6 +1462,100 @@ export class AgentConnector {
   }
 
   /**
+   * OMP-only, pre-teardown gate-context prevalidation. OMP recovery has no
+   * context-free legacy path: the recovered session's OWN complete gate context
+   * is mandatory, must name the recovery cwd, must carry the resolved policy
+   * fields the client would otherwise take from the process-frozen client
+   * config (`yolo`, and the owning skill session whenever the process carries a
+   * frozen identity), and — when this connector still holds the context it
+   * registered for that id — must agree with it on every policy field. A
+   * missing, incomplete, cwd-disagreeing or foreign (sibling/process-frozen)
+   * context is a bounded gate-context restore failure raised BEFORE
+   * settings/executable preflight, `disconnect()`, spawn or `session/load`, so
+   * it has zero side effects. `trustedSkills` is deliberately not compared: for
+   * OMP it is minted/reobserved from the factory settings plan at every
+   * registration (row 28), so no caller carries it.
+   */
+  private prevalidateOmpRecoveryGateContext(
+    sessionId: string,
+    cwd: string,
+    gateContext: SessionGateContext | undefined,
+  ): void {
+    if (!gateContext) {
+      throw new GateContextRestoreError(
+        sessionId,
+        "OMP recovery requires the recovered session's own gate context; none was supplied",
+      );
+    }
+    if (gateContext.cwd !== cwd) {
+      throw new GateContextRestoreError(
+        sessionId,
+        `supplied context cwd "${gateContext.cwd}" disagrees with recovery cwd "${cwd}"`,
+      );
+    }
+    // Completeness: the fields the client would otherwise fall back to the
+    // PROCESS-FROZEN client config for (`gateYolo`, `gateSessionId`) must be
+    // resolved by the caller, so a cwd-only-shaped gate can never silently
+    // reopen the frozen policy this contract exists to close.
+    if (typeof gateContext.yolo !== "boolean") {
+      throw new GateContextRestoreError(
+        sessionId,
+        "supplied context carries no resolved yolo permission; the process-frozen " +
+          "client default is never substituted for OMP recovery",
+      );
+    }
+    const frozenSessionId = this.options.clientConfig?.sessionId;
+    if (frozenSessionId !== undefined && gateContext.shellSessionId === undefined) {
+      throw new GateContextRestoreError(
+        sessionId,
+        "supplied context names no owning skill session while this process carries a " +
+          "frozen session identity; the frozen identity is never substituted for OMP recovery",
+      );
+    }
+    const own = this.sessionGateContexts.get(sessionId);
+    // No own registration left on this connector (fresh connector after a
+    // liveness re-spawn): the caller's context IS the session's own context by
+    // construction — the cwd agreement above is the only available binding.
+    if (!own) return;
+    const describe = (label: string, supplied: unknown, registered: unknown): string =>
+      `supplied ${label} "${String(supplied ?? "none")}" disagrees with the recovered ` +
+      `session's registered value "${String(registered ?? "none")}"`;
+    const registeredExtensions = own.allowedWriteExtensions;
+    const suppliedExtensions = gateContext.allowedWriteExtensions;
+    const extensionsAgree = registeredExtensions === undefined || suppliedExtensions === undefined
+      ? registeredExtensions === suppliedExtensions
+      : registeredExtensions.length === suppliedExtensions.length &&
+        registeredExtensions.every((value, index) => value === suppliedExtensions[index]);
+    let mismatch: string | null = null;
+    if (own.cwd !== cwd) {
+      mismatch = `the recovered session's registered cwd "${own.cwd}" disagrees with the ` +
+        `recovery cwd "${cwd}"`;
+    } else if (own.shellSessionId !== gateContext.shellSessionId) {
+      mismatch = describe("owning skill session", gateContext.shellSessionId, own.shellSessionId);
+    } else if (own.yolo !== gateContext.yolo) {
+      mismatch = describe("yolo", gateContext.yolo, own.yolo);
+    } else if (own.canWriteAgentWorkspace !== gateContext.canWriteAgentWorkspace) {
+      mismatch = describe(
+        "canWriteAgentWorkspace",
+        gateContext.canWriteAgentWorkspace,
+        own.canWriteAgentWorkspace,
+      );
+    } else if (!extensionsAgree) {
+      mismatch = describe(
+        "allowedWriteExtensions",
+        gateContext.allowedWriteExtensions?.join(","),
+        own.allowedWriteExtensions?.join(","),
+      );
+    }
+    if (mismatch !== null) {
+      throw new GateContextRestoreError(
+        sessionId,
+        `supplied context is not the recovered session's own registered gate context: ${mismatch}`,
+      );
+    }
+  }
+
+  /**
    * Verify a session's recorded acquisition ownership against this connector's
    * own recovery target — the mode-scoped namespace its spawn configuration
    * carries, read from the factory-produced `agentConfig.env` (the single
@@ -1451,7 +1572,15 @@ export class AgentConnector {
       isSupportedAgentType(this.options.agentType ?? "")
         ? this.options.agentType as AgentType
         : undefined;
-    const agentType: AgentType | undefined = ownership?.agentType ?? configuredAgentType;
+    // A configured OMP deployment always compares against the ACTUAL OMP target
+    // derived from its own spawn env, never against a rule selected by the
+    // supplied record — a foreign (e.g. OpenCode-shaped) record must be rejected
+    // as unmatched provenance rather than passing under its own comparison rule.
+    // Non-OMP connectors keep the record-selected rule (OpenCode's pinned
+    // foreign-record classification is unchanged).
+    const agentType: AgentType | undefined = configuredAgentType === "omp"
+      ? "omp"
+      : (ownership?.agentType ?? configuredAgentType);
     // An unknown deployment agent type cannot prove same-mode recovery: model it
     // as an underivable OMP-style target so the verdict fails closed.
     const actual = agentType === undefined

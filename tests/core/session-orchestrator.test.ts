@@ -5483,3 +5483,228 @@ Deno.test({
     }
   },
 });
+
+// === Per-spawn recovery-context threading and bounded outcome (task 1.1/3.1) ===
+
+/** Test-only view of the pending per-spawn recovery-abort reasons. */
+interface RecoveryAbortReasonMapView {
+  recoveryAbortReasons: Map<string, string>;
+}
+
+Deno.test({
+  name:
+    "SessionOrchestrator - per-spawn self-research initial and corrective retry carry the IDENTICAL recorded recovery context",
+  async fn() {
+    const tempDir = await Deno.makeTempDir();
+    try {
+      const { orchestrator, sessionRegistry, config, skillRegistry, workspaceManager } =
+        await createTestableOrchestrator(tempDir);
+      // OMP per-spawn: the context is mandatory, and the corrective retry must
+      // reuse the initial acquisition's captured value (never a re-inference).
+      config.agent.defaultAgentType = "omp";
+      config.agent.mcpServers = [{ name: "identity-server", command: "echo", args: ["hello"] }];
+      await Deno.writeTextFile(
+        `${tempDir}/prompts/system_self_research.md`,
+        "Research instructions\n{{ rssItems }}\nROOT={{ skillsDir }}",
+      );
+
+      const event = createTestEvent();
+      orchestrator.setConnectorSetup((connector) => {
+        connector.reconnectResult = true;
+        let calls = 0;
+        connector.prompt = () => {
+          calls++;
+          connector.promptCallCount = calls;
+          if (calls === 1 || calls === 3) {
+            // Both the initial turn and the corrective retry die mid-flight.
+            return Promise.reject(new Error("ACP connection dead"));
+          }
+          if (calls === 4) {
+            // The retry produced a note, so the session completes successfully.
+            writeResearchNote(tempDir, "notes/final.md", "# Final");
+            writeResearchNote(tempDir, "notes/_index.md", "- final");
+            markReplySent(
+              skillRegistry,
+              workspaceManager.getWorkspaceKeyFromEvent({ ...event, userId: "self-research" }),
+              "internal",
+            );
+          }
+          return Promise.resolve({ stopReason: "end_turn" } as PromptResponse);
+        };
+      });
+
+      const response = await orchestrator.processSelfResearch(srRssItems(), SR_CONFIG);
+
+      const connector = orchestrator.mockConnector!;
+      assertEquals(connector.reconnectCalls.length, 2, "initial + corrective retry recover");
+      const [initial, correction] = connector.reconnectCalls;
+      assertEquals(correction.sessionId, initial.sessionId);
+      assertEquals(correction.cwd, initial.cwd);
+      assertEquals(correction.mcpServers, initial.mcpServers);
+      const initialOpts = initial.opts as RecordedRecoveryOpts | undefined;
+      const correctionOpts = correction.opts as RecordedRecoveryOpts | undefined;
+      // Identity equality: the SAME captured acquisition context, values included.
+      assertEquals(correctionOpts, initialOpts);
+      assertEquals(initial.mcpServers.length > 0, true, "non-empty operator MCP definitions");
+      assertExists(initialOpts);
+      assertExists(initialOpts.ownership);
+      assertEquals(initialOpts.ownership.agentType, "omp");
+      assertEquals(initialOpts.ownership.permissionMode, "restricted");
+      assertEquals(
+        initialOpts.ownership.processNamespace,
+        connector.options.agentConfig.env?.PI_CODING_AGENT_DIR,
+      );
+      assertExists(initialOpts.gateContext);
+      // Own cwd = the ACP session's own cwd (`createSession()` used agentConfig.cwd).
+      assertEquals(initialOpts.gateContext.cwd, connector.options.agentConfig.cwd);
+      assertEquals(initialOpts.gateContext.cwd, initial.cwd);
+      // The self-research session's own gate fields and resolved effort.
+      assertEquals(initialOpts.gateContext.canWriteAgentWorkspace, true);
+      assertEquals(initialOpts.gateContext.yolo, false);
+      assertEquals(initialOpts.reasoningEffort, "default");
+      assertEquals(initialOpts.onGateContextRestored, undefined);
+      assertEquals(response.success, true, response.error);
+
+      sessionRegistry.stop();
+    } finally {
+      await Deno.remove(tempDir, { recursive: true });
+    }
+  },
+});
+
+for (
+  const scenario of [
+    {
+      name: "ownership_violation",
+      make: () =>
+        new RecoveryOwnershipError({
+          sessionId: "acp-id",
+          expectedMode: "native-yolo",
+          expectedNamespace: "/root/omp-agent/native-yolo",
+          actualMode: "restricted",
+          actualNamespace: "/root/omp-agent/restricted",
+          reason: "ownership_violation",
+        }),
+    },
+    {
+      name: "gate_context_restore_failed",
+      make: () => new GateContextRestoreError("acp-id", "no own gate context"),
+    },
+  ] as const
+) {
+  for (const entry of ["message", "memory", "channel-memory"] as const) {
+    Deno.test({
+      name:
+        `SessionOrchestrator - per-spawn recovery abort (${scenario.name}, ${entry}) ends ONLY its session with a reason-coded error and audit`,
+      async fn() {
+        const tempDir = await Deno.makeTempDir();
+        try {
+          const { orchestrator, sessionRegistry, config, workspaceManager } =
+            await createTestableOrchestrator(tempDir);
+          config.agent.defaultAgentType = "omp";
+          enableAudit(config);
+          orchestrator.setConnectorSetup((connector) => {
+            connector.reconnectError = scenario.make();
+            connector.prompt = () => {
+              connector.promptCallCount++;
+              return Promise.reject(new Error("ACP connection dead"));
+            };
+          });
+
+          const maintenance = {
+            enabled: true,
+            model: "test",
+            minMemoryCount: 1,
+            intervalMs: 1000,
+          };
+          const response = entry === "message"
+            ? await orchestrator.processMessage(
+              createTestEvent(),
+              new MockPlatformAdapter() as unknown as PlatformAdapter,
+            )
+            : entry === "memory"
+            ? await orchestrator.processMemoryMaintenance("discord/user", maintenance)
+            : await orchestrator.processChannelMemoryMaintenance(
+              "discord/channel",
+              await workspaceManager.getOrCreateChannelWorkspace("discord", "channel"),
+              maintenance,
+            );
+          const connector = orchestrator.mockConnector!;
+
+          assertEquals(response.success, false);
+          assertEquals(response.error, `session_recovery_failed: ${scenario.name}`);
+          assertEquals(
+            response.error?.includes("Session lost"),
+            false,
+            "recovery aborts stay distinct from the capability-absence session-loss text",
+          );
+          // No re-prompt after the abort, and no teardown from the recovery path
+          // itself (the per-spawn owned-process cleanup still disconnects once).
+          assertEquals(connector.promptCallCount, 1);
+          assertEquals(connector.disconnectCallsAtReconnectThrow, 0);
+          assertEquals(
+            connector.disconnectCalls - connector.disconnectCallsAtReconnectThrow,
+            1,
+            "only the owned per-spawn cleanup disconnects",
+          );
+          // The bounded reason was consumed exactly once (no stale entry left).
+          const reasonView = orchestrator as unknown as RecoveryAbortReasonMapView;
+          assertEquals(reasonView.recoveryAbortReasons.size, 0);
+          const ends = await readAuditSessionEnds(tempDir);
+          assertEquals(ends.length, 1, "exactly one session_end");
+          assertEquals(ends[0].error, `session_recovery_failed: ${scenario.name}`);
+
+          sessionRegistry.stop();
+        } finally {
+          await Deno.remove(tempDir, { recursive: true });
+        }
+      },
+    });
+  }
+}
+
+Deno.test({
+  name: "SessionOrchestrator - a failing conversation-summary prompt never triggers a reconnect",
+  async fn() {
+    const tempDir = await Deno.makeTempDir();
+    try {
+      const { orchestrator, sessionRegistry, config, skillRegistry, workspaceManager } =
+        await createTestableOrchestrator(tempDir);
+      config.agent.systemPromptPath = `${tempDir}/prompts/system_reply.md`;
+      config.conversationSummary = { enabled: true };
+      await Deno.writeTextFile(
+        `${tempDir}/prompts/system_summary.md`,
+        "SUMMARY\nROOT={{ skillsDir }}",
+      );
+
+      const event = createTestEvent();
+      orchestrator.setConnectorSetup((connector) => {
+        connector.prompt = (_sessionId: string, text: string) => {
+          connector.promptCallCount++;
+          if (text.startsWith("SUMMARY")) {
+            return Promise.reject(new Error("ACP connection dead"));
+          }
+          markReplySent(
+            skillRegistry,
+            workspaceManager.getWorkspaceKeyFromEvent(event),
+            event.channelId,
+          );
+          return Promise.resolve({ stopReason: "end_turn" } as PromptResponse);
+        };
+      });
+
+      const platformAdapter = new MockPlatformAdapter() as unknown as PlatformAdapter;
+      const response = await orchestrator.processMessage(event, platformAdapter);
+
+      // The delivery turn succeeded; the summary's own failure is caught by the
+      // fire-and-forget caller and never enters the recovery seam.
+      assertEquals(response.success, true);
+      assertEquals(orchestrator.mockConnector!.reconnectCalls.length, 0);
+      assertEquals(orchestrator.mockConnector!.promptCallCount, 2);
+
+      sessionRegistry.stop();
+    } finally {
+      await Deno.remove(tempDir, { recursive: true });
+    }
+  },
+});
