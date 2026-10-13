@@ -58,6 +58,32 @@
  *    - Logic: `Object.assign(headers, getOpenRouterHeaders())` assigns `HTTP-Referer: https://omp.sh/` and `X-OpenRouter-Title: omp`
  *      AFTER model/config headers, so `HTTP-Referer` is non-overridable via content configuration.
  *
+ * 11. `tools.approval` (restricted mode only; exact read/search-class allow entries):
+ *    - Pin & Symbol: `v18.6.1` / `packages/coding-agent/src/tools/settings.ts` (`cfgToolsApproval`)
+ *    - Type & Domain: record of exact registered tool key → `"allow" | "prompt" | "deny"` (honored in EVERY approval mode)
+ *    - Purpose: pins exact-name `allow` for the native read/search builtins the restricted inventory
+ *      admits, so approved read-tier calls need no human elicitation. Admission is still provenance-
+ *      first (SDK/foreign same-name calls deny before native approval), and this record is an
+ *      approval posture — never an authorization, a filesystem ACL, or a merge-reset.
+ *
+ * 12. `grep.enabled` / `glob.enabled`:
+ *    - Pin & Symbol: `v18.6.1` / `tools/settings.ts` (`cfgGrepEnabled`, `cfgGlobEnabled`), boolean, default `true`
+ *    - Purpose: keeps the native local builtin search tools available under the supported activation control.
+ *
+ * 13. `find.enabled`:
+ *    - Pin & Symbol: `v18.6.1` / `tools/settings.ts` (`cfgFindEnabled`), enum `"auto" | "on" | "off"`, default `"auto"`
+ *    - Purpose: pinned to `auto` so the model-dependent native `find` availability is UNCHANGED
+ *      (`isFindEnabled`/`jfind` resolve `auto` only when the judge role is a native TypeSafe model and a
+ *      model registry exists); no judge/model/backend is added to force it on.
+ *
+ * 14. `fetch.enabled` (restricted mode only):
+ *    - Pin & Symbol: `v18.6.1` / `tools/settings.ts` (`cfgFetchEnabled`), boolean, default `true`;
+ *      consumed by `tools/fetch.ts` `materializeReadUrlToFile`
+ *    - Purpose: defense in depth against native URL materialization (including native grep URL roots),
+ *      which throws before any fetch. The registered owned `read` replacement performs its own
+ *      controlled per-hop transport and never consults this key, so controlled adapter URL
+ *      functionality stays available; a disabled key is NOT a complete URI-route block.
+ *
  * NO subprocess execution, NO filesystem writes, NO pool/LSP implementation.
  */
 
@@ -75,11 +101,33 @@ import { isAbsolute, resolve } from "@std/path";
 export type OmpPermissionMode = "restricted" | "native-yolo";
 
 /**
+ * Pinned per-tool approval value vocabulary (`tools/settings.ts`
+ * `cfgToolsApproval`: `"allow" | "prompt" | "deny"`).
+ */
+export const PINNED_TOOL_APPROVAL_VALUES: readonly string[] = ["allow", "prompt", "deny"] as const;
+
+/**
+ * The EXACT owned `tools.approval` entries the restricted overlay pins for the
+ * native read/search builtins the restricted inventory admits (name → pinned
+ * value). The name set is CLOSED: an unknown tool key rejects, so no OMP-only
+ * execution surface (`eval`, `task`, `lsp`, …) and no unlisted capability can
+ * enter an owned overlay through this branch. These are approval POSTURE
+ * entries — provenance still denies SDK/foreign same-name calls before native
+ * approval, and the record neither authorizes nor confines anything.
+ */
+export const PINNED_TOOL_APPROVAL_ALLOW_ENTRIES: Readonly<Record<string, string>> = {
+  read: "allow",
+  grep: "allow",
+  glob: "allow",
+  find: "allow",
+};
+
+/**
  * Pinned registered settings keys and their allowed value specifications.
  */
 export interface RegisteredKeySpec {
   readonly path: string;
-  readonly type: "string" | "boolean" | "string[]";
+  readonly type: "string" | "boolean" | "string[]" | "record";
   readonly allowedValues?: readonly string[];
   readonly description: string;
 }
@@ -116,6 +164,36 @@ export const PINNED_REGISTERED_SETTINGS_KEYS: Readonly<Record<string, Registered
     type: "string",
     allowedValues: ["always-ask", "write", "yolo"],
     description: "Approval mode for tool executions (packages/coding-agent/src/tools/settings.ts)",
+  },
+  "tools.approval": {
+    path: "tools.approval",
+    type: "record",
+    allowedValues: [...PINNED_TOOL_APPROVAL_VALUES],
+    description:
+      "Per-tool approval policy record (tools/settings.ts cfgToolsApproval); owned overlays carry exact read/search-class `allow` entries only",
+  },
+  "grep.enabled": {
+    path: "grep.enabled",
+    type: "boolean",
+    description: "Native grep tool enablement (tools/settings.ts cfgGrepEnabled)",
+  },
+  "glob.enabled": {
+    path: "glob.enabled",
+    type: "boolean",
+    description: "Native glob tool enablement (tools/settings.ts cfgGlobEnabled)",
+  },
+  "find.enabled": {
+    path: "find.enabled",
+    type: "string",
+    allowedValues: ["auto", "on", "off"],
+    description:
+      "Native semantic find enablement enum (tools/settings.ts cfgFindEnabled); `auto` stays judge/model-dependent",
+  },
+  "fetch.enabled": {
+    path: "fetch.enabled",
+    type: "boolean",
+    description:
+      "Native URL materialization toggle (tools/settings.ts cfgFetchEnabled, consumed by fetch.ts materializeReadUrlToFile)",
   },
   "lsp.enabled": {
     path: "lsp.enabled",
@@ -249,6 +327,8 @@ export const PINNED_DISABLED_PROVIDERS_CATALOG: readonly string[] = ([
  */
 export const RESTRICTED_ONLY_KEYS: readonly string[] = [
   "disabledProviders",
+  "tools.approval",
+  "fetch.enabled",
 ] as const;
 
 /**
@@ -669,6 +749,19 @@ export const RESTRICTED_YAML_CONTENT =
 # Pinned to official OMP v18.6.1 / 2a2c6dcbbb558c0f8145f67f28b3370984f2bf60.
 tools:
   approvalMode: write
+  approval:
+    read: allow
+    grep: allow
+    glob: allow
+    find: allow
+grep:
+  enabled: true
+glob:
+  enabled: true
+find:
+  enabled: auto
+fetch:
+  enabled: false
 lsp:
   enabled: false
 skills:
@@ -822,13 +915,75 @@ providers:
 `;
 
 /**
+ * Activation key each pinned approval entry depends on (`read` has no native
+ * toggle). Keeps the approved entries and their activation flags in lockstep:
+ * adding a pinned entry without its toggle fails validation instead of
+ * silently declaring an approval posture for a tool that cannot run.
+ */
+export const PINNED_TOOL_APPROVAL_ACTIVATION: Readonly<Record<string, string | undefined>> = {
+  read: undefined,
+  grep: "grep.enabled",
+  glob: "glob.enabled",
+  find: "find.enabled",
+};
+
+/**
+ * The exact non-record values restricted mode requires (the approval record is
+ * validated separately, and `tools.approvalMode` keeps its own message below).
+ */
+export const PINNED_RESTRICTED_SETTINGS_VALUES: Readonly<Record<string, unknown>> = {
+  "grep.enabled": true,
+  "glob.enabled": true,
+  "find.enabled": "auto",
+  "fetch.enabled": false,
+};
+
+/**
+ * Validate one owned `tools.approval` record: a non-empty mapping of exact
+ * registered tool key → pinned approval value, restricted to the CLOSED pinned
+ * entry-name set. Null resets, unknown tool names and unknown values all
+ * reject, so the record can neither nullify a lower layer through this branch
+ * nor smuggle an entry for an unlisted capability.
+ */
+function assertOwnedToolApprovalRecord(value: unknown): void {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error('Invalid type for key "tools.approval": expected a record of tool entries');
+  }
+  const entries = Object.entries(value as Record<string, unknown>);
+  if (entries.length === 0) {
+    throw new Error(
+      'Forbidden empty object at path "tools.approval": empty mapping branches are disallowed',
+    );
+  }
+  for (const [toolName, approval] of entries) {
+    if (!Object.hasOwn(PINNED_TOOL_APPROVAL_ALLOW_ENTRIES, toolName)) {
+      throw new Error(
+        `Unsupported "tools.approval" entry "${toolName}": only the pinned entries (${
+          Object.keys(PINNED_TOOL_APPROVAL_ALLOW_ENTRIES).join(", ")
+        }) may appear in owned settings overlays`,
+      );
+    }
+    if (typeof approval !== "string" || !PINNED_TOOL_APPROVAL_VALUES.includes(approval)) {
+      throw new Error(
+        `Invalid value "${
+          String(approval)
+        }" for key "tools.approval.${toolName}": must be one of [${
+          PINNED_TOOL_APPROVAL_VALUES.join(", ")
+        }]`,
+      );
+    }
+  }
+}
+
+/**
  * Validates a parsed owned settings document against the pinned v18.6.1 schema.
  * Validates both leaf values and intermediate mappings. Rejects:
  * - Keys not registered at v18.6.1
  * - Values outside registered enum/type
  * - Restricted-only keys present in native-yolo mode
  * - Mode mismatch in tools.approvalMode
- * - Per-tool tools.approval policy records (owned by row 14)
+ * - Per-tool `tools.approval` records outside the closed pinned entry-name set
+ *   or outside the pinned value enum (and any `tools.approval` in native-yolo)
  * - Empty or unexpected object branches
  * - Missing/disabled-off LSP posture: BOTH modes require the decision-5 shared
  *   deployment pin `lsp.enabled: false` (boolean only; a true value, a
@@ -849,13 +1004,6 @@ export function assertOwnedSettingsDocument(
   function inspectTree(prefix: string, obj: Record<string, unknown>) {
     for (const [key, value] of Object.entries(obj)) {
       const fullPath = prefix ? `${prefix}.${key}` : key;
-
-      // Check against disallowed tools.approval* records
-      if (fullPath === "tools.approval" || fullPath.startsWith("tools.approval.")) {
-        throw new Error(
-          `Disallowed key "${fullPath}": per-tool approval records and approval resets must not appear in owned settings overlays (owned by row 14)`,
-        );
-      }
 
       if (
         value !== null &&
@@ -885,6 +1033,10 @@ export function assertOwnedSettingsDocument(
 
   // Validate every path
   for (const [path, value] of Object.entries(allPaths)) {
+    // Children of the `tools.approval` record are covered by that record's own
+    // validation (closed name set + pinned value enum); they are not separate
+    // registered keys.
+    if (path.startsWith("tools.approval.")) continue;
     // If it's a top-level object container (e.g. "tools", "lsp", "startup", "marketplace", "update", "compaction")
     if (
       !path.includes(".") && typeof value === "object" && value !== null && !Array.isArray(value)
@@ -941,6 +1093,8 @@ export function assertOwnedSettingsDocument(
           `Invalid type for key "${path}": expected string array`,
         );
       }
+    } else if (spec.type === "record") {
+      assertOwnedToolApprovalRecord(value);
     }
   }
 
@@ -952,6 +1106,60 @@ export function assertOwnedSettingsDocument(
           allPaths["tools.approvalMode"]
         }"`,
       );
+    }
+    // Owned native read/search posture: the exact pinned activation values and
+    // the exact pinned `allow` approval entries. Values are pinned rather than
+    // merely typed, so a relaxed activation flag cannot ride alongside an
+    // approval entry.
+    for (const [key, pinnedValue] of Object.entries(PINNED_RESTRICTED_SETTINGS_VALUES)) {
+      if (allPaths[key] !== pinnedValue) {
+        throw new Error(
+          `Restricted mode requires explicit ${key}: ${JSON.stringify(pinnedValue)}, got ${
+            JSON.stringify(allPaths[key])
+          }`,
+        );
+      }
+    }
+    const approvalRecord = allPaths["tools.approval"];
+    if (
+      approvalRecord === null || typeof approvalRecord !== "object" ||
+      Array.isArray(approvalRecord)
+    ) {
+      throw new Error(
+        "Restricted mode requires the owned tools.approval record with the pinned read/search-class entries",
+      );
+    }
+    const approvalEntries = approvalRecord as Record<string, unknown>;
+    const pinnedEntryNames = Object.keys(PINNED_TOOL_APPROVAL_ALLOW_ENTRIES);
+    if (Object.keys(approvalEntries).length !== pinnedEntryNames.length) {
+      throw new Error(
+        `Restricted mode requires EXACTLY the pinned tools.approval entries (${
+          pinnedEntryNames.join(", ")
+        })`,
+      );
+    }
+    for (const [toolName, pinnedValue] of Object.entries(PINNED_TOOL_APPROVAL_ALLOW_ENTRIES)) {
+      if (approvalEntries[toolName] !== pinnedValue) {
+        throw new Error(
+          `Restricted mode requires explicit tools.approval.${toolName}: "${pinnedValue}", got "${
+            String(approvalEntries[toolName])
+          }"`,
+        );
+      }
+      // Lockstep: an approved entry without its activation key (or with the
+      // entry's tool disabled/off) is not a usable posture.
+      const activationKey = PINNED_TOOL_APPROVAL_ACTIVATION[toolName];
+      if (activationKey === undefined) continue;
+      if (!(activationKey in allPaths)) {
+        throw new Error(
+          `Restricted mode requires the activation key "${activationKey}" for approved tool "${toolName}"`,
+        );
+      }
+      if (allPaths[activationKey] === false || allPaths[activationKey] === "off") {
+        throw new Error(
+          `Approved tool "${toolName}" cannot be paired with a disabled "${activationKey}"`,
+        );
+      }
     }
     const dp = allPaths["disabledProviders"];
     if (!Array.isArray(dp) || dp.length !== PINNED_DISABLED_PROVIDERS_CATALOG.length) {
@@ -1103,6 +1311,13 @@ export function ompSettingsForMode(
   if (mode === "restricted") {
     if (
       !modeContent.includes("approvalMode: write") ||
+      !modeContent.includes(
+        "approval:\n    read: allow\n    grep: allow\n    glob: allow\n    find: allow",
+      ) ||
+      !modeContent.includes("grep:\n  enabled: true") ||
+      !modeContent.includes("glob:\n  enabled: true") ||
+      !modeContent.includes("find:\n  enabled: auto") ||
+      !modeContent.includes("fetch:\n  enabled: false") ||
       !modeContent.includes("lsp:\n  enabled: false")
     ) {
       throw new Error("Assembly validation failed for restricted settings overlay");
@@ -1111,7 +1326,9 @@ export function ompSettingsForMode(
     if (
       !modeContent.includes("approvalMode: yolo") ||
       !modeContent.includes("lsp:\n  enabled: false") ||
-      modeContent.includes("disabledProviders:")
+      modeContent.includes("disabledProviders:") ||
+      modeContent.includes("approval:") ||
+      modeContent.includes("fetch:")
     ) {
       throw new Error(
         "Assembly validation failed: native-yolo overlay lost the decision-5 LSP pin or gained a restricted-only key",

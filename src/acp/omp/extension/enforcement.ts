@@ -353,6 +353,17 @@ export function composeFreshProvenance(
 ): ProvenanceRecord {
   const recorded = observation.registryObservation.recordedOrigin;
   switch (recorded.origin) {
+    case "native-builtin":
+      // Current epoch + generation = the live wiring-owned reads for THIS
+      // call. The recorded halves came from the same live roster read that
+      // produced the identity (see `NativeBuiltinProvenance`), so this pairing
+      // is a coherence assertion over one observation domain rather than a
+      // race guard.
+      return {
+        ...recorded,
+        currentRegistryEpoch: observation.registryObservation.registryEpoch,
+        currentResourceGeneration: observation.registryObservation.resourceGeneration,
+      };
     case "operator-mcp":
       // Current epoch = the live wiring-owned observation for THIS call.
       return { ...recorded, currentRegistryEpoch: observation.registryObservation.registryEpoch };
@@ -517,11 +528,15 @@ export function composeRestrictedToolCall(
   if (decision.outcome === "deny") {
     if (decision.pending === "re-observe") {
       // Stale epoch / generation: bounded re-observe denial naming WHICH
-      // freshness element lags. Admission is possible only on fresh data,
-      // and the advisory records cannot soften a freshness denial.
+      // freshness element lags — the provenance decision names the element
+      // that actually mismatched, and the origin-class fallback covers the
+      // incoherent-future-epoch case that carries no element.
+      // Admission is possible only on fresh data, and the advisory records
+      // cannot soften a freshness denial.
       return blocked({
         code: "rejected_stale_observation",
-        staleElement: origin.origin === "operator-mcp" ? "registry-epoch" : "resource-generation",
+        staleElement: decision.staleElement ??
+          (origin.origin === "operator-mcp" ? "registry-epoch" : "resource-generation"),
         originCategory,
         ...(decision.tableRowId !== undefined ? { tableRowId: decision.tableRowId } : {}),
       });
@@ -584,7 +599,7 @@ export function mcpAdmissionDenialBlock(
   if (admission.pending === "re-observe") {
     return {
       code: "rejected_stale_observation",
-      staleElement: "registry-epoch",
+      staleElement: admission.staleElement ?? "registry-epoch",
       originCategory,
       seam: "mcp-admission-basis",
     };

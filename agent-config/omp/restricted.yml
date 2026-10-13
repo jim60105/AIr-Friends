@@ -2,6 +2,19 @@
 # Pinned to official OMP v18.6.1 / 2a2c6dcbbb558c0f8145f67f28b3370984f2bf60.
 tools:
   approvalMode: write
+  approval:
+    read: allow
+    grep: allow
+    glob: allow
+    find: allow
+grep:
+  enabled: true
+glob:
+  enabled: true
+find:
+  enabled: auto
+fetch:
+  enabled: false
 lsp:
   enabled: false
 skills:

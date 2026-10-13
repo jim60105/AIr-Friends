@@ -10,6 +10,15 @@
  * destructive routing, and every denial reason stay 14a's; this module only
  * represents what the event positively carries.
  *
+ * Root screening (task 2.2): before any native read/search call could reach
+ * local dispatch, `screenNativeInput` decodes EVERY path/root constituent of
+ * the real pinned parameter vocabulary (delimited `;`/`,`/whitespace lists,
+ * inline selectors, archive members, collapsed and glued internal-scheme
+ * spellings). An HTTP(S), SSH or internal/device root denies the WHOLE call
+ * before native scanning or URL materialization — a valid local constituent
+ * never authorizes a mixed unsafe root list — while literal pattern/query TEXT
+ * is never a root and stays usable.
+ *
  * Trusted-context discipline (spec: model input cannot forge admission):
  * `input` is model-authored, so ONLY arguments-derived fields are read from
  * it — the path/command/target strings a tool call necessarily contains.
@@ -118,6 +127,198 @@ const PATH_TARGET_TOOLS: readonly string[] = [
   "apply_patch",
 ];
 
+// ---------------------------------------------------------------------------
+// Native local read/search root screening (task 2.2).
+// ---------------------------------------------------------------------------
+
+/**
+ * The read/search-class names whose REAL path/root constituents are screened
+ * before local dispatch (the inventory's read-class vocabulary: the pinned
+ * builtin names plus the legacy `list`/`search` spellings).
+ */
+const SCREENED_NATIVE_SEARCH_TOOLS: readonly string[] = [
+  "read",
+  "list",
+  "glob",
+  "grep",
+  "search",
+  "find",
+];
+
+/**
+ * Every root field the real pinned read/search tools accept (`read` declares
+ * `path`; the search tools declare `path`, and the pinned host approval
+ * wrapper also reads `paths`). Literal TEXT fields — `pattern`, `query`,
+ * `grep_keywords` — are never roots and are never screened: a search pattern
+ * that happens to contain URI-like text stays usable.
+ */
+const NATIVE_ROOT_FIELDS: readonly string[] = ["path", "paths"];
+
+/**
+ * The pinned internal-URL scheme vocabulary (`internal-urls/router.ts` at the
+ * pin: every registered handler plus the MCP resource fallback). It bounds
+ * OPAQUE `<scheme>:payload` recognition: a local file may legitimately be
+ * named `report.pdf:2-4` or `archive.zip:member`, so only the pinned scheme
+ * vocabulary classifies that form. Hierarchical `<scheme>:/…` spellings are
+ * screened for EVERY scheme (fail closed).
+ */
+const PINNED_INTERNAL_URL_SCHEMES: readonly string[] = [
+  "skill",
+  "rule",
+  "memory",
+  "agent",
+  "history",
+  "artifact",
+  "local",
+  "proc",
+  "cfg",
+  "ssh",
+  "security",
+  "vault",
+  "issue",
+  "pr",
+  "mcp",
+  "omp",
+  "xd",
+  "attachment",
+  "conflict",
+];
+
+const PINNED_INTERNAL_URL_SCHEME_LOOKUP: Readonly<Record<string, true>> = Object.fromEntries(
+  PINNED_INTERNAL_URL_SCHEMES.map((scheme): [string, true] => [scheme, true]),
+);
+
+/**
+ * `<scheme>:/…` or a bare `<scheme>:` — two characters minimum, so a Windows
+ * drive letter (`C:\x`, `C:/x`) and a single-letter directory root stay local.
+ */
+const LEADING_SCHEME_RE = /^([a-zA-Z][a-zA-Z0-9+.-]{1,31}):(\/|$)/;
+const OPAQUE_SCHEME_RE = /^([a-zA-Z][a-zA-Z0-9+.-]{1,31}):/;
+/**
+ * A filesystem path glued in front of an internal URL (`/repo/local://x`),
+ * which the pinned router normalizes into that scheme's URL.
+ */
+const GLUED_SCHEME_RE = /[\\/]([a-zA-Z][a-zA-Z0-9+.-]{1,31}):\/\/(?=[^/]|$)/;
+/**
+ * Delimited root lists: the pinned search path resolver splits `;`, `,` and
+ * whitespace lists (`path-utils.ts` `splitDelimitedPathEntry`), so screening
+ * must see every constituent, never only the first.
+ */
+const ROOT_LIST_SEPARATOR_RE = /[\s;,]+/;
+
+/** One constituent's route class; `local` is the only admissible class. */
+type NativeRootConstituentClass = "local" | "url" | "ssh" | "internal";
+
+/**
+ * A screened-out root: the whole native read/search call must deny before any
+ * native scan or URL materialization.
+ */
+export interface NativeRootScreening {
+  readonly deviceSurface: "remote-url" | "internal-uri-scheme" | "ssh-device";
+  readonly decodedCapability: string;
+}
+
+/**
+ * Classify one root constituent. `allowSkillUri` mirrors the pinned `read`
+ * branch parser: a `skill://` read is the owned skill-URI route (local to this
+ * screen; its own authorization runs downstream), while every other
+ * non-HTTP(S) scheme is an internal/device or SSH route. Fail-closed for
+ * unrepresentable spellings: an unrecognized `<scheme>:/…` form is a route,
+ * never a local path.
+ */
+function classifyNativeRootConstituent(
+  token: string,
+  allowSkillUri: boolean,
+): NativeRootConstituentClass {
+  const leading = LEADING_SCHEME_RE.exec(token);
+  let scheme = leading?.[1]?.toLowerCase();
+  if (scheme === undefined) {
+    const glued = GLUED_SCHEME_RE.exec(token);
+    const gluedScheme = glued?.[1]?.toLowerCase();
+    if (
+      gluedScheme !== undefined && Object.hasOwn(PINNED_INTERNAL_URL_SCHEME_LOOKUP, gluedScheme)
+    ) {
+      scheme = gluedScheme;
+    } else {
+      const opaque = OPAQUE_SCHEME_RE.exec(token);
+      const opaqueScheme = opaque?.[1]?.toLowerCase();
+      if (
+        opaqueScheme === undefined ||
+        !Object.hasOwn(PINNED_INTERNAL_URL_SCHEME_LOOKUP, opaqueScheme)
+      ) {
+        return "local";
+      }
+      scheme = opaqueScheme;
+    }
+  }
+  if (scheme === "http" || scheme === "https") return "url";
+  if (scheme === "skill" && allowSkillUri) return "local";
+  if (scheme === "ssh") return "ssh";
+  return "internal";
+}
+
+/** Every root constituent a real pinned read/search call positively names. */
+function nativeRootConstituents(input: Record<string, unknown>): string[] {
+  const constituents: string[] = [];
+  for (const field of NATIVE_ROOT_FIELDS) {
+    const value = input[field];
+    const entries = typeof value === "string"
+      ? [value]
+      : Array.isArray(value)
+      ? value.filter((entry): entry is string => typeof entry === "string")
+      : [];
+    for (const entry of entries) {
+      for (const token of entry.split(ROOT_LIST_SEPARATOR_RE)) {
+        // A delimited list can leave empty tokens (trailing separators, a bare
+        // `;`); an empty constituent is the native default (trusted cwd), not
+        // a route.
+        if (token !== "") constituents.push(token);
+      }
+    }
+  }
+  return constituents;
+}
+
+/**
+ * Screen EVERY path/root constituent of a native read/search call against the
+ * real pinned parameter vocabulary: local paths, globs and selectors stay
+ * local; an HTTP(S) root is a remote route (owned-adapter work, never a native
+ * search root); an SSH or internal/device scheme — including collapsed
+ * (`local:/x`) and glued (`/repo/local://x`) spellings — is a route. ONE unsafe
+ * constituent denies the WHOLE call; checking only the first root never
+ * suffices. Returns `undefined` when every constituent is local.
+ */
+export function screenNativeLocalSearchRoots(
+  toolName: string,
+  input: Record<string, unknown>,
+): NativeRootScreening | undefined {
+  if (!SCREENED_NATIVE_SEARCH_TOOLS.includes(toolName)) return undefined;
+  const allowSkillUri = toolName === "read";
+  let unsafe: Exclude<NativeRootConstituentClass, "local"> | undefined;
+  for (const token of nativeRootConstituents(input)) {
+    const classification = classifyNativeRootConstituent(token, allowSkillUri);
+    if (classification === "local") continue;
+    // The one admitted URL route: the registered owned `read` replacement's
+    // controlled per-hop transport, reached through the ordinary `url` shape
+    // selection below.
+    if (classification === "url" && allowSkillUri) continue;
+    unsafe ??= classification;
+  }
+  switch (unsafe) {
+    case undefined:
+      return undefined;
+    case "url":
+      return { deviceSurface: "remote-url", decodedCapability: "network-read" };
+    case "ssh":
+      return { deviceSurface: "ssh-device", decodedCapability: "filesystem-read" };
+    case "internal":
+      return {
+        deviceSurface: "internal-uri-scheme",
+        decodedCapability: allowSkillUri ? "network-read" : "filesystem-read",
+      };
+  }
+}
+
 /** `isSafeUrlLike`-style URL branch detection (native fetch.ts posture, S6). */
 export function isUrlLikeString(value: string): boolean {
   const repaired = value.replace(/^([a-zA-Z][a-zA-Z0-9+.-]*):\/(?!\/)/, "$1://");
@@ -135,7 +336,11 @@ function firstStringField(
   return undefined;
 }
 
-/** The decoded input shape: argument structure only, never a policy claim. */
+/**
+ * The decoded input shape: argument structure only, never a policy claim.
+ * `screenNativeInput` runs the root screening FIRST, so a screened-out native
+ * read/search root never reaches this function's ordinary shape selection.
+ */
 export function selectNativeInputShape(
   toolName: string,
   input: Record<string, unknown>,
@@ -154,6 +359,29 @@ export function selectNativeInputShape(
   // Unknown names: opaque keeps the row's default-deny-by-absence intact
   // while the alternate-route pair screening still runs on the shape.
   return "opaque";
+}
+
+/** One native call's screened shape + route data (the decoder's hand-off). */
+export interface NativeInputScreening {
+  readonly shape: InputShape;
+  readonly deviceSurface?: "remote-url" | "internal-uri-scheme" | "ssh-device";
+  readonly decodedCapability?: string;
+}
+
+/**
+ * Screen then shape one native call. A screened-out root yields the
+ * non-ordinary `device-route` shape plus the exact route/capability pair, so
+ * stage-1 pair screening denies the WHOLE call before any native scan or URL
+ * materialization; every other call keeps the shape selection
+ * `selectNativeInputShape` already provided.
+ */
+export function screenNativeInput(
+  toolName: string,
+  input: Record<string, unknown>,
+): NativeInputScreening {
+  const roots = screenNativeLocalSearchRoots(toolName, input);
+  if (roots !== undefined) return { shape: "device-route", ...roots };
+  return { shape: selectNativeInputShape(toolName, input) };
 }
 
 // ---------------------------------------------------------------------------
@@ -311,12 +539,17 @@ export function decodeNativeToolCallEvent(
   const input: Record<string, unknown> = rawInput ?? {};
   const destructive = decodeNativeDestructivePayload(toolName, input, sessionContext);
   if (destructive === null) return failure();
+  const screening = screenNativeInput(toolName, input);
   return {
     ok: true,
     input: {
       toolKey,
       toolName,
-      decodedInputShape: selectNativeInputShape(toolName, input),
+      decodedInputShape: screening.shape,
+      ...(screening.deviceSurface !== undefined ? { deviceSurface: screening.deviceSurface } : {}),
+      ...(screening.decodedCapability !== undefined
+        ? { decodedCapability: screening.decodedCapability }
+        : {}),
       ...(destructive !== undefined ? { destructive } : {}),
       recordEvaluation: emptyRecordEvaluation(),
     },

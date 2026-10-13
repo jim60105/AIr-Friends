@@ -33,10 +33,12 @@ import {
   evaluateToolProvenance,
   type ProvenanceDecision,
   type ProvenanceRecord,
+  type ProvenanceStaleElement,
 } from "./tool-provenance.ts";
 
 /** Recorded origin of a tool; names are never sufficient (design D3). */
 export type ToolOrigin =
+  | "native-builtin"
   | "owned-extension"
   | "operator-mcp"
   | "host"
@@ -62,6 +64,7 @@ export type InputShape =
 /** Route surface a capability is reached through (design D4). */
 export type RouteSurface =
   | "ordinary-tool"
+  | "remote-url"
   | "internal-uri-scheme"
   | "config-device"
   | "debug-device"
@@ -90,8 +93,25 @@ export const RESTRICTED_DENIAL_VOCABULARY: readonly RestrictedDenialReason[] = [
 
 /** Which predecessor decision completes an allow outcome. */
 export type CompletingAuthority =
+  /**
+   * Ordinary native local read/search: the fresh authenticated native origin
+   * plus the supported native activation/approval tier, then the PROCESS's own
+   * ambient OS permissions. Native scans and content IO are NOT daemon
+   * descriptor-bound and no row-4 filesystem confinement is claimed
+   * (`native-local-read-approval`).
+   */
+  | "native-local-read-approval"
+  /**
+   * Ordinary native local write/edit: the pinned native approval path plus the
+   * process's ambient OS permissions, mirroring the accepted native
+   * read/search posture. The restricted ACP sink is retained as the route the
+   * pinned bridge applies WHERE IT ROUTES THE CALL — it is not asserted as the
+   * completing boundary, and no pre-dispatch route evidence is required
+   * (`native-local-write-approval`).
+   */
+  | "native-local-write-approval"
+  /** Protected ACP callback read route (trusted skills), unchanged. */
   | "row4-filesystem-read-boundary"
-  | "row4-filesystem-write-sink"
   | "existing-common-command-policy"
   | "row5-destructive-all-target-policy"
   | "mcp-client-ownership"
@@ -118,11 +138,6 @@ export type RestrictedToolDecision =
     readonly pendingAdapter: true;
   }
   | {
-    readonly outcome: "routed-filesystem-sink";
-    readonly completingAuthority: "row4-filesystem-write-sink";
-    readonly tableRowId: string;
-  }
-  | {
     readonly outcome: "routed-destructive";
     readonly completingAuthority: "row5-destructive-all-target-policy";
     readonly tableRowId: string;
@@ -145,6 +160,13 @@ export type RestrictedToolDecision =
     readonly tableRowId?: string;
     /** Present on stale-provenance denials: fresh observation demanded. */
     readonly pending?: "re-observe";
+    /**
+     * Present with `pending`: the freshness element that actually failed the
+     * current-observation comparison (from the provenance decision), so the
+     * wiring names the mismatched element instead of inferring one from the
+     * origin class.
+     */
+    readonly staleElement?: ProvenanceStaleElement;
     /** Present on alternate-route denials: the blocked capability+route pair. */
     readonly blockedPair?: {
       readonly capability: string;
@@ -158,7 +180,6 @@ export type RestrictedToolDecision =
 export type InventoryRowKind =
   | "allow-gated"
   | "allow-gated-pending-adapter"
-  | "routed-filesystem-sink"
   | "routed-destructive"
   | "routed-provenance"
   | "in-session-state-only"
@@ -195,10 +216,10 @@ export const RESTRICTED_TOOL_INVENTORY_TABLE: readonly InventoryRow[] = Object.f
       id: "read-class",
       toolNames: ["read", "list", "glob", "grep", "search", "find"],
       kind: "allow-gated",
-      completingAuthority: "row4-filesystem-read-boundary",
+      completingAuthority: "native-local-read-approval",
       designCitation: D6,
       notes:
-        "Gated to the existing row-4 session boundaries plus authorized shared/read-only roots and the trusted-skills read root. Pinned note: some native search implementations do not automatically invoke ACP callbacks, so the decision binds at the handler (14b), never by assumed callback coverage. The URL branch of native `read` decodes to the `url` shape and lands on `url-read`.",
+        "Authentic local read/search completes through the fresh authenticated native origin plus supported native activation/approval, and then the PROCESS's own ambient OS permissions — native scans and content IO are not daemon descriptor-bound, and no row-4 filesystem confinement is claimed for them (accepted native posture). Pinned note: some native search implementations do not automatically invoke ACP callbacks, so the decision binds at the handler (14b), never by assumed callback coverage. The URL branch of native `read` decodes to the `url` shape and lands on `url-read`; a URL or device/remote root inside a local search is screened out BEFORE local dispatch by the decoder's constituent screen (see `remote-url`/`internal-uri-scheme`/`ssh-device` pairs).",
     },
     {
       id: "url-read",
@@ -239,11 +260,11 @@ export const RESTRICTED_TOOL_INVENTORY_TABLE: readonly InventoryRow[] = Object.f
     {
       id: "write-edit-ordinary",
       toolNames: ["write", "edit"],
-      kind: "routed-filesystem-sink",
-      completingAuthority: "row4-filesystem-write-sink",
+      kind: "allow-gated",
+      completingAuthority: "native-local-write-approval",
       designCitation: D6,
       notes:
-        "Ordinary write/edit routes to the row-4 restricted sinks via the row-8 sink contract. Implicit side effects keyed by D4 instead: a write/edit whose decoded shape is `config-write` or `device-route` never reaches this row.",
+        "Ordinary local write/edit runs under the PINNED NATIVE APPROVAL PATH and the process's ambient OS permissions, mirroring the accepted native local read/search posture: the restricted ACP sink is retained as the route the pinned bridge applies WHERE IT ROUTES THE CALL, with its decision and denial propagation unchanged and no path added here that bypasses a sink denial. No pre-dispatch sink-route evidence gate exists: an absolute native session-sandbox/plan target and an unavailable client bridge do not reach the sink and mutate directly — the residual risk the user explicitly authorized (see docs/OMP_TOOL_POLICY.md). Implicit side effects are still keyed by D4: a write/edit whose decoded shape is `config-write` or `device-route` never reaches this row, and destructive/multi-file mutation still routes to the complete fail-closed destructive decision.",
     },
     {
       id: "bash",
@@ -543,6 +564,20 @@ export const ALTERNATE_ROUTE_BLOCKING_TABLE: readonly AlternateRoutePair[] = Obj
       notes: "Remote reads via SSH device.",
     },
     {
+      capability: "filesystem-read",
+      route: "remote-url",
+      designCitation: `${D6}; design decision \"Screen the real multi-root native input\"`,
+      notes:
+        "An HTTP(S) target named as a ROOT of a native local search (grep/glob/find): URL reads are owned-adapter operations, so a search root naming a URL is a remote route rather than the local search route and native fetch materialization must never run for it. Fail-closed superset row for a remote presentation carrying the local-read capability; the search-URL presentation the decoder actually builds carries `network-read` (next row).",
+    },
+    {
+      capability: "network-read",
+      route: "remote-url",
+      designCitation: `${D6}; design decision \"Screen the real multi-root native input\"`,
+      notes:
+        "The presentation the native decoder builds for an HTTP(S) root of a screened local search (`device-route` shape + `remote-url` surface + `network-read` capability) — a search URL root never reaches native scanning/materialization. A lone HTTP(S) `read` path stays on the ORDINARY `url` branch (the registered owned controlled-transport adapter), so this pair never labels that route.",
+    },
+    {
       capability: "approval-posture",
       route: "config-device",
       designCitation: `${D6}; design §7`,
@@ -609,9 +644,11 @@ export const INPUT_SHAPE_CAPABILITIES: Readonly<Record<InputShape, string>> = Ob
  * (rename-invariant). Ordinary shapes stay on `ordinary-tool`; device-route and
  * config-write shapes present non-ordinary routes for capability screening.
  * Shapes whose device character depends on the decoded carrier (debug, AST,
- * SSH, LSP-adjacent) decode upstream into `device-route` or `config-write`
- * with an explicit `decodedCapability`; the pair table still enumerates every
- * design-§6 route for the screening below and for consumer-visible docs.
+ * SSH, LSP-adjacent, and an HTTP(S) root inside a screened native search)
+ * decode upstream into `device-route` or `config-write` with an explicit
+ * `decodedCapability`; `remote-url` is decoder-supplied the same way. The pair
+ * table still enumerates every design-§6 route for the screening below and for
+ * consumer-visible docs.
  */
 export function classifyRouteSurface(inputShape: InputShape): RouteSurface {
   switch (inputShape) {
@@ -733,6 +770,9 @@ export function decideRestrictedTool(
       reason: "rejected_tool_provenance",
       tableRowId: row.id,
       ...(provenanceDecision.pending === "re-observe" ? { pending: "re-observe" as const } : {}),
+      ...(provenanceDecision.staleElement !== undefined
+        ? { staleElement: provenanceDecision.staleElement }
+        : {}),
     };
   }
 
@@ -760,12 +800,6 @@ export function decideRestrictedTool(
         completingAuthority: "rows-17-19-transport-adapter",
         tableRowId: row.id,
         pendingAdapter: true,
-      };
-    case "routed-filesystem-sink":
-      return {
-        outcome: "routed-filesystem-sink",
-        completingAuthority: "row4-filesystem-write-sink",
-        tableRowId: row.id,
       };
     case "routed-destructive":
       return {
@@ -813,6 +847,7 @@ export type McpAdmissionDecision =
     readonly reason: RestrictedDenialReason;
     readonly tableRowId?: string;
     readonly pending?: "re-observe";
+    readonly staleElement?: ProvenanceStaleElement;
     readonly blockedPair?: { capability: string; route: RouteSurface };
   };
 
@@ -841,6 +876,7 @@ export function decideMcpAdmission(request: McpAdmissionRequest): McpAdmissionDe
       reason: decision.reason,
       ...(decision.tableRowId !== undefined ? { tableRowId: decision.tableRowId } : {}),
       ...(decision.pending !== undefined ? { pending: decision.pending } : {}),
+      ...(decision.staleElement !== undefined ? { staleElement: decision.staleElement } : {}),
       ...(decision.blockedPair !== undefined ? { blockedPair: decision.blockedPair } : {}),
     };
   }

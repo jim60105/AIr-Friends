@@ -178,6 +178,9 @@ export interface NetworkAdmissionObservation {
  * One restricted `tool_call` observation, assembled fresh per call by the
  * dispatcher. The provenance record's freshness halves carry this call's
  * observation pair:
+ *   - `native-builtin` records pair BOTH freshness elements with this call's
+ *     live reads (the record's halves come from the same live roster read that
+ *     produced the builtin identity — see `NativeBuiltinProvenance`);
  *   - `owned-extension` records pair `observedResourceGeneration` (what the
  *     metadata surface recorded) with `currentResourceGeneration` (row 12's
  *     live counter) — both or neither, never one-sided;

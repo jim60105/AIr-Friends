@@ -18,23 +18,31 @@
  * NOTHING — the exemption stays structural at the registration site.
  *
  * Fresh-origin provenance (task 1.2): the production registry surface is
- * the pinned `getAllTools()`-shaped configured-tool roster — a fresh
- * snapshot per observation — and each entry's RECORDED `sourceInfo` is
- * translated to the canonical `ProvenanceRecord` here. Only host-runtime
- * metadata (never model input) is trusted: an `extension`-sourced entry is
- * owned ONLY when its file is positively identified — the contracted
- * deployment-tree path under the observed base root, or this module's OWN
- * loaded file (the C3 single generated bundle) inside the observed owned
- * base root — and records owned-extension provenance with its ACTUAL
- * identity, never relabelled as a builtin; `mcp__`-prefixed `mcp`-sourced
- * entries record operator-MCP with the admission basis 14a still re-decides
- * per call; `builtin`/`sdk` record host; a missing, ambiguous
- * (duplicate same-name), or unrecognized source records
- * unowned-discovery, which the inventory/provenance steps deny before
- * dispatch. An unavailable/throwing roster yields an EMPTY snapshot — the
- * surface itself fails closed, so the removed empty-registry PRODUCTION
- * default cannot be reintroduced by omission: with no native roster, every
- * call reads unowned and denies.
+ * the pinned API's DIRECT `getAllTools()` method (the runtime's action
+ * method, a throwing stub until initialization) — a fresh snapshot per
+ * observation — and each entry's RECORDED `sourceInfo` is translated to the
+ * canonical `ProvenanceRecord` here. The method is captured at factory
+ * evaluation and invoked ONLY on live observations, so a load-time stub can
+ * never be called and registration never needs the roster. Only
+ * host-runtime metadata (never model input) is trusted: an
+ * `extension`-sourced entry is owned ONLY when its file is positively
+ * identified — the contracted deployment-tree path under the observed base
+ * root, or this module's OWN loaded file (the C3 single generated bundle)
+ * inside the observed owned base root — and records owned-extension
+ * provenance with its ACTUAL identity, never relabelled as a builtin;
+ * `mcp__`-prefixed `mcp`-sourced entries record operator-MCP with the
+ * admission basis 14a still re-decides per call; a `builtin`-sourced entry
+ * admits as `native-builtin` ONLY when it presents the exact pinned runtime
+ * tuple for that name (`<builtin:name>` / `temporary` / `top-level`, see
+ * `NATIVE_BUILTIN_SOURCE_*`); `sdk` (RPC-host injection) records host, and
+ * any builtin-looking entry that does not present the exact tuple records
+ * unowned-discovery; a missing, ambiguous (duplicate same-name), or
+ * unrecognized source records unowned-discovery too, which the
+ * inventory/provenance steps deny before dispatch. An
+ * unavailable/throwing roster yields an EMPTY snapshot — the surface itself
+ * fails closed, so the removed empty-registry PRODUCTION default cannot be
+ * reintroduced by omission: with no native roster, every call reads unowned
+ * and denies.
  *
  * Honesty posture (design §15, unchanged): nothing here demonstrates the
  * official binary invokes, honors, or enforces anything — API-shaped
@@ -64,6 +72,9 @@ import { evaluateOwnedModuleOwnership } from "./ownership.ts";
 import {
   type CanonicalTarget,
   credentialPresenceFromEnv,
+  NATIVE_BUILTIN_SOURCE_ORIGIN,
+  NATIVE_BUILTIN_SOURCE_SCOPE,
+  nativeBuiltinSourcePath,
   type ProvenanceRecord,
   type SearchCredentialPresence,
 } from "./_daemon/mod.ts";
@@ -133,16 +144,13 @@ export interface NativeToolDefinitionLike {
   ): Promise<unknown>;
 }
 
-/** The pinned `ctx` surface exposing the fresh configured-tool roster. */
-export interface NativeToolContext {
-  getAllTools?(): NativeToolInfo[] | undefined;
-}
-
 /**
  * The pinned `ExtensionAPI` structural subset this extension touches:
  * synchronous `tool_call` registration, `registerTool` name replacement,
- * and the fresh-configured-tools `ctx` surface. Extra host fields are
- * ignored; nothing here may assume more than these members exist.
+ * and the DIRECT `getAllTools()` configured-tool registry method
+ * (`extensibility/extensions/types.ts` at the pin). Extra host fields are
+ * ignored; nothing here may assume more than these members exist, and no
+ * nested `ctx` roster surface exists at the pin.
  */
 export interface NativeExtensionApi {
   on(
@@ -150,7 +158,12 @@ export interface NativeExtensionApi {
     handler: (event: NativeToolCallEvent) => NativeToolCallEventResult | undefined | void,
   ): void;
   registerTool(tool: NativeToolDefinitionLike): void;
-  readonly ctx?: NativeToolContext;
+  /**
+   * The pinned DIRECT runtime action method. It THROWS (runtime-not-
+   * initialized) until the host initializes the action set, so it is
+   * captured at factory evaluation and invoked only on live observations.
+   */
+  readonly getAllTools?: () => NativeToolInfo[];
 }
 
 /** The tool-call event/result shapes are owned by `native-events.ts`. */
@@ -214,6 +227,23 @@ interface NativeObservationCapture {
 }
 
 /**
+ * One live roster read's observation stamp: the surface epoch and row 12's
+ * resource generation as they were at the instant the roster was read.
+ * `native-builtin` records are stamped from THIS (the read that produced
+ * their identity), never from a first-sighting capture: the runtime derives
+ * a builtin's identity from the session's own builtin membership on every
+ * read, so the fresh read IS the authoritative observation and a later
+ * unrelated roster movement must not stale a builtin whose tuple is
+ * unchanged. Replacement invalidation is carried by the identity itself (a
+ * same-name replacement loses builtin membership and therefore presents a
+ * different source tuple, which denies).
+ */
+export interface NativeObservationStamp {
+  readonly epoch: number;
+  readonly generation: string;
+}
+
+/**
  * Translate one fresh configured-tool entry into the RECORDED provenance
  * side of the wiring observation. Fail-closed by construction: anything the
  * host metadata cannot positively classify records unowned-discovery, and
@@ -222,25 +252,57 @@ interface NativeObservationCapture {
  * exact sourceInfo spelling — the composition recomputes the CURRENT half
  * live per call (`composeFreshProvenance`), so a resource-generation bump
  * or registry movement since the tool was first seen reads stale and
- * denies before dispatch. The stamp records WHEN the surface saw the tool,
- * never a durable admission.
+ * denies before dispatch. `native-builtin` is the one origin stamped from
+ * the CURRENT observation (`current`) instead of the first-sighting capture,
+ * per the boundary statement on `NativeBuiltinProvenance`. The stamp records
+ * WHEN the surface saw the tool, never a durable admission.
  */
 export function translateNativeSourceInfo(
   name: string,
   sourceInfo: NativeToolSourceInfo | null | undefined,
   owned: NativeOwnedIdentity,
   capture: NativeObservationCapture,
+  current: NativeObservationStamp,
 ): ProvenanceRecord {
   const unowned: ProvenanceRecord = { origin: "unowned-discovery", presentedName: name };
   if (sourceInfo === null || sourceInfo === undefined || typeof sourceInfo !== "object") {
     return unowned;
   }
   switch (sourceInfo.source) {
-    case "builtin":
+    case "builtin": {
+      // Authentic native builtin only (task 1.2). The pinned runtime produces
+      // `source: "builtin"` from the session's OWN builtin name set and pairs
+      // it with the synthetic `<builtin:name>` path, `temporary` scope and
+      // `top-level` origin; that tuple is SELF-CONSISTENT WITH THE NAME, so a
+      // builtin-labelled entry naming another tool's path/spelling is not an
+      // authentic builtin and records unowned-discovery (denied). SDK/RPC-host
+      // injection cannot reach this branch: it reports `source: "sdk"`.
+      const builtinPath = String(sourceInfo.path ?? "");
+      if (
+        builtinPath !== nativeBuiltinSourcePath(name) ||
+        sourceInfo.scope !== NATIVE_BUILTIN_SOURCE_SCOPE ||
+        sourceInfo.origin !== NATIVE_BUILTIN_SOURCE_ORIGIN
+      ) {
+        return unowned;
+      }
+      return {
+        origin: "native-builtin",
+        sourcePath: builtinPath,
+        sourceScope: NATIVE_BUILTIN_SOURCE_SCOPE,
+        sourceOrigin: NATIVE_BUILTIN_SOURCE_ORIGIN,
+        // Both halves are the CURRENT read: the roster entry above was read
+        // live, and `composeFreshProvenance` re-reads the same live state for
+        // the current half at decision time.
+        registryEpochObserved: current.epoch,
+        currentRegistryEpoch: current.epoch,
+        observedResourceGeneration: current.generation,
+        currentResourceGeneration: current.generation,
+      };
+    }
     case "sdk":
-      // Host-owned surfaces are the `host` category — never admitted, and
-      // owned replacements are NEVER relabelled into this category (C4
-      // spec: owned tools keep their actual extension origin).
+      // RPC-host injection is the `host` category — never admitted, and owned
+      // replacements are NEVER relabelled into this category (C4 spec: owned
+      // tools keep their actual extension origin).
       return { origin: "host", presentedName: name };
     case "mcp": {
       if (!name.startsWith(MCP_TOOL_NAME_PREFIX)) return unowned;
@@ -352,6 +414,10 @@ export function createNativeRegistrySurface(
       );
       if (lastRosterKey !== undefined && rosterKey !== lastRosterKey) epoch += 1;
       lastRosterKey = rosterKey;
+      // One stamp for THIS read: the epoch after the movement check plus row
+      // 12's current generation. `native-builtin` records carry it as both
+      // freshness halves; every other origin keeps its first-sighting capture.
+      const stamp: NativeObservationStamp = { epoch, generation: owned.resourceGeneration() };
       // Map (never a plain object): a roster name like `constructor` or
       // `__proto__` must NOT read/write through Object.prototype — an
       // inherited member silently defeats the duplicate-name guard and
@@ -369,7 +435,13 @@ export function createNativeRegistrySurface(
         const spellingKey = JSON.stringify(tool.sourceInfo ?? null);
         const origin: ProvenanceRecord = (counts.get(name) ?? 0) > 1
           ? { origin: "unowned-discovery", presentedName: name }
-          : translateNativeSourceInfo(name, tool.sourceInfo, owned, captureFor(name, spellingKey));
+          : translateNativeSourceInfo(
+            name,
+            tool.sourceInfo,
+            owned,
+            captureFor(name, spellingKey),
+            stamp,
+          );
         snapshots.push({ toolName: name, origin });
       }
       return snapshots;
@@ -522,9 +594,12 @@ export function baseRootFromLaunchCwd(observedCwd: string): string {
  * through the pinned native API. The restricted/YOLO branch stays keyed on
  * the module's OWN observed launch identity; the YOLO/unidentified branch
  * registers NOTHING at all (structural exemption, row 8/9 posture, C4 spec
- * scenario 2). The native `ctx` roster surface feeds the fresh-registry
- * observation; an absent `ctx` leaves the roster unavailable, which reads
- * every tool unowned — fail closed.
+ * scenario 2). The pinned DIRECT `api.getAllTools()` method feeds the
+ * fresh-registry observation: it is CAPTURED here (synchronously) and
+ * invoked only from live observations, because the pinned runtime's action
+ * methods throw until initialization. An absent method, or one that throws
+ * when invoked before initialization completes, leaves the roster
+ * unavailable, which reads every tool unowned — fail closed.
  */
 export function registerNativeEnforcement(
   api: NativeExtensionApi,
@@ -548,11 +623,14 @@ export function registerNativeEnforcement(
       ? { canonicalTarget: deps.sessionContext.canonicalTarget }
       : {}),
   };
-  const readAllTools = (): NativeToolInfo[] | undefined => {
-    const ctx = api.ctx;
-    if (ctx && typeof ctx.getAllTools === "function") return ctx.getAllTools();
-    return undefined;
-  };
+  // Capture the DIRECT runtime method at factory evaluation and defer every
+  // invocation to a live observation: the pinned runtime's action methods
+  // are throwing stubs until the host initializes them (the same runtime
+  // object is mutated in place, so this capture reaches the initialized
+  // implementation). Registration itself never reads the roster.
+  const directGetAllTools = api.getAllTools;
+  const readAllTools = (): NativeToolInfo[] | undefined =>
+    typeof directGetAllTools === "function" ? directGetAllTools.call(api) : undefined;
   const surface = createNativeRegistrySurface(readAllTools, owned);
   // The handler-side observer rides the SAME surface epoch the recorded
   // stamps were taken from: observed/current freshness can never desync
