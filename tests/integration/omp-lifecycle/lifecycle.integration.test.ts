@@ -298,6 +298,17 @@ Deno.test({
 
         // Load on the same live connection (the mock replays a catalog).
         assert(connector.supportsLoadSession());
+        // The recovered session's OWN gate context (row 11): OMP recovery
+        // requires it and prevalidates it against the recovery cwd and this
+        // connector's registration for that id BEFORE any teardown.
+        const gateContext = {
+          cwd: opts.sessionCwd,
+          shellSessionId: h.shellSessionId,
+          yolo: false,
+          canWriteAgentWorkspace: false,
+          allowedWriteExtensions: [".md"],
+        };
+        connector.setSessionGateContext(acpSessionId, gateContext);
         const resumed = await connector.reconnectAndResumeSession(
           acpSessionId,
           opts.sessionCwd,
@@ -307,6 +318,7 @@ Deno.test({
               "restricted",
               join(h.tempDir, "omp-pools", "discord:lifecycle-31"),
             ),
+            gateContext,
           },
         );
         assertEquals(resumed, true);
