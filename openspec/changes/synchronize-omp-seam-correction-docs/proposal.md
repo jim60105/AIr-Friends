@@ -8,7 +8,7 @@ The batch index still calls archived C1-C7 changes unapplied and omits the archi
 
 - Record the 35 archived baseline changes, preserve cancelled row 13, and label historical proposal-time evidence separately from current state.
 - Replace obsolete copied `_daemon`/raw-source launch claims with C3's generated bundle contract for development and image deployment.
-- Add this five-issue batch's ownership/dependency/conflict map, truthful per-change state and the user's accepted native local read/search posture beside the latest-version source investigation.
+- Add this five-issue batch's ownership/dependency/conflict map, truthful per-change state (no application-blocked mutation status) and the user's accepted native local read/search plus authorized ambient native mutation posture beside the latest-version source investigation.
 - Reconcile nearby current enforcement/discovery/network/recovery/prompt docs after their owners, consolidating CHANGELOG without duplicate entries or runtime-verification claims.
 - Keep pins, cancelled readiness, both-agent/both-mode LSP, public-code-search removal and existing configuration trio unchanged.
 
@@ -34,4 +34,4 @@ depends-on: render-delivered-skill-root-contract
 depends-on: thread-per-spawn-omp-recovery-context
 code-conflicts: all predecessors (current OMP docs and CHANGELOG); final writer after substantive changes, without recasting native local IO as protected ACP confinement.
 
-Implementation-status consolidation follows actual substantive changes, not artifact completion. No archive, main-spec synchronization or runtime acceptance is part of proposal creation.
+Implementation-status consolidation follows actual substantive changes, not artifact completion. Ordering among the five is shared-file serialization only: no change is gated on an unmet mutation or runtime prerequisite, and issues1, 3 and 4 are independently actionable. No archive, main-spec synchronization or runtime acceptance is part of proposal creation.

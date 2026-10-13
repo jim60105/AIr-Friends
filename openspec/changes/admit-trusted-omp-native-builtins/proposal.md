@@ -8,9 +8,9 @@ Restricted OMP misrecords authentic native builtins as untrusted host tools, pre
 
 - Authenticate a distinct `native-builtin` origin from the supported direct live `api.getAllTools()` registry; keep SDK/RPC-host injection, workspace and unknown sources denied.
 - Restore genuine local read/search through native activation/approval and ambient OS permissions, with no false claim of daemon descriptor-bound filesystem confinement.
-- Keep ACP command/write/destructive boundaries unchanged, require an established sink route before ordinary mutation, positively screen alternate/URI roots across all native read/search inputs and retain owned URL/skill replacement routes.
+- Keep ACP command/write/destructive boundaries unchanged: restore ordinary local native write/edit under the pinned native approval path and the process's ambient OS permissions, mirroring the accepted native read/search posture, while destructive/multi-file mutation keeps its shared complete fail-closed decision; positively screen alternate/URI roots across all native read/search inputs and retain owned URL/skill replacement routes.
 - Pin supported restricted settings for local builtin search, preserving model-dependent native find selection and disabling native fetch materialization as defense in depth. No public runtime field or new backend is added.
-- Record the v18.10.3 source/settings investigation and accepted residual risk; retain deployment v18.6.1 because the newer version does not fix the seam.
+- Record the v18.10.3 source/settings investigation, the accepted native local read/search status and the user's explicit authorization of the ambient native mutation risk; retain deployment v18.6.1 because the newer version does not fix the seam.
 - Update tool/enforcement/settings documentation and CHANGELOG with the approved native-versus-ACP boundary split.
 
 ## Capabilities
@@ -29,9 +29,9 @@ Owns native registration/roster, provenance and inventory composition, native in
 
 The full requested builtin scope is retained in these artifacts. Direct native reads/search can access paths outside daemon session roots when OS permissions permit it; this is the user's accepted native status. Controlled read's actual owned registration is completed by the following module-evidence change.
 
-## Application Prerequisite
+## Accepted Ambient Native Mutation
 
-Full ordinary native write/edit restoration is BLOCKED, separately from accepted local read/search. Pinned native mutation can bypass ACP for absolute session-sandbox/plan targets or an unavailable bridge; the supported ExtensionContext has no ToolSession bridge/plan-mode route producer. Until a user-selected supported upstream interface/version establishes the actual sink-required dispatch route, unrepresentable mutation calls must deny. A hypothetical getter or synthetic successful write fixture cannot satisfy this prerequisite. Alternatively accepting ambient native mutation requires a separate explicit user decision; it is not authorized by accepted native read/search. No broker, readiness mechanism, new runtime field or native mutation grant is introduced by this proposal.
+The user explicitly authorized accepting the ambient native mutation risk. Ordinary local native write/edit therefore restores and executes under the pinned native approval path and the process's ambient OS permissions, mirroring the accepted native local read/search posture. Truthful residual risk stays stated: an absolute native session-sandbox/plan target or an unavailable client bridge does not reach the ACP sink and mutates directly, and no ACP-sink protection is claimed for those paths. No pre-dispatch sink-route evidence requirement, invented `ctx` getter, `ToolSession` cast, custom IO broker, fabricated sink guarantee, readiness mechanism, new runtime/config/env field or compatibility alias is introduced. Destructive and multi-file mutation keep their existing shared complete fail-closed decision.
 
 ## Batch:
 

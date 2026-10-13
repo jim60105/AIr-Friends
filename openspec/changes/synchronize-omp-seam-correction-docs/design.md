@@ -8,7 +8,7 @@ Current launch assembly already consumes the generated .js bundle, not raw sourc
 
 ## Goals / Non-Goals
 
-Synchronize current status and deployment contract without rewriting historical archives or inventing acceptance evidence. Consolidate after each functional owner has documented its behavior; record the user's accepted native local read/search status and the latest-version investigation without a false confinement claim.
+Synchronize current status and deployment contract without rewriting historical archives or inventing acceptance evidence. Consolidate after each functional owner has documented its behavior; record the user's accepted native local read/search status, the authorized ambient native mutation posture and the latest-version investigation without a false confinement claim.
 
 No implementation, archive, main-spec sync, readiness restoration, pin update, configuration change, runtime launch or repetition of the user's observations. The final docs apply does not convert merely proposed changes to applied.
 
@@ -18,7 +18,7 @@ No implementation, archive, main-spec sync, readiness restoration, pin update, c
 
 Rewrite current-status paragraphs/table to list the 35 archived baseline changes and five new proposals separately. Retain the historical original rows and proposal-time evidence with explicit historical labels. Row 13 stays cancelled with no readiness channel; row 21 stays historical/superseded by C1. C1-C7 become archived baseline, not queued changes, and the skill-root-resolution archive gets its current ownership row.
 
-Add this batch's issue owner, decision, dependency and code-conflict matrix. Proposed/applied state comes from real artifacts and merged implementation status at future apply time. Artifact existence or strict OpenSpec validation proves proposed completeness, not implementation or native runtime success. The accepted native local-IO decision removes the former protected-IO prerequisite; do not retain an obsolete user-decision blocker or claim native filesystem confinement.
+Add this batch's issue owner, decision, dependency and code-conflict matrix. Proposed/applied state comes from real artifacts and merged implementation status at future apply time. Artifact existence or strict OpenSpec validation proves proposed completeness, not implementation or native runtime success. The accepted native local-IO decision removes the former protected-IO prerequisite, and the user's explicit authorization of the ambient native mutation risk removes the former mutation-route gate: do not retain an obsolete user-decision blocker, an application-blocked mutation status, a pending mutation prerequisite or a claim of native filesystem confinement.
 
 ### Correct exact deployment wording
 
@@ -26,7 +26,7 @@ Document canonical source `src/acp/omp/extension/index.ts` as a build input. Dev
 
 ### Truthful boundary documentation
 
-After owners land, synchronize native builtin versus SDK provenance, direct `api.getAllTools`, physically observed owned replacements, delivered quoted skills root and all per-spawn recovery callers. Remove no-consumer/pooled-only language only where source now supports the corrected claim. Distinguish supported ACP bash/write completion and callback-only protected filesystem policy from accepted native local read/search under approval and ambient OS permissions.
+After owners land, synchronize native builtin versus SDK provenance, direct `api.getAllTools`, physically observed owned replacements, delivered quoted skills root and all per-spawn recovery callers. Remove no-consumer/pooled-only language only where source now supports the corrected claim. Distinguish supported ACP bash/write sink completion and callback-only protected filesystem policy from accepted native local read/search and authorized ambient native write/edit under approval and ambient OS permissions, recording the mutation residual risk.
 
 Replace OMP_DISCOVERY's hard extension-load rejection/never-extensionless guarantee with the approved residual risk: source enforces deployment preflight and owned handler decisions, but pinned native extension error handling can log failures without observable authenticated readiness. This documentation change must not add a gate or claim the absence of a handler is detected. Keep fail-closed daemon settings/executable preflight guarantees only at their actual seams. Unresolved native pinned verdict strings remain unchanged alongside DECIDED deployment-admission/skill-selection dispositions; they are not a pending second user approval for those old decisions. Issue 1's newer decision accepts native local read/search, including ambient readability beyond daemon roots, with remote/device routes still denied.
 
@@ -34,7 +34,7 @@ Replace OMP_DISCOVERY's hard extension-load rejection/never-extensionless guaran
 
 | File or surface | Factual correction owner | Final pass |
 | --- | --- | --- |
-| OMP_ENFORCEMENT, OMP_TOOL_POLICY, OMP_SETTINGS, OMP_COMPATIBILITY | native admission / owned evidence | remove stale taxonomy, api.ctx, no-consumer and false callback-completion statements; record accepted native local posture, supported settings and latest-version/no-bump investigation |
+| OMP_ENFORCEMENT, OMP_TOOL_POLICY, OMP_SETTINGS, OMP_COMPATIBILITY | native admission / owned evidence | remove stale taxonomy, api.ctx, no-consumer and false callback-completion statements; record accepted native local read/search, the authorized ambient native mutation posture with its residual risk, supported settings and latest-version/no-bump investigation |
 | OMP_NETWORK and skill-URI handoff sections | owned evidence | valid physical origin precedes completing policy; preserve absent-credential deny/no fallback |
 | Prompt variable docs and skill invocation recipes | delivered root | all delivered templates/retry use literal trusted root and quoted arguments |
 | OMP_RECOVERY | per-spawn recovery | all owning callers, mandatory OMP context, legacy OpenCode distinction, no readiness |
@@ -55,17 +55,17 @@ Preserve the selected configuration trio, public code search removal, native YOL
 | 4 All recorded OMP recovery context | thread-per-spawn-omp-recovery-context | issue3 | 7h | preserves issue3 render/delivery edits |
 | 5 Current docs/history reconciliation | synchronize-omp-seam-correction-docs | issues1,2,3,4 | 3h | last substantive/current-doc writer |
 
-Every substantive writer owns focused docs and a history entry. All pairs therefore conflict on append-only CHANGELOG; serialize those commits and let issue5 deduplicate final history without creating runtime dependencies. Issues1/2 also overlap current provenance/enforcement docs and bundle inputs. Issues3/4 overlap orchestrator delivery/recovery callers. Issue5 overlaps all current documentation.
+Every substantive writer owns focused docs and a history entry. All pairs therefore conflict on append-only CHANGELOG; serialize those commits and let issue5 deduplicate final history without creating runtime dependencies. Issues1/2 also overlap current provenance/enforcement docs and bundle inputs. Issues3/4 overlap orchestrator delivery/recovery callers. Issue5 overlaps all current documentation. Every ordering edge is shared-file serialization only: no change in the batch is gated on an unmet mutation or runtime prerequisite.
 
 Project deltas in order1,2,3,4,5. Issue1 fully modifies live-provenance and inventory requirements, retaining every existing scenario title while replacing the universal native-read callback promise with approved local-native authority. Issue2 modifies exact owned-module trust and native-event context requirements; it does not overwrite issue1's builtin union or reinstate fake session filesystem evidence. Its packaging declaration grants authority only to exact generated deployments. Issue3 modifies the delivered-template requirement. Issue4 modifies recovery threading and adds agent-specific mandatory OMP context; the existing optional trailing API remains optional for legacy OpenCode only. Issue5 adds documentation requirements without rewriting historical runtime verdicts.
 
 The main ACP protected-filesystem callback requirement remains unchanged and applies only when those callbacks execute. It does not confine direct native IO. All MODIFIED blocks retain their complete preexisting scenario sets. Archive/sync is outside this assignment; projection here is a planning contract, not an applied main-spec change.
 
-Issue1's full ordinary mutation restoration has a separate application prerequisite: supported native sink-route evidence/no-fallback dispatch is absent from the pinned extension API. This is unrelated to the resolved native read/search acceptance. Until a user-selected supported interface/version or separately approved native mutation posture resolves it, issue1 is application-blocked, issue2 is dependency-gated and issue5's final apply is dependency-gated. Issues3/4 remain independently actionable. All artifact phases can still be proposed; strict validation is not proof that this producer exists. Do not mark the full builtin issue complete while ordinary mutation only denies.
+Issue1's ordinary mutation restoration runs under the pinned native approval path and the process's ambient OS permissions: the user explicitly authorized accepting the ambient native mutation risk and the residual risk is recorded, so there is no application-blocked status and no pending mutation prerequisite. Issue2 follows issue1, and issue5 is last, purely by shared-file/dependency serialization; issues1, 3 and 4 are independently actionable. All artifact phases can still be proposed; strict validation is not proof that any producer exists or that implementation or runtime acceptance has landed. Do not mark the full builtin issue complete on artifact existence alone.
 
 ## Risks / Trade-offs
 
-A current-status edit can accidentally falsify historical proposal evidence. Keep history labeled and archives frozen. Native local-IO adoption does not fix root confinement; keep its accepted ambient-readability risk explicit without manufacturing a remaining decision blocker. Source/mock evidence does not prove native handler execution or packaged runtime behavior.
+A current-status edit can accidentally falsify historical proposal evidence. Keep history labeled and archives frozen. Native local-IO adoption does not fix root confinement; keep its accepted ambient-readability risk and the authorized ambient native mutation risk explicit without manufacturing a remaining decision blocker or claiming ACP-sink protection for the paths that bypass it. Source/mock evidence does not prove native handler execution or packaged runtime behavior.
 
 ## Migration Plan
 

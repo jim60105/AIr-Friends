@@ -19,12 +19,12 @@ Current OMP documentation SHALL distinguish the 35 archived baseline changes fro
 #### Scenario: New proposals are not claimed applied
 - **WHEN** correction artifacts exist without their implementation having landed
 - **THEN** the index SHALL report proposed status with its ownership and application matrix
-- **AND** the user's accepted native local read/search SHALL NOT be reported as daemon root confinement or a still-pending protected-IO prerequisite
+- **AND** the user's accepted native local read/search and authorized ambient native mutation SHALL NOT be reported as daemon root confinement, a still-pending protected-IO prerequisite or an application-blocked mutation status
 
-#### Scenario: Mutation-route prerequisite is distinct from accepted reads
-- **WHEN** the supported native surface lacks actual sink-route evidence and no-fallback mutation dispatch
-- **THEN** full ordinary mutation restoration SHALL be labeled application-blocked with the concrete producer prerequisite and dependent application gates
-- **AND** safe mutation denial SHALL NOT be reported as completed write capability or reopen the accepted local read/search decision
+#### Scenario: Authorized native mutation is not a pending prerequisite
+- **WHEN** the current docs describe ordinary native write/edit beside the accepted native read/search posture
+- **THEN** they SHALL record the user's explicit authorization of the ambient native mutation risk and SHALL NOT retain an application-blocked mutation status or a pending mutation-route prerequisite
+- **AND** they SHALL NOT claim ACP-sink protection for absolute native session-sandbox/plan targets or an unavailable client bridge, and SHALL NOT reopen the accepted local read/search decision
 
 ### Requirement: OMP Launch Documentation Names the Generated Deployment Artifact
 
@@ -57,7 +57,7 @@ Current OMP boundary documentation SHALL separate source/mock findings, user obs
 #### Scenario: Final docs pass removes current stale claims
 - **WHEN** the correction owners' implemented behavior is consolidated
 - **THEN** current docs SHALL reflect direct live roster observation, source-specific provenance, independent physical module evidence, delivered quoted root and all owning recovery callers
-- **AND** no-runtime-consumer or pooled-only language SHALL remain as a false current-state assertion
+- **AND** no-runtime-consumer or pooled-only language SHALL NOT remain as a false current-state assertion
 
 #### Scenario: Accepted native status and version audit stay distinct
 - **WHEN** current docs describe local native read/search and the official v18.10.3 source investigation

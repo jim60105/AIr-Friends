@@ -6,7 +6,7 @@ Apply last after all four substantive owners. Maximum implementation budget: 3h.
 
 - [ ] 1.1 Update the current batch index/status paragraphs to separate the exact 35 archived OMP baseline changes from the five new proposals, including C1-C7 and unify-omp-skill-root-resolution; verify against actual archive membership without modifying archive contents or counting unrelated changes.
 - [ ] 1.2 Keep original row 13 cancelled, mark row 21/code search historical and superseded by C1, and label old proposal-time evidence; verify current-state tables, design links and configuration audit references contain no stale unapplied-C or readiness-restoration claim.
-- [ ] 1.3 Add the issue ownership/application and dependency/code-conflict matrix with truthful proposed/applied and accepted-native disposition; verify no artifact-only work is marked implemented, no obsolete protected-IO decision blocker remains and substantive docs link to their owner.
+- [ ] 1.3 Add the issue ownership/application and dependency/code-conflict matrix with truthful proposed/applied and accepted-native disposition; verify no artifact-only work is marked implemented, no obsolete protected-IO decision blocker or application-blocked mutation status remains, the recorded ordering edges are shared-file serialization only and substantive docs link to their owner.
 
 ## 2. Launch, ownership and honest boundary documentation (1h)
 

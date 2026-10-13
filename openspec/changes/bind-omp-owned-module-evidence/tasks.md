@@ -1,6 +1,6 @@
 # Tasks
 
-Apply after `admit-trusted-omp-native-builtins` for shared roster/provenance serialization. Maximum implementation budget: 8h. All boxes are implementation work, not proposal-time runtime evidence.
+Apply after `admit-trusted-omp-native-builtins` for shared roster/provenance serialization only — there is no unmet runtime or mutation prerequisite for this change. Maximum implementation budget: 8h. All boxes are implementation work, not proposal-time runtime evidence.
 
 ## 1. Declared deployment identity and physical observer (2.5h)
 
