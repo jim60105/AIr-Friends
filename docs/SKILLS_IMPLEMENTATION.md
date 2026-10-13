@@ -202,6 +202,30 @@ Located in `skills/{name}/SKILL.md`, these files follow the [Agent Skills Standa
 
 Every `SKILL.md` invocation recipe names the script path under the literal placeholder `<skill root rendered in your system prompt>` — the absolute trusted skill-script root the daemon renders into every prompt as the internal `skillsDir` template variable (`resolveTrustedSkillsRoot`, `src/core/skills-root.ts`; see `docs/DEVELOPMENT.md` §Available Template Variables). Recipes NEVER use a `$HOME`/`${HOME}` expression: for OMP the rendered root is the declared owned tree (`/opt/air/skills` in the image; the repository's own `skills/` tree in development) and the agent child's isolated HOME can only ever name an empty sandbox directory, while OpenCode keeps its existing installed-root behavior (`agent.skillsDir`, container: `/home/deno/.agents/skills`).
 
+Since `render-delivered-skill-root-contract` the delivered prompt states that root
+in a dedicated `## Skill Script Root` section (shared fragment
+`prompts/skills_root.md`, included by every skill-instructing session template),
+together with the session's allowed recipes. The section is asserted to be
+present in the classified final prompt BEFORE delivery: a missing, empty or
+relative root, or an operator-mounted template that renders without the literal
+root, fails explicitly instead of sending rootless instructions. Dashboard
+web-chat is not a skill-instructing session and keeps its skill prohibition and
+its absence of any skill recipe.
+
+### Argument Quoting
+
+Every recipe argument is POSIX single-quoted — the **complete** executable path
+(`'<root>/<skill>/scripts/<skill>.ts'`), each `--session-id <id>` value and each
+payload-file path — never just the root prefix and never a double-quoted form
+(which would let `$`, a backtick or an embedded `"` expand or terminate the
+argument). An apostrophe inside a value is escaped as the quote-close /
+escaped-quote / reopen triple `'\''`, so a root or staging directory containing
+spaces, apostrophes, `$` or backticks remains ONE literal argument. Templates use
+the injected `quoteShellArgument(value)` / `skillScript(root, skill)` helpers and
+the retry builder calls the same formatters
+(`quoteShellArgument`/`skillScriptPath`, `src/core/skills-root.ts`), so template
+and retry spellings agree exactly.
+
 ## Payload-File Argument Contract
 
 Skill scripts NEVER accept free-text content as CLI argument values. Free-text arguments (`--message`, `--content`, `--query`, `--caption`) were removed because skill scripts are executed via the Bash tool: the shell expands `$VAR` in double-quoted arguments before the script runs, corrupting content (`$0.435` became `/usr/bin/bash.435` in production) and leaking subprocess environment variables (e.g. `$OPENROUTER_API_KEY`) into external channels. Since `agent-config/opencode.json` grants skill-invocation bash patterns `"allow"`, the script itself is the authoritative enforcement point.
@@ -211,6 +235,12 @@ The contract:
 1. The agent writes the free text to a payload file under the session staging directory using its edit/write tool — the literal `$TMPDIR/$SESSION_ID/...` path is expanded by the ACP path boundary (`src/acp/client.ts`), so the write is approved and bytes are preserved verbatim.
 2. The agent invokes the script with the payload-file flag: `--message-file` (send-reply/edit-reply/set-reminder), `--content-file` (memory-save), `--query-file` (memory-search/fetch-context), `--caption-file` (send-file).
 3. The shared helper (`skills/lib/payload.ts`) resolves the payload path against the script's cwd (the session workspace) and requires it to be inside `{workspace}/tmp/{sessionId}` (boundary-safe, symlink-aware via `Deno.realPath`), so a payload file can never exfiltrate arbitrary workspace/home files. The payload file is deleted after a successful read.
+
+The delivered recipe spells that invocation with POSIX single-quoted arguments —
+`'<root>/<skill>/scripts/<skill>.ts' --session-id '<id>' --message-file '<staging>/reply.md'`
+— so the script path, the literal session id and the payload path reach the shell
+verbatim even when they contain spaces, `$`, backticks or apostrophes. Only
+paths and ids appear on the command line; free text stays in the payload file.
 
 Legacy flags are rejected in both forms (`--flag value` and `--flag=value`) with a typed error (`SKILL_LEGACY_FLAG` / `SKILL_MISSING_PAYLOAD` / `SKILL_PAYLOAD_OUT_OF_BOUNDS` / `SKILL_PAYLOAD_NOT_FOUND` / `SKILL_SINGLE_FILE_FLAG` for the removed singular `--file-path`) whose `error` field teaches the correct two-step pattern with a concrete example invocation. The ACP gate additionally rejects skill commands carrying a legacy free-text flag as defense-in-depth.
 
