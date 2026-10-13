@@ -18,7 +18,7 @@
 // resolved skill root to the agent, described in its own section at the end of
 // the file.
 
-import { isAbsolute, join, resolve } from "@std/path";
+import { basename, dirname, isAbsolute, join, resolve } from "@std/path";
 import { ConfigError, ErrorCode } from "../types/errors.ts";
 import {
   jsonInsertMember,
@@ -479,4 +479,147 @@ export function applyOpencodeSkillDiscoveryDeclaration(
     root,
     home,
   );
+}
+
+/** The outcome of one declaration step. */
+export interface OpencodeSkillDiscoveryResult {
+  /** The deployed configuration document the declaration is carried by. */
+  readonly path: string;
+  /** The resolved skill root the declaration names. */
+  readonly root: string;
+  /** What the step did with the document. */
+  readonly action: "unchanged" | "created" | "updated";
+}
+
+/**
+ * Replace the deployed document through a same-directory temporary file and a
+ * rename, so a reader never observes a partial document. The deployed file's
+ * own mode is preserved (the image ships it group-writable), the temporary
+ * file is removed when the write or the rename fails, and a planted link or a
+ * non-regular file at the target refuses outright rather than being followed.
+ */
+function writeOpencodeDocument(path: string, content: string): void {
+  const directory = dirname(path);
+  Deno.mkdirSync(directory, { recursive: true });
+  let mode = 0o644;
+  try {
+    const info = Deno.lstatSync(path);
+    if (info.isSymlink || !info.isFile) {
+      throw new Error("the existing target is a symbolic link or not a regular file");
+    }
+    // A platform that reports no mode keeps the created-file default.
+    if (info.mode !== null) mode = info.mode & 0o777;
+  } catch (error) {
+    if (!(error instanceof Deno.errors.NotFound)) throw error;
+  }
+  const temporary = join(directory, `.${basename(path)}.${crypto.randomUUID()}.tmp`);
+  try {
+    Deno.writeTextFileSync(temporary, content, { mode });
+    // `mode` is subject to the process umask at creation, so the observed mode
+    // is reasserted explicitly.
+    Deno.chmodSync(temporary, mode);
+    Deno.renameSync(temporary, path);
+  } catch (error) {
+    try {
+      Deno.removeSync(temporary);
+    } catch {
+      // The temporary file was never created or is already gone.
+    }
+    throw error;
+  }
+}
+
+/**
+ * Write the document, failing explicitly — with the file and the resolved root
+ * — when it cannot be written. This is the posture that keeps a contradicting
+ * read-only operator mount from starting an agent whose discovery disagrees
+ * with the root the daemon tells it to execute from.
+ */
+function writeOpencodeSkillDiscoveryDocument(
+  path: string,
+  content: string,
+  root: string,
+  options: OpencodeSkillDiscoveryOptions,
+): void {
+  try {
+    (options.writeFile ?? writeOpencodeDocument)(path, content);
+  } catch (error) {
+    throw new ConfigError(
+      ErrorCode.CONFIG_INVALID,
+      `The deployed OpenCode configuration "${path}" must declare the resolved skill root ` +
+        `"${root}" but could not be written: ` +
+        (error instanceof Error ? error.message : String(error)),
+      { path, root },
+    );
+  }
+}
+
+/**
+ * Declare the resolved skill root in the deployed OpenCode global
+ * configuration, so the agent that must discover and read the
+ * runtime-installed external skills follows the deployment's ONE configured
+ * root instead of only the implicit home convention.
+ *
+ * Inspect-then-write: a document that already carries BOTH declaration entries
+ * is left byte-identical and nothing is written; an absent document is created
+ * (with its parent directory) carrying exactly the declaration entries; any
+ * other document is updated in place. The root is an INPUT — this function
+ * never resolves, defaults or derives one.
+ *
+ * Everything that makes the declaration impossible to state truthfully fails
+ * explicitly, naming the document and the resolved root: an unwritable or
+ * unreadable target, a document whose declaration places hold shapes the
+ * declaration cannot extend, and a resolved root that is the daemon user's home
+ * directory or an ancestor of it. An agent session is never started with a
+ * discovery declaration that contradicts the resolved root.
+ */
+export function ensureOpencodeSkillDiscoveryDeclaration(
+  root: string,
+  options: OpencodeSkillDiscoveryOptions = {},
+): OpencodeSkillDiscoveryResult {
+  const home = opencodeDaemonHome(options);
+  assertOpencodeSkillRootIsDeclarable(root, home);
+  const path = opencodeGlobalConfigPath(options);
+  const readFile = options.readFile ??
+    ((target: string) => {
+      try {
+        return Deno.readTextFileSync(target);
+      } catch (error) {
+        if (error instanceof Deno.errors.NotFound) return undefined;
+        throw error;
+      }
+    });
+  let existing: string | undefined;
+  try {
+    existing = readFile(path);
+  } catch (error) {
+    throw new ConfigError(
+      ErrorCode.CONFIG_INVALID,
+      `The deployed OpenCode configuration "${path}" could not be read for the skill-discovery ` +
+        `declaration of the resolved root "${root}": ` +
+        (error instanceof Error ? error.message : String(error)),
+      { path, root },
+    );
+  }
+  if (existing === undefined) {
+    const content = renderOpencodeSkillDiscoveryDeclaration(root);
+    writeOpencodeSkillDiscoveryDocument(path, content, root, options);
+    return { path, root, action: "created" };
+  }
+  let updated: string | undefined;
+  try {
+    const verdict = inspectOpencodeSkillDiscoveryDeclaration(existing, root, home);
+    if (!verdict.declared) updated = applyOpencodeSkillDiscoveryDeclaration(existing, root, home);
+  } catch (error) {
+    throw new ConfigError(
+      ErrorCode.CONFIG_INVALID,
+      `The deployed OpenCode configuration "${path}" cannot carry the skill-discovery ` +
+        `declaration of the resolved root "${root}": ` +
+        (error instanceof Error ? error.message : String(error)),
+      { path, root },
+    );
+  }
+  if (updated === undefined) return { path, root, action: "unchanged" };
+  writeOpencodeSkillDiscoveryDocument(path, updated, root, options);
+  return { path, root, action: "updated" };
 }
