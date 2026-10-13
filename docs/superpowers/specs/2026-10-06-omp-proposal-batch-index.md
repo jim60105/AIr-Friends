@@ -2,18 +2,30 @@
 
 - Date: 2026-10-06
 - Design: `docs/superpowers/specs/2026-10-06-omp-integration-design.md` (approved).
-- Status: All 27 non-cancelled original and follow-up changes are applied/archived. Row 13
-  remains cancelled. Seven new correction proposals are planning artifacts only, each budgeted
-  <=8h including implementation, focused verification, and documentation. Original artifact
-  validation and whole-batch review did not establish correct native registration or production
-  wiring. The correction batch below owns the source-audit findings.
+- Status (current, 2026-10-13): the archived OMP baseline is **35** changes — the 27 original
+  non-cancelled rows, the seven `C1`–`C7` correction followups and
+  `2026-10-13-unify-omp-skill-root-resolution`. Row 13 (`gate-omp-policy-readiness`) stays
+  cancelled and has no archive. Unrelated non-OMP archive entries are not part of this baseline.
+- The follow-on seam-correction batch is five changes: four are applied, archived and merged into
+  `master`; the fifth, `synchronize-omp-seam-correction-docs`, is the final documentation
+  reconciliation. Section 8 owns their ownership, dependency, shared-file conflict and
+  application matrix.
 - Acceptance contract: automated evidence is unit + mock integration only. All real-runtime
-  verification (design section 15) is user-owned and ships unverified.
+  verification (design section 15) is user-owned and ships unverified. Artifact existence or
+  strict OpenSpec validation proves neither implementation nor native acceptance.
+- Historical (proposal time, 2026-10-06): the paragraphs below that call the original changes plus
+  seven correction *proposals* "planning artifacts only", and the section 6/7 language about
+  unchecked tasks and unapplied source removal, record the state at proposal generation. Every one
+  of those changes has since been applied and archived; those labels are retained as history,
+  never as current status. Original artifact validation and whole-batch review did not establish
+  correct native registration or production wiring — the correction and seam-correction batches
+  own those source-audit findings, and both are applied.
 
 ## 1. Original application order (historical, already archived)
 
 The original batch used this order, skipping cancelled row 13 without renumbering the remaining
-rows. Do not reapply archived changes. Apply the new correction batch in section 6 instead.
+rows. Do not reapply archived changes. Both follow-on batches — section 6's `C1`–`C7` and
+section 8's seam-correction batch — are applied and archived.
 
 | #  | Change                                | Batch row     | Budget |
 | -- | ------------------------------------- | ------------- | ------ |
@@ -51,8 +63,9 @@ Ordering notes:
 - Numbered row 15 (`harden-acp-command-path-gate`, 14c) lands before row 16's extension consumers
   and row 17's LSP edits. `src/acp/client.ts` edits in rows 4/5/15 are serial; removed row 13 adds none.
 - The trusted-extension tree is serial: row 12 discovery → row 16 enforcement → row 19 fetch →
-  row 20 search → row 21 historical code-search slot, now scheduled for removal. Row 22 cut digests after content landed;
-  subsequent `/opt/air/omp` input changes recut `PACKAGE-MANIFEST.sha256` in the same commit.
+  row 20 search → the row-21 historical code-search slot, REMOVED by C1
+  (`remove-omp-public-code-search`). Row 22 cut digests after content landed; subsequent
+  `/opt/air/omp` input changes recut `PACKAGE-MANIFEST.sha256` in the same commit.
 - Rows 23/24 are the original batch's final lifecycle/handoff consumers. Legacy proposal labels (14a/14b/14c, P5d,
   row-17 fetch, row-20 packaging, row-21 lifecycle, row-22 handoff) are not this table's numbering.
 - Rows 25–28 are also applied/archived. Their historical order was 25 → 26 → 27 → 28.
@@ -80,10 +93,16 @@ Ordering notes:
 - Row 16 owns synchronous handler-slot registration/attachment and live registryEpoch observation;
   it consumes row 12 resourceGeneration for stale-generation denial. Live-origin checks and
   post-start MCP refresh admission remain; no ReadySignal/channel or readiness reset is consumed.
-- Extension dependency closure remains binding: row 22 installs 14a pure modules into the image
-  extension's `_daemon/` tree with a `mod.ts` barrel. All imports resolve inside
-  `/opt/air/omp/extension`; dev mode resolves the same committed sources. No runtime `/app/src`
-  import. Extending the closure recuts the digest manifest in the same change.
+- Extension packaging closure (row 22's copied `_daemon/` install tree is superseded by C3
+  `package-bun-compatible-omp-extension`): the image installs ONE generated native-loadable
+  `index.js` at `/opt/air/omp/extension/index.js`, cut by `deno bundle --frozen --format esm`
+  from the canonical entry `src/acp/omp/extension/index.ts` (build input only, never a launch
+  target) against the committed `deno.lock`; the development launch presents the generated
+  `build/omp-extension/index.js` verbatim. `src/acp/omp/extension/_daemon/mod.ts` is the
+  extension's build-TIME re-export barrel of the 14a pure modules and is inlined into that single
+  bundle — there is no installed `mod.ts` image copy and no sidecar import map, and no runtime
+  `/app/src` import ever existed. Extending the closure recuts the digest manifest in the same
+  change.
 - Row 23 may add at most one flagged test-only command override on row 9's launch path if no
   injection point exists; row 24 may need one flagged ephemeral Skill API port/JWT-dir seam.
   Implementation records seam/no-seam and retains production defaults.
@@ -128,7 +147,7 @@ The follow-ups extend the carrying changes recorded below without changing any p
 | OMP restricted-only LSP incl. lazy cold-start                                  | CANDIDATE                                                                                                                                        | DECIDED: LSP disabled for OMP restricted+YOLO. Row 17 supplies both-mode --no-lsp flags over the existing restricted pin; row 25 supplies the mandatory native-yolo settings pin and content/validator changes. D6 LSP exemption superseded; no restricted tool policy copied into YOLO and native implicit startup remains unverified. | `disable-restricted-agent-lsp`; `pin-omp-yolo-lsp-settings` | P0 ledger; decision 5; rows 17/P5d and 25 | DECIDED disposition above governs application; pinned verdict and unverified runtime limits remain. |
 | OpenCode restricted-only LSP mechanism                                         | UNAUDITED at 1.18.21                                                                                                                             | DECIDED: OpenCode build+yolo both explicitly deny lsp in their per-agent permission maps; no top-level global clamp. Explicit denial does not clear implicit-startup incompatibility or prove native server suppression. | `disable-restricted-agent-lsp`                                                                          | P0 ledger; decision 5; row 17/P5d | DECIDED disposition above governs application; pinned verdict and unverified runtime limits remain. |
 | Native transport bypasses (loadPage/fetchBinary redirect:follow) | PARTIAL | DECIDED: controlled replacements cover URL read and web search only. Uncovered native routes remain blocked; proxy environment alone is not enforcement. C2–C5 repair definition, packaging, registration, and admission gaps. | `control-omp-url-fetch-transport`; `adapt-omp-web-search`; C2–C5 | P0 ledger; network docs | Native runtime observations remain user-owned and unverified. |
-| D4 public code-search parity | PREMISE FALSE: pinned OpenCode 1.18.21 removed codesearch upstream, commit 2481dde, 2026-05-12 | SUPERSEDED by the user's parity decision: no dedicated public code-search implementation is required. Remove its executor, route, inventory/ledger requirements, obsolete tests, and packaging slot. Keep local search, URL read, and web search. | C1: `remove-omp-public-code-search` | Archived row 21; network docs | Removal is proposed, not yet applied. No additional backend or credentials. |
+| D4 public code-search parity | PREMISE FALSE: pinned OpenCode 1.18.21 removed codesearch upstream, commit 2481dde, 2026-05-12 | SUPERSEDED by the user's parity decision: no dedicated public code-search implementation is required. Its executor, route, inventory/ledger requirements, obsolete tests and packaging slot are removed; local search, URL read and web search are kept. | C1: `remove-omp-public-code-search` | Archived row 21; network docs | Removal applied and archived as C1. No additional backend or credential, and no outstanding credential decision. |
 | Row-15 audit OpenCode version bump (if the LSP mechanism needs newer OpenCode) | deferred                                                                                                                                         | DECIDED (decision 5): no OpenCode version bump; keep 1.18.21 and preserve implicit-startup evidence limits while both agents explicitly deny lsp per agent. | `disable-restricted-agent-lsp`                                                                          | decision 5; row 17/P5d caveat | DECIDED disposition above governs application; pinned verdict and unverified runtime limits remain. |
 | Digest-manifest recuts                                                         | invariant                                                                                                                                        | DECIDED — retained as an invariant (no user decision was required); any content change to `/opt/air/omp` inputs still recuts `PACKAGE-MANIFEST.sha256` in the same commit.                                                                                                                                                                                                                   | `package-pinned-omp-runtime` (row 20)                                                                   | row 20                      | DECIDED disposition above governs application; pinned verdict and unverified runtime limits remain. |
 
@@ -151,11 +170,14 @@ suppression incl. implicit startup, cross-mode native load rejection, native fet
 traffic routing, digest/asset bytes, or image/architecture behavior. Those are design section-15
 user-owned checks, tracked in `docs/USER-RUNTIME-VERIFICATION.md` at row 24.
 
-## 6. Correction batch (single writer, serial)
+## 6. Correction batch (applied and archived)
 
-Author and apply changes independently, in the listed application order. Dependencies are
-behavioral prerequisites; serialization also prevents conflicts in shared source and main specs.
-All seven proposals include proposal, design, delta specs, and unchecked implementation tasks.
+Historical plan: these changes were authored and applied independently, in the listed application
+order. Dependencies are behavioral prerequisites; serialization also prevented conflicts in shared
+source and main specs. At proposal time each carried proposal, design, delta specs and unchecked
+implementation tasks; all seven are now applied and archived (section 7), with
+`synchronize-omp-seam-correction-docs` (section 8, issue 5) as this batch's final documentation
+writer.
 
 | Order | Change | Scope | Prerequisites | Budget |
 | --- | --- | --- | --- | --- |
@@ -183,14 +205,86 @@ readiness change, changes LSP scope, loosens YOLO/restricted isolation, or edits
 Proposal validation is artifact evidence only. Native loading, actual traffic, browser interaction,
 and container behavior remain unverified until their respective implementation/manual checks.
 
-## 7. Correction proposal evidence
+## 7. Correction-proposal evidence (proposal-time record; all seven since applied)
 
-At proposal creation, all seven changes pass `openspec validate <change> --strict` and have
-complete proposal, design, delta-spec, and task artifacts. All implementation checkboxes remain
-unchecked. An in-memory serial projection of their 30 delta operations has no missing modification
-targets or duplicate additions and removes all six dedicated public-code-search requirements.
-This projection does not modify main specs or archive any change.
+**Historical, proposal time (2026-10-06).** At proposal creation, all seven changes passed
+`openspec validate <change> --strict` and had complete proposal, design, delta-spec and task
+artifacts; every implementation checkbox was unchecked, and an in-memory serial projection of
+their 30 delta operations had no missing modification targets or duplicate additions and removed
+all six dedicated public-code-search requirements (that projection modified no main spec and
+archived no change). Artifact validation and that projection are proposal-completeness evidence
+only: they proved neither implementation nor native acceptance.
 
-Draft style checking reports zero errors; its colon-label and literal source-mirror warnings were
-reviewed in context. No project test suite, real agent, provider, browser, or container was run
-for this proposal task. Source removal and runtime repairs remain unapplied.
+All seven have since been applied and archived — `remove-omp-public-code-search`,
+`align-omp-native-tool-contracts`, `package-bun-compatible-omp-extension`,
+`wire-omp-native-extension-api`, `admit-completed-omp-network-adapters`,
+`repair-omp-owned-skill-handoff`, `expose-omp-dashboard-agent-selection` — so the "unchecked" and
+"remain unapplied" statements above describe the proposal, not the outcome. The draft-style
+findings (zero errors; colon-label and literal source-mirror warnings reviewed in context) and the
+absence of any project test suite, real agent, provider, browser or container run belong to that
+proposal task; official-runtime acceptance remains user-owned and UNVERIFIED.
+
+## 8. Seam-correction batch (2026-10-13, applied)
+
+Five changes close the source-audit seams left by the archived C batch. Ordering among them is
+shared-file serialization only: no change is gated on an unmet mutation or runtime prerequisite,
+and issues 1, 3 and 4 were independently actionable.
+
+| Issue | Change | Depends on | Application state | Archive / merge evidence |
+| --- | --- | --- | --- | --- |
+| 1 | `admit-trusted-omp-native-builtins` | archived baseline | applied, archived, merged | archive `2026-10-13-admit-trusted-omp-native-builtins`; merge `5064689` |
+| 2 | `bind-omp-owned-module-evidence` | issue 1 | applied, archived, merged | archive `2026-10-13-bind-omp-owned-module-evidence`; merge `6948f9f` |
+| 3 | `render-delivered-skill-root-contract` | archived baseline | applied, archived, merged | archive `2026-10-13-render-delivered-skill-root-contract`; merge `a6f12e6` |
+| 4 | `thread-per-spawn-omp-recovery-context` | issue 3 | applied, archived, merged | archive `2026-10-13-thread-per-spawn-omp-recovery-context`; merge `90b50ea` |
+| 5 | `synchronize-omp-seam-correction-docs` | issues 1–4 | this change: documentation implemented on `feat/synchronize-omp-seam-correction-docs`; archive/main-spec sync is the batch owner's step | — |
+
+Implementation state is read from the landed implementation and source, never from artifact
+existence: a change's four planning artifacts (and their strict validation) prove proposed
+completeness only — not implementation and not native runtime acceptance.
+
+### Ownership and shared-file conflict matrix
+
+| Surface | Owner | Final pass |
+| --- | --- | --- |
+| Native builtin admission, provenance and owned-replacement evidence in `OMP_ENFORCEMENT.md`, `OMP_TOOL_POLICY.md`, `OMP_SETTINGS.md`, `OMP_COMPATIBILITY.md` | issues 1 and 2 | issue 5 removes stale taxonomy/no-consumer/callback-completion wording and records the accepted native posture |
+| `OMP_NETWORK.md` and the skill-URI handoff | issue 2 | issue 5 keeps physical origin ahead of route completion and the absent-credential deny (no fallback) |
+| Prompt variables, skill recipes and the shared skills-root fragment | issue 3 | issue 5 keeps every delivered template/retry on the literal, quoted trusted root |
+| `OMP_RECOVERY.md` | issue 4 | issue 5 keeps all nine owning callers, the mandatory OMP context and the legacy-OpenCode distinction |
+| `OMP_SPAWN.md`, `OMP_DISCOVERY.md`, `OMP_PACKAGING.md`, this index | issue 5 (predecessors supplied the new evidence types) | generated launch-path contract, deployment/state root separation, accepted extension-load residual |
+| `CHANGELOG.md` | every substantive writer | issue 5 deduplicates and adds supersession context only — no owner's entry is rewritten |
+| `USER-RUNTIME-VERIFICATION.md` | every behavior owner | issue 5 keeps the source/mock/user-observation separation and every UNVERIFIED row |
+
+Every pair conflicts on the append-only CHANGELOG, so those commits are serialized; issues 1/2
+also share the provenance/enforcement docs and bundle inputs, and issues 3/4 share the
+session-orchestrator delivery/recovery callers. **Every ordering edge is shared-file serialization
+only** — no change in this batch is gated on an unmet mutation or runtime prerequisite, and no
+change remains application-blocked.
+
+### Accepted native boundaries and residuals this batch records
+
+- **Native local read/search (issue 1)** — the authority is `native-local-read-approval`:
+  authenticated native builtins, the supported native activation/approval tier, then the
+  PROCESS's own ambient OS permissions. A read may reach an ambient-readable path outside the
+  daemon session roots; the ACP read boundary keeps its guarantees only for the callbacks that
+  actually execute. Remote/device routes stay denied and are screened out before local dispatch.
+  No daemon root-confinement is claimed.
+- **Native write/edit (issue 1)** — `native-local-write-approval`: the pinned native approval path
+  plus ambient OS permissions, with the restricted ACP mutation sink retained only as the route
+  the pinned bridge applies WHERE IT ROUTES THE CALL. An absolute native session-sandbox/plan
+  target and an unavailable client bridge do not reach that sink and mutate directly: **the user
+  explicitly authorized that ambient native mutation risk, and it is recorded as a residual — not
+  as an application-blocked status and not as a pending protected-IO prerequisite.** No ACP-sink
+  protection is claimed for those paths, and no pre-dispatch route gate exists.
+- **Cancelled readiness (never restored)** — row 13 stays removed: no readiness channel,
+  handshake, tuple or assertion exists. The accepted residual is that the pinned host logs
+  extension-load/lifecycle failures without failing startup, so an extension that fails to load
+  leaves a running session without the restricted capability set.
+- **Named residual, not closed** — at the pin the roster forwards only the definition-authorable
+  `sourceInfo.path`, so a hostile same-name extension declaring our artifact path is
+  indistinguishable through the supported roster API: **which extension implementation the host
+  invokes under a name is not claimed anywhere** (`docs/OMP_ENFORCEMENT.md`, "Named residual —
+  the roster's `sourceInfo.path` is definition-authorable").
+- **Pins and invariants unchanged** — OMP `v18.6.1` / `2a2c6dcbbb558c0f8145f67f28b3370984f2bf60`,
+  OpenCode `1.18.21`, ACP SDK `0.14.1`; the investigated `v18.10.3` supplies no confined-IO fix
+  (no bump, no fork, no custom broker); the configuration trio, the public-code-search removal,
+  native-YOLO separation, LSP disable scope and sandbox/egress behavior are unchanged.

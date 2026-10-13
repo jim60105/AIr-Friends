@@ -72,8 +72,9 @@ amendment is a deployment-owned disposition of a recorded gap, not a supported-m
    `tool_call` enforcement handler plus the client's ACP permission policy as the only boundary.
    Residual risk recorded: `runner.emit` logs lifecycle-hook errors without failing session startup,
    so a failed extension leaves the session running without the restricted capability set and no
-   client-observable signal exists. No readiness claim is made. Carried by
-   `gate-omp-policy-readiness`.
+   client-observable signal exists. No readiness claim is made. The carrying change is
+   `wire-omp-restricted-tool-enforcement`; `gate-omp-policy-readiness` (numbered row 13) was
+   REMOVED from the batch, so no readiness implementation exists or is deferred.
 3. **Authoritative approval-record reset.** Supersedes section 7 "Authoritative settings" where it
    selects "an owned reset overlay followed by the owned mode overlay" as the record-reset strategy
    and requires verifying the `approval: null` barrier. Control moves to settings discovery paths:
@@ -142,7 +143,7 @@ the section 15 runtime checklist remains user-owned.
 | `AgentProcessPool`      | Existing channel-scoped reuse and global execution lease; adds OMP permission mode to process identity and state ownership.                                                  |
 | `AgentConnector`        | ACP lifecycle, stable-first model configuration, reasoning normalization, session option caches, and same-mode recovery.                                                     |
 | `ChatbotClient`         | Per-session permission authority, filesystem authorization, trusted-root reads, and rejection diagnostics.                                                                   |
-| AIr-owned OMP extension | Restricted tool admission, provenance checks, alternate-entry rejection, network adaptation, and policy-readiness enforcement. No independent mutable YOLO authority.        |
+| AIr-owned OMP extension | Restricted tool admission, provenance checks, alternate-entry rejection, network adaptation, and the deployed native registrations (synchronous `tool_call` enforcement plus the restricted replacement tools). No independent mutable YOLO authority. Policy readiness is cancelled — no readiness responsibility exists here. |
 | Existing Skill API      | Session authentication, payload containment, existing memory/reply operations, and platform-facing delivery.                                                                 |
 
 Prefer focused modules for policy evaluation, path access, and extension adaptation rather than
@@ -676,3 +677,11 @@ The source audit found these integration gaps despite the original batch being a
 The correction batch, application order, shared-file serialization, and workday budgets are owned
 by `docs/superpowers/specs/2026-10-06-omp-proposal-batch-index.md`. This amendment records source
 findings and planned repairs, not successful native execution or a rerun of the test suite.
+
+Status (2026-10-13): the findings above were repaired by the archived correction batch `C1`–`C7`
+and by the applied seam-correction batch, whose ownership/application matrix is recorded in
+`docs/superpowers/specs/2026-10-06-omp-proposal-batch-index.md` section 8. The readiness
+statements this amendment supersedes (sections 7, 10, 13 and the older readiness checklist rows)
+stay historical and are not active restoration work. Official-runtime acceptance — native
+extension load, handler invocation, LSP suppression, traffic mediation — remains user-owned and
+UNVERIFIED (`docs/USER-RUNTIME-VERIFICATION.md`).
