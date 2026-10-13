@@ -595,6 +595,29 @@ podman run -d --rm \
 
 For more information about OpenCode configuration, see the [OpenCode documentation](https://opencode.ai/docs/config/).
 
+#### Generated Skill Discovery Declaration
+
+OpenCode discovers skills only from what its own configuration declares, so at startup the bot writes the deployment's ONE resolved skill root — `agent.skillsDir` / `AGENT_SKILLS_DIR`, `/home/deno/.agents/skills` in the stock image — into the deployed OpenCode global configuration:
+
+- `skills.paths` is set to exactly that resolved root, always as an ABSOLUTE path (a `~`-relative or relative entry would be resolved against the session's working directory instead of the skill tree).
+- `agent.build.permission.external_directory` gains one `"<root>/**": "allow"` entry for that root alone, so the agent can READ the skill tree. It grants discovery and file-read visibility only: script execution still goes through the ACP approval gate (`deno run *` and `*.ts*` stay `"ask"`) and the root-exact inventory stays the only execution authority.
+
+The step inspects before it writes:
+
+- A document that already declares the resolved root — literally or in a `~/…` / `$HOME/…` spelling that resolves to it — AND already allows external-directory reads under it is left **byte-identical**, and nothing is written.
+- A document that does not exist is **created** (with its parent directory) containing exactly those declaration entries and no other setting.
+- Any other document is **updated in place**, and every other byte keeps its value.
+
+Startup fails explicitly, naming the file and the resolved root, when the declaration cannot be stated truthfully:
+
+- The document must change but the file — or its directory — is not writable. Because the `my-opencode.json` mount above is read-only, a mounted file must **either already declare the resolved root plus its allowance** — which makes the step a no-op and keeps the read-only mount valid — **or be mounted writable**.
+- The document cannot be interpreted: malformed JSON/JSONC, a `skills` / `agent.build.permission` shape the declaration cannot extend, or a key declared twice.
+- The resolved root is the daemon user's home directory or an ancestor of it, or its literal name contains a permission-pattern metacharacter (`*`, `?`, `\`).
+
+The document is the AGENT's own global configuration (`$HOME/.config/opencode/opencode.json`): the agent subprocess is launched with an explicit environment allow-list (`clearEnv: true`) that carries `HOME` and no config-directory selector, so `OPENCODE_CONFIG_DIR` / `XDG_CONFIG_HOME` in the bot's own environment cannot relocate it. Only `opencode.json` is written — a later-loaded `opencode.jsonc` in the same directory stays the operator's own file.
+
+**Development consequence:** a local run (`deno task dev`) writes a repository-derived path and its allowance into *your* `~/.config/opencode/opencode.json`. Declare that same root in the file yourself, and the step becomes a no-op.
+
 ## Customizing the Bot
 
 I recommend checking out my blog post, ["🤖 AI Can Cosplay Too? A Beginner's Guide to LLM Character Role-Playing"](https://xn--jgy.tw/AI/design-roleplay-llm-prompts), for tips on setting up your character.
