@@ -21,7 +21,10 @@
 import { isAbsolute, join, resolve } from "@std/path";
 import { ConfigError, ErrorCode } from "../types/errors.ts";
 import {
+  jsonInsertMember,
   jsonMember,
+  jsonMemberIndent,
+  jsonReplaceSpan,
   jsonScalarValue,
   type JsonSourceNode,
   type JsonSourceObject,
@@ -247,6 +250,21 @@ function externalDirectoryObject(document: JsonSourceObject): JsonSourceObject |
   return objectMember(permission, "external_directory");
 }
 
+/**
+ * Whether one `skills.paths` VALUE names exactly the resolved root. Both the
+ * inspection and the update use this one predicate, so a list the inspection
+ * accepts is never rewritten by the update.
+ */
+function isSkillDiscoveryPathList(
+  node: JsonSourceNode,
+  root: string,
+  home: string | undefined,
+): boolean {
+  if (node.kind !== "array") return false;
+  const entries = requireStringArray(node, '"skills.paths"');
+  return entries.length === 1 && declaredDirectory(entries[0]!, home) === root;
+}
+
 /** Whether the document's discovery path list names exactly the resolved root. */
 function declaresSkillDiscoveryPath(
   document: JsonSourceObject,
@@ -256,9 +274,7 @@ function declaresSkillDiscoveryPath(
   const skills = objectMember(document, "skills");
   if (skills === undefined) return false;
   const paths = jsonMember(skills, "paths");
-  if (paths === undefined) return false;
-  const entries = requireStringArray(paths.value, '"skills.paths"');
-  return entries.length === 1 && declaredDirectory(entries[0]!, home) === root;
+  return paths !== undefined && isSkillDiscoveryPathList(paths.value, root, home);
 }
 
 /** Whether the allowance for the resolved root is an `allow`. */
@@ -303,4 +319,164 @@ export function inspectOpencodeSkillDiscoveryDeclaration(
     return { declared: false, detail: `external_directory does not allow reads under "${root}"` };
   }
   return { declared: true, detail: "" };
+}
+
+/**
+ * The declaration document written when NO deployed configuration exists:
+ * exactly the declaration entries and nothing else, so no pre-existing key can
+ * be overridden for any other source. The root is serialized as a JSON string,
+ * so a legitimate resolved path containing quotes, backslashes or spaces
+ * round-trips to exactly the same string.
+ */
+export function renderOpencodeSkillDiscoveryDeclaration(root: string): string {
+  return `{
+  "skills": {
+    "paths": [
+      ${JSON.stringify(root)}
+    ]
+  },
+  "agent": {
+    "build": {
+      "permission": {
+        "external_directory": {
+          ${JSON.stringify(`${root}/**`)}: "allow"
+        }
+      }
+    }
+  }
+}
+`;
+}
+
+/**
+ * The remaining chain as ONE JSON member text, one indentation level per step,
+ * so a missing `agent.build.permission.external_directory` chain is inserted
+ * with a single splice at the deepest existing level and no other key is added
+ * anywhere.
+ */
+function chainMemberText(
+  memberIndent: string,
+  keys: readonly string[],
+  leaf: string,
+): string {
+  const [head, ...rest] = keys;
+  const inner = `${memberIndent}  `;
+  if (rest.length === 0) return `${JSON.stringify(head)}: {\n${inner}${leaf}\n${memberIndent}}`;
+  return `${JSON.stringify(head)}: {\n${inner}${
+    chainMemberText(inner, rest, leaf)
+  }\n${memberIndent}}`;
+}
+
+/** Insert the missing chain (carrying the allowance) as one member of `parent`. */
+function insertChain(
+  source: string,
+  parent: JsonSourceObject,
+  keys: readonly string[],
+  allowance: string,
+): string {
+  const indent = jsonMemberIndent(source, parent);
+  return jsonInsertMember(source, parent, chainMemberText(indent, keys, allowance));
+}
+
+/**
+ * Set the skill discovery path list to exactly the resolved root. A list that
+ * already names it keeps its bytes; a missing `skills` or `skills.paths` is
+ * inserted as that one list. The list is never merged with another entry: the
+ * declaration introduces no second root.
+ */
+function withSkillDiscoveryPath(
+  source: string,
+  root: string,
+  home: string | undefined,
+): string {
+  const document = requireDocumentObject(source);
+  const skills = objectMember(document, "skills");
+  if (skills === undefined) {
+    const indent = jsonMemberIndent(source, document);
+    const list = `[\n${indent}    ${JSON.stringify(root)}\n${indent}  ]`;
+    return jsonInsertMember(
+      source,
+      document,
+      `"skills": {\n${indent}  "paths": ${list}\n${indent}}`,
+    );
+  }
+  const paths = jsonMember(skills, "paths");
+  if (paths !== undefined && isSkillDiscoveryPathList(paths.value, root, home)) return source;
+  if (paths !== undefined) {
+    return jsonReplaceSpan(
+      source,
+      paths.value.start,
+      paths.value.end,
+      `[${JSON.stringify(root)}]`,
+    );
+  }
+  return jsonInsertMember(source, skills, `"paths": [${JSON.stringify(root)}]`);
+}
+
+/**
+ * Ensure the ONE `external_directory` allowance for the resolved root: an
+ * existing entry covering that root whose value is not `allow` is set to
+ * `allow`, an absent entry is inserted, and a missing chain above it is
+ * created — each as one splice. Every other permission entry, including the
+ * `deny` default and the unrelated allowances, keeps its bytes.
+ */
+function withExternalDirectoryAllowance(
+  source: string,
+  root: string,
+  home: string | undefined,
+): string {
+  const document = requireDocumentObject(source);
+  const allowance = `${JSON.stringify(`${root}/**`)}: "allow"`;
+  const agent = objectMember(document, "agent");
+  if (agent === undefined) {
+    return insertChain(
+      source,
+      document,
+      ["agent", "build", "permission", "external_directory"],
+      allowance,
+    );
+  }
+  const build = objectMember(agent, "build");
+  if (build === undefined) {
+    return insertChain(source, agent, ["build", "permission", "external_directory"], allowance);
+  }
+  const permission = objectMember(build, "permission");
+  if (permission === undefined) {
+    return insertChain(
+      source,
+      build,
+      ["permission", "external_directory"],
+      allowance,
+    );
+  }
+  const externalDirectory = objectMember(permission, "external_directory");
+  if (externalDirectory === undefined) {
+    return insertChain(source, permission, ["external_directory"], allowance);
+  }
+  const covering = externalDirectory.members.find((member) =>
+    allowanceDirectory(member.key, home) === root
+  );
+  if (covering !== undefined) {
+    return jsonReplaceSpan(source, covering.value.start, covering.value.end, `"allow"`);
+  }
+  return jsonInsertMember(source, externalDirectory, allowance);
+}
+
+/**
+ * Splice the declaration into an existing document: the discovery path list
+ * becomes exactly the resolved root, and the allowance under that root is
+ * ensured. Both steps are source-preserving text splices, so every other byte
+ * of the document — the `deno run *` / `*.ts*` routing to the approval gate,
+ * the remaining allowances and every unrelated setting — is copied verbatim.
+ */
+export function applyOpencodeSkillDiscoveryDeclaration(
+  source: string,
+  root: string,
+  home?: string,
+): string {
+  return withExternalDirectoryAllowance(
+    withSkillDiscoveryPath(source, root, home),
+    root,
+    home,
+  );
 }
