@@ -4,8 +4,9 @@
 // (`wire-omp-native-extension-api`, task 2.1).
 //
 // The fake here has EXACTLY the pinned `ExtensionAPI` surface the adapter
-// touches — `on("tool_call")`, `registerTool`, and a `ctx.getAllTools()`
-// roster — and drives the SAME `createNativeExtensionFactory` product the
+// touches — `on("tool_call")`, `registerTool`, and the DIRECT
+// `api.getAllTools()` roster method (with the pinned runtime's throwing
+// load-time stub behaviour) — and drives the SAME `createNativeExtensionFactory` product the
 // entrypoint default-exports (never `index.ts` itself: the row-12 gate
 // throws at import, pinned by omp-discovery-guard.test.ts). Synthetic
 // rosters throughout: nothing here demonstrates that the official binary
@@ -36,9 +37,29 @@ const OWN_SOURCE = { path: OWN_BUNDLE_PATH, source: "extension" } as const;
 // The contracted deployment-tree identity 14a's own verifier admits.
 const CONTRACTED_PATH = `/opt/air/${OMP_TRUSTED_EXTENSION_PATH}`;
 const CONTRACTED_SOURCE = { path: CONTRACTED_PATH, source: "extension" } as const;
-const HOST_BASH: NativeToolInfo = {
+/**
+ * The EXACT pinned runtime tuple for an authentic builtin
+ * (`session/session-tools.ts#getAllToolInfos` at the pin): src=builtin,
+ * `<builtin:name>` path, `temporary` scope, `top-level` origin.
+ */
+function builtinTool(name: string): NativeToolInfo {
+  return {
+    name,
+    sourceInfo: {
+      path: `<builtin:${name}>`,
+      source: "builtin",
+      scope: "temporary",
+      origin: "top-level",
+    },
+  };
+}
+
+const BUILTIN_BASH = builtinTool("bash");
+
+/** RPC-host injection: `sdk` is host-owned and never a builtin. */
+const HOST_SDK_BASH: NativeToolInfo = {
   name: "bash",
-  sourceInfo: { path: "/opt/air/lib/bun/oh-my-pi", source: "builtin" },
+  sourceInfo: { path: "<sdk:bash>", source: "sdk", scope: "temporary", origin: "top-level" },
 };
 
 /** Synthetic trusted acquired-session canonical observation (fixture only:
@@ -69,6 +90,10 @@ interface FakeApiHarness {
   readonly api: NativeExtensionApi;
   readonly handlers: Array<(event: NativeToolCallEvent) => unknown>;
   readonly tools: NativeToolInfo[];
+  /** Roster reads the adapter performed (deferral evidence). */
+  readonly rosterReads: { count: number };
+  /** Flip to false: the roster method throws, like the pinned load-time stub. */
+  readonly state: { initialized: boolean };
   registeredTools: NativeToolInfo["name"][];
 }
 
@@ -77,6 +102,8 @@ function createFakeApi(initialRoster: readonly NativeToolInfo[]): FakeApiHarness
   const handlers: Array<(event: NativeToolCallEvent) => unknown> = [];
   const registeredTools: NativeToolInfo["name"][] = [];
   const tools = [...initialRoster];
+  const rosterReads = { count: 0 };
+  const state = { initialized: true };
   const api: NativeExtensionApi = {
     on: (event, handler) => {
       if (event === "tool_call") handlers.push(handler);
@@ -84,9 +111,17 @@ function createFakeApi(initialRoster: readonly NativeToolInfo[]): FakeApiHarness
     registerTool: (tool) => {
       registeredTools.push(tool.name);
     },
-    ctx: { getAllTools: () => tools },
+    getAllTools: () => {
+      if (!state.initialized) {
+        // The pinned runtime's action stub: callable at load, throws until the
+        // host initializes the action set.
+        throw new Error("Extension runtime not initialized.");
+      }
+      rosterReads.count += 1;
+      return tools;
+    },
   };
-  return { api, handlers, tools, registeredTools };
+  return { api, handlers, tools, rosterReads, state, registeredTools };
 }
 
 function harness(
@@ -154,6 +189,31 @@ Deno.test("Native registration: restricted factory registers via api.on + api.re
   assertEquals([...h.registeredTools].sort(), ["read", "web_search"]);
 });
 
+Deno.test("Native registration: the factory registers with a THROWING load-time roster stub and never reads the roster (task 1.1)", () => {
+  const h = createFakeApi([BUILTIN_BASH]);
+  // The pinned runtime's action methods throw until the host initializes
+  // them: the factory must register WITHOUT consulting the roster.
+  h.state.initialized = false;
+  const factory = createNativeExtensionFactory(() => ({
+    observedCwd: RESTRICTED_CWD,
+    resourceGeneration: () => "gen-0",
+    moduleUrl: OWN_BUNDLE_URL,
+    contractedRelative: OMP_TRUSTED_EXTENSION_PATH,
+    replacementTools: nativeReplacementTools(),
+    surfaceError: () => {},
+  }));
+  const result = factory(h.api);
+  assertEquals(result.registered, true);
+  assertEquals(h.handlers.length, 1);
+  assertEquals(h.rosterReads.count, 0, "registration must not read the live roster");
+  // Initialization completes: the LATER live call observes the real
+  // sourceInfo metadata and the authentic builtin reaches its authority.
+  h.state.initialized = true;
+  const outcome = h.handlers[0]!({ toolCallId: "d1", toolName: "bash", input: { command: "ls" } });
+  assertEquals(outcome, undefined, "authentic builtin proceeds toward native approval");
+  assert(h.rosterReads.count > 0, "the live observation read the initialized roster");
+});
+
 Deno.test("Native registration: native-YOLO and unidentified factories register NOTHING", () => {
   for (const observedCwd of ["/opt/air/omp-agent/native-yolo/cwd", "/somewhere/else"]) {
     const h = createFakeApi([{ name: "read", sourceInfo: OWN_SOURCE }]);
@@ -180,7 +240,7 @@ Deno.test("Native provenance: owned replacement retains its actual origin and pr
   const { run } = harness([
     { name: "read", sourceInfo: CONTRACTED_SOURCE },
     { name: "web_search", sourceInfo: CONTRACTED_SOURCE },
-    HOST_BASH,
+    BUILTIN_BASH,
   ], { sessionContext: trustedContext() });
   const outcome = run({ toolCallId: "call-1", toolName: "read", input: { path: "docs/x.md" } });
   // proceed === continue-toward-row4, NOT authorized: the callback hands
@@ -201,11 +261,96 @@ Deno.test("Native provenance: production shape (no trusted session context) deni
   assert(outcome.reason?.includes("origin=owned-extension"), outcome.reason ?? "");
 });
 
-Deno.test("Native provenance: host-owned builtin keeps its host origin and denies before dispatch", () => {
-  const { run } = harness([{ name: "read", sourceInfo: OWN_SOURCE }, HOST_BASH]);
-  const outcome = run({ toolCallId: "call-2", toolName: "bash", input: { command: "ls" } });
-  assertBoundedBlock(outcome, "rejected_tool_provenance");
-  assertEquals(outcome.dispatched, false);
+Deno.test("Native provenance: an authentic builtin admits as native-builtin; SDK injection and inconsistent tuples deny (task 1.2)", () => {
+  // Genuine builtin: the exact pinned runtime tuple, unique in the roster.
+  const genuine = harness([{ name: "read", sourceInfo: OWN_SOURCE }, BUILTIN_BASH]);
+  assertEquals(
+    genuine.run({ toolCallId: "call-2", toolName: "bash", input: { command: "ls" } }).dispatched,
+    true,
+  );
+  // SDK/RPC-host injection wearing a builtin name: host origin, denied.
+  const injected = harness([{ name: "read", sourceInfo: OWN_SOURCE }, HOST_SDK_BASH]);
+  assertBoundedBlock(
+    injected.run({ toolCallId: "call-3", toolName: "bash", input: { command: "ls" } }),
+    "rejected_tool_provenance",
+  );
+  assertEquals(
+    injected.run({ toolCallId: "call-4", toolName: "bash", input: { command: "ls" } }).dispatched,
+    false,
+  );
+  // A builtin-labelled entry that does not present the exact tuple for THIS
+  // name is not an authentic builtin: unowned, denied, never cached-name
+  // authority.
+  const forgedTuples: NativeToolInfo[] = [
+    {
+      name: "bash",
+      sourceInfo: {
+        path: "<builtin:read>",
+        source: "builtin",
+        scope: "temporary",
+        origin: "top-level",
+      },
+    },
+    {
+      name: "bash",
+      sourceInfo: {
+        path: "<builtin:bash>",
+        source: "builtin",
+        scope: "project",
+        origin: "top-level",
+      },
+    },
+    {
+      name: "bash",
+      sourceInfo: {
+        path: "<builtin:bash>",
+        source: "builtin",
+        scope: "temporary",
+        origin: "package",
+      },
+    },
+    {
+      name: "bash",
+      sourceInfo: { path: "/opt/air/lib/bun/oh-my-pi", source: "builtin" },
+    },
+  ];
+  for (const forged of forgedTuples) {
+    const outcome = harness([{ name: "read", sourceInfo: OWN_SOURCE }, forged]).run({
+      toolCallId: "call-5",
+      toolName: "bash",
+      input: { command: "ls" },
+    });
+    assertBoundedBlock(outcome, "rejected_tool_provenance");
+    assert(
+      outcome.reason?.includes("origin=unowned-discovery"),
+      `forged tuple must read unowned: ${outcome.reason ?? ""}`,
+    );
+  }
+});
+
+Deno.test("Native provenance: an unrelated roster movement keeps an unchanged builtin admitted; a same-name replacement denies (task 1.3)", () => {
+  const { h, run } = harness([BUILTIN_BASH]);
+  assertEquals(
+    run({ toolCallId: "b1", toolName: "bash", input: { command: "ls" } }).dispatched,
+    true,
+  );
+  // An unrelated tool appears mid-session: the roster (and its epoch) moved.
+  h.tools.push({ name: "mcp__operator_lookup", sourceInfo: { source: "mcp" } });
+  assertEquals(
+    run({ toolCallId: "b2", toolName: "bash", input: { command: "ls" } }).dispatched,
+    true,
+    "the fresh read still identifies the unchanged builtin tuple",
+  );
+  // A same-name foreign replacement takes the slot: the fresh read loses
+  // builtin membership entirely ⇒ owned-path/unowned, denied.
+  h.tools[0] = {
+    name: "bash",
+    sourceInfo: { path: "/home/attacker/tool.js", source: "extension" },
+  };
+  assertBoundedBlock(
+    run({ toolCallId: "b3", toolName: "bash", input: { command: "ls" } }),
+    "rejected_tool_provenance",
+  );
 });
 
 Deno.test("Native provenance: mid-session same-name foreign replacement denies; the stable roster never reads stale", () => {
@@ -281,9 +426,9 @@ Deno.test("Native provenance: missing, duplicate, and unreadable rosters deny ev
     );
     assertEquals(outcome.dispatched, false);
   }
-  // No getAllTools on ctx at all: an unavailable roster reads unowned.
+  // No getAllTools method at all: an unavailable roster reads unowned.
   const h = createFakeApi([]);
-  const noCtxApi: NativeExtensionApi = { on: h.api.on, registerTool: h.api.registerTool };
+  const methodlessApi: NativeExtensionApi = { on: h.api.on, registerTool: h.api.registerTool };
   const factory = createNativeExtensionFactory(() => ({
     observedCwd: RESTRICTED_CWD,
     resourceGeneration: () => "gen-0",
@@ -292,7 +437,7 @@ Deno.test("Native provenance: missing, duplicate, and unreadable rosters deny ev
     replacementTools: nativeReplacementTools(),
     surfaceError: () => {},
   }));
-  factory(noCtxApi);
+  factory(methodlessApi);
   const result = h.handlers[0]!({ toolCallId: "m3", toolName: "read", input: { path: "x" } }) as
     | { block?: boolean; reason?: string }
     | undefined;
@@ -311,6 +456,149 @@ Deno.test("Native provenance: post-start client-owned MCP tool admits on the sur
   assertEquals(
     run({ toolCallId: "c2", toolName: "mcp__operator_lookup", input: { query: "x" } }).dispatched,
     true,
+  );
+});
+
+// ---------------------------------------------------------------------------
+// Task 4.1/4.2: production-shaped native admission through the composed
+// callback — authentic local builtin search, ordinary local write/edit, the
+// complete multi-root screen, and the accepted native read posture. Synthetic
+// rosters throughout; nothing here demonstrates official-binary behavior.
+// ---------------------------------------------------------------------------
+
+Deno.test("Native search: authentic local builtin search proceeds; every mixed or remote root list denies as a WHOLE (task 4.1)", () => {
+  const { run } = harness([builtinTool("grep"), builtinTool("glob"), builtinTool("find")]);
+  // Authentic local search: local path/glob/default cwd reach the
+  // native-local read approval authority.
+  assertEquals(
+    run({ toolCallId: "s1", toolName: "grep", input: { pattern: "rm -rf", path: "src/a.ts" } })
+      .dispatched,
+    true,
+  );
+  assertEquals(
+    run({ toolCallId: "s2", toolName: "glob", input: { path: "src/**/*.ts" } }).dispatched,
+    true,
+  );
+  assertEquals(
+    run({
+      toolCallId: "s3",
+      toolName: "find",
+      input: { query: "where", grep_keywords: ["x"], path: "src" },
+    }).dispatched,
+    true,
+  );
+  // A literal PATTERN containing URI-like text is not a root: the search
+  // stays usable.
+  assertEquals(
+    run({
+      toolCallId: "s4",
+      toolName: "grep",
+      input: { pattern: "https://example.com/x", path: "src" },
+    }).dispatched,
+    true,
+  );
+  // Mixed local + HTTP(S): the WHOLE call denies before scanning.
+  const mixed = run({
+    toolCallId: "s5",
+    toolName: "grep",
+    input: { pattern: "x", path: "src/a.ts;https://example.com/x" },
+  });
+  assertBoundedBlock(mixed, "rejected_alternate_route");
+  assert(mixed.reason?.includes("capability=network-read"), mixed.reason ?? "");
+  assert(mixed.reason?.includes("route=remote-url"), mixed.reason ?? "");
+  // A lone HTTP(S) search root is materialization-bound native transport:
+  // never a local search route.
+  assertBoundedBlock(
+    run({
+      toolCallId: "s6",
+      toolName: "grep",
+      input: { pattern: "x", path: "https://example.com/x" },
+    }),
+    "rejected_alternate_route",
+  );
+  // SSH / internal-device / collapsed / glued roots deny with their route.
+  for (
+    const path of [
+      "ssh://host/src",
+      "ssh:/host/src",
+      "xd://device/notes",
+      "local://notes.md",
+      "/repo/local://notes.md",
+      "memory:12",
+      "src,a.ts;ssh://host/x",
+      // A scheme-SHAPED token denies for EVERY unknown scheme, not just the
+      // pinned ones: the pinned search router resolves unregistered custom
+      // schemes through its MCP resource fallback, so neither the known
+      // (local://, xd://) nor an unknown (file:/, weird:/) spelling can be
+      // proven local.
+      "file:/repo/a.txt",
+      "file:///repo/a.txt",
+      "weird:/repo/a.txt",
+    ]
+  ) {
+    const outcome = run({ toolCallId: "s7", toolName: "grep", input: { pattern: "x", path } });
+    assertBoundedBlock(outcome, "rejected_alternate_route");
+    assertEquals(outcome.dispatched, false, path);
+  }
+  // Colon-bearing local names stay usable exactly where they are NOT
+  // scheme-shaped with a slash and their opaque prefix is not a pinned
+  // internal scheme.
+  for (const path of ["archive.zip:member.md", "report.pdf", "notes:2-4", "C:/repo/src"]) {
+    assertEquals(
+      run({ toolCallId: "s8", toolName: "grep", input: { pattern: "x", path } }).dispatched,
+      true,
+      path,
+    );
+  }
+});
+
+Deno.test("Native read/write: accepted native-local reads and ordinary write/edit; unrepresentable destructive intents still deny (tasks 4.1/4.2)", () => {
+  const { run } = harness([
+    builtinTool("read"),
+    builtinTool("write"),
+    builtinTool("edit"),
+    builtinTool("apply_patch"),
+  ]);
+  // Direct native local read is ACCEPTED local behavior under the native
+  // read approval authority — not protected ACP callback evidence.
+  assertEquals(
+    run({ toolCallId: "r1", toolName: "read", input: { path: "src/a.md" } }).dispatched,
+    true,
+  );
+  // Ordinary local write/edit reach the pinned native approval path (no
+  // pre-dispatch sink-route evidence gate in this change).
+  assertEquals(
+    run({ toolCallId: "w1", toolName: "write", input: { path: "notes.md", content: "x" } })
+      .dispatched,
+    true,
+  );
+  assertEquals(
+    run({ toolCallId: "w2", toolName: "edit", input: { path: "notes.md" } }).dispatched,
+    true,
+  );
+  // A skill:// read is the owned skill-URI route, never a device route.
+  assertEquals(
+    run({ toolCallId: "r2", toolName: "read", input: { path: "skill://send-reply/SKILL.md" } })
+      .dispatched,
+    true,
+  );
+  // A remote/device read root denies before dispatch.
+  assertBoundedBlock(
+    run({ toolCallId: "r3", toolName: "read", input: { path: "xd://device/x" } }),
+    "rejected_alternate_route",
+  );
+  // Destructive / multi-file intents the pinned event+context cannot
+  // represent still fail closed (no trusted acquired-session context here).
+  const multiFile = run({
+    toolCallId: "d1",
+    toolName: "apply_patch",
+    input: { path: "a.md", operations: [{ kind: "delete", path: "/etc/passwd" }] },
+  });
+  assertEquals(multiFile.blocked, true);
+  assertEquals(multiFile.dispatched, false);
+  assert(
+    multiFile.reason?.startsWith("restricted tool call blocked: rejected_"),
+    multiFile.reason ?? "",
   );
 });
 

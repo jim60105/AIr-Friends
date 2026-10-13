@@ -219,7 +219,7 @@ Deno.test("Wiring: wrong-origin same-name fixture blocked while owning-origin pr
   const ownedRead = composeRestrictedToolCall(obs("read", "path-target", owned));
   assertEquals(ownedRead, {
     proceed: true,
-    completingAuthority: "row4-filesystem-read-boundary",
+    completingAuthority: "native-local-read-approval",
   });
 });
 
@@ -512,7 +512,7 @@ Deno.test("Wiring: decisions are consumed LIVE, never memoized across identical 
     recordEvaluation: NO_RECORDS,
   };
   const first = handler(input);
-  assertEquals(first, { proceed: true, completingAuthority: "row4-filesystem-read-boundary" });
+  assertEquals(first, { proceed: true, completingAuthority: "native-local-read-approval" });
   allowOwned = false;
   // BYTE-IDENTICAL second call: the live origin read flips the decision, so
   // any memoizing implementation fails this assertion.

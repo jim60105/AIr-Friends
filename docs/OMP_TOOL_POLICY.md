@@ -21,13 +21,14 @@ flows are byte-unchanged — this change has no runtime consumer yet.
 | Module                                | Role                                                                                                                                                     |
 | ------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `src/acp/omp/tool-inventory.ts`       | Entry decision over (tool name, recorded provenance, decoded input shape); machine-readable inventory table + alternate-route pair table + honesty gates |
-| `src/acp/omp/tool-provenance.ts`      | Live-provenance admission (owned-extension canonical ownership, operator-MCP ownership + epoch freshness) and the MCP mechanism-status table             |
+| `src/acp/omp/tool-provenance.ts`      | Live-provenance admission (authenticated `native-builtin` tuple, owned-extension canonical ownership, operator-MCP ownership + epoch freshness) and the MCP mechanism-status table |
 | `src/acp/omp/approval-records.ts`     | Exact-key native approval-record interpretation under the surviving-lower-record reality                                                                 |
 | `src/acp/omp/destructive-decision.ts` | Thin consumer of the shared row-5 destructive policy; replays its conformance table                                                                      |
 
 `allow` never means "authorized": every non-deny outcome names the completing
-authority (row 4 sink policy, the existing common command policy, the row 5
-all-target pass, or MCP client ownership). Deny reasons come from one bounded
+authority (the native-local read/write approval posture, the protected row-4
+read boundary, the existing common command policy, the row 5 all-target pass,
+the owned transport adapters, or MCP client ownership). Deny reasons come from one bounded
 vocabulary: `rejected_tool_inventory`, `rejected_tool_provenance`,
 `rejected_alternate_route`, `rejected_approval_record_survivor`,
 `rejected_destructive_incomplete`, `rejected_destructive_binding`.
@@ -42,9 +43,9 @@ outcome.
 
 | Entry                                                                         | Decision                                            | Completing authority                                                                                                                                                                                                                                     |
 | ----------------------------------------------------------------------------- | --------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `read`, `list`, `glob`, `grep`, `search`/`find`                               | allow gated                                         | Row 4 boundaries + authorized shared/read-only roots + trusted-skills read root. Pinned note: some native search implementations do not automatically invoke ACP callbacks — the decision binds at the handler (14b), never by assumed callback coverage |
+| `read`, `list`, `glob`, `grep`, `search`/`find`                               | allow gated                                         | `native-local-read-approval`: fresh authenticated native origin, the supported native activation/approval tier, then the process's own ambient OS permissions. Native scans/content IO are NOT daemon descriptor-bound and no row-4 filesystem confinement is claimed for them (accepted native posture). Pinned note: some native search implementations do not automatically invoke ACP callbacks — the decision binds at the handler (14b), never by assumed callback coverage. URL/device/remote roots are screened out before local dispatch (`remote-url`/`internal-uri-scheme`/`ssh-device` pairs) |
 | native `read` URL branch; `webfetch`, `websearch`, `web_search`               | `allow-gated-pending-adapter` (distinct from allow) | Rows 17–18 adapters landed; since C5 (`admit-completed-omp-network-adapters`) 14b consumes the route owner's typed completion — the registered owned replacement on a completed route (search: a supported backend's exact grounding route) proceeds to the NAMED controlled boundary; every other case (incl. `webfetch`, credential-absent) stays failed closed, never letting native unadapted transport run. Capability parity preserved, never deny-parity                                                                       |
-| `write` / `edit` (ordinary)                                                   | routed to sinks                                     | Row 4 `filesystem-policy.ts` via the row-8 sink contract                                                                                                                                                                                                 |
+| `write` / `edit` (ordinary)                                                   | allow gated                                         | `native-local-write-approval`: the pinned native approval path plus the process's ambient OS permissions. The restricted ACP sink is retained only as the route the pinned bridge applies WHERE IT ROUTES THE CALL (unchanged decision and denial propagation; no added bypass); an absolute native sandbox/plan target and an unavailable client bridge do not reach it and mutate directly — the user-authorized residual risk. No pre-dispatch route gate |
 | todo-shaped write (`todoread`/`todowrite` and a `todo`-shaped `write`/`edit`) | in-session state only                               | Session planning state; the outcome carries `filesystemMutationRoute: false` — a todo-shaped write never opens a filesystem mutation route                                                                                                               |
 | `bash`                                                                        | allow gated                                         | The EXISTING common command policy (lexical path gate unchanged; 14c owns canonical hardening); the extra native ACP bash permission path stays active                                                                                                   |
 | `delete`, `move`, `apply_patch`                                               | routed to row 5                                     | Shared destructive all-target policy (below)                                                                                                                                                                                                             |
@@ -70,9 +71,10 @@ startup suppression (decision-5 evidence limits; `docs/AGENT_PERMISSIONS.md`).
 ## Alternate-route pair blocking
 
 Even when capability C has an allowed ordinary tool, C reached through
-`internal-uri-scheme`, `config-device`, `debug-device`, `ast-device`,
-`ssh-device`, or `lsp-adjacent` denies as `rejected_alternate_route` naming the
-(capability, route) pair — `ALTERNATE_ROUTE_BLOCKING_TABLE`. Route detection
+`remote-url`, `internal-uri-scheme`, `config-device`, `debug-device`,
+`ast-device`, `ssh-device`, or `lsp-adjacent` denies as
+`rejected_alternate_route` naming the (capability, route) pair —
+`ALTERNATE_ROUTE_BLOCKING_TABLE`. Route detection
 derives from the decoded input shape only, so a renamed carrier of the same
 pair produces the identical pair-named denial, and the gate/sink status of the
 capability's ordinary tool never excuses the route. A `config-write` shape —
@@ -82,12 +84,23 @@ names the protected posture keys the DECIDED settings-discovery-path control
 guards. Any unenumerated non-ordinary pair still denies fail-closed naming the
 presented pair.
 
+The `remote-url` route is the DECODER-supplied screen for a native
+read/search call whose real path/root constituent names an HTTP(S) target: the
+native decoder decodes every `path`/`paths` constituent (delimited lists,
+selectors, archive members, collapsed/glued internal spellings) and denies the
+WHOLE call as `rejected_alternate_route` before any native scan or URL
+materialization when any constituent is HTTP(S), SSH or an internal/device
+scheme. A lone HTTP(S) `read` path stays on the ordinary `url` branch (the
+registered owned controlled-transport replacement), so the pair never labels
+that route; literal `pattern`/`query`/`grep_keywords` text is never screened.
+
 ## Provenance admission table
 
 `evaluateToolProvenance` (names are structurally insufficient):
 
 | Origin                                   | Admission                                                                                                                                                                                                                                                                                         |
 | ---------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `native-builtin`                         | Admits allow-table names only when the live runtime roster uniquely presents the pinned builtin tuple FOR THAT NAME (`path` `<builtin:name>`, `scope` `temporary`, `origin` `top-level`); `source: "sdk"` (RPC-host injection) stays host-denied, and a builtin-labelled entry outside the tuple records unowned-discovery. The recorded freshness halves come from the same live read as the identity, so the comparison denies a foreign-domain/hand-built stamp (naming the element); replacement invalidation rides the identity (a replaced name loses builtin membership) |
 | `owned-extension`                        | Admits allow-table names only with exact contracted module ownership (row 12 canonical evidence required; lexical path alone never carries the tier) and current resource-generation observation                                                                                                  |
 | `operator-mcp`                           | Admits iff the recorded origin is the ACP client's MCP ownership **and** the registry observation is current to `registryEpoch`. Post-start registration/refresh ADMITS on a fresh observation — no exclusion, no elicitation. Stale or incoherent observations deny with `pending: "re-observe"` |
 | `host`, `workspace`, `unowned-discovery` | Deny structurally **even on allow-table names** (the name-match insufficiency made executable)                                                                                                                                                                                                    |
@@ -121,6 +134,31 @@ record-authority verdict) without re-implementing the comparison:
 - Records are advisory inputs; the execution-time default-deny decision is the
   operative boundary. The module contains no assertion or code path depending
   on a working record reset.
+
+### Owned approval entries (row 29 `admit-trusted-omp-native-builtins`)
+
+The restricted owned overlay pins exact-name `allow` entries for the native
+read/search builtins it admits (`read`, `grep`, `glob`, `find`) plus their
+activation flags, validated by `assertOwnedSettingsDocument` against a CLOSED
+entry-name set and the pinned value vocabulary — so no unlisted tool key
+(`eval`, `task`, `lsp`, …) and no unknown value can enter an owned overlay
+through this branch. These entries are an APPROVAL POSTURE, not a boundary of
+their own: provenance still denies SDK/foreign same-name calls before native
+approval, and a record cannot NULLIFY a lower-layer survivor either (the reset
+merge it would need does not exist) — that residual is contained by the
+settings-discovery-path control (row 26) plus the execution-time default-deny
+decision.
+
+## Native-local versus protected-ACP boundary (row 29)
+
+| Surface                                                        | Route that decides it                                                                                                                                                                                       |
+| -------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| native `read`/`grep`/`glob`/`find` local IO                    | authenticated native origin + native activation/approval, then the process's ambient OS permissions (`native-local-read-approval`); no daemon root-confinement claim                                         |
+| native `write`/`edit` ordinary local IO                        | pinned native approval path + ambient OS permissions (`native-local-write-approval`); the restricted ACP mutation sink applies WHERE THE PINNED BRIDGE ROUTES THE CALL, with its denial propagation unchanged |
+| native `bash`                                                  | the existing common command policy plus the active native ACP permission path                                                                                                                               |
+| protected ACP filesystem callbacks the client serves           | unchanged row-4 boundaries (`row4-filesystem-read-boundary`, `filesystem-policy.ts` write sinks)                                                                                                            |
+| delete / move / multi-file mutation                            | the complete shared fail-closed destructive decision (`row5-destructive-all-target-policy`)                                                                                                                  |
+| owned URL read / web search                                    | the registered owned replacement's controlled per-hop transport (rows 17–19)                                                                                                                                |
 
 ## Destructive decision (consumption, not duplication)
 
@@ -169,6 +207,20 @@ tests clear neither verdict; unit/mock evidence validates decision logic only.
 
 ## Handoff
 
+- **Row 29 → the owned-module-evidence writer**
+  (`admit-trusted-omp-native-builtins` → `bind-omp-owned-module-evidence`): the
+  DIRECT-ROSTER/PROVENANCE CONTRACT this change settles is the surface the
+  successor binds physical module admission against — the pinned direct
+  `api.getAllTools()` provider, the exact runtime builtin tuple
+  (`<builtin:name>` / `temporary` / `top-level`) behind `native-builtin`, the
+  `NativeBuiltinProvenance` record (full source identity + one live
+  observation's epoch/generation), per-name roster uniqueness, the
+  current-observation stamping rule, and the decoder's root-constituent
+  vocabulary (`remote-url`/`internal-uri-scheme`/`ssh-device` screening before
+  local dispatch). Native builtin authentication does NOT consume module
+  evidence: the successor restores the owned `read`/`web_search` replacement's
+  production origin admission, and no daemon protected-read broker is invented
+  by either change.
 - **14b** (`wire-omp-restricted-tool-enforcement`): trusted-extension
   `tool_call` handler wiring — decodes native arguments into `InputShape`
   (including device/config surface detection and `decodedCapability`;

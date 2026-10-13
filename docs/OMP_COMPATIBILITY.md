@@ -95,6 +95,40 @@ replacements at all remains user-owned UNVERIFIED.
 
 ---
 
+## 1b. Investigated v18.10.3 and the Accepted Native Local Posture (2026-10-13)
+
+OpenSpec change `admit-trusted-omp-native-builtins` investigated the LATEST
+official release, `v18.10.3` (commit
+[`81e1d8927a3c16cfaff2e9456baa8c060e1e0e9b`](https://github.com/can1357/oh-my-pi/tree/81e1d8927a3c16cfaff2e9456baa8c060e1e0e9b)),
+for a confined read/search seam and found none that would change this
+deployment's boundary:
+
+| Inspected interface                                                                                                                                                                                                                                                                                                                                                             | Source-backed result                                                                                                                                                                                                                                                    |
+| :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | :----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `tools/read.ts` ([lines 1506–1529](https://github.com/can1357/oh-my-pi/blob/81e1d8927a3c16cfaff2e9456baa8c060e1e0e9b/packages/coding-agent/src/tools/read.ts#L1506-L1529), [2270–2292](https://github.com/can1357/oh-my-pi/blob/81e1d8927a3c16cfaff2e9456baa8c060e1e0e9b/packages/coding-agent/src/tools/read.ts#L2270-L2292)) | An ACP read failure logs and falls back to a direct disk read; buffering can read native bytes before later bridge handling, and directories are enumerated directly. No confined-IO seam.                                                                                 |
+| `docs/settings.md` + `tools/settings.ts`                                                                                                                                                                                                                                                                                                                                        | Exact-name tool approval and activation controls are supported; path-scoped model/provider selection arrays are NOT filesystem ACLs. `grep`/`glob` are booleans, `find` is an `auto`/`on`/`off` enum, `fetch.enabled` is a boolean (checked before native URL materialization). |
+| `docs/tools/grep.md`                                                                                                                                                                                                                                                                                                                                                            | Native Rust search, explicit paths and gitignore switches are search BEHAVIOR, not root confinement.                                                                                                                                                                     |
+
+**Disposition — no fix, no bump:** the deployment pin STAYS
+`v18.6.1` / `2a2c6dcbbb558c0f8145f67f28b3370984f2bf60`. No blanket upstream
+version bump, fork, custom IO broker, blanket host admission, or unsupported
+`allowedPaths`-style ACL is introduced, and the newer version clears no
+section-3 ledger row.
+
+**User-accepted posture:** the user explicitly accepted native local
+read/search IO and authorized accepting the ambient native mutation risk.
+Authenticated native builtins therefore execute their local IO under the
+supported native activation/approval tier plus the PROCESS's ambient OS
+permissions, and ordinary local native write/edit runs under the pinned native
+approval path with the restricted ACP mutation sink retained only for the
+calls that bridge actually routes. The residual risk — an ambient-readable
+path outside the daemon session roots, an absolute native session-sandbox/plan
+target, and an unavailable client bridge — is recorded and accepted rather
+than claimed as confined (`docs/OMP_ENFORCEMENT.md`, "Accepted native local
+posture").
+
+---
+
 ## 2. Fixed Upstream Pins and Reference Authority
 
 | Component          | Fixed Release / Distribution      | Resolved Source Revision / Commit / Tree                                                                                               | Specification / Architecture Scope     |

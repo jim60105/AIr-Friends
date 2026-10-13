@@ -22,11 +22,62 @@ import type { CanonicalTarget } from "../filesystem-roots.ts";
 
 /** Recorded origins; mirrors the inventory vocabulary (type-only consumer). */
 export type ToolOrigin =
+  | "native-builtin"
   | "owned-extension"
   | "operator-mcp"
   | "host"
   | "workspace"
   | "unowned-discovery";
+
+/**
+ * Pinned runtime-produced builtin source tuple (v18.6.1,
+ * `session/session-tools.ts#getAllToolInfos`): the session's OWN builtin
+ * membership produces `source: "builtin"` with the synthetic
+ * `<builtin:name>` path, `scope: "temporary"` and `origin: "top-level"`.
+ * These three helpers are the ONE definition of that tuple: the native
+ * registration adapter authenticates against them and this decision
+ * re-checks them, so neither side can drift into a second spelling.
+ * `source: "sdk"` (RPC-host injection) is NOT part of this tuple and stays
+ * host-denied.
+ */
+export const NATIVE_BUILTIN_SOURCE_SCOPE = "temporary";
+export const NATIVE_BUILTIN_SOURCE_ORIGIN = "top-level";
+
+/** The pinned synthetic path of an authentic builtin (`<builtin:read>`). */
+export function nativeBuiltinSourcePath(name: string): string {
+  return `<builtin:${name}>`;
+}
+
+/**
+ * Authenticated native-builtin provenance. The record carries the FULL
+ * runtime-produced source identity plus one live observation's epoch and
+ * resource generation.
+ *
+ * Boundary statement (honest, post-review): admission rests on the
+ * host-produced tuple being exact for THIS name (the runtime derives
+ * `builtin` from the session's own builtin name set, so the tuple is not
+ * model- or extension-authorable), on per-name roster uniqueness, and on the
+ * surface re-reading the live roster on every observation. The freshness
+ * halves below are stamped from the SAME live observation that produced the
+ * identity, so their comparison is a wiring-coherence assertion — it denies a
+ * record stamped by another domain (fixtures, a foreign observer, a
+ * hand-built record) rather than guarding a mid-call race. Do not read it as
+ * an additional attack surface.
+ */
+export interface NativeBuiltinProvenance {
+  readonly origin: "native-builtin";
+  /** Verbatim runtime-produced path the live roster presented. */
+  readonly sourcePath: string;
+  readonly sourceScope: string;
+  readonly sourceOrigin: string;
+  /** Registry epoch observed when the surface read this builtin identity. */
+  readonly registryEpochObserved: number;
+  /** Current live registry epoch (consumed; 14b owns its observation). */
+  readonly currentRegistryEpoch: number;
+  /** Row 12 resource generation observed with the same live read. */
+  readonly observedResourceGeneration: string;
+  readonly currentResourceGeneration: string;
+}
 
 /**
  * Owned trusted-extension provenance: exact contracted module ownership is only
@@ -72,9 +123,17 @@ export interface UntrustedProvenance {
 }
 
 export type ProvenanceRecord =
+  | NativeBuiltinProvenance
   | OwnedExtensionProvenance
   | OperatorMcpProvenance
   | UntrustedProvenance;
+
+/**
+ * Which freshness element a stale/no-current observation denial names, so the
+ * wiring's bounded error reports the element that actually mismatched instead
+ * of guessing from the origin class.
+ */
+export type ProvenanceStaleElement = "registry-epoch" | "resource-generation";
 
 export type ProvenanceDecision =
   | { readonly admit: true }
@@ -91,6 +150,8 @@ export type ProvenanceDecision =
       | "name_not_on_allow_table";
     /** Fresh observation demanded; 14b surfaces the fail-closed shape. */
     readonly pending?: "re-observe";
+    /** Freshness element that failed the current-observation comparison. */
+    readonly staleElement?: ProvenanceStaleElement;
   };
 
 export interface ProvenanceEvaluationOptions {
@@ -122,6 +183,43 @@ export function evaluateToolProvenance(
       // Same name from the wrong origin denies even though the name is allowed.
       return { admit: false, reason: "untrusted_origin" };
 
+    case "native-builtin": {
+      // Full source identity first: the record must carry the exact pinned
+      // tuple FOR THIS NAME. A record naming another tool's tuple, or one
+      // built outside the pinned runtime producer, is an unknown observation
+      // — never admitted on a cached or claimed name.
+      if (
+        provenance.sourcePath !== nativeBuiltinSourcePath(toolName) ||
+        provenance.sourceScope !== NATIVE_BUILTIN_SOURCE_SCOPE ||
+        provenance.sourceOrigin !== NATIVE_BUILTIN_SOURCE_ORIGIN
+      ) {
+        return { admit: false, reason: "unknown_observation" };
+      }
+      // Live-observation coherence (see NativeBuiltinProvenance: the surface
+      // stamps both halves from one live read, so this denies a foreign-domain
+      // or hand-built stamp, not a mid-call race).
+      if (provenance.registryEpochObserved !== provenance.currentRegistryEpoch) {
+        return {
+          admit: false,
+          reason: "stale_observation",
+          pending: "re-observe",
+          staleElement: "registry-epoch",
+        };
+      }
+      if (provenance.observedResourceGeneration !== provenance.currentResourceGeneration) {
+        return {
+          admit: false,
+          reason: "stale_observation",
+          pending: "re-observe",
+          staleElement: "resource-generation",
+        };
+      }
+      if (!options.nameOnAllowTable) {
+        return { admit: false, reason: "name_not_on_allow_table" };
+      }
+      return { admit: true };
+    }
+
     case "operator-mcp": {
       if (!provenance.clientMcpOwnership) {
         // MCP is never host-owned; a claim of MCP origin without client
@@ -133,13 +231,23 @@ export function evaluateToolProvenance(
       ) {
         // Post-start registration/refresh is admitted when the observation is
         // CURRENT; only observations predating the current epoch deny.
-        return { admit: false, reason: "stale_observation", pending: "re-observe" };
+        return {
+          admit: false,
+          reason: "stale_observation",
+          pending: "re-observe",
+          staleElement: "registry-epoch",
+        };
       }
       if (
         provenance.registryEpochObserved > provenance.currentRegistryEpoch
       ) {
         // A future epoch is incoherent freshness: re-observe, never admit.
-        return { admit: false, reason: "unknown_observation", pending: "re-observe" };
+        return {
+          admit: false,
+          reason: "unknown_observation",
+          pending: "re-observe",
+          staleElement: "registry-epoch",
+        };
       }
       return { admit: true };
     }
@@ -151,7 +259,12 @@ export function evaluateToolProvenance(
       const observed = provenance.observedResourceGeneration;
       const current = provenance.currentResourceGeneration;
       if ((observed === undefined) !== (current === undefined) || observed !== current) {
-        return { admit: false, reason: "stale_observation", pending: "re-observe" };
+        return {
+          admit: false,
+          reason: "stale_observation",
+          pending: "re-observe",
+          staleElement: "resource-generation",
+        };
       }
       if (!options.nameOnAllowTable) {
         // Allow-table membership is owned by the inventory decision; the entry
