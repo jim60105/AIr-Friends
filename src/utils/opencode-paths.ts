@@ -22,10 +22,10 @@ import { basename, dirname, isAbsolute, join, resolve } from "@std/path";
 import { ConfigError, ErrorCode } from "../types/errors.ts";
 import {
   jsonInsertMember,
-  jsonMember,
   jsonMemberIndent,
   jsonReplaceSpan,
   jsonScalarValue,
+  type JsonSourceMember,
   type JsonSourceNode,
   type JsonSourceObject,
   parseJsonSource,
@@ -243,9 +243,27 @@ function requireDocumentObject(source: string): JsonSourceObject {
   return document;
 }
 
+/**
+ * A named member of an object this module INTERPRETS, refusing an object that
+ * names the same key twice: two declarations of one key mean the effective
+ * value depends on which parser the reader uses, and the runtime's own parser
+ * would keep the later one while a first-match lookup here could judge a
+ * document correct on the strength of the earlier one.
+ */
+function interpretedMember(
+  object: JsonSourceObject,
+  key: string,
+): JsonSourceMember | undefined {
+  const matches = object.members.filter((member) => member.key === key);
+  if (matches.length > 1) {
+    throw new Error(`"${key}" is declared ${matches.length} times and cannot be interpreted`);
+  }
+  return matches[0];
+}
+
 /** A named member required to hold an object whenever the key is present. */
 function objectMember(object: JsonSourceObject, key: string): JsonSourceObject | undefined {
-  const member = jsonMember(object, key);
+  const member = interpretedMember(object, key);
   if (member === undefined) return undefined;
   if (member.value.kind !== "object") throw new Error(`"${key}" is not a JSON object`);
   return member.value;
@@ -262,10 +280,37 @@ function requireStringArray(node: JsonSourceNode, label: string): string[] {
   });
 }
 
-/** The canonical directory an allowance KEY covers (`{directory}/**`), if any. */
-function allowanceDirectory(key: string, home: string | undefined): string | undefined {
-  if (!key.endsWith("/**")) return undefined;
-  return declaredDirectory(key.slice(0, -3), home);
+/**
+ * The `/**` or `/*` directory a permission KEY names, if it ends in one. The
+ * pinned engine turns both forms into `…/.*`, which matches any characters
+ * INCLUDING `/` (`docs/AGENT_PERMISSIONS.md`), so the two are one form here.
+ */
+function keyedDirectory(key: string, home: string | undefined): string | undefined {
+  const suffix = key.endsWith("/**") ? "/**" : key.endsWith("/*") ? "/*" : undefined;
+  if (suffix === undefined) return undefined;
+  return declaredDirectory(key.slice(0, -suffix.length), home);
+}
+
+/**
+ * Whether a permission KEY covers reads under the resolved root, under the
+ * pinned engine's documented semantics: `*` and `**` are one global wildcard
+ * matching anything (separators included), and a `{directory}/**` key covers
+ * that directory subtree — so its directory must be the root itself or an
+ * ancestor of it.
+ */
+function coversRootSubtree(key: string, root: string, home: string | undefined): boolean {
+  if (key === "*" || key === "**" || key === "/**") return true;
+  const directory = keyedDirectory(key, home);
+  if (directory === undefined) return false;
+  return directory === "/" || directory === root || root.startsWith(`${directory}/`);
+}
+
+/**
+ * Whether a permission KEY is the declaration's OWN entry for the resolved
+ * root: a pattern covering exactly that root subtree and no parent of it.
+ */
+function isRootOwnEntry(key: string, root: string, home: string | undefined): boolean {
+  return keyedDirectory(key, home) === root;
 }
 
 /**
@@ -284,9 +329,13 @@ function externalDirectoryObject(document: JsonSourceObject): JsonSourceObject |
 }
 
 /**
- * Whether one `skills.paths` VALUE names exactly the resolved root. Both the
- * inspection and the update use this one predicate, so a list the inspection
- * accepts is never rewritten by the update.
+ * Whether one `skills.paths` VALUE names the resolved root and no OTHER root:
+ * every entry must name it, so repeated spellings of the same directory (the
+ * literal and the `~/…` form, say) are already correct and are left alone,
+ * while a second, distinct discovery root is not — the declaration introduces
+ * exactly one root, and a document naming another one is rewritten to it.
+ * Both the inspection and the update use this one predicate, so a list the
+ * inspection accepts is never rewritten by the update.
  */
 function isSkillDiscoveryPathList(
   node: JsonSourceNode,
@@ -295,7 +344,7 @@ function isSkillDiscoveryPathList(
 ): boolean {
   if (node.kind !== "array") return false;
   const entries = requireStringArray(node, '"skills.paths"');
-  return entries.length === 1 && declaredDirectory(entries[0]!, home) === root;
+  return entries.length > 0 && entries.every((entry) => declaredDirectory(entry, home) === root);
 }
 
 /** Whether the document's discovery path list names exactly the resolved root. */
@@ -306,11 +355,17 @@ function declaresSkillDiscoveryPath(
 ): boolean {
   const skills = objectMember(document, "skills");
   if (skills === undefined) return false;
-  const paths = jsonMember(skills, "paths");
+  const paths = interpretedMember(skills, "paths");
   return paths !== undefined && isSkillDiscoveryPathList(paths.value, root, home);
 }
 
-/** Whether the allowance for the resolved root is an `allow`. */
+/**
+ * Whether the document's external-directory rules EFFECTIVELY allow reads
+ * under the resolved root. The pinned engine is LAST-MATCH-WINS in source
+ * order (`docs/AGENT_PERMISSIONS.md`), so the verdict is the value of the last
+ * rule covering the root subtree — never merely the presence of an `allow`
+ * somewhere, which a later `"*": "deny"` contradicts.
+ */
 function declaresExternalDirectoryAllowance(
   document: JsonSourceObject,
   root: string,
@@ -318,10 +373,13 @@ function declaresExternalDirectoryAllowance(
 ): boolean {
   const externalDirectory = externalDirectoryObject(document);
   if (externalDirectory === undefined) return false;
-  return externalDirectory.members.some((member) => {
-    if (allowanceDirectory(member.key, home) !== root) return false;
-    return member.value.kind === "scalar" && jsonScalarValue(member.value) === "allow";
-  });
+  let verdict = "";
+  for (const member of externalDirectory.members) {
+    if (!coversRootSubtree(member.key, root, home)) continue;
+    const value = member.value.kind === "scalar" ? jsonScalarValue(member.value) : undefined;
+    verdict = typeof value === "string" ? value : "not-a-permission-value";
+  }
+  return verdict === "allow";
 }
 
 /** The verdict of one inspection of a deployed configuration document. */
@@ -433,7 +491,7 @@ function withSkillDiscoveryPath(
       `"skills": {\n${indent}  "paths": ${list}\n${indent}}`,
     );
   }
-  const paths = jsonMember(skills, "paths");
+  const paths = interpretedMember(skills, "paths");
   if (paths !== undefined && isSkillDiscoveryPathList(paths.value, root, home)) return source;
   if (paths !== undefined) {
     return jsonReplaceSpan(
@@ -447,11 +505,18 @@ function withSkillDiscoveryPath(
 }
 
 /**
- * Ensure the ONE `external_directory` allowance for the resolved root: an
- * existing entry covering that root whose value is not `allow` is set to
- * `allow`, an absent entry is inserted, and a missing chain above it is
- * created — each as one splice. Every other permission entry, including the
- * `deny` default and the unrelated allowances, keeps its bytes.
+ * Ensure the ONE `external_directory` allowance for the resolved root, in the
+ * position the pinned engine's LAST-MATCH-WINS order requires: an existing
+ * declaration for exactly this root subtree is set to `allow` in place (it
+ * already governs, being the last covering rule), an absent one is inserted as
+ * the LAST rule (so it governs the root subtree over any earlier `deny`), and a
+ * missing chain above it is created — each as one splice. Every other
+ * permission entry, including the `deny` default and the unrelated allowances,
+ * keeps its bytes.
+ *
+ * An operator rule that comes AFTER the root's own entry and also covers it
+ * cannot be repaired without deleting or rewriting that authored rule, so it
+ * refuses explicitly instead of emitting a second, contradictory declaration.
  */
 function withExternalDirectoryAllowance(
   source: string,
@@ -486,11 +551,17 @@ function withExternalDirectoryAllowance(
   if (externalDirectory === undefined) {
     return insertChain(source, permission, ["external_directory"], allowance);
   }
-  const covering = externalDirectory.members.find((member) =>
-    allowanceDirectory(member.key, home) === root
-  );
-  if (covering !== undefined) {
-    return jsonReplaceSpan(source, covering.value.start, covering.value.end, `"allow"`);
+  const members = externalDirectory.members;
+  const own = members.findLast((member) => isRootOwnEntry(member.key, root, home));
+  const lastCovering = members.findLast((member) => coversRootSubtree(member.key, root, home));
+  if (own === lastCovering && own !== undefined) {
+    return jsonReplaceSpan(source, own.value.start, own.value.end, `"allow"`);
+  }
+  if (lastCovering !== undefined && own !== undefined) {
+    throw new Error(
+      `the rule "${lastCovering.key}" comes after the declaration for "${root}" and also covers ` +
+        "it, so the root cannot be allowed without rewriting that authored rule",
+    );
   }
   return jsonInsertMember(source, externalDirectory, allowance);
 }
