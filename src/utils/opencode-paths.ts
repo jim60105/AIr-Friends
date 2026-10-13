@@ -18,7 +18,7 @@
 // resolved skill root to the agent, described in its own section at the end of
 // the file.
 
-import { basename, dirname, isAbsolute, join, resolve } from "@std/path";
+import { dirname, isAbsolute, join, resolve } from "@std/path";
 import { ConfigError, ErrorCode } from "../types/errors.ts";
 import {
   jsonInsertMember,
@@ -596,11 +596,21 @@ export interface OpencodeSkillDiscoveryResult {
 }
 
 /**
- * Replace the deployed document through a same-directory temporary file and a
- * rename, so a reader never observes a partial document. The deployed file's
- * own mode is preserved (the image ships it group-writable), the temporary
- * file is removed when the write or the rename fails, and a planted link or a
- * non-regular file at the target refuses outright rather than being followed.
+ * Write the deployed document in place, creating the parent directory (and the
+ * document) when it is absent.
+ *
+ * In place, not through a temporary file and a rename: the documented operator
+ * workflow bind-mounts a file over this path, and Linux refuses to rename over
+ * a mount point (`EBUSY`), so an atomic replacement would make the documented
+ * "mount it writable" migration impossible. Writing in place also honors the
+ * FILE's own writability rather than its directory's, which is what the delta's
+ * "the file or its directory is not writable" clause is about.
+ *
+ * The only reader is the agent process this daemon later spawns, so a partial
+ * document is never observed concurrently: a crash mid-write leaves a document
+ * the NEXT startup inspects (and repairs, or fails on explicitly when it is
+ * malformed). The deployed file's own mode survives an in-place write; a
+ * created document gets `0644`.
  */
 function writeOpencodeDocument(path: string, content: string): void {
   const directory = dirname(path);
@@ -616,21 +626,9 @@ function writeOpencodeDocument(path: string, content: string): void {
   } catch (error) {
     if (!(error instanceof Deno.errors.NotFound)) throw error;
   }
-  const temporary = join(directory, `.${basename(path)}.${crypto.randomUUID()}.tmp`);
-  try {
-    Deno.writeTextFileSync(temporary, content, { mode });
-    // `mode` is subject to the process umask at creation, so the observed mode
-    // is reasserted explicitly.
-    Deno.chmodSync(temporary, mode);
-    Deno.renameSync(temporary, path);
-  } catch (error) {
-    try {
-      Deno.removeSync(temporary);
-    } catch {
-      // The temporary file was never created or is already gone.
-    }
-    throw error;
-  }
+  // `mode` applies only when the document is created (and is subject to the
+  // process umask); an existing document keeps its own mode in place.
+  Deno.writeTextFileSync(path, content, { mode });
 }
 
 /**
