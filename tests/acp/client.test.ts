@@ -7071,6 +7071,94 @@ Deno.test("root-exact - entrypoint laundering and operator chains stay rejected 
   }
 });
 
+// ---------------------------------------------------------------------------
+// Inventory denial invariants (`align-omp-skill-trust-to-shared-root` 4.1):
+// the accepted ownership relaxation changes WHICH roots are admitted, never how
+// a script is approved — one inventory per client, and a decision-time identity
+// recheck. Both vectors use REAL filesystem fixtures around a constructed
+// inventory.
+// ---------------------------------------------------------------------------
+
+Deno.test("inventory invariants - a script planted after construction is not approved", async () => {
+  const tempDir = Deno.makeTempDirSync();
+  try {
+    const skill = skillFixture(["memory-save"], []);
+    const client = createRegisteredClient(createTestSkillRegistry(), createTestLogger(), {
+      workingDir: tempDir,
+      platform: "discord",
+      userId: "123",
+      channelId: "456",
+      isDM: false,
+    }, skill.list);
+    // Baseline: the enumerated script approves.
+    assertEquals(
+      await verdict(client, `deno run ${skill.root}/memory-save/scripts/memory-save.ts`),
+      "allow-1",
+    );
+    // Planted AFTER the inventory was constructed: a structurally identical
+    // skill inside the SAME root is never enumerated by that inventory, so the
+    // gate denies it — no per-decision re-scan of the root.
+    Deno.mkdirSync(`${skill.root}/late-skill/scripts`, { recursive: true });
+    Deno.writeTextFileSync(`${skill.root}/late-skill/SKILL.md`, "# late-skill");
+    Deno.writeTextFileSync(
+      `${skill.root}/late-skill/scripts/late-skill.ts`,
+      "#!/usr/bin/env deno\n",
+    );
+    assertEquals(
+      await verdict(client, `deno run ${skill.root}/late-skill/scripts/late-skill.ts`),
+      "reject-1",
+    );
+    // The root's own recorded `(dev, ino, ctime, size)` identity moved when the
+    // entry was added, so even the previously enumerated grant denies: the
+    // decision-time observation of the ROOT is re-taken, never silently
+    // re-anchored (`skill-inventory.ts` decision-time root check).
+    assertEquals(
+      await verdict(client, `deno run ${skill.root}/memory-save/scripts/memory-save.ts`),
+      "reject-1",
+    );
+    // The inventory the client was handed was never re-scanned or rebuilt:
+    // its grant set is still exactly the ONE construction from before the
+    // planted script existed.
+    assertEquals(skill.list.scripts.map((script) => script.canonicalPath), [
+      `${skill.root}/memory-save/scripts/memory-save.ts`,
+    ]);
+    assertEquals(
+      [...skill.list.scripts].some((script) => script.canonicalPath.includes("late-skill")),
+      false,
+    );
+  } finally {
+    Deno.removeSync(tempDir, { recursive: true });
+  }
+});
+
+Deno.test("inventory invariants - in-place modification of an enumerated script denies at decision time", async () => {
+  const tempDir = Deno.makeTempDirSync();
+  try {
+    const skill = skillFixture(["memory-save"], []);
+    const entrypoint = `${skill.root}/memory-save/scripts/memory-save.ts`;
+    const client = createRegisteredClient(createTestSkillRegistry(), createTestLogger(), {
+      workingDir: tempDir,
+      platform: "discord",
+      userId: "123",
+      channelId: "456",
+      isDM: false,
+    }, skill.list);
+    assertEquals(await verdict(client, `deno run ${entrypoint}`), "allow-1");
+    // In-place modification after the accepted identity (a DIFFERENT SIZE, so
+    // the check is deterministic without any clock dependence): the
+    // decision-time `(dev, ino, ctime, size)` re-observation denies, and the
+    // grant is never re-established from the changed metadata alone.
+    Deno.writeTextFileSync(entrypoint, "#!/usr/bin/env deno\n// modified in place\n");
+    assertEquals(await verdict(client, `deno run ${entrypoint}`), "reject-1");
+    // Same-path REPLACEMENT is denied too (a fresh inode at the same pathname).
+    Deno.removeSync(entrypoint);
+    Deno.writeTextFileSync(entrypoint, "#!/usr/bin/env deno\n");
+    assertEquals(await verdict(client, `deno run ${entrypoint}`), "reject-1");
+  } finally {
+    Deno.removeSync(tempDir, { recursive: true });
+  }
+});
+
 Deno.test("ChatbotClient - unknown-tool rejection preserved for non-edit kinds (kind other)", async () => {
   const tempDir = Deno.makeTempDirSync();
   try {

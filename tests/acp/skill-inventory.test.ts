@@ -623,3 +623,28 @@ Deno.test("inventory - unobservable scripts path never promotes a command prefix
   });
   assert(promoted.commandPrefixes.has("agent-browser"));
 });
+
+Deno.test("inventory - a WRITABLE installed root is enumerated and matched for BOTH agent types", () => {
+  // `align-omp-skill-trust-to-shared-root` 1.2/4.2: the deployment-resolved
+  // root is the packaged personal tree (non-root-owned, agent-writable,
+  // group/other-writable). The inventory judges names, structure and physical
+  // membership — never ownership or permission bits — so one runtime-installed
+  // external skill under that root is a grant for BOTH agent types.
+  const root = makeRoot(["external-skill"]);
+  for (const directory of [root, `${root}/external-skill`, `${root}/external-skill/scripts`]) {
+    Deno.chmodSync(directory, 0o775);
+  }
+  const entrypoint = `${root}/external-skill/scripts/external-skill.ts`;
+  for (const file of [`${root}/external-skill/SKILL.md`, entrypoint]) {
+    Deno.chmodSync(file, 0o664);
+  }
+  for (const agentType of AGENT_TYPES) {
+    const inv = list(agentType, root);
+    assertEquals(inv.scripts.map((s) => s.canonicalPath), [entrypoint], agentType);
+    assertEquals(
+      matchesScriptEntrypoint(`deno run ${entrypoint}`, inv, { sessionCwd: undefined }),
+      true,
+      agentType,
+    );
+  }
+});

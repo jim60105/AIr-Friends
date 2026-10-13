@@ -89,11 +89,11 @@
 
 import { PINNED_OMP_COMMIT, PINNED_OMP_VERSION } from "./omp/compatibility-contracts.ts";
 import {
-  OMP_IMAGE_SKILLS_ROOT,
   ompAgentDir,
   ompLaunchCwd,
   ompOwnedHome,
   ompProcessTmpDir,
+  ompSkillRootDeclarationPath,
   ompXdgDataHome,
 } from "../utils/omp-paths.ts";
 import { isAbsolute, resolve } from "@std/path";
@@ -337,7 +337,14 @@ export const RESTRICTED_ONLY_KEYS: readonly string[] = [
  * boolean false. This is a deployment pin, never a restricted YOLO tool policy.
  */
 export const SHARED_DEPLOYMENT_KEYS: readonly string[] = [
-  ...Object.keys(PINNED_REGISTERED_SETTINGS_KEYS).filter((key) => key.startsWith("skills.")),
+  // `skills.customDirectories` is NOT a shared authoring pin
+  // (`align-omp-skill-trust-to-shared-root` D2/D3): the authored mode documents
+  // carry enablement and the source toggles and declare NO skill directory,
+  // while the generated declaration carries the resolved root. Presence of the
+  // directory is validated per carrier, never as a required document key.
+  ...Object.keys(PINNED_REGISTERED_SETTINGS_KEYS).filter((key) =>
+    key.startsWith("skills.") && key !== "skills.customDirectories"
+  ),
   "lsp.enabled",
   "startup.checkUpdate",
   "marketplace.autoUpdate",
@@ -368,8 +375,20 @@ export interface EnvironmentPostureContracts {
   readonly launchCwdRequirement:
     "Deployment-owned working directory preventing hostile project .omp/ discovery";
   readonly forbiddenInheritance: readonly string[];
+  /**
+   * Authored overlays only: the ONE generated skill-root declaration is exempt
+   * (it must be writable at launch time), and it keeps every other overlay
+   * check — see {@link skillRootDeclarationContract}.
+   */
   readonly overlayPathPlacementRequirement:
     "Owned overlay paths must reside outside agent-writable roots";
+  /**
+   * The generated skill-root declaration contract
+   * (`align-omp-skill-trust-to-shared-root` D3): exactly one key, its own
+   * deployment-controlled path, first among the `--config` overlays, validated
+   * against the daemon's resolved root, and rewritten at every launch.
+   */
+  readonly skillRootDeclarationContract: string;
   /**
    * Row 26 (decision 3): the selectors whose inherited values are removed from
    * every OMP child MANDATORILY (regardless of filterEnv/allowedEnvVars); the
@@ -590,10 +609,26 @@ export const PINNED_FORBIDDEN_SETTINGS_SOURCES: readonly PinnedSettingsSource[] 
 );
 
 /**
+ * The deployment-owned launch-environment selector that conveys the RESOLVED
+ * skill root to the OMP child, and through it to the trusted extension loaded
+ * in that child (`align-omp-skill-trust-to-shared-root` D4).
+ *
+ * It is an INTERNAL plan value, never an operator configuration surface: the
+ * launch assembly's finalization assigns it from the plan and verifies it, so
+ * the extension reads its only witness of the declared root from a
+ * deployment-owned source the child cannot select. Like the other
+ * settings-discovery selectors it is stripped from any inherited environment
+ * before the trusted assignment, and an absent value denies with zero skill
+ * authority.
+ */
+export const OMP_DECLARED_SKILL_ROOT_ENV = "OMP_DECLARED_SKILL_ROOT";
+
+/**
  * The exact environment selectors the pinned inventory records as settings-source
  * selectors. Every one of them is removed from an OMP child unconditionally
  * (mandatory sanitization) and may only reappear with its exact deployment-owned
- * value assigned by the source plan (HOME, PI_CODING_AGENT_DIR, XDG_DATA_HOME).
+ * value assigned by the source plan (HOME, PI_CODING_AGENT_DIR, XDG_DATA_HOME,
+ * OMP_DECLARED_SKILL_ROOT).
  * The list is OMP-only: OpenCode's existing HOME/XDG_DATA_HOME semantics never
  * consult it.
  */
@@ -608,6 +643,7 @@ export const OMP_SETTINGS_DISCOVERY_ENV_SELECTORS: readonly string[] = Object.fr
     "PI_PROFILE",
     "PI_CONFIG_FILES",
     "PI_CODING_AGENT_DIR",
+    OMP_DECLARED_SKILL_ROOT_ENV,
   ] as const,
 );
 
@@ -635,6 +671,13 @@ export interface OmpSettingsSourcePlan {
   readonly mode: OmpPermissionMode;
   /** Mode-scoped process state namespace root (existing row-9/10 namespace). */
   readonly baseRoot: string;
+  /**
+   * The generated single-key skill-root declaration for this mode
+   * (`{baseRoot}/omp-overlays/{mode}-skill-root.yml`), always FIRST among
+   * {@link allowedOverlayPaths}. It is the one overlay path exempt from the
+   * authored-overlay placement rule; every other overlay check still applies.
+   */
+  readonly skillRootDeclarationPath: string;
   /** Deployment-owned HOME generated beneath the mode namespace. */
   readonly ownedHome: string;
   /** Exact PI_CODING_AGENT_DIR under the mode namespace. */
@@ -659,11 +702,20 @@ export interface OmpSettingsSourcePlan {
 }
 
 export interface OmpSourcePlanInput {
-  /** Validated actual overlay declaration; omitted pure callers use image assets. */
-  readonly ownedSkillRoots?: readonly string[];
+  /**
+   * The deployment-RESOLVED skill root(s) (`agent.skillsDir`, observed by the
+   * factory before subprocess creation). Exactly one root is required: the
+   * generated declaration carries it and the plan refuses any other value, so
+   * no constant, default or fallback root can enter the plan.
+   */
+  readonly ownedSkillRoots: readonly string[];
   /** Absolute, deployment-owned base root for the mode namespace. */
   readonly baseRoot: string;
-  /** Resolved owned `--config` overlay paths (mode document last). */
+  /**
+   * Resolved authored `--config` overlay paths (mode document last). The
+   * generated declaration is added FIRST by the plan builder; a caller may
+   * also pass it explicitly, but only in first position.
+   */
   readonly allowedOverlayPaths: readonly string[];
 }
 
@@ -672,7 +724,9 @@ export interface OmpSourcePlanInput {
  * mode-scoped state roots. Pure path composition (no filesystem I/O): owned
  * HOME/agent/cwd/xdg/tmp paths are derived with the canonical omp-paths
  * primitives and stay distinct from the `{workspace}/tmp/{sessionId}` payload
- * staging by construction (they live under `{baseRoot}/omp-agent/{mode}`).
+ * staging by construction (they live under `{baseRoot}/omp-agent/{mode}`). The
+ * generated skill-root declaration path is added FIRST to the ordered overlay
+ * list, so the authored mode document stays LAST.
  */
 export function ompSettingsSourcePlan(
   mode: OmpPermissionMode,
@@ -694,14 +748,34 @@ export function ompSettingsSourcePlan(
   const xdgDataHome = ompXdgDataHome(baseRoot, mode);
   const tmpDir = ompProcessTmpDir(baseRoot, mode);
   const overlays = [...input.allowedOverlayPaths];
-  // D1: the plan declares exactly the single contracted deployment-owned
-  // root — never a workspace, config, model, or CWD-relative selector.
-  const skillRoots = input.ownedSkillRoots ?? [OMP_IMAGE_SKILLS_ROOT];
-  if (skillRoots.length !== 1 || skillRoots[0] !== OMP_IMAGE_SKILLS_ROOT) {
-    throw new Error("Settings source plan requires exactly the deployment-owned skill root");
+  // D2: the plan declares exactly the caller-supplied RESOLVED root — never a
+  // constant, a workspace, a config, a model, or a CWD-relative selector.
+  const skillRoots = [...input.ownedSkillRoots];
+  if (skillRoots.length !== 1) {
+    throw new Error("Settings source plan requires exactly one resolved skill root");
   }
+  for (const root of skillRoots) {
+    if (
+      root.length === 0 || root.includes("\0") || !isAbsolute(root) ||
+      resolve(root) !== root
+    ) {
+      throw new Error(
+        `Settings source plan skill root "${root}" is not an absolute canonical path`,
+      );
+    }
+  }
+  const skillRootDeclarationPath = ompSkillRootDeclarationPath(baseRoot, mode);
   if (overlays.length === 0) {
     throw new Error("Settings source plan requires at least one owned overlay");
+  }
+  if (overlays.includes(skillRootDeclarationPath)) {
+    if (overlays[0] !== skillRootDeclarationPath) {
+      throw new Error(
+        "Settings source plan requires the generated skill-root declaration FIRST among overlays",
+      );
+    }
+  } else {
+    overlays.unshift(skillRootDeclarationPath);
   }
   for (const overlay of overlays) {
     if (overlay.length === 0 || overlay.includes("\0") || !isAbsolute(resolve(overlay))) {
@@ -716,6 +790,7 @@ export function ompSettingsSourcePlan(
     launchCwd,
     xdgDataHome,
     tmpDir,
+    skillRootDeclarationPath,
     ownedSkillRoots: Object.freeze([...skillRoots]),
     allowedOverlayPaths: Object.freeze(overlays),
     forbiddenSelectors: OMP_SETTINGS_DISCOVERY_ENV_SELECTORS,
@@ -766,8 +841,6 @@ lsp:
   enabled: false
 skills:
   enabled: true
-  customDirectories:
-    - /opt/air/skills
   enableCodexUser: false
   enableClaudeUser: false
   enableClaudeProject: false
@@ -882,8 +955,6 @@ lsp:
   enabled: false
 skills:
   enabled: true
-  customDirectories:
-    - /opt/air/skills
   enableCodexUser: false
   enableClaudeUser: false
   enableClaudeProject: false
@@ -988,11 +1059,19 @@ function assertOwnedToolApprovalRecord(value: unknown): void {
  * - Missing/disabled-off LSP posture: BOTH modes require the decision-5 shared
  *   deployment pin `lsp.enabled: false` (boolean only; a true value, a
  *   non-boolean value, an omission or an unregistered `lsp.*` key all reject)
+ * - Skill-directory carrier mismatch: the GENERATED skill-root declaration
+ *   (`expectedSkillRoots`) must declare exactly those roots, while an authored
+ *   mode document (`expectedSkillRoots === null`) must declare NO skill
+ *   directory at all — a drifted hard-coded directory rejects.
+ *
+ * `expectedSkillRoots` is a required caller input (no default exists, because
+ * no skill-root constant exists): pass the daemon's resolved root for the
+ * generated declaration, or `null` for an authored mode document.
  */
 export function assertOwnedSettingsDocument(
   doc: Record<string, unknown>,
   mode: OmpPermissionMode,
-  expectedSkillRoots: readonly string[] = [OMP_IMAGE_SKILLS_ROOT],
+  expectedSkillRoots: readonly string[] | null,
 ): void {
   if (!doc || typeof doc !== "object" || Array.isArray(doc)) {
     throw new Error("Settings document must be an object");
@@ -1099,6 +1178,35 @@ export function assertOwnedSettingsDocument(
   }
 
   // 3. Required mode-specific key assertions
+  // Carrier branch FIRST (`align-omp-skill-trust-to-shared-root` D2/D3): the
+  // GENERATED declaration is a single-key document — exactly
+  // `skills.customDirectories` holding the caller's by construction validated
+  // resolved root — so none of the authored-document pins below apply to it.
+  // The authored mode document (carrier `null`) must declare NO skill
+  // directory, because the generated declaration carries the resolved root.
+  if (expectedSkillRoots !== null) {
+    const skillRoots = allPaths["skills.customDirectories"];
+    if (
+      !Array.isArray(skillRoots) || expectedSkillRoots.length !== 1 ||
+      skillRoots.length !== expectedSkillRoots.length ||
+      skillRoots.some((root, index) =>
+        typeof root !== "string" || !isAbsolute(root) || root.includes("\0") ||
+        resolve(root) !== root || root !== expectedSkillRoots[index]
+      )
+    ) {
+      throw new Error(
+        "skills.customDirectories must exactly declare the resolved skill root",
+      );
+    }
+    return;
+  }
+  if ("skills.customDirectories" in allPaths) {
+    throw new Error(
+      "authored mode document must declare no skill directory (the generated " +
+        "skill-root declaration carries the resolved root)",
+    );
+  }
+
   if (mode === "restricted") {
     if (allPaths["tools.approvalMode"] !== "write") {
       throw new Error(
@@ -1180,18 +1288,8 @@ export function assertOwnedSettingsDocument(
     }
   }
 
-  // 4. Shared deployment key presence
-  const skillRoots = allPaths["skills.customDirectories"];
-  if (
-    !Array.isArray(skillRoots) || expectedSkillRoots.length !== 1 ||
-    skillRoots.length !== expectedSkillRoots.length ||
-    skillRoots.some((root, index) =>
-      typeof root !== "string" || !isAbsolute(root) || root.includes("\0") ||
-      root !== expectedSkillRoots[index]
-    )
-  ) {
-    throw new Error("skills.customDirectories must exactly declare the deployment-owned roots");
-  }
+  // 4. Shared deployment key presence (authored mode documents only: the
+  // generated single-key declaration returned above).
   for (const key of Object.keys(PINNED_REGISTERED_SETTINGS_KEYS)) {
     if (key === "skills.enabled" && allPaths[key] !== true) {
       throw new Error("skills.enabled must remain true");
@@ -1318,7 +1416,8 @@ export function ompSettingsForMode(
       !modeContent.includes("glob:\n  enabled: true") ||
       !modeContent.includes("find:\n  enabled: auto") ||
       !modeContent.includes("fetch:\n  enabled: false") ||
-      !modeContent.includes("lsp:\n  enabled: false")
+      !modeContent.includes("lsp:\n  enabled: false") ||
+      modeContent.includes("customDirectories")
     ) {
       throw new Error("Assembly validation failed for restricted settings overlay");
     }
@@ -1326,6 +1425,7 @@ export function ompSettingsForMode(
     if (
       !modeContent.includes("approvalMode: yolo") ||
       !modeContent.includes("lsp:\n  enabled: false") ||
+      modeContent.includes("customDirectories") ||
       modeContent.includes("disabledProviders:") ||
       modeContent.includes("approval:") ||
       modeContent.includes("fetch:")
@@ -1373,6 +1473,15 @@ export function ompSettingsForMode(
       "XDG_CONFIG_HOME",
     ],
     overlayPathPlacementRequirement: "Owned overlay paths must reside outside agent-writable roots",
+    skillRootDeclarationContract:
+      "Generated skill-root declaration ({baseRoot}/omp-overlays/{mode}-skill-root.yml): exactly " +
+      "one key (skills.customDirectories holding the daemon's resolved root), written at every " +
+      "launch with a symlink-refusing unconditional overwrite, passed FIRST among the --config " +
+      "overlays with the authored mode document LAST so a rewritten declaration cannot out-rank a " +
+      "pin; it is the one overlay path exempt from the agent-writable placement rule while keeping " +
+      "the unchanged link/regular-file/canonical-parent and accepted size/mtime identity checks; " +
+      "its parsed content is validated against that same resolved root before launch, and the " +
+      "pre-request preflight stays metadata-only",
     mandatoryDiscoverySanitization: OMP_SETTINGS_DISCOVERY_ENV_SELECTORS,
     foreignProviderSelectors: OMP_FOREIGN_PROVIDER_ENV_SELECTORS,
     homeAssignmentRequirement:

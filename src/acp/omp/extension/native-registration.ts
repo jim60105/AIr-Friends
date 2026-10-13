@@ -89,7 +89,6 @@ import {
   createOwnedSkillUriAuthorization,
   createReadReplacementToolDefinition,
 } from "./read-replacement.ts";
-import { OMP_IMAGE_SKILLS_ROOT } from "../../../utils/omp-paths.ts";
 import { createSearchReplacementToolDefinition } from "./search-replacement.ts";
 import {
   decodeNativeToolCallEvent,
@@ -760,19 +759,22 @@ export function registerNativeEnforcement(
 /**
  * The C2 controlled replacement definitions, built for native registration.
  * `resourceGeneration` (C6): the read replacement's owned skill-URI
- * authorization is wired against the single DECLARED owned source constant
- * (`OMP_IMAGE_SKILLS_ROOT` — never a workspace/HOME/CWD candidate) and the
- * live discovery generation, so a `skill://` read authorizes only against
- * the current declared identity and an off-image host (root absent) simply
- * denies with no fallback root. The search replacement is unchanged.
+ * authorization is wired against the DECLARED owned source the caller passes
+ * in — the root the load-time decision observed from the deployment-owned
+ * launch environment (`align-omp-skill-trust-to-shared-root` D4), never a
+ * constant, a workspace, HOME, CWD or model-named candidate — plus the live
+ * discovery generation, so a `skill://` read authorizes only against the
+ * current declared identity, and a launch without a declared root (empty
+ * value) denies with no fallback root. The search replacement is unchanged.
  */
 export function nativeReplacementTools(
+  ownedSkillRoot: string,
   resourceGeneration?: () => string,
 ): readonly NativeToolDefinitionLike[] {
   return [
     createReadReplacementToolDefinition({
       skillUriAuthorization: createOwnedSkillUriAuthorization({
-        ownedRoot: OMP_IMAGE_SKILLS_ROOT,
+        ownedRoot: ownedSkillRoot,
         resourceGeneration: resourceGeneration ?? (() => ""),
       }),
     }),

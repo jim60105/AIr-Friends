@@ -12,12 +12,12 @@
 //   `/home/deno/.agents/skills`, the repository default is `skills`) —
 //   relative roots resolved against the daemon/deployment process working
 //   directory, never the agent child's HOME.
-// - `OMP_IMAGE_SKILLS_ROOT` is NOT a selection input here. It survives as the
-//   OMP owned-settings declaration constant (and the image tree it names) until
-//   the co-released `align-omp-skill-trust-to-shared-root` parameterizes that
-//   declaration and `collapse-skill-packaging-to-one-tree` removes the tree.
-//   `agentType` never selects a root: it is accepted for supported-type
-//   validation and error context only.
+// - No skill-root constant exists anymore: `align-omp-skill-trust-to-shared-root`
+//   deleted the retired `/opt/air/skills` declaration constant, and the OMP
+//   owned-settings declaration now GENERATES its single `skills.customDirectories`
+//   key from this resolved root at launch (the `collapse-skill-packaging-to-one-tree`
+//   change removes the retired image tree). `agentType` never selects a root: it
+//   is accepted for supported-type validation and error context only.
 //
 // `skillsDir` is an internal render input: no new public configuration, no
 // new environment override, and no subprocess secret is introduced here.

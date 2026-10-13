@@ -57,20 +57,25 @@ export const OMP_TRUSTED_EXTENSION_BUNDLE_PATH =
 export const OMP_IMAGE_ROOT = "/opt/air/omp";
 
 /**
- * Row-28 owned skill root seam (design D1): the single deployment-owned,
- * root-owned, content-faithful skills tree, deliberately OUTSIDE the
- * `/opt/air/omp` manifest scope and every agent-writable root. Consumed
- * verbatim by the settings declaration, the launch-assembly validation, the
- * source plan, the connector lifecycle producer, and the trusted read. The
- * source-owned development equivalent is explicit in the Containerfile: the
- * image installs the repository `skills/` tree content-faithfully
- * (`COPY skills/ /opt/air/skills/`, root:root 0755). The declaration NEVER
- * resolves a workspace, config, model, or CWD-relative location; off-image
- * hosts deliberately keep the declared root absent, and the lifecycle
- * producer then observes nothing, mints no critical authority, and adds no
- * trusted-skills root (fail closed, zero workspace fallback).
+ * Generated skill-root declaration path for one mode
+ * (`align-omp-skill-trust-to-shared-root` D3): `{baseRoot}/omp-overlays/{mode}-skill-root.yml`,
+ * written at spawn time with exactly one key — the deployment-RESOLVED skill
+ * custom-directory array. There is no fixed skill-root constant anymore: the
+ * declaration carries whatever root the deployment resolved from
+ * `agent.skillsDir` (the ONE root both agent types share), and the declaration
+ * is passed FIRST among the `--config` overlays so the authored mode document
+ * stays last.
+ *
+ * The directory sits outside the mode-scoped process state area
+ * (`{baseRoot}/omp-agent/{mode}`), so the pre-native-request overlay observer
+ * accepts the path by placement; like every other overlay it is link-,
+ * regular-file-, canonical-parent- and accepted-identity-checked, and the
+ * daemon rewrites it (symlink-refusing, unconditional overwrite) at every
+ * spawn, so a post-spawn rewrite is revealed by the accepted identity.
  */
-export const OMP_IMAGE_SKILLS_ROOT = "/opt/air/skills";
+export function ompSkillRootDeclarationPath(baseRoot: string, mode: OmpPermissionMode): string {
+  return resolve(join(baseRoot, "omp-overlays", `${mode}-skill-root.yml`));
+}
 
 /** Image path of the trusted-extension tree root (D4's contracted constant). */
 export const OMP_IMAGE_EXTENSION_ROOT = `${OMP_IMAGE_ROOT}/extension`;

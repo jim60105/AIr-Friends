@@ -29,7 +29,7 @@ Arguments are deterministically assembled from the owned-settings composition pr
 
 - Subcommand: `acp`
 - Base flags: `--no-extensions --no-lsp` (LSP disabled in every mode, decision 5 / row 17)
-- Overlay configuration: `--config` flags for each path in `orderedOverlayPaths` (mode document `restricted.yml` last among overlays).
+- Overlay configuration: `--config` flags for the generated skill-root declaration FIRST (a single-key document holding the deployment-resolved root) followed by the authored mode document `restricted.yml` LAST (`align-omp-skill-trust-to-shared-root`: a rewritten declaration can then never out-rank the authored pins).
 - Trusted extension: `--trusted-extension <selected generated artifact>` — the launch assembly
   (`selectLaunchDeploymentModule()`, `src/acp/omp/deployment-module.ts`) consumes the resolver
   output VERBATIM: the image face `/opt/air/omp/extension/index.js` when that installed artifact
@@ -45,7 +45,7 @@ Arguments are deterministically assembled from the owned-settings composition pr
 
 - Subcommand: `acp`
 - Base flags: `--no-extensions --no-lsp` (LSP disabled in every mode, decision 5 / row 17)
-- Overlay configuration: `--config` flags for each path in `orderedOverlayPaths` (`native-yolo.yml` with `tools.approvalMode: yolo`).
+- Overlay configuration: `--config` flags for the generated skill-root declaration FIRST followed by `native-yolo.yml` LAST (`tools.approvalMode: yolo`).
 - Trusted extension: the SAME selected generated artifact as the restricted launch (the flag sits
   in the common argument assembly). The exemption is structural at the registration site — a
   native-YOLO process registers no restricted handler and no replacement tool.
@@ -63,10 +63,11 @@ To ensure complete isolation between permission modes:
 4. `XDG_DATA_HOME` is scoped under `{baseRoot}/omp-agent/{mode}/xdg-data`.
 5. Canonical payload staging remains `{workspace}/tmp/{sessionId}`, independent of OMP internal state partitioning.
 6. Row 26 (`isolate-omp-settings-discovery`): `HOME` is EXPLICITLY assigned to the deployment-owned `{baseRoot}/omp-agent/{mode}/home` (never inherited, never unset — the native homedir fallback must not reach the daemon home). Every settings-discovery selector (`HOME`, all XDG selectors, `OMP_PROFILE`, `PI_PROFILE`, `PI_CONFIG_FILES`, `PI_CODING_AGENT_DIR`) and every foreign provider config selector is mandatorily stripped from the OMP child regardless of `filterEnv`/`allowedEnvVars`; only the exact plan values are re-assigned afterwards (`sanitizeOmpDiscoveryEnv` then `finalizeOmpSpawnEnvironment` in `src/acp/agent-factory.ts`). The typed source plan rides `AgentConfig.settingsSourcePlan`.
+7. `align-omp-skill-trust-to-shared-root` (`OMP_DECLARED_SKILL_ROOT`): the plan's RESOLVED skill root (`agent.skillsDir`, the ONE root both agent types resolve) is stripped like every other selector and then assigned and verified by `finalizeOmpSpawnEnvironment` on BOTH spawn routes. The trusted extension loaded in this child reads that value as its only witness of the declared root and verifies it is one absolute, existing, non-link directory; an absent or unacceptable value denies with zero skill authority and no workspace/HOME/cwd fallback. The skill-root declaration file itself is generated at launch at `{baseRoot}/omp-overlays/{mode}-skill-root.yml` and passed as the FIRST `--config` overlay — `{baseRoot}` being the mode's own base root (the pooled `{dataRoot}/omp-pools/{key}`, or the per-spawn session `{workspace}/tmp`), so the declaration is the ONE overlay the daemon must write at launch time; it is rewritten on every launch and its accepted `(dev, ino, ctime, size, mtime)` identity is captured after that write, so a later rewrite is refused.
 
 ### Settings-source lifecycle order (row 26)
 
-The metadata-only settings-source preflight (`src/acp/omp/settings-sources.ts`) runs strictly BEFORE every native protected request, on both modes and both deployment routes: (1) before the subprocess spawn in `connect()`; (2) before native `session/new` in `createSession()`, against the ACTUAL session cwd; (3) before teardown/respawn/`session/load` in `reconnectAndResumeSession()`, against the recovery cwd, so a rejection has zero side effects. The first check is never after a native `newSession`. A rejection (`SettingsSourceRejectionError`) performs no spawn, no session request, and no mutation of user files; the pool/connector surfaces it fail-closed. See `docs/OMP_SETTINGS.md` section 6.
+The metadata-only settings-source preflight (`src/acp/omp/settings-sources.ts`) runs strictly BEFORE every native protected request, on both modes and both deployment routes: (1) before the subprocess spawn in `connect()`; (2) before native `session/new` in `createSession()`, against the ACTUAL session cwd; (3) before teardown/respawn/`session/load` in `reconnectAndResumeSession()`, against the recovery cwd, so a rejection has zero side effects. The first check is never after a native `newSession`. It stays metadata-only for the generated skill-root declaration too: that path is exempt from the agent-writable placement rule (the daemon must be writable to it at launch time) and is otherwise checked exactly like any other overlay (link, regular file, canonical parent, accepted `(dev, ino, ctime, size, mtime)` identity), so a post-launch rewrite is revealed by the accepted identity — restoring the modification time does not reproduce it; the declaration's CONTENT is validated by the launch assembly against the resolved root instead. A rejection (`SettingsSourceRejectionError`) performs no spawn, no session request, and no mutation of user files; the pool/connector surfaces it fail-closed. See `docs/OMP_SETTINGS.md` section 6.
 
 ### Executable-source lifecycle order (row 27)
 

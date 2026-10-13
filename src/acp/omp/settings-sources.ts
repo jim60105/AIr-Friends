@@ -63,6 +63,16 @@ export interface AcceptedOverlayIdentity {
   readonly path: string;
   readonly size: number;
   readonly mtimeMs: number;
+  /**
+   * Inode identity plus change time, on top of size/mtime: `mtime` alone is
+   * restorable by whoever can write the overlay, so a same-length rewrite that
+   * restores the accepted modification time is still revealed here. Metadata
+   * only — the preflight never reads overlay content. An UNAVAILABLE identity
+   * (`dev`/`ino`/`ctime` null) proves nothing and is refused, never trusted.
+   */
+  readonly dev: number;
+  readonly ino: number;
+  readonly ctimeMs: number;
 }
 
 export type SettingsSourceCheckResult =
@@ -287,10 +297,20 @@ export async function checkOmpSettingsSources(
       // caught by re-canonicalizing the parent.
       const canonicalParent = await reader.realPath(dirname(overlayPath));
       const expectedCanonical = resolve(canonicalParent, basename(overlayPath));
+      // The generated skill-root declaration is the ONE overlay path exempt
+      // from the agent-writable placement rule: the daemon must be able to
+      // write it at spawn time (`align-omp-skill-trust-to-shared-root` D3), and
+      // it lives under `{baseRoot}/omp-overlays/` — outside the mode-scoped
+      // process state area by construction. Every other overlay check still
+      // applies to it identically (link, regular file, canonical parent and
+      // the accepted `(dev, ino, ctime, size, mtime)` identity below, which
+      // reveals a post-spawn rewrite — a restored mtime does not reproduce the
+      // accepted inode identity); this preflight keeps reading no content.
+      const isGeneratedDeclaration = overlayPath === plan.skillRootDeclarationPath;
       if (
         canonical !== expectedCanonical ||
-        isWithinRoot(canonical, plan.agentDir) ||
-        isWithinRoot(canonical, plan.ownedHome)
+        (!isGeneratedDeclaration &&
+          (isWithinRoot(canonical, plan.agentDir) || isWithinRoot(canonical, plan.ownedHome)))
       ) {
         failures.push({
           kind: "overlay_identity_mismatch",
@@ -309,7 +329,22 @@ export async function checkOmpSettingsSources(
     }
     const prior = expected.get(overlayPath);
     const observedMtimeMs = info.mtime?.getTime() ?? 0;
-    if (prior && (prior.size !== info.size || prior.mtimeMs !== observedMtimeMs)) {
+    const dev = info.dev;
+    const ino = info.ino;
+    const ctime = info.ctime;
+    if (dev === null || ino === null || ctime === null) {
+      failures.push({
+        kind: "overlay_identity_mismatch",
+        label: `owned overlay ${overlayPath}`,
+        detail: "owned overlay identity unavailable",
+      });
+      continue;
+    }
+    const observedCtimeMs = ctime.getTime();
+    if (
+      prior && (prior.size !== info.size || prior.mtimeMs !== observedMtimeMs ||
+        prior.dev !== dev || prior.ino !== ino || prior.ctimeMs !== observedCtimeMs)
+    ) {
       failures.push({
         kind: "overlay_identity_mismatch",
         label: `owned overlay ${overlayPath}`,
@@ -317,7 +352,14 @@ export async function checkOmpSettingsSources(
       });
       continue;
     }
-    overlays.push({ path: overlayPath, size: info.size, mtimeMs: observedMtimeMs });
+    overlays.push({
+      path: overlayPath,
+      size: info.size,
+      mtimeMs: observedMtimeMs,
+      dev,
+      ino,
+      ctimeMs: observedCtimeMs,
+    });
   }
 
   if (failures.length > 0) {

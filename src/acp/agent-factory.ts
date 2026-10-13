@@ -6,11 +6,11 @@ import { SandboxManager } from "./sandbox-manager.ts";
 import { getRunningEgressProxyUrl } from "@utils/egress-proxy.ts";
 import { sessionXdgDataHome } from "@utils/opencode-paths.ts";
 import {
-  OMP_IMAGE_SKILLS_ROOT,
   ompAgentDir,
   ompLaunchCwd,
   ompOwnedHome,
   ompProcessTmpDir,
+  ompSkillRootDeclarationPath,
   ompXdgDataHome,
   resolveOmpConfigPath,
   resolveOmpSystemPromptPath,
@@ -18,6 +18,7 @@ import {
 import { selectLaunchDeploymentModule } from "./omp/deployment-module.ts";
 import {
   assertOwnedSettingsDocument,
+  OMP_DECLARED_SKILL_ROOT_ENV,
   OMP_FOREIGN_PROVIDER_ENV_SELECTORS,
   type OmpPermissionMode,
   ompSettingsForMode,
@@ -25,6 +26,7 @@ import {
   ompSettingsSourcePlan,
 } from "./omp-settings.ts";
 import { sanitizeOmpDiscoveryEnv } from "./sandbox-manager.ts";
+import { writeOmpSkillRootDeclaration } from "./omp/skill-root-declaration.ts";
 import { createLogger } from "@utils/logger.ts";
 import { resolveSkillJwtDir } from "@utils/skill-jwt.ts";
 import {
@@ -66,6 +68,7 @@ export function createAgentConfig(
     workingDir,
     appConfig,
     yolo,
+    skillsRoot.root,
     agentWorkspacePath,
     sessionId,
     poolKey,
@@ -128,6 +131,10 @@ export function createAgentConfig(
  * - `PI_CODING_AGENT_DIR` = plan.agentDir
  * - `XDG_DATA_HOME` = plan.xdgDataHome
  * - `TMPDIR` = plan.tmpDir
+ * - `OMP_DECLARED_SKILL_ROOT` = the plan's RESOLVED skill root: the trusted
+ *   extension's only witness of the declared root (`align-omp-skill-trust-to-
+ *   shared-root` D4). It is fixed at spawn and verified here, so an absent or
+ *   unacceptable value denies with zero skill authority in the child.
  *
  * Every other forbidden selector must be ABSENT (e.g. an assembly that forgot
  * the sanitization step). Throws with a bounded, content-free reason.
@@ -141,6 +148,7 @@ export function finalizeOmpSpawnEnvironment(
   env["PI_CODING_AGENT_DIR"] = plan.agentDir;
   env["XDG_DATA_HOME"] = plan.xdgDataHome;
   env["TMPDIR"] = plan.tmpDir;
+  env[OMP_DECLARED_SKILL_ROOT_ENV] = plan.ownedSkillRoots[0];
 
   // Observation: the final spawn environment must match the plan.
   const expected: Readonly<Record<string, string>> = {
@@ -148,6 +156,7 @@ export function finalizeOmpSpawnEnvironment(
     "PI_CODING_AGENT_DIR": plan.agentDir,
     "XDG_DATA_HOME": plan.xdgDataHome,
     "TMPDIR": plan.tmpDir,
+    [OMP_DECLARED_SKILL_ROOT_ENV]: plan.ownedSkillRoots[0],
   };
   for (const [selector, planValue] of Object.entries(expected)) {
     if (env[selector] !== planValue) {
@@ -183,6 +192,13 @@ function buildBaseAgentConfig(
   workingDir: string,
   appConfig: Config,
   yolo: boolean,
+  /**
+   * The deployment's ONE resolved skill-script root, observed ONCE by
+   * {@link createAgentConfig} before subprocess creation. The OMP branch
+   * renders it into the generated settings declaration and the plan, so the
+   * declared root, the mounted root and the inventory root cannot diverge.
+   */
+  resolvedSkillRoot: string,
   agentWorkspacePath?: string,
   sessionId?: string,
   poolKey?: string,
@@ -368,25 +384,50 @@ function buildBaseAgentConfig(
             `deno task bundle:omp-extension`,
         );
       }
-      const resolvedOverlayPaths = settings.orderedOverlayPaths.map((overlayPath) =>
+      // Authored mode overlays ONLY (`settings.orderedOverlayPaths`, dev→image
+      // seam): the daemon passes the resolved root to the child through the
+      // generated declaration, never through a hard-coded skill directory, so
+      // each authored document must validate its registered pins and declare no
+      // skill directory of its own.
+      const authoredOverlayPaths = settings.orderedOverlayPaths.map((overlayPath) =>
         resolveOmpConfigPath(overlayPath)
       );
-      for (const overlayPath of resolvedOverlayPaths) {
+      for (const overlayPath of authoredOverlayPaths) {
         try {
           Deno.statSync(overlayPath);
         } catch {
           throw new Error(`Missing owned overlay configuration file at "${overlayPath}"`);
         }
-        // D1 (decision 7, DECIDED): every actual final `--config` document
-        // must declare EXACTLY the contracted deployment-owned skill root.
-        // The image installs that root content-faithfully (Containerfile COPY
-        // of the repository `skills/` tree, root:root 0755); off-image hosts
-        // keep the same declaration with the tree deliberately absent, so the
-        // lifecycle producer observes nothing and mints no authority (fail
-        // closed — no dev fallback, ever).
         const document = parseYaml(Deno.readTextFileSync(overlayPath)) as Record<string, unknown>;
-        assertOwnedSettingsDocument(document, mode, [OMP_IMAGE_SKILLS_ROOT]);
+        assertOwnedSettingsDocument(document, mode, null);
       }
+
+      // Generated single-key declaration (D3): exactly
+      // `skills.customDirectories: [<resolved root>]`, written at every spawn
+      // with a symlink-refusing unconditional overwrite, so a pooled base root
+      // never keeps a stale or rewritten document. Its parsed content is
+      // validated against the SAME resolved root the daemon mounted and the
+      // inventory enumerates; a failed write or a drifted value fails the
+      // launch before any subprocess exists.
+      const skillRootDeclarationPath = ompSkillRootDeclarationPath(baseRoot, mode);
+      writeOmpSkillRootDeclaration(skillRootDeclarationPath, resolvedSkillRoot);
+      const declarationDocument = parseYaml(
+        Deno.readTextFileSync(skillRootDeclarationPath),
+      ) as Record<string, unknown>;
+      assertOwnedSettingsDocument(declarationDocument, mode, [resolvedSkillRoot]);
+
+      // Ordered `--config` overlays: the declaration FIRST, the authored mode
+      // document LAST, so a rewritten declaration can never out-rank a pin.
+      const resolvedOverlayPaths = [skillRootDeclarationPath, ...authoredOverlayPaths];
+
+      // Row 26: the FINAL settings-source plan carries the RESOLVED owned
+      // overlay paths (dev→image seam) plus the generated declaration first,
+      // and the RESOLVED skill root (never a constant).
+      const sourcePlan = ompSettingsSourcePlan(mode, {
+        baseRoot,
+        ownedSkillRoots: [resolvedSkillRoot],
+        allowedOverlayPaths: resolvedOverlayPaths.map((overlayPath) => resolve(overlayPath)),
+      });
 
       // Argument assembly: acp, --no-extensions, --no-lsp, ordered overlays, --trusted-extension, --system-prompt
       // Decision 5 (docs/OMP_COMPATIBILITY.md §1a): `--no-lsp` is carried unconditionally in BOTH
@@ -400,14 +441,6 @@ function buildBaseAgentConfig(
       }
       args.push("--trusted-extension", trustedExtensionPath);
       args.push("--system-prompt", resolveOmpSystemPromptPath());
-
-      // Row 26: the FINAL settings-source plan carries the RESOLVED owned
-      // overlay paths (dev→image seam), mode document last.
-      const sourcePlan = ompSettingsSourcePlan(mode, {
-        baseRoot,
-        allowedOverlayPaths: resolvedOverlayPaths.map((overlayPath) => resolve(overlayPath)),
-        ownedSkillRoots: [OMP_IMAGE_SKILLS_ROOT],
-      });
 
       // Base root resolution and mode-distinct state roots
       // (baseRoot composed above, ahead of the settings-plan construction.)

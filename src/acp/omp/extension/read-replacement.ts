@@ -218,23 +218,25 @@ function skillUriDefaultReader(): SkillUriSourceReader {
 
 /**
  * The production resolver: authorize a `skill://` URI against the DECLARED
- * canonical deployment-owned skill source only — the constant
- * `OMP_IMAGE_SKILLS_ROOT` the settings contract freezes as the single owned
- * root (never a model-named root, workspace, HOME, or CWD candidate). Every
- * check is re-observed per call (the freshness posture shared with the
- * enforcement observer — a stale generation is a MOVED identity, and a moved
- * identity fails the identity/containment checks at this instant):
+ * canonical deployment-resolved skill source only — the root the settings
+ * contract and the factory carry into the child (never a model-named root,
+ * workspace, HOME, or CWD candidate, and never a constant). Every check is
+ * re-observed per call (the freshness posture shared with the enforcement
+ * observer — a stale generation is a MOVED identity, and a moved identity
+ * fails the identity/containment checks at this instant):
  * - shape: `skill://<relative-instruction-path>`; the authority carries no
  *   host component, and `..`/`.`/absolute segments never resolve;
  * - source: the declared root exists as a real, link-free directory whose
- *   realpath IS the constant (a replaced/symlinked identity is denied —
- *   off-image hosts have NO declared source and deny with no fallback root),
- *   and it is neither agent-writable nor group/other-writable;
+ *   realpath IS the declared value (a replaced/symlinked identity is denied —
+ *   a host without a declared source denies with no fallback root). Its
+ *   ownership and permission bits are NOT admission inputs
+ *   (`align-omp-skill-trust-to-shared-root` D1: the shared root is
+ *   agent-writable and is admitted on identity alone);
  * - target: canonicalizes INSIDE the owned source (no traversal out), is an
  *   existing regular file, link-free through every component, and carries no
- *   agent-writable or aliased (hard-linked) identity, while every directory
- *   component between the root and the target is likewise link-free and
- *   non-writable — the same ladder `owned-skills.ts` observes at
+ *   aliased (hard-linked) identity, while every directory component between
+ *   the root and the target is likewise link-free and a real directory — the
+ *   same ladder `owned-skills.ts` observes at
  *   registration, re-taken at read time;
  * - generation: the caller's live resource-generation observation must be
  *   present (the extension's load-time discovery generation) — an extension
@@ -297,12 +299,6 @@ export function createOwnedSkillUriAuthorization(deps: {
         if (rootInfo.isSymlink || !rootInfo.isDirectory) {
           return { ok: false, reason: "declared skill source is not a plain directory" };
         }
-        if (rootInfo.uid !== 0 && ((rootInfo.mode ?? 0o777) & 0o222) !== 0) {
-          return { ok: false, reason: "declared skill source is agent-writable" };
-        }
-        if (((rootInfo.mode ?? 0o777) & 0o022) !== 0) {
-          return { ok: false, reason: "declared skill source is group/other-writable" };
-        }
         rootReal = reader.realPath(deps.ownedRoot);
       } catch {
         return { ok: false, reason: "declared skill source is not observable (no fallback root)" };
@@ -318,12 +314,6 @@ export function createOwnedSkillUriAuthorization(deps: {
         if (info.isSymlink || !info.isFile) {
           return { ok: false, reason: "target is not a regular owned file" };
         }
-        if (info.uid !== 0 && ((info.mode ?? 0o777) & 0o222) !== 0) {
-          return { ok: false, reason: "target is agent-writable" };
-        }
-        if (((info.mode ?? 0o777) & 0o022) !== 0) {
-          return { ok: false, reason: "target is group/other-writable" };
-        }
         if (info.nlink !== 1) {
           return { ok: false, reason: "target is aliased (hard-linked)" };
         }
@@ -338,9 +328,9 @@ export function createOwnedSkillUriAuthorization(deps: {
         return { ok: false, reason: "target escapes or aliases the declared owned source" };
       }
       // Ladder: every DIRECTORY component between the target and the declared
-      // root (root inclusive) is link-free, a real directory, and carries no
-      // group/other- or agent-writability — a planted instruction file needs
-      // a writable ancestor, and one is refused here, not just at the leaf.
+      // root (root inclusive) is link-free and a real directory. Writability is
+      // deliberately not an admission input (D1), so the ladder still refuses
+      // a linked component or a non-directory component at every level.
       let component = pathModule.dirname(candidate);
       for (;;) {
         try {
@@ -350,12 +340,6 @@ export function createOwnedSkillUriAuthorization(deps: {
           }
           if (!info.isDirectory) {
             return { ok: false, reason: "path component is not a directory" };
-          }
-          if (info.uid !== 0 && ((info.mode ?? 0o777) & 0o222) !== 0) {
-            return { ok: false, reason: "path component is agent-writable" };
-          }
-          if (((info.mode ?? 0o777) & 0o022) !== 0) {
-            return { ok: false, reason: "path component is group/other-writable" };
           }
         } catch {
           return { ok: false, reason: "path component not observable" };

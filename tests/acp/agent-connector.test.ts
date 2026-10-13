@@ -4,7 +4,8 @@ import { assertEquals, assertRejects } from "@std/assert";
 import * as acp from "@agentclientprotocol/sdk";
 import { AgentConnector } from "@acp/agent-connector.ts";
 import { ChatbotClient } from "@acp/client.ts";
-import { type OmpSettingsSourcePlan, ompSettingsSourcePlan } from "@acp/omp-settings.ts";
+import type { OmpSettingsSourcePlan } from "@acp/omp-settings.ts";
+import { stageOmpSettingsSourcePlan } from "../mocks/omp-plan-fixture.ts";
 import type {
   AgentCapabilities,
   HTTPMCPServerConfig,
@@ -1183,9 +1184,10 @@ function ompRecoveryPlan(): OmpSettingsSourcePlan {
     const baseRoot = Deno.makeTempDirSync({ prefix: "omp-recovery-plan-" });
     const overlayPath = `${baseRoot}/native-yolo.yml`;
     Deno.writeTextFileSync(overlayPath, "# deployment-owned recovery fixture overlay\n");
-    const plan = ompSettingsSourcePlan("native-yolo", {
+    const plan = stageOmpSettingsSourcePlan({
       baseRoot,
-      allowedOverlayPaths: [overlayPath],
+      mode: "native-yolo",
+      authoredOverlayPaths: [overlayPath],
     });
     Deno.mkdirSync(plan.ownedHome, { recursive: true });
     Deno.mkdirSync(plan.agentDir, { recursive: true });

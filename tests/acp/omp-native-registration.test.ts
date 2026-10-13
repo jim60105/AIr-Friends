@@ -165,7 +165,7 @@ function harness(
     resourceGeneration: () => "gen-0",
     moduleUrl: IMAGE_ARTIFACT_URL,
     moduleEvidence: imageEvidenceSource(),
-    replacementTools: nativeReplacementTools(),
+    replacementTools: nativeReplacementTools(""),
     surfaceError: (message: string) => surfaced.push(message),
     ...depsOver,
   }));
@@ -205,7 +205,7 @@ Deno.test("Native registration: restricted factory registers via api.on + api.re
     resourceGeneration: () => "gen-0",
     moduleUrl: IMAGE_ARTIFACT_URL,
     moduleEvidence: imageEvidenceSource(),
-    replacementTools: nativeReplacementTools(),
+    replacementTools: nativeReplacementTools(""),
     surfaceError: () => {},
   }));
   const result = factory(h.api);
@@ -226,7 +226,7 @@ Deno.test("Native registration: the factory registers with a THROWING load-time 
     resourceGeneration: () => "gen-0",
     moduleUrl: IMAGE_ARTIFACT_URL,
     moduleEvidence: imageEvidenceSource(),
-    replacementTools: nativeReplacementTools(),
+    replacementTools: nativeReplacementTools(""),
     surfaceError: () => {},
   }));
   const result = factory(h.api);
@@ -249,7 +249,7 @@ Deno.test("Native registration: native-YOLO and unidentified factories register 
       resourceGeneration: () => "gen-0",
       moduleUrl: IMAGE_ARTIFACT_URL,
       moduleEvidence: imageEvidenceSource(),
-      replacementTools: nativeReplacementTools(),
+      replacementTools: nativeReplacementTools(""),
       surfaceError: () => {},
     }));
     const result = factory(h.api);
@@ -566,7 +566,7 @@ Deno.test("Native provenance: missing, duplicate, and unreadable rosters deny ev
     resourceGeneration: () => "gen-0",
     moduleUrl: IMAGE_ARTIFACT_URL,
     moduleEvidence: imageEvidenceSource(),
-    replacementTools: nativeReplacementTools(),
+    replacementTools: nativeReplacementTools(""),
     surfaceError: () => {},
   }));
   factory(methodlessApi);
@@ -899,25 +899,24 @@ Deno.test("Native C6: skill:// decodes as path-target, never url/device", () => 
 });
 
 Deno.test("Native C6: the registered read declares readsSkillUris and denies skill URIs off-image", async () => {
-  const tools = nativeReplacementTools(() => "gen-7");
+  const tools = nativeReplacementTools("", () => "gen-7");
   const read = tools.find((tool) => tool.name === "read");
   assert(read !== undefined);
   // The pinned capability the native host keys skill admission on.
   assertEquals(read.readsSkillUris, true);
   // The search replacement makes no skill claim.
   assertEquals(tools.find((tool) => tool.name === "search")?.readsSkillUris, undefined);
-  // Off-image host (this test machine has no /opt/air/skills): the declared
-  // root is not observable, so a skill URI DENIES before any delegation and
-  // no fallback root is consulted — and an absent generation changes nothing
-  // about that story.
+  // A launch without a declared root (empty value): the declared root is not
+  // observable, so a skill URI DENIES before any delegation and no fallback
+  // root is consulted — and an absent generation changes nothing about it.
   const deny = async (generation: string) => {
-    const seam = nativeReplacementTools(() => generation).find((tool) => tool.name === "read");
+    const seam = nativeReplacementTools("", () => generation).find((tool) => tool.name === "read");
     assert(seam?.execute !== undefined);
     try {
       await seam.execute("t1", { path: "skill://send-reply/SKILL.md" }, undefined, undefined, {
         invokeTool: () => Promise.reject(new Error("must never delegate")),
       });
-      throw new Error("skill:// off-image must deny");
+      throw new Error("skill:// without a declared root must deny");
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       assert(message.includes("skill_uri_denied"), message);
@@ -925,4 +924,59 @@ Deno.test("Native C6: the registered read declares readsSkillUris and denies ski
   };
   await deny("gen-7");
   await deny("");
+
+  // The DECLARED root is the resolution admission input: a runtime-resolved
+  // root the runtime agent user can write (`0775` directories, `0664` file —
+  // the packaged personal tree's own modes) is ADMITTED on identity,
+  // containment and the link-free ladder alone
+  // (`align-omp-skill-trust-to-shared-root` D1), and the ORIGINAL URI is
+  // delegated once.
+  const declaredRoot = await Deno.makeTempDir({ prefix: "omp-declared-root-" });
+  try {
+    const instruction = `${declaredRoot}/send-reply/SKILL.md`;
+    await Deno.mkdir(`${declaredRoot}/send-reply`, { recursive: true });
+    await Deno.writeTextFile(instruction, "owned instruction");
+    await Deno.chmod(`${declaredRoot}/send-reply`, 0o775);
+    await Deno.chmod(declaredRoot, 0o775);
+    await Deno.chmod(instruction, 0o664);
+    const seam = nativeReplacementTools(declaredRoot, () => "gen-7").find((tool) =>
+      tool.name === "read"
+    );
+    assert(seam?.execute !== undefined);
+    const delegated: Array<Record<string, unknown>> = [];
+    const result = await seam.execute(
+      "t2",
+      { path: "skill://send-reply/SKILL.md" },
+      undefined,
+      undefined,
+      {
+        invokeTool: (params) => {
+          delegated.push(params);
+          return Promise.resolve({ content: "native instruction result" });
+        },
+      },
+    );
+    assertEquals(delegated.length, 1, "the writable declared root delegates exactly once");
+    assertEquals(delegated[0]!["path"], "skill://send-reply/SKILL.md");
+    assertEquals(result, { content: "native instruction result" });
+
+    // A linked component inside the SAME writable tree still denies: the
+    // relaxation never converts an identity/containment denial into admission.
+    await Deno.symlink(instruction, `${declaredRoot}/send-reply/LINKED.md`);
+    const linked = nativeReplacementTools(declaredRoot, () => "gen-7").find((tool) =>
+      tool.name === "read"
+    );
+    assert(linked?.execute !== undefined);
+    let joined = "";
+    try {
+      await linked.execute("t3", { path: "skill://send-reply/LINKED.md" }, undefined, undefined, {
+        invokeTool: () => Promise.reject(new Error("must never delegate")),
+      });
+    } catch (error) {
+      joined = error instanceof Error ? error.message : String(error);
+    }
+    assert(joined.includes("skill_uri_denied"), joined);
+  } finally {
+    await Deno.remove(declaredRoot, { recursive: true });
+  }
 });

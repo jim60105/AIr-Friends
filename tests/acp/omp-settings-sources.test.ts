@@ -13,14 +13,15 @@ import { assert, assertEquals, assertExists, assertRejects, assertThrows } from 
 import { createAgentConfig, finalizeOmpSpawnEnvironment } from "@acp/agent-factory.ts";
 import { AgentConnector } from "@acp/agent-connector.ts";
 import {
+  OMP_DECLARED_SKILL_ROOT_ENV,
   OMP_FOREIGN_PROVIDER_ENV_SELECTORS,
   OMP_SETTINGS_DISCOVERY_ENV_SELECTORS,
   type OmpPermissionMode,
   ompSettingsForMode,
   type OmpSettingsSourcePlan,
-  ompSettingsSourcePlan,
 } from "@acp/omp-settings.ts";
 import {
+  type AcceptedOverlayIdentity,
   assertOmpSettingsSourcesVisible,
   checkOmpSettingsSources,
   formatSettingsSourceError,
@@ -32,6 +33,7 @@ import { SandboxManager, sanitizeOmpDiscoveryEnv } from "@acp/sandbox-manager.ts
 import type { AgentConfig } from "@acp/types.ts";
 import type { Config, SandboxConfig } from "../../src/types/config.ts";
 import { dirname } from "@std/path";
+import { stageOmpSettingsSourcePlan } from "../mocks/omp-plan-fixture.ts";
 
 // Discriminated-union readers (no inline cast access on the check result).
 function expectRejection(result: SettingsSourceCheckResult): readonly SourceCheckFailure[] {
@@ -66,7 +68,7 @@ async function makeLivePlan(
   const overlayPath = `${baseRoot}/config/${mode}.yml`;
   await Deno.mkdir(dirname(overlayPath), { recursive: true });
   await Deno.writeTextFile(overlayPath, overlayContent);
-  const plan = ompSettingsSourcePlan(mode, { baseRoot, allowedOverlayPaths: [overlayPath] });
+  const plan = stageOmpSettingsSourcePlan({ baseRoot, mode, authoredOverlayPaths: [overlayPath] });
   await Deno.mkdir(plan.ownedHome, { recursive: true });
   await Deno.mkdir(plan.agentDir, { recursive: true });
   await Deno.mkdir(plan.launchCwd, { recursive: true });
@@ -166,9 +168,18 @@ Deno.test("finalizeOmpSpawnEnvironment - assigns plan values post-filter and lea
     assertEquals(env["PI_CODING_AGENT_DIR"], plan.agentDir);
     assertEquals(env["XDG_DATA_HOME"], plan.xdgDataHome);
     assertEquals(env["TMPDIR"], plan.tmpDir);
+    // `align-omp-skill-trust-to-shared-root` D4: the RESOLVED skill root rides
+    // the launch environment as a plan-owned value.
+    assertEquals(env[OMP_DECLARED_SKILL_ROOT_ENV], plan.ownedSkillRoots[0]);
     for (
       const selector of ALL_FORBIDDEN_SELECTORS.filter((s) =>
-        !["HOME", "PI_CODING_AGENT_DIR", "XDG_DATA_HOME", "TMPDIR"].includes(s)
+        ![
+          "HOME",
+          "PI_CODING_AGENT_DIR",
+          "XDG_DATA_HOME",
+          "TMPDIR",
+          OMP_DECLARED_SKILL_ROOT_ENV,
+        ].includes(s)
       )
     ) {
       assertEquals(env[selector], undefined);
@@ -239,6 +250,9 @@ for (const withSandbox of [true, false]) {
         assertEquals(cfg.env?.["PI_CODING_AGENT_DIR"], plan.agentDir);
         assertEquals(cfg.env?.["XDG_DATA_HOME"], plan.xdgDataHome);
         assertEquals(cfg.env?.["TMPDIR"], plan.tmpDir);
+        // The declared skill root is the plan's resolved root on BOTH routes
+        // (`align-omp-skill-trust-to-shared-root` D4).
+        assertEquals(cfg.env?.[OMP_DECLARED_SKILL_ROOT_ENV], plan.ownedSkillRoots[0]);
         assertEquals(cfg.env?.["XDG_CONFIG_HOME"], undefined);
         assertEquals(cfg.env?.["PI_CONFIG_FILES"], undefined);
         assertEquals(cfg.env?.["CLAUDE_CONFIG_DIR"], undefined);
@@ -267,7 +281,11 @@ Deno.test("observer - clean plan accepted in both modes; unrelated user files un
       const unrelated = `${sessionCwd}/notes.md`;
       await Deno.writeTextFile(unrelated, "user content\n");
       const overlays = expectAcceptance(await checkOmpSettingsSources(plan, sessionCwd));
-      assertEquals(overlays.length, 1, `${mode}: clean plan must be accepted`);
+      // TWO accepted overlays: the generated skill-root declaration FIRST and
+      // the authored mode document LAST (`align-omp-skill-trust-to-shared-root`).
+      assertEquals(overlays.length, 2, `${mode}: clean plan must be accepted`);
+      assertEquals(overlays[0]!.path, plan.skillRootDeclarationPath, mode);
+      assertEquals(overlays[1]!.path, plan.allowedOverlayPaths[1], mode);
       assertEquals(await Deno.readTextFile(unrelated), "user content\n");
     } finally {
       await cleanup();
@@ -401,21 +419,44 @@ Deno.test("observer - unreadable metadata cannot prove absence (observation_erro
 });
 
 Deno.test("observer - owned overlays must exist, be plain files outside agent-writable roots, and keep identity across rechecks", async () => {
+  // (a) The generated declaration is FIRST and is checked exactly like every
+  // other overlay: no content read, and its accepted identity reveals a
+  // post-spawn rewrite (`align-omp-skill-trust-to-shared-root` D3).
   const { plan, sessionCwd, cleanup } = await makeLivePlan("restricted", "v1\n");
-  const overlayPath = plan.allowedOverlayPaths[0]!;
   try {
-    // Accepted once (identity captured).
+    assertEquals(plan.allowedOverlayPaths[0], plan.skillRootDeclarationPath);
     const identities = await assertOmpSettingsSourcesVisible(plan, sessionCwd);
-    assertEquals(identities.length, 1);
-
-    // Replacement between checks fails closed on the changed identity (the
-    // replaced content is a DIFFERENT SIZE, so the identity check is
-    // deterministic without any clock dependence).
-    await Deno.writeTextFile(overlayPath, "v2 REPLACED longer content\n");
-    const failures = expectRejection(
+    assertEquals(
+      identities.map((identity) => identity.path),
+      [plan.skillRootDeclarationPath, plan.allowedOverlayPaths[1]!],
+    );
+    await Deno.writeTextFile(
+      plan.skillRootDeclarationPath,
+      "skills:\n  customDirectories:\n    - /hijacked\n",
+    );
+    const rewritten = expectRejection(
       await checkOmpSettingsSources(plan, sessionCwd, {
         expectedOverlayIdentities: identities,
       }),
+    );
+    assert(
+      rewritten.some((f) => f.kind === "overlay_identity_mismatch"),
+      "a rewritten generated declaration fails closed",
+    );
+  } finally {
+    await cleanup();
+  }
+
+  // (b) Authored overlay replacement between checks fails closed on the
+  // changed identity (a DIFFERENT SIZE, so the check is deterministic without
+  // any clock dependence).
+  const { plan: p1, sessionCwd: c1, cleanup: cl1 } = await makeLivePlan("restricted", "v1\n");
+  try {
+    const authoredOverlayPath = p1.allowedOverlayPaths[1]!;
+    const identities = await assertOmpSettingsSourcesVisible(p1, c1);
+    await Deno.writeTextFile(authoredOverlayPath, "v2 REPLACED longer content\n");
+    const failures = expectRejection(
+      await checkOmpSettingsSources(p1, c1, { expectedOverlayIdentities: identities }),
     );
     assert(
       failures.some((f) =>
@@ -424,25 +465,42 @@ Deno.test("observer - owned overlays must exist, be plain files outside agent-wr
       "a same-path overlay replacement fails closed",
     );
   } finally {
-    await cleanup();
+    await cl1();
   }
 
-  // Missing overlay and overlay placed INSIDE the agent dir are rejections.
+  // (c) A missing generated declaration is a rejection.
   const { plan: p2, sessionCwd: c2, cleanup: cl2 } = await makeLivePlan();
   try {
-    await Deno.remove(p2.allowedOverlayPaths[0]!);
+    await Deno.remove(p2.skillRootDeclarationPath);
     const failures = expectRejection(await checkOmpSettingsSources(p2, c2));
+    assert(
+      failures.some((f) =>
+        f.kind === "overlay_identity_mismatch" && f.label.includes("skill-root.yml")
+      ),
+      "a missing generated declaration is a rejection",
+    );
+  } finally {
+    await cl2();
+  }
+
+  // (d) A missing authored overlay and (e) an overlay placed INSIDE the agent
+  // dir are rejections.
+  const { plan: p3, sessionCwd: c3, cleanup: cl3 } = await makeLivePlan();
+  try {
+    await Deno.remove(p3.allowedOverlayPaths[1]!);
+    const failures = expectRejection(await checkOmpSettingsSources(p3, c3));
     assert(
       failures.some((f) => f.kind === "overlay_identity_mismatch"),
       "a missing owned overlay is a rejection",
     );
-    const inside = `${p2.agentDir}/planted.yml`;
+    const inside = `${p3.agentDir}/planted.yml`;
     await Deno.writeTextFile(inside, "agent-writable placement");
-    const plantedPlan = ompSettingsSourcePlan("restricted", {
-      baseRoot: p2.baseRoot,
-      allowedOverlayPaths: [inside],
+    const plantedPlan = stageOmpSettingsSourcePlan({
+      baseRoot: p3.baseRoot,
+      mode: "restricted",
+      authoredOverlayPaths: [inside],
     });
-    const plantedFailures = expectRejection(await checkOmpSettingsSources(plantedPlan, c2));
+    const plantedFailures = expectRejection(await checkOmpSettingsSources(plantedPlan, c3));
     assert(
       plantedFailures.some((f) =>
         f.kind === "overlay_identity_mismatch" && f.detail.includes("placement")
@@ -450,7 +508,67 @@ Deno.test("observer - owned overlays must exist, be plain files outside agent-wr
       "an overlay inside the agent-writable root escapes its deployment placement",
     );
   } finally {
-    await cl2();
+    await cl3();
+  }
+});
+
+Deno.test("observer - a same-length rewrite with a restored mtime is still rejected", async () => {
+  const { plan, sessionCwd, cleanup } = await makeLivePlan("restricted", "v1\n");
+  try {
+    const identities = await assertOmpSettingsSourcesVisible(plan, sessionCwd);
+    const accepted = identities.find((identity) => identity.path === plan.skillRootDeclarationPath);
+    assertExists(accepted, "the declaration is one of the accepted overlays");
+    const declarationPath = plan.skillRootDeclarationPath;
+    const original = Deno.readTextFileSync(declarationPath);
+    // Same LENGTH: every lower-case alphanumeric character is swapped, so the
+    // accepted size is reproduced exactly, and the accepted modification time is
+    // restored below. Only the inode identity (`dev`/`ino`/`ctime`) reveals the
+    // rewrite — `mtime` alone is restorable by whoever can write the overlay.
+    const replacement = original.replace(/[a-z0-9]/g, (character) => character === "z" ? "y" : "z");
+    assertEquals(replacement.length, original.length);
+    assertEquals(replacement === original, false);
+    const restored = new Date(accepted.mtimeMs);
+    const rejectedAfter = async (prior: readonly AcceptedOverlayIdentity[], detail: string) => {
+      const failures = expectRejection(
+        await checkOmpSettingsSources(plan, sessionCwd, { expectedOverlayIdentities: prior }),
+      );
+      assert(
+        failures.some((f) =>
+          f.kind === "overlay_identity_mismatch" &&
+          f.label.includes("skill-root.yml") &&
+          f.detail.includes("content identity changed")
+        ),
+        `${detail}: ${JSON.stringify(failures)}`,
+      );
+    };
+    const tampered = (patch: Partial<AcceptedOverlayIdentity>): AcceptedOverlayIdentity[] =>
+      identities.map((identity) =>
+        identity.path === plan.skillRootDeclarationPath ? { ...identity, ...patch } : identity
+      );
+
+    // Control: the untouched observation is still accepted.
+    await assertOmpSettingsSourcesVisible(plan, sessionCwd, {
+      expectedOverlayIdentities: identities,
+    });
+    // A changed change time and a replaced inode each reject on their own with
+    // size and mtime identical — `mtime` alone is restorable by whoever can
+    // write the overlay, so the inode identity is what detects the rewrite.
+    await rejectedAfter(tampered({ ctimeMs: accepted.ctimeMs + 1 }), "a changed change time");
+    await rejectedAfter(tampered({ ino: accepted.ino + 1 }), "a replaced inode");
+
+    // End to end: an equal-length document installed at the same pathname with
+    // the accepted size and a restored mtime is rejected (the rename installs a
+    // new inode).
+    const staged = `${declarationPath}.staged`;
+    Deno.writeTextFileSync(staged, replacement);
+    Deno.renameSync(staged, declarationPath);
+    Deno.utimeSync(declarationPath, restored, restored);
+    const observed = Deno.lstatSync(declarationPath);
+    assertEquals(observed.size, accepted.size, "the rewrite preserves the accepted size");
+    assertEquals(observed.mtime?.getTime(), accepted.mtimeMs, "the mtime was restored");
+    await rejectedAfter(identities, "a same-length replacement with a restored mtime");
+  } finally {
+    await cleanup();
   }
 });
 

@@ -80,6 +80,15 @@ export default createNativeExtensionFactory(() => ({
   moduleUrl: import.meta.url,
   // C6: the read replacement's owned skill-URI authorization rides the SAME
   // live discovery generation the enforcement observer consumes — an absent
-  // generation mints no skill authority.
-  replacementTools: nativeReplacementTools(() => loadTimeDiscoveryDecision.resourceGeneration),
+  // generation mints no skill authority. The declared root is the one the
+  // load-time decision observed from the deployment-owned launch environment
+  // (`align-omp-skill-trust-to-shared-root` D4): a decision without EXACTLY one
+  // declared root wires an empty root, so a `skill://` read denies before any
+  // native delegation rather than resolving against a fallback.
+  replacementTools: nativeReplacementTools(
+    loadTimeDiscoveryDecision.ownedSkillRoots.length === 1
+      ? loadTimeDiscoveryDecision.ownedSkillRoots[0]
+      : "",
+    () => loadTimeDiscoveryDecision.resourceGeneration,
+  ),
 }));

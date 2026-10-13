@@ -6,8 +6,6 @@ lsp:
   enabled: false
 skills:
   enabled: true
-  customDirectories:
-    - /opt/air/skills
   enableCodexUser: false
   enableClaudeUser: false
   enableClaudeProject: false

@@ -431,6 +431,8 @@ interface Harness {
   server: SkillAPIServer;
   port: number;
   event: NormalizedEvent;
+  /** The deployed external-skill root this harness resolved, when installed. */
+  skillsRoot: string | null;
 }
 
 function buildHarnessConfig(params: {
@@ -438,6 +440,8 @@ function buildHarnessConfig(params: {
   jwtDir: string;
   agentType: "opencode" | "omp";
   shared: boolean;
+  /** The deployment-RESOLVED skill root (defaults to the repo `skills/` tree). */
+  skillsDir?: string;
 }): Config {
   return {
     platforms: {
@@ -453,6 +457,9 @@ function buildHarnessConfig(params: {
       // same dir); `enabled` marks the pooled deployment.
       sharedProcess: { enabled: params.shared, jwtDir: params.jwtDir, reclaimIdleMs: 120_000 },
       idleTimeout: { enabled: false, timeoutMs: 300_000, checkIntervalMs: 30_000 },
+      // ONE resolved root for BOTH agent types (`unify-skill-root-and-inventory`
+      // D1); the shared-root scenario points it at an installed external skill.
+      ...(params.skillsDir ? { skillsDir: params.skillsDir } : {}),
       // Isolated agent-workspace root (the shipped optional knob): every
       // harness run is single-shot, but keeping ownership out of the test
       // tree mirrors the shared-process suite's deployment shape.
@@ -481,6 +488,14 @@ async function createHarness(params: {
    * no pool (createConnector-hook swap tier). */
   shape: "pooled" | "per-spawn";
   conversationSummaryEnabled?: boolean;
+  /**
+   * Install ONE runtime-installed external skill into a deployment-resolved
+   * root and point `agent.skillsDir` at it (`align-omp-skill-trust-to-shared-
+   * root` 4.1/4.2): the tree carries the shared root's own writable posture
+   * (directories `0775`, files `0664`, never root-owned) so the fixtures prove
+   * admission on identity alone.
+   */
+  installExternalSkill?: boolean;
 }): Promise<Harness> {
   const shared = params.shape === "pooled";
   const tempDir = await Deno.makeTempDir({ prefix: `omp-handoff-${params.name}-` });
@@ -488,6 +503,26 @@ async function createHarness(params: {
   Deno.mkdirSync(jwtDir, { mode: 0o700 });
   const stateDir = join(tempDir, "mock-state");
   Deno.mkdirSync(stateDir, { recursive: true });
+  let skillsRoot: string | null = null;
+  if (params.installExternalSkill) {
+    const skillDirectory = join(tempDir, "skills", "external-skill");
+    const scriptsDirectory = join(skillDirectory, "scripts");
+    Deno.mkdirSync(scriptsDirectory, { recursive: true });
+    Deno.writeTextFileSync(join(skillDirectory, "SKILL.md"), "# external-skill\n");
+    Deno.writeTextFileSync(
+      join(scriptsDirectory, "external-skill.ts"),
+      "#!/usr/bin/env deno\n",
+    );
+    for (const directory of [join(tempDir, "skills"), skillDirectory, scriptsDirectory]) {
+      Deno.chmodSync(directory, 0o775);
+    }
+    for (
+      const file of [join(skillDirectory, "SKILL.md"), join(scriptsDirectory, "external-skill.ts")]
+    ) {
+      Deno.chmodSync(file, 0o664);
+    }
+    skillsRoot = Deno.realPathSync(join(tempDir, "skills"));
+  }
   const promptsDir = join(tempDir, "prompts");
   Deno.mkdirSync(promptsDir, { recursive: true });
   // Harness templates render the literal pair the shipped system_reply.md
@@ -514,6 +549,7 @@ async function createHarness(params: {
     jwtDir,
     agentType: params.agentType,
     shared,
+    ...(skillsRoot ? { skillsDir: skillsRoot } : {}),
   });
   if (params.conversationSummaryEnabled !== undefined) {
     config.conversationSummary = { enabled: params.conversationSummaryEnabled };
@@ -653,6 +689,7 @@ async function createHarness(params: {
     server,
     port,
     event,
+    skillsRoot,
   };
 }
 
@@ -1606,6 +1643,105 @@ async function runOpenCodeRegression(): Promise<void> {
 }
 
 // ---------------------------------------------------------------------------
+// 4.1/4.2 (`align-omp-skill-trust-to-shared-root`): ONE runtime-installed
+// external skill published into the deployment-RESOLVED skill root is usable by
+// BOTH agent types from that single root, on the shared tree's own writable
+// posture (directories `0775`, files `0664`), while the retained
+// identity/containment denials still hold. Every scripted ACP expectation is
+// consumed by the REAL ChatbotClient over the live stdio connection, and the
+// mock REFUSES its prompt response on any mismatch — so a successful run is the
+// aggregate proof. A live `send-reply` invocation on either agent remains
+// user-owned runtime acceptance.
+// ---------------------------------------------------------------------------
+
+async function runSharedRootUsability(agentType: "omp" | "opencode"): Promise<void> {
+  const h = await createHarness({
+    name: `shared-root-${agentType}`,
+    agentType,
+    shape: "per-spawn",
+    installExternalSkill: true,
+  });
+  const skillsRoot = h.skillsRoot;
+  assert(skillsRoot !== null, "the shared-root fixture installs its resolved root");
+  try {
+    const instruction = join(skillsRoot, "external-skill", "SKILL.md");
+    const entrypoint = join(skillsRoot, "external-skill", "scripts", "external-skill.ts");
+    const options = [
+      { optionId: "allow", name: "Allow", kind: "allow_once" },
+      { optionId: "reject", name: "Reject", kind: "reject_once" },
+    ];
+    const acpRequests: AcpRequest[] = [
+      {
+        // The installed skill's instruction, read for the SAME root. OMP admits
+        // it through the trusted-skills role over the resolved writable root;
+        // OpenCode has no such role, so the read stays denied — the shared root
+        // never widens another agent type's workspace reads.
+        method: "fs/read_text_file",
+        params: { sessionId: "@ACP_SESSION_ID", path: instruction },
+        expect: agentType === "omp" ? "ok" : "error:rejected_filesystem_path_unavailable",
+      },
+      {
+        // The enumerated script from that root is approved…
+        method: "session/request_permission",
+        params: {
+          sessionId: "@ACP_SESSION_ID",
+          toolCall: {
+            toolCallId: "shared-root-enumerated",
+            title: "Execute shell command",
+            kind: "execute",
+            rawInput: { commands: [`deno run ${entrypoint} --session-id @SESSION_ID`] },
+          },
+          options,
+        },
+        expect: 'result:"optionId":"allow"',
+      },
+      {
+        // …while a sibling-prefix planted root at the same suffix stays
+        // rejected: the retired suffix matcher's bypass is not re-introduced.
+        method: "session/request_permission",
+        params: {
+          sessionId: "@ACP_SESSION_ID",
+          toolCall: {
+            toolCallId: "shared-root-planted",
+            title: "Execute shell command",
+            kind: "execute",
+            rawInput: {
+              commands: [`deno run ${skillsRoot}-evil/external-skill/scripts/external-skill.ts`],
+            },
+          },
+          options,
+        },
+        expect: 'result:"optionId":"reject"',
+      },
+    ];
+    scriptSteps(h, [
+      {
+        stagePayload: { file: "@STAGING_DIR/reply.md", content: "shared-root reply" },
+        invocations: [
+          {
+            script: scriptUrl("send-reply"),
+            argv: ["--session-id", "@SESSION_ID", "--message-file", "@STAGING_DIR/reply.md"],
+            cwd: h.workspacePath,
+            env: { SESSION_ID: "@SESSION_ID" },
+          },
+        ],
+        acpRequests,
+      },
+      {},
+    ]);
+    const result = await h.orchestrator.processMessage(h.event, h.ledger);
+    assertEquals(result.success, true);
+    // The ONE resolved root is the literal this agent type was delivered.
+    assertStringIncludes(h.orchestrator.promptTexts[0] ?? "", skillsRoot);
+    // The enumerated external script really ran through the real skill path.
+    const records = readSkillRecords(h);
+    assert(records.length >= 1, `expected the external script to run: ${JSON.stringify(records)}`);
+  } finally {
+    await teardownHarness(h);
+  }
+}
+
+// ---------------------------------------------------------------------------
 // 5.2 guard: every synthetic positive registered in this process is a labeled
 // composition-boundary (row-21 runtime-ledger guard precedent).
 // ---------------------------------------------------------------------------
@@ -1679,6 +1815,14 @@ const scenarios: Array<{ name: string; fn: () => Promise<void> }> = [
   {
     name: "3.6 OpenCode per-spawn regression byte-identity + legacy payload",
     fn: runOpenCodeRegression,
+  },
+  {
+    name: "4.1/4.2 one installed external skill over the shared resolved root (omp)",
+    fn: () => runSharedRootUsability("omp"),
+  },
+  {
+    name: "4.1/4.2 one installed external skill over the shared resolved root (opencode)",
+    fn: () => runSharedRootUsability("opencode"),
   },
 ];
 
