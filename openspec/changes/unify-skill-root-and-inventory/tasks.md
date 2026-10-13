@@ -22,7 +22,7 @@
 
 ## 4. Install destination
 
-- [ ] 4.1 Change the publication destination in `src/bootstrap.ts:192-195` to `resolveTrustedSkillsRoot(config.agent.defaultAgentType, config.agent.skillsDir)`; leave `src/core/skill-installer.ts` untouched. Verify: `deno task test:unit` over a rewritten `tests/core/external-skill-publication-parity.test.ts` proving one destination for both agent types, that a published external `.ts` script is eligible for both, and that the collision/link/traversal refusals and failure isolation are unchanged.
+- [x] 4.1 Change the publication destination in `src/bootstrap.ts:192-195` to `resolveTrustedSkillsRoot(config.agent.defaultAgentType, config.agent.skillsDir)`; leave `src/core/skill-installer.ts` untouched. Verify: `deno task test:unit` over a rewritten `tests/core/external-skill-publication-parity.test.ts` proving one destination for both agent types, that a published external `.ts` script is eligible for both, and that the collision/link/traversal refusals and failure isolation are unchanged.
 
 ## 5. Integration verification
 
