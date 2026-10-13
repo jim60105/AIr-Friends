@@ -21,6 +21,32 @@ This document describes the translation of AIr-Friends / OpenCode settings into 
 | **HTTP-Referer Attribution**   | `headers: { "HTTP-Referer": "https://github.com/jim60105/AIr-Friends" }` | **Not preservable** through supported configuration                                                                                | Pinned OMP hard-codes `HTTP-Referer: https://omp.sh/` and `X-OpenRouter-Title: omp` via `getOpenRouterHeaders()` in `packages/ai/src/utils/openrouter-headers.ts`, which overrides model/config headers in `openai-shared.ts:229-231`.                                                                                                                                                                        |
 | **Disabled Providers**         | N/A (OpenCode uses explicit provider list)                               | `disabledProviders: [...]` (`agent-config/omp/restricted.yml`)                                                                     | Complete replacement array disabling all 81 catalog and hosted provider backends outside approved set (`google`, `openrouter`).                                                                                                                                                                                                                                                                               |
 
+### Owned native local read/search posture (row 29 `admit-trusted-omp-native-builtins`)
+
+`agent-config/omp/restricted.yml` (and the byte-equal `RESTRICTED_YAML_CONTENT`)
+carry, in addition to `tools.approvalMode: write`:
+
+| Key                              | Pinned value                                                            | Source-backed meaning                                                                                                                                                                                                                                                                                                                                                 |
+| :------------------------------- | :---------------------------------------------------------------------- | :--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `tools.approval`                 | `{read: allow, grep: allow, glob: allow, find: allow}`                  | `tools/settings.ts` `cfgToolsApproval` record (per-tool `allow`/`prompt`/`deny`, honored in every approval mode). Exact-name `allow` for the native read/search builtins the restricted inventory admits, so approved read-tier calls need no human elicitation. It is an approval POSTURE: provenance still denies SDK/foreign same-name calls before native approval.   |
+| `grep.enabled` / `glob.enabled`  | `true` / `true`                                                         | `cfgGrepEnabled`/`cfgGlobEnabled` booleans: the native builtin search tools stay available under the supported activation control.                                                                                                                                                                                                                                    |
+| `find.enabled`                   | `auto`                                                                  | `cfgFindEnabled` enum pinned VERBATIM so availability stays judge/model-dependent: `auto` resolves only when the judge role is backed by a native TypeSafe model AND a model registry exists. No judge, model or backend is added to force it on.                                                                                                                      |
+| `fetch.enabled`                  | `false` (restricted-only)                                               | `cfgFetchEnabled`, consumed by `fetch.ts` `materializeReadUrlToFile`: native URL materialization (including native `grep` URL roots) throws before any fetch. The registered owned `read` replacement performs its OWN controlled per-hop transport and never consults this key, so controlled URL reading stays available — and a disabled key is NOT a complete URI-route block (the decoder's root screen is). |
+
+Validation: `assertOwnedSettingsDocument` checks this key surface through a
+CLOSED entry-name set plus the pinned value vocabulary (unknown tool name,
+unknown value, a `null` reset and an empty branch all reject), requires these
+exact values in restricted mode, keeps `tools.approvalMode: write`, and rejects
+both new restricted-only keys in the native-YOLO document — whose bytes are
+unchanged.
+
+What this is NOT: there is no `allowedPaths`-style path ACL, no exclusion list,
+and no per-user path-confinement claim in the pinned schema. cwd, `.gitignore`,
+hidden-file filtering, candidate credential/binary filtering and output limits
+are BEHAVIOR controls, not a filesystem boundary: native local read/search runs
+under the process's ambient OS permissions (see `OMP_ENFORCEMENT.md`,
+"Accepted native local posture").
+
 ---
 
 ## 2. Authoritative Record-Reset Application Gate
@@ -47,6 +73,15 @@ Because overlay ordering cannot clear base-only entries:
 - **No working settings-layer reset is fabricated or certified.**
 - The **restricted execution-time default-deny policy (row 14)** is the operative security boundary holding containment while this gate stands.
 - **Decision 3 disposition (DECIDED 2026-10-09, `isolate-omp-settings-discovery` row 26):** admission no longer waits on a supported-native-reset verdict or a separate user decision — control moved to the settings **discovery paths** instead of the merge behavior (section 6). The pinned verdict above stays `unresolved` verbatim: the binary still provides no deep-merge reset barrier, and nothing here claims it does. Restricted execution-time default-deny remains the second boundary. The machine-readable disposition rides `recordResetGate.applicationDisposition` in `src/acp/omp-settings.ts`.
+
+- **An owned approval record is a posture, never a reset (row 29
+  `admit-trusted-omp-native-builtins`):** the restricted overlay's exact
+  `tools.approval` `allow` entries narrow the posture for their own names, but
+  they cannot NULLIFY a lower-layer survivor (the merge preserves base-only
+  keys), so a hostile/legacy lower layer stays the settings-discovery-path
+  control's responsibility (section 6) — with the restricted execution-time
+  default-deny decision denying any name the inventory does not carry. Nothing
+  here claims the record performs a reset.
 
 ---
 
@@ -80,7 +115,7 @@ The following areas are explicitly out of scope for this change and belong to do
 
 - **Row 9 (`spawn-mode-scoped-omp-agents`)**: Subprocess launch arguments, `--config` interleaving, `--system-prompt` flag passing, `PI_CODING_AGENT_DIR` assignment, and process working directory setup.
 - **Row 10 (`isolate-omp-process-pools-by-mode`)**: Pool separation and mode-distinct state roots.
-- **Row 14 (`define-omp-restricted-tool-decisions` / `wire-omp-restricted-tool-enforcement`)**: Runtime tool inventory, execution-time default-deny policy, and per-tool `tools.approval` records.
+- **Row 14 (`define-omp-restricted-tool-decisions` / `wire-omp-restricted-tool-enforcement`)**: Runtime tool inventory, execution-time default-deny policy, and approval-record interpretation. The owned overlay's exact `tools.approval` entries and the native local search activation pins are row 29's surface (section 1a / `admit-trusted-omp-native-builtins`).
 - **LSP row 17 (`disable-restricted-agent-lsp`)**: both-mode `--no-lsp` carriers and per-agent OpenCode LSP denial (wiring only; native cold-start proof remains user runtime-observed). Row 25 (`pin-omp-yolo-lsp-settings`) landed the mandatory native-YOLO `lsp.enabled: false` settings pin: `lsp.enabled` is a shared deployment key required boolean-false in both mode documents.
 - **Row 20 (`package-pinned-omp-runtime`)**: Checksum validation and packaging of `agent-config/omp/*` assets outside agent-writable roots.
 
