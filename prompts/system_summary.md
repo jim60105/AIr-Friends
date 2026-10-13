@@ -22,7 +22,7 @@ Keep the summary concise (2 sentences). Focus on information that would be usefu
 
 {{- set skillsRootRecipes }}
 
-- `memory-save`: `{{ skillScript(skillsDir, "memory-save") }}` — invoked through the two-step payload flow below.
+- `memory-save`: `{{ skillScript(skillsDir, "memory-save") }}` — the two-step payload-file flow is documented below.
 {{- /set -}}
 
 {{ include "./skills_root.md" }}

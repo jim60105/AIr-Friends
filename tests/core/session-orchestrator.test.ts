@@ -271,6 +271,60 @@ Deno.test("SessionOrchestrator - a mounted classified template without the root 
   }
 });
 
+// Spec scenario "Mounted classified template omits its root", summary path:
+// the fire-and-forget conversation summary is a classified render too, so a
+// mounted system_summary.md that renders without the literal root fails its
+// assertion BEFORE connector.prompt — the session still completes and no
+// rootless summary is ever delivered.
+Deno.test({
+  name: "SessionOrchestrator - a rootless mounted summary template never reaches connector.prompt",
+  sanitizeResources: false,
+  sanitizeOps: false,
+  fn: async () => {
+    const tempDir = await Deno.makeTempDir();
+    try {
+      const { orchestrator, skillRegistry, workspaceManager, sessionRegistry, config } =
+        await createTestableOrchestrator(tempDir);
+      // Point the session prompt dir at the temp fixtures so the mounted
+      // rootless summary template is the one that renders.
+      config.agent.systemPromptPath = `${tempDir}/prompts/system_reply.md`;
+      config.conversationSummary = { enabled: true };
+      await Deno.writeTextFile(
+        `${tempDir}/prompts/system_summary.md`,
+        "Summarize this conversation without any trusted skill root.",
+      );
+
+      const platformAdapter = new MockPlatformAdapter() as unknown as PlatformAdapter;
+      const event = createTestEvent();
+
+      orchestrator.setConnectorSetup((connector) => {
+        connector.promptResponses = [
+          { stopReason: "end_turn" } as PromptResponse,
+          { stopReason: "end_turn" } as PromptResponse,
+        ];
+        connector.onPrompt = (callCount) => {
+          if (callCount === 1) {
+            const replyHandler = skillRegistry.getReplyHandler();
+            const key = `${workspaceManager.getWorkspaceKeyFromEvent(event)}:${event.channelId}`;
+            (replyHandler as unknown as ReplySentMapView).replySentMap.set(key, true);
+          }
+        };
+      });
+
+      const response = await orchestrator.processMessage(event, platformAdapter);
+
+      assertEquals(response.success, true);
+      // Only the delivery turn was prompted: the rootless summary render failed
+      // its classified assertion first.
+      assertEquals(orchestrator.mockConnector!.promptCallCount, 1);
+
+      sessionRegistry.stop();
+    } finally {
+      await Deno.remove(tempDir, { recursive: true });
+    }
+  },
+});
+
 Deno.test("SessionOrchestrator - skips agent execution for /clear command", async () => {
   const tempDir = await Deno.makeTempDir();
   try {
