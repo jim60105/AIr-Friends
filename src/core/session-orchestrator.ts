@@ -92,6 +92,29 @@ type RecoveryAbortReason =
   | "executable_sources_rejected";
 
 /**
+ * Row-11 recovery context threaded into `AgentConnector.reconnectAndResumeSession`.
+ * `ownership` is the acquisition record read back from the session registry
+ * (never re-resolved), `gateContext` is the session's own full gate context
+ * (never a sibling's or the process-frozen client config's), `reasoningEffort`
+ * is the session's already-resolved effort, and the optional hook is the named
+ * post-restore seam. For OMP the connector requires `ownership` AND
+ * `gateContext`; OpenCode keeps the optional trailing shape and its
+ * context-free legacy recovery.
+ */
+interface RecoveryContext {
+  ownership?: SessionRecoveryOwnership;
+  gateContext?: SessionGateContext;
+  reasoningEffort?: string;
+  /** Named post-restore recovery hook: called by the connector exactly
+   * once after gate-context restoration and before success/resumed
+   * prompting. Gates nothing — no readiness assertion, request, channel,
+   * or prompt gate (docs/OMP_RECOVERY.md names it as the attach point).
+   * Production passes the documented no-op; the seam remains so the
+   * position is observable and extendable. */
+  onGateContextRestored?: (sessionId: string) => void | Promise<void>;
+}
+
+/**
  * Format fetched RSS items for the self-research prompt as explicitly
  * untrusted, third-party content (F16).
  *
@@ -1228,21 +1251,40 @@ export class SessionOrchestrator {
           connector,
           sessionId,
           promptContent,
-          workspace.path,
+          // The session's OWN ACP cwd (`createSession()` used
+          // `agentConfig.cwd`): the recovery load and the owning gate context
+          // must both name it, never a reconstructed workspace path.
+          perSpawnAgentConfig.cwd,
           this.getMCPServers(),
           shellSessionId,
+          // Row-11 recovery context: this session's recorded ownership, its own
+          // gate fields, resolved reasoning and own cwd. OMP requires it; the
+          // connector verifies ownership before any teardown.
+          this.perSpawnRecoveryContext({
+            agentType,
+            shellSessionId,
+            sessionCwd: perSpawnAgentConfig.cwd,
+            clientConfig,
+            resolvedReasoningEffort,
+          }),
         );
 
         if (response === null) {
+          const { error } = await this.endPerSpawnRecoveryAbort(
+            auditWriter,
+            sessionStartTime,
+            shellSessionId,
+            "Session lost due to idle timeout and reconnection failure",
+          );
           sessionLogger.warn(
             "Session {sessionId} ended without agent response after reconnect",
-            { sessionId },
+            { sessionId, error },
           );
           result = {
             success: false,
             replySent: false,
             fileSent: false,
-            error: "Session lost due to idle timeout and reconnection failure",
+            error,
           };
           return result;
         }
@@ -1838,18 +1880,34 @@ export class SessionOrchestrator {
           connector,
           sessionId,
           fullPrompt,
-          workspace.path,
+          perSpawnAgentConfig.cwd,
           this.getMCPServers(),
           shellSessionId,
+          this.perSpawnRecoveryContext({
+            agentType,
+            shellSessionId,
+            sessionCwd: perSpawnAgentConfig.cwd,
+            clientConfig,
+            resolvedReasoningEffort,
+          }),
         );
 
         if (response === null) {
-          sessionLogger.warn("Spontaneous session ended without response after reconnect");
+          const { error } = await this.endPerSpawnRecoveryAbort(
+            auditWriter,
+            sessionStartTime,
+            shellSessionId,
+            "Session lost due to idle timeout",
+          );
+          sessionLogger.warn(
+            "Spontaneous session ended without response after reconnect",
+            { error },
+          );
           result = {
             success: false,
             replySent: false,
             fileSent: false,
-            error: "Session lost due to idle timeout",
+            error,
           };
           return result;
         }
@@ -2294,23 +2352,44 @@ export class SessionOrchestrator {
           }
         }
 
+        // Row 11: capture this research session's recovery context ONCE and
+        // reuse it for the corrective retry below, so both reconnect attempts
+        // carry the identical initial acquisition values — never a freshly
+        // inferred ownership or gate.
+        const researchRecovery = this.perSpawnRecoveryContext({
+          agentType,
+          shellSessionId,
+          sessionCwd: perSpawnAgentConfig.cwd,
+          clientConfig,
+          resolvedReasoningEffort,
+        });
+
         // Send prompt
         const response = await this.promptWithIdleTimeoutHandling(
           connector,
           sessionId,
           fullPrompt,
-          workspace.path,
+          perSpawnAgentConfig.cwd,
           this.getMCPServers(),
           shellSessionId,
+          researchRecovery,
         );
 
         if (response === null) {
-          sessionLogger.warn("Self-research session ended without response after reconnect");
+          const { error } = await this.endPerSpawnRecoveryAbort(
+            auditWriter,
+            sessionStartTime,
+            shellSessionId,
+            "Session lost due to idle timeout",
+          );
+          sessionLogger.warn("Self-research session ended without response after reconnect", {
+            error,
+          });
           result = {
             success: false,
             replySent: false,
             fileSent: false,
-            error: "Session lost due to idle timeout",
+            error,
           };
           return result;
         }
@@ -2410,22 +2489,34 @@ export class SessionOrchestrator {
           connector,
           sessionId,
           retryMessage,
-          workspace.path,
+          perSpawnAgentConfig.cwd,
           this.getMCPServers(),
           shellSessionId,
+          // The corrective retry carries the SAME captured initial context.
+          researchRecovery,
         );
 
         if (retryResponse === null) {
-          const error = "Session lost during corrective retry";
+          const { error, recoveryAborted } = await this.endPerSpawnRecoveryAbort(
+            auditWriter,
+            sessionStartTime,
+            shellSessionId,
+            "Session lost during corrective retry",
+          );
           sessionLogger.warn(error);
-          await auditWriter?.write("session_end", {
-            success: false,
-            replySent: false,
-            fileSent: false,
-            durationMs: Date.now() - sessionStartTime,
-            error,
-            ...auditWriter?.getSummaryCounters(),
-          });
+          // A recovery abort already wrote its own reason-coded session_end
+          // above; the pre-existing generic end is written only for the plain
+          // session-loss outcome.
+          if (!recoveryAborted) {
+            await auditWriter?.write("session_end", {
+              success: false,
+              replySent: false,
+              fileSent: false,
+              durationMs: Date.now() - sessionStartTime,
+              error,
+              ...auditWriter?.getSummaryCounters(),
+            });
+          }
           result = {
             success: false,
             replySent: false,
@@ -2833,13 +2924,29 @@ export class SessionOrchestrator {
           connector,
           sessionId,
           fullPrompt,
-          workspace.path,
+          perSpawnAgentConfig.cwd,
           this.getMCPServers(),
           shellSessionId,
+          this.perSpawnRecoveryContext({
+            agentType,
+            shellSessionId,
+            sessionCwd: perSpawnAgentConfig.cwd,
+            clientConfig,
+            resolvedReasoningEffort,
+          }),
         );
 
         if (response === null) {
-          sessionLogger.warn("Memory maintenance session ended without response after reconnect");
+          const { error } = await this.endPerSpawnRecoveryAbort(
+            auditWriter,
+            sessionStartTime,
+            shellSessionId,
+            "Session lost due to idle timeout",
+          );
+          sessionLogger.warn(
+            "Memory maintenance session ended without response after reconnect",
+            { error },
+          );
           result = {
             success: false,
             replySent: false,
@@ -3202,14 +3309,31 @@ export class SessionOrchestrator {
           connector,
           sessionId,
           fullPrompt,
-          workspace.path,
+          // The session's own ACP cwd (the channel workspace the acquisition
+          // spawned with) — not the synthetic per-user workspace used for the
+          // registry/staging identity above.
+          channelAgentConfig.cwd,
           this.getMCPServers(),
           shellSessionId,
+          this.perSpawnRecoveryContext({
+            agentType,
+            shellSessionId,
+            sessionCwd: channelAgentConfig.cwd,
+            clientConfig,
+            resolvedReasoningEffort,
+          }),
         );
 
         if (response === null) {
+          const { error } = await this.endPerSpawnRecoveryAbort(
+            auditWriter,
+            sessionStartTime,
+            shellSessionId,
+            "Session lost due to idle timeout",
+          );
           sessionLogger.warn(
             "Channel memory maintenance session ended without response after reconnect",
+            { error },
           );
           result = {
             success: false,
@@ -3605,18 +3729,34 @@ export class SessionOrchestrator {
           connector,
           sessionId,
           fullPrompt,
-          workspace.path,
+          reminderAgentConfig.cwd,
           this.getMCPServers(),
           shellSessionId,
+          this.perSpawnRecoveryContext({
+            agentType,
+            shellSessionId,
+            sessionCwd: reminderAgentConfig.cwd,
+            clientConfig,
+            resolvedReasoningEffort,
+          }),
         );
 
         if (response === null) {
-          sessionLogger.warn("Reminder session ended without response after reconnect");
+          const { error } = await this.endPerSpawnRecoveryAbort(
+            auditWriter,
+            sessionStartTime,
+            shellSessionId,
+            "Session lost due to idle timeout",
+          );
+          sessionLogger.warn(
+            "Reminder session ended without response after reconnect",
+            { error },
+          );
           result = {
             success: false,
             replySent: false,
             fileSent: false,
-            error: "Session lost due to idle timeout",
+            error,
           };
           return result;
         }
@@ -4091,15 +4231,19 @@ export class SessionOrchestrator {
    * 2. If session resumed and agent is still working → wait for completion
    * 3. If session cannot be resumed (loadSession unsupported) → throw error
    *
-   * Row 11 (restore-mode-owned-acp-sessions): pooled call sites pass the
-   * session's OWN recovery context — the registry-recorded mode/namespace
-   * (read-only), its full gate-context fields, its resolved reasoning effort,
-   * and its own cwd — which the connector verifies BEFORE any teardown. A
-   * recovery failure classified as ownership violation / unverified provenance
-   * / namespace mismatch / gate-context restore failure / post-restore hook
-   * failure ends ONLY this session: a bounded reason-coded `session_end` audit,
-   * an end-without-response result, and NEVER the respond-gated re-prompt path
-   * nor a `disconnect()`/`cancel()` from the recovery path. Those classes stay
+   * Row 11 (restore-mode-owned-acp-sessions): every reconnect-capable caller
+   * passes the session's OWN recovery context — the registry-recorded
+   * mode/namespace (read-only), its full gate-context fields, its resolved
+   * reasoning effort, and its own cwd — which the connector verifies BEFORE any
+   * teardown. Both pooled runner callers and all seven per-spawn callers supply
+   * it; the connector additionally requires `ownership` and `gateContext` for
+   * the OMP deployment agent independently of whether they were supplied, so no
+   * OMP call can select the context-free legacy restore. A recovery failure
+   * classified as ownership violation / unverified provenance / namespace
+   * mismatch / gate-context restore failure / post-restore hook failure ends
+   * ONLY this session: a bounded reason-coded `session_end` audit, an
+   * end-without-response result, and NEVER the respond-gated re-prompt path nor
+   * a `disconnect()`/`cancel()` from the recovery path. Those classes stay
    * distinct from the capability-absence "Session lost" outcome. Load failures
    * and post-load catalog misses keep their existing isolated throw path.
    */
@@ -4110,18 +4254,7 @@ export class SessionOrchestrator {
     sessionCwd: string,
     mcpServers: MCPServerConfig[],
     shellSessionId: string | null,
-    recovery?: {
-      ownership?: SessionRecoveryOwnership;
-      gateContext?: SessionGateContext;
-      reasoningEffort?: string;
-      /** Named post-restore recovery hook: called by the connector exactly
-       * once after gate-context restoration and before success/resumed
-       * prompting. Gates nothing — no readiness assertion, request, channel,
-       * or prompt gate (docs/OMP_RECOVERY.md names it as the attach point).
-       * Production pooled recovery passes no hook (the documented no-op);
-       * the seam remains so the position is observable and extendable. */
-      onGateContextRestored?: (sessionId: string) => void | Promise<void>;
-    },
+    recovery?: RecoveryContext,
   ): Promise<acp.PromptResponse | null> {
     try {
       return await connector.prompt(sessionId, content);
@@ -4464,6 +4597,79 @@ export class SessionOrchestrator {
       permissionMode: session.permissionMode,
       processNamespace: session.processNamespace,
     };
+  }
+
+  /**
+   * The per-spawn recovery context (row 11) — the counterpart of the pooled
+   * callers' inline context, built once per acquisition from exactly the values
+   * that acquisition used:
+   *
+   * - `ownership`: the row-10 registry record, read back read-only (never
+   *   re-resolved from configuration).
+   * - `gateContext`: this session's own gate fields. A per-spawn connector
+   *   serves exactly one session, so its `clientConfig` IS the session's own
+   *   acquisition config — the same values `createSession()` registered as the
+   *   gate, and `sessionCwd` is the ACP session's own cwd (`agentConfig.cwd`),
+   *   never another session's or the process-frozen default.
+   * - `reasoningEffort`: the already-resolved effort of this session's setup.
+   * - `onGateContextRestored`: the production no-op attach seam.
+   *
+   * OMP requires the complete context (its connector enforces it at recovery
+   * time). OpenCode is deliberately left `undefined`: its per-spawn ownership
+   * record uses the spawn-mode vocabulary, and its context-free legacy recovery
+   * is the pre-change contract. Do not infer ownership or effort here — the
+   * values come from the acquisition record and the setup-time resolution.
+   */
+  private perSpawnRecoveryContext(params: {
+    agentType: AgentType;
+    shellSessionId: string | null;
+    sessionCwd: string;
+    clientConfig: ClientConfig;
+    resolvedReasoningEffort: string;
+  }): RecoveryContext | undefined {
+    if (params.agentType !== "omp") return undefined;
+    return {
+      ownership: this.recoveryOwnershipFromRegistry(params.shellSessionId, params.agentType),
+      gateContext: {
+        cwd: params.sessionCwd,
+        shellSessionId: params.clientConfig.sessionId,
+        yolo: params.clientConfig.yolo,
+        canWriteAgentWorkspace: params.clientConfig.canWriteAgentWorkspace,
+        allowedWriteExtensions: params.clientConfig.allowedWriteExtensions,
+        trustedSkills: params.clientConfig.trustedSkills,
+      },
+      reasoningEffort: params.resolvedReasoningEffort,
+      onGateContextRestored: this.recoveryPostRestoreHook(),
+    };
+  }
+
+  /**
+   * Consume the pending row-11 recovery-abort reason for a per-spawn session
+   * (the same classifier outcome the pooled paths stamp post-lease). When the
+   * session's null/ended-without-response outcome WAS a recovery abort, the
+   * bounded reason replaces the generic idle-timeout message and exactly one
+   * reason-coded `session_end` is written for this turn — never a re-prompt and
+   * never the capability-absence "Session lost" text. Without a pending reason
+   * the generic message and the pre-existing audit behavior are unchanged.
+   */
+  private async endPerSpawnRecoveryAbort(
+    auditWriter: SessionAuditWriter | null,
+    sessionStartTime: number,
+    shellSessionId: string | null,
+    genericError: string,
+  ): Promise<{ error: string; recoveryAborted: boolean }> {
+    const reason = this.takeRecoveryAbortReason(shellSessionId);
+    if (reason === null) return { error: genericError, recoveryAborted: false };
+    const error = `session_recovery_failed: ${reason}`;
+    await auditWriter?.write("session_end", {
+      success: false,
+      replySent: false,
+      fileSent: false,
+      durationMs: Date.now() - sessionStartTime,
+      error,
+      ...auditWriter?.getSummaryCounters(),
+    });
+    return { error, recoveryAborted: true };
   }
 
   /**
