@@ -112,9 +112,16 @@ including the pinned internal-URL scheme vocabulary in opaque
 constituent denies the WHOLE call as `rejected_alternate_route` before any
 scan or materialization; checking only the first root never suffices. Literal
 pattern/query/keyword TEXT is never a root, so a valid local pattern containing
-URI-like text stays usable, and ordinary local filenames containing colons
-(`report.pdf`, `notes:2-4`, `archive.zip:member`) stay local. A lone HTTP(S)
-`read` path keeps the ordinary `url` branch (the registered owned
+URI-like text stays usable. Colon-bearing local names stay usable exactly where
+the pinned routers agree they are paths: a token is LOCAL when it is not
+scheme-shaped with a slash (`report.pdf`, `notes:2-4`, `archive.zip:member`,
+`C:/repo/src`) or when its opaque prefix is not one of the pinned internal
+schemes. A scheme-SHAPED token, by contrast, denies for EVERY unknown scheme
+(`<scheme>:/…`, collapsed `<scheme>:/x`, glued `/repo/<scheme>://x`), not only
+the known ones: the pinned native search router resolves unregistered custom
+schemes through its MCP resource fallback (a remote resource), so an unknown
+scheme-shaped root cannot be proven local — `file:/…` denies with them. A lone
+HTTP(S) `read` path keeps the ordinary `url` branch (the registered owned
 controlled-transport replacement); a `skill://` read keeps the owned skill-URI
 route.
 
@@ -319,3 +326,4 @@ Related: [OMP_TOOL_POLICY.md](OMP_TOOL_POLICY.md) ·
 [AGENT_PERMISSIONS.md](AGENT_PERMISSIONS.md)
 
 > Runtime verification for this area is consolidated in the single checklist artifact [USER-RUNTIME-VERIFICATION.md](USER-RUNTIME-VERIFICATION.md) (section B); the numbered items above are expanded there as unverified runtime rows.
+

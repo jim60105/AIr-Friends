@@ -579,8 +579,8 @@ export function composeRestrictedToolCall(
     return blocked(mcpAdmissionDenialBlock(originCategory, admission));
   }
 
-  // allow-gated / routed-filesystem-sink / in-session-state-only: proceed to
-  // the NAMED completing authority only; the handler asserts no authorization.
+  // allow-gated / in-session-state-only: proceed to the NAMED completing
+  // authority only; the handler asserts no authorization.
   return { proceed: true, completingAuthority: decision.completingAuthority };
 }
 

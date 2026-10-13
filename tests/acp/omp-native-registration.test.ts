@@ -526,13 +526,23 @@ Deno.test("Native search: authentic local builtin search proceeds; every mixed o
       "/repo/local://notes.md",
       "memory:12",
       "src,a.ts;ssh://host/x",
+      // A scheme-SHAPED token denies for EVERY unknown scheme, not just the
+      // pinned ones: the pinned search router resolves unregistered custom
+      // schemes through its MCP resource fallback, so neither the known
+      // (local://, xd://) nor an unknown (file:/, weird:/) spelling can be
+      // proven local.
+      "file:/repo/a.txt",
+      "file:///repo/a.txt",
+      "weird:/repo/a.txt",
     ]
   ) {
     const outcome = run({ toolCallId: "s7", toolName: "grep", input: { pattern: "x", path } });
     assertBoundedBlock(outcome, "rejected_alternate_route");
     assertEquals(outcome.dispatched, false, path);
   }
-  // Ordinary local filenames that merely contain colons stay usable.
+  // Colon-bearing local names stay usable exactly where they are NOT
+  // scheme-shaped with a slash and their opaque prefix is not a pinned
+  // internal scheme.
   for (const path of ["archive.zip:member.md", "report.pdf", "notes:2-4", "C:/repo/src"]) {
     assertEquals(
       run({ toolCallId: "s8", toolName: "grep", input: { pattern: "x", path } }).dispatched,
