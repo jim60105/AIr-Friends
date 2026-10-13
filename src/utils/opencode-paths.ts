@@ -20,6 +20,13 @@
 
 import { isAbsolute, join, resolve } from "@std/path";
 import { ConfigError, ErrorCode } from "../types/errors.ts";
+import {
+  jsonMember,
+  jsonScalarValue,
+  type JsonSourceNode,
+  type JsonSourceObject,
+  parseJsonSource,
+} from "./json-source.ts";
 
 /**
  * Root of the session-scoped OpenCode data area: a directory under the session TMPDIR,
@@ -140,4 +147,160 @@ export function opencodeGlobalConfigPath(options: OpencodeSkillDiscoveryOptions 
     );
   }
   return join(home, ".config", "opencode", "opencode.json");
+}
+
+/**
+ * Refuse a resolved root that must never become an `external_directory`
+ * allowance: the daemon user's home directory, or an ancestor of it. An
+ * allowance bounded to the home — or above it — would let the agent read
+ * unrelated home content (credentials, other configuration) far beyond a skill
+ * tree, so the declaration refuses instead of narrowing that silently. The
+ * filesystem root is always such an ancestor and is refused for the same
+ * reason, even when no home is observable.
+ */
+export function assertOpencodeSkillRootIsDeclarable(root: string, home?: string): void {
+  if (root === "" || !isAbsolute(root) || resolve(root) !== root) {
+    throw new ConfigError(
+      ErrorCode.CONFIG_INVALID,
+      `The resolved skill root "${root}" is not an absolute canonical path — the OpenCode ` +
+        "skill-discovery declaration writes the resolved path verbatim and never a spelling " +
+        "that a session's own working directory could re-resolve",
+      { root },
+    );
+  }
+  const homeScoped = home !== undefined && (home === root || home.startsWith(`${root}/`));
+  if (root === "/" || homeScoped) {
+    throw new ConfigError(
+      ErrorCode.CONFIG_INVALID,
+      `The resolved skill root "${root}" is the daemon user's home directory or an ancestor of ` +
+        "it — refusing to declare a home-scoped external-directory allowance" +
+        (home !== undefined ? ` (daemon home "${home}")` : ""),
+      home !== undefined ? { root, home } : { root },
+    );
+  }
+}
+
+/**
+ * The canonical directory one declaration ENTRY names, or `undefined` when the
+ * entry can never name the resolved root: a `~user` form the pinned loader
+ * does not expand, or a relative entry, which that loader resolves against the
+ * SESSION's working directory rather than the configuration file's own
+ * directory. Resolving canonically is what makes a `~/…` spelling equivalent
+ * to the absolute path it stands for.
+ */
+function declaredDirectory(entry: string, home: string | undefined): string | undefined {
+  if (entry === "~") return home;
+  if (entry.startsWith("~/")) {
+    return home === undefined ? undefined : resolve(join(home, entry.slice(2)));
+  }
+  if (entry.startsWith("~")) return undefined;
+  if (!isAbsolute(entry)) return undefined;
+  return resolve(entry);
+}
+
+/** Parse the deployed document, requiring a JSON object at the top level. */
+function requireDocumentObject(source: string): JsonSourceObject {
+  const document = parseJsonSource(source);
+  if (document.kind !== "object") {
+    throw new Error("the deployed OpenCode configuration is not a JSON object");
+  }
+  return document;
+}
+
+/** A named member required to hold an object whenever the key is present. */
+function objectMember(object: JsonSourceObject, key: string): JsonSourceObject | undefined {
+  const member = jsonMember(object, key);
+  if (member === undefined) return undefined;
+  if (member.value.kind !== "object") throw new Error(`"${key}" is not a JSON object`);
+  return member.value;
+}
+
+/** The decoded entries of a string array; any other shape fails explicitly. */
+function requireStringArray(node: JsonSourceNode, label: string): string[] {
+  if (node.kind !== "array") throw new Error(`${label} is not an array`);
+  return node.items.map((item) => {
+    if (item.kind !== "scalar" || typeof jsonScalarValue(item) !== "string") {
+      throw new Error(`${label} contains a non-string entry`);
+    }
+    return jsonScalarValue(item) as string;
+  });
+}
+
+/** The canonical directory an allowance KEY covers (`{directory}/**`), if any. */
+function allowanceDirectory(key: string, home: string | undefined): string | undefined {
+  if (!key.endsWith("/**")) return undefined;
+  return declaredDirectory(key.slice(0, -3), home);
+}
+
+/**
+ * The `agent.build.permission.external_directory` object when the document
+ * carries one. Every level of that chain must be an object: a chain the
+ * declaration cannot extend is never overwritten, it fails explicitly.
+ */
+function externalDirectoryObject(document: JsonSourceObject): JsonSourceObject | undefined {
+  const agent = objectMember(document, "agent");
+  if (agent === undefined) return undefined;
+  const build = objectMember(agent, "build");
+  if (build === undefined) return undefined;
+  const permission = objectMember(build, "permission");
+  if (permission === undefined) return undefined;
+  return objectMember(permission, "external_directory");
+}
+
+/** Whether the document's discovery path list names exactly the resolved root. */
+function declaresSkillDiscoveryPath(
+  document: JsonSourceObject,
+  root: string,
+  home: string | undefined,
+): boolean {
+  const skills = objectMember(document, "skills");
+  if (skills === undefined) return false;
+  const paths = jsonMember(skills, "paths");
+  if (paths === undefined) return false;
+  const entries = requireStringArray(paths.value, '"skills.paths"');
+  return entries.length === 1 && declaredDirectory(entries[0]!, home) === root;
+}
+
+/** Whether the allowance for the resolved root is an `allow`. */
+function declaresExternalDirectoryAllowance(
+  document: JsonSourceObject,
+  root: string,
+  home: string | undefined,
+): boolean {
+  const externalDirectory = externalDirectoryObject(document);
+  if (externalDirectory === undefined) return false;
+  return externalDirectory.members.some((member) => {
+    if (allowanceDirectory(member.key, home) !== root) return false;
+    return member.value.kind === "scalar" && jsonScalarValue(member.value) === "allow";
+  });
+}
+
+/** The verdict of one inspection of a deployed configuration document. */
+export interface OpencodeSkillDiscoveryVerdict {
+  /** True when the document already carries BOTH declaration entries. */
+  readonly declared: boolean;
+  /** What the document still lacks (empty when it is already complete). */
+  readonly detail: string;
+}
+
+/**
+ * Decide whether the deployed document already declares the resolved root — in
+ * any spelling that resolves to it, `~/…` included — and already allows
+ * external-directory reads under that root. The comparison key set is BOTH
+ * entries: a document that names the root but omits (or denies) the allowance
+ * is INCOMPLETE, so the caller rewrites it rather than skipping it.
+ */
+export function inspectOpencodeSkillDiscoveryDeclaration(
+  source: string,
+  root: string,
+  home?: string,
+): OpencodeSkillDiscoveryVerdict {
+  const document = requireDocumentObject(source);
+  if (!declaresSkillDiscoveryPath(document, root, home)) {
+    return { declared: false, detail: `the skill discovery path list is not exactly "${root}"` };
+  }
+  if (!declaresExternalDirectoryAllowance(document, root, home)) {
+    return { declared: false, detail: `external_directory does not allow reads under "${root}"` };
+  }
+  return { declared: true, detail: "" };
 }
