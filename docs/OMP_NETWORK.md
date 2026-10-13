@@ -128,20 +128,26 @@ tiers; citations re-verified at pin `2a2c6dc` / v18.6.1):
   classifies `skill://` inputs on their OWN branch — distinct from HTTP(S),
   local paths, and the blanket rejected-scheme denial. An owned
   `SkillUriAuthorization` seam resolves the URI ONLY against the declared
-  canonical owned source (`OMP_IMAGE_SKILLS_ROOT`), gated on the live
-  discovery generation and per-call link-free identity/writability/containment
-  checks of the target. Authorized reads delegate the ORIGINAL URI once
+  canonical owned source — the deployment-RESOLVED root the load-time decision
+  observed from its launch environment (`align-omp-skill-trust-to-shared-root`
+  D4: `OMP_DECLARED_SKILL_ROOT`, never a constant, workspace, HOME, CWD or
+  model-named candidate; a launch without a declared root wires an empty root),
+  gated on the live discovery generation and per-call link-free
+  identity/containment checks of the target (ownership and permission bits are
+  deliberately NOT admission inputs: the shared root is agent-writable).
+  Authorized reads delegate the ORIGINAL URI once
   through `ctx.invokeTool` to the captured native skill reader (zero network
   dispatch; the canonical path is authorization evidence only, never a
   rewritten native argument); unwired seams, foreign same-name shadows,
   symlink-replaced identities, traversal spellings, stale/absent generations,
-  and off-image roots deny BEFORE delegation with no fallback root. Network
+  aliased (hard-linked) targets, and an absent or unacceptable declared root
+  deny BEFORE delegation with no fallback root. Network
   completion grants nothing here: the URL-route completion above and the
-  skill-URI admission are independent decisions. The grant stays IMAGE-ONLY
-  and is unchanged by `bind-omp-owned-module-evidence`: an owned DEVELOPMENT
-  module never adds a skill-URI root or a fallback source, and the separately
-  selected native script root used by delivered prompts does not expand this
-  URI authorization.
+  skill-URI admission are independent decisions. The grant stays bound to the
+  ONE resolved root and is unchanged by `bind-omp-owned-module-evidence`: an
+  owned DEVELOPMENT module never adds a skill-URI root or a fallback source,
+  and the separately selected native script root used by delivered prompts does
+  not expand this URI authorization.
 - `partial-seam-not-selected`: the native `ToolSession.fetch` seam —
   exists, enrichment reach only, and **no** supported ACP-bootstrapped
   injection point sets it; promotion would require a P0 revision.

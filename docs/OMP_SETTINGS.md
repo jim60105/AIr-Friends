@@ -61,6 +61,18 @@ In official OMP `v18.6.1` (`packages/coding-agent/src/config/settings.ts`):
 2. `#mergeOwnLayers` deep-merges the aggregated overlay on top of global and project configuration using `#deepMerge`.
 3. `#deepMerge` retains base-only entries, and configured whole-setting `null` counts as unset during settings resolution.
 
+The deployment relies on exactly that fold for its skill directory
+(`align-omp-skill-trust-to-shared-root` D3): the launch passes TWO overlays —
+the generated single-key skill-root declaration FIRST
+(`skills.customDirectories` holding the deployment-resolved root) and the
+authored mode document LAST (enablement, the seven foreign-source toggles, the
+approval/LSP/update pins, declaring NO skill directory). The fold therefore
+takes the directory from the declaration and every other pin from the authored
+document, and because the authored document is last a rewritten declaration can
+never out-rank a pin. The declaration is rewritten at every launch
+(symlink-refusing, unconditional overwrite) and its parsed content is validated
+against the daemon's own resolved root before the process starts.
+
 ### Security Consequence
 
 If a lower configuration layer (such as a project `.omp/config.yml` or global settings) contains tool approval grants (`allow`) or prompt/deny entries:
@@ -93,15 +105,15 @@ To prevent hostile or accidental workspace/global configuration from loosening s
 
 1. **Deployment-owned launch working directory**: Pinned OMP discovers project settings strictly within `<cwd>/.omp/`. Launching from a deployment-controlled working directory prevents workspace `.omp/config.yml` files from entering the merge.
 2. **Empty deployment-owned agent directory**: `PI_CODING_AGENT_DIR` must point to an empty directory under the process state root, preventing hostile global configuration inheritance.
-3. **Protected overlay asset storage**: Owned overlays and `models.yml` must reside in locations outside agent-writable directories.
+3. **Protected overlay asset storage**: Authored overlays and `models.yml` must reside in locations outside agent-writable directories. The ONE exception is the generated skill-root declaration (`{baseRoot}/omp-overlays/{mode}-skill-root.yml`), which must be writable by the daemon at launch time; it is exempt from the placement rule alone and keeps every other overlay check (link, regular file, canonical parent and the accepted size/mtime identity that reveals a post-launch rewrite), plus its content is validated against the resolved root before the launch.
 4. **Environment isolation**: Child processes must never inherit `OMP_PROFILE`, `PI_PROFILE`, `PI_CONFIG_FILES`, or `XDG_CONFIG_HOME`.
-5. **Overlay ordering**: When invoking OMP with multiple `--config` arguments, the mode document (`restricted.yml` or `native-yolo.yml`) must be placed **last** among deployment overlays.
+5. **Overlay ordering**: When invoking OMP with multiple `--config` arguments, the generated skill-root declaration is placed **first** and the mode document (`restricted.yml` or `native-yolo.yml`) **last** among deployment overlays.
 
 ---
 
 ## 4. Zero Configuration Drift Confirmation
 
-This change introduces **no new configuration fields**, **no new environment variables**, and **no new Helm chart values**:
+This section's original change introduced **no new configuration fields**, **no new environment variables**, and **no new Helm chart values**; its successor `align-omp-skill-trust-to-shared-root` keeps that posture — it adds no operator-facing field, and the internal `OMP_DECLARED_SKILL_ROOT` conveyance is a deployment-owned launch value assigned from the source plan, never an operator surface (`config.example.yaml`, `.env.example` and `helm/values.yaml` stay unmodified):
 
 - Owned assets follow the deployment-owned file pattern established by `agent-config/opencode.json`.
 - Provider credentials reuse the existing `GEMINI_API_KEY` and `OPENROUTER_API_KEY` handled by row 7.
@@ -135,9 +147,28 @@ Decision 3 is applied as **settings-discovery-path control**: rather than trusti
 
 Every OMP child has `HOME`, all XDG selectors, `OMP_PROFILE`, `PI_PROFILE`, `PI_CONFIG_FILES`, `PI_CODING_AGENT_DIR` and the foreign provider selectors (`CLAUDE_CONFIG_DIR`, `CURSOR_CONFIG_DIR`, `CODEX_HOME`, `GEMINI_CONFIG_DIR`) removed unconditionally — regardless of `filterEnv`/`allowedEnvVars`, sandboxed or not (`sanitizeOmpDiscoveryEnv`, `src/acp/sandbox-manager.ts`) — after which `finalizeOmpSpawnEnvironment` assigns ONLY the exact plan values (`HOME` = owned HOME — an unset HOME could let the native homedir fallback return the daemon home) and fails closed if any other forbidden selector survived. The bootstrap `omp --version` observability probe spawns with an explicitly sanitized environment copy too, so it never inherits the daemon's discovery selectors. OpenCode's HOME/XDG semantics never consult this machinery.
 
+`align-omp-skill-trust-to-shared-root` adds exactly ONE deployment-owned
+assignment to that set: `OMP_DECLARED_SKILL_ROOT` carries the plan's RESOLVED
+skill root to the extension loaded in the child. Like every other selector it is
+stripped from an inherited environment and then assigned and verified by
+`finalizeOmpSpawnEnvironment` on both spawn routes, so the extension's only
+witness of the declared root is a launch-environment value the child cannot
+choose (an absent or unacceptable value denies with zero skill authority).
+
 ### Pre-native-request observer
 
 `src/acp/omp/settings-sources.ts` is a metadata-only observer (lstat/realpath; never reads content, never writes, never deletes or migrates a user file). Before every spawn and before every native session `new`/`load`/recovery it verifies: authority roots exist, are directories, and are link-free; every pinned forbidden source is ABSENT at its anchors (global under owned HOME/agent dir, project at the ACTUAL session cwd and neutral launch cwd, foreign-project across a bounded ancestor walk — the pinned `getProjectPath` itself is cwd-only; the ancestor walk is this deployment's stricter posture); owned overlays are plain files outside the agent-writable roots whose size/mtime identity stays stable across rechecks (same-path replacement fails closed). Unexpected presence, links, unreadable metadata, or missing authority fail closed with a bounded, content-free `SettingsSourceRejectionError`; nothing is created on the user's behalf.
+
+The generated skill-root declaration is observed as one more owned overlay, with
+ONE named exemption and no content read: the declaration path is exempt from the
+`plan.agentDir`/`plan.ownedHome` placement rule (it must be writable at launch
+time), while the link, regular-file, canonical-parent and accepted size/mtime
+identity checks apply to it unchanged — so a post-launch rewrite of the
+declaration is revealed by the accepted identity, exactly like a replaced
+authored overlay. Because the authored mode document is passed LAST, such a
+rewrite can still never out-rank the pins. The declaration's CONTENT is
+validated at launch by the assembly (`assertOwnedSettingsDocument` against the
+daemon's resolved root), never by this preflight.
 
 ### Responsibility and limits (user-owned / unverified)
 
@@ -151,20 +182,24 @@ Every OMP child has `HOME`, all XDG selectors, `OMP_PROFILE`, `PI_PROFILE`, `PI_
 
 ## 7. Deployment-Owned Skill Roots (row 28 `pin-omp-owned-skill-roots`)
 
-Decision 7 is applied as **skill-root ownership selection**: OMP skill discovery for the deployment comes exclusively from the settings-declared owned root, and every trusted-read selection decision consumes that declaration rather than a separately configurable root.
+Decision 7 is applied as **skill-root ownership selection**: OMP skill discovery for the deployment comes exclusively from the settings-declared owned root, and every trusted-read selection decision consumes that declaration rather than a separately configurable root. Since `align-omp-skill-trust-to-shared-root` that declared root is the SAME deployment-resolved root every other agent type uses (`agent.skillsDir`) — there is no OMP-specific tree, constant or fallback — and admission is decided on canonical identity, link-free components and containment rather than on root ownership.
 
 ### Pinned skills block
 
-Both mode documents (`agent-config/omp/restricted.yml`, `agent-config/omp/native-yolo.yml`) and their composition constants carry the complete `skills` block: `skills.enabled: true`, `skills.customDirectories: [/opt/air/skills]` (the array replaces the native default wholesale), and `enableCodexUser`/`enableClaudeUser`/`enableClaudeProject`/`enablePiUser`/`enablePiProject`/`enableAgentsUser`/`enableAgentsProject` all `false` — the seven foreign-source toggles switch OFF the compat/personal-tree discovery that would otherwise admit workspace-adjacent or home-directory skill candidates. `assertOwnedSettingsDocument` validates registered keys, types, and these exact semantics in BOTH modes (missing, wrongly typed, or falling-back-to-default skills keys reject), and the row-26 source plan carries `ownedSkillRoots: [/opt/air/skills]` so every `--config` overlay placement — image path or dev fallback — is validated against exactly that root (any deviation rejects). The image installs the repo skill tree root-owned `0:0` `0755` at `/opt/air/skills`: outside every agent-writable root, and — a deliberate, documented divergence — outside the `/opt/air/omp` manifest tree, so its bytes are not covered by `PACKAGE-MANIFEST.sha256`'s digest set.
+The authored mode documents (`agent-config/omp/restricted.yml`, `agent-config/omp/native-yolo.yml`) and their composition constants carry `skills.enabled: true` and `enableCodexUser`/`enableClaudeUser`/`enableClaudeProject`/`enablePiUser`/`enablePiProject`/`enableAgentsUser`/`enableAgentsProject` all `false` — the seven foreign-source toggles switch OFF the compat/personal-tree discovery that would otherwise admit workspace-adjacent or home-directory skill candidates — and they declare NO skill directory. The DIRECTORY is carried by the generated declaration (`{baseRoot}/omp-overlays/{mode}-skill-root.yml`): a single-key document holding exactly the daemon's resolved root, written at every launch with a symlink-refusing unconditional overwrite and passed FIRST among the `--config` overlays with the authored mode document LAST.
+
+`assertOwnedSettingsDocument` validates registered keys, types and these exact carrier semantics: the generated declaration must declare exactly the resolved root, an authored mode document must declare none (a drifted hard-coded directory rejects), both keep `skills.enabled: true` and the seven toggles `false`, and missing, wrongly typed or falling-back-to-default `skills` keys reject. The row-26 source plan carries `ownedSkillRoots: [<resolved root>]` plus the declaration path, so every parsed overlay — declaration and authored document alike — is validated against the root the daemon resolved, and the plan refuses any other value. That resolved root is the deployment's ordinary skill tree (`agent.skillsDir`; the container ships `AGENT_SKILLS_DIR=/home/deno/.agents/skills`) at the image's `$UID:0` `0775` posture: OMP admission no longer requires root ownership, agent-non-writability or non-group/world-writability. The `/opt/air/skills` tree the earlier row-28 pin installed is no longer declared or trusted by any OMP code path; `collapse-skill-packaging-to-one-tree` removes it.
 
 ### Declaration-to-selection interface
 
-`src/acp/omp/owned-skills.ts` (`observeOwnedSkills`) is the metadata-only producer bridging the declaration to selection: it lstats the declared root (canonical, link-free, read-only posture; dev/ino identity attestation), walks the `PINNED_CRITICAL_SKILLS` instruction layout (`review/SKILL.md`, `destructive/SKILL.md`, `lsp/SKILL.md`, `readiness/SKILL.md`), and mints `TrustedSkillsSource` with per-reference `sessionId`/`sessionGenerationId`/instruction-identity binding. The connector calls it in `setSessionGateContext` with the ACTUAL client's `nextRegistrationGeneration()`; the accepted observation becomes the baseline for replacement detection (a same-path root or instruction replacement throws or denies that identifier alone). An unobservable root without a baseline mints `null` — zero authority, fail closed; a non-authorizing (empty session/generation) observation is what the extension startup check uses. The client (`observeFilesystemRoots`) admits trusted reads only when `rootIdentity` is present and matches the currently canonicalized root, every reference is `deployment_owned`, pinned, session-matched, generation-current, and path-canonical; an unregistered name-only selector never authorizes anything. Workspace/provider/custom/managed skill candidates are excluded from OMP critical resolution before any collision or precedence decision, and ordinary (non-critical) owned skills plus global skill behavior are untouched.
+`src/acp/omp/owned-skills.ts` (`observeOwnedSkills`) is the metadata-only producer bridging the declaration to selection: it lstats the declared root (canonical path, link-free components, real directory, `dev`/`ino` identity attestation; writability and ownership are deliberately NOT admission inputs), walks the `PINNED_CRITICAL_SKILLS` instruction layout (`review/SKILL.md`, `destructive/SKILL.md`, `lsp/SKILL.md`, `readiness/SKILL.md`), and mints `TrustedSkillsSource` with per-reference `sessionId`/`sessionGenerationId`/instruction-identity binding. The connector calls it in `setSessionGateContext` with the ACTUAL client's `nextRegistrationGeneration()`; the accepted observation becomes the baseline for replacement detection (a same-path root or instruction replacement throws or denies that identifier alone). An unobservable root without a baseline mints `null` — zero authority, fail closed; a non-authorizing (empty session/generation) observation is what the extension startup check uses. The client (`observeFilesystemRoots`) admits trusted reads only when `rootIdentity` is present and matches the currently canonicalized root, every reference is `deployment_owned`, pinned, session-matched, generation-current, and path-canonical; an unregistered name-only selector never authorizes anything. Workspace/provider/custom/managed skill candidates are excluded from OMP critical resolution before any collision or precedence decision, and ordinary (non-critical) owned skills plus global skill behavior are untouched.
 
-**The pinned instruction layout is currently unpopulated.** The repository `skills/` tree installed at `/opt/air/skills` contains none of the four pinned `*/SKILL.md` files, so every on-image registration observably mints zero critical references — the safe fail-closed empty posture (no critical authority, no workspace fallback), never a silent fabrication. Populating the layout is an operator mount of the root-owned tree; until that mount exists, the critical-skill authority this interface guards is present in mechanism only. Unit/mock suites mint against synthetic pinned trees (a fixture `review/SKILL.md`), which prove the mechanism, not production content.
+The one place the ownership/mode observation survives is CRITICAL minting: the producer derives the root's own OBSERVED read-only fact and `evaluateCriticalSkillSelection` mints only when it is true — a writable tree therefore mints no critical authority (a planted pinned `*/SKILL.md` layout is refused) while ordinary skill admission never consults the flag. The read path (`read-replacement.ts`), the daemon's canonical-root observation (`filesystem-roots.ts`) and the inventory keep their identity, containment, link-free, `nlink === 1`, current-generation and writable-root-overlap requirements unchanged.
+
+**The pinned instruction layout is currently unpopulated.** The deployment-resolved root (the repository `skills/` tree, installed as the stock image's `$UID:0` `0775` personal tree) contains none of the four pinned `*/SKILL.md` files, so every registration observably mints zero critical references — the safe fail-closed empty posture (no critical authority, no workspace fallback), never a silent fabrication. Because that shipped root is also agent-writable, the observed read-only carve-out above is what keeps a planted pinned layout authority-free; an operator who wants critical authority must supply a root whose observed ownership and mode are read-only. Unit/mock suites mint against synthetic pinned trees (a fixture `review/SKILL.md`), which prove the mechanism, not production content.
 
 ### Responsibility and limits (user-owned / unverified)
 
-- **No new configuration surface**: no new config field, environment variable, or Helm value; `/opt/air/skills` is an internal deployment constant (`OMP_IMAGE_SKILLS_ROOT`), not operator-configurable, and critical-id expansion stays pinned.
+- **No new configuration surface**: no new config field, environment variable, or Helm value is introduced; the declared root is the deployment's existing `agent.skillsDir` / `AGENT_SKILLS_DIR` value (the ONE root both agent types resolve), and the internal `OMP_DECLARED_SKILL_ROOT` conveyance is a launch value assigned from the source plan, never an operator surface. Critical-id expansion stays pinned.
 - **Native custom-directory semantics remain user-owned unverified**: whether the pinned OMP binary's `skills.customDirectories` consumption behaves as translated here is runtime evidence (USER-RUNTIME-VERIFICATION.md section B); nothing here claims native support beyond the translated settings shape.
-- **Non-image hosts fail closed**: outside the image the root is simply absent, `observeOwnedSkills` mints `null`, and trusted reads are denied — development behavior keeps row-9/10 dev-fallback conventions for other owned artifacts but carries no skill authority fallback.
+- **Non-image hosts fail closed in the extension**: the in-child declaration check still consumes the installed `/opt/air/omp/config/{mode}.yml` document (there is no dev fallback for it), so a host without the owned tree mints zero skill authority there. Daemon-side callbacks use the resolved root instead, and an unobservable, linked, non-canonical or replaced root mints `null` — no fallback tree.
