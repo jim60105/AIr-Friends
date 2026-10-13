@@ -57,6 +57,9 @@ async function runBundleSmoke(): Promise<SmokeResult> {
   assertEquals(buildOutput.code, 0, new TextDecoder().decode(buildOutput.stderr));
 
   const stateBase = await Deno.makeTempDir({ prefix: "omp-bundle-smoke-state-" });
+  const parentConfigHome = Deno.env.get("XDG_CONFIG_HOME");
+  // A hostile parent selector must not reach the controlled driver environment.
+  Deno.env.set("XDG_CONFIG_HOME", `${stateBase}/foreign-config`);
   try {
     const ownedHome = `${stateBase}/omp-agent/restricted/home`;
     const agentDir = `${stateBase}/omp-agent/restricted`;
@@ -74,6 +77,7 @@ async function runBundleSmoke(): Promise<SmokeResult> {
       cwd: launchCwd,
       // A CONTROLLED environment: the owned launch env the bootstrap validates
       // and deliberately NO search-provider credentials.
+      clearEnv: true,
       env: { HOME: ownedHome, PI_CODING_AGENT_DIR: agentDir, PATH: "/usr/bin:/bin" },
       stdout: "piped",
       stderr: "piped",
@@ -84,6 +88,11 @@ async function runBundleSmoke(): Promise<SmokeResult> {
     assertEquals(output.code, 0, `driver failed:\n${stderr}\n${stdout}`);
     return JSON.parse(stdout) as SmokeResult;
   } finally {
+    if (parentConfigHome === undefined) {
+      Deno.env.delete("XDG_CONFIG_HOME");
+    } else {
+      Deno.env.set("XDG_CONFIG_HOME", parentConfigHome);
+    }
     await Deno.remove(stateBase, { recursive: true });
   }
 }
