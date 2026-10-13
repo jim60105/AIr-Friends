@@ -81,7 +81,7 @@ export function opencodeToolOutputDir(xdgDataHome: string): string {
  * filesystem.
  */
 export interface OpencodeSkillDiscoveryOptions {
-  /** Environment accessor; defaults to the process environment. */
+  /** Environment accessor (`HOME`); defaults to the process environment. */
   readonly env?: (name: string) => string | undefined;
   /**
    * The daemon user's OBSERVED home directory: what a `~/` entry in the
@@ -97,9 +97,9 @@ export interface OpencodeSkillDiscoveryOptions {
 
 /**
  * The daemon user's observed home, canonicalized. An unset, empty or relative
- * `HOME` yields `undefined`: no `~/` entry can then be resolved and no
- * home-scoped allowance can be bounded, so the refusal below stays vacuous
- * rather than bounding against a guessed directory.
+ * `HOME` yields `undefined` rather than a guessed directory: no `~/` entry can
+ * then be resolved and no home-scoped allowance can be bounded, so the
+ * declaration cannot be placed at all.
  */
 export function opencodeDaemonHome(
   options: OpencodeSkillDiscoveryOptions = {},
@@ -111,42 +111,28 @@ export function opencodeDaemonHome(
 }
 
 /**
- * The deployed OpenCode GLOBAL configuration document — the file the pinned
- * runtime reads from its global config directory, and the file an operator
- * mount shadows (documented in `docs/DEVELOPMENT.md`).
+ * The deployed OpenCode GLOBAL configuration document the AGENT reads: the
+ * file an operator mount shadows (documented in `docs/DEVELOPMENT.md`).
  *
- * Resolution follows the runtime's own order: `OPENCODE_CONFIG_DIR` (refused
- * when it is not absolute — a relative value would resolve against each
- * session's cwd, so the declaration could not be placed where the agent
- * reads); else `$XDG_CONFIG_HOME/opencode` (a relative `XDG_CONFIG_HOME` is
- * ignored, as the XDG base-directory specification requires); else
- * `{daemon home}/.config/opencode`.
+ * The home-based resolution is the agent subprocess's own, not a preference:
+ * that process is spawned with `clearEnv: true` and an explicit allow-list
+ * (`src/acp/agent-factory.ts`, `src/acp/sandbox-manager.ts`) that conveys
+ * `HOME` but NEVER a config-directory selector — `OPENCODE_CONFIG_DIR` is not
+ * in the list at all and `XDG_CONFIG_HOME` is in `NEVER_PASS_ENV`. So the
+ * document the agent reads is `{its HOME}/.config/opencode/opencode.json`
+ * whatever the daemon's own selectors say, and a declaration written anywhere
+ * else would be silently ineffective — the exact asymmetry this change
+ * removes. `HOME` is inherited verbatim, so the daemon's observed home IS the
+ * agent's home on this launch path.
  */
 export function opencodeGlobalConfigPath(options: OpencodeSkillDiscoveryOptions = {}): string {
-  const env = options.env ?? ((name: string) => Deno.env.get(name));
-  const configuredDir = env("OPENCODE_CONFIG_DIR");
-  if (configuredDir !== undefined && configuredDir !== "") {
-    if (!isAbsolute(configuredDir)) {
-      throw new ConfigError(
-        ErrorCode.CONFIG_INVALID,
-        `OPENCODE_CONFIG_DIR "${configuredDir}" is not an absolute path — the deployed OpenCode ` +
-          "configuration the skill-discovery declaration must be written into cannot be determined",
-        { opencodeConfigDir: configuredDir },
-      );
-    }
-    return join(configuredDir, "opencode.json");
-  }
-  const xdgConfigHome = env("XDG_CONFIG_HOME");
-  if (xdgConfigHome !== undefined && xdgConfigHome !== "" && isAbsolute(xdgConfigHome)) {
-    return join(xdgConfigHome, "opencode", "opencode.json");
-  }
   const home = opencodeDaemonHome(options);
   if (home === undefined) {
     throw new ConfigError(
       ErrorCode.CONFIG_INVALID,
-      "Neither OPENCODE_CONFIG_DIR nor XDG_CONFIG_HOME nor an absolute HOME is set — the " +
-        "deployed OpenCode configuration the skill-discovery declaration must be written into " +
-        "cannot be determined",
+      "No absolute HOME is observable in the daemon environment — the OpenCode agent subprocess " +
+        "inherits HOME and no config-directory selector, so the global configuration document " +
+        "the skill-discovery declaration must be written into cannot be determined",
     );
   }
   return join(home, ".config", "opencode", "opencode.json");
