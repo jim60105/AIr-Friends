@@ -20,7 +20,7 @@ user-owned checklist at the bottom.
 | ---------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `src/acp/omp/extension/enforcement.ts`         | Synchronous slot registration + attached handler body + live epoch observer                                                                                                              |
 | `src/acp/omp/extension/enforcement-error.ts`   | Bounded error shapes, observation shapes, composition-order data                                                                                                                         |
-| `src/acp/omp/extension/_daemon/mod.ts`         | Image-mapped re-export barrel (row 20 D5) — the extension's ONLY 14a import surface                                                                                                      |
+| `src/acp/omp/extension/_daemon/mod.ts`         | Build-TIME re-export barrel of the 14a modules — the extension's ONLY 14a import surface, inlined by the C3 bundler into the single generated `index.js` (no copied image install tree)  |
 | `src/acp/omp/tool-enforcement-wiring.ts`       | Composition point: seam table, pinned mechanism evidence, honesty gates                                                                                                                  |
 | `src/acp/omp/extension/native-registration.ts` | C4 native adapter: `api.on("tool_call")` + `api.registerTool(...)` at factory evaluation; the DIRECT `api.getAllTools()` method (captured at factory evaluation, invoked only on live calls) → canonical provenance: authentic `native-builtin` tuple, owned-extension, or operator-MCP   |
 | `src/acp/omp/extension/native-events.ts`       | C4 decoder: pinned `ToolCallEvent` → restricted input (root screening, shape selection, destructive payload, empty-hierarchy record evaluation); model-forged authority fields are never read                                                            |
@@ -28,14 +28,16 @@ user-owned checklist at the bottom.
 | `src/acp/omp/deployment-module.ts`             | Declared deployment-module identity: the image/development artifact faces, permitted dependency closure, and the PURE physical-evidence policy (posture, containment, anchoring)       |
 | `src/acp/omp/owned-module-evidence.ts`         | Context-free physical observer over the declared faces: one acceptance anchor, per-observation re-verification, and the production metadata reader (`node:fs` under the pinned host)   |
 
-**Current-pin reality:** the shipped row-12 gate always yields blockers
-(native-custom-tool-discovery and plugin-entry-points are P0-unresolved and
-pushed unconditionally), so the entrypoint throws BEFORE the default factory
-is ever exported in every environment today — the native registrations below
-become operative only if the pinned pre-import-exclusion
-verdicts ever pass — this is a stronger residual than "extension load might
-fail" (checklist item 4) and no wiring test can or does certify a registered
-handler in a real process.
+**Current-pin reality:** the shipped row-12 gate keeps its P0-unresolved
+`no-supported-mechanism` verdicts for native-custom-tool-discovery and
+plugin-entry-points, and pushes those blockers UNLESS the decision carries a
+matching accepted `absent-clean` executable-source observation for the exact
+workspace and generation (DECIDED decision 1, row 27). Without one, the
+entrypoint throws BEFORE the default factory is exported, so the native
+registrations below are operative only on the decision-1 admission path and
+after every other blocker is clear; a merely failed or absent extension leaves
+a running session without the handler (checklist item 4). No wiring test can or
+does certify a registered handler in a real process.
 
 ## Native registration (C4 correction)
 
@@ -352,10 +354,12 @@ install (row 20):
    Since C4 there is no module-local attachment point to inspect: the
    factory's `api.on("tool_call", ...)` call IS the registration; observe
    a real blocked call to prove invocation. Load evidence for the factory
-   itself remains limited: the row-12 gate currently throws at module load
-   in every environment, and `runner.emit` only logs lifecycle-hook errors,
-   so neither tests nor docs here certify that the binary ever evaluated
-   the factory.
+   itself remains limited: the module throws at load whenever a discovery
+   blocker remains (the two native executable-discovery surfaces are admitted
+   only under decision-1's matching accepted observation), the pinned host
+   omits a failed extension, and `runner.emit` only logs lifecycle-hook errors
+   without failing startup — so neither tests nor docs here certify that the
+   binary ever evaluated the factory.
 2. **Real block behavior** — does a blocked call fail closed natively
    (handler error/timeout blocks per `emitToolCall`), with no retry or
    continue?

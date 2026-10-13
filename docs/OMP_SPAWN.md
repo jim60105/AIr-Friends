@@ -30,7 +30,14 @@ Arguments are deterministically assembled from the owned-settings composition pr
 - Subcommand: `acp`
 - Base flags: `--no-extensions --no-lsp` (LSP disabled in every mode, decision 5 / row 17)
 - Overlay configuration: `--config` flags for each path in `orderedOverlayPaths` (mode document `restricted.yml` last among overlays).
-- Trusted extension: `--trusted-extension src/acp/omp/extension/index.ts` (contracted dev path; packaged under `/opt/air/omp/extension/index.ts` by row 20).
+- Trusted extension: `--trusted-extension <selected generated artifact>` — the launch assembly
+  (`selectLaunchDeploymentModule()`, `src/acp/omp/deployment-module.ts`) consumes the resolver
+  output VERBATIM: the image face `/opt/air/omp/extension/index.js` when that installed artifact
+  exists, otherwise the deterministic GENERATED development entry
+  `build/omp-extension/index.js` (repository-relative; the checkout's own bundling contract). The
+  canonical source `src/acp/omp/extension/index.ts` (`OMP_TRUSTED_EXTENSION_PATH`) is the
+  bundler INPUT and never a launch target, and an absent generated artifact fails the launch
+  preflight naming the `deno task bundle:omp-extension` remedy.
 - System prompt override: `--system-prompt /app/prompts/system_prompt_override.md`.
 - **Invariant**: No `--yolo` or auto-approval CLI flags appear in restricted mode. Non-YOLO approval is pinned in `restricted.yml` (`tools.approvalMode: write`).
 
@@ -39,6 +46,9 @@ Arguments are deterministically assembled from the owned-settings composition pr
 - Subcommand: `acp`
 - Base flags: `--no-extensions --no-lsp` (LSP disabled in every mode, decision 5 / row 17)
 - Overlay configuration: `--config` flags for each path in `orderedOverlayPaths` (`native-yolo.yml` with `tools.approvalMode: yolo`).
+- Trusted extension: the SAME selected generated artifact as the restricted launch (the flag sits
+  in the common argument assembly). The exemption is structural at the registration site — a
+  native-YOLO process registers no restricted handler and no replacement tool.
 - Disjointness check: Assembly asserts at runtime that no restricted overlay appears in a native-yolo launch.
 
 ---
@@ -64,10 +74,20 @@ The metadata-only executable-source check (`src/acp/omp/executable-sources.ts`) 
 
 ---
 
-## 4. Inherited Application Gates
+## 4. Inherited Verdicts, Landed Integration and Evidence Limits
 
-Unit and mock tests in AIr-Friends verify configuration assembly and argument construction decisions only. Full runtime execution remains gated by:
+Unit and mock tests in AIr-Friends verify configuration assembly and argument construction
+decisions only. The pinned upstream verdicts below are INHERITED, not reopened, and the seams they
+name are carried by their DECIDED dispositions and landed integrations — no change in the OMP
+batch waits on an unmet prerequisite:
 
-1. P0 compatibility contracts (`docs/OMP_COMPATIBILITY.md`).
-2. Row 8 authoritative record-reset application gate (`docs/OMP_SETTINGS.md`) — the pinned `unresolved` merge verdict stands verbatim. Decision 3's application no longer waits on it or on a separate user decision: it is DECIDED via settings-discovery-path control (row 26, `docs/OMP_SETTINGS.md` sections 2 and 6), with restricted execution-time default-deny as the second boundary.
-3. Downstream packaging and binary installation (row 20).
+1. P0 compatibility contracts (`docs/OMP_COMPATIBILITY.md`): every `incompatible`/`unresolved`
+   boundary verdict stands verbatim beside its DECIDED (2026-10-09) disposition. P0's
+   application-halt ruling is superseded by §1a, so nothing here is application-blocked.
+2. Row 8 authoritative record-reset gate (`docs/OMP_SETTINGS.md`) — the pinned `unresolved` merge
+   verdict stands verbatim. Decision 3's application did not wait on it or on a separate user
+   decision: it is DECIDED via settings-discovery-path control (row 26, `docs/OMP_SETTINGS.md`
+   sections 2 and 6), with restricted execution-time default-deny as the second boundary.
+3. Packaging and binary installation (row 20): landed — the root-owned `/opt/air/omp` tree plus
+   the pinned `omp` v18.6.1 install. Official-runtime behavior (the native extension load and
+   image acceptance) remains user-owned and UNVERIFIED (`docs/USER-RUNTIME-VERIFICATION.md`).

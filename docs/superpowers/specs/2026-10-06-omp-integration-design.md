@@ -72,8 +72,9 @@ amendment is a deployment-owned disposition of a recorded gap, not a supported-m
    `tool_call` enforcement handler plus the client's ACP permission policy as the only boundary.
    Residual risk recorded: `runner.emit` logs lifecycle-hook errors without failing session startup,
    so a failed extension leaves the session running without the restricted capability set and no
-   client-observable signal exists. No readiness claim is made. Carried by
-   `gate-omp-policy-readiness`.
+   client-observable signal exists. No readiness claim is made. The carrying change is
+   `wire-omp-restricted-tool-enforcement`; `gate-omp-policy-readiness` (numbered row 13) was
+   REMOVED from the batch, so no readiness implementation exists or is deferred.
 3. **Authoritative approval-record reset.** Supersedes section 7 "Authoritative settings" where it
    selects "an owned reset overlay followed by the owned mode overlay" as the record-reset strategy
    and requires verifying the `approval: null` barrier. Control moves to settings discovery paths:
@@ -142,7 +143,7 @@ the section 15 runtime checklist remains user-owned.
 | `AgentProcessPool`      | Existing channel-scoped reuse and global execution lease; adds OMP permission mode to process identity and state ownership.                                                  |
 | `AgentConnector`        | ACP lifecycle, stable-first model configuration, reasoning normalization, session option caches, and same-mode recovery.                                                     |
 | `ChatbotClient`         | Per-session permission authority, filesystem authorization, trusted-root reads, and rejection diagnostics.                                                                   |
-| AIr-owned OMP extension | Restricted tool admission, provenance checks, alternate-entry rejection, network adaptation, and policy-readiness enforcement. No independent mutable YOLO authority.        |
+| AIr-owned OMP extension | Restricted tool admission, provenance checks, alternate-entry rejection, network adaptation, and the deployed native registrations (synchronous `tool_call` enforcement plus the restricted replacement tools). No independent mutable YOLO authority. Policy readiness is cancelled — no readiness responsibility exists here. |
 | Existing Skill API      | Session authentication, payload containment, existing memory/reply operations, and platform-facing delivery.                                                                 |
 
 Prefer focused modules for policy evaluation, path access, and extension adaptation rather than
@@ -168,6 +169,13 @@ The trusted extension admits the intended capability set, checks provenance at e
 and blocks unknown tools and alternative execution surfaces. Bash and destructive actions still
 reach AIr's ACP permission policy. Ordinary writes reach the independently secure ACP write sink.
 Do not require a form-elicitation interaction to execute an already authorized capability.
+
+> Superseded on local IO by the 2026-10-13 native local IO amendment (end of this document):
+> ordinary `write`/`edit` run under the pinned native approval path plus the process's ambient OS
+> permissions, and the ACP write sink applies only WHERE THE PINNED BRIDGE ROUTES THE CALL — an
+> absolute native session-sandbox/plan target and an unavailable client bridge mutate directly
+> (the user-authorized residual). No ACP-sink confinement is claimed and no pre-dispatch route
+> gate is added.
 
 ### Native YOLO
 
@@ -218,9 +226,9 @@ OMP must reject it too. Do not widen the command list while translating configur
 
 | Capability                                | Restricted behavior                                                                                                                                             |
 | ----------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Read/list/glob/grep and equivalent search | Existing session boundaries plus explicit authorized shared/read-only roots. Account for native implementations that do not automatically invoke ACP callbacks. |
+| Read/list/glob/grep and equivalent search | Existing session boundaries plus explicit authorized shared/read-only roots. Account for native implementations that do not automatically invoke ACP callbacks. *(2026-10-13 amendment: accepted native local read/search runs under `native-local-read-approval` — native approval plus ambient OS permissions, including ambient-readable paths beyond the daemon roots; the ACP read boundary holds only for callbacks that execute.)* |
 | Trusted skills                            | Owned skills remain discoverable and readable; workspace content cannot shadow a critical skill.                                                                |
-| Ordinary write/edit                       | Session staging/TMPDIR, or authorized shared Agent workspace with allowed extension. No arbitrary normal user-workspace mutation.                               |
+| Ordinary write/edit                       | Session staging/TMPDIR, or authorized shared Agent workspace with allowed extension. No arbitrary normal user-workspace mutation. *(2026-10-13 amendment: `native-local-write-approval` — the pinned native approval path plus ambient OS permissions, with the ACP sink only where the bridge routes the call; absolute native session-sandbox/plan targets and an unavailable client bridge are the user-authorized ambient native mutation residual and carry no confinement claim.)* |
 | Delete/move/destructive patch             | Normalize into the common destructive-action policy; validate all targets and require per-session authorization.                                                |
 | Bash                                      | Existing script/command/argument/path policy, with the native ACP permission gate active.                                                                       |
 | Web fetching                              | Preserve URL-reading capability, including the URL branch of native `read`; controlled transport and per-hop validation.                                        |
@@ -481,6 +489,12 @@ Container execution and architecture packaging checks are user-owned manual veri
 
 - Missing/invalid owned configuration or failed trusted-module initialization fails the affected
   restricted session; do not use an unguarded fallback.
+  *(2026-10-13: the daemon-side owned-configuration/asset preflight still fails the launch or the
+  session closed, but a merely failed or absent TRUSTED MODULE does not — the pinned host omits
+  the failed extension and only logs lifecycle errors, so the session continues without the
+  restricted handler; "policy readiness" below is cancelled (row 13 removed) and no readiness
+  denial exists. See `docs/OMP_DISCOVERY.md`, "Extension-Load Failure Is Not Observable
+  Readiness".)*
 - Pre-import exclusion, policy readiness, gate-context ownership, and path-containment failure deny
   the operation/session before the protected side effect.
 - Record bounded authorization rejection diagnostics without exposing secrets or private content.
@@ -676,3 +690,38 @@ The source audit found these integration gaps despite the original batch being a
 The correction batch, application order, shared-file serialization, and workday budgets are owned
 by `docs/superpowers/specs/2026-10-06-omp-proposal-batch-index.md`. This amendment records source
 findings and planned repairs, not successful native execution or a rerun of the test suite.
+
+Status (2026-10-13): the findings above were repaired by the archived correction batch `C1`–`C7`
+and by the applied seam-correction batch, whose ownership/application matrix is recorded in
+`docs/superpowers/specs/2026-10-06-omp-proposal-batch-index.md` section 8. The readiness
+statements this amendment supersedes (sections 7, 10, 13 and the older readiness checklist rows)
+stay historical and are not active restoration work. Official-runtime acceptance — native
+extension load, handler invocation, LSP suppression, traffic mediation — remains user-owned and
+UNVERIFIED (`docs/USER-RUNTIME-VERIFICATION.md`).
+
+## Native local IO amendment (2026-10-13)
+
+The accepted posture of `admit-trusted-omp-native-builtins` supersedes the local-IO statements in
+sections 5 and 6 and in the capability table above wherever they read as confinement or as
+universal ACP-sink completion:
+
+- Native `read`/`grep`/`glob`/`find` local IO runs under
+  `native-local-read-approval` — authenticated native origin, the supported native
+  activation/approval tier, then the PROCESS's own ambient OS permissions. An ambient-readable
+  path outside the daemon session roots may be read; the ACP read boundary keeps its guarantees
+  only for the callbacks that actually execute. Remote/device routes stay denied and are screened
+  out before local dispatch.
+- Ordinary native `write`/`edit` runs under `native-local-write-approval` — the pinned native
+  approval path plus the same ambient OS permissions — with the restricted ACP mutation sink
+  retained only as the route the pinned bridge applies WHERE IT ROUTES THE CALL (decision and
+  denial propagation unchanged). Two conditions do not reach that sink and mutate directly: an
+  absolute native session-sandbox/plan target that resolves to a native exemption, and an
+  unavailable client bridge/capability. That is the residual risk the user explicitly
+  authorized; **no ACP-sink confinement is claimed for those paths** and no pre-dispatch
+  route-evidence gate is added.
+
+Everything else in this design stands unchanged: the complete fail-closed destructive path, the
+common command policy with the active native ACP permission path, the controlled transports, the
+owned skill-URI authorization, and the named execution-surface denials. Deployment stays pinned at
+OMP `v18.6.1`: the investigated `v18.10.3` supplies no confined-IO seam
+(`docs/OMP_COMPATIBILITY.md` §1b).

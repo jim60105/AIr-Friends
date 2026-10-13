@@ -17,6 +17,12 @@ The official OMP runtime (`v18.6.1` / commit `2a2c6dcbbb558c0f8145f67f28b3370984
 **Downstream Gate Invariant:**
 All downstream implementation changes (`canonicalize-acp-filesystem-roots`, `secure-acp-filesystem-access`, `enforce-acp-filesystem-authorization`, `normalize-acp-destructive-targets`, `translate-omp-owned-settings`, `spawn-mode-scoped-omp-agents`, `gate-omp-policy-readiness`, `guard-omp-executable-discovery`, `control-omp-url-fetch-transport`, etc.) **MUST REMAIN BLOCKED** from applying to runtime production while any required boundary or subcase is classified as `incompatible` or `unresolved`. Proposal generation may proceed, but no runtime security boundary is cleared by mock tests or partial hooks. Resolving genuine incompatibilities requires an explicit user design decision.
 
+**Historical application ruling (superseded 2026-10-09 — see §1a).** The invariant above is
+the proposal-time ruling and is retained as the historical record. §1a records the user's
+explicit decisions on all seven boundaries, which supersede it: no downstream change is held
+back by it any longer. The verdict tokens and the per-boundary classifications in §3 are
+unchanged and remain authoritative at their pinned boundaries.
+
 ---
 
 ## 1a. User Decision Register (2026-10-09)
@@ -37,7 +43,11 @@ deployment ownership rather than as a claim of native support. All seven disposi
    executable custom tools and plugin entry points out of the workspace, the owned extension is
    loaded only from the image path with `--no-extensions` keeping ambient discovery off, and a
    startup check rejects the session when it finds an executable module in the workspace. The
-   fail-closed session rejection the guard already ships remains the fallback. Carried by
+   fail-closed session rejection the guard already ships remains the fallback. The launch
+   selects the generated artifact — the image face `/opt/air/omp/extension/index.js`, or the
+   generated development entry `build/omp-extension/index.js` where the owned tree is absent —
+   and that session rejection is the DAEMON-side pre-native check: a merely failed or absent
+   extension is not a session-level fail-closed guarantee (`docs/OMP_DISCOVERY.md`). Carried by
    `guard-omp-executable-discovery`.
 2. **Authenticated policy readiness** — disposition of section 3 boundary 2 (recorded
    `unresolved`). The requirement for a client-observable, authenticated readiness handshake is
@@ -217,7 +227,7 @@ OMP `packages/coding-agent/src/tools/fetch.ts` provides a `fetchOverride` hook i
 | Contract Name               | Downstream Batch Owner                                                            | Imported Value / Signature          | Downstream Obligation                                                                                                                                                                                                                  |
 | :-------------------------- | :-------------------------------------------------------------------------------- | :---------------------------------- | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `DiscoveryContract`         | `guard-omp-executable-discovery` (P5a)                                            | `validateDiscoveryContract`         | Must enforce pre-import rejection before invoking any importer or factory.                                                                                                                                                             |
-| `ReadinessContract`         | `gate-omp-policy-readiness` (P5b)                                                 | `validateReadinessContract`         | Must bind handshake to current process, session, challenge, revision, and epoch.                                                                                                                                                       |
+| `ReadinessContract`         | `gate-omp-policy-readiness` (P5b) — CANCELLED (removed 2026-10-09)                | `validateReadinessContract`         | Historical only: no runtime consumer exists or is planned, the client-observable readiness requirement is cancelled (decision 2), and the export stays unwired.                                                                        |
 | `RecordAuthorityContract`   | `translate-omp-owned-settings` (P3b)                                              | `evaluateApprovalRecordAuthority`   | Must evaluate effective merged settings and detect residual grants/prompts/denies.                                                                                                                                                     |
 | `DestructiveIntentContract` | `normalize-acp-destructive-targets` (P1d)                                         | `validateDestructiveIntentContract` | Must validate all delete targets, move endpoints, and patch mutations before execution.                                                                                                                                                |
 | `RestrictedLspContract`     | `disable-restricted-agent-lsp` (P5d)                                              | `validateRestrictedLspContract`     | Superseded posture: encodes decision D6's restricted-only LSP removal; decision 5 (row 17) disables LSP in all agents/modes instead, so the export stays unwired (named residual; see `tests/acp/omp-lsp-coldstart-evidence.test.ts`). |
@@ -232,7 +242,7 @@ The following checklist contains runtime properties of the official compiled bin
 
 - [ ] **Executable & Architecture:** Verify installed `omp --version` matches `v18.6.1`, SHA-256 checksums match published manifests for x64 (`c92a684...`) and arm64 (`cb78153...`), packaged notices are present, and image starts without adding Bun.\
       _Current Status:_ **UNVERIFIED**.
-- [ ] **Extension Loading & Discovery:** Exercise real trusted-extension load, pre-import exclusion, policy readiness, hostile custom tool/plugin top-level code, setting precedence, and critical skill resolution on new/load.\
+- [ ] **Extension Loading & Discovery:** Exercise real trusted-extension load, pre-import exclusion, hostile custom tool/plugin top-level code, setting precedence, and critical skill resolution on new/load; observe the accepted extension-load residual (a failed or absent extension leaves the session without the restricted handler and no readiness signal exists — policy readiness is cancelled, not restored).\
       _Current Status:_ **UNVERIFIED**.
 - [ ] **Filesystem Delegation:** Observe actual ACP filesystem delegation, transformed-write readback behavior, restricted sink rejection, and native destructive permission shapes.\
       _Current Status:_ **UNVERIFIED**.

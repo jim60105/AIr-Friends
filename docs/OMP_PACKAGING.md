@@ -7,10 +7,11 @@ sidecar-import-map scaffolding is REMOVED — one generated `index.js` is the
 installed extension artifact.
 This document is the packaging contract for the official Oh-My-Pi (`omp`) CLI
 and the deployment-owned artifacts under `/opt/air/omp`. It installs bytes and
-records digests; it certifies **nothing** about native enforcement — rows
-12/13/14's gates and P0's unresolved verdicts gate security consumption, and
-the live acceptance checklist (§7) is user-owned (design §15) and ships
-explicitly unverified.
+records digests; it certifies **nothing** about native enforcement — every
+pinned P0 verdict stands verbatim beside its DECIDED (2026-10-09) disposition,
+no change in this batch remains application-blocked, and no runtime acceptance
+is claimed. The live acceptance checklist (§7) is user-owned (design §15) and
+ships explicitly unverified.
 
 Related: [OMP settings](OMP_SETTINGS.md) (the row-8 overlays + SYSTEM.md
 mapping), [OMP discovery](OMP_DISCOVERY.md) (the trusted extension's load-time
@@ -75,7 +76,7 @@ is verified with `sha256sum -c -` BEFORE any install/COPY consumption.
 | `/opt/air/omp/prompt/SYSTEM.md`         | `prompts/system_prompt_override.md`      | `0:0`       | 0644       |
 | `/opt/air/omp/extension/index.js`       | build-time generated ESM bundle (C3)     | `0:0`       | 0644       |
 | `/opt/air/omp/PACKAGE-MANIFEST.sha256`  | regenerated at every image build         | `0:0`       | 0644       |
-| `/opt/air/skills/**`                    | `skills/` (row 28 owned skill root)      | `0:0`       | 0755 files |
+| `/opt/air/skills/**`                    | staged bundled catalog + reserved `lib` (`scripts/stage-owned-skills.ts`; `unify-omp-skill-root-resolution` D7 — never a broad `skills/` copy) | `0:0`       | 0755 files |
 
 Ownership rationale (deliberate divergences from the image's `$UID:0` 775
 pattern, both documented in Containerfile comments):
@@ -105,18 +106,20 @@ and is not modified by these steps.
 
 ## 4. Dev→image path mapping (`src/utils/omp-paths.ts`)
 
-The mapping is exported code, not a Dockerfile convention. All resolvers are
-**image-first-if-exists** with byte-identical dev fallback: development
-checkouts never own `/opt/air`, so existence of the root IS the deployment
-signal and dev behavior is unchanged. The launch assembly
-(`src/acp/agent-factory.ts`) consumes resolver output verbatim — there is no
-second path convention — and row 9's fail-closed presence checks (and their
-error messages) stay exactly as shipped.
+The mapping is exported code, not a Dockerfile convention. The extension's
+face selection is the deployment-module declaration
+(`selectLaunchDeploymentModule()`, `src/acp/omp/deployment-module.ts`) and the
+remaining resolvers are **image-first-if-exists** with byte-identical dev
+fallback: development checkouts never own `/opt/air`, so existence of the root
+IS the deployment signal and dev behavior is unchanged. The launch assembly
+(`src/acp/agent-factory.ts`) consumes the selected declaration verbatim —
+there is no second path convention — and row 9's fail-closed presence checks
+(and their error messages) stay exactly as shipped.
 
-| Export                             | Image path (when it exists)       | Dev fallback                                                                                                                                                                                                             |
+| Export / selector                  | Image path (when it exists)       | Dev fallback                                                                                                                                                                                                             |
 | ---------------------------------- | --------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `OMP_IMAGE_ROOT`                   | `/opt/air/omp`                    | — (constant)                                                                                                                                                                                                             |
-| `resolveOmpTrustedExtensionPath()` | `/opt/air/omp/extension/index.js` | `build/omp-extension/index.js` (`OMP_TRUSTED_EXTENSION_BUNDLE_PATH` — the GENERATED development bundle; `deno task bundle:omp-extension` cuts it and the launch preflight fails closed with that remedy until it exists) |
+| `selectLaunchDeploymentModule()`   | `/opt/air/omp/extension/index.js` (`OMP_IMAGE_EXTENSION_ARTIFACT`) | `build/omp-extension/index.js` (`OMP_TRUSTED_EXTENSION_BUNDLE_PATH` — the GENERATED development entry, presented to the launch VERBATIM as a repository-relative path; `deno task bundle:omp-extension` cuts it and the launch preflight fails closed with that remedy until it exists. The bundle separately embeds the canonical ABSOLUTE development declaration the physical evidence is anchored to) |
 | `resolveOmpConfigPath(devPath)`    | `/opt/air/omp/config/<basename>`  | `devPath` (e.g. `agent-config/omp/restricted.yml`)                                                                                                                                                                       |
 | `resolveOmpSystemPromptPath()`     | `/opt/air/omp/prompt/SYSTEM.md`   | `/app/prompts/system_prompt_override.md`                                                                                                                                                                                 |
 
@@ -204,13 +207,16 @@ CLOSED at the bundle boundary. What remains asymmetry: the bare
 `@sinclair/typebox` edge resolves to whatever facade the real host provides
 at trusted-extension load (the fixture in the packaging suite is a
 stand-in), and whether OMP's embedded runtime reaches the discovery-gate
-import at all stays design §15 user-owned and UNVERIFIED (row 12's
-pre-import-exclusion blocker is unchanged: BOTH the dev bundle and the
-canonical source still fail closed at load with the same discovery-gate
-error — that parity is what the packaging suite proves). When row 12 is
-ever resolved, the packaging suite's fail-closed parity test is designed to
-fail on purpose in that same change, forcing the rewrite to
-successful-load parity.
+import at all stays design §15 user-owned and UNVERIFIED. Row 12's
+pre-import-exclusion verdict stays `unresolved` and is NOT reopened: with no
+accepted executable-source observation the module still throws at load with the
+same discovery-gate error, so the dev bundle and the canonical source stay at
+fail-closed parity — that parity is what the packaging suite proves. The other
+side of the same condition is exercised by the row-27 decision-1 admission:
+driven with the full restricted launch posture plus a matching accepted
+`absent-clean` observation for that exact workspace and generation, the load
+proceeds past the gate to the factory — the §5 scope note below drives exactly
+that path.
 
 Scope note (row 27 + `bind-omp-owned-module-evidence`): the fail-closed load
 above is what an identified-yet-UNRESOLVED launch sees. Under the row-27
@@ -275,8 +281,10 @@ ships explicitly UNVERIFIED:
 - [ ] OMP's embedded (Bun-embedded) runtime natively loads
       `/opt/air/omp/extension/index.js` with NO import map and NO download:
       the bare `@sinclair/typebox` edge reaches the host's own `Type` facade
-      and the `node:*` builtins resolve (the §5 external-trust asymmetry;
-      fail-closed at the discovery gate if the load never happens)
+      and the `node:*` builtins resolve (the §5 external-trust asymmetry; if
+      the load does not happen the extension is omitted and the session runs
+      without the restricted handler — no readiness signal exists, see
+      `docs/OMP_DISCOVERY.md`)
 - [ ] The controlled transports' `node:dns/promises` resolution face works
       under the real host for a name with records in exactly one family
       (§5 D4; fixture-proven in CI, live-resolver behavior user-owned)

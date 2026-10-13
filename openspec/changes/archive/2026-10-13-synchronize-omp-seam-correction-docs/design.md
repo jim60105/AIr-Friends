@@ -22,7 +22,7 @@ Add this batch's issue owner, decision, dependency and code-conflict matrix. Pro
 
 ### Correct exact deployment wording
 
-Document canonical source `src/acp/omp/extension/index.ts` as a build input. Development launch selects `build/omp-extension/index.js` resolved to an absolute path by assembly; image launch selects `/opt/air/omp/extension/index.js`. Packaging contains the single generated locked ESM artifact and explicit supported native-host/typebox facade, with manifest coverage. Remove copied `_daemon` and raw-source launch claims rather than preserving deprecated alternatives. Keep module deployment root separate from mutable per-spawn/pool state root and session roots.
+Document canonical source `src/acp/omp/extension/index.ts` as a build input. Development launch presents the repository-relative generated entry `build/omp-extension/index.js` to the host verbatim (`selectLaunchDeploymentModule()`; the checkout's own bundling contract — the bundle separately embeds the canonical ABSOLUTE development declaration its physical evidence is anchored to); image launch selects `/opt/air/omp/extension/index.js`. Packaging contains the single generated locked ESM artifact and explicit supported native-host/typebox facade, with manifest coverage. Remove copied `_daemon` and raw-source launch claims rather than preserving deprecated alternatives. Keep module deployment root separate from mutable per-spawn/pool state root and session roots.
 
 ### Truthful boundary documentation
 

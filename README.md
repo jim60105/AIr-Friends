@@ -198,8 +198,11 @@ The official container image includes:
 
 - Pre-installed AI agent binary (OpenCode CLI)
 - Pre-installed OMP CLI (`omp`), pinned by exact tag + per-arch SHA-256 checksums
-  (`Containerfile` `OMP_VERSION`); packaging only — OMP runtime enforcement is gated
-  by the earlier OMP rows. See [OMP Packaging](docs/OMP_PACKAGING.md).
+  (`Containerfile` `OMP_VERSION`), with the generated trusted-extension
+  packaging/launch integration landed. Native enforcement and image/runtime
+  acceptance remain user-owned and unverified — see
+  [OMP Packaging](docs/OMP_PACKAGING.md) and the
+  [consolidated runtime checklist](docs/USER-RUNTIME-VERIFICATION.md).
 - Auto-approval mode enabled for isolated execution
 - Health check endpoint on port 8080
 - Default prompts at `/app/prompts` (can be overridden)

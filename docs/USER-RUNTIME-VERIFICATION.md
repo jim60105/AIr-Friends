@@ -6,13 +6,19 @@ expanded with the per-area runtime items recorded across the batch's OMP
 documentation. Exclusive home: every predecessor document cross-links here and
 keeps its own content — verification items are never maintained in two places.
 
-**Evidence separation (binding on every row).** Each row separates three
-kinds of evidence, and none of the first two ever substitutes for the third:
+**Evidence separation (binding on every row).** Each row separates the
+following kinds of evidence, and none of the first three ever substitutes for
+the last:
 
 - **Source audit** — what the pinned upstream source/contracts establish
   (never a claim that the official executable behaves).
 - **Unit/mock** — automated suites in this repository (`deno task test:unit` /
   `test:integration`). A passed unit/mock suite is NOT runtime verification.
+- **User-reported observation** — an operator report from a running deployment.
+  This change's design directs that the reported skill helper/recipe render
+  failures be preserved without being rerun. Such a report stays a boundary
+  observation: it is never an evidence record, it is not reproduced here, and
+  it neither flips a row nor substitutes for the native acceptance below.
 - **User runtime** — the user's own observation on a real deployment. Until
   supplied, the runtime outcome reads `unverified`.
 
@@ -103,6 +109,7 @@ Unit/mock: connector/recovery suites, row-23 lifecycle suite.
 ## F. Skill handoff and payload staging (rows 16/18; design §15 bullet 6)
 
 Source-audit home: [docs/SKILLS_IMPLEMENTATION.md](SKILLS_IMPLEMENTATION.md) ·
+[docs/DEVELOPMENT.md](DEVELOPMENT.md) (delivered skills-root contract) ·
 Unit/mock: row-24 `tests/integration/omp-skill-handoff/handoff.integration.test.ts`
 (both spawn shapes), `tests/skills/*`, `tests/skill-api/*`.
 
@@ -111,6 +118,7 @@ Unit/mock: row-24 `tests/integration/omp-skill-handoff/handoff.integration.test.
 | Real per-spawn skill delivery: literal session id + absolute staging path in prompt; skill script delivers once, no duplicates | prompt templates; `session-staging.ts` | row-24 `3.1/3.2` per-spawn (mock agent + real server + real scripts) | unverified —                       |
 | Real pooled/shared skill delivery: same contract with pointer resolution (no session env at spawn)                             | pointer/`active.json` contract         | row-24 `3.1/3.2` pooled                                              | unverified —                       |
 | Real retry-on-missing-reply lands exactly once with literal-first guidance under real agent output                             | main-spec retry requirement            | row-24 `3.2` (mock silent turn)                                      | unverified —                       |
+| Delivered trusted skills-root contract: the literal absolute root renders into every classified skill-instructing prompt and retry recipe as POSIX single-quoted executable/id/payload arguments, a missing/empty/relative root fails before delivery, and the mounted-template omission guard fires | `DEVELOPMENT.md` §Prompt Template System; `SKILLS_IMPLEMENTATION.md` §Script Root Convention | `render-delivered-skill-root-contract` render/delivery fixtures (mock only) | unverified — the reported helper/render failures remain observations, not native acceptance |
 
 ## G. Process pool modes and recovery (rows 10/11/21; design §15 bullet 7)
 
