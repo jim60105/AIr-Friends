@@ -137,7 +137,11 @@ tiers; citations re-verified at pin `2a2c6dc` / v18.6.1):
   symlink-replaced identities, traversal spellings, stale/absent generations,
   and off-image roots deny BEFORE delegation with no fallback root. Network
   completion grants nothing here: the URL-route completion above and the
-  skill-URI admission are independent decisions.
+  skill-URI admission are independent decisions. The grant stays IMAGE-ONLY
+  and is unchanged by `bind-omp-owned-module-evidence`: an owned DEVELOPMENT
+  module never adds a skill-URI root or a fallback source, and the separately
+  selected native script root used by delivered prompts does not expand this
+  URI authorization.
 - `partial-seam-not-selected`: the native `ToolSession.fetch` seam —
   exists, enrichment reach only, and **no** supported ACP-bootstrapped
   injection point sets it; promotion would require a P0 revision.
@@ -157,6 +161,18 @@ surface, an unregistered or shadowed name — still blocks at
 `rejected_pending_adapter`. The marker is never a plain allow either way,
 and the compiled-binary invocation claim below stays user-owned: completion
 is composition evidence, not native observation.
+
+Since `bind-omp-owned-module-evidence` the ownership step in front of this
+completion uses PHYSICAL deployment-module evidence instead of session
+identity, so the owned `read`/`web_search` replacements genuinely reach this
+clamp in production with no acquired session context. The clamp's own
+registration evidence is no longer a name-only membership test: the live
+roster record for the exact name must BE this owned extension AND pass the
+full provenance admission (physical evidence against the accepted anchor,
+coherent epoch/generation) at this instant, so a foreign same-name
+registration can never complete a controlled route. Denials still perform no
+transport or backend delegation, and absent credentials still block
+`rejected_pending_adapter` with no native-provider fallback.
 
 ## Honesty table (D1) — what the suites do and cannot certify
 

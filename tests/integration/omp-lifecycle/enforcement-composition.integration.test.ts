@@ -36,6 +36,11 @@ import {
   evaluateApprovalRecordAuthority,
 } from "@acp/omp/record-evaluator.ts";
 import { SyntheticPositiveLedger } from "../../mocks/omp-mock-session.ts";
+import { OMP_IMAGE_MODULE_DECLARATION } from "@acp/omp/deployment-module.ts";
+import {
+  fixtureImageObservation,
+  fixtureOwnedExtensionRecord,
+} from "../../acp/omp-owned-module-fixture.ts";
 
 function blockedOutcome(outcome: EnforcementOutcome): Extract<
   EnforcementOutcome,
@@ -47,28 +52,15 @@ function blockedOutcome(outcome: EnforcementOutcome): Extract<
 
 // --- Synthetic provenance/observation fixtures (row-16 shapes) --------------
 
-const owned: ProvenanceRecord = {
-  origin: "owned-extension",
-  modulePath: "/opt/air/src/acp/omp/extension/index.ts",
-  baseRoot: "/opt/air",
-  canonicalTarget: {
-    acpSessionId: "s1",
-    sessionContextGeneration: "g1",
-    roles: ["trusted-skills"],
-    rootIdentities: [{
-      role: "trusted-skills",
-      configuredPath: "/opt/air/src/acp/omp/extension",
-      canonicalPath: "/opt/air/src/acp/omp/extension",
-      readOnly: true,
-    }],
-    normalizedInput: "/opt/air/src/acp/omp/extension/index.ts",
-    canonicalTarget: "/opt/air/src/acp/omp/extension/index.ts",
-    rootRelativePath: "index.ts",
-    targetType: "file",
-    observedSymlinks: [],
-  },
-  observedResourceGeneration: "gen-0",
-};
+// Owned-extension provenance rides the DECLARED deployment artifact plus its
+// physical observation, stamped from ONE live read in the fixture SURFACE's
+// own epoch domain (no session identity): the record, its evidence and the
+// wiring's live read must all agree, so the helper takes the epoch.
+function ownedAt(epoch: number): ProvenanceRecord {
+  return fixtureOwnedExtensionRecord({
+    observation: fixtureImageObservation({ generation: "gen-0", epoch }),
+  });
+}
 
 const approvalResetFixture = JSON.parse(
   Deno.readTextFileSync(
@@ -149,8 +141,9 @@ Deno.test({
       surface,
       () => "gen-0",
       () => ({
-        modulePath: "/opt/air/index.ts",
-        baseRoot: "/opt/air",
+        // This composition test drives origins through the SURFACE; the
+        // owning-module seam is not consumed here, so it carries no evidence.
+        modulePath: OMP_IMAGE_MODULE_DECLARATION.artifact,
         resourceGeneration: "gen-0",
       }),
     );
@@ -269,7 +262,7 @@ Deno.test({
         decodedInputShape: "opaque",
         recordEvaluation: p0SurvivorRecords,
         registryObservation: {
-          recordedOrigin: owned,
+          recordedOrigin: ownedAt(registry.currentEpoch()),
           registryEpoch: registry.currentEpoch(),
           resourceGeneration: "gen-0",
         },
@@ -289,7 +282,7 @@ Deno.test({
         decodedInputShape: "path-target",
         recordEvaluation: NO_RECORDS,
         registryObservation: {
-          recordedOrigin: owned,
+          recordedOrigin: ownedAt(registry.currentEpoch()),
           registryEpoch: registry.currentEpoch(),
           resourceGeneration: "gen-0",
         },

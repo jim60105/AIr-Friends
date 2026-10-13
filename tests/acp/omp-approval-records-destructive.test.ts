@@ -34,6 +34,10 @@ import type {
   RootPathResult,
 } from "@acp/filesystem-roots.ts";
 import type { AuthorizeWriteParams } from "@acp/filesystem-policy.ts";
+import {
+  fixtureImageObservation,
+  fixtureOwnedExtensionRecord,
+} from "./omp-owned-module-fixture.ts";
 
 const approvalResetFixture = JSON.parse(
   Deno.readTextFileSync(
@@ -46,27 +50,11 @@ const approvalResetFixture = JSON.parse(
   expectedEffectiveApproval: Record<string, string>;
 };
 
-const owned: ProvenanceRecord = {
-  origin: "owned-extension",
-  modulePath: "/opt/air/src/acp/omp/extension/index.ts",
-  baseRoot: "/opt/air",
-  canonicalTarget: {
-    acpSessionId: "s1",
-    sessionContextGeneration: "g1",
-    roles: ["trusted-skills"],
-    rootIdentities: [{
-      role: "trusted-skills",
-      configuredPath: "/opt/air/src/acp/omp/extension",
-      canonicalPath: "/opt/air/src/acp/omp/extension",
-      readOnly: true,
-    }],
-    normalizedInput: "/opt/air/src/acp/omp/extension/index.ts",
-    canonicalTarget: "/opt/air/src/acp/omp/extension/index.ts",
-    rootRelativePath: "index.ts",
-    targetType: "file",
-    observedSymlinks: [],
-  },
-};
+// Owned-extension provenance rides the DECLARED deployment artifact plus its
+// physical observation (no session id, role or CanonicalTarget).
+const owned: ProvenanceRecord = fixtureOwnedExtensionRecord({
+  observation: fixtureImageObservation({ generation: "gen-0", epoch: 7 }),
+});
 
 /** Row-8 folded-overlay evaluation of the P0 counterexample (restricted mode). */
 function p0CounterexampleEvaluation(): EffectiveRecordEvaluation {

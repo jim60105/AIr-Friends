@@ -153,6 +153,22 @@ inventory — `entry sha256 … src/acp/omp/extension/index.ts` and
 `lock sha256 … deno.lock` — so every bundle names the exact source+lock
 bytes it was cut from.
 
+**Build-owned deployment declaration (`bind-omp-owned-module-evidence`).** The
+bundle also carries the declaration the runtime verifier anchors its physical
+evidence to: the canonical source checkout's generated
+`build/omp-extension/index.js` artifact. `bundle-extension.ts` substitutes the
+**realpath of the source root it was invoked with** into the one placeholder
+the source carries (`bundle-declaration.ts`), and the header records both that
+declared development artifact and the permitted dependency closure. The
+transformation is deterministic and TARGET-INDEPENDENT: the same source root
+produces byte-identical bundles into any output target, an output target gains
+no runtime module authority, and a moved checkout is REBUILT (never relocated
+at runtime). Packaging fails closed if the placeholder is absent or repeated,
+if the substituted root is not an absolute canonical path, or if the artifact
+carries an emitted edge outside the declared closure. The fixed image face
+(`/opt/air/omp/extension/index.js`) is a runtime constant, so the same
+generated artifact installs in the image and is recognized there.
+
 **Native-loadable boundary (enforced, never trusted).** After bundling, the
 production audit (`bundle-audit.ts`) enumerates the EMITTED external edges
 (static import/export-from + literal dynamic-import specifiers) and fails
@@ -195,6 +211,18 @@ error — that parity is what the packaging suite proves). When row 12 is
 ever resolved, the packaging suite's fail-closed parity test is designed to
 fail on purpose in that same change, forcing the rewrite to
 successful-load parity.
+
+Scope note (row 27 + `bind-omp-owned-module-evidence`): the fail-closed load
+above is what an identified-yet-UNRESOLVED launch sees. Under the row-27
+deployment admission (restricted launch identity AND an `absent-clean`
+executable-source observation for that exact workspace and generation) the load
+SUCCEEDS, and the packaging suite's bundle smoke exercises exactly that path:
+it builds the real bundle at its declared development path and drives the
+default factory in a child process with the restricted launch env, asserting
+that owned replacements reach their separate completion policies on real
+module evidence while a foreign same-name registration still denies. That
+smoke is harness evidence about the delivered artifact's own wiring — official
+host behavior stays user-owned.
 
 ## 6. `PACKAGE-MANIFEST.sha256` and the recut invariant
 

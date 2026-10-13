@@ -1,7 +1,8 @@
 # OMP Restricted `tool_call` Enforcement Wiring (row 16 + C4)
 
-Implements OpenSpec changes `wire-omp-restricted-tool-enforcement` and
-`wire-omp-native-extension-api` (C4). Pinned to official OMP v18.6.1 /
+Implements OpenSpec changes `wire-omp-restricted-tool-enforcement`,
+`wire-omp-native-extension-api` (C4) and `bind-omp-owned-module-evidence`
+(owned-replacement module identity). Pinned to official OMP v18.6.1 /
 commit 2a2c6dcbbb558c0f8145f67f28b3370984f2bf60.
 
 This document describes the WIRING: how the trusted extension registers a
@@ -24,6 +25,8 @@ user-owned checklist at the bottom.
 | `src/acp/omp/extension/native-registration.ts` | C4 native adapter: `api.on("tool_call")` + `api.registerTool(...)` at factory evaluation; the DIRECT `api.getAllTools()` method (captured at factory evaluation, invoked only on live calls) → canonical provenance: authentic `native-builtin` tuple, owned-extension, or operator-MCP   |
 | `src/acp/omp/extension/native-events.ts`       | C4 decoder: pinned `ToolCallEvent` → restricted input (root screening, shape selection, destructive payload, empty-hierarchy record evaluation); model-forged authority fields are never read                                                            |
 | `src/acp/omp/extension/index.ts`               | Entrypoint: pre-import gate, then the default factory that performs the native registrations                                                                                             |
+| `src/acp/omp/deployment-module.ts`             | Declared deployment-module identity: the image/development artifact faces, permitted dependency closure, and the PURE physical-evidence policy (posture, containment, anchoring)       |
+| `src/acp/omp/owned-module-evidence.ts`         | Context-free physical observer over the declared faces: one acceptance anchor, per-observation re-verification, and the production metadata reader (`node:fs` under the pinned host)   |
 
 **Current-pin reality:** the shipped row-12 gate always yields blockers
 (native-custom-tool-discovery and plugin-entry-points are P0-unresolved and
@@ -65,9 +68,12 @@ the roster):
   the session's own builtin name set, so the tuple is host-produced and
   self-consistent with the name; any other `builtin`-labelled spelling
   records unowned-discovery and denies.
-- `extension`-sourced entries are owned only when their recorded file is the
-  contracted deployment path or this module's own loaded (C3 single-bundle)
-  file inside the observed base root.
+- `extension`-sourced entries are owned only when their recorded file IS the
+  exact declared deployment artifact this process loaded AND that artifact's
+  PHYSICAL evidence re-verifies against the accepted anchor at this instant
+  (`bind-omp-owned-module-evidence`; see "Module evidence vs session
+  evidence" below). A raw source file, a module-parent directory, a copy in a
+  workspace/HOME/cache tree, or the process's own state root confers nothing.
 - `mcp__`-prefixed `mcp` sources record operator-MCP on the shared epoch
   domain; `sdk` (RPC-host injection) records host and is never admitted —
   SDK injection cannot forge the builtin tuple.
@@ -76,10 +82,16 @@ the roster):
   PRODUCTION default is removed — an unavailable roster reads every tool
   unowned and fails closed.
 
-Freshness: for `owned-extension`/`operator-mcp` the recorded halves come from
-the surface's FIRST sighting of each (name, sourceInfo) spelling, and the
-composition recomputes the current halves live, so a mid-session same-name
-foreign replacement or generation bump reads stale and denies. `native-builtin`
+Freshness: for `operator-mcp` the recorded halves come from the surface's FIRST
+sighting of each (name, sourceInfo) spelling, and the composition recomputes
+the current halves live. `owned-extension` and `native-builtin` records are
+stamped from the SAME live read that produced their evidence — the module
+observation (with its epoch and generation) for the former, the roster read for
+the latter — and the owned decision additionally requires the record's
+epoch/generation halves to agree with each other AND with the carried
+observation, so a mid-session same-name foreign replacement, a movement the
+record has outrun, or an incoherent (foreign-domain, hand-built) stamp reads
+stale/unknown and denies. `native-builtin`
 records are stamped from the SAME live read that produced their identity: the
 roster is re-read per call and the builtin identity is host-produced per read,
 so an unrelated roster movement must not stale an unchanged builtin tuple
@@ -91,12 +103,73 @@ mismatched), while the operative boundary is the exact host-produced tuple,
 per-name roster uniqueness, and the per-call re-read.
 
 A trusted acquired-session context (canonical target resolution + row-4
-write-authorization parameters) is injectable only — the pinned host offers
-none into the extension child today, so the owned-extension tier's canonical
-evidence is absent in production, the owned read replacement's URL/skill
-completion stays gated as before, and production destructive-shaped calls fail
-closed on absent canonical observations rather than trusting anything the
-model serialized.
+write-authorization parameters) is injectable only, and it is consumed ONLY by
+destructive/session-bound completion — the pinned host offers none into the
+extension child today, so production destructive-shaped calls still fail closed
+on absent canonical observations rather than trusting anything the model
+serialized. **Owned-replacement module identity does NOT consume it**: a
+session id, a session role or a `CanonicalTarget` never stands in for the
+physical deployment evidence, which is why the owned `read`/`web_search`
+replacements no longer need any session context to reach their separate
+completion policies.
+
+### Module evidence vs session evidence (`bind-omp-owned-module-evidence`)
+
+Three identities are kept strictly apart:
+
+1. **Process launch identity** — the observed cwd and its mode-scoped state
+   namespace (`{workspace}/tmp/omp-agent/{mode}/cwd`, or
+   `{dataRoot}/omp-pools/{key}/omp-agent/{mode}/cwd`). It selects the
+   restricted-vs-YOLO wiring and supplies NO module ownership.
+2. **Deployment module identity** — the DECLARED generated artifact and its
+   physical observation. Two declared faces exist: the fixed image artifact
+   (`/opt/air/omp/extension/index.js`, root-owned and not agent-writable) and
+   the build-owned development face
+   (`<canonical checkout>/build/omp-extension/index.js`, embedded by the
+   bundler from the source checkout it cut, developer-owned by design).
+   `import.meta.url` selects the face; a loaded artifact matching neither face
+   gets no declaration and therefore no authority.
+3. **Session filesystem context** — acquired elsewhere, absent in production,
+   required by destructive/session-bound operations, and NEVER manufactured
+   from either of the other two.
+
+The physical observation records the declared root and artifact metadata
+(dev/ino/size/mtime/mode/uid/nlink), the link-free ladder, the replacement
+fingerprint derived from that metadata, the resource generation and the
+registry epoch. The registration site anchors ONE accepted observation and
+every later observation is compared against that anchor: a replaced artifact,
+an inode/fingerprint movement, a rotated generation, a hard-linked artifact, a
+symlinked root or artifact, missing metadata, or a posture violation
+(image: root-owned and not group/other-writable; development: one owner, not
+group/other-writable) all deny — the anchor is never re-anchored to whatever is
+present now. A trusted developer rebuild therefore requires a FRESH launch.
+
+Honesty boundaries: this evidence proves the DECLARED deployment location and
+the identity stability of the running artifact. It does not authenticate the
+bundle's bytes (the fingerprint is metadata-derived, not a content digest), it
+does not prove the official host loaded the extension, and it claims no ACL-,
+capability- or mount-independent immutability. Exclusion of ancestors ABOVE the
+declared root is a packaging fact, not something the observer checks; the
+image posture's `uid 0` plus non-writable modes are the stock image's non-root
+deployment precondition.
+
+**Named residual — the roster's `sourceInfo.path` is definition-authorable.**
+At the pin, `extensibility/extensions/loader.ts#extensionToolSourceInfo` builds
+an extension-registered tool's `sourceInfo.path` from the DEFINITION's own
+filesystem-absolute `sourcePath` when it declares one, falling back to the
+extension's resolved entry; `session/session-tools.ts#getAllToolInfos` then
+forwards exactly that path and does NOT forward the authoritative
+`RegisteredTool.extensionPath`. A hostile same-name extension that declares our
+artifact path as its own `sourcePath` is therefore indistinguishable from the
+genuine registration through the supported roster API. What the implementation
+still guarantees: an `extension`-sourced entry is owned only while the genuine
+declared artifact is physically present, link-free, correctly postured and
+unchanged since acceptance, and any entry reporting a path outside the declared
+faces — the ordinary foreign same-name replacement — denies before dispatch.
+What it cannot guarantee: which extension's implementation the host invokes
+under the name. Closing that needs an authoritative owner surface the pinned
+API does not expose; it stays user-owned runtime verification (checklist item
+4) and is NOT claimed closed.
 
 ### Native local read/search root screening (task 2.2)
 
@@ -246,7 +319,12 @@ not provide:
   for delete/move/multi-file mutation the pinned event/context cannot
   represent, the owned URL/web-search adapters' controlled per-hop transport,
   the owned skill-URI authorization, and every named OMP-only execution
-  surface deny all stand unchanged.
+  surface deny all stand unchanged. What changed with
+  `bind-omp-owned-module-evidence` is only the OWNERSHIP step in front of those
+  boundaries: an owned replacement now reaches its transport/backend/skill
+  completion on physical deployment evidence instead of an absent session
+  observation, while a missing/stale/incoherent module observation still denies
+  BEFORE any transport, backend execution or skill delegation.
 - **Settings, not ACLs** — support comes from the owned restricted overlay's
   exact `tools.approval` read/search `allow` entries and activation pins
   (`grep.enabled`/`glob.enabled`/`find.enabled: auto`), with native fetch
@@ -295,30 +373,46 @@ install (row 20):
    foreign stamp denies re-observe fail-closed, never admits. Sibling item:
    the production decoder/assembler that delivers `RestrictedToolCallInput`
    is, since C4, the `native-events.ts` decoder: root screening, input-shape
-   decode and the destructive payload build run natively, but canonical
-   observations and row-4 write authorization require the trusted
-   acquired-session context the pinned host does NOT acquire into the
-   extension child — until that acquisition exists, the owned-extension tier's
-   REQUIRED canonical evidence is absent, so the owned `read`/`web_search`
-   replacements deny re-observe (`rejected_stale_observation`,
-   `origin=owned-extension`), destructive-shaped calls fail closed at the
-   `complete-awaiting-authorization` seam, and URL/search calls never reach
-   the adapter-completion clamp (C5's typed completion consumes only calls
-   that have passed live provenance; where it applies, absence still blocks
-   `rejected_pending_adapter`); approval records stay the empty-hierarchy
+   decode and the destructive payload build run natively. Since
+   `bind-omp-owned-module-evidence` the owned `read`/`web_search` replacements
+   decide on that decoder's origin PLUS the physical deployment-module
+   evidence, so they DO reach the adapter-completion clamp (C5's typed
+   completion) without any acquired session context; a denied completion still
+   keeps the bounded `rejected_pending_adapter` block. Destructive-shaped calls
+   still require the trusted acquired-session context that the pinned host does
+   NOT acquire into the extension child — until that acquisition exists they
+   fail closed at the `complete-awaiting-authorization` seam, and module
+   evidence grants them nothing. Approval records stay the empty-hierarchy
    evaluation (the child observes no settings layer). Native builtin names
-   (bash, read, grep/glob/find, write/edit) do NOT depend on this context:
-   they decide on the authenticated native origin and then follow their
+   (bash, read, grep/glob/find, write/edit) do NOT depend on this context
+   either: they decide on the authenticated native origin and then follow their
    native-local authority. Client-owned MCP admission is the other origin
    class that decides fully on native-registry data alone.
-4. **Extension-load failure** — `runner.emit` only logs lifecycle-hook errors
+4. **Deployment-module evidence on the official binary** — confirm that the
+   native loader evaluates the extension from the DECLARED face: in the image,
+   `/opt/air/omp/extension/index.js` inside the root-owned, non-agent-writable
+   tree; in development, the canonical checkout's
+   `build/omp-extension/index.js` that the bundler declared. The
+   registration-time acceptance failing (an unrecognized artifact, a linked or
+   replaced path, a moved fingerprint, a rotated generation, a posture
+   violation) is the fail-closed state in which every owned name reads
+   unowned and denies — verify a genuine owned `read`/`web_search` admits and
+   a same-name foreign `extension` registration is denied. Physical
+   self-evidence is NOT content authentication and NOT proof that this binary
+   loaded the module; a trusted developer rebuild requires a fresh launch.
+   Additionally probe the named residual above: whether the loader forwards an
+   authoritative registration owner anywhere an extension can observe (only the
+   definition-authorable `sourceInfo.path` is exposed at v18.6.1), and whether
+   a hostile same-name extension declaring our artifact path as its own
+   `sourcePath` can be detected at all on this pin.
+5. **Extension-load failure** — `runner.emit` only logs lifecycle-hook errors
    and does NOT fail session startup: an extension that fails to load leaves
    the session without the restricted capability set (accepted residual
    risk; NO client-observable readiness assertion exists — row 13 cancelled).
    If the handler is absent, non-YOLO native approval plus the client ACP
    policy remain the boundary for ACP-mediated operations; that fallback is
    NOT equivalent to execution-time default-deny.
-5. **Record reset / destructive decoding** — the INCOMPATIBLE/UNRESOLVED
+6. **Record reset / destructive decoding** — the INCOMPATIBLE/UNRESOLVED
    pinned verdicts stand; do not treat any wiring test as evidence of a
    working reset or a complete native decoder.
 

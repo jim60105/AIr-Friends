@@ -98,6 +98,12 @@ export function emptyRecordEvaluation(): EffectiveRecordEvaluation {
  * only an explicitly attached context (deployment acquisition, or an
  * API-shaped test harness) enriches the decode. This parameter is NEVER
  * populated from event input.
+ *
+ * `bind-omp-owned-module-evidence` removed the former `canonicalTarget`
+ * member: module identity is independent physical deployment evidence and
+ * NEVER session identity, so no session-role canonical observation can stand
+ * in for it. Destructive/session-bound completion still requires THIS
+ * acquired context, and its absence still denies.
  */
 export interface NativeSessionContext {
   resolveCanonicalTargets(
@@ -105,8 +111,6 @@ export interface NativeSessionContext {
   ): readonly RootPathResult<CanonicalTarget>[];
   /** Row-4 write-authorization parameters (the per-target `target` field is the policy's own). */
   readonly authorizationParams?: Omit<AuthorizeWriteParams, "target">;
-  /** Trusted canonical identity of the acquired session, when one exists. */
-  readonly canonicalTarget?: CanonicalTarget;
 }
 
 // ---------------------------------------------------------------------------

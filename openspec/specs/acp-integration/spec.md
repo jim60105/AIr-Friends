@@ -2128,7 +2128,7 @@ When deployment preflight, executable workspace discovery, owned identity, link 
 
 ### Requirement: Exact Owned-Module Trust Scope
 
-Only the module at the contracted deployment-owned path imported from the owned path constants, together with its pinned image-owned dependency closure, SHALL be trusted.
+Only the exact selected generated module artifact at its deployment-declared canonical root, together with its pinned permitted dependency closure, SHALL be trusted. Module trust SHALL consume physical deployment-root and loaded-artifact evidence independent of mutable process state and session filesystem authority. Canonical source files SHALL remain build inputs, not alternative load entries.
 
 #### Scenario: Identical module outside the owned root is untrusted
 - **GIVEN** a workspace, home, or package-cache path holds a copy of the owned module content
@@ -2162,6 +2162,27 @@ Only the module at the contracted deployment-owned path imported from the owned 
 #### Scenario: Permission mode is not part of owned-module identity
 - **WHEN** owned-module identity is evaluated
 - **THEN** identity SHALL NOT depend on permission mode
+
+#### Scenario: Installed artifact is independent of launch state root
+- **GIVEN** the declared image generated artifact is physically owned and unchanged
+- **WHEN** a restricted per-spawn or pooled process observes it from its own distinct mutable state cwd
+- **THEN** module ownership SHALL identify that exact artifact without requiring it under the process state root
+- **AND** the state root SHALL gain no deployment-module authority
+
+#### Scenario: Development generated artifact follows the same contract
+- **WHEN** the declared generated development artifact has valid build-owned source identity and physical root/file identities
+- **THEN** the exact generated artifact SHALL satisfy module ownership using that declaration
+- **AND** a raw source file or arbitrary module-parent directory SHALL NOT satisfy it
+
+#### Scenario: Development source ownership is not image immutability
+- **WHEN** the real declared development artifact is developer-owned rather than root-owned
+- **THEN** its exact build declaration and anchored physical identities SHALL govern source ownership without a new read-only mount prerequisite
+- **AND** later substitution or metadata movement SHALL deny rather than silently reanchor
+
+#### Scenario: Accepted module identity changes
+- **WHEN** the declared root, loaded artifact, link-free component identity or replacement fingerprint changes after acceptance
+- **THEN** module admission SHALL deny with a bounded ownership reason
+- **AND** a fresh observation SHALL NOT silently replace the accepted trusted anchor
 
 ### Requirement: Canonical Critical-Skill Ownership Across New, Load, and Refresh
 
@@ -3926,7 +3947,7 @@ The restricted extension SHALL install its tool-call handler and controlled repl
 
 ### Requirement: Native Events Use Trusted Session and Origin Context
 
-Each native call SHALL obtain fresh configured-tool source metadata and trusted acquired-session context. Origin, ownership, approvals, and adapter completion SHALL NOT be accepted from model input. Missing, ambiguous, foreign, stale, or unrepresentable required context SHALL deny before execution. Owned replacement tools SHALL be admitted by their actual extension provenance, not relabelled as builtins.
+Each native call SHALL obtain fresh tool origin metadata and the trusted context required by its operation. Owned replacements SHALL use independent physical deployment-module evidence, not invented session filesystem authority. Session-bound operations SHALL require acquired session context. Missing, ambiguous, foreign, stale or unrepresentable required evidence SHALL deny; model input SHALL NOT provide origin, ownership, approval or adapter completion.
 
 #### Scenario: Registry changes after the first call
 - **GIVEN** an initially owned tool is replaced by a foreign same-name registration
@@ -3948,6 +3969,17 @@ Each native call SHALL obtain fresh configured-tool source metadata and trusted 
 - **WHEN** fresh native metadata identifies a replacement under the declared canonical owned extension root
 - **THEN** its actual owned-extension origin SHALL reach provenance admission
 - **AND** admission SHALL still require the operation's separate completing boundary
+
+#### Scenario: Controlled network needs no invented session roots
+- **GIVEN** the default factory has valid physical module evidence but no session filesystem context
+- **WHEN** an owned controlled URL read or web search is invoked
+- **THEN** provenance SHALL use that module evidence and reach its separate network/backend admission
+- **AND** no ACP id, skill-session id, canonical target or shared-write grant SHALL be fabricated
+
+#### Scenario: Missing destructive context stays closed
+- **GIVEN** the module identity is valid but acquired destructive-session context is missing or incomplete
+- **WHEN** a destructive call is evaluated
+- **THEN** module admission SHALL NOT grant destructive authority and the operation SHALL deny before mutation
 
 ### Requirement: Owned Skill URIs Remain Readable Through Native Read
 
@@ -4122,3 +4154,36 @@ OMP recovery SHALL require recorded ownership and its complete owning gate conte
 - **WHEN** an OpenCode caller invokes its existing reconnect path without additional context
 - **THEN** its existing recovery, capability-absence return and fixed-mode behavior SHALL remain unchanged
 - **AND** no new OMP mode or native-YOLO restriction SHALL be consulted
+### Requirement: Owned Replacement Admission Preserves Separate Completion
+
+Genuine owned replacement admission SHALL precede and retain the existing operation-specific controlled transport, search backend or trusted instruction-root policy. Module ownership SHALL NOT imply adapter completion, credential availability, skill ownership or filesystem authority. Denied completion SHALL NOT use native network or untrusted source fallback.
+
+#### Scenario: Owned URL read reaches per-hop controlled transport
+- **WHEN** a physically owned current-generation URL-read replacement is called for an authorized HTTP(S) destination
+- **THEN** it SHALL reach the existing classified per-hop controlled transport
+- **AND** denied addresses, redirects and alternate/device schemes SHALL remain denied without native fallback
+
+#### Scenario: Owned search reaches the existing configured backend
+- **WHEN** a physically owned current-generation web_search replacement is invoked
+- **THEN** it SHALL reach existing backend selection and credential/host admission
+- **AND** absent credentials or denied completion SHALL NOT fall back to a native provider
+
+#### Scenario: Owned skill URI reaches its independent exact-root check
+- **WHEN** a physically owned read replacement receives an owned skill instruction URI
+- **THEN** the existing image-only OMP_IMAGE_SKILLS_ROOT and current skill identity SHALL be checked separately
+- **AND** only successful skill authorization SHALL delegate the original URI unchanged
+
+#### Scenario: Development module ownership does not add skill URI authority
+- **WHEN** an owned development module receives a skill URI without the existing declared image skill source
+- **THEN** skill authorization SHALL retain its off-image denial with no development/workspace fallback root
+- **AND** native script-root selection for delivered prompts SHALL NOT expand that URI grant
+
+#### Scenario: Module observation missing or stale
+- **WHEN** physical module metadata is missing, violates its declared image/development ownership posture, is linked, outside the declaration or stale at the current epoch/generation
+- **THEN** owned replacement admission SHALL deny before transport, backend execution or skill delegation
+- **AND** no source-name or process-state-root fallback SHALL admit it
+
+#### Scenario: Owned local read uses the accepted native posture
+- **WHEN** the physically owned read replacement receives an ordinary screened local path
+- **THEN** it SHALL delegate unchanged through the supported captured native reader under native approval and ambient OS permissions
+- **AND** it SHALL NOT invent daemon session-root evidence or claim protected descriptor confinement

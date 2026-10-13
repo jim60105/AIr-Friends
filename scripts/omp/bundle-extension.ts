@@ -63,6 +63,10 @@ for (const [name, v] of [["src", src], ["target", target], ["deno.lock", denoLoc
 // beside this script so packaging tests exercise the exact production
 // predicate on synthetic bundle text.
 import { auditEmittedBundle, emittedExternals, HOST_FACADE_EXTERNAL } from "./bundle-audit.ts";
+import { emittedRequireEdges } from "./bundle-audit.ts";
+import { declarationCoverageProblems, embedDeploymentDeclarations } from "./bundle-declaration.ts";
+import { DEPLOYMENT_MODULE_DEPENDENCY_CLOSURE } from "../../src/acp/omp/deployment-module.ts";
+import { OMP_TRUSTED_EXTENSION_BUNDLE_PATH } from "../../src/utils/omp-paths.ts";
 
 // The bundle is cut from canonical source at <src> with the repo's own deno
 // configuration and committed lock (cwd = <src> so both resolve there). The
@@ -116,6 +120,34 @@ if (problems.length) {
   Deno.exit(1);
 }
 
+// Build-owned deployment declaration (`bind-omp-owned-module-evidence` task
+// 4.1): substitute the CANONICAL SOURCE CHECKOUT this bundle was cut from into
+// the one placeholder the source carries. The declaration is a build input —
+// never the process cwd, never the output target below, never a loaded-module
+// parent — so an arbitrarily placed output gains no runtime module authority
+// and a moved checkout is rebuilt rather than relocated.
+const canonicalSourceRoot = await Deno.realPath(src);
+let declared: string;
+try {
+  declared = embedDeploymentDeclarations(emitted, canonicalSourceRoot);
+} catch (error) {
+  console.error(`deployment declaration embedding failed: ${(error as Error).message}`);
+  Deno.exit(1);
+}
+// The declaration's permitted dependency closure must COVER what the bundle
+// actually carries (static, dynamic and runtime-require edges alike).
+const coverageProblems = declarationCoverageProblems(
+  [...emittedExternals(declared), ...emittedRequireEdges(declared)],
+  DEPLOYMENT_MODULE_DEPENDENCY_CLOSURE,
+);
+if (coverageProblems.length) {
+  console.error(
+    `generated bundle declares an incomplete dependency closure:\n` +
+      coverageProblems.join("\n"),
+  );
+  Deno.exit(1);
+}
+
 // Deterministic source/input digest inventory (auditable provenance header).
 // Computed over the canonical inputs only — never timestamps — so rebuilds
 // from the same checkout produce byte-identical bundle content apart from
@@ -129,6 +161,8 @@ const entryBytes = await Deno.readFile(`${src}/${ENTRY}`);
 const inventory = [
   `entry sha256 ${await sha256Hex(entryBytes)}  ${ENTRY}`,
   `lock sha256 ${await sha256Hex(lockBytes)}  ${denoLockPath.replace(`${src}/`, "")}`,
+  `declared development artifact  ${canonicalSourceRoot}/${OMP_TRUSTED_EXTENSION_BUNDLE_PATH}`,
+  `declared dependency closure  ${DEPLOYMENT_MODULE_DEPENDENCY_CLOSURE.join(", ")}`,
 ];
 
 // Prepend the inventory header to the generated bundle (pure comment: the
@@ -145,7 +179,7 @@ const header = [
   ...inventory.map((line) => `//   ${line}`),
   "",
 ].join("\n");
-await Deno.writeTextFile(bundlePath, `${header}${emitted}`);
+await Deno.writeTextFile(bundlePath, `${header}${declared}`);
 
 console.log(
   `bundled ${ENTRY} -> ${bundlePath} ` +
