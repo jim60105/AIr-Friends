@@ -55,3 +55,41 @@ Cleanly update all bundled classified templates, render/delivery callsites and r
 ## Verification Plan
 
 Render actual bundled templates with the real engine, then capture final delivery in focused context-assembler/orchestrator mocks. Table-drive both agent roots, pooled/per-spawn literal ids/staging, and every path above. Assert literal absolute root, a correctly quoted full executable argument wherever a recipe appears, pointer-only payload flags, no unresolved `${HOME}`, `$HOME`, `{{ skillsDir }}` or missing-root output, and unchanged web-chat no-skill posture. Cover missing/empty/relative root and configured mounted-template omission before connector.prompt is called. Keep the existing staging-literal and retry rejection-diagnostic assertions; test a root containing spaces and shell metacharacters without launching an agent, provider or shell recipe.
+
+## Implementation handoff (for the following `thread-per-spawn-omp-recovery-context` writer)
+
+That change applies second because both writers edit `src/core/session-orchestrator.ts`. What this
+change touched there (re-anchor by name, not line):
+
+- the existing `trustedSkillsDir()` root resolution (behavior unchanged) and the NEW private
+  `renderClassifiedSkillPrompt(env, templatePath, variables, boundary)` (validate → render → assert);
+- `buildSelfResearchRetryMessage(skillsRoot, rejections)` — gained the selected-root parameter; its
+  call site passes `this.trustedSkillsDir()`;
+- `sendRetryPrompt(...)` — now asserts the built retry guidance carries `retryCtx.skillsDir` before
+  `connector.prompt`;
+- the channel-memory-maintenance inline render and `buildSpontaneousPromptFromTemplate`,
+  `buildSelfResearchPrompt`, `buildMemoryMaintenancePrompt`, `buildReminderPrompt` and
+  `generateConversationSummary` now route through `renderClassifiedSkillPrompt` instead of calling
+  `renderTemplate` directly.
+
+NO change was made to `promptWithIdleTimeoutHandling`, `runSharedPoolSession`, `retryPromptContext`,
+`recoveryOwnershipFromRegistry`, `recoveryPostRestoreHook`, the recovery-abort classification, or any
+spawn/recovery shape — the recovery writer layers its per-spawn recovery context on top without
+reworking these.
+
+Delivered matrix — every final delivered type reaches a classified boundary:
+
+| Delivery path | Boundary | Root asserted |
+| --- | --- | --- |
+| Normal reply, lurk-originated reply | `ContextAssembler.renderFullPrompt` | literal presence before delivery |
+| Initial/assembled context | `ContextAssembler.assembleContext` | required-root validation before render |
+| Spontaneous context | `ContextAssembler.assembleSpontaneousContext` | required-root validation before render |
+| Spontaneous post | `buildSpontaneousPromptFromTemplate` | literal presence before delivery |
+| Self research | `buildSelfResearchPrompt` | literal presence before delivery |
+| User memory maintenance | `buildMemoryMaintenancePrompt` | literal presence before delivery |
+| Channel memory maintenance | inline channel render | literal presence before delivery |
+| Conversation summary | `generateConversationSummary` | literal presence before delivery (a failure is logged and no prompt is sent) |
+| Scheduled reminder | `buildReminderPrompt` | literal presence before delivery |
+| Missing-response retry | `getRetryPromptStrategy` (validates the mandatory context) + `sendRetryPrompt` (asserts) | literal presence before delivery |
+| Self-research correction retry | `buildSelfResearchRetryMessage` | literal presence before delivery |
+| Dashboard web-chat | `dashboard/server.ts` web-chat render | unclassified — unchanged prohibition, no recipe |
