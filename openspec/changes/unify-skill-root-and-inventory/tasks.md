@@ -26,8 +26,8 @@
 
 ## 5. Integration verification
 
-- [ ] 5.1 Add/extend a wiring regression that resolves the root for `opencode` and `omp` from one configured value and asserts byte-identical canonical roots for a stock-image shape, a development shape and a custom absolute root, plus identical roots for a per-spawn and a pooled connector without consulting `SESSION_ID` — acceptance criteria 1 and 7; criterion 3 (an absent name grants nothing, an uninstalled configured name expands nothing) is delivered by task 3.1's inventory tests. Verify: `deno task test:unit` over `tests/core/skill-root-wiring.test.ts`.
-- [ ] 5.2 Run `deno task ci` once over the whole cutover and `openspec validate unify-skill-root-and-inventory --strict`; report only exercised results. Real-agent and container acceptance (a runtime-installed external skill completing one real `send-reply` on each agent) remains user-owned and is completed by `align-omp-skill-trust-to-shared-root` and `collapse-skill-packaging-to-one-tree`.
+- [x] 5.1 Add/extend a wiring regression that resolves the root for `opencode` and `omp` from one configured value and asserts byte-identical canonical roots for a stock-image shape, a development shape and a custom absolute root, plus identical roots for a per-spawn and a pooled connector without consulting `SESSION_ID` — acceptance criteria 1 and 7; criterion 3 (an absent name grants nothing, an uninstalled configured name expands nothing) is delivered by task 3.1's inventory tests. Verify: `deno task test:unit` over `tests/core/skill-root-wiring.test.ts`.
+- [x] 5.2 Run `deno task ci` once over the whole cutover and `openspec validate unify-skill-root-and-inventory --strict`; report only exercised results. Real-agent and container acceptance (a runtime-installed external skill completing one real `send-reply` on each agent) remains user-owned and is completed by `align-omp-skill-trust-to-shared-root` and `collapse-skill-packaging-to-one-tree`.
 
 ## Workflow follow-up
 
