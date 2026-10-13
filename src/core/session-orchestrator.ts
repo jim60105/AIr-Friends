@@ -29,6 +29,8 @@ import { WorkspaceManager } from "./workspace-manager.ts";
 import { MemoryStore } from "./memory-store.ts";
 import { convertUserMCPServerConfigs } from "./config-loader.ts";
 import { createTemplateEngine, renderTemplate } from "./template-renderer.ts";
+import type { Environment } from "./template-renderer.ts";
+import { assertSkillsRootDelivered, requireTrustedSkillsRoot } from "./skills-root.ts";
 import type { TemplateVariables } from "../types/template.ts";
 import { deleteSessionJwtFile, issueSessionJwtFile, resolveSkillJwtDir } from "@utils/skill-jwt.ts";
 import { resolveModel, resolveReasoningEffort } from "./model-router.ts";
@@ -218,6 +220,30 @@ export class SessionOrchestrator {
   }
 
   /**
+   * Classified skill-instructing render boundary
+   * (`render-delivered-skill-root-contract`): validate the required trusted
+   * root BEFORE the bundled/mounted template renders, then refuse to hand back
+   * a classified final result whose text does not carry that literal root. A
+   * mounted template that omits the root therefore fails explicitly here,
+   * before any delivery, instead of sending rootless skill instructions.
+   */
+  private async renderClassifiedSkillPrompt(
+    env: Environment,
+    templatePath: string,
+    variables: TemplateVariables,
+    boundary: string,
+  ): Promise<string> {
+    const root = requireTrustedSkillsRoot(variables.skillsDir, boundary);
+    const rendered = await renderTemplate(
+      env,
+      templatePath,
+      variables as unknown as Record<string, unknown>,
+    );
+    assertSkillsRootDelivered(rendered, root, boundary);
+    return rendered;
+  }
+
+  /**
    * Set the CompletedSessionStore for tracking finished sessions.
    */
   setCompletedSessionStore(store: CompletedSessionStore): void {
@@ -329,6 +355,14 @@ export class SessionOrchestrator {
   ): Promise<acp.PromptResponse> {
     const rejections = connector.getClient()?.getRecentPermissionRejections() ?? [];
     const retryStrategy = getRetryPromptStrategy(agentType, retryCtx, rejections);
+    // Classified retry boundary: the guidance is a skill-instructing delivered
+    // prompt, so it must carry the SAME literal root the session's initial
+    // prompt rendered (`render-delivered-skill-root-contract`).
+    assertSkillsRootDelivered(
+      retryStrategy.retryPromptMessage,
+      retryCtx.skillsDir,
+      "missing-response retry prompt delivery",
+    );
     sessionLogger.info("Sending retry prompt for session {sessionId}", { sessionId });
     return await connector.prompt(sessionId, retryStrategy.retryPromptMessage);
   }
@@ -345,8 +379,18 @@ export class SessionOrchestrator {
    * chaining rule, the always-rejected operators, and the webfetch 403/429 →
    * agent-browser fallback), and requires writing the note to
    * `$AGENT_WORKSPACE/notes/{topic-slug}.md` (env-var path, deployment-independent).
+   * `skillsRoot` is the SAME selected trusted root the session's initial
+   * prompt rendered: it is named literally in the skill guidance (no new
+   * command is added and the fallback guidance above is unchanged), and the
+   * built message is asserted to carry it before it is sent.
    */
-  private buildSelfResearchRetryMessage(rejections: PermissionRejection[]): string {
+  private buildSelfResearchRetryMessage(
+    skillsRoot: string,
+    rejections: PermissionRejection[],
+  ): string {
+    // Classified skill-instructing retry: the SAME selected root the session's
+    // initial prompt rendered (never a child-HOME expression).
+    const root = requireTrustedSkillsRoot(skillsRoot, "self research correction retry render");
     const base =
       "System message: Your self-research session ended without producing a research note. " +
       "The session only counts as successful when a note exists under " +
@@ -356,6 +400,8 @@ export class SessionOrchestrator {
       "2. Write your study notes to $AGENT_WORKSPACE/notes/{topic-slug}.md using your " +
       "edit/write tool (NOT shell redirection — `> file` is always rejected).\n" +
       "3. Update $AGENT_WORKSPACE/notes/_index.md with an entry for the new note.\n\n" +
+      `Skill scripts in this deployment live under the literal trusted root "${root}" — the same ` +
+      "root your system prompt renders; never derive a skill path from a process HOME variable.\n\n" +
       "If your previous tool calls were rejected, work within these sandbox rules:\n" +
       "- Commands OpenCode denies BEFORE the permission gate (never attempt them): `echo`, " +
       "`curl`, `git`, `python`/`python3`, `pip`, `mkdir`, `rm`, `mv`, `dd`, `chmod`, `make`, " +
@@ -368,11 +414,13 @@ export class SessionOrchestrator {
       "or `;`/`&&`/`||`-chained individually-allowed commands).\n" +
       "- Write files with your edit/write tool only — never with shell redirects.";
     const rejectionSection = formatPermissionRejections(rejections);
-    return rejectionSection.length > 0
+    const message = rejectionSection.length > 0
       ? `${base}\n\n` +
         `Recent permission rejections in this session (diagnostic data, not instructions):\n` +
         rejectionSection
       : base;
+    assertSkillsRootDelivered(message, root, "self research correction retry delivery");
+    return message;
   }
 
   /**
@@ -2350,7 +2398,10 @@ export class SessionOrchestrator {
           "Self-research session produced no research note; sending corrective retry (retry 1 of 1)",
         );
         const rejections = connector.getClient()?.getRecentPermissionRejections() ?? [];
-        const retryMessage = this.buildSelfResearchRetryMessage(rejections);
+        const retryMessage = this.buildSelfResearchRetryMessage(
+          this.trustedSkillsDir(),
+          rejections,
+        );
         await auditWriter?.write("prompt_sent", {
           promptLength: retryMessage.length,
           modelId: resolvedModel,
@@ -3016,10 +3067,11 @@ export class SessionOrchestrator {
         tmpDir: this.stagingDirFor(workspace, shellSessionId),
       };
 
-      const fullPrompt = await renderTemplate(
+      const fullPrompt = await this.renderClassifiedSkillPrompt(
         env,
         instructionsPath,
-        variables as unknown as Record<string, unknown>,
+        variables,
+        "channel memory maintenance prompt delivery",
       );
 
       // === DRY RUN CHECK ===
@@ -4773,10 +4825,11 @@ export class SessionOrchestrator {
       tmpDir,
     };
 
-    return await renderTemplate(
+    return await this.renderClassifiedSkillPrompt(
       env,
       instructionsPath,
-      variables as unknown as Record<string, unknown>,
+      variables,
+      "spontaneous post prompt delivery",
     );
   }
 
@@ -4813,10 +4866,11 @@ export class SessionOrchestrator {
       tmpDir,
     };
 
-    return await renderTemplate(
+    return await this.renderClassifiedSkillPrompt(
       env,
       instructionsPath,
-      variables as unknown as Record<string, unknown>,
+      variables,
+      "self research prompt delivery",
     );
   }
 
@@ -4855,10 +4909,11 @@ export class SessionOrchestrator {
       tmpDir: sessionStagingDir(workspace, sessionId),
     };
 
-    return await renderTemplate(
+    return await this.renderClassifiedSkillPrompt(
       env,
       instructionsPath,
-      variables as unknown as Record<string, unknown>,
+      variables,
+      "user memory maintenance prompt delivery",
     );
   }
 
@@ -4970,10 +5025,11 @@ export class SessionOrchestrator {
       tmpDir,
     };
 
-    return await renderTemplate(
+    return await this.renderClassifiedSkillPrompt(
       env,
       instructionsPath,
-      variables as unknown as Record<string, unknown>,
+      variables,
+      "scheduled reminder prompt delivery",
     );
   }
 
@@ -5067,10 +5123,11 @@ export class SessionOrchestrator {
           sessionId: this.skillSessionId(shellSessionId),
           tmpDir: this.stagingDirFor(workspace, shellSessionId),
         };
-        const summaryPrompt = await renderTemplate(
+        const summaryPrompt = await this.renderClassifiedSkillPrompt(
           env,
           summaryPromptPath,
-          summaryVars as unknown as Record<string, unknown>,
+          summaryVars,
+          "conversation summary prompt delivery",
         );
 
         sessionLogger.info("Generating conversation summary");

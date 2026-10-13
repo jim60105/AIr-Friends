@@ -5,6 +5,7 @@ import { combinedTokenCount, estimateTokens } from "@utils/token-counter.ts";
 import { MemoryStore } from "./memory-store.ts";
 import { WorkspaceManager } from "./workspace-manager.ts";
 import { loadSystemPrompt } from "./config-loader.ts";
+import { assertSkillsRootDelivered, requireTrustedSkillsRoot } from "./skills-root.ts";
 import { sessionStagingDir } from "./session-staging.ts";
 import { DEFAULT_RECALL_CONFIG } from "./memory-recall/recall-config.ts";
 import { renderFixedMemoryLine, selectFixedMemories } from "./memory-recall/fixed-selection.ts";
@@ -140,7 +141,18 @@ export class ContextAssembler {
       sessionId,
     };
 
-    return await this.getSystemPrompt(templateVars);
+    // Classified skill-instructing render: the required trusted root is
+    // validated BEFORE rendering, and the delivered normal/lurk prompt is the
+    // classified final result — a mounted template that renders without the
+    // literal root fails explicitly here instead of being sent
+    // (`render-delivered-skill-root-contract`).
+    const skillsRoot = requireTrustedSkillsRoot(
+      this.config.skillsDir,
+      "normal reply prompt render",
+    );
+    const fullPrompt = await this.getSystemPrompt(templateVars);
+    assertSkillsRootDelivered(fullPrompt, skillsRoot, "normal reply prompt delivery");
+    return fullPrompt;
   }
 
   /**
@@ -192,6 +204,11 @@ export class ContextAssembler {
       sessionId,
       tmpDir: sessionStagingDir(workspace, sessionId),
     };
+
+    // Classified skill-instructing render: validate the required trusted root
+    // before the template renders it (this assembly result is not itself
+    // delivered; the delivered normal/lurk prompt is `renderFullPrompt`).
+    requireTrustedSkillsRoot(this.config.skillsDir, "normal message context assembly");
 
     // Load system prompt
     const systemPrompt = await this.getSystemPrompt(templateVars);
@@ -1028,6 +1045,11 @@ export class ContextAssembler {
       sessionId,
       tmpDir: sessionStagingDir(workspace, sessionId),
     };
+
+    // Classified skill-instructing render: validate the required trusted root
+    // before rendering (the delivered spontaneous prompt is re-rendered by the
+    // orchestrator's own classified builder with the same root).
+    requireTrustedSkillsRoot(this.config.skillsDir, "spontaneous context assembly");
 
     const systemPrompt = await this.getSystemPrompt(templateVars);
     // A spontaneous post has no trigger, so it has no channel context either;
