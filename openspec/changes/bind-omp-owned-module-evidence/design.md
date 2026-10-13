@@ -38,6 +38,8 @@ The fresh direct native roster yields each replacement's real extension `sourceI
 
 Successful provenance then reaches existing completion. HTTP(S) read uses the owned adapter, each hop's classified destination and controlled transport; unsupported schemes and final denied addresses remain blocked. `web_search` uses the existing selected backend/credential probe and host/credential policy; no native provider fallback or new backend. Owned `skill://` read uses its separate exact instruction-root authorization then supported same-tool delegation with the original URI, with no path substitution. Ordinary local read delegates unchanged to the native reader under issue 1's accepted native approval/ambient-OS posture, with no fabricated daemon filesystem grant.
 
+The existing production skill-URI grant remains image-only: `read-replacement.ts` authorizes the frozen `OMP_IMAGE_SKILLS_ROOT` and explicitly denies off-image hosts with no fallback source. Developer-owned module evidence does not add development skill-URI roots. Development delivered prompts may use the separately selected native script root; that prompt contract does not broaden this URI authorization.
+
 The default exported factory produces module evidence itself, without a fixture-injected `sessionContext`. Native read and web_search must reach transport/backend admission in production-shaped tests with no session filesystem context. Destructive calls lacking their separate trusted complete context still deny.
 
 ## Risks / Trade-offs

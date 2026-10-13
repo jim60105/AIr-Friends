@@ -12,7 +12,7 @@ Apply after `admit-trusted-omp-native-builtins` for shared roster/provenance ser
 
 - [ ] 2.1 Wire the default factory to produce module evidence without `NativeSessionContext`; migrate every owned provenance/verifier consumer to retain the full declaration and evidence, using the predecessor's direct `getAllTools`; verify no api.ctx, closure-dropping or session-root fabrication remains.
 - [ ] 2.2 Bind read/web_search registeredOwned evidence to the actual fresh owned registration, not name alone; verify production-shaped image per-spawn/pool and declared-development fixtures reach the existing HTTP(S) transport/backend admission with no injected session filesystem context.
-- [ ] 2.3 Keep operation completion separate: verify per-hop address/redirect deny, absent backend credentials/no fallback, owned skill URI exact-root checks/original-URI delegation, ordinary local read unchanged same-tool delegation under accepted native approval/ambient OS posture, and missing destructive-session context denial; update OMP_NETWORK and skill-URI handoff docs without claiming native root confinement.
+- [ ] 2.3 Keep operation completion separate: verify per-hop address/redirect deny, absent backend credentials/no fallback, image-only owned skill URI exact-root checks/original-URI delegation and unchanged off-image denial, ordinary local read unchanged same-tool delegation under accepted native approval/ambient OS posture, and missing destructive-session context denial; update OMP_NETWORK and skill-URI handoff docs without claiming native root confinement or adding development URI authority.
 
 ## 3. Production-shaped focused fixtures (2h)
 

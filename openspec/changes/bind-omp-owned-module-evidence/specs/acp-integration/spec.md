@@ -114,8 +114,13 @@ Genuine owned replacement admission SHALL precede and retain the existing operat
 
 #### Scenario: Owned skill URI reaches its independent exact-root check
 - **WHEN** a physically owned read replacement receives an owned skill instruction URI
-- **THEN** the exact declared instruction root and current skill identity SHALL be checked separately
+- **THEN** the existing image-only OMP_IMAGE_SKILLS_ROOT and current skill identity SHALL be checked separately
 - **AND** only successful skill authorization SHALL delegate the original URI unchanged
+
+#### Scenario: Development module ownership does not add skill URI authority
+- **WHEN** an owned development module receives a skill URI without the existing declared image skill source
+- **THEN** skill authorization SHALL retain its off-image denial with no development/workspace fallback root
+- **AND** native script-root selection for delivered prompts SHALL NOT expand that URI grant
 
 #### Scenario: Module observation missing or stale
 - **WHEN** physical module metadata is missing, violates its declared image/development ownership posture, is linked, outside the declaration or stale at the current epoch/generation
