@@ -1,24 +1,23 @@
 // src/core/skills-root.ts
 //
 // The single trusted skill-script root resolver
-// (`repair-omp-owned-skill-handoff` D1): one deployment-owned ABSOLUTE root
-// per agent type/deployment, supplied as the internal `skillsDir` template
+// (`unify-skill-root-and-inventory` D1): ONE deployment-owned ABSOLUTE root
+// shared by BOTH agent types, supplied as the internal `skillsDir` template
 // variable to every skill-instructing render and to the retry builder. There
-// is exactly ONE root convention — no child-HOME fallback, no session
-// directory, no second root convention:
+// is exactly ONE root convention — no per-agent image root, no image-first
+// selection, no child-HOME fallback, no session directory:
 //
-// - `omp`: the installed owned root (`OMP_IMAGE_SKILLS_ROOT`, the deployment
-//   declaration every owned settings overlay names; the Containerfile installs
-//   the repository `skills/` tree content-faithfully there), falling back —
-//   through the same image-first, validated-dev pattern every other OMP path
-//   seam in `utils/omp-paths.ts` uses — to the VALIDATED development source
-//   root (this repository's own `skills/` tree). The child's isolated HOME is
-//   NEVER consulted: the agent-side `$HOME/.agents/skills` expression can only
-//   ever name an empty sandbox directory there.
-// - `opencode`: the existing installed-root resolution — `agent.skillsDir`
-//   (env `AGENT_SKILLS_DIR`; container deployments set
-//   `/home/deno/.agents/skills`) — relative roots resolved against the
-//   daemon/deployment process working directory, never the agent child's HOME.
+// - the existing installed-root resolution — `agent.skillsDir` (env
+//   `AGENT_SKILLS_DIR`; the stock container deployment declares
+//   `/home/deno/.agents/skills`, the repository default is `skills`) —
+//   relative roots resolved against the daemon/deployment process working
+//   directory, never the agent child's HOME.
+// - `OMP_IMAGE_SKILLS_ROOT` is NOT a selection input here. It survives as the
+//   OMP owned-settings declaration constant (and the image tree it names) until
+//   the co-released `align-omp-skill-trust-to-shared-root` parameterizes that
+//   declaration and `collapse-skill-packaging-to-one-tree` removes the tree.
+//   `agentType` never selects a root: it is accepted for supported-type
+//   validation and error context only.
 //
 // `skillsDir` is an internal render input: no new public configuration, no
 // new environment override, and no subprocess secret is introduced here.
@@ -29,31 +28,18 @@
 // canonical PHYSICAL observation (realpath) so each consumer — prompt recipes,
 // script inventory, permission decisions, readiness and read-only mounts —
 // shares the SAME canonical absolute spelling and a root identity an inventory
-// can recheck at decision time. The selection logic below is unchanged:
-// image-first OMP, validated development source, and daemon-side OpenCode
-// configuration; only the OBSERVATION of the selected root was added.
+// can recheck at decision time.
 
-import { isAbsolute, join, resolve } from "@std/path";
-import { OMP_IMAGE_SKILLS_ROOT } from "@utils/omp-paths.ts";
+import { isAbsolute, resolve } from "@std/path";
 import { isSupportedAgentType } from "../acp/types.ts";
 import type { AgentType } from "../acp/types.ts";
 import { ConfigError, ErrorCode } from "../types/errors.ts";
-
-/**
- * Development source root: the repository `skills/` tree — the declared
- * content-faithful COPY source of `OMP_IMAGE_SKILLS_ROOT` (Containerfile:
- * `COPY skills/ /opt/air/skills/`). Validated for existence before use, the
- * same posture as every other dev→image seam.
- */
-export const DEV_SOURCE_SKILLS_ROOT = resolve(
-  join(import.meta.dirname ?? ".", "..", "..", "skills"),
-);
 
 /** Injectable seam so tests and unusual hosts can probe without the real filesystem. */
 export interface SkillsRootOptions {
   /** Existence probe for directory roots; defaults to the real filesystem. */
   directoryExists?: (path: string) => boolean;
-  /** Working directory OpenCode relative roots resolve against (daemon-side, never child HOME). */
+  /** Working directory relative roots resolve against (deployment-side, never child HOME). */
   deploymentCwd?: string;
   /**
    * Full physical-observation seam: returns the canonical observation of an
@@ -102,10 +88,11 @@ function defaultObserveDirectory(
 }
 
 /**
- * Resolve the deployment-owned ABSOLUTE skill-script root for one agent type.
- * `configuredSkillsDir` is the existing `agent.skillsDir` value (opencode
- * installed-root resolution only). Throws `ConfigError` when no validated
- * root exists — the caller's render/retry then fails explicitly instead of
+ * Resolve the deployment-owned ABSOLUTE skill-script root shared by BOTH agent
+ * types. `configuredSkillsDir` is the existing `agent.skillsDir` value;
+ * `agentType` is accepted for supported-type validation and error context only
+ * and never selects the root. Throws `ConfigError` when no validated root
+ * exists — the caller's render/retry then fails explicitly instead of
  * instructing a nonexistent location.
  * The returned path is the CANONICAL physical spelling of the validated
  * selection (`observeTrustedSkillsRoot` for the identity as well).
@@ -173,22 +160,11 @@ export function observeTrustedSkillsRoot(
     }
     return observation;
   };
-  if (agentType === "omp") {
-    // Image-first, validated dev fallback: the OFFICIAL image always installs
-    // the owned root, so development hosts are the only ones reaching the
-    // dev branch, and they only when the repository tree really exists.
-    if (directoryExists(OMP_IMAGE_SKILLS_ROOT)) return validated(OMP_IMAGE_SKILLS_ROOT);
-    if (directoryExists(DEV_SOURCE_SKILLS_ROOT)) return validated(DEV_SOURCE_SKILLS_ROOT);
-    throw new ConfigError(
-      ErrorCode.CONFIG_INVALID,
-      `No trusted OMP skill-script root: neither the installed owned root ` +
-        `"${OMP_IMAGE_SKILLS_ROOT}" nor the development source root ` +
-        `"${DEV_SOURCE_SKILLS_ROOT}" exists — an isolated agent child HOME is never a fallback`,
-      { agentType },
-    );
-  }
-  // opencode: the existing installed-root resolution (agent.skillsDir, default
-  // "skills"), relative roots anchored at the daemon-side working directory.
+  // ONE selection for BOTH agent types (`unify-skill-root-and-inventory` D1):
+  // the existing installed-root resolution — `agent.skillsDir` (default
+  // "skills") — with relative roots anchored at the daemon-side working
+  // directory. No image constant, no separately packaged tree and no agent-type
+  // branch can select this root.
   const configured = configuredSkillsDir && configuredSkillsDir !== ""
     ? configuredSkillsDir
     : "skills";
@@ -198,7 +174,7 @@ export function observeTrustedSkillsRoot(
   if (!directoryExists(root)) {
     throw new ConfigError(
       ErrorCode.CONFIG_INVALID,
-      `No trusted OpenCode skill-script root: the configured installed root ` +
+      `No trusted skill-script root: the configured installed root ` +
         `"${root}" does not exist — the agent child HOME is never used to derive it`,
       { agentType, root },
     );

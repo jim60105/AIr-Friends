@@ -548,7 +548,14 @@ async function createHarness(params: {
   const sessionRegistry = new SnapshotRegistry();
   const contextAssembler = new ContextAssembler(memoryStore, {
     systemPromptPath: config.agent.systemPromptPath,
-    skillsDir: "/opt/air/skills", // trusted skill-script root (required render input)
+    // The ONE deployment-resolved skill-script root
+    // (`unify-skill-root-and-inventory`): the same value the orchestrator, the
+    // connector inventory and the retry assertions below resolve, for either
+    // agent type — so the delivered root and the resolved root are one value.
+    skillsDir: resolveTrustedSkillsRoot(
+      config.agent.defaultAgentType ?? "opencode",
+      config.agent.skillsDir,
+    ),
     recentMessageLimit: 20,
     tokenLimit: 20000,
   });
@@ -812,8 +819,14 @@ async function runHappyPath(shape: "per-spawn" | "pooled"): Promise<void> {
     const promptText = h.orchestrator.promptTexts[0] ?? "";
     assertStringIncludes(promptText, `--session-id ${sessionId}`);
     // The delivered reply prompt carries the literal trusted skill-script root
-    // the assembler was configured with.
-    assertStringIncludes(promptText, "/opt/air/skills");
+    // the whole deployment resolves (`unify-skill-root-and-inventory`).
+    assertStringIncludes(
+      promptText,
+      resolveTrustedSkillsRoot(
+        h.config.agent.defaultAgentType ?? "opencode",
+        h.config.agent.skillsDir,
+      ),
+    );
     const stagingDir = `${h.workspacePath}/tmp/${sessionId}`;
     assertStringIncludes(promptText, stagingDir);
 

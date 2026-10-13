@@ -7,8 +7,9 @@
 // Every classified session type (normal message, channel lurk, spontaneous,
 // self-research, summary, user memory maintenance, channel memory maintenance,
 // scheduled reminder) renders — through the REAL Vento engine against the REAL
-// bundled templates/fragment — the selected agent's literal ABSOLUTE trusted
-// root, the literal Skill API session id and the absolute staging directory,
+// bundled templates/fragment — the deployment's ONE resolved literal ABSOLUTE
+// trusted root (`unify-skill-root-and-inventory`: identical for both agent
+// types), the literal Skill API session id and the absolute staging directory,
 // with every recipe argument POSIX single-quoted and no unexpanded
 // `$TMPDIR`/`$SESSION_ID` token. Dashboard web-chat keeps its skill
 // prohibition and acquires no root requirement.
@@ -36,9 +37,13 @@ const PROMPTS_DIR = join(import.meta.dirname ?? ".", "..", "..", "prompts");
 const SESSION_ID = "sess_literal_42";
 const STAGING_DIR = "/data/workspaces/discord/123/tmp/sess_literal_42";
 
-/** The two agent roots the deployment resolves (`docs/DEVELOPMENT.md`). */
-const OMP_IMAGE_ROOT = "/opt/air/skills";
-const OPENCODE_CONTAINER_ROOT = "/home/deno/.agents/skills";
+/**
+ * The ONE deployment-resolved skill-script root
+ * (`unify-skill-root-and-inventory`): both agent types render this same
+ * configured value, so the render contract is proved once instead of once per
+ * agent-specific root.
+ */
+const RESOLVED_SKILLS_ROOT = "/srv/air/skills";
 
 const baseVars = {
   isDm: false,
@@ -48,7 +53,7 @@ const baseVars = {
   guildId: "",
   agentType: "opencode",
   model: "test-model",
-  skillsDir: OMP_IMAGE_ROOT,
+  skillsDir: RESOLVED_SKILLS_ROOT,
 };
 
 // The values every payload-staging render supplies (what the orchestrator /
@@ -179,8 +184,8 @@ function assertRootContract(rendered: string, root: string, label: string): void
 
 const env = createTemplateEngine(PROMPTS_DIR);
 
-// Every classified render, for BOTH selected-agent roots.
-for (const root of [OMP_IMAGE_ROOT, OPENCODE_CONTAINER_ROOT]) {
+// Every classified render, at the single root every agent type resolves.
+for (const root of [RESOLVED_SKILLS_ROOT]) {
   for (
     const [label, template, vars] of [
       ["normal message (system_reply.md)", "system_reply.md", { userContextMessage: "hi" }],
@@ -246,7 +251,7 @@ Deno.test("prompt skills root - reply recipe quotes the complete executable and 
   const line = recipeLine(rendered, "send-reply");
   assertEquals(
     recipeExecutable(rendered, "send-reply"),
-    `${OMP_IMAGE_ROOT}/send-reply/scripts/send-reply.ts`,
+    `${RESOLVED_SKILLS_ROOT}/send-reply/scripts/send-reply.ts`,
   );
   assertEquals(recipeArgument(line, "--session-id"), SESSION_ID);
   assertEquals(recipeArgument(line, "--message-file"), `${STAGING_DIR}/reply.md`);
@@ -262,7 +267,7 @@ Deno.test("prompt skills root - spontaneous post recipe quotes the complete exec
   const line = recipeLine(rendered, "send-reply");
   assertEquals(
     recipeExecutable(rendered, "send-reply"),
-    `${OMP_IMAGE_ROOT}/send-reply/scripts/send-reply.ts`,
+    `${RESOLVED_SKILLS_ROOT}/send-reply/scripts/send-reply.ts`,
   );
   assertEquals(recipeArgument(line, "--message-file"), `${STAGING_DIR}/reply.md`);
 });
@@ -279,7 +284,7 @@ Deno.test("prompt skills root - reminder recipe quotes the complete executable",
   const line = recipeLine(rendered, "send-reply");
   assertEquals(
     recipeExecutable(rendered, "send-reply"),
-    `${OMP_IMAGE_ROOT}/send-reply/scripts/send-reply.ts`,
+    `${RESOLVED_SKILLS_ROOT}/send-reply/scripts/send-reply.ts`,
   );
   assertEquals(recipeArgument(line, "--session-id"), SESSION_ID);
   assertEquals(recipeArgument(line, "--message-file"), `${STAGING_DIR}/reply.md`);
@@ -293,7 +298,7 @@ Deno.test("prompt skills root - summary recipe quotes memory-save and its conten
   const line = recipeLine(rendered, "memory-save");
   assertEquals(
     recipeExecutable(rendered, "memory-save"),
-    `${OMP_IMAGE_ROOT}/memory-save/scripts/memory-save.ts`,
+    `${RESOLVED_SKILLS_ROOT}/memory-save/scripts/memory-save.ts`,
   );
   assertEquals(recipeArgument(line, "--session-id"), SESSION_ID);
   assertEquals(recipeArgument(line, "--content-file"), `${STAGING_DIR}/summary.md`);
@@ -310,13 +315,13 @@ Deno.test("prompt skills root - maintenance recipe quotes memory-save and its co
   const line = recipeLine(rendered, "memory-save");
   assertEquals(
     recipeExecutable(rendered, "memory-save"),
-    `${OMP_IMAGE_ROOT}/memory-save/scripts/memory-save.ts`,
+    `${RESOLVED_SKILLS_ROOT}/memory-save/scripts/memory-save.ts`,
   );
   assertEquals(recipeArgument(line, "--content-file"), `${STAGING_DIR}/memory.md`);
   // The patch script is named with the same complete, quoted path.
   assertStringIncludes(
     rendered,
-    `'${OMP_IMAGE_ROOT}/memory-patch/scripts/memory-patch.ts'`,
+    `'${RESOLVED_SKILLS_ROOT}/memory-patch/scripts/memory-patch.ts'`,
   );
   // No reply capability is added to a maintenance session.
   assertFalse(rendered.includes("send-reply/scripts/send-reply.ts"));
@@ -393,7 +398,7 @@ Deno.test("prompt skills root - required root validation rejects absent, empty a
     assertStringIncludes(error.message, "test classified render");
   }
   // A validated absolute root is returned unchanged — no HOME expansion.
-  assertEquals(requireTrustedSkillsRoot(OMP_IMAGE_ROOT, "test"), OMP_IMAGE_ROOT);
+  assertEquals(requireTrustedSkillsRoot(RESOLVED_SKILLS_ROOT, "test"), RESOLVED_SKILLS_ROOT);
 });
 
 Deno.test("prompt skills root - a mounted classified template without the root fails before delivery", async () => {
@@ -405,11 +410,11 @@ Deno.test("prompt skills root - a mounted classified template without the root f
     { ...stagingVars } as unknown as Record<string, unknown>,
   );
   const error = assertThrows(
-    () => assertSkillsRootDelivered(rootless, OMP_IMAGE_ROOT, "mounted template delivery"),
+    () => assertSkillsRootDelivered(rootless, RESOLVED_SKILLS_ROOT, "mounted template delivery"),
     ConfigError,
   ) as ConfigError;
   assertEquals(error.code, ErrorCode.CONFIG_INVALID);
-  assertStringIncludes(error.message, OMP_IMAGE_ROOT);
+  assertStringIncludes(error.message, RESOLVED_SKILLS_ROOT);
   assertStringIncludes(error.message, "mounted template delivery");
 });
 
@@ -428,7 +433,11 @@ Deno.test("prompt skills root - no staging token fallback even without the pair"
     });
     assertFalse(rendered.includes("$SESSION_ID"), `${template}: no $SESSION_ID fallback`);
     assertFalse(rendered.includes("$TMPDIR"), `${template}: no $TMPDIR fallback`);
-    assertRootContract(rendered, OMP_IMAGE_ROOT, `${template}: root present without the pair`);
+    assertRootContract(
+      rendered,
+      RESOLVED_SKILLS_ROOT,
+      `${template}: root present without the pair`,
+    );
   }
 });
 
@@ -440,7 +449,7 @@ Deno.test("prompt skills root - summary without a session id renders the root an
     ...baseVars,
     tmpDir: STAGING_DIR,
   });
-  assertRootContract(rendered, OMP_IMAGE_ROOT, "summary without session id");
+  assertRootContract(rendered, RESOLVED_SKILLS_ROOT, "summary without session id");
   // The named script path and the flag documentation stay (they describe the
   // root's own layout), but the two-step INVOCATION is omitted: with no id to
   // pass there is no runnable command.

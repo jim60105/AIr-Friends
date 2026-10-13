@@ -75,13 +75,14 @@ Deno.test("buildBwrapConfinement - inner command preserved after separator", () 
 });
 
 // ---------------------------------------------------------------------------
-// Trusted skill root mounts (`unify-omp-skill-root-resolution` D4 / task 4.1):
-// the selected root mounts read-only AT ITS LITERAL PATH — image (OMP
-// `/opt/air/skills`, OpenCode `/home/deno/.agents/skills` on top of the ro
-// `/home/deno/.agents` parent) and custom roots alike; a root descending from
-// a writable parent is bound AFTER that parent; a root equal to or containing
-// any mandatory writable mount is refused BEFORE spawn; no root means no
-// invented fallback mount.
+// Trusted skill root mounts (`unify-skill-root-and-inventory` D4, generalizing
+// `unify-omp-skill-root-resolution` task 4.1): the ONE deployment-resolved root
+// mounts read-only AT ITS LITERAL PATH for BOTH agent types — the stock
+// container root (`/home/deno/.agents/skills`, on top of the ro
+// `/home/deno/.agents` parent) and custom roots alike; a root descending from a
+// writable parent is bound AFTER that parent; a root equal to or containing any
+// mandatory writable mount is refused BEFORE spawn; no root means no invented
+// fallback mount.
 // ---------------------------------------------------------------------------
 
 const roBindPairs = (args: string[]): Array<[string, string]> => {
@@ -92,16 +93,23 @@ const roBindPairs = (args: string[]): Array<[string, string]> => {
   return pairs;
 };
 
-Deno.test("buildBwrapConfinement - OMP image root mounts read-only at its literal path", () => {
-  const { args } = buildBwrapConfinement(
-    { sessionWorkspace: "/ws", tmpDir: "/ws/tmp", skillRoot: "/opt/air/skills", shareNet: true },
-    "omp",
-    ["acp"],
-  );
-  assertEquals(
-    roBindPairs(args).some(([src, dst]) => src === "/opt/air/skills" && dst === "/opt/air/skills"),
-    true,
-  );
+Deno.test("buildBwrapConfinement - the resolved root mounts read-only at its literal path for either agent type", () => {
+  // The single resolved root is supplied identically for both agent types, so
+  // the mount is identical too — no agent-specific image tree is privileged.
+  for (const agentType of ["opencode", "omp"] as const) {
+    const { args } = buildBwrapConfinement(
+      { sessionWorkspace: "/ws", tmpDir: "/ws/tmp", skillRoot: "/srv/air/skills", shareNet: true },
+      agentType,
+      ["acp"],
+    );
+    assertEquals(
+      roBindPairs(args).some(([src, dst]) =>
+        src === "/srv/air/skills" && dst === "/srv/air/skills"
+      ),
+      true,
+      agentType,
+    );
+  }
 });
 
 Deno.test("buildBwrapConfinement - OpenCode container root mounts ro while the legitimate personal-tree visibility stays", () => {
@@ -254,7 +262,9 @@ Deno.test("buildBwrapConfinement - no skill root invents no fallback mount", () 
     [],
   );
   const joined = args.join(" ");
-  assertEquals(joined.includes("/opt/air/skills"), false);
+  // Neither a skill bind source nor any baked-in tree appears: with no resolved
+  // root supplied, the confinement adds no skill mount of its own.
+  assertEquals(roBindPairs(args).some(([, dst]) => dst.endsWith("/skills")), false);
   assertEquals(joined.includes("/app/skills"), false);
   // Only the DEFAULT read-only set is bound; no extra ro bind beyond defaults.
   assertEquals(roBindPairs(args).length >= 0, true);

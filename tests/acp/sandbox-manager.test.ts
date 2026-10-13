@@ -342,9 +342,10 @@ Deno.test("SandboxManager - cwd is passed through", () => {
   assertEquals(opts.cwd, "/my/workspace");
 });
 
-Deno.test("SandboxManager - confinement mounts the selected skills root read-only", () => {
-  // `unify-omp-skill-root-resolution` D4/4.1: the factory's observation is
-  // threaded to the bwrap builder, which mounts the root at its literal path.
+Deno.test("SandboxManager - confinement mounts the resolved skills root read-only for either agent type", () => {
+  // `unify-skill-root-and-inventory` D4: the factory's single observation is
+  // threaded to the bwrap builder, which mounts that root at its literal path
+  // for BOTH agent types (no per-agent image tree).
   withCapabilities(false, true, () => {
     const sandbox = new SandboxManager(
       createSandboxConfig({
@@ -354,16 +355,20 @@ Deno.test("SandboxManager - confinement mounts the selected skills root read-onl
         filterEnv: false,
       }),
     );
-    const opts = sandbox.buildSpawnOptions("omp", "omp", ["acp"], {}, "/ws", {
-      root: "/opt/air/skills",
-      identity: { dev: 1, ino: 2 },
-    });
-    assertEquals(opts.command, "bwrap");
-    let found = false;
-    for (let i = 0; i < opts.args.length - 2; i++) {
-      if (opts.args[i] === "--ro-bind-try" && opts.args[i + 1] === "/opt/air/skills") found = true;
+    for (const agentType of ["opencode", "omp"] as const) {
+      const opts = sandbox.buildSpawnOptions(agentType, agentType, ["acp"], {}, "/ws", {
+        root: "/srv/air/skills",
+        identity: { dev: 1, ino: 2 },
+      });
+      assertEquals(opts.command, "bwrap");
+      let found = false;
+      for (let i = 0; i < opts.args.length - 2; i++) {
+        if (opts.args[i] === "--ro-bind-try" && opts.args[i + 1] === "/srv/air/skills") {
+          found = true;
+        }
+      }
+      assertEquals(found, true, `${agentType}: root mounted read-only at its literal path`);
     }
-    assertEquals(found, true, "selected root mounted read-only at its literal path");
   });
 });
 
@@ -379,7 +384,13 @@ Deno.test("SandboxManager - no skills root invents no fallback mount", () => {
     );
     const opts = sandbox.buildSpawnOptions("opencode", "opencode", ["--acp"], {}, "/ws");
     assertEquals(opts.command, "bwrap");
-    assertEquals(opts.args.join(" ").includes("/opt/air/skills"), false);
+    // With no resolved root supplied the confinement mounts no skill tree of
+    // its own — neither an image constant nor a cwd-relative guess.
+    for (let i = 0; i < opts.args.length - 2; i++) {
+      if (opts.args[i] === "--ro-bind-try") {
+        assertEquals(opts.args[i + 1].endsWith("/skills"), false, opts.args.join(" "));
+      }
+    }
     assertEquals(opts.args.join(" ").includes("/app/skills"), false);
   });
 });

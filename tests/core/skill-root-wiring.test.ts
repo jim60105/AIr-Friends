@@ -5,23 +5,21 @@
 // == skill mount == readiness root, for the repository-development shape
 // (real filesystem, real factory/connector/sandbox/healthcheck code paths).
 //
-// The container shapes (OMP image `/opt/air/skills`, OpenCode image
-// `/home/deno/.agents/skills`) are covered by the resolver suite
-// (`tests/core/skills-root.test.ts` — image-first selection + canonical
-// observation through its injectable seams), the confinement suite
-// (literal-path ro mounts for both image roots) and the packaging suite;
-// a real container/bwrap acceptance run remains USER-OWNED and UNVERIFIED.
-// The synthetic positives below are honestly labeled: they capture that the
-// REAL consumers compose the SAME observation, not that a container exists.
+// The container shape (the stock image's configured
+// `/home/deno/.agents/skills`, shared by BOTH agent types since
+// `unify-skill-root-and-inventory`) is covered by the resolver suite
+// (`tests/core/skills-root.test.ts` — the one configured-root selection +
+// canonical observation through its injectable seams), the confinement suite
+// (literal-path ro mounts) and the packaging suite; a real container/bwrap
+// acceptance run remains USER-OWNED and UNVERIFIED. The synthetic positives
+// below are honestly labeled: they capture that the REAL consumers compose the
+// SAME observation, not that a container exists.
 
 import { assertEquals } from "@std/assert";
 import { createAgentConfig, getDefaultAgentType } from "@acp/agent-factory.ts";
 import { buildSkillAutoApproveList, matchesScriptEntrypoint } from "@acp/skill-inventory.ts";
-import {
-  DEV_SOURCE_SKILLS_ROOT,
-  observeTrustedSkillsRoot,
-  resolveTrustedSkillsRoot,
-} from "@core/skills-root.ts";
+import { observeTrustedSkillsRoot, resolveTrustedSkillsRoot } from "@core/skills-root.ts";
+import { resolve } from "@std/path";
 import { SandboxManager } from "../../src/acp/sandbox-manager.ts";
 import { HealthCheckServer } from "../../src/healthcheck.ts";
 import type { Config } from "../../src/types/config.ts";
@@ -29,6 +27,14 @@ import {
   resetSandboxCapabilityCache,
   setSandboxCapabilityCacheForTest,
 } from "../../src/acp/sandbox-capabilities.ts";
+
+/**
+ * The ONE deployment-resolved root in the repository-development shape
+ * (`unify-skill-root-and-inventory`): the repository's own `skills/` tree, i.e.
+ * what `agent.skillsDir` (default `"skills"`) resolves to from the repository
+ * working directory for BOTH agent types.
+ */
+const REPO_SKILLS_ROOT = Deno.realPathSync(resolve(import.meta.dirname ?? ".", "../../skills"));
 
 function makeConfig(overrides: Partial<Config["agent"]> = {}): Config {
   return {
@@ -78,7 +84,7 @@ Deno.test("wiring identity - repository development: every consumer carries ONE 
   //    consume the resolver's string spelling of the SAME observation.
   const renderedSkillsDir = resolveTrustedSkillsRoot(agentType, config.agent.skillsDir);
   assertEquals(renderedSkillsDir, resolver.root);
-  assertEquals(resolver.root, DEV_SOURCE_SKILLS_ROOT);
+  assertEquals(resolver.root, REPO_SKILLS_ROOT);
 
   // 4. Skill mount: the sandbox threads the factory observation to bwrap,
   //    which mounts the SAME literal path read-only.
@@ -134,18 +140,17 @@ Deno.test("wiring identity - repository development: every consumer carries ONE 
   assertEquals(resolveTrustedSkillsRoot(agentType, config.agent.skillsDir), resolver.root);
 });
 
-Deno.test("wiring identity - dashboard agent override stays root-identical (dev tree)", () => {
-  // Dashboard override (5.1): selecting the OTHER agent type must not create
-  // a second root spelling. In the repository-development shape both agents
-  // legitimately resolve to the same physical tree (OMP's validated dev
-  // source root IS the repository `skills/` the OpenCode default resolves);
-  // in the image shapes the two roots are distinct and each consumer resolves
-  // per the SELECTED agent (dashboard now renders `chatSession.agentType`).
+Deno.test("wiring identity - a dashboard agent-type override cannot change the root", () => {
+  // Dashboard override: selecting the OTHER agent type must not create a
+  // second root spelling. Since `unify-skill-root-and-inventory` the resolver
+  // has no agent-type selection at all, so both agent types (and every
+  // dashboard `chatSession.agentType`) land on the one configured root — here
+  // the repository `skills/` tree the default `"skills"` value resolves to.
   const config = makeConfig({ defaultAgentType: "omp" });
   const overridden = observeTrustedSkillsRoot("opencode", config.agent.skillsDir);
   const factory = createAgentConfig("opencode", "/tmp/test/workspace", config);
   assertEquals(factory.skillsRoot?.root, overridden.root);
-  assertEquals(overridden.root, DEV_SOURCE_SKILLS_ROOT);
+  assertEquals(overridden.root, REPO_SKILLS_ROOT);
 });
 
 Deno.test("wiring identity - pooled reconnect re-observation is deterministic", () => {

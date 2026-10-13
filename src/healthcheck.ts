@@ -189,11 +189,12 @@ export class HealthCheckServer {
     const checks: SkillReadinessCheck[] = [];
 
     if (this.context) {
-      // 1. Check skill scripts existence against the DEFAULT selected agent's
-      // trusted root (`unify-omp-skill-root-resolution` D4): the SAME resolver
-      // the connector/factory use — never a daemon-cwd-relative or HOME guess.
-      // A root ConfigError becomes an explicit failed `skill-root` entry
-      // (HTTP 503 through allReady) with no fallback tree.
+      // 1. Check skill scripts existence against the deployment's ONE shared
+      // trusted root (`unify-skill-root-and-inventory` D4): the SAME resolver
+      // the connector/factory use for BOTH agent types — never a daemon-cwd-
+      // relative or HOME guess, and never a per-agent alternate tree. A root
+      // ConfigError becomes an explicit failed `skill-root` entry (HTTP 503
+      // through allReady) with no fallback tree.
       const skillNames = this.context.agentCore.getSkillRegistry().getAvailableSkills();
       let skillsDir: string | undefined;
       try {

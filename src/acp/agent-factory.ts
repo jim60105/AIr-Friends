@@ -49,14 +49,15 @@ export function createAgentConfig(
   sessionId?: string,
   poolKey?: string,
 ): AgentConfig {
-  // `unify-omp-skill-root-resolution` D1: the trusted skill-script root for the
-  // SELECTED agent type is observed ONCE here — before subprocess creation — and
+  // `unify-skill-root-and-inventory` D1: the deployment's ONE trusted
+  // skill-script root is observed ONCE here — before subprocess creation — and
   // rides the AgentConfig as the mandatory internal `skillsDir` render input:
   // the confinement builder mounts THAT observation read-only and the connector
-  // builds its script inventory from it. No consumer re-derives from HOME or
-  // `Deno.cwd()/skills`, and an unresolvable root fails here explicitly before
-  // the child is ever spawned. Dashboard agent-type overrides flow through this
-  // same call, so the root is always the selected agent's own.
+  // builds its script inventory from it. The observation is identical for both
+  // agent types (the resolver has no agent-type selection), so a dashboard
+  // agent-type override flows through this same call and lands on the same root.
+  // No consumer re-derives from HOME, `Deno.cwd()/skills` or an image tree, and
+  // an unresolvable root fails here explicitly before the child is ever spawned.
   const skillsRoot = observeTrustedSkillsRoot(type, appConfig.agent.skillsDir);
 
   // Build the base (unfiltered) config for the agent type
