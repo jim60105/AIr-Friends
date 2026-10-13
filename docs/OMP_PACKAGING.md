@@ -156,6 +156,15 @@ inventory — `entry sha256 … src/acp/omp/extension/index.ts` and
 `lock sha256 … deno.lock` — so every bundle names the exact source+lock
 bytes it was cut from.
 
+The image's `cache` stage keeps `scripts/omp/` beside `src/`, `deno.json` and
+`deno.lock`, and the owned-tree step invokes both the bundler and the manifest
+generator from that read-only stage mount (`/build-src/scripts/omp/`). Module
+specifiers resolve against the importing file's own URL, so the packaging
+scripts must stay a sibling of `src/`; a relocated copy resolves `/opt/src` and
+fails the build. The bundler toolchain itself is resolved at build time — `deno
+bundle` fetches its own esbuild backend from the registry — which is
+independent of the module graph this stage pre-caches.
+
 **Build-owned deployment declaration (`bind-omp-owned-module-evidence`).** The
 bundle also carries the declaration the runtime verifier anchors its physical
 evidence to: the canonical source checkout's generated

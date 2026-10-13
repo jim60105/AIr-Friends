@@ -66,6 +66,7 @@ function section(start: string, end: string): string {
 const ompStage = section("FROM base AS omp-unpacker", "FROM base AS final");
 const finalStage = containerfile.slice(containerfile.indexOf("FROM base AS final"));
 const opencodeStage = section("FROM base AS opencode-unpacker", "FROM base AS cache");
+const cacheStage = section("FROM base AS cache", "FROM cache AS owned-skills-stager");
 
 // --- 4.1 Containerfile-parse assertions ------------------------------------
 
@@ -201,6 +202,37 @@ Deno.test("omp packaging - bundle + manifest run inside the owned-tree step", ()
   assert(finalStage.includes("chmod 0644 /opt/air/omp/PACKAGE-MANIFEST.sha256"));
   // The staging scripts do not survive the build.
   assert(finalStage.includes("rm -rf /opt/air-build"));
+});
+
+Deno.test("omp packaging - linked copies never precede the directory preparation", () => {
+  // `COPY --link` lands as an independent layer that re-creates the
+  // destination's parent directories at 0755 with that copy's ownership, so a
+  // directory prepared to another mode must be prepared AFTER the last linked
+  // copy in the stage (verified under rootless podman: /app and /home/deno came
+  // back 0755, while /app/data and /deno-dir — never copy parents — kept 0775).
+  const lastLinkedCopy = finalStage.lastIndexOf("COPY --link");
+  assert(lastLinkedCopy > 0, "the final stage installs content via COPY --link");
+  assert(
+    finalStage.indexOf("install -d -m 775 -o $UID -g 0 /app") > lastLinkedCopy,
+    "the $UID:0 775 directory preparation follows every linked copy",
+  );
+  // Same rule for the root-owned binary directory: without the explicit
+  // declaration its owner would follow whichever linked copy touched it last.
+  assert(
+    finalStage.indexOf("install -d -m 755 -o 0 -g 0 /usr/local /usr/local/bin") > lastLinkedCopy,
+    "root-owned /usr/local/bin is declared after every linked copy",
+  );
+  // The packaging scripts resolve `../../src/...` against their own file URL,
+  // so the cache stage keeps them beside `src/` and the owned-tree step invokes
+  // them from that same read-only mount.
+  assert(
+    cacheStage.includes("COPY --link --chown=0:0 --chmod=0755 scripts/omp/ ./scripts/omp/"),
+    "the cache stage carries the sibling scripts/omp tree",
+  );
+  assert(
+    finalStage.includes("/build-src/scripts/omp/bundle-omp-extension.sh"),
+    "the bundler runs from the cache-stage mount, never a relocated copy",
+  );
 });
 
 Deno.test("omp packaging - no-new-Bun rule in the OMP steps", () => {

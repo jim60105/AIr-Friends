@@ -11,6 +11,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 - Isolated the generated OMP bundle smoke driver's environment from its parent process with `clearEnv: true`. The existing smoke now injects a hostile parent `XDG_CONFIG_HOME` to exercise the isolation while preserving the restricted discovery guard and every bundle behavior assertion.
 - Compiled the CI executable with the documented application runtime permissions and made its `--help` smoke check propagate failures instead of masking permission errors.
+- Preserved the OMP packaging scripts' canonical source-relative layout in the container build: the cache stage carries `scripts/omp/` as a sibling of `src/`, and the owned-tree step invokes the bundler and the manifest generator from that read-only mount, fixing the `Module not found "file:///opt/src/acp/omp/deployment-module.ts"` failures in both architecture image builds without shipping build scripts into the runtime image.
+- Declared the prepared directories after the final stage's linked copies: `COPY --link` re-creates a destination's parent directories as 0755 entries owned by that copy, so the previous ordering silently discarded the declared `0775` GID-0 group-write modes on `/app`, `/licenses`, `/home/deno`, and `/home/deno/.config/opencode`, and `/usr/local` plus `/usr/local/bin` now install root-owned 0755 instead of following whichever linked copy touched them last.
+- Verified the pinned `dumb-init` v1.2.5 download against per-architecture SHA-256 digests before install, matching the existing OpenCode and OMP asset verification.
 
 ### Added
 

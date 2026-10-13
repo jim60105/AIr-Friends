@@ -79,6 +79,16 @@ COPY assets/ ./assets/
 RUN deno cache --lock=deno.lock src/main.ts && \
     deno cache --lock=deno.lock "npm:@node-rs/jieba"
 
+# Owned-tree build scripts (root-owned read-only; never in the runtime image).
+# They stay a SIBLING of `src/` because `bundle-extension.ts` and
+# `bundle-declaration.ts` import `../../src/...`, and module specifiers resolve
+# against the importing file's own URL — a relocated copy looks for `/opt/src`
+# and the build fails. Copied AFTER the dependency cache so editing a packaging
+# script cannot invalidate the cached module graph. `deno bundle` fetches its
+# own esbuild backend from the registry at build time; that fetch is intentional
+# and independent of this stage's module cache.
+COPY --link --chown=0:0 --chmod=0755 scripts/omp/ ./scripts/omp/
+
 ########################################
 # Owned-skill staging stage
 # `unify-omp-skill-root-resolution` D2/D7: the owned OMP root is packaged from
@@ -184,33 +194,28 @@ ARG UID
 ARG NODE_ENV=production
 ENV NODE_ENV=$NODE_ENV
 
-# Set up directories with proper permissions
-# OpenShift compatibility: root group (GID 0) for arbitrary UID support
-RUN install -d -m 775 -o $UID -g 0 /app && \
-    install -d -m 775 -o $UID -g 0 /app/data && \
-    install -d -m 775 -o $UID -g 0 /licenses && \
-    install -d -m 775 -o $UID -g 0 /deno-dir/ && \
-    install -d -m 775 -o $UID -g 0 /home/deno/ && \
-    install -d -m 775 -o $UID -g 0 /home/deno/.local && \
-    install -d -m 775 -o $UID -g 0 /home/deno/.local/bin && \
-    install -d -m 775 -o $UID -g 0 /home/deno/.local/share/opencode && \
-    install -d -m 775 -o $UID -g 0 /home/deno/.config/opencode && \
-    install -d -m 775 -o $UID -g 0 /home/deno/.cache && \
-    install -d -m 775 -o $UID -g 0 /home/deno/.agent-browser
-
 # Copy license file (OpenShift Policy)
 COPY --link --chown=$UID:0 --chmod=775 LICENSE /licenses/LICENSE
 
 # Get Dumb Init
+# Pinned release + per-arch SHA-256, verified BEFORE install exactly like the
+# OpenCode and OMP assets: this binary is PID 1 for every container start, so a
+# moved upstream tag or a tampered download must fail the build instead of
+# shipping. Bump deliberately and recompute BOTH digests; verify with:
+#   curl -fsSL "https://github.com/Yelp/dumb-init/releases/download/v${DUMBINIT_VERSION}/dumb-init_${DUMBINIT_VERSION}_${DUMBINIT_ARCH}" | sha256sum
+ARG DUMBINIT_VERSION=1.2.5
+ARG DUMBINIT_SHA256_X64=e874b55f3279ca41415d290c512a7ba9d08f98041b28ae7c2acb19a545f1c4df
+ARG DUMBINIT_SHA256_ARM64=b7d648f97154a99c539b63c55979cd29f005f88430fb383007fe3458340b795e
 # Map Docker TARGETARCH to dumb-init naming convention
 # TARGETARCH: amd64 -> x86_64, arm64 -> aarch64
 RUN case "${TARGETARCH}" in \
-      amd64) DUMBINIT_ARCH="x86_64" ;; \
-      arm64) DUMBINIT_ARCH="aarch64" ;; \
+      amd64) DUMBINIT_ARCH="x86_64"; DUMBINIT_SHA256="${DUMBINIT_SHA256_X64}" ;; \
+      arm64) DUMBINIT_ARCH="aarch64"; DUMBINIT_SHA256="${DUMBINIT_SHA256_ARM64}" ;; \
       *) echo "unsupported architecture: ${TARGETARCH}" && exit 1 ;; \
     esac && \
-    curl -fsSL "https://github.com/Yelp/dumb-init/releases/download/v1.2.5/dumb-init_1.2.5_${DUMBINIT_ARCH}" \
+    curl -fsSL "https://github.com/Yelp/dumb-init/releases/download/v${DUMBINIT_VERSION}/dumb-init_${DUMBINIT_VERSION}_${DUMBINIT_ARCH}" \
     -o /usr/local/bin/dumb-init && \
+    echo "${DUMBINIT_SHA256}  /usr/local/bin/dumb-init" | sha256sum -c - && \
     chmod 755 /usr/local/bin/dumb-init && \
     chown $UID:0 /usr/local/bin/dumb-init
 
@@ -305,14 +310,46 @@ COPY --link --chown=0:0 --chmod=0644 prompts/system_prompt_override.md /opt/air/
 # /opt/air/omp inputs must recut it in the same change (the bundle is now a
 # manifest-listed input) — a stale manifest
 # after a content change is a task-failure condition (docs/OMP_PACKAGING.md).
-COPY --link --chown=0:0 --chmod=0755 scripts/omp/ /opt/air-build/bin-omp/
 COPY --link --chown=0:0 --chmod=0644 --from=omp-unpacker /omp/out/OMP_VERSION /opt/air-build/OMP_VERSION
+# Both staging scripts run straight from the read-only cache-stage mount, which
+# keeps them beside the canonical `src/` their `../../src/...` imports resolve
+# against; /opt/air-build now carries only the pinned version file.
 RUN --mount=type=bind,from=cache,src=/app,target=/build-src \
-    /opt/air-build/bin-omp/bundle-omp-extension.sh /build-src /opt/air/omp/extension /build-src/deno.lock && \
-    /opt/air-build/bin-omp/generate-omp-manifest.sh /opt/air/omp "$(cat /opt/air-build/OMP_VERSION)" && \
+    /build-src/scripts/omp/bundle-omp-extension.sh /build-src /opt/air/omp/extension /build-src/deno.lock && \
+    /build-src/scripts/omp/generate-omp-manifest.sh /opt/air/omp "$(cat /opt/air-build/OMP_VERSION)" && \
     chown 0:0 /opt/air/omp/PACKAGE-MANIFEST.sha256 && \
     chmod 0644 /opt/air/omp/PACKAGE-MANIFEST.sha256 && \
     rm -rf /opt/air-build
+
+# Set up directories with proper permissions.
+# OpenShift compatibility: root group (GID 0) for arbitrary UID support.
+#
+# THIS RUN MUST FOLLOW EVERY `COPY --link` IN THIS STAGE. A linked copy lands as
+# an independent layer that re-creates the destination's PARENT directories as
+# plain 0755 entries owned by that copy's `--chown`, discarding modes prepared
+# earlier — verified under rootless podman, where /app and /home/deno came back
+# 0755 while the non-parent /app/data and /deno-dir kept 0775. A linked copy
+# added after this RUN silently resets /app to 0755 again.
+# Deliberately NOT declared here, and therefore left at 0755: /home/deno/.config
+# (the 775 entry below is its `opencode` child), /home/deno/.agents and
+# /home/deno/.agents/skills (the packaged personal-skill tree), and
+# /licenses/omp (root-owned notices).
+RUN install -d -m 775 -o $UID -g 0 /app && \
+    install -d -m 775 -o $UID -g 0 /app/data && \
+    install -d -m 775 -o $UID -g 0 /licenses && \
+    install -d -m 775 -o $UID -g 0 /deno-dir/ && \
+    install -d -m 775 -o $UID -g 0 /home/deno/ && \
+    install -d -m 775 -o $UID -g 0 /home/deno/.local && \
+    install -d -m 775 -o $UID -g 0 /home/deno/.local/bin && \
+    install -d -m 775 -o $UID -g 0 /home/deno/.local/share/opencode && \
+    install -d -m 775 -o $UID -g 0 /home/deno/.config/opencode && \
+    install -d -m 775 -o $UID -g 0 /home/deno/.cache && \
+    install -d -m 775 -o $UID -g 0 /home/deno/.agent-browser && \
+    # Root-owned and NOT group-writable, unlike the $UID:0 entries above: the
+    # agent's own binaries live here (the omp install contract), so the runtime
+    # user must not be able to replace them. Without this explicit declaration
+    # the owner follows whichever linked copy touched the directory last.
+    install -d -m 755 -o 0 -g 0 /usr/local /usr/local/bin
 
 WORKDIR /app
 
