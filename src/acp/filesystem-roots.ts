@@ -597,19 +597,22 @@ export async function canonicalizeSessionRoots(
         // Row 28 review follow-up: an ABSENT identity proves nothing and is
         // treated as a mismatch — the hardening is unconditional, matching
         // the client gate's discipline.
+        // `align-omp-skill-trust-to-shared-root` D1: the root's ownership and
+        // permission bits are NOT admission inputs (the shared root the
+        // deployment resolves is agent-writable). Identity, link-freedom,
+        // canonical spelling, directory type and writable-root disjointness
+        // remain mandatory.
         !trustedSkills.rootIdentity ||
         (
           lstatSkills.isSymlink || canonicalSkills !== trustedSkills.ownedRootPath ||
           destInfo.dev !== trustedSkills.rootIdentity.dev ||
-          destInfo.ino !== trustedSkills.rootIdentity.ino ||
-          destInfo.mode === null || (destInfo.mode & 0o022) !== 0 ||
-          ((destInfo.mode & 0o200) !== 0 && destInfo.uid !== 0)
+          destInfo.ino !== trustedSkills.rootIdentity.ino
         )
       ) {
         return {
           ok: false,
           reason: "trusted_identity_mismatch",
-          message: "Owned skill root ownership changed",
+          message: "Owned skill root identity changed",
         };
       }
       if (!destInfo.isDirectory) {

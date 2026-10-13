@@ -641,6 +641,23 @@ Deno.test("Task 3.3: Critical skills contract validation, disjointness and rejec
     const skillsRootInfo = roots.roots.find((r) => r.role === "trusted-skills")!;
     assertEquals(skillsRootInfo.readOnly, true);
 
+    // 2b. `align-omp-skill-trust-to-shared-root` D1: the SAME root with the
+    // packaged personal tree's own `775` posture (group/other-writable) is
+    // STILL admitted — ownership and permission bits are not admission inputs,
+    // while identity, canonical spelling and writable-root disjointness are.
+    Deno.chmodSync(skillsRoot, 0o775);
+    const writableTrustedConfig: TrustedSkillsRootConfig = {
+      ownedRootPath: skillsRoot,
+      source: "deployment_owned",
+      rootIdentity: identityOf(skillsRoot),
+    };
+    const writableRoots = unwrap(await canonicalizeSessionRoots(context, writableTrustedConfig));
+    assertEquals(
+      writableRoots.roots.find((r) => r.role === "trusted-skills")!.readOnly,
+      true,
+    );
+    Deno.chmodSync(skillsRoot, 0o555);
+
     // Row 28 review follow-up: the dead resolveFilesystemTarget criticalRef
     // ladder is removed; the live client admission gate (identity/source/
     // session/generation/canonical-path binding and workspace-spoof denial)

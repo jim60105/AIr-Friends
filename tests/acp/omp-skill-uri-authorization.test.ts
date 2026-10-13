@@ -68,9 +68,13 @@ const HEALTHY: Record<string, FakeNode> = {
   "/": { kind: "dir" },
   "/opt": { kind: "dir" },
   "/opt/air": { kind: "dir" },
-  [ROOT]: { kind: "dir", mode: 0o755 },
-  [`${ROOT}/send-reply`]: { kind: "dir", mode: 0o755 },
-  [`${ROOT}/send-reply/SKILL.md`]: { kind: "file", mode: 0o644 },
+  // The ADMITTED tree is the deployment-resolved shared root: agent-writable
+  // and group/other-writable (`align-omp-skill-trust-to-shared-root` D1), the
+  // packaged personal tree's own posture. Ownership and permission bits are not
+  // admission inputs; identity, containment and the link-free ladder are.
+  [ROOT]: { kind: "dir", mode: 0o775, uid: 1000 },
+  [`${ROOT}/send-reply`]: { kind: "dir", mode: 0o775, uid: 1000 },
+  [`${ROOT}/send-reply/SKILL.md`]: { kind: "file", mode: 0o664, uid: 1000 },
 };
 
 Deno.test("declared owned skill file authorizes to its canonical path", () => {
@@ -152,35 +156,57 @@ Deno.test("symlinked path component inside the source denies before delegation",
   assertEquals(resolution.ok, false);
 });
 
-Deno.test("agent-writable or aliased (hard-linked) instruction identities deny", () => {
-  for (const knob of [{ uid: 1000, mode: 0o666 }, { uid: 0, mode: 0o666 }, { nlink: 2 }]) {
+Deno.test("an aliased (hard-linked) instruction identity denies", () => {
+  const nodes: Record<string, FakeNode> = {
+    ...HEALTHY,
+    [`${ROOT}/send-reply/SKILL.md`]: { kind: "file", mode: 0o664, nlink: 2 },
+  };
+  const resolution = resolver(nodes, GENERATION).authorize("skill://send-reply/SKILL.md");
+  assertEquals(resolution.ok, false);
+});
+
+// `align-omp-skill-trust-to-shared-root` D1: the shared root the deployment
+// resolves is writable by the runtime agent user, so no permission-bit or
+// ownership combination may deny an otherwise canonical, contained, link-free,
+// single-link instruction — and none may admit a target those checks reject.
+Deno.test("writable and non-root-owned trees are admitted on identity alone", () => {
+  const writable: Array<Partial<FakeNode>> = [
+    { mode: 0o777, uid: 1000 }, // fully agent-writable root + components
+    { mode: 0o775, uid: 1000 }, // the packaged personal tree's own posture
+    { mode: 0o666, uid: 0 }, // root-owned but world-writable
+    { mode: 0o755, uid: 4321 }, // foreign uid, non-writable
+  ];
+  for (const knob of writable) {
     const nodes: Record<string, FakeNode> = {
       ...HEALTHY,
-      [`${ROOT}/send-reply/SKILL.md`]: { kind: "file", mode: 0o644, ...knob },
+      [ROOT]: { kind: "dir", ...knob },
+      [`${ROOT}/send-reply`]: { kind: "dir", ...knob },
+      [`${ROOT}/send-reply/SKILL.md`]: { kind: "file", ...knob, nlink: 1 },
     };
     const resolution = resolver(nodes, GENERATION).authorize("skill://send-reply/SKILL.md");
-    assertEquals(resolution.ok, false, JSON.stringify(knob));
+    assertEquals(resolution.ok, true, JSON.stringify(knob));
   }
 });
 
-// The ladder re-checks EVERY directory component, not only the leaf: an
-// attacker plants instructions through a writable ancestor, so a writable
-// directory inside the owned tree denies even for a pristine target file.
-Deno.test("writable ancestor directories deny (planted-file vectors refused)", () => {
+// The ladder still re-checks EVERY directory component, not only the leaf:
+// writability is not an admission input (D1), but a LINKED component at any
+// level denies, so a linked ancestor can never redirect the read even for a
+// pristine target file.
+Deno.test("linked ancestor components deny at every level", () => {
   for (
-    const [dir, knob] of [
-      [`${ROOT}/send-reply`, { uid: 1000, mode: 0o770 }], // agent-writable intermediate
-      [`${ROOT}/send-reply`, { uid: 0, mode: 0o775 }], // group/other-writable intermediate
-      [ROOT, { uid: 1000, mode: 0o770 }], // agent-writable declared root
-      [ROOT, { uid: 0, mode: 0o777 }], // group/other-writable declared root
+    const [dir, target] of [
+      [`${ROOT}/send-reply`, "/foreign/send-reply"], // intermediate linked
+      [ROOT, "/foreign/skills"], // declared root linked
     ] as const
   ) {
     const nodes: Record<string, FakeNode> = {
       ...HEALTHY,
-      [dir]: { kind: "dir", ...knob },
+      [dir]: { kind: "symlink", target },
+      [`${target}`]: { kind: "dir", mode: 0o775, uid: 1000 },
+      [`${target}/SKILL.md`]: { kind: "file", mode: 0o664, uid: 1000 },
     };
     const resolution = resolver(nodes, GENERATION).authorize("skill://send-reply/SKILL.md");
-    assertEquals(resolution.ok, false, `${dir} ${JSON.stringify(knob)}`);
+    assertEquals(resolution.ok, false, `${dir} -> ${target}`);
   }
 });
 

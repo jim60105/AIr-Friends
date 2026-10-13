@@ -1,4 +1,22 @@
-/** Metadata-only owned skill observations; never evaluates discovered instructions. */
+/**
+ * Metadata-only owned skill observations; never evaluates discovered instructions.
+ *
+ * Accepted security posture (`align-omp-skill-trust-to-shared-root` D1, stated
+ * once in design.md): the deployment resolves ONE shared skill root for both
+ * agent types, and that tree is not required to be root-owned,
+ * agent-non-writable or non-group/world-writable. Admission therefore judges an
+ * owned object by canonical identity alone — an absolute canonical path, a
+ * link-free walk of every component, a real directory or file, `nlink === 1`
+ * for files, realpath containment and the caller's supplied `dev`/`ino`
+ * identity. A writable permission bit neither admits a target those checks
+ * reject nor denies one they accept.
+ *
+ * The ownership/mode observation is NOT deleted; it survives exactly where it
+ * is load-bearing: {@link observeReadOnlyRoot} derives the root's read-only
+ * fact from the observed root's OWN ownership and mode, and critical-skill
+ * minting consults it (a writable tree mints no critical authority), while
+ * ordinary skill admission never does.
+ */
 import { dirname, isAbsolute, join, resolve } from "@std/path";
 import type { OmpSettingsSourcePlan } from "../omp-settings.ts";
 import type { CriticalSkillReference } from "../filesystem-roots.ts";
@@ -58,6 +76,22 @@ function identity(info: ReturnType<OwnedSkillMetadataReader["lstat"]>): Observed
   return Object.freeze({ dev: info.dev, ino: info.ino });
 }
 
+/**
+ * The root's OBSERVED read-only determination: the ownership and mode clauses
+ * the admission ladder no longer applies, evaluated on the declared root
+ * alone. Critical-skill minting consults this instead of assuming it, so a
+ * tree the runtime agent user can write mints no critical authority (the
+ * pinned-layout carve-out). `null` mode proves nothing and reads false.
+ */
+function observeReadOnlyRoot(path: string, reader: OwnedSkillMetadataReader): boolean {
+  const info = reader.lstat(path);
+  const mode = info.mode;
+  if (mode === null) return false;
+  if ((mode & 0o022) !== 0) return false;
+  if ((mode & 0o222) !== 0 && info.uid !== 0) return false;
+  return true;
+}
+
 function observe(
   path: string,
   directory: boolean,
@@ -66,8 +100,9 @@ function observe(
   if (!isAbsolute(path) || resolve(path) !== path || reader.realPath(path) !== path) {
     throw new Error("Owned skill path is not canonical");
   }
-  // Every component must be link-free. Instructions additionally require
-  // read-only ancestors up to their separately observed declared root.
+  // Every component must be link-free. Ownership and writability are NOT
+  // admission inputs (D1): canonical identity, link-free components,
+  // containment, real type and the file's single-link count are.
   let component = path;
   while (true) {
     if (reader.lstat(component).isSymlink) throw new Error("Linked owned skill path");
@@ -77,12 +112,7 @@ function observe(
   }
   const info = reader.lstat(path);
   if (directory ? !info.isDirectory : !info.isFile) throw new Error("Missing owned skill object");
-  if (info.mode === null || (info.mode & 0o222) !== 0 && info.uid !== 0) {
-    throw new Error("Agent-writable owned skill object");
-  }
-  if (info.mode === null || (info.mode & 0o022) !== 0 || (!directory && info.nlink !== 1)) {
-    throw new Error("Writable or aliased owned skill object");
-  }
+  if (!directory && info.nlink !== 1) throw new Error("Aliased owned skill object");
   return identity(info);
 }
 
@@ -90,10 +120,11 @@ function observe(
  * Mint the trusted-skills lifecycle input for one context registration.
  *
  * Fail-closed ladder (design D2/D3, plan duck B3/B5):
- * - An unobservable declared root (missing, linked, agent-writable, aliased)
+ * - An unobservable declared root (missing, linked, non-canonical, aliased)
  *   with no accepted baseline yields NO source at all: no trusted-skills root
  *   is attached, so workspace policy continues unchanged and no critical
- *   authority exists — never a fallback root, never a global disablement.
+ *   authority exists — never a fallback root, never a global disablement. A
+ *   writable root is observable and IS admitted (the accepted posture).
  * - A baseline whose accepted root identity the current observation cannot
  *   confirm is a SAME-PATH REPLACEMENT: it throws BEFORE any caller state
  *   changes, so the accepted trust is neither silently kept nor silently
@@ -135,6 +166,16 @@ export function observeOwnedSkills(
   ) {
     throw new Error("Owned skill root replaced since the accepted observation");
   }
+  // The pinned-critical-layout carve-out at its enforcement point: the flag is
+  // DERIVED from this observation, never asserted. `evaluateCriticalSkillSelection`
+  // mints only for a true flag, so an agent-writable tree mints no critical
+  // reference (ordinary skill admission never consults it).
+  let rootIsReadOnly = false;
+  try {
+    rootIsReadOnly = observeReadOnlyRoot(root, reader);
+  } catch {
+    rootIsReadOnly = false;
+  }
   const criticalSkills: CriticalSkillReference[] = [];
   if (!sessionId || !generation) {
     return Object.freeze({
@@ -172,7 +213,7 @@ export function observeOwnedSkills(
         currentSessionId: sessionId,
         candidateSessionId: sessionId,
         currentSessionGenerationId: generation,
-        isReadOnlyRoot: true,
+        isReadOnlyRoot: rootIsReadOnly,
       });
       if (!selection.authoritative) continue;
       criticalSkills.push(Object.freeze({
