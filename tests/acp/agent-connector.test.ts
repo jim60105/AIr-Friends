@@ -1424,7 +1424,7 @@ Deno.test("reconnectAndResumeSession - post-connect namespace drift aborts befor
           permissionMode: "native-yolo",
           processNamespace: OMP_YOLO_NS,
         },
-        gateContext: { cwd: ompRecoveryWorkspace() },
+        gateContext: { cwd: ompRecoveryWorkspace(), shellSessionId: "shell_a", yolo: true },
       }),
     RecoveryOwnershipError,
     "namespace_mismatch",
@@ -1487,7 +1487,7 @@ Deno.test("reconnectAndResumeSession - matched recovery consumes row 6: cache + 
     {
       reasoningEffort: "high",
       ownership: { agentType: "omp", permissionMode: "native-yolo", processNamespace: OMP_YOLO_NS },
-      gateContext: { cwd: ompRecoveryWorkspace(), shellSessionId: "shell_r" },
+      gateContext: { cwd: ompRecoveryWorkspace(), shellSessionId: "shell_r", yolo: true },
     },
   );
 
@@ -1532,7 +1532,7 @@ Deno.test("reconnectAndResumeSession - post-load catalog miss propagates in isol
           permissionMode: "native-yolo",
           processNamespace: OMP_YOLO_NS,
         },
-        gateContext: { cwd: ompRecoveryWorkspace() },
+        gateContext: { cwd: ompRecoveryWorkspace(), shellSessionId: "shell_miss", yolo: true },
       }),
     Error,
     "Requested model 'gone-model' is not offered in advertised catalog",
@@ -1654,7 +1654,7 @@ Deno.test("reconnectAndResumeSession - hook runs exactly once after restore, bef
     [],
     {
       ownership: { agentType: "omp", permissionMode: "native-yolo", processNamespace: OMP_YOLO_NS },
-      gateContext: { cwd: ompRecoveryWorkspace(), shellSessionId: "shell_a" },
+      gateContext: { cwd: ompRecoveryWorkspace(), shellSessionId: "shell_a", yolo: true },
       onGateContextRestored: (sessionId) => {
         hookSessions.push(sessionId);
         mutationsAtHookTime = h.gateMutations.length;
@@ -1681,7 +1681,7 @@ Deno.test("reconnectAndResumeSession - rejecting hook fails only this session as
           permissionMode: "native-yolo",
           processNamespace: OMP_YOLO_NS,
         },
-        gateContext: { cwd: ompRecoveryWorkspace() },
+        gateContext: { cwd: ompRecoveryWorkspace(), shellSessionId: "shell_a", yolo: true },
         onGateContextRestored: () => Promise.reject(new Error("hook exploded")),
       }),
     RecoveryHookError,
@@ -1762,7 +1762,7 @@ Deno.test("reconnectAndResumeSession - capability absence still returns false wi
     [],
     {
       ownership: { agentType: "omp", permissionMode: "native-yolo", processNamespace: OMP_YOLO_NS },
-      gateContext: { cwd: ompRecoveryWorkspace() },
+      gateContext: { cwd: ompRecoveryWorkspace(), shellSessionId: "shell_a", yolo: true },
     },
   );
 
@@ -1923,6 +1923,61 @@ for (const supplied of gateDiscrepancies) {
   );
 }
 
+const incompleteGates: {
+  name: string;
+  gate: (cwd: string) => SessionGateContext;
+  message: string;
+}[] = [
+  {
+    name: "no resolved permission",
+    gate: (cwd) => ({ cwd, shellSessionId: "shell_a" }),
+    message: "no resolved yolo permission",
+  },
+  {
+    name: "no owning skill session",
+    gate: (cwd) => ({ cwd, yolo: true }),
+    message: "names no owning skill session",
+  },
+];
+
+for (const incomplete of incompleteGates) {
+  Deno.test(
+    `reconnectAndResumeSession - an incomplete OMP gate (${incomplete.name}) is rejected before preflight/teardown on a fresh connector`,
+    async () => {
+      const h = createRecoveryHarness({
+        agentType: "omp",
+        env: { PI_CODING_AGENT_DIR: OMP_YOLO_NS, TMPDIR: `${OMP_YOLO_NS}/tmp` },
+      });
+      const cwd = ompRecoveryWorkspace();
+
+      await assertRejects(
+        () =>
+          h.connector.reconnectAndResumeSession("sess_fresh", cwd, [], {
+            ownership: {
+              agentType: "omp",
+              permissionMode: "native-yolo",
+              processNamespace: OMP_YOLO_NS,
+            },
+            gateContext: incomplete.gate(cwd),
+          }),
+        GateContextRestoreError,
+        incomplete.message,
+      );
+
+      // No cached registration exists for this id, yet the incomplete gate is
+      // still rejected — the process-frozen policy is never substituted.
+      assertEquals(h.order, ["verifyOwnership", "gatePrevalidation"]);
+      assertEquals(h.interactions, []);
+      assertEquals(h.rpc, []);
+      assertEquals(h.gateMutations, []);
+      assertEquals(
+        (h.connector["sessionGateContexts"] as Map<string, unknown>).has("sess_fresh"),
+        false,
+      );
+    },
+  );
+}
+
 Deno.test("reconnectAndResumeSession - OMP order: verify → gate prevalidation → preflight → teardown → load → model/effort → gate → hook → success", async () => {
   const h = createRecoveryHarness({
     agentType: "omp",
@@ -2063,7 +2118,7 @@ Deno.test("reconnectAndResumeSession - a failing effort RPC stays best-effort an
     {
       reasoningEffort: "high",
       ownership: { agentType: "omp", permissionMode: "native-yolo", processNamespace: OMP_YOLO_NS },
-      gateContext: { cwd: ompRecoveryWorkspace(), shellSessionId: "shell_a" },
+      gateContext: { cwd: ompRecoveryWorkspace(), shellSessionId: "shell_a", yolo: true },
       onGateContextRestored: () => {
         hookRan = true;
         h.order.push("hook");
@@ -2104,7 +2159,7 @@ Deno.test("reconnectAndResumeSession - plan-less OMP connector fails the setting
             permissionMode: "native-yolo",
             processNamespace: OMP_YOLO_NS,
           },
-          gateContext: { cwd: ompRecoveryWorkspace() },
+          gateContext: { cwd: ompRecoveryWorkspace(), shellSessionId: "shell_a", yolo: true },
         }),
       Error,
       "no settings-source plan",

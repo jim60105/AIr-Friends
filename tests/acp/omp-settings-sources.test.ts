@@ -595,7 +595,9 @@ Deno.test("connector recovery - hostile recovery cwd rejects with zero teardown/
             permissionMode: "restricted",
             processNamespace: plan.agentDir,
           },
-          gateContext: { cwd: recoveryCwd },
+          // A complete owning gate context (row 11): OMP recovery requires the
+          // resolved permission and the owning skill session, not a cwd-only shape.
+          gateContext: { cwd: recoveryCwd, shellSessionId: "shell_recovery", yolo: false },
         }),
       SettingsSourceRejectionError,
     );

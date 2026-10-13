@@ -1464,9 +1464,12 @@ export class AgentConnector {
   /**
    * OMP-only, pre-teardown gate-context prevalidation. OMP recovery has no
    * context-free legacy path: the recovered session's OWN complete gate context
-   * is mandatory, must name the recovery cwd, and — when this connector still
-   * holds the context it registered for that id — must agree with it on every
-   * policy field. A missing, cwd-disagreeing or foreign (sibling/process-frozen)
+   * is mandatory, must name the recovery cwd, must carry the resolved policy
+   * fields the client would otherwise take from the process-frozen client
+   * config (`yolo`, and the owning skill session whenever the process carries a
+   * frozen identity), and — when this connector still holds the context it
+   * registered for that id — must agree with it on every policy field. A
+   * missing, incomplete, cwd-disagreeing or foreign (sibling/process-frozen)
    * context is a bounded gate-context restore failure raised BEFORE
    * settings/executable preflight, `disconnect()`, spawn or `session/load`, so
    * it has zero side effects. `trustedSkills` is deliberately not compared: for
@@ -1488,6 +1491,25 @@ export class AgentConnector {
       throw new GateContextRestoreError(
         sessionId,
         `supplied context cwd "${gateContext.cwd}" disagrees with recovery cwd "${cwd}"`,
+      );
+    }
+    // Completeness: the fields the client would otherwise fall back to the
+    // PROCESS-FROZEN client config for (`gateYolo`, `gateSessionId`) must be
+    // resolved by the caller, so a cwd-only-shaped gate can never silently
+    // reopen the frozen policy this contract exists to close.
+    if (typeof gateContext.yolo !== "boolean") {
+      throw new GateContextRestoreError(
+        sessionId,
+        "supplied context carries no resolved yolo permission; the process-frozen " +
+          "client default is never substituted for OMP recovery",
+      );
+    }
+    const frozenSessionId = this.options.clientConfig?.sessionId;
+    if (frozenSessionId !== undefined && gateContext.shellSessionId === undefined) {
+      throw new GateContextRestoreError(
+        sessionId,
+        "supplied context names no owning skill session while this process carries a " +
+          "frozen session identity; the frozen identity is never substituted for OMP recovery",
       );
     }
     const own = this.sessionGateContexts.get(sessionId);

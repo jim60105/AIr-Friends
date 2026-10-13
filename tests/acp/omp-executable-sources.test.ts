@@ -726,7 +726,9 @@ Deno.test("connector - recovery seam rejects with zero teardown/respawn/load sid
             permissionMode: "restricted",
             processNamespace: f.plan.agentDir,
           },
-          gateContext: { cwd: recoveryCwd },
+          // A complete owning gate context (row 11): OMP recovery requires the
+          // resolved permission and the owning skill session, not a cwd-only shape.
+          gateContext: { cwd: recoveryCwd, shellSessionId: "shell_recovery", yolo: false },
         }),
       ExecutableSourceRejectionError,
     );

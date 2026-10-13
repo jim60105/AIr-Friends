@@ -132,10 +132,13 @@ on every caller (§0), with `cwd` equal to the session's own ACP cwd:
 - Supplied context whose `cwd` disagrees with the recovery cwd → `GateContextRestoreError`, no
   mutation.
 - **OMP only, before any teardown**: the gate context is mandatory, so a missing one is a bounded
-  `gate_context_restore_failed` (never a cwd-only legacy restore). When this connector still holds
-  the context it registered for the recovered id, the supplied context must also agree with it on
-  `cwd`, the owning skill session, `yolo`, `canWriteAgentWorkspace` and `allowedWriteExtensions` —
-  a sibling or process-frozen context is rejected instead of substituted. `trustedSkills` is not
+  `gate_context_restore_failed` (never a cwd-only legacy restore). It must also be COMPLETE — the
+  resolved `yolo` permission, and the owning skill session whenever the process carries a frozen
+  session identity, are required, because those are exactly the fields the client would otherwise
+  take from the process-frozen `clientConfig`. When this connector still holds the context it
+  registered for the recovered id, the supplied context must additionally agree with it on `cwd`,
+  the owning skill session, `yolo`, `canWriteAgentWorkspace` and `allowedWriteExtensions` — a
+  sibling or process-frozen context is rejected instead of substituted. `trustedSkills` is not
   compared: for OMP it is minted/reobserved from the factory settings plan at every registration
   (row 28) and no caller carries it.
 - Supplied (or agreement-cached) context is restored for the RECOVERED session id via the existing
