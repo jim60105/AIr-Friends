@@ -74,7 +74,6 @@ import {
   createOwnedModuleEvidenceSource,
   evaluateOwnedModuleOwnership,
   type OwnedModuleEvidenceSource,
-  type OwnedModuleFreshness,
 } from "./ownership.ts";
 import {
   credentialPresenceFromEnv,

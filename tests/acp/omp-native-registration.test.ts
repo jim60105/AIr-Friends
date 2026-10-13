@@ -28,7 +28,6 @@ import {
   type NativeToolInfo,
 } from "@acp/omp/extension/native-registration.ts";
 import { decodeNativeToolCallEvent } from "@acp/omp/extension/native-events.ts";
-import { OMP_IMAGE_MODULE_DECLARATION } from "@acp/omp/deployment-module.ts";
 import type { OwnedModuleEvidenceSource } from "@acp/omp/owned-module-evidence.ts";
 import {
   FIXTURE_DEVELOPMENT_DECLARATION,
@@ -301,6 +300,66 @@ Deno.test("Native provenance: the raw source tree and a foreign bundle copy are 
     assertBoundedBlock(outcome, "rejected_tool_provenance");
     assert(outcome.reason?.includes("origin=unowned-discovery"), outcome.reason ?? "");
   }
+});
+
+Deno.test("Native provenance: the declared module face is independent of the process state root (task 3.1)", () => {
+  const call = { toolCallId: "root-1", toolName: "read", input: { path: "notes.md" } } as const;
+  // Per-spawn (`{workspace}/tmp/omp-agent/restricted/cwd`) and pooled
+  // (`{dataRoot}/omp-pools/<key>/omp-agent/restricted/cwd`) launches present
+  // DIFFERENT mutable state roots; the declared artifact is neither, and both
+  // restricted identities admit the owned replacement.
+  assertEquals(harness([{ name: "read", sourceInfo: IMAGE_SOURCE }]).run(call).dispatched, true);
+  assertEquals(
+    harness([{ name: "read", sourceInfo: IMAGE_SOURCE }], { observedCwd: POOLED_RESTRICTED_CWD })
+      .run(call).dispatched,
+    true,
+  );
+  // The declared DEVELOPMENT face serves a pooled process too: module identity
+  // follows the declaration, never the state root.
+  assertEquals(
+    harness([{ name: "read", sourceInfo: DEVELOPMENT_SOURCE }], {
+      observedCwd: POOLED_RESTRICTED_CWD,
+      moduleUrl: `file://${DEVELOPMENT_OBSERVATION.artifact.path}`,
+      moduleEvidence: fixtureEvidenceSource({ observation: DEVELOPMENT_OBSERVATION }),
+    }).run(call).dispatched,
+    true,
+  );
+  // The STATE ROOT gains no deployment-module authority: a module-shaped file
+  // under the pooled mode namespace is not the declared artifact.
+  const stateRootIndex = `${POOLED_RESTRICTED_CWD.replace(/\/cwd\/?$/, "")}/index.js`;
+  const fromStateRoot = harness(
+    [{ name: "read", sourceInfo: { path: stateRootIndex, source: "extension" } }],
+    { observedCwd: POOLED_RESTRICTED_CWD },
+  ).run(call);
+  assertBoundedBlock(fromStateRoot, "rejected_tool_provenance");
+  assert(fromStateRoot.reason?.includes("origin=unowned-discovery"), fromStateRoot.reason ?? "");
+});
+
+Deno.test("Native provenance: an injected session context mints no module identity (task 3.2)", () => {
+  const call = { toolCallId: "sess-1", toolName: "read", input: { path: "notes.md" } } as const;
+  // A session context exists ONLY for destructive/session-bound completion: it
+  // cannot turn a non-declared artifact into an owned replacement...
+  const undeclared = harness([{ name: "read", sourceInfo: SOURCE_TREE_SOURCE }], {
+    sessionContext: { resolveCanonicalTargets: () => [] },
+  });
+  assertBoundedBlock(undeclared.run(call), "rejected_tool_provenance");
+  // ...and it does not disturb a genuinely declared, physically verified one.
+  const declared = harness([{ name: "read", sourceInfo: IMAGE_SOURCE }], {
+    sessionContext: { resolveCanonicalTargets: () => [] },
+  });
+  assertEquals(declared.run(call).dispatched, true);
+  // The destructive operation still needs its own COMPLETE session context:
+  // module evidence grants no destructive authority.
+  const destructive = declared.run({
+    toolCallId: "sess-2",
+    toolName: "delete",
+    input: { path: "docs/x.md" },
+  });
+  assertEquals(destructive.blocked, true);
+  assert(
+    destructive.reason?.startsWith("restricted tool call blocked: rejected_"),
+    destructive.reason ?? "",
+  );
 });
 
 Deno.test("Native provenance: an authentic builtin admits as native-builtin; SDK injection and inconsistent tuples deny (task 1.2)", () => {

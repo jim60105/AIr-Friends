@@ -6,7 +6,7 @@ The `guard-omp-executable-discovery` integration protects restricted OpenCode / 
 
 1. **Load-Time Discovery Bootstrap**: A pure pre-import exclusion decision computed at trusted-extension module load, before any dynamic tool, plugin, or configured module can import.
 2. **Audited Surface Verification**: Table-driven evaluation of all 7 P0-audited executable discovery routes. Surfaces without supported mechanisms produce hard initialization blockers.
-3. **Exact Owned-Module Ownership**: Only the contracted `OMP_TRUSTED_EXTENSION_PATH` within deployment-owned directories and pinned image-owned closures are admitted. Workspace copies, cache directories, symlink escapes, and name-only matches are unconditionally untrusted.
+3. **Exact Owned-Module Ownership**: Only the DECLARED generated artifact at its declared canonical root — the fixed image face or the build-owned development face — with satisfying PHYSICAL evidence is admitted. Workspace copies, cache directories, symlink escapes, name-only matches and raw source files are unconditionally untrusted.
 4. **Canonical Critical-Skill Ownership**: Critical skill IDs resolve strictly to canonical instruction files (`SKILL.md`) inside the read-only deployment-owned skills root. Workspace shadowing is excluded, and stale/foreign session generations reject.
 5. **Honesty Gates**: Two blocking application gates remain open with verbatim pinned verdicts requiring explicit user-decision adoption before native security guarantees can be claimed.
 
@@ -31,7 +31,7 @@ The `guard-omp-executable-discovery` integration protects restricted OpenCode / 
 The extension module — the generated native-loadable bundle cut from canonical source `OMP_TRUSTED_EXTENSION_PATH` (`src/acp/omp/extension/index.ts`); image face `/opt/air/omp/extension/index.js`, development face `build/omp-extension/index.js`, per `docs/OMP_PACKAGING.md` §4–§5 — loads synchronously at agent startup:
 
 1. **Identity Resolution**: Checks process environment variables and launch working directory.
-2. **Dependency-Closure Verification**: Determines the contracted extension module path and valid closure roots.
+2. **Declared-Module Resolution**: Matches this module's own loaded file URL against the DECLARED deployment faces and reports the declared artifact it belongs to as the decision's module trust root. When the loaded URL matches no declared face, the decision claims NO module trust root rather than defaulting to the image path (the `.ts` source constant remains a build input, never a load entry).
 3. **Surface Evaluation**: Evaluates all 7 surfaces, records excluded candidate roots, and identifies blockers.
 4. **Deep Freeze**: Produces an immutable, deeply frozen `DiscoveryDecision` record.
 5. **Fail-Closed Gate**: If any blocker is present in `decision.blockers`, the module throws an immediate initialization error:
@@ -59,11 +59,16 @@ When trusted-module initialization fails due to unestablished pre-import exclusi
 
 ### Module Ownership
 
-- Contracted path: `OMP_TRUSTED_EXTENSION_PATH` (`src/acp/omp/extension/index.ts`).
+- Declared artifacts (`bind-omp-owned-module-evidence`, `src/acp/omp/deployment-module.ts`): the fixed image face `/opt/air/omp/extension/index.js` (root-owned, non-agent-writable tree) and the build-owned development face `<canonical checkout>/build/omp-extension/index.js` (developer-owned by design). `OMP_TRUSTED_EXTENSION_PATH` (`src/acp/omp/extension/index.ts`) remains the canonical SOURCE origin and the packaging build input — never an alternative load entry.
+- The declaration also carries the permitted dependency closure; the bundler substitutes the canonical source root into the emitted artifact and refuses to ship a bundle whose emitted edges exceed that closure.
+- Physical evidence (`src/acp/omp/owned-module-evidence.ts`): the declared root and artifact are observed with complete metadata (dev/ino/size/mtime/mode/uid/nlink), a link-free ladder, `nlink === 1`, containment via the shared canonical `isWithinRoot`, and the posture requirement (image: root-owned and not group/other-writable; development: one owner, not group/other-writable). One accepted observation is ANCHORED at registration; every later observation must still match it (identity, fingerprint, accepted generation), so a replaced artifact, moved inode/fingerprint, rotated generation or posture violation denies and never silently re-anchors. A trusted developer rebuild requires a fresh launch.
+- Module identity is independent of the process state namespace: per-spawn (`{workspace}/tmp/omp-agent/{mode}/cwd`) and pooled (`{dataRoot}/omp-pools/{key}/omp-agent/{mode}/cwd`) launches observe the SAME declared artifact, and neither state root gains deployment-module authority.
+- The evidence is not a session identity: no session id, session role or `CanonicalTarget` stands in for it, and it grants no read/write/destructive authority.
+- Honesty: physical self-evidence proves declared location and identity stability only — not content authentication, not that the official host loaded the module, and not mount/ACL-independent immutability. Ancestors above the declared root are a packaging fact.
 - Workspace copies, home directories (`~/.omp`), and package caches (`node_modules`, `.cache`) are untrusted (`outside_roots`).
 - Candidates matching critical tool/skill names outside the owned root are untrusted (`trusted_identity_mismatch`). Name-only trust is rejected.
 - Symlinks leaving the owned root are untrusted (`symlink_escape`).
-- Identity evaluation is mode-independent (identical for `restricted` and `native-yolo`).
+- Identity evaluation is mode-independent: permission mode is not an input of the ownership decision at all.
 
 ### Critical-Skill Ownership
 
@@ -109,6 +114,7 @@ Automated unit and mock tests validate **decision logic only** (which roots and 
 - **Row 13 (cancelled readiness gate)**: no readiness channel or acknowledgement exists (cancelled by user decision); the load-time decision and resource generation are consumed read-only by the row-16 enforcement wiring.
 - **Row 14 (`enforce-omp-restricted-tool-policy`)**: Provides execution-time tool inventory default-deny.
 - **Row 20 (`package-pinned-omp-runtime`) + `package-bun-compatible-omp-extension` (C3)**: Packages the GENERATED single-artifact bundle of the module tree authored here at `/opt/air/omp/extension/index.js`, digest-covered by `PACKAGE-MANIFEST.sha256`.
+- **`bind-omp-owned-module-evidence`**: Declares the image/development faces, embeds the canonical source root in the emitted bundle, and supplies the physical deployment-module evidence the owned `read`/`web_search` replacement admission consumes (`docs/OMP_ENFORCEMENT.md` §Module evidence vs session evidence).
 
 ---
 
@@ -116,7 +122,7 @@ Automated unit and mock tests validate **decision logic only** (which roots and 
 
 The following items cannot be certified by mock or unit tests and remain unverified until observed in a real runtime environment:
 
-- [ ] **Real Trusted-Module Load**: Pinned OMP executable loads the generated trusted-extension bundle (`/opt/air/omp/extension/index.js`, cut from `OMP_TRUSTED_EXTENSION_PATH` source) via `--trusted-extension` — with no import map and no download (`docs/OMP_PACKAGING.md` §7).
+- [ ] **Real Trusted-Module Load**: Pinned OMP executable loads the generated trusted-extension bundle (`/opt/air/omp/extension/index.js`, cut from `OMP_TRUSTED_EXTENSION_PATH` source) via `--trusted-extension` — with no import map and no download (`docs/OMP_PACKAGING.md` §7) — and its loaded artifact is observed at the DECLARED image face with satisfying physical evidence.
 - [ ] **Hostile Code Suppression**: Hostile custom tools or plugins with executable top-level code do not run during startup.
 - [ ] **Critical Skill Resolution**: Critical skills resolve strictly to canonical owned `SKILL.md` on session `new`, `load`, and `refresh` events.
 

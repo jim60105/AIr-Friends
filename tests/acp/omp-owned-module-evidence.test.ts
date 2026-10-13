@@ -55,7 +55,7 @@ async function withRealDevelopmentFace(
   fn: (
     declaration: DeploymentModuleDeclaration,
     artifactPath: string,
-  ) => Promise<void>,
+  ) => void | Promise<void>,
 ): Promise<void> {
   const base = await Deno.makeTempDir({ prefix: "omp-owned-module-" });
   // The declaration is a CANONICAL path (as a build-owned declaration is):
@@ -82,7 +82,7 @@ async function withRealDevelopmentFace(
 // ---------------------------------------------------------------------------
 
 Deno.test("evidence: the real generated development artifact is accepted at its declared path", async () => {
-  await withRealDevelopmentFace(async (declaration) => {
+  await withRealDevelopmentFace((declaration) => {
     const source = createOwnedModuleEvidenceSource({
       moduleUrl: `file://${declaration.artifact}`,
       resourceGeneration: () => "gen-0",

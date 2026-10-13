@@ -12,7 +12,7 @@ import {
   preImportExclusionGate,
   transitionSkillLifecycleState,
 } from "../../src/acp/omp/discovery-guard.ts";
-import { OMP_TRUSTED_EXTENSION_PATH, ompLaunchCwd } from "../../src/utils/omp-paths.ts";
+import { ompLaunchCwd } from "../../src/utils/omp-paths.ts";
 import type { SkillCandidate } from "../../src/acp/omp/compatibility-contracts.ts";
 import {
   type DeploymentModuleDeclaration,

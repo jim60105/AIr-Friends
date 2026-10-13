@@ -7,7 +7,7 @@
 // Live image build/arch/binary acceptance is user-owned (§7 of
 // docs/OMP_PACKAGING.md) and ships explicitly unverified.
 
-import { assert, assertEquals, assertStringIncludes } from "@std/assert";
+import { assert, assertEquals, assertStringIncludes, assertThrows } from "@std/assert";
 // The generated-bundle audit predicate is imported from its production
 // module — tests exercise the EXACT function the bundler runs, never a
 // re-typed copy.
@@ -16,6 +16,12 @@ import {
   emittedExternals,
   emittedRequireEdges,
 } from "../../scripts/omp/bundle-audit.ts";
+import {
+  CANONICAL_SOURCE_ROOT_LITERAL,
+  declarationCoverageProblems,
+  embedDeploymentDeclarations,
+} from "../../scripts/omp/bundle-declaration.ts";
+import { DEPLOYMENT_MODULE_DEPENDENCY_CLOSURE } from "@acp/omp/deployment-module.ts";
 import {
   OMP_IMAGE_CONFIG_ROOT,
   OMP_IMAGE_EXTENSION_ROOT,
@@ -821,5 +827,108 @@ console.log(r);
   } finally {
     await Deno.remove(fixture, { recursive: true });
     await Deno.remove(target, { recursive: true });
+  }
+});
+
+// --- 4.1 Build-owned deployment declaration (`bind-omp-owned-module-evidence`)
+//
+// The generated bundle declares the EXACT development artifact it was cut from
+// (its canonical source checkout's build/omp-extension/index.js) so the runtime
+// verifier can anchor physical evidence to a build input instead of a mutable
+// cwd or an arbitrary loaded-module parent.
+
+Deno.test("bundle declaration - the canonical source root is substituted exactly once", () => {
+  const emitted = `const ROOT = ${CANONICAL_SOURCE_ROOT_LITERAL};\n`;
+  assertEquals(
+    embedDeploymentDeclarations(emitted, "/checkout"),
+    `const ROOT = "/checkout";\n`,
+  );
+  // A bundle without the declaration, or with more than one, fails the build:
+  // an artifact whose runtime identity is a placeholder never ships.
+  assertThrows(
+    () => embedDeploymentDeclarations("const OTHER = 1;\n", "/checkout"),
+    Error,
+    "must carry EXACTLY ONE",
+  );
+  assertThrows(
+    () =>
+      embedDeploymentDeclarations(
+        `${CANONICAL_SOURCE_ROOT_LITERAL} ${CANONICAL_SOURCE_ROOT_LITERAL}`,
+        "/checkout",
+      ),
+    Error,
+    "found 2",
+  );
+  // The declared root must be an absolute canonical path.
+  assertThrows(
+    () => embedDeploymentDeclarations(emitted, "checkout/"),
+    Error,
+    "absolute path",
+  );
+});
+
+Deno.test("bundle declaration - an under-declared emitted edge fails the closure check", () => {
+  assertEquals(
+    declarationCoverageProblems(
+      ["@sinclair/typebox", "node:dns/promises", "node:fs"],
+      DEPLOYMENT_MODULE_DEPENDENCY_CLOSURE,
+    ),
+    [],
+  );
+  // Documented native builtins keep their own emitted-edge policy.
+  assertEquals(declarationCoverageProblems(["bun:sqlite"], []), []);
+  assertEquals(
+    declarationCoverageProblems(["left-pad"], DEPLOYMENT_MODULE_DEPENDENCY_CLOSURE),
+    ["emitted edge 'left-pad' is not in the declared dependency closure"],
+  );
+});
+
+Deno.test("extension bundle - the declared artifact follows the canonical SOURCE, never the output target", async () => {
+  const targetA = await Deno.makeTempDir({ prefix: "omp-bundle-" });
+  const targetB = await Deno.makeTempDir({ prefix: "omp-bundle-" });
+  const alias = await Deno.makeTempDir({ prefix: "omp-bundle-alias-" });
+  const canonicalSource = await Deno.realPath(repoRoot);
+  try {
+    await buildBundle(`${targetA}/extension`);
+    await buildBundle(`${targetB}/extension`);
+    const a = await Deno.readTextFile(`${targetA}/extension/index.js`);
+    const b = await Deno.readTextFile(`${targetB}/extension/index.js`);
+    // Deterministic: an arbitrary packaging output target changes NOTHING.
+    assertEquals(a, b);
+    // The declaration names the canonical source checkout, and the header
+    // records both the declared artifact and the permitted closure.
+    assert(
+      a.includes(JSON.stringify(canonicalSource)),
+      "declaration carries the canonical source root",
+    );
+    assertEquals(a.includes(CANONICAL_SOURCE_ROOT_LITERAL), false, "no placeholder survives");
+    assertStringIncludes(
+      a,
+      `declared development artifact  ${canonicalSource}/${OMP_TRUSTED_EXTENSION_BUNDLE_PATH}`,
+    );
+    assertStringIncludes(
+      a,
+      `declared dependency closure  ${DEPLOYMENT_MODULE_DEPENDENCY_CLOSURE.join(", ")}`,
+    );
+    // The output target itself (a different tree, `/extension` included) is
+    // never what the declaration names.
+    assertEquals(a.includes(`"${targetA}`), false, "output target gains no authority");
+
+    // A moved checkout: bundling through a SYMLINKED source path still
+    // declares the canonical checkout (a real move rebuilds, never relocates).
+    await Deno.symlink(repoRoot, `${alias}/checkout`);
+    const moved = new Deno.Command(`${repoRoot}/scripts/omp/bundle-omp-extension.sh`, {
+      args: [`${alias}/checkout`, `${alias}/out`, `${alias}/checkout/deno.lock`],
+      stdout: "piped",
+      stderr: "piped",
+    });
+    const movedOutput = await moved.output();
+    assertEquals(movedOutput.code, 0, new TextDecoder().decode(movedOutput.stderr));
+    const viaAlias = await Deno.readTextFile(`${alias}/out/index.js`);
+    assertEquals(viaAlias, a, "the declaration follows the canonical source, not the spelling");
+  } finally {
+    await Deno.remove(targetA, { recursive: true });
+    await Deno.remove(targetB, { recursive: true });
+    await Deno.remove(alias, { recursive: true });
   }
 });
