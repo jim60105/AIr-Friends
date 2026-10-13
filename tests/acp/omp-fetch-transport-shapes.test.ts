@@ -15,6 +15,10 @@ import { assert, assertEquals, assertExists } from "@std/assert";
 // remaps only the exact bare package specifier).
 import { Value } from "@sinclair/typebox/value";
 import {
+  fixtureImageObservation,
+  fixtureOwnedExtensionRecord,
+} from "./omp-owned-module-fixture.ts";
+import {
   extensionHintFor,
   type FetchEgressPolicy,
   fetchShapedRoute,
@@ -62,33 +66,13 @@ const ENFORCING: FetchEgressPolicy = {
   proxyEndpoint: "http://127.0.0.1:9099",
 };
 
-// 14a/14b fixture shapes reused verbatim from the row-14 suites.
-// (14a's suites pass the bare record; 14b's compose adds the observed
-// generation and matches it against the registry observation.)
-const ownedRecord = {
-  origin: "owned-extension",
-  modulePath: "/opt/air/src/acp/omp/extension/index.ts",
-  baseRoot: "/opt/air",
-  canonicalTarget: {
-    acpSessionId: "s1",
-    sessionContextGeneration: "g1",
-    roles: ["trusted-skills"],
-    rootIdentities: [{
-      role: "trusted-skills",
-      configuredPath: "/opt/air/src/acp/omp/extension",
-      canonicalPath: "/opt/air/src/acp/omp/extension",
-      readOnly: true,
-    }],
-    normalizedInput: "/opt/air/src/acp/omp/extension/index.ts",
-    canonicalTarget: "/opt/air/src/acp/omp/extension/index.ts",
-    rootRelativePath: "index.ts",
-    targetType: "file",
-    observedSymlinks: [],
-  },
-} as const satisfies ProvenanceRecord;
-
-const ownedObserved: ProvenanceRecord = { ...ownedRecord, observedResourceGeneration: "gen-0" };
-const owned: ProvenanceRecord = ownedRecord;
+// Owned-extension provenance now rides the DECLARED deployment artifact plus
+// its physical observation, with the epoch/generation stamps of the same live
+// read (no session id, role or CanonicalTarget).
+const ownedObserved: ProvenanceRecord = fixtureOwnedExtensionRecord({
+  observation: fixtureImageObservation({ generation: "gen-0", epoch: 7 }),
+});
+const owned: ProvenanceRecord = ownedObserved;
 
 const NO_RECORDS = evaluateApprovalRecordAuthority(
   { lowerLayer: { approval: {} } },

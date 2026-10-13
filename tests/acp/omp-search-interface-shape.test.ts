@@ -20,6 +20,10 @@ import { assert, assertEquals, assertExists } from "@std/assert";
 // closure — the bundler rejects subpaths and the host remaps only the bare
 // package specifier).
 import { Value } from "@sinclair/typebox/value";
+import {
+  fixtureImageObservation,
+  fixtureOwnedExtensionRecord,
+} from "./omp-owned-module-fixture.ts";
 import { type FetchEgressPolicy, type FetchTransportFn } from "@acp/omp/fetch-transport.ts";
 import { FETCH_COMPLETING_ADAPTER_MARKER, FETCH_ROUTE_TABLE } from "@acp/omp/fetch-routes.ts";
 import {
@@ -82,30 +86,13 @@ const BOTH: SearchCredentialPresence = { geminiKey: true, openrouterKey: true };
 const NEITHER: SearchCredentialPresence = { geminiKey: false, openrouterKey: false };
 const OPENROUTER: SearchCredentialPresence = { geminiKey: false, openrouterKey: true };
 
-// 14a/14b fixture shapes reused verbatim from the row-14 suites.
-const ownedRecord = {
-  origin: "owned-extension",
-  modulePath: "/opt/air/src/acp/omp/extension/index.ts",
-  baseRoot: "/opt/air",
-  canonicalTarget: {
-    acpSessionId: "s1",
-    sessionContextGeneration: "g1",
-    roles: ["trusted-skills"],
-    rootIdentities: [{
-      role: "trusted-skills",
-      configuredPath: "/opt/air/src/acp/omp/extension",
-      canonicalPath: "/opt/air/src/acp/omp/extension",
-      readOnly: true,
-    }],
-    normalizedInput: "/opt/air/src/acp/omp/extension/index.ts",
-    canonicalTarget: "/opt/air/src/acp/omp/extension/index.ts",
-    rootRelativePath: "index.ts",
-    targetType: "file",
-    observedSymlinks: [],
-  },
-} as const satisfies ProvenanceRecord;
-const ownedObserved: ProvenanceRecord = { ...ownedRecord, observedResourceGeneration: "gen-0" };
-const owned: ProvenanceRecord = ownedRecord;
+// Owned-extension provenance now rides the DECLARED deployment artifact plus
+// its physical observation, with the epoch/generation stamps of the same live
+// read (no session id, role or CanonicalTarget).
+const ownedObserved: ProvenanceRecord = fixtureOwnedExtensionRecord({
+  observation: fixtureImageObservation({ generation: "gen-0", epoch: 7 }),
+});
+const owned: ProvenanceRecord = ownedObserved;
 
 const NO_RECORDS = evaluateApprovalRecordAuthority(
   { lowerLayer: { approval: {} } },

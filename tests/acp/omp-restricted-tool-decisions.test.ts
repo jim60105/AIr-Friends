@@ -27,28 +27,16 @@ import {
 } from "@acp/omp/tool-provenance.ts";
 import { AUDITED_PINNED_LEDGER, REQUIRED_BOUNDARIES } from "@acp/omp/compatibility-contracts.ts";
 import { ompSettingsForMode } from "@acp/omp-settings.ts";
+import {
+  fixtureImageObservation,
+  fixtureOwnedExtensionRecord,
+} from "./omp-owned-module-fixture.ts";
 
-const owned: ProvenanceRecord = {
-  origin: "owned-extension",
-  modulePath: "/opt/air/src/acp/omp/extension/index.ts",
-  baseRoot: "/opt/air",
-  canonicalTarget: {
-    acpSessionId: "s1",
-    sessionContextGeneration: "g1",
-    roles: ["trusted-skills"],
-    rootIdentities: [{
-      role: "trusted-skills",
-      configuredPath: "/opt/air/src/acp/omp/extension",
-      canonicalPath: "/opt/air/src/acp/omp/extension",
-      readOnly: true,
-    }],
-    normalizedInput: "/opt/air/src/acp/omp/extension/index.ts",
-    canonicalTarget: "/opt/air/src/acp/omp/extension/index.ts",
-    rootRelativePath: "index.ts",
-    targetType: "file",
-    observedSymlinks: [],
-  },
-};
+// Owned-extension provenance now rides the DECLARED deployment artifact plus
+// its physical observation (no session id, role or CanonicalTarget).
+const owned: ProvenanceRecord = fixtureOwnedExtensionRecord({
+  observation: fixtureImageObservation({ generation: "gen-0", epoch: 7 }),
+});
 
 const mcpFresh: ProvenanceRecord = {
   origin: "operator-mcp",
@@ -608,16 +596,17 @@ Deno.test("Provenance: native-builtin admits the exact pinned tuple; wrong tuple
   if (!offTable.admit) assertEquals(offTable.reason, "name_not_on_allow_table");
 });
 
-Deno.test("Provenance: owned-extension admission requires canonical ownership evidence", () => {
+Deno.test("Provenance: owned-extension admission requires physical module evidence", () => {
   const bare: ProvenanceRecord = {
     origin: "owned-extension",
     modulePath: owned.modulePath,
-    baseRoot: owned.baseRoot,
+    registryEpochObserved: 7,
+    currentRegistryEpoch: 7,
   };
   const denied = evaluateToolProvenance("read", bare, { nameOnAllowTable: true });
   assertEquals(denied.admit, false);
   if (!denied.admit) {
-    assertEquals(denied.reason, "canonical_ownership_evidence_missing");
+    assertEquals(denied.reason, "module_ownership_evidence_missing");
     assertEquals(denied.pending, "re-observe");
   }
 });
@@ -707,15 +696,39 @@ Deno.test("Provenance: a half-supplied generation observation denies re-observe"
     evaluateToolProvenance("read", halfCurrent, { nameOnAllowTable: true }).admit,
     false,
   );
-  // Both supplied and agreeing admits.
+  // Both supplied and agreeing admits — and the PHYSICAL EVIDENCE must be the
+  // same live read: the record's stamps are the observation stamps.
+  const coherent = fixtureOwnedExtensionRecord({
+    observation: fixtureImageObservation({ generation: "gen-3", epoch: 7 }),
+    generation: "gen-3",
+  });
   assertEquals(
-    evaluateToolProvenance(
-      "read",
-      { ...owned, observedResourceGeneration: "gen-3", currentResourceGeneration: "gen-3" },
-      { nameOnAllowTable: true },
-    ).admit,
+    evaluateToolProvenance("read", coherent, { nameOnAllowTable: true }).admit,
     true,
   );
+  // A record whose halves agree with EACH OTHER but not with the evidence is
+  // an incoherent observation (another read, another domain) — denies.
+  const incoherentEvidence = evaluateToolProvenance(
+    "read",
+    { ...coherent, observedResourceGeneration: "gen-4", currentResourceGeneration: "gen-4" },
+    { nameOnAllowTable: true },
+  );
+  assertEquals(incoherentEvidence.admit, false);
+  if (!incoherentEvidence.admit) {
+    assertEquals(incoherentEvidence.reason, "unknown_observation");
+  }
+  // The same holds for a record replaying an older positive epoch against the
+  // newer current epoch (`registryEpochObserved !== currentRegistryEpoch`).
+  const staleEpoch = evaluateToolProvenance(
+    "read",
+    { ...coherent, registryEpochObserved: 3, currentRegistryEpoch: 7 },
+    { nameOnAllowTable: true },
+  );
+  assertEquals(staleEpoch.admit, false);
+  if (!staleEpoch.admit) {
+    assertEquals(staleEpoch.reason, "stale_observation");
+    assertEquals(staleEpoch.staleElement, "registry-epoch");
+  }
 });
 
 Deno.test("MCP admission: client-owned fresh tool admitted without human interaction", () => {

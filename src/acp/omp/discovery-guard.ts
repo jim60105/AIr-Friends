@@ -14,12 +14,13 @@ import {
   type SkillCandidate,
   validateCriticalSkillContract,
 } from "./compatibility-contracts.ts";
+import type { RootPathFailureReason } from "../filesystem-roots.ts";
+import { ompLaunchCwd } from "../../utils/omp-paths.ts";
 import {
-  type CanonicalTarget,
-  isWithinRoot,
-  type RootPathFailureReason,
-} from "../filesystem-roots.ts";
-import { OMP_TRUSTED_EXTENSION_PATH, ompLaunchCwd } from "../../utils/omp-paths.ts";
+  type DeploymentModuleDeclaration,
+  type OwnedModuleObservation,
+  verifyOwnedModuleObservation,
+} from "./deployment-module.ts";
 import type { OmpPermissionMode } from "../omp-settings.ts";
 import type { ExecutableObservationForGuard } from "./executable-sources.ts";
 
@@ -238,18 +239,22 @@ export function computeDiscoveryDecision(input: DiscoveryDecisionInput): Discove
     input.executableObservation.sessionCwd === resolve(input.observedCwd);
 
   const expectedLaunchCwd = ompLaunchCwd(input.baseRoot, input.mode);
-  const contractedModulePath = resolve(input.baseRoot, OMP_TRUSTED_EXTENSION_PATH);
+  // The module trust root is the DECLARED generated artifact this process's
+  // own module URL selected (`bind-omp-owned-module-evidence`) — never the
+  // base-root-relative `.ts` source path (a build input, not a load entry) and
+  // never a default: an unrecognized module URL claims NO module trust root
+  // Here rather than silently inheriting the image face. Anything else
+  // presented as an extension root is therefore uncontracted.
+  const declaredModuleArtifact = input.trustedModuleCanonicalPath;
 
   const trustedRoots: string[] = [
-    input.trustedModuleCanonicalPath ?? contractedModulePath,
+    ...(declaredModuleArtifact !== undefined ? [declaredModuleArtifact] : []),
     ...(input.closureRoots ?? []),
   ];
 
   // 1. Ambient extension discovery
   const extraExtensions = (input.presentedExtensionRoots ?? []).filter(
-    (ext) =>
-      ext !== OMP_TRUSTED_EXTENSION_PATH && ext !== contractedModulePath &&
-      ext !== (input.trustedModuleCanonicalPath ?? contractedModulePath),
+    (ext) => ext !== declaredModuleArtifact,
   );
   if (extraExtensions.length > 0) {
     for (const ext of extraExtensions) {
@@ -395,26 +400,46 @@ export interface OwnedModuleOwnershipDecision {
   readonly failureReason?: RootPathFailureReason;
 }
 
+/**
+ * Input of the owned-module ownership decision (`bind-omp-owned-module-evidence`):
+ * the DECLARED deployment face plus its physical observation. The mutable
+ * launch-state base root and the session-role `CanonicalTarget` that used to
+ * stand in for module identity are GONE — module ownership consumes the
+ * deployment declaration and physical evidence only, and the permitted
+ * dependency closure rides the declaration (build-audited, never a path list
+ * inferred at runtime).
+ */
 export interface EvaluateOwnedModuleOptions {
-  readonly baseRoot: string;
-  readonly mode?: OmpPermissionMode;
-  readonly canonicalTarget?: CanonicalTarget;
-  readonly isSymlink?: boolean;
-  readonly symlinkTarget?: string;
-  readonly closureRoots?: readonly string[];
+  readonly declaration: DeploymentModuleDeclaration;
+  /** The physical observation of that declaration (absent ⇒ no evidence, deny). */
+  readonly observation?: OwnedModuleObservation;
 }
 
 /**
- * Evaluate exact owned-module ownership.
- * Requires canonical filesystem verification via CanonicalTarget from row 2.
+ * Evaluate exact owned-module ownership against a declared deployment face.
+ *
+ * The ONE trusted module location is the declaration's exact generated
+ * artifact. Everything else — an identical copy under a workspace, HOME or
+ * package-cache path, a name-only critical-tool look-alike, a raw source file,
+ * a module-parent directory — is excluded with a bounded untrusted-location or
+ * identity reason, and never gains a trusted-extension argument, read
+ * exception or skill authority. A candidate that IS the declared artifact must
+ * additionally carry physical evidence satisfying the declaration
+ * (`verifyOwnedModuleObservation`: link-free root over a link-free
+ * singly-linked regular artifact inside the declared root, complete metadata,
+ * the posture-specific ownership/mode requirement and a derived fingerprint).
+ *
+ * Containment reuses the shared canonical `isWithinRoot` predicate inside the
+ * module policy: there is exactly ONE canonicalizer, and it is not a lexical
+ * prefix test. Permission mode is deliberately absent: it is not part of
+ * module identity.
  */
 export function evaluateOwnedModuleOwnership(
   candidatePath: string,
   options: EvaluateOwnedModuleOptions,
 ): OwnedModuleOwnershipDecision {
-  const contractedPath = resolve(options.baseRoot, OMP_TRUSTED_EXTENSION_PATH);
-  const closure = options.closureRoots ?? [];
-  const validRoots = [contractedPath, ...closure];
+  const declaredArtifact = options.declaration.artifact;
+  const resolvedCandidate = resolve(candidatePath);
 
   // Check critical-name or tool-name match attempt
   const criticalNames = [
@@ -430,117 +455,70 @@ export function evaluateOwnedModuleOwnership(
   const basename = candidatePath.split("/").pop() ?? "";
   const isNameOnlyAttempt = criticalNames.some(
     (name) => basename === name || basename.startsWith(`${name}.`),
-  ) && !validRoots.includes(resolve(candidatePath));
+  ) && resolvedCandidate !== declaredArtifact;
 
-  if (isNameOnlyAttempt && !validRoots.includes(resolve(candidatePath))) {
+  if (isNameOnlyAttempt) {
     return {
       trusted: false,
+      canonicalPath: resolvedCandidate,
       reason:
-        "Name-only trust rejected: candidate name matches critical skill/tool but path is outside owned module root",
+        "Name-only trust rejected: candidate name matches critical skill/tool but is not the declared deployment module artifact",
       failureReason: "trusted_identity_mismatch",
     };
   }
 
-  // Row 2 canonical identity verification
-  if (options.canonicalTarget) {
-    const target = options.canonicalTarget;
-    const hasOwnedRole = target.roles.some(
-      (role) => role === "shared" || role === "trusted-skills",
-    );
-    if (!hasOwnedRole) {
-      return {
-        trusted: false,
-        canonicalPath: target.canonicalTarget,
-        reason: `Untrusted location: module resides in untrusted role(s) '${
-          target.roles.join(", ")
-        }'`,
-        failureReason: "outside_roots",
-      };
-    }
-
-    const hasEscapingSymlink = target.observedSymlinks.some(
-      (sym) => !validRoots.some((r) => isWithinRoot(sym.target, r)),
-    );
-    if (hasEscapingSymlink) {
-      return {
-        trusted: false,
-        canonicalPath: target.canonicalTarget,
-        reason: "Symlink escapes canonical owned root",
-        failureReason: "symlink_escape",
-      };
-    }
-
-    const matchesOwned = validRoots.some((r) =>
-      target.canonicalTarget === r || isWithinRoot(target.canonicalTarget, r)
-    );
-    if (!matchesOwned) {
-      return {
-        trusted: false,
-        canonicalPath: target.canonicalTarget,
-        reason: `Module canonical path '${target.canonicalTarget}' outside owned module closure`,
-        failureReason: "trusted_identity_mismatch",
-      };
-    }
-
-    return {
-      trusted: true,
-      canonicalPath: target.canonicalTarget,
-      reason: "Module verified canonically within deployment-owned closure",
-    };
-  }
-
-  // Without CanonicalTarget, untrusted locations are strictly rejected with reasons
-  const resolvedCandidate = resolve(candidatePath);
-  const lowerPath = candidatePath.toLowerCase();
-
-  if (
-    lowerPath.includes("/home/") ||
-    lowerPath.includes("/workspace/") ||
-    lowerPath.includes("/node_modules/") ||
-    lowerPath.includes("/.cache/") ||
-    lowerPath.includes("/.npm/") ||
-    lowerPath.includes("/.deno/")
-  ) {
-    return {
-      trusted: false,
-      canonicalPath: resolvedCandidate,
-      reason: `Untrusted location: module resides in workspace/home/cache path '${candidatePath}'`,
-      failureReason: "outside_roots",
-    };
-  }
-
-  if (options.isSymlink) {
+  // The DECLARED artifact is the decision's subject and is never screened by
+  // location: a declared development face legitimately lives under a
+  // home-shaped canonical checkout (the repository's own checkout does), so
+  // the location screening below applies ONLY to candidates that are not the
+  // declaration.
+  if (resolvedCandidate !== declaredArtifact) {
+    const lowerPath = candidatePath.toLowerCase();
     if (
-      !options.symlinkTarget ||
-      !validRoots.some((r) => isWithinRoot(resolve(options.symlinkTarget!), r))
+      lowerPath.includes("/home/") ||
+      lowerPath.includes("/workspace/") ||
+      lowerPath.includes("/node_modules/") ||
+      lowerPath.includes("/.cache/") ||
+      lowerPath.includes("/.npm/") ||
+      lowerPath.includes("/.deno/")
     ) {
       return {
         trusted: false,
-        canonicalPath: options.symlinkTarget ? resolve(options.symlinkTarget) : resolvedCandidate,
-        reason: "Symlink escapes canonical owned root",
-        failureReason: "symlink_escape",
+        canonicalPath: resolvedCandidate,
+        reason:
+          `Untrusted location: module resides in workspace/home/cache path '${candidatePath}'`,
+        failureReason: "outside_roots",
       };
     }
-  }
-
-  const isContracted = validRoots.some((r) =>
-    resolvedCandidate === r || isWithinRoot(resolvedCandidate, r)
-  );
-  if (!isContracted) {
     return {
       trusted: false,
       canonicalPath: resolvedCandidate,
       reason:
-        `Module path '${candidatePath}' does not match contracted deployment module path '${contractedPath}'`,
+        `Module path '${candidatePath}' is not the declared deployment module artifact '${declaredArtifact}'`,
       failureReason: "trusted_identity_mismatch",
     };
   }
 
-  return {
-    trusted: true,
-    canonicalPath: resolvedCandidate,
-    reason: "Module matches contracted deployment path and closure",
-  };
+  const observation = options.observation;
+  if (observation === undefined) {
+    return {
+      trusted: false,
+      canonicalPath: resolvedCandidate,
+      reason:
+        "Physical deployment-module evidence is missing for the declared artifact (no invented session identity substitutes for it)",
+      failureReason: "not_found",
+    };
+  }
+  const verdict = verifyOwnedModuleObservation(options.declaration, observation);
+  if (!verdict.trusted) {
+    return {
+      trusted: false,
+      canonicalPath: resolvedCandidate,
+      reason: verdict.reason,
+      ...(verdict.failureReason !== undefined ? { failureReason: verdict.failureReason } : {}),
+    };
+  }
+  return { trusted: true, canonicalPath: resolvedCandidate, reason: verdict.reason };
 }
 
 /**

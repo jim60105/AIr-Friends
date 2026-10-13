@@ -26,10 +26,12 @@
  * never be called and registration never needs the roster. Only
  * host-runtime metadata (never model input) is trusted: an
  * `extension`-sourced entry is owned ONLY when its file is positively
- * identified — the contracted deployment-tree path under the observed base
- * root, or this module's OWN loaded file (the C3 single generated bundle)
- * inside the observed owned base root — and records owned-extension
- * provenance with its ACTUAL identity, never relabelled as a builtin;
+ * identified — it IS the exact declared deployment artifact this process
+ * loaded AND that artifact's physical evidence re-verifies against the
+ * accepted anchor right now (`bind-omp-owned-module-evidence`: the mutable
+ * launch-state base root and any session-role canonical observation no longer
+ * stand in for module identity) — and records owned-extension provenance with
+ * its ACTUAL identity, never relabelled as a builtin;
  * `mcp__`-prefixed `mcp`-sourced entries record operator-MCP with the
  * admission basis 14a still re-decides per call; a `builtin`-sourced entry
  * admits as `native-builtin` ONLY when it presents the exact pinned runtime
@@ -68,16 +70,22 @@ import {
   type ToolCallSlotRegistrar,
   type ToolMetadataSnapshot,
 } from "./enforcement.ts";
-import { evaluateOwnedModuleOwnership } from "./ownership.ts";
 import {
-  type CanonicalTarget,
+  createOwnedModuleEvidenceSource,
+  evaluateOwnedModuleOwnership,
+  type OwnedModuleEvidenceSource,
+  type OwnedModuleFreshness,
+} from "./ownership.ts";
+import {
   credentialPresenceFromEnv,
+  evaluateToolProvenance,
   NATIVE_BUILTIN_SOURCE_ORIGIN,
   NATIVE_BUILTIN_SOURCE_SCOPE,
   nativeBuiltinSourcePath,
   type ProvenanceRecord,
   type SearchCredentialPresence,
 } from "./_daemon/mod.ts";
+import { moduleUrlToPath } from "../deployment-module.ts";
 import {
   createOwnedSkillUriAuthorization,
   createReadReplacementToolDefinition,
@@ -173,28 +181,9 @@ export type { NativeToolCallEvent, NativeToolCallEventResult };
 // Fresh native sourceInfo → canonical provenance adapter (task 1.2).
 // ---------------------------------------------------------------------------
 
-/** Owned-module identity the adapter verifies recorded `extension` sources against. */
-export interface NativeOwnedIdentity {
-  /** Observed deployment base root (row 9's `{baseRoot}`). */
-  readonly baseRoot: string;
-  /** The module's own loaded file URL (production: the single generated bundle). */
-  readonly moduleUrl: string;
-  /** Contracted development-tree path, relative to the base root. */
-  readonly contractedRelative: string;
-  /** Row 12's session resource generation getter. */
-  readonly resourceGeneration: () => string;
-  /** Trusted acquired-session canonical observation (absent ⇒ lexical identity only). */
-  readonly canonicalTarget?: CanonicalTarget;
-}
-
-/** File URL → filesystem path (runtime-supported reader only; no Deno-only API at module scope). */
-export function nativeFileUrlToPath(url: string): string {
-  return decodeURIComponent(new URL(url).pathname);
-}
-
 function normalizeNativeModulePath(value: string): string {
   const trimmed = value.trim();
-  const source = /^file:\/\//.test(trimmed) ? nativeFileUrlToPath(trimmed) : trimmed;
+  const source = /^file:\/\//.test(trimmed) ? moduleUrlToPath(trimmed) : trimmed;
   if (!source.startsWith("/")) return "";
   const segments: string[] = [];
   for (const part of source.split("/")) {
@@ -207,12 +196,6 @@ function normalizeNativeModulePath(value: string): string {
     segments.push(part);
   }
   return `/${segments.join("/")}`;
-}
-
-function withinBaseRoot(path: string, baseRoot: string): boolean {
-  const normalizedRoot = baseRoot.replace(/\/+$/, "");
-  if (normalizedRoot === "") return false;
-  return path === normalizedRoot || path.startsWith(`${normalizedRoot}/`);
 }
 
 /** The pinned `mcp__` client-tool name prefix (tools/builtin-names.ts at the pin). */
@@ -256,11 +239,19 @@ export interface NativeObservationStamp {
  * the CURRENT observation (`current`) instead of the first-sighting capture,
  * per the boundary statement on `NativeBuiltinProvenance`. The stamp records
  * WHEN the surface saw the tool, never a durable admission.
+ *
+ * `owned-extension` (`bind-omp-owned-module-evidence`) is stamped from the
+ * SAME live read: the entry is owned only when it IS the declared deployment
+ * artifact this process loaded AND that artifact's physical evidence
+ * re-verifies against the accepted anchor at this instant. Its recorded epoch
+ * pair and generation pair therefore come from this one observation, and the
+ * full module observation rides the record so the pure provenance decision can
+ * re-decide ownership without any session identity.
  */
 export function translateNativeSourceInfo(
   name: string,
   sourceInfo: NativeToolSourceInfo | null | undefined,
-  owned: NativeOwnedIdentity,
+  moduleEvidence: OwnedModuleEvidenceSource,
   capture: NativeObservationCapture,
   current: NativeObservationStamp,
 ): ProvenanceRecord {
@@ -320,41 +311,41 @@ export function translateNativeSourceInfo(
     case "extension": {
       const extensionPath = normalizeNativeModulePath(String(sourceInfo.path ?? ""));
       if (extensionPath === "") return unowned;
-      const ownModulePath = normalizeNativeModulePath(owned.moduleUrl);
-      const contractedPath = normalizeNativeModulePath(
-        `${owned.baseRoot.replace(/\/+$/, "")}/${owned.contractedRelative.replace(/^\/+/, "")}`,
-      );
-      // Positive identity only: the contracted deployment-tree file, or
-      // this module's OWN loaded file (the C3 single generated bundle —
-      // `import.meta.url` is the module's own runtime identity, not a
-      // claim) sitting inside the base root observed from this process's
-      // own launch identity. A trusted canonical session observation, when
-      // present, owns the final verdict through the row-2 verifier.
-      const isContracted = contractedPath !== "" && extensionPath === contractedPath;
-      const isOwnLoadedBundle = ownModulePath !== "" && extensionPath === ownModulePath &&
-        withinBaseRoot(extensionPath, owned.baseRoot);
-      if (!isContracted && !isOwnLoadedBundle) return unowned;
-      if (owned.canonicalTarget !== undefined) {
-        const ownership = evaluateOwnedModuleOwnership(extensionPath, {
-          baseRoot: owned.baseRoot,
-          mode: "restricted",
-          canonicalTarget: owned.canonicalTarget,
-          closureRoots: [owned.baseRoot],
-        });
-        if (!ownership.trusted) return unowned;
+      // The replacement must BE the declared deployment artifact this process
+      // itself loaded, and that artifact's physical evidence must re-verify
+      // against the accepted anchor RIGHT NOW. There is no lexical fallback:
+      // the base-root-relative `.ts` source path and any arbitrary
+      // module-parent directory confer nothing (design: never infer an owned
+      // root from a loaded module's directory), and no session identity
+      // substitutes for the physical observation.
+      const observation = moduleEvidence.observe({
+        resourceGeneration: current.generation,
+        registryEpoch: current.epoch,
+      });
+      if (observation === undefined) return unowned;
+      if (
+        extensionPath !== observation.presentedArtifactPath &&
+        extensionPath !== observation.canonicalArtifactPath
+      ) {
+        return unowned;
       }
+      const ownership = evaluateOwnedModuleOwnership(observation.artifact.path, {
+        declaration: observation.declaration,
+        observation,
+      });
+      if (!ownership.trusted) return unowned;
       return {
         origin: "owned-extension",
         modulePath: extensionPath,
-        baseRoot: owned.baseRoot,
-        // Canonical evidence rides the record when the trusted acquired
-        // session context supplies one: 14a's own verifier re-runs the
-        // row-2 check per call, and its ABSENCE (production today) denies
-        // admission fail-closed — a lexical path never carries the tier.
-        ...(owned.canonicalTarget !== undefined ? { canonicalTarget: owned.canonicalTarget } : {}),
-        mode: "restricted",
-        observedResourceGeneration: capture.observedGeneration,
-        currentResourceGeneration: capture.observedGeneration,
+        moduleEvidence: observation,
+        // BOTH halves come from the same live read that produced the physical
+        // observation; `composeFreshProvenance` re-reads the current halves at
+        // decision time, so a generation bump or roster movement since this
+        // read reads stale and denies.
+        registryEpochObserved: current.epoch,
+        currentRegistryEpoch: current.epoch,
+        observedResourceGeneration: observation.resourceGeneration,
+        currentResourceGeneration: observation.resourceGeneration,
       };
     }
     default:
@@ -384,7 +375,8 @@ export function translateNativeSourceInfo(
  */
 export function createNativeRegistrySurface(
   getAllTools: () => NativeToolInfo[] | undefined,
-  owned: NativeOwnedIdentity,
+  moduleEvidence: OwnedModuleEvidenceSource,
+  resourceGeneration: () => string,
 ): { snapshot(): readonly ToolMetadataSnapshot[]; epoch(): number } {
   let epoch = 0;
   let lastRosterKey: string | undefined;
@@ -395,7 +387,7 @@ export function createNativeRegistrySurface(
     const fresh: NativeObservationCapture = {
       key: spellingKey,
       observedEpoch: epoch,
-      observedGeneration: owned.resourceGeneration(),
+      observedGeneration: resourceGeneration(),
     };
     captures.set(key, fresh);
     return fresh;
@@ -417,7 +409,7 @@ export function createNativeRegistrySurface(
       // One stamp for THIS read: the epoch after the movement check plus row
       // 12's current generation. `native-builtin` records carry it as both
       // freshness halves; every other origin keeps its first-sighting capture.
-      const stamp: NativeObservationStamp = { epoch, generation: owned.resourceGeneration() };
+      const stamp: NativeObservationStamp = { epoch, generation: resourceGeneration() };
       // Map (never a plain object): a roster name like `constructor` or
       // `__proto__` must NOT read/write through Object.prototype — an
       // inherited member silently defeats the duplicate-name guard and
@@ -438,7 +430,7 @@ export function createNativeRegistrySurface(
           : translateNativeSourceInfo(
             name,
             tool.sourceInfo,
-            owned,
+            moduleEvidence,
             captureFor(name, spellingKey),
             stamp,
           );
@@ -566,10 +558,12 @@ export interface NativeRegistrationDeps {
   readonly resourceGeneration: () => string;
   /** Trusted acquired-session context; absent in production today ⇒ destructive calls fail closed. */
   readonly sessionContext?: NativeSessionContext;
-  /** The module's own loaded file URL (production: the generated bundle). */
+  /**
+   * The module's own loaded file URL (production: the generated bundle). The
+   * registration site selects the DECLARED deployment face from it; no cwd,
+   * base root or session identity participates in module identity.
+   */
   readonly moduleUrl: string;
-  /** Contracted development-tree path (OMP_TRUSTED_EXTENSION_PATH value). */
-  readonly contractedRelative: string;
   /** Controlled replacement definitions (C2 read + web_search); restricted branch only. */
   readonly replacementTools: readonly NativeToolDefinitionLike[];
   /**
@@ -580,12 +574,39 @@ export interface NativeRegistrationDeps {
   readonly searchCredentialPresence?: () => SearchCredentialPresence;
   /** Bounded diagnostic sink (row 12 posture). */
   readonly surfaceError?: (message: string) => void;
+  /**
+   * Physical deployment-module evidence source. ABSENT means the registration
+   * site builds the PRODUCTION producer from `moduleUrl` and the runtime's own
+   * metadata reader — the default factory path, which needs no session
+   * context, cwd or fixture. API-shaped fixtures may inject their own source
+   * and must name that evidence honestly (harness evidence is never native
+   * executable evidence).
+   */
+  readonly moduleEvidence?: OwnedModuleEvidenceSource;
 }
 
-/** Row 9's mode-distinct launch cwd is `{baseRoot}/omp-agent/{mode}/cwd`. */
-export function baseRootFromLaunchCwd(observedCwd: string): string {
-  if (!observedCwd.includes("/omp-agent/")) return observedCwd;
-  return observedCwd.replace(/\/omp-agent\/[^/]+\/cwd\/?$/, "");
+/**
+ * The network-admission registration half: TRUE only when the LIVE roster
+ * record for this exact name is a currently valid owned replacement — the
+ * record must be this owned extension AND pass the full provenance decision
+ * (allow-table name, physical module evidence against the accepted anchor,
+ * and a coherent current epoch/generation pair) on this call's live values.
+ * A name-only membership test is deliberately NOT enough: a foreign same-name
+ * registration satisfies the name and nothing else, and must never complete a
+ * controlled route.
+ */
+function ownedReplacementRegistrationEvidence(
+  toolName: string,
+  record: ProvenanceRecord,
+  currentResourceGeneration: string,
+  currentRegistryEpoch: number,
+): boolean {
+  if (record.origin !== "owned-extension") return false;
+  return evaluateToolProvenance(
+    toolName,
+    { ...record, currentRegistryEpoch, currentResourceGeneration },
+    { nameOnAllowTable: true },
+  ).admit;
 }
 
 /**
@@ -613,16 +634,16 @@ export function registerNativeEnforcement(
   }
   const surfaceError = deps.surfaceError ??
     ((message: string) => console.error(`[air-friends-trusted-extension] ${message}`));
-  const baseRoot = baseRootFromLaunchCwd(deps.observedCwd);
-  const owned: NativeOwnedIdentity = {
-    baseRoot,
-    moduleUrl: deps.moduleUrl,
-    contractedRelative: deps.contractedRelative,
-    resourceGeneration: deps.resourceGeneration,
-    ...(deps.sessionContext?.canonicalTarget !== undefined
-      ? { canonicalTarget: deps.sessionContext.canonicalTarget }
-      : {}),
-  };
+  // Module identity: the DECLARED deployment face this process's own loaded
+  // artifact belongs to, accepted physically HERE (registration time) and
+  // re-observed per call. An unrecognized artifact or a failed acceptance
+  // leaves `anchor === undefined`, and every owned name then reads
+  // unowned-discovery — fail closed, never a manufactured session identity.
+  const moduleEvidence = deps.moduleEvidence ??
+    createOwnedModuleEvidenceSource({
+      moduleUrl: deps.moduleUrl,
+      resourceGeneration: deps.resourceGeneration,
+    });
   // Capture the DIRECT runtime method at factory evaluation and defer every
   // invocation to a live observation: the pinned runtime's action methods
   // are throwing stubs until the host initializes them (the same runtime
@@ -631,20 +652,27 @@ export function registerNativeEnforcement(
   const directGetAllTools = api.getAllTools;
   const readAllTools = (): NativeToolInfo[] | undefined =>
     typeof directGetAllTools === "function" ? directGetAllTools.call(api) : undefined;
-  const surface = createNativeRegistrySurface(readAllTools, owned);
+  const surface = createNativeRegistrySurface(
+    readAllTools,
+    moduleEvidence,
+    deps.resourceGeneration,
+  );
   // The handler-side observer rides the SAME surface epoch the recorded
   // stamps were taken from: observed/current freshness can never desync
   // into a stale-forever denial on a stable roster, and a mid-session
   // foreign same-name replacement moves the roster (and every recorded
   // epoch stamp with it) exactly once — per the shared freshness rules.
-  const observer = createNativeLiveObserver(surface, deps.resourceGeneration, () => ({
-    modulePath: deps.moduleUrl,
-    baseRoot,
-    resourceGeneration: deps.resourceGeneration(),
-    ...(deps.sessionContext?.canonicalTarget !== undefined
-      ? { canonicalTarget: deps.sessionContext.canonicalTarget }
-      : {}),
-  }));
+  const observer = createNativeLiveObserver(surface, deps.resourceGeneration, () => {
+    const observation = moduleEvidence.observe({
+      resourceGeneration: deps.resourceGeneration(),
+      registryEpoch: surface.epoch(),
+    });
+    return {
+      modulePath: observation?.presentedArtifactPath ?? "",
+      ...(observation !== undefined ? { moduleEvidence: observation } : {}),
+      resourceGeneration: observation?.resourceGeneration ?? "",
+    };
+  });
   // The registrar seam is reused PURELY as the synchronous attach channel
   // for the identity-re-verifying handler factory; the "slot" here is a
   // local capture — the module-global registration record is gone.
@@ -655,19 +683,29 @@ export function registerNativeEnforcement(
     },
   };
   // C5: the network-admission seam, read FRESH on every call (no cache):
-  //   - registration evidence = the LIVE roster currently carries THIS exact
-  //     name (the owned half rides the fresh provenance record the handler
-  //     composes from the same surface, so a shadowed or unregistered name
-  //     never reads owned);
+  //   - registration evidence = the ACTUAL fresh owned registration for THIS
+  //     exact name, never the name alone: the live roster record must be this
+  //     owned extension AND pass the full provenance admission (physical
+  //     module evidence against the accepted anchor plus the current
+  //     epoch/generation halves) at this instant, so a foreign same-name
+  //     registration can never complete a controlled route by shadowing the
+  //     name;
   //   - credential presence = the CURRENT trusted presence read (booleans
   //     only — values never enter the observation and are never logged).
   // Availability changing mid-session moves the next call's decision exactly
   // like a roster change moves the epoch: no freeze, no ack, no reset.
   const credentialPresence = deps.searchCredentialPresence ?? credentialPresenceFromEnv;
-  const networkAdmission = (toolName: string): NetworkAdmissionObservation => ({
-    registeredOwnedReplacement: surface.snapshot().some((entry) => entry.toolName === toolName),
-    searchCredentialPresence: credentialPresence(),
-  });
+  const networkAdmission = (toolName: string): NetworkAdmissionObservation => {
+    const entry = surface.snapshot().find((candidate) => candidate.toolName === toolName);
+    const registeredOwnedReplacement = entry !== undefined &&
+      ownedReplacementRegistrationEvidence(
+        toolName,
+        entry.origin,
+        deps.resourceGeneration(),
+        surface.epoch(),
+      );
+    return { registeredOwnedReplacement, searchCredentialPresence: credentialPresence() };
+  };
   registerRestrictedEnforcement(
     localCapture,
     {

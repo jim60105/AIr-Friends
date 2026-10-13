@@ -31,10 +31,14 @@
 import { bootstrapDiscoveryGuard } from "./bootstrap.ts";
 import { formatDiscoverySessionError } from "../discovery-guard.ts";
 import { createNativeExtensionFactory, nativeReplacementTools } from "./native-registration.ts";
-import { OMP_TRUSTED_EXTENSION_PATH } from "../../../utils/omp-paths.ts";
 
 // Execute load-time pre-import discovery bootstrap sequence immediately upon import
-export const loadTimeDiscoveryDecision = bootstrapDiscoveryGuard();
+export const loadTimeDiscoveryDecision = bootstrapDiscoveryGuard({
+  // The load-time decision REPORTS the declared deployment artifact this
+  // module belongs to; module authority itself comes from the registration
+  // site's physical observation of that same declaration.
+  moduleUrl: import.meta.url,
+});
 
 // If any blocker is present at module load, fail initialization closed
 if (loadTimeDiscoveryDecision.blockers.length > 0) {
@@ -70,8 +74,10 @@ export default createNativeExtensionFactory(() => ({
   // the extension child today: production wires no session context, so
   // destructive-shaped calls fail closed on absent canonical
   // observations — never on model-supplied ones.
+  // Module identity, in contrast, needs no session context: the registration
+  // site builds the physical deployment-module evidence itself from this
+  // module's own loaded URL (the declared development or image artifact).
   moduleUrl: import.meta.url,
-  contractedRelative: OMP_TRUSTED_EXTENSION_PATH,
   // C6: the read replacement's owned skill-URI authorization rides the SAME
   // live discovery generation the enforcement observer consumes — an absent
   // generation mints no skill authority.

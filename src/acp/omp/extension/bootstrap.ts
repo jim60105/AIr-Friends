@@ -37,6 +37,7 @@ import {
   executableObservationForGuard,
   type ExecutableOwnedRoots,
 } from "../executable-sources.ts";
+import { DEPLOYMENT_MODULE_DECLARATIONS, moduleUrlToPath } from "../deployment-module.ts";
 import { observeLaunchMode } from "./enforcement.ts";
 import { observeDeclaredSkillRoots } from "./critical-skills.ts";
 
@@ -44,6 +45,12 @@ export interface BootstrapDiscoveryOptions {
   readonly deploymentBaseRoot?: string;
   readonly observedEnv?: Record<string, string | undefined>;
   readonly observedCwd?: string;
+  /**
+   * This module's own loaded file URL. The load-time decision reports the
+   * DECLARED deployment artifact it belongs to as the module trust root
+   * (`bind-omp-owned-module-evidence`); an unrecognized URL reports none.
+   */
+  readonly moduleUrl?: string;
 }
 
 /**
@@ -115,6 +122,7 @@ export function bootstrapDiscoveryGuard(
       processEnv: launchEnv,
     })
     : undefined;
+  const declaredModuleArtifact = declaredArtifactForModuleUrl(options.moduleUrl);
 
   return computeDiscoveryDecision({
     baseRoot,
@@ -122,6 +130,9 @@ export function bootstrapDiscoveryGuard(
     observedEnv,
     observedCwd,
     ownedSkillRoots,
+    ...(declaredModuleArtifact !== undefined
+      ? { trustedModuleCanonicalPath: declaredModuleArtifact }
+      : {}),
     ...(executableObservation !== undefined
       ? {
         resourceGeneration: executableObservation.resourceGeneration,
@@ -129,6 +140,25 @@ export function bootstrapDiscoveryGuard(
       }
       : {}),
   });
+}
+
+/**
+ * The declared deployment artifact this loaded module belongs to, matched by
+ * the module's OWN file URL. Nothing here decides authority: the declaration
+ * is REPORTED (as the decision's module trust root), while the physical
+ * observation and anchoring live in the registration path. An unrecognized
+ * URL reports no artifact, so the decision claims no module trust root rather
+ * than defaulting to the image face.
+ */
+function declaredArtifactForModuleUrl(moduleUrl: string | undefined): string | undefined {
+  if (moduleUrl === undefined) return undefined;
+  let loadedPath: string;
+  try {
+    loadedPath = moduleUrlToPath(moduleUrl);
+  } catch {
+    return undefined;
+  }
+  return DEPLOYMENT_MODULE_DECLARATIONS.find((face) => face.artifact === loadedPath)?.artifact;
 }
 
 /**

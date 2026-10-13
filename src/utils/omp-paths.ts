@@ -33,7 +33,19 @@ export const OMP_TRUSTED_EXTENSION_PATH = "src/acp/omp/extension/index.ts";
  * a missing generated development entry fails the launch preflight with the build
  * remedy — the resolver NEVER falls back to the raw Deno-only source tree.
  */
-export const OMP_TRUSTED_EXTENSION_BUNDLE_PATH = "build/omp-extension/index.js";
+export const OMP_TRUSTED_EXTENSION_BUNDLE_DIR = "build/omp-extension";
+
+/**
+ * The single generated artifact's file name. One name serves BOTH deployment
+ * faces (`bind-omp-owned-module-evidence`): the fixed image artifact and the
+ * development bundle are the same generated contract installed in two trees,
+ * so the declared root + this name is the whole module-identity surface.
+ */
+export const OMP_TRUSTED_EXTENSION_ARTIFACT_NAME = "index.js";
+
+/** Deterministic generated development artifact path (relative to the checkout). */
+export const OMP_TRUSTED_EXTENSION_BUNDLE_PATH =
+  `${OMP_TRUSTED_EXTENSION_BUNDLE_DIR}/${OMP_TRUSTED_EXTENSION_ARTIFACT_NAME}`;
 
 /**
  * Root-owned image tree installed by the OMP packaging steps (design D3/D4:
@@ -63,6 +75,15 @@ export const OMP_IMAGE_SKILLS_ROOT = "/opt/air/skills";
 /** Image path of the trusted-extension tree root (D4's contracted constant). */
 export const OMP_IMAGE_EXTENSION_ROOT = `${OMP_IMAGE_ROOT}/extension`;
 
+/**
+ * Image artifact of the trusted extension: the SAME generated bundle contract
+ * installed at the owned image root (`<root>/index.js`) by packaging. This is
+ * the fixed image face of the deployment-module declaration
+ * (`bind-omp-owned-module-evidence`), never a development-tree path.
+ */
+export const OMP_IMAGE_EXTENSION_ARTIFACT =
+  `${OMP_IMAGE_EXTENSION_ROOT}/${OMP_TRUSTED_EXTENSION_ARTIFACT_NAME}`;
+
 /** Image path of the owned settings overlays (D3: dirs 0755, files 0644). */
 export const OMP_IMAGE_CONFIG_ROOT = `${OMP_IMAGE_ROOT}/config`;
 
@@ -74,34 +95,6 @@ export const OMP_IMAGE_PROMPT_PATH = `${OMP_IMAGE_ROOT}/prompt/SYSTEM.md`;
  * assembly consumes; operator-owned and never relocated by this module).
  */
 export const OMP_SYSTEM_PROMPT_MOUNT_PATH = "/app/prompts/system_prompt_override.md";
-
-/**
- * Resolve the contracted trusted-extension entry to its image path when the
- * installed tree exists, otherwise the deterministic GENERATED development
- * entry (`OMP_TRUSTED_EXTENSION_BUNDLE_PATH`) — the single exported
- * dev→image seam (image face: `<root>/index.js`, the same generated artifact
- * contract installed by packaging; development face: the bundle the
- * repository bundling command emits). The resolver NEVER selects the raw
- * Deno-only source tree: a missing generated development entry surfaces as
- * the launch preflight's fail-closed error naming the build remedy, so no
- * alternative extension-root convention exists to fall back to. Consumers
- * launch with the resolver's output verbatim and no second path convention.
- *
- * The resolver itself never raises: absence simply selects the generated
- * development entry (whose absence the preflight then rejects).
- * Existence injection keeps unit tests fixture-driven; production callers use
- * the real filesystem.
- */
-export function resolveOmpTrustedExtensionPath(options: {
-  /** Injectable existence probe; defaults to the real filesystem. */
-  exists?: (path: string) => boolean;
-  /** Injectable image extension root; defaults to the contracted constant. */
-  imageExtensionRoot?: string;
-} = {}): string {
-  const exists = options.exists ?? defaultExists;
-  const imageEntry = join(options.imageExtensionRoot ?? OMP_IMAGE_EXTENSION_ROOT, "index.js");
-  return exists(imageEntry) ? imageEntry : OMP_TRUSTED_EXTENSION_BUNDLE_PATH;
-}
 
 /**
  * Resolve a contracted owned-settings dev path (e.g.

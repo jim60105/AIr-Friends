@@ -46,6 +46,10 @@ import { evaluateApprovalRecordAuthority } from "@acp/omp/record-evaluator.ts";
 import { createAgentConfig } from "@acp/agent-factory.ts";
 import type { EffectiveRecordEvaluation } from "@acp/omp/record-evaluator.ts";
 import type { Config } from "../../src/types/config.ts";
+import {
+  fixtureImageObservation,
+  fixtureOwnedExtensionRecord,
+} from "./omp-owned-module-fixture.ts";
 
 const approvalResetFixture = JSON.parse(
   Deno.readTextFileSync(
@@ -60,28 +64,18 @@ const approvalResetFixture = JSON.parse(
 // Synthetic fixtures (14a suite shapes reused unchanged; row 12 generation).
 // ---------------------------------------------------------------------------
 
-const owned: ProvenanceRecord = {
-  origin: "owned-extension",
-  modulePath: "/opt/air/src/acp/omp/extension/index.ts",
-  baseRoot: "/opt/air",
-  canonicalTarget: {
-    acpSessionId: "s1",
-    sessionContextGeneration: "g1",
-    roles: ["trusted-skills"],
-    rootIdentities: [{
-      role: "trusted-skills",
-      configuredPath: "/opt/air/src/acp/omp/extension",
-      canonicalPath: "/opt/air/src/acp/omp/extension",
-      readOnly: true,
-    }],
-    normalizedInput: "/opt/air/src/acp/omp/extension/index.ts",
-    canonicalTarget: "/opt/air/src/acp/omp/extension/index.ts",
-    rootRelativePath: "index.ts",
-    targetType: "file",
-    observedSymlinks: [],
-  },
-  observedResourceGeneration: "gen-0",
-};
+// Owned-extension provenance rides the DECLARED deployment artifact plus its
+// physical observation, stamped from ONE live read (no session identity). The
+// hand-built composition helper uses the epoch-7 domain; the fixture SURFACE
+// used with `createLiveObserver` counts roster movements from 0, so it needs a
+// record stamped for ITS domain — a record from the other domain is exactly
+// what the epoch-coherence check must deny.
+const ownedObservation = fixtureImageObservation({ generation: "gen-0", epoch: 7 });
+const owned: ProvenanceRecord = fixtureOwnedExtensionRecord({ observation: ownedObservation });
+const ownedSurfaceObservation = fixtureImageObservation({ generation: "gen-0" });
+const ownedSurface: ProvenanceRecord = fixtureOwnedExtensionRecord({
+  observation: ownedSurfaceObservation,
+});
 
 const mcpFresh: ProvenanceRecord = {
   origin: "operator-mcp",
@@ -313,7 +307,10 @@ Deno.test("Wiring: handler-throw fixture fails closed at the seam (no catch-and-
       observeOrigin: (name) => ({ origin: "unowned-discovery", presentedName: name }),
       observeRegistryEpoch: () => 0,
       observeResourceGeneration: () => "gen-0",
-      owningModule: () => ({ modulePath: "m", baseRoot: "b", resourceGeneration: "gen-0" }),
+      // No verified module evidence: this seam fixture asserts the handler's
+      // fail-closed body, and an evidence-less owning module is exactly the
+      // fail-closed owned state.
+      owningModule: () => ({ modulePath: "m", resourceGeneration: "gen-0" }),
     },
     surfaceError: (message) => surfaced.push(message),
   };
@@ -487,15 +484,15 @@ Deno.test("Wiring: decisions are consumed LIVE, never memoized across identical 
   let allowOwned = true;
   const surface = fixtureSurface(() => [{
     toolName: "read",
-    origin: allowOwned ? owned : { origin: "workspace", presentedName: "read" },
+    origin: allowOwned ? ownedSurface : { origin: "workspace", presentedName: "read" },
   }]);
   const generation = "gen-0";
   const { observer } = createLiveObserver(
     surface,
     () => generation,
     () => ({
-      modulePath: owned.modulePath!,
-      baseRoot: "/opt/air",
+      modulePath: ownedSurfaceObservation.artifact.path,
+      moduleEvidence: ownedSurfaceObservation,
       resourceGeneration: generation,
     }),
   );
@@ -540,7 +537,7 @@ Deno.test("Wiring refresh: post-start owned-MCP refresh re-admits on the fresh e
       observeOrigin: (name) => registry.observeOrigin(name),
       observeRegistryEpoch: () => registry.currentEpoch(),
       observeResourceGeneration: () => "gen-0",
-      owningModule: () => ({ modulePath: "m", baseRoot: "b", resourceGeneration: "gen-0" }),
+      owningModule: () => ({ modulePath: "m", resourceGeneration: "gen-0" }),
     },
     surfaceError: () => {},
   };
@@ -596,7 +593,7 @@ Deno.test("Wiring: observeCall re-reads origin/epoch/generation freshly on every
       },
       observeRegistryEpoch: () => 7,
       observeResourceGeneration: () => "gen-0",
-      owningModule: () => ({ modulePath: "m", baseRoot: "b", resourceGeneration: "gen-0" }),
+      owningModule: () => ({ modulePath: "m", resourceGeneration: "gen-0" }),
     },
     surfaceError: () => {},
   };
@@ -639,7 +636,7 @@ Deno.test("Wiring registration: YOLO/unidentified identities register nothing; i
       observeOrigin: (name) => ({ origin: "unowned-discovery", presentedName: name }),
       observeRegistryEpoch: () => 0,
       observeResourceGeneration: () => "gen-0",
-      owningModule: () => ({ modulePath: "m", baseRoot: "b", resourceGeneration: "gen-0" }),
+      owningModule: () => ({ modulePath: "m", resourceGeneration: "gen-0" }),
     },
     surfaceError: () => {},
   });

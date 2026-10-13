@@ -14,7 +14,15 @@ import {
 } from "../../src/acp/omp/discovery-guard.ts";
 import { OMP_TRUSTED_EXTENSION_PATH, ompLaunchCwd } from "../../src/utils/omp-paths.ts";
 import type { SkillCandidate } from "../../src/acp/omp/compatibility-contracts.ts";
-import type { CanonicalTarget } from "../../src/acp/filesystem-roots.ts";
+import {
+  type DeploymentModuleDeclaration,
+  OMP_IMAGE_MODULE_DECLARATION,
+} from "../../src/acp/omp/deployment-module.ts";
+import {
+  FIXTURE_DEVELOPMENT_DECLARATION,
+  fixtureImageObservation,
+  fixtureModuleObservation,
+} from "./omp-owned-module-fixture.ts";
 
 Deno.test("Task 4.1: Table-driven exclusion tests over each audited surface", () => {
   const baseRoot = "/opt/air";
@@ -38,7 +46,10 @@ Deno.test("Task 4.1: Table-driven exclusion tests over each audited surface", ()
     mode,
     observedCwd: neutralCwd,
     observedEnv: {},
-    presentedExtensionRoots: [`${baseRoot}/${OMP_TRUSTED_EXTENSION_PATH}`],
+    // The presented extension root is the DECLARED generated artifact (the
+    // `.ts` source path is a build input, not a load entry).
+    presentedExtensionRoots: [OMP_IMAGE_MODULE_DECLARATION.artifact],
+    trustedModuleCanonicalPath: OMP_IMAGE_MODULE_DECLARATION.artifact,
     customToolRoots: ["/workspace/project/.omp/tools", "/workspace/tools/bad.ts"],
     pluginRoots: ["/workspace/plugins/malicious", "/workspace/node_modules/plugin-x"],
     workspaceDependencyRoots: ["/workspace/node_modules"],
@@ -55,6 +66,14 @@ Deno.test("Task 4.1: Table-driven exclusion tests over each audited surface", ()
     // Importer spy is never invoked
   }
   assertEquals(importAttempts, 0);
+
+  // The decision's module trust root is the declared artifact, and the
+  // declared artifact is not an uncontracted extension root.
+  assertEquals(decision.trustedRoots[0], OMP_IMAGE_MODULE_DECLARATION.artifact);
+  assertEquals(
+    decision.blockers.some((b) => b.surfaceId === "ambient-extension-discovery"),
+    false,
+  );
 
   // Verify all 7 surfaces present
   assertEquals(decision.surfaces.length, 7);
@@ -98,114 +117,162 @@ Deno.test("Task 4.1: Table-driven exclusion tests over each audited surface", ()
   assertEquals(Object.isFrozen(decision.blockers), true);
 });
 
-Deno.test("Task 4.2: Owned-module ownership tests with CanonicalTarget and reasons", () => {
-  const baseRoot = "/opt/air";
-  const trustedPath = `${baseRoot}/${OMP_TRUSTED_EXTENSION_PATH}`;
+Deno.test("Task 4.2: Owned-module ownership consumes the declaration and physical evidence", () => {
+  const imageObservation = fixtureImageObservation();
 
-  // 1. Contracted module is trusted
-  const ownedRes = evaluateOwnedModuleOwnership(trustedPath, {
-    baseRoot,
-    mode: "restricted",
+  // 1. The declared image artifact with valid physical evidence is trusted.
+  const declared = evaluateOwnedModuleOwnership(imageObservation.artifact.path, {
+    declaration: OMP_IMAGE_MODULE_DECLARATION,
+    observation: imageObservation,
   });
-  assertEquals(ownedRes.trusted, true);
+  assertEquals(declared.trusted, true);
+  assertEquals(declared.canonicalPath, OMP_IMAGE_MODULE_DECLARATION.artifact);
 
-  // 1b. With row 2 CanonicalTarget inside shared role
-  const mockSharedTarget: CanonicalTarget = {
-    acpSessionId: "session-1",
-    sessionContextGeneration: "1",
-    roles: ["shared"],
-    rootIdentities: [],
-    normalizedInput: trustedPath,
-    canonicalTarget: trustedPath,
-    rootRelativePath: OMP_TRUSTED_EXTENSION_PATH,
-    targetType: "file",
-    observedSymlinks: [],
+  // 2. A declared DEVELOPMENT artifact under a canonical checkout that lives
+  //    under a home-shaped root is trusted: the DECLARED artifact is the
+  //    decision's subject — the location screening below can never reject the
+  //    declaration itself (the repository's real checkout is /var/home/...).
+  const homeCheckout: DeploymentModuleDeclaration = {
+    ...FIXTURE_DEVELOPMENT_DECLARATION,
+    root: "/var/home/dev/checkout/build/omp-extension",
+    artifact: "/var/home/dev/checkout/build/omp-extension/index.js",
   };
-  const targetOwnedRes = evaluateOwnedModuleOwnership(trustedPath, {
-    baseRoot,
-    mode: "restricted",
-    canonicalTarget: mockSharedTarget,
+  const devObservation = fixtureModuleObservation({ declaration: homeCheckout });
+  const development = evaluateOwnedModuleOwnership(devObservation.artifact.path, {
+    declaration: homeCheckout,
+    observation: devObservation,
   });
-  assertEquals(targetOwnedRes.trusted, true);
+  assertEquals(development.trusted, true);
 
-  // 2. CanonicalTarget in untrusted workspace role is untrusted
-  const mockWorkspaceTarget: CanonicalTarget = {
-    acpSessionId: "session-1",
-    sessionContextGeneration: "1",
-    roles: ["workspace"],
-    rootIdentities: [],
-    normalizedInput: "/workspace/app/index.ts",
-    canonicalTarget: "/workspace/app/index.ts",
-    rootRelativePath: "index.ts",
-    targetType: "file",
-    observedSymlinks: [],
+  // 3. An identical copy outside the declaration is excluded — by LOCATION
+  //    for the workspace/HOME/package-cache spellings, by IDENTITY otherwise.
+  for (
+    const copy of [
+      "/workspace/app/index.js",
+      "/home/user/.omp/index.js",
+      "/root/.cache/omp/index.js",
+    ]
+  ) {
+    const verdict = evaluateOwnedModuleOwnership(copy, {
+      declaration: OMP_IMAGE_MODULE_DECLARATION,
+      observation: imageObservation,
+    });
+    assertEquals(verdict.trusted, false, copy);
+    assertEquals(verdict.failureReason, "outside_roots", copy);
+  }
+  const mirrorCopy = evaluateOwnedModuleOwnership("/srv/mirror/omp-extension/index.js", {
+    declaration: OMP_IMAGE_MODULE_DECLARATION,
+    observation: imageObservation,
+  });
+  assertEquals(mirrorCopy.trusted, false);
+  assertEquals(mirrorCopy.failureReason, "trusted_identity_mismatch");
+
+  // 4. Candidate matching a critical skill or tool name is untrusted by name,
+  //    even when it carries a valid-looking observation.
+  for (const lookAlike of ["/tmp/skill.ts", "/tmp/run_command.ts", "/tmp/tools.js"]) {
+    const verdict = evaluateOwnedModuleOwnership(lookAlike, {
+      declaration: OMP_IMAGE_MODULE_DECLARATION,
+      observation: imageObservation,
+    });
+    assertEquals(verdict.trusted, false, lookAlike);
+    assertEquals(verdict.failureReason, "trusted_identity_mismatch", lookAlike);
+  }
+
+  // 5. The declared artifact WITHOUT physical evidence denies: no session
+  //    role, id or CanonicalTarget substitutes for the observation.
+  const withoutEvidence = evaluateOwnedModuleOwnership(OMP_IMAGE_MODULE_DECLARATION.artifact, {
+    declaration: OMP_IMAGE_MODULE_DECLARATION,
+  });
+  assertEquals(withoutEvidence.trusted, false);
+  assertEquals(withoutEvidence.failureReason, "not_found");
+
+  // 6. A linked artifact and a linked root are symlink escapes.
+  const linkedArtifact = fixtureImageObservation({
+    artifact: { isFile: false, isSymbolicLink: true },
+  });
+  const linked = evaluateOwnedModuleOwnership(linkedArtifact.artifact.path, {
+    declaration: OMP_IMAGE_MODULE_DECLARATION,
+    observation: linkedArtifact,
+  });
+  assertEquals(linked.trusted, false);
+  assertEquals(linked.failureReason, "symlink_escape");
+  const linkedRoot = fixtureImageObservation({ root: { isSymbolicLink: true } });
+  const rootLink = evaluateOwnedModuleOwnership(linkedRoot.artifact.path, {
+    declaration: OMP_IMAGE_MODULE_DECLARATION,
+    observation: linkedRoot,
+  });
+  assertEquals(rootLink.trusted, false);
+  assertEquals(rootLink.failureReason, "symlink_escape");
+
+  // 7. A hard-linked (aliased) artifact and a moved fingerprint deny.
+  const hardLinked = fixtureImageObservation({ artifact: { nlink: 2 } });
+  const aliased = evaluateOwnedModuleOwnership(hardLinked.artifact.path, {
+    declaration: OMP_IMAGE_MODULE_DECLARATION,
+    observation: hardLinked,
+  });
+  assertEquals(aliased.trusted, false);
+  assertEquals(aliased.failureReason, "path_changed");
+  const movedFingerprint = fixtureImageObservation({ fingerprint: "stale-fingerprint" });
+  const moved = evaluateOwnedModuleOwnership(movedFingerprint.artifact.path, {
+    declaration: OMP_IMAGE_MODULE_DECLARATION,
+    observation: movedFingerprint,
+  });
+  assertEquals(moved.trusted, false);
+  assertEquals(moved.failureReason, "trusted_identity_mismatch");
+
+  // 8. Posture violations deny: a non-root-owned image artifact, a
+  //    group/other-writable path and a differently-owned development artifact.
+  const foreignOwner = fixtureImageObservation({ artifact: { uid: 1000 } });
+  const notRootOwned = evaluateOwnedModuleOwnership(foreignOwner.artifact.path, {
+    declaration: OMP_IMAGE_MODULE_DECLARATION,
+    observation: foreignOwner,
+  });
+  assertEquals(notRootOwned.trusted, false);
+  assertEquals(notRootOwned.failureReason, "outside_roots");
+  const writable = fixtureImageObservation({ artifact: { mode: 0o666 } });
+  const groupWritable = evaluateOwnedModuleOwnership(writable.artifact.path, {
+    declaration: OMP_IMAGE_MODULE_DECLARATION,
+    observation: writable,
+  });
+  assertEquals(groupWritable.trusted, false);
+  assertEquals(groupWritable.failureReason, "outside_roots");
+  // Developer OWNER-writability is the source-owned posture and stays valid;
+  // an artifact owned by ANOTHER user than its declared root does not.
+  const ownerWritableDev = fixtureModuleObservation({
+    declaration: FIXTURE_DEVELOPMENT_DECLARATION,
+    artifact: { mode: 0o644 },
+  });
+  assertEquals(
+    evaluateOwnedModuleOwnership(ownerWritableDev.artifact.path, {
+      declaration: FIXTURE_DEVELOPMENT_DECLARATION,
+      observation: ownerWritableDev,
+    }).trusted,
+    true,
+  );
+  const foreignDevArtifact = fixtureModuleObservation({
+    declaration: FIXTURE_DEVELOPMENT_DECLARATION,
+    artifact: { uid: 4321 },
+  });
+  const unownedSubstitution = evaluateOwnedModuleOwnership(foreignDevArtifact.artifact.path, {
+    declaration: FIXTURE_DEVELOPMENT_DECLARATION,
+    observation: foreignDevArtifact,
+  });
+  assertEquals(unownedSubstitution.trusted, false);
+  assertEquals(unownedSubstitution.failureReason, "outside_roots");
+
+  // 9. An observation of ANOTHER declaration than the evaluated one denies:
+  //    a development observation can never satisfy a declaration claiming the
+  //    image posture for the same paths.
+  const wrongPosture: DeploymentModuleDeclaration = {
+    ...homeCheckout,
+    posture: "image",
   };
-  const workspaceTargetRes = evaluateOwnedModuleOwnership("/workspace/app/index.ts", {
-    baseRoot,
-    mode: "restricted",
-    canonicalTarget: mockWorkspaceTarget,
+  const crossFace = evaluateOwnedModuleOwnership(devObservation.artifact.path, {
+    declaration: wrongPosture,
+    observation: devObservation,
   });
-  assertEquals(workspaceTargetRes.trusted, false);
-  assertEquals(workspaceTargetRes.failureReason, "outside_roots");
-
-  // 3. Byte-identical copy in workspace / HOME / package-cache paths is untrusted
-  const workspaceCopy = evaluateOwnedModuleOwnership("/workspace/app/index.ts", {
-    baseRoot,
-    mode: "restricted",
-  });
-  assertEquals(workspaceCopy.trusted, false);
-  assertEquals(workspaceCopy.failureReason, "outside_roots");
-
-  const homeCopy = evaluateOwnedModuleOwnership("/home/user/.omp/index.ts", {
-    baseRoot,
-    mode: "restricted",
-  });
-  assertEquals(homeCopy.trusted, false);
-  assertEquals(homeCopy.failureReason, "outside_roots");
-
-  const cacheCopy = evaluateOwnedModuleOwnership("/root/.cache/omp/index.ts", {
-    baseRoot,
-    mode: "restricted",
-  });
-  assertEquals(cacheCopy.trusted, false);
-  assertEquals(cacheCopy.failureReason, "outside_roots");
-
-  // 4. Candidate matching critical skill or tool name is untrusted by name
-  const nameOnlyMatch = evaluateOwnedModuleOwnership("/tmp/skill.ts", {
-    baseRoot,
-    mode: "restricted",
-  });
-  assertEquals(nameOnlyMatch.trusted, false);
-  assertEquals(nameOnlyMatch.failureReason, "trusted_identity_mismatch");
-
-  const toolNameMatch = evaluateOwnedModuleOwnership("/tmp/run_command.ts", {
-    baseRoot,
-    mode: "restricted",
-  });
-  assertEquals(toolNameMatch.trusted, false);
-  assertEquals(toolNameMatch.failureReason, "trusted_identity_mismatch");
-
-  // 5. Symlink escaping the owned canonical root is untrusted with symlink_escape
-  const escapingSymlink = evaluateOwnedModuleOwnership(`${baseRoot}/link.ts`, {
-    baseRoot,
-    mode: "restricted",
-    isSymlink: true,
-    symlinkTarget: "/workspace/escape.ts",
-  });
-  assertEquals(escapingSymlink.trusted, false);
-  assertEquals(escapingSymlink.failureReason, "symlink_escape");
-
-  // 6. Mode-independence: restricted vs native-yolo yields identical trust verdict
-  const restrictedResult = evaluateOwnedModuleOwnership(trustedPath, {
-    baseRoot,
-    mode: "restricted",
-  });
-  const yoloResult = evaluateOwnedModuleOwnership(trustedPath, {
-    baseRoot,
-    mode: "native-yolo",
-  });
-  assertEquals(restrictedResult.trusted, yoloResult.trusted);
-  assertEquals(restrictedResult.canonicalPath, yoloResult.canonicalPath);
+  assertEquals(crossFace.trusted, false);
+  assertEquals(crossFace.failureReason, "trusted_identity_mismatch");
 });
 
 Deno.test("Task 4.3: Critical-skill ownership decision-table and lifecycle tests", () => {

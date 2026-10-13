@@ -33,6 +33,7 @@ import type {
   ToolOrigin,
 } from "./_daemon/mod.ts";
 import type { SearchCredentialPresence } from "./_daemon/mod.ts";
+import type { OwnedModuleObservation } from "../deployment-module.ts";
 
 // ---------------------------------------------------------------------------
 // Wiring-level error codes added on top of 14a's finite deny vocabulary.
@@ -136,11 +137,17 @@ export interface ToolRegistryObservation {
   readonly resourceGeneration: string;
 }
 
-/** Owned-module identity observed for the extension itself (row 12 evidence). */
+/**
+ * Owned-module identity observed for the extension itself
+ * (`bind-omp-owned-module-evidence`): the declared artifact path this process
+ * loaded plus its physical observation against the accepted anchor. No session
+ * role or `CanonicalTarget` participates — module evidence is independent of
+ * session filesystem authority and grants none.
+ */
 export interface OwningModuleObservation {
   readonly modulePath: string;
-  readonly baseRoot: string;
-  readonly canonicalTarget?: CanonicalTarget;
+  /** Present only when the loaded artifact's physical evidence re-verifies. */
+  readonly moduleEvidence?: OwnedModuleObservation;
   /** Row 12's generation observation for this session. */
   readonly resourceGeneration: string;
 }

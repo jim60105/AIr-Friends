@@ -57,7 +57,7 @@ import {
   RESTRICTED_DENIAL_VOCABULARY,
   type RestrictedDenialReason,
 } from "./_daemon/mod.ts";
-import type { CanonicalTarget, FilesystemAuthorizationResult } from "./_daemon/mod.ts";
+import type { FilesystemAuthorizationResult } from "./_daemon/mod.ts";
 // C5 (`admit-completed-omp-network-adapters`): the typed completion
 // decisions live with the ROUTE OWNERS — this wiring consults them and
 // holds no route table of its own.
@@ -368,11 +368,14 @@ export function composeFreshProvenance(
       // Current epoch = the live wiring-owned observation for THIS call.
       return { ...recorded, currentRegistryEpoch: observation.registryObservation.registryEpoch };
     case "owned-extension":
-      // Current generation = row 12's live counter for THIS call; the
-      // observed half stays whatever the surface recorded (BOTH-or-NEITHER
-      // is enforced by the provenance decision itself).
+      // Current epoch and generation = the wiring's live reads for THIS call;
+      // the observed halves stay whatever the live surface read recorded, so
+      // the owned decision's coherence check denies a record the movement has
+      // outrun (BOTH-or-NEITHER for the generation pair is enforced by the
+      // provenance decision itself).
       return {
         ...recorded,
+        currentRegistryEpoch: observation.registryObservation.registryEpoch,
         currentResourceGeneration: observation.registryObservation.resourceGeneration,
       };
     default:
@@ -720,18 +723,22 @@ export function createRestrictedToolCallHandler(
   };
 }
 
-/** Fresh owned-extension provenance record from the observer seam. */
-export function ownedProvenanceFrom(
-  observer: LiveToolMetadataObserver,
-  canonicalTarget: CanonicalTarget | undefined,
-): ProvenanceRecord {
+/**
+ * Fresh owned-extension provenance record from the observer seam: the
+ * observer's own live module evidence, stamped with the live epoch and
+ * generation halves it was read with. No session identity enters — an
+ * observer with no verified module evidence produces a record the provenance
+ * decision denies (missing evidence), never a manufactured one.
+ */
+export function ownedProvenanceFrom(observer: LiveToolMetadataObserver): ProvenanceRecord {
   const owning = observer.owningModule();
+  const evidence = owning.moduleEvidence;
   return {
     origin: "owned-extension",
     modulePath: owning.modulePath,
-    baseRoot: owning.baseRoot,
-    ...(canonicalTarget !== undefined ? { canonicalTarget } : {}),
-    mode: "restricted",
+    ...(evidence !== undefined ? { moduleEvidence: evidence } : {}),
+    registryEpochObserved: observer.observeRegistryEpoch(),
+    currentRegistryEpoch: observer.observeRegistryEpoch(),
     observedResourceGeneration: owning.resourceGeneration,
     currentResourceGeneration: observer.observeResourceGeneration(),
   };

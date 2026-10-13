@@ -14,8 +14,8 @@ import {
   ompXdgDataHome,
   resolveOmpConfigPath,
   resolveOmpSystemPromptPath,
-  resolveOmpTrustedExtensionPath,
 } from "@utils/omp-paths.ts";
+import { selectLaunchDeploymentModule } from "./omp/deployment-module.ts";
 import {
   assertOwnedSettingsDocument,
   OMP_FOREIGN_PROVIDER_ENV_SELECTORS,
@@ -347,15 +347,17 @@ function buildBaseAgentConfig(
       }
 
       // Fail-closed checks on required assets: trusted extension module and overlay files
-      // Row-20 dev→image seam (src/utils/omp-paths.ts): the launch assembly
-      // consumes the resolver output VERBATIM — the installed generated
-      // bundle when the owned /opt/air/omp tree exists, the deterministic
-      // GENERATED development entry (build/omp-extension/index.js) otherwise.
-      // No second path convention, and the raw Deno-only source tree is NEVER
-      // a fallback: a missing generated development entry fails here naming
-      // the build remedy (package-bun-compatible-omp-extension D2) instead of
-      // presenting a Deno-only import specifier as loadable.
-      const trustedExtensionPath = resolveOmpTrustedExtensionPath();
+      // Deployment-module declaration seam (`bind-omp-owned-module-evidence`):
+      // the launch assembly consumes the SELECTED declaration's artifact
+      // VERBATIM — the installed generated bundle when the owned /opt/air/omp
+      // tree exists, the deterministic GENERATED development entry
+      // (build/omp-extension/index.js) otherwise. The same declaration type is
+      // what the runtime verifier observes and anchors. No second path
+      // convention, and the raw Deno-only source tree is NEVER a fallback: a
+      // missing generated development entry fails here naming the build remedy
+      // (package-bun-compatible-omp-extension D2) instead of presenting a
+      // Deno-only import specifier as loadable.
+      const trustedExtensionPath = selectLaunchDeploymentModule().artifact;
       try {
         Deno.statSync(trustedExtensionPath);
       } catch {

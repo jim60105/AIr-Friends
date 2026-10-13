@@ -18,7 +18,7 @@
  */
 
 import { evaluateOwnedModuleOwnership } from "./discovery-guard.ts";
-import type { CanonicalTarget } from "../filesystem-roots.ts";
+import type { OwnedModuleObservation } from "./deployment-module.ts";
 
 /** Recorded origins; mirrors the inventory vocabulary (type-only consumer). */
 export type ToolOrigin =
@@ -80,25 +80,38 @@ export interface NativeBuiltinProvenance {
 }
 
 /**
- * Owned trusted-extension provenance: exact contracted module ownership is only
- * established from canonical filesystem evidence (row 12 `CanonicalTarget`);
- * a lexically supplied path without canonical evidence is never trusted.
+ * Owned trusted-extension provenance (`bind-omp-owned-module-evidence`): exact
+ * deployment-module ownership rests on the DECLARED generated artifact plus
+ * its PHYSICAL observation — the declaration's artifact/root, complete
+ * metadata, the posture-specific ownership requirement and identity stability
+ * against the accepted anchor. No session role, session id, cwd or invented
+ * `CanonicalTarget` participates: a lexically supplied path, a name, or a
+ * session-role claim without this evidence is never trusted.
+ *
+ * The epoch and generation pairs are the observation stamps of the same live
+ * roster read that produced the record (`registryEpochObserved` /
+ * `observedResourceGeneration`) paired with the wiring's CURRENT reads
+ * (`currentRegistryEpoch` / `currentResourceGeneration`): a movement since
+ * that read denies pending a fresh observation.
  */
 export interface OwnedExtensionProvenance {
   readonly origin: "owned-extension";
-  /** Candidate module path presented by the loader. */
+  /** Artifact path the fresh native sourceInfo presented. */
   readonly modulePath: string;
-  /** Deployment base root the trusted-extension path is contracted against. */
-  readonly baseRoot: string;
-  /** Canonical identity evidence from row 2 for the candidate module. */
-  readonly canonicalTarget?: CanonicalTarget;
-  /** Mode-scoped ownership evaluation (row 12 contract). */
-  readonly mode?: "restricted" | "native-yolo";
   /**
-   * Row 12 generation observation for this session. 14b's contract: BOTH
-   * fields are supplied together from one observation pair, or both are
-   * absent (the explicit untracked-generation case). Exactly one present is
-   * an incomplete observation and denies re-observe; disagreement denies too.
+   * The full physical deployment-module observation. ABSENT is an incomplete
+   * observation and denies pending a fresh one — never an admit-by-name.
+   */
+  readonly moduleEvidence?: OwnedModuleObservation;
+  /** Registry epoch observed when the roster read produced this record. */
+  readonly registryEpochObserved: number;
+  /** Current live registry epoch (consumed; the wiring owns its observation). */
+  readonly currentRegistryEpoch: number;
+  /**
+   * Row-12 generation observation for this session. BOTH fields are supplied
+   * together from one observation pair, or both are absent (the explicit
+   * untracked-generation case). Exactly one present is an incomplete
+   * observation and denies re-observe; disagreement denies too.
    */
   readonly observedResourceGeneration?: string;
   readonly currentResourceGeneration?: string;
@@ -143,7 +156,7 @@ export type ProvenanceDecision =
     readonly reason:
       | "untrusted_origin"
       | "client_ownership_absent"
-      | "canonical_ownership_evidence_missing"
+      | "module_ownership_evidence_missing"
       | "owned_module_ownership_denied"
       | "stale_observation"
       | "unknown_observation"
@@ -253,9 +266,19 @@ export function evaluateToolProvenance(
     }
 
     case "owned-extension": {
-      // Row 12 generation freshness, consumed as pure input: disagreement or
-      // an observation half missing both deny pending re-observation, so a
-      // rotated resourceGeneration can never be admitted by omitting a field.
+      // One live read's coherence first, exactly as for `native-builtin`: the
+      // observed current-call epoch and generation halves must agree, so a
+      // record stamped by another domain (fixtures, a foreign observer, a
+      // hand-built record) or one predating a movement reads stale and denies
+      // pending a fresh observation rather than admitting.
+      if (provenance.registryEpochObserved !== provenance.currentRegistryEpoch) {
+        return {
+          admit: false,
+          reason: "stale_observation",
+          pending: "re-observe",
+          staleElement: "registry-epoch",
+        };
+      }
       const observed = provenance.observedResourceGeneration;
       const current = provenance.currentResourceGeneration;
       if ((observed === undefined) !== (current === undefined) || observed !== current) {
@@ -271,19 +294,33 @@ export function evaluateToolProvenance(
         // decision denies such names with the inventory reason before routing.
         return { admit: false, reason: "name_not_on_allow_table" };
       }
-      if (!provenance.canonicalTarget) {
-        // Canonical evidence is REQUIRED: an influenceable lexical path can
-        // never carry the owned-extension trust tier.
+      const evidence = provenance.moduleEvidence;
+      if (evidence === undefined) {
+        // Physical deployment-module evidence is REQUIRED: a lexical path, a
+        // tool name or a session-role claim can never carry the owned tier.
         return {
           admit: false,
-          reason: "canonical_ownership_evidence_missing",
+          reason: "module_ownership_evidence_missing",
+          pending: "re-observe",
+        };
+      }
+      // Evidence coherence: the observation must be the SAME live read that
+      // produced this record's stamps and must describe the recorded artifact.
+      if (
+        evidence.artifact.path !== provenance.modulePath ||
+        evidence.declaration.artifact !== provenance.modulePath ||
+        evidence.registryEpoch !== provenance.registryEpochObserved ||
+        evidence.resourceGeneration !== provenance.observedResourceGeneration
+      ) {
+        return {
+          admit: false,
+          reason: "unknown_observation",
           pending: "re-observe",
         };
       }
       const ownership = evaluateOwnedModuleOwnership(provenance.modulePath, {
-        baseRoot: provenance.baseRoot,
-        mode: provenance.mode,
-        canonicalTarget: provenance.canonicalTarget,
+        declaration: evidence.declaration,
+        observation: evidence,
       });
       if (!ownership.trusted) {
         return { admit: false, reason: "owned_module_ownership_denied" };

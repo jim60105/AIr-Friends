@@ -26,8 +26,9 @@ import {
   OMP_TRUSTED_EXTENSION_PATH,
   resolveOmpConfigPath,
   resolveOmpSystemPromptPath,
-  resolveOmpTrustedExtensionPath,
 } from "@utils/omp-paths.ts";
+import { OMP_IMAGE_EXTENSION_ARTIFACT } from "@utils/omp-paths.ts";
+import { selectLaunchDeploymentModule } from "@acp/omp/deployment-module.ts";
 
 const repoRoot = new URL("../../", import.meta.url).pathname.replace(/\/$/, "");
 const containerfile = await Deno.readTextFile(`${repoRoot}/Containerfile`);
@@ -263,7 +264,11 @@ Deno.test("omp-paths resolvers - image-first when the installed tree exists", ()
     path === `${OMP_IMAGE_EXTENSION_ROOT}/index.js` ||
     path === `${OMP_IMAGE_CONFIG_ROOT}/restricted.yml` ||
     path === OMP_IMAGE_PROMPT_PATH;
-  assertEquals(resolveOmpTrustedExtensionPath({ exists }), "/opt/air/omp/extension/index.js");
+  const launch = selectLaunchDeploymentModule({ exists });
+  assertEquals(launch.artifact, "/opt/air/omp/extension/index.js");
+  assertEquals(launch.posture, "image");
+  // The image face is the FIXED declared constant (no injectable root).
+  assertEquals(launch.artifact, OMP_IMAGE_EXTENSION_ARTIFACT);
   assertEquals(
     resolveOmpConfigPath("agent-config/omp/restricted.yml", { exists }),
     "/opt/air/omp/config/restricted.yml",
@@ -275,10 +280,9 @@ Deno.test("omp-paths resolvers - dev fallback selects the generated bundle when 
   // C3: the dev face is the deterministic GENERATED entry, never the raw
   // Deno-only source tree (OMP_TRUSTED_EXTENSION_PATH stays the canonical
   // source origin, asserted separately below).
-  assertEquals(
-    resolveOmpTrustedExtensionPath({ exists }),
-    OMP_TRUSTED_EXTENSION_BUNDLE_PATH,
-  );
+  const launch = selectLaunchDeploymentModule({ exists });
+  assertEquals(launch.artifact, OMP_TRUSTED_EXTENSION_BUNDLE_PATH);
+  assertEquals(launch.posture, "development");
   assertEquals(OMP_TRUSTED_EXTENSION_BUNDLE_PATH, "build/omp-extension/index.js");
   assertEquals(OMP_TRUSTED_EXTENSION_PATH, "src/acp/omp/extension/index.ts");
   assertEquals(
@@ -318,10 +322,10 @@ Deno.test("omp-paths resolvers - fixture roots exercise both branches end-to-end
       }
     };
     const imageExistsExt = (path: string) => real(path.startsWith(root) ? path : `${root}${path}`);
-    // With the fixture tree: image branch.
+    // With the fixture tree carrying the fixed image artifact: image branch.
     assertEquals(
-      resolveOmpTrustedExtensionPath({ exists: imageExistsExt, imageExtensionRoot: `${imageExt}` }),
-      `${imageExt}/index.js`,
+      selectLaunchDeploymentModule({ exists: imageExistsExt }).artifact,
+      OMP_IMAGE_EXTENSION_ARTIFACT,
     );
     assertEquals(
       resolveOmpConfigPath("agent-config/omp/restricted.yml", {
@@ -333,7 +337,7 @@ Deno.test("omp-paths resolvers - fixture roots exercise both branches end-to-end
     // Against a nonexistent tree: dev fallback verbatim.
     const missing = `${root}/nope`;
     assertEquals(
-      resolveOmpTrustedExtensionPath({ exists: real, imageExtensionRoot: missing }),
+      selectLaunchDeploymentModule({ exists: real }).artifact,
       OMP_TRUSTED_EXTENSION_BUNDLE_PATH,
     );
     assertEquals(
