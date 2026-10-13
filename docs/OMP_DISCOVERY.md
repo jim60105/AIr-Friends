@@ -5,10 +5,10 @@
 The `guard-omp-executable-discovery` integration protects restricted OpenCode / OMP agent sessions against unauthorized top-level executable code discovery and module imports. It establishes:
 
 1. **Load-Time Discovery Bootstrap**: A pure pre-import exclusion decision computed at trusted-extension module load, before any dynamic tool, plugin, or configured module can import.
-2. **Audited Surface Verification**: Table-driven evaluation of all 7 P0-audited executable discovery routes. Surfaces without supported mechanisms produce hard initialization blockers.
+2. **Audited Surface Verification**: Table-driven evaluation of all 7 P0-audited executable discovery routes. Surfaces without supported mechanisms keep their pinned `no-supported-mechanism` status; the two native executable-discovery surfaces are admitted ONLY under the DECIDED decision-1 deployment control with a matching accepted pre-native observation, and the entrypoint otherwise throws on the remaining blockers.
 3. **Exact Owned-Module Ownership**: Only the DECLARED generated artifact at its declared canonical root — the fixed image face or the build-owned development face — with satisfying PHYSICAL evidence is admitted. Workspace copies, cache directories, symlink escapes, name-only matches and raw source files are unconditionally untrusted.
 4. **Canonical Critical-Skill Ownership**: Critical skill IDs resolve strictly to canonical instruction files (`SKILL.md`) inside the read-only deployment-owned skills root. Workspace shadowing is excluded, and stale/foreign session generations reject.
-5. **Honesty Gates**: Two blocking application gates remain open with verbatim pinned verdicts requiring explicit user-decision adoption before native security guarantees can be claimed.
+5. **Honesty Gates**: Two honesty gates keep their verbatim pinned `unresolved` verdicts beside their DECIDED (2026-10-09, rows 27/28) dispositions. Neither gate carries a pending user-decision blocker any longer, and no native security guarantee follows from either.
 
 ---
 
@@ -17,8 +17,8 @@ The `guard-omp-executable-discovery` integration protects restricted OpenCode / 
 | Surface ID                     | Name                         | Pinned Route                                                                                                                                                       | Status                              | Applied Mechanism                                                                                                                                                                           |
 | ------------------------------ | ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `ambient-extension-discovery`  | Ambient extension discovery  | `main.ts` `buildSessionOptions` trusted-path branch: exact canonical module files, extension discovery disabled; `--no-extensions` + `--trusted-extension` (row 9) | `supported` (for this surface only) | Consume row 9 flags unchanged; verifies canonical module identity and that no uncontracted extension root was presented.                                                                    |
-| `native-custom-tool-discovery` | Native custom-tool discovery | `sdk.ts` `discoverCustomToolPaths`/`loadCustomTools`, independent of extension flags; `custom-tools/loader.ts` `loadTool` imports before factory/name inspection   | `no-supported-mechanism`            | Excludes configured/workspace custom-tool roots before import and emits an unconditional blocker. `withHostGuard` and preloaded paths are never treated as import boundaries.               |
-| `plugin-entry-points`          | Plugin entry points          | `plugins/loader.ts` `getEnabledPlugins`, includes project roots and linked dependencies                                                                            | `no-supported-mechanism`            | Enumerates plugin roots as excluded before import and emits an unconditional blocker. `marketplace.autoUpdate: off` is posture, not exclusion.                                              |
+| `native-custom-tool-discovery` | Native custom-tool discovery | `sdk.ts` `discoverCustomToolPaths`/`loadCustomTools`, independent of extension flags; `custom-tools/loader.ts` `loadTool` imports before factory/name inspection   | `no-supported-mechanism`            | Excludes configured/workspace custom-tool roots before import and emits a blocker UNLESS the decision carries a matching accepted `absent-clean` executable-source observation for this exact workspace and generation (DECIDED decision 1, row 27), which admits this surface under the deployment control. `withHostGuard` and preloaded paths are never treated as import boundaries. |
+| `plugin-entry-points`          | Plugin entry points          | `plugins/loader.ts` `getEnabledPlugins`, includes project roots and linked dependencies                                                                            | `no-supported-mechanism`            | Enumerates plugin roots as excluded before import and emits a blocker under the same decision-1 admission rule. `marketplace.autoUpdate: off` is posture, not exclusion.                    |
 | `configured-module-roots`      | Configured module roots      | `PI_CONFIG_FILES` / `OMP_PROFILE` / `PI_PROFILE` selectors that can add module/config layers                                                                       | `candidate-to-verify`               | Deployment env posture: verifies forbidden configuration variables (`PI_CONFIG_FILES`, `OMP_PROFILE`, `PI_PROFILE`, `XDG_CONFIG_HOME`) are absent from observed process env.                |
 | `workspace-owned-dependencies` | Workspace-owned dependencies | Linked/installed package resolution reachable from a project cwd                                                                                                   | `candidate-to-verify`               | Verifies launch working directory matches neutral deployment launch cwd (`ompLaunchCwd`) where `.omp/` is empty. Workspace-derived dependency roots are excluded.                           |
 | `symlinked-linked-roots`       | Symlinked/linked roots       | Any discovery candidate reaching the owned root or escaping it via a link                                                                                          | `candidate-to-verify`               | Reuses row 2 filesystem-root canonical identity: rejects links escaping canonical owned roots with `symlink_escape` or `trusted_identity_mismatch`.                                         |
@@ -43,15 +43,29 @@ No candidate modules are ever imported or evaluated during discovery inspection.
 
 ---
 
-## Session Setup Failure Contract
+## Extension-Load Failure Is Not Observable Readiness
 
-When trusted-module initialization fails due to unestablished pre-import exclusion:
-
-- The agent process fails to load the extension.
-- Session creation (`session/new`) or recovery (`session/load`) rejects with an ACP request error observable through `AgentConnector.createSession()` / `raceAgainstCrash`.
-- The error message is bounded, naming the failing surface and status (e.g. `pre-import exclusion not established: native-custom-tool-discovery (no-supported-mechanism)`).
-- The error message contains **no credentials, secrets, or file contents**.
-- The system **never falls back** to an unguarded session, an extensionless process, or OpenCode substitution.
+1. **Module-level fail-closed gate.** Whenever a blocker remains in `decision.blockers`, the
+   extension entrypoint throws a bounded initialization error naming the failing surface and
+   status (e.g. `pre-import exclusion not established: native-custom-tool-discovery
+   (no-supported-mechanism)`). The message carries **no credentials, secrets, or file contents**,
+   and no candidate module is ever imported or evaluated during discovery inspection.
+2. **What the pinned host does with that failure.** The pinned host catches extension
+   import/factory failures and continues WITHOUT the failed extension
+   (`extensibility/extensions/loader.ts`), and lifecycle-hook errors are reported by `runner.emit`,
+   which only logs them — neither path fails session startup. An extension that fails to load
+   therefore leaves a RUNNING session without the restricted capability set, and there is **no
+   authenticated handler-readiness signal**: row 13 (`gate-omp-policy-readiness`) is cancelled, so
+   no channel, handshake, acknowledgement or assertion exists anywhere.
+3. **What IS fail-closed, and where.** The deployment-side preflights reject the session BEFORE
+   the native request — owned assets and mode overlays, the settings-source plan and the workspace
+   executable observation all run before spawn / `session/new` / recovery
+   (`docs/OMP_SPAWN.md` section 3, `docs/OMP_SETTINGS.md` section 6). Those rejections are
+   daemon-side guarantees; they are NOT a claim about native handler presence.
+4. **No over-claim.** This documentation asserts neither authenticated handler presence, nor a
+   guaranteed `session/new`/`session/load` rejection on extension failure, nor never-extensionless
+   execution. The residual risk is accepted and recorded
+   (`docs/USER-RUNTIME-VERIFICATION.md` section B; decision register §1a decision 2).
 
 ---
 
@@ -87,7 +101,7 @@ Two honesty gates remain open as named data exports in `src/acp/omp/discovery-gu
 
 - **Status**: `unresolved`
 - **Pinned Verdict**: `"extension flags alone incompatible and the supported full mechanism unresolved"`
-- **Disposition (row 27, DECIDED 2026-10-09)**: `DECISION_1_DEPLOYMENT_ADMISSION` — the selected control is _deployment admission_: the deployment keeps executable custom tools and plugin entry points out of the workspace, loads the owned extension only from the image path (`--no-extensions` keeps ambient discovery off), the pre-native STARTUP CHECK rejects a workspace executable module, and fail-closed session rejection is the fallback. The native unresolved/verbatim verdict stands UNCHANGED alongside the disposition (`runtimeUnverified: UNVERIFIED`); no repository mock clears the native gate, and the disposition claims no supported native mechanism.
+- **Disposition (row 27, DECIDED 2026-10-09)**: `DECISION_1_DEPLOYMENT_ADMISSION` — the selected control is _deployment admission_: the deployment keeps executable custom tools and plugin entry points out of the workspace, loads the owned extension only from the selected generated artifact (the image face `/opt/air/omp/extension/index.js`, or the generated development entry `build/omp-extension/index.js` when the owned tree is absent; `--no-extensions` keeps ambient discovery off), the pre-native STARTUP CHECK rejects a workspace executable module, and fail-closed session rejection is the fallback. That rejection is the DAEMON-side pre-native check (`docs/OMP_SPAWN.md` section 3): a merely failed or absent extension is not a session-level fail-closed guarantee (see the load-failure section above). The native unresolved/verbatim verdict stands UNCHANGED alongside the disposition (`runtimeUnverified: UNVERIFIED`); no repository mock clears the native gate, and the disposition claims no supported native mechanism.
 
 ### 2. `criticalSkillSelectionGate`
 
@@ -99,11 +113,11 @@ Neither gate carries a pending "another user decision required" blocker anymore 
 
 ### Decision-1 Deployment Admission (row 27)
 
-`computeDiscoveryDecision` accepts an `executableObservation` — the accepted pre-native observation for one exact workspace + resource generation (`src/acp/omp/executable-sources.ts`). ONLY a matching `absent-clean` observation at the decision's own generation admits the two native executable-discovery surfaces under the deployment control instead of the unconditional unsupported-native-status rejection. An absent, stale, or foreign observation never reuses a previous clean result: both `no-supported-mechanism` blockers stay verbatim (fail-closed fallback), the pinned surfaces table never changes, and excluded-root records are still emitted for every configured root. The extension's restricted-identity startup check supplies this observation at production load; development/unidentified loads take no observation and fail closed exactly as before.
+`computeDiscoveryDecision` accepts an `executableObservation` — the accepted pre-native observation for one exact workspace + resource generation (`src/acp/omp/executable-sources.ts`). ONLY a matching `absent-clean` observation at the decision's own generation admits the two native executable-discovery surfaces under the deployment control instead of the unconditional unsupported-native-status rejection. A matching observation admits ONLY those two surfaces: every other blocker still applies, and the entrypoint still throws whenever any blocker remains. An absent, stale, or foreign observation never reuses a previous clean result: both `no-supported-mechanism` blockers stay verbatim (fail-closed fallback), the pinned surfaces table never changes, and excluded-root records are still emitted for every configured root. The extension's restricted-identity startup check supplies this observation at production load; development/unidentified loads take no observation and fail closed exactly as before.
 
 ### Operative Security Boundary
 
-While these gates stand open, discovery-side exclusion is defense in depth. Restricted execution-time default-deny (row 14) and ACP filesystem authorization (rows 2–4) constitute the operative security boundaries.
+While these gates keep their pinned verdicts, discovery-side exclusion is defense in depth. Restricted execution-time default-deny (row 14) and ACP filesystem authorization (rows 2–4) constitute the operative security boundaries. The ACP filesystem boundary covers the callbacks that actually execute; it does NOT confine direct native local IO, whose accepted posture is recorded in `docs/OMP_ENFORCEMENT.md` ("Accepted native local posture").
 
 Automated unit and mock tests validate **decision logic only** (which roots and names are excluded, fail-closed error payload). Passing tests do not constitute evidence that the native upstream binary enforces pre-import exclusion.
 
@@ -112,7 +126,7 @@ Automated unit and mock tests validate **decision logic only** (which roots and 
 ## Downstream Handoff
 
 - **Row 13 (cancelled readiness gate)**: no readiness channel or acknowledgement exists (cancelled by user decision); the load-time decision and resource generation are consumed read-only by the row-16 enforcement wiring.
-- **Row 14 (`enforce-omp-restricted-tool-policy`)**: Provides execution-time tool inventory default-deny.
+- **Row 14 (`define-omp-restricted-tool-decisions` / `wire-omp-restricted-tool-enforcement`)**: Provides the pure restricted tool inventory plus its wired native `tool_call` consumer (default-deny by absence).
 - **Row 20 (`package-pinned-omp-runtime`) + `package-bun-compatible-omp-extension` (C3)**: Packages the GENERATED single-artifact bundle of the module tree authored here at `/opt/air/omp/extension/index.js`, digest-covered by `PACKAGE-MANIFEST.sha256`.
 - **`bind-omp-owned-module-evidence`**: Declares the image/development faces, embeds the canonical source root in the emitted bundle, and supplies the physical deployment-module evidence the owned `read`/`web_search` replacement admission consumes (`docs/OMP_ENFORCEMENT.md` §Module evidence vs session evidence).
 

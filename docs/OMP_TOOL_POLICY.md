@@ -13,8 +13,12 @@ and the generic-command path canonicalization is 14c
 (`harden-acp-command-path-gate`).
 
 Consulted **only in restricted mode**: native-YOLO OMP sessions receive none of
-these clamps (their LSP disablement is owned separately, row 15), and OpenCode
-flows are byte-unchanged — this change has no runtime consumer yet.
+these clamps (their LSP disablement is owned separately, row 17), and OpenCode
+flows are byte-unchanged. The runtime consumer is 14b
+(`wire-omp-restricted-tool-enforcement`): the trusted extension's native
+`tool_call` handler consults these decisions per call in restricted sessions,
+registered through the pinned native `ExtensionAPI` (C4). Whether the official
+binary ever invokes that handler stays user-owned and UNVERIFIED.
 
 ## Modules
 
@@ -235,11 +239,15 @@ tests clear neither verdict; unit/mock evidence validates decision logic only.
   view); there is no second admission path. Note that MCP-origin `url`/`todo`
   shapes are origin-keyed client capability calls, not native transport/todo
   routes — they are not pending-adapter or session-state coverage. The modules
-  import cleanly as a self-contained tree for the image extension's `_daemon/`
-  install (row 22).
+  import cleanly as a self-contained tree; `src/acp/omp/extension/_daemon/mod.ts`
+  is the extension's build-TIME re-export barrel and the C3 bundler inlines it
+  into the single generated `index.js` (row 22's copied `_daemon/` image install
+  tree no longer exists).
 - **14c** (`harden-acp-command-path-gate`): lexical→canonical hardening of the
   `bash` completing authority.
-- **Row 21**: inherits the MCP tiers and honesty gates as exported data.
+- **Row 21** (`adapt-omp-public-code-search`) was REMOVED by C1
+  (`remove-omp-public-code-search`): it is not a shipped consumer of the MCP
+  tiers or honesty gates, which stay exported data.
 
 ## User-owned runtime checklist (UNVERIFIED — not claimed by any test here)
 
