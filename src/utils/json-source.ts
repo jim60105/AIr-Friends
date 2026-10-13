@@ -183,11 +183,17 @@ class JsonSourceReader {
   /** A number, `true`, `false` or `null` — read as its verbatim span. */
   private readLiteral(): JsonSourceScalar {
     const start = this.index;
-    // A literal ends at the next structural delimiter or at any trivia.
-    while (
-      this.index < this.source.length &&
-      !",}]\t\n\r ".includes(this.source[this.index]!)
-    ) {
+    // A literal ends at the next structural delimiter, at any trivia, or at a
+    // comment opener: `jsonc-parser` accepts `false/* note */,` and the literal
+    // must not swallow the adjacent comment into its own span.
+    while (this.index < this.source.length) {
+      const char = this.source[this.index]!;
+      if (",}]\t\n\r ".includes(char)) break;
+      if (
+        char === "/" && (this.source[this.index + 1] === "/" || this.source[this.index + 1] === "*")
+      ) {
+        break;
+      }
       this.index += 1;
     }
     if (this.index === start) {
