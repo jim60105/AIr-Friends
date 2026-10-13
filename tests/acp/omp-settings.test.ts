@@ -65,7 +65,18 @@ Deno.test("Task 2.1: agent-config/omp/restricted.yml content matches pinned keys
   assertOwnedSettingsDocument(parsed, "restricted");
 
   // Assert exact keys
-  assertEquals(parsed["tools"], { approvalMode: "write" });
+  assertEquals(parsed["tools"], {
+    approvalMode: "write",
+    approval: { read: "allow", grep: "allow", glob: "allow", find: "allow" },
+  });
+  // Owned native local search posture (row 29): the supported activation pins
+  // and the restricted-only defense-in-depth fetch disable. `find.enabled:
+  // auto` is pinned verbatim so the judge/model-dependent availability stays
+  // unchanged.
+  assertEquals(parsed["grep"], { enabled: true });
+  assertEquals(parsed["glob"], { enabled: true });
+  assertEquals(parsed["find"], { enabled: "auto" });
+  assertEquals(parsed["fetch"], { enabled: false });
   assertEquals(parsed["lsp"], { enabled: false });
   assertEquals(parsed["startup"], { checkUpdate: false });
   assertEquals(parsed["marketplace"], { autoUpdate: "off" });
@@ -173,22 +184,44 @@ Deno.test("Task 3.1: assertOwnedSettingsDocument rejects invalid schema keys and
     'Restricted-only key "disabledProviders" is forbidden in native-yolo',
   );
 
-  // Per-tool approval in restricted
+  // An UNLISTED per-tool approval entry cannot enter an owned overlay: the
+  // pinned entry-name set is closed, so no OMP-only execution surface (`bash`
+  // here, or `eval`/`task`/`lsp`/…) can be allow-listed through this branch.
   assertThrows(
     () =>
       assertOwnedSettingsDocument(
-        fixtures.invalidOverlays.perToolApprovalInRestricted,
+        fixtures.invalidOverlays.unlistedApprovalEntryInRestricted,
         "restricted",
       ),
     Error,
-    "per-tool approval records and approval resets must not appear",
+    'Unsupported "tools.approval" entry "bash"',
   );
 
-  // Approval null reset
+  // An unlisted approval VALUE rejects (the pinned vocabulary is closed).
+  assertThrows(
+    () => assertOwnedSettingsDocument(fixtures.invalidOverlays.unlistedApprovalValue, "restricted"),
+    Error,
+    'Invalid value "maybe" for key "tools.approval.read"',
+  );
+
+  // The approval branch and the native fetch-materialization pin are
+  // restricted-only: neither can ride into the native-YOLO document.
+  assertThrows(
+    () => assertOwnedSettingsDocument(fixtures.invalidOverlays.approvalInYolo, "native-yolo"),
+    Error,
+    'Restricted-only key "tools.approval" is forbidden in native-yolo',
+  );
+  assertThrows(
+    () => assertOwnedSettingsDocument(fixtures.invalidOverlays.fetchInYolo, "native-yolo"),
+    Error,
+    'Restricted-only key "fetch.enabled" is forbidden in native-yolo',
+  );
+
+  // An approval NULL reset is not an owned record.
   assertThrows(
     () => assertOwnedSettingsDocument(fixtures.invalidOverlays.approvalNullReset, "restricted"),
     Error,
-    "per-tool approval records and approval resets must not appear",
+    'Invalid type for key "tools.approval"',
   );
 
   // Invalid models document tests
@@ -206,6 +239,81 @@ Deno.test("Task 3.1: assertOwnedSettingsDocument rejects invalid schema keys and
     () => assertOwnedModelsDocument(fixtures.invalidModels.commandHeader),
     Error,
     "Dynamic command execution",
+  );
+});
+
+Deno.test("Task 29-3.1: the owned read/search posture is validated exactly, not merely typed", () => {
+  const restricted = parseYaml(RESTRICTED_YAML_CONTENT) as Record<string, unknown>;
+  // The composed owned document passes as-is.
+  assertOwnedSettingsDocument(restricted, "restricted");
+  const withTools = (tools: unknown) => ({ ...restricted, tools });
+  // The pinned entry set is EXACT: a missing entry rejects.
+  assertThrows(
+    () =>
+      assertOwnedSettingsDocument(
+        withTools({ approvalMode: "write", approval: { read: "allow" } }),
+        "restricted",
+      ),
+    Error,
+    "EXACTLY the pinned tools.approval entries",
+  );
+  // A relaxed value for a pinned entry rejects.
+  assertThrows(
+    () =>
+      assertOwnedSettingsDocument(
+        withTools({
+          approvalMode: "write",
+          approval: { read: "prompt", grep: "allow", glob: "allow", find: "allow" },
+        }),
+        "restricted",
+      ),
+    Error,
+    'Restricted mode requires explicit tools.approval.read: "allow"',
+  );
+  // An activation pin cannot be relaxed alongside its approval entry.
+  assertThrows(
+    () => assertOwnedSettingsDocument({ ...restricted, grep: { enabled: false } }, "restricted"),
+    Error,
+    "Restricted mode requires explicit grep.enabled: true",
+  );
+  assertThrows(
+    () => assertOwnedSettingsDocument({ ...restricted, find: { enabled: "off" } }, "restricted"),
+    Error,
+    'Restricted mode requires explicit find.enabled: "auto"',
+  );
+  // The defense-in-depth native fetch disable is required in restricted mode.
+  const withoutFetch = { ...restricted } as Record<string, unknown>;
+  delete withoutFetch["fetch"];
+  assertThrows(
+    () => assertOwnedSettingsDocument(withoutFetch, "restricted"),
+    Error,
+    "Restricted mode requires explicit fetch.enabled: false",
+  );
+  // `auto` is pinned VERBATIM: the native `find` availability stays
+  // judge/model-dependent, with no judge/model/backend configured here.
+  assertEquals((restricted["find"] as Record<string, unknown>)["enabled"], "auto");
+});
+
+Deno.test("Task 29-3.2: the owned approval record cannot nullify lower-layer survivors (residual owned by the discovery-path control)", () => {
+  // The owned read/search entries win for their exact keys...
+  const { configuredLookups } = resolveEffectiveSettings(
+    { approval: { unknown_tool: "allow", read: "deny" } },
+    [{ approval: { read: "allow", grep: "allow", glob: "allow", find: "allow" } }],
+  );
+  const approval = configuredLookups["approval"] as Record<string, unknown>;
+  assertEquals(approval["read"], "allow");
+  assertEquals(approval["grep"], "allow");
+  assertEquals(approval["glob"], "allow");
+  assertEquals(approval["find"], "allow");
+  // ...but a lower-layer entry for ANOTHER name SURVIVES: an approval record
+  // is a posture, never a merge reset. That residual is contained by the
+  // settings-discovery-path control (DISCOVERY, not the record) plus the
+  // execution-time default-deny decision that denies any name the restricted
+  // inventory does not carry.
+  assertEquals(approval["unknown_tool"], "allow");
+  assertEquals(
+    ompSettingsForMode("restricted").recordResetGate.applicationDisposition.control,
+    "settings-discovery-path-control",
   );
 });
 

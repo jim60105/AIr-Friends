@@ -34,7 +34,7 @@
       "update": { "channel": "stable" },
       "disabledProviders": ["anthropic"]
     },
-    "perToolApprovalInRestricted": {
+    "unlistedApprovalEntryInRestricted": {
       "tools": {
         "approvalMode": "write",
         "approval": {
@@ -47,6 +47,45 @@
       "update": { "channel": "stable" },
       "lsp": { "enabled": false },
       "disabledProviders": []
+    },
+    "unlistedApprovalValue": {
+      "tools": {
+        "approvalMode": "write",
+        "approval": {
+          "read": "maybe",
+          "grep": "allow",
+          "glob": "allow",
+          "find": "allow"
+        }
+      },
+      "compaction": { "enabled": true },
+      "startup": { "checkUpdate": false },
+      "marketplace": { "autoUpdate": "off" },
+      "update": { "channel": "stable" },
+      "lsp": { "enabled": false },
+      "disabledProviders": []
+    },
+    "approvalInYolo": {
+      "tools": {
+        "approvalMode": "yolo",
+        "approval": {
+          "read": "allow"
+        }
+      },
+      "compaction": { "enabled": true },
+      "startup": { "checkUpdate": false },
+      "marketplace": { "autoUpdate": "off" },
+      "update": { "channel": "stable" },
+      "lsp": { "enabled": false }
+    },
+    "fetchInYolo": {
+      "tools": { "approvalMode": "yolo" },
+      "compaction": { "enabled": true },
+      "startup": { "checkUpdate": false },
+      "marketplace": { "autoUpdate": "off" },
+      "update": { "channel": "stable" },
+      "lsp": { "enabled": false },
+      "fetch": { "enabled": false }
     },
     "approvalNullReset": {
       "tools": {

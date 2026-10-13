@@ -93,8 +93,8 @@ Deno.test("Inventory: every allow-gated/routed row yields its delegating outcome
     ["search", "query", "allow-gated", "read-class"],
     ["skill", "path-target", "allow-gated", "trusted-skills"],
     ["bash", "command", "allow-gated", "bash"],
-    ["write", "path-target", "routed-filesystem-sink", "write-edit-ordinary"],
-    ["edit", "path-target", "routed-filesystem-sink", "write-edit-ordinary"],
+    ["write", "path-target", "allow-gated", "write-edit-ordinary"],
+    ["edit", "path-target", "allow-gated", "write-edit-ordinary"],
     ["todoread", "todo", "in-session-state-only", "todo-state"],
     ["todowrite", "todo", "in-session-state-only", "todo-state"],
     ["delete", "path-target", "routed-destructive", "delete-move-patch"],
@@ -248,6 +248,43 @@ Deno.test("Inventory: todo-shaped write/edit never opens a filesystem mutation r
   assertEquals(del.outcome, "routed-destructive");
 });
 
+Deno.test("Inventory: read/search-class and ordinary write/edit name the native-local authorities (task 2.1)", () => {
+  for (const name of ["read", "glob", "grep", "find"]) {
+    const decision = decideRestrictedTool(req(name, owned, "path-target"));
+    assertEquals(decision.outcome, "allow-gated", name);
+    if (decision.outcome === "allow-gated") {
+      assertEquals(decision.completingAuthority, "native-local-read-approval", name);
+      assertEquals(decision.tableRowId, "read-class", name);
+    }
+  }
+  for (const name of ["write", "edit"]) {
+    const decision = decideRestrictedTool(req(name, owned, "path-target"));
+    assertEquals(decision.outcome, "allow-gated", name);
+    if (decision.outcome === "allow-gated") {
+      assertEquals(decision.completingAuthority, "native-local-write-approval", name);
+    }
+  }
+  // The former row-4 write-sink naming is gone; the ACP PROTECTED callback
+  // read route keeps its own row-4 authority unchanged.
+  const authorities = RESTRICTED_TOOL_INVENTORY_TABLE.map((row) => row.completingAuthority);
+  assertEquals(
+    (authorities as readonly (string | undefined)[]).includes(
+      "row4-filesystem-write-sink",
+    ),
+    false,
+  );
+  assertEquals(decideRestrictedTool(req("skill", owned, "path-target")), {
+    outcome: "allow-gated",
+    completingAuthority: "row4-filesystem-read-boundary",
+    tableRowId: "trusted-skills",
+  });
+  // Truthful posture: the read-class wording claims the ambient OS posture,
+  // not daemon descriptor-bound confinement.
+  const readRow = RESTRICTED_TOOL_INVENTORY_TABLE.find((row) => row.id === "read-class")!;
+  assertEquals(readRow.notes.includes("ambient OS permissions"), true);
+  assertEquals(readRow.notes.includes("not daemon descriptor-bound"), true);
+});
+
 // -----------------------------------------------------------------------------
 // 2.2 / 5.1 Alternate-route pair blocking.
 // -----------------------------------------------------------------------------
@@ -274,6 +311,30 @@ Deno.test("Alternate routes: every blocked pair denies by shape-derived capabili
   }
 });
 
+Deno.test("Alternate routes: a remote URL search root denies as a remote route, never as a local read", () => {
+  for (const capability of ["network-read", "filesystem-read"]) {
+    const decision = decideRestrictedTool(
+      req("grep", owned, "device-route", {
+        deviceSurface: "remote-url",
+        decodedCapability: capability,
+      }),
+    );
+    assertEquals(decision.outcome, "deny", capability);
+    if (decision.outcome === "deny") {
+      assertEquals(decision.reason, "rejected_alternate_route");
+      assertEquals(decision.blockedPair?.route, "remote-url");
+      assertEquals(decision.blockedPair?.capability, capability);
+    }
+  }
+  // The owned read adapter answers HTTP(S) through its own ordinary url
+  // branch: that route is not relabeled by the remote-url pair.
+  const readUrl = decideRestrictedTool(req("read", owned, "url"));
+  assertEquals(readUrl.outcome, "allow-gated-pending-adapter");
+  if (readUrl.outcome === "allow-gated-pending-adapter") {
+    assertEquals(readUrl.tableRowId, "url-read");
+  }
+});
+
 Deno.test("Alternate routes: execution via internal scheme denies while bash is gated", () => {
   const bash = decideRestrictedTool(req("bash", owned, "command"));
   assertEquals(bash.outcome, "allow-gated");
@@ -290,7 +351,10 @@ Deno.test("Alternate routes: execution via internal scheme denies while bash is 
 
 Deno.test("Alternate routes: config-write posture flip denies while writes are sink-routed", () => {
   const ordinaryWrite = decideRestrictedTool(req("write", owned, "path-target"));
-  assertEquals(ordinaryWrite.outcome, "routed-filesystem-sink");
+  assertEquals(ordinaryWrite.outcome, "allow-gated");
+  if (ordinaryWrite.outcome === "allow-gated") {
+    assertEquals(ordinaryWrite.completingAuthority, "native-local-write-approval");
+  }
   // A config write targeting approval posture, presented by the ordinary
   // `write` tool, denies regardless of the sink route's status.
   const postureFlip = decideRestrictedTool(
@@ -463,6 +527,85 @@ Deno.test("Provenance: same allow-table name from wrong origin denies; owned adm
     if (entry.outcome === "deny") assertEquals(entry.reason, "rejected_tool_provenance");
   }
   assertEquals(decideRestrictedTool(req("read", owned, "path-target")).outcome, "allow-gated");
+});
+
+Deno.test("Provenance: native-builtin admits the exact pinned tuple; wrong tuple and stale stamps deny (tasks 1.2/1.3)", () => {
+  const nativeBuiltin: ProvenanceRecord = {
+    origin: "native-builtin",
+    sourcePath: "<builtin:grep>",
+    sourceScope: "temporary",
+    sourceOrigin: "top-level",
+    registryEpochObserved: 3,
+    currentRegistryEpoch: 3,
+    observedResourceGeneration: "gen-0",
+    currentResourceGeneration: "gen-0",
+  };
+  assertEquals(
+    evaluateToolProvenance("grep", nativeBuiltin, { nameOnAllowTable: true }).admit,
+    true,
+  );
+  // Entry decision: the authentic builtin reaches its native-local authority.
+  assertEquals(decideRestrictedTool(req("grep", nativeBuiltin, "query")), {
+    outcome: "allow-gated",
+    completingAuthority: "native-local-read-approval",
+    tableRowId: "read-class",
+  });
+  // The record must carry THIS name's tuple: a foreign/claimed tuple, or one
+  // outside the pinned scope/origin, is an unknown observation — never
+  // admitted on a cached or claimed name.
+  for (
+    const forged of [
+      { ...nativeBuiltin, sourcePath: "<builtin:read>" },
+      { ...nativeBuiltin, sourceScope: "project" },
+      { ...nativeBuiltin, sourceOrigin: "package" },
+    ]
+  ) {
+    const denied = evaluateToolProvenance("grep", forged, { nameOnAllowTable: true });
+    assertEquals(denied.admit, false);
+    if (!denied.admit) assertEquals(denied.reason, "unknown_observation");
+  }
+  // Stale/cross-domain stamps deny re-observe and NAME the element that
+  // mismatched.
+  const staleEpoch = evaluateToolProvenance(
+    "grep",
+    { ...nativeBuiltin, registryEpochObserved: 2 },
+    { nameOnAllowTable: true },
+  );
+  assertEquals(staleEpoch.admit, false);
+  if (!staleEpoch.admit) {
+    assertEquals(staleEpoch.reason, "stale_observation");
+    assertEquals(staleEpoch.pending, "re-observe");
+    assertEquals(staleEpoch.staleElement, "registry-epoch");
+  }
+  const staleGeneration = evaluateToolProvenance(
+    "grep",
+    { ...nativeBuiltin, observedResourceGeneration: "gen-1" },
+    { nameOnAllowTable: true },
+  );
+  assertEquals(staleGeneration.admit, false);
+  if (!staleGeneration.admit) {
+    assertEquals(staleGeneration.reason, "stale_observation");
+    assertEquals(staleGeneration.staleElement, "resource-generation");
+  }
+  // The entry decision surfaces the same element so the wiring names it.
+  const entry = decideRestrictedTool(
+    req("grep", { ...nativeBuiltin, observedResourceGeneration: "gen-1" }, "query"),
+  );
+  assertEquals(entry.outcome, "deny");
+  if (entry.outcome === "deny") {
+    assertEquals(entry.reason, "rejected_tool_provenance");
+    assertEquals(entry.pending, "re-observe");
+    assertEquals(entry.staleElement, "resource-generation");
+  }
+  // A builtin name outside the allow table is a name denial, not an origin
+  // admission.
+  const offTable = evaluateToolProvenance(
+    "eval",
+    { ...nativeBuiltin, sourcePath: "<builtin:eval>" },
+    { nameOnAllowTable: false },
+  );
+  assertEquals(offTable.admit, false);
+  if (!offTable.admit) assertEquals(offTable.reason, "name_not_on_allow_table");
 });
 
 Deno.test("Provenance: owned-extension admission requires canonical ownership evidence", () => {
