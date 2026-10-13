@@ -146,6 +146,18 @@ export function opencodeGlobalConfigPath(options: OpencodeSkillDiscoveryOptions 
  * tree, so the declaration refuses instead of narrowing that silently. The
  * filesystem root is always such an ancestor and is refused for the same
  * reason, even when no home is observable.
+ *
+ * The home is compared BOTH as the daemon observed it and as its best-effort
+ * physical observation, because the resolved root is already physical
+ * (`resolveTrustedSkillsRoot` returns a realpath): a home that is itself a
+ * link (a corporate `/home/alias` pointing at `/srv/user`) must not make the
+ * bounded check miss the real home boundary.
+ *
+ * A root whose literal spelling carries a permission-pattern metacharacter is
+ * refused too: the pinned engine turns a pattern into a regular expression
+ * WITHOUT escaping it, so a directory literally named `/srv/skills*` would
+ * render an allowance that also matches `/srv/skills-evil` — an allowance
+ * wider than the root the deployment resolved.
  */
 export function assertOpencodeSkillRootIsDeclarable(root: string, home?: string): void {
   if (root === "" || !isAbsolute(root) || resolve(root) !== root) {
@@ -157,15 +169,42 @@ export function assertOpencodeSkillRootIsDeclarable(root: string, home?: string)
       { root },
     );
   }
-  const homeScoped = home !== undefined && (home === root || home.startsWith(`${root}/`));
+  if (/[*?\\]/.test(root)) {
+    throw new ConfigError(
+      ErrorCode.CONFIG_INVALID,
+      `The resolved skill root "${root}" contains a character the pinned OpenCode permission ` +
+        "engine reads as pattern syntax (`*`, `?` or `\\`) — an allowance rendered from it would " +
+        "match directories outside the resolved root",
+      { root },
+    );
+  }
+  const homeObservations = [home, physicalPath(home)];
+  const homeScoped = homeObservations.some((candidate) =>
+    candidate !== undefined && (candidate === root || candidate.startsWith(`${root}/`))
+  );
   if (root === "/" || homeScoped) {
+    const observed = home === undefined ? "" : ` (daemon home "${home}")`;
     throw new ConfigError(
       ErrorCode.CONFIG_INVALID,
       `The resolved skill root "${root}" is the daemon user's home directory or an ancestor of ` +
-        "it — refusing to declare a home-scoped external-directory allowance" +
-        (home !== undefined ? ` (daemon home "${home}")` : ""),
+        `it${observed} — refusing to declare a home-scoped external-directory allowance`,
       home !== undefined ? { root, home } : { root },
     );
+  }
+}
+
+/**
+ * A best-effort physical observation of a directory: its realpath when the
+ * real filesystem can observe it, else nothing. This is the posture the
+ * skill-root resolver shares — an unusual host, or a synthetic path supplied by
+ * a test, adds no physical observation instead of failing the check.
+ */
+function physicalPath(path: string | undefined): string | undefined {
+  if (path === undefined) return undefined;
+  try {
+    return Deno.realPathSync(path);
+  } catch {
+    return undefined;
   }
 }
 
