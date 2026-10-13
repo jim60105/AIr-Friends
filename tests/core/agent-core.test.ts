@@ -326,7 +326,7 @@ Deno.test("AgentCore - a channel session's context carries the channel memories"
     await Deno.mkdir(`${tempDir}/prompts`, { recursive: true });
     await Deno.writeTextFile(
       `${tempDir}/prompts/system_reply.md`,
-      "You are a helpful assistant.\n\n{{ userContextMessage }}",
+      "You are a helpful assistant.\n\n{{ userContextMessage }}\n\nSkill root: {{ skillsDir }}",
     );
 
     const config = createTestConfig(tempDir, "all", []);

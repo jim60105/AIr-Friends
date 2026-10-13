@@ -588,12 +588,12 @@ Deno.test("loadSystemPrompt - system_summary Usage example renders the literal s
     tmpDir: "/data/workspaces/discord/u1/tmp/sess_sum",
   });
   assertEquals(
-    withSession.includes("--session-id sess_sum"),
+    withSession.includes("--session-id 'sess_sum'"),
     true,
     "example should carry the rendered session id",
   );
   assertEquals(
-    withSession.includes('--content-file "/data/workspaces/discord/u1/tmp/sess_sum/summary.md"'),
+    withSession.includes("--content-file '/data/workspaces/discord/u1/tmp/sess_sum/summary.md'"),
     true,
     "example should carry the rendered staging directory",
   );

@@ -165,23 +165,25 @@ async function createOrchestrator(tempDir: string, dryRunEnabled = true, sendFil
   await Deno.mkdir(`${tempDir}/prompts`, { recursive: true });
   await Deno.writeTextFile(
     `${tempDir}/prompts/system_reply.md`,
-    "You are a helper.\n{{ if sessionId }}\nSession: {{ sessionId }}\n{{ /if }}",
+    "You are a helper.\n{{ if sessionId }}\nSession: {{ sessionId }}\n{{ /if }}\n" +
+      "Skill root: {{ skillsDir }}",
   );
   await Deno.writeTextFile(
     `${tempDir}/prompts/system_spontaneous.md`,
-    "Spontaneous post prompt.",
+    "Spontaneous post prompt.\nSkill root: {{ skillsDir }}",
   );
   await Deno.writeTextFile(
     `${tempDir}/prompts/system_self_research.md`,
-    "Self research prompt. RSS: {{ rssItems }}",
+    "Self research prompt. RSS: {{ rssItems }}\nSkill root: {{ skillsDir }}",
   );
   await Deno.writeTextFile(
     `${tempDir}/prompts/system_memory_maintenance.md`,
-    "Memory maintenance for {{ workspaceKey }}. Threshold: {{ minMemoryCount }}. Dump: {{ memoriesDump }}",
+    "Memory maintenance for {{ workspaceKey }}. Threshold: {{ minMemoryCount }}. Dump: {{ memoriesDump }}\n" +
+      "Skill root: {{ skillsDir }}",
   );
   await Deno.writeTextFile(
     `${tempDir}/prompts/system_reminder.md`,
-    "Reminder: {{ reminderMessage }}",
+    "Reminder: {{ reminderMessage }}\nSkill root: {{ skillsDir }}",
   );
 
   const contextAssembler = new ContextAssembler(memoryStore, {

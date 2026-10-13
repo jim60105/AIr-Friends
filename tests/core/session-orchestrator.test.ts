@@ -191,7 +191,7 @@ Deno.test("SessionOrchestrator - processMessage creates workspace", async () => 
     await Deno.mkdir(`${tempDir}/prompts`, { recursive: true });
     await Deno.writeTextFile(
       `${tempDir}/prompts/system_reply.md`,
-      "You are a helpful assistant.",
+      "You are a helpful assistant.\n\nSkill root: {{ skillsDir }}",
     );
 
     const contextAssembler = new ContextAssembler(memoryStore, {
@@ -238,6 +238,39 @@ Deno.test("SessionOrchestrator - processMessage creates workspace", async () => 
   }
 });
 
+// Spec scenario "Mounted classified template omits its root": a configured
+// classification path whose template renders WITHOUT the literal trusted root
+// must raise an explicit bounded failure BEFORE the agent is prompted — no
+// rootless, blank or alternate-root skill instructions are ever delivered.
+Deno.test("SessionOrchestrator - a mounted classified template without the root never reaches connector.prompt", async () => {
+  const tempDir = await Deno.makeTempDir();
+  try {
+    const { orchestrator, sessionRegistry } = await createTestableOrchestrator(tempDir);
+    // Override the fixture with a rootless classified template (the pre-change
+    // bundled shape): `{{ skillsDir }}` is never interpolated.
+    await Deno.writeTextFile(
+      `${tempDir}/prompts/system_reply.md`,
+      "You are a helpful assistant.\n\n{{ userContextMessage }}",
+    );
+
+    const event = createTestEvent();
+    const platformAdapter = new MockPlatformAdapter() as unknown as PlatformAdapter;
+    const response = await orchestrator.processMessage(event, platformAdapter);
+
+    assertEquals(response.success, false);
+    assertExists(response.error);
+    assertStringIncludes(response.error, "skill-script root");
+    assertStringIncludes(response.error, "/opt/air/skills");
+    // The fail-closed boundary sits BEFORE connector creation: nothing was
+    // prompted and no delivery attempt was made.
+    assertEquals(orchestrator.mockConnector, null);
+
+    sessionRegistry.stop();
+  } finally {
+    await Deno.remove(tempDir, { recursive: true });
+  }
+});
+
 Deno.test("SessionOrchestrator - skips agent execution for /clear command", async () => {
   const tempDir = await Deno.makeTempDir();
   try {
@@ -253,7 +286,7 @@ Deno.test("SessionOrchestrator - skips agent execution for /clear command", asyn
     await Deno.mkdir(`${tempDir}/prompts`, { recursive: true });
     await Deno.writeTextFile(
       `${tempDir}/prompts/system_reply.md`,
-      "You are a helpful assistant.",
+      "You are a helpful assistant.\n\nSkill root: {{ skillsDir }}",
     );
 
     const contextAssembler = new ContextAssembler(memoryStore, {
@@ -313,7 +346,7 @@ Deno.test("SessionOrchestrator - handles /clear with leading whitespace", async 
     await Deno.mkdir(`${tempDir}/prompts`, { recursive: true });
     await Deno.writeTextFile(
       `${tempDir}/prompts/system_reply.md`,
-      "You are a helpful assistant.",
+      "You are a helpful assistant.\n\nSkill root: {{ skillsDir }}",
     );
 
     const contextAssembler = new ContextAssembler(memoryStore, {
@@ -364,7 +397,7 @@ Deno.test("SessionOrchestrator - processMessage handles agent failure gracefully
     await Deno.mkdir(`${tempDir}/prompts`, { recursive: true });
     await Deno.writeTextFile(
       `${tempDir}/prompts/system_reply.md`,
-      "You are a helpful assistant.",
+      "You are a helpful assistant.\n\nSkill root: {{ skillsDir }}",
     );
 
     const contextAssembler = new ContextAssembler(memoryStore, {
@@ -680,7 +713,9 @@ Use the \`send-reply\` skill to deliver your final response.
 You may also use \`react-message\` to add an emoji reaction to the trigger message.
 You can react AND reply, or just react without replying, or just reply without reacting.
 You may use other available skills as needed.
-{{ /if }}`,
+{{ /if }}
+
+Skill root: {{ skillsDir }}`,
   );
   await Deno.writeTextFile(
     `${tempDir}/prompts/system_spontaneous.md`,
@@ -713,7 +748,9 @@ Create something entirely original
 
 Your session ID is: {{ sessionId }}
 Use this session ID when calling skills that require --session-id parameter.
-{{ /if }}`,
+{{ /if }}
+
+Skill root: {{ skillsDir }}`,
   );
 
   const contextAssembler = new ContextAssembler(memoryStore, {
@@ -1436,7 +1473,7 @@ Deno.test("SessionOrchestrator - processSpontaneousPost with skillApi disabled",
     await Deno.mkdir(`${tempDir}/prompts`, { recursive: true });
     await Deno.writeTextFile(
       `${tempDir}/prompts/system_reply.md`,
-      "You are a helpful assistant.",
+      "You are a helpful assistant.\n\nSkill root: {{ skillsDir }}",
     );
 
     const contextAssembler = new ContextAssembler(memoryStore, {
@@ -1573,7 +1610,7 @@ Deno.test("SessionOrchestrator - processSelfResearch creates workspace and runs 
     // Create system_self_research.md prompt file
     await Deno.writeTextFile(
       `${tempDir}/prompts/system_self_research.md`,
-      "Research instructions\n{{ rssItems }}",
+      "Research instructions\n{{ rssItems }}\n\nSkill root: {{ skillsDir }}",
     );
 
     const rssItems = [
@@ -1630,7 +1667,7 @@ Deno.test("SessionOrchestrator - processSelfResearch returns error on cancelled 
 
     await Deno.writeTextFile(
       `${tempDir}/prompts/system_self_research.md`,
-      "Research instructions\n{{ rssItems }}",
+      "Research instructions\n{{ rssItems }}\n\nSkill root: {{ skillsDir }}",
     );
 
     const rssItems = [
@@ -1688,11 +1725,11 @@ Deno.test("SessionOrchestrator - processSelfResearch handles agent connection fa
     await Deno.mkdir(`${tempDir}/prompts`, { recursive: true });
     await Deno.writeTextFile(
       `${tempDir}/prompts/system_reply.md`,
-      "You are a helpful assistant.",
+      "You are a helpful assistant.\n\nSkill root: {{ skillsDir }}",
     );
     await Deno.writeTextFile(
       `${tempDir}/prompts/system_self_research.md`,
-      "Research\n{{ rssItems }}",
+      "Research\n{{ rssItems }}\n\nSkill root: {{ skillsDir }}",
     );
 
     const contextAssembler = new ContextAssembler(memoryStore, {

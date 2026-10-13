@@ -17,6 +17,7 @@ import {
 } from "@acp/agent-factory.ts";
 import { isAbsolute, join, resolve } from "@std/path";
 import { DEFAULT_SKILL_JWT_DIR } from "../../src/utils/skill-jwt.ts";
+import { ConfigError, ErrorCode } from "../../src/types/errors.ts";
 import type { Config } from "../../src/types/config.ts";
 
 // Mandatory literal-first retry context used by the strategy tests: the
@@ -1035,9 +1036,16 @@ Deno.test("getRetryPromptStrategy - retry prompt is instructive (causes + payloa
   assertStringIncludes(msg, "--file-path");
 
   // Correct two-step example invocation with the payload-file flag, naming the
-  // ctx's LITERAL session id + absolute staging dir (no shell tokens).
-  assertStringIncludes(msg, 'send-reply.ts --session-id "sess_test"');
-  assertStringIncludes(msg, '--message-file "/data/workspaces/discord/123/tmp/sess_test/reply.md"');
+  // ctx's LITERAL session id + absolute staging dir (no shell tokens). Every
+  // recipe argument is POSIX single-quoted — the complete executable path
+  // included, not just the root prefix
+  // (`render-delivered-skill-root-contract`).
+  assertStringIncludes(msg, `'${TEST_RETRY_CTX.skillsDir}/send-reply/scripts/send-reply.ts'`);
+  assertStringIncludes(msg, `--session-id 'sess_test'`);
+  assertStringIncludes(
+    msg,
+    `--message-file '/data/workspaces/discord/123/tmp/sess_test/reply.md'`,
+  );
   assertStringIncludes(
     msg,
     "Write the reply text to /data/workspaces/discord/123/tmp/sess_test/reply.md",
@@ -1068,8 +1076,8 @@ Deno.test("getRetryPromptStrategy - pooled ctx names literal session id + stagin
 
   // The pooled variant names the literal ids/paths.
   assertStringIncludes(msg, `Write the reply text to ${stagingDir}/reply.md`);
-  assertStringIncludes(msg, `--session-id "sess_abc"`);
-  assertStringIncludes(msg, `--message-file "${stagingDir}/reply.md"`);
+  assertStringIncludes(msg, `--session-id 'sess_abc'`);
+  assertStringIncludes(msg, `--message-file '${stagingDir}/reply.md'`);
   // The guidance section must not reference the shell tokens at all.
   const guidance = msg.split("\n---\n")[0];
   assertFalse(guidance.includes("$SESSION_ID"));
@@ -1097,7 +1105,24 @@ Deno.test("getRetryPromptStrategy - per-spawn ctx names the same literals (no to
     skillsDir: TEST_RETRY_CTX.skillsDir,
   }).retryPromptMessage;
   assertEquals(perSpawn, pooled);
-  assertStringIncludes(perSpawn, `--session-id "sess_abc"`);
+  assertStringIncludes(perSpawn, `--session-id 'sess_abc'`);
   assertFalse(perSpawn.split("\n---\n")[0].includes("$SESSION_ID"));
   assertFalse(perSpawn.split("\n---\n")[0].includes("$TMPDIR"));
+});
+
+Deno.test("getRetryPromptStrategy - rejects an empty or relative trusted root", () => {
+  for (
+    const [label, skillsDir] of [
+      ["empty", ""],
+      ["relative", "skills"],
+    ] as const
+  ) {
+    const error = assertThrows(
+      () => getRetryPromptStrategy("opencode", { ...TEST_RETRY_CTX, skillsDir }),
+      ConfigError,
+      undefined,
+      `${label} root must fail the retry build`,
+    ) as ConfigError;
+    assertEquals(error.code, ErrorCode.CONFIG_INVALID);
+  }
 });

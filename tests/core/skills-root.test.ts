@@ -8,10 +8,15 @@
 
 import { assertEquals, assertThrows } from "@std/assert";
 import {
+  assertSkillsRootDelivered,
   DEV_SOURCE_SKILLS_ROOT,
   observeTrustedSkillsRoot,
+  quoteShellArgument,
+  requireTrustedSkillsRoot,
   resolveTrustedSkillsRoot,
+  skillScriptPath,
 } from "@core/skills-root.ts";
+import { containsUnquotedShellExpansion, tokenizeShellCommand } from "@acp/command-syntax.ts";
 import { OMP_IMAGE_SKILLS_ROOT } from "@utils/omp-paths.ts";
 import { ConfigError, ErrorCode } from "../../src/types/errors.ts";
 
@@ -181,4 +186,78 @@ Deno.test("a canonical observation that lands on the filesystem root is refused 
   ) as ConfigError;
   assertEquals(error.code, ErrorCode.CONFIG_INVALID);
   assertEquals(error.message.includes('cannot be the filesystem root "/"'), true);
+});
+
+// --- Delivery-boundary helpers (`render-delivered-skill-root-contract`) ---
+//
+// The classified render/delivery contract beside the resolver: required-root
+// validation, the POSIX recipe-argument formatter the templates and the retry
+// builder share, and the literal-presence assertion that refuses to deliver a
+// classified prompt rendering without the root.
+
+Deno.test("requireTrustedSkillsRoot accepts an absolute root and rejects absent, empty and relative ones", () => {
+  assertEquals(requireTrustedSkillsRoot("/opt/air/skills", "unit"), "/opt/air/skills");
+  for (
+    const [label, value] of [
+      ["absent", undefined],
+      ["null", null],
+      ["empty", ""],
+      ["relative", "skills"],
+      ["parent-relative", "../skills"],
+      ["child-HOME expression", "$HOME/.agents/skills"],
+    ] as const
+  ) {
+    const error = assertThrows(
+      () => requireTrustedSkillsRoot(value, "unit boundary"),
+      ConfigError,
+      undefined,
+      `${label}: root must be refused`,
+    ) as ConfigError;
+    assertEquals(error.code, ErrorCode.CONFIG_INVALID);
+    assertEquals(error.message.includes("unit boundary"), true);
+  }
+});
+
+Deno.test("quoteShellArgument makes a hostile argument one literal token with no expansion", () => {
+  assertEquals(quoteShellArgument("/opt/air/skills"), "'/opt/air/skills'");
+  // An embedded apostrophe is the POSIX quote-close / escaped-quote / reopen
+  // triple — the only form `sh` accepts inside single quotes.
+  assertEquals(quoteShellArgument("/opt/ro'ot"), "'/opt/ro'\\''ot'");
+  // Everything else is already literal inside the quotes.
+  assertEquals(quoteShellArgument('/opt/my skills/a$b`c"d'), "'/opt/my skills/a$b`c\"d'");
+
+  // The two properties that matter, checked with the repository's own
+  // quote-aware tokenizer rather than by eyeballing the spelling: the value
+  // never splits on its spaces, and it introduces no expandable operator.
+  const hostile = "/opt/my skills/ro'ot/a$b`c\"d";
+  const quoted = quoteShellArgument(hostile);
+  assertEquals(tokenizeShellCommand(quoted).length, 1);
+  assertEquals(containsUnquotedShellExpansion(quoted), false);
+});
+
+Deno.test("skillScriptPath quotes the COMPLETE root-plus-script path, not just the root", () => {
+  assertEquals(
+    skillScriptPath("/opt/air/skills", "send-reply"),
+    "'/opt/air/skills/send-reply/scripts/send-reply.ts'",
+  );
+  assertEquals(
+    skillScriptPath("/opt/my skills", "memory-save"),
+    "'/opt/my skills/memory-save/scripts/memory-save.ts'",
+  );
+  assertEquals(
+    skillScriptPath("/opt/ro'ot", "send-file"),
+    "'/opt/ro'\\''ot/send-file/scripts/send-file.ts'",
+  );
+});
+
+Deno.test("assertSkillsRootDelivered refuses a classified prompt without the literal root", () => {
+  assertSkillsRootDelivered("trusted root: /opt/air/skills", "/opt/air/skills", "unit");
+  const error = assertThrows(
+    () =>
+      assertSkillsRootDelivered("a rootless mounted prompt", "/opt/air/skills", "unit delivery"),
+    ConfigError,
+  ) as ConfigError;
+  assertEquals(error.code, ErrorCode.CONFIG_INVALID);
+  assertEquals(error.message.includes("/opt/air/skills"), true);
+  assertEquals(error.message.includes("unit delivery"), true);
 });
