@@ -213,7 +213,7 @@ Configuration is loaded from `config.yaml` (YAML format). See [config.example.ya
 | --------------------------- | -------------------------------------------------------------------------------------------------- |
 | `AGENT_MODEL`               | LLM model identifier (e.g., "gpt-5-mini")                                                          |
 | `AGENT_DEFAULT_TYPE`        | Default ACP agent type (`opencode` [default], `omp`; unknown values fail startup)                   |
-| `AGENT_SKILLS_DIR`          | OpenCode installed-root declaration (default: "skills"; container: "/home/deno/.agents/skills"; relative values anchor at the deployment cwd; never consulted for OMP) |
+| `AGENT_SKILLS_DIR`          | The ONE shared trusted skill-script root and external-install destination for BOTH agent types (default: "skills"; container/Helm: "/home/deno/.agents/skills"; relative values anchor at the deployment cwd) |
 | `AGENT_EXTERNAL_SKILLS`     | External skills to install at startup (JSON string, e.g. `[{"repo":"owner/repo","skill":"name"}]`) |
 | `AGENT_AUTO_APPROVE_SKILLS` | Skill-name FILTER over skills observed inside the resolved trusted root (comma-separated; never expands beyond it) |
 | `AGENT_MCP_SERVERS`         | External MCP servers (JSON string array)                                                           |
@@ -632,7 +632,7 @@ The following variables are available in all prompt templates:
 | `model`                  | `string`  | Model identifier for the current session                        | `"claude-opus-4.6"`      |
 | `yolo`                   | `boolean` | Whether YOLO mode is enabled (bypasses permission restrictions) | `true`                   |
 | `canWriteAgentWorkspace` | `boolean` | Whether this session allows writing to agent workspace          | `false`                  |
-| `skillsDir`              | `string`  | Absolute trusted skill-script root rendered into every script recipe (see the note below) | `"/opt/air/skills"`      |
+| `skillsDir`              | `string`  | Absolute trusted skill-script root rendered into every script recipe (see the note below) | `"/home/deno/.agents/skills"` |
 
 **Special prompt variables** (only available in specific prompt types):
 
@@ -651,9 +651,9 @@ The following variables are available in all prompt templates:
 | `reminderCreatedAt`     | `system_reminder.md`           | Reminder creation timestamp                    |
 | `reminderScheduledAt`   | `system_reminder.md`           | Reminder scheduled timestamp                   |
 
-> **`skillsDir` is required** (`repair-omp-owned-skill-handoff`): every render caller — normal, spontaneous, self-research, both maintenance forms, reminder, summary, web-chat, and the retry prompt builder — must supply it, and a missing root fails the request explicitly instead of rendering a skill-less prompt. The value comes from `resolveTrustedSkillsRoot()` (`src/core/skills-root.ts`): for OMP it is the declared owned root `/opt/air/skills` (development: the repository's own `skills/` tree); for OpenCode it is the existing installed-root resolution (`agent.skillsDir`, container: `/home/deno/.agents/skills`, relative values resolved against the daemon/deployment working directory). The agent child's HOME is NEVER consulted — an isolated OMP HOME cannot redirect script invocation — and `skillsDir` is an internal render input, not new public configuration. Prompts and `SKILL.md` files name script paths as `{{ skillsDir }}/<skill>/scripts/<script>.ts` (rendered) / `<skill root rendered in your system prompt>/<skill>/scripts/<script>.ts` (instruction text) and never a `$HOME`/`${HOME}` recipe.
+> **`skillsDir` is required** (`repair-omp-owned-skill-handoff`; ONE root since `unify-skill-root-and-inventory`): every render caller — normal, spontaneous, self-research, both maintenance forms, reminder, summary, web-chat, and the retry prompt builder — must supply it, and a missing root fails the request explicitly instead of rendering a skill-less prompt. The value comes from `resolveTrustedSkillsRoot()` (`src/core/skills-root.ts`): the deployment's ONE configured skill root (`agent.skillsDir`, container/Helm: `/home/deno/.agents/skills`; default `skills` resolved against the daemon/deployment working directory), identical for BOTH agent types — `agentType` never selects a root, and the agent child's HOME is NEVER consulted. `skillsDir` is an internal render input, not new public configuration. Prompts and `SKILL.md` files name script paths as `{{ skillsDir }}/<skill>/scripts/<script>.ts` (rendered) / `<skill root rendered in your system prompt>/<skill>/scripts/<script>.ts` (instruction text) and never a `$HOME`/`${HOME}` recipe.
 >
-> **Same physical root everywhere** (`unify-omp-skill-root-resolution`): the resolved value is the CANONICAL realpath of the validated selection (`observeTrustedSkillsRoot()` also records its `dev`/`ino` identity), and the identical root — prompt/retry `skillsDir`, the ACP client's mandatory root-exact script inventory (`src/acp/skill-inventory.ts`), the read-only bwrap skill mount and the healthcheck readiness root — is resolved ONCE per selected agent before subprocess creation, including dashboard agent overrides and pooled reconnects. An unresolvable root fails explicitly everywhere; there is no per-consumer fallback spelling.
+> **Same physical root everywhere** (`unify-skill-root-and-inventory`, generalizing `unify-omp-skill-root-resolution`): the resolved value is the CANONICAL realpath of the validated selection (`observeTrustedSkillsRoot()` also records its `dev`/`ino` identity), and the identical root — prompt/retry `skillsDir`, the ACP client's mandatory root-exact script inventory (`src/acp/skill-inventory.ts`), the read-only bwrap skill mount and the healthcheck readiness root — is resolved ONCE per connector from that one configured value for BOTH agent types, including dashboard agent overrides and pooled reconnects. An unresolvable root fails explicitly everywhere; there is no per-consumer fallback spelling.
 
 ##### Delivered skills-root contract
 
@@ -688,7 +688,7 @@ without re-implementing quoting:
 | Helper | Example | Result |
 | ------ | ------- | ------ |
 | `quoteShellArgument(value)` | `{{ quoteShellArgument(tmpDir + "/reply.md") }}` | `'/data/.../reply.md'` |
-| `skillScript(root, skill)` | `{{ skillScript(skillsDir, "send-reply") }}` | `'/opt/air/skills/send-reply/scripts/send-reply.ts'` |
+| `skillScript(root, skill)` | `{{ skillScript(skillsDir, "send-reply") }}` | `'/home/deno/.agents/skills/send-reply/scripts/send-reply.ts'` |
 
 Both POSIX single-quote the **complete** argument (an embedded apostrophe
 becomes the quote-close / escaped-quote / reopen triple), so a root or staging

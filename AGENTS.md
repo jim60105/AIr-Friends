@@ -1154,9 +1154,9 @@ agent:
 
 1. Configured in `config.yaml` under `agent.externalSkills` or via `AGENT_EXTERNAL_SKILLS` env var
 2. `installExternalSkills()` runs during `bootstrap()`, after config loading and before `AgentCore` initialization
-3. Skills are installed sequentially to avoid filesystem conflicts in `~/.agents/skills/`
-4. Each skill is installed via `npx --yes --package=skills skills add <repo> -a universal -s <skill> -g -y`
-5. Individual installation failures are logged but do **not** block application startup
+3. Each skill installs sequentially in a private installer HOME, then publishes into the deployment's ONE resolved skill root (`agent.skillsDir` / `AGENT_SKILLS_DIR` — the same root both agent types resolve), avoiding filesystem conflicts
+4. Each skill is installed via `npx --yes --package=skills skills add <repo> -a universal -s <skill> -g -y --copy`
+5. Bundled-skill/`lib` collisions, traversal and linked or escaping materialization are refused per entry; individual installation failures are logged but do **not** block application startup
 
 **Key Components:**
 
@@ -1339,7 +1339,7 @@ You are Yuna. This is a private chat.
   - `rg` - ripgrep (from the Debian apt package) for agent-side in-workspace file reading
   - `dumb-init` - Used as PID 1 and to wrap agent subprocesses for proper signal forwarding
 - OpenCode configuration is pre-configured at `/home/deno/.config/opencode/opencode.json`
-- Skills are copied to `/home/deno/.agents/skills/` for agent discovery
+- Skills are copied to `/home/deno/.agents/skills/`, which is also the stock image's declared `AGENT_SKILLS_DIR` value — the ONE skill root both agent types resolve
 
 **Example compose.yml:**
 
@@ -1537,6 +1537,7 @@ one of the three files without a row here fails that test (fail-closed).
 | `agent.defaultAgentType` / `AGENT_DEFAULT_TYPE` | row 7 (`add-omp-agent-configuration`)            | yes — `config.example.yaml` (config key + `${AGENT_DEFAULT_TYPE}` reference), `.env.example`, `helm/values.yaml`     | none — all three state the `opencode` (default) / `omp` domain and load-time rejection of unknown values |
 | `AGENT_OMP_MIN_VERSION`                         | row 20 (`package-pinned-omp-runtime`)            | yes — commented-out with default `18.6.1` in all three, mirroring the `AGENT_OPENCODE_MIN_VERSION` sibling treatment | none — WARN-only observability wording consistent across the trio                                        |
 | `OMP_VERSION`                                   | row 20 (consumed reference, not a runtime field) | yes — cited in trio comments as the `Containerfile` build arg owning the pin                                         | none — never a runtime config/env input; documented solely as the packaging pin the comments point at    |
+| `agent.skillsDir` / `AGENT_SKILLS_DIR`          | `unify-skill-root-and-inventory`                 | yes — `config.example.yaml` (config key + env reference), `.env.example` (commented `skills` default), `helm/values.yaml` (`/home/deno/.agents/skills`) | widened — formerly described as the OpenCode-only installed root; it is now the ONE shared skill-script root and external-install destination for BOTH agent types, and the trio names no OMP-specific skill root |
 
 Zero-new-field claims audited (each verified by trio grep: the owning change
 added no field to any of the three files): rows 8, 10, 12, 14a/14b, 15, 16,

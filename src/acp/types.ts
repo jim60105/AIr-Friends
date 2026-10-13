@@ -50,13 +50,12 @@ export interface ClientConfig {
   autoApproveSkills?: string[];
 
   /**
-   * The deployment-configured `agent.skillsDir` value (OpenCode installed-root
-   * selection input; OMP never consumes it). `unify-omp-skill-root-resolution`
-   * D1: when an AgentConfig predates the factory-resolved `skillsRoot` field,
-   * the connector re-observes the root through the SAME resolver using THIS
-   * connector's selected agent type and this configured value — the resolver's
-   * approved daemon-side OpenCode configuration, never a HOME or arbitrary
-   * cwd scan.
+   * The deployment-configured `agent.skillsDir` value the trusted-root resolver
+   * is called with (`unify-skill-root-and-inventory`): the ONE skill-root input
+   * for BOTH agent types — never a HOME or arbitrary cwd scan, and never a
+   * per-agent alternate tree. The resolved root itself rides the
+   * factory-produced `skillsRoot` observation on the AgentConfig; this field
+   * carries the configured spelling it came from.
    */
   skillsDir?: string;
 

@@ -200,7 +200,7 @@ Located in `skills/{name}/SKILL.md`, these files follow the [Agent Skills Standa
 
 ## Script Root Convention
 
-Every `SKILL.md` invocation recipe names the script path under the literal placeholder `<skill root rendered in your system prompt>` — the absolute trusted skill-script root the daemon renders into every prompt as the internal `skillsDir` template variable (`resolveTrustedSkillsRoot`, `src/core/skills-root.ts`; see `docs/DEVELOPMENT.md` §Available Template Variables). Recipes NEVER use a `$HOME`/`${HOME}` expression: for OMP the rendered root is the declared owned tree (`/opt/air/skills` in the image; the repository's own `skills/` tree in development) and the agent child's isolated HOME can only ever name an empty sandbox directory, while OpenCode keeps its existing installed-root behavior (`agent.skillsDir`, container: `/home/deno/.agents/skills`).
+Every `SKILL.md` invocation recipe names the script path under the literal placeholder `<skill root rendered in your system prompt>` — the absolute trusted skill-script root the daemon renders into every prompt as the internal `skillsDir` template variable (`resolveTrustedSkillsRoot`, `src/core/skills-root.ts`; see `docs/DEVELOPMENT.md` §Available Template Variables). Recipes NEVER use a `$HOME`/`${HOME}` expression: the rendered root is the deployment's ONE configured skill root (`agent.skillsDir`, container/Helm: `/home/deno/.agents/skills`; default `skills` in the repository working directory), the SAME value for BOTH agent types, and the agent child's isolated HOME can only ever name an empty sandbox directory.
 
 Since `render-delivered-skill-root-contract` the delivered prompt states that root
 in a dedicated `## Skill Script Root` section (shared fragment
