@@ -294,11 +294,12 @@ export interface AgentConnectorOptions {
   logger: unknown; // Logger type - using unknown to avoid circular deps
   idleTimeoutConfig?: IdleTimeoutConfig;
   /**
-   * The SELECTED agent type for this connector (`unify-omp-skill-root-resolution`
-   * D1). MANDATORY: the connector resolves the trusted skill-script root and the
-   * agent-type-specific script inventory from it before subprocess creation
-   * (including dashboard-selected overrides and pooled reconnects), and it rides
-   * reasoning-effort warning context.
+   * The SELECTED agent type for this connector — what the child process is
+   * launched as, and the context reasoning-effort warnings name. It does NOT
+   * select a skill root or shape the script inventory
+   * (`unify-skill-root-and-inventory` D1/D2): the connector consumes the
+   * factory-resolved `AgentConfig.skillsRoot` observation, which is the
+   * deployment's one root for both agent types.
    */
   agentType: AgentType;
   /** Maximum time in milliseconds to wait for the ACP handshake during `connect()` (default: 30000) */

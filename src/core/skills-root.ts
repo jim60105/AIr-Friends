@@ -190,7 +190,7 @@ export function observeTrustedSkillsRoot(
 // render, quote a complete recipe argument the way a POSIX shell reads it, and
 // refuse to deliver a classified prompt that renders without the literal root.
 // They add no second root convention, no configuration field and no process
-// environment input — the value is always the selected agent's resolved root.
+// environment input — the value is always the deployment's one resolved root.
 // ---------------------------------------------------------------------------
 
 /**

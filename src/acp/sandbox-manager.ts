@@ -164,12 +164,12 @@ export class SandboxManager {
     baseEnv: Record<string, string>,
     cwd: string,
     /**
-     * `unify-omp-skill-root-resolution` D4: the factory's canonical observation
-     * of the deployment trusted skill-script root for the SELECTED agent type.
-     * Filesystem confinement mounts it read-only at its literal path (the
-     * builder validates it against the mandatory writables). Absent only when
-     * the caller has no selected root — confinement then behaves as before,
-     * with no invented fallback root.
+     * The factory's canonical observation of the deployment's ONE trusted
+     * skill-script root (`unify-skill-root-and-inventory` D4), identical for
+     * BOTH agent types. Filesystem confinement mounts it read-only at its
+     * literal path (the builder validates it against the mandatory writables).
+     * Absent only when the caller has no resolved root — confinement then
+     * behaves as before, with no invented fallback root.
      */
     skillsRoot?: SkillsRootObservation,
   ): SpawnOptions {

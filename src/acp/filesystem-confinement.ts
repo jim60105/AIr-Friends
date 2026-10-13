@@ -73,9 +73,10 @@ export interface BwrapConfinementOptions {
   /** Read-write runtime paths. Defaults to {@link DEFAULT_CONFINEMENT_WRITABLE_RUNTIME_PATHS}. */
   writableRuntimePaths?: readonly string[];
   /**
-   * The canonical deployment trusted skill-script root for the SELECTED agent
-   * (`unify-omp-skill-root-resolution` D4): mounted read-only at its LITERAL
-   * path — never the agent HOME, never a guessed `/app/skills`, and never an
+   * The canonical deployment trusted skill-script root (`unify-skill-root-and-
+   * inventory` D4, generalizing `unify-omp-skill-root-resolution` D4) — BOTH
+   * agent types resolve this same value: mounted read-only at its LITERAL path
+   * — never the agent HOME, never a guessed `/app/skills`, and never an
    * agent-writable parent mount. When it sits UNDER a mandatory writable mount
    * (development repository layouts), the read-only child bind is emitted
    * AFTER that writable parent so the child stays read-only. Absent (undefined)

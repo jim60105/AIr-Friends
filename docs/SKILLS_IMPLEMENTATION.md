@@ -453,16 +453,16 @@ Skill permissions are enforced through the root-exact inventory `SkillAutoApprov
 
 ### Root-Exact Matching
 
-The inventory is built over ONE observed trusted skill-script root per selected agent — the canonical (realpath) `observeTrustedSkillsRoot()` result (`src/core/skills-root.ts`; the same root that renders into prompts, mounts read-only into the sandbox, and drives readiness). It never scans a HOME-global tree or the daemon cwd. Two matching methods:
+The inventory is built over ONE observed trusted skill-script root shared by BOTH agent types (`unify-skill-root-and-inventory`) — the canonical (realpath) `observeTrustedSkillsRoot()` result (`src/core/skills-root.ts`; the same root that renders into prompts, mounts read-only into the sandbox, and drives readiness). It never scans a HOME-global tree or the daemon cwd, and no agent type selects a root of its own. Two matching methods:
 
 - **Script entrypoint matching** (`matchesScriptEntrypoint`): grants are the canonical ABSOLUTE paths (with `dev`/`ino` identity) of `scripts/*.ts` regular files enumerated inside that root. A command segment's located entrypoint must canonically resolve — relative spellings only against the requesting registered session cwd — to exactly one recorded grant, rechecked at decision time (root still carries its recorded identity, target physically contained, identity matches). Suffix matching is GONE: a same-suffix planted copy anywhere — absolute, session-relative, or under an alternate HOME — is denied, as is a root replaced after inventory construction.
 - **Command prefix matching** (`commandPrefixes`): observed command-based skills without a `scripts/` directory (e.g., `agent-browser`) contribute exact first-token matches. Promotion requires an ABSENT `scripts` path (a broken-but-existing `scripts` entry grants nothing).
 
-OMP enumeration is restricted to the authored bundled catalog (`BUNDLED_SKILLS`, `src/core/bundled-skills.ts`) inside the resolved root — external installations sharing the physical tree never gain OMP authority — while OpenCode enumerates every well-formed installed skill directory there (built-ins plus explicitly published external installations).
+Both agent types enumerate every well-formed installed skill directory inside the resolved root — built-ins plus explicitly published external installations. Neither restricts eligibility to an authored name catalog, so a runtime-installed external skill is eligible for either of them; the retained bounds are the `scripts/*.ts`-only enumeration, the `deno`-only interpreter allowlist and the reserved `lib` exclusion.
 
 ### Configuration
 
-`agent.autoApproveSkills` / `AGENT_AUTO_APPROVE_SKILLS` is a FILTER over skill names observed inside the resolved root: a nonempty list can only narrow the inventory (and for OMP never beyond the bundled catalog); a configured name that is not physically present grants nothing. When unset or empty, enumeration of the resolved root stands.
+`agent.autoApproveSkills` / `AGENT_AUTO_APPROVE_SKILLS` is a FILTER over skill names observed inside the resolved root: a nonempty list can only narrow the inventory; a configured name that is not physically present grants nothing. When unset or empty, enumeration of the resolved root stands.
 
 For detailed documentation on permission layers and shell injection protection, see [Skill Auto-Approve List (Root-Exact Inventory) in AGENT_PERMISSIONS.md](AGENT_PERMISSIONS.md#skill-auto-approve-list-root-exact-inventory).
 
