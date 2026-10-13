@@ -111,8 +111,13 @@ export function bootstrapDiscoveryGuard(
   // blockers stay, and the dev path's pinned fail-closed load posture is
   // byte-for-byte the pre-row-27 behavior.
   const launchEnv = observedEnv as Record<string, string | undefined>;
+  // Row 16/27 restricted-launch scope: only a restricted process declares a
+  // skill root (the YOLO/unidentified branch registers nothing, so a declared
+  // root would grant nothing there). The value is read from the
+  // DEPLOYMENT-OWNED launch environment (`align-omp-skill-trust-to-shared-root`
+  // D4) — the only witness of the root the daemon resolved and verified.
   const ownedSkillRoots = observeLaunchMode(observedCwd) === "restricted"
-    ? observeDeclaredSkillRoots("restricted")
+    ? observeDeclaredSkillRoots("restricted", launchEnv)
     : undefined;
   const executableObservation = observeLaunchMode(observedCwd) === "restricted"
     ? checkOmpExecutableSources({

@@ -287,10 +287,19 @@ export async function checkOmpSettingsSources(
       // caught by re-canonicalizing the parent.
       const canonicalParent = await reader.realPath(dirname(overlayPath));
       const expectedCanonical = resolve(canonicalParent, basename(overlayPath));
+      // The generated skill-root declaration is the ONE overlay path exempt
+      // from the agent-writable placement rule: the daemon must be able to
+      // write it at spawn time (`align-omp-skill-trust-to-shared-root` D3), and
+      // it lives under `{baseRoot}/omp-overlays/` — outside the mode-scoped
+      // process state area by construction. Every other overlay check still
+      // applies to it identically (link, regular file, canonical parent and
+      // the accepted size/mtime identity below, which reveals a post-spawn
+      // rewrite); this preflight keeps reading no content.
+      const isGeneratedDeclaration = overlayPath === plan.skillRootDeclarationPath;
       if (
         canonical !== expectedCanonical ||
-        isWithinRoot(canonical, plan.agentDir) ||
-        isWithinRoot(canonical, plan.ownedHome)
+        (!isGeneratedDeclaration &&
+          (isWithinRoot(canonical, plan.agentDir) || isWithinRoot(canonical, plan.ownedHome)))
       ) {
         failures.push({
           kind: "overlay_identity_mismatch",

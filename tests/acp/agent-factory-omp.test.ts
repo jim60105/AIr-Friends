@@ -9,13 +9,17 @@
 // packaging, and user runtime observation.
 
 import { assert, assertEquals, assertStringIncludes, assertThrows } from "@std/assert";
+import { parse as parseYaml } from "@std/yaml";
 import { createAgentConfig, getSessionModeOverride } from "../../src/acp/agent-factory.ts";
+import { OMP_DECLARED_SKILL_ROOT_ENV } from "../../src/acp/omp-settings.ts";
+import { resolveTrustedSkillsRoot } from "../../src/core/skills-root.ts";
 import {
   OMP_TRUSTED_EXTENSION_BUNDLE_PATH,
   OMP_TRUSTED_EXTENSION_PATH,
   ompAgentDir,
   ompLaunchCwd,
   ompProcessTmpDir,
+  ompSkillRootDeclarationPath,
   ompXdgDataHome,
 } from "../../src/utils/omp-paths.ts";
 import type { Config } from "../../src/types/config.ts";
@@ -182,12 +186,35 @@ Deno.test("agent-factory omp - assembles both modes over tracked assets with dis
     );
   }
 
-  // Restricted keeps the row-8 owned overlay carrying its lsp.enabled:false
-  // pin: the flag lands over the unchanged ordered overlay, not instead of it.
-  assertEquals(
-    restrictedConfig.args.indexOf("--config"),
-    restrictedConfig.args.indexOf("agent-config/omp/restricted.yml") - 1,
-  );
+  // `align-omp-skill-trust-to-shared-root` 3.1/3.2: the generated single-key
+  // skill-root declaration is FIRST among the `--config` overlays, the authored
+  // mode document carrying the pins is LAST, and the declaration declares
+  // exactly the deployment-resolved root (here the repository `skills/` tree,
+  // the default `agent.skillsDir`), which is also the value conveyed to the
+  // extension through the launch environment.
+  const resolvedRoot = resolveTrustedSkillsRoot("omp", config.agent.skillsDir);
+  for (
+    const [assembled, mode, modeDocument] of [
+      [restrictedConfig, "restricted", "agent-config/omp/restricted.yml"],
+      [yoloConfig, "native-yolo", "agent-config/omp/native-yolo.yml"],
+    ] as const
+  ) {
+    const overlayPaths = assembled.args.filter((_, index) =>
+      assembled.args[index - 1] === "--config"
+    );
+    assertEquals(overlayPaths.length, 2, assembled.args.join(" "));
+    const declarationPath = overlayPaths[0]!;
+    assertEquals(declarationPath, ompSkillRootDeclarationPath("/tmp/ws/tmp", mode));
+    assertEquals(overlayPaths[1], modeDocument);
+    const declaration = parseYaml(Deno.readTextFileSync(declarationPath)) as Record<
+      string,
+      unknown
+    >;
+    assertEquals(declaration, { skills: { customDirectories: [resolvedRoot] } });
+    assertEquals(assembled.env?.[OMP_DECLARED_SKILL_ROOT_ENV], resolvedRoot);
+    assertEquals(assembled.settingsSourcePlan?.ownedSkillRoots, [resolvedRoot]);
+    assertEquals(assembled.settingsSourcePlan?.skillRootDeclarationPath, declarationPath);
+  }
 
   // Mode-isolated state roots remain unchanged by the LSP carriers.
   assertEquals(

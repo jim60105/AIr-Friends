@@ -9,6 +9,7 @@ import {
   MODELS_YAML_CONTENT,
   NATIVE_YOLO_YAML_CONTENT,
   ompSettingsForMode,
+  ompSettingsSourcePlan,
   PINNED_DISABLED_PROVIDERS_CATALOG,
   resolveEffectiveSettings,
   RESTRICTED_ONLY_KEYS,
@@ -62,7 +63,7 @@ Deno.test("Task 2.1: agent-config/omp/restricted.yml content matches pinned keys
   const parsed = parseYaml(fileContent) as Record<string, unknown>;
 
   // Validate with schema validator
-  assertOwnedSettingsDocument(parsed, "restricted");
+  assertOwnedSettingsDocument(parsed, "restricted", null);
 
   // Assert exact keys
   assertEquals(parsed["tools"], {
@@ -82,6 +83,21 @@ Deno.test("Task 2.1: agent-config/omp/restricted.yml content matches pinned keys
   assertEquals(parsed["marketplace"], { autoUpdate: "off" });
   assertEquals(parsed["update"], { channel: "stable" });
   assertEquals(parsed["compaction"], { enabled: true });
+  // `align-omp-skill-trust-to-shared-root` D2/D3: the authored document carries
+  // the skills enablement and the seven foreign-source toggles and declares NO
+  // skill directory — the deployment-resolved root arrives through the
+  // generated single-key declaration instead, so a hard-coded directory here
+  // would be a carrier violation.
+  assertEquals(parsed["skills"], {
+    enabled: true,
+    enableCodexUser: false,
+    enableClaudeUser: false,
+    enableClaudeProject: false,
+    enablePiUser: false,
+    enablePiProject: false,
+    enableAgentsUser: false,
+    enableAgentsProject: false,
+  });
 
   const disabledProviders = parsed["disabledProviders"] as string[];
   assertEquals(Array.isArray(disabledProviders), true);
@@ -102,13 +118,25 @@ Deno.test("Task 2.2: agent-config/omp/native-yolo.yml non-contamination", async 
   const parsed = parseYaml(fileContent) as Record<string, unknown>;
 
   // Validate with schema validator
-  assertOwnedSettingsDocument(parsed, "native-yolo");
+  assertOwnedSettingsDocument(parsed, "native-yolo", null);
 
   // Contains tools.approvalMode: yolo
   assertEquals(parsed["tools"], { approvalMode: "yolo" });
 
   // Decision 5 (row 25): the shared deployment pin lands in YOLO too.
   assertEquals(parsed["lsp"], { enabled: false });
+  // Same authored carrier shape as restricted: enablement + the seven toggles,
+  // NO skill directory (`align-omp-skill-trust-to-shared-root` D2/D3).
+  assertEquals(parsed["skills"], {
+    enabled: true,
+    enableCodexUser: false,
+    enableClaudeUser: false,
+    enableClaudeProject: false,
+    enablePiUser: false,
+    enablePiProject: false,
+    enableAgentsUser: false,
+    enableAgentsProject: false,
+  });
   // NO disabledProviders, NO per-tool approval, NO reset
   assertEquals("disabledProviders" in parsed, false);
 
@@ -149,7 +177,7 @@ Deno.test("Task 2.3: agent-config/omp/models.yml contains only X-Title header, z
 Deno.test("Task 3.1: assertOwnedSettingsDocument rejects invalid schema keys and values", () => {
   // Invented key
   assertThrows(
-    () => assertOwnedSettingsDocument(fixtures.invalidOverlays.inventedKey, "restricted"),
+    () => assertOwnedSettingsDocument(fixtures.invalidOverlays.inventedKey, "restricted", null),
     Error,
     "Unregistered settings key",
   );
@@ -157,21 +185,26 @@ Deno.test("Task 3.1: assertOwnedSettingsDocument rejects invalid schema keys and
   // Empty mapping branch in native-yolo (lsp: {})
   assertThrows(
     () =>
-      assertOwnedSettingsDocument({
-        tools: { approvalMode: "yolo" },
-        compaction: { enabled: true },
-        startup: { checkUpdate: false },
-        marketplace: { autoUpdate: "off" },
-        update: { channel: "stable" },
-        lsp: {},
-      }, "native-yolo"),
+      assertOwnedSettingsDocument(
+        {
+          tools: { approvalMode: "yolo" },
+          compaction: { enabled: true },
+          startup: { checkUpdate: false },
+          marketplace: { autoUpdate: "off" },
+          update: { channel: "stable" },
+          lsp: {},
+        },
+        "native-yolo",
+        null,
+      ),
     Error,
     "Forbidden empty object",
   );
 
   // Case-mismatched enum
   assertThrows(
-    () => assertOwnedSettingsDocument(fixtures.invalidOverlays.caseMismatchedEnum, "restricted"),
+    () =>
+      assertOwnedSettingsDocument(fixtures.invalidOverlays.caseMismatchedEnum, "restricted", null),
     Error,
     'Invalid value "Write" for key "tools.approvalMode"',
   );
@@ -179,7 +212,11 @@ Deno.test("Task 3.1: assertOwnedSettingsDocument rejects invalid schema keys and
   // Restricted key in YOLO (disabledProviders)
   assertThrows(
     () =>
-      assertOwnedSettingsDocument(fixtures.invalidOverlays.disabledProvidersInYolo, "native-yolo"),
+      assertOwnedSettingsDocument(
+        fixtures.invalidOverlays.disabledProvidersInYolo,
+        "native-yolo",
+        null,
+      ),
     Error,
     'Restricted-only key "disabledProviders" is forbidden in native-yolo',
   );
@@ -192,6 +229,7 @@ Deno.test("Task 3.1: assertOwnedSettingsDocument rejects invalid schema keys and
       assertOwnedSettingsDocument(
         fixtures.invalidOverlays.unlistedApprovalEntryInRestricted,
         "restricted",
+        null,
       ),
     Error,
     'Unsupported "tools.approval" entry "bash"',
@@ -199,7 +237,12 @@ Deno.test("Task 3.1: assertOwnedSettingsDocument rejects invalid schema keys and
 
   // An unlisted approval VALUE rejects (the pinned vocabulary is closed).
   assertThrows(
-    () => assertOwnedSettingsDocument(fixtures.invalidOverlays.unlistedApprovalValue, "restricted"),
+    () =>
+      assertOwnedSettingsDocument(
+        fixtures.invalidOverlays.unlistedApprovalValue,
+        "restricted",
+        null,
+      ),
     Error,
     'Invalid value "maybe" for key "tools.approval.read"',
   );
@@ -207,19 +250,20 @@ Deno.test("Task 3.1: assertOwnedSettingsDocument rejects invalid schema keys and
   // The approval branch and the native fetch-materialization pin are
   // restricted-only: neither can ride into the native-YOLO document.
   assertThrows(
-    () => assertOwnedSettingsDocument(fixtures.invalidOverlays.approvalInYolo, "native-yolo"),
+    () => assertOwnedSettingsDocument(fixtures.invalidOverlays.approvalInYolo, "native-yolo", null),
     Error,
     'Restricted-only key "tools.approval" is forbidden in native-yolo',
   );
   assertThrows(
-    () => assertOwnedSettingsDocument(fixtures.invalidOverlays.fetchInYolo, "native-yolo"),
+    () => assertOwnedSettingsDocument(fixtures.invalidOverlays.fetchInYolo, "native-yolo", null),
     Error,
     'Restricted-only key "fetch.enabled" is forbidden in native-yolo',
   );
 
   // An approval NULL reset is not an owned record.
   assertThrows(
-    () => assertOwnedSettingsDocument(fixtures.invalidOverlays.approvalNullReset, "restricted"),
+    () =>
+      assertOwnedSettingsDocument(fixtures.invalidOverlays.approvalNullReset, "restricted", null),
     Error,
     'Invalid type for key "tools.approval"',
   );
@@ -245,7 +289,7 @@ Deno.test("Task 3.1: assertOwnedSettingsDocument rejects invalid schema keys and
 Deno.test("Task 29-3.1: the owned read/search posture is validated exactly, not merely typed", () => {
   const restricted = parseYaml(RESTRICTED_YAML_CONTENT) as Record<string, unknown>;
   // The composed owned document passes as-is.
-  assertOwnedSettingsDocument(restricted, "restricted");
+  assertOwnedSettingsDocument(restricted, "restricted", null);
   const withTools = (tools: unknown) => ({ ...restricted, tools });
   // The pinned entry set is EXACT: a missing entry rejects.
   assertThrows(
@@ -253,6 +297,7 @@ Deno.test("Task 29-3.1: the owned read/search posture is validated exactly, not 
       assertOwnedSettingsDocument(
         withTools({ approvalMode: "write", approval: { read: "allow" } }),
         "restricted",
+        null,
       ),
     Error,
     "EXACTLY the pinned tools.approval entries",
@@ -266,18 +311,29 @@ Deno.test("Task 29-3.1: the owned read/search posture is validated exactly, not 
           approval: { read: "prompt", grep: "allow", glob: "allow", find: "allow" },
         }),
         "restricted",
+        null,
       ),
     Error,
     'Restricted mode requires explicit tools.approval.read: "allow"',
   );
   // An activation pin cannot be relaxed alongside its approval entry.
   assertThrows(
-    () => assertOwnedSettingsDocument({ ...restricted, grep: { enabled: false } }, "restricted"),
+    () =>
+      assertOwnedSettingsDocument(
+        { ...restricted, grep: { enabled: false } },
+        "restricted",
+        null,
+      ),
     Error,
     "Restricted mode requires explicit grep.enabled: true",
   );
   assertThrows(
-    () => assertOwnedSettingsDocument({ ...restricted, find: { enabled: "off" } }, "restricted"),
+    () =>
+      assertOwnedSettingsDocument(
+        { ...restricted, find: { enabled: "off" } },
+        "restricted",
+        null,
+      ),
     Error,
     'Restricted mode requires explicit find.enabled: "auto"',
   );
@@ -285,7 +341,7 @@ Deno.test("Task 29-3.1: the owned read/search posture is validated exactly, not 
   const withoutFetch = { ...restricted } as Record<string, unknown>;
   delete withoutFetch["fetch"];
   assertThrows(
-    () => assertOwnedSettingsDocument(withoutFetch, "restricted"),
+    () => assertOwnedSettingsDocument(withoutFetch, "restricted", null),
     Error,
     "Restricted mode requires explicit fetch.enabled: false",
   );
@@ -560,7 +616,7 @@ Deno.test("Task 25-2.1: decision-5 LSP pin — parsed assets match emitted compo
     assertEquals(parsedAsset, emitted, `${mode}: parsed asset drifted from emitted composition`);
 
     // Both validate, and both carry the shared pin.
-    assertOwnedSettingsDocument(parsedAsset, mode);
+    assertOwnedSettingsDocument(parsedAsset, mode, null);
     assertEquals((parsedAsset["lsp"] as Record<string, unknown>)["enabled"], false);
   }
 });
@@ -577,12 +633,12 @@ Deno.test("Task 25-2.1: decision-5 LSP pin — missing/true/string/unknown/empty
     );
 
     // Baseline (with the pin) validates.
-    assertOwnedSettingsDocument(baseline, mode);
+    assertOwnedSettingsDocument(baseline, mode, null);
 
     // Missing: the shared-key loop rejects.
     delete baseline["lsp"];
     assertThrows(
-      () => assertOwnedSettingsDocument(baseline, mode),
+      () => assertOwnedSettingsDocument(baseline, mode, null),
       Error,
       `Required shared deployment key "lsp.enabled" missing from ${mode} document`,
     );
@@ -590,7 +646,7 @@ Deno.test("Task 25-2.1: decision-5 LSP pin — missing/true/string/unknown/empty
     // Enabled (true): the decision-5 false pin rejects.
     baseline["lsp"] = { enabled: true };
     assertThrows(
-      () => assertOwnedSettingsDocument(baseline, mode),
+      () => assertOwnedSettingsDocument(baseline, mode, null),
       Error,
       "Decision 5 requires the shared deployment pin lsp.enabled: false",
     );
@@ -598,7 +654,7 @@ Deno.test("Task 25-2.1: decision-5 LSP pin — missing/true/string/unknown/empty
     // Non-boolean string value: registered boolean-type check rejects.
     baseline["lsp"] = { enabled: "false" };
     assertThrows(
-      () => assertOwnedSettingsDocument(baseline, mode),
+      () => assertOwnedSettingsDocument(baseline, mode, null),
       Error,
       'Invalid type for key "lsp.enabled": expected boolean, got string',
     );
@@ -607,7 +663,7 @@ Deno.test("Task 25-2.1: decision-5 LSP pin — missing/true/string/unknown/empty
     // the registered lsp.enabled pin, never an arbitrary LSP setting).
     baseline["lsp"] = { enabled: false, server: "pyright" };
     assertThrows(
-      () => assertOwnedSettingsDocument(baseline, mode),
+      () => assertOwnedSettingsDocument(baseline, mode, null),
       Error,
       'Unregistered settings key "lsp.server"',
     );
@@ -615,7 +671,7 @@ Deno.test("Task 25-2.1: decision-5 LSP pin — missing/true/string/unknown/empty
     // Empty lsp mapping branch stays forbidden.
     baseline["lsp"] = {};
     assertThrows(
-      () => assertOwnedSettingsDocument(baseline, mode),
+      () => assertOwnedSettingsDocument(baseline, mode, null),
       Error,
       'Forbidden empty object at path "lsp"',
     );
@@ -667,6 +723,62 @@ Deno.test("Task 25-2.2: row-17 carrier interface consumed verbatim — native YO
     assertEquals(file.content.includes("disabledProviders"), false);
     assertEquals(file.content.includes("approval:"), false);
   }
+
+  // `align-omp-skill-trust-to-shared-root` task 3.1: the plan orders the
+  // generated skill-root declaration FIRST and the authored mode document
+  // LAST, and carries the caller's RESOLVED root — never a constant.
+  for (const mode of ["restricted", "native-yolo"] as const) {
+    const resolvedRoot = "/srv/deployment/shared-skills";
+    const authoredOverlayPaths = ompSettingsForMode(mode).orderedOverlayPaths;
+    const plan = ompSettingsSourcePlan(mode, {
+      baseRoot: "/var/tmp/omp-source-plan-unit",
+      ownedSkillRoots: [resolvedRoot],
+      allowedOverlayPaths: [...authoredOverlayPaths],
+    });
+    assertEquals(
+      plan.skillRootDeclarationPath,
+      `/var/tmp/omp-source-plan-unit/omp-overlays/${mode}-skill-root.yml`,
+    );
+    assertEquals(plan.allowedOverlayPaths[0], plan.skillRootDeclarationPath);
+    assertEquals(plan.allowedOverlayPaths.length, authoredOverlayPaths.length + 1);
+    assertEquals(
+      plan.allowedOverlayPaths[plan.allowedOverlayPaths.length - 1],
+      authoredOverlayPaths[authoredOverlayPaths.length - 1],
+    );
+    assertEquals(plan.ownedSkillRoots, [resolvedRoot]);
+  }
+  // The plan refuses a missing/relative root and a declaration that is not
+  // FIRST among the overlays.
+  assertThrows(
+    () =>
+      ompSettingsSourcePlan("restricted", {
+        baseRoot: "/var/tmp/x",
+        ownedSkillRoots: [],
+        allowedOverlayPaths: ["/a.yml"],
+      }),
+    Error,
+    "exactly one resolved skill root",
+  );
+  assertThrows(
+    () =>
+      ompSettingsSourcePlan("restricted", {
+        baseRoot: "/var/tmp/x",
+        ownedSkillRoots: ["relative/skills"],
+        allowedOverlayPaths: ["/a.yml"],
+      }),
+    Error,
+    "absolute canonical path",
+  );
+  assertThrows(
+    () =>
+      ompSettingsSourcePlan("restricted", {
+        baseRoot: "/var/tmp/x",
+        ownedSkillRoots: ["/srv/skills"],
+        allowedOverlayPaths: ["/a.yml", "/var/tmp/x/omp-overlays/restricted-skill-root.yml"],
+      }),
+    Error,
+    "declaration FIRST",
+  );
 
   // OpenCode carrier interface (owned by row 17; consumed, never edited):
   // the shipped map denies lsp per agent for build and yolo, no global clamp.

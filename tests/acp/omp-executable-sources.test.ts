@@ -9,7 +9,7 @@
  */
 
 import { AgentConnector } from "@acp/agent-connector.ts";
-import { type OmpSettingsSourcePlan, ompSettingsSourcePlan } from "@acp/omp-settings.ts";
+import type { OmpSettingsSourcePlan } from "@acp/omp-settings.ts";
 import {
   checkOmpExecutableSources,
   executableObservationForGuard,
@@ -19,6 +19,7 @@ import {
 import { computeDiscoveryDecision } from "@acp/omp/discovery-guard.ts";
 import { SettingsSourceRejectionError } from "@acp/omp/settings-sources.ts";
 import { bootstrapDiscoveryGuard } from "@acp/omp/extension/bootstrap.ts";
+import { stageOmpSettingsSourcePlan } from "../mocks/omp-plan-fixture.ts";
 import {
   assert,
   assertEquals,
@@ -39,7 +40,7 @@ async function ownedFixture(mode: "restricted" | "native-yolo"): Promise<Fixture
   const baseRoot = await Deno.makeTempDir({ prefix: "omp-exec-fixture-" });
   const overlayPath = `${baseRoot}/mode.yml`;
   await Deno.writeTextFile(overlayPath, "# deployment-owned fixture overlay\n");
-  const plan = ompSettingsSourcePlan(mode, { baseRoot, allowedOverlayPaths: [overlayPath] });
+  const plan = stageOmpSettingsSourcePlan({ baseRoot, mode, authoredOverlayPaths: [overlayPath] });
   await Deno.mkdir(plan.ownedHome, { recursive: true });
   await Deno.mkdir(plan.agentDir, { recursive: true });
   await Deno.mkdir(plan.launchCwd, { recursive: true });
