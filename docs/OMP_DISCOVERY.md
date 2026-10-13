@@ -57,11 +57,15 @@ No candidate modules are ever imported or evaluated during discovery inspection.
    therefore leaves a RUNNING session without the restricted capability set, and there is **no
    authenticated handler-readiness signal**: row 13 (`gate-omp-policy-readiness`) is cancelled, so
    no channel, handshake, acknowledgement or assertion exists anywhere.
-3. **What IS fail-closed, and where.** The deployment-side preflights reject the session BEFORE
-   the native request — owned assets and mode overlays, the settings-source plan and the workspace
-   executable observation all run before spawn / `session/new` / recovery
-   (`docs/OMP_SPAWN.md` section 3, `docs/OMP_SETTINGS.md` section 6). Those rejections are
-   daemon-side guarantees; they are NOT a claim about native handler presence.
+3. **What IS fail-closed, and where.** Two different deployment-side seams exist and are not the
+   same check repeated. LAUNCH ASSEMBLY (`src/acp/agent-factory.ts`) validates the owned assets —
+   the selected generated extension artifact, every resolved `--config` overlay document and the
+   owned skill-root declarations — before the process is created and fails the launch closed. The
+   connector's PER-REQUEST preflights then recheck the settings-source plan and the workspace
+   executable observation immediately before spawn, before `session/new`, and before
+   recovery/`session/load` (`docs/OMP_SPAWN.md` section 3, `docs/OMP_SETTINGS.md` section 6); they
+   do not repeat the assembly-time asset stat. All of these are daemon-side guarantees; they are
+   NOT a claim about native handler presence.
 4. **No over-claim.** This documentation asserts neither authenticated handler presence, nor a
    guaranteed `session/new`/`session/load` rejection on extension failure, nor never-extensionless
    execution. The residual risk is accepted and recorded
@@ -86,7 +90,7 @@ No candidate modules are ever imported or evaluated during discovery inspection.
 
 ### Critical-Skill Ownership
 
-- Critical skill IDs resolve strictly to the pinned instruction layout (`review/SKILL.md`, `destructive/SKILL.md`, `lsp/SKILL.md`, `readiness/SKILL.md`) inside the read-only deployment-owned skills root (`/opt/air/skills`), declared by the pinned owned-settings `skills` block (`skills.enabled: true`, `skills.customDirectories: [/opt/air/skills]`, all seven foreign-source toggles false — row 28 `pin-omp-owned-skill-roots`, docs/OMP_SETTINGS.md §7). **The pinned layout is currently UNPOPULATED**: the repository `skills/` tree installed verbatim at `/opt/air/skills` ships none of those four instruction files, so an on-image registration observably mints ZERO critical references (each identifier denies fail-closed on absence — the safe empty posture, never a fallback); populating the layout is an operator mount of the root-owned tree, and until it happens no critical-skill authority exists in production.
+- Critical skill IDs resolve strictly to the pinned instruction layout (`review/SKILL.md`, `destructive/SKILL.md`, `lsp/SKILL.md`, `readiness/SKILL.md`) inside the read-only deployment-owned skills root (`/opt/air/skills`), declared by the pinned owned-settings `skills` block (`skills.enabled: true`, `skills.customDirectories: [/opt/air/skills]`, all seven foreign-source toggles false — row 28 `pin-omp-owned-skill-roots`, docs/OMP_SETTINGS.md §7). **The pinned layout is currently UNPOPULATED**: the image stages that root from the deployment-controlled bundled catalog plus the reserved `lib` only (`scripts/stage-owned-skills.ts`, `unify-omp-skill-root-resolution` D2/D7 — never a broad copy of whatever a development machine installed under `skills/`), and that staged tree ships none of those four instruction files, so an on-image registration observably mints ZERO critical references (each identifier denies fail-closed on absence — the safe empty posture, never a fallback); populating the layout is an operator mount of the root-owned tree, and until it happens no critical-skill authority exists in production.
 - Workspace candidates with identical names are excluded from critical-name resolution before any collision or precedence decision; name-only authority is denied and an unregistered selector never authorizes anything.
 - Ordinary (non-critical) skills remain enabled and discoverable globally; the `skills.*` pin declares the owned root only and expands no critical-id set.
 - Re-evaluated across `new`, `load`, and `refresh` events; candidates carrying a stale generation ID or foreign session ID are rejected, and a replacement of an accepted instruction identity denies that identifier alone (never re-mints trust from fresh metadata).

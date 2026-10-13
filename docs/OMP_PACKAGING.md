@@ -76,7 +76,7 @@ is verified with `sha256sum -c -` BEFORE any install/COPY consumption.
 | `/opt/air/omp/prompt/SYSTEM.md`         | `prompts/system_prompt_override.md`      | `0:0`       | 0644       |
 | `/opt/air/omp/extension/index.js`       | build-time generated ESM bundle (C3)     | `0:0`       | 0644       |
 | `/opt/air/omp/PACKAGE-MANIFEST.sha256`  | regenerated at every image build         | `0:0`       | 0644       |
-| `/opt/air/skills/**`                    | `skills/` (row 28 owned skill root)      | `0:0`       | 0755 files |
+| `/opt/air/skills/**`                    | staged bundled catalog + reserved `lib` (`scripts/stage-owned-skills.ts`; `unify-omp-skill-root-resolution` D7 — never a broad `skills/` copy) | `0:0`       | 0755 files |
 
 Ownership rationale (deliberate divergences from the image's `$UID:0` 775
 pattern, both documented in Containerfile comments):

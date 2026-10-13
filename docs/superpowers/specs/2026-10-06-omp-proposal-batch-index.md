@@ -24,8 +24,10 @@
 ## 1. Original application order (historical, already archived)
 
 The original batch used this order, skipping cancelled row 13 without renumbering the remaining
-rows. Do not reapply archived changes. Both follow-on batches — section 6's `C1`–`C7` and
-section 8's seam-correction batch — are applied and archived.
+rows. Do not reapply archived changes. Section 6's `C1`–`C7` batch is applied and archived; in
+the follow-on seam-correction batch (section 8) issues 1–4 are applied, archived and merged, and
+issue 5's documentation is implemented on `feat/synchronize-omp-seam-correction-docs` with its
+archive/main-spec sync still owned by the batch owner.
 
 | #  | Change                                | Batch row     | Budget |
 | -- | ------------------------------------- | ------------- | ------ |

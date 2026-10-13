@@ -169,8 +169,15 @@ clamp in production with no acquired session context. The clamp's own
 registration evidence is no longer a name-only membership test: the live
 roster record for the exact name must BE this owned extension AND pass the
 full provenance admission (physical evidence against the accepted anchor,
-coherent epoch/generation) at this instant, so a foreign same-name
-registration can never complete a controlled route. Denials still perform no
+coherent epoch/generation) at this instant, so an ORDINARY foreign same-name
+registration — one reporting a path outside the declared faces — can never
+complete a controlled route. One named residual stays open: at the pin the
+roster forwards only the definition-authorable `sourceInfo.path`, so a hostile
+same-name extension declaring our artifact path as its own `sourcePath` is
+indistinguishable through the supported roster API and "which implementation
+the host invokes under the name" is not claimed (`docs/OMP_ENFORCEMENT.md`,
+"Named residual — the roster's `sourceInfo.path` is definition-authorable").
+Denials still perform no
 transport or backend delegation, and absent credentials still block
 `rejected_pending_adapter` with no native-provider fallback.
 
