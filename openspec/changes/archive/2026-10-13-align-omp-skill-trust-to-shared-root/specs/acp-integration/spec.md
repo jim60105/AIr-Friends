@@ -132,13 +132,13 @@ The system SHALL provide, as pure data and assembly code, deployment-owned OMP s
 
 ### Requirement: Deployment-Owned OMP Skill Root Settings
 
-Owned OMP settings SHALL declare the single deployment-resolved absolute skill root through pinned registered settings: the generated declaration carries the root, the authored mode documents carry skills enablement, the seven foreign-source toggles and no skill directory, and the composed fold therefore declares exactly that root. Exclude ambient/workspace sources where supported and keep skills globally enabled. Only that declared root SHALL supply critical-skill authority. Invalid or unowned declarations SHALL be rejected. Native verdicts and user-owned runtime acceptance SHALL remain unchanged.
+Owned OMP settings SHALL declare the single deployment-resolved absolute skill root through pinned registered settings, exclude ambient/workspace sources where supported and keep skills globally enabled. Only that declared root SHALL supply critical-skill authority. Invalid or unowned declarations SHALL be rejected. Native verdicts and user-owned runtime acceptance SHALL remain unchanged.
 
 #### Scenario: Both modes declare the same owned skill roots
 
 - **WHEN** actual owned restricted/native-yolo overlays, the generated declarations and the composed settings are validated
 - **THEN** the composed settings SHALL resolve to the same single resolved root with skills enabled and the registered source-toggle posture
-- **AND** each generated declaration SHALL declare exactly that root, and each authored mode document SHALL declare no skill directory
+- **AND** each generated declaration SHALL declare exactly that root, while each authored mode document SHALL carry the skills enablement and the seven foreign-source toggles and SHALL declare no skill directory of its own
 - **AND** native-yolo SHALL retain native approval, LSP disabled and absence of restricted tool policy
 
 #### Scenario: Invalid or ambient declarations fail closed
