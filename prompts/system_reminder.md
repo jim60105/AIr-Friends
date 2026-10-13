@@ -42,3 +42,16 @@ edit/write tool, then pass that absolute path via the skill's payload-file flag 
 `--message-file`). Use the literal directory above — do not build staging paths from environment
 variables: a process-level temporary-directory variable is not this session's staging area.
 {{- /if }}
+
+{{- set skillsRootRecipes -}}
+{{- if sessionId && tmpDir -}}
+1. Write the reminder reply text to `{{ tmpDir }}/reply.md` with your edit/write tool.
+2. Invoke the delivery script with the literal session id and the payload-file path:
+
+```bash
+{{ skillScript(skillsDir, "send-reply") }} --session-id {{ quoteShellArgument(sessionId) }} --message-file {{ quoteShellArgument(tmpDir + "/reply.md") }}
+```
+{{- /if -}}
+{{- /set -}}
+
+{{ include "./skills_root.md" }}

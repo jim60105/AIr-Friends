@@ -43,3 +43,5 @@ skill's payload-file flag (e.g. `--message-file`, `--content-file`). Use the lit
 above — do not build staging paths from environment variables: a process-level temporary-directory
 variable is not this session's staging area.
 {{- /if }}
+
+{{ include "./skills_root.md" }}

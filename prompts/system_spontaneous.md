@@ -98,3 +98,16 @@ skill's payload-file flag (e.g. `--message-file`, `--content-file`). Use the lit
 above — do not build staging paths from environment variables: a process-level temporary-directory
 variable is not this session's staging area.
 {{- /if }}
+
+{{- set skillsRootRecipes -}}
+{{- if sessionId && tmpDir -}}
+1. Write the post text to `{{ tmpDir }}/reply.md` with your edit/write tool.
+2. Invoke the post script with the literal session id and the payload-file path:
+
+```bash
+{{ skillScript(skillsDir, "send-reply") }} --session-id {{ quoteShellArgument(sessionId) }} --message-file {{ quoteShellArgument(tmpDir + "/reply.md") }}
+```
+{{- /if -}}
+{{- /set -}}
+
+{{ include "./skills_root.md" }}
