@@ -342,7 +342,9 @@ function isSkillDiscoveryPathList(
   root: string,
   home: string | undefined,
 ): boolean {
-  if (node.kind !== "array") return false;
+  // A `skills.paths` that is not an array of strings is refused rather than
+  // overwritten: the declaration repairs its OWN entries, never an authored
+  // value whose shape it does not understand.
   const entries = requireStringArray(node, '"skills.paths"');
   return entries.length > 0 && entries.every((entry) => declaredDirectory(entry, home) === root);
 }
