@@ -153,6 +153,24 @@ declared root is a packaging fact, not something the observer checks; the
 image posture's `uid 0` plus non-writable modes are the stock image's non-root
 deployment precondition.
 
+**Named residual — the roster's `sourceInfo.path` is definition-authorable.**
+At the pin, `extensibility/extensions/loader.ts#extensionToolSourceInfo` builds
+an extension-registered tool's `sourceInfo.path` from the DEFINITION's own
+filesystem-absolute `sourcePath` when it declares one, falling back to the
+extension's resolved entry; `session/session-tools.ts#getAllToolInfos` then
+forwards exactly that path and does NOT forward the authoritative
+`RegisteredTool.extensionPath`. A hostile same-name extension that declares our
+artifact path as its own `sourcePath` is therefore indistinguishable from the
+genuine registration through the supported roster API. What the implementation
+still guarantees: an `extension`-sourced entry is owned only while the genuine
+declared artifact is physically present, link-free, correctly postured and
+unchanged since acceptance, and any entry reporting a path outside the declared
+faces — the ordinary foreign same-name replacement — denies before dispatch.
+What it cannot guarantee: which extension's implementation the host invokes
+under the name. Closing that needs an authoritative owner surface the pinned
+API does not expose; it stays user-owned runtime verification (checklist item
+4) and is NOT claimed closed.
+
 ### Native local read/search root screening (task 2.2)
 
 Before any native read/search call could reach local dispatch, the decoder
@@ -382,6 +400,11 @@ install (row 20):
    a same-name foreign `extension` registration is denied. Physical
    self-evidence is NOT content authentication and NOT proof that this binary
    loaded the module; a trusted developer rebuild requires a fresh launch.
+   Additionally probe the named residual above: whether the loader forwards an
+   authoritative registration owner anywhere an extension can observe (only the
+   definition-authorable `sourceInfo.path` is exposed at v18.6.1), and whether
+   a hostile same-name extension declaring our artifact path as its own
+   `sourcePath` can be detected at all on this pin.
 5. **Extension-load failure** — `runner.emit` only logs lifecycle-hook errors
    and does NOT fail session startup: an extension that fails to load leaves
    the session without the restricted capability set (accepted residual

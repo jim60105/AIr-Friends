@@ -865,6 +865,15 @@ Deno.test("bundle declaration - the canonical source root is substituted exactly
     Error,
     "absolute path",
   );
+  // Replacement-sequence safety: a checkout path containing `$$`, `$&` or
+  // `$1` must be embedded LITERALLY (a replacement string would rewrite it).
+  for (const root of ["/tmp/$$/checkout", "/tmp/$&/checkout", "/tmp/$1/checkout", "/tmp/$`/x"]) {
+    assertEquals(
+      embedDeploymentDeclarations(emitted, root),
+      `const ROOT = ${JSON.stringify(root)};\n`,
+      root,
+    );
+  }
 });
 
 Deno.test("bundle declaration - an under-declared emitted edge fails the closure check", () => {

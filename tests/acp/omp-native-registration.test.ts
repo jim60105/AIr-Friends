@@ -28,6 +28,7 @@ import {
   type NativeToolInfo,
 } from "@acp/omp/extension/native-registration.ts";
 import { decodeNativeToolCallEvent } from "@acp/omp/extension/native-events.ts";
+import { DEPLOYMENT_MODULE_DEPENDENCY_CLOSURE } from "@acp/omp/deployment-module.ts";
 import type { OwnedModuleEvidenceSource } from "@acp/omp/owned-module-evidence.ts";
 import {
   FIXTURE_DEVELOPMENT_DECLARATION,
@@ -333,6 +334,36 @@ Deno.test("Native provenance: the declared module face is independent of the pro
   ).run(call);
   assertBoundedBlock(fromStateRoot, "rejected_tool_provenance");
   assert(fromStateRoot.reason?.includes("origin=unowned-discovery"), fromStateRoot.reason ?? "");
+});
+
+Deno.test("Native provenance: an ancestor-normalized loaded spelling still admits", () => {
+  // The checkout is reached through a home-shaped alias of the same canonical
+  // tree: acceptance binds the PRESENTED spelling, the record names the
+  // canonical artifact, and provenance must accept both spellings instead of
+  // denying a legitimately normalized load as an incoherent observation.
+  const canonicalRoot = "/var/home/dev/checkout/build/omp-extension";
+  const declaration = {
+    artifact: `${canonicalRoot}/index.js`,
+    root: canonicalRoot,
+    posture: "development",
+    dependencyClosure: DEPLOYMENT_MODULE_DEPENDENCY_CLOSURE,
+  } as const;
+  const presented = "/home/dev/checkout/build/omp-extension/index.js";
+  const observation = fixtureModuleObservation({
+    declaration,
+    presentedArtifactPath: presented,
+    generation: "gen-0",
+  });
+  const { run } = harness(
+    [{ name: "read", sourceInfo: { path: presented, source: "extension" } }],
+    {
+      moduleUrl: `file://${presented}`,
+      moduleEvidence: fixtureEvidenceSource({ observation }),
+    },
+  );
+  const outcome = run({ toolCallId: "alias-1", toolName: "read", input: { path: "notes.md" } });
+  assertEquals(outcome.blocked, false, outcome.reason ?? "");
+  assertEquals(outcome.dispatched, true);
 });
 
 Deno.test("Native provenance: an injected session context mints no module identity (task 3.2)", () => {

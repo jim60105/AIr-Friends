@@ -46,7 +46,11 @@ export function embedDeploymentDeclarations(
         `got '${canonicalSourceRoot}'`,
     );
   }
-  return emitted.replace(CANONICAL_SOURCE_ROOT_LITERAL, JSON.stringify(canonicalSourceRoot));
+  // A replacement CALLBACK, not a replacement string: `String.replace` would
+  // interpret `$$`, `$&`, `` $` `` and `$1` inside the serialized path, so a
+  // checkout legitimately living under such a directory would ship a corrupted
+  // (or syntactically invalid) declaration.
+  return emitted.replace(CANONICAL_SOURCE_ROOT_LITERAL, () => JSON.stringify(canonicalSourceRoot));
 }
 
 /**

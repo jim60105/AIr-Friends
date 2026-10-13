@@ -317,11 +317,32 @@ export function translateNativeSourceInfo(
       // module-parent directory confer nothing (design: never infer an owned
       // root from a loaded module's directory), and no session identity
       // substitutes for the physical observation.
+      //
+      // RESIDUAL (pinned v18.6.1, `extensibility/extensions/loader.ts`
+      // `extensionToolSourceInfo` + `session/session-tools.ts`
+      // `getAllToolInfos`): the roster's `sourceInfo.path` is the registered
+      // DEFINITION's own filesystem-absolute `sourcePath` when it declares one,
+      // falling back to the extension's resolved entry. The authoritative
+      // owner (`RegisteredTool.extensionPath`) is NOT forwarded by the
+      // supported roster, so a hostile same-name extension that declares OUR
+      // artifact path as its `sourcePath` cannot be distinguished from the
+      // genuine registration through `getAllToolInfos()`. What this translation
+      // therefore guarantees: (a) no name/path-only claim admitted without the
+      // genuine declared artifact being physically present and unchanged
+      // (anchored, re-verified per call), and (b) every registration that
+      // reports a path outside the declared faces (or a changed/moved artifact)
+      // denies. It cannot certify which extension's implementation the host
+      // puts under the name — that stays user-owned runtime verification
+      // (docs/OMP_ENFORCEMENT.md item 4).
       const observation = moduleEvidence.observe({
         resourceGeneration: current.generation,
         registryEpoch: current.epoch,
       });
       if (observation === undefined) return unowned;
+      // The entry must BE the artifact this process loaded, in either observed
+      // spelling: the path our own module URL presented (bound at acceptance
+      // and never re-derived from roster input) or its canonical resolution
+      // (trusted ancestor normalization, e.g. `/home` -> `/var/home`).
       if (
         extensionPath !== observation.presentedArtifactPath &&
         extensionPath !== observation.canonicalArtifactPath
@@ -335,7 +356,10 @@ export function translateNativeSourceInfo(
       if (!ownership.trusted) return unowned;
       return {
         origin: "owned-extension",
-        modulePath: extensionPath,
+        // The record names the CANONICAL artifact, so the provenance decision's
+        // evidence-coherence check is exact for both spellings instead of
+        // rejecting a legitimately normalized load.
+        modulePath: observation.canonicalArtifactPath,
         moduleEvidence: observation,
         // BOTH halves come from the same live read that produced the physical
         // observation; `composeFreshProvenance` re-reads the current halves at
