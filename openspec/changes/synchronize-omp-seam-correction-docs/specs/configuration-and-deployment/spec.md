@@ -21,6 +21,11 @@ Current OMP documentation SHALL distinguish the 35 archived baseline changes fro
 - **THEN** the index SHALL report proposed status with its ownership and application matrix
 - **AND** the user's accepted native local read/search SHALL NOT be reported as daemon root confinement or a still-pending protected-IO prerequisite
 
+#### Scenario: Mutation-route prerequisite is distinct from accepted reads
+- **WHEN** the supported native surface lacks actual sink-route evidence and no-fallback mutation dispatch
+- **THEN** full ordinary mutation restoration SHALL be labeled application-blocked with the concrete producer prerequisite and dependent application gates
+- **AND** safe mutation denial SHALL NOT be reported as completed write capability or reopen the accepted local read/search decision
+
 ### Requirement: OMP Launch Documentation Names the Generated Deployment Artifact
 
 Current launch, discovery and packaging documentation SHALL identify the canonical TypeScript tree as build input and the selected generated JavaScript bundle as the sole loaded artifact. It SHALL distinguish deployment module/root ownership from mutable process state and session roots. Obsolete copied source closure and raw-source launch instructions SHALL be removed, not retained as alternatives.

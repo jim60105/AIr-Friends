@@ -61,6 +61,8 @@ Project deltas in order1,2,3,4,5. Issue1 fully modifies live-provenance and inve
 
 The main ACP protected-filesystem callback requirement remains unchanged and applies only when those callbacks execute. It does not confine direct native IO. All MODIFIED blocks retain their complete preexisting scenario sets. Archive/sync is outside this assignment; projection here is a planning contract, not an applied main-spec change.
 
+Issue1's full ordinary mutation restoration has a separate application prerequisite: supported native sink-route evidence/no-fallback dispatch is absent from the pinned extension API. This is unrelated to the resolved native read/search acceptance. Until a user-selected supported interface/version or separately approved native mutation posture resolves it, issue1 is application-blocked, issue2 is dependency-gated and issue5's final apply is dependency-gated. Issues3/4 remain independently actionable. All artifact phases can still be proposed; strict validation is not proof that this producer exists. Do not mark the full builtin issue complete while ordinary mutation only denies.
+
 ## Risks / Trade-offs
 
 A current-status edit can accidentally falsify historical proposal evidence. Keep history labeled and archives frozen. Native local-IO adoption does not fix root confinement; keep its accepted ambient-readability risk explicit without manufacturing a remaining decision blocker. Source/mock evidence does not prove native handler execution or packaged runtime behavior.
