@@ -39,6 +39,77 @@ Deno.test("declaration content - exactly one key holding the resolved root", () 
   );
 });
 
+Deno.test("declaration content - a YAML-significant resolved root round-trips exactly", () => {
+  // The root is serialized as a quoted YAML scalar: a legitimate canonical
+  // directory containing `#`, `: `, spaces or a quote must parse back to the
+  // same string and validate against it, never become a comment or another type.
+  for (
+    const root of [
+      "/srv/shared # skills",
+      "/srv/skills: prod",
+      "/srv/dir with space/skills",
+      '/srv/quote"dir/skills',
+      "/srv/tab\tdir/skills",
+    ]
+  ) {
+    const document = parseYaml(ompSkillRootDeclarationContent(root)) as Record<string, unknown>;
+    assertEquals(document["skills"], { customDirectories: [root] }, root);
+    assertOwnedSettingsDocument(document, "restricted", [root]);
+  }
+});
+
+Deno.test("declaration carrier - the wrong carrier shape never validates", () => {
+  // A declaration missing the key, carrying a second entry, or carrying a
+  // non-absolute/non-canonical root rejects against the resolved root.
+  assertThrows(
+    () => assertOwnedSettingsDocument({}, "restricted", [ROOT]),
+    Error,
+    "exactly declare the resolved skill root",
+  );
+  assertThrows(
+    () =>
+      assertOwnedSettingsDocument(
+        { skills: { customDirectories: [ROOT, "/srv/second"] } },
+        "restricted",
+        [ROOT],
+      ),
+    Error,
+    "exactly declare the resolved skill root",
+  );
+  assertThrows(
+    () =>
+      assertOwnedSettingsDocument(
+        { skills: { customDirectories: ["relative/skills"] } },
+        "restricted",
+        ["relative/skills"],
+      ),
+    Error,
+    "exactly declare the resolved skill root",
+  );
+  assertThrows(
+    () =>
+      assertOwnedSettingsDocument(
+        { skills: { customDirectories: ["/srv/skills/../skills"] } },
+        "restricted",
+        ["/srv/skills/../skills"],
+      ),
+    Error,
+    "exactly declare the resolved skill root",
+  );
+  // An authored mode document (carrier `null`) must declare NO directory, even
+  // when the directory it declares is the resolved root.
+  assertThrows(
+    () =>
+      assertOwnedSettingsDocument(
+        { skills: { enabled: true, customDirectories: [ROOT] } },
+        "restricted",
+        null,
+      ),
+    Error,
+    "must declare no skill directory",
+  );
+});
+
 Deno.test("declaration write - overwrites unconditionally and refuses links, non-files and non-canonical paths", async () => {
   const baseRoot = await Deno.realPath(await Deno.makeTempDir({ prefix: "omp-declaration-" }));
   const declarationPath = `${baseRoot}/omp-overlays/restricted-skill-root.yml`;

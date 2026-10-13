@@ -27,7 +27,11 @@ import { basename, dirname, join, resolve } from "@std/path";
 
 /**
  * The single-key declaration document for one resolved root. The YAML mapping
- * carries `skills.customDirectories` and nothing else.
+ * carries `skills.customDirectories` and nothing else. The root is serialized
+ * as a QUOTED YAML scalar (JSON string escaping is a subset of YAML's
+ * double-quoted style), so a legitimate resolved path containing YAML
+ * significant characters — `#`, `: `, quotes, spaces — round-trips to exactly
+ * the same string instead of turning into a comment or a different type.
  */
 export function ompSkillRootDeclarationContent(root: string): string {
   if (root.length === 0 || root.includes("\0") || root.includes("\n")) {
@@ -40,7 +44,7 @@ export function ompSkillRootDeclarationContent(root: string): string {
 # Exactly one key: the deployment-resolved skill root (skills.customDirectories).
 skills:
   customDirectories:
-    - ${root}
+    - ${JSON.stringify(root)}
 `;
 }
 

@@ -7116,6 +7116,16 @@ Deno.test("inventory invariants - a script planted after construction is not app
       await verdict(client, `deno run ${skill.root}/memory-save/scripts/memory-save.ts`),
       "reject-1",
     );
+    // The inventory the client was handed was never re-scanned or rebuilt:
+    // its grant set is still exactly the ONE construction from before the
+    // planted script existed.
+    assertEquals(skill.list.scripts.map((script) => script.canonicalPath), [
+      `${skill.root}/memory-save/scripts/memory-save.ts`,
+    ]);
+    assertEquals(
+      [...skill.list.scripts].some((script) => script.canonicalPath.includes("late-skill")),
+      false,
+    );
   } finally {
     Deno.removeSync(tempDir, { recursive: true });
   }

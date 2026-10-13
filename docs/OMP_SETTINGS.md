@@ -162,13 +162,15 @@ choose (an absent or unacceptable value denies with zero skill authority).
 The generated skill-root declaration is observed as one more owned overlay, with
 ONE named exemption and no content read: the declaration path is exempt from the
 `plan.agentDir`/`plan.ownedHome` placement rule (it must be writable at launch
-time), while the link, regular-file, canonical-parent and accepted size/mtime
-identity checks apply to it unchanged — so a post-launch rewrite of the
-declaration is revealed by the accepted identity, exactly like a replaced
-authored overlay. Because the authored mode document is passed LAST, such a
-rewrite can still never out-rank the pins. The declaration's CONTENT is
-validated at launch by the assembly (`assertOwnedSettingsDocument` against the
-daemon's resolved root), never by this preflight.
+time), while the link, regular-file, canonical-parent and accepted
+`(dev, ino, ctime, size, mtime)` identity checks apply to it unchanged — so a
+post-launch rewrite of the declaration is revealed by that identity, exactly
+like a replaced authored overlay: restoring the modification time (or the size)
+does not reproduce the accepted inode identity, and an unavailable identity
+metadata set is refused rather than trusted. Because the authored mode document
+is passed LAST, such a rewrite can never out-rank the pins. The declaration's
+CONTENT is validated at launch by the assembly (`assertOwnedSettingsDocument`
+against the daemon's resolved root), never by this preflight.
 
 ### Responsibility and limits (user-owned / unverified)
 

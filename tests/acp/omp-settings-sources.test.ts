@@ -21,6 +21,7 @@ import {
   type OmpSettingsSourcePlan,
 } from "@acp/omp-settings.ts";
 import {
+  type AcceptedOverlayIdentity,
   assertOmpSettingsSourcesVisible,
   checkOmpSettingsSources,
   formatSettingsSourceError,
@@ -508,6 +509,66 @@ Deno.test("observer - owned overlays must exist, be plain files outside agent-wr
     );
   } finally {
     await cl3();
+  }
+});
+
+Deno.test("observer - a same-length rewrite with a restored mtime is still rejected", async () => {
+  const { plan, sessionCwd, cleanup } = await makeLivePlan("restricted", "v1\n");
+  try {
+    const identities = await assertOmpSettingsSourcesVisible(plan, sessionCwd);
+    const accepted = identities.find((identity) => identity.path === plan.skillRootDeclarationPath);
+    assertExists(accepted, "the declaration is one of the accepted overlays");
+    const declarationPath = plan.skillRootDeclarationPath;
+    const original = Deno.readTextFileSync(declarationPath);
+    // Same LENGTH: every lower-case alphanumeric character is swapped, so the
+    // accepted size is reproduced exactly, and the accepted modification time is
+    // restored below. Only the inode identity (`dev`/`ino`/`ctime`) reveals the
+    // rewrite — `mtime` alone is restorable by whoever can write the overlay.
+    const replacement = original.replace(/[a-z0-9]/g, (character) => character === "z" ? "y" : "z");
+    assertEquals(replacement.length, original.length);
+    assertEquals(replacement === original, false);
+    const restored = new Date(accepted.mtimeMs);
+    const rejectedAfter = async (prior: readonly AcceptedOverlayIdentity[], detail: string) => {
+      const failures = expectRejection(
+        await checkOmpSettingsSources(plan, sessionCwd, { expectedOverlayIdentities: prior }),
+      );
+      assert(
+        failures.some((f) =>
+          f.kind === "overlay_identity_mismatch" &&
+          f.label.includes("skill-root.yml") &&
+          f.detail.includes("content identity changed")
+        ),
+        `${detail}: ${JSON.stringify(failures)}`,
+      );
+    };
+    const tampered = (patch: Partial<AcceptedOverlayIdentity>): AcceptedOverlayIdentity[] =>
+      identities.map((identity) =>
+        identity.path === plan.skillRootDeclarationPath ? { ...identity, ...patch } : identity
+      );
+
+    // Control: the untouched observation is still accepted.
+    await assertOmpSettingsSourcesVisible(plan, sessionCwd, {
+      expectedOverlayIdentities: identities,
+    });
+    // A changed change time and a replaced inode each reject on their own with
+    // size and mtime identical — `mtime` alone is restorable by whoever can
+    // write the overlay, so the inode identity is what detects the rewrite.
+    await rejectedAfter(tampered({ ctimeMs: accepted.ctimeMs + 1 }), "a changed change time");
+    await rejectedAfter(tampered({ ino: accepted.ino + 1 }), "a replaced inode");
+
+    // End to end: an equal-length document installed at the same pathname with
+    // the accepted size and a restored mtime is rejected (the rename installs a
+    // new inode).
+    const staged = `${declarationPath}.staged`;
+    Deno.writeTextFileSync(staged, replacement);
+    Deno.renameSync(staged, declarationPath);
+    Deno.utimeSync(declarationPath, restored, restored);
+    const observed = Deno.lstatSync(declarationPath);
+    assertEquals(observed.size, accepted.size, "the rewrite preserves the accepted size");
+    assertEquals(observed.mtime?.getTime(), accepted.mtimeMs, "the mtime was restored");
+    await rejectedAfter(identities, "a same-length replacement with a restored mtime");
+  } finally {
+    await cleanup();
   }
 });
 
