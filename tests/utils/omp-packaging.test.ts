@@ -62,11 +62,11 @@ function section(start: string, end: string): string {
 }
 
 // Stage slices are delimited by the NEXT stage's FROM line:
-// opencode-unpacker -> cache; omp-unpacker -> final.
+// opencode-unpacker -> cache; cache -> omp-unpacker; omp-unpacker -> final.
 const ompStage = section("FROM base AS omp-unpacker", "FROM base AS final");
 const finalStage = containerfile.slice(containerfile.indexOf("FROM base AS final"));
 const opencodeStage = section("FROM base AS opencode-unpacker", "FROM base AS cache");
-const cacheStage = section("FROM base AS cache", "FROM cache AS owned-skills-stager");
+const cacheStage = section("FROM base AS cache", "FROM base AS omp-unpacker");
 
 // --- 4.1 Containerfile-parse assertions ------------------------------------
 
