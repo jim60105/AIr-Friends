@@ -84,3 +84,15 @@ scope.
    with the sibling marker moved out of every measured directory, and teardown
    asserts that no captured connector keeps a process and that every recorded
    native pid exited.
+
+   A second review round tightened three of those remedies: descriptor
+   directories are now collected only from the ARGUMENT part of a record (a
+   decoded RETURN descriptor names the file that was opened, never a base
+   directory), every resolved path is normalized so a `/cfg/./models.yml`
+   spelling cannot slip past the comparison, `successfulEventsBeneath()` itself
+   requires the recorded success (the unit case no longer filters on the
+   caller's side and adds a failed attempt beneath the same directory), and the
+   leak evidence records each wrapper plus its live descendants at every acquire
+   and recovery respawn and boundedly waits for all of them to disappear —
+   because `disconnect()` clears the connector's process reference regardless of
+   the kill result.

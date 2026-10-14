@@ -406,6 +406,60 @@ function processAlive(pid: number): boolean {
   }
 }
 
+/**
+ * A pid plus every live descendant (`pgrep -P`, the same enumeration the pool's
+ * own child drain uses), so the leak assertion covers the native process beneath
+ * its `dumb-init`/`bwrap` wrappers rather than only the wrapper itself.
+ */
+async function liveProcessTree(pid: number): Promise<number[]> {
+  const tree = [pid];
+  const seen = new Set<number>([pid]);
+  const queue = [pid];
+  while (queue.length > 0 && seen.size < 64) {
+    const parent = queue.shift()!;
+    const output = await new Deno.Command("pgrep", {
+      args: ["-P", String(parent)],
+      stdout: "piped",
+      stderr: "null",
+    }).output().catch(() => null);
+    if (output === null || !output.success) continue;
+    for (const token of new TextDecoder().decode(output.stdout).split("\n")) {
+      const child = Number(token.trim());
+      if (token.trim() === "" || !Number.isInteger(child) || seen.has(child)) continue;
+      seen.add(child);
+      tree.push(child);
+      queue.push(child);
+    }
+  }
+  return tree;
+}
+
+/** Record a connector's live native process tree (wrapper plus descendants). */
+async function recordProcessTree(
+  connector: AgentConnector,
+  into: Set<number>,
+): Promise<void> {
+  const pid = connector.getProcessPid();
+  if (pid === undefined) return;
+  for (const treePid of await liveProcessTree(pid)) into.add(treePid);
+}
+
+/** Boundedly wait for every recorded process to exit; returns the survivors. */
+async function waitForProcessesGone(
+  pids: Iterable<number>,
+  timeoutMs: number,
+): Promise<number[]> {
+  const deadline = Date.now() + timeoutMs;
+  let survivors = [...pids].filter(processAlive);
+  while (survivors.length > 0 && Date.now() < deadline) {
+    const { promise, resolve: done } = Promise.withResolvers<void>();
+    setTimeout(done, POOL_IDLE_POLL_MS);
+    await promise;
+    survivors = survivors.filter(processAlive);
+  }
+  return survivors;
+}
+
 // ---------------------------------------------------------------------------
 // Filesystem write observation
 // ---------------------------------------------------------------------------
@@ -461,12 +515,15 @@ function parseMutationEvents(traceText: string): MutationEvent[] {
     const operands = [...line.matchAll(/"((?:[^"\\]|\\.)*)"/g)].map((match) =>
       unescapeOperand(match[1])
     );
-    // `-y` renders descriptor arguments as `3</some/dir>`; those decoded
-    // directories are what resolves a relative pathname operand.
-    const fdDirs = [...line.matchAll(/<([^<>]*)>/g)]
+    const result = /\)\s*=\s*(-?\d+)/.exec(line);
+    // `-y` renders descriptor ARGUMENTS as `3</some/dir>`; those decoded
+    // directories are what resolves a relative pathname operand. Only the
+    // argument part counts: a decoded RETURN descriptor (e.g. `= 9</cfg/x>`)
+    // names the file that was opened, never a base directory.
+    const argsPart = line.slice(0, result === null ? line.length : result.index);
+    const fdDirs = [...argsPart.matchAll(/<([^<>]*)>/g)]
       .map((match) => match[1])
       .filter((path) => path.startsWith("/"));
-    const result = /\)\s*=\s*(-?\d+)/.exec(line);
     events.push({
       syscall,
       operands,
@@ -478,21 +535,23 @@ function parseMutationEvents(traceText: string): MutationEvent[] {
 }
 
 /**
- * Resolve an event's pathname operands to absolute spellings.
+ * Resolve an event's pathname operands to normalized absolute spellings.
  *
  * `resolved` holds operands that are absolute or that a decoded descriptor
  * directory resolves; `unresolved` holds relative operands this observer cannot
- * place on the filesystem. Callers must treat an unresolved operand naming a
- * watched file as a POTENTIAL write (fail closed) rather than as unrelated.
+ * place on the filesystem. Normalization matters: `/cfg/./models.yml` and
+ * `/cfg/models.yml` are the same file, and an escaped or dotted spelling must
+ * not slip past the comparison. Callers must treat an unresolved operand naming
+ * a watched file as a POTENTIAL write (fail closed) rather than as unrelated.
  */
 function eventPaths(event: MutationEvent): { resolved: string[]; unresolved: string[] } {
   const resolved: string[] = [];
   const unresolved: string[] = [];
   for (const operand of event.operands) {
     if (operand.startsWith("/")) {
-      resolved.push(operand);
+      resolved.push(resolve(operand));
     } else if (event.fdDirs.length > 0) {
-      for (const dir of event.fdDirs) resolved.push(join(dir, operand));
+      for (const dir of event.fdDirs) resolved.push(resolve(join(dir, operand)));
     } else {
       unresolved.push(operand);
     }
@@ -505,21 +564,23 @@ function eventsTouching(
   events: readonly MutationEvent[],
   watched: readonly string[],
 ): MutationEvent[] {
+  const watchedPaths = new Set(watched.map((path) => resolve(path)));
   const watchedNames = new Set(watched.map((path) => basename(path)));
   return events.filter((event) => {
     const { resolved, unresolved } = eventPaths(event);
-    if (resolved.some((path) => watched.includes(path))) return true;
+    if (resolved.some((path) => watchedPaths.has(path))) return true;
     return unresolved.some((path) => watchedNames.has(basename(path)));
   });
 }
 
-/** Successfully completed mutating events beneath a directory. */
+/** Successfully COMPLETED mutating events beneath a directory (attempts excluded). */
 function successfulEventsBeneath(
   events: readonly MutationEvent[],
   directory: string,
 ): MutationEvent[] {
+  const root = resolve(directory);
   return events.filter((event) =>
-    eventPaths(event).resolved.some((path) => path.startsWith(`${directory}/`))
+    event.succeeded && eventPaths(event).resolved.some((path) => path.startsWith(`${root}/`))
   );
 }
 
@@ -530,6 +591,7 @@ function successfulEventsBeneath(
  */
 function readOnlyConsumptions(traceText: string, paths: readonly string[]): string[] {
   const seen = new Set<string>();
+  const watched = new Map(paths.map((path) => [resolve(path), path]));
   const pattern = /(?:^|\s)(openat2|openat)\(/;
   for (const line of traceText.split("\n")) {
     if (!pattern.test(line) || !line.includes("O_RDONLY")) continue;
@@ -537,8 +599,8 @@ function readOnlyConsumptions(traceText: string, paths: readonly string[]): stri
     if (!/\)\s*=\s*\d+/.test(line)) continue;
     const operand = /"((?:[^"\\]|\\.)*)"/.exec(line)?.[1];
     if (operand === undefined) continue;
-    const path = unescapeOperand(operand);
-    if (paths.includes(path)) seen.add(path);
+    const original = watched.get(resolve(unescapeOperand(operand)));
+    if (original !== undefined) seen.add(original);
   }
   return [...seen];
 }
@@ -611,6 +673,11 @@ Deno.test("native probe observer: mutating events are resolved and classified fa
     `100  openat(3</cfg>, "models.yml", O_WRONLY) = 9`,
     // Relative writable open with no decoded descriptor: must stay unresolved.
     `100  openat(3, "models.yml", O_RDWR) = 10`,
+    // Undecoded input descriptor plus a decoded RETURN descriptor: the return
+    // value names the file that was opened, never a base directory.
+    `100  openat(3, "models.yml", O_RDWR) = 10</cfg/models.yml>`,
+    // The same watched file spelled with a dot segment.
+    `100  openat(AT_FDCWD, "/cfg/./models.yml", O_WRONLY) = 11`,
     // openat2 carries its flags inside the struct form.
     `100  openat2(AT_FDCWD, "/data/agent.db", {flags=O_RDWR|O_CREAT|O_CLOEXEC, resolve=0x0}) = 11`,
     // Failed writable open: an attempt, never a successful write.
@@ -621,21 +688,35 @@ Deno.test("native probe observer: mutating events are resolved and classified fa
     // Unfinished records carry no result: treated as attempted, not successful.
     `100  openat(AT_FDCWD, "/cfg/models.yml", O_RDWR <unfinished ...>`,
     `100  <... openat resumed>) = 12`,
+    // A failed attempt beneath the native data root is still only an attempt.
+    `100  openat(AT_FDCWD, "/data/failed.db", O_RDWR|O_CREAT, 0644) = -1 ENOENT (No such file)`,
   ].join("\n");
 
   const events = parseMutationEvents(trace);
+  const watchedModels = "/cfg/models.yml";
 
-  // Six writable openat/openat2 forms (absolute, descriptor-decoded relative,
-  // unresolved relative, openat2 struct form, failed attempt, unfinished
-  // record); the read-only open is not a mutation.
+  // Nine writable openat/openat2 forms (absolute, descriptor-decoded relative,
+  // two undecoded relative, dot-segment spelling, openat2 struct form, two
+  // failed attempts, unfinished record); the read-only open and the resumed
+  // record are not mutations.
   assertEquals(
     events.filter((event) => event.syscall.startsWith("openat")).length,
-    6,
+    9,
     "writable openat/openat2 forms are classified, read-only opens are not",
   );
-  // Absolute, descriptor-decoded relative, and unresolved relative spellings all
-  // count as touching the first watched file.
-  assertEquals(eventsTouching(events, ["/cfg/models.yml"]).length, 5);
+  // Every spelling that designates the watched file counts: absolute, dot
+  // segment, descriptor-decoded relative, and the unresolved relative operand.
+  assertEquals(
+    eventsTouching(events, [watchedModels]).length,
+    7,
+    "absolute, dot-segment, descriptor-decoded and unresolved spellings all match",
+  );
+  // The decoded RETURN descriptor must never be used as a directory base.
+  assertEquals(
+    events.some((event) => eventPaths(event).resolved.includes("/cfg/models.yml/models.yml")),
+    false,
+    "a return-descriptor annotation is not a directory base",
+  );
   // The failed attempt touches the second watched file; the unlinkat names a
   // DIFFERENT file (`restricted.yml.tmp`), so it must not be attributed to it.
   assertEquals(
@@ -648,23 +729,36 @@ Deno.test("native probe observer: mutating events are resolved and classified fa
   const unresolvedMatch = eventsTouching(events, ["/elsewhere/models.yml"]);
   assertEquals(
     unresolvedMatch.length,
-    1,
+    2,
     "an unresolved relative operand matching a watched basename is still reported",
   );
-  assertEquals(unresolvedMatch[0].fdDirs, [], "it is the operand with no decoded descriptor");
+  assertEquals(
+    unresolvedMatch.every((event) => event.fdDirs.length === 0),
+    true,
+    "both matches are operands with no decoded descriptor",
+  );
   assertEquals(
     eventsTouching(events, ["/elsewhere/unwatched.yml"]),
     [],
     "an unrelated basename matches nothing",
   );
-  // Completion is distinguished from attempt.
-  assertEquals(successfulEventsBeneath(events, "/data").length, 1);
-  // Successfully completed mutations under /cfg: two writable opens, the
-  // replacement, and the unlink. The failed open and the unfinished record are
-  // attempts, so they are excluded here (and still count as mutations above).
+  // Completion is distinguished from attempt BY THE HELPER: the failed attempt
+  // beneath /data is excluded while the successful openat2 is counted.
   assertEquals(
-    successfulEventsBeneath(events, "/cfg").filter((event) => event.succeeded).length,
-    4,
+    successfulEventsBeneath(events, "/data").length,
+    1,
+    "only the successful native-data mutation counts as a positive control",
+  );
+  // Successfully completed mutations under /cfg: the two absolute writable opens
+  // (one with a dot segment), the descriptor-decoded relative open, the
+  // replacement and the unlink. The failed open and the unfinished record are
+  // attempts, so they are excluded (while still counting as mutations above).
+  assertEquals(successfulEventsBeneath(events, "/cfg").length, 5);
+  // The dot-segment spelling is normalized to the watched file.
+  assertEquals(
+    eventPaths(events.find((event) => event.operands.includes("/cfg/./models.yml"))!)
+      .resolved.includes(watchedModels),
+    true,
   );
   // Consumption evidence requires a SUCCESSFUL read-only open.
   assertEquals(readOnlyConsumptions(trace, ["/cfg/models.yml"]), ["/cfg/models.yml"]);
@@ -891,6 +985,11 @@ Deno.test({
         connector: AgentConnector;
         sessionId: string;
       }> = [];
+      // Every native process tree this leg ever started — the acquire wrapper
+      // and its descendants, plus the respawned tree recovery creates — so the
+      // leak assertion covers the PROCESSES, not just the connector's latest
+      // reference (which `disconnect()` clears regardless of the kill result).
+      const recordedPids = new Set<number>();
       try {
         for (
           const { yolo, mode } of [
@@ -975,6 +1074,7 @@ Deno.test({
             connector: captured[captured.length - 1],
             sessionId: result.acpSessionId,
           });
+          await recordProcessTree(captured[captured.length - 1], recordedPids);
         }
 
         // ── Selected-root IO controls through the shipped mount policy ───────
@@ -1047,13 +1147,16 @@ Deno.test({
             [],
           );
           assertEquals(resumed, true, `${run.mode}: the confined session was restored`);
+          // Record the respawned tree BEFORE it is torn down below.
+          await recordProcessTree(run.connector, recordedPids);
         }
       } finally {
-        // Record every live pid BEFORE teardown so the leak assertion below can
-        // prove no native subprocess survived it.
-        const livePids = captured
-          .map((connector) => connector.getProcessPid())
-          .filter((pid): pid is number => pid !== undefined);
+        // Every process tree this leg started is already recorded (each acquire
+        // and each recovery respawn); capture the still-live trees once more so
+        // nothing started between those points is missed.
+        for (const connector of captured) {
+          await recordProcessTree(connector, recordedPids);
+        }
 
         await waitForPoolIdle(pool, POOL_IDLE_TIMEOUT_MS).catch(() => {});
         for (const connector of captured) {
@@ -1062,6 +1165,7 @@ Deno.test({
         pool.stop();
         registry.stop();
 
+        // Connector-state check: each connector dropped its process reference.
         for (const connector of captured) {
           assertEquals(
             connector.getProcessPid(),
@@ -1069,9 +1173,14 @@ Deno.test({
             "every captured connector released its native process",
           );
         }
-        for (const pid of livePids) {
-          assertEquals(processAlive(pid), false, `native subprocess ${pid} exited during teardown`);
-        }
+        // Process-tree evidence: every recorded wrapper AND descendant really
+        // exited, not merely that a reference was cleared.
+        const survivors = await waitForProcessesGone(recordedPids, POOL_IDLE_TIMEOUT_MS);
+        assertEquals(
+          survivors,
+          [],
+          "every native process this leg started exited during teardown",
+        );
       }
     });
   },
