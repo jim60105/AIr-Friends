@@ -95,6 +95,15 @@ export interface ClientConfig {
 
   /** Optional injectable native backend calls for testing */
   nativeCalls?: LinuxNativeCalls;
+
+  /**
+   * INTERNAL connector context (`normalize-omp-destructive-acp-ingress`): the
+   * configured ACP agent type of the connector that owns this client. The ACP
+   * client uses it ONLY to select the OMP destructive-ingress normalizer; it is
+   * never read from request metadata, so a caller cannot select the decoder.
+   * Direct client fixtures that omit it keep the legacy/OpenCode decoder path.
+   */
+  agentType?: AgentType;
 }
 
 /**

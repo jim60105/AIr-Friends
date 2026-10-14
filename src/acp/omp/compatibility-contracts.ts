@@ -695,23 +695,9 @@ export interface ApprovalRecord {
 // Boundary 4: Complete Destructive Intent Contract Types
 // -----------------------------------------------------------------------------
 
-export type DestructiveOperation =
-  | { readonly kind: "delete"; readonly path: string }
-  | { readonly kind: "move"; readonly source: string; readonly destination: string }
-  | { readonly kind: "patch_mutation"; readonly targetPath: string };
-
-export interface DestructiveIntentInput {
-  readonly nativeTool: "delete" | "move" | "edit" | "apply_patch";
-  readonly rawInput: string;
-  readonly executionInputBinding: string;
-  readonly parserProvenance:
-    | "supported_full_parser"
-    | "native_first_location_only"
-    | "synthetic_adapter_decoder"
-    | "unknown";
-  readonly operations?: readonly DestructiveOperation[];
-}
-
+// The shared `DestructiveIntentInput` / `DestructiveOperation` declarations
+// moved to their policy owner (`src/acp/destructive-policy.ts`); the ledger
+// keeps only this boundary's decision shape. See `normalize-omp-destructive-acp-ingress`.
 export interface DestructiveIntentDecision {
   readonly valid: boolean;
   readonly decoded: boolean;

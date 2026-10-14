@@ -41,6 +41,14 @@ import {
   fixtureImageObservation,
   fixtureOwnedExtensionRecord,
 } from "../../acp/omp-owned-module-fixture.ts";
+import { join } from "@std/path";
+import { ChatbotClient } from "@acp/client.ts";
+import { buildSkillAutoApproveList } from "@acp/skill-inventory.ts";
+import { observeTrustedSkillsRoot } from "@core/skills-root.ts";
+import { Logger, LogLevel } from "@utils/logger.ts";
+import { SkillRegistry } from "@skills/registry.ts";
+import { MemoryStore } from "@core/memory-store.ts";
+import { WorkspaceManager } from "@core/workspace-manager.ts";
 
 function blockedOutcome(outcome: EnforcementOutcome): Extract<
   EnforcementOutcome,
@@ -326,4 +334,73 @@ Deno.test({
       );
     }
   },
+});
+
+// --- ACP client destructive ingress (independent of the restricted extension) ---
+//
+// This case drives the REAL ACP client permission ingress — NOT the restricted
+// `tool_call` handler above — to show that a connector-configured OMP client
+// normalizes a native single move into the shared all-target authorization.
+// Nothing here invokes the native OMP binary; the evidence is the client-side
+// permission decision over real temporary files.
+
+Deno.test("OMP lifecycle: configured-OMP ACP client ingress authorizes a native move", async () => {
+  const workspace = Deno.makeTempDirSync({ prefix: "air-ingress-" });
+  const staging = join(workspace, "tmp", "test-session");
+  Deno.mkdirSync(staging, { recursive: true });
+  const source = join(staging, "from.md");
+  const destination = join(staging, "to.md");
+  Deno.writeTextFileSync(source, "seed");
+  try {
+    const workspaceManager = new WorkspaceManager({
+      repoPath: Deno.makeTempDirSync({ prefix: "air-ingress-repo-" }),
+      workspacesDir: "workspaces",
+    });
+    const registry = new SkillRegistry(new MemoryStore(workspaceManager, {}));
+    const allowList = buildSkillAutoApproveList({
+      rootObservation: observeTrustedSkillsRoot(
+        "omp",
+        Deno.makeTempDirSync({ prefix: "air-ingress-skills-" }),
+      ),
+    });
+    const client = new ChatbotClient(
+      registry,
+      new Logger("test", { level: LogLevel.FATAL }),
+      {
+        workingDir: workspace,
+        platform: "discord",
+        userId: "123",
+        channelId: "456",
+        isDM: false,
+        sessionId: "test-session",
+        agentType: "omp",
+      },
+      allowList,
+    );
+    client.setSessionContext("test-session", {
+      cwd: workspace,
+      shellSessionId: "test-session",
+    });
+
+    const response = await client.requestPermission({
+      sessionId: "test-session",
+      toolCall: {
+        toolCallId: "tc-ingress",
+        status: "pending",
+        content: [],
+        title: `Move ${source} to ${destination}`,
+        rawInput: { from: source, to: destination },
+        locations: [{ path: source }, { path: destination }],
+      },
+      options: [
+        { kind: "allow_once", optionId: "allow", name: "Allow once" },
+        { kind: "reject_once", optionId: "reject", name: "Reject once" },
+      ],
+    });
+
+    assertEquals(response.outcome, { outcome: "selected", optionId: "allow" });
+    assertEquals(Deno.statSync(source).isFile, true);
+  } finally {
+    Deno.removeSync(workspace, { recursive: true });
+  }
 });

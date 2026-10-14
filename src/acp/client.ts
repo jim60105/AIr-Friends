@@ -35,10 +35,10 @@ import {
   authorizeDestructiveTargets,
   decodeDestructiveIntent,
   destructiveDenialReason,
+  type DestructiveIntentInput,
   isDestructiveRequest,
   normalizeDestructiveIntent,
 } from "./destructive-policy.ts";
-import type { DestructiveIntentInput } from "./omp/compatibility-contracts.ts";
 import {
   authorizeFilesystemRead,
   authorizeFilesystemWrite,
@@ -49,6 +49,7 @@ import {
   type TrustedSkillsSource,
 } from "./filesystem-policy.ts";
 import { matchesScriptEntrypoint, type SkillAutoApproveList } from "./skill-inventory.ts";
+import { normalizeOmpDestructivePermissionInput } from "./omp/destructive-ingress.ts";
 
 /**
  * Read-extension allowlist for `readTextFile` (F4). Intentionally BROADER than the
@@ -584,16 +585,24 @@ export class ChatbotClient implements acp.Client {
     // Snapshot only the actual callback input. No request-supplied provenance is trusted.
     // Pinned session-tools.ts sends execution args as rawInput and preserves acpApprovedArgs;
     // this is snapshot consistency, not attestation of native completeness.
-    const rawInput = typeof params.toolCall.rawInput === "string"
-      ? params.toolCall.rawInput
-      : JSON.stringify(params.toolCall.rawInput);
-    const nativeTool = kind === "delete" ? "delete" : kind === "move" ? "move" : "edit";
-    const input: DestructiveIntentInput | undefined = rawInput === undefined ? undefined : {
-      nativeTool,
-      rawInput,
-      executionInputBinding: rawInput,
-      parserProvenance: nativeTool === "edit" ? "unknown" : "supported_full_parser",
-    };
+    // Configured OMP selects the native single-operation normalizer; every other
+    // (or omitted) type keeps the legacy decoder. The selection comes ONLY from the
+    // connector-supplied config — request fields cannot choose the decoder.
+    let input: DestructiveIntentInput | undefined;
+    if (this.config.agentType === "omp") {
+      input = normalizeOmpDestructivePermissionInput(params.toolCall);
+    } else {
+      const rawInput = typeof params.toolCall.rawInput === "string"
+        ? params.toolCall.rawInput
+        : JSON.stringify(params.toolCall.rawInput);
+      const nativeTool = kind === "delete" ? "delete" : kind === "move" ? "move" : "edit";
+      input = rawInput === undefined ? undefined : {
+        nativeTool,
+        rawInput,
+        executionInputBinding: rawInput,
+        parserProvenance: nativeTool === "edit" ? "unknown" : "supported_full_parser",
+      };
+    }
     const decoded = input ? decodeDestructiveIntent(input) : undefined;
     if (!decoded?.ok) {
       reason = destructiveDenialReason(

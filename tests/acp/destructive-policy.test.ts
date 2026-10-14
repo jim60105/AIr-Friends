@@ -6,6 +6,7 @@ import {
   DESTRUCTIVE_CONFORMANCE_FIXTURES,
   DESTRUCTIVE_CONFORMANCE_TABLE,
   destructiveDenialReason,
+  type DestructiveIntentInput,
   isDestructiveRequest,
   normalizeDestructiveIntent,
 } from "@acp/destructive-policy.ts";
@@ -16,7 +17,6 @@ import {
   resolveSessionPath,
   type SessionContext,
 } from "@acp/filesystem-roots.ts";
-import type { DestructiveIntentInput } from "@acp/omp/compatibility-contracts.ts";
 
 Deno.test("Destructive normalization: shared fixtures have complete ordered targets or bounded failure", () => {
   for (const fixture of DESTRUCTIVE_CONFORMANCE_FIXTURES) {
@@ -263,4 +263,34 @@ Deno.test("Destructive targets: real observations reuse ordinary write decisions
     Deno.chmodSync(skills, 0o755);
     Deno.removeSync(base, { recursive: true });
   }
+});
+
+Deno.test("Destructive normalization: canonical OMP single-operation payloads decode completely", () => {
+  // The exact canonical strings the OMP ingress adapter serializes for a native
+  // delete/move must decode to complete ordered targets, and a location set that
+  // disagrees with the decoded targets must keep the shared binding denial.
+  const deleteInput: DestructiveIntentInput = {
+    nativeTool: "delete",
+    rawInput: '{"path":"a.md"}',
+    executionInputBinding: '{"path":"a.md"}',
+    parserProvenance: "supported_full_parser",
+  };
+  assertEquals(decodeDestructiveIntent(deleteInput), {
+    ok: true,
+    operations: [{ kind: "delete", path: "a.md" }],
+    targets: [{ path: "a.md", intent: "delete" }],
+  });
+
+  const moveInput: DestructiveIntentInput = {
+    nativeTool: "move",
+    rawInput: '{"source":"a.md","destination":"b.md"}',
+    executionInputBinding: '{"source":"a.md","destination":"b.md"}',
+    parserProvenance: "supported_full_parser",
+  };
+  assertEquals(normalizeDestructiveIntent(moveInput, ["a.md", "b.md"], ["a.md", "b.md"]).ok, true);
+  assertEquals(normalizeDestructiveIntent(moveInput, ["a.md", "b.md"], ["a.md", "b.md", "c.md"]), {
+    ok: false,
+    reason: "binding_mismatch",
+    targets: [],
+  });
 });

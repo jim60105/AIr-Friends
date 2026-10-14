@@ -1,6 +1,6 @@
 // tests/acp/client.test.ts
 
-import { assertEquals, assertRejects } from "@std/assert";
+import { assert, assertEquals, assertRejects } from "@std/assert";
 import {
   ALLOWED_READ_EXTENSIONS,
   ChatbotClient,
@@ -7220,6 +7220,429 @@ Deno.test("ChatbotClient - legacy write title shape (title write, kind edit) sti
     if (response.outcome.outcome === "selected") {
       assertEquals(response.outcome.optionId, "allow-1");
     }
+  } finally {
+    Deno.removeSync(tempDir, { recursive: true });
+  }
+});
+
+// ============ OMP destructive ACP ingress (`normalize-omp-destructive-acp-ingress`) ============
+//
+// Every scenario drives the REAL ACP permission ingress (`requestPermission`) with
+// real temporary files and a registered session gate context. The OMP ingress
+// normalizer is selected ONLY by the client's configured `agentType` (supplied by
+// the connector); request fields can never choose the decoder. Assertions are on
+// the selected permission and the retained file, never on helper serialization.
+
+interface OmpIngressScenario {
+  readonly name: string;
+  readonly agentType?: "opencode" | "omp";
+  readonly yolo?: boolean;
+  readonly title: string;
+  readonly kind?: acp.ToolKind;
+  readonly rawInput?: unknown;
+  /** Absolute location paths sent with the request. */
+  readonly locations: readonly string[];
+  readonly expected: "allow-1" | "reject-1";
+}
+
+async function ingressVerdict(
+  tempDir: string,
+  scenario: OmpIngressScenario,
+): Promise<string> {
+  const client = createRegisteredClient(createTestSkillRegistry(), createTestLogger(), {
+    workingDir: tempDir,
+    platform: "discord",
+    userId: "123",
+    channelId: "456",
+    isDM: false,
+    sessionId: "test-session",
+    ...(scenario.agentType === undefined ? {} : { agentType: scenario.agentType }),
+    ...(scenario.yolo ? { yolo: true } : {}),
+  }, emptySkillList());
+  const response = await client.requestPermission({
+    sessionId: "test-session",
+    toolCall: {
+      toolCallId: "tc-ingress",
+      status: "pending" as const,
+      content: [],
+      title: scenario.title,
+      ...(scenario.kind === undefined ? {} : { kind: scenario.kind }),
+      ...(scenario.rawInput === undefined ? {} : { rawInput: scenario.rawInput }),
+      locations: scenario.locations.map((path) => ({ path })),
+    },
+    options: [
+      { kind: "allow_once", optionId: "allow-1", name: "Allow once" },
+      { kind: "reject_once", optionId: "reject-1", name: "Reject once" },
+    ],
+  });
+  return response.outcome.outcome === "selected" ? response.outcome.optionId : "cancelled";
+}
+
+Deno.test("ChatbotClient - OMP destructive ingress table (native delete/move, aliases and denials)", async () => {
+  const tempDir = Deno.makeTempDirSync();
+  const staging = join(tempDir, "tmp", "test-session");
+  Deno.mkdirSync(staging, { recursive: true });
+  const otherRoot = Deno.makeTempDirSync({ prefix: "air-ingress-outside-" });
+  const f = (name: string) => join(staging, name);
+  try {
+    // Seed every source file these scenarios treat as EXISTING; destinations stay
+    // prospective (created by the operation, never pre-seeded).
+    const seeds = [
+      "del.md",
+      "del2.md",
+      "del3.md",
+      "del4.md",
+      "del5.md",
+      "del6.md",
+      "other.md",
+      "m1.md",
+      "m2.md",
+      "m3.md",
+      "m4.md",
+      "m5.md",
+      "m6.md",
+      "m7.md",
+      "m8.md",
+      "m9.md",
+      "m10.md",
+      "m11.md",
+      "m12.md",
+    ];
+    for (const name of seeds) Deno.writeTextFileSync(f(name), "seed");
+
+    const scenarios: OmpIngressScenario[] = [
+      {
+        name: "native delete (kind delete, {path})",
+        agentType: "omp",
+        title: `Delete ${f("del.md")}`,
+        kind: "delete",
+        rawInput: { path: f("del.md") },
+        locations: [f("del.md")],
+        expected: "allow-1",
+      },
+      {
+        name: "missing kind identified from Delete title",
+        agentType: "omp",
+        title: `Delete ${f("del2.md")}`,
+        rawInput: { path: f("del2.md") },
+        locations: [f("del2.md")],
+        expected: "allow-1",
+      },
+      {
+        name: "title-identified move with from/to aliases",
+        agentType: "omp",
+        title: `move ${f("m1.md")} to ${f("m1-dst.md")}`,
+        rawInput: { from: f("m1.md"), to: f("m1-dst.md") },
+        locations: [f("m1.md"), f("m1-dst.md")],
+        expected: "allow-1",
+      },
+      {
+        name: "move oldPath/newPath aliases",
+        agentType: "omp",
+        title: "Move",
+        kind: "move",
+        rawInput: { oldPath: f("m2.md"), newPath: f("m2-dst.md") },
+        locations: [f("m2.md"), f("m2-dst.md")],
+        expected: "allow-1",
+      },
+      {
+        name: "move path/destination aliases",
+        agentType: "omp",
+        title: "Move",
+        kind: "move",
+        rawInput: { path: f("m3.md"), destination: f("m3-dst.md") },
+        locations: [f("m3.md"), f("m3-dst.md")],
+        expected: "allow-1",
+      },
+      {
+        name: "nullish precedence skips a null higher alias",
+        agentType: "omp",
+        title: "Move",
+        kind: "move",
+        rawInput: {
+          oldPath: null,
+          from: f("m4.md"),
+          newPath: null,
+          to: f("m4-dst.md"),
+        },
+        locations: [f("m4.md"), f("m4-dst.md")],
+        expected: "allow-1",
+      },
+      {
+        name: "invalid higher-precedence alias is never skipped",
+        agentType: "omp",
+        title: "Move",
+        kind: "move",
+        rawInput: { oldPath: 123, from: f("m5.md"), newPath: f("m5-dst.md") },
+        locations: [f("m5.md"), f("m5-dst.md")],
+        expected: "reject-1",
+      },
+      {
+        name: "missing locations",
+        agentType: "omp",
+        title: "Move",
+        kind: "move",
+        rawInput: { from: f("m6.md"), to: f("m6-dst.md") },
+        locations: [],
+        expected: "reject-1",
+      },
+      {
+        name: "partial locations (destination omitted)",
+        agentType: "omp",
+        title: "Move",
+        kind: "move",
+        rawInput: { from: f("m7.md"), to: f("m7-dst.md") },
+        locations: [f("m7.md")],
+        expected: "reject-1",
+      },
+      {
+        name: "location set inconsistent with decoded targets",
+        agentType: "omp",
+        title: "Delete",
+        kind: "delete",
+        rawInput: { path: f("del3.md") },
+        locations: [f("del3.md"), f("other.md")],
+        expected: "reject-1",
+      },
+      {
+        name: "extra mutation field edits under Delete",
+        agentType: "omp",
+        title: "Delete",
+        kind: "delete",
+        rawInput: { path: f("del4.md"), edits: [] },
+        locations: [f("del4.md")],
+        expected: "reject-1",
+      },
+      {
+        name: "extra mutation field operations under Move",
+        agentType: "omp",
+        title: "Move",
+        kind: "move",
+        rawInput: { from: f("m8.md"), to: f("m8-dst.md"), operations: [] },
+        locations: [f("m8.md"), f("m8-dst.md")],
+        expected: "reject-1",
+      },
+      {
+        name: "title-only delete without rawInput",
+        agentType: "omp",
+        title: "Delete something",
+        locations: [],
+        expected: "reject-1",
+      },
+      {
+        name: "malformed JSON keeps the unparseable denial",
+        agentType: "omp",
+        title: "Delete",
+        kind: "delete",
+        rawInput: "{",
+        locations: [f("del.md")],
+        expected: "reject-1",
+      },
+      {
+        name: "embedded patch under a Delete title",
+        agentType: "omp",
+        title: "Delete",
+        kind: "edit",
+        rawInput: { patch: "*** Begin Patch\n*** Delete File: x\n*** End Patch" },
+        locations: [],
+        expected: "reject-1",
+      },
+      {
+        name: "unsupported apply_patch shape",
+        agentType: "omp",
+        title: "apply_patch",
+        kind: "edit",
+        rawInput: { diff: "--- a\n+++ b\n" },
+        locations: [],
+        expected: "reject-1",
+      },
+      {
+        name: "move source missing denies for prospective delete target",
+        agentType: "omp",
+        title: "Move",
+        kind: "move",
+        rawInput: { from: f("absent.md"), to: f("absent-dst.md") },
+        locations: [f("absent.md"), f("absent-dst.md")],
+        expected: "reject-1",
+      },
+      {
+        name: "Delete title with kind edit is still normalized (OMP)",
+        agentType: "omp",
+        title: `Delete ${f("del5.md")}`,
+        kind: "edit",
+        rawInput: { path: f("del5.md") },
+        locations: [f("del5.md")],
+        expected: "allow-1",
+      },
+      {
+        name: "YOLO early approval precedes normalization",
+        agentType: "omp",
+        yolo: true,
+        title: "Delete",
+        kind: "delete",
+        rawInput: { path: f("del.md"), edits: [] },
+        locations: [],
+        expected: "allow-1",
+      },
+      {
+        name: "OpenCode canonical delete unchanged",
+        agentType: "opencode",
+        title: "Delete",
+        kind: "delete",
+        rawInput: { path: f("del6.md") },
+        locations: [f("del6.md")],
+        expected: "allow-1",
+      },
+      {
+        name: "OpenCode canonical move unchanged",
+        agentType: "opencode",
+        title: "Move",
+        kind: "move",
+        rawInput: { source: f("m9.md"), destination: f("m9-dst.md") },
+        locations: [f("m9.md"), f("m9-dst.md")],
+        expected: "allow-1",
+      },
+      {
+        name: "spoofed OMP native move on an OpenCode connector keeps the OpenCode outcome",
+        agentType: "opencode",
+        title: "Move",
+        kind: "move",
+        rawInput: { from: f("m10.md"), to: f("m10-dst.md") },
+        locations: [f("m10.md"), f("m10-dst.md")],
+        expected: "reject-1",
+      },
+      {
+        name: "omitted agent type keeps the legacy decoder",
+        title: "Move",
+        kind: "move",
+        rawInput: { from: f("m11.md"), to: f("m11-dst.md") },
+        locations: [f("m11.md"), f("m11-dst.md")],
+        expected: "reject-1",
+      },
+      {
+        name: "the same move shape is accepted when the connector is OMP",
+        agentType: "omp",
+        title: "Move",
+        kind: "move",
+        rawInput: { from: f("m12.md"), to: f("m12-dst.md") },
+        locations: [f("m12.md"), f("m12-dst.md")],
+        expected: "allow-1",
+      },
+    ];
+
+    for (const scenario of scenarios) {
+      assertEquals(
+        await ingressVerdict(tempDir, scenario),
+        scenario.expected,
+        scenario.name,
+      );
+    }
+
+    // A permission decision never mutates: every seeded source file is retained,
+    // and no destination is created by the ingress path.
+    for (const name of seeds) assertEquals(Deno.statSync(f(name)).isFile, true, name);
+    assertEquals(Deno.statSync(otherRoot).isDirectory, true);
+  } finally {
+    Deno.removeSync(tempDir, { recursive: true });
+    Deno.removeSync(otherRoot, { recursive: true });
+  }
+});
+
+Deno.test("ChatbotClient - OMP destructive denial records the shared reason and retains the file", async () => {
+  const tempDir = Deno.makeTempDirSync();
+  const staging = join(tempDir, "tmp", "test-session");
+  Deno.mkdirSync(staging, { recursive: true });
+  const source = join(staging, "keep.md");
+  Deno.writeTextFileSync(source, "seed");
+  try {
+    const client = createRegisteredClient(createTestSkillRegistry(), createTestLogger(), {
+      workingDir: tempDir,
+      platform: "discord",
+      userId: "123",
+      channelId: "456",
+      isDM: false,
+      sessionId: "test-session",
+      agentType: "omp",
+    }, emptySkillList());
+
+    const response = await client.requestPermission({
+      sessionId: "test-session",
+      toolCall: {
+        toolCallId: "tc-deny",
+        status: "pending" as const,
+        content: [],
+        title: "Move",
+        kind: "move",
+        rawInput: { from: source, to: join(staging, "keep-dst.md") },
+        locations: [],
+      },
+      options: [
+        { kind: "allow_once", optionId: "allow-1", name: "Allow once" },
+        { kind: "reject_once", optionId: "reject-1", name: "Reject once" },
+      ],
+    });
+    assertEquals(response.outcome.outcome, "selected");
+    if (response.outcome.outcome === "selected") {
+      assertEquals(response.outcome.optionId, "reject-1");
+    }
+    const rejections = client.getRecentPermissionRejections();
+    assertEquals(rejections.length, 1);
+    assertEquals(rejections[0].reason, "rejected_destructive_incomplete");
+    assert(Deno.statSync(source).isFile, "the denied move retains its source file");
+    await assertRejects(() => Deno.stat(join(staging, "keep-dst.md")));
+  } finally {
+    Deno.removeSync(tempDir, { recursive: true });
+  }
+});
+
+Deno.test("ChatbotClient - request metadata cannot select the OMP decoder", async () => {
+  const tempDir = Deno.makeTempDirSync();
+  const staging = join(tempDir, "tmp", "test-session");
+  Deno.mkdirSync(staging, { recursive: true });
+  Deno.writeTextFileSync(join(staging, "meta.md"), "seed");
+  try {
+    const run = async (agentType: ClientConfig["agentType"]) => {
+      const client = createRegisteredClient(createTestSkillRegistry(), createTestLogger(), {
+        workingDir: tempDir,
+        platform: "discord",
+        userId: "123",
+        channelId: "456",
+        isDM: false,
+        sessionId: "test-session",
+        agentType,
+      }, emptySkillList());
+      const response = await client.requestPermission({
+        sessionId: "test-session",
+        toolCall: {
+          toolCallId: "tc-meta",
+          status: "pending" as const,
+          content: [],
+          title: "Move",
+          kind: "move",
+          // Caller claims OMP-native move fields and synthetic parser provenance.
+          rawInput: {
+            from: join(staging, "meta.md"),
+            to: join(staging, "meta-dst.md"),
+            parserProvenance: "synthetic_adapter_decoder",
+          },
+          locations: [
+            { path: join(staging, "meta.md") },
+            { path: join(staging, "meta-dst.md") },
+          ],
+        },
+        options: [
+          { kind: "allow_once", optionId: "allow-1", name: "Allow once" },
+          { kind: "reject_once", optionId: "reject-1", name: "Reject once" },
+        ],
+      });
+      return response.outcome.outcome === "selected" ? response.outcome.optionId : "cancelled";
+    };
+
+    // The extra `parserProvenance` field makes both decoders fail closed, and the
+    // OpenCode/omitted clients keep their own decoder — never the OMP normalizer.
+    assertEquals(await run("opencode"), "reject-1");
+    assertEquals(await run(undefined), "reject-1");
+    assertEquals(await run("omp"), "reject-1");
   } finally {
     Deno.removeSync(tempDir, { recursive: true });
   }
