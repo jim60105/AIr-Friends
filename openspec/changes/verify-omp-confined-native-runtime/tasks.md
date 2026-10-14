@@ -1,0 +1,41 @@
+# Tasks
+
+## 1. Complete pinned-native evidence deliverable
+
+Estimated2.50h work plus1.00h acceptance/docs/repair =3.50h, not a guarantee. No runtime source correction, generated production YAML, missing-import bridge or paid prompt. Run acceptance only after this change is complete.
+
+- [ ] 1.1 Author the native model fixture and setup boundary (0.50 h estimate).
+  - Prerequisite: every cutover-omp-native-runtime task; its production launch/mount code and real confined IO tests already work.
+  - Exact targets: new tests/fixtures/omp-native-runtime/home/.omp/agent/models.yml; new tests/acp/omp-native-runtime-smoke.test.ts fixture-setup helper; existing src/core/skills-root.ts resolver is consumed unchanged.
+  - Ordered edits: Hand-author the exact provider/model YAML fields in design.md. Create temporary HOME and copy authored fixture bytes there before starting observation. Provision the configured single skill root at HOME/.agents/skills using existing tracked skill bytes; set agent.skillsDir to that same root. Use stock mode YAML verbatim and existing prompt/bundle assets. Restore parent HOME/environment in finally and serialize these tests to avoid global-environment races.
+  - Input/output/error behavior: Native model loader reads the authored fixture at its default HOME path and later catalog selection resolves parity-fixture; no config parser/serializer or string interpolation constructs YAML. Missing source fixture/asset fails with its path.
+  - Callers/remove: Final consumer proposal reuses this fixture path; no existing production caller changes or shared tests removed.
+  - Non-goals: No provider credentials, paid model, runtime YAML provisioning, native profile consistency gate or test of copied bytes/defaults.
+  - Acceptance after all tasks: the real connector can select parity-fixture from the actual advertised catalog; configuration access events are read-only after setup.
+
+- [ ] 1.2 Exercise real connector lifecycle in both modes (1.00 h estimate).
+  - Prerequisite: Task1.1; shipped native18.6.1 executable and bundled ESM output available.
+  - Exact targets/symbols: tests/acp/omp-native-runtime-smoke.test.ts; createAgentConfig from src/acp/agent-factory.ts; AgentConnector.connect/createSession/setSessionModel/cancel/reconnectAndResumeSession/disconnect from src/acp/agent-connector.ts; existing client/registry/logger test constructors.
+  - Ordered edits: Record omp --version and reject absent/mismatched executable explicitly. Create the actual production factory configuration for restricted, then YOLO. Connect; createSession([],workingDir); select parity-fixture via setSessionModel(actualId,'parity-fixture'); cancel(actualId); reconnectAndResumeSession(actualId,workingDir,[]) without an OMP ownership/gate payload; assert true and the same actual session ID/model selection. Disconnect in finally. Do not replace subprocess/connection/catalog with mocks and do not send a prompt.
+  - Input/output/error behavior: Actual native initialization/catalog/cancel/load succeed without paid network use. Native startup/model/load errors are failures, not fabricated readiness or silent skips. Wrong-version evidence is not image certification.
+  - Callers/remove: Consume existing factory/connector APIs unchanged; no implementation or obsolete shared tests to remove. Native tool execution remains F's separate evidence.
+  - Non-goals: No native capability-handler execution claim from handshake, external network/proxy/platform claim or new readiness channel.
+  - Acceptance after all tasks: restricted and YOLO complete native create/select/cancel/restart/load with their actual IDs and zero authored configuration-write events.
+
+- [ ] 1.3 Extend the same native probe to confined real pool consumers (1.00 h estimate).
+  - Prerequisite: Tasks1.1–1.2; supported Linux bwrap namespace runtime. D already adds selected asset/data mounts and own/sibling/read-only IO cases.
+  - Exact targets: tests/acp/omp-native-runtime-smoke.test.ts; AgentProcessPool constructor/run/isIdle/stop from src/core/agent-process-pool.ts; PoolRunOptions fields as used by tests/core/omp-pool-modes.test.ts; tests/acp/filesystem-confinement.test.ts behavioral controls from D.
+  - Ordered edits: Repeat real connector lifecycle with filesystemConfinement:true and network sharing configured via existing sandbox option. Construct a real pool, using its existing connectorFactory injection only to capture new AgentConnector(options) instances. Use public pool.run(options,runner) twice for one poolKey with explicit agentType:'omp' and opposite permissionMode values. Each runner uses the actual connector lifecycle above. Capture actual native writes below each selected XDG_DATA_HOME/omp, then restore that mode's real session through its connector; keep caller cwd/shared channel TMPDIR conventions. Execute the existing real bwrap IO controls for sibling marker unreadability and skill-root read-only behavior. Finally wait for isIdle(), disconnect every captured real connector and call stop() for timers; never invent pool.dispose/shutdown or call private acquireProcess.
+  - Input/output/error behavior: Confined native catalog reads and native database/session persistence/load succeed in both mode roots. Sibling marker and protected skill mutation fail via the actual shared mount boundary. Missing bwrap capability is an explicit failed prerequisite; there is no fallback to unconfined success.
+  - Callers/remove: No public production API changes. Keep shared lease/key/OpenCode tests unchanged and remove no inventory or identity-drift scenarios.
+  - Non-goals: No broad dataRoot/HOME/sibling bind, additional module identity gate, per-decision root rescan or paid prompt.
+  - Acceptance after all tasks: confined restricted/YOLO native sessions consume assets, persist and restore their own data; actual selected-root controls deny sibling/skill effects; no leaked subprocesses/timers remain.
+
+- [ ] 1.4 Execute acceptance, label evidence and repair probe failures (1.00 h estimate).
+  - Prerequisite: Tasks1.1–1.3; total allowance includes0.25h documentation plus0.75h native execution/repair.
+  - Exact targets: tests/acp/omp-native-runtime-smoke.test.ts; docs/OMP_SPAWN.md native evidence section; docs/OMP_PACKAGING.md native bundle/model evidence; CHANGELOG.md.
+  - Ordered edits: Trace production factory/native starts after named provisioning with strace -f openat/openat2/creat/rename/renameat/renameat2/unlink/unlinkat, or an equivalent observer that detects writable opens and replacements. Classify mode/model YAML writes separately from expected native data writes. Run the single probe and existing confinement/pool tests once after the unit is coherent; fix only probe regressions, not deferred production cutover work. Document exact version/architecture, confined and unconfined catalog/load evidence, provisioned fixture boundaries and what remains unexercised. If production cutover is broken, report its prerequisite failure rather than adding a placeholder/fallback.
+  - Input/output/error behavior: Zero authored config writable-open/replacement events; actual mode-root data writes; explicit prerequisite failure for unavailable binary/bwrap/observer. No paid/public/tool-dispatch success claim follows from this test.
+  - Callers/remove: F consumes the authored fixture and adds scripted native dispatch; no runtime callers or old shared specs/tests removed.
+  - Non-goals: No image/public provider/proxy/platform certification, byte-equality assertion, source/argv assertion or implementation scope expansion.
+  - Acceptance commands: omp --version; deno test --allow-net --allow-read --allow-write --allow-env --allow-run --allow-ffi tests/acp/omp-native-runtime-smoke.test.ts tests/acp/filesystem-confinement.test.ts tests/core/omp-pool-modes.test.ts. Expected exact18.6.1, actual confined/unconfined create/select/cancel/load, two mode data roots, rejected sibling/skill effects and zero production YAML write/replacement events. Record failures honestly; never skip/pass missing prerequisites.
