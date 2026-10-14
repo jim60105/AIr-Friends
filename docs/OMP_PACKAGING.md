@@ -76,10 +76,11 @@ is verified with `sha256sum -c -` BEFORE any install/COPY consumption.
 | `/opt/air/omp/prompt/SYSTEM.md`         | `prompts/system_prompt_override.md`      | `0:0`       | 0644       |
 | `/opt/air/omp/extension/index.js`       | build-time generated ESM bundle (C3)     | `0:0`       | 0644       |
 | `/opt/air/omp/PACKAGE-MANIFEST.sha256`  | regenerated at every image build         | `0:0`       | 0644       |
-| `/opt/air/skills/**`                    | staged bundled catalog + reserved `lib` (`scripts/stage-owned-skills.ts`; `unify-omp-skill-root-resolution` D7 — never a broad `skills/` copy). No OMP code path declares or trusts this tree since `align-omp-skill-trust-to-shared-root`; `collapse-skill-packaging-to-one-tree` removes the install and this row | `0:0`       | 0755 files |
+| `/home/deno/.agents/skills/**`          | repository `skills/` tree (`COPY skills/` — the image's ONLY packaged skill tree) | `$UID:0`    | 0775       |
 
-Ownership rationale (deliberate divergences from the image's `$UID:0` 775
-pattern, both documented in Containerfile comments):
+Ownership rationale (the one packaged skill tree first, then the deliberate
+divergences from the image's `$UID:0` 775 pattern — both documented in
+Containerfile comments):
 
 - **`omp` binary is root-owned 0755, not `$UID:0` 775.** `$UID` is the agent's
   own user inside this image — a group-writable agent binary would be
@@ -89,17 +90,18 @@ pattern, both documented in Containerfile comments):
   user**, and it sits outside every agent-writable root: never under
   `/app/data`, `/app/prompts`, or `/home/deno`. The user-home config-dir
   pattern used for `opencode.json` was rejected for exactly this reason.
-- **`/opt/air/skills` (row 28) is a retired declaration.** It is installed
-  root-owned `0:0` `0755` as it was, but since
-  `align-omp-skill-trust-to-shared-root` NO OMP code path declares or trusts it:
-  the settings declaration is generated per launch from the deployment-RESOLVED
-  root (`skills.customDirectories`, docs/OMP_SETTINGS.md §7) and that root — the
-  image's agent-writable personal tree at `/home/deno/.agents/skills`, `$UID:0`
-  `0775` — is admitted on canonical identity, link-free components and
-  containment rather than on ownership. The `README`/catalog staging is
-  unchanged; the tree sits OUTSIDE `/opt/air/omp`, so its bytes were never in
-  `PACKAGE-MANIFEST.sha256`'s digest set, and `collapse-skill-packaging-to-one-tree`
-  removes both the install and this rationale.
+- **`/home/deno/.agents/skills` is the image's only packaged skill tree, and it
+  is agent-writable by design.** It is not an ownership divergence: it follows
+  the deployment's `$UID:0` 775 pattern, the linked `COPY` leaves the
+  `/home/deno/.agents` parent entries at 0755 as this Containerfile's mode note
+  records, and no second skill root exists under any other path. Both agent
+  types resolve it (`agent.skillsDir` / `AGENT_SKILLS_DIR`) — the settings
+  declaration is generated per launch from that deployment-RESOLVED root
+  (`skills.customDirectories`, docs/OMP_SETTINGS.md §7), admitted on canonical
+  identity, link-free components and containment rather than on ownership — and
+  external runtime installs publish into the SAME tree alongside the authored
+  content. It sits OUTSIDE `/opt/air/omp`, so no skill byte was ever in
+  `PACKAGE-MANIFEST.sha256`'s digest set.
 
 **Manifest scope is unchanged and still mandatory:** every installed
 `/opt/air/omp` input is digest-covered, so the authored mode overlays (whose
