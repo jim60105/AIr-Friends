@@ -37,28 +37,24 @@ Never run bare `deno test`; use the tasks above so permission flags match CI.
   connection death (`crash: true` never settles).
 - **`omp-mock-session.ts`** — the shared OMP mock-session builder (spec:
   Shared OMP Mock Session Builder Contract). Composition dimensions:
-  permission mode, recorded ownership context (`deriveActualRecoveryTarget`
-  from the factory env — never hand-derived), config-catalog shape, handler
-  availability (**default absent**), live registry-epoch tool-observation
-  fixtures, and destructive-input shapes. Every allow-path fixture must be
-  registered as a labeled synthetic positive in `SyntheticPositiveLedger`.
-  The 5.2 runtime guard scans `SyntheticPositiveLedger.allEntries()` — a
-  **per-Deno-process** scan (Deno gives each test file its own process), so
-  the guard verifies every positive registered in its own file, and every
-  other suite verifies its own fixtures locally (each file asserts its own
-  ledger entries carry the label). There is no readiness
+  permission mode, the pool base root the mode-scoped native data root
+  derives from (`{baseRoot}/omp-agent/{mode}/xdg-data`), the scripted
+  in-process connection, and client-config/cwd overrides. There is no readiness
   tuple/channel/surface anywhere on the composed object. The follow-up
   per-spawn/pool
   skill-handoff regression (row 22) consumes this builder **unchanged**;
   new fields are added only additively in that change.
 
+Mock evidence is identified as mock evidence by the owning suite's scenario
+and comment naming; no synthetic-approval ledger, epoch or governance record
+exists anywhere in this tree.
+
 ## Combined lifecycle suite (`tests/integration/omp-lifecycle/`)
 
-| File                                          | Covers                                                                                                                                                                                                                                                                                                                                                                                                              |
-| --------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `lifecycle.integration.test.ts`               | 3.1 happy path (initialize/new/prompt/cancel/load through the real `AgentProcessPool`), 3.2 crash → reconnect → same-mode load with gate-context re-evaluation, 3.3/3.3b cross-mode ownership rejection both directions + post-load catalog-miss isolation, 4.1 absent-handler client-policy denials + pinned launch posture, 4.3 dual-mode coexistence on the global lease + LSP-posture stability across respawn. |
-| `enforcement-composition.integration.test.ts` | 4.2 registry-refresh re-admission composed through 14b's real handler body + 14a's real decision modules (connection tier): stale-epoch denial, labeled MCP re-admission positive, workspace-origin provenance denial, record-survivor never grants, undecodable destructive fail-closed with zero side effects.                                                                                                    |
-| `opencode-regression.integration.test.ts`     | 5.1 OpenCode launch values byte-compared to the shipped factory output + pool reuse + OpenCode-only RPC stream + `agent-config/opencode.json` build/yolo `lsp` denies; 5.2 the mandatory runtime honesty guard (ledger scan + pinned unresolved-seam statuses as data).                                                                                                                                             |
+| File                                      | Covers                                                                                                                                                                                                                                                                                                                                                                                                              |
+| ----------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `lifecycle.integration.test.ts`           | 3.1 happy path (initialize/new/prompt/cancel/load through the real `AgentProcessPool`), 3.2 crash → reconnect → same-mode load with gate-context re-evaluation, 3.3/3.3b cross-mode ownership rejection both directions + post-load catalog-miss isolation, 4.1 absent-handler client-policy denials + pinned launch posture, 4.3 dual-mode coexistence on the global lease + LSP-posture stability across respawn. |
+| `opencode-regression.integration.test.ts` | 5.1 OpenCode launch values byte-compared to the shipped factory output + pool reuse + OpenCode-only RPC stream + `agent-config/opencode.json` build/yolo `lsp` denies; 5.2 the mock composition exposes no readiness/handler surface, so no readiness claim can drift in.                                                                                                                                           |
 
 ## Determinism rules
 
@@ -79,16 +75,12 @@ Never run bare `deno test`; use the tasks above so permission flags match CI.
   mocks of `mock-acp-agent.ts`: no real `omp` executable, provider or paid
   credentials, network egress, container/bwrap, or live-acceptance path.
 
-## P0 fixture-labeling rule
+## Mock-evidence rule
 
-Every scenario where a restricted call or prompt is **allowed** registers
-its enabling fixture in `SyntheticPositiveLedger` with a
-`composition-boundary:` label stating why it is a synthetic positive, not
-native evidence. Deny/blocked outcomes need no ledger entry (they are the
-fail-closed default). The 5.2 guard fails the suite if any ledger entry
-lacks the label, and asserts the pinned unresolved-seam statuses
-(`needs-mechanism-audit` MCP basis, `unresolved` record-reset gate,
-`UNRESOLVED` destructive-decode verdict) as deny-basis data.
+Mock evidence stays mock evidence: the owning suite identifies it as such in
+its own scenario names and comments. There is no synthetic-approval ledger,
+epoch or governance record to register against, so an allow-path fixture needs
+no separate bookkeeping entry.
 
 ## Evidence boundary (design §15)
 
@@ -106,14 +98,15 @@ The original (P0–P9) suite was test-only: `CHANGELOG.md` was intentionally
 untouched (the batch changelog sync is owned by the final docs row), and
 `config.example.yaml`, `.env.example`, `helm/values.yaml`, and `deno.json`
 carried no changes. Correction-batch row C2 (`align-omp-native-tool-contracts`)
-supersedes the last claim: `deno.json`/`deno.lock` now carry the exact
-`@sinclair/typebox` import-map pin that lets Deno fixtures resolve the same
-schema-builder facade the pinned host host-resolves for the extension
-closure (`docs/OMP_PACKAGING.md` §5).
+once pinned `@sinclair/typebox` in `deno.json`/`deno.lock` so Deno fixtures
+resolved the schema-builder facade the pinned host resolved; the native
+runtime cutover removed that alias, so no import-map pin remains
+(`docs/OMP_PACKAGING.md` §5).
 Correction-batch row C3 (`package-bun-compatible-omp-extension`) replaces the
 extension packaging under test: the image-side mirror tree and generated
 `deno.json` import map are gone, replaced by ONE generated native-loadable
 bundle (`deno task bundle:omp-extension` → `index.js`; the packaging suite
-builds it and asserts the emitted-edge audit and digest inventory). The repo
-import-map pin above stays for Deno fixtures — the BUNDLE itself keeps only
-the bare host-facade specifier and installs no npm: pin.
+builds it and asserts the emitted-edge audit and digest inventory). The bundled
+capability-admission closure carries no external dependency edge at all —
+documented `node:`/`bun:` builtins stay external because the native runtime
+provides them — and the bundle installs no npm: pin.

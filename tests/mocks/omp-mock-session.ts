@@ -1,20 +1,17 @@
 /**
- * Shared OMP mock-session composition surface (mock-acp-lifecycle-coverage).
+ * Shared OMP mock-session composition surface.
  *
- * The consume-unchanged builder promised to row 22 (finish-omp-mocked-skill-
- * handoff): one entry point assembles
- * the dimensions every OMP lifecycle scenario needs — mode-scoped OMP launch
- * identity ({permissionMode, processNamespace}), OMP-shaped config catalogs,
- * handler-absent posture, registry observations, destructive fixtures — and
- * an explicit SyntheticPositiveLedger.
+ * The consume-unchanged builder promised to the mock handoff suite: one entry
+ * point assembles the dimensions every OMP lifecycle scenario needs —
+ * mode-scoped OMP launch identity ({permissionMode, native data root}),
+ * OMP-shaped config catalogs, scripted connection/subprocess behavior and
+ * destructive request fixtures.
  *
- * Pinned honesty posture (row-13 cancelled readiness; P0 fixture rule):
- * - There is NO readiness tuple, handshake, channel, or state anywhere on the
- *   builder surface: the builder exposes none, and default compositions are
- *   fail-closed (handler "absent" by default, untrusted registry defaults).
- * - Every allow-path fixture must be registered as a labeled synthetic
- *   positive in the ledger; the ledger makes the composition boundary
- *   explicit and mechanically inspectable.
+ * Honesty posture:
+ * - There is NO readiness tuple, handshake, channel or state anywhere on the
+ *   builder surface, and no synthetic-approval ledger: mock evidence is
+ *   identified as mock evidence by this builder's own shape and by the owning
+ *   suites' scenario names.
  * - Nothing here demonstrates native OMP binary behavior: catalogs are
  *   synthetic shapes, subprocess spawns are `deno run` mocks only, and the
  *   real production defaults (factory launch posture, real pool, real
@@ -27,64 +24,14 @@
 
 import { AgentConnector } from "@acp/agent-connector.ts";
 import { createAgentConfig } from "@acp/agent-factory.ts";
-import { ompSettingsForMode } from "@acp/omp-settings.ts";
-import { stageOmpSettingsSourcePlan } from "./omp-plan-fixture.ts";
-import { ompAgentDir, resolveOmpConfigPath } from "@utils/omp-paths.ts";
-import type { AgentConfig, ClientConfig } from "@acp/types.ts";
+import { ompXdgDataHome } from "@utils/omp-paths.ts";
+import type { AgentConfig, ClientConfig, OmpPermissionMode } from "@acp/types.ts";
 import type { Config } from "../../src/types/config.ts";
 import {
   createMockAcpConnection,
   type MockAcpConnection,
   type MockAcpConnectionScript,
 } from "./mock-acp-connection.ts";
-
-export type OmpPermissionMode = "restricted" | "native-yolo";
-
-/**
- * One labeled synthetic allow-positive. Every client-observable allow that the
- * mock composition produces (e.g. the yolo gate approving the recovered
- * session's re-issued prompt, an operator-MCP re-admission on a fresh epoch)
- * is registered here with the label stating WHY it is a synthetic positive
- * and not native-agent evidence.
- */
-export interface SyntheticPositive {
-  readonly id: string;
-  readonly label: string;
-  readonly detail: string;
-}
-
-export class SyntheticPositiveLedger {
-  static #all: SyntheticPositiveLedger[] = [];
-  #entries: SyntheticPositive[] = [];
-
-  constructor() {
-    // Suite-level honesty guard (5.2) scans every ledger created anywhere in
-    // the process at runtime — no source-text snapshots.
-    SyntheticPositiveLedger.#all.push(this);
-  }
-
-  /** Every synthetic positive registered across all ledgers so far. */
-  static allEntries(): readonly SyntheticPositive[] {
-    return SyntheticPositiveLedger.#all.flatMap((ledger) => ledger.entries());
-  }
-
-  register(id: string, label: string, detail: string): SyntheticPositive {
-    if (this.#entries.some((entry) => entry.id === id)) {
-      throw new Error(`duplicate synthetic positive id: ${id}`);
-    }
-    const entry: SyntheticPositive = { id, label, detail };
-    this.#entries.push(entry);
-    return entry;
-  }
-
-  entries(): readonly SyntheticPositive[] {
-    return [...this.#entries];
-  }
-
-  ids(): readonly string[] {
-    return this.#entries.map((entry) => entry.id);
-  }
-}
 
 /** The silent connector logger used across the mock suites. */
 export const SILENT_LOGGER = {
@@ -131,8 +78,9 @@ export function createOmpTestConfig(params: {
 
 /**
  * Build the shipped-launch-posture OMP AgentConfig for a mode via the REAL
- * factory (workingDir is the mock subprocess's launch cwd; mode roots derive
- * from repoPath). Call AFTER asserting the pinned launch assets exist.
+ * factory (workingDir is the mock subprocess's working directory; the mode data
+ * root derives from repoPath). Call AFTER asserting the pinned launch assets
+ * exist.
  */
 export function buildOmpFactoryAgentConfig(params: {
   mode: OmpPermissionMode;
@@ -203,16 +151,10 @@ export function useMockOmpAgent(
 export interface OmpMockSessionInput {
   /** Mode-scoped launch identity for the connector's OMP env shape. */
   mode: OmpPermissionMode;
-  /** Pool base root the namespace derives from (`{baseRoot}/omp-agent/{mode}`). */
+  /** Pool base root the native data root derives from (`{baseRoot}/omp-agent/{mode}/xdg-data`). */
   baseRoot: string;
   /** Script for the injected in-process connection (synthetic responses). */
   script: MockAcpConnectionScript;
-  /**
-   * Handler posture: "absent" (default) leaves the connector with NO handler
-   * composition (the accepted residual); an object records a LABELED
-   * synthetic-installed positive — never a native-invocation claim.
-   */
-  handler?: "absent" | { syntheticInstalled: true };
   /** Client config overrides for the real ChatbotClient under the connector. */
   clientConfig?: Partial<ClientConfig>;
   /** Session cwd for the client config. */
@@ -224,8 +166,6 @@ export interface OmpMockSession {
   connector: AgentConnector;
   /** RPC recorder over the injected connection. */
   connection: MockAcpConnection;
-  /** The labeled synthetic-positive ledger for this composition. */
-  ledger: SyntheticPositiveLedger;
   /** The recorded launch posture for the requested mode (factory-shaped env). */
   agentConfig: AgentConfig;
   /**
@@ -233,45 +173,29 @@ export interface OmpMockSession {
    * the raced calls deterministically (no timers, no process).
    */
   armCrashSignal(): (message?: string) => void;
-  /** Register a labeled synthetic positive (guarded at the builder edge). */
-  registerPositive(id: string, label: string, detail: string): SyntheticPositive;
 }
 
 /**
  * Compose one connection-tier OMP mock session around a REAL AgentConnector.
  * The connector's connection is replaced with the scripted recorder;
  * capabilities carry loadSession so recovery paths are exercisable. Default
- * posture is fail-closed: no handler, no readiness, empty catalogs unless
- * scripted.
+ * posture is fail-closed: empty catalogs unless scripted.
  */
 export function buildOmpMockSession(input: OmpMockSessionInput): OmpMockSession {
-  const ledger = new SyntheticPositiveLedger();
-  const processNamespace = ompAgentDir(input.baseRoot, input.mode);
   const cwd = input.cwd ?? input.baseRoot;
+  const nativeDataHome = ompXdgDataHome(input.baseRoot, input.mode);
 
   const agentConfig: AgentConfig = {
     command: "true",
     args: [],
     cwd,
     env: {
-      // The mode-scoped identity the ownership derivation consumes.
-      PI_CODING_AGENT_DIR: processNamespace,
-      TMPDIR: `${processNamespace}/tmp`,
-      XDG_DATA_HOME: `${processNamespace}/xdg`,
+      // The mode-distinct native data root IS this composition's mode-scoped
+      // identity (session database, auth side files); the shared TMPDIR
+      // convention carries the process temporary root.
+      XDG_DATA_HOME: nativeDataHome,
+      TMPDIR: `${input.baseRoot}/channel-tmp/${input.mode}`,
     },
-    // Row 26: the real owned-only settings-source plan for this composition's
-    // base root and mode, with the same pinned overlay assets the factory
-    // launches with. Consumers that drive a CONNECTOR seam (createSession /
-    // reconnectAndResumeSession) must first ensure the plan's authority roots
-    // exist (`ownedHome`/`agentDir`/`launchCwd` below `baseRoot`) — with a
-    // synthetic base root the preflight correctly fails closed instead.
-    settingsSourcePlan: stageOmpSettingsSourcePlan({
-      baseRoot: input.baseRoot,
-      mode: input.mode,
-      authoredOverlayPaths: ompSettingsForMode(input.mode).orderedOverlayPaths.map((overlayPath) =>
-        resolveOmpConfigPath(overlayPath)
-      ),
-    }),
   };
 
   const connector = new AgentConnector({
@@ -308,26 +232,9 @@ export function buildOmpMockSession(input: OmpMockSessionInput): OmpMockSession 
   connector["connection"] = connection.connection as unknown as typeof connector["connection"];
   connector["capabilities"] = { loadSession: true } as typeof connector["capabilities"];
 
-  if (input.handler === "absent" || input.handler === undefined) {
-    // Default: nothing installed — the accepted-residual posture. Recorded in
-    // the ledger as an ABSENCE fact so guards can name the composition.
-    ledger.register(
-      "handler-absent",
-      "composition-boundary: no handler installed (accepted residual; not a native claim)",
-      `mode=${input.mode}`,
-    );
-  } else {
-    ledger.register(
-      "handler-synthetic-installed",
-      "composition-boundary: handler installation is a SYNTHETIC positive; nothing demonstrates the native binary invokes it",
-      `mode=${input.mode}`,
-    );
-  }
-
   return {
     connector,
     connection,
-    ledger,
     agentConfig,
     armCrashSignal: () => {
       const { promise, reject } = Promise.withResolvers<never>();
@@ -345,7 +252,6 @@ export function buildOmpMockSession(input: OmpMockSessionInput): OmpMockSession 
         reject(new Error(message ?? "mock crash signal"));
       };
     },
-    registerPositive: (id, label, detail) => ledger.register(id, label, detail),
   };
 }
 
@@ -374,7 +280,9 @@ export async function expectProcessGone(
 ): Promise<void> {
   for (let attempt = 0; attempt < attempts; attempt++) {
     if (!processAlive(pid)) return;
-    await new Promise((resolve) => setTimeout(resolve, 25));
+    const { promise, resolve } = Promise.withResolvers<void>();
+    setTimeout(resolve, 25);
+    await promise;
   }
   throw new Error(`${what} (pid ${pid}) still live after bounded kill -0 observation`);
 }

@@ -1161,14 +1161,14 @@ type RecoveryHarness = {
   order: string[];
 };
 
-const OMP_YOLO_NS = "/data/omp-pools/discord:c1/omp-agent/native-yolo";
-const OMP_RESTRICTED_NS = "/data/omp-pools/discord:c1/omp-agent/restricted";
+const OMP_YOLO_NS = "/data/omp-pools/discord:c1/omp-agent/native-yolo/xdg-data";
+const OMP_RESTRICTED_NS = "/data/omp-pools/discord:c1/omp-agent/restricted/xdg-data";
 const OC_DATA_HOME = "/data/opencode-data/discord:c1";
 
 // OMP recovery tests resume against a REAL clean (empty) workspace directory.
 // The connector consumes no settings-source plan any more
-// (`simplify-omp-session-boundaries`), so no plan fixture is built. The env
-// namespaces above stay synthetic — the ownership derivation reads
+// (`simplify-omp-session-boundaries`), so no plan fixture is built. The native
+// XDG data roots above stay synthetic — the ownership derivation reads
 // agentConfig.env only.
 let ompWorkspaceFixture: string | null = null;
 /** The real clean recovery workspace for OMP harnesses (`suffix` distinguishes
@@ -1264,7 +1264,7 @@ function createRecoveryHarness(params: {
 Deno.test("reconnectAndResumeSession - same-mode OMP recovery respawns, loads, restores, returns true", async () => {
   const h = createRecoveryHarness({
     agentType: "omp",
-    env: { PI_CODING_AGENT_DIR: OMP_YOLO_NS, TMPDIR: `${OMP_YOLO_NS}/tmp` },
+    env: { XDG_DATA_HOME: OMP_YOLO_NS },
   });
 
   const success = await h.connector.reconnectAndResumeSession(
@@ -1287,7 +1287,7 @@ Deno.test("reconnectAndResumeSession - same-mode OMP recovery respawns, loads, r
 Deno.test("reconnectAndResumeSession - OMP recovery without any supplied context uses the cwd-only restore", async () => {
   const h = createRecoveryHarness({
     agentType: "omp",
-    env: { PI_CODING_AGENT_DIR: OMP_YOLO_NS, TMPDIR: `${OMP_YOLO_NS}/tmp` },
+    env: { XDG_DATA_HOME: OMP_YOLO_NS },
   });
   const cwd = ompRecoveryWorkspace();
 
@@ -1307,7 +1307,7 @@ Deno.test("reconnectAndResumeSession - OMP recovery without any supplied context
 Deno.test("reconnectAndResumeSession - a legacy OMP ownership record is not an authorization input", async () => {
   const h = createRecoveryHarness({
     agentType: "omp",
-    env: { PI_CODING_AGENT_DIR: OMP_RESTRICTED_NS, TMPDIR: `${OMP_RESTRICTED_NS}/tmp` },
+    env: { XDG_DATA_HOME: OMP_RESTRICTED_NS },
   });
 
   // The record contradicts the configured env namespace and mode: OMP recovery
@@ -1335,7 +1335,7 @@ Deno.test("reconnectAndResumeSession - a legacy OMP ownership record is not an a
 Deno.test("reconnectAndResumeSession - matched recovery consumes row 6: cache + stable-first model + supplied reasoning", async () => {
   const h = createRecoveryHarness({
     agentType: "omp",
-    env: { PI_CODING_AGENT_DIR: OMP_YOLO_NS, TMPDIR: `${OMP_YOLO_NS}/tmp` },
+    env: { XDG_DATA_HOME: OMP_YOLO_NS },
   });
   (h.connector["sessionModelIds"] as Map<string, string>).set("sess_restore", "provider/target");
   h.connector.connect = () => {
@@ -1402,7 +1402,7 @@ Deno.test("reconnectAndResumeSession - matched recovery consumes row 6: cache + 
 Deno.test("reconnectAndResumeSession - post-load catalog miss propagates in isolation with the recovery context supplied", async () => {
   const h = createRecoveryHarness({
     agentType: "omp",
-    env: { PI_CODING_AGENT_DIR: OMP_YOLO_NS, TMPDIR: `${OMP_YOLO_NS}/tmp` },
+    env: { XDG_DATA_HOME: OMP_YOLO_NS },
   });
   (h.connector["sessionModelIds"] as Map<string, string>).set("sess_miss", "gone-model");
   h.connector.connect = () => {
@@ -1437,7 +1437,7 @@ Deno.test("reconnectAndResumeSession - post-load catalog miss propagates in isol
 Deno.test("reconnectAndResumeSession - full gate context restored for the recovered id on a FRESH connector", async () => {
   const h = createRecoveryHarness({
     agentType: "omp",
-    env: { PI_CODING_AGENT_DIR: OMP_YOLO_NS, TMPDIR: `${OMP_YOLO_NS}/tmp` },
+    env: { XDG_DATA_HOME: OMP_YOLO_NS },
   });
   const full = {
     cwd: ompRecoveryWorkspace("/a"),
@@ -1475,7 +1475,7 @@ Deno.test("reconnectAndResumeSession - OMP recovery with only a contradicting le
   const siblingCtx = { cwd: "/workspace/b", shellSessionId: "shell_b", yolo: false };
   const h = createRecoveryHarness({
     agentType: "omp",
-    env: { PI_CODING_AGENT_DIR: OMP_YOLO_NS, TMPDIR: `${OMP_YOLO_NS}/tmp` },
+    env: { XDG_DATA_HOME: OMP_YOLO_NS },
     cachedGateContexts: { sess_b: siblingCtx },
   });
   const cwd = ompRecoveryWorkspace("/a");
@@ -1508,7 +1508,7 @@ Deno.test("reconnectAndResumeSession - OMP recovery with only a contradicting le
 Deno.test("reconnectAndResumeSession - supplied gate context disagreeing with the recovery cwd fails after load for that session only", async () => {
   const h = createRecoveryHarness({
     agentType: "omp",
-    env: { PI_CODING_AGENT_DIR: OMP_YOLO_NS, TMPDIR: `${OMP_YOLO_NS}/tmp` },
+    env: { XDG_DATA_HOME: OMP_YOLO_NS },
   });
 
   await assertRejects(
@@ -1529,7 +1529,7 @@ Deno.test("reconnectAndResumeSession - supplied gate context disagreeing with th
 Deno.test("reconnectAndResumeSession - an absent native session propagates the load error with no config tail or gate restore", async () => {
   const h = createRecoveryHarness({
     agentType: "omp",
-    env: { PI_CODING_AGENT_DIR: OMP_YOLO_NS, TMPDIR: `${OMP_YOLO_NS}/tmp` },
+    env: { XDG_DATA_HOME: OMP_YOLO_NS },
   });
   h.connector.connect = () => {
     h.order.push("connect");
@@ -1569,7 +1569,7 @@ Deno.test("reconnectAndResumeSession - an absent native session propagates the l
 Deno.test("reconnectAndResumeSession - hook runs exactly once after restore, before success", async () => {
   const h = createRecoveryHarness({
     agentType: "omp",
-    env: { PI_CODING_AGENT_DIR: OMP_YOLO_NS, TMPDIR: `${OMP_YOLO_NS}/tmp` },
+    env: { XDG_DATA_HOME: OMP_YOLO_NS },
   });
   const hookSessions: string[] = [];
   let mutationsAtHookTime = -1;
@@ -1595,7 +1595,7 @@ Deno.test("reconnectAndResumeSession - hook runs exactly once after restore, bef
 Deno.test("reconnectAndResumeSession - rejecting hook fails only this session as RecoveryHookError", async () => {
   const h = createRecoveryHarness({
     agentType: "omp",
-    env: { PI_CODING_AGENT_DIR: OMP_YOLO_NS, TMPDIR: `${OMP_YOLO_NS}/tmp` },
+    env: { XDG_DATA_HOME: OMP_YOLO_NS },
   });
 
   await assertRejects(
@@ -1672,7 +1672,7 @@ Deno.test("reconnectAndResumeSession - OpenCode recovery against a foreign data 
 Deno.test("reconnectAndResumeSession - capability absence still returns false with a recovery context (never an ownership error)", async () => {
   const h = createRecoveryHarness({
     agentType: "omp",
-    env: { PI_CODING_AGENT_DIR: OMP_YOLO_NS, TMPDIR: `${OMP_YOLO_NS}/tmp` },
+    env: { XDG_DATA_HOME: OMP_YOLO_NS },
   });
   h.connector["capabilities"] = { loadSession: false } as typeof h.connector["capabilities"];
 
@@ -1693,7 +1693,7 @@ Deno.test("reconnectAndResumeSession - capability absence still returns false wi
 Deno.test("reconnectAndResumeSession - OMP order: teardown → load → model/effort → gate → hook → success", async () => {
   const h = createRecoveryHarness({
     agentType: "omp",
-    env: { PI_CODING_AGENT_DIR: OMP_YOLO_NS, TMPDIR: `${OMP_YOLO_NS}/tmp` },
+    env: { XDG_DATA_HOME: OMP_YOLO_NS },
   });
   (h.connector["sessionModelIds"] as Map<string, string>).set("sess_order", "provider/target");
   h.connector.connect = () => {
@@ -1771,7 +1771,7 @@ Deno.test("reconnectAndResumeSession - OMP order: teardown → load → model/ef
 Deno.test("reconnectAndResumeSession - a failing effort RPC stays best-effort and the OMP restore tail still completes", async () => {
   const h = createRecoveryHarness({
     agentType: "omp",
-    env: { PI_CODING_AGENT_DIR: OMP_YOLO_NS, TMPDIR: `${OMP_YOLO_NS}/tmp` },
+    env: { XDG_DATA_HOME: OMP_YOLO_NS },
   });
   (h.connector["sessionModelIds"] as Map<string, string>).set("sess_effort", "provider/target");
   h.connector.connect = () => {

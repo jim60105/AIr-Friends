@@ -238,6 +238,13 @@ COPY --link --chown=0:0 --chmod=0644 --from=omp-unpacker /omp/licenses/THIRD-PAR
 # Copy OpenCode configuration
 COPY --link --chown=$UID:0 --chmod=775 agent-config/opencode.json /home/deno/.config/opencode/opencode.json
 
+# Authored native OMP model configuration. Native OMP reads `models.yml` from
+# `getAgentDir()/models.yml` (config HOME), so the authored provider header is
+# installed at the NATIVE config path instead of a second owned overlay tree.
+# Root-owned 0644: the runtime user reads it and can never rewrite it; the
+# parent directory stays agent-writable for native auth/session side files.
+COPY --link --chown=0:0 --chmod=0644 agent-config/omp/models.yml /home/deno/.omp/agent/models.yml
+
 # Copy application files
 COPY --link --chown=$UID:0 --chmod=775 deno.json deno.lock /app/
 COPY --link --chown=$UID:0 --chmod=775 config.example.yaml /app/config.yaml
@@ -273,7 +280,6 @@ RUN install -d -m 755 -o 0 -g 0 /opt/air/omp && \
 
 COPY --link --chown=0:0 --chmod=0644 agent-config/omp/restricted.yml /opt/air/omp/config/restricted.yml
 COPY --link --chown=0:0 --chmod=0644 agent-config/omp/native-yolo.yml /opt/air/omp/config/native-yolo.yml
-COPY --link --chown=0:0 --chmod=0644 agent-config/omp/models.yml /opt/air/omp/config/models.yml
 # Row-8 prompt mapping: the SYSTEM.md prompt artifact installs under its
 # contracted name; operator prompt mounts keep their existing semantics and
 # are never relocated (src/utils/omp-paths.ts resolveOmpSystemPromptPath).
@@ -321,6 +327,9 @@ RUN install -d -m 775 -o $UID -g 0 /app && \
     install -d -m 775 -o $UID -g 0 /licenses && \
     install -d -m 775 -o $UID -g 0 /deno-dir/ && \
     install -d -m 775 -o $UID -g 0 /home/deno/ && \
+    # Native OMP config HOME (`~/.omp/agent`): holds the root-owned authored
+    # models.yml installed above; agent-writable for native side files.
+    install -d -m 775 -o $UID -g 0 /home/deno/.omp/agent && \
     install -d -m 775 -o $UID -g 0 /home/deno/.local && \
     install -d -m 775 -o $UID -g 0 /home/deno/.local/bin && \
     install -d -m 775 -o $UID -g 0 /home/deno/.local/share/opencode && \

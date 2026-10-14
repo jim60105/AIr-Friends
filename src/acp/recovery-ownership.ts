@@ -69,9 +69,9 @@ export function mapOwnershipVerdictToReason(
 /**
  * Read the connector's actual recovery target from its own spawn env — the SAME
  * factory-produced env row 10 recorded from (never recomputed, never re-derived):
- * - OMP: namespace = `PI_CODING_AGENT_DIR` (fallback `TMPDIR`); the mode is the
- *   mode-scoped state-root suffix the factory writes (`.../omp-agent/<mode>`). An env
- *   whose mode segment is underivable yields `permissionMode: ""` → `unverified`.
+ * - OMP: namespace = the mode-distinct native `XDG_DATA_HOME` (fallback `TMPDIR`);
+ *   the mode is the `.../omp-agent/<mode>/xdg-data` segment the factory writes. An
+ *   env whose mode segment is underivable yields `permissionMode: ""` → `unverified`.
  * - OpenCode: a fixed per-session `yolo-switch` identity by construction; the pool-key
  *   data root is `XDG_DATA_HOME`. An absent data root yields `""` → `unverified`
  *   (an empty actual namespace never matches by luck and never mismatches asymmetrically).
@@ -81,11 +81,13 @@ export function deriveActualRecoveryTarget(
   env?: Record<string, string>,
 ): ActualRecoveryTarget {
   if (agentType === "omp") {
-    const agentDir = env?.["PI_CODING_AGENT_DIR"] ?? "";
-    const processNamespace = agentDir !== "" ? agentDir : (env?.["TMPDIR"] ?? "");
+    const dataHome = env?.["XDG_DATA_HOME"] ?? "";
+    const processNamespace = dataHome !== "" ? dataHome : (env?.["TMPDIR"] ?? "");
     let permissionMode = "";
-    if (agentDir.endsWith("/restricted")) permissionMode = "restricted";
-    else if (agentDir.endsWith("/native-yolo")) permissionMode = "native-yolo";
+    // Match the TERMINAL factory-produced segment only: a base root that
+    // happens to contain the opposite mode name must not select that mode.
+    if (dataHome.endsWith("/omp-agent/restricted/xdg-data")) permissionMode = "restricted";
+    else if (dataHome.endsWith("/omp-agent/native-yolo/xdg-data")) permissionMode = "native-yolo";
     return { agentType, permissionMode, processNamespace };
   }
   return {

@@ -1,4 +1,5 @@
-# Pinned deployment-owned OMP custom provider model assets.
+# Hand-authored native OMP model configuration (NOT an overlay; native OMP reads
+# this file directly from `getAgentDir()/models.yml`).
 # Pinned to official OMP v18.6.1 / 2a2c6dcbbb558c0f8145f67f28b3370984f2bf60.
 # Schema per docs/models.md: custom provider level headers.
 # Zero hardcoded model IDs; zero credential literals.

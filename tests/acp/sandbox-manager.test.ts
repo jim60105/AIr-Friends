@@ -1,12 +1,18 @@
 // tests/acp/sandbox-manager.test.ts
 
-import { assertEquals, assertThrows } from "@std/assert";
+import { assert, assertEquals, assertThrows } from "@std/assert";
+import { dirname, join } from "@std/path";
 import { SandboxManager } from "../../src/acp/sandbox-manager.ts";
 import type { SandboxConfig } from "../../src/types/config.ts";
 import {
+  canConfineFilesystem,
   resetSandboxCapabilityCache,
   setSandboxCapabilityCacheForTest,
 } from "../../src/acp/sandbox-capabilities.ts";
+import {
+  DEFAULT_CONFINEMENT_READONLY_PATHS,
+  DEFAULT_CONFINEMENT_WRITABLE_RUNTIME_PATHS,
+} from "../../src/acp/filesystem-confinement.ts";
 
 // Base helper: raw egress + no confinement, so command/env pass through unwrapped. Tests
 // that exercise wrapping override the relevant flags and pin capability probe results.
@@ -393,4 +399,339 @@ Deno.test("SandboxManager - no skills root invents no fallback mount", () => {
     }
     assertEquals(opts.args.join(" ").includes("/app/skills"), false);
   });
+});
+
+// ---------------------------------------------------------------------------
+// Per-launch runtime mounts (OMP `runtimeMounts`) and the confinement they produce
+// ---------------------------------------------------------------------------
+
+/** argv index of the bind whose SOURCE is `src`, or -1 when absent. */
+function bindSourceIndex(args: string[], flag: string, src: string): number {
+  for (let i = 0; i < args.length - 1; i++) {
+    if (args[i] === flag && args[i + 1] === src) return i;
+  }
+  return -1;
+}
+
+/** Every `flag <src> <src>` bind source in argv order — i.e. the whole mount list. */
+function bindSources(args: string[], flag: string): string[] {
+  const sources: string[] = [];
+  for (let i = 0; i < args.length - 2; i++) {
+    if (args[i] === flag && args[i + 1] === args[i + 2]) sources.push(args[i + 1]);
+  }
+  return sources;
+}
+
+/**
+ * Whether THIS host has the known topology that cannot materialise the production
+ * confinement mount list at all.
+ *
+ * `canConfineFilesystem()` only proves that bwrap can create a namespace with a fresh
+ * `/proc`; the real mount policy can still be unspawnable, because `--ro-bind-try`
+ * tolerates a missing SOURCE but bwrap aborts the whole spawn when it cannot create a
+ * bind DESTINATION. On a Fedora Silverblue-style host `/usr/local` is a symlink into
+ * `/var` (`/usr/local -> ../var/usrlocal`), so the default read-only `/usr/local/bin`
+ * resolves to an unbound `/var/usrlocal/bin` and every confined spawn fails before exec.
+ *
+ * The gate names that topology EXPLICITLY (and only it) rather than probing a spawn:
+ * a regression that makes the default argv unspawnable on a normal host must turn
+ * this test RED, never silently ignore it.
+ */
+function confinementHostUnsupported(): boolean {
+  if (!canConfineFilesystem()) return false;
+  try {
+    // `/usr/local` present as a SYMLINK is the known unspawnable topology; a real
+    // directory (or its absence) is supported.
+    return Deno.lstatSync("/usr/local").isSymlink;
+  } catch {
+    return false;
+  }
+}
+
+Deno.test("SandboxManager - OMP runtimeMounts are additive and emitted after the writable binds", () => {
+  withCapabilities(false, true, () => {
+    // F12 filesystem confinement with the shared network kept; filterEnv stays off so the
+    // fixtures below exercise the mount policy, not the env policy.
+    const sandbox = new SandboxManager(
+      createSandboxConfig({
+        filesystemConfinement: true,
+        egressProxy: false,
+        unrestrictedEgress: true,
+        filterEnv: false,
+      }),
+    );
+    // The restricted-mode launch shape: the authored settings + system prompt +
+    // installed extension bundle read-only, plus the mode's own native data dir writable.
+    const readOnly = [
+      "/mode/agent-config/omp/restricted.yml",
+      "/mode/prompts/omp/restricted.md",
+      "/install/omp/extension/index.js",
+    ];
+    const writable = ["/base/omp-agent/restricted/xdg-data/omp"];
+    const shadowed = ["/ws/tmp/omp-agent"];
+    const opts = sandbox.buildSpawnOptions(
+      "omp",
+      "omp",
+      ["acp"],
+      { TMPDIR: "/ws/tmp" },
+      "/ws",
+      undefined,
+      { readOnlyPaths: readOnly, writableRuntimePaths: writable, shadowedPaths: shadowed },
+    );
+    assertEquals(opts.command, "bwrap");
+    // The shared defaults are untouched by the extra inputs: the whole read-only list is
+    // the shared defaults followed by the extras, and no shared default is dropped.
+    assertEquals(bindSources(opts.args, "--ro-bind-try"), [
+      ...DEFAULT_CONFINEMENT_READONLY_PATHS,
+      ...readOnly,
+    ]);
+    assertEquals(bindSources(opts.args, "--bind-try"), [
+      ...DEFAULT_CONFINEMENT_WRITABLE_RUNTIME_PATHS,
+      ...writable,
+    ]);
+    // Positional proof, independent of the list equality above: the extras are emitted
+    // AFTER the mandatory writable binds (session workspace, session TMPDIR, shared
+    // writable runtime roots), so no writable ancestor can widen or hide them.
+    const sessionWorkspaceBind = opts.args.indexOf("--bind");
+    assert(sessionWorkspaceBind > -1, "the confinement binds the session workspace");
+    for (const path of readOnly) {
+      assert(
+        bindSourceIndex(opts.args, "--ro-bind-try", path) > sessionWorkspaceBind,
+        `${path} must be bound read-only after every writable bind`,
+      );
+    }
+    for (const path of writable) {
+      assert(
+        bindSourceIndex(opts.args, "--bind-try", path) > sessionWorkspaceBind,
+        `${path} must be bound writable after every mandatory writable bind`,
+      );
+    }
+    // The mode parent is shadowed BEFORE the selected child is re-exposed inside it.
+    const shadowIndex = opts.args.findIndex(
+      (arg, index) => arg === "--tmpfs" && opts.args[index + 1] === shadowed[0],
+    );
+    assert(shadowIndex > -1, `the mode parent must be shadowed: ${opts.args.join(" ")}`);
+    assert(shadowIndex > sessionWorkspaceBind, "the shadow must follow the writable binds");
+    assertEquals(
+      bindSourceIndex(opts.args, "--bind-try", writable[0]) > shadowIndex,
+      true,
+      "the selected data child must be re-bound after its parent is shadowed",
+    );
+    // No extra read-only path is ever emitted as a writable bind.
+    assertEquals(
+      bindSources(opts.args, "--bind-try").some((source) => readOnly.includes(source)),
+      false,
+    );
+    // The shared skill-root overlap refusal still applies unchanged.
+    assertEquals(bindSources(opts.args, "--ro-bind-try").includes("/ws"), false);
+  });
+});
+
+Deno.test("SandboxManager - a skill root overlapping a runtime writable input is refused", () => {
+  withCapabilities(false, true, () => {
+    const sandbox = new SandboxManager(
+      createSandboxConfig({
+        filesystemConfinement: true,
+        egressProxy: false,
+        unrestrictedEgress: true,
+        filterEnv: false,
+      }),
+    );
+    const data = "/base/omp-agent/restricted/xdg-data/omp";
+    const spawn = (skillRoot: string, writable: string): void => {
+      sandbox.buildSpawnOptions(
+        "omp",
+        "omp",
+        ["acp"],
+        { TMPDIR: "/ws/tmp" },
+        "/ws",
+        { root: skillRoot, identity: { dev: 1, ino: 2 } },
+        { readOnlyPaths: [], writableRuntimePaths: [writable] },
+      );
+    };
+    // The late per-launch writable inputs are mandatory writables for the
+    // overlap refusal: an equal root, an enclosing root and a canonical alias
+    // spelling are all refused before any mount is emitted.
+    assertThrows(() => spawn(data, data), Error, "mandatory writable mount");
+    assertThrows(() => spawn("/base/omp-agent", data), Error, "mandatory writable mount");
+    const base = Deno.makeTempDirSync({ prefix: "air-omp-overlap-" });
+    try {
+      const real = join(base, "xdg-data");
+      Deno.mkdirSync(real, { recursive: true });
+      const alias = join(base, "data-alias");
+      Deno.symlinkSync(real, alias);
+      assertThrows(() => spawn(real, alias), Error, "mandatory writable mount");
+    } finally {
+      Deno.removeSync(base, { recursive: true });
+    }
+  });
+});
+
+Deno.test("SandboxManager - no runtimeMounts emits exactly the shared default mounts", () => {
+  withCapabilities(false, true, () => {
+    const sandbox = new SandboxManager(
+      createSandboxConfig({
+        filesystemConfinement: true,
+        egressProxy: false,
+        unrestrictedEgress: true,
+        filterEnv: false,
+      }),
+    );
+    for (const agentType of ["opencode", "omp"] as const) {
+      const env = { TMPDIR: "/ws/tmp" };
+      const baseline = sandbox.buildSpawnOptions(agentType, agentType, ["acp"], env, "/ws");
+      // Pre-existing call shape (no 7th argument) and an explicitly empty mount set must be
+      // byte-identical: an absent runtimeMounts adds no mount at all.
+      const emptyMounts = sandbox.buildSpawnOptions(
+        agentType,
+        agentType,
+        ["acp"],
+        env,
+        "/ws",
+        undefined,
+        {},
+      );
+      assertEquals(emptyMounts.args, baseline.args, agentType);
+      assertEquals(bindSources(baseline.args, "--ro-bind-try"), [
+        ...DEFAULT_CONFINEMENT_READONLY_PATHS,
+      ]);
+      assertEquals(bindSources(baseline.args, "--bind-try"), [
+        ...DEFAULT_CONFINEMENT_WRITABLE_RUNTIME_PATHS,
+      ]);
+      assertEquals(
+        baseline.args.some((arg, index) =>
+          arg === "--tmpfs" && baseline.args[index + 1] === "/tmp"
+        ),
+        true,
+        "the confinement still shadows /tmp itself",
+      );
+      // Neither agent type gets a mode-scoped native-data mount it did not ask for.
+      assertEquals(baseline.args.some((arg) => arg.includes("/omp-agent/")), false);
+    }
+  });
+});
+
+Deno.test({
+  name: "SandboxManager - confined omp: mounts read, own data written, no sibling access",
+  // Both gates must hold: bwrap can namespace (canConfineFilesystem) AND this host can
+  // materialise the production mount list (confinementHostUnsupported names the one
+  // known-unsupported topology explicitly).
+  ignore: !canConfineFilesystem() || confinementHostUnsupported(),
+  fn: async () => {
+    // Real spawn through the real confinement builder: the assertions below observe the
+    // mounted filesystem (reads, writes, exit statuses), never the argv that produced it.
+    const baseRoot = Deno.makeTempDirSync({ prefix: "air-omp-confinement-" });
+    try {
+      const home = join(baseRoot, "home");
+      const modelsFile = join(home, ".omp", "agent", "models.yml");
+      // The REAL per-spawn factory layout: the session workspace holds the
+      // session TMPDIR, and native data lives under `{TMPDIR}/omp-agent/{mode}`.
+      const workspace = join(baseRoot, "workspace");
+      const tmpDir = join(workspace, "tmp");
+      const shadowedModeParent = join(tmpDir, "omp-agent");
+      const nativeDataDir = join(shadowedModeParent, "restricted", "xdg-data", "omp");
+      const siblingMarker = join(
+        shadowedModeParent,
+        "native-yolo",
+        "xdg-data",
+        "omp",
+        "marker",
+      );
+      const skillRoot = join(baseRoot, "skills");
+      const directories = [
+        dirname(modelsFile),
+        nativeDataDir,
+        dirname(siblingMarker),
+        skillRoot,
+        workspace,
+        tmpDir,
+      ];
+      for (const directory of directories) {
+        Deno.mkdirSync(directory, { recursive: true });
+      }
+      const modelBytes = "model: deployment-authored";
+      const siblingSentinel = "sibling-mode-sentinel";
+      const skillInstruction = "trusted instruction";
+      Deno.writeTextFileSync(modelsFile, `${modelBytes}\n`);
+      Deno.writeTextFileSync(siblingMarker, siblingSentinel);
+      Deno.writeTextFileSync(join(skillRoot, "SKILL.md"), `${skillInstruction}\n`);
+      // The sibling marker IS readable outside the confinement, so a failing read inside can
+      // only come from the mount policy — not from a missing fixture.
+      assertEquals(Deno.readTextFileSync(siblingMarker), siblingSentinel);
+
+      const ownMarker = join(nativeDataDir, "agent-marker");
+      const forbiddenInSkillRoot = join(skillRoot, "forbidden.md");
+      // Deno-generated absolute paths never contain a single quote, so single-quoting them
+      // keeps the script free of any shell expansion.
+      const script = [
+        `cat '${modelsFile}'`,
+        `echo "model_read_status=$?"`,
+        `printf '%s' 'native-agent-marker' > '${ownMarker}'`,
+        `echo "native_write_status=$?"`,
+        `cat '${join(skillRoot, "SKILL.md")}'`,
+        `echo "skill_read_status=$?"`,
+        `cat '${siblingMarker}' 2>/dev/null`,
+        `echo "sibling_read_status=$?"`,
+        `touch '${forbiddenInSkillRoot}' 2>/dev/null`,
+        `echo "skill_write_status=$?"`,
+      ].join("\n");
+
+      const sandbox = new SandboxManager(
+        createSandboxConfig({
+          filesystemConfinement: true,
+          egressProxy: false,
+          unrestrictedEgress: true,
+          filterEnv: false,
+        }),
+      );
+      const opts = sandbox.buildSpawnOptions(
+        "omp",
+        "sh",
+        ["-c", script],
+        { PATH: Deno.env.get("PATH") ?? "/usr/bin:/bin", TMPDIR: tmpDir },
+        workspace,
+        { root: skillRoot },
+        {
+          readOnlyPaths: [modelsFile],
+          writableRuntimePaths: [nativeDataDir],
+          shadowedPaths: [shadowedModeParent],
+        },
+      );
+      assertEquals(opts.command, "bwrap");
+      const output = await new Deno.Command(opts.command, {
+        args: opts.args,
+        cwd: opts.cwd,
+        env: opts.env,
+        stdout: "piped",
+        stderr: "piped",
+      }).output();
+      const stdout = new TextDecoder().decode(output.stdout);
+      const stderr = new TextDecoder().decode(output.stderr);
+      assert(output.success, `confined sh exited ${output.code}: ${stderr}`);
+
+      /** The `key=<n>` line the confined script printed; absent means the run aborted early. */
+      const status = (key: string): number => {
+        const match = stdout.match(new RegExp(`(?:^|\\n)${key}=(\\d+)`));
+        assert(match !== null, `confined script printed no "${key}" status: ${stdout}`);
+        return Number(match[1]);
+      };
+
+      // (a) The authored model file is really readable through the read-only mount.
+      assertEquals(stdout.includes(modelBytes), true, stdout);
+      assertEquals(status("model_read_status"), 0);
+      // (b) The native data child is really writable, and the write lands on the host tree.
+      assertEquals(status("native_write_status"), 0);
+      assertEquals(Deno.readTextFileSync(ownMarker), "native-agent-marker");
+      // The skill root is admitted read-only (its instruction reads) but refuses writes.
+      assertEquals(stdout.includes(skillInstruction), true, stdout);
+      assertEquals(status("skill_read_status"), 0);
+      assertEquals(status("skill_write_status") !== 0, true);
+      assertEquals(await Deno.lstat(forbiddenInSkillRoot).catch(() => null), null);
+      // (c) The SIBLING mode's marker is absent from the mount namespace.
+      assertEquals(status("sibling_read_status") !== 0, true);
+      assertEquals(stdout.includes(siblingSentinel), false, stdout);
+    } finally {
+      Deno.removeSync(baseRoot, { recursive: true });
+    }
+  },
 });

@@ -1,15 +1,14 @@
 // src/utils/omp-paths.ts
 //
-// Single source of truth for mode-scoped OMP state, working directory, and
-// process temporary roots, plus the contracted trusted extension path selector
-// and the row-20 (package-pinned-omp-runtime) dev→image path seam.
+// Single source of truth for the mode-scoped native OMP data root and the
+// contracted trusted-extension dev→image path selector.
 //
-// Mirroring the pure-helper pattern of opencode-paths.ts:
-// All helpers deterministically derive mode-separated paths so restricted and
-// native-yolo OMP processes never share a mutable state root or discoverable cwd.
+// Mirroring the pure-helper pattern of opencode-paths.ts: the selected native
+// data root is derived deterministically per approval mode so restricted and
+// native-yolo OMP processes never share a mutable native data directory.
 
 import { basename, join, resolve } from "@std/path";
-import type { OmpPermissionMode } from "../acp/omp-settings.ts";
+import type { OmpPermissionMode } from "../acp/types.ts";
 
 /**
  * Canonical SOURCE origin of the deployment-owned trusted extension. Shared with
@@ -19,9 +18,8 @@ import type { OmpPermissionMode } from "../acp/omp-settings.ts";
  * SOURCE, not a loadable entry. The artifact that development launch and image
  * installation actually consume is the generated native-loadable bundle —
  * `OMP_TRUSTED_EXTENSION_BUNDLE_PATH` in development,
- * `<OMP_IMAGE_EXTENSION_ROOT>/index.js` in the image. Canonical extension-root and
- * source-origin observations of the SELECTED artifact identify that generated file;
- * nothing launches this raw Deno-only source tree any more.
+ * `<OMP_IMAGE_EXTENSION_ROOT>/index.js` in the image. Nothing launches this raw
+ * Deno-only source tree any more.
  */
 export const OMP_TRUSTED_EXTENSION_PATH = "src/acp/omp/extension/index.ts";
 
@@ -35,12 +33,7 @@ export const OMP_TRUSTED_EXTENSION_PATH = "src/acp/omp/extension/index.ts";
  */
 export const OMP_TRUSTED_EXTENSION_BUNDLE_DIR = "build/omp-extension";
 
-/**
- * The single generated artifact's file name. One name serves BOTH deployment
- * faces (`bind-omp-owned-module-evidence`): the fixed image artifact and the
- * development bundle are the same generated contract installed in two trees,
- * so the declared root + this name is the whole module-identity surface.
- */
+/** The single generated artifact's file name (both deployment faces). */
 export const OMP_TRUSTED_EXTENSION_ARTIFACT_NAME = "index.js";
 
 /** Deterministic generated development artifact path (relative to the checkout). */
@@ -56,54 +49,31 @@ export const OMP_TRUSTED_EXTENSION_BUNDLE_PATH =
  */
 export const OMP_IMAGE_ROOT = "/opt/air/omp";
 
-/**
- * Generated skill-root declaration path for one mode
- * (`align-omp-skill-trust-to-shared-root` D3): `{baseRoot}/omp-overlays/{mode}-skill-root.yml`,
- * written at spawn time with exactly one key — the deployment-RESOLVED skill
- * custom-directory array. There is no fixed skill-root constant anymore: the
- * declaration carries whatever root the deployment resolved from
- * `agent.skillsDir` (the ONE root both agent types share), and the declaration
- * is passed FIRST among the `--config` overlays so the authored mode document
- * stays last.
- *
- * The directory sits outside the mode-scoped process state area
- * (`{baseRoot}/omp-agent/{mode}`), so the pre-native-request overlay observer
- * accepts the path by placement; like every other overlay it is link-,
- * regular-file-, canonical-parent- and accepted-identity-checked, and the
- * daemon rewrites it (symlink-refusing, unconditional overwrite) at every
- * spawn, so a post-spawn rewrite is revealed by the accepted identity.
- */
-export function ompSkillRootDeclarationPath(baseRoot: string, mode: OmpPermissionMode): string {
-  return resolve(join(baseRoot, "omp-overlays", `${mode}-skill-root.yml`));
-}
-
 /** Image path of the trusted-extension tree root (D4's contracted constant). */
 export const OMP_IMAGE_EXTENSION_ROOT = `${OMP_IMAGE_ROOT}/extension`;
 
 /**
  * Image artifact of the trusted extension: the SAME generated bundle contract
- * installed at the owned image root (`<root>/index.js`) by packaging. This is
- * the fixed image face of the deployment-module declaration
- * (`bind-omp-owned-module-evidence`), never a development-tree path.
+ * installed at the owned image root (`<root>/index.js`) by packaging.
  */
 export const OMP_IMAGE_EXTENSION_ARTIFACT =
   `${OMP_IMAGE_EXTENSION_ROOT}/${OMP_TRUSTED_EXTENSION_ARTIFACT_NAME}`;
 
-/** Image path of the owned settings overlays (D3: dirs 0755, files 0644). */
+/** Image path of the authored native mode settings (dirs 0755, files 0644). */
 export const OMP_IMAGE_CONFIG_ROOT = `${OMP_IMAGE_ROOT}/config`;
 
-/** Image path of the owned SYSTEM.md prompt artifact. */
+/** Image path of the installed SYSTEM.md prompt artifact. */
 export const OMP_IMAGE_PROMPT_PATH = `${OMP_IMAGE_ROOT}/prompt/SYSTEM.md`;
 
 /**
- * Row-8 contracted system-prompt operator-mount path (the mapping the launch
+ * Contracted system-prompt operator-mount path (the mapping the launch
  * assembly consumes; operator-owned and never relocated by this module).
  */
 export const OMP_SYSTEM_PROMPT_MOUNT_PATH = "/app/prompts/system_prompt_override.md";
 
 /**
- * Resolve a contracted owned-settings dev path (e.g.
- * `agent-config/omp/restricted.yml`) to its installed overlay when present,
+ * Resolve a contracted authored mode-settings dev path (e.g.
+ * `agent-config/omp/restricted.yml`) to its installed copy when present,
  * otherwise the pre-existing development-tree path, verbatim.
  */
 export function resolveOmpConfigPath(
@@ -121,20 +91,39 @@ export function resolveOmpConfigPath(
 }
 
 /**
- * Resolve the owned SYSTEM.md prompt artifact (row-8 mapping).
+ * Resolve the required native-loadable extension bundle for the restricted
+ * launch: the installed image artifact when present, otherwise the
+ * deterministic generated development entry. A missing artifact is reported by
+ * the caller with the build remedy — this resolver never falls back to the raw
+ * Deno-only source tree.
+ */
+export function resolveOmpExtensionPath(options: {
+  /** Injectable existence probe; defaults to the real filesystem. */
+  exists?: (path: string) => boolean;
+  /** Injectable image artifact; defaults to the contracted constant. */
+  imageArtifact?: string;
+  /** Injectable development artifact; defaults to the contracted constant. */
+  developmentArtifact?: string;
+} = {}): string {
+  const exists = options.exists ?? defaultExists;
+  const imageArtifact = options.imageArtifact ?? OMP_IMAGE_EXTENSION_ARTIFACT;
+  if (exists(imageArtifact)) return imageArtifact;
+  return options.developmentArtifact ?? OMP_TRUSTED_EXTENSION_BUNDLE_PATH;
+}
+
+/**
+ * Resolve the SYSTEM.md prompt artifact (operator-mount mapping).
  *
- * Priority (D4, spec "Operator prompt mount honored"): the row-8 mount path
- * wins whenever it exists — mounts are operator-owned and never relocated, and
- * in a stock image that path is populated (bundled default or operator mount),
- * exactly as row 8 defined. The owned artifact serves installs where the
- * mount path is absent but the owned tree is present (its digest is covered by
- * PACKAGE-MANIFEST.sha256 either way); without either, the pre-existing
- * development path returns unchanged.
+ * Priority: the mount path wins whenever it exists — mounts are operator-owned
+ * and never relocated, and in a stock image that path is populated (bundled
+ * default or operator mount). The installed artifact serves installs where the
+ * mount path is absent but the image tree is present; without either, the
+ * pre-existing development path returns unchanged.
  */
 export function resolveOmpSystemPromptPath(options: {
   /** Injectable existence probe; defaults to the real filesystem. */
   exists?: (path: string) => boolean;
-  /** Row-8 dev/mount path; defaults to the contracted constant. */
+  /** Dev/mount path; defaults to the contracted constant. */
   devPath?: string;
   /** Injectable image prompt path; defaults to the contracted constant. */
   imagePromptPath?: string;
@@ -157,50 +146,14 @@ function defaultExists(path: string): boolean {
 }
 
 /**
- * Common parent root for OMP agent state under a given base root.
- */
-export function ompProcessStateRoot(baseRoot: string): string {
-  return resolve(join(baseRoot, "omp-agent"));
-}
-
-/**
- * Mode-distinct PI_CODING_AGENT_DIR root for the process ({baseRoot}/omp-agent/{mode}).
- * This guarantees restricted and native-yolo never share a mutable agent state root.
- */
-export function ompAgentDir(baseRoot: string, mode: OmpPermissionMode): string {
-  return resolve(join(ompProcessStateRoot(baseRoot), mode));
-}
-
-/**
- * Mode-distinct process temporary directory ({baseRoot}/omp-agent/{mode}/tmp).
- */
-export function ompProcessTmpDir(baseRoot: string, mode: OmpPermissionMode): string {
-  return resolve(join(ompAgentDir(baseRoot, mode), "tmp"));
-}
-
-/**
- * Neutral deployment-owned launch working directory ({baseRoot}/omp-agent/{mode}/cwd).
- * By construction, its .omp/ layer is empty, preventing hostile project config discovery.
- */
-export function ompLaunchCwd(baseRoot: string, mode: OmpPermissionMode): string {
-  return resolve(join(ompAgentDir(baseRoot, mode), "cwd"));
-}
-
-/**
- * Process-scoped XDG_DATA_HOME ({baseRoot}/omp-agent/{mode}/xdg-data).
- * Prevents tool-output or data artifacts from polluting the shared home root.
+ * Mode-distinct native `XDG_DATA_HOME` root
+ * ({baseRoot}/omp-agent/{mode}/xdg-data).
+ *
+ * Native OMP redirects its data directory (sessions, database, auth side
+ * files) to `$XDG_DATA_HOME/omp` when that application directory already
+ * exists, so the launch creates `<this>/omp` before spawn. Restricted and
+ * native-yolo never share one mutable native data root.
  */
 export function ompXdgDataHome(baseRoot: string, mode: OmpPermissionMode): string {
-  return resolve(join(ompAgentDir(baseRoot, mode), "xdg-data"));
-}
-
-/**
- * Deployment-owned HOME for the OMP child ({baseRoot}/omp-agent/{mode}/home).
- * Row 26 (`isolate-omp-settings-discovery`): HOME is assigned explicitly to
- * this owned directory so the native homedir fallback can never return the
- * daemon home; it stays mode-distinct and separate from payload staging
- * ({workspace}/tmp/{sessionId}) by construction.
- */
-export function ompOwnedHome(baseRoot: string, mode: OmpPermissionMode): string {
-  return resolve(join(ompAgentDir(baseRoot, mode), "home"));
+  return resolve(join(baseRoot, "omp-agent", mode, "xdg-data"));
 }

@@ -5,10 +5,7 @@ import type { SandboxConfig } from "../types/config.ts";
 import { canConfineFilesystem, canIsolateNetwork } from "./sandbox-capabilities.ts";
 import { buildBwrapConfinement } from "./filesystem-confinement.ts";
 import type { SkillsRootObservation } from "@core/skills-root.ts";
-import {
-  OMP_FOREIGN_PROVIDER_ENV_SELECTORS,
-  OMP_SETTINGS_DISCOVERY_ENV_SELECTORS,
-} from "./omp-settings.ts";
+import type { AgentRuntimeMounts } from "./types.ts";
 
 const logger = createLogger("SandboxManager");
 
@@ -44,9 +41,9 @@ const BASE_ALLOWED_ENV = [
   // NOTE: This entry is the existing OpenCode tool-output scoping mechanism (the factory
   // always sets the value it passes: session-scoped under the session TMPDIR per-spawn,
   // pool-key-scoped in shared mode) and it is NOT a grant of scoped state to an OMP process.
-  // PI_CODING_AGENT_DIR under the selected process's TMPDIR/omp-agent and mode-distinct state roots
-  // are owned by translate-omp-owned-settings (row 8) and spawn-mode-scoped-omp-agents (row 9).
-  // Do not drop, rename, or re-scope this variable here.
+  // OMP's own value is the mode-distinct native data root (`{baseRoot}/omp-agent/{mode}/xdg-data`)
+  // and that value is NOT a grant of scoped state to a deferred mechanism. Do not drop, rename,
+  // or re-scope this variable here.
   "XDG_DATA_HOME",
   // Browser automation
   "AGENT_BROWSER_EXECUTABLE_PATH",
@@ -106,38 +103,16 @@ const NEVER_PASS_ENV = new Set([
   "OMP_PROFILE",
   "PI_PROFILE",
   "PI_CODING_AGENT_DIR",
-  // Row 26: pinned settings/config-source override selector (never reaches any agent)
+  // Settings/config-source override selector (never reaches any agent)
   "PI_CONFIG_FILES",
-  // Row 26: foreign provider config selectors — never permitted in any form;
-  // they could reintroduce a host settings source and are never plan-owned.
-  ...OMP_FOREIGN_PROVIDER_ENV_SELECTORS,
+  // Foreign provider config selectors — never permitted in any form, for
+  // either agent type (an operator allowance for one of these is excluded with
+  // the existing warning outcome, unchanged).
+  "CLAUDE_CONFIG_DIR",
+  "CURSOR_CONFIG_DIR",
+  "CODEX_HOME",
+  "GEMINI_CONFIG_DIR",
 ]);
-
-/**
- * Mandatory OMP-only settings-discovery sanitization (row 26, D2).
- *
- * Removes every inherited OMP settings-discovery selector (HOME, all XDG
- * selectors including XDG_DATA_HOME, OMP_PROFILE, PI_PROFILE, PI_CONFIG_FILES,
- * PI_CODING_AGENT_DIR) and every foreign provider config selector from an OMP
- * child environment REGARDLESS of `filterEnv` or `allowedEnvVars`. This is
- * OMP-only: OpenCode's existing HOME/XDG_DATA_HOME allowlist semantics are
- * untouched (the OpenCode branch never calls this).
- *
- * Removal is the FIRST half of the control; the OMP factory's post-filter
- * trusted assignment (`finalizeOmpSpawnEnvironment`) is the second half —
- * only the exact deployment-owned plan values may (re)appear.
- */
-// Returns the SAME record it sanitized, so spawn-environment builders can chain
-// the call (in-place mutators such as the factory/child filter ignore it too).
-export function sanitizeOmpDiscoveryEnv(env: Record<string, string>): Record<string, string> {
-  for (const selector of OMP_SETTINGS_DISCOVERY_ENV_SELECTORS) {
-    delete env[selector];
-  }
-  for (const selector of OMP_FOREIGN_PROVIDER_ENV_SELECTORS) {
-    delete env[selector];
-  }
-  return env;
-}
 
 export interface SpawnOptions {
   command: string;
@@ -172,14 +147,15 @@ export class SandboxManager {
      * behaves as before, with no invented fallback root.
      */
     skillsRoot?: SkillsRootObservation,
+    /**
+     * Per-launch extra confinement mounts (OMP only). Merged with the shared
+     * defaults: extra read-only paths and extra writable runtime paths are
+     * appended after the defaults so the shared mount policy is never widened
+     * by a caller-supplied entry. Absent for OpenCode.
+     */
+    runtimeMounts?: AgentRuntimeMounts,
   ): SpawnOptions {
     const env = this.config.filterEnv ? this.buildFilteredEnv(agentType, baseEnv) : baseEnv;
-
-    // Row 26 (D2): OMP settings-discovery sanitization is MANDATORY for both
-    // filterEnv values and cannot be widened back by allowedEnvVars.
-    if (agentType === "omp") {
-      sanitizeOmpDiscoveryEnv(env);
-    }
 
     // Egress posture (F14). Throws if nothing is configured (never silently open).
     const wantsNetworkIsolation = this.resolveWantsNetworkIsolation();
@@ -216,6 +192,14 @@ export class SandboxManager {
           tmpDir,
           agentWorkspace,
           skillRoot: skillsRoot?.root,
+          // The per-launch inputs are bound LAST (after every mandatory
+          // writable bind): the selected data child survives the shadowing of
+          // its mode parent, and the selected authored assets stay read-only
+          // even when a writable ancestor (session workspace/TMPDIR) covers
+          // them.
+          runtimeReadOnlyPaths: runtimeMounts?.readOnlyPaths,
+          runtimeWritablePaths: runtimeMounts?.writableRuntimePaths,
+          shadowedRuntimePaths: runtimeMounts?.shadowedPaths,
           shareNet: !wantsNetworkIsolation,
         },
         command,

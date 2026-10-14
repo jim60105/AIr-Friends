@@ -4,7 +4,6 @@ import * as acp from "@agentclientprotocol/sdk";
 import { ChatbotClient, type SessionGateContext } from "@acp/client.ts";
 import { AgentConnector } from "@acp/agent-connector.ts";
 import type { TrustedSkillsSource } from "@acp/filesystem-policy.ts";
-import { observeOwnedSkills } from "@acp/omp/owned-skills.ts";
 import { SkillRegistry } from "@skills/registry.ts";
 import { MemoryStore } from "@core/memory-store.ts";
 import { WorkspaceManager } from "@core/workspace-manager.ts";
@@ -39,7 +38,7 @@ function fixture(beforeOpen?: (path: string) => void): FilesystemFixture {
   const workspace = join(base, "workspace");
   const shared = join(workspace, "shared");
   const staging = join(workspace, "tmp", "skill-1");
-  const skills = join(base, "owned-skills");
+  const skills = join(base, "trusted-skills");
   const sibling = join(base, "workspace-sibling");
   for (const path of [workspace, shared, staging, skills, sibling]) {
     Deno.mkdirSync(path, { recursive: true });
@@ -887,86 +886,5 @@ Deno.test("Filesystem lifecycle: dedicated creation and pooled restore register 
     );
   } finally {
     Deno.removeSync(f.base, { recursive: true });
-  }
-});
-
-// ---------------------------------------------------------------------------
-// `align-omp-skill-trust-to-shared-root` 1.1/1.4 — the admitted shared root
-// ---------------------------------------------------------------------------
-
-Deno.test("producer - a 775 shared root admits ordinary skills and mints no critical authority", () => {
-  const root = Deno.makeTempDirSync({ prefix: "omp-shared-root-" });
-  const pinnedDirectory = join(root, "review");
-  try {
-    const instruction = join(pinnedDirectory, "SKILL.md");
-    const helper = join(root, "helper.ts");
-    Deno.mkdirSync(pinnedDirectory, { recursive: true });
-    Deno.writeTextFileSync(instruction, "planted pinned layout");
-    Deno.writeTextFileSync(helper, "ordinary owned helper");
-    // The deployment-resolved shared root's posture: non-root-owned,
-    // agent-writable AND group/world-writable (the packaged personal tree is
-    // `uid 1000:0`, mode 0775).
-    for (const path of [root, pinnedDirectory]) Deno.chmodSync(path, 0o775);
-    for (const path of [instruction, helper]) Deno.chmodSync(path, 0o664);
-
-    const writable = observeOwnedSkills(
-      { ownedSkillRoots: [root] },
-      "acp-1",
-      "gen-1",
-      null,
-    )!;
-    // Ordinary admission is identity-only: the writable tree is accepted on
-    // canonical path, link-free components, real type and identity.
-    assertEquals(writable.ownedRootPath, root);
-    assertEquals(writable.rootIdentity?.dev !== undefined, true);
-    // The planted pinned `review/SKILL.md` layout supplies NO critical
-    // authority: the read-only fact is OBSERVED from the root, never asserted.
-    assertEquals(writable.criticalSkills.length, 0);
-
-    // Seal the SAME tree (root + pinned directory read-only): the flag follows
-    // that observation, so the pinned identifier mints.
-    Deno.chmodSync(root, 0o555);
-    Deno.chmodSync(pinnedDirectory, 0o555);
-    const sealed = observeOwnedSkills({ ownedSkillRoots: [root] }, "acp-1", "gen-1", null)!;
-    assertEquals(sealed.criticalSkills.map((reference) => reference.skillId), ["review"]);
-
-    // Retained denials are unchanged by the relaxation: a LINKED root is never
-    // admitted (no source, no fallback root), and a LINKED pinned directory
-    // cannot satisfy the identifier through an escaping link.
-    Deno.chmodSync(root, 0o755);
-    Deno.chmodSync(pinnedDirectory, 0o755);
-    const linkedParent = Deno.makeTempDirSync({ prefix: "omp-shared-link-" });
-    const foreign = Deno.makeTempDirSync({ prefix: "omp-shared-foreign-" });
-    try {
-      const linked = join(linkedParent, "skills");
-      Deno.symlinkSync(root, linked);
-      assertEquals(
-        observeOwnedSkills({ ownedSkillRoots: [linked] }, "acp-1", "gen-1", null),
-        null,
-        "a linked root mints no source at all",
-      );
-      Deno.removeSync(linked);
-
-      const foreignReview = join(foreign, "review");
-      Deno.mkdirSync(foreignReview);
-      Deno.writeTextFileSync(join(foreignReview, "SKILL.md"), "foreign instruction");
-      Deno.removeSync(pinnedDirectory, { recursive: true });
-      Deno.symlinkSync(foreignReview, pinnedDirectory);
-      const escaped = observeOwnedSkills({ ownedSkillRoots: [root] }, "acp-1", "gen-1", null)!;
-      assertEquals(
-        escaped.criticalSkills.length,
-        0,
-        "a linked pinned directory never satisfies the identifier",
-      );
-    } finally {
-      Deno.removeSync(pinnedDirectory, { recursive: true });
-      Deno.mkdirSync(pinnedDirectory, { recursive: true });
-      Deno.removeSync(linkedParent, { recursive: true });
-      Deno.removeSync(foreign, { recursive: true });
-    }
-  } finally {
-    Deno.chmodSync(root, 0o755);
-    Deno.chmodSync(pinnedDirectory, 0o755);
-    Deno.removeSync(root, { recursive: true });
   }
 });

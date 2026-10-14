@@ -1,982 +1,170 @@
 // tests/acp/omp-native-registration.test.ts
 //
-// API-shaped smoke suite for the C4 native registration
-// (`wire-omp-native-extension-api`, task 2.1).
+// Behavioural suite for the restricted capability registration surface
+// (`src/acp/omp/extension/native-registration.ts`).
 //
-// The fake here has EXACTLY the pinned `ExtensionAPI` surface the adapter
-// touches — `on("tool_call")`, `registerTool`, and the DIRECT
-// `api.getAllTools()` roster method (with the pinned runtime's throwing
-// load-time stub behaviour) — and drives the SAME `createNativeExtensionFactory` product the
-// entrypoint default-exports (never `index.ts` itself: the row-12 gate
-// throws at import, pinned by omp-discovery-guard.test.ts). Synthetic
-// rosters throughout: nothing here demonstrates that the official binary
-// evaluates the factory, invokes the callback, or honors a block — that is
-// the user-owned checklist (docs/OMP_ENFORCEMENT.md §Checklist).
+// The pinned native contract is exactly two facts: `api.on("tool_call", h)`
+// attaches a SYNCHRONOUS pre-dispatch handler, and `{block: true, reason}`
+// stops the call before it executes. Everything asserted here is stated in
+// terms of those two facts plus the restricted capability map: mapped tool
+// names continue to native dispatch (return `undefined`), every other name is
+// blocked with the bounded `rejected_unknown_tool` reason.
 //
-// Dispatch discipline: a callback return of `undefined` is the ONLY outcome
-// under which the native call continues, so `dispatched === true` here
-// means "not blocked by enforcement" — the completing authority still
-// owns the call.
+// The `NativeExtensionApi` fixture is a recorder, not a mock framework: it
+// remembers what the module registered so the assertions below can drive the
+// registered handler themselves. Nothing here claims the official binary
+// evaluates the entrypoint or honours a block — that is the user-owned
+// checklist.
 
 import { assert, assertEquals } from "@std/assert";
 import {
-  createNativeExtensionFactory,
+  createOmpCapabilityToolCallHandler,
   type NativeExtensionApi,
-  type NativeRegistrationDeps,
-  nativeReplacementTools,
-  type NativeToolCallEvent,
-  type NativeToolInfo,
+  type NativeToolCallHandler,
+  registerOmpCapabilityCallback,
 } from "@acp/omp/extension/native-registration.ts";
-import { decodeNativeToolCallEvent } from "@acp/omp/extension/native-events.ts";
-import { DEPLOYMENT_MODULE_DEPENDENCY_CLOSURE } from "@acp/omp/deployment-module.ts";
-import type { OwnedModuleEvidenceSource } from "@acp/omp/owned-module-evidence.ts";
-import {
-  FIXTURE_DEVELOPMENT_DECLARATION,
-  fixtureEvidenceSource,
-  fixtureImageObservation,
-  fixtureModuleObservation,
-} from "./omp-owned-module-fixture.ts";
 
-/** Per-spawn restricted launch cwd (`{workspace}/tmp/omp-agent/restricted/cwd`). */
-const RESTRICTED_CWD = "/workspace/tmp/omp-agent/restricted/cwd";
-/** Pooled restricted launch cwd (`{dataRoot}/omp-pools/<key>/omp-agent/restricted/cwd`). */
-const POOLED_RESTRICTED_CWD = "/data/omp-pools/channel-1/omp-agent/restricted/cwd";
-
-/**
- * The declared IMAGE face's physical observation (fixture metadata at the real
- * declared image paths). The state roots above are unrelated to it — that
- * independence is precisely what this suite exercises.
- */
-const IMAGE_OBSERVATION = fixtureImageObservation({ generation: "gen-0" });
-const IMAGE_ARTIFACT_PATH = IMAGE_OBSERVATION.artifact.path;
-const IMAGE_ARTIFACT_URL = `file://${IMAGE_ARTIFACT_PATH}`;
-const IMAGE_SOURCE = { path: IMAGE_ARTIFACT_PATH, source: "extension" } as const;
-/** The declared DEVELOPMENT face in a checkout with a DIFFERENT state root. */
-const DEVELOPMENT_OBSERVATION = fixtureModuleObservation({
-  declaration: FIXTURE_DEVELOPMENT_DECLARATION,
-  generation: "gen-0",
-});
-const DEVELOPMENT_SOURCE = {
-  path: DEVELOPMENT_OBSERVATION.artifact.path,
-  source: "extension",
-} as const;
-/**
- * A raw Deno-only source-tree path: a build input, NEVER a load entry. The
- * pre-`bind-omp-owned-module-evidence` lexical fallback admitted it; nothing
- * may now.
- */
-const SOURCE_TREE_SOURCE = {
-  path: "/workspace/tmp/src/acp/omp/extension/index.ts",
-  source: "extension",
-} as const;
-/** A copied bundle outside every declared face (workspace/HOME/cache copy). */
-const FOREIGN_COPY_SOURCE = {
-  path: "/home/attacker/build/omp-extension/index.js",
-  source: "extension",
-} as const;
-/**
- * The EXACT pinned runtime tuple for an authentic builtin
- * (`session/session-tools.ts#getAllToolInfos` at the pin): src=builtin,
- * `<builtin:name>` path, `temporary` scope, `top-level` origin.
- */
-function builtinTool(name: string): NativeToolInfo {
-  return {
-    name,
-    sourceInfo: {
-      path: `<builtin:${name}>`,
-      source: "builtin",
-      scope: "temporary",
-      origin: "top-level",
-    },
-  };
-}
-
-const BUILTIN_BASH = builtinTool("bash");
-
-/** RPC-host injection: `sdk` is host-owned and never a builtin. */
-const HOST_SDK_BASH: NativeToolInfo = {
-  name: "bash",
-  sourceInfo: { path: "<sdk:bash>", source: "sdk", scope: "temporary", origin: "top-level" },
-};
+/** The restricted capability map's mapped names (exact native tool names). */
+const MAPPED_TOOL_NAMES = [
+  "read",
+  "grep",
+  "glob",
+  "find",
+  "todo",
+  "web_search",
+  "bash",
+  "edit",
+  "write",
+  "delete",
+  "move",
+] as const;
 
 /**
- * The fixture physical-evidence source: the REAL acceptance/anchor policy over
- * a fixture observation of the declared image face. Nothing session-shaped is
- * involved — that independence is what these fixtures assert.
+ * Unmatched names: never registered by the native runtime or a deployment
+ * extension, plus prototype-shaped names that a non-own-property membership
+ * test would wrongly admit.
  */
-function imageEvidenceSource(): OwnedModuleEvidenceSource {
-  return fixtureEvidenceSource({ observation: IMAGE_OBSERVATION });
-}
+const UNMATCHED_TOOL_NAMES = [
+  "unknown_tool",
+  "skills",
+  "webfetch",
+  "task",
+  "READ",
+  "bash ",
+  "",
+  "toString",
+  "__proto__",
+  "constructor",
+] as const;
 
-/** The fail-closed producer state: no declared face for the loaded artifact. */
-function unavailableEvidenceSource(): OwnedModuleEvidenceSource {
-  return { anchor: undefined, observe: () => undefined };
-}
+const BLOCKED = { block: true, reason: "rejected_unknown_tool" } as const;
 
-interface FakeApiHarness {
+/** Records every `api.on(...)` registration so a test can drive the handler. */
+interface RecordingApi {
   readonly api: NativeExtensionApi;
-  readonly handlers: Array<(event: NativeToolCallEvent) => unknown>;
-  readonly tools: NativeToolInfo[];
-  /** Roster reads the adapter performed (deferral evidence). */
-  readonly rosterReads: { count: number };
-  /** Flip to false: the roster method throws, like the pinned load-time stub. */
-  readonly state: { initialized: boolean };
-  registeredTools: NativeToolInfo["name"][];
+  readonly events: string[];
+  readonly handlers: NativeToolCallHandler[];
 }
 
-/** The API-shaped fake: only the pinned members, nothing more. */
-function createFakeApi(initialRoster: readonly NativeToolInfo[]): FakeApiHarness {
-  const handlers: Array<(event: NativeToolCallEvent) => unknown> = [];
-  const registeredTools: NativeToolInfo["name"][] = [];
-  const tools = [...initialRoster];
-  const rosterReads = { count: 0 };
-  const state = { initialized: true };
+function createRecordingApi(): RecordingApi {
+  const events: string[] = [];
+  const handlers: NativeToolCallHandler[] = [];
   const api: NativeExtensionApi = {
-    on: (event, handler) => {
-      if (event === "tool_call") handlers.push(handler);
-    },
-    registerTool: (tool) => {
-      registeredTools.push(tool.name);
-    },
-    getAllTools: () => {
-      if (!state.initialized) {
-        // The pinned runtime's action stub: callable at load, throws until the
-        // host initializes the action set.
-        throw new Error("Extension runtime not initialized.");
-      }
-      rosterReads.count += 1;
-      return tools;
+    on(event, handler) {
+      events.push(event);
+      handlers.push(handler);
     },
   };
-  return { api, handlers, tools, rosterReads, state, registeredTools };
+  return { api, events, handlers };
 }
 
-function harness(
-  roster: readonly NativeToolInfo[],
-  depsOver: Partial<NativeRegistrationDeps> = {},
-): {
-  h: FakeApiHarness;
-  run: (event: NativeToolCallEvent) => { blocked: boolean; dispatched: boolean; reason?: string };
-} {
-  const surfaced: string[] = [];
-  const h = createFakeApi(roster);
-  const factory = createNativeExtensionFactory(() => ({
-    observedCwd: RESTRICTED_CWD,
-    resourceGeneration: () => "gen-0",
-    moduleUrl: IMAGE_ARTIFACT_URL,
-    moduleEvidence: imageEvidenceSource(),
-    replacementTools: nativeReplacementTools(""),
-    surfaceError: (message: string) => surfaced.push(message),
-    ...depsOver,
-  }));
-  factory(h.api);
-  const run = (event: NativeToolCallEvent) => {
-    assertEquals(h.handlers.length, 1, "exactly one tool_call callback is registered");
-    const result = h.handlers[0]!(event) as
-      | { block?: boolean; reason?: string }
-      | undefined;
-    return {
-      blocked: result?.block === true,
-      dispatched: result === undefined,
-      ...(result?.reason !== undefined ? { reason: result.reason } : {}),
-    };
+/**
+ * The pinned pre-dispatch discipline: a call is dispatched natively unless the
+ * handler returned `{block: true}`. `dispatched` counts the operations that
+ * actually executed for one native tool call.
+ */
+function invokeNativeToolCall(
+  handler: NativeToolCallHandler,
+  toolName: string,
+): { readonly dispatched: number } {
+  let dispatched = 0;
+  const dispatch = () => {
+    dispatched += 1;
   };
-  return { h, run };
+  const result = handler({ toolName });
+  if (result?.block !== true) dispatch();
+  return { dispatched };
 }
 
-function assertBoundedBlock(outcome: { blocked: boolean; reason?: string }, code: string): void {
-  assert(outcome.blocked, `expected a block carrying ${code}`);
-  assert(
-    outcome.reason !== undefined && outcome.reason.startsWith("restricted tool call blocked: "),
-  );
-  assert(outcome.reason.includes(code), `reason must carry ${code}: ${outcome.reason}`);
-  // Bounded shape: no payload, path content, or model text can appear.
-  assert(!outcome.reason.includes("docs/"), `reason must stay content-free: ${outcome.reason}`);
-}
+Deno.test("registerOmpCapabilityCallback attaches exactly one tool_call handler", () => {
+  const { api, events, handlers } = createRecordingApi();
 
-// ---------------------------------------------------------------------------
-// Task 1.1: registration happens during factory evaluation, native-API only.
-// ---------------------------------------------------------------------------
+  registerOmpCapabilityCallback(api);
 
-Deno.test("Native registration: restricted factory registers via api.on + api.registerTool", () => {
-  const h = createFakeApi([]);
-  const factory = createNativeExtensionFactory(() => ({
-    observedCwd: RESTRICTED_CWD,
-    resourceGeneration: () => "gen-0",
-    moduleUrl: IMAGE_ARTIFACT_URL,
-    moduleEvidence: imageEvidenceSource(),
-    replacementTools: nativeReplacementTools(""),
-    surfaceError: () => {},
-  }));
-  const result = factory(h.api);
-  assertEquals(result.registered, true);
-  assertEquals(result.mode, "restricted");
-  assertEquals(h.handlers.length, 1);
-  // The C2 controlled replacements are handed to the native registrar.
-  assertEquals([...h.registeredTools].sort(), ["read", "web_search"]);
+  assertEquals(events, ["tool_call"]);
+  assertEquals(handlers.length, 1);
+  assert(typeof handlers[0] === "function");
 });
 
-Deno.test("Native registration: the factory registers with a THROWING load-time roster stub and never reads the roster (task 1.1)", () => {
-  const h = createFakeApi([BUILTIN_BASH]);
-  // The pinned runtime's action methods throw until the host initializes
-  // them: the factory must register WITHOUT consulting the roster.
-  h.state.initialized = false;
-  const factory = createNativeExtensionFactory(() => ({
-    observedCwd: RESTRICTED_CWD,
-    resourceGeneration: () => "gen-0",
-    moduleUrl: IMAGE_ARTIFACT_URL,
-    moduleEvidence: imageEvidenceSource(),
-    replacementTools: nativeReplacementTools(""),
-    surfaceError: () => {},
-  }));
-  const result = factory(h.api);
-  assertEquals(result.registered, true);
-  assertEquals(h.handlers.length, 1);
-  assertEquals(h.rosterReads.count, 0, "registration must not read the live roster");
-  // Initialization completes: the LATER live call observes the real
-  // sourceInfo metadata and the authentic builtin reaches its authority.
-  h.state.initialized = true;
-  const outcome = h.handlers[0]!({ toolCallId: "d1", toolName: "bash", input: { command: "ls" } });
-  assertEquals(outcome, undefined, "authentic builtin proceeds toward native approval");
-  assert(h.rosterReads.count > 0, "the live observation read the initialized roster");
-});
+Deno.test("mapped tool names continue to native dispatch", () => {
+  const handler = createOmpCapabilityToolCallHandler();
 
-Deno.test("Native registration: native-YOLO and unidentified factories register NOTHING", () => {
-  for (const observedCwd of ["/opt/air/omp-agent/native-yolo/cwd", "/somewhere/else"]) {
-    const h = createFakeApi([{ name: "read", sourceInfo: IMAGE_SOURCE }]);
-    const factory = createNativeExtensionFactory(() => ({
-      observedCwd,
-      resourceGeneration: () => "gen-0",
-      moduleUrl: IMAGE_ARTIFACT_URL,
-      moduleEvidence: imageEvidenceSource(),
-      replacementTools: nativeReplacementTools(""),
-      surfaceError: () => {},
-    }));
-    const result = factory(h.api);
-    assertEquals(result.registered, false, observedCwd);
-    assertEquals(h.handlers.length, 0, observedCwd);
-    assertEquals(h.registeredTools.length, 0, observedCwd);
+  for (const toolName of MAPPED_TOOL_NAMES) {
+    assertEquals(handler({ toolName }), undefined, toolName);
   }
 });
 
-// ---------------------------------------------------------------------------
-// Task 1.2: fresh getAllTools() provenance decides every call.
-// ---------------------------------------------------------------------------
+Deno.test("unmatched tool names are blocked with the bounded reason", () => {
+  const handler = createOmpCapabilityToolCallHandler();
 
-Deno.test("Native provenance: owned replacement retains its actual origin and proceeds on PHYSICAL module evidence with NO session context", () => {
-  const { run } = harness([
-    { name: "read", sourceInfo: IMAGE_SOURCE },
-    { name: "web_search", sourceInfo: IMAGE_SOURCE },
-    BUILTIN_BASH,
-  ]);
-  const outcome = run({ toolCallId: "call-1", toolName: "read", input: { path: "docs/x.md" } });
-  // proceed === continue-toward-row4, NOT authorized: the callback hands
-  // the call to the named completing authority (undefined return). The
-  // owned identity survives the provenance step on its ACTUAL extension
-  // origin — never relabelled builtin because its name is `read` — and it
-  // needed NO session filesystem context to get there.
-  assertEquals(outcome.dispatched, true);
-});
-
-Deno.test("Native provenance: an artifact with no declared deployment face mints no owned authority", () => {
-  // The loaded artifact belongs to no declared image/development face (or its
-  // initial physical acceptance failed): the fail-closed producer state. Every
-  // owned name then reads unowned-discovery — never a permission invented from
-  // a path, a name or a fabricated session identity.
-  const { run } = harness([{ name: "read", sourceInfo: IMAGE_SOURCE }], {
-    moduleEvidence: unavailableEvidenceSource(),
-  });
-  const outcome = run({ toolCallId: "p1", toolName: "read", input: { path: "docs/x.md" } });
-  assertBoundedBlock(outcome, "rejected_tool_provenance");
-  assert(outcome.reason?.includes("origin=unowned-discovery"), outcome.reason ?? "");
-});
-
-Deno.test("Native provenance: the raw source tree and a foreign bundle copy are never owned", () => {
-  // Canonical source files are build inputs, never alternative load entries,
-  // and a bundle copy outside every declared face acquires no authority from
-  // where it happens to sit.
-  for (const sourceInfo of [SOURCE_TREE_SOURCE, FOREIGN_COPY_SOURCE]) {
-    const { run } = harness([{ name: "read", sourceInfo }]);
-    const outcome = run({ toolCallId: "call-src", toolName: "read", input: { path: "docs/x.md" } });
-    assertBoundedBlock(outcome, "rejected_tool_provenance");
-    assert(outcome.reason?.includes("origin=unowned-discovery"), outcome.reason ?? "");
+  for (const toolName of UNMATCHED_TOOL_NAMES) {
+    assertEquals(handler({ toolName }), BLOCKED, JSON.stringify(toolName));
   }
 });
 
-Deno.test("Native provenance: the declared module face is independent of the process state root (task 3.1)", () => {
-  const call = { toolCallId: "root-1", toolName: "read", input: { path: "notes.md" } } as const;
-  // Per-spawn (`{workspace}/tmp/omp-agent/restricted/cwd`) and pooled
-  // (`{dataRoot}/omp-pools/<key>/omp-agent/restricted/cwd`) launches present
-  // DIFFERENT mutable state roots; the declared artifact is neither, and both
-  // restricted identities admit the owned replacement.
-  assertEquals(harness([{ name: "read", sourceInfo: IMAGE_SOURCE }]).run(call).dispatched, true);
-  assertEquals(
-    harness([{ name: "read", sourceInfo: IMAGE_SOURCE }], { observedCwd: POOLED_RESTRICTED_CWD })
-      .run(call).dispatched,
-    true,
-  );
-  // The declared DEVELOPMENT face serves a pooled process too: module identity
-  // follows the declaration, never the state root.
-  assertEquals(
-    harness([{ name: "read", sourceInfo: DEVELOPMENT_SOURCE }], {
-      observedCwd: POOLED_RESTRICTED_CWD,
-      moduleUrl: `file://${DEVELOPMENT_OBSERVATION.artifact.path}`,
-      moduleEvidence: fixtureEvidenceSource({ observation: DEVELOPMENT_OBSERVATION }),
-    }).run(call).dispatched,
-    true,
-  );
-  // The STATE ROOT gains no deployment-module authority: a module-shaped file
-  // under the pooled mode namespace is not the declared artifact.
-  const stateRootIndex = `${POOLED_RESTRICTED_CWD.replace(/\/cwd\/?$/, "")}/index.js`;
-  const fromStateRoot = harness(
-    [{ name: "read", sourceInfo: { path: stateRootIndex, source: "extension" } }],
-    { observedCwd: POOLED_RESTRICTED_CWD },
-  ).run(call);
-  assertBoundedBlock(fromStateRoot, "rejected_tool_provenance");
-  assert(fromStateRoot.reason?.includes("origin=unowned-discovery"), fromStateRoot.reason ?? "");
-});
+Deno.test("prototype-shaped names never match the capability map", () => {
+  const handler = createOmpCapabilityToolCallHandler();
 
-Deno.test("Native provenance: an ancestor-normalized loaded spelling still admits", () => {
-  // The checkout is reached through a home-shaped alias of the same canonical
-  // tree: acceptance binds the PRESENTED spelling, the record names the
-  // canonical artifact, and provenance must accept both spellings instead of
-  // denying a legitimately normalized load as an incoherent observation.
-  const canonicalRoot = "/var/home/dev/checkout/build/omp-extension";
-  const declaration = {
-    artifact: `${canonicalRoot}/index.js`,
-    root: canonicalRoot,
-    posture: "development",
-    dependencyClosure: DEPLOYMENT_MODULE_DEPENDENCY_CLOSURE,
-  } as const;
-  const presented = "/home/dev/checkout/build/omp-extension/index.js";
-  const observation = fixtureModuleObservation({
-    declaration,
-    presentedArtifactPath: presented,
-    generation: "gen-0",
-  });
-  const { run } = harness(
-    [{ name: "read", sourceInfo: { path: presented, source: "extension" } }],
-    {
-      moduleUrl: `file://${presented}`,
-      moduleEvidence: fixtureEvidenceSource({ observation }),
-    },
-  );
-  const outcome = run({ toolCallId: "alias-1", toolName: "read", input: { path: "notes.md" } });
-  assertEquals(outcome.blocked, false, outcome.reason ?? "");
-  assertEquals(outcome.dispatched, true);
-});
-
-Deno.test("Native provenance: an injected session context mints no module identity (task 3.2)", () => {
-  const call = { toolCallId: "sess-1", toolName: "read", input: { path: "notes.md" } } as const;
-  // A session context exists ONLY for destructive/session-bound completion: it
-  // cannot turn a non-declared artifact into an owned replacement...
-  const undeclared = harness([{ name: "read", sourceInfo: SOURCE_TREE_SOURCE }], {
-    sessionContext: { resolveCanonicalTargets: () => [] },
-  });
-  assertBoundedBlock(undeclared.run(call), "rejected_tool_provenance");
-  // ...and it does not disturb a genuinely declared, physically verified one.
-  const declared = harness([{ name: "read", sourceInfo: IMAGE_SOURCE }], {
-    sessionContext: { resolveCanonicalTargets: () => [] },
-  });
-  assertEquals(declared.run(call).dispatched, true);
-  // The destructive operation still needs its own COMPLETE session context:
-  // module evidence grants no destructive authority.
-  const destructive = declared.run({
-    toolCallId: "sess-2",
-    toolName: "delete",
-    input: { path: "docs/x.md" },
-  });
-  assertEquals(destructive.blocked, true);
-  assert(
-    destructive.reason?.startsWith("restricted tool call blocked: rejected_"),
-    destructive.reason ?? "",
-  );
-});
-
-Deno.test("Native provenance: an authentic builtin admits as native-builtin; SDK injection and inconsistent tuples deny (task 1.2)", () => {
-  // Genuine builtin: the exact pinned runtime tuple, unique in the roster.
-  const genuine = harness([{ name: "read", sourceInfo: IMAGE_SOURCE }, BUILTIN_BASH]);
-  assertEquals(
-    genuine.run({ toolCallId: "call-2", toolName: "bash", input: { command: "ls" } }).dispatched,
-    true,
-  );
-  // SDK/RPC-host injection wearing a builtin name: host origin, denied.
-  const injected = harness([{ name: "read", sourceInfo: IMAGE_SOURCE }, HOST_SDK_BASH]);
-  assertBoundedBlock(
-    injected.run({ toolCallId: "call-3", toolName: "bash", input: { command: "ls" } }),
-    "rejected_tool_provenance",
-  );
-  assertEquals(
-    injected.run({ toolCallId: "call-4", toolName: "bash", input: { command: "ls" } }).dispatched,
-    false,
-  );
-  // A builtin-labelled entry that does not present the exact tuple for THIS
-  // name is not an authentic builtin: unowned, denied, never cached-name
-  // authority.
-  const forgedTuples: NativeToolInfo[] = [
-    {
-      name: "bash",
-      sourceInfo: {
-        path: "<builtin:read>",
-        source: "builtin",
-        scope: "temporary",
-        origin: "top-level",
-      },
-    },
-    {
-      name: "bash",
-      sourceInfo: {
-        path: "<builtin:bash>",
-        source: "builtin",
-        scope: "project",
-        origin: "top-level",
-      },
-    },
-    {
-      name: "bash",
-      sourceInfo: {
-        path: "<builtin:bash>",
-        source: "builtin",
-        scope: "temporary",
-        origin: "package",
-      },
-    },
-    {
-      name: "bash",
-      sourceInfo: { path: "/opt/air/lib/bun/oh-my-pi", source: "builtin" },
-    },
-  ];
-  for (const forged of forgedTuples) {
-    const outcome = harness([{ name: "read", sourceInfo: IMAGE_SOURCE }, forged]).run({
-      toolCallId: "call-5",
-      toolName: "bash",
-      input: { command: "ls" },
-    });
-    assertBoundedBlock(outcome, "rejected_tool_provenance");
-    assert(
-      outcome.reason?.includes("origin=unowned-discovery"),
-      `forged tuple must read unowned: ${outcome.reason ?? ""}`,
-    );
+  for (const toolName of ["toString", "__proto__", "constructor"]) {
+    assertEquals(handler({ toolName }), BLOCKED, toolName);
   }
 });
 
-Deno.test("Native provenance: an unrelated roster movement keeps an unchanged builtin admitted; a same-name replacement denies (task 1.3)", () => {
-  const { h, run } = harness([BUILTIN_BASH]);
-  assertEquals(
-    run({ toolCallId: "b1", toolName: "bash", input: { command: "ls" } }).dispatched,
-    true,
-  );
-  // An unrelated tool appears mid-session: the roster (and its epoch) moved.
-  h.tools.push({ name: "mcp__operator_lookup", sourceInfo: { source: "mcp" } });
-  assertEquals(
-    run({ toolCallId: "b2", toolName: "bash", input: { command: "ls" } }).dispatched,
-    true,
-    "the fresh read still identifies the unchanged builtin tuple",
-  );
-  // A same-name foreign replacement takes the slot: the fresh read loses
-  // builtin membership entirely ⇒ owned-path/unowned, denied.
-  h.tools[0] = {
-    name: "bash",
-    sourceInfo: { path: "/home/attacker/tool.js", source: "extension" },
-  };
-  assertBoundedBlock(
-    run({ toolCallId: "b3", toolName: "bash", input: { command: "ls" } }),
-    "rejected_tool_provenance",
-  );
-});
+Deno.test("a blocked call executes zero operations and a mapped call exactly one", () => {
+  const handler = createOmpCapabilityToolCallHandler();
+  let dispatched = 0;
 
-Deno.test("Native provenance: mid-session same-name foreign replacement denies; the stable roster never reads stale", () => {
-  const { h, run } = harness([{ name: "read", sourceInfo: IMAGE_SOURCE }]);
-  assertEquals(
-    run({ toolCallId: "c1", toolName: "read", input: { path: "docs/x.md" } }).dispatched,
-    true,
-  );
-  // Byte-identical repeat on the unchanged roster: live-read, never stale.
-  assertEquals(
-    run({ toolCallId: "c2", toolName: "read", input: { path: "docs/x.md" } }).dispatched,
-    true,
-  );
-  // Foreign same-name extension file enters the registry: the fresh read
-  // re-keys the first-sighting capture to an unowned identity — denied.
-  h.tools[0] = {
-    name: "read",
-    sourceInfo: { path: "/home/attacker/tool.js", source: "extension" },
-  };
-  const outcome = run({ toolCallId: "c3", toolName: "read", input: { path: "docs/x.md" } });
-  assertBoundedBlock(outcome, "rejected_tool_provenance");
-});
-
-Deno.test("Native provenance: resource-generation rotation invalidates the anchored module evidence and denies", () => {
-  let generation = "gen-0";
-  const { run } = harness([{ name: "read", sourceInfo: IMAGE_SOURCE }], {
-    resourceGeneration: () => generation,
-  });
-  assertEquals(
-    run({ toolCallId: "c1", toolName: "read", input: { path: "docs/x.md" } }).dispatched,
-    true,
-  );
-  // Row 12 rotates the session generation: the accepted anchor pins the
-  // generation it was taken at, so the fresh observation no longer matches and
-  // the artifact reads unowned. A trusted rebuild needs a FRESH launch — the
-  // anchor is never silently re-anchored to what is present now.
-  generation = "gen-1";
-  const outcome = run({ toolCallId: "c2", toolName: "read", input: { path: "docs/x.md" } });
-  assertBoundedBlock(outcome, "rejected_tool_provenance");
-  assert(outcome.reason?.includes("origin=unowned-discovery"), outcome.reason ?? "");
-});
-
-Deno.test("Native provenance: missing, duplicate, and unreadable rosters deny every call fail-closed", () => {
-  // No sourceInfo at all.
-  assertBoundedBlock(
-    harness([{ name: "read" }]).run({ toolCallId: "m1", toolName: "read", input: { path: "x" } }),
-    "rejected_tool_provenance",
-  );
-  // Duplicate names: the entry is ambiguous, so NOTHING is owned.
-  assertBoundedBlock(
-    harness([
-      { name: "read", sourceInfo: IMAGE_SOURCE },
-      { name: "read", sourceInfo: IMAGE_SOURCE },
-    ]).run({ toolCallId: "m2", toolName: "read", input: { path: "x" } }),
-    "rejected_tool_provenance",
-  );
-  // Prototype-key names must not defeat the duplicate guard through an
-  // inherited Object.prototype member (`constructor`), nor silently drop
-  // the count (`__proto__` bracket writes never create own properties).
-  // These names are also table-foreign, so the inventory absence-deny may
-  // fire first — the discriminating invariant is that the record reads
-  // UNOWNED: a defeated guard would translate the first (owned-path)
-  // spelling and the block would name the owned origin instead.
-  for (const poisoned of ["constructor", "__proto__"]) {
-    const outcome = harness([
-      { name: poisoned, sourceInfo: IMAGE_SOURCE },
-      { name: poisoned, sourceInfo: { path: "/home/attacker/tool.js", source: "extension" } },
-    ]).run({ toolCallId: "m4", toolName: poisoned, input: { path: "x" } });
-    assert(outcome.blocked, `duplicate ${poisoned} must block before dispatch`);
-    assert(
-      outcome.reason?.includes("origin=unowned-discovery"),
-      `duplicate ${poisoned} must read unowned, never first-wins: ${outcome.reason ?? ""}`,
-    );
-    assertEquals(outcome.dispatched, false);
+  for (const toolName of UNMATCHED_TOOL_NAMES) {
+    const outcome = invokeNativeToolCall(handler, toolName);
+    assertEquals(outcome.dispatched, 0, toolName);
+    dispatched += outcome.dispatched;
   }
-  // No getAllTools method at all: an unavailable roster reads unowned.
-  const h = createFakeApi([]);
-  const methodlessApi: NativeExtensionApi = { on: h.api.on, registerTool: h.api.registerTool };
-  const factory = createNativeExtensionFactory(() => ({
-    observedCwd: RESTRICTED_CWD,
-    resourceGeneration: () => "gen-0",
-    moduleUrl: IMAGE_ARTIFACT_URL,
-    moduleEvidence: imageEvidenceSource(),
-    replacementTools: nativeReplacementTools(""),
-    surfaceError: () => {},
-  }));
-  factory(methodlessApi);
-  const result = h.handlers[0]!({ toolCallId: "m3", toolName: "read", input: { path: "x" } }) as
-    | { block?: boolean; reason?: string }
-    | undefined;
-  assert(result?.block === true);
-  assert(result.reason?.includes("rejected_tool_provenance"));
-});
+  assertEquals(dispatched, 0);
 
-Deno.test("Native provenance: post-start client-owned MCP tool admits on the surface epoch, zero interaction", () => {
-  const { h, run } = harness([]);
-  // The MCP client tool appears mid-session: no ack, no reset, no
-  // readiness signal — the next call reads the advanced roster.
-  h.tools.push({
-    name: "mcp__operator_lookup",
-    sourceInfo: { path: "/opt/air/mcp/operator.js", source: "mcp" },
-  });
-  assertEquals(
-    run({ toolCallId: "c2", toolName: "mcp__operator_lookup", input: { query: "x" } }).dispatched,
-    true,
-  );
-});
-
-// ---------------------------------------------------------------------------
-// Task 4.1/4.2: production-shaped native admission through the composed
-// callback — authentic local builtin search, ordinary local write/edit, the
-// complete multi-root screen, and the accepted native read posture. Synthetic
-// rosters throughout; nothing here demonstrates official-binary behavior.
-// ---------------------------------------------------------------------------
-
-Deno.test("Native search: authentic local builtin search proceeds; every mixed or remote root list denies as a WHOLE (task 4.1)", () => {
-  const { run } = harness([builtinTool("grep"), builtinTool("glob"), builtinTool("find")]);
-  // Authentic local search: local path/glob/default cwd reach the
-  // native-local read approval authority.
-  assertEquals(
-    run({ toolCallId: "s1", toolName: "grep", input: { pattern: "rm -rf", path: "src/a.ts" } })
-      .dispatched,
-    true,
-  );
-  assertEquals(
-    run({ toolCallId: "s2", toolName: "glob", input: { path: "src/**/*.ts" } }).dispatched,
-    true,
-  );
-  assertEquals(
-    run({
-      toolCallId: "s3",
-      toolName: "find",
-      input: { query: "where", grep_keywords: ["x"], path: "src" },
-    }).dispatched,
-    true,
-  );
-  // A literal PATTERN containing URI-like text is not a root: the search
-  // stays usable.
-  assertEquals(
-    run({
-      toolCallId: "s4",
-      toolName: "grep",
-      input: { pattern: "https://example.com/x", path: "src" },
-    }).dispatched,
-    true,
-  );
-  // Mixed local + HTTP(S): the WHOLE call denies before scanning.
-  const mixed = run({
-    toolCallId: "s5",
-    toolName: "grep",
-    input: { pattern: "x", path: "src/a.ts;https://example.com/x" },
-  });
-  assertBoundedBlock(mixed, "rejected_alternate_route");
-  assert(mixed.reason?.includes("capability=network-read"), mixed.reason ?? "");
-  assert(mixed.reason?.includes("route=remote-url"), mixed.reason ?? "");
-  // A lone HTTP(S) search root is materialization-bound native transport:
-  // never a local search route.
-  assertBoundedBlock(
-    run({
-      toolCallId: "s6",
-      toolName: "grep",
-      input: { pattern: "x", path: "https://example.com/x" },
-    }),
-    "rejected_alternate_route",
-  );
-  // SSH / internal-device / collapsed / glued roots deny with their route.
-  for (
-    const path of [
-      "ssh://host/src",
-      "ssh:/host/src",
-      "xd://device/notes",
-      "local://notes.md",
-      "/repo/local://notes.md",
-      "memory:12",
-      "src,a.ts;ssh://host/x",
-      // A scheme-SHAPED token denies for EVERY unknown scheme, not just the
-      // pinned ones: the pinned search router resolves unregistered custom
-      // schemes through its MCP resource fallback, so neither the known
-      // (local://, xd://) nor an unknown (file:/, weird:/) spelling can be
-      // proven local.
-      "file:/repo/a.txt",
-      "file:///repo/a.txt",
-      "weird:/repo/a.txt",
-    ]
-  ) {
-    const outcome = run({ toolCallId: "s7", toolName: "grep", input: { pattern: "x", path } });
-    assertBoundedBlock(outcome, "rejected_alternate_route");
-    assertEquals(outcome.dispatched, false, path);
+  for (const toolName of MAPPED_TOOL_NAMES) {
+    const outcome = invokeNativeToolCall(handler, toolName);
+    assertEquals(outcome.dispatched, 1, toolName);
+    dispatched += outcome.dispatched;
   }
-  // Colon-bearing local names stay usable exactly where they are NOT
-  // scheme-shaped with a slash and their opaque prefix is not a pinned
-  // internal scheme.
-  for (const path of ["archive.zip:member.md", "report.pdf", "notes:2-4", "C:/repo/src"]) {
-    assertEquals(
-      run({ toolCallId: "s8", toolName: "grep", input: { pattern: "x", path } }).dispatched,
-      true,
-      path,
-    );
+  assertEquals(dispatched, MAPPED_TOOL_NAMES.length);
+});
+
+Deno.test("the registered callback decides exactly like the directly created handler", () => {
+  const direct = createOmpCapabilityToolCallHandler();
+  const { api, handlers } = createRecordingApi();
+  registerOmpCapabilityCallback(api);
+  const registered = handlers[0];
+
+  for (const toolName of [...MAPPED_TOOL_NAMES, ...UNMATCHED_TOOL_NAMES]) {
+    assertEquals(registered({ toolName }), direct({ toolName }), toolName);
   }
 });
 
-Deno.test("Native read/write: accepted native-local reads and ordinary write/edit; unrepresentable destructive intents still deny (tasks 4.1/4.2)", () => {
-  const { run } = harness([
-    builtinTool("read"),
-    builtinTool("write"),
-    builtinTool("edit"),
-    builtinTool("apply_patch"),
-  ]);
-  // Direct native local read is ACCEPTED local behavior under the native
-  // read approval authority — not protected ACP callback evidence.
-  assertEquals(
-    run({ toolCallId: "r1", toolName: "read", input: { path: "src/a.md" } }).dispatched,
-    true,
-  );
-  // Ordinary local write/edit reach the pinned native approval path (no
-  // pre-dispatch sink-route evidence gate in this change).
-  assertEquals(
-    run({ toolCallId: "w1", toolName: "write", input: { path: "notes.md", content: "x" } })
-      .dispatched,
-    true,
-  );
-  assertEquals(
-    run({ toolCallId: "w2", toolName: "edit", input: { path: "notes.md" } }).dispatched,
-    true,
-  );
-  // A skill:// read is the owned skill-URI route, never a device route.
-  assertEquals(
-    run({ toolCallId: "r2", toolName: "read", input: { path: "skill://send-reply/SKILL.md" } })
-      .dispatched,
-    true,
-  );
-  // A remote/device read root denies before dispatch.
-  assertBoundedBlock(
-    run({ toolCallId: "r3", toolName: "read", input: { path: "xd://device/x" } }),
-    "rejected_alternate_route",
-  );
-  // Destructive / multi-file intents the pinned event+context cannot
-  // represent still fail closed (no trusted acquired-session context here).
-  const multiFile = run({
-    toolCallId: "d1",
-    toolName: "apply_patch",
-    input: { path: "a.md", operations: [{ kind: "delete", path: "/etc/passwd" }] },
-  });
-  assertEquals(multiFile.blocked, true);
-  assertEquals(multiFile.dispatched, false);
-  assert(
-    multiFile.reason?.startsWith("restricted tool call blocked: rejected_"),
-    multiFile.reason ?? "",
-  );
-});
+Deno.test("the registered callback blocks before dispatch", () => {
+  const { api, handlers } = createRecordingApi();
+  registerOmpCapabilityCallback(api);
+  const registered = handlers[0];
 
-// ---------------------------------------------------------------------------
-// Task 1.3: model-authored event data can never carry authority.
-// ---------------------------------------------------------------------------
-
-Deno.test("Native decode: forged authority fields in tool input change nothing (destructive blocks)", () => {
-  // Module evidence is valid here; the DESTRUCTIVE operation still needs its
-  // own acquired session context, which production does not supply.
-  const { run } = harness([{ name: "read", sourceInfo: IMAGE_SOURCE }]);
-  const outcome = run({
-    toolCallId: "d1",
-    toolName: "delete",
-    input: {
-      path: "docs/x.md",
-      // Model-supplied "authority": ownership, shared-write, completion,
-      // and even a claimed full-parser provenance with side-listed ops.
-      ownedClaim: true,
-      sharedWrite: true,
-      adapterComplete: true,
-      parserProvenance: "supported_full_parser",
-      operations: [{ kind: "delete", path: "/etc/passwd" }],
-    },
-  });
-  assert(outcome.blocked, "a destructive-shaped call with no trusted session context must block");
-  assert(outcome.reason?.startsWith("restricted tool call blocked: rejected_"));
-  assertEquals(outcome.dispatched, false);
-});
-
-Deno.test("Native decode: unrepresentable events block at the decode seam, never silently allow", () => {
-  const { run } = harness([{ name: "read", sourceInfo: IMAGE_SOURCE }]);
-  for (
-    const bad of [
-      { toolName: "read", input: { path: "x" } }, // no toolCallId
-      { toolCallId: "b1", input: { path: "x" } }, // no toolName
-      { toolCallId: "b2", toolName: "read", input: "not-an-object" },
-      { type: "session_updated", toolCallId: "b3", toolName: "read", input: {} },
-      // Unserializable destructive arguments NEVER become a payload-less
-      // "non-destructive" shape claim: they fail at the decode seam.
-      { toolCallId: "b4", toolName: "delete", input: { path: 42n as unknown as string } },
-    ]
-  ) {
-    const outcome = run(bad as NativeToolCallEvent);
-    assert(
-      outcome.blocked,
-      `unrepresentable event must block: ${
-        JSON.stringify(bad, (_k, v) => typeof v === "bigint" ? "<bigint>" : v)
-      }`,
-    );
-    assert(outcome.reason?.includes("rejected_enforcement_seam"));
-    assert(outcome.reason?.includes("native-event-decode"));
-    assertEquals(outcome.dispatched, false);
-  }
-});
-
-// ---------------------------------------------------------------------------
-// C5 (`admit-completed-omp-network-adapters`, task 2.1): the composed
-// native-callback surface consumes route completion — completion admits ONLY
-// the registered owned replacement on a completed route with a supported
-// backend; absence keeps the bounded pending block with zero dispatch.
-// Synthetic API-shaped fixtures throughout (same honesty rules as above).
-// ---------------------------------------------------------------------------
-
-const NO_BACKEND = { geminiKey: false, openrouterKey: false };
-const GEMINI_BACKEND = { geminiKey: true, openrouterKey: false };
-
-Deno.test("Native C5: registered owned URL read proceeds on the completed route; web_search blocks pending with no backend", () => {
-  const { run } = harness([
-    { name: "read", sourceInfo: IMAGE_SOURCE },
-    { name: "web_search", sourceInfo: IMAGE_SOURCE },
-  ], { searchCredentialPresence: () => NO_BACKEND });
-  // URL-shaped read on the registered owned replacement: the completed
-  // controlled route covers it ⇒ continue (undefined return — the named
-  // replacement, not native transport, owns the call).
-  assertEquals(
-    run({ toolCallId: "u1", toolName: "read", input: { path: "https://example.com/page" } })
-      .dispatched,
-    true,
-  );
-  // web_search with NO supported backend: the existing bounded pending
-  // block, zero dispatch (nothing continues into any transport).
-  const blocked = run({ toolCallId: "s1", toolName: "web_search", input: { query: "q" } });
-  assertBoundedBlock(blocked, "rejected_pending_adapter");
-});
-
-Deno.test("Native C5: supported backend continues; presence read per call, mid-session change moves the next call", () => {
-  let presence = NO_BACKEND;
-  const { run } = harness([{ name: "web_search", sourceInfo: IMAGE_SOURCE }], {
-    searchCredentialPresence: () => presence,
-  });
-  assertBoundedBlock(
-    run({ toolCallId: "p1", toolName: "web_search", input: { query: "q" } }),
-    "rejected_pending_adapter",
-  );
-  presence = GEMINI_BACKEND;
-  assertEquals(
-    run({ toolCallId: "p2", toolName: "web_search", input: { query: "q" } }).dispatched,
-    true,
-    "availability appearing moves the NEXT call — never cached",
-  );
-  presence = NO_BACKEND;
-  // Availability disappearing returns the bounded block (read fresh again).
-  assertBoundedBlock(
-    run({ toolCallId: "p3", toolName: "web_search", input: { query: "q" } }),
-    "rejected_pending_adapter",
-  );
-});
-
-Deno.test("Native C5: shadow-same-name registration never completes the URL route", () => {
-  const { h, run } = harness([{ name: "read", sourceInfo: IMAGE_SOURCE }], {
-    searchCredentialPresence: () => NO_BACKEND,
-  });
-  assertEquals(
-    run({ toolCallId: "k1", toolName: "read", input: { path: "https://example.com/a" } })
-      .dispatched,
-    true,
-  );
-  // A foreign same-name extension file takes the slot: the fresh provenance
-  // read re-keys it unowned ⇒ denial BEFORE the clamp — no completion path,
-  // no dispatch.
-  h.tools[0] = {
-    name: "read",
-    sourceInfo: { path: "/home/attacker/tool.js", source: "extension" },
-  };
-  assertBoundedBlock(
-    run({ toolCallId: "k2", toolName: "read", input: { path: "https://example.com/b" } }),
-    "rejected_tool_provenance",
-  );
-});
-
-// ---------------------------------------------------------------------------
-// C6 (`repair-omp-owned-skill-handoff` task 2.1): the decoder must classify
-// a `skill://` read as the EXISTING trusted-skills path-target route — never
-// a url, never a downgrade to an arbitrary device/opaque shape — and the
-// registered read must carry the pinned skill-reading capability backed by
-// an owned-seam authorization over the DECLARED root (never a fallback).
-// ---------------------------------------------------------------------------
-
-Deno.test("Native C6: skill:// decodes as path-target, never url/device", () => {
-  for (
-    const path of [
-      "skill://send-reply/SKILL.md",
-      "skill:/send-reply/SKILL.md",
-      "skill://nested/dir/SKILL.md",
-    ]
-  ) {
-    const decoded = decodeNativeToolCallEvent({
-      toolCallId: "c1",
-      toolName: "read",
-      input: { path },
-    });
-    assertEquals(decoded.ok, true, path);
-    if (decoded.ok) {
-      assertEquals(decoded.input.decodedInputShape, "path-target", path);
-    }
-  }
-  // The http(s) shapes stay url-classified: the skill branch did not widen
-  // URL decoding.
-  const url = decodeNativeToolCallEvent({
-    toolCallId: "c2",
-    toolName: "read",
-    input: { path: "https://example.com/x" },
-  });
-  assertEquals(url.ok && url.input.decodedInputShape, "url");
-});
-
-Deno.test("Native C6: the registered read declares readsSkillUris and denies skill URIs off-image", async () => {
-  const tools = nativeReplacementTools("", () => "gen-7");
-  const read = tools.find((tool) => tool.name === "read");
-  assert(read !== undefined);
-  // The pinned capability the native host keys skill admission on.
-  assertEquals(read.readsSkillUris, true);
-  // The search replacement makes no skill claim.
-  assertEquals(tools.find((tool) => tool.name === "search")?.readsSkillUris, undefined);
-  // A launch without a declared root (empty value): the declared root is not
-  // observable, so a skill URI DENIES before any delegation and no fallback
-  // root is consulted — and an absent generation changes nothing about it.
-  const deny = async (generation: string) => {
-    const seam = nativeReplacementTools("", () => generation).find((tool) => tool.name === "read");
-    assert(seam?.execute !== undefined);
-    try {
-      await seam.execute("t1", { path: "skill://send-reply/SKILL.md" }, undefined, undefined, {
-        invokeTool: () => Promise.reject(new Error("must never delegate")),
-      });
-      throw new Error("skill:// without a declared root must deny");
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      assert(message.includes("skill_uri_denied"), message);
-    }
-  };
-  await deny("gen-7");
-  await deny("");
-
-  // The DECLARED root is the resolution admission input: a runtime-resolved
-  // root the runtime agent user can write (`0775` directories, `0664` file —
-  // the packaged personal tree's own modes) is ADMITTED on identity,
-  // containment and the link-free ladder alone
-  // (`align-omp-skill-trust-to-shared-root` D1), and the ORIGINAL URI is
-  // delegated once.
-  const declaredRoot = await Deno.makeTempDir({ prefix: "omp-declared-root-" });
-  try {
-    const instruction = `${declaredRoot}/send-reply/SKILL.md`;
-    await Deno.mkdir(`${declaredRoot}/send-reply`, { recursive: true });
-    await Deno.writeTextFile(instruction, "owned instruction");
-    await Deno.chmod(`${declaredRoot}/send-reply`, 0o775);
-    await Deno.chmod(declaredRoot, 0o775);
-    await Deno.chmod(instruction, 0o664);
-    const seam = nativeReplacementTools(declaredRoot, () => "gen-7").find((tool) =>
-      tool.name === "read"
-    );
-    assert(seam?.execute !== undefined);
-    const delegated: Array<Record<string, unknown>> = [];
-    const result = await seam.execute(
-      "t2",
-      { path: "skill://send-reply/SKILL.md" },
-      undefined,
-      undefined,
-      {
-        invokeTool: (params) => {
-          delegated.push(params);
-          return Promise.resolve({ content: "native instruction result" });
-        },
-      },
-    );
-    assertEquals(delegated.length, 1, "the writable declared root delegates exactly once");
-    assertEquals(delegated[0]!["path"], "skill://send-reply/SKILL.md");
-    assertEquals(result, { content: "native instruction result" });
-
-    // A linked component inside the SAME writable tree still denies: the
-    // relaxation never converts an identity/containment denial into admission.
-    await Deno.symlink(instruction, `${declaredRoot}/send-reply/LINKED.md`);
-    const linked = nativeReplacementTools(declaredRoot, () => "gen-7").find((tool) =>
-      tool.name === "read"
-    );
-    assert(linked?.execute !== undefined);
-    let joined = "";
-    try {
-      await linked.execute("t3", { path: "skill://send-reply/LINKED.md" }, undefined, undefined, {
-        invokeTool: () => Promise.reject(new Error("must never delegate")),
-      });
-    } catch (error) {
-      joined = error instanceof Error ? error.message : String(error);
-    }
-    assert(joined.includes("skill_uri_denied"), joined);
-  } finally {
-    await Deno.remove(declaredRoot, { recursive: true });
-  }
+  assertEquals(invokeNativeToolCall(registered, "bash").dispatched, 1);
+  assertEquals(invokeNativeToolCall(registered, "__proto__").dispatched, 0);
 });

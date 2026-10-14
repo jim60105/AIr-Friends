@@ -1,22 +1,21 @@
 /**
- * Generated-bundle / default-factory smoke
- * (`bind-omp-owned-module-evidence` task 3.2, duck finding 6).
+ * Generated-bundle / default-extension smoke (delivered-artifact dispatch).
  *
- * Every other suite binds `createNativeExtensionFactory` to injected deps. This
- * suite instead builds the REAL bundle at its DECLARED development path
- * (`<checkout>/build/omp-extension/index.js` — the artifact the embedded
- * declaration names), loads it in a CHILD PROCESS under the restricted launch
- * identity and drives its DEFAULT exported factory with an API-shaped roster.
- * That is the only way to exercise, together: the placeholder substitution, the
- * embedded declaration, `import.meta.url`, the production node:fs metadata
- * reader, the registration-time acceptance and the live re-observation.
+ * Every other suite imports the extension module source directly. This suite
+ * instead builds the REAL bundle at its declared development path
+ * (`<checkout>/build/omp-extension/index.js` — the artifact development launch
+ * and image installation both consume), loads it in a CHILD PROCESS and drives
+ * its DEFAULT exported extension with an API-shaped `tool_call` registration.
+ * That is the only way to exercise the delivered artifact's own wiring: module
+ * load without an import map, official-API registration, and the pre-dispatch
+ * capability decision for mapped versus unmatched native tool names.
  *
  * Assertions are about the DELIVERED ARTIFACT'S OWN wiring. Nothing here claims
  * the official host binary evaluates or honors the extension — that stays
  * user-owned runtime verification (docs/OMP_ENFORCEMENT.md §Checklist).
  */
 
-import { assert, assertEquals } from "@std/assert";
+import { assertEquals } from "@std/assert";
 import { OMP_TRUSTED_EXTENSION_BUNDLE_PATH } from "@utils/omp-paths.ts";
 
 const repoRoot = new URL("../../", import.meta.url).pathname.replace(/\/$/, "");
@@ -27,24 +26,31 @@ const declaredArtifactPath = `${await Deno.realPath(
   repoRoot,
 )}/${OMP_TRUSTED_EXTENSION_BUNDLE_PATH}`;
 
-interface SmokeResult {
-  readonly registered: boolean;
-  readonly mode: string;
-  readonly registeredTools: readonly string[];
-  readonly loadBlockers: number;
-  readonly trustedRoots: readonly string[];
-  readonly localRead: string;
-  readonly urlRead: string;
-  readonly webSearchNoBackend: string;
-  readonly authenticBuiltin: string;
-  readonly foreignSameName: string;
+/** One dispatched call: the callback verdict plus the fixture operations it ran. */
+interface SmokeCall {
+  readonly outcome: string;
+  readonly executed: number;
 }
 
-/**
- * Build the generated bundle at its declared path (the real packaging entry
- * point) and run the driver in a child process whose launch identity is a
- * restricted mode cwd with owned HOME / agent dir and NO API keys.
- */
+interface SmokeResult {
+  readonly handlerCount: number;
+  readonly read: SmokeCall;
+  readonly grep: SmokeCall;
+  readonly glob: SmokeCall;
+  readonly find: SmokeCall;
+  readonly todo: SmokeCall;
+  readonly web_search: SmokeCall;
+  readonly bash: SmokeCall;
+  readonly edit: SmokeCall;
+  readonly write: SmokeCall;
+  readonly delete: SmokeCall;
+  readonly move: SmokeCall;
+  readonly unknownTool: SmokeCall;
+  readonly protoName: SmokeCall;
+  readonly toStringName: SmokeCall;
+}
+
+/** Build the generated bundle and run the driver against the delivered file. */
 async function runBundleSmoke(): Promise<SmokeResult> {
   const buildTarget = `${repoRoot}/${OMP_TRUSTED_EXTENSION_BUNDLE_PATH.replace(/\/[^/]+$/, "")}`;
   const build = new Deno.Command(`${repoRoot}/scripts/omp/bundle-omp-extension.sh`, {
@@ -56,89 +62,65 @@ async function runBundleSmoke(): Promise<SmokeResult> {
   const buildOutput = await build.output();
   assertEquals(buildOutput.code, 0, new TextDecoder().decode(buildOutput.stderr));
 
-  const stateBase = await Deno.makeTempDir({ prefix: "omp-bundle-smoke-state-" });
-  const parentConfigHome = Deno.env.get("XDG_CONFIG_HOME");
-  // A hostile parent selector must not reach the controlled driver environment.
-  Deno.env.set("XDG_CONFIG_HOME", `${stateBase}/foreign-config`);
-  try {
-    const ownedHome = `${stateBase}/omp-agent/restricted/home`;
-    const agentDir = `${stateBase}/omp-agent/restricted`;
-    const launchCwd = `${stateBase}/omp-agent/restricted/cwd`;
-    for (const dir of [ownedHome, launchCwd]) await Deno.mkdir(dir, { recursive: true });
-    const runner = new Deno.Command(Deno.execPath(), {
-      args: [
-        "run",
-        "--allow-read",
-        "--allow-env",
-        driverPath,
-        `file://${declaredArtifactPath}`,
-        declaredArtifactPath,
-      ],
-      cwd: launchCwd,
-      // A CONTROLLED environment: the owned launch env the bootstrap validates
-      // and deliberately NO search-provider credentials.
-      clearEnv: true,
-      env: { HOME: ownedHome, PI_CODING_AGENT_DIR: agentDir, PATH: "/usr/bin:/bin" },
-      stdout: "piped",
-      stderr: "piped",
-    });
-    const output = await runner.output();
-    const stdout = new TextDecoder().decode(output.stdout);
-    const stderr = new TextDecoder().decode(output.stderr);
-    assertEquals(output.code, 0, `driver failed:\n${stderr}\n${stdout}`);
-    return JSON.parse(stdout) as SmokeResult;
-  } finally {
-    if (parentConfigHome === undefined) {
-      Deno.env.delete("XDG_CONFIG_HOME");
-    } else {
-      Deno.env.set("XDG_CONFIG_HOME", parentConfigHome);
-    }
-    await Deno.remove(stateBase, { recursive: true });
-  }
+  const runner = new Deno.Command(Deno.execPath(), {
+    args: [
+      "run",
+      "--allow-read",
+      driverPath,
+      `file://${declaredArtifactPath}`,
+    ],
+    cwd: repoRoot,
+    stdout: "piped",
+    stderr: "piped",
+  });
+  const output = await runner.output();
+  const stdout = new TextDecoder().decode(output.stdout);
+  const stderr = new TextDecoder().decode(output.stderr);
+  assertEquals(output.code, 0, `driver failed:\n${stderr}\n${stdout}`);
+  return JSON.parse(stdout) as SmokeResult;
 }
 
 Deno.test({
-  name:
-    "bundle smoke: the delivered default factory admits owned replacements on REAL module evidence",
+  name: "bundle smoke: the delivered extension dispatches mapped tools and blocks unmatched ones",
   fn: async () => {
     const result = await runBundleSmoke();
 
-    // The restricted branch registered through the pinned native API.
-    assertEquals(result.registered, true);
-    assertEquals(result.mode, "restricted");
-    assertEquals([...result.registeredTools].sort(), ["read", "web_search"]);
-    // The load-time decision saw no blockers and reported the DECLARED
-    // development artifact as its module trust root.
-    assertEquals(result.loadBlockers, 0);
-    assertEquals(result.trustedRoots, [declaredArtifactPath]);
+    // The default export registered exactly one pre-dispatch tool_call handler.
+    assertEquals(result.handlerCount, 1);
 
-    // Owned replacement admission on the real evidence: ordinary local read and
-    // the controlled HTTP(S) URL branch both reach their completing boundary,
-    // and an authentic builtin still proceeds — with NO session context, NO
-    // injected module evidence and NO fixture declaration anywhere.
-    assertEquals(result.localRead, "dispatch");
-    assertEquals(result.urlRead, "dispatch");
+    // Every mapped capability continues to its native path, and the fixture
+    // dispatcher executes exactly one operation for each of them.
+    for (
+      const [name, call] of [
+        ["read", result.read],
+        ["grep", result.grep],
+        ["glob", result.glob],
+        ["find", result.find],
+        ["todo", result.todo],
+        ["web_search", result.web_search],
+        ["bash", result.bash],
+        ["edit", result.edit],
+        ["write", result.write],
+        ["delete", result.delete],
+        ["move", result.move],
+      ] as const
+    ) {
+      assertEquals(call.outcome, "dispatch", name);
+      assertEquals(call.executed, 1, `${name} must execute exactly one operation`);
+    }
 
-    // web_search reaches the EXISTING backend/credential admission: with no
-    // provider credentials present it keeps the bounded pending-adapter block
-    // (never a native-provider fallback, never a provenance denial).
-    assert(
-      result.webSearchNoBackend.startsWith("block:"),
-      `web_search must reach backend admission: ${result.webSearchNoBackend}`,
-    );
-    assert(
-      result.webSearchNoBackend.includes("rejected_pending_adapter"),
-      `expected the pending-adapter clamp, got: ${result.webSearchNoBackend}`,
-    );
-    assertEquals(result.authenticBuiltin, "dispatch");
-
-    // A foreign same-name extension registration NEVER completes: the fresh
-    // provenance read denies it before any transport.
-    assert(result.foreignSameName.startsWith("block:"), result.foreignSameName);
-    assert(
-      result.foreignSameName.includes("rejected_tool_provenance"),
-      result.foreignSameName,
-    );
+    // Unmatched names never execute — including prototype-shaped names, which
+    // the own-property membership check must treat as unknown.
+    for (
+      const [name, call] of [
+        ["unknownTool", result.unknownTool],
+        ["protoName", result.protoName],
+        ["toStringName", result.toStringName],
+      ] as const
+    ) {
+      assertEquals(call.outcome, "block", name);
+      assertEquals(call.executed, 0, `${name} must execute no operation`);
+    }
   },
   sanitizeOps: false,
   sanitizeResources: false,

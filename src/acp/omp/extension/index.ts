@@ -1,94 +1,20 @@
 /**
- * Trusted Extension Module Entrypoint.
+ * Trusted Extension Module Entrypoint (restricted capability admission only).
  *
  * Pinned development-tree location: src/acp/omp/extension/index.ts
  * Contracted by OMP_TRUSTED_EXTENSION_PATH in src/utils/omp-paths.ts.
  *
- * Implements the official OMP trusted extension factory.
- * Executes the pre-import discovery bootstrap sequence at module load time.
- * Throws a fatal initialization error if pre-import exclusion blockers exist.
+ * The pinned native loader evaluates the default export with its own
+ * `ExtensionAPI` and discards the return value, so the capability handler is
+ * attached SYNCHRONOUSLY through `api.on("tool_call", ...)` during this
+ * evaluation and lives nowhere else. The restricted launch is the only launch
+ * that loads this module: native-YOLO expresses its single LSP denial in its
+ * own native YAML and loads no extension.
  *
- * C4 (`wire-omp-native-extension-api`) replaced the row-16 factory-return/
- * private-slot convention: the pinned loader AWAITS the default export and
- * DISCARDS its return value, so enforcement lives ONLY in the native API
- * registrations the factory makes synchronously during its own evaluation —
- * `api.on("tool_call", ...)` before execution and `api.registerTool(...)`
- * for the C2 `read`/`web_search` name replacements. The registration branch
- * is still gated on the module's OWN observed launch identity (row 9's
- * mode-distinct launch cwd `{baseRoot}/omp-agent/{mode}/cwd`): a
- * native-YOLO or otherwise unidentified process registers nothing at all,
- * so the exemption stays structural at the registration site and no mode
- * check exists inside the decision path.
- * Because the pinned pre-import-exclusion verdicts are unresolved (row 12),
- * this entrypoint fail-closes BEFORE the registrations: the factory exists
- * only when the gate passes. The accepted absence-of-handler residual risk
- * is unchanged (design §15) — whether the official binary ever evaluates
- * this factory or invokes the registered callback remains user-owned
- * runtime verification, never something this module claims, and no
- * readiness handshake exists or is asserted here.
+ * There is no module-load bootstrap, discovery guard, cwd/mode inference,
+ * registry observation, replacement tool registration or readiness handshake.
  */
 
-import { bootstrapDiscoveryGuard } from "./bootstrap.ts";
-import { formatDiscoverySessionError } from "../discovery-guard.ts";
-import { createNativeExtensionFactory, nativeReplacementTools } from "./native-registration.ts";
+import { registerOmpCapabilityCallback } from "./native-registration.ts";
 
-// Execute load-time pre-import discovery bootstrap sequence immediately upon import
-export const loadTimeDiscoveryDecision = bootstrapDiscoveryGuard({
-  // The load-time decision REPORTS the declared deployment artifact this
-  // module belongs to; module authority itself comes from the registration
-  // site's physical observation of that same declaration.
-  moduleUrl: import.meta.url,
-});
-
-// If any blocker is present at module load, fail initialization closed
-if (loadTimeDiscoveryDecision.blockers.length > 0) {
-  throw new Error(formatDiscoverySessionError(loadTimeDiscoveryDecision));
-}
-
-function safeCwd(): string {
-  try {
-    if (typeof Deno !== "undefined" && Deno.cwd) return Deno.cwd();
-    if (typeof process !== "undefined" && process.cwd) return process.cwd();
-  } catch {
-    // Permission restricted: the launch identity simply stays unobserved.
-  }
-  return "";
-}
-
-/**
- * Default extension factory complying with the pinned native extension
- * contract: the loader evaluates it with the native `ExtensionAPI` and the
- * registrations happen SYNCHRONOUSLY inside this call — no returned object
- * carries a handler or a registrar anymore, because the loader discards
- * the return value entirely. The native-YOLO branch registers nothing
- * (structural exemption). The return value is a plain status record for
- * API-shaped consumers/tests, never an attachment point.
- * The factory object itself is the shared `createNativeExtensionFactory`
- * product, so API-shaped fixtures exercise the SAME function the pinned
- * loader would evaluate (fixtures name their injected identity honestly).
- */
-export default createNativeExtensionFactory(() => ({
-  observedCwd: safeCwd(),
-  resourceGeneration: () => loadTimeDiscoveryDecision.resourceGeneration,
-  // The pinned host offers NO trusted session-context acquisition into
-  // the extension child today: production wires no session context, so
-  // destructive-shaped calls fail closed on absent canonical
-  // observations — never on model-supplied ones.
-  // Module identity, in contrast, needs no session context: the registration
-  // site builds the physical deployment-module evidence itself from this
-  // module's own loaded URL (the declared development or image artifact).
-  moduleUrl: import.meta.url,
-  // C6: the read replacement's owned skill-URI authorization rides the SAME
-  // live discovery generation the enforcement observer consumes — an absent
-  // generation mints no skill authority. The declared root is the one the
-  // load-time decision observed from the deployment-owned launch environment
-  // (`align-omp-skill-trust-to-shared-root` D4): a decision without EXACTLY one
-  // declared root wires an empty root, so a `skill://` read denies before any
-  // native delegation rather than resolving against a fallback.
-  replacementTools: nativeReplacementTools(
-    loadTimeDiscoveryDecision.ownedSkillRoots.length === 1
-      ? loadTimeDiscoveryDecision.ownedSkillRoots[0]
-      : "",
-    () => loadTimeDiscoveryDecision.resourceGeneration,
-  ),
-}));
+export default registerOmpCapabilityCallback;

@@ -14,15 +14,13 @@
 // a `deno run` mock; every catalog/observation is synthetic. Nothing in this
 // file demonstrates or claims that the native OMP binary invokes the attached
 // handler, honors a denial, emits readiness, or suppresses a language server.
-// Allow-path fixtures are registered as labeled
-// synthetic positives on the shared ledger; the suite guard in
-// opencode-regression.integration.test.ts scans them.
+// The scenario names and comments identify the evidence as mock evidence.
 
 import { assert, assertEquals, assertRejects, assertStringIncludes } from "@std/assert";
 import { join } from "@std/path";
 import { AgentProcessPool } from "@core/agent-process-pool.ts";
 import { AgentConnector } from "@acp/agent-connector.ts";
-import type { AgentConfig, AgentConnectorOptions } from "@acp/types.ts";
+import type { AgentConfig, AgentConnectorOptions, OmpPermissionMode } from "@acp/types.ts";
 import { SessionRegistry } from "../../../src/skill-api/session-registry.ts";
 import { SkillRegistry } from "@skills/registry.ts";
 import { MemoryStore } from "@core/memory-store.ts";
@@ -35,9 +33,7 @@ import {
   buildOmpFactoryAgentConfig,
   createOmpTestConfig,
   expectProcessGone,
-  type OmpPermissionMode,
   processAlive,
-  SyntheticPositiveLedger,
   useMockOmpAgent,
 } from "../../mocks/omp-mock-session.ts";
 
@@ -236,6 +232,35 @@ function scopedOptions(params: {
   return { options, factoryArgs, agentConfig };
 }
 
+/**
+ * Launch-posture invariant of the shipped OMP factory output, asserted on the
+ * args captured BEFORE the mock agent swap: the authored mode settings
+ * document and the system prompt are each passed exactly once, the retired
+ * `--no-extensions`/`--no-lsp` flags are absent, and the restricted launch —
+ * and only it — attaches the capability extension bundle. This asserts OUR
+ * launch configuration only, never native honoring of it.
+ */
+function assertOmpLaunchPosture(args: string[], mode: OmpPermissionMode): void {
+  assert(args.includes("acp"));
+  assertEquals(args.filter((a) => a === "--config").length, 1, "exactly one --config");
+  assertEquals(
+    args.filter((a) => a === "--system-prompt").length,
+    1,
+    "exactly one --system-prompt",
+  );
+  assertEquals(
+    args.filter((a) => a === "--trusted-extension").length,
+    mode === "restricted" ? 1 : 0,
+    `${mode} trusted-extension attachment`,
+  );
+  assert(!args.includes("--no-extensions"), "--no-extensions is retired");
+  assert(!args.includes("--no-lsp"), "--no-lsp is retired");
+  assertStringIncludes(
+    args.join(" "),
+    mode === "restricted" ? "restricted.yml" : "native-yolo.yml",
+  );
+}
+
 // ---------------------------------------------------------------------------
 // 3.1 Happy path: initialize/new/prompt/cancel/load through REAL pool wiring
 // ---------------------------------------------------------------------------
@@ -260,7 +285,6 @@ Deno.test({
         recordRpcFile: rpcFile,
         catalog: "grouped",
       });
-      const ledger = new SyntheticPositiveLedger();
 
       const result = await h.pool.run(scoped.options, async (connector, opts) => {
         // Real spawn: initialize happens inside connect() during acquisition.
@@ -271,11 +295,6 @@ Deno.test({
         // grouped catalog (synthetic shape; the canonical advertised value is
         // what must reach the wire).
         await connector.setSessionModel(acpSessionId, "MOCK-MODEL-CANONICAL");
-        ledger.register(
-          "31-model-set",
-          "composition-boundary: model set is a scripted mock response; no native catalog claim",
-          "grouped catalog, case-insensitive canonical selection",
-        );
 
         // Reasoning effort reapplication shape (row 6): requested `none`
         // resolves to the advertised `off`.
@@ -351,15 +370,6 @@ Deno.test({
       // directly: the only consumer-visible surface is selection behavior).
       const cache = h.spawned[0]["sessionConfigOptions"].get(result.acpSessionId!);
       assert(cache !== undefined && cache.length > 0, "config-options cache populated");
-      // Local honesty check: this file's process must never see an
-      // unlabeled allow fixture (the 5.2 guard only scans its own
-      // Deno process; each suite checks its own registrations here).
-      for (const entry of SyntheticPositiveLedger.allEntries()) {
-        assert(
-          entry.label.startsWith("composition-boundary:"),
-          `unlabeled synthetic positive in-process: ${entry.id}`,
-        );
-      }
     } finally {
       await teardownHarness(h, livePids);
     }
@@ -393,7 +403,6 @@ Deno.test({
         crashOnPrompt: "mock-crash-now",
         sidebro: true,
       });
-      const ledger = new SyntheticPositiveLedger();
 
       const entryIdentity: { connector?: AgentConnector; pid?: number; respawnPid?: number } = {};
 
@@ -476,13 +485,8 @@ Deno.test({
         // it (row 4 surfaces through the shipped writeTextFile boundary):
         const client = connector.getClient();
         assert(client !== null);
-        // Synthetic positive: the restricted write ALLOW (in-cwd, .md) is a
-        // staging-root client-policy composition result, not native evidence.
-        ledger.register(
-          "32-gate-allow-md",
-          "composition-boundary: allowed write inside the recovered session's staging root is a synthetic positive; no native enforcement claim",
-          "recovered gate context, staging root {cwd}/tmp/{shellSessionId}",
-        );
+        // The restricted write ALLOW (in-cwd, .md) is a staging-root
+        // client-policy composition result, not native evidence.
         const stagingRoot = join(opts.sessionCwd, "tmp", h.shellSessionId);
         await Deno.mkdir(stagingRoot, { recursive: true });
         await client.writeTextFile({
@@ -544,16 +548,10 @@ Deno.test({
         l.method === "session/set_config_option"
       )[0];
       assertEquals(modelReapply?.params?.["value"], "mock-model-canonical");
-      // LSP posture survives the respawn: the SAME connector respawns from
-      // its factory-built configuration — the `--no-lsp` carrier, exactly
-      // once, is the identical shipped posture before and after the respawn.
-      assertEquals(scoped.factoryArgs.filter((a) => a === "--no-lsp").length, 1);
-      for (const entry of SyntheticPositiveLedger.allEntries()) {
-        assert(
-          entry.label.startsWith("composition-boundary:"),
-          `unlabeled synthetic positive in-process: ${entry.id}`,
-        );
-      }
+      // Launch posture survives the respawn: the SAME connector respawns from
+      // its factory-built configuration, whose pinned args are the identical
+      // shipped posture before and after the respawn.
+      assertOmpLaunchPosture(scoped.factoryArgs, "restricted");
     } finally {
       await teardownHarness(h, livePids);
     }
@@ -623,11 +621,14 @@ async function modeRecoveryThroughOwnOptions(mode: OmpPermissionMode): Promise<v
     });
     assertEquals(result.cancelledByDeadline, false);
 
-    // The selected mode keeps its own mode-scoped state root, and recovery
+    // The selected mode keeps its own mode-scoped native data namespace — the
+    // very identity `deriveActualRecoveryTarget` reads for OMP — and recovery
     // loaded the session without promoting modes.
-    assertEquals(
-      scoped.agentConfig.env?.["PI_CODING_AGENT_DIR"]?.endsWith(`/omp-agent/${mode}`),
-      true,
+    assertOmpLaunchPosture(scoped.factoryArgs, mode);
+    assertStringIncludes(
+      scoped.agentConfig.env?.["XDG_DATA_HOME"] ?? "",
+      `/omp-agent/${mode}/`,
+      "mode-scoped native data namespace",
     );
     const lines = await readRpcLines(rpcFile);
     assert(lines.some((l) => l.method === "session/load"), "recovery issued session/load");
@@ -756,14 +757,8 @@ Deno.test({
         catalog: "grouped",
       });
       // No handler is installed anywhere in this composition (the mock agent
-      // loads no extension): the accepted-residual posture. The ledger marks
-      // it an absence fact, never a native default-deny equivalence claim.
-      const ledger = new SyntheticPositiveLedger();
-      ledger.register(
-        "41-handler-absent",
-        "composition-boundary: handler absent (accepted residual); client-policy denial here is NOT equivalent to native-callback default-deny",
-        `mode=restricted`,
-      );
+      // loads no extension): the accepted-residual posture. The client-policy
+      // denial below is NOT equivalent to native-callback default-deny.
 
       const result = await h.pool.run(scoped.options, async (connector, opts) => {
         livePids.push(connector.getProcessPid());
@@ -791,19 +786,15 @@ Deno.test({
         assertEquals(rejections.length, 1, "exactly one bounded denial recorded");
 
         // Pinned non-YOLO native approval launch posture (factory output,
-        // consumed verbatim): restricted overlay carried, trusted extension
-        // attached, system prompt owned — the launch args the native approval
-        // configuration rides on. This asserts OUR launch configuration only,
-        // never native honoring of it.
-        const args = scoped.factoryArgs;
-        assert(args.includes("acp"));
-        assert(args.includes("--no-extensions"));
-        assert(args.includes("--no-lsp"));
-        assertStringIncludes(args.join(" "), "restricted.yml");
-        assert(args.includes("--trusted-extension"));
-        assert(
-          scoped.agentConfig.env?.["PI_CODING_AGENT_DIR"]?.endsWith("/omp-agent/restricted") ===
-            true,
+        // consumed verbatim): the authored restricted settings document, the
+        // capability extension, and an owned system prompt — the launch args
+        // the native approval configuration rides on. This asserts OUR launch
+        // configuration only, never native honoring of it.
+        assertOmpLaunchPosture(scoped.factoryArgs, "restricted");
+        assertStringIncludes(
+          scoped.agentConfig.env?.["XDG_DATA_HOME"] ?? "",
+          "/omp-agent/restricted/",
+          "mode-scoped native data namespace",
         );
 
         // No readiness handshake exists to reject: the ACP surface used is
@@ -822,7 +813,6 @@ Deno.test({
         return acpSessionId;
       });
       assertEquals(result.cancelledByDeadline, false);
-      assert(ledger.entries().some((e) => e.id === "41-handler-absent"));
     } finally {
       await teardownHarness(h, livePids);
     }
@@ -830,12 +820,12 @@ Deno.test({
 });
 
 // ---------------------------------------------------------------------------
-// 4.3 Dual-mode coexistence on the global lease + LSP posture across respawn
+// 4.3 Dual-mode coexistence on the global lease + launch posture across respawn
 // ---------------------------------------------------------------------------
 
 Deno.test({
   name:
-    "OMP lifecycle 4.3: restricted and native-YOLO sessions coexist under mode-keyed entries and serialize on the single execution lease; both modes' --no-lsp carrier survives crash-respawn and same-mode load, YOLO without restricted policy",
+    "OMP lifecycle 4.3: restricted and native-YOLO sessions coexist under mode-keyed entries and serialize on the single execution lease; both modes' pinned launch posture survives crash-respawn and same-mode load, YOLO without restricted policy",
   ignore: !CAN_RUN_SUBPROCESS,
   sanitizeOps: false,
   sanitizeResources: false,
@@ -895,7 +885,7 @@ Deno.test({
           try {
             const id = await connector.createSession([], opts.sessionCwd);
             // Crash + same-mode recovery INSIDE the lease to also observe the
-            // LSP posture across the respawn while both entries are live.
+            // launch posture across the respawn while both entries are live.
             const gateContext = {
               cwd: opts.sessionCwd,
               shellSessionId: h.shellSessionId,
@@ -934,16 +924,15 @@ Deno.test({
       );
       assertEquals(new Set(pids).size, 2, "restricted and YOLO run as distinct processes");
 
-      // LSP disable carrier in BOTH modes after respawn/load; YOLO carries it
+      // Pinned launch posture in BOTH modes after respawn/load; YOLO carries it
       // WITHOUT the restricted policy file (no contamination).
-      for (const scopedPair of [restrictedScoped, yoloScoped]) {
-        assertEquals(scopedPair.factoryArgs.filter((a) => a === "--no-lsp").length, 1);
-      }
+      assertOmpLaunchPosture(restrictedScoped.factoryArgs, "restricted");
+      assertOmpLaunchPosture(yoloScoped.factoryArgs, "native-yolo");
       const yoloJoined = yoloScoped.factoryArgs.join(" ");
-      assertStringIncludes(yoloJoined, "native-yolo.yml");
       assert(!yoloJoined.includes("restricted.yml"), "no restricted policy crosses into YOLO");
       // No fixture here certifies implicit native startup suppression — the
-      // carrier is the claim's full extent (docs/OMP_COMPATIBILITY §1a).
+      // pinned launch args are the claim's full extent (docs/OMP_COMPATIBILITY
+      // §1a).
     } finally {
       await teardownHarness(h, livePids);
     }

@@ -1,5 +1,11 @@
-# Pinned deployment-owned OMP configuration overlay for restricted mode.
+# Hand-authored native OMP settings for the restricted mode.
 # Pinned to official OMP v18.6.1 / 2a2c6dcbbb558c0f8145f67f28b3370984f2bf60.
+#
+# `tools.approvalMode: write` plus exact-name `tools.approval.<name>` entries:
+# every mapped native ability is allowed by name and the LSP tool is explicitly
+# denied. The restricted capability extension blocks any OTHER tool name before
+# dispatch, so no wildcard default-deny key is authored here (the pinned native
+# schema has none).
 tools:
   approvalMode: write
   approval:
@@ -7,25 +13,21 @@ tools:
     grep: allow
     glob: allow
     find: allow
+    todo: allow
+    web_search: allow
+    lsp: deny
 grep:
   enabled: true
 glob:
   enabled: true
 find:
   enabled: auto
-fetch:
-  enabled: false
-lsp:
-  enabled: false
 skills:
   enabled: true
-  enableCodexUser: false
-  enableClaudeUser: false
-  enableClaudeProject: false
-  enablePiUser: false
-  enablePiProject: false
-  enableAgentsUser: false
-  enableAgentsProject: false
+  # Stock-image shared skill root. Native `expandTilde()` resolves `~`.
+  # Development/custom deployments author their actual root here AND configure
+  # `agent.skillsDir` to the same root; nothing interpolates or rewrites this.
+  customDirectories: ["~/.agents/skills"]
 startup:
   checkUpdate: false
 marketplace:
@@ -34,88 +36,3 @@ update:
   channel: stable
 compaction:
   enabled: true
-disabledProviders:
-  - abliteration
-  - aimlapi
-  - aiand
-  - alibaba-coding-plan
-  - alibaba-token-plan
-  - amazon-bedrock
-  - anthropic
-  - apple
-  - azure
-  - baseten
-  - bedrock-mantle
-  - cerebras
-  - charm-hyper
-  - cline-pass
-  - cloudflare-ai-gateway
-  - commandcode
-  - coreweave
-  - cursor
-  - deepinfra
-  - deepseek
-  - devin
-  - factory-droid
-  - firepass
-  - fireworks
-  - github-copilot
-  - gitlab-duo
-  - gitlab-duo-agent
-  - gmi-cloud
-  - google-antigravity
-  - google-gemini-cli
-  - google-vertex
-  - groq
-  - helmcode
-  - huggingface
-  - kilo
-  - kimi-code
-  - llama.cpp
-  - litellm
-  - lm-studio
-  - local
-  - meta
-  - minimax
-  - minimax-code
-  - minimax-code-cn
-  - mistral
-  - moonshot
-  - muse-code
-  - nanogpt
-  - novita
-  - nvidia
-  - ollama
-  - ollama-cloud
-  - opencode-go
-  - opencode-zen
-  - openai
-  - openai-codex
-  - qianfan
-  - qwen-portal
-  - sakana
-  - siliconflow
-  - siliconflow-cn
-  - singularityapi-dev
-  - singularityapi-tech
-  - snowflake
-  - stepfun
-  - synthetic
-  - together
-  - typesafe
-  - umans
-  - venice
-  - vercel-ai-gateway
-  - vllm
-  - wafer-serverless
-  - web
-  - xai
-  - xai-oauth
-  - xiaomi
-  - xiaomi-token-plan-ams
-  - xiaomi-token-plan-cn
-  - xiaomi-token-plan-sgp
-  - yolo-auto
-  - zai
-  - zenmux
-  - zhipu-coding-plan

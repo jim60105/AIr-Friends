@@ -57,7 +57,7 @@ import type {
 import type { AgentConfig, AgentConnectorOptions } from "../../../src/acp/types.ts";
 import type { Config } from "../../../src/types/config.ts";
 import { createSkillJwt } from "@utils/skill-jwt.ts";
-import { SyntheticPositiveLedger, useMockOmpAgent } from "../../mocks/omp-mock-session.ts";
+import { useMockOmpAgent } from "../../mocks/omp-mock-session.ts";
 import { createFilesystemTestCalls } from "../../acp/filesystem-test-calls.ts";
 
 // ---------------------------------------------------------------------------
@@ -1401,12 +1401,7 @@ async function runHonestPostureDenial(): Promise<void> {
     // Skill-script completion is asserted from the RECORDED invocation ledger
     // (records above), never a poll — every observed spawn here completed
     // before its notification (the mock awaits each child to exit).
-    // This suite composes the mock's absent-handler default; label it.
-    new SyntheticPositiveLedger().register(
-      "24-mock-absent-handler-default",
-      "composition-boundary: the mock never loads the native extension; unauthorized denial here is client/handler composition, never native default-deny or callback-coverage evidence",
-      "handoff suite honest-posture denial",
-    );
+    // Evidence posture: mock ACP composition only — the mock never loads the native extension, so this denial is client/handler composition, never native default-deny evidence.
   } finally {
     await teardownHarness(h);
   }
@@ -1524,13 +1519,7 @@ async function runUnauthorizedAcpMediatedDenial(shape: "per-spawn" | "pooled"): 
     for (const key of Object.keys(preSwap.env ?? {})) {
       assert(!key.startsWith("MOCK_OMP"), `readiness/env leak: ${key}`);
     }
-    // The absent-handler default is the mock's, not the native extension's:
-    // label the composition boundary (5.2 guard rejects unregistered ones).
-    new SyntheticPositiveLedger().register(
-      `24-acp-mediated-client-policy-deny-${shape}`,
-      "composition-boundary: the mock's agent-initiated ACP requests exercise the REAL ChatbotClient gate; the mock never loads the native extension, so these denials are client-policy composition, never native enforcement evidence",
-      `handoff suite ACP-mediated unauthorized denial (${shape})`,
-    );
+    // Evidence posture: mock ACP composition only — these agent-initiated ACP requests exercise the REAL ChatbotClient gate, but the mock never loads the native extension, so the denials are client-policy composition, never native enforcement evidence.
   } finally {
     await teardownHarness(h);
   }
@@ -1742,31 +1731,11 @@ async function runSharedRootUsability(agentType: "omp" | "opencode"): Promise<vo
 }
 
 // ---------------------------------------------------------------------------
-// 5.2 guard: every synthetic positive registered in this process is a labeled
-// composition-boundary (row-21 runtime-ledger guard precedent).
-// ---------------------------------------------------------------------------
-
-Deno.test({
-  name: "omp-skill-handoff - synthetic-positive ledger hygiene",
-  fn() {
-    // This suite's fixtures compose the CLIENT side only; every allow path
-    // it depends on (mock fixture staging standing in for the agent's write)
-    // is a composition boundary, never native evidence.
-    new SyntheticPositiveLedger().register(
-      "24-mock-staging-write",
-      "composition-boundary: mock fixture stages payloads with its own fs access (stands in for the agent's write); authorization under test is the client-side gate, never native enforcement",
-      "handoff suite payload staging",
-    );
-    for (const entry of SyntheticPositiveLedger.allEntries()) {
-      assert(
-        entry.label.startsWith("composition-boundary:"),
-        `unlabeled synthetic positive in-process: ${entry.id}`,
-      );
-    }
-  },
-});
-
-// ---------------------------------------------------------------------------
+// Evidence posture: this suite's fixtures compose the CLIENT side only and the
+// mock never loads the native extension; every allow path it depends on (mock
+// fixture staging standing in for the agent's write) is mock ACP composition,
+// never native evidence.
+//
 // Scenario registrations (subprocess tier).
 // ---------------------------------------------------------------------------
 

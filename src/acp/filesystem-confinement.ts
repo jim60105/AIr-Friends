@@ -73,6 +73,28 @@ export interface BwrapConfinementOptions {
   /** Read-write runtime paths. Defaults to {@link DEFAULT_CONFINEMENT_WRITABLE_RUNTIME_PATHS}. */
   writableRuntimePaths?: readonly string[];
   /**
+   * Per-launch runtime paths that must end up READ-ONLY even when a mandatory
+   * writable mount covers an ancestor (session workspace / TMPDIR / shared
+   * agent workspace). Emitted AFTER every writable bind, so the last bind wins
+   * — the same technique the skill root uses below. Absent for OpenCode, which
+   * supplies no runtime inputs.
+   */
+  runtimeReadOnlyPaths?: readonly string[];
+  /**
+   * Per-launch writable paths re-emitted AFTER {@link shadowedRuntimePaths}, so
+   * the selected data child survives the shadowing of its parent. Absent for
+   * OpenCode.
+   */
+  runtimeWritablePaths?: readonly string[];
+  /**
+   * Per-launch parents shadowed by an EMPTY tmpfs after the writable binds, so
+   * a mode's sibling state directories sitting under a mandatory writable
+   * ancestor are neither visible nor writable. Callers MUST only pass paths
+   * whose parent is already bound in this namespace (bwrap creates missing
+   * mountpoint parents against the real root otherwise).
+   */
+  shadowedRuntimePaths?: readonly string[];
+  /**
    * The canonical deployment trusted skill-script root (`unify-skill-root-and-
    * inventory` D4, generalizing `unify-omp-skill-root-resolution` D4) — BOTH
    * agent types resolve this same value: mounted read-only at its LITERAL path
@@ -137,6 +159,11 @@ export function buildBwrapConfinement(
       opts.sessionWorkspace,
       opts.tmpDir,
       ...writableRuntime,
+      // The per-launch writable inputs are bound LATE, but they are writable
+      // mounts all the same: a skill root that equals or contains one of them
+      // would be re-bound read-only over a writable state tree, so it must be
+      // refused here exactly like every other mandatory writable.
+      ...(opts.runtimeWritablePaths ?? []),
     ];
     if (opts.agentWorkspace) mandatoryWritables.push(opts.agentWorkspace);
     for (const writable of mandatoryWritables) {
@@ -189,6 +216,21 @@ export function buildBwrapConfinement(
   a.push("--bind", opts.tmpDir, opts.tmpDir);
   if (opts.agentWorkspace) {
     a.push("--bind", opts.agentWorkspace, opts.agentWorkspace);
+  }
+
+  // Per-launch runtime reachability, emitted LAST among the writable/bind
+  // steps so a mandatory writable ancestor can never widen or hide it:
+  //   1. shadow the mode parent (hides sibling state under a writable tree),
+  //   2. re-bind the selected data child inside that shadow,
+  //   3. bind the selected authored assets read-only.
+  for (const shadowed of opts.shadowedRuntimePaths ?? []) {
+    a.push("--tmpfs", shadowed);
+  }
+  for (const rw of opts.runtimeWritablePaths ?? []) {
+    a.push("--bind-try", rw, rw);
+  }
+  for (const ro of opts.runtimeReadOnlyPaths ?? []) {
+    a.push("--ro-bind-try", ro, ro);
   }
 
   // D4: the trusted skill root, read-only at its literal path, bound LAST so a
