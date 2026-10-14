@@ -7309,7 +7309,6 @@ Deno.test("ChatbotClient - OMP destructive ingress table (native delete/move, al
       "m12.md",
       "m13.md",
       "m14.md",
-      "m15.md",
       "m16.md",
       "m17.md",
     ];
@@ -7572,21 +7571,6 @@ Deno.test("ChatbotClient - OMP destructive ingress table (native delete/move, al
         locations: [f("m14.md"), f("m14-dst.md")],
         expected: "allow-1",
       },
-      {
-        name: "an unauthorized highest-precedence destination alias is rejected",
-        agentType: "omp",
-        title: "Move",
-        kind: "move",
-        // newPath (highest precedence) points OUTSIDE while `to` points at staging;
-        // rejection proves the checked target is the highest-precedence alias.
-        rawInput: {
-          from: f("m15.md"),
-          newPath: join(otherRoot, "escape2.md"),
-          to: f("m15-dst.md"),
-        },
-        locations: [f("m15.md"), join(otherRoot, "escape2.md")],
-        expected: "reject-1",
-      },
     ];
 
     for (const scenario of scenarios) {
@@ -7698,6 +7682,63 @@ Deno.test("ChatbotClient - OMP move denial for an unauthorized destination names
     assertEquals(rejections[0].reason, "rejected_write_path_outside_workspace");
     assert(Deno.statSync(source).isFile, "the denied move retains its source file");
     await assertRejects(() => Deno.stat(destination));
+  } finally {
+    Deno.removeSync(tempDir, { recursive: true });
+    Deno.removeSync(outside, { recursive: true });
+  }
+});
+
+Deno.test("ChatbotClient - OMP move checks the highest-precedence destination alias", async () => {
+  // `newPath` (highest precedence) points OUTSIDE while the lower-precedence `to`
+  // points at an allowed staging target. The denial MUST be the outside-destination
+  // write-path authorization failure naming that target — not a location-binding
+  // rejection that would also pass if the wrong alias were selected.
+  const tempDir = Deno.makeTempDirSync();
+  const staging = join(tempDir, "tmp", "test-session");
+  Deno.mkdirSync(staging, { recursive: true });
+  const source = join(staging, "src.md");
+  Deno.writeTextFileSync(source, "seed");
+  const outside = Deno.makeTempDirSync({ prefix: "air-ingress-outside-" });
+  const outsideDestination = join(outside, "escape.md");
+  try {
+    const client = createRegisteredClient(createTestSkillRegistry(), createTestLogger(), {
+      workingDir: tempDir,
+      platform: "discord",
+      userId: "123",
+      channelId: "456",
+      isDM: false,
+      sessionId: "test-session",
+      agentType: "omp",
+    }, emptySkillList());
+
+    const response = await client.requestPermission({
+      sessionId: "test-session",
+      toolCall: {
+        toolCallId: "tc-precedence",
+        status: "pending" as const,
+        content: [],
+        title: "Move",
+        kind: "move",
+        rawInput: { from: source, newPath: outsideDestination, to: join(staging, "safe.md") },
+        locations: [{ path: source }, { path: outsideDestination }],
+      },
+      options: [
+        { kind: "allow_once", optionId: "allow-1", name: "Allow once" },
+        { kind: "reject_once", optionId: "reject-1", name: "Reject once" },
+      ],
+    });
+    assertEquals(response.outcome.outcome, "selected");
+    if (response.outcome.outcome === "selected") {
+      assertEquals(response.outcome.optionId, "reject-1");
+    }
+    const rejections = client.getRecentPermissionRejections();
+    assertEquals(rejections.length, 1);
+    assertEquals(rejections[0].reason, "rejected_write_path_outside_workspace");
+    assert(
+      rejections[0].commandOrPath?.includes(outsideDestination) ?? false,
+      "the denial names the highest-precedence outside destination",
+    );
+    assert(Deno.statSync(source).isFile, "the denied move retains its source file");
   } finally {
     Deno.removeSync(tempDir, { recursive: true });
     Deno.removeSync(outside, { recursive: true });
