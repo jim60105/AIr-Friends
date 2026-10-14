@@ -9,11 +9,12 @@ This planning batch covers all 37 items of `docs/superpowers/specs/2026-10-14-om
 | A | normalize-omp-destructive-acp-ingress | 4.00 h | 1.50 h | 5.50 h |
 | B | simplify-omp-session-boundaries | 5.25 h | 1.50 h | 6.75 h |
 | C | simplify-omp-recovery-context | 3.50 h | 1.00 h | 4.50 h |
-| D | cutover-omp-native-runtime | 6.25 h | 1.50 h | 7.75 h |
+| D | cutover-omp-native-runtime | 6.75 h | 1.00 h | 7.75 h |
 | E | simplify-omp-container-installation | 4.00 h | 1.00 h | 5.00 h |
 | F | document-omp-parity-and-consumer-regressions | 6.50 h | 1.00 h | 7.50 h |
+| G | verify-omp-confined-native-runtime | 2.50 h | 1.00 h | 3.50 h |
 
-Total batch estimate is 37.00 engineer-hours. Every individual estimate is strictly below 8 hours, includes tests/docs and repair allowance, and is an estimate rather than a guarantee. Each task has its own estimate in tasks.md. No task is left as architectural exploration for a gpt-luna worker.
+Total batch estimate is 40.50 engineer-hours. Every individual estimate is strictly below 8 hours, includes tests/docs and repair allowance, and is an estimate rather than a guarantee. Each task has its own estimate in tasks.md. No task is left as architectural exploration for a gpt-luna worker.
 
 ## Valid decomposition of the coupled architecture
 
@@ -23,7 +24,7 @@ D replaces all remaining tightly coupled config/launch/extension/build consumers
 
 ## Dependency/conflict matrix and implementation order
 
-Behavioral DAG: B -> C; A+B+C -> D; D -> E; D+E -> F. A and B are behavior-independent but edit shared files, so use serial order **A, B, C, D, E, F**. There is one integration owner per shared file at each stage. Spec requirement ownership below prevents independent changes from replacing the same requirement accidentally.
+Behavioral DAG: B -> C; A+B+C -> D; D -> E; D -> G; D+E+G -> F. A and B are behavior-independent but edit shared files, so use serial order **A, B, C, D, E, G, F**. E/G have no behavioral dependency but share current docs. There is one integration owner per shared file at each stage. Spec requirement ownership below prevents independent changes from replacing the same requirement accidentally.
 
 | Pair | Behavioral dependency | Shared-file conflict | Scheduling decision |
 |---|---|---|---|
@@ -32,8 +33,11 @@ Behavioral DAG: B -> C; A+B+C -> D; D -> E; D+E -> F. A and B are behavior-indep
 | B/C | C requires B | agent-connector.ts, session-orchestrator.ts, callback/recovery/lifecycle/handoff fixtures, OMP_RECOVERY.md | B then C |
 | A/B/C with D | D requires all three | types.ts, factory/connector references, client/lifecycle/mock fixtures, OMP docs, acp-integration capability | D starts after all three |
 | D/E | E requires D | Containerfile, bundle/package smoke, omp-packaging.test.ts, OMP_PACKAGING.md, container-packaging capability | D owns models COPY/native closure; E owns manifest/install policy |
-| D/F | F requires D | native authored fixture/smoke, handoff/mock builder, current OMP docs and feature site | D migrates old imports/tests now; F adds consumer breadth |
+| D/F | F requires D | handoff/mock builder, current OMP docs and feature site | D migrates old imports/tests now; F adds consumer breadth |
 | E/F | F requires E | packaging/checklist documentation, config-write observer, CHANGELOG | E then F |
+| D/G | G requires D | current native launch docs and acp-integration capability | D completes mounts/consumer IO; G owns new native probe/fixture only |
+| E/G | None | OMP_PACKAGING.md, OMP_SPAWN.md, CHANGELOG | Serialize E then G; no production code conflict |
+| G/F | F requires G | authored native model fixture, native probe evidence, OMP docs | G native init/catalog/load; F extends scripted actual tool dispatch |
 
 No implementation worktrees are needed for these proposals. Batch planning commits touch only their own `openspec/changes/<change>/` directory and stay on master. Implementation branches are a later os-apply concern.
 
@@ -47,16 +51,17 @@ No implementation worktrees are needed for these proposals. Batch planning commi
 | src/core/session-orchestrator.ts | B -> C | B removed scanner error classifications; C OMP ownership bookkeeping/context type retirement |
 | src/acp/omp/compatibility-contracts.ts | A -> D | A moves shared types with every consumer; D deletes ledger after last live consumers disappear |
 | src/acp/omp/* and extension/* | D, with B retiring daemon owned-skills consumers and A adding destructive-ingress | D complete native capability/build closure; B retains owned-skills/critical-skills for old native bootstrap; never delete still-consumed prerequisites before D |
-| src/utils/omp-paths.ts, factory, sandbox, process pool | D | Replace old mode cwd/agent-home/state plans with authored files and native XDG data roots |
+| src/utils/omp-paths.ts, factory, sandbox, filesystem-confinement, process pool | D | Replace old mode cwd/agent-home/state plans; supply selected authored read-only assets and writable native data through existing mount arrays |
 | scripts/omp/bundle-extension.ts / bundle-declaration.ts | D | D native ESM build and deployment declaration removal |
 | Containerfile | D -> E | D native HOME models path consumed by launch; E ordinary install conventions and manifest closure |
 | tests/mocks/omp-mock-session.ts and consumer fixtures | D -> F | D all dead-import/governance migration; F real-component handoff/native evidence extension |
-| acp-integration requirements | A -> B -> C -> D | A adds ingress requirements; B retires mixed critical/shared-root contract for a shared-root replacement; C retires mandatory OMP recovery contracts for shared/OpenCode replacements; D retires remaining mixed governance contracts for native launch/tool requirements |
+| acp-integration requirements | A -> B -> C -> D -> G | A ingress; B shared root; C shared/OpenCode recovery; D native launch/tools/confinement and canonical evidence without P0 blockers, preserving shared script inventory; G adds distinct native evidence contract |
 | container-packaging requirements | D -> E | D native-loadable closure and declaration removal; E install/manifest/single-tree changes |
 | configuration-and-deployment requirements | D -> F | D generated-artifact/current path requirement; F replaces historical current-governance docs requirements and adds manual/evidence documentation |
 | skills-and-reply requirements | F | consumer suite requirements only; preserve JWT/auth/payload/reply rules |
-| shared-acp-process-pool requirements | C | add normal OMP mode-entry recovery; retained mode keys and global lease requirements unchanged |
-| current OMP docs / CHANGELOG | A -> B -> C -> D -> E -> F | Each owner updates its affected current behavior immediately; F reconciles inventory without deferring earlier docs/tests |
+| shared-acp-process-pool requirements | C -> D | C adds normal OMP recovery; D replaces only mixed obsolete directory separation while preserving every shared lease/key/reclaim and OpenCode scenario |
+| tests/acp/omp-native-runtime-smoke.test.ts, authored native models fixture | G -> F | G creates whole native probe/fixture; F reuses authored model fixture and adds separate model-driven integration test |
+| current OMP docs / CHANGELOG | A -> B -> C -> D -> E -> G -> F | Each owner updates its affected current behavior immediately; F reconciles inventory without deferring earlier docs/tests |
 
 ## All 37 design dispositions
 
@@ -66,23 +71,23 @@ A task reference is `Key 1.N`. “Retain” means implementation intentionally r
 |---:|---|---|---|
 | 1 | Optional agent type | Retain shared supported set/default/load validation | F 1.3,1.5; factory/dashboard consumer selection unchanged |
 | 2 | Compatibility contracts/audit | Remove governance ledger and fixed postures; retain source evidence | D 1.4,1.6; shared types first moved by A 1.1 |
-| 3 | Mode-owned settings | Simplify to hand-authored native YAML; delete mirror/schema simulation | D 1.1,1.2,1.7; native consumption plus actual config-write observation |
+| 3 | Mode-owned settings | Simplify to hand-authored native YAML; delete mirror/schema simulation | D 1.1,1.2; G 1.1–1.4 native consumption plus actual config-write observation |
 | 4 | Settings-source isolation | Remove identity/preflight isolation | B 1.1,1.3; D 1.2,1.4 removes still-consumed factory/bootstrap closure |
 | 5 | Both-mode LSP disable | Native tool deny only; remove global/flag cold-start suppression | D 1.1,1.3; F 1.2 explicit native tool deny without startup assertion |
-| 6 | Mode launch | Retain native launch policy; simplify generated/validated/path state | D 1.2,1.7; authored configuration + native XDG model/data behavior |
-| 7 | Mode process pool | Retain mode-separated OMP process keys and global lease | C 1.3,1.5; D 1.2; F 1.5 OpenCode reuse preserved |
+| 6 | Mode launch | Retain native launch policy; simplify generated/validated/path state | D 1.2; G 1.2–1.4 authored configuration + native XDG model/data behavior |
+| 7 | Mode process pool | Retain mode-separated OMP process keys and global lease; simplify only cwd/TMPDIR obligation | C 1.3,1.5; D 1.2,1.6 pool delta; G 1.3; F 1.5 OpenCode reuse preserved |
 | 8 | Pre-import guard/critical skills | Remove bootstrap and critical exclusions | D 1.3,1.4,1.5; no empty first-stage replacement |
 | 9 | Workspace executable preflight | Remove scans and lifecycle wiring | B 1.1,1.3; D 1.4 deletes bootstrap's final scanner consumer |
 | 10 | Restricted tool inventory | Minimal actual capability map + default deny | D 1.3; F 1.2 unmatched effectful tool cannot dispatch |
 | 11 | Runtime enforcement | Native callback only for wildcard default deny; shared ACP gate for policy | D 1.3,1.5; actual dispatch and rejected-write outcomes |
-| 12 | Native extension wiring | Retain official on(tool_call), delete registry/evidence machinery | D 1.3,1.4,1.7; native load and later F 1.2 native dispatch |
+| 12 | Native extension wiring | Retain official on(tool_call), delete registry/evidence machinery | D 1.3,1.4; G 1.2 native load and F 1.2 native dispatch |
 | 13 | Builtin provenance | Remove source tuple/admission | D 1.3,1.4,1.5; mapped capability policy applies |
 | 14 | Physical module evidence | Remove runtime/build anchors and deployment surface; normal install | D 1.4; E 1.1,1.2,1.5 |
 | 15 | Destructive operations | Retain common decoder/all-target policy, add OMP ingress shape | A 1.1–1.5; D 1.3 removes extension duplicate; F 1.2 native cases |
 | 16 | Filesystem boundary | Retain existing shared callbacks/no-follow/authorization, scoped to real callbacks | B 1.2,1.4,1.5; A 1.4; F 1.2,1.5 actual native route recorded |
-| 17 | Syscall confinement | Retain shared sandbox/mount mechanism unchanged | B 1.2; D 1.2 shared observation retained; F 1.5 confinement suite |
+| 17 | Syscall confinement | Retain shared mechanism; add required selected native asset/data inputs, not broader roots | B 1.2; D 1.2 actual confined IO; G 1.3 confined native catalog/persistence/load; F 1.5 shared suite |
 | 18 | Command path gate | Retain common syntax/path policy unchanged | A 1.4,1.5; D 1.3 no duplicate; F 1.2,1.5 consumer allow/deny |
-| 19 | Skill script inventory | Retain exact shared entrypoint/configured root | B 1.2,1.5; F 1.1,1.4,1.5 |
+| 19 | Skill script inventory | Retain exact shared entrypoint/configured root and post-enumeration/identity-drift denial contract | B 1.2,1.5; D 1.6 explicitly leaves shared inventory requirement/code/tests unchanged; F 1.1,1.4,1.5 |
 | 20 | URL fetch transport | Remove project transport/routes/read replacement; native read | D 1.1,1.3,1.4; F 1.2 native URL result |
 | 21 | Web search | Remove backend/credential gate/search replacement; native search | D 1.3,1.4; F 1.2 actual native capability/provider result |
 | 22 | Network replacement admission | Remove completion markers and gates with replacements | D 1.3,1.4,1.5 |
@@ -92,8 +97,8 @@ A task reference is `Key 1.N`. “Retain” means implementation intentionally r
 | 26 | Skill reads/handoff | Native skill:// read; retain actual script root/prompt/handoff | D 1.3,1.5; F 1.1,1.2 native read/current-session delivery |
 | 27 | Skill trust ladders | Remove OMP root baseline/critical/generation/URI validation | B 1.2,1.4 removes daemon producer consumers and moves native-only type; D 1.3,1.4 removes remaining producer/extension closure |
 | 28 | Single skills root | Retain common resolver/install/inventory/mounts; manual native declaration | B 1.2,1.5; F 1.1,1.4,1.5 |
-| 29 | Binary version/package | Retain pin, per-architecture download checksum and version health | E 1.1,1.3,1.5; F 1.5 record actual architecture/version |
-| 30 | Native extension bundle | Retain single native-loadable frozen ESM; remove trust evidence/declarations | D 1.4,1.7; E 1.2,1.5 |
+| 29 | Binary version/package | Retain pin, per-architecture download checksum and version health | E 1.1,1.3,1.5; G 1.2,1.4; F 1.5 record actual architecture/version |
+| 30 | Native extension bundle | Retain single native-loadable frozen ESM; remove trust evidence/declarations | D 1.4,1.7; E 1.2,1.5; G 1.2 real native load |
 | 31 | Extension architecture | Replace governance core with native capability difference only | D 1.3,1.4,1.5 |
 | 32 | Recovery ownership | Remove mandatory OMP record/full-context gates; preserve OpenCode optional checks | C 1.1–1.5; B scan precondition retirement |
 | 33 | Dashboard agent selection | Retain shared UI/type selection; no UI edits | F 1.3,1.5 dashboard consumer suite |
@@ -103,6 +108,8 @@ A task reference is `Key 1.N`. “Retain” means implementation intentionally r
 | 37 | Current docs/decisions | Sync current docs/specs/checklists and fix OpenCode discovery mistake | Each unit's docs tasks; F 1.3–1.5 final inventory/config-trio reconciliation |
 
 ## Native reachability decisions resolved during planning
+
+The final blocking review required mount reachability and surviving-spec reconciliation. D now mounts exact assets/data using shared confinement arrays and preserves the inventory-denial requirement; it replaces obsolete P0/PI_CODING_AGENT_DIR/pool-cwd obligations explicitly. G is a complete independently useful native acceptance driver, moved out of D to accommodate the actual mount integration under8h. No production prerequisite, behavior test for changed mounts or callsite migration is deferred to G. F's direct/mounted unknown fixture has explicit essential/discoverable exposure, bounded denial results and YOLO positive controls, preventing unavailable-tool false positives.
 
 Native tools.approval uses exact keys and has no wildcard. The official on(tool_call) result blocks dispatch. OMP native ACP supports no per-session approval mode, so mode-separated processes stay. Native destructive bridge provides execute kind for Bash but can omit kind on delete/move and embeds first-operation-only edit locations; A normalizes single native shapes and retains shared patch denial.
 

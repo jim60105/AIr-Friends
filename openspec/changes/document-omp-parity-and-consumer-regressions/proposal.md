@@ -35,6 +35,7 @@ No OpenCode JSON-to-OMP translation, generated YAML, configuration templates, ne
 
 depends-on: cutover-omp-native-runtime
 depends-on: simplify-omp-container-installation
+depends-on: verify-omp-confined-native-runtime
 
 code-conflict: tests/mocks/omp-mock-session.ts; tests/integration/omp-skill-handoff/; tests/integration/omp-native-runtime/; tests/fixtures/omp-native-runtime/; docs/OMP_*.md; docs/omp-features/; config.example.yaml; .env.example; helm/values.yaml; openspec/specs/configuration-and-deployment/spec.md; openspec/specs/skills-and-reply/spec.md; CHANGELOG.md
 
