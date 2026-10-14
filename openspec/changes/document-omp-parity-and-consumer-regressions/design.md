@@ -1,0 +1,26 @@
+# Design
+
+## Context
+
+The approved design supplies 37 dispositions, including shared mechanisms intentionally unchanged. Current docs and integration suites still describe ledger gates, synthetic-positive governance evidence, root declarations and full critical-skill chains. Each substantive predecessor owns its runtime tests and docs; this final unit owns cross-component consumer evidence and current inventory reconciliation.
+
+## Goals / Non-Goals
+
+Preserve native skills and end-to-end Skill API delivery, session isolation, unchanged dashboard/type selection and thought auditing. Make current docs describe applied behavior without rewriting historical design/archived changes. No runtime feature implementation or tightening of OpenCode behavior.
+
+## Decisions
+
+1. Use `coverage.md` as the batch's planning inventory and dependency/conflict owner ledger. It covers each numbered item from the approved design exactly and identifies retained shared behavior and owning proposal/task. Planning docs remain under this change only.
+2. Extend existing `tests/integration/omp-skill-handoff/handoff.integration.test.ts` using real SessionOrchestrator, Skill API server, registry/handlers and the existing mock ACP fixture. Cover per-spawn and pooled skill reads/payload creation/script invocation/JWT resolution/delivery plus sibling isolation and response-gated retry. Predecessors already migrate imports and remove obsolete governance branches so this unit never acts as their repair bridge.
+3. Extend native smoke evidence with an official pinned executable against a loopback OpenAI-compatible scripted provider. Models fixture is hand-authored `tests/fixtures/omp-native-runtime/home/.omp/agent/models.yml` with `providers.parity-fixture.baseUrl: http://127.0.0.1:43187/v1`, `auth: none`, `api: openai-completions`, one `models` entry `id: parity-fixture`, `reasoning: false`, `input: [text]`, `contextWindow: 8192`, `maxTokens: 1024`, zero cost fields. Fixed loopback port avoids YAML interpolation; occupied port is an explicit prerequisite failure, never a claimed pass. Native HOME fixture is copied during test setup as authored bytes and is never synthesized by production launch/build. No runtime production YAML copy is introduced. Native handshake uses ACP initialize/new then stable model option selection to the advertised fixture model; scripted provider emits ordinary tool calls followed by a terminal response with no paid model.
+4. Use the actual shipped bundle and native tool dispatch for local file/URL/skill reads, web_search native availability, callback write denial and default-denied unknown calls. Network-tool provider differences are native: deterministic capability checks establish registration/attempted dispatch; real public search ranking/backend success is a separately labeled unverified operational scenario if credentials are absent. Do not replace native search to obtain test results. Capture external-directory read behavior through actual native requests/results; report the upstream path observed rather than inventing an extra read policy. Native find remains conditional.
+5. Observe config writes through OS events: trace application spawn/native smoke and bundle/image build with `strace -f -e trace=openat,openat2,creat,rename,renameat,renameat2,unlink,unlinkat` or equivalent filesystem watcher, classifying writable opens and replacement events for production authored mode/model files. Config-byte equality and source-string scans are insufficient evidence. Test setup/provisioning of authored fixtures is outside the production start/build observation interval and is named in results.
+6. Update all current `docs/OMP_*.md`, the 12 category pages/matrix/glossary under `docs/omp-features/`, README operational links/checklists, config.example.yaml/.env.example/helm values comments for manual skill-root coordination and CHANGELOG. Correct the assertion that OpenCode lacks workspace tool/plugin discovery using the approved design's cited upstream docs. Preserve OpenCode's existing dynamic skill declaration utility; mention it separately from forbidden OMP YAML generation. Record default deny basis, LSP tool exception, native config error ownership, mode-split process reason, native redirect/result differences and unverified proxy/container/platform evidence.
+
+## Risks / Trade-offs
+
+A scripted provider is native dispatch evidence with a mock model, not paid-model reasoning evidence. Real binary version must match the pin or be reported as mismatch, without claiming image certification. Tool/error text is not a stable native compatibility API; assert requested operation, selected permission and filesystem/delivery outcomes. No test asserts that cancelled policy concerns must remain unhandled. Required native smoke prerequisites are explicit; unavailable prerequisites fail/report rather than silently skip or declare acceptance.
+
+## Migration Plan
+
+Apply after native cutover and packaging. Current docs describe the resulting system; historical docs remain historical. No compatibility rollout, migration or new feature scope. The acceptance record separates mock consumer integration, official native executable, built image/architecture and platform/network evidence.
