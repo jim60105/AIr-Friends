@@ -1,9 +1,10 @@
 // tests/core/bundled-skills.test.ts
 //
-// Authored catalog parity + owned-packaging filter
-// (`unify-omp-skill-root-resolution` D2/D7, tasks 1.4/3.4). The catalog is
-// daemon application source: it never grows from an installed tree, and the
-// owned-image packaging seam stages ONLY catalog + reserved content.
+// Authored catalog parity + external-install collision protection
+// (`unify-omp-skill-root-resolution` D2, trimmed to its surviving roles by
+// `collapse-skill-packaging-to-one-tree`). The catalog is daemon application
+// source: it never grows from an installed tree, and it bounds external
+// publication only — no packaging filter consumes it anymore.
 
 import { assert, assertEquals } from "@std/assert";
 import {
@@ -12,8 +13,6 @@ import {
   isValidSkillNameComponent,
   RESERVED_SKILL_ENTRIES,
 } from "@core/bundled-skills.ts";
-
-const SCRIPT = new URL("../../scripts/stage-owned-skills.ts", import.meta.url).pathname;
 
 Deno.test("catalog parity - the authored catalog matches the repository skills/ directories", () => {
   const sourceRoot = new URL("../../skills", import.meta.url).pathname;
@@ -51,140 +50,108 @@ Deno.test("name component - traversal/absolute/separator names rejected", () => 
   }
 });
 
-Deno.test("packaging filter - stages ONLY catalog + reserved content, never a dev-installed external dir", async () => {
-  const base = await Deno.makeTempDir({ prefix: "air-package-" });
-  try {
-    // A development source tree: catalog members, reserved lib, AND an
-    // external skill installed on the development machine.
-    // The stager requires EVERY catalog entry to exist (source must match the
-    // authored catalog), so materialize the whole catalog first...
-    for (const name of [...RESERVED_SKILL_ENTRIES, ...BUNDLED_SKILLS]) {
-      Deno.mkdirSync(`${base}/skills/${name}`, { recursive: true });
-      Deno.writeTextFileSync(`${base}/skills/${name}/SKILL.md`, `# ${name}`);
-    }
-    // ...with a script under memory-save for content-parity checking.
-    Deno.mkdirSync(`${base}/skills/memory-save/scripts`, { recursive: true });
-    Deno.writeTextFileSync(`${base}/skills/memory-save/scripts/memory-save.ts`, "// real");
-    // ...plus the dev-installed EXTERNAL addition the filter must exclude.
-    Deno.mkdir(`${base}/skills/create-blog-post/scripts`, { recursive: true });
-    Deno.writeTextFile(`${base}/skills/create-blog-post/SKILL.md`, "# external (dev-installed)");
-    Deno.writeTextFile(
-      `${base}/skills/create-blog-post/scripts/create-blog-post.ts`,
-      "// external payload",
-    );
-
-    const out = `${base}/staged`;
-    const proc = new Deno.Command(Deno.execPath(), {
-      args: ["run", "--allow-read", "--allow-write", SCRIPT, `${base}/skills`, out],
-      stdout: "piped",
-      stderr: "piped",
-    });
-    const result = await proc.output();
-    assertEquals(result.code, 0, new TextDecoder().decode(result.stderr));
-    const log = new TextDecoder().decode(result.stdout);
-    // The exclusion is LOUD in the build log.
-    assert(log.includes("excluded non-catalog source entry: create-blog-post"), log);
-
-    const staged = [...Deno.readDirSync(out)].map((e) => e.name).sort();
-    // ONLY catalog + reserved entries exist in the staging output — and every
-    // catalog entry is present (stager fails the build on a missing one, so a
-    // complete run proves all landed).
-    assert(!staged.includes("create-blog-post"), "external addition must never be staged");
-    assert(staged.includes("memory-save"));
-    assert(staged.includes("lib"));
-    // Byte content of a staged file is preserved.
-    assertEquals(
-      await Deno.readTextFile(`${out}/memory-save/scripts/memory-save.ts`),
-      "// real",
-    );
-    assertEquals(
-      [...Deno.readDirSync(out)].length,
-      BUNDLED_SKILLS.length + RESERVED_SKILL_ENTRIES.length,
-    );
-  } finally {
-    await Deno.remove(base, { recursive: true });
-  }
-});
-
-Deno.test("packaging filter - linked catalog entries fail the build", async () => {
-  const base = await Deno.makeTempDir({ prefix: "air-package-" });
-  try {
-    Deno.mkdir(`${base}/skills`, { recursive: true });
-    // Every catalog entry exists for real except ONE replaced by a symlink.
-    for (const name of [...RESERVED_SKILL_ENTRIES, ...BUNDLED_SKILLS]) {
-      if (name === "memory-save") continue;
-      Deno.mkdirSync(`${base}/skills/${name}`, { recursive: true });
-      Deno.writeTextFileSync(`${base}/skills/${name}/x`, name);
-    }
-    Deno.mkdirSync(`${base}/elsewhere/memory-save/scripts`, { recursive: true });
-    Deno.writeTextFileSync(`${base}/elsewhere/memory-save/scripts/memory-save.ts`, "// linked");
-    await Deno.symlink(`${base}/elsewhere/memory-save`, `${base}/skills/memory-save`);
-
-    const proc = new Deno.Command(Deno.execPath(), {
-      args: ["run", "--allow-read", "--allow-write", SCRIPT, `${base}/skills`, `${base}/staged`],
-      stdout: "piped",
-      stderr: "piped",
-    });
-    const result = await proc.output();
-    const err = new TextDecoder().decode(result.stderr);
-    assertEquals(result.code, 1, `linked entry must fail the build; got ${result.code}: ${err}`);
-    assert(err.includes("linked entry refused"), err);
-  } finally {
-    await Deno.remove(base, { recursive: true });
-  }
-});
-
-Deno.test("packaging filter - a missing catalog entry fails the build (source must match the catalog)", async () => {
-  const base = await Deno.makeTempDir({ prefix: "air-package-" });
-  try {
-    Deno.mkdir(`${base}/skills`, { recursive: true });
-    // Only the reserved entry exists; the whole catalog is "missing".
-    Deno.mkdirSync(`${base}/skills/lib`, { recursive: true });
-    const proc = new Deno.Command(Deno.execPath(), {
-      args: ["run", "--allow-read", "--allow-write", SCRIPT, `${base}/skills`, `${base}/staged`],
-      stdout: "piped",
-      stderr: "piped",
-    });
-    const result = await proc.output();
-    assertEquals(result.code, 1);
-    const err = new TextDecoder().decode(result.stderr);
-    assert(err.includes("missing from"), err);
-  } finally {
-    await Deno.remove(base, { recursive: true });
-  }
-});
-
-// --- Stock-image declarations (task 1.3): the declared COPY / config /
+// --- Stock-image declarations (`collapse-skill-packaging-to-one-tree` 1.1):
+// the declared COPY / config /
 // working-directory relationship, proven by Containerfile parse ONLY — no
 // container is built (image build acceptance stays user-owned). ---
 
-Deno.test("Containerfile - owned root installs staged catalog content, never the raw skills tree", () => {
+/**
+ * Every instruction that puts a SKILL TREE into the image, as the destination
+ * it installs to (or its own text for a RUN). Handles shell and JSON forms,
+ * any flag order, and backslash continuations, so an equivalent rewrite of the
+ * sanctioned instruction is accepted while a second tree in ANY form — a
+ * stage-sourced copy, a differently spelled source, a RUN that duplicates the
+ * tree — is surfaced.
+ */
+function skillsTreeInstalls(containerfile: string): string[] {
+  // Join continuations first: a wrapped instruction is ONE logical line.
+  const logical: string[] = [];
+  for (const raw of containerfile.split("\n")) {
+    const previous = logical.length - 1;
+    if (previous >= 0 && logical[previous].endsWith("\\")) {
+      logical[previous] = `${logical[previous].slice(0, -1).trimEnd()} ${raw.trim()}`;
+    } else {
+      logical.push(raw.trim());
+    }
+  }
+  const installs: string[] = [];
+  for (const line of logical) {
+    const instruction = line.match(/^(?:COPY|ADD)\s+(.*)$/);
+    if (instruction) {
+      const json = instruction[1].match(/^\[.*\]$/);
+      let args: string[] | null = null;
+      if (json) {
+        try {
+          args = JSON.parse(instruction[1]) as string[];
+        } catch {
+          args = null;
+        }
+      } else {
+        args = instruction[1].split(/\s+/);
+      }
+      if (!args || args.length < 2) continue;
+      // The source and destination are the last two arguments; everything
+      // before them is a flag in either form.
+      const source = args[args.length - 2];
+      const destination = args[args.length - 1];
+      if (source.includes("skills") || destination.includes("skills")) {
+        installs.push(destination);
+      }
+    } else if (line.startsWith("RUN") && line.includes("skills")) {
+      // A RUN that touches a skills path can install a second tree too.
+      installs.push(line);
+    }
+  }
+  return installs;
+}
+
+Deno.test("Containerfile - installs exactly one skill tree, at the personal skill root", () => {
   const containerfile = Deno.readTextFileSync(
     new URL("../../Containerfile", import.meta.url).pathname,
   );
-  // The stager stage runs the application-source packaging seam…
-  assert(
-    containerfile.includes(
-      "RUN deno run --allow-read --allow-write /app/scripts/stage-owned-skills.ts /build-skills/skills /owned-skills",
+  // Exactly ONE instruction installs a skill tree, and it is the personal
+  // root every agent type resolves and external runtime installs publish into.
+  assertEquals(skillsTreeInstalls(containerfile), ["/home/deno/.agents/skills/"]);
+  // The retired owned skill tree, its packaging stage and its stager script
+  // are gone from the image definition.
+  assert(!containerfile.includes("/opt/air/skills"));
+  assert(!containerfile.includes("owned-skills-stager"));
+  assert(!containerfile.includes("stage-owned-skills"));
+});
+
+Deno.test("Containerfile guard - a second skill tree is surfaced in every form", () => {
+  // A second source COPY, whatever its spelling.
+  assertEquals(
+    skillsTreeInstalls(
+      [
+        "COPY --link skills/ /home/deno/.agents/skills/",
+        "COPY --link skills /opt/air/skills/",
+      ].join("\n"),
     ),
+    ["/home/deno/.agents/skills/", "/opt/air/skills/"],
   );
-  // …and the owned root installs ONLY from that stage's output.
-  assert(
-    /COPY --link --chown=0:0 --chmod=0755 --from=owned-skills-stager \/owned-skills\/ \/opt\/air\/skills\//
-      .test(containerfile),
-    "owned root must come from the stager stage",
+  // A tree re-imported from a packaging stage.
+  assertEquals(
+    skillsTreeInstalls("COPY --from=stager /owned-skills/ /opt/air/skills/"),
+    ["/opt/air/skills/"],
   );
-  // The old broad COPY of the raw (possibly dev-installed) tree is GONE.
-  assert(
-    !/COPY --link --chown=0:0 --chmod=0755 skills\/ \/opt\/air\/skills\//.test(containerfile),
-    "raw skills/ COPY into the owned root must not return",
+  // A RUN that duplicates the tree, across a continuation.
+  assertEquals(
+    skillsTreeInstalls("RUN install -d /tmp/x && \\\n    cp -a /home/deno/.agents/skills /tmp/x"),
+    ["RUN install -d /tmp/x && cp -a /home/deno/.agents/skills /tmp/x"],
   );
-  // The OpenCode personal COPY destination stays the declared installed root.
-  assert(
-    containerfile.includes(
-      "COPY --link --chown=$UID:0 --chmod=775 skills/ /home/deno/.agents/skills/",
-    ),
+  // ...while an equivalent rewrite of the one sanctioned instruction passes in
+  // either form and in any flag order.
+  assertEquals(
+    skillsTreeInstalls('COPY ["--chmod=775", "skills/", "/home/deno/.agents/skills/"]'),
+    ["/home/deno/.agents/skills/"],
   );
+  assertEquals(
+    skillsTreeInstalls("COPY --chmod=775 --chown=$UID:0 --link skills/ /home/deno/.agents/skills/"),
+    ["/home/deno/.agents/skills/"],
+  );
+  // An unrelated copy is not a skill tree.
+  assertEquals(skillsTreeInstalls("COPY --link prompts/ /app/prompts/"), []);
 });
 
 Deno.test("Containerfile and Helm declare the same shared installed root; development default stays 'skills'", () => {

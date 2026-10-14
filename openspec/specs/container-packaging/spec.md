@@ -143,28 +143,6 @@ The installed and development extension entries SHALL have a reproducible depend
 - **THEN** it SHALL rebuild the closure and recut every affected owned digest in the same change
 - **AND** independently edited mirror content SHALL NOT be accepted
 
-### Requirement: Owned Skill Image Excludes External Publication
-
-The OMP owned image skill root SHALL contain only deployment-cataloged bundled skill directories and shared skill libraries, installed content-faithfully with the existing root-owned modes. External additions published into a development source tree SHALL NOT become owned image skills. The same deployment-controlled bundled catalog SHALL govern OMP script eligibility and external-name collision protection; installed-tree discovery SHALL NOT amend it.
-
-#### Scenario: Development external addition is absent from owned staging
-- **GIVEN** a packaging source fixture contains all bundled skills and an extra externally installed directory
-- **WHEN** the owned skill image source is assembled
-- **THEN** the extra directory SHALL be excluded from `/opt/air/skills` installation
-- **AND** cataloged skills and shared libraries SHALL retain their exact authored content
-- **AND** the external addition SHALL NOT become a native OMP owned discovery source
-
-#### Scenario: Linked source cannot enter the owned skill image
-- **WHEN** a bundled staging entry is linked or resolves outside the declared bundled source
-- **THEN** owned packaging SHALL fail before installation
-- **AND** it SHALL NOT substitute a foreign copy for cataloged content
-
-#### Scenario: OpenCode personal root and existing owned manifest remain unchanged
-- **WHEN** bundled-only OMP skill staging is introduced
-- **THEN** the OpenCode personal skills root SHALL remain `/home/deno/.agents/skills`
-- **AND** OMP skill installation SHALL remain root-owned at `/opt/air/skills`
-- **AND** the existing settings/extension/prompt manifest scope and agent versions SHALL remain unchanged
-
 ### Requirement: Generated OMP Bundle Carries Its Owned Deployment Declaration
 
 The generated native-loadable OMP bundle SHALL carry a build-owned declaration of its exact contracted development artifact and fixed image artifact for physical ownership admission. The declaration SHALL originate from trusted canonical build inputs, not process cwd, model input or an arbitrary loaded-module parent. It SHALL add no public runtime configuration field, credential or environment override.
@@ -188,3 +166,28 @@ The generated native-loadable OMP bundle SHALL carry a build-owned declaration o
 - **WHEN** the module declaration passes physical ownership checks
 - **THEN** it SHALL confer only module origin evidence
 - **AND** it SHALL NOT manufacture session ids, filesystem canonical targets, destructive approvals or readiness assertions
+
+### Requirement: Single Packaged Skill Tree For Every Agent Type
+
+The container image SHALL install exactly one skill tree — the authored repository `skills/` content — at the personal skill root that every agent type resolves, and SHALL NOT install a second skill tree under any other path. No owned skill root, staged catalog filter or bundled-catalog packaging rule SHALL remain. The owned OMP artifact tree, its digest manifest scope and the pinned agent versions SHALL remain unchanged.
+
+#### Scenario: One skill tree in the finished image
+
+- **WHEN** the finished image layout is asserted from the Containerfile install instructions
+- **THEN** exactly one skill tree SHALL exist, at the personal skill root that the configured value resolves
+- **AND** `/opt/air/skills` SHALL be absent
+- **AND** no Containerfile instruction, manifest entry, packaged script or code path SHALL name it
+
+#### Scenario: Authored content and runtime installs share the one tree
+
+- **GIVEN** the image ships the authored bundled skills and the deployment configures an external skill
+- **WHEN** bootstrap publishes that external skill
+- **THEN** the authored content SHALL be installed content-faithfully as the tree's initial content
+- **AND** the external skill SHALL land in that same tree, which SHALL remain the only install location for either agent type
+
+#### Scenario: Owned runtime tree and manifest scope are untouched
+
+- **WHEN** the packaging change is completed
+- **THEN** the owned OMP artifact tree under its own root and the SHA-256 digest manifest covering exactly the extension tree, settings overlays and prompt artifact SHALL remain unchanged
+- **AND** no skill byte SHALL enter that manifest's digest set
+- **AND** the generated extension bundle contract and the pinned agent versions SHALL remain unchanged
