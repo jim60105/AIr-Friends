@@ -1401,46 +1401,6 @@ The helpers SHALL classify a target's physical membership with equal-or-separato
 - **WHEN** contained links are recorded as canonical observations for a candidate role
 - **THEN** their raw spelling SHALL NOT be reopened as proof of safe access
 
-### Requirement: Trusted Read-Only ACP Skills Root Identity
-
-The skills-root helper SHALL consume deployment-owned canonical source/root identity from the predecessor critical-skill compatibility contract and SHALL NOT trust a directory by name, by workspace contents or as an arbitrary model-supplied location. An agent-writable skill tree SHALL NOT by itself disqualify an otherwise canonical root. Canonical identity, link-free components, containment and current-generation evidence SHALL remain mandatory.
-
-#### Scenario: Owned skill instruction is readable as an observation
-
-- **GIVEN** a deployment-declared read-only root and a matching canonical current-generation instruction reference
-- **WHEN** the instruction target is observed within that root
-- **THEN** the result SHALL include the trusted read-only role and canonical owned instruction identity
-- **AND** no mutation authority SHALL be created
-
-#### Scenario: Skill name collision or external link is not trusted
-
-- **WHEN** a same-name workspace file, a link leaving the root, a stale resource generation, a mismatching instruction path, or a root overlapping a writable root is supplied as a trusted reference
-- **THEN** the helper SHALL return the specific ownership/containment/overlap failure
-- **AND** it SHALL NOT substitute a same-name file or globally disable skills to claim success
-
-#### Scenario: Critical references match contract path and generation
-
-- **WHEN** an explicit critical reference is resolved against the skills root
-- **THEN** it SHALL match the contract's canonical instruction path and the current session resource generation
-
-#### Scenario: Skills root is disjoint, read-only and non-escaping
-
-- **WHEN** the canonical skills root is established
-- **THEN** it SHALL be disjoint from writable workspace/shared roots and SHALL be granted only the read-only role
-- **AND** a skills-root link leaving that root SHALL fail trusted membership even if its destination lies within another readable root
-
-#### Scenario: Trust decisions certify no native support or policy change
-
-- **WHEN** the helper reaches trusted read-only identity decisions
-- **THEN** those decisions SHALL NOT certify native OMP selection/discovery support, change unrelated workspace read-extension policy, or introduce a skills write exception
-
-#### Scenario: Agent-writable shared root is admitted under identity checks
-
-- **GIVEN** the deployment-declared shared skill root is writable by the runtime agent user
-- **WHEN** an owned skill instruction inside it is observed
-- **THEN** ownership SHALL be decided by canonical identity, link-free components, realpath containment and current-generation evidence alone
-- **AND** a linked component, an escaping target, a replaced identity or a stale generation SHALL still deny
-
 ### Requirement: Fail-Closed ACP Root Observation and Evidence Limits
 
 All context/root/target helpers SHALL return either one complete successful observation or one finite specific failure, and SHALL NOT return a partial successful grant, an empty root or a lexical fallback.
@@ -3834,43 +3794,6 @@ The combined suite SHALL NOT duplicate single-component unit assertions already 
 - **THEN** the session may run without the restricted capability set and no client-observable readiness assertion SHALL be made
 - **AND** native non-YOLO approval plus client ACP policy SHALL NOT be claimed equivalent to installed-handler default-deny or proof of native callback coverage
 
-### Requirement: Owned-Only OMP Settings Discovery Sources
-
-Before OMP spawn and native session new/load/recovery or repository-triggered rediscovery, the system SHALL verify that only exact deployment-owned `--config` overlays can contribute persistent settings. Inherited HOME/XDG, native global/project, legacy and foreign-provider lower sources SHALL be excluded. Observation failure or unexpected sources SHALL reject before the native protected request without removing user files or relying on precedence to erase lower-only records.
-
-#### Scenario: Hostile HOME or XDG settings cannot become a lower layer
-- **GIVEN** hostile settings under daemon HOME or XDG roots and inherited selectors pointing there
-- **WHEN** either OMP mode is prepared for spawn
-- **THEN** the child SHALL receive the controlled discovery environment and owned paths only
-- **AND** no inherited host source SHALL enter the repository's accepted settings-source plan
-
-#### Scenario: Project settings cause pre-request rejection
-- **GIVEN** the actual requested ACP workspace or relevant pinned foreign-provider project/ancestor root contains a settings source
-- **WHEN** session new/load or recovery is attempted despite a neutral process launch cwd
-- **THEN** setup SHALL reject before the native request with a bounded content/credential-free source reason
-- **AND** the hostile file SHALL remain unchanged
-- **AND** accepting that workspace SHALL require its deployment/workspace owner to remove the forbidden source; no native suppression of an existing project source SHALL be claimed
-
-#### Scenario: Polluted reused state fails closed
-- **GIVEN** the mode's global agent directory contains config.yml, config.yaml or legacy settings.json outside the owned overlays
-- **WHEN** a new or recovered session is prepared
-- **THEN** setup SHALL reject that lower source without migration, null-reset or silent merge
-
-#### Scenario: Clean sources support both modes and lifecycle shapes
-- **GIVEN** canonical controlled HOME/agent roots, absent lower settings sources and valid exact owned overlays
-- **WHEN** restricted or native-yolo sessions use per-spawn, pooled new or same-mode load/recovery paths
-- **THEN** their source checks SHALL accept the owned-only plan with mode overlay last
-- **AND** restricted default-deny SHALL remain a separate second boundary without copying restricted tool policy into YOLO
-
-#### Scenario: Observation failures cannot manufacture absence
-- **WHEN** a forbidden-source check encounters unreadable metadata, missing authority, link escape or identity replacement
-- **THEN** the operation SHALL reject rather than return an empty successful source inventory
-
-#### Scenario: Runtime reload assurance remains bounded
-- **WHEN** documentation or mock evidence describes source visibility
-- **THEN** it SHALL distinguish repository preflight/rechecks from deployment responsibility to keep lower sources absent throughout process lifetime
-- **AND** native autonomous reload and undetectable mutation timing SHALL remain user-owned/unverified rather than be certified by mocks
-
 ### Requirement: Deployment-Owned OMP Skill Root Settings
 
 Owned OMP settings SHALL declare the single deployment-resolved absolute skill root through pinned registered settings, exclude ambient/workspace sources where supported and keep skills globally enabled. Only that declared root SHALL supply critical-skill authority. Invalid or unowned declarations SHALL be rejected. Native verdicts and user-owned runtime acceptance SHALL remain unchanged.
@@ -4282,37 +4205,6 @@ Script inventory SHALL use the single explicit resolved root and canonical absol
 - **THEN** no inventory entry and no grant SHALL be created for it
 - **AND** enumeration SHALL remain limited to `scripts/*.ts` with the `deno` interpreter as the sole allowlisted entrypoint
 
-### Requirement: OMP Owned Skill Read And Execution Over The Shared Root
-
-OMP SHALL admit the deployment-resolved shared skill root for owned skill instruction reads and for script execution, under the same root every other agent type resolves, without a separately packaged image tree. Admission SHALL judge the root and every target by canonical identity, link-free components and containment, and SHALL NOT require root ownership, agent-non-writability or non-group/world-writability for an ordinary skill.
-
-#### Scenario: Installed external skill is usable by both agent types
-
-- **GIVEN** an external skill was installed at runtime and published into the resolved root
-- **WHEN** an `omp` session reads its instruction and invokes its enumerated script, and an `opencode` session does the same
-- **THEN** both agent types SHALL admit the installed skill and reach the same canonical instruction path and script
-- **AND** the deployment SHALL require exactly one install location and one configuration value for that skill
-
-#### Scenario: Shared root passes OMP admission without root ownership
-
-- **GIVEN** the resolved root is owned by a user other than root and its mode grants the runtime user write access
-- **WHEN** OMP observes the root, a skill directory and a skill script inside it, in the extension and through the ACP callback layer alike
-- **THEN** admission SHALL succeed on canonical identity, link-free components, real-directory/file type, `nlink === 1` for the file and supplied device/inode identity
-- **AND** no ownership or permission-bit test SHALL admit a target that identity, containment or generation checks reject
-
-#### Scenario: The extension learns the declared root from its deployment-owned launch environment
-
-- **GIVEN** an OMP process launched in either spawn shape (per-spawn or pooled)
-- **WHEN** the trusted extension resolves the declared skill root for `skill://` authorization
-- **THEN** it SHALL read the deployment-owned value the daemon placed in its spawn environment, treat that value as its only witness of the declared root, and verify it is one absolute, existing, non-link directory its own root observation accepts
-- **AND** an absent, unobservable or non-directory value SHALL deny with zero skill authority and no workspace, HOME or cwd fallback, and the per-spawn and pooled shapes SHALL behave identically
-
-#### Scenario: Denied shapes stay denied
-
-- **WHEN** the root or the target is linked, escapes the root through a link or realpath, is replaced between observation and decision, or carries a stale generation
-- **THEN** OMP admission SHALL deny with a bounded reason
-- **AND** a writable permission bit SHALL NOT convert such a denial into an admission
-
 ### Requirement: Inventory Denial Invariants Survive The Ownership Relaxation
 
 The relaxed shared-root posture SHALL NOT weaken the script inventory's denial behavior. A script that appears after the inventory was constructed SHALL NOT be approved by that inventory, and an enumerated script whose identity changed in place SHALL be denied at decision time.
@@ -4366,3 +4258,38 @@ OMP normalization SHALL retain the original request for diagnostics and use one 
 #### Scenario: YOLO and OpenCode unchanged
 - **WHEN** YOLO or OpenCode receives a destructive-shaped request
 - **THEN** the existing YOLO early approval or OpenCode decoder outcome SHALL remain unchanged.
+
+### Requirement: Shared Deployment Skills Root In ACP Callbacks
+
+The skills-root helper SHALL consume the existing shared deployment skill-root observation and SHALL NOT trust a directory by name, by workspace contents or as an arbitrary model-supplied location. An agent-writable skill tree SHALL NOT by itself disqualify an otherwise canonical root. Canonical identity, link-free components, containment and current-generation evidence SHALL remain mandatory.
+
+#### Scenario: Owned skill instruction is readable as an observation
+
+- **GIVEN** a deployment-declared read-only root and a matching canonical root observation for the requesting session
+- **WHEN** the instruction target is observed within that root
+- **THEN** the result SHALL include the trusted read-only role and canonical owned instruction identity
+- **AND** no mutation authority SHALL be created
+
+#### Scenario: Skill name collision or external link is not trusted
+
+- **WHEN** a workspace file outside the declared root, a link leaving the root, mismatching root identity, or a root overlapping a writable root is supplied as a trusted target
+- **THEN** the helper SHALL return the specific ownership/containment/overlap failure
+- **AND** it SHALL NOT substitute a same-name file or globally disable skills to claim success
+
+#### Scenario: Skills root is disjoint, read-only and non-escaping
+
+- **WHEN** the canonical skills root is established
+- **THEN** it SHALL be disjoint from writable workspace/shared roots and SHALL be granted only the read-only role
+- **AND** a skills-root link leaving that root SHALL fail trusted membership even if its destination lies within another readable root
+
+#### Scenario: Trust decisions certify no native support or policy change
+
+- **WHEN** the helper reaches trusted read-only identity decisions
+- **THEN** those decisions SHALL NOT certify native OMP selection/discovery support, change unrelated workspace read-extension policy, or introduce a skills write exception
+
+#### Scenario: Agent-writable shared root is admitted under identity checks
+
+- **GIVEN** the deployment-declared shared skill root is writable by the runtime agent user
+- **WHEN** an owned skill instruction inside it is observed
+- **THEN** ownership SHALL be decided by canonical identity, link-free components, realpath containment and current-generation evidence alone
+- **AND** a linked component, an escaping target, a replaced identity or a stale generation SHALL still deny

@@ -4,7 +4,6 @@ import * as acp from "@agentclientprotocol/sdk";
 import { ChatbotClient, type SessionGateContext } from "@acp/client.ts";
 import { AgentConnector } from "@acp/agent-connector.ts";
 import type { TrustedSkillsSource } from "@acp/filesystem-policy.ts";
-import type { CriticalSkillReference } from "@acp/filesystem-roots.ts";
 import { observeOwnedSkills } from "@acp/omp/owned-skills.ts";
 import { SkillRegistry } from "@skills/registry.ts";
 import { MemoryStore } from "@core/memory-store.ts";
@@ -30,15 +29,9 @@ interface FilesystemFixture {
   instruction: string;
   client: ChatbotClient;
   register: (context?: Partial<SessionGateContext>) => void;
-  /** Mint current-generation provenance through the actual row-28 producer. */
-  mint: () => TrustedSkillsSource;
-  /** Restore the sealed packaged-tree posture after tampering. */
-  seal: () => void;
-  /** Make the sealed owned tree writable for tampering or cleanup. */
-  unseal: () => void;
+  /** The shared canonical root observation the connector derives for OMP callbacks. */
   trusted: TrustedSkillsSource;
   contentCalls: string[];
-  reference: { -readonly [K in keyof CriticalSkillReference]: CriticalSkillReference[K] };
 }
 
 function fixture(beforeOpen?: (path: string) => void): FilesystemFixture {
@@ -51,27 +44,12 @@ function fixture(beforeOpen?: (path: string) => void): FilesystemFixture {
   for (const path of [workspace, shared, staging, skills, sibling]) {
     Deno.mkdirSync(path, { recursive: true });
   }
-  // The producer admits only a canonical, link-free, read-only root, so the fixture
-  // stands in for the packaged owned tree: the pinned instruction layout, sealed
-  // against the agent, with one ordinary owned helper outside the pinned set.
-  const instruction = join(skills, "review", "SKILL.md");
-  Deno.mkdirSync(join(skills, "review"), { recursive: true });
+  // One owned instruction plus one ordinary owned helper under the shared root.
+  const instruction = join(skills, "owned-skill", "SKILL.md");
+  Deno.mkdirSync(join(skills, "owned-skill"), { recursive: true });
   Deno.writeTextFileSync(instruction, "owned instruction");
   const helper = join(skills, "helper.ts");
   Deno.writeTextFileSync(helper, "owned helper");
-  Deno.chmodSync(instruction, 0o444);
-  Deno.chmodSync(helper, 0o444);
-  // The producer and canonical-root observation reject any owner/group-writable
-  // owned object unless root-owned, so minting seals the packaged tree the way
-  // the image ships it; provenance tests unseal again for cleanup.
-  const seal = () => {
-    Deno.chmodSync(join(skills, "review"), 0o555);
-    Deno.chmodSync(skills, 0o555);
-  };
-  const unseal = () => {
-    Deno.chmodSync(join(skills, "review"), 0o755);
-    Deno.chmodSync(skills, 0o755);
-  };
   const logger = new Logger("test", { level: LogLevel.FATAL });
   const registry = new SkillRegistry(
     new MemoryStore(
@@ -110,34 +88,15 @@ function fixture(beforeOpen?: (path: string) => void): FilesystemFixture {
   const register = (context: Partial<SessionGateContext> = {}) => {
     client.setSessionContext("acp-1", { cwd: workspace, shellSessionId: "skill-1", ...context });
   };
-  const reference: FilesystemFixture["reference"] = {
-    skillId: "",
-    canonicalInstructionPath: "",
-    sessionGenerationId: "",
-    source: "deployment_owned",
-  };
+  // The shared canonical root observation the connector derives for OMP callbacks: the
+  // real deployment root with its dev/ino identity. The daemon callback contract carries
+  // no critical-skill metadata, so none is fabricated here.
+  const skillsInfo = Deno.lstatSync(skills);
   const trusted: TrustedSkillsSource = {
-    ownedRootPath: "",
-    canonicalOwnedRootPath: "",
+    ownedRootPath: skills,
+    canonicalOwnedRootPath: skills,
     source: "deployment_owned",
-    criticalSkills: [reference],
-  };
-  // Stands in for the connector's registration-time mint: the actual producer observes
-  // the sealed tree and binds references to the generation the client assigns at the
-  // NEXT registration. The value is obtained from the client (never fabricated), so a
-  // fresh client instance — a reconnect — cannot admit it. The shared mutable copies
-  // let tests perturb exactly one provenance field at a time.
-  const mint = (): TrustedSkillsSource => {
-    seal();
-    const fresh = observeOwnedSkills(
-      { ownedSkillRoots: [skills] },
-      "acp-1",
-      client.nextRegistrationGeneration(),
-      null,
-    )!;
-    Object.assign(reference, fresh.criticalSkills[0]);
-    Object.assign(trusted, fresh, { criticalSkills: [reference] });
-    return trusted;
+    rootIdentity: { dev: skillsInfo.dev!, ino: skillsInfo.ino! },
   };
   return {
     base,
@@ -149,12 +108,8 @@ function fixture(beforeOpen?: (path: string) => void): FilesystemFixture {
     instruction,
     client,
     register,
-    unseal,
-    seal,
-    mint,
     trusted,
     contentCalls,
-    reference,
   };
 }
 
@@ -270,7 +225,6 @@ Deno.test("Destructive permission routing: complete ACP endpoints only; native p
     f.register({ yolo: true });
     await request("delete", { path: outside }, [outside]);
     await request("edit", { edits: [] }, [source]);
-    f.mint();
     f.register({ yolo: true, trustedSkills: f.trusted });
     await denied(
       f,
@@ -284,7 +238,6 @@ Deno.test("Destructive permission routing: complete ACP endpoints only; native p
     );
     assertEquals(Deno.readTextFileSync(f.instruction), "owned instruction");
   } finally {
-    f.unseal();
     Deno.removeSync(f.base, { recursive: true });
   }
 });
@@ -564,11 +517,11 @@ Deno.test("Filesystem callbacks: sibling, escaping/contained links and observati
   }
 });
 
-Deno.test("Trusted skills: root-wide reads require canonical current-generation critical provenance", async () => {
+Deno.test("Trusted skills: the shared canonical root admits root-wide reads and stays read-only", async () => {
   for (const mode of [false, true]) {
     const f = fixture();
     try {
-      f.register({ yolo: mode, trustedSkills: f.mint() });
+      f.register({ yolo: mode, trustedSkills: f.trusted });
       const script = join(f.skills, "helper.ts");
       assertEquals(
         (await f.client.readTextFile({ sessionId: "acp-1", path: script })).content,
@@ -586,35 +539,29 @@ Deno.test("Trusted skills: root-wide reads require canonical current-generation 
           optionId: "allow",
         });
       }
-      // The same references under a new registration are stale and never fall back.
-      f.register({ trustedSkills: f.trusted });
-      await denied(
-        f,
-        "rejected_trusted_skills_identity",
-        () => f.client.readTextFile({ sessionId: "acp-1", path: script }),
-      );
     } finally {
-      f.unseal();
       Deno.removeSync(f.base, { recursive: true });
     }
   }
-  for (const failure of ["source", "root", "instruction", "overlap", "stale", "absent"] as const) {
+});
+
+Deno.test("Trusted skills: a mismatching, overlapping or absent root observation never admits", async () => {
+  for (const failure of ["root", "identity", "overlap", "absent"] as const) {
     const f = fixture();
     try {
-      f.mint();
-      const provenance: TrustedSkillsSource = {
-        ...f.trusted,
-        criticalSkills: f.trusted.criticalSkills.map((reference) => ({
-          ...reference,
-          source: failure === "source" ? "workspace_project" : reference.source,
-          sessionGenerationId: failure === "stale" ? "stale" : reference.sessionGenerationId,
-          canonicalInstructionPath: failure === "instruction"
-            ? join(f.skills, "missing.md")
-            : reference.canonicalInstructionPath,
-        })),
-        canonicalOwnedRootPath: failure === "root" ? f.sibling : f.skills,
-        ownedRootPath: failure === "overlap" ? f.workspace : f.skills,
-      };
+      const workspaceInfo = Deno.lstatSync(f.workspace);
+      const provenance: TrustedSkillsSource = failure === "root"
+        ? { ...f.trusted, ownedRootPath: f.sibling, canonicalOwnedRootPath: f.sibling }
+        : failure === "identity"
+        ? { ...f.trusted, rootIdentity: { dev: f.trusted.rootIdentity!.dev, ino: -1 } }
+        : failure === "overlap"
+        ? {
+          ownedRootPath: f.workspace,
+          canonicalOwnedRootPath: f.workspace,
+          source: "deployment_owned",
+          rootIdentity: { dev: workspaceInfo.dev!, ino: workspaceInfo.ino! },
+        }
+        : f.trusted;
       f.register({ trustedSkills: failure === "absent" ? undefined : provenance });
       await denied(
         f,
@@ -628,23 +575,92 @@ Deno.test("Trusted skills: root-wide reads require canonical current-generation 
         optionId: "reject",
       });
     } finally {
-      f.unseal();
       Deno.removeSync(f.base, { recursive: true });
     }
   }
 });
 
-Deno.test("Trusted permission classification denies HOME copies, workspace names and escaping links", async () => {
+Deno.test("OMP connector registration derives the callback root from agentConfig.skillsRoot", async () => {
   const f = fixture();
   try {
-    f.mint();
+    const skillsInfo = Deno.lstatSync(f.skills);
+    const conflicting: TrustedSkillsSource = {
+      ownedRootPath: f.sibling,
+      canonicalOwnedRootPath: f.sibling,
+      source: "deployment_owned",
+      rootIdentity: { dev: skillsInfo.dev!, ino: skillsInfo.ino! },
+    };
+    const outside = join(f.sibling, "outside.md");
+    Deno.writeTextFileSync(outside, "sibling sentinel");
+    const mkConnector = (skillsRoot: { root: string; identity?: { dev: number; ino: number } }) =>
+      new AgentConnector({
+        agentConfig: { command: "mock", args: [], cwd: f.workspace, skillsRoot },
+        clientConfig: { ...f.client["config"], sessionId: "skill-1" },
+        skillRegistry: f.client["skillRegistry"],
+        logger: f.client["logger"],
+        agentType: "omp",
+      });
+
+    // A conflicting caller-supplied source must NOT override the shared observation.
+    const connector = mkConnector({
+      root: f.skills,
+      identity: { dev: skillsInfo.dev!, ino: skillsInfo.ino! },
+    });
+    connector["client"] = f.client;
+    connector.setSessionGateContext("acp-1", {
+      cwd: f.workspace,
+      shellSessionId: "skill-1",
+      trustedSkills: conflicting,
+    });
+    const script = join(f.skills, "helper.ts");
+    assertEquals(
+      (await f.client.readTextFile({ sessionId: "acp-1", path: script })).content,
+      "owned helper",
+    );
+    await denied(
+      f,
+      "rejected_trusted_skills_read_only",
+      () => f.client.writeTextFile({ sessionId: "acp-1", path: script, content: "mutated" }),
+    );
+    assertEquals(Deno.readTextFileSync(script), "owned helper");
+    await denied(
+      f,
+      "rejected_filesystem_path_unavailable",
+      () => f.client.readTextFile({ sessionId: "acp-1", path: outside }),
+    );
+
+    // An observation without identity is passed through and denied, never widened.
+    const identityLess = mkConnector({ root: f.skills });
+    identityLess["client"] = f.client;
+    identityLess.setSessionGateContext("acp-1", {
+      cwd: f.workspace,
+      shellSessionId: "skill-1",
+      trustedSkills: conflicting,
+    });
+    const contentCalls = f.contentCalls.length;
+    await denied(
+      f,
+      "rejected_trusted_skills_identity",
+      () => f.client.readTextFile({ sessionId: "acp-1", path: f.instruction }),
+    );
+    assertEquals(f.contentCalls.length, contentCalls);
+    assertEquals((await f.client.requestPermission(permission(f.instruction, "read"))).outcome, {
+      outcome: "selected",
+      optionId: "reject",
+    });
+  } finally {
+    Deno.removeSync(f.base, { recursive: true });
+  }
+});
+
+Deno.test("Trusted permission classification denies workspace copies and escaping links", async () => {
+  const f = fixture();
+  try {
     f.register({ trustedSkills: f.trusted });
     const copy = join(f.workspace, "SKILL.md");
     Deno.writeTextFileSync(copy, "unowned");
     const escape = join(f.skills, "escape.md");
-    f.unseal();
     Deno.symlinkSync(copy, escape);
-    f.seal();
     for (
       const path of [
         copy,
@@ -663,7 +679,6 @@ Deno.test("Trusted permission classification denies HOME copies, workspace names
       optionId: "reject",
     });
   } finally {
-    f.unseal();
     Deno.removeSync(f.base, { recursive: true });
   }
 });
@@ -701,7 +716,6 @@ Deno.test("Filesystem registration: immutable policy and revocation while observ
     const original = Deno.realPath;
     try {
       const withProvenance = operation === "permission-read";
-      if (withProvenance) f.mint();
       f.register({ trustedSkills: withProvenance ? f.trusted : undefined });
       const path = operation === "permission-read" ? f.instruction : join(f.staging, "file.md");
       if (!withProvenance) Deno.writeTextFileSync(path, "sentinel");
@@ -737,21 +751,18 @@ Deno.test("Filesystem registration: immutable policy and revocation while observ
       );
     } finally {
       Deno.realPath = original;
-      f.unseal();
       Deno.removeSync(f.base, { recursive: true });
     }
   }
   const f = fixture();
   try {
     const extensions = [".md"];
-    f.mint();
     f.register({
       canWriteAgentWorkspace: true,
       allowedWriteExtensions: extensions,
       trustedSkills: f.trusted,
     });
     extensions.push(".ts");
-    f.reference.source = "workspace_project";
     assertEquals(
       (await f.client.readTextFile({ sessionId: "acp-1", path: f.instruction })).content,
       "owned instruction",
@@ -767,7 +778,6 @@ Deno.test("Filesystem registration: immutable policy and revocation while observ
         }),
     );
   } finally {
-    f.unseal();
     Deno.removeSync(f.base, { recursive: true });
   }
 });
@@ -876,108 +886,6 @@ Deno.test("Filesystem lifecycle: dedicated creation and pooled restore register 
       "rejected_write_extension",
     );
   } finally {
-    Deno.removeSync(f.base, { recursive: true });
-  }
-});
-
-Deno.test("Trusted provenance: generations never repeat across re-registration or reconnect", async () => {
-  const f = fixture();
-  try {
-    const config = { ...f.client["config"], sessionId: "skill-1", trustedSkills: f.trusted };
-    const connector = new AgentConnector({
-      agentConfig: { command: "mock", args: [], cwd: f.workspace },
-      clientConfig: config,
-      skillRegistry: f.client["skillRegistry"],
-      logger: f.client["logger"],
-      agentType: "opencode",
-    });
-    connector["client"] = f.client;
-    const connection = {
-      loadSession: () => Promise.resolve({}),
-    } as unknown as typeof connector["connection"];
-    connector["connection"] = connection;
-    connector["capabilities"] = { loadSession: true };
-
-    const script = join(f.skills, "helper.ts");
-
-    // Trusted producer mints the reference for the registration the connector is about to
-    // perform; that registration is the only one this generation is admitted by.
-    f.mint();
-    const minted = f.reference.sessionGenerationId;
-    connector.setSessionGateContext("acp-1", {
-      cwd: f.workspace,
-      shellSessionId: "skill-1",
-      trustedSkills: f.trusted,
-    });
-    assertEquals(
-      (await f.client.readTextFile({ sessionId: "acp-1", path: script })).content,
-      "owned helper",
-    );
-    assertEquals((await f.client.requestPermission(permission(script, "read"))).outcome, {
-      outcome: "selected",
-      optionId: "allow",
-    });
-
-    // The same references are stale under a re-registration: denied on both paths.
-    connector.setSessionGateContext("acp-1", {
-      cwd: f.workspace,
-      shellSessionId: "skill-1",
-      trustedSkills: f.trusted,
-    });
-    await denied(
-      f,
-      "rejected_trusted_skills_identity",
-      () => f.client.readTextFile({ sessionId: "acp-1", path: script }),
-    );
-    const staleContentCalls = f.contentCalls.length;
-    assertEquals((await f.client.requestPermission(permission(script, "read"))).outcome, {
-      outcome: "selected",
-      optionId: "reject",
-    });
-    assertEquals(f.contentCalls.length, staleContentCalls);
-
-    // Reconnect: a fresh client instance replays the cached context verbatim but assigns its
-    // own registration generation, so the previously minted reference stays denied.
-    const replayed: { session?: string; reference?: string } = {};
-    let restored: ChatbotClient | undefined;
-    connector.connect = () => {
-      restored = new ChatbotClient(
-        f.client["skillRegistry"],
-        f.client["logger"],
-        config,
-        emptySkillList(),
-      );
-      connector["client"] = restored;
-      connector["connection"] = connection;
-      connector["capabilities"] = { loadSession: true };
-      connector["replaySessionGateContexts"]();
-      const replayedContext = restored["sessionContexts"].get("acp-1");
-      replayed.session = replayedContext?.generation;
-      replayed.reference = replayedContext?.trustedSkills?.criticalSkills[0]?.sessionGenerationId;
-      return Promise.resolve();
-    };
-    assertEquals(await connector.reconnectAndResumeSession("acp-1", f.workspace, []), true);
-    assertEquals(replayed.reference, minted, "replay preserves supplied references verbatim");
-    assertEquals(replayed.session === minted, false, "replay never rebinds to the new epoch");
-
-    const replayedContentCalls = f.contentCalls.length;
-    restored!.clearPermissionRejections();
-    const error = await assertRejects(
-      () => restored!.readTextFile({ sessionId: "acp-1", path: script }),
-      acp.RequestError,
-    );
-    assertEquals(error.message, "Filesystem request denied: rejected_trusted_skills_identity");
-    assertEquals(
-      restored!.getRecentPermissionRejections().map((item) => item.reason),
-      ["rejected_trusted_skills_identity"],
-    );
-    assertEquals((await restored!.requestPermission(permission(script, "read"))).outcome, {
-      outcome: "selected",
-      optionId: "reject",
-    });
-    assertEquals(f.contentCalls.length, replayedContentCalls, "replay must not authorize IO");
-  } finally {
-    f.unseal();
     Deno.removeSync(f.base, { recursive: true });
   }
 });

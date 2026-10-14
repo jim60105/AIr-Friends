@@ -115,15 +115,6 @@ export interface TrustedSkillsRootConfig {
   readonly rootIdentity?: ObservedIdentity;
 }
 
-export interface CriticalSkillReference {
-  readonly skillId: string;
-  readonly canonicalInstructionPath: string;
-  readonly sessionGenerationId: string;
-  readonly source: "deployment_owned" | "workspace_project" | "symlink_escape";
-  readonly sessionId?: string;
-  readonly instructionIdentity?: ObservedIdentity;
-}
-
 export interface MetadataReader {
   lstat(path: string): Promise<Deno.FileInfo>;
   realPath(path: string): Promise<string>;

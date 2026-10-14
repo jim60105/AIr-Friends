@@ -64,14 +64,16 @@ export function observeDeclaredSkillRoots(
   if (!isAbsolute(declared) || resolve(declared) !== declared) return Object.freeze([]);
 
   const roots = Object.freeze([declared]);
-  // The same producer observation the daemon runs: canonical, link-free,
-  // real-directory, identity-bearing. A null result (unobservable or
-  // non-canonical) mints no authority — never a fallback root.
+  // The extension bootstrap is now the ONLY consumer of the producer
+  // (`simplify-omp-session-boundaries` removed the daemon's registration-time
+  // call): canonical, link-free, real-directory, identity-bearing. A null
+  // result (unobservable or non-canonical) mints no authority — never a
+  // fallback root.
   const source = observeOwnedSkills({ ownedSkillRoots: roots }, "", "", null);
   if (source === null || source.ownedRootPath !== declared) return Object.freeze([]);
   // Non-authorizing: the extension records the declaration without minting
-  // critical references (no session, no native generation — those exist only in
-  // the daemon's registration seam).
+  // critical references (no session, no native generation — the daemon no
+  // longer mints them).
   return roots;
 }
 

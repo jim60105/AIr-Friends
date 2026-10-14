@@ -39,7 +39,7 @@ OMP 在工作區裡會尋找「自訂工具」與「外掛」模組並載入執�
 ## 4.2 工作區可執行檔預檢
 
 **白話說明**
-接續上一項。由於上游無法在匯入前完全排除，這項功能改成以「部署控制 + 啟動前檢查」因應：在真正啟動 OMP、以及每次 `session/new`、`session/load` 或重新探索之前，先用**只讀取中繼資料**的方式掃描 session 工作區與可達的可執行探索根目錄（例如 `.omp/tools`、`.omp/plugins`）。只要發現任何可匯入的可執行模組、斷掉的連結、缺少授權根目錄或讀取失敗，就立即拒絕該 session，且不做任何修補。
+接續上一項。由於上游無法在匯入前完全排除，這項功能改成以「部署控制 + 啟動前檢查」因應：以**只讀取中繼資料**的方式掃描 session 工作區與可達的可執行探索根目錄（例如 `.omp/tools`、`.omp/plugins`）。只要發現任何可匯入的可執行模組、斷掉的連結、缺少授權根目錄或讀取失敗，就立即拒絕，且不做任何修補。自 `simplify-omp-session-boundaries` 起，這項檢查**不再**由 daemon 在每次原生請求前執行；它唯一的正式消費者是擴充載入期的啟動檢查（`extension_load`），daemon 端已無獨立的掃描閘門或對應的復原中止原因。
 
 **主要實作**
 
@@ -48,7 +48,6 @@ OMP 在工作區裡會尋找「自訂工具」與「外掛」模組並載入執�
 | `src/acp/omp/executable-sources.ts:856` | `checkOmpExecutableSources()`：同步中繼資料觀察 |
 | `src/acp/omp/executable-sources.ts:103` | `ExecutableSourceRejectionError` |
 | `src/acp/omp/executable-sources.ts:958` | `executableObservationForGuard()`：把觀察結果綁到探索決策與啟動工作目錄 |
-| `src/acp/agent-connector.ts:254` | `verifyOmpExecutableSourcesBeforeRequest()`：每個原生請求縫隙前執行 |
 | `src/acp/omp/extension/bootstrap.ts:122` | 擴充載入期的 `extension_load` 階段檢查 |
 
 **測試位置**

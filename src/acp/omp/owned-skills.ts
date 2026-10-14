@@ -19,10 +19,34 @@
  */
 import { dirname, isAbsolute, join, resolve } from "@std/path";
 import type { OmpSettingsSourcePlan } from "../omp-settings.ts";
-import type { CriticalSkillReference } from "../filesystem-roots.ts";
 import type { TrustedSkillsSource } from "../filesystem-policy.ts";
 import type { ObservedIdentity } from "../filesystem-roots.ts";
 import { evaluateCriticalSkillSelection, PINNED_CRITICAL_SKILLS } from "./discovery-guard.ts";
+
+/**
+ * OMP-only critical-skill provenance. It is not part of the shared ACP
+ * callback contract: the daemon consumes only {@link TrustedSkillsSource},
+ * while the still-live native extension bootstrap
+ * (`extension/critical-skills.ts`, `observeDeclaredSkillRoots`) keeps its own
+ * critical metadata through this producer.
+ */
+export interface CriticalSkillReference {
+  readonly skillId: string;
+  readonly canonicalInstructionPath: string;
+  readonly sessionGenerationId: string;
+  readonly source: "deployment_owned" | "workspace_project" | "symlink_escape";
+  readonly sessionId?: string;
+  readonly instructionIdentity?: ObservedIdentity;
+}
+
+/**
+ * The producer's own observation: the shared trusted-skill root plus the
+ * OMP-only critical references it mints. Never registered as an ACP callback
+ * source directly — the connector derives the shared fields alone.
+ */
+export interface OwnedSkillsObservation extends TrustedSkillsSource {
+  readonly criticalSkills: readonly CriticalSkillReference[];
+}
 
 export interface OwnedSkillMetadataReader {
   lstat(path: string): Pick<
@@ -139,9 +163,9 @@ export function observeOwnedSkills(
   plan: Pick<OmpSettingsSourcePlan, "ownedSkillRoots">,
   sessionId: string,
   generation: string,
-  previous: TrustedSkillsSource | null,
+  previous: OwnedSkillsObservation | null,
   reader: OwnedSkillMetadataReader = ownedSkillMetadataReader,
-): TrustedSkillsSource | null {
+): OwnedSkillsObservation | null {
   if (plan.ownedSkillRoots.length !== 1) {
     throw new Error("Owned skill declaration requires exactly one root");
   }

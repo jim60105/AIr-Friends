@@ -4,8 +4,6 @@ import { assertEquals, assertRejects } from "@std/assert";
 import * as acp from "@agentclientprotocol/sdk";
 import { AgentConnector } from "@acp/agent-connector.ts";
 import { ChatbotClient } from "@acp/client.ts";
-import type { OmpSettingsSourcePlan } from "@acp/omp-settings.ts";
-import { stageOmpSettingsSourcePlan } from "../mocks/omp-plan-fixture.ts";
 import type {
   AgentCapabilities,
   HTTPMCPServerConfig,
@@ -1156,10 +1154,10 @@ type RecoveryHarness = {
   /** RPC order against the mock connection. */
   rpc: string[];
   /**
-   * Row-11 phase ledger: ownership verification → gate prevalidation → settings
-   * preflight → executable preflight → teardown → load → restore tail → gate →
-   * hook. Every recovery phase appends here, so a test can assert the FULL
-   * ordering (verify-before-any-side-effect included) in one comparison.
+   * Row-11 phase ledger: ownership verification → gate prevalidation → teardown
+   * → load → restore tail → gate → hook. Every recovery phase appends here, so
+   * a test can assert the FULL ordering (verify-before-any-side-effect
+   * included) in one comparison.
    */
   order: string[];
 };
@@ -1168,48 +1166,27 @@ const OMP_YOLO_NS = "/data/omp-pools/discord:c1/omp-agent/native-yolo";
 const OMP_RESTRICTED_NS = "/data/omp-pools/discord:c1/omp-agent/restricted";
 const OC_DATA_HOME = "/data/opencode-data/discord:c1";
 
-// Row 26: OMP connectors now preflight the owned-only settings-source plan
-// before every native request, so OMP harnesses must carry a REAL plan whose
-// authority roots exist. Row 27 additionally observes the ACTUAL recovery
-// workspace for executable discovery shapes, so the same temp root also backs
-// the real (clean, empty) workspaces the OMP recovery tests resume against.
-// One temp-root fixture serves every OMP recovery test (created lazily,
-// removed by the final OMP recovery test). The env namespaces above stay
-// synthetic — the ownership derivation reads agentConfig.env, while the
-// observers only ever stat the plan's roots and these workspaces.
-let ompPlanFixture: { plan: OmpSettingsSourcePlan; baseRoot: string; workspace: string } | null =
-  null;
-function ompRecoveryPlan(): OmpSettingsSourcePlan {
-  if (!ompPlanFixture) {
-    const baseRoot = Deno.makeTempDirSync({ prefix: "omp-recovery-plan-" });
-    const overlayPath = `${baseRoot}/native-yolo.yml`;
-    Deno.writeTextFileSync(overlayPath, "# deployment-owned recovery fixture overlay\n");
-    const plan = stageOmpSettingsSourcePlan({
-      baseRoot,
-      mode: "native-yolo",
-      authoredOverlayPaths: [overlayPath],
-    });
-    Deno.mkdirSync(plan.ownedHome, { recursive: true });
-    Deno.mkdirSync(plan.agentDir, { recursive: true });
-    Deno.mkdirSync(plan.launchCwd, { recursive: true });
-    // Row 27: clean real workspaces the recovery tests resume against.
-    Deno.mkdirSync(`${baseRoot}/workspace`, { recursive: true });
+// OMP recovery tests resume against a REAL clean (empty) workspace directory.
+// The connector consumes no settings-source plan any more
+// (`simplify-omp-session-boundaries`), so no plan fixture is built. The env
+// namespaces above stay synthetic — the ownership derivation reads
+// agentConfig.env only.
+let ompWorkspaceFixture: string | null = null;
+/** The real clean recovery workspace for OMP harnesses (`suffix` distinguishes
+ * the `/a`-style variant the full-gate-context test uses). */
+function ompRecoveryWorkspace(suffix = ""): string {
+  if (!ompWorkspaceFixture) {
+    const baseRoot = Deno.makeTempDirSync({ prefix: "omp-recovery-ws-" });
     Deno.mkdirSync(`${baseRoot}/workspace/a`, { recursive: true });
     Deno.mkdirSync(`${baseRoot}/workspace/OTHER`, { recursive: true });
-    ompPlanFixture = { plan, baseRoot, workspace: `${baseRoot}/workspace` };
+    ompWorkspaceFixture = `${baseRoot}/workspace`;
   }
-  return ompPlanFixture.plan;
+  return ompWorkspaceFixture + suffix;
 }
-/** Row 27: the real clean recovery workspace for OMP harnesses (`suffix`
- * distinguishes the `/a`-style variant the full-gate-context test uses). */
-function ompRecoveryWorkspace(suffix = ""): string {
-  ompRecoveryPlan();
-  return ompPlanFixture!.workspace + suffix;
-}
-function cleanupOmpPlanFixture(): void {
-  if (ompPlanFixture) {
-    Deno.removeSync(ompPlanFixture.baseRoot, { recursive: true });
-    ompPlanFixture = null;
+function cleanupOmpRecoveryWorkspace(): void {
+  if (ompWorkspaceFixture) {
+    Deno.removeSync(ompWorkspaceFixture, { recursive: true });
+    ompWorkspaceFixture = null;
   }
 }
 
@@ -1217,8 +1194,6 @@ function createRecoveryHarness(params: {
   agentType: "opencode" | "omp";
   env?: Record<string, string>;
   cachedGateContexts?: Record<string, Record<string, unknown>>;
-  /** Row 26: real plan fixture for OMP connectors; `null` keeps a plan-less config. */
-  plan?: OmpSettingsSourcePlan | null;
   /** Namespace the (mock) respawn leaves in agentConfig.env — mutate to simulate drift. */
 }): RecoveryHarness {
   const interactions: string[] = [];
@@ -1231,9 +1206,6 @@ function createRecoveryHarness(params: {
       args: [],
       cwd: "/tmp",
       env: params.env,
-      ...(params.agentType === "omp" && params.plan !== null
-        ? { settingsSourcePlan: params.plan ?? ompRecoveryPlan() }
-        : {}),
     },
     clientConfig: {
       workingDir: "/tmp/workspace",
@@ -1269,8 +1241,6 @@ function createRecoveryHarness(params: {
   };
   instrument("verifyRecoveryOwnership", "verifyOwnership");
   instrument("prevalidateOmpRecoveryGateContext", "gatePrevalidation");
-  instrument("verifyOmpSettingsSourcesBeforeRequest", "settingsPreflight");
-  instrument("verifyOmpExecutableSourcesBeforeRequest", "executablePreflight");
   instrument("setSessionGateContext", "gateRestore");
   connector.disconnect = () => {
     order.push("disconnect");
@@ -1980,7 +1950,7 @@ for (const incomplete of incompleteGates) {
   );
 }
 
-Deno.test("reconnectAndResumeSession - OMP order: verify → gate prevalidation → preflight → teardown → load → model/effort → gate → hook → success", async () => {
+Deno.test("reconnectAndResumeSession - OMP order: verify → gate prevalidation → teardown → load → model/effort → gate → hook → success", async () => {
   const h = createRecoveryHarness({
     agentType: "omp",
     env: { PI_CODING_AGENT_DIR: OMP_YOLO_NS, TMPDIR: `${OMP_YOLO_NS}/tmp` },
@@ -2049,8 +2019,6 @@ Deno.test("reconnectAndResumeSession - OMP order: verify → gate prevalidation 
   assertEquals(h.order, [
     "verifyOwnership",
     "gatePrevalidation",
-    "settingsPreflight",
-    "executablePreflight",
     "disconnect",
     "connect",
     "verifyOwnership",
@@ -2139,39 +2107,8 @@ Deno.test("reconnectAndResumeSession - a failing effort RPC stays best-effort an
     true,
   );
   assertEquals(h.gateMutations.length, 1);
-});
-
-// Row 26 (task 4.2): an OMP connector whose agentConfig carries NO settings-source
-// plan cannot prove the owned-only posture — the preflight fails closed BEFORE any
-// teardown/respawn/load, with zero connector side effects. Deliberate missing-plan
-// scenario; last OMP recovery test, so it also releases the shared plan fixture.
-Deno.test("reconnectAndResumeSession - plan-less OMP connector fails the settings preflight closed with zero side effects", async () => {
-  try {
-    const h = createRecoveryHarness({
-      agentType: "omp",
-      env: { PI_CODING_AGENT_DIR: OMP_YOLO_NS, TMPDIR: `${OMP_YOLO_NS}/tmp` },
-      plan: null,
-    });
-
-    await assertRejects(
-      () =>
-        h.connector.reconnectAndResumeSession("sess_a", ompRecoveryWorkspace(), [], {
-          ownership: {
-            agentType: "omp",
-            permissionMode: "native-yolo",
-            processNamespace: OMP_YOLO_NS,
-          },
-          gateContext: { cwd: ompRecoveryWorkspace(), shellSessionId: "shell_a", yolo: true },
-        }),
-      Error,
-      "no settings-source plan",
-    );
-    assertEquals(h.interactions, [], "plan-less rejection precedes disconnect/respawn/load");
-    assertEquals(h.rpc, []);
-    assertEquals(h.gateMutations, []);
-  } finally {
-    cleanupOmpPlanFixture();
-  }
+  // Last OMP recovery test in this file: release the shared workspace fixture.
+  cleanupOmpRecoveryWorkspace();
 });
 
 // Post-implementation review B6: the mandatory root-exact inventory is built

@@ -1,8 +1,7 @@
 // src/acp/client.ts
 
 import * as acp from "@agentclientprotocol/sdk";
-import { join, resolve, SEPARATOR } from "@std/path";
-import { PINNED_CRITICAL_SKILLS } from "./omp/discovery-guard.ts";
+import { resolve, SEPARATOR } from "@std/path";
 import type { SkillRegistry } from "@skills/registry.ts";
 import type { Logger } from "@utils/logger.ts";
 import type { ClientConfig, PermissionRejection } from "./types.ts";
@@ -290,10 +289,10 @@ export class ChatbotClient implements acp.Client {
   private contextGenerationCounter: number = 0;
   /**
    * Per-client-instance registration epoch. Registration generations are the currency
-   * checked for trusted-provenance admission, so they must never repeat. A reconnect
+   * checked for session-context currency, so they must never repeat. A reconnect
    * constructs a fresh client and replays the cached gate contexts onto it; the new
-   * instance carries a new epoch, so a critical reference minted for a previous
-   * instance's epoch is never admitted by the new one.
+   * instance carries a new epoch, so a request bound to a previous instance's
+   * registration is never admitted by the new one.
    */
   private readonly contextGenerationEpoch: string = crypto.randomUUID();
 
@@ -355,8 +354,8 @@ export class ChatbotClient implements acp.Client {
    */
   setSessionContext(sessionId: string, ctx: SessionGateContext): void {
     const existing = this.sessionContexts.get(sessionId);
-    // Announced generation: computed before the counter advances, so the value a supplier
-    // mints against `nextRegistrationGeneration()` is exactly the one stored here.
+    // The registration generation is computed before the counter advances, so the value
+    // this call assigns is exactly the one stored and later currency-checked.
     const generation = this.nextRegistrationGeneration();
     this.contextGenerationCounter += 1;
     this.sessionContexts.set(sessionId, {
@@ -366,23 +365,17 @@ export class ChatbotClient implements acp.Client {
       generation,
       allowedWriteExtensions: (ctx.allowedWriteExtensions ?? existing?.allowedWriteExtensions)
         ?.slice(),
-      trustedSkills: ctx.trustedSkills
-        ? {
-          ...ctx.trustedSkills,
-          criticalSkills: ctx.trustedSkills.criticalSkills.map((reference) => ({ ...reference })),
-        }
-        : ctx.trustedSkills,
+      trustedSkills: ctx.trustedSkills ? { ...ctx.trustedSkills } : ctx.trustedSkills,
     });
   }
 
   /**
    * Registration generation this client assigns on its next `setSessionContext()` call.
-   * A deployment-owned trusted-provenance supplier mints each
-   * `CriticalSkillReference.sessionGenerationId` from this value for the registration it
-   * is about to perform; any other value — a previously assigned generation, or one
-   * obtained from another client instance — is never admitted.
+   * Session-scoped callback policy (path containment, staging, JWT context) is bound to
+   * this value, so a stale registration can never authorize a request made against a
+   * newer one. Not public: no external caller supplies provenance any more.
    */
-  nextRegistrationGeneration(): string {
+  private nextRegistrationGeneration(): string {
     return `${this.contextGenerationEpoch}:gen-${this.contextGenerationCounter + 1}`;
   }
 
@@ -405,31 +398,7 @@ export class ChatbotClient implements acp.Client {
       // admitted.
       trustedSkills.rootIdentity === undefined ||
       trustedSkills.rootIdentity.dev !== trustedRoot.identity?.dev ||
-      trustedSkills.rootIdentity.ino !== trustedRoot.identity?.ino ||
-      // D4: every supplied reference must name a pinned identifier and
-      // resolve to the exact current canonical instruction under the owned
-      // root. An unresolvable selector denies that reference, never falls
-      // back to a workspace or same-name skill.
-      trustedSkills.criticalSkills.some((reference) => {
-        const expected = PINNED_CRITICAL_SKILLS[reference.skillId];
-        // D4 (plan duck B5): an unregistered name-only selector is DENIED —
-        // never treated as an owned skill merely because its name matches.
-        if (expected === undefined) return true;
-        // Only deployment-owned provenance is authority; a workspace- or
-        // link-attributed reference never authorizes anything.
-        if (reference.source !== "deployment_owned") return true;
-        // D3: the reference's recorded session and registration generation
-        // must belong to THIS registration context.
-        if (
-          reference.sessionId !== context.acpSessionId ||
-          reference.sessionGenerationId !== context.sessionContextGeneration
-        ) return true;
-        const path = resolveSessionPath(
-          join(trustedRoot.canonicalPath, expected),
-          context,
-        );
-        return !path.ok || path.value.normalizedPath !== reference.canonicalInstructionPath;
-      })
+      trustedSkills.rootIdentity.ino !== trustedRoot.identity?.ino
     ) {
       return {
         ok: false,

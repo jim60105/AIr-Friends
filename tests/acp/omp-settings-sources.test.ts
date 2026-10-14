@@ -9,9 +9,8 @@
 // These tests certify deployment-side control logic only; native runtime
 // discovery behavior remains user-owned runtime evidence.
 
-import { assert, assertEquals, assertExists, assertRejects, assertThrows } from "@std/assert";
+import { assert, assertEquals, assertExists, assertThrows } from "@std/assert";
 import { createAgentConfig, finalizeOmpSpawnEnvironment } from "@acp/agent-factory.ts";
-import { AgentConnector } from "@acp/agent-connector.ts";
 import {
   OMP_DECLARED_SKILL_ROOT_ENV,
   OMP_FOREIGN_PROVIDER_ENV_SELECTORS,
@@ -26,7 +25,6 @@ import {
   checkOmpSettingsSources,
   formatSettingsSourceError,
   type SettingsSourceCheckResult,
-  SettingsSourceRejectionError,
   type SourceCheckFailure,
 } from "@acp/omp/settings-sources.ts";
 import { SandboxManager, sanitizeOmpDiscoveryEnv } from "@acp/sandbox-manager.ts";
@@ -583,148 +581,6 @@ Deno.test("observer - rejection message is bounded and content-free", () => {
   assert(!message.includes("source-8"), "only the first 8 failures are listed");
   assert(message.includes("(+5 more)"));
   assert(message.includes("No user file was modified"));
-});
-
-// ---------------------------------------------------------------------------
-// Task 4.2 — connector gate: zero protected calls on rejection; lifecycle
-// steps accept on a clean plan (per-spawn/pooled share the seam)
-// ---------------------------------------------------------------------------
-
-function gatedConnector(plan: OmpSettingsSourcePlan): {
-  connector: AgentConnector;
-  protectedCalls: string[];
-} {
-  const protectedCalls: string[] = [];
-  const connector = new AgentConnector({
-    agentConfig: {
-      command: "unused",
-      args: [],
-      cwd: plan.launchCwd,
-      env: {
-        // Ownership derivation reads the mode-scoped identity from the spawn
-        // env; keep it consistent with the plan so recovery reaches the
-        // settings preflight (row 26) AFTER the row-11 ownership verify.
-        PI_CODING_AGENT_DIR: plan.agentDir,
-        TMPDIR: plan.tmpDir,
-      },
-      settingsSourcePlan: plan,
-    },
-    clientConfig: {
-      workingDir: plan.launchCwd,
-      platform: "test",
-      userId: "u",
-      channelId: "c",
-      isDM: false,
-    },
-    skillRegistry: null,
-    logger: { debug: () => {}, info: () => {}, warn: () => {}, error: () => {} },
-    agentType: "omp",
-  });
-  // Instrument the protected surface: any newSession here would be a native
-  // request; connect() would spawn a process. Neither may happen on rejection.
-  const stubConnection = {
-    newSession: () => {
-      protectedCalls.push("newSession");
-      return Promise.resolve({ sessionId: "s", configOptions: [] });
-    },
-  } as unknown as typeof connector["connection"];
-  connector["connection"] = stubConnection;
-  connector["capabilities"] = { loadSession: true } as typeof connector["capabilities"];
-  return { connector, protectedCalls };
-}
-
-Deno.test("connector createSession - hostile session cwd rejects BEFORE session/new (zero protected calls)", async () => {
-  const { plan, sessionCwd, cleanup } = await makeLivePlan();
-  try {
-    await Deno.mkdir(`${sessionCwd}/.claude`, { recursive: true });
-    await Deno.writeTextFile(`${sessionCwd}/.claude/settings.json`, "hostile");
-    const { connector, protectedCalls } = gatedConnector(plan);
-
-    await assertRejects(
-      () => connector.createSession([], sessionCwd),
-      SettingsSourceRejectionError,
-      "settings-source preflight rejected",
-    );
-    assertEquals(protectedCalls, [], "session/new must never be reached");
-  } finally {
-    await cleanup();
-  }
-});
-
-Deno.test("connector connect - planted forbidden source rejects BEFORE any spawn", async () => {
-  const { plan, cleanup } = await makeLivePlan();
-  try {
-    await Deno.writeTextFile(`${plan.agentDir}/config.yml`, "planted global");
-    const { connector } = gatedConnector(plan);
-    await assertRejects(
-      () => connector.connect(),
-      SettingsSourceRejectionError,
-      "native-global-config-yml",
-    );
-    assertEquals(connector.getProcessPid(), undefined, "the spawn is a protected call too");
-  } finally {
-    await cleanup();
-  }
-});
-
-Deno.test("connector createSession - clean plan accepts, then overlay replacement fails the next request closed", async () => {
-  const { plan, sessionCwd, cleanup } = await makeLivePlan("native-yolo", "v1\n");
-  try {
-    const { connector, protectedCalls } = gatedConnector(plan);
-    const sessionId = await connector.createSession([], sessionCwd);
-    assertEquals(sessionId, "s");
-    assertEquals(protectedCalls, ["newSession"]);
-
-    // Owner replaces the overlay between lifecycle steps (same connector, so
-    // the accepted identity rides the recheck; size change keeps it clock-free).
-    await Deno.writeTextFile(plan.allowedOverlayPaths[0]!, "v2 replaced longer\n");
-    await assertRejects(
-      () => connector.createSession([], sessionCwd),
-      SettingsSourceRejectionError,
-      "overlay_identity_mismatch",
-    );
-    assertEquals(protectedCalls, ["newSession"], "the replaced overlay never reaches session/new");
-  } finally {
-    await cleanup();
-  }
-});
-
-Deno.test("connector recovery - hostile recovery cwd rejects with zero teardown/respawn side effects", async () => {
-  const { plan, cleanup } = await makeLivePlan();
-  const recoveryCwd = await Deno.makeTempDir({ prefix: "omp-recovery-" });
-  try {
-    await Deno.mkdir(`${recoveryCwd}/.gemini`, { recursive: true });
-    await Deno.writeTextFile(`${recoveryCwd}/.gemini/settings.json`, "hostile");
-    const { connector, protectedCalls } = gatedConnector(plan);
-    let disconnects = 0;
-    connector.disconnect = () => {
-      disconnects++;
-      return Promise.resolve();
-    };
-    connector.connect = () => {
-      protectedCalls.push("connect");
-      return Promise.resolve();
-    };
-    await assertRejects(
-      () =>
-        connector.reconnectAndResumeSession("sess", recoveryCwd, [], {
-          ownership: {
-            agentType: "omp",
-            permissionMode: "restricted",
-            processNamespace: plan.agentDir,
-          },
-          // A complete owning gate context (row 11): OMP recovery requires the
-          // resolved permission and the owning skill session, not a cwd-only shape.
-          gateContext: { cwd: recoveryCwd, shellSessionId: "shell_recovery", yolo: false },
-        }),
-      SettingsSourceRejectionError,
-    );
-    assertEquals(disconnects, 0);
-    assertEquals(protectedCalls, [], "recovery load/respawn must not start");
-  } finally {
-    await Deno.remove(recoveryCwd, { recursive: true });
-    await cleanup();
-  }
 });
 
 // ---------------------------------------------------------------------------

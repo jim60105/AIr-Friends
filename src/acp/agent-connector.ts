@@ -19,15 +19,6 @@ import {
   type SessionRecoveryOwnership,
   verifyRecoveryOwnership,
 } from "./recovery-ownership.ts";
-import {
-  type AcceptedOverlayIdentity,
-  assertOmpSettingsSourcesVisible,
-} from "./omp/settings-sources.ts";
-import {
-  type AcceptedExecutableObservation,
-  checkOmpExecutableSources,
-} from "./omp/executable-sources.ts";
-import { observeOwnedSkills } from "./omp/owned-skills.ts";
 import type { TrustedSkillsSource } from "./filesystem-policy.ts";
 import {
   collectOptionValues,
@@ -173,116 +164,9 @@ export class AgentConnector {
    * still in flight must still unstick that prompt.
    */
   private intentionalShutdown = false;
-  /**
-   * Row 26: identities of the owned overlays accepted by the most recent
-   * settings-source check on this connector. Every later check re-verifies
-   * them, so an overlay replaced between checks fails closed
-   * (`overlay_identity_mismatch`) — the repository-triggered rediscovery
-   * recheck the design records. Identity tracking deliberately spans
-   * `disconnect()`/respawn: the accepted deployment posture keeps the owned
-   * overlays stable for the process lifetime, so a replacement across a
-   * restart must also fail closed rather than reset the baseline.
-   */
-  private acceptedOverlayIdentities: readonly AcceptedOverlayIdentity[] | null = null;
-  /**
-   * Row 28 (D2/D3): the last ACCEPTED owned-skill observation. The first OMP
-   * context registration mints it from the factory-produced settings plan;
-   * every later registration (pooled second session, deliberate recovery
-   * restore) reobserves the CURRENT tree against it, so a root replaced
-   * between registrations fails closed instead of carrying old trust.
-   * Absent/unavailable authority is the same fail-closed denial, never a
-   * fallback root.
-   */
-  private ownedSkillsBaseline: TrustedSkillsSource | null = null;
-
-  /**
-   * Row 27: the most recent ACCEPTED executable-source observation on this
-   * connector. Every later check re-observes the CURRENT actual workspace
-   * afresh, so a workspace replaced or a workspace that grew an executable
-   * discovery entry between checks produces a new identity/generation or a
-   * rejection — a previous clean result is never reused as admission for a
-   * different state. A rejection throws BEFORE this field is written, so a
-   * rejected check has zero connector-side effects.
-   */
-  private acceptedExecutableObservation: AcceptedExecutableObservation | null = null;
 
   constructor(options: AgentConnectorOptions) {
     this.options = options;
-  }
-
-  /**
-   * Row 26 (D3): the pre-native-request settings-source gate. Runs strictly
-   * BEFORE any native protected request — spawn, `session/new`,
-   * `session/load`/recovery, or repository-triggered rediscovery — for OMP
-   * connectors only (OpenCode never consults the plan). The connector's
-   * factory-produced `agentConfig.settingsSourcePlan` is mandatory: an OMP
-   * connector whose config carries no plan cannot prove the owned-only
-   * posture and fails closed with a bounded reason BEFORE any side effect.
-   * A check failure throws `SettingsSourceRejectionError`; no user file is
-   * touched and no native request is sent.
-   */
-  private async verifyOmpSettingsSourcesBeforeRequest(sessionCwd: string): Promise<void> {
-    if (this.options.agentType !== "omp") return;
-    const plan = this.options.agentConfig.settingsSourcePlan;
-    if (!plan) {
-      throw new Error(
-        "OMP connector refuses the native request: agentConfig carries no settings-source plan, " +
-          "so the owned-only settings posture cannot be verified (fail closed).",
-      );
-    }
-    const identities = await assertOmpSettingsSourcesVisible(
-      plan,
-      sessionCwd,
-      this.acceptedOverlayIdentities
-        ? { expectedOverlayIdentities: this.acceptedOverlayIdentities }
-        : {},
-    );
-    this.acceptedOverlayIdentities = identities;
-  }
-
-  /**
-   * Row 27 (decision 1 / D3): the pre-native-request executable-source gate.
-   * Runs immediately AFTER `verifyOmpSettingsSourcesBeforeRequest` at every
-   * seam — spawn, `session/new`, recovery `session/load` — for OMP connectors
-   * only (OpenCode never takes this path). The actual session workspace (plus
-   * the deployment-set shared Agent workspace) is observed metadata-only for
-   * executable discovery shapes; a found entry, broken link, missing
-   * authority, or IO failure throws `ExecutableSourceRejectionError` BEFORE
-   * any native request or connector-side mutation. The owned roots ride the
-   * same factory-produced plan the settings check just verified.
-   */
-  private verifyOmpExecutableSourcesBeforeRequest(sessionCwd: string): void {
-    if (this.options.agentType !== "omp") return;
-    const plan = this.options.agentConfig.settingsSourcePlan;
-    if (!plan) {
-      // The settings check above already refused this connector on the same
-      // condition; this stays as an independent fail-closed assertion.
-      throw new Error(
-        "OMP connector refuses the native request: agentConfig carries no settings-source plan, " +
-          "so the owned executable-source authority cannot be verified (fail closed).",
-      );
-    }
-    this.acceptedExecutableObservation = checkOmpExecutableSources({
-      phase: "preflight",
-      sessionCwd,
-      ...(this.options.agentConfig.env?.["AGENT_WORKSPACE"] !== undefined
-        ? { sharedWorkspace: this.options.agentConfig.env["AGENT_WORKSPACE"] }
-        : {}),
-      roots: {
-        ownedHome: plan.ownedHome,
-        agentDir: plan.agentDir,
-        // The plan's neutral launch cwd is the designed spawn-location identity
-        // (inside the mode namespace by row-9 layout); the `connect()` seam
-        // observes exactly it and must not be rejected as owned-state aliasing.
-        launchCwd: plan.launchCwd,
-      },
-      processEnv: this.options.agentConfig.env ?? {},
-    });
-  }
-
-  /** Test seam: the last accepted executable observation (null before any). */
-  get lastExecutableObservation(): AcceptedExecutableObservation | null {
-    return this.acceptedExecutableObservation;
   }
 
   /**
@@ -290,14 +174,6 @@ export class AgentConnector {
    */
   async connect(): Promise<void> {
     const { agentConfig, clientConfig, skillRegistry, logger } = this.options;
-
-    // Row 26 (D3): settings-source preflight BEFORE the spawn — the neutral
-    // launch cwd is the plan's own root here; the actual session workspace is
-    // re-checked per `createSession`/load below.
-    await this.verifyOmpSettingsSourcesBeforeRequest(agentConfig.cwd);
-    // Row 27: executable-source observation rides the same pre-spawn seam,
-    // strictly AFTER the settings check (settings first, executable second).
-    this.verifyOmpExecutableSourcesBeforeRequest(agentConfig.cwd);
 
     // MANDATORY root-exact inventory (`unify-skill-root-and-inventory` D2/D4,
     // generalizing `unify-omp-skill-root-resolution` D1/D3, post-implementation
@@ -491,20 +367,6 @@ export class AgentConnector {
     // Filter out MCP servers with unsupported transports (skip + warn)
     const supportedServers = this.filterSupportedMCPServers(mcpServers);
     const sessionCwd = cwd ?? this.options.agentConfig.cwd;
-
-    // Row 26 (D3): the ACTUAL session workspace is re-checked before the
-    // native `session/new` — the neutral launch cwd never covers it. The
-    // previously accepted overlay identities are re-verified here, so an
-    // owned-overlay replacement between lifecycle steps fails closed.
-    // This precedes the per-session rejection-record reset below, so a
-    // rejected createSession has zero side effects — a denied-tool record is
-    // never silently dropped by a request that never reached the agent.
-    await this.verifyOmpSettingsSourcesBeforeRequest(sessionCwd);
-    // Row 27: the ACTUAL session workspace is observed for executable
-    // discovery shapes immediately after the settings recheck and — like the
-    // settings gate — BEFORE the per-session rejection-record reset below, so
-    // a rejected createSession has zero side effects.
-    this.verifyOmpExecutableSourcesBeforeRequest(sessionCwd);
 
     // Start a fresh rejection record per logical session (Design Decision 2).
     // Cleared HERE, NOT in `reset()`: `reset()` runs at the start of every prompt
@@ -1003,50 +865,48 @@ export class AgentConnector {
    */
   setSessionGateContext(acpSessionId: string, ctx: SessionGateContext): void {
     const existing = this.sessionGateContexts.get(acpSessionId);
-    // Row 28 (D2/D3, plan duck B4): production owned-skill provenance is
-    // minted HERE, at the actual client's next registration generation —
-    // exactly the generation `setSessionContext` assigns — from the factory
-    // settings plan's validated declaration, never from a workspace/config/
-    // model selector. The declaration or an unavailable owned root yields a
-    // frozen empty-selection source: the root-scoped read path stays intact
-    // while every critical-skill reference stays unattested (fail closed,
-    // no workspace fallback, no global disablement). A reobservation that
-    // contradicts the accepted baseline throws BEFORE any state mutates.
-    // Passive reconnect replay never routes through here, so replayed
-    // references keep the previous client's generation and stay denied.
-    const declaredRoots = this.options.agentConfig.settingsSourcePlan?.ownedSkillRoots;
-    const trustedSkills = this.options.agentType === "omp" && declaredRoots
-      ? observeOwnedSkills(
-        { ownedSkillRoots: declaredRoots },
-        acpSessionId,
-        this.client?.nextRegistrationGeneration?.() ?? "",
-        this.ownedSkillsBaseline,
-      )
+    // OMP's callback trusted root is the factory-produced shared observation
+    // already used by inventory and confinement — the SAME configured root the
+    // deployment mounts read-only — never the settings plan or a workspace/
+    // config/model selector. An unavailable identity stays unavailable and
+    // follows the existing shared callback denial. OpenCode's supplied
+    // `ctx.trustedSkills` choice is preserved unchanged.
+    const trustedSkills = this.options.agentType === "omp"
+      ? this.sharedSkillsRootSource()
       : ctx.trustedSkills;
     const merged: SessionGateContext = {
       ...existing,
       ...ctx,
       allowedWriteExtensions: (ctx.allowedWriteExtensions ?? existing?.allowedWriteExtensions)
         ?.slice(),
-      trustedSkills: trustedSkills
-        ? {
-          ...trustedSkills,
-          criticalSkills: trustedSkills.criticalSkills.map((reference) => ({ ...reference })),
-        }
-        : undefined,
+      trustedSkills,
     };
     this.sessionGateContexts.set(acpSessionId, merged);
-    if (this.options.agentType === "omp" && declaredRoots && trustedSkills) {
-      this.ownedSkillsBaseline = trustedSkills;
-    }
     this.client?.setSessionContext(acpSessionId, merged);
+  }
+
+  /**
+   * The OMP callback trusted root, derived from the one shared deployment
+   * skill-root observation the connector already received. No discovery
+   * fallback: an absent root or identity is passed through as-is and denied by
+   * the existing shared callback checks.
+   */
+  private sharedSkillsRootSource(): TrustedSkillsSource | undefined {
+    const observation = this.options.agentConfig.skillsRoot;
+    if (!observation) return undefined;
+    return {
+      ownedRootPath: observation.root,
+      canonicalOwnedRootPath: observation.root,
+      source: "deployment_owned",
+      rootIdentity: observation.identity,
+    };
   }
 
   /**
    * Replay the cached per-session gate contexts onto the current client. The client is
    * fresh after a respawn and assigns fresh registration generations, so replayed
-   * critical-skill references — which keep the previous instance's generation verbatim —
-   * stay denied. The replay restores context identity, never trust.
+   * contexts are re-bound to the new instance's current generation. The replay restores
+   * context identity, never trust.
    */
   private replaySessionGateContexts(): void {
     for (const [sid, ctx] of this.sessionGateContexts) {
@@ -1317,21 +1177,10 @@ export class AgentConnector {
     // gate context is mandatory and must agree with the recovery cwd and with
     // the context this connector registered for that id. A missing or
     // disagreeing gate is a bounded gate-context restore failure here, before
-    // settings/executable preflight, `disconnect()`, spawn or `session/load`.
+    // `disconnect()`, spawn or `session/load`.
     if (ompRecovery) {
       this.prevalidateOmpRecoveryGateContext(sessionId, cwd, opts?.gateContext);
     }
-
-    // ── Settings-source recheck BEFORE any teardown (row 26, D3) ────────────
-    // Recovery is a native `session/load`: the owned-only posture is verified
-    // against the ACTUAL recovery cwd ahead of `disconnect()`, the respawn, and
-    // the load itself, so a rejection has zero disconnect/spawn/load side
-    // effects (the same zero-side-effect discipline row 11 established for
-    // ownership). The previously accepted overlay identities ride the recheck.
-    await this.verifyOmpSettingsSourcesBeforeRequest(cwd);
-    // Row 27: executable observation rides the same pre-teardown position —
-    // a rejection leaves disconnect/respawn/load all untouched.
-    this.verifyOmpExecutableSourcesBeforeRequest(cwd);
 
     logger.info("Attempting to reconnect and resume session {sessionId}", { sessionId });
 
@@ -1476,10 +1325,10 @@ export class AgentConnector {
    * registered for that id — must agree with it on every policy field. A
    * missing, incomplete, cwd-disagreeing or foreign (sibling/process-frozen)
    * context is a bounded gate-context restore failure raised BEFORE
-   * settings/executable preflight, `disconnect()`, spawn or `session/load`, so
-   * it has zero side effects. `trustedSkills` is deliberately not compared: for
-   * OMP it is minted/reobserved from the factory settings plan at every
-   * registration (row 28), so no caller carries it.
+   * `disconnect()`, spawn or `session/load`, so it has zero side effects.
+   * `trustedSkills` is deliberately not compared: for OMP it is derived from
+   * the shared factory observation at every registration, so no caller carries
+   * it.
    */
   private prevalidateOmpRecoveryGateContext(
     sessionId: string,

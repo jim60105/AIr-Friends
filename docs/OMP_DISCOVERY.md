@@ -7,7 +7,7 @@ The `guard-omp-executable-discovery` integration protects restricted OpenCode / 
 1. **Load-Time Discovery Bootstrap**: A pure pre-import exclusion decision computed at trusted-extension module load, before any dynamic tool, plugin, or configured module can import.
 2. **Audited Surface Verification**: Table-driven evaluation of all 7 P0-audited executable discovery routes. Surfaces without supported mechanisms keep their pinned `no-supported-mechanism` status; the two native executable-discovery surfaces are admitted ONLY under the DECIDED decision-1 deployment control with a matching accepted pre-native observation, and the entrypoint otherwise throws on the remaining blockers.
 3. **Exact Owned-Module Ownership**: Only the DECLARED generated artifact at its declared canonical root — the fixed image face or the build-owned development face — with satisfying PHYSICAL evidence is admitted. Workspace copies, cache directories, symlink escapes, name-only matches and raw source files are unconditionally untrusted.
-4. **Canonical Critical-Skill Ownership**: Critical skill IDs resolve strictly to canonical instruction files (`SKILL.md`) inside the read-only deployment-owned skills root. Workspace shadowing is excluded, and stale/foreign session generations reject.
+4. **Shared Callback Skills Root**: The daemon's ACP filesystem callbacks admit the configured deployment skill root by canonical identity alone — the same factory-resolved root used by script inventory and confinement. Critical-skill metadata and per-identifier generations are no longer part of the callback contract; critical instruction resolution belongs to the native extension bootstrap and to upstream discovery.
 5. **Honesty Gates**: Two honesty gates keep their verbatim pinned `unresolved` verdicts beside their DECIDED (2026-10-09, rows 27/28) dispositions. Neither gate carries a pending user-decision blocker any longer, and no native security guarantee follows from either.
 
 ---
@@ -61,11 +61,11 @@ No candidate modules are ever imported or evaluated during discovery inspection.
    same check repeated. LAUNCH ASSEMBLY (`src/acp/agent-factory.ts`) validates the owned assets —
    the selected generated extension artifact, every resolved `--config` overlay document and the
    owned skill-root declarations — before the process is created and fails the launch closed. The
-   connector's PER-REQUEST preflights then recheck the settings-source plan and the workspace
-   executable observation immediately before spawn, before `session/new`, and before
-   recovery/`session/load` (`docs/OMP_SPAWN.md` section 3, `docs/OMP_SETTINGS.md` section 6); they
-   do not repeat the assembly-time asset stat. All of these are daemon-side guarantees; they are
-   NOT a claim about native handler presence.
+   connector does NOT run per-request scan preflights any more: the settings-source and
+   workspace-executable observations are extension/assembly-side mechanisms, consumed by the
+   LAUNCH ASSEMBLY and by the extension-load STARTUP CHECK, so the connector has no separate
+   scan-gate rejection between lifecycle steps. All of these are daemon-side guarantees; they
+   are NOT a claim about native handler presence.
 4. **No over-claim.** This documentation asserts neither authenticated handler presence, nor a
    guaranteed `session/new`/`session/load` rejection on extension failure, nor never-extensionless
    execution. The residual risk is accepted and recorded
@@ -90,10 +90,22 @@ No candidate modules are ever imported or evaluated during discovery inspection.
 
 ### Critical-Skill Ownership
 
-- Critical skill IDs resolve strictly to the pinned instruction layout (`review/SKILL.md`, `destructive/SKILL.md`, `lsp/SKILL.md`, `readiness/SKILL.md`) inside the DEPLOYMENT-RESOLVED skills root the settings declaration carries (`skills.customDirectories` in the generated single-key declaration, with `skills.enabled: true` and all seven foreign-source toggles false in the authored mode documents — row 28 `pin-omp-owned-skill-roots` as parameterized by `align-omp-skill-trust-to-shared-root`, docs/OMP_SETTINGS.md §7). Critical minting is additionally gated on the root's OBSERVED read-only determination (its own ownership and mode): the shared root is the deployment's ordinary `agent.skillsDir` tree (`$UID:0` `0775` in the container), so a writable root mints ZERO critical authority even when a pinned `*/SKILL.md` layout is present — the planted layout is refused, never silently minted, and ordinary (non-critical) skill admission does not consult that flag at all. **The pinned layout is currently UNPOPULATED**: the resolved root ships the repository `skills/` content, which contains none of those four instruction files, so every registration observably mints ZERO critical references (each identifier denies fail-closed on absence — the safe empty posture, never a fallback); populating the layout is an operator decision that must also satisfy the observed read-only requirement, and until then no critical-skill authority exists in production.
-- Workspace candidates with identical names are excluded from critical-name resolution before any collision or precedence decision; name-only authority is denied and an unregistered selector never authorizes anything.
-- Ordinary (non-critical) skills remain enabled and discoverable globally; the `skills.*` pin declares the owned root only and expands no critical-id set.
-- Re-evaluated across `new`, `load`, and `refresh` events; candidates carrying a stale generation ID or foreign session ID are rejected, and a replacement of an accepted instruction identity denies that identifier alone (never re-mints trust from fresh metadata).
+- Critical instruction resolution is NOT a daemon callback responsibility. The daemon's ACP
+  filesystem callbacks admit the configured deployment skill root by canonical identity alone
+  (absolute canonical path, link-free components, real directory, matching `dev`/`ino`,
+  writable-root disjointness); they carry no critical-skill metadata, no per-identifier generation
+  and no root-inode baseline. Skill discovery, including any critical identifiers, is native/OMP-owned
+  and is documented as such instead of asserted by this deployment.
+- The OMP-only metadata producer `src/acp/omp/owned-skills.ts` and the
+  `extension/critical-skills.ts` bootstrap remain in place until the pending native-runtime cutover
+  replaces their closure: `observeDeclaredSkillRoots()` still consumes the producer before old
+  bootstrap admission, and the producer still derives the pinned instruction layout
+  (`review/SKILL.md`, `destructive/SKILL.md`, `lsp/SKILL.md`, `readiness/SKILL.md`) from the
+  DEPLOYMENT-RESOLVED skills root the settings declaration carries (`skills.customDirectories` in
+  the generated single-key declaration — `docs/OMP_SETTINGS.md` §7). That mechanism belongs to the
+  old extension bootstrap, not to the daemon callback contract.
+- Ordinary (non-critical) skills remain enabled and discoverable globally; the `skills.*` pin
+  declares the owned root only and expands no critical-id set.
 
 ---
 
@@ -111,7 +123,7 @@ Two honesty gates remain open as named data exports in `src/acp/omp/discovery-gu
 
 - **Status**: `unresolved`
 - **Pinned Verdict**: `"name-only trust incompatible and canonical selection unresolved"`
-- **Disposition (row 27, DECIDED 2026-10-09)**: `DECISION_7_SKILL_OWNERSHIP_ADMISSION` — owned-settings skill-root ownership selection; row 28 (`pin-omp-owned-skill-roots`) LANDED the settings skill-root selection checks (pinned `skills` block in both overlays, `ownedSkillRoots` on the source plan, the `observeOwnedSkills` registration-time producer, and identity/replacement-attested client admission), the existing canonical critical-skill checks are retained here, and this record remains the decided disposition only.
+- **Disposition (row 27, DECIDED 2026-10-09)**: `DECISION_7_SKILL_OWNERSHIP_ADMISSION` — owned-settings skill-root ownership selection. The settings skill-root selection checks landed (pinned `skills` block in both overlays, `ownedSkillRoots` on the source plan, the OMP-only `observeOwnedSkills` producer consumed by the extension bootstrap). The daemon's ACP callbacks no longer carry critical-skill metadata: they admit the shared canonical root by identity alone, and the producer remains part of the still-live native extension mechanism until the cutover. This record remains the decided disposition only.
 
 Neither gate carries a pending "another user decision required" blocker anymore (row 27): decisions 1 and 7 pinned their dispositions on 2026-10-09.
 
@@ -142,7 +154,7 @@ The following items cannot be certified by mock or unit tests and remain unverif
 
 - [ ] **Real Trusted-Module Load**: Pinned OMP executable loads the generated trusted-extension bundle (`/opt/air/omp/extension/index.js`, cut from `OMP_TRUSTED_EXTENSION_PATH` source) via `--trusted-extension` — with no import map and no download (`docs/OMP_PACKAGING.md` §7) — and its loaded artifact is observed at the DECLARED image face with satisfying physical evidence.
 - [ ] **Hostile Code Suppression**: Hostile custom tools or plugins with executable top-level code do not run during startup.
-- [ ] **Critical Skill Resolution**: Critical skills resolve strictly to canonical owned `SKILL.md` on session `new`, `load`, and `refresh` events.
+- [ ] **Native Skill Discovery**: Native discovery resolves skills (and any critical instruction identifiers) under the shared configured root on session `new`, `load`, and `refresh`; the daemon callback only attests that shared root's canonical identity.
 
 ---
 

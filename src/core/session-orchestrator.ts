@@ -9,8 +9,6 @@ import {
 } from "@acp/agent-connector.ts";
 import type { SessionGateContext } from "@acp/client.ts";
 import { RecoveryOwnershipError, type SessionRecoveryOwnership } from "@acp/recovery-ownership.ts";
-import { SettingsSourceRejectionError } from "@acp/omp/settings-sources.ts";
-import { ExecutableSourceRejectionError } from "@acp/omp/executable-sources.ts";
 import { AgentProcessPool } from "./agent-process-pool.ts";
 import type { PoolPermissionMode, PoolRunOptions } from "./agent-process-pool.ts";
 import * as acp from "@agentclientprotocol/sdk";
@@ -83,13 +81,7 @@ type RecoveryAbortReason =
   | "ownership_unverified"
   | "namespace_mismatch"
   | "gate_context_restore_failed"
-  | "post_restore_hook_failed"
-  // Row 26: a recovery refused by the settings-source preflight must surface
-  // its own bounded reason instead of riding the pool's relabels.
-  | "settings_sources_rejected"
-  // Row 27: a recovery refused by the executable-source startup check surfaces
-  // its own bounded reason, never riding the settings relabel or the pool's.
-  | "executable_sources_rejected";
+  | "post_restore_hook_failed";
 
 /**
  * Row-11 recovery context threaded into `AgentConnector.reconnectAndResumeSession`.
@@ -4431,8 +4423,6 @@ export class SessionOrchestrator {
     if (error instanceof RecoveryOwnershipError) return error.reason;
     if (error instanceof GateContextRestoreError) return "gate_context_restore_failed";
     if (error instanceof RecoveryHookError) return "post_restore_hook_failed";
-    if (error instanceof SettingsSourceRejectionError) return "settings_sources_rejected";
-    if (error instanceof ExecutableSourceRejectionError) return "executable_sources_rejected";
     return null;
   }
 
