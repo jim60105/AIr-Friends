@@ -1,94 +1,101 @@
-# Mode-Owned ACP Session Recovery
+# Mode-Separated ACP Session Recovery
 
-This document is the recovery contract for `restore-mode-owned-acp-sessions` (batch row 11):
-what a resumed ACP session is bound to, what is verified before anything is torn down, what is
-restored afterwards, and what a recovery failure is allowed to touch. It consumes row 10's
-acquisition-time ownership record (`docs/OMP_POOL_MODES.md`) and row 6's session-config restore
-logic (AGENTS.md, "Session Model Selection (Stable-First)" / "Cache Restoration on Reconnect");
-it changes neither.
+This document is the recovery contract for `restore-mode-owned-acp-sessions` (batch row 11) as
+amended by `simplify-omp-recovery-context`: what a resumed ACP session is bound to, what is
+verified before anything is torn down, what is restored afterwards, and what a recovery failure is
+allowed to touch. It consumes row 10's acquisition-time identity record
+(`docs/OMP_POOL_MODES.md`) and row 6's session-config restore logic (AGENTS.md, "Session Model
+Selection (Stable-First)" / "Cache Restoration on Reconnect"); it changes neither.
 
-Implementation surfaces: `src/acp/recovery-ownership.ts` (pure verdict helper),
-`AgentConnector.reconnectAndResumeSession()` in `src/acp/agent-connector.ts` (verify → respawn →
-load → config tail → gate-context restore → hook), and ALL NINE recovery call sites — the two
-pooled runner seams plus the seven per-spawn seams — with the failure classification in
-`src/core/session-orchestrator.ts`.
+Implementation surfaces: `src/acp/recovery-ownership.ts` (pure verdict helper, consumed by the
+OpenCode path only), `AgentConnector.reconnectAndResumeSession()` in `src/acp/agent-connector.ts`
+(verify-when-supplied → respawn → load → config tail → gate-context restore → hook), and ALL NINE
+recovery call sites — the two pooled runner seams plus the seven per-spawn seams — with the failure
+classification in `src/core/session-orchestrator.ts`.
 
 ## 0. Caller matrix — every reconnect-capable runner carries its own context
 
 `SessionOrchestrator.promptWithIdleTimeoutHandling()` is the single recovery seam; every one of its
-nine callers supplies the owning session's own recovery context (recorded ownership, own gate
-context, own cwd, operator MCP servers, resolved reasoning effort). No caller leaves the context
-implicit.
+nine callers supplies the owning session's own recovery context — its own gate context, its own
+cwd, the operator MCP servers and the resolved reasoning effort. A pooled OpenCode caller
+additionally passes the row-10 ownership record; OMP recovery carries none (see §1). No caller
+leaves the context implicit.
 
 | Caller                                                                   | Acquisition shape | Context source                                                                                      |
 | ------------------------------------------------------------------------ | ----------------- | --------------------------------------------------------------------------------------------------- |
-| `processMessage` pooled runner (`message`/`channelLurk`)                 | pooled            | registry record (row 10) + the per-session gate registration + resolved effort                      |
-| `runSharedPoolSession` (pooled `spontaneous`/`selfResearch`/maintenance) | pooled            | registry record + the per-session gate registration + resolved effort                               |
-| `processMessage` per-spawn (`message`/`channelLurk`)                     | per-spawn         | registry record + the connector's own `clientConfig` gate fields + resolved effort                   |
+| `processMessage` pooled runner (`message`/`channelLurk`)                 | pooled            | the per-session gate registration + resolved effort (pooled OpenCode also threads its row-10 record) |
+| `runSharedPoolSession` (pooled `spontaneous`/`selfResearch`/maintenance) | pooled            | the per-session gate registration + resolved effort (pooled OpenCode also threads its row-10 record) |
+| `processMessage` per-spawn (`message`/`channelLurk`)                     | per-spawn         | the connector's own `clientConfig` gate fields + resolved effort                                     |
 | `processSpontaneousPost` per-spawn                                       | per-spawn         | same shape (own workspace/effort)                                                                   |
 | self research initial (per-spawn)                                        | per-spawn         | same shape, including the shared-workspace write authorization                                      |
-| self research correction retry (per-spawn)                               | per-spawn         | the SAME captured initial research context — never a freshly inferred ownership or gate             |
+| self research correction retry (per-spawn)                               | per-spawn         | the SAME captured initial research context — never a freshly inferred gate                          |
 | user memory maintenance (per-spawn)                                      | per-spawn         | same shape (own maintenance identity/effort)                                                        |
 | channel memory maintenance (per-spawn)                                   | per-spawn         | same shape against the CHANNEL workspace the acquisition spawned with                               |
 | reminder (per-spawn)                                                     | per-spawn         | same shape (own shell identity/cwd/effort)                                                          |
 
 The pooled callers' context is built inline at the seam; the per-spawn callers build it through one
-helper (`perSpawnRecoveryContext`) from the acquisition record and the session's own
-`clientConfig`, whose per-spawn connector serves exactly that one session. `reasoningEffort` is the
-already-resolved value of the session setup; nothing is re-resolved at recovery time.
+helper (`perSpawnRecoveryContext`) from the session's own `clientConfig`, whose per-spawn connector
+serves exactly that one session. `reasoningEffort` is the already-resolved value of the session
+setup; nothing is re-resolved at recovery time. `recoveryOwnershipFromRegistry()` reads the row-10
+record for OpenCode only and returns `undefined` for OMP, so no OMP caller can thread an ownership
+record.
 
 There is no recovery caller in `generateConversationSummary()`: the conversation summary prompts the
 live session directly and catches failures, so a summary failure never triggers a reconnect and this
 change gives the summary path no new retry behavior.
 
-## 1. Recovery contract — recorded context is the target
+## 1. Recovery contract — OMP recovers from its own options; OpenCode keeps its checks
 
-Recovery never re-resolves the permission mode and never picks a different process. The values
-recorded at acquisition are the TARGET of verification, consumed read-only (row 10: the ownership
-fields "SHALL NOT be mutated by later per-session activity"; their recovery interface is read-only
-consumption).
+OMP recovery is option-based. The connector restarts its OWN process from its own immutable
+connector options — the factory-produced command, args and env it was constructed with — and resumes
+the in-flight session through the shared `session/load` capability path. There is no OMP ownership
+prerequisite: a legacy OMP ownership record supplied by an old caller is NOT an authorization input
+and is ignored, and the resolved permission mode stays an audit/pool-selection observation rather
+than a recovery input. Mode separation is the pool entry key and the factory-produced mode-scoped
+state root (`docs/OMP_POOL_MODES.md`); recovery never reconstructs a mode from a mutable namespace.
 
-| Recorded input                   | Source                                                                        | Recovery use                                                                                                         |
+OpenCode recovery keeps its pre-change verification. When a recovery context is supplied
+(`opts.ownership` or `opts.gateContext`), the recorded acquisition mode/namespace is verified
+against this connector's own recovery target BEFORE any teardown, and once more after the respawn.
+The rule is selected by the supplied record's agent type, falling back to the configured deployment
+type — an OpenCode connector receiving a foreign (e.g. OMP-shaped) record still fails closed as
+unmatched provenance. No ownership check is applied to a context-free OpenCode recovery, and none is
+applied to any OMP recovery.
+
+| Recorded input                   | Source                                                                        | Recovery use (OpenCode)                                                                                              |
 | -------------------------------- | ----------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
-| `ActiveSession.permissionMode`   | row 10 acquisition (`process_acquired`)                                       | Expected ownership mode; mismatch in EITHER direction is a violation                                                 |
-| `ActiveSession.processNamespace` | row 10 acquisition (mode-scoped omp state root / pool-key OpenCode data root) | Expected namespace; derived again ONLY from the connector's own factory-produced `agentConfig.env`, never recomputed |
+| `ActiveSession.permissionMode`   | row 10 OpenCode acquisition (`process_acquired`)                              | Expected ownership mode; mismatch in EITHER direction is a violation                                                 |
+| `ActiveSession.processNamespace` | row 10 OpenCode acquisition (pool-key data root)                              | Expected namespace; derived again ONLY from the connector's own factory-produced `agentConfig.env`, never recomputed |
 | Session cwd                      | the session's own ACP cwd: pooled runner `sessionCwd`, per-spawn `agentConfig.cwd` (what `createSession()` used) | Passed positionally; a supplied `gateContext.cwd` must agree or restore fails closed                                 |
 | Operator MCP definitions         | `SessionOrchestrator.getMCPServers()` at the call site                        | Passed to the respawn unchanged                                                                                      |
 | Resolved reasoning effort        | row 6 `resolvedReasoningEffort` (same value as session setup)                 | Threaded through `opts.reasoningEffort`; `default`/empty keeps the no-op semantics                                   |
 
-Ordering inside `reconnectAndResumeSession` (also asserted by the post-connect re-check):
+Ordering inside `reconnectAndResumeSession` (the supplied-context verification is part of the
+OpenCode leg; every other step serves both agent types):
 
-1. **Verify ownership FIRST** — before `disconnect()`, before any spawn, load, or gate-context
-   mutation. `actual` is derived from the connector's own options env (`PI_CODING_AGENT_DIR` /
-   `TMPDIR` / `XDG_DATA_HOME` for OMP, the pool-key data root for OpenCode — the same
-   factory-produced env row 10 recorded from, so there is exactly one namespace formula:
-   `src/utils/omp-paths.ts` via the factory). For the **OMP deployment agent the check is
-   mandatory**, independently of whether `opts.ownership`/`opts.gateContext` were supplied, and it
-   always compares against the ACTUAL OMP target of this connector — a foreign record (e.g. an
-   OpenCode-shaped one) is rejected as unmatched provenance instead of passing under its own
-   comparison rule. A configured non-OMP connector keeps the record-selected rule. The trigger for
-   OpenCode stays the supplied recovery context.
-2. **OMP owning gate-context prevalidation** — the recovered session's complete own gate context is
-   mandatory and must agree with the recovery cwd and with the context this connector registered for
-   that id (see §3). A missing or disagreeing gate is a bounded gate-context restore failure HERE,
-   strictly before `disconnect()`, spawn or `session/load`.
-3. `disconnect()` → `connect()` on the connector's OWN options — a same-mode respawn is asserted by
-   step 1, not re-selected; recovery never asks the pool for a new entry.
-4. Post-connect invariant re-check of the freshly spawned env (assertion; the values are
-   reconstructed from the same options).
-5. `session/load` (capability absence keeps the existing "loadSession not supported … Session lost"
+1. **Verify ownership FIRST (OpenCode with a supplied recovery context only)** — before
+   `disconnect()`, before any spawn, load, or gate-context mutation. `actual` is derived from the
+   connector's own options env (the pool-key data root for OpenCode — the same factory-produced env
+   row 10 recorded from, so there is exactly one namespace formula). OMP runs no ownership step at
+   all.
+2. `disconnect()` → `connect()` on the connector's OWN options. OMP's mode-separated pool entry and
+   mode-scoped state root select the process; recovery never asks the pool for a new entry.
+3. Post-connect invariant re-check of the freshly spawned env, for OpenCode with a supplied
+   ownership record (assertion; the values are reconstructed from the same options).
+4. `session/load` (capability absence keeps the existing "loadSession not supported … Session lost"
    path — that string stays reserved for genuine capability absence).
-6. Row-6 config tail (see §2).
-7. Full gate-context restore (see §3).
-8. `onGateContextRestored` hook, if supplied (see §4).
+5. Row-6 config tail (see §2).
+6. Gate-context restore (see §3).
+7. `onGateContextRestored` hook, if supplied (see §4).
 
-### Verdicts and both violation directions
+### Verdicts and both violation directions (OpenCode)
 
 `verifyRecoveryOwnership(recorded, actual)` (`src/acp/recovery-ownership.ts`) returns
-`match | mode-mismatch | namespace-mismatch | unverified`. OMP: an absent/incomplete record is
-`unverified` and fails closed — recovery without provenance cannot prove same-mode. OpenCode: a
-matching `yolo-switch` + pool-key data-root record is `match`, and an ABSENT OpenCode record is
-also `match` (today's behavior preserved byte-identically).
+`match | mode-mismatch | namespace-mismatch | unverified`. A matching `yolo-switch` + pool-key
+data-root record is `match`, and an ABSENT OpenCode record is also `match` (today's behavior
+preserved byte-identically). An OMP-shaped record supplied to an OpenCode connector derives the
+actual target through the record's own agent type, finds no OMP namespace in the OpenCode spawn env,
+and fails closed as `unverified`.
 
 Both cross-mode directions are ownership VIOLATIONS, never a fallback:
 
@@ -101,7 +108,7 @@ Pinned verdict → bounded reason-code mapping (single source of truth
 `mapOwnershipVerdictToReason`): `mode-mismatch → ownership_violation`,
 `namespace-mismatch → namespace_mismatch`, `unverified → ownership_unverified`. Messages carry the
 session id, expected/actual mode, and expected/actual namespace only — no MCP env/headers, no
-secrets.
+secrets. The reason-code vocabulary is retained because the OpenCode path still produces it.
 
 A violation performs NO disconnect, NO spawn, NO `session/load`, NO gate-context mutation. The
 possibly dead-but-connected entry is left for the existing pool reclaim/drain paths; deliberately
@@ -112,47 +119,41 @@ not killing it is what keeps a violation from disturbing the opposite mode.
 After a successful load the sequence is exactly row 6's as shipped: refresh the canonical cache
 from the load response's `configOptions`, reapply the prior model stable-first (a post-load catalog
 miss propagates and fails THIS session in isolation, no unstable second chance), then reapply
-reasoning effort best-effort — only because row 11 now supplies `opts.reasoningEffort`, so a crash
-no longer silently loses reasoning configuration. Every reasoning outcome stays non-fatal. This
-change adds NO matching, flattening, casing, or cache-refresh code: `src/acp/session-config.ts`
-has zero diff in this change.
+reasoning effort best-effort — only because row 11 supplies `opts.reasoningEffort`, so a crash no
+longer silently loses reasoning configuration. Every reasoning outcome stays non-fatal. This change
+adds NO matching, flattening, casing, or cache-refresh code: `src/acp/session-config.ts` has zero
+diff in this change.
 
 Note for pooled OpenCode: reasoning reapplication rides row 6's stable-first config-options path;
 when the agent advertises no `thought_level` option it remains the documented best-effort no-op
 (same semantics as session setup), and the orchestrator-side reasoning RPC activation ordering
 (`setSessionConfigOption` after model, before prompt) is unchanged.
 
-## 3. Gate-context restore — no fallback context for an unknown session id
+## 3. Gate-context restore — supplied context is restored for the recovered id
 
 The orchestrator passes the FULL `SessionGateContext` the session was registered with (`cwd`,
 `shellSessionId`, `yolo`, `canWriteAgentWorkspace`, `allowedWriteExtensions`) as `opts.gateContext`
 on every caller (§0), with `cwd` equal to the session's own ACP cwd:
 
 - Supplied context whose `cwd` disagrees with the recovery cwd → `GateContextRestoreError`, no
-  mutation.
-- **OMP only, before any teardown**: the gate context is mandatory, so a missing one is a bounded
-  `gate_context_restore_failed` (never a cwd-only legacy restore). It must also be COMPLETE — the
-  resolved `yolo` permission, and the owning skill session whenever the process carries a frozen
-  session identity, are required, because those are exactly the fields the client would otherwise
-  take from the process-frozen `clientConfig`. When this connector still holds the context it
-  registered for the recovered id, the supplied context must additionally agree with it on `cwd`,
-  the owning skill session, `yolo`, `canWriteAgentWorkspace` and `allowedWriteExtensions` — a
-  sibling or process-frozen context is rejected instead of substituted. `trustedSkills` is not
-  compared: for OMP it is derived at every registration from the one shared deployment skill-root
-  observation the connector already received, so no caller carries it.
+  mutation, this session only. The check is POST-LOAD for every agent type: no recovery
+  prevalidation runs before the teardown.
 - Supplied (or agreement-cached) context is restored for the RECOVERED session id via the existing
   `setSessionGateContext` merge, AFTER the load/config tail and BEFORE success — so it also
-  survives later `connect()` replays.
-- No context supplied AND none cached for that id (e.g. a fresh connector from row 10's liveness
-  re-spawn) → fail closed as `gate_context_restore_failed` (the OpenCode optional-context leg; the
-  OMP leg already failed before teardown). The session NEVER resumes on the process-frozen client
-  flags or another session's cached context.
+  survives later `connect()` replays. Cached contexts stay per ACP session id: the recovered id's
+  OWN context is re-registered and a sibling's cached context is never rebound to it.
+- No context supplied AND none cached for that id, on an OpenCode recovery that DID supply an
+  ownership record → fail closed as `gate_context_restore_failed`. The session NEVER resumes on the
+  process-frozen client flags or another session's cached context.
+- An OMP call that supplies no gate context uses the existing cwd-only restore (the connector's
+  process-frozen `clientConfig` fields) and still recovers. Production OMP callers always supply the
+  session's own full gate context, which supersedes that fallback; the fallback exists so a
+  context-free OMP recovery is a supported load rather than a bounded failure.
 - Other sessions' cached contexts: replay logic unchanged, never rebound.
 
-When no recovery context at all is supplied (OpenCode call sites — no `opts.ownership`, no
-`opts.gateContext`), the method keeps its exact pre-row-11 behavior: cwd-only restore tail,
-byte-identical OpenCode recovery. No OMP call can take that branch: its ownership verification and
-gate prevalidation both precede it.
+When no recovery context at all is supplied (`opts.ownership` and `opts.gateContext` both absent),
+the method keeps its exact pre-row-11 behavior: the cwd-only restore tail applies. That is the
+pre-change OpenCode shape and the OMP context-free recovery shape.
 
 ## 4. Post-restore recovery hook — named, optional, no readiness assertion
 
@@ -176,15 +177,15 @@ post-lease `session_end` writer; per-spawn callers stamp it on their ended-witho
 (the bounded reason replaces the generic idle-timeout message for that turn only, and the same
 reason vocabulary is reused — no second one):
 
-| Failure                                  | Reason code                      | Blast radius                                                                                                                                           |
-| ---------------------------------------- | -------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Cross-mode ownership                     | `ownership_violation`            | This session only; opposite-mode process and other gate contexts untouched                                                                             |
-| Namespace drift                          | `namespace_mismatch`             | This session only                                                                                                                                      |
-| OMP provenance record missing/incomplete | `ownership_unverified`           | This session only (record-loss loses the session — accepted: one lost session is strictly safer than loading a restricted history into a YOLO process) |
-| Gate context absent, incomplete or disagreeing | `gate_context_restore_failed`    | This session only; siblings' contexts intact and replayed                                                                                              |
-| Hook rejected                            | `post_restore_hook_failed`       | This session only                                                                                                                                      |
-| Load failure / post-load catalog miss    | (unchanged row-6/§13 throw path) | This session only — unchanged behavior, asserted never to fall through into the recovery-abort classes                                                 |
-| `loadSession` capability absence         | existing "Session lost" path     | unchanged — kept distinct from every reason code above so tests and operators can tell the classes apart                                               |
+| Failure                                            | Reason code                      | Blast radius                                                                                                                                           |
+| -------------------------------------------------- | -------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| OpenCode supplied-record mode mismatch             | `ownership_violation`            | This session only; opposite-mode process and other gate contexts untouched                                                                             |
+| OpenCode supplied-record namespace drift           | `namespace_mismatch`             | This session only                                                                                                                                      |
+| OpenCode supplied-record unreadable/foreign        | `ownership_unverified`           | This session only                                                                                                                                      |
+| Gate context disagreeing cwd                       | `gate_context_restore_failed`    | This session only; siblings' contexts intact and replayed                                                                                              |
+| Hook rejected                                      | `post_restore_hook_failed`       | This session only                                                                                                                                      |
+| Load failure / post-load catalog miss              | (unchanged row-6/§13 throw path) | This session only — unchanged behavior, asserted never to fall through into the recovery-abort classes                                                 |
+| `loadSession` capability absence                   | existing "Session lost" path     | unchanged — kept distinct from every reason code above so tests and operators can tell the classes apart                                               |
 
 Fence lowering around recovery is unchanged in all outcomes (match, violation, restore failure),
 and the pool's `finally` release path is untouched.
@@ -196,16 +197,12 @@ Superseded OMP scan-gate rejections are no longer produced and therefore have no
 
 ## 6. OpenCode recovery is unchanged
 
-No ownership requirement, no gate-context requirement, same cwd-only restore when no options are
-passed, same `false`-on-unsupported return, same respond-gate behavior, and the same
-record-selected verification rule. The existing shared-process resumption suite
-(`tests/core/session-orchestrator.test.ts`, the resumption cases in
-`tests/acp/agent-connector.test.ts`) passes with zero modified expectations, and the default
-`yolo-switch` + pool-key record passes verification by construction.
-
-The OMP tightening is agent-type-selected at the connector, so it never applies to an OpenCode
-connector; conversely no OMP caller — pooled or per-spawn, including the research correction retry —
-can reach the context-free legacy restore.
+No gate-context requirement, same cwd-only restore when no options are passed, same
+`false`-on-unsupported return, same respond-gate behavior, and the same record-selected
+verification rule (now the only rule, since OMP no longer consults ownership). The existing
+shared-process resumption suite (`tests/core/session-orchestrator.test.ts`, the resumption cases in
+`tests/acp/agent-connector.test.ts`) passes with zero modified OpenCode expectations, and the
+default `yolo-switch` + pool-key record passes verification by construction.
 
 ## 7. Verdicts, dispositions, and evidence limits
 
@@ -213,20 +210,20 @@ can reach the context-free legacy restore.
   user dispositions in §1a are unchanged by this document; this recovery contract consumes
   decision 2's post-amendment posture (readiness cancelled; the named hook carries no readiness
   claim).
-- **Mock-only evidence.** The tests certify this repository's client-side decisions (verify-first,
-  zero-side-effect violations, restore ordering, per-session isolation). They cannot show the
-  pinned OMP binary refusing a cross-mode load. Design §15 remains user-owned and UNVERIFIED for:
-  "Observe real pool reuse, mode separation, crash/restart, history restoration, and cross-mode
-  ownership rejection."
+- **Mock-only evidence.** The tests certify this repository's client-side decisions (verify-first
+  for supplied OpenCode contexts, zero-side-effect violations, restore ordering, per-session
+  isolation, option-based OMP recovery). They cannot show the pinned OMP binary accepting or
+  refusing a load. Design §15 remains user-owned and UNVERIFIED for: "Observe real pool reuse, mode
+  separation, crash/restart and history restoration."
 - The caller matrix in §0 is certified by mock/recording fixtures in both spawn shapes and both OMP
   modes (`tests/core/omp-pool-modes.test.ts`, `tests/core/session-orchestrator.test.ts`,
   `tests/acp/agent-connector.test.ts`) for the values each caller hands to recovery — never for
   runtime provider behavior. A real reconnect against the pinned binary remains user-owned and
-  UNVERIFIED.
+  UNVERIFIED, including whether a real native session restart actually resumes its history.
 
 ## Cross-links
 
-- Row 10 (ownership record, pool identity, `process_acquired`): `docs/OMP_POOL_MODES.md`
+- Row 10 (identity record, pool identity, `process_acquired`): `docs/OMP_POOL_MODES.md`
 - Row 6 (stable-first selection, cache restoration on reconnect, reasoning): AGENTS.md — "Session
   Model Selection (Stable-First)" and "Reasoning Effort (ACP `thought_level`)"
 - Row 3 (spawn-time mode-scoped state roots feeding the namespace formula): `docs/OMP_SPAWN.md`
