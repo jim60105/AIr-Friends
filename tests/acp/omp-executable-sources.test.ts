@@ -8,7 +8,6 @@
  * ever launched: the protected surface is a spy stub.
  */
 
-import { AgentConnector } from "@acp/agent-connector.ts";
 import type { OmpSettingsSourcePlan } from "@acp/omp-settings.ts";
 import {
   checkOmpExecutableSources,
@@ -17,7 +16,6 @@ import {
   ExecutableSourceRejectionError,
 } from "@acp/omp/executable-sources.ts";
 import { computeDiscoveryDecision } from "@acp/omp/discovery-guard.ts";
-import { SettingsSourceRejectionError } from "@acp/omp/settings-sources.ts";
 import { bootstrapDiscoveryGuard } from "@acp/omp/extension/bootstrap.ts";
 import { stageOmpSettingsSourcePlan } from "../mocks/omp-plan-fixture.ts";
 import {
@@ -25,7 +23,6 @@ import {
   assertEquals,
   assertExists,
   assertInstanceOf,
-  assertRejects,
   assertStringIncludes,
 } from "@std/assert";
 
@@ -582,161 +579,6 @@ Deno.test("guard - clean observation admits decision 1 in both modes; stale gene
     } finally {
       await f.cleanup();
     }
-  }
-});
-
-// ---------------------------------------------------------------------------
-// Task 3.1/4.2 — connector seam: after settings, before protected calls,
-// fresh workspace observed per step, zero side effects on rejection
-// ---------------------------------------------------------------------------
-
-function gatedConnector(
-  plan: OmpSettingsSourcePlan,
-  env: Record<string, string> = {},
-): { connector: AgentConnector; protectedCalls: string[] } {
-  const protectedCalls: string[] = [];
-  const connector = new AgentConnector({
-    agentConfig: {
-      command: "unused",
-      args: [],
-      cwd: plan.launchCwd,
-      env: { PI_CODING_AGENT_DIR: plan.agentDir, TMPDIR: plan.tmpDir, ...env },
-      settingsSourcePlan: plan,
-    },
-    clientConfig: {
-      workingDir: plan.launchCwd,
-      platform: "test",
-      userId: "u",
-      channelId: "c",
-      isDM: false,
-    },
-    skillRegistry: null,
-    logger: { debug: () => {}, info: () => {}, warn: () => {}, error: () => {} },
-    agentType: "omp",
-  });
-  connector["connection"] = {
-    newSession: () => {
-      protectedCalls.push("newSession");
-      return Promise.resolve({ sessionId: "s", configOptions: [] });
-    },
-  } as unknown as typeof connector["connection"];
-  connector["capabilities"] = { loadSession: true } as typeof connector["capabilities"];
-  return { connector, protectedCalls };
-}
-
-Deno.test("connector - clean workspace accepts in both modes; the observation rides the connector", async () => {
-  for (const mode of ["restricted", "native-yolo"] as const) {
-    const f = await ownedFixture(mode);
-    try {
-      const { connector, protectedCalls } = gatedConnector(f.plan);
-      const sessionId = await connector.createSession([], f.workspace);
-      assertEquals(sessionId, "s");
-      assertEquals(protectedCalls, ["newSession"]);
-      const observation = connector.lastExecutableObservation;
-      assertExists(observation);
-      assertEquals(observation.sessionCwd, await Deno.realPath(f.workspace));
-    } finally {
-      await f.cleanup();
-    }
-  }
-});
-
-Deno.test("connector - workspace executable entry rejects BEFORE session/new (zero protected calls)", async () => {
-  const f = await ownedFixture("restricted");
-  try {
-    const { connector, protectedCalls } = gatedConnector(f.plan);
-    await connector.createSession([], f.workspace); // clean first acceptance
-
-    // Owner drops a custom-tool module between lifecycle steps.
-    await Deno.mkdir(`${f.workspace}/tools`, { recursive: true });
-    await Deno.writeTextFile(`${f.workspace}/tools/dropped.ts`, "0");
-    await assertRejects(
-      () => connector.createSession([], f.workspace),
-      ExecutableSourceRejectionError,
-      "rejected session before the native request",
-    );
-    assertEquals(protectedCalls, ["newSession"], "the grown entry never reaches session/new");
-    assertExists(
-      connector.lastExecutableObservation,
-      "a rejection never clobbers the accepted one",
-    );
-  } finally {
-    await f.cleanup();
-  }
-});
-
-Deno.test("connector - settings check runs FIRST on the same seam (ordering witness)", async () => {
-  const f = await ownedFixture("native-yolo");
-  try {
-    await Deno.mkdir(`${f.workspace}/.claude`, { recursive: true });
-    await Deno.writeTextFile(`${f.workspace}/.claude/settings.json`, "hostile");
-    await Deno.mkdir(`${f.workspace}/tools`, { recursive: true });
-    await Deno.writeTextFile(`${f.workspace}/tools/also.ts`, "0");
-    const { connector, protectedCalls } = gatedConnector(f.plan);
-    // Both gates would reject; the SETTINGS error must win → settings runs first.
-    await assertRejects(
-      () => connector.createSession([], f.workspace),
-      SettingsSourceRejectionError,
-    );
-    assertEquals(protectedCalls, []);
-  } finally {
-    await f.cleanup();
-  }
-});
-
-Deno.test("connector - shared AGENT_WORKSPACE participates in the observation", async () => {
-  const f = await ownedFixture("restricted");
-  try {
-    const shared = await mkWorkspace(f.baseRoot);
-    const { connector } = gatedConnector(f.plan, { AGENT_WORKSPACE: shared });
-    await connector.createSession([], f.workspace); // both clean
-    await Deno.mkdir(`${shared}/plugins/evil`, { recursive: true });
-    await Deno.writeTextFile(`${shared}/plugins/evil/index.ts`, "0");
-    await assertRejects(
-      () => connector.createSession([], f.workspace),
-      ExecutableSourceRejectionError,
-      "plugin-entry-points",
-      "a plugin entry point in the shared workspace rejects the session",
-    );
-  } finally {
-    await f.cleanup();
-  }
-});
-
-Deno.test("connector - recovery seam rejects with zero teardown/respawn/load side effects", async () => {
-  const f = await ownedFixture("restricted");
-  try {
-    const recoveryCwd = await mkWorkspace(f.baseRoot);
-    await Deno.mkdir(`${recoveryCwd}/.omp/tools`, { recursive: true });
-    await Deno.writeTextFile(`${recoveryCwd}/.omp/tools/load.ts`, "0");
-    const { connector, protectedCalls } = gatedConnector(f.plan);
-    let disconnects = 0;
-    connector.disconnect = () => {
-      disconnects++;
-      return Promise.resolve();
-    };
-    connector.connect = () => {
-      protectedCalls.push("connect");
-      return Promise.resolve();
-    };
-    await assertRejects(
-      () =>
-        connector.reconnectAndResumeSession("sess", recoveryCwd, [], {
-          ownership: {
-            agentType: "omp",
-            permissionMode: "restricted",
-            processNamespace: f.plan.agentDir,
-          },
-          // A complete owning gate context (row 11): OMP recovery requires the
-          // resolved permission and the owning skill session, not a cwd-only shape.
-          gateContext: { cwd: recoveryCwd, shellSessionId: "shell_recovery", yolo: false },
-        }),
-      ExecutableSourceRejectionError,
-    );
-    assertEquals(disconnects, 0, "rejection precedes teardown — zero side effects");
-    assertEquals(protectedCalls, [], "respawn/load must not start");
-  } finally {
-    await f.cleanup();
   }
 });
 

@@ -71,8 +71,7 @@ Ordering inside `reconnectAndResumeSession` (also asserted by the post-connect r
 2. **OMP owning gate-context prevalidation** — the recovered session's complete own gate context is
    mandatory and must agree with the recovery cwd and with the context this connector registered for
    that id (see §3). A missing or disagreeing gate is a bounded gate-context restore failure HERE,
-   strictly before the settings/executable preflight and before `disconnect()`, spawn or
-   `session/load`.
+   strictly before `disconnect()`, spawn or `session/load`.
 3. `disconnect()` → `connect()` on the connector's OWN options — a same-mode respawn is asserted by
    step 1, not re-selected; recovery never asks the pool for a new entry.
 4. Post-connect invariant re-check of the freshly spawned env (assertion; the values are
@@ -139,8 +138,8 @@ on every caller (§0), with `cwd` equal to the session's own ACP cwd:
   registered for the recovered id, the supplied context must additionally agree with it on `cwd`,
   the owning skill session, `yolo`, `canWriteAgentWorkspace` and `allowedWriteExtensions` — a
   sibling or process-frozen context is rejected instead of substituted. `trustedSkills` is not
-  compared: for OMP it is minted/reobserved from the factory settings plan at every registration
-  (row 28) and no caller carries it.
+  compared: for OMP it is derived at every registration from the one shared deployment skill-root
+  observation the connector already received, so no caller carries it.
 - Supplied (or agreement-cached) context is restored for the RECOVERED session id via the existing
   `setSessionGateContext` merge, AFTER the load/config tail and BEFORE success — so it also
   survives later `connect()` replays.
@@ -189,6 +188,11 @@ reason vocabulary is reused — no second one):
 
 Fence lowering around recovery is unchanged in all outcomes (match, violation, restore failure),
 and the pool's `finally` release path is untouched.
+
+Native/config/transport failures and shared authorization denials keep their pre-existing handling:
+they are NOT recovery-abort classes (`classifyRecoveryFailure()` returns `null` for them), so a
+failure after the load still propagates through the isolated per-session throw path asserted above.
+Superseded OMP scan-gate rejections are no longer produced and therefore have no reason code.
 
 ## 6. OpenCode recovery is unchanged
 

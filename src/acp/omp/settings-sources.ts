@@ -370,9 +370,10 @@ export async function checkOmpSettingsSources(
 
 /**
  * Fail-closed gate: throws {@link SettingsSourceRejectionError} unless the plan
- * is the ONLY visible settings source for this session. Callers invoke this
- * strictly BEFORE any native protected request (spawn, session/new,
- * session/load, recovery, repository-triggered rediscovery).
+ * is the ONLY visible settings source for this session. Retained mechanism: the
+ * ACP connector no longer invokes it before spawn/`session/new`/`session/load`
+ * (`simplify-omp-session-boundaries`), so a caller that still needs the
+ * fail-closed conversion is the launch assembly / extension-side consumer.
  */
 export async function assertOmpSettingsSourcesVisible(
   plan: OmpSettingsSourcePlan,

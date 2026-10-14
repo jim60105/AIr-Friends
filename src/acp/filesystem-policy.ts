@@ -8,7 +8,6 @@ import { extname } from "@std/path";
 import type {
   CanonicalSessionRoots,
   CanonicalTarget,
-  CriticalSkillReference,
   RootPathFailureReason,
   RootRole,
   SessionContext,
@@ -22,7 +21,6 @@ import { validateSessionContext } from "./filesystem-roots.ts";
 /** Trusted lifecycle input; never derived from a requested path or ambient HOME. */
 export interface TrustedSkillsSource extends TrustedSkillsRootConfig {
   readonly canonicalOwnedRootPath: string;
-  readonly criticalSkills: readonly CriticalSkillReference[];
 }
 
 /**

@@ -74,7 +74,7 @@ OMP 需要一份設定檔才能啟動。這項功能替它準備兩套「由部�
 ## 2.3 自有設定探索來源隔離
 
 **白話說明**
-如果 OMP 在啟動時會去讀使用者的家目錄設定、專案目錄設定或環境變數指定的設定檔，那麼使用者就能偷偷放一份設定來放寬安全限制。這項功能把這些「外來設定來源」一律移除：子行程環境中的相關環境變數被強制清掉，且系統會在真正發出請求前，檢查是否還有任何被禁止的設定來源存在；一旦發現就明確拒絕、不做任何變更，而不是合併或刪除使用者檔案。
+如果 OMP 在啟動時會去讀使用者的家目錄設定、專案目錄設定或環境變數指定的設定檔，那麼使用者就能偷偷放一份設定來放寬安全限制。這項功能把這些「外來設定來源」一律移除：子行程環境中的相關環境變數被強制清掉，並由部署方計畫與既有的中繼資料觀察器檢查是否還有任何被禁止的設定來源存在；一旦發現就明確拒絕、不做任何變更，而不是合併或刪除使用者檔案。自 `simplify-omp-session-boundaries` 起，daemon 端不再逐次請求執行此檢查（連線／`session/new`／`session/load` 的請求前閘門與其已接受身分基線已移除），此觀察器保留給啟動組裝與擴充端使用。
 
 **主要實作**
 
@@ -84,7 +84,7 @@ OMP 需要一份設定檔才能啟動。這項功能替它準備兩套「由部�
 | `src/acp/sandbox-manager.ts:180-182` | 對 OMP 子行程強制執行上述清理（無法被 `filterEnv` 關閉） |
 | `src/acp/agent-factory.ts:142` | `finalizeOmpSpawnEnvironment()`：清理後只重新帶入部署方計畫值 |
 | `src/acp/omp/settings-sources.ts:183` | `checkOmpSettingsSources()` |
-| `src/acp/omp/settings-sources.ts:377` | `assertOmpSettingsSourcesVisible()`：請求前閘門 |
+| `src/acp/omp/settings-sources.ts:377` | `assertOmpSettingsSourcesVisible()`：觀察器保留（已無 daemon 端呼叫端） |
 | `src/acp/omp/settings-sources.ts:93` | `SettingsSourceRejectionError` |
 | `src/acp/omp-settings.ts:635` | `OMP_SETTINGS_DISCOVERY_ENV_SELECTORS` |
 | `src/acp/omp-settings.ts:466` | `PINNED_FORBIDDEN_SETTINGS_SOURCES` |
