@@ -1,5 +1,31 @@
 # User-Owned Runtime Verification Checklist
 
+> **Superseded for OMP rows by `cutover-omp-native-runtime` (2026-10-15).** The
+> rows below that name the owned-settings composition, the settings-source plan,
+> the discovery/executable-source guards, the compatibility ledger, the
+> owned-module evidence, the tool-provenance/record-evaluator enforcement
+> wiring, critical-skill ownership, the generated skill-root declaration or the
+> project-owned fetch/search transports describe mechanisms that NO LONGER
+> EXIST. The same applies to `--no-lsp`-as-suppression and to mandatory
+> discovery sanitization. Their runtime observations are void: do not spend
+> operator time on them.
+>
+> The current OMP contracts are
+> [OMP Spawn & Modes](OMP_SPAWN.md) ·
+> [OMP Settings](OMP_SETTINGS.md) ·
+> [OMP Tool Policy](OMP_TOOL_POLICY.md) ·
+> [OMP Enforcement](OMP_ENFORCEMENT.md) ·
+> [OMP Network](OMP_NETWORK.md) ·
+> [OMP Packaging](OMP_PACKAGING.md). The OMP runtime observations this cutover
+> leaves user-owned are the hand-written mode/model YAML being consumed as
+> authored, both modes denying the LSP tool by exact-name approval, the native
+> `read`/`web_search`/skill URI paths running their original implementations,
+> the confined mount set exposing only the selected assets and the selected
+> native data child, and the shipped bundle attaching the restricted capability
+> callback on the real host. Rows unrelated to those removed mechanisms (agent
+> binary version/notices, container startup, OpenCode behaviour, credentials)
+> stay valid as written.
+
 Single consolidated checklist for the OMP integration batch (design
 [§15](superpowers/specs/2026-10-06-omp-integration-design.md#15-user-owned-manual-verification-and-evidence-limit)),
 expanded with the per-area runtime items recorded across the batch's OMP
