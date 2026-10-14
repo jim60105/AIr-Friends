@@ -5510,7 +5510,8 @@ Deno.test({
     try {
       const { orchestrator, sessionRegistry, config, skillRegistry, workspaceManager } =
         await createTestableOrchestrator(tempDir);
-      // OMP per-spawn: the context is mandatory, and the corrective retry must
+      // OMP per-spawn: only the session's own gate context is carried (OMP
+      // recovery reads no ownership record), and the corrective retry must
       // reuse the initial acquisition's captured value (never a re-inference).
       config.agent.defaultAgentType = "omp";
       config.agent.mcpServers = [{ name: "identity-server", command: "echo", args: ["hello"] }];
@@ -5558,13 +5559,8 @@ Deno.test({
       assertEquals(correctionOpts, initialOpts);
       assertEquals(initial.mcpServers.length > 0, true, "non-empty operator MCP definitions");
       assertExists(initialOpts);
-      assertExists(initialOpts.ownership);
-      assertEquals(initialOpts.ownership.agentType, "omp");
-      assertEquals(initialOpts.ownership.permissionMode, "restricted");
-      assertEquals(
-        initialOpts.ownership.processNamespace,
-        connector.options.agentConfig.env?.PI_CODING_AGENT_DIR,
-      );
+      // OMP recovery ignores legacy ownership: none is threaded.
+      assertEquals(initialOpts.ownership, undefined);
       assertExists(initialOpts.gateContext);
       // Own cwd = the ACP session's own cwd (`createSession()` used agentConfig.cwd).
       assertEquals(initialOpts.gateContext.cwd, connector.options.agentConfig.cwd);
