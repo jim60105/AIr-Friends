@@ -1,0 +1,28 @@
+# Hand-authored native OMP model configuration for the confined-runtime native
+# probe (`verify-omp-confined-native-runtime`). NOT generated, NOT an overlay:
+# native OMP reads this file directly from `getAgentDir()/models.yml` at the
+# inherited HOME's native config path (`~/.omp/agent/models.yml`).
+#
+# Pinned to official OMP v18.6.1 / 2a2c6dcbbb558c0f8145f67f28b3370984f2bf60.
+# Schema per docs/models.md (`providers` is the only root key the registry
+# consumes): one custom provider with one model, zero credentials, zero cost,
+# and a baseUrl that is never contacted by the probe (catalog resolution and
+# `session/set_config_option` need no request).
+providers:
+  parity-fixture:
+    baseUrl: http://127.0.0.1:43187/v1
+    auth: none
+    api: openai-completions
+    models:
+      - id: parity-fixture
+        name: parity-fixture
+        reasoning: false
+        input:
+          - text
+        contextWindow: 8192
+        maxTokens: 1024
+        cost:
+          input: 0
+          output: 0
+          cacheRead: 0
+          cacheWrite: 0
