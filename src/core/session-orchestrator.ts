@@ -86,12 +86,12 @@ type RecoveryAbortReason =
 /**
  * Row-11 recovery context threaded into `AgentConnector.reconnectAndResumeSession`.
  * `ownership` is the acquisition record read back from the session registry
- * (never re-resolved), `gateContext` is the session's own full gate context
- * (never a sibling's or the process-frozen client config's), `reasoningEffort`
- * is the session's already-resolved effort, and the optional hook is the named
- * post-restore seam. For OMP the connector requires `ownership` AND
- * `gateContext`; OpenCode keeps the optional trailing shape and its
- * context-free legacy recovery.
+ * (never re-resolved; OpenCode-only — OMP recovery ignores it), `gateContext` is
+ * the session's own full gate context (never a sibling's or the process-frozen
+ * client config's), `reasoningEffort` is the session's already-resolved effort,
+ * and the optional hook is the named post-restore seam. Every field is optional:
+ * OpenCode keeps its context-free legacy recovery, and an OMP recovery with no
+ * supplied gate context uses the shared cwd-only restore.
  */
 interface RecoveryContext {
   ownership?: SessionRecoveryOwnership;
@@ -104,20 +104,6 @@ interface RecoveryContext {
    * Production passes the documented no-op; the seam remains so the
    * position is observable and extendable. */
   onGateContextRestored?: (sessionId: string) => void | Promise<void>;
-}
-
-/**
- * The OMP shape of {@link RecoveryContext}: the owning gate context is
- * mandatory, and `ownership` carries the registry record read back read-only —
- * `undefined` when the acquisition left no complete record, which the connector
- * fails closed on (`ownership_unverified`) instead of substituting an inferred
- * mode or namespace. `perSpawnRecoveryContext` returns this for OMP
- * acquisitions and `undefined` for OpenCode's context-free legacy shape, so an
- * OMP caller cannot compile a context without an owning gate context.
- */
-interface OmpRecoveryContext extends RecoveryContext {
-  ownership: SessionRecoveryOwnership | undefined;
-  gateContext: SessionGateContext;
 }
 
 /**
@@ -826,7 +812,7 @@ export class SessionOrchestrator {
             const processNamespace = agentType === "omp"
               ? (agentConfig.env?.["PI_CODING_AGENT_DIR"] ?? agentConfig.env?.["TMPDIR"] ?? "")
               : (agentConfig.env?.["XDG_DATA_HOME"] ?? poolKey);
-            if (shellSessionId) {
+            if (shellSessionId && agentType === "opencode") {
               this.sessionRegistry.recordOwnership(shellSessionId, {
                 permissionMode: ownershipMode,
                 processNamespace,
@@ -1156,7 +1142,7 @@ export class SessionOrchestrator {
           ? (perSpawnAgentConfig.env?.["PI_CODING_AGENT_DIR"] ??
             perSpawnAgentConfig.env?.["TMPDIR"] ?? "")
           : (perSpawnAgentConfig.env?.["XDG_DATA_HOME"] ?? workspace.path);
-        if (shellSessionId) {
+        if (shellSessionId && agentType === "opencode") {
           this.sessionRegistry.recordOwnership(shellSessionId, {
             permissionMode: perSpawnOwnershipMode,
             processNamespace: perSpawnNamespace,
@@ -1268,7 +1254,6 @@ export class SessionOrchestrator {
           // connector verifies ownership before any teardown.
           this.perSpawnRecoveryContext({
             agentType,
-            shellSessionId,
             sessionCwd: perSpawnAgentConfig.cwd,
             clientConfig,
             resolvedReasoningEffort,
@@ -1824,7 +1809,7 @@ export class SessionOrchestrator {
           ? (perSpawnAgentConfig.env?.["PI_CODING_AGENT_DIR"] ??
             perSpawnAgentConfig.env?.["TMPDIR"] ?? "")
           : (perSpawnAgentConfig.env?.["XDG_DATA_HOME"] ?? workspace.path);
-        if (shellSessionId) {
+        if (shellSessionId && agentType === "opencode") {
           this.sessionRegistry.recordOwnership(shellSessionId, {
             permissionMode: perSpawnOwnershipMode,
             processNamespace: perSpawnNamespace,
@@ -1891,7 +1876,6 @@ export class SessionOrchestrator {
           shellSessionId,
           this.perSpawnRecoveryContext({
             agentType,
-            shellSessionId,
             sessionCwd: perSpawnAgentConfig.cwd,
             clientConfig,
             resolvedReasoningEffort,
@@ -2293,7 +2277,7 @@ export class SessionOrchestrator {
           ? (perSpawnAgentConfig.env?.["PI_CODING_AGENT_DIR"] ??
             perSpawnAgentConfig.env?.["TMPDIR"] ?? "")
           : (perSpawnAgentConfig.env?.["XDG_DATA_HOME"] ?? workspace.path);
-        if (shellSessionId) {
+        if (shellSessionId && agentType === "opencode") {
           this.sessionRegistry.recordOwnership(shellSessionId, {
             permissionMode: perSpawnOwnershipMode,
             processNamespace: perSpawnNamespace,
@@ -2364,7 +2348,6 @@ export class SessionOrchestrator {
         // inferred ownership or gate.
         const researchRecovery = this.perSpawnRecoveryContext({
           agentType,
-          shellSessionId,
           sessionCwd: perSpawnAgentConfig.cwd,
           clientConfig,
           resolvedReasoningEffort,
@@ -2878,7 +2861,7 @@ export class SessionOrchestrator {
           ? (perSpawnAgentConfig.env?.["PI_CODING_AGENT_DIR"] ??
             perSpawnAgentConfig.env?.["TMPDIR"] ?? "")
           : (perSpawnAgentConfig.env?.["XDG_DATA_HOME"] ?? workspace.path);
-        if (shellSessionId) {
+        if (shellSessionId && agentType === "opencode") {
           this.sessionRegistry.recordOwnership(shellSessionId, {
             permissionMode: perSpawnOwnershipMode,
             processNamespace: perSpawnNamespace,
@@ -2935,7 +2918,6 @@ export class SessionOrchestrator {
           shellSessionId,
           this.perSpawnRecoveryContext({
             agentType,
-            shellSessionId,
             sessionCwd: perSpawnAgentConfig.cwd,
             clientConfig,
             resolvedReasoningEffort,
@@ -3265,7 +3247,7 @@ export class SessionOrchestrator {
           ? (channelAgentConfig.env?.["PI_CODING_AGENT_DIR"] ??
             channelAgentConfig.env?.["TMPDIR"] ?? "")
           : (channelAgentConfig.env?.["XDG_DATA_HOME"] ?? channelWorkspace.path);
-        if (shellSessionId) {
+        if (shellSessionId && agentType === "opencode") {
           this.sessionRegistry.recordOwnership(shellSessionId, {
             permissionMode: perSpawnOwnershipMode,
             processNamespace: perSpawnNamespace,
@@ -3323,7 +3305,6 @@ export class SessionOrchestrator {
           shellSessionId,
           this.perSpawnRecoveryContext({
             agentType,
-            shellSessionId,
             sessionCwd: channelAgentConfig.cwd,
             clientConfig,
             resolvedReasoningEffort,
@@ -3676,7 +3657,7 @@ export class SessionOrchestrator {
           ? (reminderAgentConfig.env?.["PI_CODING_AGENT_DIR"] ??
             reminderAgentConfig.env?.["TMPDIR"] ?? "")
           : (reminderAgentConfig.env?.["XDG_DATA_HOME"] ?? workspace.path);
-        if (shellSessionId) {
+        if (shellSessionId && agentType === "opencode") {
           this.sessionRegistry.recordOwnership(shellSessionId, {
             permissionMode: perSpawnOwnershipMode,
             processNamespace: perSpawnNamespace,
@@ -3740,7 +3721,6 @@ export class SessionOrchestrator {
           shellSessionId,
           this.perSpawnRecoveryContext({
             agentType,
-            shellSessionId,
             sessionCwd: reminderAgentConfig.cwd,
             clientConfig,
             resolvedReasoningEffort,
@@ -3985,7 +3965,7 @@ export class SessionOrchestrator {
           ? (connectorOptions.agentConfig?.env?.["PI_CODING_AGENT_DIR"] ??
             connectorOptions.agentConfig?.env?.["TMPDIR"] ?? "")
           : (connectorOptions.agentConfig?.env?.["XDG_DATA_HOME"] ?? poolKey);
-        if (shellSessionId) {
+        if (shellSessionId && agentType === "opencode") {
           this.sessionRegistry.recordOwnership(shellSessionId, {
             permissionMode: ownershipMode,
             processNamespace,
@@ -4582,18 +4562,19 @@ export class SessionOrchestrator {
 
   /**
    * Build the recovery-ownership context from the registry's acquisition record
-   * (row 10), consumed READ-ONLY: recovery never re-resolves the mode, rewrites
-   * the fields, or re-derives the namespace. An OMP session whose record is
-   * missing/incomplete yields `undefined`, which the connector fails closed on
-   * (`ownership_unverified`); an OpenCode pooled record carries the fixed
-   * `yolo-switch` identity and matches by construction. `agentType` is the
-   * deployment type fixed at acquisition (connector options never change for a
-   * registry session's lifetime).
+   * (row 10) for OpenCode, consumed READ-ONLY: recovery never re-resolves the
+   * mode, rewrites the fields, or re-derives the namespace. An OpenCode pooled
+   * record carries the fixed `yolo-switch` identity and matches by construction.
+   * OMP recovery ignores legacy ownership entirely, so this returns `undefined`
+   * for every non-OpenCode deployment and the connector starts from its own
+   * options. `agentType` is the deployment type fixed at acquisition (connector
+   * options never change for a registry session's lifetime).
    */
   private recoveryOwnershipFromRegistry(
     shellSessionId: string | null,
     agentType: AgentType,
   ): SessionRecoveryOwnership | undefined {
+    if (agentType !== "opencode") return undefined;
     const session = shellSessionId ? this.sessionRegistry.get(shellSessionId) : undefined;
     if (!session?.permissionMode || !session.processNamespace) return undefined;
     return {
@@ -4608,8 +4589,6 @@ export class SessionOrchestrator {
    * callers' inline context, built once per acquisition from exactly the values
    * that acquisition used:
    *
-   * - `ownership`: the row-10 registry record, read back read-only (never
-   *   re-resolved from configuration).
    * - `gateContext`: this session's own gate fields. A per-spawn connector
    *   serves exactly one session, so its `clientConfig` IS the session's own
    *   acquisition config — the same values `createSession()` registered as the
@@ -4618,22 +4597,20 @@ export class SessionOrchestrator {
    * - `reasoningEffort`: the already-resolved effort of this session's setup.
    * - `onGateContextRestored`: the production no-op attach seam.
    *
-   * OMP requires the complete context (its connector enforces it at recovery
-   * time). OpenCode is deliberately left `undefined`: its per-spawn ownership
-   * record uses the spawn-mode vocabulary, and its context-free legacy recovery
-   * is the pre-change contract. Do not infer ownership or effort here — the
-   * values come from the acquisition record and the setup-time resolution.
+   * No `ownership` is carried: OMP recovery ignores legacy ownership, and the
+   * connector recovers from its own options. OpenCode is deliberately left
+   * `undefined`: its context-free legacy recovery is the pre-change contract. Do
+   * not infer ownership or effort here — the values come from the acquisition
+   * record and the setup-time resolution.
    */
   private perSpawnRecoveryContext(params: {
     agentType: AgentType;
-    shellSessionId: string | null;
     sessionCwd: string;
     clientConfig: ClientConfig;
     resolvedReasoningEffort: string;
-  }): OmpRecoveryContext | undefined {
+  }): RecoveryContext | undefined {
     if (params.agentType !== "omp") return undefined;
     return {
-      ownership: this.recoveryOwnershipFromRegistry(params.shellSessionId, params.agentType),
       gateContext: {
         cwd: params.sessionCwd,
         shellSessionId: params.clientConfig.sessionId,
