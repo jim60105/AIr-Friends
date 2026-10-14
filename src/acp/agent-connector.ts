@@ -1122,9 +1122,9 @@ export class AgentConnector {
    * the recovered id (never another session's cached context, never the
    * process-frozen client fallback) before the named post-restore hook runs and
    * success is reported; without a supplied context the existing cwd-only
-   * restore is used. OpenCode callers keep the pre-change behavior
-   * byte-identically — optional context, cwd-only restore without options, and
-   * the capability-absence `false` return.
+   * restore is used. OpenCode callers keep the same observable recovery behavior
+   * and ordering — optional context, cwd-only restore without options, and the
+   * capability-absence `false` return.
    *
    * @param sessionId the ACP session to resume
    * @param cwd the session's working directory (required by `session/load`); a

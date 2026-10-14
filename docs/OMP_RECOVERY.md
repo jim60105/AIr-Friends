@@ -15,11 +15,12 @@ classification in `src/core/session-orchestrator.ts`.
 
 ## 0. Caller matrix — every reconnect-capable runner carries its own context
 
-`SessionOrchestrator.promptWithIdleTimeoutHandling()` is the single recovery seam; every one of its
-nine callers supplies the owning session's own recovery context — its own gate context, its own
-cwd, the operator MCP servers and the resolved reasoning effort. A pooled OpenCode caller
-additionally passes the row-10 ownership record; OMP recovery carries none (see §1). No caller
-leaves the context implicit.
+`SessionOrchestrator.promptWithIdleTimeoutHandling()` is the single recovery seam. Every one of its
+nine callers passes the owning session's own ACP cwd and the operator MCP servers; an OMP caller and
+a pooled OpenCode caller additionally pass the owning session's own gate context, and a pooled
+OpenCode caller additionally passes the row-10 ownership record. OMP recovery carries no ownership
+record, and an OpenCode per-spawn caller passes NO trailing context at all — its pre-change
+context-free legacy recovery (see §1 and §3).
 
 | Caller                                                                   | Acquisition shape | Context source                                                                                      |
 | ------------------------------------------------------------------------ | ----------------- | --------------------------------------------------------------------------------------------------- |
@@ -92,17 +93,17 @@ OpenCode leg; every other step serves both agent types):
 
 `verifyRecoveryOwnership(recorded, actual)` (`src/acp/recovery-ownership.ts`) returns
 `match | mode-mismatch | namespace-mismatch | unverified`. A matching `yolo-switch` + pool-key
-data-root record is `match`, and an ABSENT OpenCode record is also `match` (today's behavior
-preserved byte-identically). An OMP-shaped record supplied to an OpenCode connector derives the
-actual target through the record's own agent type, finds no OMP namespace in the OpenCode spawn env,
-and fails closed as `unverified`.
+data-root record is `match`, and an ABSENT OpenCode record is also `match` (today's outcome
+preserved). Because OpenCode's record and target are both the fixed `yolo-switch`
+identity, the failure outcomes it can reach are:
 
-Both cross-mode directions are ownership VIOLATIONS, never a fallback:
-
-| Direction                                                            | Outcome                                                                                        |
-| -------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
-| restricted recovery context holding a `native-yolo`-owned session id | `RecoveryOwnershipError` (`ownership_violation`), zero side effects                            |
-| `native-yolo` context holding a restricted-owned id                  | same — no opposite-mode resume, no fresh opposite-mode process, no "Session lost" string reuse |
+| Supplied record / target state                     | Outcome                                                                             |
+| -------------------------------------------------- | ----------------------------------------------------------------------------------- |
+| matching `yolo-switch` + pool-key data root        | `match`                                                                             |
+| `yolo-switch` + a foreign data root                | `RecoveryOwnershipError` (`namespace_mismatch`), zero side effects                  |
+| a foreign-agent (e.g. OMP-shaped) record           | `RecoveryOwnershipError` (`ownership_unverified`), zero side effects                |
+| an OpenCode data root the connector cannot read    | `RecoveryOwnershipError` (`ownership_unverified`), never a mismatch                 |
+| no record at all                                   | `match` — the context-free legacy recovery, unchanged                               |
 
 Pinned verdict → bounded reason-code mapping (single source of truth
 `mapOwnershipVerdictToReason`): `mode-mismatch → ownership_violation`,
@@ -131,9 +132,11 @@ when the agent advertises no `thought_level` option it remains the documented be
 
 ## 3. Gate-context restore — supplied context is restored for the recovered id
 
-The orchestrator passes the FULL `SessionGateContext` the session was registered with (`cwd`,
-`shellSessionId`, `yolo`, `canWriteAgentWorkspace`, `allowedWriteExtensions`) as `opts.gateContext`
-on every caller (§0), with `cwd` equal to the session's own ACP cwd:
+An OMP caller and a pooled OpenCode caller pass the FULL `SessionGateContext` the session was
+registered with (`cwd`, `shellSessionId`, `yolo`, `canWriteAgentWorkspace`,
+`allowedWriteExtensions`) as `opts.gateContext` (§0) — every production OMP caller does — with `cwd`
+equal to the session's own ACP cwd. OpenCode per-spawn callers pass no trailing context at all and
+therefore keep the context-free legacy arm described at the end of this section.
 
 - Supplied context whose `cwd` disagrees with the recovery cwd → `GateContextRestoreError`, no
   mutation, this session only. The check is POST-LOAD for every agent type: no recovery

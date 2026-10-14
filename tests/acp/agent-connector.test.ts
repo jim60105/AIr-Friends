@@ -1471,7 +1471,7 @@ Deno.test("reconnectAndResumeSession - full gate context restored for the recove
   );
 });
 
-Deno.test("reconnectAndResumeSession - OMP recovery without a supplied gate context registers cwd-only and leaves sibling contexts registered", async () => {
+Deno.test("reconnectAndResumeSession - OMP recovery with only a contradicting legacy ownership record registers cwd-only and leaves sibling contexts registered", async () => {
   const siblingCtx = { cwd: "/workspace/b", shellSessionId: "shell_b", yolo: false };
   const h = createRecoveryHarness({
     agentType: "omp",
@@ -1480,10 +1480,21 @@ Deno.test("reconnectAndResumeSession - OMP recovery without a supplied gate cont
   });
   const cwd = ompRecoveryWorkspace("/a");
 
-  const success = await h.connector.reconnectAndResumeSession("sess_unknown", cwd, []);
+  // Ownership supplied WITHOUT a gate context is not a supplied recovery context
+  // for OMP: no ownership phase runs, the fail-closed arm is skipped, and the
+  // legacy cwd-only restore registers the recovered id.
+  const success = await h.connector.reconnectAndResumeSession("sess_unknown", cwd, [], {
+    ownership: {
+      agentType: "omp",
+      permissionMode: "restricted",
+      processNamespace: OMP_RESTRICTED_NS,
+    },
+  });
 
   assertEquals(success, true);
   assertEquals(h.interactions, ["disconnect", "connect", "loadSession"]);
+  assertEquals(h.order.includes("verifyOwnership"), false);
+  assertEquals(h.order[0], "disconnect");
   // The sibling's cached context is untouched, never rebound to the recovered id.
   assertEquals(
     (h.connector["sessionGateContexts"] as Map<string, unknown>).get("sess_b"),
@@ -1513,6 +1524,46 @@ Deno.test("reconnectAndResumeSession - supplied gate context disagreeing with th
   assertEquals(h.interactions, ["disconnect", "connect", "loadSession"]);
   assertEquals(h.order, ["disconnect", "connect", "loadSession"]);
   assertEquals(h.gateMutations, []);
+});
+
+Deno.test("reconnectAndResumeSession - an absent native session propagates the load error with no config tail or gate restore", async () => {
+  const h = createRecoveryHarness({
+    agentType: "omp",
+    env: { PI_CODING_AGENT_DIR: OMP_YOLO_NS, TMPDIR: `${OMP_YOLO_NS}/tmp` },
+  });
+  h.connector.connect = () => {
+    h.order.push("connect");
+    h.interactions.push("connect");
+    h.connector["connection"] = {
+      loadSession: () => {
+        h.order.push("loadSession");
+        h.rpc.push("loadSession");
+        return Promise.reject(new Error("session not found in native storage"));
+      },
+    } as unknown as typeof h.connector["connection"];
+    return Promise.resolve();
+  };
+  let hookRan = false;
+
+  await assertRejects(
+    () =>
+      h.connector.reconnectAndResumeSession("sess_absent", ompRecoveryWorkspace(), [], {
+        reasoningEffort: "high",
+        gateContext: { cwd: ompRecoveryWorkspace(), shellSessionId: "shell_a", yolo: true },
+        onGateContextRestored: () => {
+          hookRan = true;
+        },
+      }),
+    Error,
+    "session not found in native storage",
+  );
+
+  // The native error propagates: session/load is the ONLY RPC, and neither the
+  // configuration tail nor the gate restore nor the hook ran.
+  assertEquals(h.rpc, ["loadSession"]);
+  assertEquals(h.order, ["disconnect", "connect", "loadSession"]);
+  assertEquals(h.gateMutations, []);
+  assertEquals(hookRan, false);
 });
 
 Deno.test("reconnectAndResumeSession - hook runs exactly once after restore, before success", async () => {

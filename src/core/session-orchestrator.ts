@@ -916,10 +916,11 @@ export class SessionOrchestrator {
               workspace.path,
               this.getMCPServers(),
               shellSessionId,
-              // Row-11 recovery context: exactly the registry-recorded ownership
-              // (read-only), this session's own gate fields, resolved reasoning,
-              // own cwd (passed positionally), and operator MCP servers. Never
-              // re-resolved or inferred at recovery time.
+              // Row-11 recovery context: this session's own gate fields, resolved
+              // reasoning, own cwd (passed positionally), and operator MCP
+              // servers, plus the registry-recorded ownership read-only for
+              // OpenCode (OMP recovery reads none). Never re-resolved or inferred
+              // at recovery time.
               {
                 ownership: this.recoveryOwnershipFromRegistry(shellSessionId, agentType),
                 gateContext: {
@@ -1249,9 +1250,9 @@ export class SessionOrchestrator {
           perSpawnAgentConfig.cwd,
           this.getMCPServers(),
           shellSessionId,
-          // Row-11 recovery context: this session's recorded ownership, its own
-          // gate fields, resolved reasoning and own cwd. OMP requires it; the
-          // connector verifies ownership before any teardown.
+          // Row-11 recovery context: this session's own gate fields, resolved
+          // reasoning and own cwd. OMP recovers from the connector's options and
+          // carries no ownership record.
           this.perSpawnRecoveryContext({
             agentType,
             sessionCwd: perSpawnAgentConfig.cwd,
@@ -4029,9 +4030,9 @@ export class SessionOrchestrator {
           this.getMCPServers(),
           shellSessionId,
           // Row-11 recovery context (shared helper runner): same contract as the
-          // inline pooled runner — registry-recorded ownership read-only, own
-          // gate fields exactly as registered at setup, resolved reasoning,
-          // own cwd, operator MCP servers.
+          // inline pooled runner — own gate fields exactly as registered at
+          // setup, resolved reasoning, own cwd, operator MCP servers, and the
+          // registry-recorded ownership read-only for OpenCode.
           {
             ownership: this.recoveryOwnershipFromRegistry(shellSessionId, agentType),
             gateContext: {
@@ -4218,18 +4219,17 @@ export class SessionOrchestrator {
    * 3. If session cannot be resumed (loadSession unsupported) → throw error
    *
    * Row 11 (restore-mode-owned-acp-sessions): every reconnect-capable caller
-   * passes the session's OWN recovery context — the registry-recorded
-   * mode/namespace (read-only), its full gate-context fields, its resolved
-   * reasoning effort, and its own cwd — which the connector verifies BEFORE any
-   * teardown. Both pooled runner callers and all seven per-spawn callers supply
-   * it; the connector additionally requires `ownership` and `gateContext` for
-   * the OMP deployment agent independently of whether they were supplied, so no
-   * OMP call can select the context-free legacy restore. A recovery failure
-   * classified as ownership violation / unverified provenance / namespace
-   * mismatch / gate-context restore failure / post-restore hook failure ends
-   * ONLY this session: a bounded reason-coded `session_end` audit, an
-   * end-without-response result, and NEVER the respond-gated re-prompt path nor
-   * a `disconnect()`/`cancel()` from the recovery path. Those classes stay
+   * passes the session's OWN recovery context — its full gate-context fields,
+   * its resolved reasoning effort, and its own cwd — and a pooled OpenCode
+   * caller additionally passes the registry-recorded mode/namespace read-only.
+   * OMP recovery carries no ownership record: the connector restarts its own
+   * process from its immutable options and resumes through the shared
+   * `session/load` path. A recovery failure classified as supplied-record
+   * ownership violation / unverified provenance / namespace mismatch /
+   * gate-context restore failure / post-restore hook failure ends ONLY this
+   * session: a bounded reason-coded `session_end` audit, an end-without-response
+   * result, and NEVER the respond-gated re-prompt path nor a
+   * `disconnect()`/`cancel()` from the recovery path. Those classes stay
    * distinct from the capability-absence "Session lost" outcome. Load failures
    * and post-load catalog misses keep their existing isolated throw path.
    */
