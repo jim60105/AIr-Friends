@@ -191,6 +191,25 @@ connector seam, startup check — deployment-side control logic only).
 No new config field, environment variable, or Helm value: the check rides the
 existing owned settings-source plan and the deployment-set `AGENT_WORKSPACE`.
 
+## L. Agent-side OpenCode skill discovery (`generate-opencode-skill-discovery-declaration`)
+
+Source-audit home: [docs/DEVELOPMENT.md](DEVELOPMENT.md) ("Generated Skill
+Discovery Declaration") · pinned OpenCode v1.17.13 discovery chain
+(`ConfigV1.Info.skills.paths` → `ConfigMigrateV1.migrate` → the `config-skill`
+plugin's `DirectorySource`) · Unit/mock:
+`tests/utils/opencode-skill-discovery-declaration.test.ts` (the pure document
+half and the one filesystem step — the deployment-side document only).
+
+| Observation                                                                                                                                                                                                                                                                                                            | Source audit                                                                                                                          | Unit/mock                                                     | Runtime outcome + user observation |
+| ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------- | ---------------------------------- |
+| A live OpenCode session discovers and reads a runtime-installed external skill through the GENERATED declaration: a skill published into the resolved root (`agent.skillsDir` / `AGENT_SKILLS_DIR`, neither the `~/.agents/skills` convention nor the container default) is enumerated from the declaration's `skills.paths` entry and its files are readable under the declaration's single `external_directory` allowance, with no other discovery configuration | `DEVELOPMENT.md` Generated Skill Discovery Declaration; the pinned chain above (source audit at the pinned revision — never exercised runtime behavior) | declaration suite (mock; deployment-side document only)       | unverified —                       |
+
+The declaration names the SAME resolved root the root-exact inventory, the
+delivered prompts and the mounts use, and it is written to the agent's own
+`$HOME/.config/opencode/opencode.json`. The repository suites prove only that
+the deployment-side document states that root (and changes nothing else), so
+what a live session actually discovers through it stays user-owned.
+
 ---
 
 ## Reading the cancelled row
