@@ -7,10 +7,15 @@
 // (`sub == sessionId`), so the vector must exist inside the live run — this
 // helper is the only moving part the harness needs.
 //
-// Identity resolution mirrors the client's own sources, read-only except for
-// the single overwritten credential file:
-//   - pooled/shared shape: {SKILL_JWT_DIR}/active.json pointer (sole source)
-//   - per-spawn shape: the unique {id}.jwt filename inside SKILL_JWT_DIR
+// Subject resolution stays consistent with the shipped skill client's own
+// sources (skills/lib/client.ts `resolveOwningSessionId` / `readSkillJwt`) and
+// is read-only except for the single overwritten credential file:
+//   - pooled/shared shape: the {SKILL_JWT_DIR}/active.json pointer is the sole
+//     identity source (a pooled process carries no SESSION_ID at all);
+//   - per-spawn shape: the client will read {SKILL_JWT_DIR}/{SESSION_ID}.jwt,
+//     so the subject here is the unique *.jwt stem in SKILL_JWT_DIR — the same
+//     id the spawned script resolves (this helper runs before any invocation
+//     that carries SESSION_ID, so the file stem is the honest locator).
 //
 // Input: FORGED_CRED_FILE env var — path of the file whose content replaces
 // {SKILL_JWT_DIR}/{subject}.jwt. Prints the resolved subject id.

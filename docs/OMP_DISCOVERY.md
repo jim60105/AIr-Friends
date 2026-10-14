@@ -66,9 +66,17 @@ resolves `~`), and a development/custom deployment authors its actual root
 there AND sets `agent.skillsDir` to the same root. Nothing interpolates or
 rewrites the authored value.
 
-Whether the pinned binary's `skills.customDirectories` consumption behaves as
-authored is runtime-unverified: it is a source-observation of the authored
-document, not an observation of the native binary.
+Whether the pinned binary's `skills.customDirectories` consumption resolves what
+the deployer authored is now partly EXERCISED: the pinned-binary scripted-model
+suite
+(`tests/integration/omp-native-runtime/native-runtime.integration.test.ts`,
+[OMP_SPAWN.md](OMP_SPAWN.md) §7) copies the tracked `skills/` tree into a fixture
+HOME's configured root and reads `skill://send-reply` through real native
+dispatch. What remains unverified is DEPLOYMENT-level: a real deployment's own
+skill tree, the native `expandTilde()` spelling of that root outside the fixture,
+and any native discovery error a hand-authored mismatch would produce
+(upstream-owned, never pre-validated here). The authored-document reading stays a
+source observation.
 
 ## No app-owned discovery prerequisite
 

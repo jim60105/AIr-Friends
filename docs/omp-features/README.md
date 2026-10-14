@@ -2,7 +2,7 @@
 
 本文件以 **專案內實際程式碼** 為準，盤點 AIr-Friends 專案中所有與 **OMP（oh-my-pi）代理整合** 相關的功能。OMP 是本專案支援的第二種 ACP Agent 類型（第一種為 OpenCode）。
 
-> 本盤點依據的是程式碼現況，不是提案階段的設計文件。每一項功能都會標出「主要實作位置」、「測試位置」與「對應規格需求」。
+> 本盤點依據的是程式碼現況（`cutover-omp-native-runtime` 之後），不是提案階段的設計文件。每一項功能都會標出「主要實作位置」、「測試位置」與「對應規格需求」，並在 [總表](matrix.md) 標示該項在 cutover 之後的處置（保留／簡化／移除）。
 
 ## 這份文件怎麼讀
 
@@ -15,13 +15,15 @@
 | **測試位置** | 對應的測試檔案 |
 | **規格需求** | `openspec/specs/` 下對應的能力規格與需求名稱 |
 
+「處置」為 **已移除** 的項目會以「歷史說明」呈現，並保留對應的封存變更連結；它們**不是**現行行為。
+
 ## 專案背景（一句話版本）
 
 AIr-Friends 本身是 **ACP Client**，會啟動外部的 ACP Agent（OpenCode 或 OMP）來執行 AI 推理；本專案負責工作區隔離、記憶、提示組裝、技能（skill）呼叫與平台回覆。
 
 ## OMP 是什麼、為什麼要有它
 
-OMP 是另一套 ACP 相容的 CLI agent。專案把它加進來當作可選的第二種代理，並且對它施加一整套「受限模式安全邊界」：對齊 OpenCode 既有的權限與檔案邊界，同時處理 OMP 在上游實作上的行為差異。
+OMP 是另一套 ACP 相容的 CLI agent。專案把它加進來當作可選的第二種代理，並在**共用授權程式碼與薄適配層**上，對齊 OpenCode 既有的權限與檔案邊界；原生 OMP 讀取自己的手寫原生設定，行為差異則交由原生實作處理。
 
 ## 功能分類總覽
 
@@ -34,34 +36,34 @@ OMP 是另一套 ACP 相容的 CLI agent。專案把它加進來當作可選的�
 [啟動階段]          模式化啟動 + 行程池隔離
     │
     ▼
-[載入階段]          自有設定 + 探索來源隔離
+[載入階段]          手寫原生設定（依模式）由原生 OMP 解析
     │
     ▼
-[執行階段]          工具授權 + 執行期強制 ──┐
-    │                                      │
-    ▼                                      ▼
-[輸出階段]          技能呼叫 + 平台回覆   [觀測] 儀表板 + 稽核
+[執行階段]          原生能力對照表 + 共用 ACP 授權 ──┐
+    │                                                │
+    ▼                                                ▼
+[輸出階段]          技能呼叫 + 平台回覆     [觀測] 儀表板 + 稽核
     │
     ▼
-[復原階段]          所有權驗證與情境還原
+[復原階段]          共用復原（OpenCode 保留可選所有權檢查）
 ```
 
 | 分類 | 頁面 | 對應功能數 |
 |---|---|---|
 | 代理類型與設定 | [01-agent-config](01-agent-config.md) | 1 |
-| 自有設定與探索隔離 | [02-settings](02-settings.md) | 4 |
+| 自有設定 | [02-settings](02-settings.md) | 4 |
 | 啟動與行程池 | [03-spawn-pool](03-spawn-pool.md) | 2 |
 | 工具授權與執行強制 | [04-enforcement](04-enforcement.md) | 7 |
 | 破壞性操作與路徑邊界 | [05-destructive](05-destructive.md) | 5（共用模組） |
-| 網路傳輸 | [06-network](06-network.md) | 5 |
+| 網路（原生讀取／搜尋） | [06-network](06-network.md) | 5 |
 | 技能根目錄與技能交接 | [07-skills](07-skills.md) | 4 |
 | 擴充模組與封裝 | [08-extension-packaging](08-extension-packaging.md) | 3 |
-| 復原與所有權 | [09-recovery](09-recovery.md) | 1 |
+| 復原（共用） | [09-recovery](09-recovery.md) | 1 |
 | 儀表板與觀測性 | [10-dashboard-observability](10-dashboard-observability.md) | 2 |
 | 測試套件與文件同步 | [11-testing-docs](11-testing-docs.md) | 3 |
 | OpenCode 對照 | [12-opencode-comparison](12-opencode-comparison.md) | （逐項對照，不計入功能數） |
 
-合計 **37** 項（涵蓋 32 個與 OMP 相關的已封存變更，加上 5 項共用安全模組）。完整的逐項對照請見 **[總表](matrix.md)**。
+合計 **37** 項（涵蓋 32 個與 OMP 相關的已封存變更，加上 5 項共用安全模組）。完整的逐項對照與處置請見 **[總表](matrix.md)**。
 
 每一項「OpenCode 側怎麼做、和 OMP 差在哪」請見 **[12. OpenCode 對照](12-opencode-comparison.md)**。
 

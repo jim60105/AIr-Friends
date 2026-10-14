@@ -148,9 +148,16 @@ file the deployer already owns.
   performed by this application.
 
 The same resolved root remains the ONE shared trusted skill-script root for
-both agent types (prompts, script inventory, permission decisions, readiness
-and the read-only confinement mount); native discovery consumes the
-hand-authored YAML entry, and this deployment mirrors no second copy of it.
+both agent types (prompts, script inventory, permission decisions and the
+read-only confinement mount); native discovery consumes the hand-authored YAML
+entry, and this deployment mirrors no second copy of it.
+
+Manual provisioning is the whole contract. There is **no interpolator,
+generator, template helper or byte-equality gate** between `agent.skillsDir` /
+`AGENT_SKILLS_DIR` and the authored `skills.customDirectories` value, and no
+interpolator or generator for the native HOME `models.yml` either (§2): the
+deployer authors both by hand, and native OMP's own discovery/config errors are
+upstream-owned rather than pre-validated here.
 
 ---
 
@@ -214,6 +221,7 @@ outcomes are untouched.
 - A YAML parse or validation error originates from native OMP startup; this
   deployment neither mirrors nor pre-validates the native schema.
 - **Zero new configuration surface**: these authored files add no
-  `config.yaml` field, no environment variable and no Helm value;
-  `config.example.yaml`, `.env.example` and `helm/values.yaml` stay
-  unmodified.
+  `config.yaml` field, no environment variable and no Helm value. The config
+  trio (`config.example.yaml`, `.env.example`, `helm/values.yaml`) gains only
+  operational comments directing custom/development deployers to the manual
+  native skill-root and native HOME `models.yml` provisioning above.

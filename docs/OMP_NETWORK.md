@@ -66,9 +66,17 @@ the supported header surface.
 
 Native URL reads and native web search are upstream behaviours. Their result
 shapes, provider selection, retry/redirect handling and error strings are owned
-upstream and may differ from OpenCode's and from the removed adapters. Nothing
-here was exercised against the native binary: this document records the intended
-posture (source-observation), not a runtime observation.
+upstream and may differ from OpenCode's and from the removed adapters.
+
+**Partly exercised.** The pinned-binary scripted-model suite
+(`tests/integration/omp-native-runtime/native-runtime.integration.test.ts`,
+[OMP_SPAWN.md](OMP_SPAWN.md) §7) drove a real native URL read against a fixed
+LOOPBACK server and a real native `web_search` dispatch in both modes, recording
+the ACTUAL provider outcome. Those are native-dispatch observations with a
+scripted model and a loopback endpoint only: they prove the native tools run and
+reach a result, NOT proxy-mediated egress, public-search backend success or
+ranking, or platform delivery — those remain user-owned and unverified. The tool
+mapping above and the shared egress posture stay source observations.
 
 ---
 

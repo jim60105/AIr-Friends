@@ -227,12 +227,22 @@ OMP restricted and YOLO via the authored exact-name `tools.approval.lsp: deny`,
 OpenCode build and yolo via per-agent explicit denies. Details:
 [OMP Spawn & Modes](docs/OMP_SPAWN.md), [OMP Settings](docs/OMP_SETTINGS.md).
 
-Honest status: the batch proposals are approved and their implementation
-lands through the applied changes; all seven user dispositions are DECIDED.
-Pinned incompatible/unresolved compatibility verdicts are unchanged, and
-automated unit and mock evidence does **not** certify native runtime
-enforcement — runtime verification remains user-owned and unverified in the
-single consolidated checklist [docs/USER-RUNTIME-VERIFICATION.md](docs/USER-RUNTIME-VERIFICATION.md).
+Custom/development deployments provision the native side by hand: the deployer
+MUST author the native skill root in the OMP mode YAML (`skills.customDirectories`)
+AND point `agent.skillsDir` / `AGENT_SKILLS_DIR` at that same root, and MUST
+provision the native HOME model file (`$HOME/.omp/agent/models.yml`) before
+launch. There is no interpolator, generator or byte-equality gate, and native
+OMP's own discovery/config errors stay upstream-owned — see
+[OMP Settings](docs/OMP_SETTINGS.md) §2–§3 and
+[OMP Discovery](docs/OMP_DISCOVERY.md).
+
+Honest status: automated unit and mock evidence certifies this repository's
+client-side decisions only. Real native tool dispatch is additionally observed by
+the pinned `omp` **18.6.1** smoke and integration suites
+([OMP Spawn & Modes](docs/OMP_SPAWN.md) §6); native runtime enforcement beyond
+those exercised paths, the image build's other architecture, and platform
+delivery remain user-owned and unverified in the single consolidated checklist
+[docs/USER-RUNTIME-VERIFICATION.md](docs/USER-RUNTIME-VERIFICATION.md).
 
 ## 🛠️ Development
 

@@ -70,6 +70,13 @@ env:
   # types (opencode and omp) and the explicit external-install destination
   # (default: skills; relative values anchor at the deployment working directory).
   AGENT_SKILLS_DIR: '/home/deno/.agents/skills'
+  #
+  # OMP native discovery is authored SEPARATELY from AGENT_SKILLS_DIR: the native OMP
+  # settings YAML declares the agent's own skill root in `skills.customDirectories`,
+  # and native OMP reads its model catalog from the config HOME's own
+  # `~/.omp/agent/models.yml`. A custom/development deployment MUST hand-author that
+  # YAML to the SAME root and provision the native model file itself — nothing
+  # interpolates or generates those files, and native errors stay upstream-owned.
 
   # Model routing
   MODEL_ROUTING_ENABLED: 'false'

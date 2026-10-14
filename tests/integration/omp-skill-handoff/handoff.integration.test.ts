@@ -1,14 +1,22 @@
 // tests/integration/omp-skill-handoff/handoff.integration.test.ts
 //
-// finish-omp-mocked-skill-handoff (row 24): the COMBINED mocked skill-handoff
-// regression suite. Drives the REAL SessionOrchestrator delivery path, the
-// REAL Skill API server + SessionRegistry + reply/file/reaction handlers, and
-// the REAL skill scripts under skills/, with the mock ACP agent subprocess
-// composed through the shared row-21 mock surface (mock-acp-agent extended
-// additively; omp-mock-session consumed unchanged) and a call-ledger platform
-// adapter — in BOTH spawn shapes (per-spawn frozen identity vs pooled
-// SKILL_SHARED_PROCESS + active.json pointer, NO SESSION_ID). No real
-// platform service, no real OMP binary, no provider, no container/bwrap.
+// The COMBINED consumer skill-handoff regression suite. It drives the REAL
+// SessionOrchestrator delivery path, the REAL Skill API server + SessionRegistry
+// + SkillRegistry + reply/file/reaction handlers, and the REAL skill scripts
+// under the deployment-resolved root — in BOTH spawn shapes (per-spawn frozen
+// identity vs pooled SKILL_SHARED_PROCESS + active.json pointer, NO SESSION_ID),
+// with a call-ledger mock platform adapter and the shared mock ACP agent
+// subprocess (mock-acp-agent consumed additively; omp-mock-session's
+// `useMockOmpAgent` consumed unchanged). No real platform service, no real OMP
+// binary, no provider, no container/bwrap, no image.
+//
+// Agent->client ACP requests here are REAL wire requests answered by the REAL
+// ChatbotClient policy: the deployment-resolved skill-instruction read
+// (`fs/read_text_file` of a SKILL.md under the same root observation the
+// factory builds into `AgentConfig.skillsRoot` and the OMP connector feeds its
+// session callbacks as the trusted skills root), the quoted absolute
+// skill-script invocation (`session/request_permission` auto-approved for the
+// enumerated entrypoint), and the bounded client-policy denials.
 //
 // Honesty boundary (spec: "Claims never attribute actions to the native
 // binary"): every payload/file below is staged by the MOCK FIXTURE with its
@@ -16,9 +24,10 @@
 // decision under test is the CLIENT-SIDE gate (payload containment + JWT +
 // handler/workspace scoping), never simulated native enforcement. The mock
 // never claims the native binary staged, invoked, delivered, or enforced
-// anything.
+// anything, and nothing observed here is native binary, image or platform
+// acceptance evidence.
 //
-// Non-duplication baseline (task 1.1): rows 16/22's component delivery test
+// Non-duplication baseline: the component delivery test
 // (tests/skills/end-to-end-delivery.test.ts) stops at the script→server→
 // handler→mock-adapter chain; tests/skills/* + tests/skill-api/* own the
 // single-component quota/anchor/registry/containment units; tests/core/*
@@ -26,8 +35,9 @@
 // ORCHESTRATOR-level: the platform-call ledger with exact intended content
 // across BOTH spawn shapes, retry-prompt LITERALNESS recorded under the real
 // retry loop (pooled headline), the file-only summary skip inside a full
-// session, reaction-gate composition, auth-failure × retry composition, and
-// OpenCode byte-identity through the real orchestrator spawn path.
+// session, reaction-gate composition, auth-failure × retry composition,
+// sibling JWT/staging denials, and OpenCode byte-identity through the real
+// orchestrator spawn path.
 
 import { assert, assertEquals, assertStringIncludes } from "@std/assert";
 import { join } from "@std/path";
@@ -35,7 +45,7 @@ import { AgentConnector } from "@acp/agent-connector.ts";
 import { AgentProcessPool } from "@core/agent-process-pool.ts";
 import { ConnectionState } from "../../../src/types/platform.ts";
 import { ContextAssembler } from "@core/context-assembler.ts";
-import { resolveTrustedSkillsRoot } from "@core/skills-root.ts";
+import { observeTrustedSkillsRoot, resolveTrustedSkillsRoot } from "@core/skills-root.ts";
 import { MemoryStore } from "@core/memory-store.ts";
 import { SessionOrchestrator } from "@core/session-orchestrator.ts";
 import { WorkspaceManager } from "@core/workspace-manager.ts";
@@ -812,12 +822,82 @@ async function runHappyPath(shape: "per-spawn" | "pooled"): Promise<void> {
     // Literal content incl. a `$` sequence: delivered verbatim through the
     // payload-file contract (never a command line).
     const replyContent = "handoff reply verbatim $HOME contents";
-    // One step: stage at the absolute staging path (the mock fixture's own
-    // fs write stands in for the agent's write) + invoke the REAL send-reply
-    // script with the literal session id resolved from bot-written material.
+    // The deployment-resolved trusted root, observed exactly as the REAL
+    // factory/orchestration observe it (one resolver for both agent types).
+    const skillsRoot = resolveTrustedSkillsRoot(
+      h.config.agent.defaultAgentType ?? "opencode",
+      h.config.agent.skillsDir,
+    );
+    const instructionPath = join(skillsRoot, "send-reply", "SKILL.md");
+    const instructionReadCopy = join(h.stateDir, `skill-instruction-read-${shape}.md`);
+    const instructionBytes = Deno.readTextFileSync(instructionPath);
+    const stagedPayloadCopy = join(h.stateDir, `staged-payload-${shape}.md`);
+    // One step, NO fixture pre-staging: the payload is created ONLY by the
+    // ACP `fs/write_text_file` request below — the session staging directory
+    // already exists because PRODUCTION orchestration pre-creates
+    // `{workspace}/tmp/{sessionId}` right after session registration
+    // (src/core/session-orchestrator.ts, "Pre-create the session-scoped
+    // payload staging directory"), so no harness provisioning is needed and a
+    // client write that silently no-ops cannot be masked by a staged file. The
+    // REAL client staging-write gate is also what the send-reply invocation
+    // then consumes, and the quoted absolute script invocation is approved by
+    // the same client. The client-write audit copy is the durable
+    // staging-creation evidence: the payload file is DELETED by the skill
+    // client once consumed (skills/lib/payload.ts) and the workspace tmp tree
+    // is removed at session finalization (`cleanupWorkspaceTmp`), so only an
+    // in-run read-back can witness it.
     scriptSteps(h, [
       {
-        stagePayload: { file: "@STAGING_DIR/reply.md", content: replyContent },
+        acpRequests: [
+          {
+            // Staging file creation through the REAL client — the ONLY writer
+            // of this payload: the bytes go to the session's OWN staging path
+            // under the shared write policy, and the audit copy re-reads the
+            // file AT THAT PATH, so a success-without-write cannot satisfy it.
+            method: "fs/write_text_file",
+            params: {
+              sessionId: "@ACP_SESSION_ID",
+              path: "@STAGING_DIR/reply.md",
+              content: replyContent,
+            },
+            expect: "ok",
+            copyResultTo: stagedPayloadCopy,
+          },
+          {
+            // Skill-instruction read under the deployment-resolved trusted
+            // root: the REAL client authorizes it from the root observation the
+            // factory carried, and the audit copy is the client's own returned
+            // content.
+            method: "fs/read_text_file",
+            params: { sessionId: "@ACP_SESSION_ID", path: instructionPath },
+            expect: "result:Send Reply Skill",
+            copyResultTo: instructionReadCopy,
+          },
+          {
+            // Quoted absolute script invocation, the same POSIX form the
+            // delivered retry guidance renders: the REAL client auto-approves
+            // the enumerated entrypoint of the resolved root and selects allow.
+            method: "session/request_permission",
+            params: {
+              sessionId: "@ACP_SESSION_ID",
+              toolCall: {
+                toolCallId: `happy-${shape}-send-reply`,
+                title: "Execute shell command",
+                kind: "execute",
+                rawInput: {
+                  commands: [
+                    `'${skillsRoot}/send-reply/scripts/send-reply.ts' --session-id '@SESSION_ID' --message-file '@STAGING_DIR/reply.md'`,
+                  ],
+                },
+              },
+              options: [
+                { optionId: "allow", name: "Allow", kind: "allow_once" },
+                { optionId: "reject", name: "Reject", kind: "reject_once" },
+              ],
+            },
+            expect: 'result:"optionId":"allow"',
+          },
+        ],
         invocations: [
           {
             script: scriptUrl("send-reply"),
@@ -857,15 +937,45 @@ async function runHappyPath(shape: "per-spawn" | "pooled"): Promise<void> {
     assertStringIncludes(promptText, `--session-id ${sessionId}`);
     // The delivered reply prompt carries the literal trusted skill-script root
     // the whole deployment resolves (`unify-skill-root-and-inventory`).
-    assertStringIncludes(
-      promptText,
-      resolveTrustedSkillsRoot(
+    assertStringIncludes(promptText, skillsRoot);
+    const stagingDir = `${h.workspacePath}/tmp/${sessionId}`;
+    assertStringIncludes(promptText, stagingDir);
+
+    // The instruction read really crossed the live stdio boundary and was
+    // authorized: the audit copy is byte-equal to the instruction file under
+    // the deployment-resolved root, and the root observation the connector
+    // composed into its config is that same resolved root + identity.
+    assertEquals(
+      Deno.readTextFileSync(instructionReadCopy),
+      instructionBytes,
+      "client-returned instruction content equals the file under the resolved root",
+    );
+    const composed = h.orchestrator.spawnedConfigs[0];
+    assert(composed, "connector-composed config recorded");
+    assertEquals(
+      composed.skillsRoot,
+      observeTrustedSkillsRoot(
         h.config.agent.defaultAgentType ?? "opencode",
         h.config.agent.skillsDir,
       ),
+      "factory root observation == deployment-resolved root observation",
     );
-    const stagingDir = `${h.workspacePath}/tmp/${sessionId}`;
-    assertStringIncludes(promptText, stagingDir);
+    // Staging file creation: the client-written payload landed at the
+    // session's OWN staging path with the exact bytes the real handler chain
+    // then consumed. Nothing pre-staged this file: the audit copy is the mock
+    // re-reading the requested staging path AFTER the client's write settled
+    // "ok", so it exists only if the REAL client actually created it.
+    assertEquals(
+      Deno.readTextFileSync(stagedPayloadCopy),
+      replyContent,
+      "client-written staging payload equals the delivered reply content",
+    );
+    // Nothing was refused: the quoted invocation was approved, not denied.
+    assertEquals(
+      h.orchestrator.observedPermissionRejections(),
+      [],
+      "happy path records zero permission rejections",
+    );
 
     // Real invocation accepted by real JWT auth + containment; argv literal.
     const records = readSkillRecords(h);
@@ -1411,10 +1521,11 @@ async function runHonestPostureDenial(): Promise<void> {
 // 4.1 (spec scenario "Absent-handler ACP policy denial prevents unauthorized
 // skill effects"): an unauthorized ACP-MEDIATED operation evaluated by client
 // policy over the live stdio connection — the mock sends REAL fs/write_text_file,
-// fs/read_text_file and session/request_permission requests; the REAL
-// ChatbotClient gate denies each with its bounded denial (write error / read
-// error / selected-reject outcome), zero skill invocations and zero platform
-// deliveries follow, and the run fails after exactly one retry. The denial
+// fs/read_text_file and session/request_permission requests, including a write
+// to a SIBLING session's staging path; the REAL ChatbotClient gate denies each
+// with its bounded denial (write error / read error / sibling-staging
+// restriction / selected-reject outcome), zero skill invocations and zero
+// platform deliveries follow, and the run fails after exactly one retry. The denial
 // observability is the shipped retry-prompt diagnostic section (the same
 // client rejection buffer the production retry consumes), so the scenario
 // asserts the exact bounded reasons the client recorded. This is client-policy
@@ -1431,6 +1542,15 @@ async function runUnauthorizedAcpMediatedDenial(shape: "per-spawn" | "pooled"): 
   try {
     const outsideWrite = `$TMPDIR/../escape.md`; // expands CLIENT-side → workspace-root write
     const outsideRead = `/etc/hostname`; // outside every session root
+    // A pre-existing SIBLING session's staging payload: the subject's own
+    // shared write rule (direct user-workspace writes outside THIS session's
+    // staging root are restricted) must refuse the overwrite and leave the
+    // sibling bytes untouched.
+    const siblingStagingDir = join(h.workspacePath, "tmp", "sibling-session");
+    const siblingStagingWrite = join(siblingStagingDir, "reply.md");
+    const siblingAfterCopy = join(h.stateDir, "sibling-payload-after.md");
+    Deno.mkdirSync(siblingStagingDir, { recursive: true });
+    Deno.writeTextFileSync(siblingStagingWrite, "sibling payload untouched");
     scriptSteps(h, [
       {
         acpRequests: [
@@ -1468,6 +1588,27 @@ async function runUnauthorizedAcpMediatedDenial(shape: "per-spawn" | "pooled"): 
             // satisfy it — not just the word "reject" appearing anywhere.
             expect: 'result:"optionId":"reject"',
           },
+          {
+            method: "fs/write_text_file",
+            params: {
+              sessionId: "@ACP_SESSION_ID",
+              path: siblingStagingWrite,
+              content: "forged sibling write",
+            },
+            expect: "error:rejected_workspace_write_restricted",
+          },
+          {
+            // Mid-run post-condition of the refused sibling write: the
+            // workspace `.md` READ rule admits the file, so the REAL client
+            // returns the sibling payload byte-identical — the refused WRITE
+            // (another session's staging path) is what the shared isolation
+            // rule denies. Observed here because session finalization removes
+            // the workspace tmp tree.
+            method: "fs/read_text_file",
+            params: { sessionId: "@ACP_SESSION_ID", path: siblingStagingWrite },
+            expect: "result:sibling payload untouched",
+            copyResultTo: siblingAfterCopy,
+          },
         ],
       },
       {}, // retry turn: silent again → run fails after the single retry
@@ -1481,7 +1622,7 @@ async function runUnauthorizedAcpMediatedDenial(shape: "per-spawn" | "pooled"): 
     assertEquals(readSkillRecords(h).length, 0, "zero skill-script invocations");
     assertEquals(h.ledger.calls.length, 0, `trace: ${h.ledger.trace().join(" | ")}`);
 
-    // The bounded client-policy denials are exactly the three expected reasons
+    // The bounded client-policy denials are exactly the four expected reasons
     // (read straight off the REAL client's rejection buffer — the same one the
     // shipped retry prompt consumes; per-spawn shape reads the disconnect-time
     // snapshot since the run's finalization already nulled the client), and the
@@ -1490,6 +1631,7 @@ async function runUnauthorizedAcpMediatedDenial(shape: "per-spawn" | "pooled"): 
       "rejected_workspace_write_restricted",
       "rejected_filesystem_path_unavailable",
       "rejected_unknown",
+      "rejected_workspace_write_restricted",
     ]);
     let escaped = true;
     try {
@@ -1498,6 +1640,13 @@ async function runUnauthorizedAcpMediatedDenial(shape: "per-spawn" | "pooled"): 
       escaped = false;
     }
     assert(!escaped, "restricted client policy must not create the escaped file");
+    // The sibling's staged payload is byte-identical: the refusal was a
+    // refusal, never a silent overwrite of another session's staging file.
+    assertEquals(
+      Deno.readTextFileSync(siblingAfterCopy),
+      "sibling payload untouched",
+      "a sibling session's staging payload is never written by this session",
+    );
 
     // Exactly one retry, and it carries the shipped permission-rejection
     // diagnostic section naming every bounded denial (literal-first posture is

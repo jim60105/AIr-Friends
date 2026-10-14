@@ -64,6 +64,15 @@ agent:
   openRouterApiKey: "${OPENROUTER_API_KEY}" # Optional OpenRouter API key (env: OPENROUTER_API_KEY)
   defaultAgentType: "${AGENT_DEFAULT_TYPE}" # Default ACP agent: "opencode" (default) | "omp" (env: AGENT_DEFAULT_TYPE; unknown values fail startup). Note: the variable must be set or this line removed.
   skillsDir: "skills" # Path to skills directory (default: "skills"); use "/home/deno/.agents/skills" for container deployment; override with env AGENT_SKILLS_DIR. Relative values anchor at the deployment working directory. The ONE shared trusted skill-script root for BOTH agent types (opencode and omp) — resolved once for prompts, script inventory, permission decisions, readiness and the read-only skill mount — and the explicit external-install destination — src/core/skills-root.ts.
+  #
+  # OMP native discovery is authored SEPARATELY from this field. The native OMP
+  # settings YAML (agent-config/omp/restricted.yml, agent-config/omp/native-yolo.yml)
+  # declares the agent's own skill root in `skills.customDirectories`, and native
+  # OMP reads its model catalog from the config HOME's own `~/.omp/agent/models.yml`.
+  # A custom/development deployment MUST hand-author `skills.customDirectories` to
+  # the SAME absolute root this field resolves and provision `~/.omp/agent/models.yml`
+  # itself. Nothing interpolates, generates or byte-compares those native files,
+  # and OMP's own discovery/config errors stay upstream-owned.
 
   # Reasoning effort (ACP thought_level): controls how hard the model "thinks".
   # Global default; resolved per session as: routing rule -> section -> this global value.
