@@ -28,6 +28,7 @@ binary ever invokes that handler stays user-owned and UNVERIFIED.
 | `src/acp/omp/tool-provenance.ts`      | Live-provenance admission (authenticated `native-builtin` tuple, owned-extension canonical ownership, operator-MCP ownership + epoch freshness) and the MCP mechanism-status table |
 | `src/acp/omp/approval-records.ts`     | Exact-key native approval-record interpretation under the surviving-lower-record reality                                                                 |
 | `src/acp/omp/destructive-decision.ts` | Thin consumer of the shared row-5 destructive policy; replays its conformance table                                                                      |
+| `src/acp/omp/destructive-ingress.ts`  | ACP client ingress normalizer: canonicalizes configured-OMP native single delete/move `rawInput` into the shared destructive vocabulary before row 5       |
 
 `allow` never means "authorized": every non-deny outcome names the completing
 authority (the native-local read/write approval posture, the protected row-4
@@ -179,6 +180,25 @@ with zero side effect. Canonical-root observations are pure data supplied by
 this entry and tests assert verdict equality against
 `DESTRUCTIVE_CONFORMANCE_TABLE` (complete multi-target, first-allowed-later-
 escaping, incomplete fail-closed, binding mismatch).
+
+### ACP client ingress normalization (`normalize-omp-destructive-acp-ingress`)
+
+Separate from — and NOT a relaxation of — the restricted extension's
+`tool_call` enforcement above, the ACP **client** ingress now normalizes the
+native single-operation vocabulary before the shared row-5 policy:
+`normalizeOmpDestructivePermissionInput()` (`src/acp/omp/destructive-ingress.ts`)
+canonicalizes a configured-OMP `Delete`/`Move` request (identified from the
+native `kind` or a case-insensitive word-boundary title) into the shared
+`{path}` / `{source,destination}` payload, using the native move alias
+precedence `oldPath`, `path`, `from` / `newPath`, `to`, `destination`. The
+decoder is selected ONLY by the connector-supplied `ClientConfig.agentType`
+— request fields, titles and claimed parser provenance grant no authority,
+and OpenCode/omitted-type clients keep the pre-existing decoder exactly. The
+adapter adds no new decoder: anything outside the native single-operation
+field vocabulary (extra mutation fields, `operations`/patch bodies, malformed
+JSON, missing or partial locations) is passed through to the same bounded
+`rejected_destructive_incomplete` / `rejected_destructive_binding` denials,
+and YOLO approval still precedes the destructive route.
 
 ## MCP admission mechanism tiers (honest, never inflatable)
 

@@ -374,7 +374,11 @@ export class AgentConnector {
     this.client = new ChatbotClient(
       skillRegistry as SkillRegistry,
       logger as Logger,
-      clientConfig,
+      // The configured connector agent type is supplied AFTER the spread so a
+      // duplicate `clientConfig.agentType` field can never override it
+      // (`normalize-omp-destructive-acp-ingress`): request/config metadata must
+      // not select the destructive-ingress decoder.
+      { ...clientConfig, agentType: this.options.agentType },
       autoApproveList,
     );
 

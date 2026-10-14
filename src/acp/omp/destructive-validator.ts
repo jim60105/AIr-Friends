@@ -1,8 +1,5 @@
-import type {
-  DestructiveIntentDecision,
-  DestructiveIntentInput,
-  DestructiveOperation,
-} from "./compatibility-contracts.ts";
+import type { DestructiveIntentDecision } from "./compatibility-contracts.ts";
+import type { DestructiveIntentInput, DestructiveOperation } from "../destructive-policy.ts";
 
 /**
  * Validates destructive operations bound to execution input.

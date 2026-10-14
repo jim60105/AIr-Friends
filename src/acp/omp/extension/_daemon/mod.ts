@@ -88,7 +88,7 @@ export {
 // pure-data). Row 20's closure list carries these basenames as well; the
 // copy step preserves repo-relative basenames so the specifiers above and
 // here resolve identically in dev and at the installed root.
-export type { DestructiveIntentInput } from "../../compatibility-contracts.ts";
+export type { DestructiveIntentInput } from "../../../destructive-policy.ts";
 export type { EffectiveRecordEvaluation, SettingsLayerHierarchy } from "../../record-evaluator.ts";
 export type { CanonicalTarget, RootPathResult } from "../../../filesystem-roots.ts";
 export type {

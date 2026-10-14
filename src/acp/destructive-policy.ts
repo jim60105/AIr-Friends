@@ -6,11 +6,12 @@
  * Note: Adapter operation binding comparison uses exact JSON representation;
  * conforming adapters must serialize operations with consistent property order
  * to satisfy executionInputBinding integrity checks.
+ *
+ * This module is also the SINGLE owner of the shared destructive vocabulary
+ * (`DestructiveIntentInput`, `DestructiveOperation`): ACP client ingress and
+ * the compatibility ledger's validators all import them from here, never from
+ * the ledger (`normalize-omp-destructive-acp-ingress`).
  */
-import type {
-  DestructiveIntentInput,
-  DestructiveOperation,
-} from "./omp/compatibility-contracts.ts";
 import type { CanonicalTarget, RootPathResult } from "./filesystem-roots.ts";
 import {
   authorizeFilesystemWrite,
@@ -19,12 +20,52 @@ import {
   mapRootPathFailureToDenial,
 } from "./filesystem-policy.ts";
 
+/** One decoded destructive operation; the shared canonical vocabulary. */
+export type DestructiveOperation =
+  | { readonly kind: "delete"; readonly path: string }
+  | { readonly kind: "move"; readonly source: string; readonly destination: string }
+  | { readonly kind: "patch_mutation"; readonly targetPath: string };
+
+/** Decoder input shared by every destructive-ingress consumer. */
+export interface DestructiveIntentInput {
+  readonly nativeTool: "delete" | "move" | "edit" | "apply_patch";
+  readonly rawInput: string;
+  readonly executionInputBinding: string;
+  readonly parserProvenance:
+    | "supported_full_parser"
+    | "native_first_location_only"
+    | "synthetic_adapter_decoder"
+    | "unknown";
+  readonly operations?: readonly DestructiveOperation[];
+}
+
 export type DestructiveFailure =
   | "incomplete_operation"
   | "unsupported_syntax"
   | "unparseable_input"
   | "binding_mismatch"
   | "title_only_intent";
+
+/**
+ * Classification for an ACP destructive snapshot that has NOT been normalized by
+ * a native ingress adapter: the caller's `kind` selects delete/move, and anything
+ * else is the unsupported `edit`/`unknown` shape. Shared so the OpenCode ingress
+ * and the OMP adapter's non-native fallback cannot drift
+ * (`normalize-omp-destructive-acp-ingress`).
+ */
+export function legacyDestructiveIntentInput(
+  rawInput: string,
+  kind: string,
+): DestructiveIntentInput {
+  const nativeTool = kind === "delete" ? "delete" : kind === "move" ? "move" : "edit";
+  return {
+    nativeTool,
+    rawInput,
+    executionInputBinding: rawInput,
+    parserProvenance: nativeTool === "edit" ? "unknown" : "supported_full_parser",
+  };
+}
+
 export interface DestructiveTarget {
   readonly path: string;
   readonly intent: "delete" | "write";

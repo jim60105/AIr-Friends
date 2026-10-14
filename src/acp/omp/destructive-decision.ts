@@ -24,7 +24,6 @@
  * mutate anything.
  */
 
-import type { DestructiveIntentInput } from "./compatibility-contracts.ts";
 import {
   authorizeDestructiveTargets,
   decodeDestructiveIntent,
@@ -32,6 +31,7 @@ import {
   DESTRUCTIVE_CONFORMANCE_TABLE,
   destructiveDenialReason,
   type DestructiveFailure,
+  type DestructiveIntentInput,
   type DestructiveNormalization,
   normalizeDestructiveIntent,
 } from "../destructive-policy.ts";
