@@ -54,14 +54,16 @@ export interface ActiveSession {
   memorySaveCount?: number;
   /**
    * Acquisition-time permission mode ("restricted" | "native-yolo" | "yolo-switch").
-   * Written once at process acquisition/spawn and immutable thereafter.
-   * Read and verified by `restore-mode-owned-acp-sessions` on reconnect/load.
+   * Written once at OpenCode process acquisition/spawn and immutable thereafter;
+   * OMP acquisitions record no ownership (OMP recovery reads none). Read and
+   * verified by `restore-mode-owned-acp-sessions` on OpenCode reconnect/load.
    */
   permissionMode?: "restricted" | "native-yolo" | "yolo-switch";
   /**
    * Acquisition-time process/state namespace root path.
-   * Written once at process acquisition/spawn and immutable thereafter.
-   * Read and verified by `restore-mode-owned-acp-sessions` on reconnect/load.
+   * Written once at OpenCode process acquisition/spawn and immutable thereafter;
+   * OMP acquisitions record no ownership (OMP recovery reads none). Read and
+   * verified by `restore-mode-owned-acp-sessions` on OpenCode reconnect/load.
    */
   processNamespace?: string;
   /** Agent's global workspace path */
@@ -464,6 +466,9 @@ export class SessionRegistry {
 
   /**
    * Record session ownership at acquisition.
+   * Written for OpenCode acquisitions only — OMP recovery consumes its resolved
+   * process mode as an audit observation and starts from the connector's own
+   * options, so it needs no ownership record.
    * Immutable write-once contract: identical repeated values are harmless,
    * conflicting values are ignored and not allowed to overwrite the original values.
    */

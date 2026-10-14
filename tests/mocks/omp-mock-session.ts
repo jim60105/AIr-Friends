@@ -228,8 +228,6 @@ export interface OmpMockSession {
   ledger: SyntheticPositiveLedger;
   /** The recorded launch posture for the requested mode (factory-shaped env). */
   agentConfig: AgentConfig;
-  /** Ownership record consistent with this session's mode + namespace. */
-  ownership: { agentType: "omp"; permissionMode: OmpPermissionMode; processNamespace: string };
   /**
    * Arm a manual crash signal on the connector: returns a fire() that rejects
    * the raced calls deterministically (no timers, no process).
@@ -331,7 +329,6 @@ export function buildOmpMockSession(input: OmpMockSessionInput): OmpMockSession 
     connection,
     ledger,
     agentConfig,
-    ownership: { agentType: "omp", permissionMode: input.mode, processNamespace },
     armCrashSignal: () => {
       const { promise, reject } = Promise.withResolvers<never>();
       promise.catch(() => {});

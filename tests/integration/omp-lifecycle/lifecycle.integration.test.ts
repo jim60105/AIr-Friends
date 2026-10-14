@@ -13,8 +13,8 @@
 // EVIDENCE BOUNDARY (docs/OMP_EVIDENCE design §15): every subprocess here is
 // a `deno run` mock; every catalog/observation is synthetic. Nothing in this
 // file demonstrates or claims that the native OMP binary invokes the attached
-// handler, honors a denial, rejects a cross-mode load, emits readiness, or
-// suppresses a language server. Allow-path fixtures are registered as labeled
+// handler, honors a denial, emits readiness, or suppresses a language server.
+// Allow-path fixtures are registered as labeled
 // synthetic positives on the shared ledger; the suite guard in
 // opencode-regression.integration.test.ts scans them.
 
@@ -28,7 +28,6 @@ import { SkillRegistry } from "@skills/registry.ts";
 import { MemoryStore } from "@core/memory-store.ts";
 import { WorkspaceManager } from "@core/workspace-manager.ts";
 import { createLogger } from "@utils/logger.ts";
-import { ompAgentDir } from "@utils/omp-paths.ts";
 import { createFilesystemTestCalls } from "../../acp/filesystem-test-calls.ts";
 import type { PoolRunOptions } from "@core/agent-process-pool.ts";
 import type { Config } from "../../../src/types/config.ts";
@@ -237,14 +236,6 @@ function scopedOptions(params: {
   return { options, factoryArgs, agentConfig };
 }
 
-function ownershipFor(mode: OmpPermissionMode, baseRoot: string) {
-  return {
-    agentType: "omp" as const,
-    permissionMode: mode,
-    processNamespace: ompAgentDir(baseRoot, mode),
-  };
-}
-
 // ---------------------------------------------------------------------------
 // 3.1 Happy path: initialize/new/prompt/cancel/load through REAL pool wiring
 // ---------------------------------------------------------------------------
@@ -299,8 +290,7 @@ Deno.test({
         // Load on the same live connection (the mock replays a catalog).
         assert(connector.supportsLoadSession());
         // The recovered session's OWN gate context (row 11): OMP recovery
-        // requires it and prevalidates it against the recovery cwd and this
-        // connector's registration for that id BEFORE any teardown.
+        // restores it for the recovered id after the load.
         const gateContext = {
           cwd: opts.sessionCwd,
           shellSessionId: h.shellSessionId,
@@ -313,13 +303,7 @@ Deno.test({
           acpSessionId,
           opts.sessionCwd,
           [],
-          {
-            ownership: ownershipFor(
-              "restricted",
-              join(h.tempDir, "omp-pools", "discord:lifecycle-31"),
-            ),
-            gateContext,
-          },
+          { gateContext },
         );
         assertEquals(resumed, true);
         // Lease must be held for the WHOLE runner body: the pool's single
@@ -388,7 +372,7 @@ Deno.test({
 
 Deno.test({
   name:
-    "OMP lifecycle 3.2: recovery resumes on same mode-composed pool entry — ownership verified, load catalog + model + reasoning reapplied, recovered session's own gate context re-evaluated for real, sibling context untouched",
+    "OMP lifecycle 3.2: recovery resumes on same mode-composed pool entry — load catalog + model + reasoning reapplied, recovered session's own gate context restored for real, sibling context untouched",
   ignore: !CAN_RUN_SUBPROCESS,
   sanitizeOps: false,
   sanitizeResources: false,
@@ -409,7 +393,6 @@ Deno.test({
         crashOnPrompt: "mock-crash-now",
         sidebro: true,
       });
-      const ownership = ownershipFor("restricted", join(h.tempDir, "omp-pools", poolKey));
       const ledger = new SyntheticPositiveLedger();
 
       const entryIdentity: { connector?: AgentConnector; pid?: number; respawnPid?: number } = {};
@@ -468,7 +451,6 @@ Deno.test({
           opts.sessionCwd,
           [],
           {
-            ownership,
             gateContext,
             reasoningEffort: "none",
             onGateContextRestored: (id) => {
@@ -579,14 +561,16 @@ Deno.test({
 });
 
 // ---------------------------------------------------------------------------
-// 3.3 Cross-mode ownership rejection, both directions + catalog miss
+// 3.3 Mode-separated recovery through each entry's own connector options
 // ---------------------------------------------------------------------------
 
-async function crossModeRejection(
-  liveMode: OmpPermissionMode,
-  recordedMode: OmpPermissionMode,
-): Promise<void> {
-  const poolKey = `discord:lifecycle-33-${liveMode}`;
+/**
+ * Crash and recover one mode's session on its own mode-keyed entry: recovery
+ * needs no ownership record, keeps the same leased connector, restores the
+ * session's own gate context, and never promotes or reconstructs the mode.
+ */
+async function modeRecoveryThroughOwnOptions(mode: OmpPermissionMode): Promise<void> {
+  const poolKey = `discord:lifecycle-33-${mode}`;
   const h = await createHarness(poolKey);
   const stateDir = join(h.tempDir, "state-33");
   const rpcFile = join(stateDir, "rpc.jsonl");
@@ -594,60 +578,63 @@ async function crossModeRejection(
   try {
     const scoped = scopedOptions({
       poolKey,
-      mode: liveMode,
+      mode,
       harness: h,
       stateDir,
       recordRpcFile: rpcFile,
       catalog: "grouped",
+      crashOnPrompt: "mock-crash-now",
     });
-    const wrongOwnership = ownershipFor(recordedMode, join(h.tempDir, "omp-pools", poolKey));
 
     const result = await h.pool.run(scoped.options, async (connector, opts) => {
       livePids.push(connector.getProcessPid());
       const acpSessionId = await connector.createSession([], opts.sessionCwd);
-      const before = await readRpcLines(rpcFile);
-      // The OPPOSITE-mode ownership record drives the recovery call on the
-      // live process: shipped code must fail BEFORE any teardown.
+      const gateContext = {
+        cwd: opts.sessionCwd,
+        shellSessionId: h.shellSessionId,
+        yolo: mode === "native-yolo",
+        canWriteAgentWorkspace: false,
+        allowedWriteExtensions: [".md"],
+      };
+      connector.setSessionGateContext(acpSessionId, gateContext);
       await assertRejects(
-        () =>
-          connector.reconnectAndResumeSession(acpSessionId, opts.sessionCwd, [], {
-            ownership: wrongOwnership,
-          }),
+        () => connector.prompt(acpSessionId, "go mock-crash-now"),
         Error,
-        "ownership check failed",
+        "exited",
       );
-      const after = await readRpcLines(rpcFile);
+
+      const resumed = await connector.reconnectAndResumeSession(
+        acpSessionId,
+        opts.sessionCwd,
+        [],
+        { gateContext },
+      );
+      assertEquals(resumed, true, `${mode} entry recovers through its own connector options`);
+      livePids.push(connector.getProcessPid());
       assertEquals(
-        after.filter((l) => l.method === "session/load").length,
-        before.filter((l) => l.method === "session/load").length,
-        "no session/load reached the agent: rejection happened BEFORE teardown (no fallback path)",
+        h.spawned.length,
+        1,
+        "recovery reuses the SAME mode-keyed entry connector",
       );
-      assertEquals(
-        after.filter((l) => l.method === "initialize").length,
-        before.filter((l) => l.method === "initialize").length,
-        "no respawn/initialize follow-up: the live process was never torn down",
-      );
-      // The opposite/live-mode process is STILL the same live process and the
-      // lease is still this session's.
-      assertEquals(connector.getProcessPid(), livePids[0], "live process untouched");
-      assertEquals(connector.isConnected, true, "live connection untouched");
-      assertEquals(h.pool.isIdle(), false, "lease still held by the running session");
-      // The session keeps working on its own process afterwards.
-      const response = await connector.prompt(acpSessionId, "still alive after rejection");
+      // The recovered session keeps working on its own entry.
+      const response = await connector.prompt(acpSessionId, "re-issued after recovery");
       assertEquals(response.stopReason, "end_turn");
       return acpSessionId;
     });
     assertEquals(result.cancelledByDeadline, false);
 
-    // Both directions must reject; also assert distinct namespaces (the
-    // violation reason is the mode mismatch, not an artifact of one side).
+    // The selected mode keeps its own mode-scoped state root, and recovery
+    // loaded the session without promoting modes.
     assertEquals(
-      ownershipFor(liveMode, join(h.tempDir, "omp-pools", poolKey)).processNamespace,
-      join(h.tempDir, "omp-pools", poolKey, "omp-agent", liveMode),
+      scoped.agentConfig.env?.["PI_CODING_AGENT_DIR"]?.endsWith(`/omp-agent/${mode}`),
+      true,
     );
-    assert(
-      wrongOwnership.processNamespace !==
-        ownershipFor(liveMode, join(h.tempDir, "omp-pools", poolKey)).processNamespace,
+    const lines = await readRpcLines(rpcFile);
+    assert(lines.some((l) => l.method === "session/load"), "recovery issued session/load");
+    assertEquals(
+      lines.filter((l) => l.method === "session/set_mode").length,
+      0,
+      "no mode promotion RPC",
     );
   } finally {
     await teardownHarness(h, livePids);
@@ -656,13 +643,13 @@ async function crossModeRejection(
 
 Deno.test({
   name:
-    "OMP lifecycle 3.3: cross-mode recovery context is rejected before teardown in BOTH directions with the live mode's process, lease and session unaffected",
+    "OMP lifecycle 3.3: each mode's entry crashes and recovers through its own connector options with no ownership prerequisite, no mode promotion and no sibling substitution",
   ignore: !CAN_RUN_SUBPROCESS,
   sanitizeOps: false,
   sanitizeResources: false,
   async fn() {
-    await crossModeRejection("native-yolo", "restricted");
-    await crossModeRejection("restricted", "native-yolo");
+    await modeRecoveryThroughOwnOptions("restricted");
+    await modeRecoveryThroughOwnOptions("native-yolo");
   },
 });
 
@@ -689,8 +676,6 @@ Deno.test({
         loadCatalog: "miss",
         crashOnPrompt: "mock-crash-now",
       });
-      const ownership = ownershipFor("restricted", join(h.tempDir, "omp-pools", poolKey));
-
       const result = await h.pool.run(scoped.options, async (connector, opts) => {
         const acpSessionId = await connector.createSession([], opts.sessionCwd);
         await connector.setSessionModel(acpSessionId, "mock-model-canonical");
@@ -713,7 +698,6 @@ Deno.test({
         await assertRejects(
           () =>
             connector.reconnectAndResumeSession(acpSessionId, opts.sessionCwd, [], {
-              ownership,
               gateContext,
             }),
           Error,
@@ -878,8 +862,6 @@ Deno.test({
         catalog: "grouped",
         crashOnPrompt: "mock-crash-now",
       });
-      const ownershipYolo = ownershipFor("native-yolo", join(h.tempDir, "omp-pools", poolKey));
-
       const lease: { held: string | null; violations: string[] } = {
         held: null,
         violations: [],
@@ -931,7 +913,7 @@ Deno.test({
               id,
               opts.sessionCwd,
               [],
-              { ownership: ownershipYolo, gateContext },
+              { gateContext },
             );
             assertEquals(resumed, true);
             livePids.push(connector.getProcessPid());

@@ -2241,44 +2241,17 @@ Per-spawn (non-pool) agent spawns SHALL pass the session's resolved effective pe
 - **WHEN** the per-spawn distinctness and shared-process identity invariants are checked
 - **THEN** they SHALL hold identically, because later payload-portability work consumes them
 
-### Requirement: Session Ownership Record Written At Acquisition
+### Requirement: OpenCode Acquisition Ownership Bookkeeping
 
-At the moment a session acquires or spawns its agent process — pooled or per-spawn — the system SHALL record the session's ORIGINAL resolved permission mode and the process/state namespace selected for that acquisition in the in-bot session-ownership bookkeeping.
+OpenCode SHALL retain its existing acquisition ownership record and read-only recovery consumption. OMP acquisition SHALL retain its resolved process mode and audit observation without requiring an ownership record for recovery.
 
-#### Scenario: Ownership fields written at pooled acquisition
-- **GIVEN** an OMP deployment pooled session whose resolved mode is native-YOLO
-- **WHEN** the pool hands it the native-YOLO entry's connector under the lease
-- **THEN** the session's ownership record SHALL carry the original mode `native-YOLO` and that entry's process/state namespace, recorded before the session's first ACP call
+#### Scenario: OpenCode acquisition
+- **WHEN** OpenCode acquires a pooled or per-spawn process
+- **THEN** its existing permission-mode/namespace record SHALL remain available to the optional recovery checks
 
-#### Scenario: Ownership fields written at per-spawn acquisition
-- **GIVEN** an OMP deployment per-spawn session whose resolved mode is restricted
-- **WHEN** its process is spawned for the session
-- **THEN** the session's ownership record SHALL carry the original mode `restricted` and the per-spawn mode-scoped state namespace
-
-#### Scenario: Recovery interface is read-only consumption
-- **GIVEN** a session whose ownership record was written at acquisition
-- **WHEN** crash recovery or session loading later consults the record (behavior owned by row 11)
-- **THEN** the record's mode and namespace fields SHALL be exactly the acquisition-time values — no acquisition or normal session path SHALL overwrite them with a re-resolved or opposite mode
-
-#### Scenario: OpenCode ownership record keeps existing identity
-- **GIVEN** an OpenCode pooled session running with per-session YOLO switching
-- **WHEN** its ownership record is written at acquisition
-- **THEN** the record SHALL name the existing pool-key-scoped data-root identity and OpenCode reuse behavior SHALL be unchanged; no OpenCode session SHALL be split or rejected because of the new fields
-
-#### Scenario: Bookkeeping spans registry record and audit event
-- **GIVEN** a session acquiring or spawning its agent process, pooled or per-spawn
-- **WHEN** the ownership values are recorded
-- **THEN** the system SHALL write them to the registry's active-session record and emit a bounded audit event alongside the existing session-start/agent-connect events
-
-#### Scenario: Record is durable and written from resolved values
-- **GIVEN** an ownership record written from the same explicitly resolved values used to build the acquisition
-- **WHEN** later per-session activity runs
-- **THEN** the recorded values SHALL remain durable for the session's lifetime and SHALL NOT be mutated by that activity
-
-#### Scenario: Restore owner consumes the record without redefining it
-- **GIVEN** the write side of the ownership interface established here
-- **WHEN** reconnect/`session/load` verification, gate-context restoration, or rejection of opposite-mode loads runs (owned by `restore-mode-owned-acp-sessions`, row 11)
-- **THEN** that owner SHALL consume, never redefine, the recorded fields
+#### Scenario: OMP acquisition
+- **WHEN** OMP acquires either mode’s process
+- **THEN** the resolved mode SHALL still select that mode’s pool/process and audit observation, independent of recovery ownership metadata
 
 ### Requirement: Independent Restricted ACP Filesystem Write Authorization
 
@@ -2641,151 +2614,69 @@ Canonicalizing the path-argument decision SHALL be a representation change only:
 - **WHEN** the gate runs on an allow-listed command
 - **THEN** it SHALL NOT modify the restricted tool inventory, provenance, and MCP admission decisions, nor the trusted-extension handler wiring
 
-### Requirement: Connector Recovery Ownership Verification Before Teardown
+### Requirement: Shared Agent Recovery With OpenCode Context Checks
 
-For an agent type whose sessions carry ownership provenance, the connector SHALL verify the recovery context's recorded permission mode and namespace against its own recovery target (the mode-scoped namespace its spawn configuration carries) as the FIRST action, before disconnecting, respawning, or issuing `session/load`; a mismatch or missing provenance SHALL raise a distinct ownership-violation error and perform no disconnect, spawn, load, or gate-context mutation.
+OpenCode recovery with supplied ownership or gate context SHALL preserve its existing pre-teardown and post-connect ownership checks and bounded failures. OMP SHALL recover from the connector options through the shared load-capability path without a separate ownership prerequisite.
 
-#### Scenario: Verification precedes any teardown or load
-- **GIVEN** a recovery call supplying a recorded mode and namespace that match the connector's recovery target
-- **WHEN** reconnect-and-resume runs
-- **THEN** the ownership verification SHALL complete before the connection is disconnected, and the same-mode respawn and `session/load` SHALL then proceed
+#### Scenario: Optional OpenCode context absent
+- **WHEN** OpenCode recovers without trailing context
+- **THEN** the existing cwd-only restore and capability-absence false result SHALL remain unchanged.
 
-#### Scenario: Ownership violation produces zero connector side effects
-- **GIVEN** a recovery call whose supplied ownership context does not match the connector's recovery target (opposite mode or different namespace)
-- **WHEN** reconnect-and-resume is invoked
-- **THEN** it SHALL reject with a distinct ownership-violation error
-- **AND** no disconnect, process spawn, `session/load`, or gate-context mutation SHALL occur
+#### Scenario: OpenCode mismatched supplied record
+- **WHEN** OpenCode recovery supplies a foreign-agent, mode or namespace mismatch
+- **THEN** the existing bounded ownership failure SHALL occur before disconnect, spawn, load or context mutation.
 
-#### Scenario: Missing provenance for a provenance-required agent fails closed
-- **GIVEN** a recovery call for a session of an agent type that requires ownership provenance, with no recovery context or an incomplete one supplied
-- **WHEN** reconnect-and-resume is invoked
-- **THEN** it SHALL fail closed as an ownership violation rather than proceeding with today's unverified recovery
+#### Scenario: Read-only supplied record
+- **WHEN** OpenCode successfully recovers with matching ownership
+- **THEN** the record SHALL remain unmodified and existing cache/model/reasoning restoration ordering SHALL be preserved.
 
-#### Scenario: Recovery context is consumed read-only
-- **GIVEN** a completed same-mode recovery that read the session's recorded mode and process/state namespace
-- **WHEN** the session continues or ends afterward
-- **THEN** the recovery path SHALL NOT have written, mutated, or re-interpreted those recorded ownership fields
+#### Scenario: OMP normal recovery
+- **WHEN** OMP reconnects with configured options and no ownership record
+- **THEN** it SHALL reconnect and load if supported, return false with existing cleanup if unsupported, and retain session-isolated native error reporting.
 
-#### Scenario: Callers without recovery context keep existing behavior
-- **GIVEN** a caller invoking reconnect-and-resume with only the pre-existing arguments (session, cwd, MCP servers) for an agent type without mode-split ownership
-- **WHEN** the call runs
-- **THEN** the operation SHALL behave exactly as before this change, including the capability-absence false return
+### Requirement: Shared Session Gate Restoration After Native Load
 
-#### Scenario: Recovery context is consumed as additive optional trailing options
-- **GIVEN** a caller supplying a recovery context with the session's recorded mode, process/state namespace, and deployment agent type (read from the session-ownership record), the session's full gate context, and its optional resolved reasoning effort
-- **WHEN** reconnect-and-resume is invoked
-- **THEN** the context SHALL be consumed as additive, optional additions to the operation's existing trailing-options shape
+Successful recovery SHALL preserve the requesting session’s context and sibling contexts, restore supplied gate context consistently with load cwd, and invoke an optional post-restore hook before success. Existing OpenCode optional-context ordering SHALL remain unchanged.
 
-#### Scenario: Ownership-violation error names the session and mismatch
-- **GIVEN** a recovery whose supplied ownership context mismatches the connector's recovery target in either direction
-- **WHEN** the verification rejects the recovery
-- **THEN** the distinct ownership-violation error SHALL name the session and the mismatched mode and namespace, with bounded detail
+#### Scenario: Supplied session context
+- **WHEN** load succeeds with the recovered session’s gate context
+- **THEN** callbacks SHALL use its cwd, skill session ID and permission flags, with no sibling-context substitution.
 
-#### Scenario: Recorded permission mode is never re-resolved
-- **GIVEN** a recovery supplying a recorded permission mode
-- **WHEN** the connector runs the recovery
-- **THEN** it SHALL NOT re-resolve the permission mode from any other source
+#### Scenario: Cwd mismatch
+- **WHEN** supplied gate context disagrees with load cwd
+- **THEN** the existing post-load gate-context failure SHALL apply to that session only.
 
-#### Scenario: Post-load configuration restoration reuses the shared logic
-- **GIVEN** a successful same-mode load with a caller-supplied resolved reasoning value
-- **WHEN** configuration restoration runs after the load
-- **THEN** it SHALL reuse the shared model-configuration logic — load-cache restoration, stable-first model reapplication, best-effort reasoning from the supplied value
-- **AND** it SHALL NOT reimplement the matching rules
+#### Scenario: No extra context
+- **WHEN** recovery has no supplied extra context
+- **THEN** the existing cwd-only restore SHALL be available; absence of a hook SHALL add no readiness gate.
 
-#### Scenario: Fixed per-session mode-switch identity matches by construction
-- **GIVEN** an agent type whose recovery provenance is a fixed per-session mode-switch identity
-- **WHEN** the ownership verification runs
-- **THEN** it SHALL match by construction
-- **AND** the agent type's existing recovery behavior SHALL remain unchanged
+#### Scenario: Sibling replay
+- **WHEN** one session recovers while sibling contexts are cached
+- **THEN** siblings SHALL replay unchanged and the recovered ID SHALL retain its own policy context.
 
-### Requirement: Gate-Context Restoration And Recovery Hook In Connector Recovery
+#### Scenario: Hook and configuration ordering
+- **WHEN** supported load returns config options and the caller supplies model/reasoning and a hook
+- **THEN** cache refresh, stable-first model selection, best-effort reasoning, gate restore and optional hook SHALL run in existing order; catalog or hook failure SHALL stay session-isolated.
 
-After a successful same-mode `session/load`, the connector SHALL re-register the recovered session id's OWN complete per-session gate context (cwd, owning skill session id, per-session permission flags), supplied by the caller and consistent with the recovery cwd, before reporting recovery success, and SHALL NOT substitute another session's cached gate context or the process-frozen client configuration when the session's own context cannot be established.
+### Requirement: Session Runner Recovery Context And Response Fences
 
-#### Scenario: Full gate context restored on a fresh client for the recovered id
-- **GIVEN** a recovery on a connector whose gate-context cache is empty (freshly respawned client) with the caller supplying the recovered session's complete gate context
-- **WHEN** `session/load` succeeds and restoration completes
-- **THEN** the recovered session id's permission gate and filesystem callbacks SHALL resolve to that session's own cwd, owning skill session id, and per-session flags before the method reports success
+Existing reconnect-capable OMP runners SHALL pass their own cwd, MCP definitions, current gate context and resolved effort through shared recovery. OpenCode’s existing optional context behavior and all existing recovery triggers, response fences and duplicate-response prevention SHALL remain unchanged.
 
-#### Scenario: No fallback context for an unknown session
-- **GIVEN** a recovery for a session id with no cached gate context and no caller-supplied context, while other sessions' contexts exist in the cache
-- **WHEN** restoration is attempted
-- **THEN** that session's recovery SHALL fail as a gate-context restore failure
-- **AND** none of the other sessions' contexts SHALL be bound to or substituted for the recovered session id
+#### Scenario: All owning runners
+- **WHEN** pooled/per-spawn message, lurk, spontaneous, research/correction, maintenance or reminder enters an existing recovery path
+- **THEN** its own session context and resolved effort SHALL reach recovery without an OMP ownership prerequisite.
 
-#### Scenario: Supplied context must agree with the recovery cwd
-- **GIVEN** a recovery whose supplied gate context names a cwd different from the recovery cwd passed to `session/load`
-- **WHEN** restoration is attempted
-- **THEN** it SHALL fail closed as a gate-context restore failure for that session rather than silently overwriting either value
+#### Scenario: Response already delivered
+- **WHEN** reply, file or reaction was recorded before a crash
+- **THEN** the existing fence SHALL prevent re-prompting and duplicate delivery.
 
-#### Scenario: Recovery hook is a positioned no-op attach point
-- **GIVEN** a successful same-mode recovery with no post-restore hook supplied
-- **WHEN** recovery completes
-- **THEN** resumption SHALL proceed without any readiness assertion
-- **AND** WHEN a stub hook is supplied it SHALL be invoked exactly once, after gate-context restoration and before success is reported
-- **AND** a rejecting hook SHALL fail only that session's recovery
+#### Scenario: Restore or hook failure
+- **WHEN** shared restore/configuration/hook recovery fails
+- **THEN** the affected session SHALL follow existing bounded loss/error reporting while sibling sessions and lease release remain correct.
 
-#### Scenario: Post-load model or reasoning restoration failure stays isolated
-- **GIVEN** a same-mode load whose restored catalog no longer contains the session's previously set model
-- **WHEN** the shared stable-first logic reports the catalog miss
-- **THEN** the error SHALL propagate to the affected session's existing failure handling without an unstable second chance, and other sessions SHALL be unaffected
-
-#### Scenario: Configuration restored through the shared model-configuration logic
-- **GIVEN** a successful same-mode recovery whose caller supplied a resolved reasoning value
-- **WHEN** the connector restores configuration after `session/load`
-- **THEN** it SHALL restore through the shared model-configuration logic in the canonical order — config-options cache restoration, then model reapplication, then best-effort reasoning reapplication from the supplied value
-
-#### Scenario: Other sessions' cached gate contexts replay unchanged
-- **GIVEN** a recovery on a connector whose gate-context cache holds other sessions' contexts to replay to a fresh client
-- **WHEN** the recovered session's own context is restored
-- **THEN** the other sessions' cached gate contexts SHALL continue to be replayed to the fresh client
-- **AND** they SHALL NOT be modified by the recovery
-
-### Requirement: Recovery Context Threading And Failure Classification In Session Runs
-
-Every existing reconnect-capable OMP runner SHALL pass its acquisition-recorded permission mode and process namespace read-only from the session registry, its complete owning gate context, resolved effort, own cwd and operator MCP definitions to recovery. This SHALL cover pooled and per-spawn paths, including correction retries, without re-resolving ownership or expanding the existing recovery triggers.
-
-#### Scenario: Recorded acquisition values reach the connector
-- **GIVEN** a pooled OMP session whose ownership record names mode `native-yolo` and that mode's state namespace, running with a resolved reasoning effort
-- **WHEN** its prompt dies mid-flight through an existing qualifying recovery path and the call site invokes reconnect-and-resume
-- **THEN** the recovery context SHALL carry exactly the recorded mode and namespace, the session's full gate context and own cwd, the operator MCP definitions, and the resolved reasoning effort, none re-resolved or inferred
-
-#### Scenario: Ownership violation ends only the affected session run
-- **GIVEN** a reconnect attempt that fails with an ownership violation while a sibling session runs on the same process
-- **WHEN** the call site handles the failure
-- **THEN** the affected session SHALL end in error with a bounded ownership-violation reason
-- **AND** no prompt SHALL be re-issued for it, no process SHALL be disconnected by the recovery path, and the sibling session SHALL continue unaffected under the unchanged lease
-
-#### Scenario: Fence semantics untouched by recovery outcomes
-- **GIVEN** a recovery attempt reaching the connector from the controlled-recovery path with the session's recovery fence raised
-- **WHEN** the recovery succeeds, fails as an ownership violation, or fails as a restore failure
-- **THEN** the fence raise/settle/decision ordering around the recovery SHALL be exactly the pre-existing controlled-recovery ordering, with the ownership check inserted strictly before the connector's own teardown
-
-#### Scenario: Restore failure ends the affected session as loss
-- **GIVEN** a reconnect attempt that fails with a gate-context restore failure rather than an ownership violation
-- **WHEN** the call site handles the failure
-- **THEN** the affected session SHALL end in error classified as loss of that session, with the same bounded classification as an ownership violation
-
-#### Scenario: Session loss is logged, audited, and kept out of re-prompt
-- **GIVEN** a session lost because the connector returned or threw an ownership violation or gate-context restore failure
-- **WHEN** the call site classifies the loss
-- **THEN** it SHALL log and audit a bounded machine-readable failure reason distinct from capability-absence session loss and surface it through the session's existing error handling
-- **AND** the lost session SHALL never continue into the respond-gated re-prompt path or disconnect a process it did not own
-
-#### Scenario: Every per-spawn owning caller carries recorded context
-- **WHEN** message/lurk reply, spontaneous, self research, user maintenance, channel maintenance or reminder enters its existing qualifying per-spawn reconnect path
-- **THEN** each SHALL supply its own recorded acquisition ownership, full gate, cwd/MCP definitions and resolved effort
-- **AND** neither another session's cache nor current configuration SHALL replace its acquisition values
-
-#### Scenario: Research correction preserves the initial session values
-- **WHEN** the existing self-research correction retry enters reconnect
-- **THEN** it SHALL supply exactly the initial research session's acquisition context and resolved effort
-- **AND** no fresh inferred ownership or gate SHALL be used
-
-#### Scenario: Nonqualifying per-spawn crashes remain fail-fast
-- **WHEN** a per-spawn crash does not match the existing idle-liveness recovery trigger
-- **THEN** its existing fail-fast behavior SHALL remain unchanged
-- **AND** this change SHALL NOT add a new retry or session-load capability
+#### Scenario: Nonqualifying crash
+- **WHEN** per-spawn crash does not match an existing recovery trigger
+- **THEN** existing fail-fast behavior SHALL remain and no new retry trigger SHALL be introduced.
 
 ### Requirement: Restricted Tool-Inventory Default-Deny Decision
 
@@ -4070,41 +3961,6 @@ Native enforcement SHALL obtain live configured-tool metadata from the pinned ex
 - **WHEN** the factory observes native-YOLO
 - **THEN** it SHALL register no restricted handler or controlled replacement
 - **AND** OpenCode, both-agent/both-mode LSP, sandbox/egress and cancelled readiness SHALL remain unchanged
-
-### Requirement: OMP Recovery Cannot Select a Context-Free Legacy Path
-
-OMP recovery SHALL require recorded ownership and its complete owning gate context based on deployment agent type, independent of whether optional arguments were supplied. Ownership verification SHALL be the first action; absent or mismatched provenance SHALL fail before teardown or load. Missing or cwd-inconsistent required gate context SHALL also fail before teardown. OpenCode's existing context-free recovery SHALL remain unchanged.
-
-#### Scenario: OMP recovery invoked without options
-- **WHEN** reconnect-and-resume is called for OMP without recorded ownership options
-- **THEN** it SHALL raise the bounded ownership-violation failure
-- **AND** it SHALL perform no disconnect, spawn, load or gate-context mutation
-
-#### Scenario: OMP recovery supplies only partial context
-- **WHEN** an OMP call lacks mode or namespace, or supplies ownership that mismatches its connector target
-- **THEN** ownership verification SHALL reject before settings preflight, teardown or load
-- **AND** it SHALL NOT use a cwd-only legacy fallback
-
-#### Scenario: OMP owning gate absent or inconsistent
-- **GIVEN** matching recorded OMP ownership
-- **WHEN** its required own gate is missing, incomplete or inconsistent with the recovery cwd or owning skill session
-- **THEN** the operation SHALL fail as gate-context restore failure before teardown
-- **AND** a sibling or process-frozen gate SHALL NOT be substituted
-
-#### Scenario: Restore order before resumption
-- **WHEN** a fully contextual same-mode OMP load succeeds
-- **THEN** config cache, prior model, caller-resolved best-effort effort and complete own gate SHALL restore in that order before the optional post-restore hook and success
-- **AND** hook absence SHALL remain a no-op without a readiness assertion
-
-#### Scenario: Sibling gate replay does not change ownership
-- **WHEN** cached sibling gate contexts replay to a fresh client during recovery
-- **THEN** they SHALL remain unchanged and SHALL NOT substitute for the recovered id's own context
-- **AND** an affected session's failure SHALL NOT resume it or modify a sibling's recorded acquisition
-
-#### Scenario: OpenCode keeps its legacy optional-options behavior
-- **WHEN** an OpenCode caller invokes its existing reconnect path without additional context
-- **THEN** its existing recovery, capability-absence return and fixed-mode behavior SHALL remain unchanged
-- **AND** no new OMP mode or native-YOLO restriction SHALL be consulted
 
 ### Requirement: Owned Replacement Admission Preserves Separate Completion
 

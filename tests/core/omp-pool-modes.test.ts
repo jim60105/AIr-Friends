@@ -168,19 +168,23 @@ Deno.test("OMP acquisition matrix: entry points, resolved modes, ownership, audi
                     const checkOwnership = () => {
                       const session = registry.get(sessionId);
                       assertExists(session);
-                      assertEquals(session.permissionMode, expectedOwnershipMode);
                       assertExists(acquiredOptions);
                       const namespace = agentType === "omp"
                         ? acquiredOptions.agentConfig.env?.PI_CODING_AGENT_DIR
                         : acquiredOptions.agentConfig.env?.XDG_DATA_HOME;
-                      assertEquals(
-                        session.processNamespace,
-                        namespace ?? acquiredOptions.agentConfig.cwd,
-                      );
                       const value = {
-                        permissionMode: session.permissionMode,
-                        processNamespace: session.processNamespace,
+                        permissionMode: expectedOwnershipMode,
+                        processNamespace: namespace ?? acquiredOptions.agentConfig.cwd,
                       };
+                      if (agentType === "omp") {
+                        // OMP recovery reads no ownership record: none is persisted,
+                        // while the audit observation is still emitted unchanged.
+                        assertEquals(session.permissionMode, undefined);
+                        assertEquals(session.processNamespace, undefined);
+                      } else {
+                        assertEquals(session.permissionMode, value.permissionMode);
+                        assertEquals(session.processNamespace, value.processNamespace);
+                      }
                       if (snapshot) assertEquals(value, snapshot);
                       else snapshot = value;
                       return session;
@@ -488,8 +492,9 @@ Deno.test("OMP acquisition matrix: entry points, resolved modes, ownership, audi
 
 // ---------------------------------------------------------------------------
 // Row 11 recovery-context matrix (`thread-per-spawn-omp-recovery-context`):
-// every reconnect-capable caller supplies its OWN recorded ownership, its own
-// gate context, its own ACP cwd and the resolved setup effort. The stub models
+// every reconnect-capable caller supplies its OWN gate context, its own ACP cwd
+// and the resolved setup effort; OpenCode pooled callers additionally thread
+// their recorded ownership, while OMP recovery carries none. The stub models
 // `createSession`'s REAL default (ACP cwd = cwdOverride ?? agentConfig.cwd, and
 // the initial gate registered from `clientConfig`), so the values handed to
 // recovery are compared against what the acquisition actually registered.
@@ -841,25 +846,23 @@ Deno.test("OMP recovery-context matrix: all nine helper callers thread their own
                     assertEquals(opts, undefined);
                   } else {
                     assertExists(opts);
-                    assertExists(opts.ownership);
-                    // Recorded ownership read back from the registry, read-only.
-                    assertEquals(
-                      opts.ownership.processNamespace,
-                      ownershipAtRecovery.processNamespace,
-                    );
-                    assertEquals(
-                      opts.ownership.processNamespace,
-                      agentType === "omp"
-                        ? acquiredOptions.agentConfig.env?.PI_CODING_AGENT_DIR
-                        : acquiredOptions.agentConfig.env?.XDG_DATA_HOME,
-                    );
-                    assertEquals(opts.ownership.agentType, agentType);
-                    assertEquals(
-                      opts.ownership.permissionMode,
-                      agentType === "omp" ? ownershipAtRecovery.permissionMode : "yolo-switch",
-                    );
                     if (agentType === "omp") {
-                      assertEquals(opts.ownership.permissionMode, expectedMode);
+                      // OMP recovery ignores legacy ownership and starts from its
+                      // own options: only the gate context is threaded.
+                      assertEquals(opts.ownership, undefined);
+                    } else {
+                      assertExists(opts.ownership);
+                      // Recorded ownership read back from the registry, read-only.
+                      assertEquals(
+                        opts.ownership.processNamespace,
+                        ownershipAtRecovery.processNamespace,
+                      );
+                      assertEquals(
+                        opts.ownership.processNamespace,
+                        acquiredOptions.agentConfig.env?.XDG_DATA_HOME,
+                      );
+                      assertEquals(opts.ownership.agentType, agentType);
+                      assertEquals(opts.ownership.permissionMode, "yolo-switch");
                     }
                     assertExists(opts.gateContext);
                     // The gate is the recovered session's OWN registered context.
