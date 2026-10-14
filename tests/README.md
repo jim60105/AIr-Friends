@@ -113,7 +113,7 @@ Correction-batch row C3 (`package-bun-compatible-omp-extension`) replaces the
 extension packaging under test: the image-side mirror tree and generated
 `deno.json` import map are gone, replaced by ONE generated native-loadable
 bundle (`deno task bundle:omp-extension` → `index.js`; the packaging suite
-builds it and asserts the emitted-edge audit and digest inventory). The bundled
-capability-admission closure carries no external dependency edge at all —
-documented `node:`/`bun:` builtins stay external because the native runtime
-provides them — and the bundle installs no npm: pin.
+builds it, audits its emitted edges and asserts that no digest inventory is
+prepended). The bundled capability-admission closure carries no external
+dependency edge at all — documented `node:`/`bun:` builtins stay external
+because the native runtime provides them — and the bundle installs no npm: pin.
