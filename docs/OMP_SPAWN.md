@@ -15,7 +15,10 @@ In AIr-Friends, OMP permission modes are resolved strictly at spawn time via the
 - `yolo === false` maps to mode `restricted`.
 - `yolo === true` maps to mode `native-yolo`.
 
-Unlike OpenCode (which uses ACP `setSessionMode()` to toggle into `"yolo"` mode on an existing process), OMP never supports mixed-mode process reuse. Consequently:
+Unlike OpenCode (which uses ACP `setSessionMode()` to toggle into `"yolo"` mode
+on an existing process), OMP never supports mixed-mode process reuse: the pinned
+native ACP exposes **no per-session approval-mode field**, so the approval
+posture is fixed at spawn for the process lifetime. Consequently:
 
 - `getSessionModeOverride("omp", false)` returns `null`.
 - `getSessionModeOverride("omp", true)` returns `null`.
@@ -154,10 +157,12 @@ Unit and mock tests in AIr-Friends verify argument construction, environment
 assembly and configuration bytes only; they never invoke the native binary, a
 provider, a container, a sandbox or a platform.
 
-1. P0 compatibility contracts ([docs/OMP_COMPATIBILITY.md](OMP_COMPATIBILITY.md)):
-   every recorded `incompatible`/`unresolved` boundary verdict stands verbatim
-   beside its DECIDED disposition. Nothing here reopens or re-litigates them,
-   and no change in the OMP batch waits on an unmet prerequisite.
+1. Pinned upstream compatibility observations ([docs/OMP_COMPATIBILITY.md](OMP_COMPATIBILITY.md)):
+   the native-runtime cutover removed the former compatibility-contract/ledger
+   apparatus and its decision register. The accepted upstream differences and
+   native approval semantics that are still current are recorded there; the
+   earlier governance verdicts survive only as historical evidence (see
+   `CHANGELOG.md`). Nothing here reopens a superseded procedure.
 2. Packaging and binary installation (row 20, revised by
    `simplify-omp-container-installation`): landed — the `/opt/air/omp` artifact
    tree, the `/usr/local/bin/omp` install and the pinned `omp` v18.6.1 pin all
@@ -178,16 +183,24 @@ provider, a container, a sandbox or a platform.
 ## 6. Native Evidence — Real Pinned-Binary Acceptance
 
 `tests/acp/omp-native-runtime-smoke.test.ts` is the REAL-binary probe for this
-document's launch/mount contracts. It is the only suite in this tree that
-executes the official pinned `omp` executable, and it never substitutes a mock,
-a synthetic session id or a fabricated catalog for a missing prerequisite.
+document's launch/mount contracts: it produces the CONFINED lifecycle/mount
+evidence (initialize → `session/new` → advertised-catalog selection → load with
+the same actual session id, plus the confined pooled consumers) and it sends NO
+prompt. It never substitutes a mock, a synthetic session id or a fabricated
+catalog for a missing prerequisite.
+
+It is **not** the only suite that executes the official pinned binary. The
+scripted-provider suite
+`tests/integration/omp-native-runtime/native-runtime.integration.test.ts` (§7)
+also runs the pinned `omp`, and it owns the native TOOL-DISPATCH evidence — real
+restricted and native-YOLO tool dispatch against a loopback scripted model.
 
 ### 6.1 What the probe exercises
 
 - **Fixture boundary.** The hand-authored
   `tests/fixtures/omp-native-runtime/home/.omp/agent/models.yml` (one
-  credential-free, zero-cost `parity-fixture` provider/model per
-  `docs/models.md`) is copied byte-for-byte into a temporary HOME BEFORE the
+  credential-free, zero-cost `parity-fixture` provider/model; the fixture file
+  IS the authored bytes) is copied byte-for-byte into a temporary HOME BEFORE the
   observation interval. The configured single skill root (`agent.skillsDir`) is
   provisioned from the tracked `skills/` tree inside that HOME, so the factory,
   the connector inventory and the confinement consumer all observe ONE root.
@@ -204,9 +217,9 @@ a synthetic session id or a fabricated catalog for a missing prerequisite.
 - **Advertised catalog.** The fixture model is selected from the ACTUAL
   advertised catalog; an unadvertised id is rejected as a `catalog-miss`
   (negative control), which proves the positive selection resolved through the
-  real catalog. OMP advertises the concrete `provider/modelId` identity
-  (`docs/models.md` §"Provider and model identity"), so the selector is
-  `parity-fixture/parity-fixture` — a bare id is a catalog miss by construction.
+  real catalog. OMP advertises the concrete `provider/modelId` identity, so the
+  selector is `parity-fixture/parity-fixture` — a bare id is a catalog miss by
+  construction.
 - **Confined pooled consumers.** One `AgentProcessPool`, one `poolKey`, two
   `run()` calls with opposite `permissionMode`, real connectors captured through
   the existing `connectorFactory` injection. Each mode persists native state
@@ -265,6 +278,21 @@ OMP_NATIVE_ACCEPTANCE=1 deno test --allow-net --allow-read --allow-write --allow
   tests/core/omp-pool-modes.test.ts
 ```
 
+`omp --version` must report EXACTLY the `18.6.1` pin. A local binary reporting a
+different version is a REPORTED MISMATCH: its results are labelled local-version
+evidence and are never claimed as certification of the pinned image runtime.
+
+The companion model-driven suite drives the same pinned binary against a
+loopback OpenAI-compatible scripted provider to observe REAL native tool
+dispatch (read/URL/skill, local search, todo, `web_search` registration,
+ordinary `edit`/`write`, the shared command/destructive denials and the
+default-denied unknown tool):
+
+```sh
+OMP_NATIVE_ACCEPTANCE=1 deno test --allow-net --allow-read --allow-write --allow-env --allow-run --allow-ffi \
+  tests/integration/omp-native-runtime/native-runtime.integration.test.ts
+```
+
 The confined half requires the supported runtime: it was exercised in the
 project container (real `/usr/local`, `bwrap`, `strace`, `dumb-init` and the
 pinned binary present), where the probe ran confined restricted and native-YOLO
@@ -287,6 +315,106 @@ authored assets). On the host itself only the unconfined evidence is produced.
 - No public provider, proxy, platform, architecture or paid-model claim follows:
   the fixture `baseUrl` is a loopback address this probe never binds, and no
   prompt is ever sent.
+- Public web-search backend success, proxy-mediated egress, platform delivery
+  and the non-local architecture are NOT exercised: no credential, network
+  path, platform service or second architecture is bound, and none of them is
+  inferred from environment variables, mocks or a local build.
 - The probe adds no production behavior, no configuration generator and no
   runtime mount; it consumes the shipped launch, mount and connector contracts
   unchanged.
+
+---
+
+## 7. Consumer Acceptance Record — `document-omp-parity-and-consumer-regressions`
+
+This is the exercised evidence for the final consumer non-regression unit. It is
+a RECORD of what one host ran, with its limits stated, not a certification.
+
+**Environment.** Checkout of
+`feat/document-omp-parity-and-consumer-regressions`, Linux x86_64 (Fedora), Deno
+2.x. The official pinned executable was obtained from the release the image
+pins: `omp-linux-x64` from `v18.6.1`, SHA-256
+`c92a6846d02984e84f07c6362d18add3783f528f494ffcf1e0f26e594f327463` (identical to
+`OMP_SHA256_X64` in the Containerfile), reporting `omp/18.6.1`.
+
+**Commands and results.**
+
+```sh
+deno task fmt:check && deno task lint && deno task check          # clean
+deno task bundle:omp-extension                                     # bundled
+PATH=<pinned 18.6.1>:$PATH deno test --allow-net --allow-read --allow-write --allow-env --allow-run --allow-ffi \
+  tests/integration/omp-lifecycle tests/integration/omp-skill-handoff \
+  tests/integration/omp-native-runtime tests/core/skills-root.test.ts \
+  tests/core/skill-root-wiring.test.ts tests/core/omp-pool-modes.test.ts \
+  tests/acp/client.test.ts tests/acp/filesystem-authorization.test.ts \
+  tests/acp/filesystem-confinement.test.ts tests/acp/command-path-canonical.test.ts \
+  tests/acp/skill-inventory.test.ts tests/dashboard/server.test.ts \
+  tests/utils/config-trio-sync.test.ts
+# → ok | 401 passed (272 steps) | 0 failed (12s)
+PATH=<pinned 18.6.1>:$PATH OMP_NATIVE_ACCEPTANCE=1 deno test … \
+  tests/integration/omp-native-runtime/native-runtime.integration.test.ts
+# → ok | 3 passed | 0 failed; restricted leg ran all 20 scripted steps,
+#   native-YOLO leg all 7, real native dispatch against the loopback provider
+#   (the restricted plan is 21 steps including the external-directory read below)
+```
+
+**Write observation (mutation events).** `strace` is not available on this host,
+so the design's permitted equivalent filesystem watcher was used instead: an
+inotify (`Deno.watchFs`) observer on the AUTHORED production paths
+(`agent-config/omp/{restricted,native-yolo,models}.yml` and the inherited HOME's
+`.omp/agent/models.yml`), with a positive control proving the watcher observed a
+known mutation, running across the extension bundle build AND a real
+`createAgentConfig` → `AgentConnector` → native `omp acp` start. Result: ZERO
+create/modify/remove/rename MUTATION events on any authored configuration path —
+the run establishes mutation-event absence on those paths (the hand-authored
+native YAML is consumed, never synthesised or rewritten). The observer was
+transient (not added to the repository).
+
+**Writable-open FLAG classification: UNEXERCISED here.** `Deno.watchFs` reports
+create/modify/remove/rename events, so this observer cannot separate a writable
+open from a read-only open, nor classify a replacement event — the design's
+decision-5 observation contract needs a flag-aware syscall observer. The command
+that would produce it is:
+
+```sh
+OMP_NATIVE_ACCEPTANCE=1 deno test --allow-net --allow-read --allow-write --allow-env --allow-run --allow-ffi \
+  tests/acp/omp-native-runtime-smoke.test.ts
+```
+
+run under
+`strace -f -y -e trace=openat,openat2,creat,rename,renameat,renameat2,unlink,unlinkat`
+in a runtime that ships `strace` and satisfies the §6.2 confinement
+prerequisites.
+
+**Evidence splits.** Real components: the orchestration/Skill API/handler/script
+chain, the shared ACP policy modules, the official `omp` executable and its
+native tool dispatch. Mocked/scripted: the model (a loopback OpenAI-compatible
+scripted provider; no paid or public model call), the ACP subprocess in the
+consumer suites, and the platform adapters. The native legs require the
+documented `ClientConfig.nativeCalls` seam because this host exposes no owned
+Debian libc at the path the production backend loads
+(`/lib/x86_64-linux-gnu/libc.so.6`); real authorization and access-admission run
+on real paths, but no `libc`/`openat2` claim follows from these legs.
+
+**External-directory read route (captured, not asserted as policy).** The
+restricted leg provisions a harmless OS-readable file in its own temporary
+directory OUTSIDE every authorized root (workspace, staging, shared agent
+workspace, trusted skills) and issues an ordinary native `read` for it. Observed
+on this host: the native read calls the ACP `fs/read_text_file` callback, the
+client refuses it with the bounded
+`Filesystem request denied: rejected_filesystem_path_unavailable`, and the native
+read tool still returns the file's own bytes through its own disk read. That is
+the documented ambient-native read boundary: the route is RECORDED, the result
+is differentiated from mock/model/image evidence, and no read policy is widened
+or asserted. The same file's sentinel is reused by the shared-policy-denied
+`bash` command, whose recorded `reject_once` decision is followed by an
+assertion that the sentinel never appears in its output.
+
+**Explicitly unexercised here.** The `strace`-based probe leg in
+`tests/acp/omp-native-runtime-smoke.test.ts` and its confined pooled consumers
+(no `strace`; this host cannot materialise the production confinement mount list
+because `/usr/local` is a symlink into `/var`); the image build and its
+installed-runtime scenario (no image build was run); proxy-mediated egress,
+public-search backend success (the pinned binary's own keyless backend did reply
+here, and that provider result is recorded, never asserted as a live-search
+contract), platform delivery, and the non-local architecture.

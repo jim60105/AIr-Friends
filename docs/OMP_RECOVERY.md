@@ -209,15 +209,16 @@ default `yolo-switch` + pool-key record passes verification by construction.
 
 ## 7. Verdicts, dispositions, and evidence limits
 
-- The pinned-binary verdicts in `docs/OMP_COMPATIBILITY.md` §3 and the seven DECIDED (2026-10-09)
-  user dispositions in §1a are unchanged by this document; this recovery contract consumes
-  decision 2's post-amendment posture (readiness cancelled; the named hook carries no readiness
-  claim).
+- The pinned upstream observations in `docs/OMP_COMPATIBILITY.md` (accepted upstream differences
+  plus native approval semantics) are unchanged by this document. The former decision register is
+  gone; this recovery contract keeps the no-readiness posture described in §4 (the named hook
+  carries no readiness claim).
 - **Mock-only evidence.** The tests certify this repository's client-side decisions (verify-first
   for supplied OpenCode contexts, zero-side-effect violations, restore ordering, per-session
   isolation, option-based OMP recovery). They cannot show the pinned OMP binary accepting or
-  refusing a load. Design §15 remains user-owned and UNVERIFIED for: "Observe real pool reuse, mode
-  separation, crash/restart and history restoration."
+  refusing a load. Real native pool reuse, mode separation, crash/restart and history restoration
+  remain user-owned and UNVERIFIED — the pinned native probes cover only init/catalog/load/restore
+  and tool dispatch ([OMP_SPAWN.md](OMP_SPAWN.md) §6).
 - The caller matrix in §0 is certified by mock/recording fixtures in both spawn shapes and both OMP
   modes (`tests/core/omp-pool-modes.test.ts`, `tests/core/session-orchestrator.test.ts`,
   `tests/acp/agent-connector.test.ts`) for the values each caller hands to recovery — never for
@@ -230,5 +231,6 @@ default `yolo-switch` + pool-key record passes verification by construction.
 - Row 6 (stable-first selection, cache restoration on reconnect, reasoning): AGENTS.md — "Session
   Model Selection (Stable-First)" and "Reasoning Effort (ACP `thought_level`)"
 - Row 3 (spawn-time mode-scoped state roots feeding the namespace formula): `docs/OMP_SPAWN.md`
-- Batch decisions and evidence rules: `docs/OMP_COMPATIBILITY.md`, design §10, §13, §15
-  (`docs/superpowers/specs/2026-10-06-omp-integration-design.md`)
+- Current upstream observations and evidence levels: `docs/OMP_COMPATIBILITY.md`; the approved
+  2026-10-14 parity design (`docs/superpowers/specs/2026-10-14-omp-opencode-parity-simplification-design.md`)
+  and `docs/OMP_SPAWN.md` §6 for the exercised evidence boundaries.

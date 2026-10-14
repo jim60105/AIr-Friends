@@ -1,6 +1,14 @@
 # OMP process pools by permission mode
 
-OMP pooled sessions use separate processes for `restricted` and `native-yolo` decisions, while one global execution lease still serializes persona execution. This change establishes bot-side acquisition identity and ownership bookkeeping. Mock tests do not clear the native-runtime security gates in [OMP_COMPATIBILITY.md](OMP_COMPATIBILITY.md).
+OMP pooled sessions use separate processes for `restricted` and `native-yolo`
+decisions — the pinned native ACP exposes no per-session approval-mode field, so
+the posture is fixed at spawn — while one global execution lease still
+serializes persona execution. This change establishes bot-side acquisition
+identity and OpenCode ownership bookkeeping (OMP recovery is option-based and
+keeps no record). Mock tests certify this repository's client-side decisions
+only; they do not stand in for the native-executable evidence recorded in
+[docs/OMP_SPAWN.md](OMP_SPAWN.md) §6 and
+[USER-RUNTIME-VERIFICATION.md](USER-RUNTIME-VERIFICATION.md).
 
 ## Process identity and state
 
@@ -38,8 +46,18 @@ No configuration field was added. `config.example.yaml`, `.env.example`, and `he
 
 ## Inherited verdicts, dispositions and evidence limits
 
-P0's recorded compatibility assessment and its per-boundary verdicts stand unchanged: pre-import custom-tool exclusion and canonical critical-skill ownership are `incompatible`, authenticated readiness and OMP restricted LSP are `unresolved`, and authoritative approval-record reset, complete native destructive intent, OpenCode implicit LSP scoping and complete native transport adaptation have `incompatible` cases. The application-halt ruling over those verdicts was superseded by the DECIDED (2026-10-09) dispositions in `docs/OMP_COMPATIBILITY.md` §1a and the accepted native posture in §1b: **no change in the OMP batch is held back by it or remains application-blocked**, and each named boundary is carried by its owner's landed integration. The verdicts themselves stay independent of local mock verification.
+The superseded P0 compatibility assessment (pre-import custom-tool exclusion,
+canonical critical-skill ownership, authenticated readiness, approval-record
+reset, complete native destructive intent, OpenCode implicit LSP scoping and
+complete native transport adaptation) is **historical evidence** only. Its
+decision register and its application-halt ruling are gone: the native-runtime
+cutover removed the compatibility-contract/ledger apparatus, and **no change in
+the OMP batch is held back by it or remains application-blocked**. Each former
+boundary is now carried by the landed native posture recorded in
+[docs/OMP_COMPATIBILITY.md](OMP_COMPATIBILITY.md) (accepted upstream differences
+plus native approval semantics) rather than by a governance gate. The historical
+verdicts stay independent of local mock verification.
 
-Separate process roots no longer carry any settings-discovery obligation: each mode's hand-authored native settings document is the whole configuration, and the selected native assets plus the selected native data child are the only OMP-specific confinement inputs ([OMP_SETTINGS.md](OMP_SETTINGS.md) §5, [OMP_SPAWN.md](OMP_SPAWN.md) §4). Rows 12 and 20 have landed: the deployment-owned restricted capability extension (the generated single bundle) and the pinned OMP binary plus packaged assets. Factory asset checks remain fail-closed. Readiness stays cancelled (row 13 removed): no handshake, channel or tuple exists, and the accepted residual is that an extension which fails to load leaves the session without the restricted capability set. Restricted tool policy is landed (14a decisions consumed by the 14b handler) and its native invocation remains user-owned and UNVERIFIED.
+Separate process roots no longer carry any settings-discovery obligation: each mode's hand-authored native settings document is the whole configuration, and the selected native assets plus the selected native data child are the only OMP-specific confinement inputs ([OMP_SETTINGS.md](OMP_SETTINGS.md) §5, [OMP_SPAWN.md](OMP_SPAWN.md) §4). Rows 12 and 20 have landed: the deployment-owned restricted capability extension (the generated single bundle) and the pinned OMP binary plus packaged assets. Factory asset checks remain fail-closed. Readiness stays cancelled (row 13 removed): no handshake, channel or tuple exists, and the accepted residual is that an extension which fails to load leaves the session without the restricted capability set. Restricted tool policy is landed (the capability decision consumed by the pre-dispatch `tool_call` handler in `src/acp/omp/extension/native-registration.ts`) and its native invocation remains user-owned and UNVERIFIED.
 
-The acceptance matrix uses the real factory and real pool with stub connectors, for both agent types, both deployment routes, global/channel/account/default decisions, and enabled/disabled Skill API. It checks ownership before ACP session creation, immutable provenance during prompts and summary, audit payloads, and disabled-API JWT absence. Factory-backed pool tests check same-mode reuse, disjoint namespaces, created directories, shared skill identity, and OpenCode paths. Existing pool tests cover global serialization, lanes/deadlines, and independent reclaim. Offline extension fixtures satisfy asset existence solely for mocked acquisition; they are never imported or executed by an agent. No live OMP/OpenCode agent, provider, container, sandbox, or platform delivery is part of this evidence.
+The acceptance matrix uses the real factory and real pool with stub connectors, for both agent types, both deployment routes, global/channel/account/default decisions, and enabled/disabled Skill API. It checks the recorded acquisition identity before ACP session creation and during prompts and summary, audit payloads, and disabled-API JWT absence. Factory-backed pool tests check same-mode reuse, disjoint namespaces, created directories, shared skill identity, and OpenCode paths. Existing pool tests cover global serialization, lanes/deadlines, and independent reclaim. Offline extension fixtures satisfy asset existence solely for mocked acquisition; they are never imported or executed by an agent. No live OMP/OpenCode agent, provider, container, sandbox, or platform delivery is part of this evidence.

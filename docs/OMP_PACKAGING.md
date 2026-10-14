@@ -287,7 +287,6 @@ Observed in the project container (real `/usr/local`, plus `bwrap`, `strace`,
 `deno test … tests/acp/omp-native-runtime-smoke.test.ts`;
 [OMP_SPAWN.md](OMP_SPAWN.md) §6 records the exact commands, the prerequisite
 gates and the evidence boundaries. Still user-owned and UNVERIFIED here: the
-image builds, the per-arch digests, the observed asset names, the
-`PACKAGE-MANIFEST.sha256` verification and the `/opt/air/omp/**` install
-topology itself — the probe drives a deployment-shaped runtime, not the image
-build.
+image builds, the per-arch digests, the observed asset names and the
+`/opt/air/omp/**` install topology itself — the probe drives a
+deployment-shaped runtime, not the image build.

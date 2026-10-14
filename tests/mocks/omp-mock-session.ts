@@ -1,7 +1,8 @@
 /**
  * Shared OMP mock-session composition surface.
  *
- * The consume-unchanged builder promised to the mock handoff suite: one entry
+ * The consume-unchanged builder consumed by the consumer skill-handoff suite
+ * (`tests/integration/omp-skill-handoff/`, via `useMockOmpAgent`): one entry
  * point assembles the dimensions every OMP lifecycle scenario needs —
  * mode-scoped OMP launch identity ({permissionMode, native data root}),
  * OMP-shaped config catalogs, scripted connection/subprocess behavior and
