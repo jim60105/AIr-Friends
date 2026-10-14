@@ -7088,10 +7088,15 @@ Deno.test("inventory invariants - a script planted after construction is not app
       await verdict(client, `deno run ${skill.root}/late-skill/scripts/late-skill.ts`),
       "reject-1",
     );
-    // The root's own recorded `(dev, ino, ctime, size)` identity moved when the
-    // entry was added, so even the previously enumerated grant denies: the
-    // decision-time observation of the ROOT is re-taken, never silently
-    // re-anchored (`skill-inventory.ts` decision-time root check).
+    // The decision-time ROOT re-observation revokes an already granted script
+    // when the root ceases to be its canonical directory. A sibling entry moved
+    // no clock field here: Deno reports `ctime` at whole-second granularity
+    // (`Deno.lstatSync(...).ctime.getTime() % 1000 === 0`), and this directory
+    // `size` only drifts on tmpfs/btrfs (which is why this case passed locally
+    // and failed on the runner's fixed-size directories). The deterministic
+    // real-filesystem trigger is a root that is no longer that directory:
+    Deno.renameSync(skill.root, `${skill.root}-moved`);
+    Deno.symlinkSync(`${skill.root}-moved`, skill.root);
     assertEquals(
       await verdict(client, `deno run ${skill.root}/memory-save/scripts/memory-save.ts`),
       "reject-1",
@@ -7130,9 +7135,17 @@ Deno.test("inventory invariants - in-place modification of an enumerated script 
     // grant is never re-established from the changed metadata alone.
     Deno.writeTextFileSync(entrypoint, "#!/usr/bin/env deno\n// modified in place\n");
     assertEquals(await verdict(client, `deno run ${entrypoint}`), "reject-1");
-    // Same-path REPLACEMENT is denied too (a fresh inode at the same pathname).
+    // Same-path REPLACEMENT with an IDENTICAL body denies too, and the
+    // discriminator is the inode, not the clock: `ctime` is whole-second
+    // granular and the body keeps `size` byte-equal, so only (dev, ino) can
+    // speak here. Plain delete+recreate cannot prove it (the runner reuses
+    // freed inodes, this machine does not — `skill-inventory.test.ts:365`), so
+    // the replacement is a HARD LINK of a twin created while the enumerated
+    // inode was still live, making its inode distinct on any filesystem.
+    const twin = `${skill.root}/twin.ts`;
+    Deno.writeTextFileSync(twin, "#!/usr/bin/env deno\n");
     Deno.removeSync(entrypoint);
-    Deno.writeTextFileSync(entrypoint, "#!/usr/bin/env deno\n");
+    Deno.linkSync(twin, entrypoint);
     assertEquals(await verdict(client, `deno run ${entrypoint}`), "reject-1");
   } finally {
     Deno.removeSync(tempDir, { recursive: true });

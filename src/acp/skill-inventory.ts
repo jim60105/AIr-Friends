@@ -11,8 +11,11 @@
 //   full identity tuple (dev, ino, ctime, size) and the root observation they
 //   were enumerated under. ext4 reuses freed inode numbers, so (dev, ino) alone
 //   cannot detect a delete+recreate replant (proven on CI runners: identical
-//   dev/ino before/after replacement); ctime adds the tight-loop discriminator
-//   and size the clock-independent one. A suffix spelling is never authority:
+//   dev/ino before/after replacement). Deno reports `ctime` at whole-second
+//   granularity, so it can only witness a change that is at least a second old;
+//   `size` is the clock-independent discriminator; a same-second, same-length
+//   rewrite is observationally indistinguishable to this mechanism. A suffix
+//   spelling is never authority:
 //   approval requires the invocation's actual entrypoint to physically resolve
 //   to one exact enumerated file.
 // - BOTH agent types discover installed entries by scanning that root; neither
@@ -65,7 +68,10 @@ export interface SkillScriptEntry {
   readonly canonicalPath: string;
   readonly dev: number;
   readonly ino: number;
-  /** Inode change time (ms) at enumeration; null when unobservable. */
+  /**
+   * Inode change time at enumeration, in milliseconds but at whole-second
+   * granularity (Deno truncates `ctime` to seconds); null when unobservable.
+   */
   readonly ctimeMs: number | null;
   /** Byte size at enumeration: clock-independent replacement discriminator. */
   readonly size: number | null;
