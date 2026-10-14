@@ -1,45 +1,27 @@
 // scripts/omp/bundle-extension.ts — build-time trusted-extension bundler
 // (OpenSpec `package-pinned-omp-runtime` D5, retargeted by
-// `package-bun-compatible-omp-extension` C3: the pinned OMP executable embeds
-// Bun and its legacy extension loader does NOT consume a sidecar Deno import
-// map, so the mirror-copy + generated deno.json mechanism is replaced by a
-// single reproducible ESM bundle built at packaging time from canonical
-// source and locked dependencies).
+// `package-bun-compatible-omp-extension` C3 and simplified by the
+// `cutover-omp-native-runtime` core cutover).
 //
 // Mechanism: ONE generated artifact.
 //
 //   - `deno bundle --frozen --format esm` (no minify, names kept) inlines the
-//     canonical `@std/*`/local VALUE closure of the trusted-extension entry
-//     into <target>/index.js — the single file development launch and image
+//     canonical value closure of the trusted-extension entry into
+//     <target>/index.js — the single file development launch and image
 //     installation both consume (src/utils/omp-paths.ts exports the mapping).
 //     `--frozen` enforces the committed deno.lock: locked dependencies are
 //     checked, never re-resolved, and no runtime download occurs at load.
-//   - The ONE documented external is the exact bare `@sinclair/typebox`
-//     schema-builder facade (align-omp-native-tool-contracts D1): the pinned
-//     legacy loader host-resolves that exact bare value import to the
-//     runtime's own `Type` facade BEFORE any import-map lookup, so the bundle
-//     keeps the canonical host-resolved spelling and the build deliberately
-//     installs NO npm:/jsr: pin for it (a pin would bypass the host facade).
-//     Subpaths of the package are NOT remapped by the host and stay outside
-//     the boundary. Documented native builtins (`node:`/`bun:`) remain
-//     external because the native runtime provides them. Every OTHER emitted
-//     dependency edge — a leftover JSR URL, an import-map alias (@std/*,
-//     @acp/*, @utils/*), an npm: package, or any unapproved bare specifier —
-//     fails the build: the boundary is enforced on the EMITTED bundle, never
-//     trusted from the source walk.
-//   - Auditable provenance is retained: no minification (deno bundle's
-//     `// deno:<locked-url>` provenance comments survive) and the generated
-//     file carries a deterministic source/input digest inventory header — the
-//     canonical entry and every locked external dependency fact this bundle
-//     was cut from, plus the bundle's own byte digest recorded by the
-//     PACKAGE-MANIFEST recut (recut invariant D5 unchanged: installed inputs
-//     changed => manifest recut in the same change).
-//
-// Canonical source stays single-owned: this script READS the committed tree
-// and writes only the generated bundle; there is no independently edited
-// mirror or augmentation (content-faithfulness now means deterministic
-// transformation of canonical source plus locked dependencies, per the
-// amended container-packaging requirement).
+//   - The extension closure is the small capability-admission module only, so
+//     it carries no external dependency edge at all. Documented native builtins
+//     (`node:`/`bun:`) stay external because the native runtime provides them.
+//     Every other emitted dependency edge — a JSR/remote URL, an import-map
+//     alias (@std/*, @acp/*, @utils/*), an npm: package, an unapproved bare
+//     specifier, or a non-inlined path edge — fails the build: the boundary is
+//     enforced on the EMITTED bundle, never trusted from the source walk.
+//   - Auditable provenance is retained through deno bundle's own non-minified
+//     output. No deployment-module declaration is embedded, no dependency
+//     closure is declared and no synthetic input-digest header is prepended:
+//     the artifact is exactly the bundler's ESM output.
 //
 // Usage (via scripts/omp/bundle-omp-extension.sh):
 //   deno run --allow-read --allow-write --allow-run bundle-extension.ts \
@@ -58,15 +40,10 @@ for (const [name, v] of [["src", src], ["target", target], ["deno.lock", denoLoc
   }
 }
 
-// The native-loadability boundary (the ONE host-facade external, documented
-// native builtins, and the emitted-edge audit) lives in bundle-audit.ts
-// beside this script so packaging tests exercise the exact production
-// predicate on synthetic bundle text.
-import { auditEmittedBundle, emittedExternals, HOST_FACADE_EXTERNAL } from "./bundle-audit.ts";
-import { emittedRequireEdges } from "./bundle-audit.ts";
-import { declarationCoverageProblems, embedDeploymentDeclarations } from "./bundle-declaration.ts";
-import { DEPLOYMENT_MODULE_DEPENDENCY_CLOSURE } from "../../src/acp/omp/deployment-module.ts";
-import { OMP_TRUSTED_EXTENSION_BUNDLE_PATH } from "../../src/utils/omp-paths.ts";
+// The native-loadability boundary (documented native builtins plus the
+// emitted-edge audit) lives in bundle-audit.ts beside this script so packaging
+// tests exercise the exact production predicate on synthetic bundle text.
+import { auditEmittedBundle, emittedExternals } from "./bundle-audit.ts";
 
 // The bundle is cut from canonical source at <src> with the repo's own deno
 // configuration and committed lock (cwd = <src> so both resolve there). The
@@ -82,8 +59,6 @@ const bundle = await new Deno.Command(Deno.execPath(), {
     "--format",
     "esm",
     "--keep-names",
-    "--external",
-    HOST_FACADE_EXTERNAL,
     "--output",
     bundlePath,
     ENTRY,
@@ -102,84 +77,12 @@ const emitted = await Deno.readTextFile(bundlePath);
 const problems: string[] = auditEmittedBundle(emitted);
 const externals = emittedExternals(emitted);
 
-// Provenance-comment completeness: non-minified deno bundle output names
-// every inlined locked module with a `// deno:<url>` comment; the @std/*
-// closure must therefore be INLINED (present as provenance), not left as an
-// alias edge (already covered above) — assert the inlining actually happened.
-const inlinedStd = /\/\/ deno:https:\/\/jsr\.io\/@std\//.test(emitted);
-if (!inlinedStd) {
-  problems.push(
-    "emitted bundle carries no inlined @std/* provenance (bundling did not inline the locked std closure)",
-  );
-}
-
 if (problems.length) {
   console.error(
     `generated bundle is not native-loadable:\n${[...new Set(problems)].sort().join("\n")}`,
   );
   Deno.exit(1);
 }
-
-// Build-owned deployment declaration (`bind-omp-owned-module-evidence` task
-// 4.1): substitute the CANONICAL SOURCE CHECKOUT this bundle was cut from into
-// the one placeholder the source carries. The declaration is a build input —
-// never the process cwd, never the output target below, never a loaded-module
-// parent — so an arbitrarily placed output gains no runtime module authority
-// and a moved checkout is rebuilt rather than relocated.
-const canonicalSourceRoot = await Deno.realPath(src);
-let declared: string;
-try {
-  declared = embedDeploymentDeclarations(emitted, canonicalSourceRoot);
-} catch (error) {
-  console.error(`deployment declaration embedding failed: ${(error as Error).message}`);
-  Deno.exit(1);
-}
-// The declaration's permitted dependency closure must COVER what the bundle
-// actually carries (static, dynamic and runtime-require edges alike).
-const coverageProblems = declarationCoverageProblems(
-  [...emittedExternals(declared), ...emittedRequireEdges(declared)],
-  DEPLOYMENT_MODULE_DEPENDENCY_CLOSURE,
-);
-if (coverageProblems.length) {
-  console.error(
-    `generated bundle declares an incomplete dependency closure:\n` +
-      coverageProblems.join("\n"),
-  );
-  Deno.exit(1);
-}
-
-// Deterministic source/input digest inventory (auditable provenance header).
-// Computed over the canonical inputs only — never timestamps — so rebuilds
-// from the same checkout produce byte-identical bundle content apart from
-// deno bundle's own deterministic output.
-async function sha256Hex(bytes: Uint8Array): Promise<string> {
-  const digest = await crypto.subtle.digest("SHA-256", bytes as unknown as ArrayBuffer);
-  return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
-}
-const lockBytes = new TextEncoder().encode(await Deno.readTextFile(denoLockPath));
-const entryBytes = await Deno.readFile(`${src}/${ENTRY}`);
-const inventory = [
-  `entry sha256 ${await sha256Hex(entryBytes)}  ${ENTRY}`,
-  `lock sha256 ${await sha256Hex(lockBytes)}  ${denoLockPath.replace(`${src}/`, "")}`,
-  `declared development artifact  ${canonicalSourceRoot}/${OMP_TRUSTED_EXTENSION_BUNDLE_PATH}`,
-  `declared dependency closure  ${DEPLOYMENT_MODULE_DEPENDENCY_CLOSURE.join(", ")}`,
-];
-
-// Prepend the inventory header to the generated bundle (pure comment: the
-// module's behavior is the bundler's ESM output, verbatim below the header).
-const header = [
-  "// Generated by scripts/omp/bundle-extension.ts (package-bun-compatible-omp-extension).",
-  "// DO NOT EDIT — deterministic ESM bundle of the trusted-extension value closure,",
-  "// built from canonical source and frozen-lock dependencies. The only externals",
-  "// are documented native builtins (node:/bun:) and the exact bare",
-  `// ${HOST_FACADE_EXTERNAL} schema-builder host-facade import, which the pinned native`,
-  "// loader host-resolves BEFORE any import-map lookup (no npm: pin is installed",
-  "// for it on purpose — docs/OMP_PACKAGING.md §5).",
-  "// Source/input digest inventory:",
-  ...inventory.map((line) => `//   ${line}`),
-  "",
-].join("\n");
-await Deno.writeTextFile(bundlePath, `${header}${declared}`);
 
 console.log(
   `bundled ${ENTRY} -> ${bundlePath} ` +

@@ -4,7 +4,6 @@
   "exports": "./src/main.ts",
   "unstable": ["net"],
   "imports": {
-    "@sinclair/typebox": "npm:@sinclair/typebox@0.34.52",
     "@std/assert": "jsr:@std/assert@^1.0.0",
     "@std/crypto": "jsr:@std/crypto@^1.0.0",
     "@std/path": "jsr:@std/path@^1.0.0",

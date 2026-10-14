@@ -1,26 +1,28 @@
 // tests/acp/agent-factory-omp.test.ts
 //
-// Consumer-visible tests for OMP spawn-mode-scoped agent configurations.
-// Tests verify assembled launch configurations, state partitioning, argument
-// construction, and invariant enforcement, including the decision-5 both-mode
-// `--no-lsp` LSP disable carriers (row 17). These mock/unit tests certify
-// decision logic only; native runtime enforcement — including native
-// language-server suppression in either mode — remains gated by P0, row 8,
-// packaging, and user runtime observation.
+// Consumer-visible tests for the native-OMP launch assembly: the assembled
+// argument vector, environment, process cwd and confinement mounts of each
+// approval mode, plus the fail-closed preflight for the generated trusted
+// extension. The assertions observe the assembled launch output (args, env,
+// cwd, mounts, filesystem state) — never source text.
 
-import { assert, assertEquals, assertStringIncludes, assertThrows } from "@std/assert";
-import { parse as parseYaml } from "@std/yaml";
-import { createAgentConfig, getSessionModeOverride } from "../../src/acp/agent-factory.ts";
-import { OMP_DECLARED_SKILL_ROOT_ENV } from "../../src/acp/omp-settings.ts";
-import { resolveTrustedSkillsRoot } from "../../src/core/skills-root.ts";
+import { assert, assertEquals, assertStringIncludes } from "@std/assert";
+import { join, resolve } from "@std/path";
 import {
+  createAgentConfig,
+  getSessionModeOverride,
+  OMP_NATIVE_YOLO_SETTINGS_PATH,
+  OMP_RESTRICTED_SETTINGS_PATH,
+} from "../../src/acp/agent-factory.ts";
+import {
+  OMP_IMAGE_EXTENSION_ARTIFACT,
+  OMP_TRUSTED_EXTENSION_BUNDLE_DIR,
   OMP_TRUSTED_EXTENSION_BUNDLE_PATH,
   OMP_TRUSTED_EXTENSION_PATH,
-  ompAgentDir,
-  ompLaunchCwd,
-  ompProcessTmpDir,
-  ompSkillRootDeclarationPath,
   ompXdgDataHome,
+  resolveOmpConfigPath,
+  resolveOmpExtensionPath,
+  resolveOmpSystemPromptPath,
 } from "../../src/utils/omp-paths.ts";
 import type { Config } from "../../src/types/config.ts";
 
@@ -33,7 +35,7 @@ import type { Config } from "../../src/types/config.ts";
 {
   const root = new URL("../../", import.meta.url).pathname.replace(/\/$/, "");
   const built = await new Deno.Command(`${root}/scripts/omp/bundle-omp-extension.sh`, {
-    args: [root, `${root}/build/omp-extension`, `${root}/deno.lock`],
+    args: [root, `${root}/${OMP_TRUSTED_EXTENSION_BUNDLE_DIR}`, `${root}/deno.lock`],
     stdout: "null",
     stderr: "piped",
   }).output();
@@ -63,12 +65,11 @@ function createTestConfig(overrides: Partial<Config> = {}): Config {
 }
 
 /**
- * Fail-closed fixture: temporarily moves the tracked trusted-extension asset
- * aside so the factory's missing-module check can fire, then restores it. The
- * asset became a tracked repo file with the row-12 extension tree, so the
- * historical fixture's write/delete cycle both could not make the fail-closed
- * case fire (the tracked file exists again under parallel runs) and left the
- * worktree dirty; save/restore keeps the invariant hermetic and testable.
+ * Fail-closed fixture: temporarily moves the selected trusted-extension
+ * artifact aside so the factory's missing-module check can fire, then restores
+ * it. The artifact is generated (or image-installed) rather than tracked, so
+ * save/restore keeps the invariant hermetic across parallel runs without
+ * leaving the checkout dirty.
  */
 function withAssetAbsent(assetPath: string, run: () => void): void {
   const backup = `${assetPath}.failclosed-backup`;
@@ -86,25 +87,13 @@ function withAssetAbsent(assetPath: string, run: () => void): void {
   }
 }
 
-Deno.test("omp-paths - mode roots are strictly disjoint and mode-distinct under identical inputs", () => {
+Deno.test("omp-paths - native data roots are mode-distinct for identical inputs", () => {
   const base = "/data/test";
-  const restrictedAgentDir = ompAgentDir(base, "restricted");
-  const yoloAgentDir = ompAgentDir(base, "native-yolo");
-  assertEquals(restrictedAgentDir !== yoloAgentDir, true);
-  assertEquals(restrictedAgentDir.includes("restricted"), true);
-  assertEquals(yoloAgentDir.includes("native-yolo"), true);
-
-  const restrictedTmp = ompProcessTmpDir(base, "restricted");
-  const yoloTmp = ompProcessTmpDir(base, "native-yolo");
-  assertEquals(restrictedTmp !== yoloTmp, true);
-
-  const restrictedCwd = ompLaunchCwd(base, "restricted");
-  const yoloCwd = ompLaunchCwd(base, "native-yolo");
-  assertEquals(restrictedCwd !== yoloCwd, true);
-
-  const restrictedXdg = ompXdgDataHome(base, "restricted");
-  const yoloXdg = ompXdgDataHome(base, "native-yolo");
-  assertEquals(restrictedXdg !== yoloXdg, true);
+  const restricted = ompXdgDataHome(base, "restricted");
+  const yolo = ompXdgDataHome(base, "native-yolo");
+  assertEquals(restricted, resolve(join(base, "omp-agent", "restricted", "xdg-data")));
+  assertEquals(yolo, resolve(join(base, "omp-agent", "native-yolo", "xdg-data")));
+  assertEquals(restricted !== yolo, true);
 });
 
 Deno.test("getSessionModeOverride - returns null for omp in both yolo states", () => {
@@ -114,124 +103,199 @@ Deno.test("getSessionModeOverride - returns null for omp in both yolo states", (
   assertEquals(getSessionModeOverride("opencode", false), null);
 });
 
-Deno.test("agent-factory omp - fails closed when the generated extension entry is missing", () => {
-  const config = createTestConfig();
-  // C3: absence of the GENERATED development entry fails the preflight with
-  // the build remedy — never a silent fallback to the raw Deno-only source
-  // tree (the error text must name the bundling command).
-  withAssetAbsent(OMP_TRUSTED_EXTENSION_BUNDLE_PATH, () => {
-    let thrown: Error | undefined;
-    try {
-      createAgentConfig("omp", "/tmp/ws", config, false);
-    } catch (error) {
-      thrown = error as Error;
+Deno.test("agent-factory omp - fails closed when the trusted extension artifact is missing", async () => {
+  const root = await Deno.makeTempDir();
+  try {
+    const repoPath = join(root, "repo");
+    const config = createTestConfig({
+      workspace: { repoPath, workspacesDir: join(root, "workspaces") },
+    });
+    const workingDir = join(root, "ws");
+    Deno.mkdirSync(workingDir, { recursive: true });
+    // C3: absence of the generated entry fails the preflight with the build
+    // remedy — never a silent fallback to the raw Deno-only source tree (the
+    // error text must name the bundling command).
+    const artifact = resolveOmpExtensionPath();
+    withAssetAbsent(artifact, () => {
+      let thrown: Error | undefined;
+      try {
+        createAgentConfig("omp", workingDir, config, false);
+      } catch (error) {
+        thrown = error as Error;
+      }
+      assert(thrown !== undefined, "missing generated entry must fail the preflight");
+      assertStringIncludes(thrown!.message, "Missing trusted extension module");
+      assertStringIncludes(thrown!.message, artifact);
+      assertStringIncludes(thrown!.message, "deno task bundle:omp-extension");
+    });
+  } finally {
+    await Deno.remove(root, { recursive: true });
+  }
+});
+
+Deno.test("agent-factory omp - assembles both modes in per-spawn and pooled shapes", async () => {
+  const root = await Deno.makeTempDir();
+  try {
+    const workingDir = join(root, "ws");
+    const repoPath = join(root, "repo");
+    Deno.mkdirSync(workingDir, { recursive: true });
+    Deno.mkdirSync(repoPath, { recursive: true });
+    const config = createTestConfig({
+      workspace: { repoPath, workspacesDir: join(root, "workspaces") },
+    });
+
+    const sessionId = "session-abc";
+    const poolKey = "pool-abc";
+
+    const settingsPathFor = (mode: "restricted" | "native-yolo"): string =>
+      resolve(
+        resolveOmpConfigPath(
+          mode === "restricted" ? OMP_RESTRICTED_SETTINGS_PATH : OMP_NATIVE_YOLO_SETTINGS_PATH,
+        ),
+      );
+    // Every selected launch path is ABSOLUTE (the child starts in workingDir).
+    const promptPath = resolve(resolveOmpSystemPromptPath());
+    const bundlePath = resolve(resolveOmpExtensionPath());
+    // Deployment-face precondition: the resolver yields exactly one of the two
+    // contracted artifacts (installed image copy, or generated development
+    // entry) — the raw Deno-only source tree is never a launch face.
+    const rawBundlePath = resolveOmpExtensionPath();
+    assert(
+      rawBundlePath === OMP_TRUSTED_EXTENSION_BUNDLE_PATH ||
+        rawBundlePath === OMP_IMAGE_EXTENSION_ARTIFACT,
+      `uncontracted extension artifact: ${rawBundlePath}`,
+    );
+    assert(bundlePath.startsWith("/"), `launch asset path must be absolute: ${bundlePath}`);
+    assert(settingsPathFor("restricted").startsWith("/"), "settings path must be absolute");
+    assert(promptPath.startsWith("/"), "prompt path must be absolute");
+    const homeModelsPath = Deno.env.get("HOME") !== undefined
+      ? resolve(join(Deno.env.get("HOME")!, ".omp", "agent", "models.yml"))
+      : undefined;
+
+    const countOf = (args: readonly string[], value: string): number =>
+      args.filter((arg) => arg === value).length;
+
+    for (const mode of ["restricted", "native-yolo"] as const) {
+      const settingsPath = settingsPathFor(mode);
+      const restricted = mode === "restricted";
+
+      for (
+        const [shape, poolArgument, expectedBaseRoot] of [
+          ["per-spawn", undefined, resolve(join(workingDir, "tmp"))],
+          ["pooled", poolKey, resolve(join(repoPath, "omp-pools", poolKey))],
+        ] as const
+      ) {
+        const assembled = createAgentConfig(
+          "omp",
+          workingDir,
+          config,
+          mode === "native-yolo",
+          undefined,
+          sessionId,
+          poolArgument,
+        );
+        const label = `${mode}/${shape}`;
+        const args = assembled.args;
+
+        assertEquals(assembled.command, "omp", label);
+        assertEquals(args[0], "acp", label);
+        // The whole launch vector is the contracted shape: acp + the selected
+        // mode settings + the prompt, plus the restricted-only extension pair.
+        assertEquals(args.length, restricted ? 7 : 5, label);
+        assertEquals(countOf(args, "acp"), 1, `exactly one acp: ${args.join(" ")}`);
+        assertEquals(countOf(args, "--config"), 1, `exactly one --config: ${args.join(" ")}`);
+        assertEquals(
+          countOf(args, "--system-prompt"),
+          1,
+          `exactly one --system-prompt: ${args.join(" ")}`,
+        );
+        assertEquals(args.indexOf("--config") + 1, args.indexOf(settingsPath), label);
+        assertEquals(args[args.indexOf("--system-prompt") + 1], promptPath, label);
+        assertEquals(args.includes("--no-extensions"), false, label);
+        assertEquals(args.includes("--no-lsp"), false, label);
+
+        // The restricted launch loads the generated capability bundle; the
+        // YOLO launch carries no restricted carrier at all, and neither mode
+        // is ever handed the raw Deno-only source tree.
+        if (restricted) {
+          assertEquals(countOf(args, "--trusted-extension"), 1, label);
+          assertEquals(args[args.indexOf("--trusted-extension") + 1], bundlePath, label);
+        } else {
+          assertEquals(countOf(args, "--trusted-extension"), 0, label);
+        }
+        assertEquals(args.includes(OMP_TRUSTED_EXTENSION_PATH), false, label);
+
+        assertEquals(assembled.cwd, workingDir, label);
+
+        // Mode-distinct native data root, created before spawn because native
+        // OMP only adopts `$XDG_DATA_HOME/omp` when the directory exists.
+        const xdgDataHome = ompXdgDataHome(expectedBaseRoot, mode);
+        assertEquals(assembled.env?.["XDG_DATA_HOME"], xdgDataHome, label);
+        assertEquals(
+          Deno.statSync(join(xdgDataHome, "omp")).isDirectory,
+          true,
+          `native data dir must exist: ${xdgDataHome}/omp`,
+        );
+
+        // HOME is inherited normally (native model configuration) and no
+        // generated settings plan or daemon-owned home rides the launch.
+        assertEquals(assembled.env?.["HOME"], Deno.env.get("HOME"), label);
+        assertEquals(assembled.env?.["PI_CODING_AGENT_DIR"], undefined, label);
+        assertEquals(assembled.env?.["settingsSourcePlan"], undefined, label);
+
+        assertEquals(
+          assembled.env?.["TMPDIR"],
+          poolArgument !== undefined
+            ? resolve(join(repoPath, "channel-tmp", poolKey))
+            : `${workingDir}/tmp`,
+          label,
+        );
+
+        const mounts = assembled.runtimeMounts;
+        assert(mounts !== undefined, `${label}: runtime mounts must be declared`);
+        assertEquals(mounts!.writableRuntimePaths, [resolve(join(xdgDataHome, "omp"))], label);
+        // The per-spawn mode parent is shadowed so the sibling mode's native
+        // data under the writable session TMPDIR is not exposed; a pooled pool
+        // root is not bound at all, so no shadow is needed (or attempted).
+        assertEquals(
+          mounts!.shadowedPaths,
+          poolArgument === undefined ? [resolve(join(expectedBaseRoot, "omp-agent"))] : [],
+          label,
+        );
+        const readOnly = mounts!.readOnlyPaths ?? [];
+        assert(readOnly.includes(settingsPath), `${label}: settings must be mounted read-only`);
+        assert(readOnly.includes(promptPath), `${label}: prompt must be mounted read-only`);
+        if (homeModelsPath !== undefined) {
+          assert(
+            readOnly.includes(homeModelsPath),
+            `${label}: inherited models.yml must be mounted read-only`,
+          );
+        }
+        if (restricted) {
+          assert(readOnly.includes(bundlePath), `${label}: bundle must be mounted read-only`);
+        } else {
+          assertEquals(readOnly.includes(bundlePath), false, label);
+        }
+
+        // Pooled processes carry the shared-process marker and freeze no
+        // single session id; per-spawn processes carry the session id.
+        if (poolArgument !== undefined) {
+          assertEquals(assembled.env?.["SKILL_SHARED_PROCESS"], "1", label);
+          assertEquals(assembled.env?.["SESSION_ID"], undefined, label);
+        } else {
+          assertEquals(assembled.env?.["SKILL_SHARED_PROCESS"], undefined, label);
+          assertEquals(assembled.env?.["SESSION_ID"], sessionId, label);
+        }
+      }
     }
-    assert(thrown !== undefined, "missing generated entry must fail the preflight");
-    assertStringIncludes(thrown!.message, "Missing trusted extension module");
-    assertStringIncludes(thrown!.message, OMP_TRUSTED_EXTENSION_BUNDLE_PATH);
-    assertStringIncludes(thrown!.message, "deno task bundle:omp-extension");
-  });
-});
 
-Deno.test("agent-factory omp - fails closed when overlay files are missing", () => {
-  const config = createTestConfig();
-  withAssetAbsent("agent-config/omp/restricted.yml", () => {
-    assertThrows(
-      () => createAgentConfig("omp", "/tmp/ws", config, false),
-      Error,
-      "Missing owned overlay configuration file",
-    );
-  });
-  withAssetAbsent("agent-config/omp/native-yolo.yml", () => {
-    assertThrows(
-      () => createAgentConfig("omp", "/tmp/ws", config, true),
-      Error,
-      "Missing owned overlay configuration file",
-    );
-  });
-});
-
-Deno.test("agent-factory omp - assembles both modes over tracked assets with disjoint overlays and exactly-once --no-lsp", () => {
-  const config = createTestConfig();
-  // The trusted extension and agent-config/omp overlays are tracked repo
-  // assets, so positive assembly runs directly against them.
-  const restrictedConfig = createAgentConfig("omp", "/tmp/ws", config, false);
-  assertEquals(restrictedConfig.command, "omp");
-  assertEquals(restrictedConfig.args.includes("acp"), true);
-  assertEquals(restrictedConfig.args.includes("--no-extensions"), true);
-  assertEquals(restrictedConfig.args.includes("--trusted-extension"), true);
-  // The launch assembly consumes the resolver output verbatim: the GENERATED
-  // development entry is presented to the host, never the raw source path.
-  assertEquals(
-    restrictedConfig.args[restrictedConfig.args.indexOf("--trusted-extension") + 1],
-    OMP_TRUSTED_EXTENSION_BUNDLE_PATH,
-  );
-  assertEquals(restrictedConfig.args.includes(OMP_TRUSTED_EXTENSION_PATH), false);
-  assertEquals(restrictedConfig.args.includes("agent-config/omp/restricted.yml"), true);
-  assertEquals(restrictedConfig.args.includes("agent-config/omp/native-yolo.yml"), false);
-
-  const yoloConfig = createAgentConfig("omp", "/tmp/ws", config, true);
-  assertEquals(yoloConfig.command, "omp");
-  assertEquals(yoloConfig.args.includes("agent-config/omp/native-yolo.yml"), true);
-  assertEquals(yoloConfig.args.includes("agent-config/omp/restricted.yml"), false);
-
-  // Decision 5 (row 17): BOTH modes carry --no-lsp exactly once. This is
-  // carrier wiring evidence only: native language-server suppression,
-  // including implicit startup, stays user-observed and unverified.
-  for (const assembled of [restrictedConfig, yoloConfig]) {
+    // The two modes never share a native data root for the same spawn shape.
     assertEquals(
-      assembled.args.filter((arg) => arg === "--no-lsp").length,
-      1,
-      `--no-lsp must appear exactly once: ${assembled.args.join(" ")}`,
+      ompXdgDataHome(resolve(join(workingDir, "tmp")), "restricted") !==
+        ompXdgDataHome(resolve(join(workingDir, "tmp")), "native-yolo"),
+      true,
     );
+  } finally {
+    await Deno.remove(root, { recursive: true });
   }
-
-  // `align-omp-skill-trust-to-shared-root` 3.1/3.2: the generated single-key
-  // skill-root declaration is FIRST among the `--config` overlays, the authored
-  // mode document carrying the pins is LAST, and the declaration declares
-  // exactly the deployment-resolved root (here the repository `skills/` tree,
-  // the default `agent.skillsDir`), which is also the value conveyed to the
-  // extension through the launch environment.
-  const resolvedRoot = resolveTrustedSkillsRoot("omp", config.agent.skillsDir);
-  for (
-    const [assembled, mode, modeDocument] of [
-      [restrictedConfig, "restricted", "agent-config/omp/restricted.yml"],
-      [yoloConfig, "native-yolo", "agent-config/omp/native-yolo.yml"],
-    ] as const
-  ) {
-    const overlayPaths = assembled.args.filter((_, index) =>
-      assembled.args[index - 1] === "--config"
-    );
-    assertEquals(overlayPaths.length, 2, assembled.args.join(" "));
-    const declarationPath = overlayPaths[0]!;
-    assertEquals(declarationPath, ompSkillRootDeclarationPath("/tmp/ws/tmp", mode));
-    assertEquals(overlayPaths[1], modeDocument);
-    const declaration = parseYaml(Deno.readTextFileSync(declarationPath)) as Record<
-      string,
-      unknown
-    >;
-    assertEquals(declaration, { skills: { customDirectories: [resolvedRoot] } });
-    assertEquals(assembled.env?.[OMP_DECLARED_SKILL_ROOT_ENV], resolvedRoot);
-    assertEquals(assembled.settingsSourcePlan?.ownedSkillRoots, [resolvedRoot]);
-    assertEquals(assembled.settingsSourcePlan?.skillRootDeclarationPath, declarationPath);
-  }
-
-  // Mode-isolated state roots remain unchanged by the LSP carriers.
-  assertEquals(
-    restrictedConfig.env!.PI_CODING_AGENT_DIR !== yoloConfig.env!.PI_CODING_AGENT_DIR,
-    true,
-  );
-
-  // Native YOLO keeps its native approval posture with no restricted carrier:
-  // the yolo overlay bytes carry approvalMode yolo plus the decision-5 shared
-  // lsp.enabled:false settings pin (row 25) and no restricted-only provider
-  // clamp, and no restricted handler/approval-record asset joins the launch.
-  const yoloOverlay = Deno.readTextFileSync("agent-config/omp/native-yolo.yml");
-  assertEquals(yoloOverlay.includes("approvalMode: yolo"), true);
-  assertEquals(yoloOverlay.includes("lsp:\n  enabled: false"), true);
-  assertEquals(yoloOverlay.includes("disabledProviders"), false);
-  assertEquals(
-    yoloConfig.args.some((arg) => arg.includes("restricted")),
-    false,
-  );
 });

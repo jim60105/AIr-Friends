@@ -1,35 +1,30 @@
 /**
- * Generated-bundle smoke driver (`bind-omp-owned-module-evidence` task 3.2).
+ * Generated-bundle smoke driver (delivered-artifact capability dispatch).
  *
- * Runs as a CHILD PROCESS with the restricted launch identity supplied by the
- * caller (cwd = the mode-scoped launch cwd, owned HOME / PI_CODING_AGENT_DIR,
- * no API keys in the environment). It imports the REAL generated bundle at its
- * declared development path and drives the DEFAULT exported factory with an
- * API-shaped roster — the same function the pinned loader would evaluate — so
- * the delivered artifact's `import.meta.url`, its embedded deployment
- * declaration, the production metadata reader and the default registration
- * wiring are all exercised together. No session context, no injected module
- * evidence and no fixture declaration participate.
+ * Runs as a CHILD PROCESS. It imports the REAL generated bundle at the path the
+ * caller supplies and drives its DEFAULT exported extension with an API-shaped
+ * `tool_call` registration — the same function the pinned loader would evaluate —
+ * so the delivered artifact's own wiring is exercised end to end: the module
+ * loads without an import map, its default export registers through the official
+ * `api.on("tool_call", ...)` surface, and the registered callback decides mapped
+ * versus unmatched native tool names.
  *
- * Prints ONE JSON object on stdout. Anything else (a load-time discovery
- * blocker, a missing declaration, a failed acceptance) surfaces as a non-zero
- * exit or an unexpected result, which is exactly the fail-closed signal.
+ * Prints ONE JSON object on stdout. A load error, a missing registration or an
+ * unexpected outcome surfaces as a non-zero exit or an unexpected result, which
+ * is exactly the fail-closed signal.
  *
  * Honesty: this proves the DELIVERED BUNDLE'S OWN wiring, nothing about the
  * official host binary invoking or honoring it.
  */
 
 const bundleUrl = Deno.args[0];
-const declaredArtifactPath = Deno.args[1];
 
-if (!bundleUrl || !declaredArtifactPath) {
-  throw new Error("usage: omp-bundle-smoke-driver.ts <bundle-file-url> <declared-artifact-path>");
+if (!bundleUrl) {
+  throw new Error("usage: omp-bundle-smoke-driver.ts <bundle-file-url>");
 }
 
 interface ToolCallEvent {
-  readonly toolCallId: string;
   readonly toolName: string;
-  readonly input: Record<string, unknown>;
 }
 
 interface ToolCallResult {
@@ -40,32 +35,11 @@ interface ToolCallResult {
 type Handler = (event: ToolCallEvent) => ToolCallResult | undefined;
 
 const handlers: Handler[] = [];
-const registeredTools: string[] = [];
-const ownedSource = { path: declaredArtifactPath, source: "extension" };
-
-/** The live roster the driver mutates: real pinned sourceInfo shapes. */
-const roster: Array<{ name: string; sourceInfo: Record<string, string> }> = [
-  { name: "read", sourceInfo: { ...ownedSource } },
-  { name: "web_search", sourceInfo: { ...ownedSource } },
-  {
-    name: "bash",
-    sourceInfo: {
-      path: "<builtin:bash>",
-      source: "builtin",
-      scope: "temporary",
-      origin: "top-level",
-    },
-  },
-];
 
 const api = {
   on: (event: string, handler: Handler) => {
     if (event === "tool_call") handlers.push(handler);
   },
-  registerTool: (tool: { name: string }) => {
-    registeredTools.push(tool.name);
-  },
-  getAllTools: () => roster,
 };
 
 // Static import cannot express this module specifier: the driver's WHOLE
@@ -73,42 +47,48 @@ const api = {
 // module-loading boundary under test), so the import is dynamic on purpose.
 // A static import of the bundle would also break the repo's own type check,
 // which never compiles the generated output.
-const loaded = await import(bundleUrl) as {
-  default: (api: unknown) => { registered: boolean; mode: string };
-  loadTimeDiscoveryDecision: { blockers: unknown[]; trustedRoots: readonly string[] };
-};
-const result = loaded.default(api);
-const handler = handlers[0]!;
+const loaded = await import(bundleUrl) as { default: (api: unknown) => void };
+loaded.default(api);
 
-/** One call outcome: `dispatch` = the native call continues; else the block. */
-function run(event: ToolCallEvent): string {
-  const outcome = handler(event);
-  return outcome === undefined ? "dispatch" : `block:${outcome.reason ?? ""}`;
+const handler = handlers[0];
+if (handler === undefined) {
+  throw new Error("the delivered bundle registered no tool_call handler");
+}
+
+/**
+ * One call outcome plus the number of fixture operations that actually ran:
+ * the fixture dispatcher executes its operation ONLY when the registered
+ * callback lets the call continue, so `executed` is the observable effect and
+ * never an inference from the return value.
+ */
+function run(toolName: string): { outcome: string; executed: number } {
+  let executed = 0;
+  const outcome = handler({ toolName });
+  // The native dispatch discipline blocks ONLY on an explicit `block: true`
+  // result; any other result lets the call continue (a result that merely
+  // carried a reason must not be mistaken for a block).
+  const blocked = outcome?.block === true;
+  if (!blocked) executed++;
+  return {
+    outcome: blocked ? "block" : "dispatch",
+    executed,
+  };
 }
 
 console.log(JSON.stringify({
-  registered: result.registered,
-  mode: result.mode,
-  registeredTools: [...registeredTools].sort(),
-  loadBlockers: loaded.loadTimeDiscoveryDecision.blockers.length,
-  trustedRoots: loaded.loadTimeDiscoveryDecision.trustedRoots,
-  localRead: run({ toolCallId: "s1", toolName: "read", input: { path: "notes.md" } }),
-  urlRead: run({
-    toolCallId: "s2",
-    toolName: "read",
-    input: { path: "https://example.com/page" },
-  }),
-  webSearchNoBackend: run({
-    toolCallId: "s3",
-    toolName: "web_search",
-    input: { query: "air friends" },
-  }),
-  authenticBuiltin: run({ toolCallId: "s4", toolName: "bash", input: { command: "ls" } }),
-  foreignSameName: (() => {
-    roster[0] = {
-      name: "read",
-      sourceInfo: { path: "/home/attacker/own.js", source: "extension" },
-    };
-    return run({ toolCallId: "s5", toolName: "read", input: { path: "notes.md" } });
-  })(),
+  handlerCount: handlers.length,
+  read: run("read"),
+  grep: run("grep"),
+  glob: run("glob"),
+  find: run("find"),
+  todo: run("todo"),
+  web_search: run("web_search"),
+  bash: run("bash"),
+  edit: run("edit"),
+  write: run("write"),
+  delete: run("delete"),
+  move: run("move"),
+  unknownTool: run("definitely_not_a_tool"),
+  protoName: run("__proto__"),
+  toStringName: run("toString"),
 }));

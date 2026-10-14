@@ -386,9 +386,7 @@ The validating proxy resolves each destination once, validates every resolved ad
 
 Closing both gaps requires the authoritative network-route boundary (a namespace whose only egress is the proxy), which is deferred until the loopback Skill API is bridged into that namespace (UDS or a non-loopback bridge address). Until then, treat the default posture as blocking the trivial external-SSRF cases for proxy-honoring clients, not as a complete egress boundary. Operators who need a hard boundary today can use `networkIsolation: true` (full isolation; disables web tools and skill callbacks) for agents that need no egress.
 
-**OMP URL reads get their own per-hop boundary on top of this posture.** The restricted OMP session's `read`-tool URL branch is served by the controlled fetch-transport adapter (`src/acp/omp/fetch-transport.ts` + the trusted-extension replacement), which re-validates **every hop before it is issued** — including redirect Locations and scraper-derived secondary URLs — with `redirect: "manual"` and the shared `ssrf.ts` rule set, so the env-proxy residual above no longer describes adapted URL reads (native auto-follow routes outside the replacement stay recorded as blocked). The posture semantics, the `HTTP_PROXY`-presence-is-not-enforcement honesty table, the DNS pinning carry-over, and the native-observation checklist live in [OMP_NETWORK.md](OMP_NETWORK.md).
-
-**OMP web search rides the same decision core.** The restricted session's `web_search` replacement (`src/acp/omp/search-transport.ts`) delegates every provider/enrichment hop to that same per-hop core. Dedicated public code search is outside the pinned OpenCode 1.18.21 parity target (the parity `codesearch` tool was removed upstream before the pin) and is no longer a recorded adapter route: public code/docs **content** stays reachable through the completed URL-read route above, an unlisted dedicated search name lands in the structural default-deny, and no code-search credential is registered or promoted (the former `adapt-omp-public-code-search` contract was removed by `remove-omp-public-code-search`).
+**OMP URL reads and web search use the native tools under this same posture.** The native-runtime cutover removed the project-owned fetch/search transports and the trusted-extension `read`/`web_search` replacements, so the restricted session's URL reads and searches run through native OMP's own `read` and `web_search` implementations, admitted by the restricted capability table (a mapped name continues to its native path) and subject only to the shared posture above. Per-hop URL control, provider-specific request shaping and result differences are upstream-owned; the residual described in the paragraph above applies to those native tools exactly as it does to any env-proxy-honoring client. The posture semantics, the `HTTP_PROXY`-presence-is-not-enforcement honesty table and the native-observation checklist live in [OMP_NETWORK.md](OMP_NETWORK.md).
 
 #### Operator-Trusted Egress Destinations (`egressAllowHosts`)
 
@@ -494,9 +492,9 @@ The skill auto-approve list determines which bash commands are automatically app
 | Development      | the repository's own `skills/` tree (`skills` relative to the deployment cwd) |
 | Custom           | the configured absolute directory, used exactly as given                      |
 
-`agentType` never selects the root (`unify-skill-root-and-inventory`): there is no image-first OMP branch, no validated development fallback for one agent alone, and no second tree. The OMP-specific owned root is gone entirely (`align-omp-skill-trust-to-shared-root` stopped declaring and trusting it, and `collapse-skill-packaging-to-one-tree` removed it from the image): the generated single-key declaration carries this SAME resolved root (see `docs/OMP_SETTINGS.md` §7).
+`agentType` never selects the root (`unify-skill-root-and-inventory`): there is no image-first OMP branch, no validated development fallback for one agent alone, and no second tree. The OMP-specific owned root is gone entirely (`align-omp-skill-trust-to-shared-root` stopped declaring and trusting it, and `collapse-skill-packaging-to-one-tree` removed it from the image): the authored native mode YAML points native skill discovery at this SAME resolved root (see `docs/OMP_SETTINGS.md`).
 
-**OMP's skill trust is identity-based, not ownership-based** (`align-omp-skill-trust-to-shared-root` D1, accepted posture): the shared root ships as the image's `$UID:0` `0775` personal tree, so OMP admission no longer requires root ownership, agent-non-writability or non-group/world-writability. What still denies, at every layer (the extension's `skill://` resolver, the daemon's canonical-root observation, and the registration-time producer): a non-canonical or non-absolute path, a linked root or linked component, a non-directory/non-file target, a file with `nlink !== 1`, a realpath escape, a replaced identity and a writable-root overlap. Critical-skill minting additionally requires the root's OBSERVED read-only determination, so an agent-writable tree mints no critical authority; the auto-approve inventory below is unaffected (names, structure and physical membership only).
+**OMP's skill trust is identity-based, not ownership-based**: the shared root ships as the image's `$UID:0` `0775` personal tree, so admission requires no root ownership, agent-non-writability or non-group/world-writability. What still denies, at the layers that remain (the daemon's canonical-root observation and the shared filesystem policy): a non-canonical or non-absolute path, a linked root or linked component, a non-directory/non-file target, a file with `nlink !== 1`, a realpath escape, a replaced identity and a writable-root overlap. The native-runtime cutover removed the generated single-key skill-root declaration, the extension-side `skill://` resolver, the owned-skills producer and critical-skill minting, so native OMP reads `skill://` through its own `read` tool against the deployer-authored discovery root; the auto-approve inventory below is unaffected (names, structure and physical membership only).
 
 The root comes from `observeTrustedSkillsRoot()` (`src/core/skills-root.ts`): the CANONICAL (realpath) spelling of the validated selection plus its `dev`/`ino` identity, resolved once per connector before subprocess creation and carried as the mandatory internal `skillsDir` through connector/client, factory/sandbox mounts, prompt rendering and readiness. The agent child's HOME is NEVER consulted and an absent/unobservable root is an explicit `ConfigError`, never a fallback tree. The same observation feeds the render identity: prompt/retry `skillsDir`, the connector inventory root, the read-only skill mount and the readiness root are the SAME path.
 
@@ -770,15 +768,38 @@ The `src/acp/filesystem-roots.ts` helper library provides an agent-generic, phys
 
 ---
 
-## Restricted OMP Tool-Decision Layer (OMP Integration Row 14a / P5c-i)
+## Restricted OMP Capability Admission (OMP Integration Row 14a / P5c-i)
 
-Pure restricted-mode tool-decision modules were defined by `define-omp-restricted-tool-decisions` (`src/acp/omp/tool-inventory.ts`, `src/acp/omp/tool-provenance.ts`, `src/acp/omp/approval-records.ts`, `src/acp/omp/destructive-decision.ts`). They are consulted **only in restricted OMP sessions** — native-YOLO sessions receive none of these clamps (its LSP disablement rides the both-mode `--no-lsp` carrier of decision 5 / row 17 plus its own settings-level pin — the shared `lsp.enabled: false` deployment disable row 25 landed in `agent-config/omp/native-yolo.yml`, never a restricted tool policy) and every OpenCode flow in Layers 1–5 above is untouched. The layers above remain the operative runtime enforcement; these decisions are consulted per restricted `tool_call` by the trusted-extension enforcement wiring (row 16 below; see [docs/OMP_ENFORCEMENT.md](OMP_ENFORCEMENT.md)), and 14c owns generic-command canonicalization. See [docs/OMP_TOOL_POLICY.md](OMP_TOOL_POLICY.md) for the inventory table, alternate-route pair table, provenance admission, record-interpretation rules, MCP mechanism tiers, and the preserved pinned verdicts (record-reset INCOMPATIBLE, destructive-intent UNRESOLVED) with their DECIDED dispositions. No runtime enforcement, record reset, or complete native destructive decoding is claimed by this layer's tests.
+Restricted-mode tool admission is one frozen capability table plus one pure
+decision in `src/acp/omp/tool-inventory.ts`: `OMP_TOOL_CAPABILITY_MAP` maps
+exactly `read`, `grep`, `glob`, `find`, `todo`, `web_search`, `bash`, `edit`,
+`write`, `delete` and `move` to their OpenCode-equivalent abilities, and
+`decideOmpToolCapability(name)` continues a mapped name to its native tool path
+with no repeated native or ACP authorization while blocking every unmatched name
+before dispatch with `{block: true, reason: "rejected_unknown_tool"}`.
+Membership is an own-property check, so prototype-shaped names never match.
+
+It is consulted **only in restricted OMP sessions**: native-YOLO sessions load
+no extension and receive a purely native permissive policy. Both modes deny the
+LSP tool through the authored exact-name `tools.approval.lsp: deny` in their own
+mode YAML (there is no `--no-lsp` flag), and every OpenCode flow in Layers 1–5
+above is untouched. The layers above remain the operative runtime enforcement
+for the callbacks that actually execute; the restricted capability callback
+(row 16 below) performs only this name admission. See
+[docs/OMP_TOOL_POLICY.md](OMP_TOOL_POLICY.md).
 
 ---
 
-## Restricted `tool_call` Enforcement Wiring (OMP Integration Row 16 / P5c-ii)
+## Restricted `tool_call` Capability Callback (OMP Integration Row 16 / P5c-ii)
 
-`wire-omp-restricted-tool-enforcement` attaches the restricted `tool_call` handler in the trusted extension's synchronous load sequence and composes the row-14a decisions per call with fresh origin/epoch/generation reads and zero local decision logic; the native-YOLO exemption is structural at the registration site. Whether the official binary invokes the attached handler remains user-owned runtime verification — no automated suite certifies native invocation, enforcement, reset, or decoding. See [docs/OMP_ENFORCEMENT.md](OMP_ENFORCEMENT.md).
+The restricted trusted extension's default export attaches exactly one handler
+through the official pre-dispatch API (`api.on("tool_call", handler)`) while the
+loader evaluates the module, and performs the row-14a name admission with zero
+further local decision logic. Native-YOLO loads no extension at all, so its
+exemption is structural rather than a mode check. Whether the official binary
+invokes the attached handler remains user-owned runtime verification — no
+automated suite certifies native invocation, enforcement, reset or decoding. See
+[docs/OMP_ENFORCEMENT.md](OMP_ENFORCEMENT.md).
 
 ---
 

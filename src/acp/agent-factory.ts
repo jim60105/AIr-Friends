@@ -1,33 +1,23 @@
 // src/acp/agent-factory.ts
 
-import type { AgentConfig, AgentType, PermissionRejection, RetryPromptStrategy } from "./types.ts";
+import type {
+  AgentConfig,
+  AgentRuntimeMounts,
+  AgentType,
+  OmpPermissionMode,
+  PermissionRejection,
+  RetryPromptStrategy,
+} from "./types.ts";
 import type { Config } from "../types/config.ts";
 import { SandboxManager } from "./sandbox-manager.ts";
 import { getRunningEgressProxyUrl } from "@utils/egress-proxy.ts";
 import { sessionXdgDataHome } from "@utils/opencode-paths.ts";
 import {
-  ompAgentDir,
-  ompLaunchCwd,
-  ompOwnedHome,
-  ompProcessTmpDir,
-  ompSkillRootDeclarationPath,
   ompXdgDataHome,
   resolveOmpConfigPath,
+  resolveOmpExtensionPath,
   resolveOmpSystemPromptPath,
 } from "@utils/omp-paths.ts";
-import { selectLaunchDeploymentModule } from "./omp/deployment-module.ts";
-import {
-  assertOwnedSettingsDocument,
-  OMP_DECLARED_SKILL_ROOT_ENV,
-  OMP_FOREIGN_PROVIDER_ENV_SELECTORS,
-  type OmpPermissionMode,
-  ompSettingsForMode,
-  type OmpSettingsSourcePlan,
-  ompSettingsSourcePlan,
-} from "./omp-settings.ts";
-import { sanitizeOmpDiscoveryEnv } from "./sandbox-manager.ts";
-import { writeOmpSkillRootDeclaration } from "./omp/skill-root-declaration.ts";
-import { createLogger } from "@utils/logger.ts";
 import { resolveSkillJwtDir } from "@utils/skill-jwt.ts";
 import {
   observeTrustedSkillsRoot,
@@ -36,7 +26,13 @@ import {
   skillScriptPath,
 } from "@core/skills-root.ts";
 import { join, resolve } from "@std/path";
-import { parse as parseYaml } from "@std/yaml";
+
+/**
+ * Contracted authored native OMP settings documents (development-tree paths;
+ * `resolveOmpConfigPath` maps them to their installed copies when present).
+ */
+export const OMP_RESTRICTED_SETTINGS_PATH = "agent-config/omp/restricted.yml";
+export const OMP_NATIVE_YOLO_SETTINGS_PATH = "agent-config/omp/native-yolo.yml";
 
 /**
  * Create ACP Agent configuration based on agent type.
@@ -68,7 +64,6 @@ export function createAgentConfig(
     workingDir,
     appConfig,
     yolo,
-    skillsRoot.root,
     agentWorkspacePath,
     sessionId,
     poolKey,
@@ -85,103 +80,19 @@ export function createAgentConfig(
       baseConfig.env ?? {},
       baseConfig.cwd,
       skillsRoot,
+      baseConfig.runtimeMounts,
     );
-    if (type === "omp" && baseConfig.settingsSourcePlan) {
-      // Belt-and-braces: mandatory sanitization runs inside buildSpawnOptions;
-      // finalization then (re)assigns the plan values and verifies the FINAL
-      // spawn environment so later sandbox assembly cannot drop or overwrite
-      // a trusted value (row 26, D2).
-      sanitizeOmpDiscoveryEnv(spawnOpts.env);
-      finalizeOmpSpawnEnvironment(spawnOpts.env, baseConfig.settingsSourcePlan);
-    }
     return {
       command: spawnOpts.command,
       args: spawnOpts.args,
       cwd: spawnOpts.cwd,
       env: spawnOpts.env,
-      settingsSourcePlan: baseConfig.settingsSourcePlan,
+      runtimeMounts: baseConfig.runtimeMounts,
       skillsRoot,
     };
   }
 
-  if (type === "omp" && baseConfig.settingsSourcePlan) {
-    // Unsandboxed route still gets the mandatory sanitization + trusted plan
-    // assignment and the plan verification (D2 is mandatory, not filterEnv-
-    // conditional; the sandbox branch simply performs it earlier).
-    const env = baseConfig.env ?? {};
-    sanitizeOmpDiscoveryEnv(env);
-    finalizeOmpSpawnEnvironment(env, baseConfig.settingsSourcePlan);
-    baseConfig.env = env;
-  }
   return { ...baseConfig, skillsRoot };
-}
-
-/**
- * Row 26 (D2): trusted post-filter environment finalization for OMP children.
- *
- * Runs AFTER ordinary sandbox filtering (and after the mandatory
- * `sanitizeOmpDiscoveryEnv` removal inside `SandboxManager`), and assigns the
- * deployment-owned settings-discovery selectors EXCLUSIVELY from the typed
- * settings-source plan — never from operator passthrough or workspace data.
- * It then verifies the final spawn environment against the plan so a later
- * sandbox-assembly bug cannot drop or overwrite a trusted value:
- *
- * - `HOME` = plan.ownedHome (explicitly assigned; unset HOME would let the
- *   native homedir fallback return the daemon home)
- * - `PI_CODING_AGENT_DIR` = plan.agentDir
- * - `XDG_DATA_HOME` = plan.xdgDataHome
- * - `TMPDIR` = plan.tmpDir
- * - `OMP_DECLARED_SKILL_ROOT` = the plan's RESOLVED skill root: the trusted
- *   extension's only witness of the declared root (`align-omp-skill-trust-to-
- *   shared-root` D4). It is fixed at spawn and verified here, so an absent or
- *   unacceptable value denies with zero skill authority in the child.
- *
- * Every other forbidden selector must be ABSENT (e.g. an assembly that forgot
- * the sanitization step). Throws with a bounded, content-free reason.
- */
-export function finalizeOmpSpawnEnvironment(
-  env: Record<string, string>,
-  plan: OmpSettingsSourcePlan,
-): void {
-  // Trusted assignment: plan values verbatim, overwriting anything inherited.
-  env["HOME"] = plan.ownedHome;
-  env["PI_CODING_AGENT_DIR"] = plan.agentDir;
-  env["XDG_DATA_HOME"] = plan.xdgDataHome;
-  env["TMPDIR"] = plan.tmpDir;
-  env[OMP_DECLARED_SKILL_ROOT_ENV] = plan.ownedSkillRoots[0];
-
-  // Observation: the final spawn environment must match the plan.
-  const expected: Readonly<Record<string, string>> = {
-    "HOME": plan.ownedHome,
-    "PI_CODING_AGENT_DIR": plan.agentDir,
-    "XDG_DATA_HOME": plan.xdgDataHome,
-    "TMPDIR": plan.tmpDir,
-    [OMP_DECLARED_SKILL_ROOT_ENV]: plan.ownedSkillRoots[0],
-  };
-  for (const [selector, planValue] of Object.entries(expected)) {
-    if (env[selector] !== planValue) {
-      throw new Error(
-        `OMP spawn environment violates the settings-source plan: ${selector} is not the deployment-owned value`,
-      );
-    }
-  }
-  for (const selector of plan.forbiddenSelectors) {
-    if (selector in expected) continue;
-    if (selector in env) {
-      throw new Error(
-        `OMP spawn environment violates the settings-source plan: ${selector} survived sanitization`,
-      );
-    }
-  }
-  // Foreign provider selectors are never plan-owned and never permitted in any
-  // form: an assembly that skipped sanitization must fail closed on them too.
-  for (const selector of OMP_FOREIGN_PROVIDER_ENV_SELECTORS) {
-    if (selector in env) {
-      throw new Error(
-        `OMP spawn environment violates the settings-source plan: ${selector} survived sanitization`,
-      );
-    }
-  }
 }
 
 /**
@@ -192,13 +103,6 @@ function buildBaseAgentConfig(
   workingDir: string,
   appConfig: Config,
   yolo: boolean,
-  /**
-   * The deployment's ONE resolved skill-script root, observed ONCE by
-   * {@link createAgentConfig} before subprocess creation. The OMP branch
-   * renders it into the generated settings declaration and the plan, so the
-   * declared root, the mounted root and the inventory root cannot diverge.
-   */
-  resolvedSkillRoot: string,
   agentWorkspacePath?: string,
   sessionId?: string,
   poolKey?: string,
@@ -337,127 +241,64 @@ function buildBaseAgentConfig(
       const baseRoot = poolKey
         ? resolve(join(appConfig.workspace.repoPath, "omp-pools", poolKey))
         : resolve(join(workingDir, "tmp"));
-      // Row 26: the launch composes its settings-source plan over the SAME
-      // mode-scoped base root it spawns with (single formula), below, once the
-      // overlay paths are resolved.
-      const settings = ompSettingsForMode(mode);
-
-      // Observability: warn on unresolved record reset gate
-      if (settings.recordResetGate.status === "unresolved") {
-        const log = createLogger("AgentFactory");
-        log.warn("OMP record-reset gate is unresolved; relying on execution-time default-deny", {
-          mode,
-          operativeBoundary: settings.recordResetGate.operativeSecurityBoundary,
-        });
-      }
-
-      // Disjointness check: native-yolo launch must not contain restricted-only overlays
-      if (mode === "native-yolo") {
-        const restrictedPaths = new Set(ompSettingsForMode("restricted").orderedOverlayPaths);
-        for (const overlayPath of settings.orderedOverlayPaths) {
-          if (restrictedPaths.has(overlayPath)) {
-            throw new Error(
-              `Contamination detected: restricted overlay "${overlayPath}" present in native-yolo launch`,
-            );
-          }
-        }
-      }
-
-      // Fail-closed checks on required assets: trusted extension module and overlay files
-      // Deployment-module declaration seam (`bind-omp-owned-module-evidence`):
-      // the launch assembly consumes the SELECTED declaration's artifact
-      // VERBATIM — the installed generated bundle when the owned /opt/air/omp
-      // tree exists, the deterministic GENERATED development entry
-      // (build/omp-extension/index.js) otherwise. The same declaration type is
-      // what the runtime verifier observes and anchors. No second path
-      // convention, and the raw Deno-only source tree is NEVER a fallback: a
-      // missing generated development entry fails here naming the build remedy
-      // (package-bun-compatible-omp-extension D2) instead of presenting a
-      // Deno-only import specifier as loadable.
-      const trustedExtensionPath = selectLaunchDeploymentModule().artifact;
-      try {
-        Deno.statSync(trustedExtensionPath);
-      } catch {
-        throw new Error(
-          `Missing trusted extension module at "${trustedExtensionPath}" — ` +
-            `build it first from canonical source and locked dependencies with ` +
-            `deno task bundle:omp-extension`,
-        );
-      }
-      // Authored mode overlays ONLY (`settings.orderedOverlayPaths`, dev→image
-      // seam): the daemon passes the resolved root to the child through the
-      // generated declaration, never through a hard-coded skill directory, so
-      // each authored document must validate its registered pins and declare no
-      // skill directory of its own.
-      const authoredOverlayPaths = settings.orderedOverlayPaths.map((overlayPath) =>
-        resolveOmpConfigPath(overlayPath)
+      // Authored native settings: ONE mode document, selected here and parsed
+      // by native OMP itself (dev→image seam). No overlay composition, no
+      // generated declaration, no app-owned schema validation.
+      //
+      // Every selected path is made ABSOLUTE here: the resolvers return the
+      // repository-relative development spelling in a checkout, while the child
+      // starts in `workingDir` and the confinement mounts name absolute paths.
+      const modeSettingsPath = resolve(
+        resolveOmpConfigPath(
+          mode === "restricted" ? OMP_RESTRICTED_SETTINGS_PATH : OMP_NATIVE_YOLO_SETTINGS_PATH,
+        ),
       );
-      for (const overlayPath of authoredOverlayPaths) {
+      const systemPromptPath = resolve(resolveOmpSystemPromptPath());
+
+      // Mode-distinct native data root. Native OMP redirects its data directory
+      // (sessions, database, auth side files) to `$XDG_DATA_HOME/omp` when that
+      // application directory already exists, so create it before spawn. Only
+      // this native data is mode-specific; process cwd and TMPDIR are shared
+      // with the ordinary launch convention.
+      const xdgDataHome = ompXdgDataHome(baseRoot, mode);
+      const nativeDataDir = resolve(join(xdgDataHome, "omp"));
+      Deno.mkdirSync(nativeDataDir, { recursive: true });
+
+      const args = ["acp", "--config", modeSettingsPath, "--system-prompt", systemPromptPath];
+
+      // Confinement inputs: the selected authored settings and prompt, the
+      // restricted capability bundle and the inherited-HOME native model file
+      // are exposed read-only; the selected native data child read-write.
+      const readOnlyMounts: string[] = [modeSettingsPath, systemPromptPath];
+      const writableMounts: string[] = [nativeDataDir];
+      // Per-spawn native data lives under the session TMPDIR, which the shared
+      // confinement binds writable in its entirety; shadow the mode parent so
+      // the SIBLING mode's native data is neither visible nor writable there.
+      // Pooled native data lives under the pool root, which is not bound at all
+      // (so no shadow is needed and bwrap never has to create its parents).
+      const shadowedMounts: string[] = poolKey ? [] : [resolve(join(baseRoot, "omp-agent"))];
+
+      // The capability extension is loaded ONLY by the restricted launch; the
+      // YOLO mode expresses its single LSP denial in its own native YAML.
+      if (mode === "restricted") {
+        // The generated native-loadable bundle is required: image artifact when
+        // installed, otherwise the deterministic development entry. The raw
+        // Deno-only source tree is never a fallback, so a missing generated
+        // artifact fails here naming the build remedy rather than presenting an
+        // unloadable specifier.
+        const trustedExtensionPath = resolve(resolveOmpExtensionPath());
         try {
-          Deno.statSync(overlayPath);
+          Deno.statSync(trustedExtensionPath);
         } catch {
-          throw new Error(`Missing owned overlay configuration file at "${overlayPath}"`);
+          throw new Error(
+            `Missing trusted extension module at "${trustedExtensionPath}" — ` +
+              `build it first from canonical source and locked dependencies with ` +
+              `deno task bundle:omp-extension`,
+          );
         }
-        const document = parseYaml(Deno.readTextFileSync(overlayPath)) as Record<string, unknown>;
-        assertOwnedSettingsDocument(document, mode, null);
+        args.push("--trusted-extension", trustedExtensionPath);
+        readOnlyMounts.push(trustedExtensionPath);
       }
-
-      // Generated single-key declaration (D3): exactly
-      // `skills.customDirectories: [<resolved root>]`, written at every spawn
-      // with a symlink-refusing unconditional overwrite, so a pooled base root
-      // never keeps a stale or rewritten document. Its parsed content is
-      // validated against the SAME resolved root the daemon mounted and the
-      // inventory enumerates; a failed write or a drifted value fails the
-      // launch before any subprocess exists.
-      const skillRootDeclarationPath = ompSkillRootDeclarationPath(baseRoot, mode);
-      writeOmpSkillRootDeclaration(skillRootDeclarationPath, resolvedSkillRoot);
-      const declarationDocument = parseYaml(
-        Deno.readTextFileSync(skillRootDeclarationPath),
-      ) as Record<string, unknown>;
-      assertOwnedSettingsDocument(declarationDocument, mode, [resolvedSkillRoot]);
-
-      // Ordered `--config` overlays: the declaration FIRST, the authored mode
-      // document LAST, so a rewritten declaration can never out-rank a pin.
-      const resolvedOverlayPaths = [skillRootDeclarationPath, ...authoredOverlayPaths];
-
-      // Row 26: the FINAL settings-source plan carries the RESOLVED owned
-      // overlay paths (dev→image seam) plus the generated declaration first,
-      // and the RESOLVED skill root (never a constant).
-      const sourcePlan = ompSettingsSourcePlan(mode, {
-        baseRoot,
-        ownedSkillRoots: [resolvedSkillRoot],
-        allowedOverlayPaths: resolvedOverlayPaths.map((overlayPath) => resolve(overlayPath)),
-      });
-
-      // Argument assembly: acp, --no-extensions, --no-lsp, ordered overlays, --trusted-extension, --system-prompt
-      // Decision 5 (docs/OMP_COMPATIBILITY.md §1a): `--no-lsp` is carried unconditionally in BOTH
-      // modes — restricted (which also keeps the row-8 `restricted.yml` lsp.enabled: false pin) and
-      // native-YOLO (whose mandatory settings pin arrives later with row 25
-      // `pin-omp-yolo-lsp-settings`; this flag is the row-17 carrier, independent of it). The flag
-      // appears exactly once per launch and no restricted tool policy crosses into YOLO.
-      const args = ["acp", "--no-extensions", "--no-lsp"];
-      for (const overlayPath of resolvedOverlayPaths) {
-        args.push("--config", overlayPath);
-      }
-      args.push("--trusted-extension", trustedExtensionPath);
-      args.push("--system-prompt", resolveOmpSystemPromptPath());
-
-      // Base root resolution and mode-distinct state roots
-      // (baseRoot composed above, ahead of the settings-plan construction.)
-
-      const agentDir = ompAgentDir(baseRoot, mode);
-      const procTmpDir = ompProcessTmpDir(baseRoot, mode);
-      const launchCwd = ompLaunchCwd(baseRoot, mode);
-      const xdgData = ompXdgDataHome(baseRoot, mode);
-      // Row 26: deployment-owned HOME replacing the daemon HOME.
-      const ownedHome = ompOwnedHome(baseRoot, mode);
-
-      // Ensure state directories exist
-      Deno.mkdirSync(agentDir, { recursive: true });
-      Deno.mkdirSync(procTmpDir, { recursive: true });
-      Deno.mkdirSync(launchCwd, { recursive: true });
-      Deno.mkdirSync(xdgData, { recursive: true });
-      Deno.mkdirSync(ownedHome, { recursive: true });
 
       const env: Record<string, string> = {};
 
@@ -472,11 +313,10 @@ function buildBaseAgentConfig(
         env["OPENROUTER_API_KEY"] = openRouterApiKey;
       }
 
-      // System essentials inheritance. Row 26: HOME is deliberately NOT
-      // inherited here — the settings-source plan owns the child HOME and
-      // `finalizeOmpSpawnEnvironment` assigns it after ordinary filtering;
-      // inheriting the daemon HOME would only hand sanitization more work.
-      const inheritVars = ["PATH", "DENO_DIR", "LANG", "LC_ALL", "USER"];
+      // System essentials inheritance. HOME IS inherited normally: native OMP
+      // reads its model configuration from the deployment HOME
+      // (`~/.omp/agent/models.yml`) and there is no daemon-owned home anymore.
+      const inheritVars = ["PATH", "HOME", "DENO_DIR", "LANG", "LC_ALL", "USER"];
       for (const varName of inheritVars) {
         const value = Deno.env.get(varName);
         if (value !== undefined) {
@@ -490,15 +330,24 @@ function buildBaseAgentConfig(
 
       env["SKILL_JWT_DIR"] = resolveSkillJwtDir(appConfig.agent.sharedProcess?.jwtDir);
 
-      // State & temporary roots
-      env["PI_CODING_AGENT_DIR"] = agentDir;
-      env["TMPDIR"] = procTmpDir;
-      env["XDG_DATA_HOME"] = xdgData;
-
+      // Native data + temporary roots. Process TMPDIR follows the existing
+      // shared/per-spawn convention; only the native data root is mode-specific.
+      env["XDG_DATA_HOME"] = xdgDataHome;
       if (poolKey) {
+        env["TMPDIR"] = resolve(join(appConfig.workspace.repoPath, "channel-tmp", poolKey));
         env["SKILL_SHARED_PROCESS"] = "1";
-      } else if (sessionId) {
-        env["SESSION_ID"] = sessionId;
+      } else {
+        env["TMPDIR"] = `${workingDir}/tmp`;
+        if (sessionId) {
+          env["SESSION_ID"] = sessionId;
+        }
+      }
+
+      // The native model file lives at the inherited HOME's native config path;
+      // expose it read-only when the deployment authored it.
+      const inheritedHome = env["HOME"];
+      if (inheritedHome !== undefined) {
+        readOnlyMounts.push(resolve(join(inheritedHome, ".omp", "agent", "models.yml")));
       }
 
       // Browser binary
@@ -527,12 +376,18 @@ function buildBaseAgentConfig(
         }
       }
 
+      const runtimeMounts: AgentRuntimeMounts = {
+        readOnlyPaths: readOnlyMounts,
+        writableRuntimePaths: writableMounts,
+        shadowedPaths: shadowedMounts,
+      };
+
       return {
         command: "omp",
         args,
-        cwd: launchCwd,
+        cwd: workingDir,
         env,
-        settingsSourcePlan: sourcePlan,
+        runtimeMounts,
       };
     }
 

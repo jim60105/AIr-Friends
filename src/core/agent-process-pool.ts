@@ -16,7 +16,7 @@
 import { createLogger } from "@utils/logger.ts";
 import { AgentConnector } from "@acp/agent-connector.ts";
 import type { AgentConnectorOptions, AgentType } from "@acp/types.ts";
-import { ompAgentDir, ompLaunchCwd, ompProcessTmpDir, ompXdgDataHome } from "@utils/omp-paths.ts";
+import { ompXdgDataHome } from "@utils/omp-paths.ts";
 import {
   deleteSessionJwtFile,
   issueSessionJwtFile,
@@ -490,10 +490,13 @@ export class AgentProcessPool {
     if (!dataRoot) return;
     if (agentType === "omp") {
       const baseRoot = resolve(join(dataRoot, "omp-pools", poolKey));
-      await Deno.mkdir(ompAgentDir(baseRoot, permissionMode), { recursive: true });
-      await Deno.mkdir(ompProcessTmpDir(baseRoot, permissionMode), { recursive: true });
-      await Deno.mkdir(ompLaunchCwd(baseRoot, permissionMode), { recursive: true });
-      await Deno.mkdir(ompXdgDataHome(baseRoot, permissionMode), { recursive: true });
+      // Native OMP redirects its data directory to `$XDG_DATA_HOME/omp`, so the
+      // application child (not just its parent) must exist before spawn.
+      await Deno.mkdir(resolve(join(ompXdgDataHome(baseRoot, permissionMode), "omp")), {
+        recursive: true,
+      });
+      // Pooled OMP processes share the pooled TMPDIR convention with OpenCode.
+      await Deno.mkdir(resolve(join(dataRoot, "channel-tmp", poolKey)), { recursive: true });
       return;
     }
     for (const sub of ["channel-cwd", "channel-tmp", "opencode-data"]) {

@@ -1,5 +1,18 @@
 # 總表：一覽全部功能
 
+> **本表為歷史功能清單（截至 OMP 整合批次），已被 `cutover-omp-native-runtime`（2026-10-15）取代。**
+> 表中提及的 `src/acp/omp-settings.ts`、`src/acp/omp/compatibility-contracts.ts`、
+> `src/acp/omp/settings-sources.ts`、`src/acp/omp/executable-sources.ts`、
+> `src/acp/omp/discovery-guard.ts`、`src/acp/omp/deployment-module.ts`、
+> `src/acp/omp/owned-module-evidence.ts`、`src/acp/omp/owned-skills.ts`、
+> `src/acp/omp/tool-provenance.ts`、`src/acp/omp/tool-enforcement-wiring.ts`、
+> `src/acp/omp/approval-records.ts`、`src/acp/omp/record-evaluator.ts`、
+> `src/acp/omp/destructive-decision.ts`、`src/acp/omp/skill-root-declaration.ts`
+> 與 `src/acp/omp/fetch-*`／`src/acp/omp/search-*` 均已刪除，相關測試檔亦已移除。
+> 目前的正確說明請見 [OMP 啟動與模式](../OMP_SPAWN.md)、[OMP 設定](../OMP_SETTINGS.md)、
+> [OMP 工具政策](../OMP_TOOL_POLICY.md) 與 [OMP 強制執行](../OMP_ENFORCEMENT.md)；
+> 原設計歷史保留於 `openspec/changes/archive/`。
+
 下表把本文件所有功能列在一起，方便快速查找。分類頁連結見左側選單。
 
 > 每一項的 **OpenCode 側做法與差異** 見 [12. OpenCode 對照](12-opencode-comparison.md)。

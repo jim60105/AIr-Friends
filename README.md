@@ -219,13 +219,13 @@ The dashboard chat (Interactive Terminal tab) offers both supported types in
 its Agent Protocol selector and submits the selected one with each connection;
 the configured default applies only when a request omits the agent type.
 
-OMP runs in two deployment postures: **restricted** (deployment-owned settings
-overlay, trusted enforcement extension, native approval mode) and
-**native-YOLO** (operator-approved; carries the LSP disable without restricted
-denials). LSP is disabled in every agent and mode — OMP restricted and YOLO
-via owned settings + `--no-lsp`, OpenCode build and yolo via per-agent
-explicit denies. Details: [OMP Spawn & Modes](docs/OMP_SPAWN.md),
-[OMP Settings](docs/OMP_SETTINGS.md).
+OMP runs in two deployment postures: **restricted** (hand-written native mode
+settings plus the restricted capability extension that blocks unmatched tool
+names before dispatch) and **native-YOLO** (operator-approved; native permissive
+policy with only the LSP tool denied). LSP is denied in every agent and mode —
+OMP restricted and YOLO via the authored exact-name `tools.approval.lsp: deny`,
+OpenCode build and yolo via per-agent explicit denies. Details:
+[OMP Spawn & Modes](docs/OMP_SPAWN.md), [OMP Settings](docs/OMP_SETTINGS.md).
 
 Honest status: the batch proposals are approved and their implementation
 lands through the applied changes; all seven user dispositions are DECIDED.

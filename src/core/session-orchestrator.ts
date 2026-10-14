@@ -810,7 +810,7 @@ export class SessionOrchestrator {
             // Record session ownership at acquisition (before first ACP call/createSession)
             const ownershipMode = agentType === "opencode" ? "yolo-switch" : permissionMode;
             const processNamespace = agentType === "omp"
-              ? (agentConfig.env?.["PI_CODING_AGENT_DIR"] ?? agentConfig.env?.["TMPDIR"] ?? "")
+              ? (agentConfig.env?.["XDG_DATA_HOME"] ?? agentConfig.env?.["TMPDIR"] ?? "")
               : (agentConfig.env?.["XDG_DATA_HOME"] ?? poolKey);
             if (shellSessionId && agentType === "opencode") {
               this.sessionRegistry.recordOwnership(shellSessionId, {
@@ -1140,7 +1140,7 @@ export class SessionOrchestrator {
           ? (yoloDecision.enabled ? "native-yolo" : "restricted")
           : permissionMode;
         const perSpawnNamespace = agentType === "omp"
-          ? (perSpawnAgentConfig.env?.["PI_CODING_AGENT_DIR"] ??
+          ? (perSpawnAgentConfig.env?.["XDG_DATA_HOME"] ??
             perSpawnAgentConfig.env?.["TMPDIR"] ?? "")
           : (perSpawnAgentConfig.env?.["XDG_DATA_HOME"] ?? workspace.path);
         if (shellSessionId && agentType === "opencode") {
@@ -1807,7 +1807,7 @@ export class SessionOrchestrator {
           ? (yoloDecision.enabled ? "native-yolo" : "restricted")
           : permissionMode;
         const perSpawnNamespace = agentType === "omp"
-          ? (perSpawnAgentConfig.env?.["PI_CODING_AGENT_DIR"] ??
+          ? (perSpawnAgentConfig.env?.["XDG_DATA_HOME"] ??
             perSpawnAgentConfig.env?.["TMPDIR"] ?? "")
           : (perSpawnAgentConfig.env?.["XDG_DATA_HOME"] ?? workspace.path);
         if (shellSessionId && agentType === "opencode") {
@@ -2275,7 +2275,7 @@ export class SessionOrchestrator {
           ? (this.yolo ? "native-yolo" : "restricted")
           : permissionMode;
         const perSpawnNamespace = agentType === "omp"
-          ? (perSpawnAgentConfig.env?.["PI_CODING_AGENT_DIR"] ??
+          ? (perSpawnAgentConfig.env?.["XDG_DATA_HOME"] ??
             perSpawnAgentConfig.env?.["TMPDIR"] ?? "")
           : (perSpawnAgentConfig.env?.["XDG_DATA_HOME"] ?? workspace.path);
         if (shellSessionId && agentType === "opencode") {
@@ -2859,7 +2859,7 @@ export class SessionOrchestrator {
           ? (this.yolo ? "native-yolo" : "restricted")
           : permissionMode;
         const perSpawnNamespace = agentType === "omp"
-          ? (perSpawnAgentConfig.env?.["PI_CODING_AGENT_DIR"] ??
+          ? (perSpawnAgentConfig.env?.["XDG_DATA_HOME"] ??
             perSpawnAgentConfig.env?.["TMPDIR"] ?? "")
           : (perSpawnAgentConfig.env?.["XDG_DATA_HOME"] ?? workspace.path);
         if (shellSessionId && agentType === "opencode") {
@@ -3245,7 +3245,7 @@ export class SessionOrchestrator {
           ? (this.yolo ? "native-yolo" : "restricted")
           : permissionMode;
         const perSpawnNamespace = agentType === "omp"
-          ? (channelAgentConfig.env?.["PI_CODING_AGENT_DIR"] ??
+          ? (channelAgentConfig.env?.["XDG_DATA_HOME"] ??
             channelAgentConfig.env?.["TMPDIR"] ?? "")
           : (channelAgentConfig.env?.["XDG_DATA_HOME"] ?? channelWorkspace.path);
         if (shellSessionId && agentType === "opencode") {
@@ -3655,7 +3655,7 @@ export class SessionOrchestrator {
           ? (yoloDecision.enabled ? "native-yolo" : "restricted")
           : permissionMode;
         const perSpawnNamespace = agentType === "omp"
-          ? (reminderAgentConfig.env?.["PI_CODING_AGENT_DIR"] ??
+          ? (reminderAgentConfig.env?.["XDG_DATA_HOME"] ??
             reminderAgentConfig.env?.["TMPDIR"] ?? "")
           : (reminderAgentConfig.env?.["XDG_DATA_HOME"] ?? workspace.path);
         if (shellSessionId && agentType === "opencode") {
@@ -3963,7 +3963,7 @@ export class SessionOrchestrator {
         // Record session ownership at acquisition (before first ACP call/createSession)
         const ownershipMode = agentType === "opencode" ? "yolo-switch" : permissionMode;
         const processNamespace = agentType === "omp"
-          ? (connectorOptions.agentConfig?.env?.["PI_CODING_AGENT_DIR"] ??
+          ? (connectorOptions.agentConfig?.env?.["XDG_DATA_HOME"] ??
             connectorOptions.agentConfig?.env?.["TMPDIR"] ?? "")
           : (connectorOptions.agentConfig?.env?.["XDG_DATA_HOME"] ?? poolKey);
         if (shellSessionId && agentType === "opencode") {

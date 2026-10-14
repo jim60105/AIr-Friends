@@ -1,6 +1,8 @@
 # OMP Spawn-Mode-Scoped Agent Integration
 
-This document defines the launch argument assembly, mode resolution, process state partitioning, and sandbox pass-through contracts for Oh-My-Pi (OMP) agents within AIr-Friends.
+This document defines the launch argument assembly, mode resolution, process
+data paths, environment and sandbox pass-through contracts for Oh-My-Pi (OMP)
+agents within AIr-Friends.
 
 Pinned to official OMP `v18.6.1` / commit `2a2c6dcbbb558c0f8145f67f28b3370984f2bf60`.
 
@@ -19,76 +21,151 @@ Unlike OpenCode (which uses ACP `setSessionMode()` to toggle into `"yolo"` mode 
 - `getSessionModeOverride("omp", true)` returns `null`.
 - OpenCode's session mode switching behavior (`getSessionModeOverride("opencode", true) === "yolo"`) remains unchanged.
 
+The resolved mode selects the mode settings document (section 2) and the mode-distinct native data root (section 3). It introduces no protocol override, environment key or control channel.
+
 ---
 
 ## 2. Launch Argument Assembly
 
-Arguments are deterministically assembled from the owned-settings composition provided by `ompSettingsForMode(mode)` (`src/acp/omp-settings.ts`):
+The factory (`src/acp/agent-factory.ts`, `omp` branch) assembles the argument
+list deterministically from the resolved mode:
+
+```
+omp acp --config <selected mode settings> --system-prompt <selected prompt>
+```
 
 ### Restricted Launch
 
 - Subcommand: `acp`
-- Base flags: `--no-extensions --no-lsp` (LSP disabled in every mode, decision 5 / row 17)
-- Overlay configuration: `--config` flags for the generated skill-root declaration FIRST (a single-key document holding the deployment-resolved root) followed by the authored mode document `restricted.yml` LAST (`align-omp-skill-trust-to-shared-root`: a rewritten declaration can then never out-rank the authored pins).
-- Trusted extension: `--trusted-extension <selected generated artifact>` — the launch assembly
-  (`selectLaunchDeploymentModule()`, `src/acp/omp/deployment-module.ts`) consumes the resolver
-  output VERBATIM: the image face `/opt/air/omp/extension/index.js` when that installed artifact
-  exists, otherwise the deterministic GENERATED development entry
-  `build/omp-extension/index.js` (repository-relative; the checkout's own bundling contract). The
-  canonical source `src/acp/omp/extension/index.ts` (`OMP_TRUSTED_EXTENSION_PATH`) is the
-  bundler INPUT and never a launch target, and an absent generated artifact fails the launch
-  preflight naming the `deno task bundle:omp-extension` remedy.
-- System prompt override: `--system-prompt /app/prompts/system_prompt_override.md`.
-- **Invariant**: No `--yolo` or auto-approval CLI flags appear in restricted mode. Non-YOLO approval is pinned in `restricted.yml` (`tools.approvalMode: write`).
+- Mode configuration: exactly ONE `--config` value —
+  `resolveOmpConfigPath("agent-config/omp/restricted.yml")`
+  (`src/utils/omp-paths.ts`): the installed copy
+  `/opt/air/omp/config/restricted.yml` when it exists, otherwise the authored
+  development-tree path. `tools.approvalMode: write` plus the exact-name
+  approval entries (see [OMP_SETTINGS.md](OMP_SETTINGS.md) §1a) are parsed by
+  native OMP itself.
+- Trusted extension: `--trusted-extension <selected generated artifact>` —
+  `resolveOmpExtensionPath()` returns the installed image artifact
+  `/opt/air/omp/extension/index.js` when present, otherwise the deterministic
+  GENERATED development entry `build/omp-extension/index.js`. The canonical
+  source `src/acp/omp/extension/index.ts` is the bundler INPUT and never a
+  launch target. A missing generated artifact fails the launch naming the
+  `deno task bundle:omp-extension` remedy; raw source is never a fallback.
+  The bundle is one small ESM file with zero external dependency edges whose
+  default export registers the restricted capability handler through the
+  official pre-dispatch tool-call API ([OMP_ENFORCEMENT.md](OMP_ENFORCEMENT.md),
+  [OMP_TOOL_POLICY.md](OMP_TOOL_POLICY.md)).
+- System prompt override: `--system-prompt <selected prompt>` —
+  `resolveOmpSystemPromptPath()` prefers the operator mount
+  `/app/prompts/system_prompt_override.md` when it exists, otherwise the
+  installed `/opt/air/omp/prompt/SYSTEM.md` artifact, otherwise the mount path
+  unchanged.
+- **Invariant**: the argument list is exactly `acp`, `--config`,
+  `--system-prompt` and (restricted launch only) `--trusted-extension`; no
+  approval-mode, extension-suppression or LSP-suppression flag exists in
+  either mode. Native ambient exploration stays enabled, and the LSP denial is
+  carried by the exact-name native approval entry
+  (`tools.approval.lsp: deny`) in each mode document — never by a launch flag.
 
 ### Native-YOLO Launch
 
 - Subcommand: `acp`
-- Base flags: `--no-extensions --no-lsp` (LSP disabled in every mode, decision 5 / row 17)
-- Overlay configuration: `--config` flags for the generated skill-root declaration FIRST followed by `native-yolo.yml` LAST (`tools.approvalMode: yolo`).
-- Trusted extension: the SAME selected generated artifact as the restricted launch (the flag sits
-  in the common argument assembly). The exemption is structural at the registration site — a
-  native-YOLO process registers no restricted handler and no replacement tool.
-- Disjointness check: Assembly asserts at runtime that no restricted overlay appears in a native-yolo launch.
+- Mode configuration: exactly ONE `--config` value for
+  `agent-config/omp/native-yolo.yml` (installed copy
+  `/opt/air/omp/config/native-yolo.yml`), authored with
+  `tools.approvalMode: yolo` and the single explicit `tools.approval.lsp: deny`
+  exception.
+- No extension: YOLO loads no `--trusted-extension` and registers no
+  restricted handler, so its permissive native policy stands for every tool
+  except the LSP denial.
+- Same system prompt argument as the restricted launch.
+
+Each mode selects its own document by construction, so a restricted document
+can never be selected for a YOLO launch and vice versa.
+
+### Native settings errors
+
+The launch delegates configuration parsing entirely to native OMP. An invalid
+authored document produces a NATIVE parse/startup error, which flows through
+the existing session error reporting as the session's error; this application
+performs no schema pre-validation and rewrites no file.
 
 ---
 
-## 3. Mode-Distinct Process State & Isolation
+## 3. Mode-Distinct Native Data & Process Environment
 
-To ensure complete isolation between permission modes:
-
-1. `PI_CODING_AGENT_DIR` is set to `{baseRoot}/omp-agent/{mode}`, preventing restricted and native-yolo processes from sharing mutable internal state.
-2. `TMPDIR` is partitioned to `{baseRoot}/omp-agent/{mode}/tmp`.
-3. Working directory (`cwd`) is set to `{baseRoot}/omp-agent/{mode}/cwd`, a deployment-controlled neutral directory with an empty `.omp/` layer. This completely prevents hostile project configuration inheritance from untrusted workspaces.
-4. `XDG_DATA_HOME` is scoped under `{baseRoot}/omp-agent/{mode}/xdg-data`.
-5. Canonical payload staging remains `{workspace}/tmp/{sessionId}`, independent of OMP internal state partitioning.
-6. Row 26 (`isolate-omp-settings-discovery`): `HOME` is EXPLICITLY assigned to the deployment-owned `{baseRoot}/omp-agent/{mode}/home` (never inherited, never unset — the native homedir fallback must not reach the daemon home). Every settings-discovery selector (`HOME`, all XDG selectors, `OMP_PROFILE`, `PI_PROFILE`, `PI_CONFIG_FILES`, `PI_CODING_AGENT_DIR`) and every foreign provider config selector is mandatorily stripped from the OMP child regardless of `filterEnv`/`allowedEnvVars`; only the exact plan values are re-assigned afterwards (`sanitizeOmpDiscoveryEnv` then `finalizeOmpSpawnEnvironment` in `src/acp/agent-factory.ts`). The typed source plan rides `AgentConfig.settingsSourcePlan`.
-7. `align-omp-skill-trust-to-shared-root` (`OMP_DECLARED_SKILL_ROOT`): the plan's RESOLVED skill root (`agent.skillsDir`, the ONE root both agent types resolve) is stripped like every other selector and then assigned and verified by `finalizeOmpSpawnEnvironment` on BOTH spawn routes. The trusted extension loaded in this child reads that value as its only witness of the declared root and verifies it is one absolute, existing, non-link directory; an absent or unacceptable value denies with zero skill authority and no workspace/HOME/cwd fallback. The skill-root declaration file itself is generated at launch at `{baseRoot}/omp-overlays/{mode}-skill-root.yml` and passed as the FIRST `--config` overlay — `{baseRoot}` being the mode's own base root (the pooled `{dataRoot}/omp-pools/{key}`, or the per-spawn session `{workspace}/tmp`), so the declaration is the ONE overlay the daemon must write at launch time; it is rewritten on every launch and its accepted `(dev, ino, ctime, size, mtime)` identity is captured after that write, so a later rewrite is refused.
-
-### Settings-source lifecycle order (row 26)
-
-The metadata-only settings-source observer (`src/acp/omp/settings-sources.ts`) is a RETAINED mechanism with no daemon-side per-request invocation since `simplify-omp-session-boundaries`: `AgentConnector` no longer calls it before the subprocess spawn in `connect()`, before native `session/new` in `createSession()`, or before teardown/respawn/`session/load` in `reconnectAndResumeSession()`, and it keeps no accepted-overlay identity baseline. The observer remains metadata-only for the generated skill-root declaration: that path is exempt from the agent-writable placement rule (the daemon must be writable to it at launch time) and is otherwise checked exactly like any other overlay (link, regular file, canonical parent, accepted `(dev, ino, ctime, size, mtime)` identity), so a post-launch rewrite is revealed by the accepted identity — restoring the modification time does not reproduce it; the declaration's CONTENT is validated by the launch assembly against the resolved root instead. Where it still gates a launch, a rejection (`SettingsSourceRejectionError`) performs no spawn, no session request, and no mutation of user files. See `docs/OMP_SETTINGS.md` section 6.
-
-### Executable-source lifecycle order (row 27)
-
-The metadata-only executable-source check (`src/acp/omp/executable-sources.ts`) no longer rides any connector lifecycle seam since `simplify-omp-session-boundaries`: the daemon has no pre-native-request invocation before spawn, `session/new` or recovery pre-teardown, so a found entry has no daemon-side rejection or recovery-abort reason of its own. The check observes the workspace's executable discovery shapes — `.omp/tools`/`tools` plus the foreign-provider `.claude/tools` project route (recursive, bounded), `.omp/plugins`/`plugins`, linked dependencies (`file:`/`link:`/`workspace:` specifiers and symlinked `node_modules` entries incl. `@scope`), the owned global routes under the plan's HOME/agent dir (custom-tool routes AND plugin routes — anything present fails closed; the owned roots themselves must be absolute, existing, non-link directories, never an empty-route interpolation), and configured module selectors in the observed child env — and NEVER executes, imports, or content-reads anything (lstat/realpath metadata plus bounded `package.json` entry declarations; no execute-bit logic: importable suffixes reject regardless of mode bits). The default metadata backend dispatches over the host runtime globals (a host `require` of `node:fs` first, the Deno sync namespace as fallback — no new static external enters the `@std/*`-only closure boundary; a host with neither fails every observation closed). A found entry, symlink, broken link, unknown shape, IO failure, or missing workspace authority throws a bounded, content-free `ExecutableSourceRejectionError` (≤8 named issues). Every observation binds the canonical workspace identity + resource generation, so a previous clean result is never reused as admission for a replaced workspace or a newly-grown entry. Its production consumer is the extension-load STARTUP CHECK: inside the extension itself (`--no-extensions`, image path only), the check runs as a restricted-identity-only STARTUP CHECK at trusted-module load (`extension/bootstrap.ts`) — a found executable module throws the load fail-closed before any decision returns, while a clean observation supplies the DECIDED decision-1 admission to the discovery guard (see `docs/OMP_DISCOVERY.md`). A development-tree/unidentified load takes NO observation and keeps the pinned fail-closed pre-import blockers verbatim — the startup check is production-only like the row-16 registration branch.
+1. **Working directory**: the process cwd is the caller/session `workingDir`
+   (`cwd: workingDir`) in pooled and per-spawn shapes alike. No
+   deployment-owned or mode-scoped working directory is used, so each session
+   keeps its own working directory.
+2. **HOME is inherited normally** (alongside `PATH`, `DENO_DIR`, `LANG`,
+   `LC_ALL` and `USER`) and is never reassigned. Native OMP reads its model
+   configuration from the inherited HOME's native config path
+   (`~/.omp/agent/models.yml`).
+3. **`XDG_DATA_HOME`** is the mode-distinct native data root
+   `ompXdgDataHome(baseRoot, mode)` = `{baseRoot}/omp-agent/{mode}/xdg-data`,
+   where `baseRoot` is `{dataRoot}/omp-pools/{poolKey}` for a pooled process
+   and `{workingDir}/tmp` for a per-spawn process. Its `omp` child is created
+   BEFORE spawn, because native OMP redirects its data directory (sessions,
+   database, auth side files) to `$XDG_DATA_HOME/omp` when that application
+   directory already exists. Restricted and native-YOLO processes therefore
+   never share one mutable native data directory.
+4. **`TMPDIR`** follows the existing shared/per-spawn convention:
+   `{dataRoot}/channel-tmp/{poolKey}` when pooled, `{workingDir}/tmp`
+   otherwise. Process tmp is NOT mode-specific.
+5. **`SESSION_ID`** is assigned per-spawn when the session has one;
+   **`SKILL_SHARED_PROCESS=1`** is assigned when pooled. `SKILL_JWT_DIR`,
+   `AGENT_WORKSPACE`, the detected browser binary path and the egress proxy
+   variables (`HTTP_PROXY`/`HTTPS_PROXY`/`NO_PROXY` and lowercase forms) keep
+   their existing behavior.
+6. **Environment filtering** is the shared filter/allowlist
+   (`sandbox.filterEnv` / operator `allowedEnvVars`). Platform, dashboard and
+   raw Skill API secrets stay denied, OpenCode's existing selector denials are
+   unchanged, and OMP adds no separate discovery-environment step or selector
+   prerequisite: the shared filtering choice is the whole OMP contract.
+7. **Payload staging** remains `{session cwd}/tmp/{Skill API ID}`, independent
+   of every native process data path above and unchanged by mode selection.
 
 ---
 
-## 4. Inherited Verdicts, Landed Integration and Evidence Limits
+## 4. Confinement Mounts
 
-Unit and mock tests in AIr-Friends verify configuration assembly and argument construction
-decisions only. The pinned upstream verdicts below are INHERITED, not reopened, and the seams they
-name are carried by their DECIDED dispositions and landed integrations — no change in the OMP
-batch waits on an unmet prerequisite:
+When filesystem confinement is configured, the OMP branch supplies
+`AgentConfig.runtimeMounts` (optional, OMP only) and
+`SandboxManager.buildSpawnOptions()` merges it with the shared confinement
+defaults:
 
-1. P0 compatibility contracts (`docs/OMP_COMPATIBILITY.md`): every `incompatible`/`unresolved`
-   boundary verdict stands verbatim beside its DECIDED (2026-10-09) disposition. P0's
-   application-halt ruling is superseded by §1a, so nothing here is application-blocked.
-2. Row 8 authoritative record-reset gate (`docs/OMP_SETTINGS.md`) — the pinned `unresolved` merge
-   verdict stands verbatim. Decision 3's application did not wait on it or on a separate user
-   decision: it is DECIDED via settings-discovery-path control (row 26, `docs/OMP_SETTINGS.md`
-   sections 2 and 6), with restricted execution-time default-deny as the second boundary.
-3. Packaging and binary installation (row 20): landed — the root-owned `/opt/air/omp` tree plus
-   the pinned `omp` v18.6.1 install. Official-runtime behavior (the native extension load and
-   image acceptance) remains user-owned and UNVERIFIED (`docs/USER-RUNTIME-VERIFICATION.md`).
+- **Read-only**: the selected mode settings file, the selected system prompt,
+  the restricted capability bundle (restricted launch only) and the
+  inherited-HOME `.omp/agent/models.yml`.
+- **Read-write**: the selected `<XDG_DATA_HOME>/omp` native data child.
+
+Neither the sibling mode/pool data roots, the pool parent, `dataRoot` nor HOME
+is exposed, and the shared skill-root overlap refusal plus the final read-only
+skill bind are unchanged. OpenCode passes no `runtimeMounts` and keeps its
+existing mounts. These are ordinary mount-reachability inputs for the selected
+native assets; they are not a source-identity or module-trust mechanism.
+
+---
+
+## 5. Inherited Verdicts and Evidence Limits
+
+Unit and mock tests in AIr-Friends verify argument construction, environment
+assembly and configuration bytes only; they never invoke the native binary, a
+provider, a container, a sandbox or a platform.
+
+1. P0 compatibility contracts ([docs/OMP_COMPATIBILITY.md](OMP_COMPATIBILITY.md)):
+   every recorded `incompatible`/`unresolved` boundary verdict stands verbatim
+   beside its DECIDED disposition. Nothing here reopens or re-litigates them,
+   and no change in the OMP batch waits on an unmet prerequisite.
+2. Packaging and binary installation (row 20): landed — the root-owned
+   `/opt/air/omp` tree, the root-owned `/usr/local/bin/omp` install and the
+   pinned `omp` v18.6.1 pin. Official-runtime behavior (the native extension
+   load, native settings parsing and image acceptance) remains user-owned and
+   UNVERIFIED ([USER-RUNTIME-VERIFICATION.md](USER-RUNTIME-VERIFICATION.md)).
+3. Restricted tool policy is landed (the capability decisions consumed by the
+   pre-dispatch handler) and its native invocation remains user-owned and
+   unverified. Readiness stays cancelled (row 13 removed): no handshake,
+   channel or tuple exists, and the accepted residual is that an extension
+   which fails to load leaves the session without the restricted capability
+   set.

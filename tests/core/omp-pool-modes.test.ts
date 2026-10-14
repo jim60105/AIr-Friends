@@ -17,7 +17,7 @@ import type { NormalizedEvent } from "../../src/types/events.ts";
 import type { PlatformAdapter } from "@platforms/platform-adapter.ts";
 import type { SessionAuditEntry } from "../../src/types/audit.ts";
 import { createAgentConfig } from "../../src/acp/agent-factory.ts";
-import { ompAgentDir, ompLaunchCwd, ompProcessTmpDir, ompXdgDataHome } from "@utils/omp-paths.ts";
+import { ompXdgDataHome } from "@utils/omp-paths.ts";
 
 /** Offline asset fixture only: never imported or executed by a real agent. */
 async function withExtensionFixture(run: () => Promise<void>): Promise<void> {
@@ -169,9 +169,7 @@ Deno.test("OMP acquisition matrix: entry points, resolved modes, ownership, audi
                       const session = registry.get(sessionId);
                       assertExists(session);
                       assertExists(acquiredOptions);
-                      const namespace = agentType === "omp"
-                        ? acquiredOptions.agentConfig.env?.PI_CODING_AGENT_DIR
-                        : acquiredOptions.agentConfig.env?.XDG_DATA_HOME;
+                      const namespace = acquiredOptions.agentConfig.env?.XDG_DATA_HOME;
                       const value = {
                         permissionMode: expectedOwnershipMode,
                         processNamespace: namespace ?? acquiredOptions.agentConfig.cwd,
@@ -200,8 +198,8 @@ Deno.test("OMP acquisition matrix: entry points, resolved modes, ownership, audi
                       assertEquals(options.clientConfig?.yolo, expectedMode === "native-yolo");
                       if (agentType === "omp") {
                         assert(
-                          options.agentConfig.env?.PI_CODING_AGENT_DIR?.endsWith(
-                            `/omp-agent/${expectedMode}`,
+                          options.agentConfig.env?.XDG_DATA_HOME?.endsWith(
+                            `/omp-agent/${expectedMode}/xdg-data`,
                           ),
                         );
                       }
@@ -994,18 +992,28 @@ Deno.test("Factory-backed pooled namespaces, skill identity and same-mode reuse"
           assertEquals(agentConfig.env?.SESSION_ID, undefined);
           if (agentType === "omp") {
             const base = join(root, "omp-pools", poolKey);
-            assertEquals(agentConfig.env?.PI_CODING_AGENT_DIR, ompAgentDir(base, mode));
-            assertEquals(agentConfig.env?.TMPDIR, ompProcessTmpDir(base, mode));
             assertEquals(agentConfig.env?.XDG_DATA_HOME, ompXdgDataHome(base, mode));
-            assertEquals(agentConfig.cwd, ompLaunchCwd(base, mode));
+            assertEquals(agentConfig.env?.TMPDIR, join(root, "channel-tmp", poolKey));
+            assertEquals(agentConfig.env?.PI_CODING_AGENT_DIR, undefined);
+            assertEquals(agentConfig.cwd, join(root, "workspace"));
+            for (
+              const path of [
+                agentConfig.env!.TMPDIR,
+                join(agentConfig.env!.XDG_DATA_HOME!, "omp"),
+              ]
+            ) assert((await Deno.stat(path)).isDirectory);
           } else {
             assertEquals(agentConfig.env?.TMPDIR, join(root, "channel-tmp", poolKey));
             assertEquals(agentConfig.env?.XDG_DATA_HOME, join(root, "opencode-data", poolKey));
             assertEquals(agentConfig.cwd, join(root, "channel-cwd", poolKey));
+            for (
+              const path of [
+                agentConfig.cwd,
+                agentConfig.env!.TMPDIR,
+                agentConfig.env!.XDG_DATA_HOME,
+              ]
+            ) assert((await Deno.stat(path)).isDirectory);
           }
-          for (
-            const path of [agentConfig.cwd, agentConfig.env!.TMPDIR, agentConfig.env!.XDG_DATA_HOME]
-          ) assert((await Deno.stat(path)).isDirectory);
         }
       }
       assertEquals(spawned.length, 3);
@@ -1014,13 +1022,13 @@ Deno.test("Factory-backed pooled namespaces, skill identity and same-mode reuse"
       assertEquals(identities[3], identities[4]);
       assertEquals(identities[3], identities[5]);
       assert(
-        spawned[0].agentConfig.env!.PI_CODING_AGENT_DIR !==
-          spawned[1].agentConfig.env!.PI_CODING_AGENT_DIR,
+        spawned[0].agentConfig.env!.XDG_DATA_HOME !==
+          spawned[1].agentConfig.env!.XDG_DATA_HOME,
       );
       const perSpawn = ["restricted", "native-yolo"].map((mode) =>
         createAgentConfig("omp", join(root, "workspace"), config, mode === "native-yolo")
       );
-      assert(perSpawn[0].env!.PI_CODING_AGENT_DIR !== perSpawn[1].env!.PI_CODING_AGENT_DIR);
+      assert(perSpawn[0].env!.XDG_DATA_HOME !== perSpawn[1].env!.XDG_DATA_HOME);
     } finally {
       if (pool) {
         // The release path includes asynchronous filesystem I/O; yield to its completion.

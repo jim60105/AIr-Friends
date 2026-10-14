@@ -170,19 +170,30 @@ Deno.test("verifyRecoveryOwnership - record under a different agent type cannot 
 Deno.test("deriveActualRecoveryTarget - OMP reads mode/namespace from the factory env, never recomputes", () => {
   assertEquals(
     deriveActualRecoveryTarget("omp", {
-      PI_CODING_AGENT_DIR: OMP_RESTRICTED_NS,
-      TMPDIR: `${OMP_RESTRICTED_NS}/tmp`,
+      XDG_DATA_HOME: `${OMP_RESTRICTED_NS}/xdg-data`,
     }),
-    { agentType: "omp", permissionMode: "restricted", processNamespace: OMP_RESTRICTED_NS },
+    {
+      agentType: "omp",
+      permissionMode: "restricted",
+      processNamespace: `${OMP_RESTRICTED_NS}/xdg-data`,
+    },
   );
   assertEquals(
     deriveActualRecoveryTarget("omp", {
-      PI_CODING_AGENT_DIR: OMP_YOLO_NS,
-      TMPDIR: `${OMP_YOLO_NS}/tmp`,
+      XDG_DATA_HOME: `${OMP_YOLO_NS}/xdg-data`,
     }),
-    { agentType: "omp", permissionMode: "native-yolo", processNamespace: OMP_YOLO_NS },
+    {
+      agentType: "omp",
+      permissionMode: "native-yolo",
+      processNamespace: `${OMP_YOLO_NS}/xdg-data`,
+    },
   );
-  // Fallback to TMPDIR; mode underivable when the agent dir is absent -> "".
+  // Mode segment absent from the data root -> underivable "" (fail closed downstream).
+  assertEquals(
+    deriveActualRecoveryTarget("omp", { XDG_DATA_HOME: "/tmp/plain" }),
+    { agentType: "omp", permissionMode: "", processNamespace: "/tmp/plain" },
+  );
+  // Fallback to TMPDIR when no data root is present; mode stays underivable.
   assertEquals(
     deriveActualRecoveryTarget("omp", { TMPDIR: "/work/tmp/omp-agent/native-yolo" }),
     { agentType: "omp", permissionMode: "", processNamespace: "/work/tmp/omp-agent/native-yolo" },

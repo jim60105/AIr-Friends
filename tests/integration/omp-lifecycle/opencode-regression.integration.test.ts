@@ -12,11 +12,9 @@
 // build+yolo per-agent explicit `lsp` denies (numbered rows 15 and 17 —
 // this asserts that CONFIG data, not any binary behavior).
 //
-// 5.2 — the mandatory runtime suite guard: the synthetic-positive ledger
-// accumulated across this suite run is scanned (every entry is a labeled
-// composition-boundary positive), the pinned unresolved-seam statuses are
-// asserted as data, and the default builder composition carries no allow
-// path and no readiness surface.
+// 5.2 — the retained runtime guard: the default builder composition carries
+// no readiness surface — no handshake, no readiness tuple/state/channel —
+// anywhere on the composed connector.
 //
 // Determinism (design D4): every subprocess assertion is driven by the
 // recorded RPC JSONL or the connector's own crash/recovery signal; the only
@@ -25,7 +23,7 @@
 // agent, official `omp` executable, container/bwrap, or provider credential
 // is used.
 
-import { assert, assertEquals, assertExists, assertRejects } from "@std/assert";
+import { assert, assertEquals, assertRejects } from "@std/assert";
 import { join, resolve } from "@std/path";
 import { AgentProcessPool, poolEntryKey } from "@core/agent-process-pool.ts";
 import { AgentConnector } from "@acp/agent-connector.ts";
@@ -36,11 +34,7 @@ import { MemoryStore } from "@core/memory-store.ts";
 import { WorkspaceManager } from "@core/workspace-manager.ts";
 import { createLogger } from "@utils/logger.ts";
 import { resolveSkillJwtDir } from "@utils/skill-jwt.ts";
-import { ompAgentDir } from "@utils/omp-paths.ts";
 import { createAgentConfig } from "@acp/agent-factory.ts";
-import { ENFORCEMENT_SEAMS, enforcementWiringGates } from "@acp/omp/tool-enforcement-wiring.ts";
-import { restrictedToolPolicyGates } from "@acp/omp/tool-inventory.ts";
-import { ompSettingsForMode } from "@acp/omp-settings.ts";
 import {
   deriveActualRecoveryTarget,
   RecoveryOwnershipError,
@@ -48,7 +42,7 @@ import {
 } from "@acp/recovery-ownership.ts";
 import type { PoolRunOptions } from "@core/agent-process-pool.ts";
 import type { Config } from "../../../src/types/config.ts";
-import { buildOmpMockSession, SyntheticPositiveLedger } from "../../mocks/omp-mock-session.ts";
+import { buildOmpMockSession } from "../../mocks/omp-mock-session.ts";
 
 const logger = createLogger("OpenCodeRegressionIntegration");
 
@@ -327,7 +321,6 @@ Deno.test({
         sessionId: "shell-opencode-51",
         xdgDataHome: runConfig.env["XDG_DATA_HOME"],
       };
-      const ledger = new SyntheticPositiveLedger();
 
       const runOptions = (key: string): PoolRunOptions => ({
         poolKey: key,
@@ -360,11 +353,6 @@ Deno.test({
         const response = await connector.prompt(acpSessionId, "opencode regression");
         assertEquals(response.stopReason, "end_turn");
         await connector.cancel(acpSessionId);
-        ledger.register(
-          "51-opencode-end-turn",
-          "composition-boundary: the end_turn response is a scripted mock reply; no model/provider behavior claim",
-          "mock-acp-agent session/prompt",
-        );
         return acpSessionId;
       });
       assertEquals(first.cancelledByDeadline, false);
@@ -394,7 +382,16 @@ Deno.test({
         const foreign: SessionRecoveryOwnership = {
           agentType: "omp",
           permissionMode: "restricted",
-          processNamespace: ompAgentDir(join(tempDir, "omp-pools", poolKey), "restricted"),
+          // The OMP namespace shape `deriveActualRecoveryTarget` reads from the
+          // spawn env: `{baseRoot}/omp-agent/{mode}/xdg-data`.
+          processNamespace: join(
+            tempDir,
+            "omp-pools",
+            poolKey,
+            "omp-agent",
+            "restricted",
+            "xdg-data",
+          ),
         };
         const before = await readRpcLines(rpcFile);
         const rejection = await assertRejects(
@@ -540,27 +537,21 @@ Deno.test({
 });
 
 // ---------------------------------------------------------------------------
-// 5.2 — mandatory runtime suite guard (spec: Fail-Closed Honest Posture)
+// 5.2 — retained runtime suite guard (spec: Fail-Closed Honest Posture)
 // ---------------------------------------------------------------------------
 
 Deno.test({
   name:
-    "runtime guard 5.2: every allow fixture is a labeled synthetic positive, unresolved seams stay pinned, and the default composition carries no allow path or readiness surface",
+    "runtime guard 5.2: the default builder composition carries no readiness surface anywhere on the connector",
   fn() {
-    // (a) Default composition is fail-closed: a builder composition with no
-    //     explicit synthetic override carries the absent-handler default, no
-    //     allow fixture, and no readiness surface anywhere.
+    // The default composition is fail-closed: a builder composition scripted
+    // only with `initialize` introduces no readiness handshake — no readiness
+    // tuple, state or channel anywhere on the composed connector.
     const harness = buildOmpMockSession({
       mode: "restricted",
       baseRoot: "/composed-harness-only",
       script: { initialize: { response: { protocolVersion: 1 } } },
     });
-    const defaultEntries = harness.ledger.entries();
-    assertEquals(
-      defaultEntries.map((entry) => entry.id),
-      ["handler-absent"],
-      "the default composition registers ONLY the absent-handler absence fact",
-    );
     for (
       const surface of ["ready", "readiness", "enforcementReady", "handlerReady"] as const
     ) {
@@ -570,60 +561,6 @@ Deno.test({
         `readiness surface leaked onto the connector: ${surface}`,
       );
     }
-
-    // (b) Every allow-path fixture registered anywhere in this test process
-    //     — this file, the lifecycle suites, the enforcement-composition
-    //     suite — is present as a LABELED synthetic positive. The
-    //     composition-boundary prefix is the machine-checkable honesty
-    //     marker: no entry may present itself as native emission or
-    //     enforcement evidence.
-    const entries = SyntheticPositiveLedger.allEntries();
-    assert(entries.length > 0, "the ledger must carry the suite's synthetic positives");
-    const ids = new Set<string>();
-    for (const entry of entries) {
-      assert(!ids.has(entry.id), `duplicate ledger id: ${entry.id}`);
-      ids.add(entry.id);
-      assert(
-        entry.label.startsWith("composition-boundary:"),
-        `synthetic positive ${entry.id} lacks the composition-boundary label`,
-      );
-      assert(entry.detail.length > 0, `synthetic positive ${entry.id} lacks its composition note`);
-    }
-
-    // (c) Pinned unresolved-seam statuses, asserted as DATA. These values
-    //     ARE the honest audit posture; the suite presents them only as
-    //     deny/blocked evidence, never as an allow-path claim.
-    assertEquals(
-      enforcementWiringGates.mcpBasis.basisStatus,
-      "needs-mechanism-audit",
-      "the MCP admission basis must stay at its audit status, not a verified claim",
-    );
-    const mcpSeam = ENFORCEMENT_SEAMS.find((seam) => seam.id === "mcp-admission-basis");
-    assertExists(mcpSeam, "the MCP admission seam stays pinned in the seam table");
-    assertEquals(mcpSeam.source.status, "needs-mechanism-audit");
-    assertEquals(
-      restrictedToolPolicyGates.row8RecordResetGate.status,
-      "unresolved",
-      "the approval-record reset gate stays pinned unresolved",
-    );
-    assertEquals(
-      ompSettingsForMode("restricted").recordResetGate.status,
-      "unresolved",
-      "row 8's own contract export keeps the reset gate unresolved",
-    );
-    const destructiveSeam = ENFORCEMENT_SEAMS.find((seam) =>
-      seam.id === "destructive-intent-decoding"
-    );
-    assertExists(destructiveSeam, "the destructive-decode seam stays pinned");
-    // The ledger verdict is quoted verbatim through the seam table: the
-    // destructive-decoding seam remains an unresolved inherited verdict.
-    assertEquals(destructiveSeam.source.status, "incompatible");
-    assertEquals(destructiveSeam.blockMarker, "destructive-intent");
-    assertEquals(
-      restrictedToolPolicyGates.verdicts[1].registerVerdict,
-      "UNRESOLVED",
-      "the destructive-decode register verdict stays UNRESOLVED",
-    );
   },
   sanitizeOps: false,
   sanitizeResources: false,

@@ -3,7 +3,6 @@
 import type { IdleTimeoutConfig } from "../types/config.ts";
 import type { TrustedSkillsSource } from "./filesystem-policy.ts";
 import type { LinuxNativeCalls } from "./filesystem-access-linux.ts";
-import type { OmpSettingsSourcePlan } from "./omp-settings.ts";
 import type { SkillsRootObservation } from "@core/skills-root.ts";
 
 /**
@@ -123,15 +122,13 @@ export interface AgentConfig {
   env?: Record<string, string>;
 
   /**
-   * Row 26 (`isolate-omp-settings-discovery`): deployment-owned settings-source
-   * plan for OMP launches. The factory composes it from `ompSettingsForMode`
-   * over the same mode-scoped roots it spawns with. The connector consumes it
-   * for the mandatory PRE-native-request settings-source preflight (spawn,
-   * session/new, session/load, same-mode recovery, rediscovery). An OMP launch
-   * without a plan fails the preflight closed — the field is the seam's
-   * transport, not an optional hint.
+   * Additional runtime mounts for THIS agent launch, merged with the shared
+   * confinement defaults by `SandboxManager.buildSpawnOptions()`. Only the OMP
+   * factory populates it, to expose the selected authored native assets
+   * read-only and the selected native mode data child read-write. OpenCode
+   * leaves it unset and keeps its existing mounts unchanged.
    */
-  settingsSourcePlan?: OmpSettingsSourcePlan;
+  runtimeMounts?: AgentRuntimeMounts;
 
   /**
    * `unify-omp-skill-root-resolution` D1: the canonical physical observation of
@@ -145,6 +142,34 @@ export interface AgentConfig {
    */
   skillsRoot?: SkillsRootObservation;
 }
+
+/**
+ * Optional per-launch confinement mounts, sharing the array shape the
+ * confinement builder already consumes.
+ */
+export interface AgentRuntimeMounts {
+  /**
+   * Extra paths bound read-only inside the confinement. They are emitted AFTER
+   * every writable bind, so a mandatory writable ancestor cannot widen them.
+   */
+  readOnlyPaths?: readonly string[];
+  /** Extra paths bound read-write inside the confinement. */
+  writableRuntimePaths?: readonly string[];
+  /**
+   * Paths shadowed by an empty tmpfs before the extra mounts are emitted, so a
+   * mode's sibling state directories under a mandatory writable ancestor are
+   * neither visible nor writable. Only paths whose parent is already bound may
+   * be listed.
+   */
+  shadowedPaths?: readonly string[];
+}
+
+/**
+ * The two native OMP approval modes a launch can select. The mode is fixed at
+ * process launch (no ACP session-mode override exists for OMP) and selects the
+ * authored native settings document and the mode-specific native data root.
+ */
+export type OmpPermissionMode = "restricted" | "native-yolo";
 
 /**
  * Supported ACP Agent types

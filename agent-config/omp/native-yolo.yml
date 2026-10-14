@@ -1,18 +1,17 @@
-# Pinned deployment-owned OMP configuration overlay for native-yolo mode.
+# Hand-authored native OMP settings for the native-YOLO mode.
 # Pinned to official OMP v18.6.1 / 2a2c6dcbbb558c0f8145f67f28b3370984f2bf60.
+#
+# `approvalMode: yolo` keeps native permissive policy for every tool except the
+# single explicit exact-name denial below. No capability extension is loaded in
+# this mode, so the denial is expressed natively and nowhere else.
 tools:
   approvalMode: yolo
-lsp:
-  enabled: false
+  approval:
+    lsp: deny
 skills:
   enabled: true
-  enableCodexUser: false
-  enableClaudeUser: false
-  enableClaudeProject: false
-  enablePiUser: false
-  enablePiProject: false
-  enableAgentsUser: false
-  enableAgentsProject: false
+  # Stock-image shared skill root. Native `expandTilde()` resolves `~`.
+  customDirectories: ["~/.agents/skills"]
 startup:
   checkUpdate: false
 marketplace:

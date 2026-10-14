@@ -7,7 +7,7 @@
 // Live image build/arch/binary acceptance is user-owned (§7 of
 // docs/OMP_PACKAGING.md) and ships explicitly unverified.
 
-import { assert, assertEquals, assertStringIncludes, assertThrows } from "@std/assert";
+import { assert, assertEquals, assertStringIncludes } from "@std/assert";
 // The generated-bundle audit predicate is imported from its production
 // module — tests exercise the EXACT function the bundler runs, never a
 // re-typed copy.
@@ -17,12 +17,6 @@ import {
   emittedRequireEdges,
 } from "../../scripts/omp/bundle-audit.ts";
 import {
-  CANONICAL_SOURCE_ROOT_LITERAL,
-  declarationCoverageProblems,
-  embedDeploymentDeclarations,
-} from "../../scripts/omp/bundle-declaration.ts";
-import { DEPLOYMENT_MODULE_DEPENDENCY_CLOSURE } from "@acp/omp/deployment-module.ts";
-import {
   OMP_IMAGE_CONFIG_ROOT,
   OMP_IMAGE_EXTENSION_ROOT,
   OMP_IMAGE_PROMPT_PATH,
@@ -31,10 +25,10 @@ import {
   OMP_TRUSTED_EXTENSION_BUNDLE_PATH,
   OMP_TRUSTED_EXTENSION_PATH,
   resolveOmpConfigPath,
+  resolveOmpExtensionPath,
   resolveOmpSystemPromptPath,
 } from "@utils/omp-paths.ts";
 import { OMP_IMAGE_EXTENSION_ARTIFACT } from "@utils/omp-paths.ts";
-import { selectLaunchDeploymentModule } from "@acp/omp/deployment-module.ts";
 
 const repoRoot = new URL("../../", import.meta.url).pathname.replace(/\/$/, "");
 const containerfile = await Deno.readTextFile(`${repoRoot}/Containerfile`);
@@ -161,10 +155,18 @@ Deno.test("omp packaging - final-stage destinations and ownership contract", () 
       "--chown=0:0 --chmod=0644 agent-config/omp/native-yolo.yml /opt/air/omp/config/native-yolo.yml",
     ),
   );
+  // models.yml is NOT an owned overlay: native OMP reads it from its own
+  // config HOME, so packaging installs it at the NATIVE path (root-owned) and
+  // the owned config tree stays the two mode YAMLs only.
   assert(
     finalStage.includes(
-      "--chown=0:0 --chmod=0644 agent-config/omp/models.yml /opt/air/omp/config/models.yml",
+      "--chown=0:0 --chmod=0644 agent-config/omp/models.yml /home/deno/.omp/agent/models.yml",
     ),
+  );
+  assertEquals(
+    finalStage.includes("/opt/air/omp/config/models.yml"),
+    false,
+    "models.yml is never installed into the owned config tree",
   );
   assert(
     finalStage.includes(
@@ -302,11 +304,9 @@ Deno.test("omp-paths resolvers - image-first when the installed tree exists", ()
     path === `${OMP_IMAGE_EXTENSION_ROOT}/index.js` ||
     path === `${OMP_IMAGE_CONFIG_ROOT}/restricted.yml` ||
     path === OMP_IMAGE_PROMPT_PATH;
-  const launch = selectLaunchDeploymentModule({ exists });
-  assertEquals(launch.artifact, "/opt/air/omp/extension/index.js");
-  assertEquals(launch.posture, "image");
-  // The image face is the FIXED declared constant (no injectable root).
-  assertEquals(launch.artifact, OMP_IMAGE_EXTENSION_ARTIFACT);
+  assertEquals(resolveOmpExtensionPath({ exists }), "/opt/air/omp/extension/index.js");
+  // The image face is the FIXED contracted constant (no injectable root).
+  assertEquals(resolveOmpExtensionPath({ exists }), OMP_IMAGE_EXTENSION_ARTIFACT);
   assertEquals(
     resolveOmpConfigPath("agent-config/omp/restricted.yml", { exists }),
     "/opt/air/omp/config/restricted.yml",
@@ -318,9 +318,7 @@ Deno.test("omp-paths resolvers - dev fallback selects the generated bundle when 
   // C3: the dev face is the deterministic GENERATED entry, never the raw
   // Deno-only source tree (OMP_TRUSTED_EXTENSION_PATH stays the canonical
   // source origin, asserted separately below).
-  const launch = selectLaunchDeploymentModule({ exists });
-  assertEquals(launch.artifact, OMP_TRUSTED_EXTENSION_BUNDLE_PATH);
-  assertEquals(launch.posture, "development");
+  assertEquals(resolveOmpExtensionPath({ exists }), OMP_TRUSTED_EXTENSION_BUNDLE_PATH);
   assertEquals(OMP_TRUSTED_EXTENSION_BUNDLE_PATH, "build/omp-extension/index.js");
   assertEquals(OMP_TRUSTED_EXTENSION_PATH, "src/acp/omp/extension/index.ts");
   assertEquals(
@@ -362,7 +360,7 @@ Deno.test("omp-paths resolvers - fixture roots exercise both branches end-to-end
     const imageExistsExt = (path: string) => real(path.startsWith(root) ? path : `${root}${path}`);
     // With the fixture tree carrying the fixed image artifact: image branch.
     assertEquals(
-      selectLaunchDeploymentModule({ exists: imageExistsExt }).artifact,
+      resolveOmpExtensionPath({ exists: imageExistsExt }),
       OMP_IMAGE_EXTENSION_ARTIFACT,
     );
     assertEquals(
@@ -375,7 +373,7 @@ Deno.test("omp-paths resolvers - fixture roots exercise both branches end-to-end
     // Against a nonexistent tree: dev fallback verbatim.
     const missing = `${root}/nope`;
     assertEquals(
-      selectLaunchDeploymentModule({ exists: real }).artifact,
+      resolveOmpExtensionPath({ exists: real }),
       OMP_TRUSTED_EXTENSION_BUNDLE_PATH,
     );
     assertEquals(
@@ -464,7 +462,13 @@ Deno.test("manifest generator - per-file lines, header facts, recut invariant", 
 Deno.test("docs/OMP_PACKAGING.md - recut invariant and digest table present", async () => {
   const doc = await Deno.readTextFile(`${repoRoot}/docs/OMP_PACKAGING.md`);
   assertStringIncludes(doc, "task-failure condition");
-  assertStringIncludes(doc, "12 → 13 → 14b → 17 → 18");
+  // The authored native model file is documented at its native config-HOME
+  // install path (never the removed `/opt/air/omp/config/models.yml`).
+  assertStringIncludes(doc, "/home/deno/.omp/agent/models.yml");
+  assert(
+    !doc.includes("/opt/air/omp/config/models.yml"),
+    "no owned models overlay install remains",
+  );
   assert(!doc.includes("reserved-but-unconsumed"), "no reserved-slot claim remains in the doc");
   // Digest table byte-identical to the design table values.
   for (const digest of Object.values(DIGESTS)) {
@@ -531,9 +535,11 @@ async function listFiles(dir: string): Promise<string[]> {
 // `package-bun-compatible-omp-extension` REPLACED the mirror-copy + generated
 // deno.json import-map packaging with ONE generated ESM bundle: the single
 // <target>/index.js cut from canonical source and frozen-lock dependencies.
-// The packaging contract asserted here is the generated file set, its digest
-// inventory, the emitted-dependency-edge audit, and fail-closed load parity —
-// never the former mirror tree, sidecar import map, or re-export barrel.
+// The packaging contract asserted here is the generated file set, the emitted-
+// dependency-edge audit (the cutover closure is fully inlined — zero
+// externals), and load parity — never the former mirror tree, sidecar import
+// map, or re-export barrel, and never a build-owned declaration or digest
+// inventory (the artifact is exactly the bundler's ESM output).
 
 async function buildBundle(target: string): Promise<void> {
   const command = new Deno.Command(`${repoRoot}/scripts/omp/bundle-omp-extension.sh`, {
@@ -543,11 +549,6 @@ async function buildBundle(target: string): Promise<void> {
   });
   const output = await command.output();
   assertEquals(output.code, 0, new TextDecoder().decode(output.stderr));
-}
-
-async function sha256Hex(bytes: Uint8Array): Promise<string> {
-  const digest = await crypto.subtle.digest("SHA-256", bytes as unknown as ArrayBuffer);
-  return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
 Deno.test("extension bundle - replay produces the single generated native-loadable entry", async () => {
@@ -560,52 +561,37 @@ Deno.test("extension bundle - replay produces the single generated native-loadab
     // ONE generated artifact: no mirror tree, no sidecar deno.json import map,
     // no generated adapter — the scaffolding removal IS the file-set equality.
     assertEquals(files, ["index.js"]);
+    // The artifact is exactly the bundler's ESM output: no build-owned
+    // deployment declaration placeholder survives, and no synthetic
+    // input-digest header is prepended.
+    const bundle = await Deno.readTextFile(`${target}/extension/index.js`);
+    assertEquals(
+      bundle.includes("@@OMP_CANONICAL_SOURCE_ROOT@@"),
+      false,
+      "no canonical-source placeholder survives",
+    );
+    assertEquals(
+      bundle.includes("Generated by scripts/omp/bundle-extension.ts"),
+      false,
+      "no digest-inventory header is prepended",
+    );
   } finally {
     await Deno.remove(target, { recursive: true });
   }
 });
 
-Deno.test("extension bundle - digest inventory names recomputed input digests", async () => {
+Deno.test("extension bundle - the extension closure is fully inlined (zero externals)", async () => {
   const target = await Deno.makeTempDir({ prefix: "omp-bundle-" });
   try {
     await buildBundle(`${target}/extension`);
     const bundle = await Deno.readTextFile(`${target}/extension/index.js`);
-    const header = bundle.split("\n").slice(0, 20).join("\n");
-    assertStringIncludes(header, "Generated by scripts/omp/bundle-extension.ts");
-    assertStringIncludes(header, "DO NOT EDIT");
-    // Deterministic source/input digest inventory: canonical entry + lock.
-    const entryBytes = await Deno.readFile(`${repoRoot}/src/acp/omp/extension/index.ts`);
-    const lockBytes = new TextEncoder().encode(await Deno.readTextFile(`${repoRoot}/deno.lock`));
-    assertStringIncludes(bundle, `entry sha256 ${await sha256Hex(entryBytes)}  `);
-    assertStringIncludes(bundle, `lock sha256 ${await sha256Hex(lockBytes)}  deno.lock`);
-    // The header claims the host-facade external and the no-pin posture
-    // (docs/OMP_PACKAGING.md §5: an image-side npm pin would bypass the host).
-    assertStringIncludes(header, "@sinclair/typebox");
-    assertStringIncludes(header, "no npm: pin");
-    // Provenance completeness: the locked @std/* closure is INLINED (non-
-    // minified deno bundle provenance comments survive the transformation).
-    assert(/\/\/ deno:https:\/\/jsr\.io\/@std\//.test(bundle), "inlined @std closure provenance");
-  } finally {
-    await Deno.remove(target, { recursive: true });
-  }
-});
-
-Deno.test("extension bundle - emitted edges are exactly the host facade and native builtins", async () => {
-  const target = await Deno.makeTempDir({ prefix: "omp-bundle-" });
-  try {
-    await buildBundle(`${target}/extension`);
-    const bundle = await Deno.readTextFile(`${target}/extension/index.js`);
-    // Exact external set: the bare TypeBox host-facade import plus the
-    // documented node: builtin the runtime-compatible DNS face uses. No
-    // jsr:/npm:/https edge, no import-map alias, no unapproved bare package,
-    // no non-inlined path edge survives the production audit.
+    // The capability-admission closure imports nothing external: no jsr:/npm:/
+    // https edge, no import-map alias, no unapproved bare package, no
+    // non-inlined path edge, and no runtime `require` edge survives bundling.
     const externals = emittedExternals(bundle);
-    assertEquals(externals, ["@sinclair/typebox", "node:dns/promises"]);
+    assertEquals(externals, []);
+    assertEquals(emittedRequireEdges(bundle), []);
     assertEquals(auditEmittedBundle(bundle), []);
-    // Runtime-require edges are audited too: the Deno-guarded metadata
-    // backends reach node:fs through globalThis.require (bundler-renamed
-    // aliases included) — nothing else may arrive through that door.
-    assertEquals(emittedRequireEdges(bundle), ["node:fs"]);
     // Cross-line static clauses must not dodge the audit either: the
     // newline-tolerant window sees no specifier beyond the strict set.
     const loose = [...bundle.matchAll(
@@ -617,15 +603,6 @@ Deno.test("extension bundle - emitted edges are exactly the host facade and nati
       externals,
       "loose cross-line scan agrees with the strict set",
     );
-    // The canonical host-resolved spelling is retained — never npm: form.
-    assert(bundle.includes(`from "@sinclair/typebox"`), "bare facade specifier");
-    assertEquals(bundle.includes(`from "npm:@sinclair/typebox"`), false, "no npm: pin emitted");
-    // TypeBox SUBPATHS are not host-remapped and must not appear.
-    assertEquals(
-      externals.some((spec) => spec.startsWith("@sinclair/typebox/")),
-      false,
-      "no typebox subpath edge",
-    );
   } finally {
     await Deno.remove(target, { recursive: true });
   }
@@ -634,7 +611,7 @@ Deno.test("extension bundle - emitted edges are exactly the host facade and nati
 Deno.test("bundle audit - production predicate fails every edge class outside the boundary", () => {
   // The audit is exercised deterministically on synthetic bundle text (zero
   // network): every class the container-packaging requirement names SHALL
-  // fail packaging BEFORE installation, and only the documented externals
+  // fail packaging BEFORE installation, and only documented native builtins
   // SHALL pass.
   const cases: [string, string][] = [
     ["jsr:@std/text@1.0.0", "runtime-download edge (JSR/remote URL)"],
@@ -643,7 +620,6 @@ Deno.test("bundle audit - production predicate fails every edge class outside th
     ["@std/path", "import-map alias edge"],
     ["@acp/omp/fetch-transport.ts", "import-map alias edge"],
     ["left-pad", "unapproved bare package"],
-    ["@sinclair/typebox/value", "unapproved bare package"],
     ["./sibling.js", "non-inlined path edge"],
     ["/opt/air/abs.js", "non-inlined path edge"],
     ["file:///tmp/leak.js", "non-inlined path edge"],
@@ -661,10 +637,10 @@ Deno.test("bundle audit - production predicate fails every edge class outside th
     );
     assertStringIncludes(problems[0]!, spec);
   }
-  // The documented externals pass clean.
+  // The documented native builtins pass clean.
   assertEquals(
     auditEmittedBundle(
-      `import { Type } from "@sinclair/typebox";\nimport * as dns from "node:dns/promises";\nconst b = await import("bun:sqlite");\nconsole.log(Type, dns, b);\n`,
+      `import * as dns from "node:dns/promises";\nconst b = await import("bun:sqlite");\nconsole.log(dns, b);\n`,
     ),
     [],
   );
@@ -709,23 +685,18 @@ Deno.test("bundle audit - production predicate fails every edge class outside th
   );
 });
 
-Deno.test("extension bundle - load parity: generated entry and dev source fail closed identically", async () => {
-  // The pinned pre-import-exclusion verdicts are unresolved (row 12), so BOTH
-  // the dev canonical source and the generated bundle fail closed at load
-  // with the same discovery-gate error. Identical failure = behavior parity
-  // of the deterministic transformation, without ever executing `omp`.
-  // REWRITE CONDITION (recut-culture note for successors): when row 12's
-  // pre-import-exclusion blocker is ever resolved, this test's fail-closed
-  // assertions become a hard failure ON PURPOSE — rewrite it in that same
-  // change to assert SUCCESSFUL-load parity (both loads return "loaded"),
-  // per docs/OMP_PACKAGING.md §5's external-trust asymmetry note.
+Deno.test("extension bundle - load parity: generated entry and dev source load identically", async () => {
+  // The cutover extension is the small capability-admission closure with no
+  // module-load bootstrap, discovery guard or host-facade edge: the dev
+  // canonical source and the generated bundle evaluate to the SAME default
+  // registration callback, without ever executing `omp`.
   const target = await Deno.makeTempDir({ prefix: "omp-bundle-" });
   try {
     await buildBundle(`${target}/extension`);
     const loadDev = new Deno.Command(Deno.execPath(), {
       args: [
         "eval",
-        `const r = await import("${repoRoot}/src/acp/omp/extension/index.ts").then(() => "loaded").catch((e) => String(e)); console.log(r)`,
+        `const r = await import("${repoRoot}/src/acp/omp/extension/index.ts").then((m) => "loaded:" + typeof m.default).catch((e) => "threw:" + String(e)); console.log(r)`,
       ],
       stdout: "piped",
       stderr: "piped",
@@ -734,7 +705,7 @@ Deno.test("extension bundle - load parity: generated entry and dev source fail c
     const loadBundle = new Deno.Command(Deno.execPath(), {
       args: [
         "eval",
-        `const r = await import("${target}/extension/index.js").then(() => "loaded").catch((e) => String(e)); console.log(r)`,
+        `const r = await import("${target}/extension/index.js").then((m) => "loaded:" + typeof m.default).catch((e) => "threw:" + String(e)); console.log(r)`,
       ],
       stdout: "piped",
       stderr: "piped",
@@ -746,25 +717,22 @@ Deno.test("extension bundle - load parity: generated entry and dev source fail c
     const devText = new TextDecoder().decode(dev.stdout).trim();
     const bundleText = new TextDecoder().decode(bundled.stdout).trim();
 
-    // Neither silently "loads" (the gate must stay fail-closed in the image too).
-    assertEquals(devText === "loaded", false, "dev entry expected to fail closed");
-    assertEquals(bundleText === "loaded", false, "bundle expected to fail closed identically");
-    // Same discovery-gate failure class (the pre-import exclusion blocker).
-    assert(devText.includes("pre-import exclusion not established"), `dev: ${devText}`);
-    assert(bundleText.includes("pre-import exclusion not established"), `bundle: ${bundleText}`);
+    // Identical successful-load parity: both expose the default registration
+    // function, so the deterministic transformation is behavior-preserving.
+    assertEquals(devText, "loaded:function");
+    assertEquals(bundleText, "loaded:function");
   } finally {
     await Deno.remove(target, { recursive: true });
   }
 });
 
-Deno.test("extension bundle - loads under a facade-only host with NO Deno import map", async () => {
-  // Task 3.1's permanent core: the generated bundle must import through the
-  // pinned host-facade contract alone. The fixture is a minimal Node-style
-  // package exposing the Type builder surface the bundle calls (Object/
-  // String/Number/Literal/Optional/Union) — the host, not an import map,
-  // owns that resolution. Node availability is environment-dependent; the
-  // test SKIP-PASSES with a notice when no node binary exists (the image
-  // build never runs the unit suite, and no runtime is installed by C3).
+Deno.test("extension bundle - loads standalone under node with NO Deno import map", async () => {
+  // The bundle is fully self-contained: no bare host facade, no import-map
+  // alias, no Deno global. Node loads the copied artifact from an isolated
+  // tree with no node_modules and no repo config, proving native-loadability
+  // without the pinned host's resolution rules. Node availability is
+  // environment-dependent; the test SKIP-PASSES with a notice when no node
+  // binary exists (the image build never runs the unit suite).
   let haveNode = true;
   try {
     await new Deno.Command("node", { args: ["--version"], stdout: "null", stderr: "null" })
@@ -776,56 +744,28 @@ Deno.test("extension bundle - loads under a facade-only host with NO Deno import
     console.warn("SKIP: no node binary — native-loader smoke is user-owned");
     return;
   }
-  const fixture = await Deno.makeTempDir({ prefix: "omp-facade-" });
+  const fixture = await Deno.makeTempDir({ prefix: "omp-standalone-" });
   const target = await Deno.makeTempDir({ prefix: "omp-bundle-" });
   try {
-    // The generated bundle is COPIED into the fixture tree: Node (and every
-    // native loader) resolves bare specifiers upward from the MODULE's own
-    // directory, so the fixture's node_modules/@sinclair/typebox stands in
-    // for the host-facade remap only for a bundle that lives under the
-    // fixture root.
+    // The generated bundle is COPIED into the fixture tree and loaded there:
+    // no node_modules, no import map, no Deno — resolution has nowhere to go
+    // but the bundle's own inlined closure.
     await buildBundle(`${target}/extension`);
     await Deno.mkdir(`${fixture}/ext`, { recursive: true });
     await Deno.copyFile(`${target}/extension/index.js`, `${fixture}/ext/index.js`);
-    await Deno.mkdir(`${fixture}/node_modules/@sinclair/typebox`, { recursive: true });
     await Deno.writeTextFile(
       `${fixture}/package.json`,
-      JSON.stringify({ name: "omp-facade-fixture", type: "module", private: true }) + "\n",
-    );
-    await Deno.writeTextFile(
-      `${fixture}/node_modules/@sinclair/typebox/package.json`,
-      JSON.stringify({
-        name: "@sinclair/typebox",
-        version: "0.0.0-fixture",
-        type: "module",
-        main: "index.js",
-        exports: { ".": "./index.js" },
-      }) + "\n",
-    );
-    await Deno.writeTextFile(
-      `${fixture}/node_modules/@sinclair/typebox/index.js`,
-      "export const Type = {\n" +
-        "  Object: (s) => ({ kind: 'object', s }),\n" +
-        "  String: () => ({ kind: 'string' }),\n" +
-        "  Number: () => ({ kind: 'number' }),\n" +
-        "  Literal: (v) => ({ kind: 'literal', v }),\n" +
-        "  Optional: (s) => ({ kind: 'optional', s }),\n" +
-        "  Union: (vs) => ({ kind: 'union', vs }),\n" +
-        "};\n" +
-        "console.log('FACADE-CALLED');\n",
+      JSON.stringify({ name: "omp-standalone-fixture", type: "module", private: true }) + "\n",
     );
     await Deno.writeTextFile(
       `${fixture}/load.mjs`,
       `
 const r = await import("./ext/index.js")
-  .then((m) => "loaded:" + Object.keys(m).sort().join(","))
+  .then((m) => "loaded:" + typeof m.default)
   .catch((e) => "threw:" + String(e).slice(0, 200));
 console.log(r);
 `,
     );
-    // Node resolves the bundle's bare @sinclair/typebox edge by walking up
-    // from the module file into the fixture's node_modules — the host
-    // facade stand-in. No import map, no repo config, no network, no Deno.
     const load = await new Deno.Command("node", {
       args: ["load.mjs"],
       cwd: fixture,
@@ -834,142 +774,20 @@ console.log(r);
     }).output();
     const out = new TextDecoder().decode(load.stdout);
     const err = new TextDecoder().decode(load.stderr);
-    // The bare @sinclair/typebox edge resolved to the FIXTURE facade (host
-    // remap stand-in), so module bodies — the schema definitions included —
-    // evaluated with no Deno global, no repo import map, and no download:
-    // the discovery-gate throw is the identical fail-closed class as the
-    // Deno-face load above. A facade resolution failure would name the
-    // import instead of the discovery gate.
+    // The bundle evaluated with no Deno global, no repo import map and no
+    // download: its default registration callback is live under a plain host.
     assert(
-      out.includes("FACADE-CALLED") || err.includes("FACADE-CALLED"),
-      `facade host-resolved (stdout=${out} stderr=${err})`,
+      out.includes("loaded:function"),
+      `bundle loaded standalone (stdout=${out} stderr=${err})`,
     );
+    // A missing external edge has its own unmistakable shape; it must never
+    // appear — the closure is fully inlined.
     assert(
-      out.includes("pre-import exclusion not established") ||
-        err.includes("pre-import exclusion not established"),
-      `bundle reached the discovery gate without Deno (stdout=${out} stderr=${err})`,
-    );
-    // Resolution failure has its own unmistakable shape; a bare mention of
-    // the specifier inside the discovery-gate stack trace is not one.
-    assertEquals(
-      /Cannot find (package|module)['\s]+["']?@sinclair\/typebox/.test(out + err),
-      false,
-      "facade never left unresolved",
+      !/Cannot find (package|module)/.test(out + err),
+      "no bare specifier was left unresolved",
     );
   } finally {
     await Deno.remove(fixture, { recursive: true });
     await Deno.remove(target, { recursive: true });
-  }
-});
-
-// --- 4.1 Build-owned deployment declaration (`bind-omp-owned-module-evidence`)
-//
-// The generated bundle declares the EXACT development artifact it was cut from
-// (its canonical source checkout's build/omp-extension/index.js) so the runtime
-// verifier can anchor physical evidence to a build input instead of a mutable
-// cwd or an arbitrary loaded-module parent.
-
-Deno.test("bundle declaration - the canonical source root is substituted exactly once", () => {
-  const emitted = `const ROOT = ${CANONICAL_SOURCE_ROOT_LITERAL};\n`;
-  assertEquals(
-    embedDeploymentDeclarations(emitted, "/checkout"),
-    `const ROOT = "/checkout";\n`,
-  );
-  // A bundle without the declaration, or with more than one, fails the build:
-  // an artifact whose runtime identity is a placeholder never ships.
-  assertThrows(
-    () => embedDeploymentDeclarations("const OTHER = 1;\n", "/checkout"),
-    Error,
-    "must carry EXACTLY ONE",
-  );
-  assertThrows(
-    () =>
-      embedDeploymentDeclarations(
-        `${CANONICAL_SOURCE_ROOT_LITERAL} ${CANONICAL_SOURCE_ROOT_LITERAL}`,
-        "/checkout",
-      ),
-    Error,
-    "found 2",
-  );
-  // The declared root must be an absolute canonical path.
-  assertThrows(
-    () => embedDeploymentDeclarations(emitted, "checkout/"),
-    Error,
-    "absolute path",
-  );
-  // Replacement-sequence safety: a checkout path containing `$$`, `$&` or
-  // `$1` must be embedded LITERALLY (a replacement string would rewrite it).
-  for (const root of ["/tmp/$$/checkout", "/tmp/$&/checkout", "/tmp/$1/checkout", "/tmp/$`/x"]) {
-    assertEquals(
-      embedDeploymentDeclarations(emitted, root),
-      `const ROOT = ${JSON.stringify(root)};\n`,
-      root,
-    );
-  }
-});
-
-Deno.test("bundle declaration - an under-declared emitted edge fails the closure check", () => {
-  assertEquals(
-    declarationCoverageProblems(
-      ["@sinclair/typebox", "node:dns/promises", "node:fs"],
-      DEPLOYMENT_MODULE_DEPENDENCY_CLOSURE,
-    ),
-    [],
-  );
-  // Documented native builtins keep their own emitted-edge policy.
-  assertEquals(declarationCoverageProblems(["bun:sqlite"], []), []);
-  assertEquals(
-    declarationCoverageProblems(["left-pad"], DEPLOYMENT_MODULE_DEPENDENCY_CLOSURE),
-    ["emitted edge 'left-pad' is not in the declared dependency closure"],
-  );
-});
-
-Deno.test("extension bundle - the declared artifact follows the canonical SOURCE, never the output target", async () => {
-  const targetA = await Deno.makeTempDir({ prefix: "omp-bundle-" });
-  const targetB = await Deno.makeTempDir({ prefix: "omp-bundle-" });
-  const alias = await Deno.makeTempDir({ prefix: "omp-bundle-alias-" });
-  const canonicalSource = await Deno.realPath(repoRoot);
-  try {
-    await buildBundle(`${targetA}/extension`);
-    await buildBundle(`${targetB}/extension`);
-    const a = await Deno.readTextFile(`${targetA}/extension/index.js`);
-    const b = await Deno.readTextFile(`${targetB}/extension/index.js`);
-    // Deterministic: an arbitrary packaging output target changes NOTHING.
-    assertEquals(a, b);
-    // The declaration names the canonical source checkout, and the header
-    // records both the declared artifact and the permitted closure.
-    assert(
-      a.includes(JSON.stringify(canonicalSource)),
-      "declaration carries the canonical source root",
-    );
-    assertEquals(a.includes(CANONICAL_SOURCE_ROOT_LITERAL), false, "no placeholder survives");
-    assertStringIncludes(
-      a,
-      `declared development artifact  ${canonicalSource}/${OMP_TRUSTED_EXTENSION_BUNDLE_PATH}`,
-    );
-    assertStringIncludes(
-      a,
-      `declared dependency closure  ${DEPLOYMENT_MODULE_DEPENDENCY_CLOSURE.join(", ")}`,
-    );
-    // The output target itself (a different tree, `/extension` included) is
-    // never what the declaration names.
-    assertEquals(a.includes(`"${targetA}`), false, "output target gains no authority");
-
-    // A moved checkout: bundling through a SYMLINKED source path still
-    // declares the canonical checkout (a real move rebuilds, never relocates).
-    await Deno.symlink(repoRoot, `${alias}/checkout`);
-    const moved = new Deno.Command(`${repoRoot}/scripts/omp/bundle-omp-extension.sh`, {
-      args: [`${alias}/checkout`, `${alias}/out`, `${alias}/checkout/deno.lock`],
-      stdout: "piped",
-      stderr: "piped",
-    });
-    const movedOutput = await moved.output();
-    assertEquals(movedOutput.code, 0, new TextDecoder().decode(movedOutput.stderr));
-    const viaAlias = await Deno.readTextFile(`${alias}/out/index.js`);
-    assertEquals(viaAlias, a, "the declaration follows the canonical source, not the spelling");
-  } finally {
-    await Deno.remove(targetA, { recursive: true });
-    await Deno.remove(targetB, { recursive: true });
-    await Deno.remove(alias, { recursive: true });
   }
 });
