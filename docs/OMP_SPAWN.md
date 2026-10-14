@@ -158,11 +158,14 @@ provider, a container, a sandbox or a platform.
    every recorded `incompatible`/`unresolved` boundary verdict stands verbatim
    beside its DECIDED disposition. Nothing here reopens or re-litigates them,
    and no change in the OMP batch waits on an unmet prerequisite.
-2. Packaging and binary installation (row 20): landed — the root-owned
-   `/opt/air/omp` tree, the root-owned `/usr/local/bin/omp` install and the
-   pinned `omp` v18.6.1 pin. Official-runtime behavior (the native extension
-   load, native settings parsing and image acceptance) remains user-owned and
-   UNVERIFIED ([USER-RUNTIME-VERIFICATION.md](USER-RUNTIME-VERIFICATION.md)).
+2. Packaging and binary installation (row 20, revised by
+   `simplify-omp-container-installation`): landed — the `/opt/air/omp` artifact
+   tree, the `/usr/local/bin/omp` install and the pinned `omp` v18.6.1 pin all
+   follow the image's ordinary `$UID:0` + `775` install convention, and no
+   OMP-specific ownership policy or internal digest manifest remains.
+   Official-runtime behavior (the native extension load, native settings parsing
+   and both-architecture image acceptance) remains user-owned and UNVERIFIED
+   ([USER-RUNTIME-VERIFICATION.md](USER-RUNTIME-VERIFICATION.md)).
 3. Restricted tool policy is landed (the capability decisions consumed by the
    pre-dispatch handler) and its native invocation remains user-owned and
    unverified. Readiness stays cancelled (row 13 removed): no handshake,

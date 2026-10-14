@@ -1,18 +1,19 @@
-# OMP Packaging — pinned `omp` install + owned image tree
+# OMP Packaging — pinned `omp` install + installed image artifacts
 
-OpenSpec change: `package-pinned-omp-runtime` (OMP batch row 20 / P8); the
-`cutover-omp-native-runtime` core cutover supersedes its bundle-governance and
-launch-face wording (§4/§5), and the artifact is now exactly the bundler's own
-output.
+OpenSpec change: `package-pinned-omp-runtime` (OMP batch row 20 / P8). The
+`cutover-omp-native-runtime` core cutover superseded its bundle-governance and
+launch-face wording (§4/§5), and `simplify-omp-container-installation` replaced
+its deployment-owned installation policy with the image's ordinary install
+convention and removed the internal artifact digest manifest.
 Packaging of the trusted extension itself (the generated native-loadable
 bundle) is `package-bun-compatible-omp-extension` (C3): the mirror-copy +
 sidecar-import-map scaffolding is REMOVED — one generated `index.js` is the
 installed extension artifact.
 This document is the packaging contract for the official Oh-My-Pi (`omp`) CLI
-and the deployment-owned artifacts under `/opt/air/omp`. It installs bytes and
-records digests; it certifies **nothing** about native enforcement, and no
-runtime acceptance is claimed. The live acceptance checklist (§7) is user-owned
-and ships explicitly unverified.
+and the artifacts installed under `/opt/air/omp`. It installs checksum-verified
+bytes at stable deployment paths; it certifies **nothing** about native
+enforcement, and a local image build certifies the LOCAL architecture only. The
+remaining acceptance items (§6) are user-owned.
 
 Related: [OMP settings](OMP_SETTINGS.md) (the authored native mode settings and
 the SYSTEM.md prompt mapping), [OMP discovery](OMP_DISCOVERY.md) (the native
@@ -24,10 +25,12 @@ egress/SSRF posture).
 The image installs OMP **v18.6.1** from the exact release tag
 `https://github.com/can1357/oh-my-pi/releases/tag/v18.6.1`
 (commit `2a2c6dcbbb558c0f8145f67f28b3370984f2bf60`). Digests are transcribed
-verbatim from the approved design table (§12); **this change never downloads the
-assets** — the first real-asset verification is the user-owned image build
-(§7), where a mismatch fails the build closed at the checksum step and never
-installs.
+verbatim from the approved design table (§12) and were re-verified against the
+live v18.6.1 assets. The image build re-verifies every downloaded byte and fails
+closed at the checksum step **before** installing anything, so a moved upstream
+tag or a tampered download can never produce a runnable image. A local build
+certifies the architecture it was built for; the other architecture stays
+user-owned (§6).
 
 | Asset (v18.6.1)           | Containerfile ARG    | SHA-256                                                            |
 | ------------------------- | -------------------- | ------------------------------------------------------------------ |
@@ -64,51 +67,50 @@ content change under the same tag failing closed at the checksum step.
 build). Every download — executable, `LICENSE`, `THIRD-PARTY-NOTICES.txt` —
 is verified with `sha256sum -c -` BEFORE any install/COPY consumption.
 
-## 3. Install contract and ownership
+## 3. Install contract
 
-| Image path                              | Source                                   | Owner:group | Mode       |
-| --------------------------------------- | ---------------------------------------- | ----------- | ---------- |
-| `/usr/local/bin/omp`                    | `omp-unpacker` stage (checksum-verified) | `0:0`       | 0755       |
-| `/licenses/omp/LICENSE`                 | same stage                               | `0:0`       | 0644       |
-| `/licenses/omp/THIRD-PARTY-NOTICES.txt` | same stage                               | `0:0`       | 0644       |
-| `/opt/air/omp/config/restricted.yml`    | `agent-config/omp/restricted.yml`        | `0:0`       | 0644       |
-| `/opt/air/omp/config/native-yolo.yml`   | `agent-config/omp/native-yolo.yml`       | `0:0`       | 0644       |
-| `/home/deno/.omp/agent/models.yml`      | `agent-config/omp/models.yml`            | `0:0`       | 0644       |
-| `/opt/air/omp/prompt/SYSTEM.md`         | `prompts/system_prompt_override.md`      | `0:0`       | 0644       |
-| `/opt/air/omp/extension/index.js`       | build-time generated ESM bundle (C3)     | `0:0`       | 0644       |
-| `/opt/air/omp/PACKAGE-MANIFEST.sha256`  | regenerated at every image build         | `0:0`       | 0644       |
-| `/home/deno/.agents/skills/**`          | repository `skills/` tree (`COPY skills/` — the image's ONLY packaged skill tree) | `$UID:0`    | 0775       |
+Every OMP artifact follows the image's ordinary `$UID:0` / mode `775` install
+convention — the same one `agent-config/opencode.json` uses. `/opt/air/omp` is a
+stable deployment location, not an ownership authority: nothing about it is
+claimed to be root-owned, immutable or agent-non-writable.
 
-Ownership rationale (the one packaged skill tree first, then the deliberate
-divergences from the image's `$UID:0` 775 pattern — both documented in
-Containerfile comments):
+| Image path                              | Source                                   | Owner:group | Mode |
+| --------------------------------------- | ---------------------------------------- | ----------- | ---- |
+| `/usr/local/bin/omp`                    | `omp-unpacker` stage (checksum-verified) | `$UID:0`    | 775  |
+| `/licenses/omp/LICENSE`                 | same stage                               | `$UID:0`    | 775  |
+| `/licenses/omp/THIRD-PARTY-NOTICES.txt` | same stage                               | `$UID:0`    | 775  |
+| `/opt/air/omp/config/restricted.yml`    | `agent-config/omp/restricted.yml`        | `$UID:0`    | 775  |
+| `/opt/air/omp/config/native-yolo.yml`   | `agent-config/omp/native-yolo.yml`       | `$UID:0`    | 775  |
+| `/home/deno/.omp/agent/models.yml`      | `agent-config/omp/models.yml`            | `$UID:0`    | 775  |
+| `/opt/air/omp/prompt/SYSTEM.md`         | `prompts/system_prompt_override.md`      | `$UID:0`    | 775  |
+| `/opt/air/omp/extension/index.js`       | build-time generated ESM bundle (C3)     | `$UID:0`    | 775  |
+| `/home/deno/.agents/skills/**`          | repository `skills/` tree (`COPY skills/` — the image's ONLY packaged skill tree) | `$UID:0` | 775 |
 
-- **`omp` binary is root-owned 0755, not `$UID:0` 775.** `$UID` is the agent's
-  own user inside this image — a group-writable agent binary would be
-  self-modifiable by the very process the restricted boundary governs. The
-  runtime needs only the exec bit.
-- **The whole `/opt/air/omp` tree is root-owned and read-only to the runtime
-  user**, and it sits outside every agent-writable root: never under
-  `/app/data`, `/app/prompts`, or `/home/deno`. The user-home config-dir
-  pattern used for `opencode.json` was rejected for exactly this reason.
-- **`/home/deno/.agents/skills` is the image's only packaged skill tree, and it
-  is agent-writable by design.** It is not an ownership divergence: it follows
-  the deployment's `$UID:0` 775 pattern, the linked `COPY` leaves the
-  `/home/deno/.agents` parent entries at 0755 as this Containerfile's mode note
-  records, and no second skill root exists under any other path. Both agent
-  types resolve it (`agent.skillsDir` / `AGENT_SKILLS_DIR`) — the authored
+- **Directory modes are prepared after the last linked copy.** A `COPY --link`
+  lands as an independent layer that recreates its destination's parent
+  directories, so `/opt/air/omp/**`, `/licenses/omp` and `/licenses` are
+  declared in the single post-`COPY --link` directory step of the final stage.
+  The generated `/opt/air/omp/extension/index.js` is produced there by the
+  build-time bundler (which runs as root before `USER $UID`) and is normalized
+  to the same `$UID:0`/775 convention in that same step.
+- **No physical-trust claim.** Installation ownership carries no governance
+  meaning: the install location no longer asserts that the runtime user cannot
+  modify the artifacts it was governed by. The earlier deployment-owned,
+  agent-non-writable tree — and the `PACKAGE-MANIFEST.sha256` digest manifest
+  with its recut invariant that audited it — is removed; download checksums
+  (§1/§2) remain the only byte-integrity control.
+- **`/home/deno/.agents/skills` is the image's only packaged skill tree.** Both
+  agent types resolve it (`agent.skillsDir` / `AGENT_SKILLS_DIR`), the authored
   native mode settings point native skill discovery at it
-  (`skills.customDirectories`, docs/OMP_SETTINGS.md), and native OMP expands the
-  entry against the inherited HOME — and external runtime installs publish into
-  the SAME tree alongside the authored content. It sits OUTSIDE `/opt/air/omp`,
-  so no skill byte was ever in `PACKAGE-MANIFEST.sha256`'s digest set.
-
-**Manifest scope is unchanged and still mandatory:** every installed
-`/opt/air/omp` input is digest-covered, so the authored mode settings, the
-prompt artifact and the generated extension bundle all require the same-change
-recut described in §6. The native model file is NOT an `/opt/air/omp` input
-(it installs under the native config HOME, above) and is therefore outside the
-manifest's digest set.
+  (`skills.customDirectories`, docs/OMP_SETTINGS.md) and native OMP expands the
+  entry against the inherited HOME. External runtime installs publish into the
+  SAME tree alongside the authored content. No second skill root exists.
+- **Native model file.** `agent-config/omp/models.yml` is installed at the
+  native config-HOME path `/home/deno/.omp/agent/models.yml` (the
+  `getAgentDir()/models.yml` the pinned executable discovers itself). No
+  application code reads, passes, translates or rewrites it. A development
+  deployment has no image build to install it, so the operator provisions the
+  same file manually at their own native HOME path before launch (§4).
 
 **No-new-Bun rule:** the official executable is self-contained; no OMP step
 installs a JavaScript/Bun runtime or speculative helper packages. The
@@ -128,7 +130,7 @@ second path convention — and the restricted launch's fail-closed presence chec
 | Export / selector                 | Image path (when it exists)       | Dev fallback                                                                                                                                                            |
 | --------------------------------- | --------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `OMP_IMAGE_ROOT`                  | `/opt/air/omp`                    | — (constant)                                                                                                                                                            |
-| `resolveOmpExtensionPath()`       | `/opt/air/omp/extension/index.js` (`OMP_IMAGE_EXTENSION_ARTIFACT`, root-owned, outside every agent-writable root) | `build/omp-extension/index.js` (`OMP_TRUSTED_EXTENSION_BUNDLE_PATH` — the GENERATED development entry; `deno task bundle:omp-extension` cuts it and the restricted launch fails closed with that remedy until it exists) |
+| `resolveOmpExtensionPath()`       | `/opt/air/omp/extension/index.js` (`OMP_IMAGE_EXTENSION_ARTIFACT`) | `build/omp-extension/index.js` (`OMP_TRUSTED_EXTENSION_BUNDLE_PATH` — the GENERATED development entry; `deno task bundle:omp-extension` cuts it and the restricted launch fails closed with that remedy until it exists) |
 | `resolveOmpConfigPath(devPath)`   | `/opt/air/omp/config/<basename>`  | `devPath` (e.g. `agent-config/omp/restricted.yml`)                                                                                                                      |
 | `resolveOmpSystemPromptPath()`    | `/opt/air/omp/prompt/SYSTEM.md`   | `/app/prompts/system_prompt_override.md`                                                                                                                                |
 
@@ -151,9 +153,9 @@ it itself, so the launch only exposes the inherited-HOME path read-only
 Prompt precedence: the operator mount path
 `/app/prompts/system_prompt_override.md` wins whenever it exists — mounts are
 operator-owned and never relocated (in a stock image it is populated by the
-bundled default or an operator mount). The owned
-`SYSTEM.md` artifact serves installs where the mount path is absent but the
-owned tree is present; its digest is covered by the manifest either way.
+bundled default or an operator mount). The installed `SYSTEM.md` artifact
+serves installs where the mount path is absent but the `/opt/air/omp` tree is
+present.
 
 ## 5. Extension artifact: the generated native-loadable bundle
 
@@ -188,8 +190,8 @@ the sidecar import map the old packaging relied on is gone, and native
 loadability cannot depend on it.
 
 The image's `cache` stage keeps `scripts/omp/` beside `src/`, `deno.json` and
-`deno.lock`, and the owned-tree step invokes both the bundler and the manifest
-generator from that read-only stage mount (`/build-src/scripts/omp/`). Module
+`deno.lock`, and the installation step invokes the bundler from that read-only
+stage mount (`/build-src/scripts/omp/`). Module
 specifiers resolve against the importing file's own URL, so the packaging
 scripts must stay a sibling of `src/`; a relocated copy resolves `/opt/src` and
 fails the build. The bundler toolchain itself is resolved at build time — `deno
@@ -209,7 +211,7 @@ serves the development and image faces; the image face
 generated bytes carry no non-native edge; it does NOT prove the pinned
 executable's own extension loader accepts the artifact. Whether the restricted
 launch's `--trusted-extension <bundle>` actually loads under the real native
-host stays user-owned and UNVERIFIED (§7): if the load does not happen the
+host stays user-owned and UNVERIFIED (§6): if the load does not happen the
 extension is omitted and the session runs without the restricted capability
 callback, and no readiness signal reports it.
 
@@ -225,64 +227,23 @@ without an import map and invokes its default export against a recording
 `ExtensionAPI` surface, observing a mapped name continue and unmatched (and
 prototype-shaped) names block. That smoke is harness evidence about the
 delivered artifact's own wiring on a stand-in host surface; real host behavior
-stays user-owned (§7), and the native-YOLO mode loads no extension at all.
+stays user-owned (§6), and the native-YOLO mode loads no extension at all.
 
-## 6. `PACKAGE-MANIFEST.sha256` and the recut invariant
+## 6. User-owned acceptance — NOT verified by CI
 
-`scripts/omp/generate-omp-manifest.sh` writes the manifest into
-`/opt/air/omp` at build time: one `sha256  <relative-path>` line per installed
-owned file (paths relative to that root, sorted; the manifest itself is the
-only excluded file), root-owned 0644. The covered set is DERIVED from the tree
-(`find`), so the install list and the manifest can never drift apart.
-
-Header facts: `OMP_VERSION` (carried from the unpacker stage, so the manifest
-records the SAME tag the checksums enforced) plus the trusted-extension serial
-composition line the generator still writes.
-
-Installed inputs covered by the digest (the full list on a fresh C3 build —
-the extension tree collapsed to its generated single artifact):
-
-- `config/restricted.yml`, `config/native-yolo.yml`
-- `prompt/SYSTEM.md`
-- `extension/index.js` (the single generated bundle; the manifest digest is
-  cut over its FINAL bytes on every build)
-
-`agent-config/omp/models.yml` is NOT an `/opt/air/omp` input any more: it
-installs at the native config-HOME path `/home/deno/.omp/agent/models.yml`
-(§3), outside the manifest root, so it is not digest-covered.
-
-**Still live until the separately scoped installation change:** this generation
-script, the `/opt/air/omp/PACKAGE-MANIFEST.sha256` file and the Containerfile
-step invoking both generators all STILL EXIST. They are removed by the later
-installation change, not by the native core cutover documented here; until
-then the manifest is regenerated on every image build exactly as before.
-
-**Recut invariant (maintenance rule for successors — rows 21/22+ and any
-insertion):** digests are cut only over FINAL content. The image build
-regenerates the manifest on every build, and ANY change that lands content
-touching `/opt/air/omp` inputs must regenerate `PACKAGE-MANIFEST.sha256` in
-the same change — **a stale manifest after a content change is a
-task-failure condition.** Because the covered set is derived from the tree
-itself, a change that alters ANY extension source or `deno.lock` changes the
-generated `index.js` bytes and therefore forces the recut — mechanically the
-same invariant, now over one extension file.
-
-The authored mode settings and the prompt artifact are hand-written inputs, so
-a change to either of those files forces the recut too.
-
-## 7. User-owned acceptance (design §15) — NOT verified by CI
-
-This change's tests are Containerfile-parse, bundle-replay, manifest-fixture,
-and unit/mock assertions only: **no docker builds, no downloads, no
-`omp --version` execution ever run in CI.** Every item below is user-owned and
-ships explicitly UNVERIFIED:
+The packaging suite really builds the local-architecture image, really fails a
+build whose pinned executable checksum does not match, and really starts the
+installed native runtime (`omp --version`, `omp config list`, and an ACP
+`initialize` against the authored `restricted.yml`/`SYSTEM.md`) and reads both
+official notices back out of it (`tests/utils/omp-packaging.test.ts`; the image
+scenario SKIP-passes with a notice when no `podman` binary is available). Every
+item below still depends on a real host or a specific architecture and is
+user-owned and UNVERIFIED:
 
 - [ ] Real image build succeeds on amd64 (digests match the live v18.6.1 assets)
 - [ ] Real image build succeeds on arm64 (digests match the live v18.6.1 assets)
 - [ ] Observed asset names on both arches match §2 (allowlist selects exactly one)
-- [ ] Container starts with the new stages and installs no additional Bun/JS runtime
-- [ ] Installed binary reports the pin: `omp --version` → `18.6.1`
-- [ ] `/opt/air/omp/PACKAGE-MANIFEST.sha256` verifies in the built image (`sha256sum -c`)
+- [ ] Container starts and installs no additional Bun/JS runtime
 - [ ] The installed native model file is discovered by the pinned executable
       at its native config-HOME path (`/home/deno/.omp/agent/models.yml`) and
       its authored provider header and credentials are consumed as authored
@@ -298,8 +259,8 @@ ships explicitly UNVERIFIED:
       selected prompt, the restricted bundle and the inherited-HOME native
       model file read-only, plus that mode's `<XDG_DATA_HOME>/omp` read-write
 
-Until those are observed, this is packaging hygiene backed by mock evidence —
-not clearance. The pin is prevention; the bootstrap version marker (`OMP
+A successful local build certifies the LOCAL architecture only — it never
+certifies both. The pin is prevention; the bootstrap version marker (`OMP
 version check: OK|BELOW_MINIMUM|UNKNOWN`, warn-only, never blocks startup) is
 observability only.
 
