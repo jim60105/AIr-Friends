@@ -8,16 +8,17 @@
 // - external-skill installation collision protection (a published external
 //   skill may never take the name of a bundled skill or the reserved shared
 //   `lib` content);
-// - owned-image packaging (`scripts/stage-owned-skills.ts` stages ONLY these
-//   directories plus `lib` into the owned `/opt/air/skills` source, so a
-//   development-installed external addition can never enter an owned image).
+// - the authored source-parity fixture, which keeps this list aligned with the
+//   repository `skills/` directories.
 //
-// Runtime-added/installed names NEVER amend this catalog; a source parity
-// fixture (`tests/core/bundled-skills.test.ts`) keeps it aligned with the
-// authored `skills/` directories. The catalog no longer bounds script
-// auto-approval (`unify-skill-root-and-inventory`): BOTH agent types enumerate
-// the one resolved skill root by observation, so a runtime-installed external
-// skill is eligible for either of them.
+// It has no packaging role: the image installs the personal skill tree by a
+// direct COPY (`collapse-skill-packaging-to-one-tree`), and no catalog filter
+// selects what ships.
+//
+// Runtime-added/installed names NEVER amend this catalog. The catalog no
+// longer bounds script auto-approval (`unify-skill-root-and-inventory`): BOTH
+// agent types enumerate the one resolved skill root by observation, so a
+// runtime-installed external skill is eligible for either of them.
 
 /** The authored bundled skill names (excludes the reserved `lib` content). */
 export const BUNDLED_SKILLS: readonly string[] = Object.freeze(
