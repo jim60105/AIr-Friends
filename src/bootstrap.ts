@@ -26,6 +26,7 @@ import { cleanupAuditLogs } from "@core/audit-retention.ts";
 import { AuditRetentionScheduler } from "@core/audit-retention-scheduler.ts";
 import { installExternalSkills } from "@core/skill-installer.ts";
 import { resolveTrustedSkillsRoot } from "@core/skills-root.ts";
+import { ensureOpencodeSkillDiscoveryDeclaration } from "@utils/opencode-paths.ts";
 import { SchedulerStateStore } from "@core/scheduler-state-store.ts";
 import { join } from "@std/path";
 import type { Platform } from "./types/events.ts";
@@ -181,21 +182,43 @@ export async function bootstrap(
     });
   }
 
-  // Install external skills before agent core initialization, into the ONE
-  // deployment-resolved skill root (`unify-skill-root-and-inventory` D3): the
-  // same root BOTH agent types resolve, so built-ins, runtime-installed
-  // external skills and either agent type share one tree and one inventory.
-  // An unresolvable destination fails startup EXPLICITLY before any install
-  // attempt (never a silent HOME fallback); the awaited completion guarantees
-  // publication strictly BEFORE the first connector inventory is ever
-  // constructed.
+  // The deployment's ONE resolved skill root, observed ONCE here for every
+  // startup consumer (`unify-skill-root-and-inventory` D3): the external-skill
+  // publication destination and the generated OpenCode discovery declaration
+  // both take THIS value, and the inventory, prompts, mounts and readiness
+  // re-resolve the same value with the same resolver. An unresolvable root
+  // fails startup EXPLICITLY before any install, declaration or agent
+  // construction — never a silent HOME fallback. This is not a new failure
+  // mode: `AgentCore`'s own construction resolves it unconditionally.
+  const deploymentSkillsRoot = resolveTrustedSkillsRoot(
+    getDefaultAgentType(config),
+    config.agent.skillsDir,
+  );
+
+  // Install external skills before agent core initialization, into that root:
+  // built-ins, runtime-installed external skills and either agent type share
+  // one tree and one inventory. The awaited completion guarantees publication
+  // strictly BEFORE the first connector inventory is ever constructed.
   if (config.agent.externalSkills && config.agent.externalSkills.length > 0) {
-    const installDestination = resolveTrustedSkillsRoot(
-      getDefaultAgentType(config),
-      config.agent.skillsDir,
-    );
-    await installExternalSkills(installDestination, config.agent.externalSkills);
+    await installExternalSkills(deploymentSkillsRoot, config.agent.externalSkills);
   }
+
+  // Declare that same root to OpenCode
+  // (`generate-opencode-skill-discovery-declaration`): OpenCode discovers
+  // skills only from what its own configuration declares, so the resolved root
+  // is written into the deployed global configuration (inspect-then-write; an
+  // already-correct document is left untouched, an absent one is created, and a
+  // document that must change but cannot be written fails startup explicitly).
+  // Runs UNCONDITIONALLY — including when OMP is the deployment's default
+  // agent, because a dashboard-selected OpenCode session there resolves this
+  // same root — and strictly BEFORE agent construction, so the inventory built
+  // afterwards observes the same root.
+  const declaration = ensureOpencodeSkillDiscoveryDeclaration(deploymentSkillsRoot);
+  logger.info("OpenCode skill-discovery declaration {action} at {path} for {root}", {
+    action: declaration.action,
+    path: declaration.path,
+    root: declaration.root,
+  });
 
   if (config.agent.gitCredential?.enabled) {
     const { setupGitCredentials } = await import("@core/git-credential-setup.ts");

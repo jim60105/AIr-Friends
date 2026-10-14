@@ -1,0 +1,21 @@
+# Tasks
+
+## 1. Generate the OpenCode skill discovery declaration
+
+- [x] 1.1 Add the generation helper next to the existing OpenCode path constants (`src/utils/opencode-paths.ts`): determine the deployed OpenCode global configuration path the way the runtime does (an `XDG_CONFIG_HOME`-aware `…/opencode/opencode.json`), read the document, set the skill discovery path list to exactly the resolved absolute root and the external-directory allowance for that root alone, and leave every other key and the file's formatting contract as they are. Refuse — failing startup explicitly, naming the root — when the resolved root is the daemon user's home directory or an ancestor of it. Verify: a unit test over fixture documents asserts that only those two places change, that the `deno run *` / `*.ts*` routing and the remaining `external_directory` entries survive, that an absolute root is written (never a `~`-relative or relative entry), and that a home-scoped or ancestor root is refused.
+- [x] 1.2 Implement inspect-then-write with canonical comparison: resolve any `~/` entry against the daemon user's observed home and compare canonically, leaving an already-correct file byte-identical and writing nothing. The comparison key set is BOTH declaration entries — the skill discovery path and the external-directory allowance for the resolved root — so a file that names the root but omits the allowance is rewritten rather than skipped; create the file (and its parent directory) containing exactly the declaration entries when it is absent; write the updated document otherwise; and fail startup explicitly, naming the file and the resolved root, when the file or its directory cannot be written. Verify: unit tests for the already-correct case (literal and `~/` spellings), the names-the-root-but-omits-the-allowance case, the rewrite case, the creation case, the read-only-contradiction case and the unwritable case.
+- [x] 1.3 Call the step from `src/bootstrap.ts` after config loading and after the external-skill publication destination is resolved, before agent construction, using the same resolved value and running unconditionally (including when OMP is the default agent, because a dashboard-selected OpenCode session on that deployment resolves the same root). Verify: a bootstrap ordering test asserts the declaration precedes agent construction and that the value equals the one the inventory and prompts use.
+
+## 2. Document the declaration and its operator consequence
+
+- [x] 2.1 Update `docs/DEVELOPMENT.md`: the `my-opencode.json` read-only mount rule (a mounted file must already declare the resolved root or be mounted writable), the generated keys, the created-when-absent behavior, and the development consequence that the developer's own OpenCode configuration is written. Update the `AGENTS.md` container section that describes the OpenCode configuration and its skills copy. Add the CHANGELOG entry for this change. Verify: the documented rule matches the implemented inspect-then-write behavior and names the startup-failure and over-broad-root conditions.
+- [x] 2.2 Add the user-owned runtime verification row for agent-side discovery to `docs/USER-RUNTIME-VERIFICATION.md` (a live OpenCode session discovering a runtime-installed external skill through the generated declaration), marked unverified, as the existing verification-checklist requirement demands for every user-owned runtime observation. Verify: the row names the declaration, the resolved root and its unverified status.
+
+## 3. Integration verification
+
+- [x] 3.1 Prove the declaration's effect without a live agent: with a non-default configured root, the generated configuration's entry is the exact resolved root and the document's other pins are unchanged; the pinned mapping from that entry to a directory-based discovery source is recorded as source-audit evidence at the pinned revision, not as exercised runtime behavior. Verify: `deno task test:unit` over the new suite plus the affected bootstrap tests.
+- [x] 3.2 Run `deno task ci` once and `openspec validate generate-opencode-skill-discovery-declaration --strict`; report only exercised results and state that live agent discovery remains user-owned.
+
+## Workflow follow-up
+
+- Apply after `unify-skill-root-and-inventory`; then archive this change and sync its delta into the main specs.

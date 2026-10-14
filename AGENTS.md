@@ -1340,6 +1340,7 @@ You are Yuna. This is a private chat.
   - `dumb-init` - Used as PID 1 and to wrap agent subprocesses for proper signal forwarding
 - OpenCode configuration is pre-configured at `/home/deno/.config/opencode/opencode.json`
 - Skills are copied to `/home/deno/.agents/skills/`, which is also the stock image's declared `AGENT_SKILLS_DIR` value — the ONE skill root both agent types resolve
+- At startup the bot GENERATES the OpenCode-side skill-discovery declaration into that configuration: `skills.paths` is set to exactly the resolved skill root and `agent.build.permission.external_directory` gains one `"<root>/**": "allow"` entry, while every other setting in the file keeps its bytes (the `deno run *` / `*.ts*` routing to the approval gate included). It inspects before writing — an already-correct document is left untouched, an absent one is created carrying exactly those entries, and a document that must change but cannot be written fails startup explicitly (`docs/DEVELOPMENT.md`, "Generated Skill Discovery Declaration")
 
 **Example compose.yml:**
 
