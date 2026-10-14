@@ -10,11 +10,9 @@
 #
 # The single generated artifact is <extension-target>/index.js. In the image
 # build: src-root=/build-src, extension-target=/opt/air/omp/extension, run as
-# ROOT before `USER $UID`; ownership hardening below makes the tree root-owned
-# with runtime-user read-only modes (dirs 0755, files 0644). Development
-# launch builds the SAME artifact contract at build/omp-extension/index.js
-# (deno task bundle:omp-extension routes here; src-root/target are the repo
-# checkout and its build dir).
+# ROOT before `USER $UID`. Development launch builds the SAME artifact
+# contract at build/omp-extension/index.js (deno task bundle:omp-extension
+# routes here; src-root/target are the repo checkout and its build dir).
 
 set -eu
 
@@ -33,10 +31,13 @@ install -d -m 755 "${TARGET}"
 
 deno run --allow-read --allow-write --allow-run "${here}/bundle-extension.ts" "${SRC}" "${TARGET}" "${DENO_LOCK}"
 
-# Ownership hardening: root-owned, the runtime agent user read-only.
+# Deterministic output modes (dirs 0755, files 0644) when run as root, so the
+# generated tree never depends on the invoking umask. The IMAGE does not keep
+# these modes: the Containerfile's post-COPY directory step re-owns and
+# re-modes the installed tree to the deployment's ordinary $UID:0 + 775
+# convention, which supersedes any ownership policy this script might imply.
 # (Non-root replay — the packaging unit test runs this script to prove the
-# bundle — skips chown; in the image the RUN executes as root before
-# `USER $UID`, which is where the ownership contract is enforced.)
+# bundle — skips chown.)
 if [ "$(id -u)" = "0" ]; then
   chown -R 0:0 "${TARGET}"
 fi
