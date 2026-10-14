@@ -1,7 +1,7 @@
 # container-packaging Specification
 
 ## Purpose
-Governs container-image packaging of external agent runtimes and deployment-owned artifacts: checksum-verified pinned executables and official notices, installation of owned settings/extension trees outside agent-writable roots with an auditable digest manifest, and the explicit resolution contract between development-tree paths and installed image paths.
+Governs container-image packaging of external agent runtimes and deployment-owned artifacts: checksum-verified pinned executables and official notices, installation of the authored settings, prompt and generated extension artifacts at stable deployment paths under the image's ordinary install convention (without a physical trust authority or an internal artifact digest manifest), and the explicit resolution contract between development-tree paths and installed image paths.
 
 ## Requirements
 

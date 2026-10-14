@@ -3,7 +3,7 @@
 # bundler (OpenSpec `package-pinned-omp-runtime` D5; native-loadable bundle
 # retarget by `package-bun-compatible-omp-extension`). The bundler logic
 # lives in bundle-extension.ts beside this script; this wrapper invokes it
-# with the exact permission set it needs and hardens ownership afterwards.
+# with the exact permission set it needs and normalizes the output modes.
 #
 # Usage:
 #   bundle-omp-extension.sh <src-root> <extension-target> <repo-deno-lock>

@@ -41,9 +41,10 @@ export const OMP_TRUSTED_EXTENSION_BUNDLE_PATH =
   `${OMP_TRUSTED_EXTENSION_BUNDLE_DIR}/${OMP_TRUSTED_EXTENSION_ARTIFACT_NAME}`;
 
 /**
- * Root-owned image tree installed by the OMP packaging steps (design D3/D4:
- * outside every agent-writable root — never under /app/data, /app/prompts, or
- * /home/deno). Existence of this root IS the deployment signal; development
+ * Installed image tree of the deployment's OMP artifacts, following the
+ * image's ordinary `$UID:0` + 775 install convention (see
+ * docs/OMP_PACKAGING.md §3): a stable deployment LOCATION, never an ownership
+ * authority. Existence of this root IS the deployment signal; development
  * checkouts never own /opt/air, so every image-first resolution below keeps
  * byte-identical dev behavior.
  */
@@ -54,12 +55,12 @@ export const OMP_IMAGE_EXTENSION_ROOT = `${OMP_IMAGE_ROOT}/extension`;
 
 /**
  * Image artifact of the trusted extension: the SAME generated bundle contract
- * installed at the owned image root (`<root>/index.js`) by packaging.
+ * installed at the image extension root (`<root>/index.js`) by packaging.
  */
 export const OMP_IMAGE_EXTENSION_ARTIFACT =
   `${OMP_IMAGE_EXTENSION_ROOT}/${OMP_TRUSTED_EXTENSION_ARTIFACT_NAME}`;
 
-/** Image path of the authored native mode settings (dirs 0755, files 0644). */
+/** Image path of the authored native mode settings (dirs and files 775). */
 export const OMP_IMAGE_CONFIG_ROOT = `${OMP_IMAGE_ROOT}/config`;
 
 /** Image path of the installed SYSTEM.md prompt artifact. */
