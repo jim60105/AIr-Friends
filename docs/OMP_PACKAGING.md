@@ -265,3 +265,29 @@ version check: OK|BELOW_MINIMUM|UNKNOWN`, warn-only, never blocks startup) is
 observability only.
 
 > Runtime verification for this area is consolidated in the single checklist artifact [USER-RUNTIME-VERIFICATION.md](USER-RUNTIME-VERIFICATION.md) (section A: installed version, both arches, notices, startup without an added Bun dependency).
+
+### Native probe evidence (real pinned binary)
+
+`verify-omp-confined-native-runtime` added the first REAL-binary evidence for
+two of the faces above, without touching the image build:
+
+- **Native model discovery.** The pinned executable discovers and consumes the
+  native model file at its inherited-HOME config path
+  (`~/.omp/agent/models.yml`): the probe installs the hand-authored fixture
+  there, the native process opens it READ-ONLY (`strace` observation), and the
+  fixture provider/model is resolved from the ACTUAL advertised session catalog.
+- **Generated bundle load.** The restricted launch runs the real
+  `omp acp --config … --system-prompt … --trusted-extension <generated bundle>`
+  and completes `session/new`; an unloadable bundle fails the request instead, so
+  a successful session proves the generated artifact was loaded by the pinned
+  runtime.
+
+Observed in the project container (real `/usr/local`, plus `bwrap`, `strace`,
+`dumb-init` and the pinned `18.6.1` binary) with
+`deno test … tests/acp/omp-native-runtime-smoke.test.ts`;
+[OMP_SPAWN.md](OMP_SPAWN.md) §6 records the exact commands, the prerequisite
+gates and the evidence boundaries. Still user-owned and UNVERIFIED here: the
+image builds, the per-arch digests, the observed asset names, the
+`PACKAGE-MANIFEST.sha256` verification and the `/opt/air/omp/**` install
+topology itself — the probe drives a deployment-shaped runtime, not the image
+build.

@@ -24,7 +24,7 @@ None.
 
 ## Impact
 
-New `tests/acp/omp-native-runtime-smoke.test.ts`, `tests/fixtures/omp-native-runtime/home/.omp/agent/models.yml`, native evidence sections in `docs/OMP_SPAWN.md`, `docs/OMP_PACKAGING.md` and `CHANGELOG.md`. Production code and OpenCode behavior remain unchanged. Covers native evidence for design items 3, 6, 7, 12, 17, 29 and 30, supplementing—not replacing—the full 37-item table in document-omp-parity-and-consumer-regressions/coverage.md.
+New `tests/acp/omp-native-runtime-smoke.test.ts`, its traced child-process driver `tests/mocks/omp-native-lifecycle-driver.ts` (the production factory runs in-process, so the driver is what lets ONE `strace` cover the factory and the native descendants), the hand-authored `tests/fixtures/omp-native-runtime/home/.omp/agent/models.yml`, and native evidence sections in `docs/OMP_SPAWN.md`, `docs/OMP_PACKAGING.md` and `CHANGELOG.md`. Production code and OpenCode behavior remain unchanged. Covers native evidence for design items 3, 6, 7, 12, 17, 29 and 30, supplementing—not replacing—the full 37-item table in document-omp-parity-and-consumer-regressions/coverage.md.
 
 ## Effort
 

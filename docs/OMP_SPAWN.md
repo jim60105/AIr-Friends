@@ -172,3 +172,121 @@ provider, a container, a sandbox or a platform.
    channel or tuple exists, and the accepted residual is that an extension
    which fails to load leaves the session without the restricted capability
    set.
+
+---
+
+## 6. Native Evidence — Real Pinned-Binary Acceptance
+
+`tests/acp/omp-native-runtime-smoke.test.ts` is the REAL-binary probe for this
+document's launch/mount contracts. It is the only suite in this tree that
+executes the official pinned `omp` executable, and it never substitutes a mock,
+a synthetic session id or a fabricated catalog for a missing prerequisite.
+
+### 6.1 What the probe exercises
+
+- **Fixture boundary.** The hand-authored
+  `tests/fixtures/omp-native-runtime/home/.omp/agent/models.yml` (one
+  credential-free, zero-cost `parity-fixture` provider/model per
+  `docs/models.md`) is copied byte-for-byte into a temporary HOME BEFORE the
+  observation interval. The configured single skill root (`agent.skillsDir`) is
+  provisioned from the tracked `skills/` tree inside that HOME, so the factory,
+  the connector inventory and the confinement consumer all observe ONE root.
+  The parent environment is restored in `finally`.
+- **Both launch modes, unconfined.** Real `createAgentConfig` →
+  real `AgentConnector`: `initialize`, `session/new`, advertised-catalog model
+  selection, `session/cancel`, then respawn + `session/load` with the SAME
+  actual session id and no OMP ownership/gate payload. No prompt is sent.
+  This leg runs in `tests/mocks/omp-native-lifecycle-driver.ts` — a child
+  process the probe executes under `strace -f`, so the PRODUCTION FACTORY's own
+  filesystem operations and every native descendant land in ONE trace and the
+  production argv is never wrapped. One trace per mode therefore covers both the
+  initial start and the recovery respawn.
+- **Advertised catalog.** The fixture model is selected from the ACTUAL
+  advertised catalog; an unadvertised id is rejected as a `catalog-miss`
+  (negative control), which proves the positive selection resolved through the
+  real catalog. OMP advertises the concrete `provider/modelId` identity
+  (`docs/models.md` §"Provider and model identity"), so the selector is
+  `parity-fixture/parity-fixture` — a bare id is a catalog miss by construction.
+- **Confined pooled consumers.** One `AgentProcessPool`, one `poolKey`, two
+  `run()` calls with opposite `permissionMode`, real connectors captured through
+  the existing `connectorFactory` injection. Each mode persists native state
+  beneath its own `{baseRoot}/omp-agent/{mode}/xdg-data/omp` (section 3.3) and is
+  restored through its own connector afterwards.
+- **Selected-root IO controls.** The shipped mount policy (`SandboxManager` +
+  the factory's `runtimeMounts`) is spawned for real: the inherited-HOME native
+  model file reads through its read-only mount, the selected native data child is
+  WRITABLE, the configured skill root reads but refuses writes, and the SIBLING
+  mode's state is unreachable.
+- **Write observation.** The traced driver runs under
+  `strace -f -y -e trace=openat,openat2,creat,rename,renameat,renameat2,unlink,unlinkat`
+  AFTER provisioning. Required: ZERO writable opens or replacements of the
+  authored inputs the launch selected (`--config`, `--system-prompt`,
+  `--trusted-extension`, the inherited-HOME `models.yml` — derived from the
+  factory output, so an installed image copy is watched exactly like a
+  development-tree file), the expected native data writes beneath the selected
+  `XDG_DATA_HOME/omp`, and READ-ONLY opens of the selected mode document and the
+  fixture model file (so the zero-write result is a real observation, not an
+  empty trace). Pathname operands are resolved against the descriptor
+  directories `-y` decodes; an operand this observer cannot resolve that carries
+  a watched file's name is treated as a POTENTIAL write (fail closed) rather
+  than silently ignored, and only successfully completed opens count as
+  consumption.
+
+### 6.2 Prerequisites
+
+Each is EXPLICIT and never downgraded to a mock:
+
+| Prerequisite | Without `OMP_NATIVE_ACCEPTANCE` | With `OMP_NATIVE_ACCEPTANCE=1` |
+| :--- | :--- | :--- |
+| `omp --version` succeeds and reports exactly `18.6.1` | the native legs report UNEXERCISED | the run FAILS naming the missing binary, the non-zero probe or the reported version |
+| `strace` available on `PATH` | the traced leg reports UNEXERCISED | the run FAILS naming the missing observer |
+| bwrap can create a user/mount namespace AND this host can materialise the production mount list | the confined leg reports UNEXERCISED | the run FAILS naming the exact cause (no namespace privilege, or the host topology below) |
+
+`OMP_NATIVE_ACCEPTANCE=1` is the ACCEPTANCE mode: it converts every unavailable
+prerequisite into a failed test that names it, so a successful acceptance exit
+means the native legs actually ran. Unset (ordinary `deno task test` / CI, which
+ship no `omp`, `bwrap` or `strace`), an unavailable prerequisite leaves the leg
+UNEXERCISED instead — never a mock substitute and never a native claim.
+
+The confinement gate is the same one the existing real-bwrap IO controls use
+(`tests/acp/sandbox-manager.test.ts`): `--ro-bind-try` tolerates a missing
+source, but bwrap aborts the spawn when it cannot create the default read-only
+bind destination `/usr/local/bin` — unspawnable wherever `/usr/local` is a
+symlink into `/var` (Fedora Silverblue-style hosts). There is NO fallback to an
+unconfined success.
+
+### 6.3 Acceptance
+
+```sh
+omp --version   # must print the pin
+OMP_NATIVE_ACCEPTANCE=1 deno test --allow-net --allow-read --allow-write --allow-env --allow-run --allow-ffi \
+  tests/acp/omp-native-runtime-smoke.test.ts \
+  tests/acp/filesystem-confinement.test.ts \
+  tests/core/omp-pool-modes.test.ts
+```
+
+The confined half requires the supported runtime: it was exercised in the
+project container (real `/usr/local`, `bwrap`, `strace`, `dumb-init` and the
+pinned binary present), where the probe ran confined restricted and native-YOLO
+pool consumers, the mount controls above and the same-mode reload alongside the
+two sibling suites.
+
+To reproduce that evidence, run the same command with the checkout mounted in a
+runtime that ships `bwrap`, `strace`, `dumb-init` and the pinned `omp`, exposes
+`/usr/local` as a real directory, and provides the unprivileged user/mount
+namespace privilege (`podman run --privileged` was used, with the checkout's
+`agent-config/omp/*.yml` and generated `build/omp-extension/index.js` bound over
+their `/opt/air/omp/**` image copies so the run consumes THIS checkout's
+authored assets). On the host itself only the unconfined evidence is produced.
+
+### 6.4 What this still does not claim
+
+- Init/catalog/load/restore proves those mechanisms only. Native
+  capability-handler execution stays the scripted native-dispatch change's
+  evidence, and no readiness signal is inferred from a successful handshake.
+- No public provider, proxy, platform, architecture or paid-model claim follows:
+  the fixture `baseUrl` is a loopback address this probe never binds, and no
+  prompt is ever sent.
+- The probe adds no production behavior, no configuration generator and no
+  runtime mount; it consumes the shipped launch, mount and connector contracts
+  unchanged.
