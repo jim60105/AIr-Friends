@@ -2,7 +2,7 @@
 
 - 日期：2026-10-14。
 
-- 狀態：三節設計方向已經使用者核准；本文件等待書面審閱。尚未授權實作。
+- 狀態：設計方向已經使用者核准，全套 7 項 OpenSpec 提案已規劃並提交至 master；尚未授權實作（無 feat 分支、無實作工作樹）。獨立審閱阻礙狀態如文內紀錄。
 
 ## 1. 目的與決策
 
@@ -236,6 +236,83 @@ OpenCode 目前使用的可選復原脈絡與其判定維持不變。移除的�
 
 ## 10. 本次交付邊界
 
-目前交付僅為本設計及使用者審閱流程。原始碼、測試、原生設定、Containerfile 與 OpenSpec 需求的實際修改，必須在書面設計審閱通過及後續實作計畫核准後才執行。
+目前交付僅限設計文件更新與規格規劃紀錄。原始碼、測試、原生設定、Containerfile 與 OpenSpec 現行需求的實際修改，必須在明確取得實作授權後才執行。
 
-目前已暫存的 `docs/omp-features/` 文件不屬於本次設計提交；提交只包含這一份設計文件。
+七項 OpenSpec 提案均已規劃完成並提交至 `master` 分支；各提案之詳細任務契約、完整覆蓋矩陣與審閱紀錄詳見下述章節。
+
+## 11. 七項提案規劃與時數估計
+
+依據本設計第 7 節之 37 項完整處置表，規劃拆分為 7 項獨立、不留相容層的 OpenSpec 提案。所有提案皆已建立於 `openspec/changes/`，且每個任務檔案（`tasks.md`）均已詳列 gpt-luna 執行契約：精確目標檔案、順序編輯步驟、I/O 與錯誤行為、遷移呼叫點與廢棄路徑、非目標、驗收指令與可觀察結果，以及任務工時估計，不將架構探索留給後續工作者。
+
+各項提案工時皆嚴格低於 8 小時（含驗證與修復餘裕），合計估計工時為 40.50 小時。完整覆蓋矩陣與衝突分析請參見 [完整覆蓋與相依矩陣（openspec/changes/document-omp-parity-and-consumer-regressions/coverage.md）](../../../openspec/changes/document-omp-parity-and-consumer-regressions/coverage.md)。
+
+| 代號 | 提案識別碼 | 簡要範圍 | 任務工時 | 整合修復 | 總估計工時 |
+|---|---|---|---:|---:|---:|
+| A | [`normalize-omp-destructive-acp-ingress`](../../../openspec/changes/normalize-omp-destructive-acp-ingress/proposal.md) | 在共用 ACP 客戶端入口正規化 OMP 單一刪除／搬移請求形狀，保留共用解碼器與拒絕語意 | 4.00 h | 1.50 h | 5.50 h |
+| B | [`simplify-omp-session-boundaries`](../../../openspec/changes/simplify-omp-session-boundaries/proposal.md) | 移除 OMP 啟動前檔案掃描器與關鍵技能中繼資料檢查，保留共用檔案讀寫回呼與腳本清單邊界 | 5.25 h | 1.50 h | 6.75 h |
+| C | [`simplify-omp-recovery-context`](../../../openspec/changes/simplify-omp-recovery-context/proposal.md) | 簡化 OMP 行程復原流程，移除強制所有權記錄與脈絡前置比較，保留 OpenCode 可選驗證 | 3.50 h | 1.00 h | 4.50 h |
+| D | [`cutover-omp-native-runtime`](../../../openspec/changes/cutover-omp-native-runtime/proposal.md) | 一次性切換 OMP 原生執行期：手寫 YAML 設定、沙箱原生資產／資料掛載、官方擴充掛載、原生網路工具恢復與舊治理核心刪除 | 6.75 h | 1.00 h | 7.75 h |
+| E | [`simplify-omp-container-installation`](../../../openspec/changes/simplify-omp-container-installation/proposal.md) | 容器安裝與發行封裝簡化：取消治理樹與產物清單摘要檢查，保留固定版本與下載 SHA-256 校驗 | 4.00 h | 1.00 h | 5.00 h |
+| G | [`verify-omp-confined-native-runtime`](../../../openspec/changes/verify-omp-confined-native-runtime/proposal.md) | 原生二進位沙箱受限驗證驅動：以手寫模型設定與原生探針驗證沙箱內目錄載入、目錄持久化與離線探針輸出 | 2.50 h | 1.00 h | 3.50 h |
+| F | [`document-omp-parity-and-consumer-regressions`](../../../openspec/changes/document-omp-parity-and-consumer-regressions/proposal.md) | 擴充跨元件消費者非回歸測試、補足原生分派案例、同步現行 OMP 規格與操作文件 | 6.50 h | 1.00 h | 7.50 h |
+
+### 審閱現狀與阻礙紀錄
+
+依據 [批次獨立審閱與阻礙紀錄（openspec/changes/document-omp-parity-and-consumer-regressions/review.md）](../../../openspec/changes/document-omp-parity-and-consumer-regressions/review.md)：
+- 初始整批獨立審閱發現 3 項阻礙（沙箱原生資產／資料掛載隔離問題、舊現行規格與切換衝突、共用腳本清單契約誤刪）與 1 項未知工具測試偽陽性風險。
+- 上述阻礙已全數於提案檔案中完成修正（包含將原生受限驗證探針由 D 拆分為獨立交付之 G，以確保切換仍在 8 小時之內）。
+- 修正後嘗試對 7 項提案重啟獨立審閱時，平台回傳 `usage_limit_reached`。因此**目前尚無觀察到經修訂後的七項提案獨立審閱通過報告**，此處如實記載阻礙狀態，不假造獨立通關證明。所有提案僅通過語法驗證（`openspec validate --strict`），未執行任何建置或執行期驗證。
+
+## 12. 未來執行排程與並行實作批次
+
+本節規範**未來授權實作時**之排程策略。注意：此處為未來實作之排程規格，並非授權立即執行 `apply` 或覆寫目前監督者之循序協定；實際提案中規劃之保守循序排程仍完好保留。
+
+### 行為相依關係圖（DAG）
+
+```mermaid
+graph LR
+    B --> C
+    A --> D
+    B --> D
+    C --> D
+    D --> E
+    D --> G
+    D --> F
+    E --> F
+    G --> F
+```
+
+核心行為相依規則：
+- `B -> C`：C 之復原簡化依賴 B 對掃描器前置條件之退役。
+- `A + B + C -> D`：D 之原生執行期切換依賴 A 之破壞性輸入型別、B 之共用回呼邊界清理以及 C 之共用復原介面。
+- `D -> E` 與 `D -> G`：容器安裝簡化與原生二進位受限驗證均依賴 D 完成之原生掛載與宣告清理。
+- `D + E + G -> F`：最終消費者測試與文件同步依賴 D、E、G 的實作產物與模型配置。
+
+### 未來執行批次表
+
+A、B、C 雖有部分行為獨立性，但三者共同修改客戶端、連接器與相關測試設施，因此**不進行並行執行**。唯一具備行為獨立性且可考慮並行的階段為批次 5（E 與 G）。
+
+| 批次 | 包含提案 | 執行性質 | 條件與共用檔案約束 |
+|---|---|---|---|
+| 批次 1 | A | 單獨循序 | A 擁有破壞性入口之共用型別移轉與輸入適配 |
+| 批次 2 | B | 單獨循序 | B 移除掃描器與關鍵技能檢查，保留共用回呼 |
+| 批次 3 | C | 單獨循序 | C 依賴 B，簡化行程復原脈絡 |
+| 批次 4 | D | 單獨循序 | 依賴 A、B、C，完成執行期核心、沙箱掛載與手寫設定切換 |
+| 批次 5 | E 與 G | 條件式並行（或保守循序） | E 與 G 行為完全獨立。但兩者皆修改 `docs/OMP_PACKAGING.md` 與 `docs/OMP_SPAWN.md`，詳見下述共用寫入者約束 |
+| 批次 6 | F | 單獨循序 | 依賴 D、E、G，執行全盤消費者非回歸驗收與現行規格同步 |
+
+### E 與 G 條件式並行實作之單一整合擁有者規範
+
+批次 5 的提案 E（`simplify-omp-container-installation`）與提案 G（`verify-omp-confined-native-runtime`）在生產程式碼層面完全無衝突，但共用現行文件：
+- `docs/OMP_PACKAGING.md`
+- `docs/OMP_SPAWN.md`
+- `CHANGELOG.md`
+
+**並行條件與約束**：
+1. **禁止共用檢出多工作者並行寫入**：同一檢出目錄（shared checkout）嚴禁同時指派不同工作者修改上述共用文件。
+2. **獨立工作樹與單一整合擁有者**：僅在分別使用獨立工作樹（independent worktrees），且指派**恰好一名整合擁有者（Single Integration Owner）**負責共用文件整合與合流時，方得啟動並行。
+3. **整合順序與語意覆蓋**：整合擁有者必須依照**先 E 後 G** 的規範整合順序合併，且必須同時對照 E 與 G 兩份提案工件，確保雙方所載之文件更新內容與語意皆被正確保留，不得遺漏或擅自縮減任一提案規定的文件責任。
+4. **提案範疇不可被私自剝奪**：在規劃階段不得預先由提案檔案中刪除任一方的說明文件任務來規避衝突。
+5. **保守循序降級（Fallback）**：若未指派單一整合擁有者，或未獲得平行工作者授權，則嚴格回退為保守循序排程：**先執行 E，完成並合併後再執行 G**。
+
+規範的基準循序排程維持為：**A → B → C → D → E → G → F**。
