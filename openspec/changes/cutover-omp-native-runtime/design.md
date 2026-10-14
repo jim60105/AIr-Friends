@@ -38,6 +38,8 @@ Process cwd becomes the existing caller workingDir, including pooled user/sessio
 
 ### Build and deletion closure
 
+Confinement reachability uses optional internal `AgentConfig.runtimeMounts` with the existing `readOnlyPaths`/`writableRuntimePaths` array shape. `SandboxManager.buildSpawnOptions()` gains only a final optional argument and merges selected runtime assets with shared defaults. Read-only files are the selected native settings, prompt, restricted ESM bundle and inherited-HOME models file; the writable path is the already-created selected `<XDG_DATA_HOME>/omp` child. Neither mode's sibling, pool parent, dataRoot nor HOME is exposed. Existing skill-root overlap refusal and final read-only bind apply unchanged. OpenCode has no extra inputs and retains its mounts. This is ordinary mount reachability, not source identity/module trust.
+
 Resolve the extension path using the existing generated development `build/omp-extension/index.js` and installed `/opt/air/omp/extension/index.js` constants in `omp-paths.ts`; no deployment evidence selector remains. The required restricted bundle missing-file error retains the existing build-remedy message. YAML parse/validation errors originate from native startup, not app-owned schema mirrors.
 
 Build the replacement entry as one ESM file with frozen lock. Delete declaration embedding/coverage and synthetic input digest headers from `bundle-extension.ts`; remove the assertion that the output contains an inlined `@std` dependency because the small replacement can have none. Keep real native-loadability checks and the output path. Remove `bundle-declaration.ts`. Bundle audit may remain as its genuine build consumer; delete host-facade handling when it has no emitted/source consumer. The image manifest is still consumed by Containerfile until its separately scoped installation change; do not orphan that command in this cutover.
@@ -46,7 +48,7 @@ Delete the old runtime closure in `src/acp/omp/`: compatibility ledger/validator
 
 ## Risks / Trade-offs
 
-The coupled architecture would exceed a workday if callback metadata and recovery cleanup were included. Those are complete earlier deliverables; this cutover is consequently a small new handler plus deterministic deletions and launch edits. Estimated 7.75 hours includes 1.50 hours of verification/repair. Each task has a bounded target and no architectural exploration left for the worker. Native extension ordering retains upstream last-registration behavior; no source-based denial or new readiness claim is added. Proxy environment is observed configuration, not proof of network routing.
+The coupled architecture would exceed a workday if callback metadata, recovery cleanup and the complete pinned-native acceptance driver were included. Those are independently functioning behavior/evidence deliverables. Estimated 7.75 hours includes 1.00 hour of verification/repair and the added native confinement mounts. The new verify-omp-confined-native-runtime change wholly owns its native test driver and authored test models fixture; it is not a missing production prerequisite or future callsite repair. Each task has a bounded target and no architectural exploration left for the worker. Native extension ordering retains upstream last-registration behavior; no source-based denial or new readiness claim is added. Proxy environment is observed configuration, not proof of network routing.
 
 ## Migration Plan
 

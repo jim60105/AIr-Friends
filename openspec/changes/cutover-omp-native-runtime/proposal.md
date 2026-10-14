@@ -17,6 +17,7 @@ The approved 2026-10-14 OMP/OpenCode parity design replaces OMP-specific governa
 None.
 
 ### Modified Capabilities
+- `shared-acp-process-pool`: retain entry/lease behavior while replacing obsolete mode-specific cwd/TMPDIR requirements with selected native data separation.
 
 - `acp-integration`: change the requirements enumerated in this change’s spec delta.
 - `container-packaging`: change the requirements enumerated in this change’s spec delta.
@@ -39,5 +40,6 @@ depends-on: simplify-omp-session-boundaries
 depends-on: simplify-omp-recovery-context
 
 code-conflict: src/acp/types.ts; src/acp/agent-factory.ts; src/utils/omp-paths.ts; src/acp/sandbox-manager.ts; src/core/agent-process-pool.ts; src/acp/omp/; scripts/omp/; Containerfile; tests/mocks/omp-mock-session.ts; tests/integration/omp-lifecycle/; tests/integration/omp-skill-handoff/; tests/utils/omp-packaging.test.ts; docs/OMP_*.md; openspec/specs/acp-integration/spec.md; openspec/specs/container-packaging/spec.md; openspec/specs/configuration-and-deployment/spec.md; CHANGELOG.md
+code-conflict: src/acp/filesystem-confinement.ts; tests/acp/filesystem-confinement.test.ts; tests/acp/sandbox-manager.test.ts; openspec/specs/shared-acp-process-pool/spec.md
 
 Implementation order is the DAG recorded in `coverage.md`; shared-file edits are serialized even when changes have no behavioral dependency. Each predecessor remains a working deliverable. No prerequisite is deleted while a retained consumer imports it.

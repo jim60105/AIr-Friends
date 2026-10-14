@@ -2,6 +2,50 @@
 
 ## ADDED Requirements
 
+### Requirement: Shared ACP Canonical Observation And Evidence Scope
+
+Shared context/root/target helpers SHALL return one complete observation or one specific failure, never a partial grant, empty root or lexical fallback. Observations SHALL remain operation- and shared-context-generation-scoped and SHALL not imply native OMP enforcement on paths that do not consume ACP callbacks.
+
+#### Scenario: Canonicalization failure
+- **WHEN** metadata observation fails other than confirmed absence permitted by existing new-file semantics
+- **THEN** the helper SHALL return a distinguished failure, no lexical grant and no protected content IO or mutation.
+
+#### Scenario: Detectable replacement
+- **WHEN** deterministic metadata observations detect a changed root, ancestor or final target
+- **THEN** the existing path-changed failure or newly observed containment decision SHALL apply, and the actual secure access consumer SHALL preserve containment through IO.
+
+#### Scenario: Broad YOLO observation
+- **WHEN** a YOLO consumer observes a target physically inside its broad user/shared Agent workspace
+- **THEN** it SHALL retain the broad role without restricted staging, command, extension or tool clamps; external escapes SHALL remain ineligible.
+
+#### Scenario: Distinguished shared failure categories
+- **WHEN** an observation fails
+- **THEN** invalid context/path/token, invalid/unavailable/overlapping root, outside-root/link escape, dangling/looping link, missing object, wrong type, canonicalization failure, changed path and shared trusted-root identity mismatch SHALL remain distinguished.
+
+#### Scenario: Observation lifetime
+- **WHEN** successful helper metadata is consumed
+- **THEN** it SHALL remain scoped to the exact shared session/context generation and SHALL not become a reusable permission or race-proof guarantee.
+
+#### Scenario: Consumer evidence limits
+- **WHEN** real helper logic with temporary filesystems or deterministic metadata mocks passes
+- **THEN** that evidence SHALL certify only the exercised helper/access behavior, not native parser/tool/proxy enforcement; real native claims SHALL require separately exercised native consumers.
+
+### Requirement: Native OMP Assets And Data Reachability Under Shared Confinement
+
+Configured filesystem confinement SHALL retain the existing shared mount mechanism and expose the selected authored OMP files read-only and selected native mode data child read-write. It SHALL not grant the parent deployment/pool/HOME tree or sibling data roots; the shared read-only skill mount and overlap refusal SHALL remain.
+
+#### Scenario: Confined native model and data
+- **WHEN** OMP starts with filesystemConfinement enabled
+- **THEN** native OMP SHALL consume the selected authored model/config assets and persist/load its own selected XDG data inside the confined view.
+
+#### Scenario: Selected roots only
+- **WHEN** the confined process attempts to read a sibling mode/pool marker or mutate the skill root
+- **THEN** filesystem access SHALL fail and the shared mount policy SHALL not be widened by the additional OMP runtime inputs.
+
+#### Scenario: OpenCode mounts unchanged
+- **WHEN** OpenCode is spawned with the same sandbox configuration
+- **THEN** its existing runtime mounts and observable access outcomes SHALL remain unchanged.
+
 ### Requirement: Shared Agent Environment Filtering With Native OMP Discovery
 
 When environment filtering is enabled, agent processes SHALL retain the existing base allowlist, supported credential sets and operator allowed variables, with platform/dashboard/raw Skill API secrets denied. OpenCode SHALL preserve its existing selector denials. OMP SHALL use shared filtering without a separate settings-discovery sanitization or selector-identity gate.
@@ -227,6 +271,18 @@ Restricted OMP SHALL permit native abilities corresponding to OpenCode read/sear
 - **THEN** it SHALL use the original native implementation without project-owned transport/backend/schema or skill-URI metadata replacement.
 
 ## REMOVED Requirements
+
+### Requirement: Fail-Closed ACP Root Observation and Evidence Limits
+
+**Reason**: Its mixed shared observation and predecessor P0-governance obligations contradict the native parity cutover.
+
+**Migration**: Preserve shared failures and evidence limits under Shared ACP Canonical Observation And Evidence Scope; remove only obsolete predecessor-governance blocking and historical future-change obligations.
+
+### Requirement: Scoped Agent State Selectors Are Not Granted By Configuration Acceptance
+
+**Reason**: The owned-settings and PI_CODING_AGENT_DIR mechanism is removed.
+
+**Migration**: Native OMP Mode Data And Session Staging Separation owns inherited config HOME and selected XDG data; OpenCode selectors and data behavior remain unchanged.
 
 ### Requirement: SandboxManager Environment Filtering
 
@@ -690,8 +746,3 @@ Restricted OMP SHALL permit native abilities corresponding to OpenCode read/sear
 
 **Migration**: Use authored native OMP settings and the existing shared ACP policy. This pre-release cutover requires no data migration or compatibility shim.
 
-### Requirement: Inventory Denial Invariants Survive The Ownership Relaxation
-
-**Reason**: Superseded by the approved native-OMP parity design; its additional governance mechanism is removed.
-
-**Migration**: Use authored native OMP settings and the existing shared ACP policy. This pre-release cutover requires no data migration or compatibility shim.
