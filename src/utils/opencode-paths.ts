@@ -209,27 +209,44 @@ function physicalPath(path: string | undefined): string | undefined {
 }
 
 /**
- * The canonical directory one declaration ENTRY names, or `undefined` when the
- * entry can never name the resolved root: a `~user` or `${HOME}` form the
- * pinned engine does not expand, or a relative entry, which the loader
- * resolves against the SESSION's working directory rather than the
- * configuration file's own directory.
- *
- * The two expanded spellings are the home-anchored ones the pinned pattern
- * engine documents (`~` and `$HOME`, never `${HOME}`), and they are accepted
- * only in an already-canonical form: that engine turns a pattern into a
- * regular expression WITHOUT normalizing `..` or `.` segments, so a spelling
- * such as `/srv/other/../skills/**` matches no real path and must never be
- * mistaken for the resolved root.
+ * The consumer an entry's spelling rules belong to: the pinned skill-discovery
+ * loader or the pinned permission-pattern engine. The two differ, and the
+ * difference is a source-audit fact about the pinned runtime (`design.md`):
+ * the pattern engine documents `~` and `$HOME` (never `${HOME}`), while the
+ * discovery loader expands ONLY a `~/` prefix — a `$HOME/…` discovery entry is
+ * a RELATIVE path there, resolved against the session's working directory, so
+ * it must never be accepted as naming the resolved root.
  */
-function declaredDirectory(entry: string, home: string | undefined): string | undefined {
-  if (entry === "~" || entry === "$HOME") return home;
-  if (entry.startsWith("~/") || entry.startsWith("$HOME/")) {
+type EntryConsumer = "skill-discovery" | "permission-pattern";
+
+/**
+ * The canonical directory one declaration ENTRY names, or `undefined` when the
+ * entry can never name the resolved root: a home spelling the CONSUMER does
+ * not expand (a `~user`, `${HOME}`, or a `$HOME/…` discovery entry), or a
+ * relative entry, which both consumers resolve against the SESSION's working
+ * directory rather than the configuration file's own directory.
+ *
+ * An expanded spelling is accepted only in an already-canonical form: the
+ * pattern engine turns a pattern into a regular expression WITHOUT normalizing
+ * `..` or `.` segments, so a spelling such as `/srv/other/../skills/**`
+ * matches no real path and must never be mistaken for the resolved root. The
+ * expansion therefore CONCATENATES rather than joins — `join` would normalize
+ * away exactly the segments that make such a spelling ineffective.
+ */
+function declaredDirectory(
+  entry: string,
+  home: string | undefined,
+  consumer: EntryConsumer,
+): string | undefined {
+  const homeSpelled = entry.startsWith("~/") ||
+    (consumer === "permission-pattern" && entry.startsWith("$HOME/"));
+  if (homeSpelled) {
     if (home === undefined) return undefined;
-    const expanded = join(home, entry.slice(entry.indexOf("/") + 1));
+    const expanded = `${home}/${entry.slice(entry.indexOf("/") + 1)}`;
     return expanded === resolve(expanded) ? expanded : undefined;
   }
-  if (entry.startsWith("~")) return undefined;
+  if (consumer === "permission-pattern" && (entry === "~" || entry === "$HOME")) return home;
+  if (entry.startsWith("~") || entry.startsWith("$")) return undefined;
   if (!isAbsolute(entry)) return undefined;
   return entry === resolve(entry) ? entry : undefined;
 }
@@ -288,7 +305,46 @@ function requireStringArray(node: JsonSourceNode, label: string): string[] {
 function keyedDirectory(key: string, home: string | undefined): string | undefined {
   const suffix = key.endsWith("/**") ? "/**" : key.endsWith("/*") ? "/*" : undefined;
   if (suffix === undefined) return undefined;
-  return declaredDirectory(key.slice(0, -suffix.length), home);
+  return declaredDirectory(key.slice(0, -suffix.length), home, "permission-pattern");
+}
+
+/**
+ * Refuse an authored rule the declaration's own root-wide allowance would
+ * out-rank. The pinned engine is LAST-MATCH-WINS in source order, and the
+ * declaration states `"{root}/**": "allow"` last, so an authored rule scoped
+ * INSIDE the resolved root subtree — `"{root}/private/**"`, or the exact
+ * `"{root}/private"`, since the engine's `*` matches separators too — with any
+ * value other than `allow` would keep its bytes and lose its effect. That is
+ * the silent widening this step refuses: the operator's own narrower rule must
+ * be reconciled by the operator, never overridden by a generated declaration.
+ *
+ * A rule scoped to the root itself, to an ancestor of it, or to the global
+ * wildcard is NOT narrower and is not refused: out-ranking those is what makes
+ * the root subtree readable at all, and it is what the delta spec requires.
+ * A key whose scope cannot be established under a known home (a foreign
+ * pattern, an unexpanded spelling) is not judged here.
+ */
+function refuseNarrowerAuthoredRule(
+  members: readonly JsonSourceMember[],
+  root: string,
+  home: string | undefined,
+): void {
+  for (const member of members) {
+    const suffix = member.key.endsWith("/**") ? "/**" : member.key.endsWith("/*") ? "/*" : "";
+    const directory = declaredDirectory(
+      suffix === "" ? member.key : member.key.slice(0, -suffix.length),
+      home,
+      "permission-pattern",
+    );
+    if (directory === undefined || !directory.startsWith(`${root}/`)) continue;
+    const value = member.value.kind === "scalar" ? jsonScalarValue(member.value) : undefined;
+    if (value === "allow") continue;
+    throw new Error(
+      `the rule "${member.key}" narrows the resolved root "${root}" and would be out-ranked by ` +
+        `the declaration's own "${root}/**" allowance, so that authored rule cannot be ` +
+        "preserved without rewriting it",
+    );
+  }
 }
 
 /**
@@ -346,7 +402,12 @@ function isSkillDiscoveryPathList(
   // overwritten: the declaration repairs its OWN entries, never an authored
   // value whose shape it does not understand.
   const entries = requireStringArray(node, '"skills.paths"');
-  return entries.length > 0 && entries.every((entry) => declaredDirectory(entry, home) === root);
+  // A `$HOME/…` entry is NOT equivalent here: the pinned loader expands only a
+  // `~/` prefix and resolves anything else against the session's working
+  // directory, so the declaration must replace such an entry with the absolute
+  // root rather than accept it.
+  return entries.length > 0 &&
+    entries.every((entry) => declaredDirectory(entry, home, "skill-discovery") === root);
 }
 
 /** Whether the document's discovery path list names exactly the resolved root. */
@@ -519,6 +580,8 @@ function withSkillDiscoveryPath(
  * An operator rule that comes AFTER the root's own entry and also covers it
  * cannot be repaired without deleting or rewriting that authored rule, so it
  * refuses explicitly instead of emitting a second, contradictory declaration.
+ * An authored rule NARROWER than the root — scoped inside it — is refused for
+ * the same reason: the root-wide allowance would out-rank it.
  */
 function withExternalDirectoryAllowance(
   source: string,
@@ -557,6 +620,12 @@ function withExternalDirectoryAllowance(
   const own = members.findLast((member) => isRootOwnEntry(member.key, root, home));
   const lastCovering = members.findLast((member) => coversRootSubtree(member.key, root, home));
   if (own === lastCovering && own !== undefined) {
+    // An entry that already allows changes nothing — the narrower rules it
+    // out-ranks were the operator's own arrangement — so it is returned
+    // verbatim instead of being refused. Any other value IS a change.
+    if (source.slice(own.value.start, own.value.end) !== `"allow"`) {
+      refuseNarrowerAuthoredRule(members, root, home);
+    }
     return jsonReplaceSpan(source, own.value.start, own.value.end, `"allow"`);
   }
   if (lastCovering !== undefined && own !== undefined) {
@@ -565,6 +634,7 @@ function withExternalDirectoryAllowance(
         "it, so the root cannot be allowed without rewriting that authored rule",
     );
   }
+  refuseNarrowerAuthoredRule(members, root, home);
   return jsonInsertMember(source, externalDirectory, allowance);
 }
 

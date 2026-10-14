@@ -277,11 +277,24 @@ export function jsonInsertMember(
   const last = object.members[object.members.length - 1];
   if (last === undefined) {
     const outer = lineIndent(source, object.start);
+    // An empty object's interior is REPLACED only when it holds nothing but
+    // whitespace. Authored trivia inside it (a `//` or `/* */` note) keeps its
+    // bytes and the member is placed after it: "everything already in the
+    // object keeps its bytes" holds for an object with no members too.
+    const interior = source.slice(object.start + 1, object.end - 1);
+    if (interior.trim() === "") {
+      return jsonReplaceSpan(
+        source,
+        object.start + 1,
+        object.end - 1,
+        `\n${outer}  ${memberText}\n${outer}`,
+      );
+    }
     return jsonReplaceSpan(
       source,
-      object.start + 1,
       object.end - 1,
-      `\n${outer}  ${memberText}\n${outer}`,
+      object.end - 1,
+      `${/\n[ \t]*$/.test(interior) ? "" : "\n"}${outer}  ${memberText}\n${outer}`,
     );
   }
   const indent = jsonMemberIndent(source, object);

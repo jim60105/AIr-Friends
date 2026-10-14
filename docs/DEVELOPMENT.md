@@ -604,7 +604,7 @@ OpenCode discovers skills only from what its own configuration declares, so at s
 
 The step inspects before it writes:
 
-- A document that already declares the resolved root — literally or in a `~/…` / `$HOME/…` spelling that resolves to it — AND already allows external-directory reads under it is left **byte-identical**, and nothing is written.
+- A document that already declares the resolved root — as that absolute path, or in the `~/…` spelling the discovery loader expands — AND already allows external-directory reads under it (as the absolute path, or in the `~/…` / `$HOME/…` form the permission-pattern engine expands) is left **byte-identical**, and nothing is written. A `$HOME/…` entry in the **path list** is not equivalent and is replaced by the absolute root: the loader expands only `~/`, so it would read that entry as a relative path under the session's working directory. A spelling carrying `.` or `..` segments is not equivalent either, in either place: the pattern engine does not normalize them, so it matches no canonical path.
 - A document that does not exist is **created** (with its parent directory) containing exactly those declaration entries and no other setting.
 - Any other document is **updated in place**, and every other byte keeps its value.
 
@@ -613,6 +613,7 @@ Startup fails explicitly, naming the file and the resolved root, when the declar
 - The document must change but the file — or its directory — is not writable. Because the `my-opencode.json` mount above is read-only, a mounted file must **either already declare the resolved root plus its allowance** — which makes the step a no-op and keeps the read-only mount valid — **or be mounted writable**.
 - The document cannot be interpreted: malformed JSON/JSONC, a `skills` / `agent.build.permission` shape the declaration cannot extend, or a key declared twice.
 - The resolved root is the daemon user's home directory or an ancestor of it, or its literal name contains a permission-pattern metacharacter (`*`, `?`, `\`).
+- An authored rule is scoped **inside** the resolved root and is not an `allow` (for example `"<root>/private/**": "deny"`, or the same path without a wildcard suffix). OpenCode's rule order is last-match-wins, so the declaration's own root-wide allowance would keep that rule's bytes but lose its effect — the step refuses rather than silently widening what the operator narrowed. A rule for the root itself, for a parent of it, or the global `*` default is not narrower and is not refused: out-ranking those is what makes the root readable at all, which is why the allowance is inserted as the **last** rule and set to `allow` in place when the document already carries one for exactly that root.
 
 The document is the AGENT's own global configuration (`$HOME/.config/opencode/opencode.json`): the agent subprocess is launched with an explicit environment allow-list (`clearEnv: true`) that carries `HOME` and no config-directory selector, so `OPENCODE_CONFIG_DIR` / `XDG_CONFIG_HOME` in the bot's own environment cannot relocate it. Only `opencode.json` is written — a later-loaded `opencode.jsonc` in the same directory stays the operator's own file.
 

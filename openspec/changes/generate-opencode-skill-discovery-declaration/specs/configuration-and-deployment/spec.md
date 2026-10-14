@@ -42,6 +42,13 @@ Bootstrap SHALL declare the deployment-resolved skill root to OpenCode by writin
 - **THEN** it SHALL fail explicitly, naming the root and the reason
 - **AND** it SHALL NOT write an external-directory allowance for a home-scoped or ancestor path
 
+#### Scenario: An authored rule inside the root is not out-ranked
+
+- **GIVEN** the deployed configuration carries an authorization rule scoped inside the resolved root whose value is not `allow`
+- **WHEN** bootstrap prepares the deployment
+- **THEN** it SHALL fail explicitly, naming that rule and the resolved root
+- **AND** it SHALL NOT write an allowance that overrides the operator's own rule
+
 #### Scenario: Declaration is not an execution authority
 
 - **WHEN** the declaration is written

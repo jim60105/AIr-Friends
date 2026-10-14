@@ -165,16 +165,42 @@ Deno.test("declaration - an already-correct document is left byte-identical", ()
     rendered,
   );
 
-  // The `~/` and `$HOME/` spellings the pinned engine expands are equivalent.
-  for (const spelling of ["~/", "$HOME/"]) {
-    const homeRelative = rendered
-      .replace(`"${CONTAINER_ROOT}"`, `"${spelling}.agents/skills"`)
-      .replace(`"${CONTAINER_ROOT}/**"`, `"${spelling}.agents/skills/**"`);
-    assertEquals(
-      inspectOpencodeSkillDiscoveryDeclaration(homeRelative, CONTAINER_ROOT, CONTAINER_HOME),
-      { declared: true, detail: "" },
-    );
-  }
+  // The `~/` spelling both consumers expand is equivalent in BOTH entries.
+  const homeRelative = rendered
+    .replace(`"${CONTAINER_ROOT}"`, `"~/.agents/skills"`)
+    .replace(`"${CONTAINER_ROOT}/**"`, `"~/.agents/skills/**"`);
+  assertEquals(
+    inspectOpencodeSkillDiscoveryDeclaration(homeRelative, CONTAINER_ROOT, CONTAINER_HOME),
+    { declared: true, detail: "" },
+  );
+  // The pattern engine's `$HOME` form is equivalent in the permission KEY
+  // alone: the pinned DISCOVERY loader expands only `~/`, so a `$HOME/…`
+  // discovery entry is a RELATIVE path there and names no root.
+  assertEquals(
+    inspectOpencodeSkillDiscoveryDeclaration(
+      rendered.replace(`"${CONTAINER_ROOT}/**"`, `"$HOME/.agents/skills/**"`),
+      CONTAINER_ROOT,
+      CONTAINER_HOME,
+    ),
+    { declared: true, detail: "" },
+  );
+  const dollarHomePath = rendered.replace(`"${CONTAINER_ROOT}"`, `"$HOME/.agents/skills"`);
+  assertEquals(
+    inspectOpencodeSkillDiscoveryDeclaration(dollarHomePath, CONTAINER_ROOT, CONTAINER_HOME),
+    {
+      declared: false,
+      detail: `the skill discovery path list is not exactly "${CONTAINER_ROOT}"`,
+    },
+  );
+  assertEquals(
+    inspectOpencodeSkillDiscoveryDeclaration(
+      applyOpencodeSkillDiscoveryDeclaration(dollarHomePath, CONTAINER_ROOT, CONTAINER_HOME),
+      CONTAINER_ROOT,
+      CONTAINER_HOME,
+    ),
+    { declared: true, detail: "" },
+    "a `$HOME/` discovery entry is rewritten to the absolute resolved root",
+  );
 
   // The deployment writes NOTHING for such a document: the reader is asked and
   // the writer would fail the test if it were ever called.
@@ -468,6 +494,109 @@ Deno.test("declaration - the allowance is judged by the engine's ordered rules",
     ).declared,
     false,
     "the path list is still the operator's own, so the document is incomplete",
+  );
+});
+
+Deno.test("declaration - an authored rule inside the root is never out-ranked", () => {
+  const allowanceFor = (external: string) =>
+    `{
+  "skills": { "paths": ["${OTHER_ROOT}"] },
+  "agent": { "build": { "permission": { "external_directory": { ${external} } } } }
+}
+`;
+  // A NARROWER authored rule keeps its bytes but loses its effect once the
+  // root-wide allowance is the last matching rule — including the repair of a
+  // root entry that currently denies, and including the exact-path form the
+  // engine also reads as a pattern. The step refuses instead of widening what
+  // the operator narrowed, naming the rule.
+  for (
+    const conflicts of [
+      `"*": "deny", "${OTHER_ROOT}/private/**": "deny"`,
+      `"*": "deny", "${OTHER_ROOT}/private": "ask"`,
+      `"*": "deny", "${OTHER_ROOT}/private/**": "deny", "${OTHER_ROOT}/**": "deny"`,
+    ]
+  ) {
+    const source = allowanceFor(conflicts);
+    assertEquals(
+      inspectOpencodeSkillDiscoveryDeclaration(source, OTHER_ROOT, CONTAINER_HOME).declared,
+      false,
+    );
+    const refusal = assertThrows(
+      () => applyOpencodeSkillDiscoveryDeclaration(source, OTHER_ROOT, CONTAINER_HOME),
+      Error,
+    );
+    assertStringIncludes(refusal.message, `${OTHER_ROOT}/private`);
+    assertStringIncludes(refusal.message, `"${OTHER_ROOT}/**"`);
+  }
+
+  // A narrower authored ALLOW pins nothing away, so the allowance is still
+  // appended after it and every authored key keeps its bytes.
+  const permissive = allowanceFor(`"*": "deny", "${OTHER_ROOT}/private/**": "allow"`);
+  const updated = applyOpencodeSkillDiscoveryDeclaration(permissive, OTHER_ROOT, CONTAINER_HOME);
+  assertStringIncludes(updated, `"${OTHER_ROOT}/private/**": "allow"`);
+  assertStringIncludes(updated, `"${OTHER_ROOT}/**": "allow" } } } }`);
+  assertEquals(
+    inspectOpencodeSkillDiscoveryDeclaration(updated, OTHER_ROOT, CONTAINER_HOME),
+    { declared: true, detail: "" },
+  );
+});
+
+Deno.test("declaration - a home spelling the consumer does not expand names no root", () => {
+  const document = (pathEntry: string, key: string) =>
+    `{
+  "skills": { "paths": ["${pathEntry}"] },
+  "agent": { "build": { "permission": { "external_directory": { "${key}": "allow" } } } }
+}
+`;
+  // `..` and `.` segments are NOT normalized by the pinned pattern engine, so
+  // such a spelling matches no canonical path and does not allow the root; the
+  // same is true of a discovery entry the loader would re-resolve against the
+  // session's working directory.
+  const unmatched: Array<[string, string]> = [
+    [CONTAINER_ROOT, "~/.agents/other/../skills/**"],
+    [CONTAINER_ROOT, "$HOME/.agents/./skills/**"],
+    ["~/.agents/other/../skills", `${CONTAINER_ROOT}/**`],
+  ];
+  for (const [pathEntry, key] of unmatched) {
+    const source = document(pathEntry, key);
+    assertEquals(
+      inspectOpencodeSkillDiscoveryDeclaration(source, CONTAINER_ROOT, CONTAINER_HOME).declared,
+      false,
+    );
+    const updated = applyOpencodeSkillDiscoveryDeclaration(source, CONTAINER_ROOT, CONTAINER_HOME);
+    assertStringIncludes(updated, `"${CONTAINER_ROOT}"`);
+    assertStringIncludes(updated, `"${CONTAINER_ROOT}/**": "allow"`);
+    assertEquals(
+      inspectOpencodeSkillDiscoveryDeclaration(updated, CONTAINER_ROOT, CONTAINER_HOME),
+      { declared: true, detail: "" },
+    );
+  }
+});
+
+Deno.test("declaration - an authored note inside an empty object survives the splice", () => {
+  const source = `{
+  "skills": {
+    // the operator's note: no paths declared yet
+  },
+  "agent": {
+    "build": {
+      "permission": {
+        "external_directory": {
+          /* nothing allowed yet */
+        }
+      }
+    }
+  }
+}
+`;
+  const updated = applyOpencodeSkillDiscoveryDeclaration(source, OTHER_ROOT, CONTAINER_HOME);
+  assertStringIncludes(updated, "// the operator's note: no paths declared yet");
+  assertStringIncludes(updated, "/* nothing allowed yet */");
+  assertStringIncludes(updated, `"${OTHER_ROOT}"`);
+  assertStringIncludes(updated, `"${OTHER_ROOT}/**": "allow"`);
+  assertEquals(
+    inspectOpencodeSkillDiscoveryDeclaration(updated, OTHER_ROOT, CONTAINER_HOME),
+    { declared: true, detail: "" },
   );
 });
 
