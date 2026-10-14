@@ -271,6 +271,14 @@ pinned binary present), where the probe ran confined restricted and native-YOLO
 pool consumers, the mount controls above and the same-mode reload alongside the
 two sibling suites.
 
+To reproduce that evidence, run the same command with the checkout mounted in a
+runtime that ships `bwrap`, `strace`, `dumb-init` and the pinned `omp`, exposes
+`/usr/local` as a real directory, and provides the unprivileged user/mount
+namespace privilege (`podman run --privileged` was used, with the checkout's
+`agent-config/omp/*.yml` and generated `build/omp-extension/index.js` bound over
+their `/opt/air/omp/**` image copies so the run consumes THIS checkout's
+authored assets). On the host itself only the unconfined evidence is produced.
+
 ### 6.4 What this still does not claim
 
 - Init/catalog/load/restore proves those mechanisms only. Native
