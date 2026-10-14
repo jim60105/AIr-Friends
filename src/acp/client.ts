@@ -37,6 +37,7 @@ import {
   destructiveDenialReason,
   type DestructiveIntentInput,
   isDestructiveRequest,
+  legacyDestructiveIntentInput,
   normalizeDestructiveIntent,
 } from "./destructive-policy.ts";
 import {
@@ -595,13 +596,7 @@ export class ChatbotClient implements acp.Client {
       const rawInput = typeof params.toolCall.rawInput === "string"
         ? params.toolCall.rawInput
         : JSON.stringify(params.toolCall.rawInput);
-      const nativeTool = kind === "delete" ? "delete" : kind === "move" ? "move" : "edit";
-      input = rawInput === undefined ? undefined : {
-        nativeTool,
-        rawInput,
-        executionInputBinding: rawInput,
-        parserProvenance: nativeTool === "edit" ? "unknown" : "supported_full_parser",
-      };
+      input = rawInput === undefined ? undefined : legacyDestructiveIntentInput(rawInput, kind);
     }
     const decoded = input ? decodeDestructiveIntent(input) : undefined;
     if (!decoded?.ok) {

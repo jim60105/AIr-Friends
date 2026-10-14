@@ -16,7 +16,10 @@
  * `Delete`/`Move` title and NEVER used to find a path.
  */
 
-import type { DestructiveIntentInput } from "../destructive-policy.ts";
+import {
+  type DestructiveIntentInput,
+  legacyDestructiveIntentInput,
+} from "../destructive-policy.ts";
 
 /** The subset of an ACP tool call this normalizer inspects. */
 export interface OmpDestructiveToolCall {
@@ -86,16 +89,9 @@ export function normalizeOmpDestructivePermissionInput(
   const raw = toolCall.rawInput;
   if (raw === undefined) return undefined;
   const rawString = typeof raw === "string" ? raw : JSON.stringify(raw);
-  const operation = identifyOperation(toolCall.kind ?? "", toolCall.title ?? "");
-  if (operation === null) {
-    // No destructive operation is named: the shared decoder's unsupported path.
-    return {
-      nativeTool: "edit",
-      rawInput: rawString,
-      executionInputBinding: rawString,
-      parserProvenance: "unknown",
-    };
-  }
+  const kind = toolCall.kind ?? "";
+  const operation = identifyOperation(kind, toolCall.title ?? "");
+  if (operation === null) return legacyDestructiveIntentInput(rawString, kind);
   let parsed: unknown;
   try {
     parsed = JSON.parse(rawString);
@@ -110,13 +106,11 @@ export function normalizeOmpDestructivePermissionInput(
   }
   const canonical = canonicalize(operation, parsed);
   if (canonical === null) {
-    // Unsupported/incomplete shape: pass the original through for the shared denial.
-    return {
-      nativeTool: operation,
-      rawInput: rawString,
-      executionInputBinding: rawString,
-      parserProvenance: "supported_full_parser",
-    };
+    // Unsupported/incomplete shape: keep the pre-change (kind-based)
+    // classification instead of promoting a title-inferred operation, so the
+    // shared decoder's accepted vocabulary is never widened. Explicit
+    // `kind: "move"`/`"delete"` requests keep their previous decode.
+    return legacyDestructiveIntentInput(rawString, kind);
   }
   // Serialize once and use the identical string for both binding fields.
   const serialized = JSON.stringify(canonical);

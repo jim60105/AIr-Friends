@@ -7307,6 +7307,11 @@ Deno.test("ChatbotClient - OMP destructive ingress table (native delete/move, al
       "m10.md",
       "m11.md",
       "m12.md",
+      "m13.md",
+      "m14.md",
+      "m15.md",
+      "m16.md",
+      "m17.md",
     ];
     for (const name of seeds) Deno.writeTextFileSync(f(name), "seed");
 
@@ -7528,6 +7533,60 @@ Deno.test("ChatbotClient - OMP destructive ingress table (native delete/move, al
         locations: [f("m12.md"), f("m12-dst.md")],
         expected: "allow-1",
       },
+      {
+        name:
+          "title-inferred move never promotes the canonical {source,destination} form (kind edit)",
+        agentType: "omp",
+        title: "Move",
+        kind: "edit",
+        rawInput: { source: f("m16.md"), destination: f("m16-dst.md") },
+        locations: [f("m16.md"), f("m16-dst.md")],
+        expected: "reject-1",
+      },
+      {
+        name:
+          "title-inferred move never promotes the canonical {source,destination} form (omitted kind)",
+        agentType: "omp",
+        title: "Move",
+        rawInput: { source: f("m17.md"), destination: f("m17-dst.md") },
+        locations: [f("m17.md"), f("m17-dst.md")],
+        expected: "reject-1",
+      },
+      {
+        name: "complete native move with an unauthorized destination is rejected",
+        agentType: "omp",
+        title: "Move",
+        kind: "move",
+        rawInput: { from: f("m13.md"), to: join(otherRoot, "escape.md") },
+        locations: [f("m13.md"), join(otherRoot, "escape.md")],
+        expected: "reject-1",
+      },
+      {
+        name: "the highest-precedence destination alias is the authorized target",
+        agentType: "omp",
+        title: "Move",
+        kind: "move",
+        // newPath (highest precedence) points at the allowed staging target;
+        // `to` points outside. Approval proves newPath was selected and checked.
+        rawInput: { from: f("m14.md"), newPath: f("m14-dst.md"), to: join(otherRoot, "x.md") },
+        locations: [f("m14.md"), f("m14-dst.md")],
+        expected: "allow-1",
+      },
+      {
+        name: "an unauthorized highest-precedence destination alias is rejected",
+        agentType: "omp",
+        title: "Move",
+        kind: "move",
+        // newPath (highest precedence) points OUTSIDE while `to` points at staging;
+        // rejection proves the checked target is the highest-precedence alias.
+        rawInput: {
+          from: f("m15.md"),
+          newPath: join(otherRoot, "escape2.md"),
+          to: f("m15-dst.md"),
+        },
+        locations: [f("m15.md"), join(otherRoot, "escape2.md")],
+        expected: "reject-1",
+      },
     ];
 
     for (const scenario of scenarios) {
@@ -7595,13 +7654,68 @@ Deno.test("ChatbotClient - OMP destructive denial records the shared reason and 
   }
 });
 
+Deno.test("ChatbotClient - OMP move denial for an unauthorized destination names the write-path reason", async () => {
+  const tempDir = Deno.makeTempDirSync();
+  const staging = join(tempDir, "tmp", "test-session");
+  Deno.mkdirSync(staging, { recursive: true });
+  const source = join(staging, "src.md");
+  Deno.writeTextFileSync(source, "seed");
+  const outside = Deno.makeTempDirSync({ prefix: "air-ingress-outside-" });
+  const destination = join(outside, "escape.md");
+  try {
+    const client = createRegisteredClient(createTestSkillRegistry(), createTestLogger(), {
+      workingDir: tempDir,
+      platform: "discord",
+      userId: "123",
+      channelId: "456",
+      isDM: false,
+      sessionId: "test-session",
+      agentType: "omp",
+    }, emptySkillList());
+
+    const response = await client.requestPermission({
+      sessionId: "test-session",
+      toolCall: {
+        toolCallId: "tc-dst",
+        status: "pending" as const,
+        content: [],
+        title: "Move",
+        kind: "move",
+        rawInput: { from: source, to: destination },
+        locations: [{ path: source }, { path: destination }],
+      },
+      options: [
+        { kind: "allow_once", optionId: "allow-1", name: "Allow once" },
+        { kind: "reject_once", optionId: "reject-1", name: "Reject once" },
+      ],
+    });
+    assertEquals(response.outcome.outcome, "selected");
+    if (response.outcome.outcome === "selected") {
+      assertEquals(response.outcome.optionId, "reject-1");
+    }
+    const rejections = client.getRecentPermissionRejections();
+    assertEquals(rejections.length, 1);
+    assertEquals(rejections[0].reason, "rejected_write_path_outside_workspace");
+    assert(Deno.statSync(source).isFile, "the denied move retains its source file");
+    await assertRejects(() => Deno.stat(destination));
+  } finally {
+    Deno.removeSync(tempDir, { recursive: true });
+    Deno.removeSync(outside, { recursive: true });
+  }
+});
+
 Deno.test("ChatbotClient - request metadata cannot select the OMP decoder", async () => {
   const tempDir = Deno.makeTempDirSync();
   const staging = join(tempDir, "tmp", "test-session");
   Deno.mkdirSync(staging, { recursive: true });
-  Deno.writeTextFileSync(join(staging, "meta.md"), "seed");
+  const source = join(staging, "meta.md");
+  const destination = join(staging, "meta-dst.md");
+  Deno.writeTextFileSync(source, "seed");
   try {
-    const run = async (agentType: ClientConfig["agentType"]) => {
+    const run = async (
+      agentType: ClientConfig["agentType"],
+      rawInput: Record<string, unknown>,
+    ) => {
       const client = createRegisteredClient(createTestSkillRegistry(), createTestLogger(), {
         workingDir: tempDir,
         platform: "discord",
@@ -7619,16 +7733,8 @@ Deno.test("ChatbotClient - request metadata cannot select the OMP decoder", asyn
           content: [],
           title: "Move",
           kind: "move",
-          // Caller claims OMP-native move fields and synthetic parser provenance.
-          rawInput: {
-            from: join(staging, "meta.md"),
-            to: join(staging, "meta-dst.md"),
-            parserProvenance: "synthetic_adapter_decoder",
-          },
-          locations: [
-            { path: join(staging, "meta.md") },
-            { path: join(staging, "meta-dst.md") },
-          ],
+          rawInput,
+          locations: [{ path: source }, { path: destination }],
         },
         options: [
           { kind: "allow_once", optionId: "allow-1", name: "Allow once" },
@@ -7638,11 +7744,23 @@ Deno.test("ChatbotClient - request metadata cannot select the OMP decoder", asyn
       return response.outcome.outcome === "selected" ? response.outcome.optionId : "cancelled";
     };
 
-    // The extra `parserProvenance` field makes both decoders fail closed, and the
-    // OpenCode/omitted clients keep their own decoder — never the OMP normalizer.
-    assertEquals(await run("opencode"), "reject-1");
-    assertEquals(await run(undefined), "reject-1");
-    assertEquals(await run("omp"), "reject-1");
+    // A caller-supplied parser-provenance claim grants no authority to any decoder.
+    const claimed = {
+      from: source,
+      to: destination,
+      parserProvenance: "synthetic_adapter_decoder",
+    };
+    assertEquals(await run("opencode", claimed), "reject-1");
+    assertEquals(await run(undefined, claimed), "reject-1");
+    assertEquals(await run("omp", claimed), "reject-1");
+
+    // The SAME request metadata without the claim is decoded by the CONFIGURED
+    // type only: the OpenCode/omitted clients keep their own decoder (reject),
+    // while a configured OMP connector selects the normalizer (allow).
+    const metadata = { from: source, to: destination };
+    assertEquals(await run("opencode", metadata), "reject-1");
+    assertEquals(await run(undefined, metadata), "reject-1");
+    assertEquals(await run("omp", metadata), "allow-1");
   } finally {
     Deno.removeSync(tempDir, { recursive: true });
   }

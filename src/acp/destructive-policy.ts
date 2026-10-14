@@ -45,6 +45,27 @@ export type DestructiveFailure =
   | "unparseable_input"
   | "binding_mismatch"
   | "title_only_intent";
+
+/**
+ * Classification for an ACP destructive snapshot that has NOT been normalized by
+ * a native ingress adapter: the caller's `kind` selects delete/move, and anything
+ * else is the unsupported `edit`/`unknown` shape. Shared so the OpenCode ingress
+ * and the OMP adapter's non-native fallback cannot drift
+ * (`normalize-omp-destructive-acp-ingress`).
+ */
+export function legacyDestructiveIntentInput(
+  rawInput: string,
+  kind: string,
+): DestructiveIntentInput {
+  const nativeTool = kind === "delete" ? "delete" : kind === "move" ? "move" : "edit";
+  return {
+    nativeTool,
+    rawInput,
+    executionInputBinding: rawInput,
+    parserProvenance: nativeTool === "edit" ? "unknown" : "supported_full_parser",
+  };
+}
+
 export interface DestructiveTarget {
   readonly path: string;
   readonly intent: "delete" | "write";
