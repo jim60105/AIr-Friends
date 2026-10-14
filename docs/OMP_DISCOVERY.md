@@ -13,8 +13,7 @@ epoch or readiness signal any more. What is actually true now is below.
   the command line (`omp acp --config <mode settings> --system-prompt <prompt>`).
   The mode documents are authored by hand and are never generated, serialized,
   templated or rewritten by the application (`agent-config/omp/restricted.yml`,
-  `agent-config/omp/native-yolo.yml`; installed read-only at
-  `/opt/air/omp/config/`).
+  `agent-config/omp/native-yolo.yml`; installed at `/opt/air/omp/config/`).
 - **Project settings**: whatever native OMP finds under `.omp/` in its process
   working directory — the caller/session `workingDir`. There is no neutral
   launch cwd.

@@ -22,13 +22,14 @@ it, and none is invented here.
 | `agent-config/omp/restricted.yml`  | `/opt/air/omp/config/restricted.yml`        | `yolo === false`    |
 | `agent-config/omp/native-yolo.yml` | `/opt/air/omp/config/native-yolo.yml`       | `yolo === true`     |
 
-The installed copies are root-owned `0644` inside root-owned `0755`
-directories (root-owned so the agent process cannot rewrite the policy that
-governs it). `resolveOmpConfigPath()` (`src/utils/omp-paths.ts`) returns the
-installed copy when it exists and the authored development-tree path
+The installed copies follow the image's ordinary `$UID:0` / `775` install
+convention (docs/OMP_PACKAGING.md §3); installation ownership carries no
+governance meaning. `resolveOmpConfigPath()` (`src/utils/omp-paths.ts`) returns
+the installed copy when it exists and the authored development-tree path
 otherwise; the factory passes exactly ONE `--config` value per launch — the
 selected mode document (see [OMP_SPAWN.md](OMP_SPAWN.md) §2). The install is
-content-faithful: the installed bytes are the authored bytes.
+content-faithful: the installed bytes are the authored bytes, and native OMP
+parses them without any application pre-validation or rewrite.
 
 ### 1a. Exact key surface per mode
 

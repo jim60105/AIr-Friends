@@ -158,11 +158,7 @@ RUN case "${TARGETARCH}" in \
     echo "${OMP_NOTICES_SHA256}  /tmp/THIRD-PARTY-NOTICES.txt" | sha256sum -c - && \
     mv /tmp/omp.bin /omp/out/omp && \
     mv /tmp/LICENSE /omp/licenses/LICENSE && \
-    mv /tmp/THIRD-PARTY-NOTICES.txt /omp/licenses/THIRD-PARTY-NOTICES.txt && \
-    # Carry the exact pinned tag to the final stage so the digest manifest
-    # header records the SAME OMP_VERSION this stage enforced (no second
-    # hard-coded copy of the version string downstream).
-    echo "${OMP_VERSION}" > /omp/out/OMP_VERSION
+    mv /tmp/THIRD-PARTY-NOTICES.txt /omp/licenses/THIRD-PARTY-NOTICES.txt
 
 ########################################
 # Final stage
@@ -219,31 +215,29 @@ RUN --mount=type=cache,id=apt-$TARGETARCH$TARGETVARIANT,sharing=locked,target=/v
 # Copy Agents CLI binary
 COPY --link --chown=$UID:0 --chmod=775 --from=opencode-unpacker /opencode/opencode /usr/local/bin/opencode
 
-# Copy the official OMP executable. Ownership divergence (deliberate): the
-# binaries above follow $UID:0 + 775, but $UID is the agent's own user inside
-# this image — a group-writable agent binary would be self-modifiable by the
-# very process the restricted boundary governs (row 12's owned/non-writable
-# ownership model). `omp` therefore installs root-owned 0755; the runtime needs
-# only the exec bit. No-new-Bun rule: the official executable is
-# self-contained; no OMP step installs a JavaScript/Bun runtime or speculative
-# helper packages (the pre-existing denoland/deno base is the image's only such
-# dependency and is not modified by these steps).
-COPY --link --chown=0:0 --chmod=0755 --from=omp-unpacker /omp/out/omp /usr/local/bin/omp
+# Copy the official OMP executable, following the same $UID:0 + 775 install
+# convention as the OpenCode binary above. The runtime needs the exec bit; the
+# install location is a deployment path, not an ownership authority.
+# No-new-Bun rule: the official executable is self-contained; no OMP step
+# installs a JavaScript/Bun runtime or speculative helper packages (the
+# pre-existing denoland/deno base is the image's only such dependency and is
+# not modified by these steps).
+COPY --link --chown=$UID:0 --chmod=775 --from=omp-unpacker /omp/out/omp /usr/local/bin/omp
 
 # Copy official OMP notices (checksum-verified in the unpacker stage above)
-# under the image's third-party license location, root-owned read-only.
-COPY --link --chown=0:0 --chmod=0644 --from=omp-unpacker /omp/licenses/LICENSE /licenses/omp/LICENSE
-COPY --link --chown=0:0 --chmod=0644 --from=omp-unpacker /omp/licenses/THIRD-PARTY-NOTICES.txt /licenses/omp/THIRD-PARTY-NOTICES.txt
+# under the image's third-party license location, following the normal
+# $UID:0 + 775 license-packaging convention used for the project LICENSE.
+COPY --link --chown=$UID:0 --chmod=775 --from=omp-unpacker /omp/licenses/LICENSE /licenses/omp/LICENSE
+COPY --link --chown=$UID:0 --chmod=775 --from=omp-unpacker /omp/licenses/THIRD-PARTY-NOTICES.txt /licenses/omp/THIRD-PARTY-NOTICES.txt
 
 # Copy OpenCode configuration
 COPY --link --chown=$UID:0 --chmod=775 agent-config/opencode.json /home/deno/.config/opencode/opencode.json
 
 # Authored native OMP model configuration. Native OMP reads `models.yml` from
 # `getAgentDir()/models.yml` (config HOME), so the authored provider header is
-# installed at the NATIVE config path instead of a second owned overlay tree.
-# Root-owned 0644: the runtime user reads it and can never rewrite it; the
-# parent directory stays agent-writable for native auth/session side files.
-COPY --link --chown=0:0 --chmod=0644 agent-config/omp/models.yml /home/deno/.omp/agent/models.yml
+# installed at the NATIVE config path instead of a second overlay tree,
+# following the project's ordinary $UID:0 + 775 install convention.
+COPY --link --chown=$UID:0 --chmod=775 agent-config/omp/models.yml /home/deno/.omp/agent/models.yml
 
 # Copy application files
 COPY --link --chown=$UID:0 --chmod=775 deno.json deno.lock /app/
@@ -261,53 +255,34 @@ COPY --link --chown=$UID:0 --chmod=775 skills/ /home/deno/.agents/skills/
 # and external runtime installs publish into it, so no second, separately
 # staged skill root is installed anywhere.
 
-# Deployment-owned OMP artifacts — a NEW root-owned tree at /opt/air/omp,
-# outside every agent-writable root (never under /app/data, /app/prompts, or
-# /home/deno): the row-8 settings overlays, the row-8 SYSTEM.md prompt
-# artifact, and the FINAL trusted-extension tree (serial composition
-# 12 -> 13 -> 14b -> 17 -> 18). Directories 0755, files 0644, owner root: the
-# agent process cannot modify the owned tree it is governed by.
+# Authored OMP mode settings and prompt artifact, installed at the stable
+# /opt/air/omp deployment paths under the project's ordinary $UID:0 + 775
+# convention (the same convention as agent-config/opencode.json). Directory
+# modes are prepared in the post-COPY directory step below: a `COPY --link`
+# lands as an independent layer that recreates its destination's parent
+# directories, so preparing them here would be discarded.
 # Content-faithful install: the settings/prompt content lands byte-identical
 # from these authored paths; the extension-tree step below installs the
 # GENERATED native-loadable bundle — a deterministic transformation of
 # canonical source plus frozen-lock dependencies (package-bun-compatible-
-# omp-extension), with the input digest inventory recorded in the bundle
-# header. No independently edited or augmented content exists either way.
-RUN install -d -m 755 -o 0 -g 0 /opt/air/omp && \
-    install -d -m 755 -o 0 -g 0 /opt/air/omp/config && \
-    install -d -m 755 -o 0 -g 0 /opt/air/omp/prompt && \
-    install -d -m 755 -o 0 -g 0 /opt/air/omp/extension
-
-COPY --link --chown=0:0 --chmod=0644 agent-config/omp/restricted.yml /opt/air/omp/config/restricted.yml
-COPY --link --chown=0:0 --chmod=0644 agent-config/omp/native-yolo.yml /opt/air/omp/config/native-yolo.yml
+# omp-extension). No independently edited or augmented content exists either
+# way, and the build synthesizes or rewrites no OMP YAML.
+COPY --link --chown=$UID:0 --chmod=775 agent-config/omp/restricted.yml /opt/air/omp/config/restricted.yml
+COPY --link --chown=$UID:0 --chmod=775 agent-config/omp/native-yolo.yml /opt/air/omp/config/native-yolo.yml
 # Row-8 prompt mapping: the SYSTEM.md prompt artifact installs under its
 # contracted name; operator prompt mounts keep their existing semantics and
 # are never relocated (src/utils/omp-paths.ts resolveOmpSystemPromptPath).
-COPY --link --chown=0:0 --chmod=0644 prompts/system_prompt_override.md /opt/air/omp/prompt/SYSTEM.md
+COPY --link --chown=$UID:0 --chmod=775 prompts/system_prompt_override.md /opt/air/omp/prompt/SYSTEM.md
 
 # Trusted-extension tree: build the native-loadable ESM bundle (the single
-# generated index.js) from the committed canonical sources and frozen lock,
-# install it into the owned tree, and cut PACKAGE-MANIFEST.sha256 over FINAL
-# content. Runs as
-# ROOT (before USER $UID) reading the root-owned cache-stage copy of the
-# committed sources (/build-src — a bind mount of the cache stage's /app, NOT
-# the agent-writable /app/src 775 copy), so nothing consumed into the owned
-# tree comes from agent-modifiable bytes during the build. Recut
-# invariant (design D5): the manifest is regenerated here over final content
-# on EVERY image build, and any successor change that lands content touching
-# /opt/air/omp inputs must recut it in the same change (the bundle is now a
-# manifest-listed input) — a stale manifest
-# after a content change is a task-failure condition (docs/OMP_PACKAGING.md).
-COPY --link --chown=0:0 --chmod=0644 --from=omp-unpacker /omp/out/OMP_VERSION /opt/air-build/OMP_VERSION
-# Both staging scripts run straight from the read-only cache-stage mount, which
-# keeps them beside the canonical `src/` their `../../src/...` imports resolve
-# against; /opt/air-build now carries only the pinned version file.
+# generated index.js) from the committed canonical sources and frozen lock and
+# install it at the stable extension path. Runs as ROOT (before USER $UID)
+# reading the root-owned cache-stage copy of the committed sources (/build-src
+# — a bind mount of the cache stage's /app, NOT the agent-writable /app/src 775
+# copy), so nothing consumed into the tree comes from agent-modifiable bytes
+# during the build.
 RUN --mount=type=bind,from=cache,src=/app,target=/build-src \
-    /build-src/scripts/omp/bundle-omp-extension.sh /build-src /opt/air/omp/extension /build-src/deno.lock && \
-    /build-src/scripts/omp/generate-omp-manifest.sh /opt/air/omp "$(cat /opt/air-build/OMP_VERSION)" && \
-    chown 0:0 /opt/air/omp/PACKAGE-MANIFEST.sha256 && \
-    chmod 0644 /opt/air/omp/PACKAGE-MANIFEST.sha256 && \
-    rm -rf /opt/air-build
+    /build-src/scripts/omp/bundle-omp-extension.sh /build-src /opt/air/omp/extension /build-src/deno.lock
 
 # Set up directories with proper permissions.
 # OpenShift compatibility: root group (GID 0) for arbitrary UID support.
@@ -319,16 +294,16 @@ RUN --mount=type=bind,from=cache,src=/app,target=/build-src \
 # 0755 while the non-parent /app/data and /deno-dir kept 0775. A linked copy
 # added after this RUN silently resets /app to 0755 again.
 # Deliberately NOT declared here, and therefore left at 0755: /home/deno/.config
-# (the 775 entry below is its `opencode` child), /home/deno/.agents and
-# /home/deno/.agents/skills (the packaged personal-skill tree), and
-# /licenses/omp (root-owned notices).
+# (the 775 entry below is its `opencode` child) and /home/deno/.agents /
+# /home/deno/.agents/skills (the packaged personal-skill tree).
 RUN install -d -m 775 -o $UID -g 0 /app && \
     install -d -m 775 -o $UID -g 0 /app/data && \
     install -d -m 775 -o $UID -g 0 /licenses && \
+    install -d -m 775 -o $UID -g 0 /licenses/omp && \
     install -d -m 775 -o $UID -g 0 /deno-dir/ && \
     install -d -m 775 -o $UID -g 0 /home/deno/ && \
-    # Native OMP config HOME (`~/.omp/agent`): holds the root-owned authored
-    # models.yml installed above; agent-writable for native side files.
+    # Native OMP config HOME (`~/.omp/agent`): holds the authored models.yml
+    # installed above and the native auth/session side files.
     install -d -m 775 -o $UID -g 0 /home/deno/.omp/agent && \
     install -d -m 775 -o $UID -g 0 /home/deno/.local && \
     install -d -m 775 -o $UID -g 0 /home/deno/.local/bin && \
@@ -336,10 +311,25 @@ RUN install -d -m 775 -o $UID -g 0 /app && \
     install -d -m 775 -o $UID -g 0 /home/deno/.config/opencode && \
     install -d -m 775 -o $UID -g 0 /home/deno/.cache && \
     install -d -m 775 -o $UID -g 0 /home/deno/.agent-browser && \
-    # Root-owned and NOT group-writable, unlike the $UID:0 entries above: the
-    # agent's own binaries live here (the omp install contract), so the runtime
-    # user must not be able to replace them. Without this explicit declaration
-    # the owner follows whichever linked copy touched the directory last.
+    # OMP artifact destinations (mode settings, prompt artifact, generated
+    # extension bundle). Prepared AFTER every linked copy above — including the
+    # FILES in them, which is why the generated tree is re-owned and re-moded
+    # here: the build-time bundler runs as root while the deployment
+    # convention is $UID:0 + 775. Only these named paths get 775; the
+    # `/opt` and `/opt/air` ancestors are created by the linked copies as
+    # $UID:0 0755 and are deliberately left that way.
+    install -d -m 775 -o $UID -g 0 /opt/air/omp && \
+    install -d -m 775 -o $UID -g 0 /opt/air/omp/config && \
+    install -d -m 775 -o $UID -g 0 /opt/air/omp/prompt && \
+    install -d -m 775 -o $UID -g 0 /opt/air/omp/extension && \
+    chown -R $UID:0 /opt/air/omp && \
+    find /opt/air/omp -type d -exec chmod 775 {} + && \
+    find /opt/air/omp -type f -exec chmod 775 {} + && \
+    # Root-owned and NOT group-writable, unlike the $UID:0 entries above: this
+    # is the SHARED binary directory both agents and dumb-init live in, and the
+    # declaration exists to stop linked-copy parent-directory drift (an
+    # un-declared parent takes the owner of whichever linked copy touched it
+    # last). It is not an OMP-artifact protection property.
     install -d -m 755 -o 0 -g 0 /usr/local /usr/local/bin
 
 WORKDIR /app

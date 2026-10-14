@@ -1,7 +1,7 @@
 # container-packaging Specification
 
 ## Purpose
-Governs container-image packaging of external agent runtimes and deployment-owned artifacts: checksum-verified pinned executables and official notices, installation of owned settings/extension trees outside agent-writable roots with an auditable digest manifest, and the explicit resolution contract between development-tree paths and installed image paths.
+Governs container-image packaging of external agent runtimes and deployment-owned artifacts: checksum-verified pinned executables and official notices, installation of the authored settings, prompt and generated extension artifacts at stable deployment paths under the image's ordinary install convention (without a physical trust authority or an internal artifact digest manifest), and the explicit resolution contract between development-tree paths and installed image paths.
 
 ## Requirements
 
@@ -58,40 +58,6 @@ The container image SHALL download the release's `LICENSE` and `THIRD-PARTY-NOTI
 - **THEN** the project's existing license file SHALL still be present at its current location
 - **AND** the OMP notices SHALL be installed alongside it under the license location
 
-### Requirement: Deployment-Owned OMP Artifacts Installed Outside Agent-Writable Roots
-
-The container image SHALL install the deployment-owned OMP artifacts (the owned settings overlays, the owned system-prompt artifact, and the trusted-extension artifact reproducibly built from canonical source and locked dependencies) under a root-owned image tree not writable by the agent's runtime user, so the agent process cannot modify the binary or owned tree it is governed by.
-
-#### Scenario: Owned tree is not agent-writable
-- **WHEN** the finished image layout is asserted from the Containerfile install instructions
-- **THEN** the settings, prompt artifact, and extension tree SHALL reside outside every agent-writable root
-- **AND** their ownership and mode bits SHALL deny write to the runtime agent user
-
-#### Scenario: Install is content-faithful
-- **WHEN** owned artifacts are copied into the image
-- **THEN** installation SHALL preserve authored settings and prompt content unchanged and use the deterministic extension bundle built only from canonical source and locked dependencies
-- **AND** no independently maintained policy mirror or arbitrary generated policy augmentation SHALL be installed
-
-#### Scenario: Ownership and mode hardening specifics
-- **GIVEN** the finished image contains the owned tree
-- **WHEN** file modes and ownership are inspected
-- **THEN** the settings files SHALL be non-writable read-only content, directories SHALL not be group/other writable, and the executable SHALL be installed owned and mode-755 by the root-equivalent user rather than the agent user
-
-### Requirement: Auditable Digest Manifest With Recut Invariant
-
-The image build SHALL record a SHA-256 digest manifest covering every installed owned file (the extension tree, settings overlays, and prompt artifact) in a root-owned, agent-non-writable manifest file, and SHALL record the pinned version and the trusted-extension serial composition fact; no reserved dedicated public-code-search slot SHALL be required.
-
-#### Scenario: Manifest covers every installed owned file
-- **WHEN** the digest manifest is produced for a fixture owned tree
-- **THEN** it SHALL contain one `sha256  <relative-path>` line per installed owned file
-- **AND** it SHALL be non-writable by the runtime agent user
-
-#### Scenario: Content landing forces recut
-- **GIVEN** a successor change that modifies any file installed into the owned tree
-- **WHEN** that change is completed
-- **THEN** the digest manifest SHALL be recut in the same change
-- **AND** documentation SHALL record the invariant so a stale manifest cannot pass review
-
 ### Requirement: Development-Path to Image-Path Resolution Contract
 
 The resolution from each contracted development-tree path (the trusted-extension entry, the owned settings overlay, and the owned system-prompt artifact) to its installed image path SHALL be exported from the agent path module as a single source of truth, SHALL prefer the image path when it exists on disk, and SHALL fall back to the deterministic generated development entry for the extension and the authored development paths for settings/prompt otherwise.
@@ -124,31 +90,6 @@ The resolution from each contracted development-tree path (the trusted-extension
 - **THEN** launch SHALL fail with the build remedy rather than import a raw Deno-only tree
 - **AND** no alternative extension-root convention SHALL be selected
 
-### Requirement: Single Packaged Skill Tree For Every Agent Type
-
-The container image SHALL install exactly one skill tree — the authored repository `skills/` content — at the personal skill root that every agent type resolves, and SHALL NOT install a second skill tree under any other path. No owned skill root, staged catalog filter or bundled-catalog packaging rule SHALL remain. The owned OMP artifact tree, its digest manifest scope and the pinned agent versions SHALL remain unchanged.
-
-#### Scenario: One skill tree in the finished image
-
-- **WHEN** the finished image layout is asserted from the Containerfile install instructions
-- **THEN** exactly one skill tree SHALL exist, at the personal skill root that the configured value resolves
-- **AND** `/opt/air/skills` SHALL be absent
-- **AND** no Containerfile instruction, manifest entry, packaged script or code path SHALL name it
-
-#### Scenario: Authored content and runtime installs share the one tree
-
-- **GIVEN** the image ships the authored bundled skills and the deployment configures an external skill
-- **WHEN** bootstrap publishes that external skill
-- **THEN** the authored content SHALL be installed content-faithfully as the tree's initial content
-- **AND** the external skill SHALL land in that same tree, which SHALL remain the only install location for either agent type
-
-#### Scenario: Owned runtime tree and manifest scope are untouched
-
-- **WHEN** the packaging change is completed
-- **THEN** the owned OMP artifact tree under its own root and the SHA-256 digest manifest covering exactly the extension tree, settings overlays and prompt artifact SHALL remain unchanged
-- **AND** no skill byte SHALL enter that manifest's digest set
-- **AND** the generated extension bundle contract and the pinned agent versions SHALL remain unchanged
-
 ### Requirement: Native OMP Single ESM Code Artifact
 
 The OMP extension SHALL be built from the canonical source and frozen dependencies as a single ESM artifact consumable by the pinned native runtime without an import map or runtime dependency downloads. Build-time loadability checks SHALL reflect the dependencies actually required by the thin capability handler.
@@ -160,3 +101,27 @@ The OMP extension SHALL be built from the canonical source and frozen dependenci
 #### Scenario: Authored config independent of bundling
 - **WHEN** the extension is bundled
 - **THEN** the build SHALL create code output only and SHALL not synthesize or rewrite OMP YAML.
+
+### Requirement: OMP Artifact Installation Uses Existing Project Conventions
+
+OMP executable, authored configuration, prompt and generated extension installation SHALL follow the project’s existing OpenCode ownership/permission conventions. Artifact location SHALL remain a deployment path rather than a physical trust authority. Official notices SHALL remain packaged.
+
+#### Scenario: Normal installation
+- **WHEN** the OMP image is built
+- **THEN** the pinned binary, authored mode/model files, prompt and native-loadable ESM artifact SHALL remain usable under normal project installation conventions.
+
+#### Scenario: Download protection retained
+- **WHEN** any executable or official notice download differs from its pinned SHA-256
+- **THEN** the build SHALL fail before installing or consuming those bytes.
+
+### Requirement: Single Authored Skill Tree Shared By Every Agent
+
+The image SHALL install exactly one authored repository skill tree at the configured personal skill root used by both agent types and external publication. No second OMP-specific skill tree SHALL be installed, and existing pinned versions SHALL remain unchanged.
+
+#### Scenario: Shared packaged skills
+- **WHEN** either agent starts with stock image settings
+- **THEN** the shared installed scripts and native discovery declaration SHALL use the single packaged root.
+
+#### Scenario: External publication
+- **WHEN** an external skill is installed
+- **THEN** publication SHALL continue using the configured common root without overwriting protected bundled content.
